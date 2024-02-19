@@ -1,0 +1,12 @@
+#!/bin/bash
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+
+## Assumes that solana validator info is checked out as a sibling of this validator
+cd $DIR/../../solana
+
+cargo doc -p $1 --no-deps --offline
+CARGO_TOML=$(cargo locate-project --workspace --offline | jq '.root')
+TARGET_DOC=$(dirname $CARGO_TOML)/target/doc
+
+CRATE_WITH_UNDERSCORES=$(echo $1 | sed 's/-/_/g')
+CRATE_DOC="${TARGET_DOC}/${CRATE_WITH_UNDERSCORES}"

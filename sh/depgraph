@@ -1,0 +1,19 @@
+#!/bin/bash
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+
+CRATE=$1
+
+## Assumes that solana validator info is checked out as a sibling of this validator
+cd $DIR/../../solana
+
+if [ -z "${INCLUDE_DEPS}" ]; then
+  cargo depgraph     \
+    --workspace-only \
+    --root $CRATE    \
+    | dot -Tsvg > /tmp/depgraph.svg && open /tmp/depgraph.svg
+else
+  cargo depgraph \
+    --root $CRATE \
+    --depth 2      \
+    | dot -Tsvg > /tmp/depgraph.svg && open /tmp/depgraph.svg
+fi
