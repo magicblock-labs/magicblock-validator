@@ -325,6 +325,7 @@ impl LoadedProgram {
         )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn new_internal(
         loader_key: &Pubkey,
         program_runtime_environment: Arc<BuiltinProgram<InvokeContext<'static>>>,

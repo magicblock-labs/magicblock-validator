@@ -37,6 +37,7 @@ use {
 
 pub type TransactionCheckResult = (transaction::Result<()>, Option<NoncePartial>, Option<u64>);
 
+#[allow(clippy::too_many_arguments)]
 pub fn load_accounts<CB: TransactionProcessingCallback>(
     callbacks: &CB,
     txs: &[SanitizedTransaction],
