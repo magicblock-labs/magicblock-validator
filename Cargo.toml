@@ -10,7 +10,7 @@ members = ["solana/program-runtime"]
 resolver = "2"
 
 [workspace.package]
-version = "1.18.0"                                               # matches Solana Version
+version = "1.19.0"                                               # matches Solana Version
 authors = ["MagicBlock Maintainers <maintainers@magicblock.gg>"]
 repository = "https://github.com/magicblock-labs/x-validator"
 homepage = "https://www.magicblock.gg"
