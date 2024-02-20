@@ -1,0 +1,26 @@
+#!/usr/bin/env bash
+
+TRACE_ARR=(
+	"warn,"
+	"geyser_plugin=trace,"
+	"sleipnir_bank=trace,"
+)
+
+DEBUG_ARR=(
+	"warn,"
+	"geyser_plugin=debug,"
+	"sleipnir_bank=debug,"
+)
+
+LOG_LEVEL='info'
+if [[ $LOG == "DEBUG" ]]; then
+	IFS=''
+	LOG_LEVEL="${DEBUG_ARR[*]}"
+elif [[ $LOG == "TRACE" ]]; then
+	IFS=''
+	LOG_LEVEL="${TRACE_ARR[*]}"
+else
+	echo "LOG is not set to DEBUG or TRACE (defaulting to info)"
+fi
+
+export RUST_LOG=$LOG_LEVEL
