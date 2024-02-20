@@ -23,6 +23,7 @@ base64 = "0.21.7"
 bincode = "1.3.3"
 eager = "0.1.0"
 enum-iterator = "1.5.0"
+env_logger = "0.11.2"
 itertools = "0.10.5"
 libc = "0.2.153"
 libsecp256k1 = "0.6.0"
@@ -41,7 +42,6 @@ solana-loader-v4-program = { git = "https://github.com/solana-labs/solana", rev 
 solana-logger = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-logger" }
 solana-measure = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-measure" }
 solana-metrics = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-metrics" }
-
 solana-program-runtime = { path = "./solana/program-runtime" }
 solana-sdk = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-sdk" }
 solana-svm = { path = "./solana/svm" }

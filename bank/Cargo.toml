@@ -8,6 +8,9 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
+env_logger = { workspace = true }
+log = { workspace = true }
+solana-accounts-db = { workspace = true }
 solana-program-runtime = { workspace = true }
 solana-sdk = { workspace = true }
 solana-svm = { workspace = true }
