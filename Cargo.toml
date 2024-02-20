@@ -4,7 +4,7 @@ debug = true
 split-debuginfo = "packed"
 
 [workspace]
-members = ["solana/program-runtime", "solana/svm"]
+members = ["bank", "solana/program-runtime", "solana/svm"]
 
 # This prevents a Travis CI error when building for Windows.
 resolver = "2"
@@ -41,6 +41,7 @@ solana-loader-v4-program = { git = "https://github.com/solana-labs/solana", rev 
 solana-logger = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-logger" }
 solana-measure = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-measure" }
 solana-metrics = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-metrics" }
+
 solana-program-runtime = { path = "./solana/program-runtime" }
 solana-sdk = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-sdk" }
 solana-svm = { path = "./solana/svm" }
