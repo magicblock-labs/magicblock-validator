@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+
+USE_XDOT=false
+DOT_FILE=/tmp/output.dot
+
+if [ -x "$(command -v xdot)" ]; then
+  if [ -z "${FORCE_DOT}" ]; then
+    USE_XDOT=true
+  fi
+fi
+
+if [ -n "${USE_XDOT}" ]; then
+  open_dot() {
+    xdot $DOT_FILE
+  }
+else
+  open_dot() {
+    dot -Tsvg $DOT_FILE > /tmp/depgraph.svg && open /tmp/depgraph.svg
+  }
+fi
+
+export USE_XDOT
+export DOT_FILE
