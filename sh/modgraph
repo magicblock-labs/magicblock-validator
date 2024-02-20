@@ -8,16 +8,9 @@ CRATE=$1
 ## Assumes that solana validator info is checked out as a sibling of this validator
 cd $DIR/../../solana
 
-if [ -z "${INCLUDE_DEPS}" ]; then
-  cargo depgraph     \
-    --workspace-only \
-    --root $CRATE    \
-    > $DOT_FILE
-else
-  cargo depgraph  \
-    --root $CRATE \
-    --depth 2     \
-    > $DOT_FILE
-fi
+cargo modules dependencies \
+  --package $CRATE         \
+  --max-depth 1            \
+  > $DOT_FILE
 
 open_dot
