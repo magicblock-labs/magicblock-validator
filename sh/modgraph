@@ -11,6 +11,7 @@ cd $DIR/../../solana
 cargo modules dependencies \
   --package $CRATE         \
   --max-depth 1            \
+  --layout twopi           \
   > $DOT_FILE
 
 open_dot
