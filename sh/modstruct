@@ -1,0 +1,12 @@
+#!/bin/bash
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+
+CRATE=$1
+
+## Assumes that solana validator info is checked out as a sibling of this validator
+cd $DIR/../../solana
+
+cargo modules structure \
+  --package $CRATE      \
+  --max-depth 1
+
