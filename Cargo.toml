@@ -4,7 +4,7 @@ debug = true
 split-debuginfo = "packed"
 
 [workspace]
-members = ["solana/program-runtime"]
+members = ["solana/program-runtime", "solana/svm"]
 
 # This prevents a Travis CI error when building for Windows.
 resolver = "2"
@@ -33,15 +33,21 @@ percentage = "0.1.0"
 rand = "0.8.5"
 rustc_version = "0.4"
 serde = "1.0.196"
+solana-accounts-db = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-accounts-db" }
+solana-bpf-loader-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-bpf-loader-program" }
 solana-frozen-abi = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-frozen-abi" }
 solana-frozen-abi-macro = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-frozen-abi-macro" }
+solana-loader-v4-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-loader-v4-program" }
 solana-logger = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-logger" }
 solana-measure = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-measure" }
 solana-metrics = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-metrics" }
 solana-program-runtime = { path = "./solana/program-runtime" }
 solana-sdk = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-sdk" }
+solana-svm = { path = "./solana/svm" }
+solana-system-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-system-program" }
 solana_rbpf = "=0.8.0"
 thiserror = "1.0.57"
 
-[patch.crates-io]
+[patch.'https://github.com/solana-labs/solana']
 solana-program-runtime = { path = "./solana/program-runtime" }
+solana-svm = { path = "./solana/svm" }
