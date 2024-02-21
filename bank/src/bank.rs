@@ -5,10 +5,14 @@
 use std::{
     borrow::Cow,
     collections::HashSet,
-    sync::{Arc, RwLock},
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc, RwLock,
+    },
 };
 
-use crate::{bank_rc::BankRc, transaction_batch::TransactionBatch};
+use crate::{bank_rc::BankRc, builtins::BuiltinPrototype, transaction_batch::TransactionBatch};
 use crate::{
     transaction_logs::{
         TransactionLogCollector, TransactionLogCollectorConfig, TransactionLogCollectorFilter,
@@ -18,8 +22,14 @@ use crate::{
 };
 use log::{debug, info};
 use solana_accounts_db::{
-    accounts::Accounts, accounts_db::AccountsDb, ancestors::Ancestors,
-    blockhash_queue::BlockhashQueue, transaction_results::TransactionExecutionDetails,
+    accounts::Accounts,
+    accounts_db::{AccountShrinkThreshold, AccountsDb, AccountsDbConfig},
+    accounts_index::{AccountSecondaryIndexes, ZeroLamport},
+    accounts_update_notifier_interface::AccountsUpdateNotifier,
+    ancestors::Ancestors,
+    blockhash_queue::BlockhashQueue,
+    storable_accounts::StorableAccounts,
+    transaction_results::TransactionExecutionDetails,
 };
 use solana_measure::measure::Measure;
 use solana_program_runtime::{
@@ -27,11 +37,13 @@ use solana_program_runtime::{
     timings::{ExecuteTimingType, ExecuteTimings},
 };
 use solana_sdk::{
-    account::AccountSharedData,
-    clock::{Epoch, Slot},
+    account::{AccountSharedData, ReadableAccount},
+    clock::{Epoch, Slot, UnixTimestamp},
     epoch_schedule::EpochSchedule,
     feature_set::FeatureSet,
     fee::FeeStructure,
+    fee_calculator::FeeRateGovernor,
+    genesis_config::GenesisConfig,
     hash::Hash,
     nonce_info::NoncePartial,
     pubkey::Pubkey,
@@ -102,6 +114,36 @@ pub struct Bank {
     transaction_debug_keys: Option<Arc<HashSet<Pubkey>>>,
 
     // -----------------
+    // Genesis related
+    // -----------------
+    /// Total capitalization, used to calculate inflation
+    capitalization: AtomicU64,
+
+    /// The initial accounts data size at the start of this Bank, before processing any transactions/etc
+    pub(super) accounts_data_size_initial: u64,
+
+    /// Track cluster signature throughput and adjust fee rate
+    pub(crate) fee_rate_governor: FeeRateGovernor,
+    //
+    // Bank max_tick_height
+    max_tick_height: u64,
+
+    /// The number of hashes in each tick. None value means hashing is disabled.
+    hashes_per_tick: Option<u64>,
+
+    /// The number of ticks in each slot.
+    ticks_per_slot: u64,
+
+    /// length of a slot in ns
+    pub ns_per_slot: u128,
+
+    /// genesis time, used for computed clock
+    genesis_creation_time: UnixTimestamp,
+
+    /// The number of slots per year, used for inflation
+    slots_per_year: f64,
+
+    // -----------------
     // For TransactionProcessingCallback
     // -----------------
     pub feature_set: Arc<FeatureSet>,
@@ -115,74 +157,6 @@ pub struct Bank {
     /// The set of parents including this bank
     /// NOTE: we're planning to only have this bank
     pub ancestors: Ancestors,
-}
-
-impl Default for Bank {
-    fn default() -> Self {
-        // NOTE: we plan to only have one bank which is created when the validator starts up
-        let slot = 0;
-        let epoch = 0;
-
-        let epoch_schedule = EpochSchedule::default();
-        let fee_structure = FeeStructure::default();
-        let runtime_config = Arc::new(RuntimeConfig::default());
-        let loaded_programs_cache = {
-            // TODO: not sure how this is setup more proper in the original implementation
-            // since there we don't call `set_fork_graph` directly from the bank
-            // Also we don't need bank forks in our initial implementation
-            let mut loaded_programs = LoadedPrograms::new(slot, epoch);
-            let simple_fork_graph = Arc::<RwLock<SimpleForkGraph>>::default();
-            loaded_programs.set_fork_graph(simple_fork_graph);
-
-            Arc::new(RwLock::new(loaded_programs))
-        };
-
-        let transaction_processor = TransactionBatchProcessor::new(
-            slot,
-            epoch,
-            epoch_schedule.clone(),
-            fee_structure.clone(),
-            runtime_config.clone(),
-            loaded_programs_cache.clone(),
-        );
-
-        // FIXME: @@@ cannot use `AccountsDb::default_for_tests()` here
-        let accounts_db = Arc::new(AccountsDb::default_for_tests());
-        let accounts = Accounts::new(accounts_db);
-
-        // NOTE: these are configured via add_builtin `bank.rs:7045` and remove_builtin `bank.rs:7057`
-        let builtin_programs = HashSet::new();
-
-        let feature_set = Arc::<FeatureSet>::default();
-        let rent_collector = RentCollector::default();
-        let blockhash_queue = RwLock::<BlockhashQueue>::default();
-        let ancestors = Ancestors::default();
-        let transaction_log_collector_config =
-            Arc::<RwLock<TransactionLogCollectorConfig>>::default();
-
-        let transaction_debug_keys = Option::<Arc<HashSet<Pubkey>>>::default();
-        let transaction_log_collector = Arc::<RwLock<TransactionLogCollector>>::default();
-
-        Self {
-            rc: BankRc::new(accounts, slot),
-            slot,
-            epoch,
-            epoch_schedule,
-            fee_structure,
-            runtime_config,
-            builtin_programs,
-            loaded_programs_cache,
-            transaction_processor,
-            transaction_log_collector_config,
-            transaction_log_collector,
-            transaction_debug_keys,
-            // For TransactionProcessingCallback
-            feature_set,
-            rent_collector,
-            blockhash_queue,
-            ancestors,
-        }
-    }
 }
 
 // -----------------
@@ -238,6 +212,160 @@ pub struct TransactionExecutionRecordingOpts {
 }
 
 impl Bank {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_paths(
+        genesis_config: &GenesisConfig,
+        runtime_config: Arc<RuntimeConfig>,
+        paths: Vec<PathBuf>,
+        debug_keys: Option<Arc<HashSet<Pubkey>>>,
+        additional_builtins: Option<&[BuiltinPrototype]>,
+        account_indexes: AccountSecondaryIndexes,
+        shrink_ratio: AccountShrinkThreshold,
+        debug_do_not_add_builtins: bool,
+        accounts_db_config: Option<AccountsDbConfig>,
+        accounts_update_notifier: Option<AccountsUpdateNotifier>,
+        #[allow(unused)] collector_id_for_tests: Option<Pubkey>,
+        exit: Arc<AtomicBool>,
+    ) -> Self {
+        let accounts_db = AccountsDb::new_with_config(
+            paths,
+            &genesis_config.cluster_type,
+            account_indexes,
+            shrink_ratio,
+            accounts_db_config,
+            accounts_update_notifier,
+            exit,
+        );
+
+        let accounts = Accounts::new(Arc::new(accounts_db));
+        let mut bank = Self::default_with_accounts(accounts);
+        bank.ancestors = Ancestors::from(vec![bank.slot()]);
+        bank.transaction_debug_keys = debug_keys;
+        bank.runtime_config = runtime_config;
+
+        #[cfg(not(feature = "dev-context-only-utils"))]
+        bank.process_genesis_config(genesis_config);
+        #[cfg(feature = "dev-context-only-utils")]
+        bank.process_genesis_config(genesis_config, collector_id_for_tests);
+
+        // NOTE: leaving out finish_init which we need (at least the adding of builtins)
+
+        // NOTE: leaving out stakes related setup
+
+        // NOTE: leaving out clock, epoch_schedule, rent, slot, blockhash, sysvar setup
+        bank
+    }
+
+    pub(super) fn default_with_accounts(accounts: Accounts) -> Self {
+        // NOTE: this was not part of the original implementation
+        let simple_fork_graph = Arc::<RwLock<SimpleForkGraph>>::default();
+        let loaded_programs_cache = {
+            // TODO: not sure how this is setup more proper in the original implementation
+            // since there we don't call `set_fork_graph` directly from the bank
+            // Also we don't need bank forks in our initial implementation
+            let mut loaded_programs = LoadedPrograms::new(Slot::default(), Epoch::default());
+            let simple_fork_graph = Arc::<RwLock<SimpleForkGraph>>::default();
+            loaded_programs.set_fork_graph(simple_fork_graph);
+
+            Arc::new(RwLock::new(loaded_programs))
+        };
+
+        let mut bank = Self {
+            rc: BankRc::new(accounts, Slot::default()),
+            slot: Slot::default(),
+            epoch: Epoch::default(),
+            epoch_schedule: EpochSchedule::default(),
+            builtin_programs: HashSet::<Pubkey>::default(),
+            runtime_config: Arc::<RuntimeConfig>::default(),
+            transaction_debug_keys: Option::<Arc<HashSet<Pubkey>>>::default(),
+            transaction_log_collector_config: Arc::<RwLock<TransactionLogCollectorConfig>>::default(
+            ),
+            transaction_log_collector: Arc::<RwLock<TransactionLogCollector>>::default(),
+            fee_structure: FeeStructure::default(),
+            loaded_programs_cache,
+            transaction_processor: TransactionBatchProcessor::default(),
+
+            // Genesis related
+            accounts_data_size_initial: 0,
+            capitalization: AtomicU64::default(),
+            fee_rate_governor: FeeRateGovernor::default(),
+            max_tick_height: u64::default(),
+            hashes_per_tick: Option::<u64>::default(),
+            ticks_per_slot: u64::default(),
+            ns_per_slot: u128::default(),
+            genesis_creation_time: UnixTimestamp::default(),
+            slots_per_year: f64::default(),
+
+            // For TransactionProcessingCallback
+            ancestors: Ancestors::default(),
+            blockhash_queue: RwLock::<BlockhashQueue>::default(),
+            feature_set: Arc::<FeatureSet>::default(),
+            rent_collector: RentCollector::default(),
+        };
+
+        bank.transaction_processor = TransactionBatchProcessor::new(
+            bank.slot,
+            bank.epoch,
+            bank.epoch_schedule.clone(),
+            bank.fee_structure.clone(),
+            bank.runtime_config.clone(),
+            bank.loaded_programs_cache.clone(),
+        );
+
+        bank
+    }
+
+    // -----------------
+    // Genesis
+    // -----------------
+    fn process_genesis_config(
+        &mut self,
+        genesis_config: &GenesisConfig,
+        #[cfg(feature = "dev-context-only-utils")] collector_id_for_tests: Option<Pubkey>,
+    ) {
+        // Bootstrap validator collects fees until `new_from_parent` is called.
+        self.fee_rate_governor = genesis_config.fee_rate_governor.clone();
+
+        for (pubkey, account) in genesis_config.accounts.iter() {
+            // TODO: get_account
+            // assert!(
+            //     self.get_account(pubkey).is_none(),
+            //     "{pubkey} repeated in genesis config"
+            // );
+            self.store_account(pubkey, account);
+            self.capitalization
+                .fetch_add(account.lamports(), Ordering::Relaxed);
+            self.accounts_data_size_initial += account.data().len() as u64;
+        }
+
+        self.blockhash_queue.write().unwrap().genesis_hash(
+            &genesis_config.hash(),
+            self.fee_rate_governor.lamports_per_signature,
+        );
+
+        self.hashes_per_tick = genesis_config.hashes_per_tick();
+        self.ticks_per_slot = genesis_config.ticks_per_slot();
+        self.ns_per_slot = genesis_config.ns_per_slot();
+        self.genesis_creation_time = genesis_config.creation_time;
+        self.max_tick_height = (self.slot + 1) * self.ticks_per_slot;
+        self.slots_per_year = genesis_config.slots_per_year();
+
+        self.epoch_schedule = genesis_config.epoch_schedule.clone();
+
+        // Add additional builtin programs specified in the genesis config
+        // TODO: add_builtin_account
+        // for (name, program_id) in &genesis_config.native_instruction_processors {
+        //     self.add_builtin_account(name, program_id, false);
+        // }
+    }
+
+    // -----------------
+    // Slot and Epoch
+    // -----------------
+    pub fn slot(&self) -> Slot {
+        self.slot
+    }
+
     // -----------------
     // Blockhash and Lamports
     // -----------------
@@ -248,6 +376,53 @@ impl Bank {
             .get_lamports_per_signature(&last_hash)
             .unwrap(); // safe so long as the BlockhashQueue is consistent
         (last_hash, last_lamports_per_signature)
+    }
+
+    /// Return the last block hash registered.
+    pub fn last_blockhash(&self) -> Hash {
+        self.blockhash_queue.read().unwrap().last_hash()
+    }
+
+    // -----------------
+    // Accounts
+    // -----------------
+    /// fn store the single `account` with `pubkey`.
+    /// Uses `store_accounts`, which works on a vector of accounts.
+    pub fn store_account<T: ReadableAccount + Sync + ZeroLamport>(
+        &self,
+        pubkey: &Pubkey,
+        account: &T,
+    ) {
+        self.store_accounts((self.slot(), &[(pubkey, account)][..]))
+    }
+
+    pub fn store_accounts<'a, T: ReadableAccount + Sync + ZeroLamport + 'a>(
+        &self,
+        accounts: impl StorableAccounts<'a, T>,
+    ) {
+        // NOTE: ideally we only have one bank and never freeze it
+        // assert!(!self.freeze_started());
+        //
+        let mut m = Measure::start("stakes_cache.check_and_store");
+
+        /* NOTE: for now disabled this part since we don't support staking
+        let new_warmup_cooldown_rate_epoch = self.new_warmup_cooldown_rate_epoch();
+        (0..accounts.len()).for_each(|i| {
+            self.stakes_cache.check_and_store(
+                accounts.pubkey(i),
+                accounts.account(i),
+                new_warmup_cooldown_rate_epoch,
+            )
+        });
+        */
+        self.rc.accounts.store_accounts_cached(accounts);
+        m.stop();
+        self.rc
+            .accounts
+            .accounts_db
+            .stats
+            .stakes_cache_check_and_store_us
+            .fetch_add(m.as_us(), Ordering::Relaxed);
     }
 
     // -----------------
@@ -533,7 +708,7 @@ mod test {
     }
 
     #[test]
-    fn test_bank() {
+    fn test_bank_empty_transactions() {
         init_logger();
 
         let bank = Bank::default();
