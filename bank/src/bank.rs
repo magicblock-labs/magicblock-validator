@@ -13,6 +13,14 @@ use std::{
 };
 
 use crate::{
+    bank_helpers::{calculate_data_size_delta, inherit_specially_retained_account_fields},
+    transaction_logs::{
+        TransactionLogCollector, TransactionLogCollectorConfig, TransactionLogCollectorFilter,
+        TransactionLogInfo,
+    },
+    transaction_results::LoadAndExecuteTransactionsOutput,
+};
+use crate::{
     bank_rc::BankRc,
     builtins::BuiltinPrototype,
     consts::LAMPORS_PER_SIGNATURE,
@@ -20,14 +28,7 @@ use crate::{
     transaction_batch::TransactionBatch,
     transaction_results::{TransactionBalances, TransactionBalancesSet},
 };
-use crate::{
-    transaction_logs::{
-        TransactionLogCollector, TransactionLogCollectorConfig, TransactionLogCollectorFilter,
-        TransactionLogInfo,
-    },
-    transaction_results::LoadAndExecuteTransactionsOutput,
-};
-use log::{debug, info};
+use log::{debug, info, trace};
 use solana_accounts_db::{
     accounts::{Accounts, TransactionLoadResult},
     accounts_db::{AccountShrinkThreshold, AccountsDb, AccountsDbConfig},
@@ -42,11 +43,11 @@ use solana_accounts_db::{
 };
 use solana_measure::measure::Measure;
 use solana_program_runtime::{
-    loaded_programs::{BlockRelation, ForkGraph, LoadedPrograms},
+    loaded_programs::{BlockRelation, ForkGraph, LoadedProgram, LoadedProgramType, LoadedPrograms},
     timings::{ExecuteTimingType, ExecuteTimings},
 };
 use solana_sdk::{
-    account::{AccountSharedData, ReadableAccount},
+    account::{AccountSharedData, ReadableAccount, WritableAccount},
     clock::{Epoch, Slot, UnixTimestamp, MAX_PROCESSING_AGE},
     epoch_schedule::EpochSchedule,
     feature_set::FeatureSet,
@@ -54,6 +55,7 @@ use solana_sdk::{
     fee_calculator::FeeRateGovernor,
     genesis_config::GenesisConfig,
     hash::Hash,
+    native_loader,
     nonce::state::DurableNonce,
     nonce_info::NoncePartial,
     pubkey::Pubkey,
@@ -163,6 +165,9 @@ pub struct Bank {
 
     /// The change to accounts data size in this Bank, due on-chain events (i.e. transactions)
     accounts_data_size_delta_on_chain: AtomicI64,
+
+    /// The change to accounts data size in this Bank, due to off-chain events (i.e. when adding a program account)
+    accounts_data_size_delta_off_chain: AtomicI64,
 
     /// The number of signatures from valid transactions in this slot
     signature_count: AtomicU64,
@@ -348,6 +353,7 @@ impl Bank {
             transaction_entries_count: AtomicU64::default(),
             transactions_per_entry_max: AtomicU64::default(),
             accounts_data_size_delta_on_chain: AtomicI64::default(),
+            accounts_data_size_delta_off_chain: AtomicI64::default(),
             signature_count: AtomicU64::default(),
 
             // Genesis related
@@ -418,10 +424,9 @@ impl Bank {
         self.epoch_schedule = genesis_config.epoch_schedule.clone();
 
         // Add additional builtin programs specified in the genesis config
-        // TODO: add_builtin_account
-        // for (name, program_id) in &genesis_config.native_instruction_processors {
-        //     self.add_builtin_account(name, program_id, false);
-        // }
+        for (name, program_id) in &genesis_config.native_instruction_processors {
+            self.add_builtin_account(name, program_id, false);
+        }
     }
 
     // -----------------
@@ -455,8 +460,21 @@ impl Bank {
         self.get_account_modified_slot(pubkey)
             .map(|(acc, _slot)| acc)
     }
+
     pub fn get_account_modified_slot(&self, pubkey: &Pubkey) -> Option<(AccountSharedData, Slot)> {
         self.load_slow(&self.ancestors, pubkey)
+    }
+
+    pub fn get_account_with_fixed_root(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
+        self.get_account_modified_slot_with_fixed_root(pubkey)
+            .map(|(acc, _slot)| acc)
+    }
+
+    pub fn get_account_modified_slot_with_fixed_root(
+        &self,
+        pubkey: &Pubkey,
+    ) -> Option<(AccountSharedData, Slot)> {
+        self.load_slow_with_fixed_root(&self.ancestors, pubkey)
     }
 
     fn load_slow(
@@ -465,6 +483,14 @@ impl Bank {
         pubkey: &Pubkey,
     ) -> Option<(AccountSharedData, Slot)> {
         self.rc.accounts.load_without_fixed_root(ancestors, pubkey)
+    }
+
+    fn load_slow_with_fixed_root(
+        &self,
+        ancestors: &Ancestors,
+        pubkey: &Pubkey,
+    ) -> Option<(AccountSharedData, Slot)> {
+        self.rc.accounts.load_with_fixed_root(ancestors, pubkey)
     }
 
     /// fn store the single `account` with `pubkey`.
@@ -504,6 +530,55 @@ impl Bank {
             .stats
             .stakes_cache_check_and_store_us
             .fetch_add(m.as_us(), Ordering::Relaxed);
+    }
+
+    /// Technically this issues (or even burns!) new lamports,
+    /// so be extra careful for its usage
+    fn store_account_and_update_capitalization(
+        &self,
+        pubkey: &Pubkey,
+        new_account: &AccountSharedData,
+    ) {
+        let old_account_data_size =
+            if let Some(old_account) = self.get_account_with_fixed_root(pubkey) {
+                match new_account.lamports().cmp(&old_account.lamports()) {
+                    std::cmp::Ordering::Greater => {
+                        let increased = new_account.lamports() - old_account.lamports();
+                        trace!(
+                            "store_account_and_update_capitalization: increased: {} {}",
+                            pubkey,
+                            increased
+                        );
+                        self.capitalization.fetch_add(increased, Ordering::Relaxed);
+                    }
+                    std::cmp::Ordering::Less => {
+                        let decreased = old_account.lamports() - new_account.lamports();
+                        trace!(
+                            "store_account_and_update_capitalization: decreased: {} {}",
+                            pubkey,
+                            decreased
+                        );
+                        self.capitalization.fetch_sub(decreased, Ordering::Relaxed);
+                    }
+                    std::cmp::Ordering::Equal => {}
+                }
+                old_account.data().len()
+            } else {
+                trace!(
+                    "store_account_and_update_capitalization: created: {} {}",
+                    pubkey,
+                    new_account.lamports()
+                );
+                self.capitalization
+                    .fetch_add(new_account.lamports(), Ordering::Relaxed);
+                0
+            };
+
+        self.store_account(pubkey, new_account);
+        self.calculate_and_update_accounts_data_size_delta_off_chain(
+            old_account_data_size,
+            new_account.data().len(),
+        );
     }
 
     // -----------------
@@ -553,6 +628,98 @@ impl Bank {
 
     pub fn read_balance(account: &AccountSharedData) -> u64 {
         account.lamports()
+    }
+
+    // -----------------
+    // Builtin Program Accounts
+    // -----------------
+    /// Add a built-in program
+    pub fn add_builtin(&mut self, program_id: Pubkey, name: String, builtin: LoadedProgram) {
+        debug!("Adding program {} under {:?}", name, program_id);
+        self.add_builtin_account(name.as_str(), &program_id, false);
+        self.builtin_programs.insert(program_id);
+        self.loaded_programs_cache
+            .write()
+            .unwrap()
+            .assign_program(program_id, Arc::new(builtin));
+        debug!("Added program {} under {:?}", name, program_id);
+    }
+
+    /// Add a builtin program account
+    pub fn add_builtin_account(&self, name: &str, program_id: &Pubkey, must_replace: bool) {
+        let existing_genuine_program =
+            self.get_account_with_fixed_root(program_id)
+                .and_then(|account| {
+                    // it's very unlikely to be squatted at program_id as non-system account because of burden to
+                    // find victim's pubkey/hash. So, when account.owner is indeed native_loader's, it's
+                    // safe to assume it's a genuine program.
+                    if native_loader::check_id(account.owner()) {
+                        Some(account)
+                    } else {
+                        // malicious account is pre-occupying at program_id
+                        self.burn_and_purge_account(program_id, account);
+                        None
+                    }
+                });
+
+        if must_replace {
+            // updating builtin program
+            match &existing_genuine_program {
+                None => panic!(
+                    "There is no account to replace with builtin program ({name}, {program_id})."
+                ),
+                Some(account) => {
+                    if *name == String::from_utf8_lossy(account.data()) {
+                        // The existing account is well formed
+                        return;
+                    }
+                }
+            }
+        } else {
+            // introducing builtin program
+            if existing_genuine_program.is_some() {
+                // The existing account is sufficient
+                return;
+            }
+        }
+
+        assert!(
+            !self.freeze_started(),
+            "Can't change frozen bank by adding not-existing new builtin program ({name}, {program_id}). \
+            Maybe, inconsistent program activation is detected on snapshot restore?"
+        );
+
+        // Add a bogus executable builtin account, which will be loaded and ignored.
+        let account = native_loader::create_loadable_account_with_fields(
+            name,
+            inherit_specially_retained_account_fields(&existing_genuine_program),
+        );
+        self.store_account_and_update_capitalization(program_id, &account);
+    }
+
+    fn burn_and_purge_account(&self, program_id: &Pubkey, mut account: AccountSharedData) {
+        let old_data_size = account.data().len();
+        self.capitalization
+            .fetch_sub(account.lamports(), Ordering::Relaxed);
+        // Both resetting account balance to 0 and zeroing the account data
+        // is needed to really purge from AccountsDb and flush the Stakes cache
+        account.set_lamports(0);
+        account.data_as_mut_slice().fill(0);
+        self.store_account(program_id, &account);
+        self.calculate_and_update_accounts_data_size_delta_off_chain(old_data_size, 0);
+    }
+
+    /// Remove a built-in instruction processor
+    pub fn remove_builtin(&mut self, program_id: Pubkey, name: String) {
+        debug!("Removing program {}", program_id);
+        // Don't remove the account since the bank expects the account state to
+        // be idempotent
+        self.add_builtin(
+            program_id,
+            name,
+            LoadedProgram::new_tombstone(self.slot, LoadedProgramType::Closed),
+        );
+        debug!("Removed program {}", program_id);
     }
 
     // -----------------
@@ -887,6 +1054,7 @@ impl Bank {
     /// that was executed. Of those, `committed_transactions_count`,
     /// `committed_with_failure_result_count` is the number of executed transactions that returned
     /// a failure result.
+    #[allow(clippy::too_many_arguments)]
     pub fn commit_transactions(
         &self,
         sanitized_txs: &[SanitizedTransaction],
@@ -1207,6 +1375,35 @@ impl Bank {
             )
             // SAFETY: unwrap() is safe since our update fn always returns `Some`
             .unwrap();
+    }
+
+    /// Update the accounts data size delta from off-chain events by adding `amount`.
+    /// The arithmetic saturates.
+    fn update_accounts_data_size_delta_off_chain(&self, amount: i64) {
+        if amount == 0 {
+            return;
+        }
+
+        self.accounts_data_size_delta_off_chain
+            .fetch_update(
+                Ordering::AcqRel,
+                Ordering::Acquire,
+                |accounts_data_size_delta_off_chain| {
+                    Some(accounts_data_size_delta_off_chain.saturating_add(amount))
+                },
+            )
+            // SAFETY: unwrap() is safe since our update fn always returns `Some`
+            .unwrap();
+    }
+
+    /// Calculate the data size delta and update the off-chain accounts data size delta
+    fn calculate_and_update_accounts_data_size_delta_off_chain(
+        &self,
+        old_data_size: usize,
+        new_data_size: usize,
+    ) {
+        let data_size_delta = calculate_data_size_delta(old_data_size, new_data_size);
+        self.update_accounts_data_size_delta_off_chain(data_size_delta);
     }
 }
 

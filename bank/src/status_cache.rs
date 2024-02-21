@@ -109,8 +109,8 @@ impl<T: Clone> StatusCache<T> {
         transaction_blockhash: &Hash,
         slot: Slot,
         key_index: usize,
-        key_slice: [u8; CACHED_KEY_SIZE],
-        res: T,
+        _key_slice: [u8; CACHED_KEY_SIZE],
+        _res: T,
     ) {
         let hash_map =
             self.cache
