@@ -391,17 +391,17 @@ impl Bank {
         self.fee_rate_governor = genesis_config.fee_rate_governor.clone();
 
         for (pubkey, account) in genesis_config.accounts.iter() {
-            // TODO: get_account
-            // assert!(
-            //     self.get_account(pubkey).is_none(),
-            //     "{pubkey} repeated in genesis config"
-            // );
+            assert!(
+                self.get_account(pubkey).is_none(),
+                "{pubkey} repeated in genesis config"
+            );
             self.store_account(pubkey, account);
             self.capitalization
                 .fetch_add(account.lamports(), Ordering::Relaxed);
             self.accounts_data_size_initial += account.data().len() as u64;
         }
 
+        debug!("set blockhash {:?}", genesis_config.hash());
         self.blockhash_queue.write().unwrap().genesis_hash(
             &genesis_config.hash(),
             self.fee_rate_governor.lamports_per_signature,

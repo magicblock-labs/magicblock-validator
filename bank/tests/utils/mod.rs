@@ -8,6 +8,10 @@ use solana_sdk::{
     system_transaction, transaction::SanitizedTransaction,
 };
 
+pub fn init_logger() {
+    let _ = env_logger::builder().is_test(true).try_init();
+}
+
 pub fn create_accounts(num: usize) -> Vec<Keypair> {
     (0..num).into_par_iter().map(|_| Keypair::new()).collect()
 }

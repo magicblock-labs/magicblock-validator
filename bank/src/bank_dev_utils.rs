@@ -3,11 +3,7 @@ use std::{borrow::Cow, path::PathBuf, sync::Arc};
 
 use solana_accounts_db::{
     accounts::Accounts,
-    accounts_db::{
-        AccountShrinkThreshold, AccountsDb, CalcAccountsHashDataSource,
-        ACCOUNTS_DB_CONFIG_FOR_TESTING,
-    },
-    accounts_hash::AccountsHash,
+    accounts_db::{AccountShrinkThreshold, AccountsDb, ACCOUNTS_DB_CONFIG_FOR_TESTING},
     accounts_index::AccountSecondaryIndexes,
 };
 use solana_sdk::transaction::{MessageHash, Result};
@@ -24,6 +20,7 @@ use crate::{bank::Bank, transaction_batch::TransactionBatch};
 pub struct BankTestConfig {
     pub secondary_indexes: AccountSecondaryIndexes,
 }
+
 impl Bank {
     pub fn default_for_tests() -> Self {
         let accounts_db = AccountsDb::default_for_tests();
