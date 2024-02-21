@@ -9,10 +9,17 @@ use std::{
 };
 
 use crate::{bank_rc::BankRc, transaction_batch::TransactionBatch};
-use log::debug;
+use crate::{
+    transaction_logs::{
+        TransactionLogCollector, TransactionLogCollectorConfig, TransactionLogCollectorFilter,
+        TransactionLogInfo,
+    },
+    transaction_results::LoadAndExecuteTransactionsOutput,
+};
+use log::{debug, info};
 use solana_accounts_db::{
     accounts::Accounts, accounts_db::AccountsDb, ancestors::Ancestors,
-    blockhash_queue::BlockhashQueue,
+    blockhash_queue::BlockhashQueue, transaction_results::TransactionExecutionDetails,
 };
 use solana_measure::measure::Measure;
 use solana_program_runtime::{
@@ -29,7 +36,7 @@ use solana_sdk::{
     nonce_info::NoncePartial,
     pubkey::Pubkey,
     rent_collector::RentCollector,
-    transaction::{Result, SanitizedTransaction, MAX_TX_ACCOUNT_LOCKS},
+    transaction::{Result, SanitizedTransaction, TransactionError, MAX_TX_ACCOUNT_LOCKS},
 };
 use solana_svm::{account_loader::TransactionCheckResult, account_overrides::AccountOverrides};
 use solana_svm::{runtime_config::RuntimeConfig, transaction_processor::TransactionBatchProcessor};
@@ -84,6 +91,15 @@ pub struct Bank {
     pub loaded_programs_cache: Arc<RwLock<LoadedPrograms<SimpleForkGraph>>>,
 
     transaction_processor: TransactionBatchProcessor<SimpleForkGraph>,
+
+    // Global configuration for how transaction logs should be collected across all banks
+    pub transaction_log_collector_config: Arc<RwLock<TransactionLogCollectorConfig>>,
+
+    // Logs from transactions that this Bank executed collected according to the criteria in
+    // `transaction_log_collector_config`
+    pub transaction_log_collector: Arc<RwLock<TransactionLogCollector>>,
+
+    transaction_debug_keys: Option<Arc<HashSet<Pubkey>>>,
 
     // -----------------
     // For TransactionProcessingCallback
@@ -141,6 +157,11 @@ impl Default for Bank {
         let rent_collector = RentCollector::default();
         let blockhash_queue = RwLock::<BlockhashQueue>::default();
         let ancestors = Ancestors::default();
+        let transaction_log_collector_config =
+            Arc::<RwLock<TransactionLogCollectorConfig>>::default();
+
+        let transaction_debug_keys = Option::<Arc<HashSet<Pubkey>>>::default();
+        let transaction_log_collector = Arc::<RwLock<TransactionLogCollector>>::default();
 
         Self {
             rc: BankRc::new(accounts, slot),
@@ -152,6 +173,9 @@ impl Default for Bank {
             builtin_programs,
             loaded_programs_cache,
             transaction_processor,
+            transaction_log_collector_config,
+            transaction_log_collector,
+            transaction_debug_keys,
             // For TransactionProcessingCallback
             feature_set,
             rent_collector,
@@ -298,11 +322,48 @@ impl Bank {
         timings: &mut ExecuteTimings,
         account_overrides: Option<&AccountOverrides>,
         log_messages_bytes_limit: Option<usize>,
-    ) {
+    ) -> LoadAndExecuteTransactionsOutput {
+        // 1. Extract and check sanitized transactions
         let sanitized_txs = batch.sanitized_transactions();
         debug!("processing transactions: {}", sanitized_txs.len());
 
         let mut error_counters = TransactionErrorMetrics::default();
+
+        let retryable_transaction_indexes: Vec<_> = batch
+            .lock_results()
+            .iter()
+            .enumerate()
+            .filter_map(|(index, res)| match res {
+                // following are retryable errors
+                Err(TransactionError::AccountInUse) => {
+                    error_counters.account_in_use += 1;
+                    Some(index)
+                }
+                Err(TransactionError::WouldExceedMaxBlockCostLimit) => {
+                    error_counters.would_exceed_max_block_cost_limit += 1;
+                    Some(index)
+                }
+                Err(TransactionError::WouldExceedMaxVoteCostLimit) => {
+                    error_counters.would_exceed_max_vote_cost_limit += 1;
+                    Some(index)
+                }
+                Err(TransactionError::WouldExceedMaxAccountCostLimit) => {
+                    error_counters.would_exceed_max_account_cost_limit += 1;
+                    Some(index)
+                }
+                Err(TransactionError::WouldExceedAccountDataBlockLimit) => {
+                    error_counters.would_exceed_account_data_block_limit += 1;
+                    Some(index)
+                }
+                // following are non-retryable errors
+                Err(TransactionError::TooManyAccountLocks) => {
+                    error_counters.too_many_account_locks += 1;
+                    None
+                }
+                Err(_) => None,
+                Ok(_) => None,
+            })
+            .collect();
 
         let mut check_time = Measure::start("check_transactions");
         let mut check_results = self.check_transactions(
@@ -315,6 +376,7 @@ impl Bank {
         debug!("check: {}us", check_time.as_us());
         timings.saturating_add_in_place(ExecuteTimingType::CheckUs, check_time.as_us());
 
+        // 2. Load and execute sanitized transactions
         let sanitized_output = self
             .transaction_processor
             .load_and_execute_sanitized_transactions(
@@ -331,10 +393,132 @@ impl Bank {
                 log_messages_bytes_limit,
             );
 
-        debug!(
-            "execution results {:#?}",
-            sanitized_output.execution_results
-        );
+        // 3. Record transaction execution stats
+        let mut signature_count = 0;
+
+        let mut executed_transactions_count: usize = 0;
+        let mut executed_non_vote_transactions_count: usize = 0;
+        let mut executed_with_successful_result_count: usize = 0;
+        let err_count = &mut error_counters.total;
+        let transaction_log_collector_config =
+            self.transaction_log_collector_config.read().unwrap();
+
+        let mut collect_logs_time = Measure::start("collect_logs_time");
+        for (execution_result, tx) in sanitized_output.execution_results.iter().zip(sanitized_txs) {
+            if let Some(debug_keys) = &self.transaction_debug_keys {
+                for key in tx.message().account_keys().iter() {
+                    if debug_keys.contains(key) {
+                        let result = execution_result.flattened_result();
+                        info!("slot: {} result: {:?} tx: {:?}", self.slot, result, tx);
+                        break;
+                    }
+                }
+            }
+
+            let is_vote = tx.is_simple_vote_transaction();
+
+            if execution_result.was_executed() // Skip log collection for unprocessed transactions
+                && transaction_log_collector_config.filter != TransactionLogCollectorFilter::None
+            {
+                let mut filtered_mentioned_addresses = Vec::new();
+                if !transaction_log_collector_config
+                    .mentioned_addresses
+                    .is_empty()
+                {
+                    for key in tx.message().account_keys().iter() {
+                        if transaction_log_collector_config
+                            .mentioned_addresses
+                            .contains(key)
+                        {
+                            filtered_mentioned_addresses.push(*key);
+                        }
+                    }
+                }
+
+                let store = match transaction_log_collector_config.filter {
+                    TransactionLogCollectorFilter::All => {
+                        !is_vote || !filtered_mentioned_addresses.is_empty()
+                    }
+                    TransactionLogCollectorFilter::AllWithVotes => true,
+                    TransactionLogCollectorFilter::None => false,
+                    TransactionLogCollectorFilter::OnlyMentionedAddresses => {
+                        !filtered_mentioned_addresses.is_empty()
+                    }
+                };
+
+                if store {
+                    if let Some(TransactionExecutionDetails {
+                        status,
+                        log_messages: Some(log_messages),
+                        ..
+                    }) = execution_result.details()
+                    {
+                        let mut transaction_log_collector =
+                            self.transaction_log_collector.write().unwrap();
+                        let transaction_log_index = transaction_log_collector.logs.len();
+
+                        transaction_log_collector.logs.push(TransactionLogInfo {
+                            signature: *tx.signature(),
+                            result: status.clone(),
+                            is_vote,
+                            log_messages: log_messages.clone(),
+                        });
+                        for key in filtered_mentioned_addresses.into_iter() {
+                            transaction_log_collector
+                                .mentioned_address_map
+                                .entry(key)
+                                .or_default()
+                                .push(transaction_log_index);
+                        }
+                    }
+                }
+            }
+
+            if execution_result.was_executed() {
+                // Signature count must be accumulated only if the transaction
+                // is executed, otherwise a mismatched count between banking and
+                // replay could occur
+                signature_count += u64::from(tx.message().header().num_required_signatures);
+                executed_transactions_count += 1;
+            }
+
+            match execution_result.flattened_result() {
+                Ok(()) => {
+                    if !is_vote {
+                        executed_non_vote_transactions_count += 1;
+                    }
+                    executed_with_successful_result_count += 1;
+                }
+                Err(err) => {
+                    if *err_count == 0 {
+                        debug!("tx error: {:?} {:?}", err, tx);
+                    }
+                    *err_count += 1;
+                }
+            }
+        }
+        collect_logs_time.stop();
+        timings
+            .saturating_add_in_place(ExecuteTimingType::CollectLogsUs, collect_logs_time.as_us());
+
+        if *err_count > 0 {
+            debug!(
+                "{} errors of {} txs",
+                *err_count,
+                *err_count + executed_with_successful_result_count
+            );
+        }
+
+        LoadAndExecuteTransactionsOutput {
+            loaded_transactions: sanitized_output.loaded_transactions,
+            execution_results: sanitized_output.execution_results,
+            retryable_transaction_indexes,
+            executed_transactions_count,
+            executed_non_vote_transactions_count,
+            executed_with_successful_result_count,
+            signature_count,
+            error_counters,
+        }
     }
 }
 
@@ -357,7 +541,7 @@ mod test {
 
         let batch = bank.prepare_sanitized_batch(&txs);
         let mut timings = ExecuteTimings::default();
-        bank.load_and_execute_transactions(
+        let res = bank.load_and_execute_transactions(
             &batch,
             MAX_PROCESSING_AGE,
             Default::default(),
@@ -365,5 +549,6 @@ mod test {
             None,
             None,
         );
+        eprintln!("{:#?}", res);
     }
 }

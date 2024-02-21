@@ -1,3 +1,4 @@
+// NOTE: copied from bank.rs:335
 use serde::{Deserialize, Serialize};
 use solana_frozen_abi_macro::{AbiEnumVisitor, AbiExample};
 use solana_sdk::{pubkey::Pubkey, signature::Signature, transaction::Result};
