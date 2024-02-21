@@ -15,6 +15,7 @@ use std::{
 use crate::{
     bank_rc::BankRc,
     builtins::BuiltinPrototype,
+    consts::LAMPORS_PER_SIGNATURE,
     status_cache::StatusCache,
     transaction_batch::TransactionBatch,
     transaction_results::{TransactionBalances, TransactionBalancesSet},
@@ -580,14 +581,16 @@ impl Bank {
         max_age: usize,
         error_counters: &mut TransactionErrorMetrics,
     ) -> Vec<TransactionCheckResult> {
-        // Show that the check_timings measure works
-        std::thread::sleep(std::time::Duration::from_millis(1));
-
         // FIXME: skipping check_transactions runtime/src/bank.rs: 4505 (which is mostly tx age related)
         sanitized_txs
             .iter()
             .map(|_| {
-                let res: TransactionCheckResult = (Ok(()), None::<NoncePartial>, None);
+                // NOTE: if we don't provide some lamports per signature we then the
+                // TransactionBatchProcessor::filter_executable_program_accounts will
+                // add a BlockhashNotFound TransactionCheckResult which causes the transaction
+                // to not execute
+                let res: TransactionCheckResult =
+                    (Ok(()), None::<NoncePartial>, Some(LAMPORS_PER_SIGNATURE));
                 res
             })
             .collect::<Vec<_>>()

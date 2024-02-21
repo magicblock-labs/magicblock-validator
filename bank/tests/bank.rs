@@ -25,6 +25,5 @@ fn test_bank_one_system_instruction() {
         None,
         None,
     );
-    eprintln!("txs: {:#?}", txs);
-    eprintln!("{:#?}", res);
+    eprintln!("{:#?}", res.loaded_transactions);
 }

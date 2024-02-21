@@ -2,6 +2,7 @@ mod address_lookup_table;
 pub mod bank;
 mod bank_rc;
 mod builtins;
+mod consts;
 mod status_cache;
 mod transaction_batch;
 mod transaction_logs;
