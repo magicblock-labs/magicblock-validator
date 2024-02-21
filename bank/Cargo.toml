@@ -18,3 +18,7 @@ solana-measure = { workspace = true }
 solana-program-runtime = { workspace = true }
 solana-sdk = { workspace = true }
 solana-svm = { workspace = true }
+solana-system-program = { workspace = true }
+
+[dev-dependencies]
+rayon = { workspace = true }
