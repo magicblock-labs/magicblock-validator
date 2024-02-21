@@ -34,6 +34,7 @@ percentage = "0.1.0"
 rand = "0.8.5"
 rustc_version = "0.4"
 serde = "1.0.196"
+serde_derive = "1.0.103"
 solana-accounts-db = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-accounts-db" }
 solana-bpf-loader-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-bpf-loader-program" }
 solana-frozen-abi = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-frozen-abi" }
