@@ -8,8 +8,10 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
+arrayref = { workspace = true }
 env_logger = { workspace = true }
 log = { workspace = true }
+rand = { workspace = true }
 serde = { workspace = true, features = ["rc"] }
 serde_derive = { workspace = true }
 solana-frozen-abi-macro = { workspace = true }
@@ -22,3 +24,10 @@ solana-system-program = { workspace = true }
 
 [dev-dependencies]
 rayon = { workspace = true }
+
+solana-accounts-db = { workspace = true, features = ["dev-context-only-utils"] }
+solana-sdk = { workspace = true, features = ["dev-context-only-utils"] }
+sleipnir-bank = { path = ".", features = ["dev-context-only-utils"] }
+
+[features]
+dev-context-only-utils = []
