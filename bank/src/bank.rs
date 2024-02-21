@@ -4,31 +4,44 @@
 
 use std::{
     borrow::Cow,
+    collections::HashSet,
     sync::{Arc, RwLock},
 };
 
 use crate::{bank_rc::BankRc, transaction_batch::TransactionBatch};
 use log::debug;
-use solana_accounts_db::{accounts::Accounts, accounts_db::AccountsDb};
+use solana_accounts_db::{
+    accounts::Accounts, accounts_db::AccountsDb, ancestors::Ancestors,
+    blockhash_queue::BlockhashQueue,
+};
 use solana_measure::measure::Measure;
 use solana_program_runtime::{
     loaded_programs::{BlockRelation, ForkGraph, LoadedPrograms},
     timings::{ExecuteTimingType, ExecuteTimings},
 };
 use solana_sdk::{
-    clock::{Epoch, Slot, MAX_PROCESSING_AGE},
+    account::AccountSharedData,
+    clock::{Epoch, Slot},
     epoch_schedule::EpochSchedule,
+    feature_set::FeatureSet,
     fee::FeeStructure,
+    hash::Hash,
     nonce_info::NoncePartial,
+    pubkey::Pubkey,
+    rent_collector::RentCollector,
     transaction::{Result, SanitizedTransaction, MAX_TX_ACCOUNT_LOCKS},
 };
-use solana_svm::account_loader::TransactionCheckResult;
-use solana_svm::transaction_error_metrics::TransactionErrorMetrics;
+use solana_svm::{account_loader::TransactionCheckResult, account_overrides::AccountOverrides};
 use solana_svm::{runtime_config::RuntimeConfig, transaction_processor::TransactionBatchProcessor};
+use solana_svm::{
+    transaction_error_metrics::TransactionErrorMetrics,
+    transaction_processor::TransactionProcessingCallback,
+};
 
 // -----------------
 // ForkGraph
 // -----------------
+#[derive(Default)]
 pub struct SimpleForkGraph;
 
 impl ForkGraph for SimpleForkGraph {
@@ -66,9 +79,26 @@ pub struct Bank {
     /// Optional config parameters that can override runtime behavior
     pub(crate) runtime_config: Arc<RuntimeConfig>,
 
+    builtin_programs: HashSet<Pubkey>,
+
     pub loaded_programs_cache: Arc<RwLock<LoadedPrograms<SimpleForkGraph>>>,
 
     transaction_processor: TransactionBatchProcessor<SimpleForkGraph>,
+
+    // -----------------
+    // For TransactionProcessingCallback
+    // -----------------
+    pub feature_set: Arc<FeatureSet>,
+
+    /// latest rent collector, knows the epoch
+    rent_collector: RentCollector,
+
+    /// FIFO queue of `recent_blockhash` items
+    blockhash_queue: RwLock<BlockhashQueue>,
+
+    /// The set of parents including this bank
+    /// NOTE: we're planning to only have this bank
+    pub ancestors: Ancestors,
 }
 
 impl Default for Bank {
@@ -80,7 +110,16 @@ impl Default for Bank {
         let epoch_schedule = EpochSchedule::default();
         let fee_structure = FeeStructure::default();
         let runtime_config = Arc::new(RuntimeConfig::default());
-        let loaded_programs_cache = Arc::new(RwLock::new(LoadedPrograms::new(slot, epoch)));
+        let loaded_programs_cache = {
+            // TODO: not sure how this is setup more proper in the original implementation
+            // since there we don't call `set_fork_graph` directly from the bank
+            // Also we don't need bank forks in our initial implementation
+            let mut loaded_programs = LoadedPrograms::new(slot, epoch);
+            let simple_fork_graph = Arc::<RwLock<SimpleForkGraph>>::default();
+            loaded_programs.set_fork_graph(simple_fork_graph);
+
+            Arc::new(RwLock::new(loaded_programs))
+        };
 
         let transaction_processor = TransactionBatchProcessor::new(
             slot,
@@ -91,9 +130,17 @@ impl Default for Bank {
             loaded_programs_cache.clone(),
         );
 
-        // TODO @@@: fix
+        // FIXME: @@@ cannot use `AccountsDb::default_for_tests()` here
         let accounts_db = Arc::new(AccountsDb::default_for_tests());
         let accounts = Accounts::new(accounts_db);
+
+        // NOTE: these are configured via add_builtin `bank.rs:7045` and remove_builtin `bank.rs:7057`
+        let builtin_programs = HashSet::new();
+
+        let feature_set = Arc::<FeatureSet>::default();
+        let rent_collector = RentCollector::default();
+        let blockhash_queue = RwLock::<BlockhashQueue>::default();
+        let ancestors = Ancestors::default();
 
         Self {
             rc: BankRc::new(accounts, slot),
@@ -102,13 +149,83 @@ impl Default for Bank {
             epoch_schedule,
             fee_structure,
             runtime_config,
+            builtin_programs,
             loaded_programs_cache,
             transaction_processor,
+            // For TransactionProcessingCallback
+            feature_set,
+            rent_collector,
+            blockhash_queue,
+            ancestors,
         }
     }
 }
 
+// -----------------
+// TransactionProcessingCallback
+// -----------------
+impl TransactionProcessingCallback for Bank {
+    fn account_matches_owners(&self, account: &Pubkey, owners: &[Pubkey]) -> Option<usize> {
+        self.rc
+            .accounts
+            .accounts_db
+            .account_matches_owners(&self.ancestors, account, owners)
+            .ok()
+    }
+
+    fn get_account_shared_data(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
+        self.rc
+            .accounts
+            .accounts_db
+            .load_with_fixed_root(&self.ancestors, pubkey)
+            .map(|(acc, _)| acc)
+    }
+
+    fn get_last_blockhash_and_lamports_per_signature(&self) -> (Hash, u64) {
+        self.last_blockhash_and_lamports_per_signature()
+    }
+
+    fn get_rent_collector(&self) -> &RentCollector {
+        &self.rent_collector
+    }
+
+    fn get_feature_set(&self) -> Arc<FeatureSet> {
+        self.feature_set.clone()
+    }
+
+    fn check_account_access(
+        &self,
+        _tx: &SanitizedTransaction,
+        _account_index: usize,
+        _account: &AccountSharedData,
+        _error_counters: &mut TransactionErrorMetrics,
+    ) -> Result<()> {
+        // NOTE: removed check for reward status/solana_stake_program::check_id(account.owner())
+        // See: `bank.rs: 7519`
+        Ok(())
+    }
+}
+
+#[derive(Default)]
+pub struct TransactionExecutionRecordingOpts {
+    enable_cpi_recording: bool,
+    enable_log_recording: bool,
+    enable_return_data_recording: bool,
+}
+
 impl Bank {
+    // -----------------
+    // Blockhash and Lamports
+    // -----------------
+    pub fn last_blockhash_and_lamports_per_signature(&self) -> (Hash, u64) {
+        let blockhash_queue = self.blockhash_queue.read().unwrap();
+        let last_hash = blockhash_queue.last_hash();
+        let last_lamports_per_signature = blockhash_queue
+            .get_lamports_per_signature(&last_hash)
+            .unwrap(); // safe so long as the BlockhashQueue is consistent
+        (last_hash, last_lamports_per_signature)
+    }
+
     // -----------------
     // Transaction Accounts
     // -----------------
@@ -177,7 +294,10 @@ impl Bank {
         &self,
         batch: &TransactionBatch,
         max_age: usize,
+        recording_opts: TransactionExecutionRecordingOpts,
         timings: &mut ExecuteTimings,
+        account_overrides: Option<&AccountOverrides>,
+        log_messages_bytes_limit: Option<usize>,
     ) {
         let sanitized_txs = batch.sanitized_transactions();
         debug!("processing transactions: {}", sanitized_txs.len());
@@ -194,11 +314,34 @@ impl Bank {
         check_time.stop();
         debug!("check: {}us", check_time.as_us());
         timings.saturating_add_in_place(ExecuteTimingType::CheckUs, check_time.as_us());
+
+        let sanitized_output = self
+            .transaction_processor
+            .load_and_execute_sanitized_transactions(
+                self,
+                sanitized_txs,
+                &mut check_results,
+                &mut error_counters,
+                recording_opts.enable_cpi_recording,
+                recording_opts.enable_log_recording,
+                recording_opts.enable_return_data_recording,
+                timings,
+                account_overrides,
+                self.builtin_programs.iter(),
+                log_messages_bytes_limit,
+            );
+
+        debug!(
+            "execution results {:#?}",
+            sanitized_output.execution_results
+        );
     }
 }
 
 #[cfg(test)]
 mod test {
+    use solana_sdk::clock::MAX_PROCESSING_AGE;
+
     use super::*;
 
     pub fn init_logger() {
@@ -214,6 +357,13 @@ mod test {
 
         let batch = bank.prepare_sanitized_batch(&txs);
         let mut timings = ExecuteTimings::default();
-        bank.load_and_execute_transactions(&batch, MAX_PROCESSING_AGE, &mut timings);
+        bank.load_and_execute_transactions(
+            &batch,
+            MAX_PROCESSING_AGE,
+            Default::default(),
+            &mut timings,
+            None,
+            None,
+        );
     }
 }
