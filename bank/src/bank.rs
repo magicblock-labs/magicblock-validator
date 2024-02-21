@@ -10,13 +10,20 @@ use std::{
 use crate::{bank_rc::BankRc, transaction_batch::TransactionBatch};
 use log::debug;
 use solana_accounts_db::{accounts::Accounts, accounts_db::AccountsDb};
-use solana_program_runtime::loaded_programs::{BlockRelation, ForkGraph, LoadedPrograms};
+use solana_measure::measure::Measure;
+use solana_program_runtime::{
+    loaded_programs::{BlockRelation, ForkGraph, LoadedPrograms},
+    timings::{ExecuteTimingType, ExecuteTimings},
+};
 use solana_sdk::{
-    clock::{Epoch, Slot},
+    clock::{Epoch, Slot, MAX_PROCESSING_AGE},
     epoch_schedule::EpochSchedule,
     fee::FeeStructure,
-    transaction::{SanitizedTransaction, MAX_TX_ACCOUNT_LOCKS},
+    nonce_info::NoncePartial,
+    transaction::{Result, SanitizedTransaction, MAX_TX_ACCOUNT_LOCKS},
 };
+use solana_svm::account_loader::TransactionCheckResult;
+use solana_svm::transaction_error_metrics::TransactionErrorMetrics;
 use solana_svm::{runtime_config::RuntimeConfig, transaction_processor::TransactionBatchProcessor};
 
 // -----------------
@@ -102,6 +109,17 @@ impl Default for Bank {
 }
 
 impl Bank {
+    // -----------------
+    // Transaction Accounts
+    // -----------------
+    pub fn unlock_accounts(&self, batch: &mut TransactionBatch) {
+        if batch.needs_unlock() {
+            batch.set_needs_unlock(false);
+            self.rc
+                .accounts
+                .unlock_accounts(batch.sanitized_transactions().iter(), batch.lock_results())
+        }
+    }
     /// Get the max number of accounts that a transaction may lock in this block
     pub fn get_transaction_account_lock_limit(&self) -> usize {
         if let Some(transaction_account_lock_limit) =
@@ -113,6 +131,9 @@ impl Bank {
         }
     }
 
+    // -----------------
+    // Transaction Preparation
+    // -----------------
     /// Prepare a locked transaction batch from a list of sanitized transactions.
     pub fn prepare_sanitized_batch<'a, 'b>(
         &'a self,
@@ -126,18 +147,53 @@ impl Bank {
         TransactionBatch::new(lock_results, self, Cow::Borrowed(txs))
     }
 
-    pub fn load_and_execute_transactions(&self, batch: &TransactionBatch) {
-        let sanitized_txs = batch.sanitized_transactions();
-        debug!("processing transactions: {}", sanitized_txs.len());
+    // -----------------
+    // Transaction Checking
+    // -----------------
+    pub fn check_transactions(
+        &self,
+        sanitized_txs: &[impl core::borrow::Borrow<SanitizedTransaction>],
+        lock_results: &[Result<()>],
+        max_age: usize,
+        error_counters: &mut TransactionErrorMetrics,
+    ) -> Vec<TransactionCheckResult> {
+        // Show that the check_timings measure works
+        std::thread::sleep(std::time::Duration::from_millis(1));
+
+        // FIXME: skipping check_transactions runtime/src/bank.rs: 4505 (which is mostly tx age related)
+        sanitized_txs
+            .iter()
+            .map(|_| {
+                let res: TransactionCheckResult = (Ok(()), None::<NoncePartial>, None);
+                res
+            })
+            .collect::<Vec<_>>()
     }
 
-    pub fn unlock_accounts(&self, batch: &mut TransactionBatch) {
-        if batch.needs_unlock() {
-            batch.set_needs_unlock(false);
-            self.rc
-                .accounts
-                .unlock_accounts(batch.sanitized_transactions().iter(), batch.lock_results())
-        }
+    // -----------------
+    // Transaction Execution
+    // -----------------
+    pub fn load_and_execute_transactions(
+        &self,
+        batch: &TransactionBatch,
+        max_age: usize,
+        timings: &mut ExecuteTimings,
+    ) {
+        let sanitized_txs = batch.sanitized_transactions();
+        debug!("processing transactions: {}", sanitized_txs.len());
+
+        let mut error_counters = TransactionErrorMetrics::default();
+
+        let mut check_time = Measure::start("check_transactions");
+        let mut check_results = self.check_transactions(
+            sanitized_txs,
+            batch.lock_results(),
+            max_age,
+            &mut error_counters,
+        );
+        check_time.stop();
+        debug!("check: {}us", check_time.as_us());
+        timings.saturating_add_in_place(ExecuteTimingType::CheckUs, check_time.as_us());
     }
 }
 
@@ -157,6 +213,7 @@ mod test {
         let txs = vec![];
 
         let batch = bank.prepare_sanitized_batch(&txs);
-        bank.load_and_execute_transactions(&batch);
+        let mut timings = ExecuteTimings::default();
+        bank.load_and_execute_transactions(&batch, MAX_PROCESSING_AGE, &mut timings);
     }
 }

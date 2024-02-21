@@ -11,6 +11,7 @@ edition.workspace = true
 env_logger = { workspace = true }
 log = { workspace = true }
 solana-accounts-db = { workspace = true }
+solana-measure = { workspace = true }
 solana-program-runtime = { workspace = true }
 solana-sdk = { workspace = true }
 solana-svm = { workspace = true }
