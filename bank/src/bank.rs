@@ -22,7 +22,7 @@ use crate::{
 };
 use crate::{
     bank_rc::BankRc,
-    builtins::BuiltinPrototype,
+    builtins::{BuiltinPrototype, BUILTINS},
     consts::LAMPORS_PER_SIGNATURE,
     status_cache::StatusCache,
     transaction_batch::TransactionBatch,
@@ -41,10 +41,16 @@ use solana_accounts_db::{
         TransactionExecutionDetails, TransactionExecutionResult, TransactionResults,
     },
 };
+use solana_bpf_loader_program::syscalls::create_program_runtime_environment_v1;
+use solana_loader_v4_program::create_program_runtime_environment_v2;
 use solana_measure::measure::Measure;
 use solana_program_runtime::{
     loaded_programs::{BlockRelation, ForkGraph, LoadedProgram, LoadedProgramType, LoadedPrograms},
     timings::{ExecuteTimingType, ExecuteTimings},
+};
+use solana_sdk::{
+    account::{create_executable_meta, Account},
+    precompiles::get_precompiles,
 };
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount, WritableAccount},
@@ -307,7 +313,11 @@ impl Bank {
         #[cfg(feature = "dev-context-only-utils")]
         bank.process_genesis_config(genesis_config, collector_id_for_tests);
 
-        // NOTE: leaving out finish_init which we need (at least the adding of builtins)
+        bank.finish_init(
+            genesis_config,
+            additional_builtins,
+            debug_do_not_add_builtins,
+        );
 
         // NOTE: leaving out stakes related setup
 
@@ -387,6 +397,62 @@ impl Bank {
     }
 
     // -----------------
+    // Init
+    // -----------------
+    fn finish_init(
+        &mut self,
+        genesis_config: &GenesisConfig,
+        additional_builtins: Option<&[BuiltinPrototype]>,
+        debug_do_not_add_builtins: bool,
+    ) {
+        // NOTE: leaving out `rewards_pool_pubkeys` initialization
+
+        // TODO: apply_feature_activations
+        // self.apply_feature_activations(
+        //     ApplyFeatureActivationsCaller::FinishInit,
+        //     debug_do_not_add_builtins,
+        // );
+
+        if !debug_do_not_add_builtins {
+            for builtin in BUILTINS
+                .iter()
+                .chain(additional_builtins.unwrap_or(&[]).iter())
+            {
+                if builtin.feature_id.is_none() {
+                    self.add_builtin(
+                        builtin.program_id,
+                        builtin.name.to_string(),
+                        LoadedProgram::new_builtin(0, builtin.name.len(), builtin.entrypoint),
+                    );
+                }
+            }
+            for precompile in get_precompiles() {
+                if precompile.feature.is_none() {
+                    self.add_precompile(&precompile.program_id);
+                }
+            }
+        }
+
+        let mut loaded_programs_cache = self.loaded_programs_cache.write().unwrap();
+        loaded_programs_cache.latest_root_slot = self.slot();
+        loaded_programs_cache.latest_root_epoch = self.epoch();
+        loaded_programs_cache.environments.program_runtime_v1 = Arc::new(
+            create_program_runtime_environment_v1(
+                &self.feature_set,
+                &self.runtime_config.compute_budget.unwrap_or_default(),
+                false, /* deployment */
+                false, /* debugging_features */
+            )
+            .unwrap(),
+        );
+        loaded_programs_cache.environments.program_runtime_v2 =
+            Arc::new(create_program_runtime_environment_v2(
+                &self.runtime_config.compute_budget.unwrap_or_default(),
+                false, /* debugging_features */
+            ));
+    }
+
+    // -----------------
     // Genesis
     // -----------------
     fn process_genesis_config(
@@ -434,6 +500,10 @@ impl Bank {
     // -----------------
     pub fn slot(&self) -> Slot {
         self.slot
+    }
+
+    pub fn epoch(&self) -> Epoch {
+        self.epoch
     }
 
     // -----------------
@@ -694,6 +764,50 @@ impl Bank {
             name,
             inherit_specially_retained_account_fields(&existing_genuine_program),
         );
+        self.store_account_and_update_capitalization(program_id, &account);
+    }
+
+    // Looks like this is only used in tests since add_precompiled_account_with_owner is as well
+    // However `finish_init` is calling this method, so we keep it here
+    pub fn add_precompile(&mut self, program_id: &Pubkey) {
+        debug!("Adding precompiled program {}", program_id);
+        self.add_precompiled_account(program_id);
+        debug!("Added precompiled program {:?}", program_id);
+    }
+
+    /// Add a precompiled program account
+    pub fn add_precompiled_account(&self, program_id: &Pubkey) {
+        self.add_precompiled_account_with_owner(program_id, native_loader::id())
+    }
+
+    // Used by tests to simulate clusters with precompiles that aren't owned by the native loader
+    fn add_precompiled_account_with_owner(&self, program_id: &Pubkey, owner: Pubkey) {
+        if let Some(account) = self.get_account_with_fixed_root(program_id) {
+            if account.executable() {
+                return;
+            }
+            // malicious account is pre-occupying at program_id
+            self.burn_and_purge_account(program_id, account);
+        };
+
+        assert!(
+            !self.freeze_started(),
+            "Can't change frozen bank by adding not-existing new precompiled program ({program_id}). \
+                Maybe, inconsistent program activation is detected on snapshot restore?"
+        );
+
+        // Add a bogus executable account, which will be loaded and ignored.
+        let (lamports, rent_epoch) = inherit_specially_retained_account_fields(&None);
+
+        // Mock account_data with executable_meta so that the account is executable.
+        let account_data = create_executable_meta(&owner);
+        let account = AccountSharedData::from(Account {
+            lamports,
+            owner,
+            data: account_data.to_vec(),
+            executable: true,
+            rent_epoch,
+        });
         self.store_account_and_update_capitalization(program_id, &account);
     }
 
