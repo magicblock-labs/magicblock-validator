@@ -3,9 +3,10 @@ use rayon::{
     prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
 };
 use sleipnir_bank::bank::Bank;
+use sleipnir_bank::LAMPORTS_PER_SIGNATURE;
 use solana_sdk::{
-    account::Account, signature::Keypair, signer::Signer, stake_history::Epoch, system_program,
-    system_transaction, transaction::SanitizedTransaction,
+    account::Account, rent::Rent, signature::Keypair, signer::Signer, stake_history::Epoch,
+    system_program, system_transaction, transaction::SanitizedTransaction,
 };
 
 pub fn init_logger() {
@@ -22,12 +23,14 @@ pub fn create_funded_accounts(bank: &Bank, num: usize) -> Vec<Keypair> {
         "must be power of 2 for parallel funding tree"
     );
     let accounts = create_accounts(num);
+    let rent_exempt_reserve = Rent::default().minimum_balance(0);
+    eprintln!("rent_exempt_reserve: {}", rent_exempt_reserve);
 
     accounts.par_iter().for_each(|account| {
         bank.store_account(
             &account.pubkey(),
             &Account {
-                lamports: 5100,
+                lamports: rent_exempt_reserve + (num as u64 * LAMPORTS_PER_SIGNATURE),
                 data: vec![],
                 owner: system_program::id(),
                 executable: false,

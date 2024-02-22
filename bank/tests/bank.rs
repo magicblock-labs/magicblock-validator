@@ -17,13 +17,14 @@ fn test_bank_one_system_instruction() {
     let batch = bank.prepare_sanitized_batch(&txs);
 
     let mut timings = ExecuteTimings::default();
-    let res = bank.load_and_execute_transactions(
+    let (transaction_results, transaction_balances) = bank.load_execute_and_commit_transactions(
         &batch,
         MAX_PROCESSING_AGE,
+        false,
         Default::default(),
         &mut timings,
         None,
-        None,
     );
-    eprintln!("{:#?}", res.loaded_transactions);
+    eprintln!("{:?}", transaction_results.execution_results);
+    eprintln!("{:#?}", transaction_balances);
 }

@@ -9,5 +9,7 @@ mod transaction_batch;
 mod transaction_logs;
 mod transaction_results;
 
+pub use consts::LAMPORTS_PER_SIGNATURE;
+
 #[cfg(any(test, feature = "dev-context-only-utils"))]
 pub mod bank_dev_utils;

@@ -23,7 +23,7 @@ use crate::{
 use crate::{
     bank_rc::BankRc,
     builtins::{BuiltinPrototype, BUILTINS},
-    consts::LAMPORS_PER_SIGNATURE,
+    consts::LAMPORTS_PER_SIGNATURE,
     status_cache::StatusCache,
     transaction_batch::TransactionBatch,
     transaction_results::{TransactionBalances, TransactionBalancesSet},
@@ -871,7 +871,7 @@ impl Bank {
                 // add a BlockhashNotFound TransactionCheckResult which causes the transaction
                 // to not execute
                 let res: TransactionCheckResult =
-                    (Ok(()), None::<NoncePartial>, Some(LAMPORS_PER_SIGNATURE));
+                    (Ok(()), None::<NoncePartial>, Some(LAMPORTS_PER_SIGNATURE));
                 res
             })
             .collect::<Vec<_>>()

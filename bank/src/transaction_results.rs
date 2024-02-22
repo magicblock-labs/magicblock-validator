@@ -22,6 +22,7 @@ pub struct LoadAndExecuteTransactionsOutput {
     pub error_counters: TransactionErrorMetrics,
 }
 
+#[derive(Debug)]
 pub struct TransactionBalancesSet {
     pub pre_balances: TransactionBalances,
     pub post_balances: TransactionBalances,
