@@ -2,9 +2,12 @@ mod utils;
 
 use std::collections::HashSet;
 
+use log::{debug, info, trace};
 use sleipnir_bank::bank::{Bank, TransactionExecutionRecordingOpts};
 use solana_program_runtime::timings::ExecuteTimings;
-use solana_sdk::{clock::MAX_PROCESSING_AGE, genesis_config::create_genesis_config};
+use solana_sdk::{
+    clock::MAX_PROCESSING_AGE, genesis_config::create_genesis_config, system_program,
+};
 
 use crate::utils::init_logger;
 
@@ -28,27 +31,30 @@ fn test_bank_one_system_instruction() {
         None,
     );
 
-    eprintln!("{:?}", txs);
-    eprintln!("{:#?}", transaction_results.execution_results);
-    eprintln!("{:#?}", transaction_balances);
+    trace!("{:#?}", txs);
+    trace!("{:#?}", transaction_results.execution_results);
+    debug!("{:#?}", transaction_balances);
 
     for key in txs
         .iter()
         .flat_map(|tx| tx.message().account_keys().iter())
         .collect::<HashSet<_>>()
     {
+        if key.eq(&system_program::id()) {
+            continue;
+        }
+
         let account = bank.get_account(key).unwrap();
-        eprintln!("{:?}: {:#?}", key, account);
+
+        debug!("{:?}: {:#?}", key, account);
     }
 
-    eprintln!("\n=============== Logs ===============\n");
+    info!("=============== Logs ===============");
     for res in transaction_results.execution_results.iter() {
         if let Some(logs) = res.details().as_ref().and_then(|x| x.log_messages.as_ref()) {
             for log in logs {
-                eprintln!("> {log}");
+                info!("> {log}");
             }
         }
     }
-
-    eprintln!("\n");
 }
