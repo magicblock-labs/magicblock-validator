@@ -1,13 +1,8 @@
 mod utils;
 
-use std::collections::HashSet;
-
-use log::{debug, info, trace};
-use sleipnir_bank::bank::{Bank, TransactionExecutionRecordingOpts};
-use solana_program_runtime::timings::ExecuteTimings;
-use solana_sdk::{
-    clock::MAX_PROCESSING_AGE, genesis_config::create_genesis_config, system_program,
-};
+use sleipnir_bank::bank::Bank;
+use solana_sdk::genesis_config::create_genesis_config;
+use utils::{add_elf_program, elfs};
 
 use crate::utils::init_logger;
 
@@ -18,43 +13,29 @@ fn test_bank_one_system_instruction() {
     let (genesis_config, _) = create_genesis_config(u64::MAX);
     let bank = Bank::new_for_tests(&genesis_config);
 
-    let txs = utils::create_transactions(&bank, 1);
-    let batch = bank.prepare_sanitized_batch(&txs);
+    let txs = utils::create_system_transfer_transactions(&bank, 1);
+    utils::execute_transactions(&bank, txs);
+}
 
-    let mut timings = ExecuteTimings::default();
-    let (transaction_results, transaction_balances) = bank.load_execute_and_commit_transactions(
-        &batch,
-        MAX_PROCESSING_AGE,
-        true,
-        TransactionExecutionRecordingOpts::recording_logs(),
-        &mut timings,
-        None,
-    );
+#[test]
+fn test_bank_one_noop_instruction() {
+    init_logger();
 
-    trace!("{:#?}", txs);
-    trace!("{:#?}", transaction_results.execution_results);
-    debug!("{:#?}", transaction_balances);
+    let (genesis_config, _) = create_genesis_config(u64::MAX);
+    let bank = Bank::new_for_tests(&genesis_config);
+    add_elf_program(&bank, &elfs::noop::ID);
 
-    for key in txs
-        .iter()
-        .flat_map(|tx| tx.message().account_keys().iter())
-        .collect::<HashSet<_>>()
-    {
-        if key.eq(&system_program::id()) {
-            continue;
-        }
+    let tx = utils::create_noop_transaction(&bank);
+    utils::execute_transactions(&bank, vec![tx]);
+}
 
-        let account = bank.get_account(key).unwrap();
+#[test]
+fn test_bank_solx_instructions() {
+    init_logger();
 
-        debug!("{:?}: {:#?}", key, account);
-    }
-
-    info!("=============== Logs ===============");
-    for res in transaction_results.execution_results.iter() {
-        if let Some(logs) = res.details().as_ref().and_then(|x| x.log_messages.as_ref()) {
-            for log in logs {
-                info!("> {log}");
-            }
-        }
-    }
+    let (genesis_config, _) = create_genesis_config(u64::MAX);
+    let bank = Bank::new_for_tests(&genesis_config);
+    add_elf_program(&bank, &elfs::solanax::ID);
+    let tx = utils::create_solx_send_post_transaction(&bank);
+    utils::execute_transactions(&bank, vec![tx]);
 }

@@ -25,6 +25,7 @@ solana-svm = { workspace = true }
 solana-system-program = { workspace = true }
 
 [dev-dependencies]
+bincode = { workspace = true }
 rayon = { workspace = true }
 
 solana-accounts-db = { workspace = true, features = ["dev-context-only-utils"] }

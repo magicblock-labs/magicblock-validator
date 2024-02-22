@@ -721,6 +721,7 @@ impl Bank {
     // -----------------
     // Builtin Program Accounts
     // -----------------
+
     /// Add a built-in program
     pub fn add_builtin(&mut self, program_id: Pubkey, name: String, builtin: LoadedProgram) {
         debug!("Adding program {} under {:?}", name, program_id);
