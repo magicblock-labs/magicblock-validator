@@ -17,6 +17,7 @@ static ELFS: &[(Pubkey, Pubkey, &[u8])] = &[
     (
         noop::ID,
         solana_sdk::bpf_loader_upgradeable::ID,
+        // solana_sdk::bpf_loader::ID,
         include_bytes!("elfs/noop.so"),
     ),
     (
@@ -55,7 +56,7 @@ pub fn elf_accounts() -> Vec<(Pubkey, AccountSharedData)> {
                 })
                 .unwrap()
             } else {
-                panic!("Only upgradable loader supported");
+                elf.to_vec()
             };
             accounts.push((
                 *program_id,
@@ -70,4 +71,21 @@ pub fn elf_accounts() -> Vec<(Pubkey, AccountSharedData)> {
             accounts.into_iter()
         })
         .collect()
+}
+
+pub fn elf_accounts_for(program_id: &Pubkey) -> Vec<(Pubkey, AccountSharedData)> {
+    let program = elf_accounts()
+        .into_iter()
+        .find(|(id, _)| id == program_id)
+        .expect("elf program not found");
+    let (programdata_address, _) = Pubkey::find_program_address(
+        &[program_id.as_ref()],
+        &solana_sdk::bpf_loader_upgradeable::ID,
+    );
+    let programdata = elf_accounts()
+        .into_iter()
+        .find(|(id, _)| id == &programdata_address)
+        .expect("elf programdata not found");
+
+    vec![program, programdata]
 }

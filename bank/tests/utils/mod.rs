@@ -82,15 +82,16 @@ pub fn add_elf_programs(bank: &Bank) {
     }
 }
 
-pub fn add_elf_program(bank: &Bank, pubkey: &Pubkey) {
-    for (program_id, account) in elfs::elf_accounts() {
-        if &program_id == pubkey {
-            debug!("Adding ELF program: '{}'", pubkey);
-            bank.store_account(&program_id, &account);
-            return;
-        }
+pub fn add_elf_program(bank: &Bank, program_id: &Pubkey) {
+    let program_accs = elfs::elf_accounts_for(program_id);
+    if program_accs.is_empty() {
+        panic!("Unknown ELF account: {:?}", program_id);
     }
-    panic!("Unknown ELF account: {:?}", pubkey);
+
+    for (acc_id, account) in program_accs {
+        debug!("Adding ELF program: '{}'", acc_id);
+        bank.store_account(&acc_id, &account);
+    }
 }
 
 pub fn create_noop_transaction(bank: &Bank) -> SanitizedTransaction {
