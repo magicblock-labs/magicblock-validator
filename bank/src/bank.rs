@@ -271,9 +271,27 @@ impl TransactionProcessingCallback for Bank {
 
 #[derive(Default)]
 pub struct TransactionExecutionRecordingOpts {
-    enable_cpi_recording: bool,
-    enable_log_recording: bool,
-    enable_return_data_recording: bool,
+    pub enable_cpi_recording: bool,
+    pub enable_log_recording: bool,
+    pub enable_return_data_recording: bool,
+}
+
+impl TransactionExecutionRecordingOpts {
+    pub fn recording_logs() -> Self {
+        Self {
+            enable_cpi_recording: false,
+            enable_log_recording: true,
+            enable_return_data_recording: false,
+        }
+    }
+
+    pub fn recording_all() -> Self {
+        Self {
+            enable_cpi_recording: true,
+            enable_log_recording: true,
+            enable_return_data_recording: true,
+        }
+    }
 }
 
 impl Bank {

@@ -14,7 +14,10 @@ use solana_sdk::{
 };
 use solana_svm::runtime_config::RuntimeConfig;
 
-use crate::{bank::Bank, transaction_batch::TransactionBatch};
+use crate::{
+    bank::Bank, transaction_batch::TransactionBatch,
+    transaction_logs::TransactionLogCollectorFilter,
+};
 
 #[derive(Debug, Default)]
 pub struct BankTestConfig {
@@ -64,7 +67,7 @@ impl Bank {
         account_indexes: AccountSecondaryIndexes,
         shrink_ratio: AccountShrinkThreshold,
     ) -> Self {
-        Self::new_with_paths(
+        let bank = Self::new_with_paths(
             genesis_config,
             runtime_config,
             paths,
@@ -77,7 +80,12 @@ impl Bank {
             None,
             Some(Pubkey::new_unique()),
             Arc::default(),
-        )
+        );
+        bank.transaction_log_collector_config
+            .write()
+            .unwrap()
+            .filter = TransactionLogCollectorFilter::All;
+        bank
     }
 
     /// Prepare a transaction batch from a list of legacy transactions. Used for tests only.

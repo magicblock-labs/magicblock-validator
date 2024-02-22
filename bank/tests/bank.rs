@@ -2,7 +2,7 @@ mod utils;
 
 use std::collections::HashSet;
 
-use sleipnir_bank::bank::Bank;
+use sleipnir_bank::bank::{Bank, TransactionExecutionRecordingOpts};
 use solana_program_runtime::timings::ExecuteTimings;
 use solana_sdk::{clock::MAX_PROCESSING_AGE, genesis_config::create_genesis_config};
 
@@ -23,7 +23,7 @@ fn test_bank_one_system_instruction() {
         &batch,
         MAX_PROCESSING_AGE,
         true,
-        Default::default(),
+        TransactionExecutionRecordingOpts::recording_logs(),
         &mut timings,
         None,
     );
@@ -40,4 +40,15 @@ fn test_bank_one_system_instruction() {
         let account = bank.get_account(key).unwrap();
         eprintln!("{:?}: {:#?}", key, account);
     }
+
+    eprintln!("\n=============== Logs ===============\n");
+    for res in transaction_results.execution_results.iter() {
+        if let Some(logs) = res.details().as_ref().and_then(|x| x.log_messages.as_ref()) {
+            for log in logs {
+                eprintln!("> {log}");
+            }
+        }
+    }
+
+    eprintln!("\n");
 }
