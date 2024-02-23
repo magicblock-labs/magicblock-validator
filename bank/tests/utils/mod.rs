@@ -13,6 +13,7 @@ use solana_sdk::{
     clock::MAX_PROCESSING_AGE,
     instruction::{AccountMeta, Instruction},
     message::Message,
+    native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
     rent::Rent,
     signature::Keypair,
@@ -31,20 +32,22 @@ pub fn create_accounts(num: usize) -> Vec<Keypair> {
     (0..num).into_par_iter().map(|_| Keypair::new()).collect()
 }
 
-pub fn create_funded_accounts(bank: &Bank, num: usize) -> Vec<Keypair> {
+pub fn create_funded_accounts(bank: &Bank, num: usize, lamports: Option<u64>) -> Vec<Keypair> {
     assert!(
         num.is_power_of_two(),
         "must be power of 2 for parallel funding tree"
     );
     let accounts = create_accounts(num);
-    let rent_exempt_reserve = Rent::default().minimum_balance(0);
-    eprintln!("rent_exempt_reserve: {}", rent_exempt_reserve);
+    let lamports = lamports.unwrap_or_else(|| {
+        let rent_exempt_reserve = Rent::default().minimum_balance(0);
+        rent_exempt_reserve + (num as u64 * LAMPORTS_PER_SIGNATURE)
+    });
 
     accounts.par_iter().for_each(|account| {
         bank.store_account(
             &account.pubkey(),
             &Account {
-                lamports: rent_exempt_reserve + (num as u64 * LAMPORTS_PER_SIGNATURE),
+                lamports,
                 data: vec![],
                 owner: system_program::id(),
                 executable: false,
@@ -60,7 +63,7 @@ pub fn create_funded_accounts(bank: &Bank, num: usize) -> Vec<Keypair> {
 // System Program
 // -----------------
 pub fn create_system_transfer_transactions(bank: &Bank, num: usize) -> Vec<SanitizedTransaction> {
-    let funded_accounts = create_funded_accounts(bank, 2 * num);
+    let funded_accounts = create_funded_accounts(bank, 2 * num, None);
     funded_accounts
         .into_par_iter()
         .chunks(2)
@@ -96,7 +99,7 @@ pub fn add_elf_program(bank: &Bank, program_id: &Pubkey) {
 }
 
 pub fn create_noop_transaction(bank: &Bank) -> SanitizedTransaction {
-    let funded_accounts = create_funded_accounts(bank, 2);
+    let funded_accounts = create_funded_accounts(bank, 2, None);
     let instruction = create_noop_instruction(&elfs::noop::id(), &funded_accounts);
     let message = Message::new(&[instruction], None);
     let transaction = Transaction::new_unsigned(message);
@@ -113,7 +116,7 @@ fn create_noop_instruction(program_id: &Pubkey, funded_accounts: &[Keypair]) -> 
 }
 
 pub fn create_solx_send_post_transaction(bank: &Bank) -> SanitizedTransaction {
-    let funded_accounts = create_funded_accounts(bank, 2);
+    let funded_accounts = create_funded_accounts(bank, 2, Some(LAMPORTS_PER_SOL));
     let instruction = create_solx_send_post_instruction(&elfs::solanax::id(), &funded_accounts);
     let message = Message::new(&[instruction], Some(&funded_accounts[0].pubkey()));
     let transaction = Transaction::new(
