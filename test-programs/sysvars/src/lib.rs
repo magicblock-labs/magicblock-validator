@@ -39,7 +39,7 @@ fn process_sysvar_get(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramR
     let rent = Rent::get().unwrap();
     msg!("{:?}", rent);
     let epoch_schedule = EpochSchedule::get().unwrap();
-    msg!("{:#?}", epoch_schedule);
+    msg!("{:?}", epoch_schedule);
     Ok(())
 }
 

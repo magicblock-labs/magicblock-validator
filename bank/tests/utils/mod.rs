@@ -127,7 +127,6 @@ pub fn create_solx_send_post_transaction(bank: &Bank) -> SanitizedTransaction {
         message,
         bank.last_blockhash(),
     );
-    debug!("{:#?}", transaction);
     SanitizedTransaction::try_from_legacy_transaction(transaction).unwrap()
 }
 
