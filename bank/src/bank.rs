@@ -67,6 +67,7 @@ use solana_sdk::{
     nonce_info::NoncePartial,
     precompiles::get_precompiles,
     pubkey::Pubkey,
+    recent_blockhashes_account,
     rent_collector::RentCollector,
     rent_debits::RentDebits,
     saturating_add_assign,
@@ -340,9 +341,12 @@ impl Bank {
             debug_do_not_add_builtins,
         );
 
-        // NOTE: leaving out epoch_schedule, rent, slot, blockhash, stake history sysvar setup
+        // NOTE: leaving out slot, blockhash, stake history sysvar setup
 
         bank.update_clock(None);
+        bank.update_rent();
+        bank.update_epoch_schedule();
+        bank.update_recent_blockhashes();
 
         bank
     }
@@ -769,6 +773,40 @@ impl Bank {
         };
         self.update_sysvar_account(&sysvar::clock::id(), |account| {
             create_account(&clock, inherit_specially_retained_account_fields(account))
+        });
+    }
+
+    fn update_rent(&self) {
+        self.update_sysvar_account(&sysvar::rent::id(), |account| {
+            create_account(
+                &self.rent_collector.rent,
+                inherit_specially_retained_account_fields(account),
+            )
+        });
+    }
+
+    fn update_epoch_schedule(&self) {
+        self.update_sysvar_account(&sysvar::epoch_schedule::id(), |account| {
+            create_account(
+                self.epoch_schedule(),
+                inherit_specially_retained_account_fields(account),
+            )
+        });
+    }
+
+    pub fn update_recent_blockhashes(&self) {
+        let blockhash_queue = self.blockhash_queue.read().unwrap();
+        self.update_recent_blockhashes_locked(&blockhash_queue);
+    }
+
+    fn update_recent_blockhashes_locked(&self, locked_blockhash_queue: &BlockhashQueue) {
+        #[allow(deprecated)]
+        self.update_sysvar_account(&sysvar::recent_blockhashes::id(), |account| {
+            let recent_blockhash_iter = locked_blockhash_queue.get_recent_blockhashes();
+            recent_blockhashes_account::create_account_with_data_and_fields(
+                recent_blockhash_iter,
+                inherit_specially_retained_account_fields(account),
+            )
         });
     }
 
