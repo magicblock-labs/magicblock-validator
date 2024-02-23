@@ -47,6 +47,7 @@ use solana_bpf_loader_program::syscalls::create_program_runtime_environment_v1;
 use solana_loader_v4_program::create_program_runtime_environment_v2;
 use solana_measure::measure::Measure;
 use solana_program_runtime::{
+    compute_budget_processor::process_compute_budget_instructions,
     loaded_programs::{BlockRelation, ForkGraph, LoadedProgram, LoadedProgramType, LoadedPrograms},
     timings::{ExecuteTimingType, ExecuteTimings},
 };
@@ -57,14 +58,16 @@ use solana_sdk::{
     },
     clock::{Epoch, Slot, UnixTimestamp, MAX_PROCESSING_AGE},
     epoch_schedule::EpochSchedule,
-    feature_set::{self, FeatureSet},
+    feature_set::{self, include_loaded_accounts_data_size_in_fee_calculation, FeatureSet},
     fee::FeeStructure,
     fee_calculator::FeeRateGovernor,
     genesis_config::GenesisConfig,
     hash::Hash,
+    message::SanitizedMessage,
     native_loader,
-    nonce::state::DurableNonce,
-    nonce_info::NoncePartial,
+    nonce::{self, state::DurableNonce, NONCED_TX_MARKER_IX_INDEX},
+    nonce_account,
+    nonce_info::{NonceInfo, NoncePartial},
     precompiles::get_precompiles,
     pubkey::Pubkey,
     recent_blockhashes_account,
@@ -74,6 +77,7 @@ use solana_sdk::{
     signature::Signature,
     sysvar::{self, last_restart_slot::LastRestartSlot},
     transaction::{Result, SanitizedTransaction, TransactionError, MAX_TX_ACCOUNT_LOCKS},
+    transaction_context::TransactionAccount,
 };
 use solana_svm::{account_loader::TransactionCheckResult, account_overrides::AccountOverrides};
 use solana_svm::{runtime_config::RuntimeConfig, transaction_processor::TransactionBatchProcessor};
@@ -81,6 +85,7 @@ use solana_svm::{
     transaction_error_metrics::TransactionErrorMetrics,
     transaction_processor::TransactionProcessingCallback,
 };
+use solana_system_program::{get_system_account_kind, SystemAccountKind};
 
 pub type BankStatusCache = StatusCache<Result<()>>;
 
@@ -1523,8 +1528,7 @@ impl Bank {
         execution_results: &[TransactionExecutionResult],
     ) -> Vec<Result<()>> {
         let hash_queue = self.blockhash_queue.read().unwrap();
-        // NOTE: not clear if we will collect fees
-        // let mut fees = 0;
+        let mut fees = 0;
 
         let results = txs
             .iter()
@@ -1550,7 +1554,6 @@ impl Bank {
                 let lamports_per_signature =
                     lamports_per_signature.ok_or(TransactionError::BlockhashNotFound)?;
 
-                /*
                 let fee = self.get_fee_for_message_with_lamports_per_signature(
                     tx.message(),
                     lamports_per_signature,
@@ -1568,7 +1571,6 @@ impl Bank {
                 }
 
                 fees += fee;
-                */
                 Ok(())
             })
             .collect();
@@ -1576,6 +1578,85 @@ impl Bank {
         // self.collector_fees.fetch_add(fees, Relaxed);
         results
     }
+
+    // -----------------
+    // Fees
+    // -----------------
+    fn withdraw(&self, pubkey: &Pubkey, lamports: u64) -> Result<()> {
+        match self.get_account_with_fixed_root(pubkey) {
+            Some(mut account) => {
+                let min_balance = match get_system_account_kind(&account) {
+                    Some(SystemAccountKind::Nonce) => self
+                        .rent_collector
+                        .rent
+                        .minimum_balance(nonce::State::size()),
+                    _ => 0,
+                };
+
+                lamports
+                    .checked_add(min_balance)
+                    .filter(|required_balance| *required_balance <= account.lamports())
+                    .ok_or(TransactionError::InsufficientFundsForFee)?;
+                account
+                    .checked_sub_lamports(lamports)
+                    .map_err(|_| TransactionError::InsufficientFundsForFee)?;
+                self.store_account(pubkey, &account);
+
+                Ok(())
+            }
+            None => Err(TransactionError::AccountNotFound),
+        }
+    }
+
+    pub fn get_fee_for_message(&self, message: &SanitizedMessage) -> Option<u64> {
+        let lamports_per_signature = {
+            let blockhash_queue = self.blockhash_queue.read().unwrap();
+            blockhash_queue.get_lamports_per_signature(message.recent_blockhash())
+        }
+        .or_else(|| {
+            self.check_message_for_nonce(message)
+                .and_then(|(address, account)| {
+                    NoncePartial::new(address, account).lamports_per_signature()
+                })
+        })?;
+        Some(self.get_fee_for_message_with_lamports_per_signature(message, lamports_per_signature))
+    }
+
+    pub fn get_fee_for_message_with_lamports_per_signature(
+        &self,
+        message: &SanitizedMessage,
+        lamports_per_signature: u64,
+    ) -> u64 {
+        self.fee_structure.calculate_fee(
+            message,
+            lamports_per_signature,
+            &process_compute_budget_instructions(message.program_instructions_iter())
+                .unwrap_or_default()
+                .into(),
+            self.feature_set
+                .is_active(&include_loaded_accounts_data_size_in_fee_calculation::id()),
+        )
+    }
+
+    // -----------------
+    // Nonces
+    // -----------------
+    fn check_message_for_nonce(&self, message: &SanitizedMessage) -> Option<TransactionAccount> {
+        let nonce_address = message.get_durable_nonce()?;
+        let nonce_account = self.get_account_with_fixed_root(nonce_address)?;
+        let nonce_data =
+            nonce_account::verify_nonce_account(&nonce_account, message.recent_blockhash())?;
+
+        let nonce_is_authorized = message
+            .get_ix_signers(NONCED_TX_MARKER_IX_INDEX as usize)
+            .any(|signer| signer == &nonce_data.authority);
+        if !nonce_is_authorized {
+            return None;
+        }
+
+        Some((*nonce_address, nonce_account))
+    }
+
     // -----------------
     // Unsupported
     // -----------------
@@ -1720,37 +1801,5 @@ impl Bank {
     ) {
         let data_size_delta = calculate_data_size_delta(old_data_size, new_data_size);
         self.update_accounts_data_size_delta_off_chain(data_size_delta);
-    }
-}
-
-#[cfg(test)]
-mod test {
-    use super::*;
-    use solana_sdk::clock::MAX_PROCESSING_AGE;
-
-    use crate::bank::Bank;
-
-    pub fn init_logger() {
-        let _ = env_logger::builder().is_test(true).try_init();
-    }
-
-    #[test]
-    fn test_bank_empty_transactions() {
-        init_logger();
-
-        let bank = Bank::default_for_tests();
-        let txs = vec![];
-
-        let batch = bank.prepare_sanitized_batch(&txs);
-        let mut timings = ExecuteTimings::default();
-        let res = bank.load_and_execute_transactions(
-            &batch,
-            MAX_PROCESSING_AGE,
-            Default::default(),
-            &mut timings,
-            None,
-            None,
-        );
-        eprintln!("{:#?}", res);
     }
 }
