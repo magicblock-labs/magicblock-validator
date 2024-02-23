@@ -76,6 +76,7 @@ pub fn create_system_transfer_transactions(bank: &Bank, num: usize) -> Vec<Sanit
 // -----------------
 // ELF Programs
 // -----------------
+#[allow(dead_code)]
 pub fn add_elf_programs(bank: &Bank) {
     for (program_id, account) in elfs::elf_accounts() {
         bank.store_account(&program_id, &account);
@@ -99,7 +100,7 @@ pub fn create_noop_transaction(bank: &Bank) -> SanitizedTransaction {
     let instruction = create_noop_instruction(&elfs::noop::id(), &funded_accounts);
     let message = Message::new(&[instruction], None);
     let transaction = Transaction::new_unsigned(message);
-    SanitizedTransaction::from_transaction_for_tests(transaction)
+    SanitizedTransaction::try_from_legacy_transaction(transaction).unwrap()
 }
 
 fn create_noop_instruction(program_id: &Pubkey, funded_accounts: &[Keypair]) -> Instruction {
@@ -114,26 +115,35 @@ fn create_noop_instruction(program_id: &Pubkey, funded_accounts: &[Keypair]) -> 
 pub fn create_solx_send_post_transaction(bank: &Bank) -> SanitizedTransaction {
     let funded_accounts = create_funded_accounts(bank, 2);
     let instruction = create_solx_send_post_instruction(&elfs::solanax::id(), &funded_accounts);
-    let transaction = Transaction::new_signed_with_payer(
-        &[instruction],
-        Some(&funded_accounts[0].pubkey()),
-        &[&funded_accounts[0]],
+    let message = Message::new(&[instruction], Some(&funded_accounts[0].pubkey()));
+    let transaction = Transaction::new(
+        &[&funded_accounts[0], &funded_accounts[1]],
+        message,
         bank.last_blockhash(),
     );
-    SanitizedTransaction::from_transaction_for_tests(transaction)
+    debug!("{:#?}", transaction);
+    SanitizedTransaction::try_from_legacy_transaction(transaction).unwrap()
 }
 
 fn create_solx_send_post_instruction(
     program_id: &Pubkey,
     funded_accounts: &[Keypair],
 ) -> Instruction {
-    let ix_bytes: Vec<u8> = Vec::new();
+    // https://explorer.solana.com/tx/nM2WLNPVfU3R8C4dJwhzwBsVXXgBkySAuBrGTEoaGaAQMxNHy4mnAgLER8ddDmD6tjw3suVhfG1RdbdbhyScwLK?cluster=devnet
+    #[rustfmt::skip]
+    let ix_bytes: Vec<u8> = vec![
+        0x84, 0xf5, 0xee, 0x1d,
+        0xf3, 0x2a, 0xad, 0x36,
+        0x05, 0x00, 0x00, 0x00,
+        0x68, 0x65, 0x6c, 0x6c,
+        0x6f,
+    ];
     Instruction::new_with_bytes(
         *program_id,
         &ix_bytes,
         vec![
             AccountMeta::new(funded_accounts[0].pubkey(), true),
-            AccountMeta::new(funded_accounts[1].pubkey(), false),
+            AccountMeta::new(funded_accounts[1].pubkey(), true),
             AccountMeta::new_readonly(system_program::id(), false),
         ],
     )
