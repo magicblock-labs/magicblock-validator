@@ -9,7 +9,6 @@ edition.workspace = true
 
 [dependencies]
 arrayref = { workspace = true }
-env_logger = { workspace = true }
 log = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true, features = ["rc"] }
@@ -26,6 +25,7 @@ solana-system-program = { workspace = true }
 
 [dev-dependencies]
 bincode = { workspace = true }
+env_logger = { workspace = true }
 rayon = { workspace = true }
 
 solana-accounts-db = { workspace = true, features = ["dev-context-only-utils"] }

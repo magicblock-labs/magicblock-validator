@@ -98,6 +98,7 @@ pub fn add_elf_program(bank: &Bank, program_id: &Pubkey) {
     }
 }
 
+// Noop
 pub fn create_noop_transaction(bank: &Bank) -> SanitizedTransaction {
     let funded_accounts = create_funded_accounts(bank, 2, None);
     let instruction = create_noop_instruction(&elfs::noop::id(), &funded_accounts);
@@ -115,6 +116,7 @@ fn create_noop_instruction(program_id: &Pubkey, funded_accounts: &[Keypair]) -> 
     )
 }
 
+// SolanaX
 pub fn create_solx_send_post_transaction(bank: &Bank) -> SanitizedTransaction {
     let funded_accounts = create_funded_accounts(bank, 2, Some(LAMPORTS_PER_SOL));
     let instruction = create_solx_send_post_instruction(&elfs::solanax::id(), &funded_accounts);
@@ -152,6 +154,24 @@ fn create_solx_send_post_instruction(
     )
 }
 
+// Sysvars
+pub fn create_sysvars_get_transaction(bank: &Bank) -> SanitizedTransaction {
+    let funded_accounts = create_funded_accounts(bank, 2, None);
+    let instruction = create_sysvars_get_instruction(&elfs::sysvars::id(), &funded_accounts);
+    let message = Message::new(&[instruction], None);
+    let transaction = Transaction::new_unsigned(message);
+    SanitizedTransaction::try_from_legacy_transaction(transaction).unwrap()
+}
+
+fn create_sysvars_get_instruction(program_id: &Pubkey, funded_accounts: &[Keypair]) -> Instruction {
+    let ix_bytes: Vec<u8> = vec![0x00];
+    Instruction::new_with_bytes(
+        *program_id,
+        &ix_bytes,
+        vec![AccountMeta::new(funded_accounts[0].pubkey(), true)],
+    )
+}
+
 // -----------------
 // Transactions
 // -----------------
@@ -181,9 +201,11 @@ pub fn execute_transactions(bank: &Bank, txs: Vec<SanitizedTransaction>) {
             continue;
         }
 
-        let account = bank.get_account(key).unwrap();
-
-        debug!("{:?}: {:#?}", key, account);
+        if let Some(account) = bank.get_account(key) {
+            debug!("{:?}: {:#?}", key, account);
+        } else {
+            debug!("{:?}: <none>", key);
+        }
     }
 
     info!("=============== Logs ===============");

@@ -12,6 +12,9 @@ pub mod noop {
 pub mod solanax {
     solana_sdk::declare_id!("SoLXmnP9JvL6vJ7TN1VqtTxqsc2izmPfF9CsMDEuRzJ");
 }
+pub mod sysvars {
+    solana_sdk::declare_id!("sysvarP9JvL6vJ7TN1VqtTxqsc2izmPfF9CsMDEuRzJ");
+}
 
 static ELFS: &[(Pubkey, Pubkey, &[u8])] = &[
     (
@@ -24,6 +27,11 @@ static ELFS: &[(Pubkey, Pubkey, &[u8])] = &[
         solanax::ID,
         solana_sdk::bpf_loader_upgradeable::ID,
         include_bytes!("elfs/solanax.so"),
+    ),
+    (
+        sysvars::ID,
+        solana_sdk::bpf_loader_upgradeable::ID,
+        include_bytes!("elfs/sysvars.so"),
     ),
 ];
 

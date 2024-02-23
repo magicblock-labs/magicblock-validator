@@ -1,0 +1,12 @@
+[workspace]
+members = ["sysvars"]
+resolver = "2"
+
+[workspace.package]
+version = "0.0.0"
+edition = "2021"
+
+[workspace.dependencies]
+# Need to pin solana version here as newer ones require a rust version that conficts with
+# the one used by cargo build-sbf
+solana-program = "=1.17.22"

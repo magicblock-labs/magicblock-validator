@@ -1,0 +1,10 @@
+[package]
+name = "sysvars"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+solana-program = { workspace = true }
+
+[lib]
+crate-type = ["cdylib", "lib"]
