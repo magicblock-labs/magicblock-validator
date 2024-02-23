@@ -961,7 +961,6 @@ impl Bank {
             .write()
             .unwrap()
             .assign_program(program_id, Arc::new(builtin));
-        debug!("Added program {} under {:?}", name, program_id);
     }
 
     /// Add a builtin program account
@@ -1021,7 +1020,6 @@ impl Bank {
     pub fn add_precompile(&mut self, program_id: &Pubkey) {
         debug!("Adding precompiled program {}", program_id);
         self.add_precompiled_account(program_id);
-        debug!("Added precompiled program {:?}", program_id);
     }
 
     /// Add a precompiled program account

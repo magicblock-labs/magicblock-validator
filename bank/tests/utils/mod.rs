@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use log::{debug, info, trace};
+use log::{debug, error, info, trace, warn};
 use rayon::{
     iter::IndexedParallelIterator,
     prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
@@ -222,7 +222,32 @@ pub fn execute_transactions(bank: &Bank, txs: Vec<SanitizedTransaction>) {
 
     trace!("{:#?}", txs);
     trace!("{:#?}", transaction_results.execution_results);
-    debug!("{:#?}", transaction_balances);
+    trace!("{:#?}", transaction_balances);
+
+    for res in transaction_results.execution_results.iter() {
+        if let Err(err) = res.flattened_result() {
+            error!(
+                "Error: {:?}, ({}) 😈",
+                err,
+                if res.was_executed() {
+                    "executed"
+                } else {
+                    "not executed"
+                },
+            );
+        } else if res.was_executed_successfully() {
+            info!(
+                "Executed {}",
+                if res.was_executed_successfully() {
+                    "successfully. 😀"
+                } else {
+                    "but failed! 😈"
+                }
+            );
+        } else {
+            warn!("Failed to execute 😈",);
+        }
+    }
 
     for key in txs
         .iter()
@@ -234,12 +259,13 @@ pub fn execute_transactions(bank: &Bank, txs: Vec<SanitizedTransaction>) {
         }
 
         if let Some(account) = bank.get_account(key) {
-            debug!("{:?}: {:#?}", key, account);
+            trace!("{:?}: {:#?}", key, account);
         } else {
-            debug!("{:?}: <none>", key);
+            debug!("{:?}: missing", key);
         }
     }
 
+    info!("");
     info!("=============== Logs ===============");
     for res in transaction_results.execution_results.iter() {
         if let Some(logs) = res.details().as_ref().and_then(|x| x.log_messages.as_ref()) {
@@ -248,4 +274,5 @@ pub fn execute_transactions(bank: &Bank, txs: Vec<SanitizedTransaction>) {
             }
         }
     }
+    info!("");
 }

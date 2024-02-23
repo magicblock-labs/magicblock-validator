@@ -35,9 +35,9 @@ fn process_sysvar_get(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramR
     msg!("accounts: {}", accounts.len());
 
     let clock: Clock = Clock::get().unwrap();
-    msg!("{:#?}", clock);
+    msg!("{:?}", clock);
     let rent = Rent::get().unwrap();
-    msg!("{:#?}", rent);
+    msg!("{:?}", rent);
     let epoch_schedule = EpochSchedule::get().unwrap();
     msg!("{:#?}", epoch_schedule);
     Ok(())
@@ -58,26 +58,26 @@ fn process_sysvar_from_account(program_id: &Pubkey, accounts: &[AccountInfo]) ->
     let last_restart_slot_account = next_account_info(accounts_iter)?;
 
     let clock = Clock::from_account_info(clock_account).unwrap();
-    msg!("{:#?}", clock);
+    msg!("{:?}", clock);
 
     let rent = Rent::from_account_info(rent_account).unwrap();
-    msg!("{:#?}", rent);
+    msg!("{:?}", rent);
 
     let epoch_schedule = EpochSchedule::from_account_info(epoch_schedule_account).unwrap();
-    msg!("{:#?}", epoch_schedule);
+    msg!("{:?}", epoch_schedule);
 
     #[allow(deprecated)]
     let fees = Fees::from_account_info(fees_account).unwrap();
-    msg!("{:#?}", fees);
+    msg!("{:?}", fees);
 
     #[allow(deprecated)]
     let recent_blockhashes =
         RecentBlockhashes::from_account_info(recent_blockhashes_account).unwrap();
-    msg!("{:#?}", recent_blockhashes);
+    msg!("{:?}", recent_blockhashes);
 
     // Showing here that we don't provide this yet since our feature set isn't enabling last_restart_slot
     // NOTE: data.len: 0
-    msg!("{:#?}", last_restart_slot_account);
+    msg!("{:?}", last_restart_slot_account);
 
     Ok(())
 }
