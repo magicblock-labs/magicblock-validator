@@ -351,7 +351,9 @@ impl Bank {
         // NOTE: leaving out stake history sysvar setup
 
         // For more info about sysvars see ../../docs/sysvars.md
-        bank.update_clock(None);
+
+        // We don't really have epochs so we use the validator start time
+        bank.update_clock(genesis_config.creation_time);
         bank.update_rent();
         bank.update_fees();
         bank.update_epoch_schedule();
@@ -771,7 +773,7 @@ impl Bank {
             .unwrap_or_default()
     }
 
-    fn update_clock(&self, parent_epoch: Option<Epoch>) {
+    fn update_clock(&self, epoch_start_timestamp: UnixTimestamp) {
         // NOTE: the Solana validator determines time with a much more complex logic
         // - slot == 0: genesis creation time + number of slots * ns_per_slot to seconds
         // - slot > 0 : epoch start time + number of slots to get a timestamp estimate with max
@@ -786,8 +788,7 @@ impl Bank {
 
         let clock = sysvar::clock::Clock {
             slot: self.slot,
-            // TODO: calculate this (runtime/src/bank.rs : 2029)
-            epoch_start_timestamp: unix_timestamp,
+            epoch_start_timestamp,
             epoch: self.epoch_schedule().get_epoch(self.slot),
             leader_schedule_epoch: self.epoch_schedule().get_leader_schedule_epoch(self.slot),
             unix_timestamp,
