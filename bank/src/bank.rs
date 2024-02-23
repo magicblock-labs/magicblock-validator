@@ -520,6 +520,18 @@ impl Bank {
         self.slot
     }
 
+    pub fn advance_slot(&mut self) {
+        self.slot += 1;
+        self.transaction_processor = TransactionBatchProcessor::new(
+            self.slot,
+            self.epoch,
+            self.epoch_schedule.clone(),
+            self.fee_structure.clone(),
+            self.runtime_config.clone(),
+            self.loaded_programs_cache.clone(),
+        );
+    }
+
     pub fn epoch(&self) -> Epoch {
         self.epoch
     }

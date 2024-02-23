@@ -22,10 +22,11 @@ fn test_bank_one_noop_instruction() {
     init_logger();
 
     let (genesis_config, _) = create_genesis_config(u64::MAX);
-    let bank = Bank::new_for_tests(&genesis_config);
+    let mut bank = Bank::new_for_tests(&genesis_config);
     add_elf_program(&bank, &elfs::noop::ID);
 
     let tx = utils::create_noop_transaction(&bank);
+    bank.advance_slot();
     utils::execute_transactions(&bank, vec![tx]);
 }
 
@@ -34,8 +35,9 @@ fn test_bank_solx_instructions() {
     init_logger();
 
     let (genesis_config, _) = create_genesis_config(u64::MAX);
-    let bank = Bank::new_for_tests(&genesis_config);
+    let mut bank = Bank::new_for_tests(&genesis_config);
     add_elf_program(&bank, &elfs::solanax::ID);
     let tx = utils::create_solx_send_post_transaction(&bank);
+    bank.advance_slot();
     utils::execute_transactions(&bank, vec![tx]);
 }
