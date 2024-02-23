@@ -2,6 +2,7 @@ use solana_sdk::{
     account::{AccountSharedData, InheritableAccountFields, ReadableAccount},
     clock::INITIAL_RENT_EPOCH,
 };
+use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Compute how much an account has changed size.  This function is useful when the data size delta
 /// needs to be computed and passed to an `update_accounts_data_size_delta` function.
@@ -28,4 +29,18 @@ pub(super) fn inherit_specially_retained_account_fields(
             .map(|a| a.rent_epoch())
             .unwrap_or(INITIAL_RENT_EPOCH),
     )
+}
+
+pub fn get_epoch_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
+
+pub fn get_epoch_millis() -> u128 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap()
+        .as_millis()
 }

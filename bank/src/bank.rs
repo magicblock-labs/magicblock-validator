@@ -13,7 +13,9 @@ use std::{
 };
 
 use crate::{
-    bank_helpers::{calculate_data_size_delta, inherit_specially_retained_account_fields},
+    bank_helpers::{
+        calculate_data_size_delta, get_epoch_secs, inherit_specially_retained_account_fields,
+    },
     transaction_logs::{
         TransactionLogCollector, TransactionLogCollectorConfig, TransactionLogCollectorFilter,
         TransactionLogInfo,
@@ -49,11 +51,10 @@ use solana_program_runtime::{
     timings::{ExecuteTimingType, ExecuteTimings},
 };
 use solana_sdk::{
-    account::{create_executable_meta, Account},
-    precompiles::get_precompiles,
-};
-use solana_sdk::{
-    account::{AccountSharedData, ReadableAccount, WritableAccount},
+    account::{
+        create_account_shared_data_with_fields as create_account, create_executable_meta,
+        from_account, Account, AccountSharedData, ReadableAccount, WritableAccount,
+    },
     clock::{Epoch, Slot, UnixTimestamp, MAX_PROCESSING_AGE},
     epoch_schedule::EpochSchedule,
     feature_set::FeatureSet,
@@ -64,11 +65,13 @@ use solana_sdk::{
     native_loader,
     nonce::state::DurableNonce,
     nonce_info::NoncePartial,
+    precompiles::get_precompiles,
     pubkey::Pubkey,
     rent_collector::RentCollector,
     rent_debits::RentDebits,
     saturating_add_assign,
     signature::Signature,
+    sysvar,
     transaction::{Result, SanitizedTransaction, TransactionError, MAX_TX_ACCOUNT_LOCKS},
 };
 use solana_svm::{account_loader::TransactionCheckResult, account_overrides::AccountOverrides};
@@ -337,9 +340,10 @@ impl Bank {
             debug_do_not_add_builtins,
         );
 
-        // NOTE: leaving out stakes related setup
+        // NOTE: leaving out epoch_schedule, rent, slot, blockhash, stake history sysvar setup
 
-        // NOTE: leaving out clock, epoch_schedule, rent, slot, blockhash, sysvar setup
+        bank.update_clock(None);
+
         bank
     }
 
@@ -536,6 +540,10 @@ impl Bank {
         self.epoch
     }
 
+    pub fn epoch_schedule(&self) -> &EpochSchedule {
+        &self.epoch_schedule
+    }
+
     // -----------------
     // Blockhash and Lamports
     // -----------------
@@ -728,6 +736,67 @@ impl Bank {
 
     pub fn read_balance(account: &AccountSharedData) -> u64 {
         account.lamports()
+    }
+
+    // -----------------
+    // SysVars
+    // -----------------
+    pub fn clock(&self) -> sysvar::clock::Clock {
+        from_account(&self.get_account(&sysvar::clock::id()).unwrap_or_default())
+            .unwrap_or_default()
+    }
+
+    fn update_clock(&self, parent_epoch: Option<Epoch>) {
+        // NOTE: the Solana validator determines time with a much more complex logic
+        // - slot == 0: genesis creation time + number of slots * ns_per_slot to seconds
+        // - slot > 0 : epoch start time + number of slots to get a timestamp estimate with max
+        //              allowable drift
+        // Different timestamp votes are then considered, taking stake into account and the median
+        // is used as the final value.
+        // Possibly for that reason the solana UnixTimestamp is an i64 in order to make those
+        // calculations easier.
+        // This makes sense since otherwise the hosting platform could manipulate the time assumed
+        // by the validator.
+        let unix_timestamp = i64::try_from(get_epoch_secs()).expect("get_epoch_secs overflow");
+
+        let clock = sysvar::clock::Clock {
+            slot: self.slot,
+            // TODO: calculate this (runtime/src/bank.rs : 2029)
+            epoch_start_timestamp: unix_timestamp,
+            epoch: self.epoch_schedule().get_epoch(self.slot),
+            leader_schedule_epoch: self.epoch_schedule().get_leader_schedule_epoch(self.slot),
+            unix_timestamp,
+        };
+        self.update_sysvar_account(&sysvar::clock::id(), |account| {
+            create_account(&clock, inherit_specially_retained_account_fields(account))
+        });
+    }
+
+    fn update_sysvar_account<F>(&self, pubkey: &Pubkey, updater: F)
+    where
+        F: Fn(&Option<AccountSharedData>) -> AccountSharedData,
+    {
+        let old_account = self.get_account_with_fixed_root(pubkey);
+        let mut new_account = updater(&old_account);
+
+        // When new sysvar comes into existence (with RENT_UNADJUSTED_INITIAL_BALANCE lamports),
+        // this code ensures that the sysvar's balance is adjusted to be rent-exempt.
+        //
+        // More generally, this code always re-calculates for possible sysvar data size change,
+        // although there is no such sysvars currently.
+        self.adjust_sysvar_balance_for_rent(&mut new_account);
+        self.store_account_and_update_capitalization(pubkey, &new_account);
+    }
+
+    fn adjust_sysvar_balance_for_rent(&self, account: &mut AccountSharedData) {
+        account.set_lamports(
+            self.get_minimum_balance_for_rent_exemption(account.data().len())
+                .max(account.lamports()),
+        );
+    }
+
+    pub fn get_minimum_balance_for_rent_exemption(&self, data_len: usize) -> u64 {
+        self.rent_collector.rent.minimum_balance(data_len).max(1)
     }
 
     // -----------------
