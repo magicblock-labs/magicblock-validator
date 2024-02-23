@@ -57,7 +57,7 @@ use solana_sdk::{
     },
     clock::{Epoch, Slot, UnixTimestamp, MAX_PROCESSING_AGE},
     epoch_schedule::EpochSchedule,
-    feature_set::FeatureSet,
+    feature_set::{self, FeatureSet},
     fee::FeeStructure,
     fee_calculator::FeeRateGovernor,
     genesis_config::GenesisConfig,
@@ -72,7 +72,7 @@ use solana_sdk::{
     rent_debits::RentDebits,
     saturating_add_assign,
     signature::Signature,
-    sysvar,
+    sysvar::{self, last_restart_slot::LastRestartSlot},
     transaction::{Result, SanitizedTransaction, TransactionError, MAX_TX_ACCOUNT_LOCKS},
 };
 use solana_svm::{account_loader::TransactionCheckResult, account_overrides::AccountOverrides};
@@ -343,9 +343,17 @@ impl Bank {
 
         // NOTE: leaving out stake history sysvar setup
 
+        // For more info about sysvars see ../../docs/sysvars.md
         bank.update_clock(None);
         bank.update_rent();
+        bank.update_fees();
         bank.update_epoch_schedule();
+        bank.update_last_restart_slot();
+
+        // NOTE: recent_blockhashes sysvar is deprecated and even if we add it to the sysvar
+        //       cache requesting it from inside a transaction fails with `UnsupportedSysvar` error
+        //       due to not supporting `Sysvar::get`.
+        //       From sysvar/recent_blockhashes.rs: [`RecentBlockhashes`] does not implement [`Sysvar::get`].
         bank.update_recent_blockhashes();
 
         // NOTE: the below sets those sysvars once and thus they stay the same for the lifetime of the bank
@@ -494,6 +502,9 @@ impl Bank {
         // Bootstrap validator collects fees until `new_from_parent` is called.
         self.fee_rate_governor = genesis_config.fee_rate_governor.clone();
 
+        // NOTE: these accounts can include feature activation accounts which need to be
+        // present in order to properly activate a feature
+        // If not then activating all features results in a panic when executing a transaction
         for (pubkey, account) in genesis_config.accounts.iter() {
             assert!(
                 self.get_account(pubkey).is_none(),
@@ -792,6 +803,21 @@ impl Bank {
         });
     }
 
+    #[allow(deprecated)]
+    fn update_fees(&self) {
+        if !self
+            .feature_set
+            .is_active(&feature_set::disable_fees_sysvar::id())
+        {
+            self.update_sysvar_account(&sysvar::fees::id(), |account| {
+                create_account(
+                    &sysvar::fees::Fees::new(&self.fee_rate_governor.create_fee_calculator()),
+                    inherit_specially_retained_account_fields(account),
+                )
+            });
+        }
+    }
+
     fn update_epoch_schedule(&self) {
         self.update_sysvar_account(&sysvar::epoch_schedule::id(), |account| {
             create_account(
@@ -799,6 +825,37 @@ impl Bank {
                 inherit_specially_retained_account_fields(account),
             )
         });
+    }
+
+    pub fn update_last_restart_slot(&self) {
+        let feature_flag = self
+            .feature_set
+            .is_active(&feature_set::last_restart_slot_sysvar::id());
+
+        if feature_flag {
+            // First, see what the currently stored last restart slot is. This
+            // account may not exist yet if the feature was just activated.
+            let current_last_restart_slot = self
+                .get_account(&sysvar::last_restart_slot::id())
+                .and_then(|account| {
+                    let lrs: Option<LastRestartSlot> = from_account(&account);
+                    lrs
+                })
+                .map(|account| account.last_restart_slot);
+
+            let last_restart_slot = 0;
+            // NOTE: removed querying hard forks here
+
+            // Only need to write if the last restart has changed
+            if current_last_restart_slot != Some(last_restart_slot) {
+                self.update_sysvar_account(&sysvar::last_restart_slot::id(), |account| {
+                    create_account(
+                        &LastRestartSlot { last_restart_slot },
+                        inherit_specially_retained_account_fields(account),
+                    )
+                });
+            }
+        }
     }
 
     pub fn update_recent_blockhashes(&self) {
