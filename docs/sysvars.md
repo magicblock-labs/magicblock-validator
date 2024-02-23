@@ -10,7 +10,9 @@ The following sysvars exist and are supported by our validator if they have a `*
 - `clock`*: current slot, epoch, and leader schedule
 - `epoch_schedule`*: epoch schedule (does not change during the life of a blockchain)
 - `fees`*: fees charged for processing a transaction (deprecated, but we support it for now)
-- `recent_blockhashes`*: recent blockhashes (supported but `RecentBlockhashes::get` is not availble - nor is it on Solana)
+  - currently we provide `lamports_per_signature: 0` though which isn't correct
+- `recent_blockhashes`*: recent blockhashes (supported but `RecentBlockhashes::get` is not available - nor is it on Solana)
+  - here we provide the recent blockhash also with incorrect `lamports_per_signature = 0`
 - `rent`*: rent parameters
 - `slot_hashes`: recent slot hashes (Solana updates this only when new bank is created from a parent)
 - `slot_history`: recent slot history (Solana updates this only when bank is frozen)

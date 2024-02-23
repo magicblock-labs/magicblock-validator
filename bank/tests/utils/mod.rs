@@ -20,6 +20,7 @@ use solana_sdk::{
     signer::Signer,
     stake_history::Epoch,
     system_program, system_transaction,
+    sysvar::{clock, epoch_schedule, fees, last_restart_slot, recent_blockhashes, rent},
     transaction::{SanitizedTransaction, Transaction},
 };
 pub(crate) mod elfs;
@@ -169,6 +170,37 @@ fn create_sysvars_get_instruction(program_id: &Pubkey, funded_accounts: &[Keypai
         *program_id,
         &ix_bytes,
         vec![AccountMeta::new(funded_accounts[0].pubkey(), true)],
+    )
+}
+
+pub fn create_sysvars_from_account_transaction(bank: &Bank) -> SanitizedTransaction {
+    let funded_accounts = create_funded_accounts(bank, 2, None);
+    let instruction =
+        create_sysvars_from_account_instruction(&elfs::sysvars::id(), &funded_accounts);
+    let message = Message::new(&[instruction], None);
+    let transaction = Transaction::new_unsigned(message);
+    SanitizedTransaction::try_from_legacy_transaction(transaction).unwrap()
+}
+
+fn create_sysvars_from_account_instruction(
+    program_id: &Pubkey,
+    funded_accounts: &[Keypair],
+) -> Instruction {
+    let ix_bytes: Vec<u8> = vec![0x01];
+    Instruction::new_with_bytes(
+        *program_id,
+        &ix_bytes,
+        vec![
+            AccountMeta::new(funded_accounts[0].pubkey(), true),
+            AccountMeta::new_readonly(clock::id(), false),
+            AccountMeta::new_readonly(rent::id(), false),
+            AccountMeta::new_readonly(epoch_schedule::id(), false),
+            #[allow(deprecated)]
+            AccountMeta::new_readonly(fees::id(), false),
+            #[allow(deprecated)]
+            AccountMeta::new_readonly(recent_blockhashes::id(), false),
+            AccountMeta::new_readonly(last_restart_slot::id(), false),
+        ],
     )
 }
 

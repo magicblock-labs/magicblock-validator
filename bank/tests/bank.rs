@@ -53,3 +53,15 @@ fn test_bank_sysvars_get() {
     bank.advance_slot();
     utils::execute_transactions(&bank, vec![tx]);
 }
+
+#[test]
+fn test_bank_sysvars_from_account() {
+    init_logger();
+
+    let (genesis_config, _) = create_genesis_config(u64::MAX);
+    let mut bank = Bank::new_for_tests(&genesis_config);
+    add_elf_program(&bank, &elfs::sysvars::ID);
+    let tx = utils::create_sysvars_from_account_transaction(&bank);
+    bank.advance_slot();
+    utils::execute_transactions(&bank, vec![tx]);
+}
