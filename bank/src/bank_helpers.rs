@@ -38,6 +38,7 @@ pub fn get_epoch_secs() -> u64 {
         .as_secs()
 }
 
+#[allow(dead_code)] // will need this for millisecond clock
 pub fn get_epoch_millis() -> u128 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

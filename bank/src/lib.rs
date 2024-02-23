@@ -5,6 +5,7 @@ mod bank_rc;
 mod builtins;
 mod consts;
 mod status_cache;
+mod sysvar_cache;
 mod transaction_batch;
 mod transaction_logs;
 mod transaction_results;

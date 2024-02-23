@@ -341,12 +341,17 @@ impl Bank {
             debug_do_not_add_builtins,
         );
 
-        // NOTE: leaving out slot, blockhash, stake history sysvar setup
+        // NOTE: leaving out stake history sysvar setup
 
         bank.update_clock(None);
         bank.update_rent();
         bank.update_epoch_schedule();
         bank.update_recent_blockhashes();
+
+        // NOTE: the below sets those sysvars once and thus they stay the same for the lifetime of the bank
+        // in our case we'd need to find a way to update at least the clock more regularly and set
+        // it via bank.transaction_processor.sysvar_cache.write().unwrap().set_clock(), etc.
+        bank.fill_missing_sysvar_cache_entries();
 
         bank
     }
@@ -538,6 +543,8 @@ impl Bank {
             self.runtime_config.clone(),
             self.loaded_programs_cache.clone(),
         );
+
+        self.fill_missing_sysvar_cache_entries();
     }
 
     pub fn epoch(&self) -> Epoch {
