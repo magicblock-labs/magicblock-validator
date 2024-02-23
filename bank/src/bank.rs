@@ -58,6 +58,7 @@ use solana_sdk::{
     },
     clock::{Epoch, Slot, UnixTimestamp, MAX_PROCESSING_AGE},
     epoch_schedule::EpochSchedule,
+    feature,
     feature_set::{self, include_loaded_accounts_data_size_in_fee_calculation, FeatureSet},
     fee::FeeStructure,
     fee_calculator::FeeRateGovernor,
@@ -95,6 +96,7 @@ pub struct CommitTransactionCounts {
     pub committed_with_failure_result_count: u64,
     pub signature_count: u64,
 }
+
 // -----------------
 // ForkGraph
 // -----------------
@@ -451,11 +453,7 @@ impl Bank {
     ) {
         // NOTE: leaving out `rewards_pool_pubkeys` initialization
 
-        // TODO: apply_feature_activations
-        // self.apply_feature_activations(
-        //     ApplyFeatureActivationsCaller::FinishInit,
-        //     debug_do_not_add_builtins,
-        // );
+        self.apply_feature_activations(debug_do_not_add_builtins);
 
         if !debug_do_not_add_builtins {
             for builtin in BUILTINS
@@ -904,6 +902,50 @@ impl Bank {
 
     pub fn get_minimum_balance_for_rent_exemption(&self, data_len: usize) -> u64 {
         self.rent_collector.rent.minimum_balance(data_len).max(1)
+    }
+
+    // -----------------
+    // Features
+    // -----------------
+    // In Solana this is called from snapshot restore AND for each epoch boundary
+    // The entire code path herein must be idempotent
+    // In our case only during finish_init when the bank is created
+    fn apply_feature_activations(&mut self, debug_do_not_add_builtins: bool) {
+        let feature_set = self.compute_active_feature_set();
+        // NOTE: at this point we have only inactive features
+        self.feature_set = Arc::new(feature_set);
+    }
+
+    /// Compute the active feature set based on the current bank state,
+    /// and return it together with the set of newly activated features (we don't).
+    fn compute_active_feature_set(&self) -> FeatureSet {
+        // NOTE: took out the `pending` features since we don't support new feature activations
+        // which in Solana only are used when we create a bank from a parent bank
+        let mut active = self.feature_set.active.clone();
+        let mut inactive = HashSet::new();
+        let slot = self.slot();
+
+        for feature_id in &self.feature_set.inactive {
+            let mut activated = None;
+            if let Some(account) = self.get_account_with_fixed_root(feature_id) {
+                if let Some(feature) = feature::from_account(&account) {
+                    match feature.activated_at {
+                        Some(activation_slot) if slot >= activation_slot => {
+                            // Feature has been activated already
+                            activated = Some(activation_slot);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+            if let Some(slot) = activated {
+                active.insert(*feature_id, slot);
+            } else {
+                inactive.insert(*feature_id);
+            }
+        }
+
+        FeatureSet { active, inactive }
     }
 
     // -----------------
