@@ -6,7 +6,7 @@ use sleipnir_bank::{bank::Bank, transaction_batch::TransactionBatch};
 use solana_program_runtime::timings::ExecuteTimings;
 use solana_sdk::{pubkey::Pubkey, transaction::Result};
 
-use crate::transaction_status::TransactionStatusSender;
+use crate::{token_balances::collect_token_balances, transaction_status::TransactionStatusSender};
 
 pub struct TransactionBatchWithIndexes<'a, 'b> {
     pub batch: TransactionBatch<'a, 'b>,

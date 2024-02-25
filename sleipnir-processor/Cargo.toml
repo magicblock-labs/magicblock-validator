@@ -12,9 +12,14 @@ crossbeam-channel = { workspace = true }
 log = { workspace = true }
 sleipnir-bank = { workspace = true }
 solana-accounts-db = { workspace = true }
+solana-account-decoder = { workspace = true }
+solana-measure = { workspace = true }
+solana-metrics = { workspace = true }
 solana-program-runtime = { workspace = true }
 solana-sdk = { workspace = true }
 solana-transaction-status = { workspace = true }
+spl-token = { workspace = true }
+spl-token-2022 = { workspace = true }
 
 [dev-dependencies]
 env_logger = { workspace = true }

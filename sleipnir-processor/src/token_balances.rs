@@ -1,10 +1,20 @@
+// NOTE: slightly adapted from ledger/src/token_balances.rs
 use std::collections::HashMap;
 
 use sleipnir_bank::{bank::Bank, transaction_batch::TransactionBatch};
-use solana_sdk::pubkey::Pubkey;
+use solana_account_decoder::parse_token::{
+    is_known_spl_token_id, token_amount_to_ui_amount, UiTokenAmount,
+};
+use solana_measure::measure::Measure;
+use solana_metrics::datapoint_debug;
+use solana_sdk::{account::ReadableAccount, pubkey::Pubkey};
 use solana_transaction_status::{
-    parse_token::{TransactionTokenBalance, UiTokenAmount},
-    token_balances::TransactionTokenBalances,
+    token_balances::TransactionTokenBalances, TransactionTokenBalance,
+};
+
+use spl_token_2022::{
+    extension::StateWithExtensions,
+    state::{Account as TokenAccount, Mint},
 };
 
 pub fn collect_token_balances(
@@ -59,6 +69,24 @@ struct TokenBalanceData {
     owner: String,
     ui_token_amount: UiTokenAmount,
     program_id: String,
+}
+
+fn get_mint_decimals(bank: &Bank, mint: &Pubkey) -> Option<u8> {
+    if mint == &spl_token::native_mint::id() {
+        Some(spl_token::native_mint::DECIMALS)
+    } else {
+        let mint_account = bank.get_account(mint)?;
+
+        if !is_known_spl_token_id(mint_account.owner()) {
+            return None;
+        }
+
+        let decimals = StateWithExtensions::<Mint>::unpack(mint_account.data())
+            .map(|mint| mint.base.decimals)
+            .ok()?;
+
+        Some(decimals)
+    }
 }
 
 fn collect_token_balance_from_account(

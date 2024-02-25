@@ -9,7 +9,6 @@ members = [
   "sleipnir-processor",
   "solana/program-runtime",
   "solana/svm",
-  "solana/transaction-status",
 ]
 
 # This prevents a Travis CI error when building for Windows.
@@ -46,6 +45,7 @@ serde = "1.0.196"
 serde_derive = "1.0.103"
 sleipnir-bank = { path = "./sleipnir-bank" }
 solana-accounts-db = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-accounts-db" }
+solana-account-decoder = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-account-decoder" }
 solana-bpf-loader-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-bpf-loader-program" }
 solana-frozen-abi = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-frozen-abi" }
 solana-frozen-abi-macro = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-frozen-abi-macro" }
@@ -57,7 +57,7 @@ solana-program-runtime = { path = "./solana/program-runtime" }
 solana-sdk = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-sdk" }
 solana-svm = { path = "./solana/svm" }
 solana-system-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-system-program" }
-solana-transaction-status = { path = "./solana/transaction-status" }
+solana-transaction-status = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-transaction-status" }
 solana_rbpf = "=0.8.0"
 spl-token = "=4.0.1"
 spl-token-2022 = "=2.0.1"
@@ -66,3 +66,43 @@ thiserror = "1.0.57"
 [patch.'https://github.com/solana-labs/solana']
 solana-program-runtime = { path = "./solana/program-runtime" }
 solana-svm = { path = "./solana/svm" }
+
+
+[patch.crates-io]
+# We include the following crates as our dependencies above from crates.io:
+#
+#  * spl-associated-token-account
+#  * spl-instruction-padding
+#  * spl-memo
+#  * spl-pod
+#  * spl-token
+#  * spl-token-2022
+#  * spl-token-metadata-interface
+#
+# They, in turn, depend on a number of crates that we also include directly
+# using `path` specifications.  For example, `spl-token` depends on
+# `solana-program`.  And we explicitly specify `solana-program` above as a local
+# path dependency:
+#
+#     solana-program = { path = "../../sdk/program", version = "=1.16.0" }
+#
+# Unfortunately, Cargo will try to resolve the `spl-token` `solana-program`
+# dependency only using what is available on crates.io.  Crates.io normally
+# contains a previous version of these crates, and we end up with two versions
+# of `solana-program` and `solana-zk-token-sdk` and all of their dependencies in
+# our build tree.
+#
+# If you are developing downstream using non-crates-io solana-program (local or
+# forked repo, or from github rev, eg), duplicate the following patch statements
+# in your Cargo.toml. If you still hit duplicate-type errors with the patch
+# statements in place, run `cargo update -p solana-program` and/or `cargo update
+# -p solana-zk-token-sdk` to remove extraneous versions from your Cargo.lock
+# file.
+#
+# There is a similar override in `programs/sbf/Cargo.toml`.  Please keep both
+# comments and the overrides in sync.
+
+# NOTE: in our case we don't have these crates locally, but need to ensure to point
+# to the compatible versions on github
+solana-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-program" }
+solana-zk-token-sdk = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-zk-token-sdk" }
