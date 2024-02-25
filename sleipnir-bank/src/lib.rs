@@ -6,9 +6,9 @@ mod builtins;
 mod consts;
 mod status_cache;
 mod sysvar_cache;
-mod transaction_batch;
+pub mod transaction_batch;
 mod transaction_logs;
-mod transaction_results;
+pub mod transaction_results;
 
 pub use consts::LAMPORTS_PER_SIGNATURE;
 
