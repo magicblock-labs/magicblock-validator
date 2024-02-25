@@ -4,7 +4,7 @@ debug = true
 split-debuginfo = "packed"
 
 [workspace]
-members = ["bank", "solana/program-runtime", "solana/svm"]
+members = ["sleipnir-bank", "solana/program-runtime", "solana/svm"]
 
 # This prevents a Travis CI error when building for Windows.
 resolver = "2"
