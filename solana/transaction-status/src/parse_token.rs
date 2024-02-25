@@ -1,9 +1,17 @@
 use serde::{Deserialize, Serialize};
+use solana_sdk::pubkey::Pubkey;
 use std::str::FromStr;
 
 // NOTE: from account-decoder/src/parse_token.rs
 pub type StringAmount = String;
 pub type StringDecimals = String;
+
+// Check if the provided program id as a known SPL Token program id
+pub fn is_known_spl_token_id(program_id: &Pubkey) -> bool {
+    // NOTE: Pubkey related dependency hell encountered here
+    // spl_token programs use a different version of Pubkey than we are here
+    *program_id == spl_token::id() || *program_id == spl_token_2022::id()
+}
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
 #[serde(rename_all = "camelCase")]

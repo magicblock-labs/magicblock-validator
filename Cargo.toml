@@ -59,6 +59,8 @@ solana-svm = { path = "./solana/svm" }
 solana-system-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-system-program" }
 solana-transaction-status = { path = "./solana/transaction-status" }
 solana_rbpf = "=0.8.0"
+spl-token = "=4.0.1"
+spl-token-2022 = "=2.0.1"
 thiserror = "1.0.57"
 
 [patch.'https://github.com/solana-labs/solana']

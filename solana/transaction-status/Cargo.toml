@@ -12,3 +12,6 @@ edition = { workspace = true }
 [dependencies]
 serde = { workspace = true }
 serde_derive = { workspace = true }
+solana-sdk = { workspace = true }
+spl-token = { workspace = true }
+spl-token-2022 = { workspace = true }
