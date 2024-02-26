@@ -4,6 +4,7 @@ mod bank_helpers;
 mod bank_rc;
 mod builtins;
 mod consts;
+pub mod get_compute_budget_details;
 mod status_cache;
 mod sysvar_cache;
 pub mod transaction_batch;

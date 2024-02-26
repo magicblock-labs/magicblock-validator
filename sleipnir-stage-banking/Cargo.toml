@@ -9,9 +9,12 @@ edition.workspace = true
 
 [dependencies]
 log = { workspace = true }
+bincode = { workspace = true }
 sleipnir-bank = { workspace = true }
 sleipnir-transaction-status = { workspace = true }
 solana-metrics = { workspace = true }
 solana-program-runtime = { workspace = true }
 solana-sdk = { workspace = true }
 solana-svm = { workspace = true }
+
+thiserror = { workspace = true }
