@@ -1,0 +1,17 @@
+[package]
+name = "sleipnir-stage-banking"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+log = { workspace = true }
+sleipnir-bank = { workspace = true }
+sleipnir-transaction-status = { workspace = true }
+solana-metrics = { workspace = true }
+solana-program-runtime = { workspace = true }
+solana-sdk = { workspace = true }
+solana-svm = { workspace = true }
