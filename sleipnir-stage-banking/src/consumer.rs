@@ -3,6 +3,9 @@ use crate::{committer::Committer, results::ExecuteAndCommitTransactionsOutput};
 use sleipnir_bank::{bank::Bank, transaction_batch::TransactionBatch};
 use std::sync::Arc;
 
+/// Consumer will create chunks of transactions from buffer with up to this size.
+pub const TARGET_NUM_TRANSACTIONS_PER_BATCH: usize = 64;
+
 // Removed the following
 // - transaction_recorder: TransactionRecorder (poh)
 // - qos_service: QosService, (cost calcualation)

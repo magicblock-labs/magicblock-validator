@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 // NOTE: from core/src/banking_stage/committer.rs
 
 use sleipnir_transaction_status::TransactionStatusSender;
