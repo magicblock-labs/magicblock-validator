@@ -1,6 +1,6 @@
 // NOTE: Adapted from core/src/banking_stage/consumer.rs
 use crate::{
-    committer::Committer,
+    committer::{CommitTransactionDetails, Committer},
     metrics::LeaderExecuteAndCommitTimings,
     qos_service::QosService,
     results::{ExecuteAndCommitTransactionsOutput, ProcessTransactionBatchOutput},
@@ -14,7 +14,7 @@ use sleipnir_bank::{
     transaction_results::LoadAndExecuteTransactionsOutput,
 };
 use sleipnir_tokens::token_balances::collect_token_balances;
-use sleipnir_transaction_status::TransactionTokenBalance;
+use sleipnir_transaction_status::token_balances::TransactionTokenBalance;
 use solana_measure::measure_us;
 use solana_program_runtime::compute_budget_processor::process_compute_budget_instructions;
 use solana_sdk::{
@@ -34,7 +34,7 @@ use std::{collections::HashMap, sync::Arc};
 pub const TARGET_NUM_TRANSACTIONS_PER_BATCH: usize = 64;
 
 #[derive(Default)]
-pub(super) struct PreBalanceInfo {
+pub(crate) struct PreBalanceInfo {
     pub native: Vec<Vec<u64>>,
     pub token: Vec<Vec<TransactionTokenBalance>>,
     pub mint_decimals: HashMap<Pubkey, u8>,

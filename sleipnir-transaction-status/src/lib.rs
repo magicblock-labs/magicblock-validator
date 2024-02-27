@@ -8,12 +8,13 @@ use sleipnir_bank::{bank::Bank, transaction_results::TransactionBalancesSet};
 use solana_accounts_db::transaction_results::TransactionExecutionDetails;
 use solana_accounts_db::transaction_results::TransactionExecutionResult;
 use solana_sdk::{clock::Slot, rent_debits::RentDebits, transaction::SanitizedTransaction};
-use solana_transaction_status::token_balances::TransactionTokenBalancesSet;
 
-pub use solana_transaction_status::TransactionTokenBalance;
 pub mod token_balances {
     pub use solana_transaction_status::token_balances::TransactionTokenBalances;
+    pub use solana_transaction_status::token_balances::TransactionTokenBalancesSet;
+    pub use solana_transaction_status::TransactionTokenBalance;
 }
+use token_balances::TransactionTokenBalancesSet;
 
 #[allow(clippy::large_enum_variant)]
 pub enum TransactionStatusMessage {

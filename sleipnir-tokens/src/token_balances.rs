@@ -1,8 +1,8 @@
 // NOTE: from ledger/src/token_balances.rs with only imports adjusted
 use {
     sleipnir_bank::{bank::Bank, transaction_batch::TransactionBatch},
-    sleipnir_transaction_status::{
-        token_balances::TransactionTokenBalances, TransactionTokenBalance,
+    sleipnir_transaction_status::token_balances::{
+        TransactionTokenBalance, TransactionTokenBalances,
     },
     solana_account_decoder::parse_token::{
         is_known_spl_token_id, token_amount_to_ui_amount, UiTokenAmount,

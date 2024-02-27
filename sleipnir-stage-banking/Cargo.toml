@@ -20,6 +20,7 @@ sleipnir-bank = { workspace = true }
 sleipnir-stage-verify = { workspace = true }
 sleipnir-tokens = { workspace = true }
 sleipnir-transaction-status = { workspace = true }
+solana-accounts-db = { workspace = true }
 solana-cost-model = { workspace = true }
 solana-frozen-abi-macro = { workspace = true }
 solana-logger = { workspace = true }
