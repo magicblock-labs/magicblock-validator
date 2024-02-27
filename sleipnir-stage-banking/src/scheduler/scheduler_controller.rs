@@ -9,6 +9,7 @@ use crate::{
 };
 use solana_program_runtime::compute_budget_processor::process_compute_budget_instructions;
 use solana_sdk::feature_set::include_loaded_accounts_data_size_in_fee_calculation;
+use std::ops::Deref;
 use std::{
     sync::{Arc, RwLock},
     time::Duration,
@@ -16,6 +17,7 @@ use std::{
 
 use crossbeam_channel::RecvTimeoutError;
 use sleipnir_bank::bank::Bank;
+
 use solana_cost_model::cost_model::CostModel;
 use solana_measure::measure_us;
 use solana_sdk::{
@@ -29,19 +31,7 @@ use super::{
     transaction_id_generator::TransactionIdGenerator,
     transaction_state_container::TransactionStateContainer,
 };
-
-// TODO: possibly define this in sigverify crate
-pub struct ReceivePacketResults;
-pub struct PacketDeserializer;
-impl PacketDeserializer {
-    pub fn receive_packets(
-        &self,
-        _recv_timeout: Duration,
-        _remaining_queue_capacity: usize,
-    ) -> Result<ReceivePacketResults, u64> {
-        todo!()
-    }
-}
+use crate::packet::packet_deserializer::PacketDeserializer;
 
 // Removed:
 // - decision_maker: DecisionMaker,
@@ -280,7 +270,7 @@ impl SchedulerController {
             let mut post_sanitization_count: usize = 0;
             let (transactions, fee_budget_limits_vec): (Vec<_>, Vec<_>) = chunk
                 .iter()
-                .filter_map(|packet| packet.build_sanitized_transaction(feature_set, bank.as_ref()))
+                .filter_map(|packet| packet.build_sanitized_transaction(feature_set, bank.deref()))
                 .inspect(|_| saturating_add_assign!(post_sanitization_count, 1))
                 .filter(|tx| {
                     SanitizedTransaction::validate_account_locks(

@@ -6,7 +6,7 @@ use solana_perf::packet::PacketBatch;
 
 use self::traced_sender::TracedSender;
 
-mod packet_deserializer;
+pub(crate) mod packet_deserializer;
 mod traced_sender;
 
 pub type BankingPacketBatch = Arc<(Vec<PacketBatch>, Option<SigverifyTracerPacketStats>)>;

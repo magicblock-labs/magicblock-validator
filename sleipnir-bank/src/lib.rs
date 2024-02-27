@@ -1,4 +1,4 @@
-mod address_lookup_table;
+pub mod address_lookup_table;
 pub mod bank;
 mod bank_helpers;
 mod bank_rc;
