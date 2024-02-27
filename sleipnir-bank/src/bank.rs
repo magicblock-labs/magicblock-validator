@@ -8,7 +8,7 @@ use std::{
     path::PathBuf,
     sync::{
         atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering},
-        Arc, RwLock,
+        Arc, LockResult, RwLock, RwLockReadGuard, RwLockWriteGuard,
     },
 };
 
@@ -44,6 +44,7 @@ use solana_accounts_db::{
     },
 };
 use solana_bpf_loader_program::syscalls::create_program_runtime_environment_v1;
+use solana_cost_model::cost_tracker::CostTracker;
 use solana_loader_v4_program::create_program_runtime_environment_v2;
 use solana_measure::measure::Measure;
 use solana_program_runtime::{
@@ -69,6 +70,7 @@ use solana_sdk::{
     nonce::{self, state::DurableNonce, NONCED_TX_MARKER_IX_INDEX},
     nonce_account,
     nonce_info::{NonceInfo, NoncePartial},
+    packet::PACKET_DATA_SIZE,
     precompiles::get_precompiles,
     pubkey::Pubkey,
     recent_blockhashes_account,
@@ -77,7 +79,10 @@ use solana_sdk::{
     saturating_add_assign,
     signature::Signature,
     sysvar::{self, last_restart_slot::LastRestartSlot},
-    transaction::{Result, SanitizedTransaction, TransactionError, MAX_TX_ACCOUNT_LOCKS},
+    transaction::{
+        Result, SanitizedTransaction, TransactionError, TransactionVerificationMode,
+        VersionedTransaction, MAX_TX_ACCOUNT_LOCKS,
+    },
     transaction_context::TransactionAccount,
 };
 use solana_svm::{account_loader::TransactionCheckResult, account_overrides::AccountOverrides};
@@ -233,6 +238,11 @@ pub struct Bank {
     /// The set of parents including this bank
     /// NOTE: we're planning to only have this bank
     pub ancestors: Ancestors,
+
+    // -----------------
+    // Cost
+    // -----------------
+    cost_tracker: RwLock<CostTracker>,
 }
 
 // -----------------
@@ -430,6 +440,9 @@ impl Bank {
             blockhash_queue: RwLock::<BlockhashQueue>::default(),
             feature_set: Arc::<FeatureSet>::default(),
             rent_collector: RentCollector::default(),
+
+            // Cost
+            cost_tracker: RwLock::<CostTracker>::default(),
         };
 
         bank.transaction_processor = TransactionBatchProcessor::new(
@@ -1100,6 +1113,23 @@ impl Bank {
         TransactionBatch::new(lock_results, self, Cow::Borrowed(txs))
     }
 
+    /// Prepare a locked transaction batch from a list of sanitized transactions, and their cost
+    /// limited packing status
+    pub fn prepare_sanitized_batch_with_results<'a, 'b>(
+        &'a self,
+        transactions: &'b [SanitizedTransaction],
+        transaction_results: impl Iterator<Item = Result<()>>,
+    ) -> TransactionBatch<'a, 'b> {
+        // this lock_results could be: Ok, AccountInUse, WouldExceedBlockMaxLimit or WouldExceedAccountMaxLimit
+        let tx_account_lock_limit = self.get_transaction_account_lock_limit();
+        let lock_results = self.rc.accounts.lock_accounts_with_results(
+            transactions.iter(),
+            transaction_results,
+            tx_account_lock_limit,
+        );
+        TransactionBatch::new(lock_results, self, Cow::Borrowed(transactions))
+    }
+
     // -----------------
     // Transaction Checking
     // -----------------
@@ -1621,6 +1651,46 @@ impl Bank {
     }
 
     // -----------------
+    // Transaction Verification
+    // -----------------
+    pub fn verify_transaction(
+        &self,
+        tx: VersionedTransaction,
+        verification_mode: TransactionVerificationMode,
+    ) -> Result<SanitizedTransaction> {
+        let sanitized_tx = {
+            let size =
+                bincode::serialized_size(&tx).map_err(|_| TransactionError::SanitizeFailure)?;
+            if size > PACKET_DATA_SIZE as u64 {
+                return Err(TransactionError::SanitizeFailure);
+            }
+            let message_hash = if verification_mode == TransactionVerificationMode::FullVerification
+            {
+                tx.verify_and_hash_message()?
+            } else {
+                tx.message.hash()
+            };
+
+            SanitizedTransaction::try_create(tx, message_hash, None, self)
+        }?;
+
+        if verification_mode == TransactionVerificationMode::HashAndVerifyPrecompiles
+            || verification_mode == TransactionVerificationMode::FullVerification
+        {
+            sanitized_tx.verify_precompiles(&self.feature_set)?;
+        }
+
+        Ok(sanitized_tx)
+    }
+
+    pub fn fully_verify_transaction(
+        &self,
+        tx: VersionedTransaction,
+    ) -> Result<SanitizedTransaction> {
+        self.verify_transaction(tx, TransactionVerificationMode::FullVerification)
+    }
+
+    // -----------------
     // Fees
     // -----------------
     fn withdraw(&self, pubkey: &Pubkey, lamports: u64) -> Result<()> {
@@ -1846,5 +1916,16 @@ impl Bank {
     ) {
         let data_size_delta = calculate_data_size_delta(old_data_size, new_data_size);
         self.update_accounts_data_size_delta_off_chain(data_size_delta);
+    }
+
+    // -----------------
+    // Accessors
+    // -----------------
+    pub fn read_cost_tracker(&self) -> LockResult<RwLockReadGuard<CostTracker>> {
+        self.cost_tracker.read()
+    }
+
+    pub fn write_cost_tracker(&self) -> LockResult<RwLockWriteGuard<CostTracker>> {
+        self.cost_tracker.write()
     }
 }

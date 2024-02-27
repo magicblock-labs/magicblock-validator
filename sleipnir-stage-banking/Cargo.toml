@@ -21,6 +21,7 @@ sleipnir-stage-verify = { workspace = true }
 sleipnir-transaction-status = { workspace = true }
 solana-cost-model = { workspace = true }
 solana-frozen-abi-macro = { workspace = true }
+solana-logger = { workspace = true }
 solana-measure = { workspace = true }
 solana-metrics = { workspace = true }
 solana-perf = { workspace = true }
