@@ -1,8 +1,15 @@
 // NOTE: Adapted from core/src/banking_stage/consumer.rs
-use crate::{committer::Committer, results::ExecuteAndCommitTransactionsOutput};
+use crate::{
+    committer::Committer,
+    results::{ExecuteAndCommitTransactionsOutput, ProcessTransactionBatchOutput},
+};
 use sleipnir_bank::{bank::Bank, transaction_batch::TransactionBatch};
 use solana_program_runtime::compute_budget_processor::process_compute_budget_instructions;
-use solana_sdk::{feature_set, message::SanitizedMessage, transaction::TransactionError};
+use solana_sdk::{
+    feature_set,
+    message::SanitizedMessage,
+    transaction::{SanitizedTransaction, TransactionError},
+};
 use solana_svm::{
     account_loader::validate_fee_payer, transaction_error_metrics::TransactionErrorMetrics,
     transaction_processor::TransactionProcessingCallback,
@@ -70,5 +77,14 @@ impl Consumer {
             bank.get_rent_collector(),
             fee,
         )
+    }
+
+    pub(crate) fn process_and_record_aged_transactions(
+        &self,
+        _bank: &Bank,
+        _transactions: &[SanitizedTransaction],
+        _max_age_slots: &[u64],
+    ) -> ProcessTransactionBatchOutput {
+        todo!()
     }
 }

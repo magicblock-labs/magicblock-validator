@@ -17,11 +17,11 @@ use super::LeaderExecuteAndCommitTimings;
 pub(crate) struct ConsumeWorkerMetrics {
     id: u32,
     interval: AtomicInterval,
-    has_data: AtomicBool,
+    pub(crate) has_data: AtomicBool,
 
-    count_metrics: ConsumeWorkerCountMetrics,
-    error_metrics: ConsumeWorkerTransactionErrorMetrics,
-    timing_metrics: ConsumeWorkerTimingMetrics,
+    pub(crate) count_metrics: ConsumeWorkerCountMetrics,
+    pub(crate) error_metrics: ConsumeWorkerTransactionErrorMetrics,
+    pub(crate) timing_metrics: ConsumeWorkerTimingMetrics,
 }
 
 impl ConsumeWorkerMetrics {
@@ -37,7 +37,7 @@ impl ConsumeWorkerMetrics {
         }
     }
 
-    fn new(id: u32) -> Self {
+    pub(crate) fn new(id: u32) -> Self {
         Self {
             id,
             interval: AtomicInterval::default(),
@@ -48,7 +48,7 @@ impl ConsumeWorkerMetrics {
         }
     }
 
-    fn update_for_consume(
+    pub(crate) fn update_for_consume(
         &self,
         ProcessTransactionBatchOutput {
             cost_model_throttled_transactions_count,
@@ -247,7 +247,7 @@ impl ConsumeWorkerMetrics {
     }
 }
 
-struct ConsumeWorkerCountMetrics {
+pub(crate) struct ConsumeWorkerCountMetrics {
     transactions_attempted_execution_count: AtomicUsize,
     executed_transactions_count: AtomicUsize,
     executed_with_successful_result_count: AtomicUsize,
@@ -327,7 +327,7 @@ impl ConsumeWorkerCountMetrics {
 }
 
 #[derive(Default)]
-struct ConsumeWorkerTimingMetrics {
+pub(crate) struct ConsumeWorkerTimingMetrics {
     cost_model_us: AtomicU64,
     collect_balances_us: AtomicU64,
     load_execute_us: AtomicU64,
@@ -380,7 +380,7 @@ impl ConsumeWorkerTimingMetrics {
 }
 
 #[derive(Default)]
-struct ConsumeWorkerTransactionErrorMetrics {
+pub(crate) struct ConsumeWorkerTransactionErrorMetrics {
     total: AtomicUsize,
     account_in_use: AtomicUsize,
     too_many_account_locks: AtomicUsize,
