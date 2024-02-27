@@ -9,12 +9,14 @@ edition.workspace = true
 
 [dependencies]
 arrayref = { workspace = true }
+bincode = { workspace = true }
 log = { workspace = true }
 rand = { workspace = true }
 serde = { workspace = true, features = ["rc"] }
 serde_derive = { workspace = true }
 solana-accounts-db = { workspace = true }
 solana-bpf-loader-program = { workspace = true }
+solana-cost-model = { workspace = true }
 solana-frozen-abi-macro = { workspace = true }
 solana-loader-v4-program = { workspace = true }
 solana-measure = { workspace = true }
@@ -24,7 +26,6 @@ solana-svm = { workspace = true }
 solana-system-program = { workspace = true }
 
 [dev-dependencies]
-bincode = { workspace = true }
 env_logger = { workspace = true }
 rayon = { workspace = true }
 
