@@ -1649,6 +1649,10 @@ impl Bank {
         }
     }
 
+    pub fn get_lamports_per_signature(&self) -> u64 {
+        self.fee_rate_governor.lamports_per_signature
+    }
+
     pub fn get_fee_for_message(&self, message: &SanitizedMessage) -> Option<u64> {
         let lamports_per_signature = {
             let blockhash_queue = self.blockhash_queue.read().unwrap();

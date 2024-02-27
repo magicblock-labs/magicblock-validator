@@ -8,40 +8,40 @@ pub(crate) struct SchedulerCountMetrics {
     interval: AtomicInterval,
 
     /// Number of packets received.
-    num_received: usize,
+    pub(crate) num_received: usize,
     /// Number of packets buffered.
-    num_buffered: usize,
+    pub(crate) num_buffered: usize,
 
     /// Number of transactions scheduled.
-    num_scheduled: usize,
+    pub(crate) num_scheduled: usize,
     /// Number of transactions that were unschedulable.
-    num_unschedulable: usize,
+    pub(crate) num_unschedulable: usize,
     /// Number of transactions that were filtered out during scheduling.
-    num_schedule_filtered_out: usize,
+    pub(crate) num_schedule_filtered_out: usize,
     /// Number of completed transactions received from workers.
-    num_finished: usize,
+    pub(crate) num_finished: usize,
     /// Number of transactions that were retryable.
-    num_retryable: usize,
+    pub(crate) num_retryable: usize,
 
     /// Number of transactions that were immediately dropped on receive.
-    num_dropped_on_receive: usize,
+    pub(crate) num_dropped_on_receive: usize,
     /// Number of transactions that were dropped due to sanitization failure.
-    num_dropped_on_sanitization: usize,
+    pub(crate) num_dropped_on_sanitization: usize,
     /// Number of transactions that were dropped due to failed lock validation.
-    num_dropped_on_validate_locks: usize,
+    pub(crate) num_dropped_on_validate_locks: usize,
     /// Number of transactions that were dropped due to failed transaction
     /// checks during receive.
-    num_dropped_on_receive_transaction_checks: usize,
+    pub(crate) num_dropped_on_receive_transaction_checks: usize,
     /// Number of transactions that were dropped due to clearing.
-    num_dropped_on_clear: usize,
+    pub(crate) num_dropped_on_clear: usize,
     /// Number of transactions that were dropped due to age and status checks.
-    num_dropped_on_age_and_status: usize,
+    pub(crate) num_dropped_on_age_and_status: usize,
     /// Number of transactions that were dropped due to exceeded capacity.
-    num_dropped_on_capacity: usize,
+    pub(crate) num_dropped_on_capacity: usize,
     /// Min prioritization fees in the transaction container
-    min_prioritization_fees: u64,
+    pub(crate) min_prioritization_fees: u64,
     /// Max prioritization fees in the transaction container
-    max_prioritization_fees: u64,
+    pub(crate) max_prioritization_fees: u64,
 }
 
 impl SchedulerCountMetrics {

@@ -51,16 +51,19 @@ rustc_version = "0.4"
 serde = "1.0.196"
 serde_derive = "1.0.103"
 sleipnir-bank = { path = "./sleipnir-bank" }
+sleipnir-stage-verify = { path = "./sleipnir-stage-verify" }
 sleipnir-transaction-status = { path = "./sleipnir-transaction-status" }
 solana-accounts-db = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-accounts-db" }
 solana-account-decoder = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-account-decoder" }
 solana-bpf-loader-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-bpf-loader-program" }
+solana-cost-model = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-cost-model" }
 solana-frozen-abi = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-frozen-abi" }
 solana-frozen-abi-macro = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-frozen-abi-macro" }
 solana-loader-v4-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-loader-v4-program" }
 solana-logger = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-logger" }
 solana-measure = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-measure" }
 solana-metrics = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-metrics" }
+solana-perf = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-perf" }
 solana-program-runtime = { path = "./solana/program-runtime" }
 solana-rayon-threadlimit = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-rayon-threadlimit" }
 solana-sdk = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-sdk" }

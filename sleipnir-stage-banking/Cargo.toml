@@ -14,10 +14,16 @@ crossbeam-channel = { workspace = true }
 itertools = { workspace = true }
 min-max-heap = { workspace = true }
 prio-graph = { workspace = true }
+serde = { workspace = true }
+serde_derive = { workspace = true }
 sleipnir-bank = { workspace = true }
+sleipnir-stage-verify = { workspace = true }
 sleipnir-transaction-status = { workspace = true }
+solana-cost-model = { workspace = true }
+solana-frozen-abi-macro = { workspace = true }
 solana-measure = { workspace = true }
 solana-metrics = { workspace = true }
+solana-perf = { workspace = true }
 solana-program-runtime = { workspace = true }
 solana-sdk = { workspace = true }
 solana-svm = { workspace = true }

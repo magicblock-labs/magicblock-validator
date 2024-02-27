@@ -4,6 +4,7 @@ mod prio_graph_scheduler;
 mod scheduler_controller;
 mod scheduler_error;
 mod thread_aware_account_locks;
+mod transaction_id_generator;
 mod transaction_priority_id;
 mod transaction_state;
 mod transaction_state_container;

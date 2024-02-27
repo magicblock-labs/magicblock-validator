@@ -5,23 +5,23 @@ use solana_sdk::timing::AtomicInterval;
 
 #[derive(Default)]
 pub(crate) struct SchedulerTimingMetrics {
-    interval: AtomicInterval,
+    pub(crate) interval: AtomicInterval,
     /// Time spent making processing decisions.
-    decision_time_us: u64,
+    pub(crate) decision_time_us: u64,
     /// Time spent receiving packets.
-    receive_time_us: u64,
+    pub(crate) receive_time_us: u64,
     /// Time spent buffering packets.
-    buffer_time_us: u64,
+    pub(crate) buffer_time_us: u64,
     /// Time spent filtering transactions during scheduling.
-    schedule_filter_time_us: u64,
+    pub(crate) schedule_filter_time_us: u64,
     /// Time spent scheduling transactions.
-    schedule_time_us: u64,
+    pub(crate) schedule_time_us: u64,
     /// Time spent clearing transactions from the container.
-    clear_time_us: u64,
+    pub(crate) clear_time_us: u64,
     /// Time spent cleaning expired or processed transactions from the container.
-    clean_time_us: u64,
+    pub(crate) clean_time_us: u64,
     /// Time spent receiving completed transactions.
-    receive_completed_time_us: u64,
+    pub(crate) receive_completed_time_us: u64,
 }
 
 impl SchedulerTimingMetrics {
