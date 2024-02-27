@@ -45,7 +45,7 @@ pub(crate) struct SchedulerCountMetrics {
 }
 
 impl SchedulerCountMetrics {
-    fn maybe_report_and_reset(&mut self, should_report: bool) {
+    pub(crate) fn maybe_report_and_reset(&mut self, should_report: bool) {
         const REPORT_INTERVAL_MS: u64 = 1000;
         if self.interval.should_update(REPORT_INTERVAL_MS) {
             if should_report {
@@ -97,7 +97,7 @@ impl SchedulerCountMetrics {
         );
     }
 
-    fn has_data(&self) -> bool {
+    pub(crate) fn has_data(&self) -> bool {
         self.num_received != 0
             || self.num_buffered != 0
             || self.num_scheduled != 0

@@ -9,11 +9,7 @@ use crate::{
 };
 use solana_program_runtime::compute_budget_processor::process_compute_budget_instructions;
 use solana_sdk::feature_set::include_loaded_accounts_data_size_in_fee_calculation;
-use std::ops::Deref;
-use std::{
-    sync::{Arc, RwLock},
-    time::Duration,
-};
+use std::{sync::Arc, time::Duration};
 
 use crossbeam_channel::RecvTimeoutError;
 use sleipnir_bank::bank::Bank;
@@ -43,7 +39,7 @@ pub(crate) struct SchedulerController {
     packet_receiver: PacketDeserializer,
 
     // changed from BankForks since we only have one
-    bank: Arc<RwLock<Bank>>,
+    bank: Arc<Bank>,
 
     /// Generates unique IDs for incoming transactions.
     transaction_id_generator: TransactionIdGenerator,
@@ -68,7 +64,7 @@ pub(crate) struct SchedulerController {
 impl SchedulerController {
     pub fn new(
         packet_deserializer: PacketDeserializer,
-        bank: Arc<RwLock<Bank>>,
+        bank: Arc<Bank>,
         scheduler: PrioGraphScheduler,
         worker_metrics: Vec<Arc<ConsumeWorkerMetrics>>,
     ) -> Self {
@@ -84,12 +80,33 @@ impl SchedulerController {
         }
     }
 
+    pub fn run(mut self) -> Result<(), SchedulerError> {
+        loop {
+            self.process_transactions()?;
+            self.receive_completed()?;
+            if !self.receive_and_buffer_packets() {
+                break;
+            }
+            // Report metrics only if there is data.
+            // Reset intervals when appropriate, regardless of report.
+            let should_report = self.count_metrics.has_data();
+            self.count_metrics
+                .update_priority_stats(self.container.get_min_max_priority());
+            self.count_metrics.maybe_report_and_reset(should_report);
+            self.timing_metrics.maybe_report_and_reset(should_report);
+            self.worker_metrics
+                .iter()
+                .for_each(|metrics| metrics.maybe_report_and_reset());
+        }
+
+        Ok(())
+    }
+
     /// Process packets
     /// NOTE: original based how to process the packet on the DecisionMaker which we don't have, we
     /// only include the BufferedPacketsDecision::Consumed variant here
-    /// NOTE: most likely we should not pass the `working_bank` and use the one and only `bank`
-    /// we have here as a field
-    fn process_transactions(&mut self, working_bank: &Bank) -> Result<(), SchedulerError> {
+    fn process_transactions(&mut self) -> Result<(), SchedulerError> {
+        let working_bank = &self.bank;
         let (scheduling_summary, schedule_time_us) = measure_us!(self.scheduler.schedule(
             &mut self.container,
             |txs, results| { Self::pre_graph_filter(txs, results, working_bank) },
@@ -163,7 +180,7 @@ impl SchedulerController {
         }
 
         // NOTE: this gets working_bank from bank_forks in original
-        let bank = self.bank.read().unwrap();
+        let bank = &self.bank;
 
         const CHUNK_SIZE: usize = 128;
         let mut error_counters = TransactionErrorMetrics::default();
@@ -258,7 +275,7 @@ impl SchedulerController {
     fn buffer_packets(&mut self, packets: Vec<ImmutableDeserializedPacket>) {
         // Sanitize packets, generate IDs, and insert into the container.
         // NOTE: this gets working_bank from bank_forks in original
-        let bank = self.bank.read().unwrap();
+        let bank = &self.bank;
         let last_slot_in_epoch = bank.epoch_schedule().get_last_slot_in_epoch(bank.epoch());
         let transaction_account_lock_limit = bank.get_transaction_account_lock_limit();
         let feature_set = &bank.feature_set;
@@ -270,7 +287,7 @@ impl SchedulerController {
             let mut post_sanitization_count: usize = 0;
             let (transactions, fee_budget_limits_vec): (Vec<_>, Vec<_>) = chunk
                 .iter()
-                .filter_map(|packet| packet.build_sanitized_transaction(feature_set, bank.deref()))
+                .filter_map(|packet| packet.build_sanitized_transaction(feature_set, bank.as_ref()))
                 .inspect(|_| saturating_add_assign!(post_sanitization_count, 1))
                 .filter(|tx| {
                     SanitizedTransaction::validate_account_locks(
@@ -305,7 +322,7 @@ impl SchedulerController {
                 let transaction_id = self.transaction_id_generator.next();
 
                 let (priority, cost) =
-                    Self::calculate_priority_and_cost(&transaction, &fee_budget_limits, &bank);
+                    Self::calculate_priority_and_cost(&transaction, &fee_budget_limits, bank);
                 let transaction_ttl = SanitizedTransactionTTL {
                     transaction,
                     max_age_slot: last_slot_in_epoch,

@@ -25,7 +25,7 @@ pub(crate) struct SchedulerTimingMetrics {
 }
 
 impl SchedulerTimingMetrics {
-    fn maybe_report_and_reset(&mut self, should_report: bool) {
+    pub(crate) fn maybe_report_and_reset(&mut self, should_report: bool) {
         const REPORT_INTERVAL_MS: u64 = 1000;
         if self.interval.should_update(REPORT_INTERVAL_MS) {
             if should_report {
