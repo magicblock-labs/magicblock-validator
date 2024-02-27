@@ -18,6 +18,7 @@ serde = { workspace = true }
 serde_derive = { workspace = true }
 sleipnir-bank = { workspace = true }
 sleipnir-stage-verify = { workspace = true }
+sleipnir-tokens = { workspace = true }
 sleipnir-transaction-status = { workspace = true }
 solana-cost-model = { workspace = true }
 solana-frozen-abi-macro = { workspace = true }

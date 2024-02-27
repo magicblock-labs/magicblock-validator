@@ -10,6 +10,7 @@ members = [
   "sleipnir-stage-banking",
   "sleipnir-stage-fetch",
   "sleipnir-stage-verify",
+  "sleipnir-tokens",
   "sleipnir-transaction-status",
   "solana/program-runtime",
   "solana/svm",
@@ -52,6 +53,7 @@ serde = "1.0.196"
 serde_derive = "1.0.103"
 sleipnir-bank = { path = "./sleipnir-bank" }
 sleipnir-stage-verify = { path = "./sleipnir-stage-verify" }
+sleipnir-tokens = { path = "./sleipnir-tokens" }
 sleipnir-transaction-status = { path = "./sleipnir-transaction-status" }
 solana-accounts-db = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-accounts-db" }
 solana-account-decoder = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-account-decoder" }

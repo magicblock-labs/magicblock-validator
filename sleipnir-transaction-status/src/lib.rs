@@ -10,6 +10,11 @@ use solana_accounts_db::transaction_results::TransactionExecutionResult;
 use solana_sdk::{clock::Slot, rent_debits::RentDebits, transaction::SanitizedTransaction};
 use solana_transaction_status::token_balances::TransactionTokenBalancesSet;
 
+pub use solana_transaction_status::TransactionTokenBalance;
+pub mod token_balances {
+    pub use solana_transaction_status::token_balances::TransactionTokenBalances;
+}
+
 #[allow(clippy::large_enum_variant)]
 pub enum TransactionStatusMessage {
     Batch(TransactionStatusBatch),

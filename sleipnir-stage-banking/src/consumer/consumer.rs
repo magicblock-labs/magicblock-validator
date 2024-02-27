@@ -13,22 +13,32 @@ use sleipnir_bank::{
     transaction_batch::TransactionBatch,
     transaction_results::LoadAndExecuteTransactionsOutput,
 };
+use sleipnir_tokens::token_balances::collect_token_balances;
+use sleipnir_transaction_status::TransactionTokenBalance;
 use solana_measure::measure_us;
 use solana_program_runtime::compute_budget_processor::process_compute_budget_instructions;
 use solana_sdk::{
     clock::MAX_PROCESSING_AGE,
     feature_set,
     message::{AddressLoader, SanitizedMessage},
+    pubkey::Pubkey,
     transaction::{SanitizedTransaction, TransactionError},
 };
 use solana_svm::{
     account_loader::validate_fee_payer, transaction_error_metrics::TransactionErrorMetrics,
     transaction_processor::TransactionProcessingCallback,
 };
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 /// Consumer will create chunks of transactions from buffer with up to this size.
 pub const TARGET_NUM_TRANSACTIONS_PER_BATCH: usize = 64;
+
+#[derive(Default)]
+pub(super) struct PreBalanceInfo {
+    pub native: Vec<Vec<u64>>,
+    pub token: Vec<Vec<TransactionTokenBalance>>,
+    pub mint_decimals: HashMap<Pubkey, u8>,
+}
 
 // Removed the following
 // - transaction_recorder: TransactionRecorder (poh)
@@ -164,7 +174,6 @@ impl Consumer {
         let transaction_status_sender_enabled = self.committer.transaction_status_sender_enabled();
         let mut execute_and_commit_timings = LeaderExecuteAndCommitTimings::default();
 
-        // TODO: sleipnir-balances crate
         let mut pre_balance_info = PreBalanceInfo::default();
         let (_, collect_balances_us) = measure_us!({
             // If the extra meta-data services are enabled for RPC, collect the
