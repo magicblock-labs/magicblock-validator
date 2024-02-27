@@ -1,5 +1,6 @@
 // NOTE: from core/src/banking_stage/transaction_scheduler/scheduler_controller.rs
 // with lots of pieces removed that we don't need
+use crate::metrics::{ConsumeWorkerMetrics, SchedulerCountMetrics, SchedulerTimingMetrics};
 use std::sync::{Arc, RwLock};
 
 use sleipnir_bank::bank::Bank;
@@ -29,7 +30,7 @@ pub(crate) struct SchedulerController {
 
     /// State for scheduling and communicating with worker threads.
     scheduler: PrioGraphScheduler,
-    /*
+
     /// Metrics tracking counts on transactions in different states.
     count_metrics: SchedulerCountMetrics,
 
@@ -38,5 +39,4 @@ pub(crate) struct SchedulerController {
 
     /// Metric report handles for the worker threads.
     worker_metrics: Vec<Arc<ConsumeWorkerMetrics>>,
-    */
 }

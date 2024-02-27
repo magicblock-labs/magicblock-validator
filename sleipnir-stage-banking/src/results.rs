@@ -4,6 +4,14 @@ use solana_svm::transaction_error_metrics::TransactionErrorMetrics;
 
 use crate::metrics::LeaderExecuteAndCommitTimings;
 
+pub struct ProcessTransactionBatchOutput {
+    // The number of transactions filtered out by the cost model
+    pub(crate) cost_model_throttled_transactions_count: usize,
+    // Amount of time spent running the cost model
+    pub(crate) cost_model_us: u64,
+    pub execute_and_commit_transactions_output: ExecuteAndCommitTransactionsOutput,
+}
+
 // NOTE: removed the following:
 // - pub commit_transactions_result: Result<Vec<CommitTransactionDetails>, PohRecorderError>, (poh)
 
