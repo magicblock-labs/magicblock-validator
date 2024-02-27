@@ -19,9 +19,8 @@ pub enum ConsumeWorkerError {
     Send(#[from] SendError<FinishedConsumeWork>),
 }
 
-// NOTE:
-// replaced leader_bank_notifier: Arc<LeaderBankNotifier>,
-// with: bank: Arc<Bank>,
+// NOTE: replaced leader_bank_notifier: Arc<LeaderBankNotifier>,
+//       with: bank: Arc<Bank>,
 pub(crate) struct ConsumeWorker {
     consume_receiver: Receiver<ConsumeWork>,
     consumer: Consumer,

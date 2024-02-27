@@ -240,6 +240,13 @@ pub struct Bank {
     pub ancestors: Ancestors,
 
     // -----------------
+    // Synchronization
+    // -----------------
+    /// Hash of this Bank's state. Only meaningful after freezing.
+    /// NOTE: we need this for the `freeze_lock` synchronization
+    hash: RwLock<Hash>,
+
+    // -----------------
     // Cost
     // -----------------
     cost_tracker: RwLock<CostTracker>,
@@ -311,6 +318,14 @@ impl TransactionExecutionRecordingOpts {
             enable_cpi_recording: true,
             enable_log_recording: true,
             enable_return_data_recording: true,
+        }
+    }
+
+    pub fn recording_all_if(condition: bool) -> Self {
+        if condition {
+            Self::recording_all()
+        } else {
+            Self::default()
         }
     }
 }
@@ -443,6 +458,9 @@ impl Bank {
 
             // Cost
             cost_tracker: RwLock::<CostTracker>::default(),
+
+            // Synchronization
+            hash: RwLock::<Hash>::default(),
         };
 
         bank.transaction_processor = TransactionBatchProcessor::new(
@@ -1927,5 +1945,11 @@ impl Bank {
 
     pub fn write_cost_tracker(&self) -> LockResult<RwLockWriteGuard<CostTracker>> {
         self.cost_tracker.write()
+    }
+
+    // NOTE: seems to be a synchronization point, i.e. only one thread can hold this
+    // at a time
+    pub fn freeze_lock(&self) -> RwLockReadGuard<Hash> {
+        self.hash.read().unwrap()
     }
 }

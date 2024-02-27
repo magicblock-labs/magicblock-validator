@@ -2,6 +2,12 @@
 
 use sleipnir_transaction_status::TransactionStatusSender;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CommitTransactionDetails {
+    Committed { compute_units: u64 },
+    NotCommitted,
+}
+
 // NOTE: removed the following:
 // - replay_vote_sender: ReplayVoteSender,
 // - prioritization_fee_cache: Arc<PrioritizationFeeCache>,
