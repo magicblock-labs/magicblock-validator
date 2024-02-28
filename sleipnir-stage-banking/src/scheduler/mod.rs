@@ -1,8 +1,8 @@
 mod batch_id_generator;
 mod in_flight_tracker;
-mod prio_graph_scheduler;
-mod scheduler_controller;
-mod scheduler_error;
+pub(crate) mod prio_graph_scheduler;
+pub(crate) mod scheduler_controller;
+pub(crate) mod scheduler_error;
 mod thread_aware_account_locks;
 mod transaction_id_generator;
 mod transaction_priority_id;

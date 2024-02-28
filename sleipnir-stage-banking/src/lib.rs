@@ -1,4 +1,5 @@
 #![allow(dead_code, unused_imports)]
+pub mod banking_stage;
 mod committer;
 mod consumer;
 mod metrics;

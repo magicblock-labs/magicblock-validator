@@ -5,7 +5,6 @@ use std::{
 
 use crossbeam_channel::RecvTimeoutError;
 use log::trace;
-use sleipnir_bank::bank::Bank;
 use sleipnir_stage_verify::metrics::SigverifyTracerPacketStats;
 use solana_perf::packet::PacketBatch;
 
@@ -28,16 +27,12 @@ pub struct ReceivePacketResults {
 pub struct PacketDeserializer {
     /// Receiver for packet batches from sigverify stage
     packet_batch_receiver: BankingPacketReceiver,
-    /// Provides working bank for deserializer to check feature activation
-    // NOTE: bank_forks in original
-    bank: Arc<RwLock<Bank>>,
 }
 
 impl PacketDeserializer {
-    pub fn new(packet_batch_receiver: BankingPacketReceiver, bank: Arc<RwLock<Bank>>) -> Self {
+    pub fn new(packet_batch_receiver: BankingPacketReceiver) -> Self {
         Self {
             packet_batch_receiver,
-            bank,
         }
     }
 
@@ -51,7 +46,6 @@ impl PacketDeserializer {
 
         // Note: this can be removed after feature `round_compute_unit_price` is activated in
         // mainnet-beta
-        let _working_bank = self.bank.read().unwrap();
         let round_compute_unit_price_enabled = false; // TODO get from working_bank.feature_set
 
         Ok(Self::deserialize_and_collect_packets(
