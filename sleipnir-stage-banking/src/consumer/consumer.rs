@@ -16,7 +16,9 @@ use sleipnir_bank::{
 use sleipnir_tokens::token_balances::collect_token_balances;
 use sleipnir_transaction_status::token_balances::TransactionTokenBalance;
 use solana_measure::measure_us;
-use solana_program_runtime::compute_budget_processor::process_compute_budget_instructions;
+use solana_program_runtime::{
+    compute_budget_processor::process_compute_budget_instructions, timings::ExecuteTimings,
+};
 use solana_sdk::{
     clock::MAX_PROCESSING_AGE,
     feature_set,
@@ -163,7 +165,64 @@ impl Consumer {
         let mut execute_and_commit_transactions_output =
             self.execute_and_commit_transactions_locked(bank, &batch);
 
-        todo!()
+        // Once the accounts are new transactions can enter the pipeline to process them
+        let (_, unlock_us) = measure_us!(drop(batch));
+
+        let ExecuteAndCommitTransactionsOutput {
+            ref mut retryable_transaction_indexes,
+            ref execute_and_commit_timings,
+            ref commit_transactions_result,
+            ..
+        } = execute_and_commit_transactions_output;
+
+        // Costs of all transactions are added to the cost_tracker before processing.
+        // To ensure accurate tracking of compute units, transactions that ultimately
+        // were not included in the block should have their cost removed.
+        QosService::remove_costs(
+            transaction_qos_cost_results.iter(),
+            Some(commit_transactions_result),
+            bank,
+        );
+
+        // once feature `apply_cost_tracker_during_replay` is activated, leader shall no longer
+        // adjust block with executed cost (a behavior more inline with bankless leader), it
+        // should use requested, or default `compute_unit_limit` as transaction's execution cost.
+        if !bank
+            .feature_set
+            .is_active(&feature_set::apply_cost_tracker_during_replay::id())
+        {
+            QosService::update_costs(
+                transaction_qos_cost_results.iter(),
+                Some(commit_transactions_result),
+                bank,
+            );
+        }
+
+        retryable_transaction_indexes
+            .iter_mut()
+            .for_each(|x| *x += chunk_offset);
+
+        let (cu, us) =
+            Self::accumulate_execute_units_and_time(&execute_and_commit_timings.execute_timings);
+        self.qos_service.accumulate_actual_execute_cu(cu);
+        self.qos_service.accumulate_actual_execute_time(us);
+
+        // reports qos service stats for this batch
+        self.qos_service.report_metrics(bank.slot());
+
+        debug!(
+            "bank: {} lock: {}us unlock: {}us txs_len: {}",
+            bank.slot(),
+            lock_us,
+            unlock_us,
+            txs.len(),
+        );
+
+        ProcessTransactionBatchOutput {
+            cost_model_throttled_transactions_count,
+            cost_model_us,
+            execute_and_commit_transactions_output,
+        }
     }
 
     fn execute_and_commit_transactions_locked(
@@ -303,5 +362,17 @@ impl Consumer {
             min_prioritization_fees,
             max_prioritization_fees,
         }
+    }
+
+    fn accumulate_execute_units_and_time(execute_timings: &ExecuteTimings) -> (u64, u64) {
+        execute_timings.details.per_program_timings.values().fold(
+            (0, 0),
+            |(units, times), program_timings| {
+                (
+                    units.saturating_add(program_timings.accumulated_units),
+                    times.saturating_add(program_timings.accumulated_us),
+                )
+            },
+        )
     }
 }
