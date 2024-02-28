@@ -2,7 +2,7 @@
 // NOTE: from core/src/banking_stage/consumer.rs:55
 use solana_svm::transaction_error_metrics::TransactionErrorMetrics;
 
-use crate::metrics::LeaderExecuteAndCommitTimings;
+use crate::{committer::CommitTransactionDetails, metrics::LeaderExecuteAndCommitTimings};
 
 pub struct ProcessTransactionBatchOutput {
     // The number of transactions filtered out by the cost model
@@ -27,6 +27,10 @@ pub struct ExecuteAndCommitTransactionsOutput {
     // Transactions that either were not executed, or were executed and failed to be committed due
     // to the block ending.
     pub(crate) retryable_transaction_indexes: Vec<usize>,
+    // A result that indicates whether transactions were successfully
+    // committed
+    // NOTE: original stores a result here with PohRecorderError which doesn't apply to us
+    pub commit_transactions_result: Vec<CommitTransactionDetails>,
     pub(crate) execute_and_commit_timings: LeaderExecuteAndCommitTimings,
     pub(crate) error_counters: TransactionErrorMetrics,
     pub(crate) min_prioritization_fees: u64,

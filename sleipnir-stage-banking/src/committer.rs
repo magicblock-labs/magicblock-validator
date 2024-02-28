@@ -63,12 +63,7 @@ impl Committer {
         executed_non_vote_transactions_count: usize,
         executed_with_successful_result_count: usize,
     ) -> (u64, Vec<CommitTransactionDetails>) {
-        let executed_transactions = execution_results
-            .iter()
-            .zip(batch.sanitized_transactions())
-            .filter_map(|(execution_result, tx)| execution_result.was_executed().then_some(tx))
-            .collect_vec();
-
+        // NOTE: omitted executed_transactions aggregation since we don't update prioritzation_fee_cache
         let (tx_results, commit_time_us) = measure_us!(bank.commit_transactions(
             batch.sanitized_transactions(),
             loaded_transactions,
@@ -99,7 +94,7 @@ impl Committer {
             .collect::<Vec<_>>();
 
         let ((), find_and_send_votes_us) = measure_us!({
-            // NOTE: removed bank_utils::find_and_send_votes(
+            // NOTE: removed bank_utils::find_and_send_votes
             self.collect_balances_and_send_status_batch(
                 tx_results,
                 bank,
@@ -107,8 +102,7 @@ impl Committer {
                 pre_balance_info,
                 starting_transaction_index,
             );
-            self.prioritization_fee_cache
-                .update(bank, executed_transactions.into_iter());
+            // NOTE: removed self.prioritization_fee_cache.update
         });
         execute_and_commit_timings.find_and_send_votes_us = find_and_send_votes_us;
         (commit_time_us, commit_transaction_statuses)

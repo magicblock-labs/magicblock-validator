@@ -100,7 +100,7 @@ impl Consumer {
 
     pub(crate) fn process_and_record_aged_transactions(
         &self,
-        bank: &Bank,
+        bank: &Arc<Bank>,
         txs: &[SanitizedTransaction],
         max_slot_ages: &[u64],
     ) -> ProcessTransactionBatchOutput {
@@ -133,7 +133,7 @@ impl Consumer {
 
     fn process_and_record_transactions_with_pre_results(
         &self,
-        bank: &Bank,
+        bank: &Arc<Bank>,
         txs: &[SanitizedTransaction],
         chunk_offset: usize,
         pre_results: impl Iterator<Item = Result<(), TransactionError>>,
@@ -168,7 +168,7 @@ impl Consumer {
 
     fn execute_and_commit_transactions_locked(
         &self,
-        bank: &Bank,
+        bank: &Arc<Bank>,
         batch: &TransactionBatch,
     ) -> ExecuteAndCommitTransactionsOutput {
         let transaction_status_sender_enabled = self.committer.transaction_status_sender_enabled();
@@ -215,7 +215,7 @@ impl Consumer {
         let LoadAndExecuteTransactionsOutput {
             mut loaded_transactions,
             execution_results,
-            mut retryable_transaction_indexes,
+            retryable_transaction_indexes,
             executed_transactions_count,
             executed_non_vote_transactions_count,
             executed_with_successful_result_count,
@@ -225,18 +225,8 @@ impl Consumer {
         } = load_and_execute_transactions_output;
 
         let transactions_attempted_execution_count = execution_results.len();
-        let (executed_transactions, execution_results_to_transactions_us) =
-            measure_us!(execution_results
-                .iter()
-                .zip(batch.sanitized_transactions())
-                .filter_map(|(execution_result, tx)| {
-                    if execution_result.was_executed() {
-                        Some(tx.to_versioned_transaction())
-                    } else {
-                        None
-                    }
-                })
-                .collect_vec());
+
+        // NOTE: omitted executed_transactions aggregation since we don't record transactions
 
         let (freeze_lock, freeze_lock_us) = measure_us!(bank.freeze_lock());
         execute_and_commit_timings.freeze_lock_us = freeze_lock_us;
@@ -256,6 +246,9 @@ impl Consumer {
         // NOTE: also omitted returning on recorder_err
 
         // TODO: build committer.commit_transactions
+
+        // Originally this was the result of record_transactions
+        let starting_transaction_index = None;
         let (commit_time_us, commit_transaction_statuses) = if executed_transactions_count != 0 {
             self.committer.commit_transactions(
                 batch,
@@ -304,7 +297,7 @@ impl Consumer {
             executed_transactions_count,
             executed_with_successful_result_count,
             retryable_transaction_indexes,
-            // commit_transactions_result: Ok(commit_transaction_statuses),
+            commit_transactions_result: commit_transaction_statuses,
             execute_and_commit_timings,
             error_counters,
             min_prioritization_fees,
