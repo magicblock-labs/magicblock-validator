@@ -4,6 +4,7 @@ mod committer;
 mod consumer;
 mod metrics;
 mod results;
+mod transport;
 
 // Scheduler work
 mod batch_transaction_details;

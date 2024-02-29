@@ -12,7 +12,7 @@ use serde_derive::{Deserialize, Serialize};
 use solana_frozen_abi_macro::{frozen_abi, AbiEnumVisitor, AbiExample};
 use solana_sdk::{hash::Hash, slot_history::Slot};
 
-use super::BankingPacketBatch;
+use crate::packet::BankingPacketBatch;
 
 #[derive(Serialize, Deserialize, Debug, AbiExample, AbiEnumVisitor)]
 pub enum TracedEvent {
@@ -33,7 +33,7 @@ pub enum ChannelLabel {
 pub struct TimedTracedEvent(pub std::time::SystemTime, pub TracedEvent);
 
 #[derive(Clone, Debug)]
-struct ActiveTracer {
+pub(crate) struct ActiveTracer {
     trace_sender: Sender<TimedTracedEvent>,
     exit: Arc<AtomicBool>,
 }
@@ -45,7 +45,7 @@ pub struct TracedSender {
 }
 
 impl TracedSender {
-    fn new(
+    pub(crate) fn new(
         label: ChannelLabel,
         sender: Sender<BankingPacketBatch>,
         active_tracer: Option<ActiveTracer>,

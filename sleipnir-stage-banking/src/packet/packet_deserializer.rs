@@ -8,9 +8,12 @@ use log::trace;
 use sleipnir_stage_verify::metrics::SigverifyTracerPacketStats;
 use solana_perf::packet::PacketBatch;
 
-use crate::messages::immutable_deserialized_packet::ImmutableDeserializedPacket;
+use crate::{
+    messages::immutable_deserialized_packet::ImmutableDeserializedPacket,
+    transport::BankingPacketReceiver,
+};
 
-use super::{BankingPacketBatch, BankingPacketReceiver};
+use super::BankingPacketBatch;
 
 /// Results from deserializing packet batches.
 pub struct ReceivePacketResults {
