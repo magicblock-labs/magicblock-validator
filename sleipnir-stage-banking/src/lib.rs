@@ -11,7 +11,7 @@ mod batch_transaction_details;
 pub mod consts;
 mod genesis_utils;
 mod messages;
-mod packet;
+pub mod packet;
 mod qos_service;
 mod read_write_account_set;
 mod scheduler;
