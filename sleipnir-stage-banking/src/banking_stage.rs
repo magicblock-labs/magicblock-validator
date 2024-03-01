@@ -23,6 +23,7 @@ use std::cmp;
 use std::env;
 use std::sync::Arc;
 use std::sync::RwLock;
+use std::thread;
 use std::thread::Builder;
 use std::thread::JoinHandle;
 
@@ -153,5 +154,12 @@ impl BankingStage {
                 .unwrap_or(NUM_THREADS),
             MIN_TOTAL_THREADS,
         )
+    }
+
+    pub fn join(self) -> thread::Result<()> {
+        for bank_thread_hdl in self.bank_thread_hdls {
+            bank_thread_hdl.join()?;
+        }
+        Ok(())
     }
 }
