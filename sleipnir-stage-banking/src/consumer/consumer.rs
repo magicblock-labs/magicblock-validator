@@ -6,7 +6,7 @@ use crate::{
     results::{ExecuteAndCommitTransactionsOutput, ProcessTransactionBatchOutput},
 };
 use itertools::Itertools;
-use log::debug;
+use log::trace;
 use sleipnir_bank::{
     bank::{Bank, TransactionExecutionRecordingOpts},
     get_compute_budget_details::GetComputeBudgetDetails,
@@ -210,7 +210,7 @@ impl Consumer {
         // reports qos service stats for this batch
         self.qos_service.report_metrics(bank.slot());
 
-        debug!(
+        trace!(
             "bank: {} lock: {}us unlock: {}us txs_len: {}",
             bank.slot(),
             lock_us,
@@ -333,7 +333,7 @@ impl Consumer {
 
         drop(freeze_lock);
 
-        debug!(
+        trace!(
             "bank: {} process_and_record_locked: {}us commit: {}us txs_len: {}",
             bank.slot(),
             load_execute_us,
@@ -341,7 +341,7 @@ impl Consumer {
             batch.sanitized_transactions().len(),
         );
 
-        debug!(
+        trace!(
             "execute_and_commit_transactions_locked: {:?}",
             execute_and_commit_timings.execute_timings,
         );
