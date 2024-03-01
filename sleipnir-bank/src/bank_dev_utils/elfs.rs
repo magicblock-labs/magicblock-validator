@@ -1,3 +1,5 @@
+use crate::bank::Bank;
+use log::debug;
 use solana_sdk::{
     account::{Account, AccountSharedData},
     bpf_loader_upgradeable::UpgradeableLoaderState,
@@ -21,17 +23,17 @@ static ELFS: &[(Pubkey, Pubkey, &[u8])] = &[
         noop::ID,
         solana_sdk::bpf_loader_upgradeable::ID,
         // solana_sdk::bpf_loader::ID,
-        include_bytes!("elfs/noop.so"),
+        include_bytes!("../../tests/utils/elfs/noop.so"),
     ),
     (
         solanax::ID,
         solana_sdk::bpf_loader_upgradeable::ID,
-        include_bytes!("elfs/solanax.so"),
+        include_bytes!("../../tests/utils/elfs/solanax.so"),
     ),
     (
         sysvars::ID,
         solana_sdk::bpf_loader_upgradeable::ID,
-        include_bytes!("elfs/sysvars.so"),
+        include_bytes!("../../tests/utils/elfs/sysvars.so"),
     ),
 ];
 
@@ -96,4 +98,23 @@ pub fn elf_accounts_for(program_id: &Pubkey) -> Vec<(Pubkey, AccountSharedData)>
         .expect("elf programdata not found");
 
     vec![program, programdata]
+}
+
+#[allow(dead_code)]
+pub fn add_elf_programs(bank: &Bank) {
+    for (program_id, account) in elf_accounts() {
+        bank.store_account(&program_id, &account);
+    }
+}
+
+pub fn add_elf_program(bank: &Bank, program_id: &Pubkey) {
+    let program_accs = elf_accounts_for(program_id);
+    if program_accs.is_empty() {
+        panic!("Unknown ELF account: {:?}", program_id);
+    }
+
+    for (acc_id, account) in program_accs {
+        debug!("Adding ELF program: '{}'", acc_id);
+        bank.store_account(&acc_id, &account);
+    }
 }

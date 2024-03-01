@@ -1,12 +1,12 @@
 use std::collections::HashSet;
 
+use crate::bank::{Bank, TransactionExecutionRecordingOpts};
+use crate::LAMPORTS_PER_SIGNATURE;
 use log::{debug, error, info, trace, warn};
 use rayon::{
     iter::IndexedParallelIterator,
     prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
 };
-use sleipnir_bank::bank::{Bank, TransactionExecutionRecordingOpts};
-use sleipnir_bank::LAMPORTS_PER_SIGNATURE;
 use solana_program_runtime::timings::ExecuteTimings;
 use solana_sdk::{
     account::Account,
@@ -23,12 +23,12 @@ use solana_sdk::{
     sysvar::{clock, epoch_schedule, fees, last_restart_slot, recent_blockhashes, rent},
     transaction::{SanitizedTransaction, Transaction},
 };
-pub(crate) mod elfs;
 
-pub fn init_logger() {
-    let _ = env_logger::builder().is_test(true).try_init();
-}
+use super::elfs;
 
+// -----------------
+// Account Initialization
+// -----------------
 pub fn create_accounts(num: usize) -> Vec<Keypair> {
     (0..num).into_par_iter().map(|_| Keypair::new()).collect()
 }
@@ -75,28 +75,6 @@ pub fn create_system_transfer_transactions(bank: &Bank, num: usize) -> Vec<Sanit
         })
         .map(SanitizedTransaction::from_transaction_for_tests)
         .collect()
-}
-
-// -----------------
-// ELF Programs
-// -----------------
-#[allow(dead_code)]
-pub fn add_elf_programs(bank: &Bank) {
-    for (program_id, account) in elfs::elf_accounts() {
-        bank.store_account(&program_id, &account);
-    }
-}
-
-pub fn add_elf_program(bank: &Bank, program_id: &Pubkey) {
-    let program_accs = elfs::elf_accounts_for(program_id);
-    if program_accs.is_empty() {
-        panic!("Unknown ELF account: {:?}", program_id);
-    }
-
-    for (acc_id, account) in program_accs {
-        debug!("Adding ELF program: '{}'", acc_id);
-        bank.store_account(&acc_id, &account);
-    }
 }
 
 // Noop
