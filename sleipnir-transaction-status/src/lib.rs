@@ -17,6 +17,7 @@ pub mod token_balances {
 use token_balances::TransactionTokenBalancesSet;
 
 #[allow(clippy::large_enum_variant)]
+#[derive(Debug)]
 pub enum TransactionStatusMessage {
     Batch(TransactionStatusBatch),
     Freeze(Slot),
@@ -30,6 +31,18 @@ pub struct TransactionStatusBatch {
     pub token_balances: TransactionTokenBalancesSet,
     pub rent_debits: Vec<RentDebits>,
     pub transaction_indexes: Vec<usize>,
+}
+
+impl std::fmt::Debug for TransactionStatusBatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("TransactionStatusBatch")
+            .field("transactions", &self.transactions)
+            .field("execution_results", &self.execution_results)
+            .field("balances", &self.balances)
+            .field("rent_debits", &self.rent_debits)
+            .field("transaction_indexes", &self.transaction_indexes)
+            .finish()
+    }
 }
 
 #[derive(Clone, Debug)]
