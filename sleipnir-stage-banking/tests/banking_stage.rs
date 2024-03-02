@@ -1,27 +1,25 @@
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
+use std::{
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+    time::Instant,
 };
 
 use crossbeam_channel::unbounded;
-use log::{debug, error, info};
+use log::{debug, info};
 use serde::Serialize;
 use sleipnir_bank::{
     bank::Bank,
-    bank_dev_utils::{
-        init_logger,
-        transactions::{create_funded_accounts, execute_transactions},
-    },
+    bank_dev_utils::{init_logger, transactions::create_funded_accounts},
     genesis_utils::{create_genesis_config, GenesisConfigInfo},
 };
 use sleipnir_stage_banking::{
     banking_stage::BankingStage, packet::BankingPacketBatch,
     transport::banking_tracer::BankingTracer,
 };
-use sleipnir_transaction_status::{
-    TransactionStatusBatch, TransactionStatusMessage, TransactionStatusSender,
-};
-use solana_measure::{measure::Measure, measure_us};
+use sleipnir_transaction_status::{TransactionStatusMessage, TransactionStatusSender};
+use solana_measure::measure::Measure;
 use solana_perf::packet::{to_packet_batches, PacketBatch};
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, system_transaction};
 
@@ -38,6 +36,7 @@ fn convert_from_old_verified(mut with_vers: Vec<(PacketBatch, Vec<u8>)>) -> Vec<
 
 fn watch_transaction_status(
     tx_received_counter: Arc<AtomicU64>,
+    tx_funded: Arc<AtomicU64>,
 ) -> (Option<TransactionStatusSender>, std::thread::JoinHandle<()>) {
     let (transaction_status_sender, transaction_status_receiver) = unbounded();
     let transaction_status_sender = Some(TransactionStatusSender {
@@ -48,6 +47,11 @@ fn watch_transaction_status(
         while let Ok(TransactionStatusMessage::Batch(batch)) = transaction_status_receiver.recv() {
             debug!("received batch: {:#?}", batch);
             tx_received_counter.fetch_add(batch.transactions.len() as u64, Ordering::Relaxed);
+            // Each status has exactly one transaction
+            for balance in &batch.balances.post_balances {
+                let funded = balance[1];
+                tx_funded.store(funded, Ordering::Relaxed);
+            }
         }
     });
     (transaction_status_sender, tx_status_thread)
@@ -74,31 +78,33 @@ fn test_banking_stage_with_transaction_status_sender_perf() {
     init_logger();
     solana_logger::setup();
 
-    const SEND_CHUNK_SIZE: usize = 100;
+    const SEND_CHUNK_SIZE: usize = 1000;
+    // We saw clearly that max thread count is ideal (tried 1..6)
+    let thread_count = std::env::var("THREAD_COUNT")
+        .ok()
+        .and_then(|s| s.parse::<u64>().ok())
+        .unwrap_or(6);
 
-    let num_transactions: Vec<u64> = vec![1, 2, 5, 10, 100, 1000]; //, 10_000];
-    let batch_sizes: Vec<u64> = vec![1, 2, 4, 8, 16, 32, 64, 128];
-    let thread_counts: Vec<u64> = vec![1, 2, 3, 4, 5, 6];
+    let num_transactions: Vec<u64> = vec![1, 2, 5, 10, 100, 1000, 10_000];
+    let batch_sizes: Vec<usize> = vec![1, 2, 4, 8, 16, 32, 64, 128];
 
     let permutations = num_transactions
         .iter()
         .flat_map(|num_transactions| {
-            batch_sizes.iter().flat_map(|batch_size| {
-                thread_counts
-                    .iter()
-                    .map(|thread_count| (*num_transactions, *batch_size, *thread_count))
-            })
+            batch_sizes
+                .iter()
+                .map(|batch_size| (*num_transactions, *batch_size))
         })
         .collect::<Vec<_>>();
 
     let mut results: Vec<BenchmarkTransactionsResult> = Vec::with_capacity(permutations.len());
-    for (num_transactions, batch_size, thread_count) in permutations {
+    for (num_transactions, batch_size) in permutations {
         let num_payers: u64 = (num_transactions / thread_count).min(thread_count).max(1);
         let config = BenchmarkTransactionsConfig {
             num_transactions,
             num_payers,
             send_chunk_size: SEND_CHUNK_SIZE,
-            batch_chunk_size: batch_size as usize,
+            batch_chunk_size: batch_size,
         };
         let result = run_bench_transactions(config);
         results.push(result);
@@ -149,8 +155,9 @@ fn run_bench_transactions(config: BenchmarkTransactionsConfig) -> BenchmarkTrans
     debug!("2. creating banking stage...");
 
     let tx_received_counter = Arc::<AtomicU64>::default();
+    let tx_funded = Arc::<AtomicU64>::default();
     let (transaction_status_sender, tx_status_thread) =
-        watch_transaction_status(tx_received_counter.clone());
+        watch_transaction_status(tx_received_counter.clone(), tx_funded.clone());
     let banking_stage = BankingStage::new(
         non_vote_receiver,
         transaction_status_sender,
@@ -167,7 +174,8 @@ fn run_bench_transactions(config: BenchmarkTransactionsConfig) -> BenchmarkTrans
             let to = solana_sdk::pubkey::Pubkey::new_unique();
             (
                 to,
-                system_transaction::transfer(payer, &to, 890_880_000, start_hash),
+                // We're abusing the post balance as tx id
+                system_transaction::transfer(payer, &to, 890_880_000 + idx, start_hash),
             )
         })
         .unzip::<_, _, Vec<_>, Vec<_>>();
@@ -186,12 +194,15 @@ fn run_bench_transactions(config: BenchmarkTransactionsConfig) -> BenchmarkTrans
     debug!("5. sending packet batches...");
     let mut execute_batches_and_receive_results_elapsed =
         Measure::start("execute_batches_and_receive_results_elapsed");
+    let instant_clock = Instant::now();
     non_vote_sender
         .send(BankingPacketBatch::new((packet_batches, None)))
         .unwrap();
 
     // 6. Ensure all transaction statuses were received
     let mut previous_num_received = 0;
+    let mut previous_funded = 0;
+    let mut times = Vec::with_capacity(config.num_transactions as usize);
     loop {
         let num_received = tx_received_counter.load(Ordering::Relaxed);
         if num_received == config.num_transactions {
@@ -201,6 +212,12 @@ fn run_bench_transactions(config: BenchmarkTransactionsConfig) -> BenchmarkTrans
         if num_received != previous_num_received {
             previous_num_received = num_received;
             // eprint!("{} ", num_received);
+        }
+        let funded = tx_funded.load(Ordering::Relaxed);
+        let elapsed = instant_clock.elapsed();
+        if funded != previous_funded {
+            previous_funded = funded;
+            times.push((elapsed.as_millis(), elapsed.as_micros()));
         }
     }
     drop(non_vote_sender);
@@ -214,10 +231,25 @@ fn run_bench_transactions(config: BenchmarkTransactionsConfig) -> BenchmarkTrans
         config.num_transactions
     );
 
-    //      1 transactions, CHUNK_SIZE=100 1 payers.   (execute_and_receive_tx_results:   3ms)
-    //      2 transactions, CHUNK_SIZE=100 2 payers.   (execute_and_receive_tx_results:   5ms)
-    //      5 transactions, CHUNK_SIZE=100 5 payers.   (execute_and_receive_tx_results: 5ms)
-    //     10 transactions, CHUNK_SIZE=100 6 payers.   (execute_and_receive_tx_results: 6ms)
+    if !times.is_empty() {
+        let min_ms = times.iter().map(|(ms, _)| ms).min().unwrap();
+        let min_us = times.iter().map(|(_, ns)| ns).min().unwrap();
+        let max_ms = times.iter().map(|(ms, _)| ms).max().unwrap();
+        let max_us = times.iter().map(|(_, ns)| ns).max().unwrap();
+        let average_ms = times.iter().map(|(ms, _)| ms).sum::<u128>() / times.len() as u128;
+        let average_us = times.iter().map(|(_, us)| us).sum::<u128>() / times.len() as u128;
+        eprintln!(
+            "txs {}, batch_size: {} -> min: {}ms {}us, max: {}ms {}us, average: {}ms {}us",
+            config.num_transactions,
+            config.batch_chunk_size,
+            min_ms,
+            min_us,
+            max_ms,
+            max_us,
+            average_ms,
+            average_us
+        );
+    }
 
     BenchmarkTransactionsResult {
         num_transactions: config.num_transactions,
