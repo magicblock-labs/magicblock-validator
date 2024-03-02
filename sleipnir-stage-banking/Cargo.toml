@@ -36,5 +36,6 @@ thiserror = { workspace = true }
 [dev-dependencies]
 assert_matches = { workspace = true }
 env_logger = { workspace = true }
+csv = { workspace = true }
 
 sleipnir-bank = { workspace = true, features = ["dev-context-only-utils"] }

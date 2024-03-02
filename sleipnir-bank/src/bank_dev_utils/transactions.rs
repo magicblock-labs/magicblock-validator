@@ -34,10 +34,6 @@ pub fn create_accounts(num: usize) -> Vec<Keypair> {
 }
 
 pub fn create_funded_accounts(bank: &Bank, num: usize, lamports: Option<u64>) -> Vec<Keypair> {
-    assert!(
-        num.is_power_of_two(),
-        "must be power of 2 for parallel funding tree"
-    );
     let accounts = create_accounts(num);
     let lamports = lamports.unwrap_or_else(|| {
         let rent_exempt_reserve = Rent::default().minimum_balance(0);
