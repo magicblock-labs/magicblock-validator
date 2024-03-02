@@ -21,7 +21,11 @@ use sleipnir_stage_banking::{
 use sleipnir_transaction_status::{TransactionStatusMessage, TransactionStatusSender};
 use solana_measure::measure::Measure;
 use solana_perf::packet::{to_packet_batches, PacketBatch};
-use solana_sdk::{native_token::LAMPORTS_PER_SOL, signature::Signature, system_transaction};
+use solana_sdk::{
+    native_token::LAMPORTS_PER_SOL,
+    signature::{Keypair, Signature},
+    system_transaction,
+};
 
 const LOG_MSGS_BYTE_LIMT: Option<usize> = None;
 
@@ -186,6 +190,83 @@ fn test_banking_stage_with_transaction_status_sender_tracking_signatures() {
 
     assert_eq!(successes, 1);
     assert_eq!(failures, 1);
+}
+
+#[test]
+fn test_banking_stage_transfer_from_non_existing_account() {
+    init_logger();
+    solana_logger::setup();
+
+    const SEND_CHUNK_SIZE: usize = 100;
+
+    let GenesisConfigInfo { genesis_config, .. } = create_genesis_config(u64::MAX);
+    let bank = Bank::new_for_tests(&genesis_config);
+    let start_hash = bank.last_blockhash();
+    let bank = Arc::new(bank);
+
+    let banking_tracer = BankingTracer::new_disabled();
+    let (non_vote_sender, non_vote_receiver) = banking_tracer.create_channel_non_vote();
+
+    // Create the banking stage
+    debug!("Creating banking stage...");
+
+    let receive_results_counter = Arc::<AtomicU64>::default();
+    let signatures = Arc::<RwLock<Vec<Signature>>>::default();
+    let (transaction_status_sender, tx_status_thread) =
+        track_transaction_sigs(receive_results_counter.clone(), signatures.clone());
+    let banking_stage = BankingStage::new(
+        non_vote_receiver,
+        transaction_status_sender,
+        LOG_MSGS_BYTE_LIMT,
+        bank.clone(),
+        None,
+    );
+
+    // Create Transactions
+    debug!("Creating transactions...");
+    let not_existing = {
+        let payer = Keypair::new();
+        let to = solana_sdk::pubkey::Pubkey::new_unique();
+        system_transaction::transfer(&payer, &to, 890_880_000, start_hash)
+    };
+
+    // Create Packet Batches
+    debug!("Creating packet batches...");
+    let txs = &[not_existing];
+    let packet_batches = to_packet_batches(txs, SEND_CHUNK_SIZE);
+    let packet_batches = packet_batches
+        .into_iter()
+        .map(|batch| (batch, vec![1u8]))
+        .collect::<Vec<_>>();
+
+    let packet_batches = convert_from_old_verified(packet_batches);
+
+    // Send the Packet Batches
+    debug!("Sending packet batches...");
+    non_vote_sender
+        .send(BankingPacketBatch::new((packet_batches, None)))
+        .unwrap();
+
+    // Wait for all txs to be received
+    let mut counter = 0;
+    while receive_results_counter.load(Ordering::Relaxed) < txs.len() as u64 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        counter += 1;
+        // I verified that a transaction with a payer that doesn't exist at all just gets
+        // dropped (instead of failing) and we have no way of verifying this at this level
+        // So we just wait here long enough to ensure we didn't hear back
+        if counter > 10 {
+            break;
+        }
+    }
+
+    // Shut things down
+    drop(non_vote_sender);
+    banking_stage.join().unwrap();
+    tx_status_thread.join().unwrap();
+
+    // Check the tx signatures
+    assert_eq!(receive_results_counter.load(Ordering::Relaxed), 0);
 }
 
 // -----------------
