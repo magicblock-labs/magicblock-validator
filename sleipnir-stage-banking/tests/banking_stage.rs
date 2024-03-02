@@ -58,6 +58,7 @@ fn watch_transaction_status(
 }
 
 fn track_transaction_sigs(
+    tx_received_counter: Arc<AtomicU64>,
     sigs: Arc<RwLock<Vec<Signature>>>,
 ) -> (Option<TransactionStatusSender>, std::thread::JoinHandle<()>) {
     let (transaction_status_sender, transaction_status_receiver) = unbounded();
@@ -67,6 +68,7 @@ fn track_transaction_sigs(
     let tx_status_thread = std::thread::spawn(move || {
         let transaction_status_receiver = transaction_status_receiver;
         while let Ok(TransactionStatusMessage::Batch(batch)) = transaction_status_receiver.recv() {
+            tx_received_counter.fetch_add(batch.transactions.len() as u64, Ordering::Relaxed);
             for tx in batch.transactions {
                 let mut sigs = sigs.write().unwrap();
                 sigs.push(*tx.signature());
@@ -107,22 +109,13 @@ fn test_banking_stage_with_transaction_status_sender_tracking_signatures() {
     let banking_tracer = BankingTracer::new_disabled();
     let (non_vote_sender, non_vote_receiver) = banking_tracer.create_channel_non_vote();
 
-    const NUM_PAYERS: u64 = 1;
-    const NUM_TRANSACTIONS: u64 = 1;
+    // Create the banking stage
+    debug!("Creating banking stage...");
 
-    // 1. Fund an account so we can send 2 good transactions in a single batch.
-    debug!("1. funding payers...");
-    let payers = create_funded_accounts(
-        &bank,
-        2 as usize,
-        Some(LAMPORTS_PER_SOL * (NUM_TRANSACTIONS / NUM_PAYERS)),
-    );
-
-    // 2. Create the banking stage
-    debug!("2. creating banking stage...");
-
+    let receive_results_counter = Arc::<AtomicU64>::default();
     let signatures = Arc::<RwLock<Vec<Signature>>>::default();
-    let (transaction_status_sender, tx_status_thread) = track_transaction_sigs(signatures.clone());
+    let (transaction_status_sender, tx_status_thread) =
+        track_transaction_sigs(receive_results_counter.clone(), signatures.clone());
     let banking_stage = BankingStage::new(
         non_vote_receiver,
         transaction_status_sender,
@@ -131,23 +124,23 @@ fn test_banking_stage_with_transaction_status_sender_tracking_signatures() {
         None,
     );
 
-    // 3. Create Transactions
-    debug!("3. creating transactions...");
-    let (_accs, txs) = (0..NUM_TRANSACTIONS)
-        .map(|idx| {
-            let payer = &payers[(idx % NUM_PAYERS) as usize];
-            let to = solana_sdk::pubkey::Pubkey::new_unique();
-            (
-                to,
-                // We're abusing the post balance as tx id
-                system_transaction::transfer(payer, &to, 890_880_000 + idx, start_hash),
-            )
-        })
-        .unzip::<_, _, Vec<_>, Vec<_>>();
+    // Create Transactions
+    debug!("Creating transactions...");
+    let fully_funded_tx = {
+        let payer = create_funded_accounts(&bank, 1 as usize, Some(LAMPORTS_PER_SOL)).remove(0);
+        let to = solana_sdk::pubkey::Pubkey::new_unique();
+        system_transaction::transfer(&payer, &to, 890_880_000, start_hash)
+    };
+    let not_fully_funded_tx = {
+        let payer = create_funded_accounts(&bank, 1 as usize, Some(5000)).remove(0);
+        let to = solana_sdk::pubkey::Pubkey::new_unique();
+        system_transaction::transfer(&payer, &to, 890_880_000, start_hash)
+    };
 
-    // 4. Create Packet Batches
-    debug!("4. creating packet batches...");
-    let packet_batches = to_packet_batches(&txs, SEND_CHUNK_SIZE);
+    // Create Packet Batches
+    debug!("Creating packet batches...");
+    let txs = &[fully_funded_tx, not_fully_funded_tx];
+    let packet_batches = to_packet_batches(txs, SEND_CHUNK_SIZE);
     let packet_batches = packet_batches
         .into_iter()
         .map(|batch| (batch, vec![1u8]))
@@ -155,20 +148,44 @@ fn test_banking_stage_with_transaction_status_sender_tracking_signatures() {
 
     let packet_batches = convert_from_old_verified(packet_batches);
 
-    // 5. Send the Packet Batches
-    debug!("5. sending packet batches...");
+    // Send the Packet Batches
+    debug!("Sending packet batches...");
     non_vote_sender
         .send(BankingPacketBatch::new((packet_batches, None)))
         .unwrap();
 
+    // Wait for all txs to be received
+    while receive_results_counter.load(Ordering::Relaxed) < txs.len() as u64 {
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+
+    // Shut things down
     drop(non_vote_sender);
     banking_stage.join().unwrap();
     tx_status_thread.join().unwrap();
-    bank.advance_slot();
-    for sig in signatures.read().unwrap().iter() {
+
+    // Check the tx signatures
+    let signatures = signatures.read().unwrap();
+    for sig in signatures.iter() {
         let status = bank.get_signature_status(sig);
-        eprintln!("sig: {:?} - {:?} ", sig, status);
+        debug!("sig: {:?} - {:?} ", sig, status);
     }
+
+    assert_eq!(
+        receive_results_counter.load(Ordering::Relaxed),
+        txs.len() as u64
+    );
+    let successes = signatures
+        .iter()
+        .filter(|sig| bank.get_signature_status(sig).unwrap().is_ok())
+        .count();
+    let failures = signatures
+        .iter()
+        .filter(|sig| bank.get_signature_status(sig).unwrap().is_err())
+        .count();
+
+    assert_eq!(successes, 1);
+    assert_eq!(failures, 1);
 }
 
 // -----------------
