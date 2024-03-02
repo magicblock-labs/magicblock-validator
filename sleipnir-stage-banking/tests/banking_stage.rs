@@ -1,7 +1,7 @@
 use std::{
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc,
+        Arc, RwLock,
     },
     time::Instant,
 };
@@ -21,7 +21,7 @@ use sleipnir_stage_banking::{
 use sleipnir_transaction_status::{TransactionStatusMessage, TransactionStatusSender};
 use solana_measure::measure::Measure;
 use solana_perf::packet::{to_packet_batches, PacketBatch};
-use solana_sdk::{native_token::LAMPORTS_PER_SOL, system_transaction};
+use solana_sdk::{native_token::LAMPORTS_PER_SOL, signature::Signature, system_transaction};
 
 const LOG_MSGS_BYTE_LIMT: Option<usize> = None;
 
@@ -57,6 +57,25 @@ fn watch_transaction_status(
     (transaction_status_sender, tx_status_thread)
 }
 
+fn track_transaction_sigs(
+    sigs: Arc<RwLock<Vec<Signature>>>,
+) -> (Option<TransactionStatusSender>, std::thread::JoinHandle<()>) {
+    let (transaction_status_sender, transaction_status_receiver) = unbounded();
+    let transaction_status_sender = Some(TransactionStatusSender {
+        sender: transaction_status_sender,
+    });
+    let tx_status_thread = std::thread::spawn(move || {
+        let transaction_status_receiver = transaction_status_receiver;
+        while let Ok(TransactionStatusMessage::Batch(batch)) = transaction_status_receiver.recv() {
+            for tx in batch.transactions {
+                let mut sigs = sigs.write().unwrap();
+                sigs.push(*tx.signature());
+            }
+        }
+    });
+    (transaction_status_sender, tx_status_thread)
+}
+
 #[test]
 fn test_banking_stage_shutdown1() {
     init_logger();
@@ -74,11 +93,93 @@ fn test_banking_stage_shutdown1() {
 }
 
 #[test]
+fn test_banking_stage_with_transaction_status_sender_tracking_signatures() {
+    init_logger();
+    solana_logger::setup();
+
+    const SEND_CHUNK_SIZE: usize = 100;
+
+    let GenesisConfigInfo { genesis_config, .. } = create_genesis_config(u64::MAX);
+    let bank = Bank::new_for_tests(&genesis_config);
+    let start_hash = bank.last_blockhash();
+    let bank = Arc::new(bank);
+
+    let banking_tracer = BankingTracer::new_disabled();
+    let (non_vote_sender, non_vote_receiver) = banking_tracer.create_channel_non_vote();
+
+    const NUM_PAYERS: u64 = 1;
+    const NUM_TRANSACTIONS: u64 = 1;
+
+    // 1. Fund an account so we can send 2 good transactions in a single batch.
+    debug!("1. funding payers...");
+    let payers = create_funded_accounts(
+        &bank,
+        2 as usize,
+        Some(LAMPORTS_PER_SOL * (NUM_TRANSACTIONS / NUM_PAYERS)),
+    );
+
+    // 2. Create the banking stage
+    debug!("2. creating banking stage...");
+
+    let signatures = Arc::<RwLock<Vec<Signature>>>::default();
+    let (transaction_status_sender, tx_status_thread) = track_transaction_sigs(signatures.clone());
+    let banking_stage = BankingStage::new(
+        non_vote_receiver,
+        transaction_status_sender,
+        LOG_MSGS_BYTE_LIMT,
+        bank.clone(),
+        None,
+    );
+
+    // 3. Create Transactions
+    debug!("3. creating transactions...");
+    let (_accs, txs) = (0..NUM_TRANSACTIONS)
+        .map(|idx| {
+            let payer = &payers[(idx % NUM_PAYERS) as usize];
+            let to = solana_sdk::pubkey::Pubkey::new_unique();
+            (
+                to,
+                // We're abusing the post balance as tx id
+                system_transaction::transfer(payer, &to, 890_880_000 + idx, start_hash),
+            )
+        })
+        .unzip::<_, _, Vec<_>, Vec<_>>();
+
+    // 4. Create Packet Batches
+    debug!("4. creating packet batches...");
+    let packet_batches = to_packet_batches(&txs, SEND_CHUNK_SIZE);
+    let packet_batches = packet_batches
+        .into_iter()
+        .map(|batch| (batch, vec![1u8]))
+        .collect::<Vec<_>>();
+
+    let packet_batches = convert_from_old_verified(packet_batches);
+
+    // 5. Send the Packet Batches
+    debug!("5. sending packet batches...");
+    non_vote_sender
+        .send(BankingPacketBatch::new((packet_batches, None)))
+        .unwrap();
+
+    drop(non_vote_sender);
+    banking_stage.join().unwrap();
+    tx_status_thread.join().unwrap();
+    bank.advance_slot();
+    for sig in signatures.read().unwrap().iter() {
+        let status = bank.get_signature_status(sig);
+        eprintln!("sig: {:?} - {:?} ", sig, status);
+    }
+}
+
+// -----------------
+// Benchmarking
+// -----------------
+#[test]
 fn test_banking_stage_with_transaction_status_sender_perf() {
     init_logger();
     solana_logger::setup();
 
-    const SEND_CHUNK_SIZE: usize = 1000;
+    const SEND_CHUNK_SIZE: usize = 100;
     // We saw clearly that max thread count is ideal (tried 1..6)
     let thread_count = std::env::var("THREAD_COUNT")
         .ok()
@@ -238,7 +339,7 @@ fn run_bench_transactions(config: BenchmarkTransactionsConfig) -> BenchmarkTrans
         let max_us = times.iter().map(|(_, ns)| ns).max().unwrap();
         let average_ms = times.iter().map(|(ms, _)| ms).sum::<u128>() / times.len() as u128;
         let average_us = times.iter().map(|(_, us)| us).sum::<u128>() / times.len() as u128;
-        eprintln!(
+        debug!(
             "txs {}, batch_size: {} -> min: {}ms {}us, max: {}ms {}us, average: {}ms {}us",
             config.num_transactions,
             config.batch_chunk_size,
