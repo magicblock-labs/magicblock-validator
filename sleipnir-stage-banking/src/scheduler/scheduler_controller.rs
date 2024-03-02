@@ -33,6 +33,8 @@ use crate::packet::packet_deserializer::PacketDeserializer;
 // - decision_maker: DecisionMaker,
 // Commented out the parts that we still need to implement
 
+const DEFAULT_CHUNK_SIZE: usize = 128;
+
 /// Controls packet and transaction flow into scheduler, and scheduling execution.
 pub(crate) struct SchedulerController {
     /// Packet/Transaction ingress.
@@ -59,6 +61,9 @@ pub(crate) struct SchedulerController {
 
     /// Metric report handles for the worker threads.
     worker_metrics: Vec<Arc<ConsumeWorkerMetrics>>,
+
+    /// Sleipir specific chunk size override, defaults to 128 as used in Solana Validator
+    chunk_size: usize,
 }
 
 impl SchedulerController {
@@ -67,6 +72,7 @@ impl SchedulerController {
         bank: Arc<Bank>,
         scheduler: PrioGraphScheduler,
         worker_metrics: Vec<Arc<ConsumeWorkerMetrics>>,
+        chunk_size: Option<usize>,
     ) -> Self {
         Self {
             packet_receiver: packet_deserializer,
@@ -77,6 +83,7 @@ impl SchedulerController {
             count_metrics: SchedulerCountMetrics::default(),
             timing_metrics: SchedulerTimingMetrics::default(),
             worker_metrics,
+            chunk_size: chunk_size.unwrap_or(DEFAULT_CHUNK_SIZE),
         }
     }
 
@@ -182,10 +189,10 @@ impl SchedulerController {
         // NOTE: this gets working_bank from bank_forks in original
         let bank = &self.bank;
 
-        const CHUNK_SIZE: usize = 128;
+        let chunk_size = self.chunk_size;
         let mut error_counters = TransactionErrorMetrics::default();
 
-        for chunk in transaction_ids.chunks(CHUNK_SIZE) {
+        for chunk in transaction_ids.chunks(chunk_size) {
             let lock_results = vec![Ok(()); chunk.len()];
             let sanitized_txs: Vec<_> = chunk
                 .iter()
@@ -280,10 +287,12 @@ impl SchedulerController {
         let transaction_account_lock_limit = bank.get_transaction_account_lock_limit();
         let feature_set = &bank.feature_set;
 
-        const CHUNK_SIZE: usize = 128;
-        let lock_results: [_; CHUNK_SIZE] = core::array::from_fn(|_| Ok(()));
+        let chunk_size: usize = self.chunk_size;
+        // NOTE: this used const CHUNK_SIZE to create an fixed-size array
+        // let lock_results: [_; CHUNK_SIZE] = core::array::from_fn(|_| Ok(()));
+        let lock_results = vec![Ok(()); chunk_size];
         let mut error_counts = TransactionErrorMetrics::default();
-        for chunk in packets.chunks(CHUNK_SIZE) {
+        for chunk in packets.chunks(chunk_size) {
             let mut post_sanitization_count: usize = 0;
             let (transactions, fee_budget_limits_vec): (Vec<_>, Vec<_>) = chunk
                 .iter()

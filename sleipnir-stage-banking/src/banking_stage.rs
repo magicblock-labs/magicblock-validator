@@ -44,6 +44,7 @@ impl BankingStage {
         transaction_status_sender: Option<TransactionStatusSender>,
         log_messages_bytes_limit: Option<usize>,
         bank: Arc<Bank>,
+        chunk_size: Option<usize>,
     ) -> Self {
         Self::new_num_threads(
             non_vote_receiver,
@@ -51,6 +52,7 @@ impl BankingStage {
             transaction_status_sender,
             log_messages_bytes_limit,
             bank,
+            chunk_size,
         )
     }
 
@@ -60,6 +62,7 @@ impl BankingStage {
         transaction_status_sender: Option<TransactionStatusSender>,
         log_messages_bytes_limit: Option<usize>,
         bank: Arc<Bank>,
+        chunk_size: Option<usize>,
     ) -> Self {
         Self::new_central_scheduler(
             non_vote_receiver,
@@ -67,6 +70,7 @@ impl BankingStage {
             transaction_status_sender,
             log_messages_bytes_limit,
             bank,
+            chunk_size,
         )
     }
 
@@ -76,6 +80,7 @@ impl BankingStage {
         transaction_status_sender: Option<TransactionStatusSender>,
         log_messages_bytes_limit: Option<usize>,
         bank: Arc<Bank>,
+        chunk_size: Option<usize>,
     ) -> Self {
         assert!(num_threads >= MIN_TOTAL_THREADS);
         // NOTE: omitted latest_unprocessed_votes
@@ -131,6 +136,7 @@ impl BankingStage {
                 bank.clone(),
                 scheduler,
                 worker_metrics,
+                chunk_size,
             );
             Builder::new()
                 .name("solBnkTxSched".to_string())
