@@ -8,7 +8,10 @@ use rand::{thread_rng, Rng};
 use solana_accounts_db::ancestors::Ancestors;
 use solana_frozen_abi_macro::AbiExample;
 use solana_sdk::{clock::Slot, hash::Hash};
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{Arc, Mutex},
+};
 
 const CACHED_KEY_SIZE: usize = 20;
 // Store forks in a single chunk of memory to avoid another lookup.
@@ -20,10 +23,19 @@ type KeyMap<T> = HashMap<KeySlice, ForkStatus<T>>;
 // the key offset and a Map of the key slice + Fork status for that key
 type KeyStatusMap<T> = HashMap<Hash, (Slot, usize, KeyMap<T>)>;
 
+// Map of Hash and status
+pub type Status<T> = Arc<Mutex<HashMap<Hash, (usize, Vec<(KeySlice, T)>)>>>;
+// A map of keys recorded in each fork; used to serialize for snapshots easily.
+// Doesn't store a `SlotDelta` in it because the bool `root` is usually set much later
+type SlotDeltaMap<T> = HashMap<Slot, Status<T>>;
+
 #[derive(Clone, Debug, AbiExample)]
 pub struct StatusCache<T: Clone> {
     cache: KeyStatusMap<T>,
     roots: HashSet<Slot>,
+
+    /// all keys seen during a fork/slot
+    slot_deltas: SlotDeltaMap<T>,
 }
 
 impl<T: Clone> Default for StatusCache<T> {
@@ -32,6 +44,7 @@ impl<T: Clone> Default for StatusCache<T> {
             cache: HashMap::default(),
             // 0 is always a root
             roots: HashSet::from([0]),
+            slot_deltas: HashMap::default(),
         }
     }
 }
@@ -109,8 +122,8 @@ impl<T: Clone> StatusCache<T> {
         transaction_blockhash: &Hash,
         slot: Slot,
         key_index: usize,
-        _key_slice: [u8; CACHED_KEY_SIZE],
-        _res: T,
+        key_slice: [u8; CACHED_KEY_SIZE],
+        res: T,
     ) {
         let hash_map =
             self.cache
@@ -118,8 +131,8 @@ impl<T: Clone> StatusCache<T> {
                 .or_insert((slot, key_index, HashMap::new()));
         hash_map.0 = std::cmp::max(slot, hash_map.0);
 
-        // NOTE: not supporting forks
-        /*
+        // NOTE: not supporting forks exactly, but need to insert the entry
+        // In the future this cache can be simplified to be a map by blockhash only
         let forks = hash_map.2.entry(key_slice).or_default();
         forks.push((slot, res.clone()));
         let slot_deltas = self.slot_deltas.entry(slot).or_default();
@@ -128,6 +141,5 @@ impl<T: Clone> StatusCache<T> {
             .entry(*transaction_blockhash)
             .or_insert((key_index, vec![]));
         hash_entry.push((key_slice, res))
-        */
     }
 }
