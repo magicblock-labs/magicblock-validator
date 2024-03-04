@@ -16,6 +16,7 @@ rand = { workspace = true }
 rayon = { workspace = true, optional = true }
 serde = { workspace = true, features = ["rc"] }
 serde_derive = { workspace = true }
+sleipnir-program = { workspace = true }
 solana-accounts-db = { workspace = true }
 solana-bpf-loader-program = { workspace = true }
 solana-cost-model = { workspace = true }

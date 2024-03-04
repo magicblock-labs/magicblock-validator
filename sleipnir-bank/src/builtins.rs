@@ -50,4 +50,10 @@ pub static BUILTINS: &[BuiltinPrototype] = &[
         name: "solana_bpf_loader_upgradeable_program",
         entrypoint: solana_bpf_loader_program::Entrypoint::vm,
     },
+    BuiltinPrototype {
+        feature_id: None,
+        program_id: sleipnir_program::id(),
+        name: "sleipnir_program",
+        entrypoint: sleipnir_program::sleipnir_processor::Entrypoint::vm,
+    },
 ];
