@@ -4,9 +4,12 @@ use crate::scheduler::transaction_state::SanitizedTransactionTTL;
 use crate::{
     consts::TOTAL_BUFFERED_PACKETS,
     consumer::Consumer,
-    messages::immutable_deserialized_packet::ImmutableDeserializedPacket,
     metrics::{ConsumeWorkerMetrics, SchedulerCountMetrics, SchedulerTimingMetrics},
 };
+
+use sleipnir_messaging::immutable_deserialized_packet::ImmutableDeserializedPacket;
+use sleipnir_messaging::packet_deserializer::PacketDeserializer;
+
 use solana_program_runtime::compute_budget_processor::process_compute_budget_instructions;
 use solana_sdk::feature_set::include_loaded_accounts_data_size_in_fee_calculation;
 use std::{sync::Arc, time::Duration};
@@ -27,7 +30,6 @@ use super::{
     transaction_id_generator::TransactionIdGenerator,
     transaction_state_container::TransactionStateContainer,
 };
-use crate::packet::packet_deserializer::PacketDeserializer;
 
 // Removed:
 // - decision_maker: DecisionMaker,

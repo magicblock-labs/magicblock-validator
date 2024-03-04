@@ -4,9 +4,9 @@ use {
         transaction_priority_id::TransactionPriorityId,
         transaction_state::{SanitizedTransactionTTL, TransactionState},
     },
-    crate::messages::scheduler_messages::TransactionId,
     itertools::MinMaxResult,
     min_max_heap::MinMaxHeap,
+    sleipnir_messaging::scheduler_messages::TransactionId,
     std::collections::HashMap,
 };
 

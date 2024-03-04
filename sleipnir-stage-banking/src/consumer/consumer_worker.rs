@@ -4,10 +4,8 @@ use crossbeam_channel::{Receiver, RecvError, SendError, Sender};
 use sleipnir_bank::bank::Bank;
 use thiserror::Error;
 
-use crate::{
-    messages::scheduler_messages::{ConsumeWork, FinishedConsumeWork},
-    metrics::ConsumeWorkerMetrics,
-};
+use crate::metrics::ConsumeWorkerMetrics;
+use sleipnir_messaging::scheduler_messages::{ConsumeWork, FinishedConsumeWork};
 
 use super::Consumer;
 

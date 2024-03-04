@@ -27,10 +27,6 @@ solana-sdk = { workspace = true }
 solana-svm = { workspace = true }
 solana-system-program = { workspace = true }
 
-[optional-dependencies]
-rayon = { workspace = true }
-env_logger = { workspace = true }
-
 [dev-dependencies]
 env_logger = { workspace = true }
 rayon = { workspace = true }

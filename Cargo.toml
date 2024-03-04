@@ -6,6 +6,7 @@ split-debuginfo = "packed"
 [workspace]
 members = [
   "sleipnir-bank",
+  "sleipnir-messaging",
   "sleipnir-processor",
   "sleipnir-stage-banking",
   "sleipnir-stage-fetch",
@@ -55,6 +56,7 @@ rustc_version = "0.4"
 serde = "1.0.196"
 serde_derive = "1.0.103"
 sleipnir-bank = { path = "./sleipnir-bank" }
+sleipnir-messaging = { path = "./sleipnir-messaging" }
 sleipnir-stage-verify = { path = "./sleipnir-stage-verify" }
 sleipnir-tokens = { path = "./sleipnir-tokens" }
 sleipnir-streamer = { path = "./sleipnir-streamer" }

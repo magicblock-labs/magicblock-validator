@@ -2,12 +2,12 @@
 use std::sync::Arc;
 
 use crossbeam_channel::{unbounded, Receiver};
-
-use crate::packet::BankingPacketBatch;
+use crate::BankingPacketReceiver;
+use crate::BankingPacketBatch;
 
 use super::{
     traced_sender::{ActiveTracer, ChannelLabel, TracedSender},
-    BankingPacketReceiver, BankingPacketSender,
+    BankingPacketSender,
 };
 
 pub struct BankingTracer {

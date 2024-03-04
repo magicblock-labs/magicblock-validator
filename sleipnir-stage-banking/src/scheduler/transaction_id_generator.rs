@@ -1,4 +1,4 @@
-use crate::messages::scheduler_messages::TransactionId;
+use sleipnir_messaging::scheduler_messages::TransactionId;
 
 /// Simple sequential ID generator for `TransactionId`s.
 /// These IDs uniquely identify transactions during the scheduling process.

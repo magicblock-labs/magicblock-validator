@@ -1,7 +1,7 @@
 // NOTE: from core/src/banking_stage/transaction_scheduler/in_flight_tracker.rs
 use {
     super::{batch_id_generator::BatchIdGenerator, thread_aware_account_locks::ThreadId},
-    crate::messages::scheduler_messages::TransactionBatchId,
+    sleipnir_messaging::scheduler_messages::TransactionBatchId,
     std::collections::HashMap,
 };
 

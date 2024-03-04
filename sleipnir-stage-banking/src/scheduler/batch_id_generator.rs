@@ -1,5 +1,5 @@
 // NOTE: from core/src/banking_stage/transaction_scheduler/batch_id_generator.rs
-use crate::messages::scheduler_messages::TransactionBatchId;
+use sleipnir_messaging::scheduler_messages::TransactionBatchId;
 
 #[derive(Default)]
 pub struct BatchIdGenerator {

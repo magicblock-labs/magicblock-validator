@@ -6,12 +6,10 @@
 use crate::committer::Committer;
 use crate::consumer::ConsumeWorker;
 use crate::consumer::Consumer;
-use crate::packet::packet_deserializer::PacketDeserializer;
 use crate::qos_service::QosService;
 use crate::scheduler::prio_graph_scheduler::PrioGraphScheduler;
 use crate::scheduler::scheduler_controller::SchedulerController;
 use crate::scheduler::scheduler_error::SchedulerError;
-use crate::transport::BankingPacketReceiver;
 use crossbeam_channel::unbounded;
 use crossbeam_channel::Receiver;
 use crossbeam_channel::Sender;
@@ -26,6 +24,8 @@ use std::sync::RwLock;
 use std::thread;
 use std::thread::Builder;
 use std::thread::JoinHandle;
+use sleipnir_messaging::BankingPacketReceiver;
+use sleipnir_messaging::packet_deserializer::PacketDeserializer;
 
 // Fixed thread size seems to be fastest on GCP setup
 pub const NUM_THREADS: u32 = 6;

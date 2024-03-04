@@ -9,15 +9,14 @@ use {
         transaction_state_container::TransactionStateContainer,
     },
     crate::{
-        consumer::TARGET_NUM_TRANSACTIONS_PER_BATCH,
-        messages::scheduler_messages::{
-            ConsumeWork, FinishedConsumeWork, TransactionBatchId, TransactionId,
-        },
-        read_write_account_set::ReadWriteAccountSet,
+        consumer::TARGET_NUM_TRANSACTIONS_PER_BATCH, read_write_account_set::ReadWriteAccountSet,
     },
     crossbeam_channel::{Receiver, Sender, TryRecvError},
     itertools::izip,
     prio_graph::{AccessKind, PrioGraph},
+    sleipnir_messaging::scheduler_messages::{
+        ConsumeWork, FinishedConsumeWork, TransactionBatchId, TransactionId,
+    },
     solana_measure::measure_us,
     solana_sdk::{
         pubkey::Pubkey, saturating_add_assign, slot_history::Slot,

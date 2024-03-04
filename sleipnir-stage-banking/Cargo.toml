@@ -17,6 +17,7 @@ prio-graph = { workspace = true }
 serde = { workspace = true }
 serde_derive = { workspace = true }
 sleipnir-bank = { workspace = true }
+sleipnir-messaging = { workspace = true }
 sleipnir-stage-verify = { workspace = true }
 sleipnir-tokens = { workspace = true }
 sleipnir-transaction-status = { workspace = true }

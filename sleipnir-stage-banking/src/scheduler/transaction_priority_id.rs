@@ -1,7 +1,7 @@
 // NOTE: from core/src/banking_stage/transaction_scheduler/transaction_priority_id.rs
 use {
-    crate::messages::scheduler_messages::TransactionId,
     prio_graph::TopLevelId,
+    sleipnir_messaging::scheduler_messages::TransactionId,
     std::hash::{Hash, Hasher},
 };
 

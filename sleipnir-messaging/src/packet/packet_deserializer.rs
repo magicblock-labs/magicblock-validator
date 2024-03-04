@@ -1,16 +1,12 @@
-use std::{
-    sync::{Arc, RwLock},
-    time::{Duration, Instant},
-};
+use std::time::{Duration, Instant};
 
+use super::sigverify_packet_stats::SigverifyTracerPacketStats;
 use crossbeam_channel::RecvTimeoutError;
 use log::trace;
-use sleipnir_stage_verify::metrics::SigverifyTracerPacketStats;
 use solana_perf::packet::PacketBatch;
 
 use crate::{
-    messages::immutable_deserialized_packet::ImmutableDeserializedPacket,
-    transport::BankingPacketReceiver,
+    messages::immutable_deserialized_packet::ImmutableDeserializedPacket, BankingPacketReceiver,
 };
 
 use super::BankingPacketBatch;

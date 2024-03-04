@@ -14,10 +14,9 @@ use sleipnir_bank::{
     bank_dev_utils::{init_logger, transactions::create_funded_accounts},
     genesis_utils::{create_genesis_config, GenesisConfigInfo},
 };
-use sleipnir_stage_banking::{
-    banking_stage::BankingStage, packet::BankingPacketBatch,
-    transport::banking_tracer::BankingTracer,
-};
+use sleipnir_messaging::banking_tracer::BankingTracer;
+use sleipnir_messaging::BankingPacketBatch;
+use sleipnir_stage_banking::banking_stage::BankingStage;
 use sleipnir_transaction_status::{TransactionStatusMessage, TransactionStatusSender};
 use solana_measure::measure::Measure;
 use solana_perf::packet::{to_packet_batches, PacketBatch};
@@ -131,12 +130,12 @@ fn test_banking_stage_with_transaction_status_sender_tracking_signatures() {
     // Create Transactions
     debug!("Creating transactions...");
     let fully_funded_tx = {
-        let payer = create_funded_accounts(&bank, 1 as usize, Some(LAMPORTS_PER_SOL)).remove(0);
+        let payer = create_funded_accounts(&bank, 1, Some(LAMPORTS_PER_SOL)).remove(0);
         let to = solana_sdk::pubkey::Pubkey::new_unique();
         system_transaction::transfer(&payer, &to, 890_880_000, start_hash)
     };
     let not_fully_funded_tx = {
-        let payer = create_funded_accounts(&bank, 1 as usize, Some(5000)).remove(0);
+        let payer = create_funded_accounts(&bank, 1, Some(5000)).remove(0);
         let to = solana_sdk::pubkey::Pubkey::new_unique();
         system_transaction::transfer(&payer, &to, 890_880_000, start_hash)
     };

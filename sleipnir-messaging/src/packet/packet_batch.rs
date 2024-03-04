@@ -6,7 +6,7 @@ use log::{error, trace};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use solana_frozen_abi_macro::AbiExample;
 use solana_perf::{cuda_runtime::PinnedVec, recycler::Recycler};
-pub use solana_sdk::packet::{Meta, Packet, PacketFlags, PACKET_DATA_SIZE};
+pub use solana_sdk::packet::{Packet, PACKET_DATA_SIZE};
 use std::{
     io::Read,
     net::SocketAddr,
