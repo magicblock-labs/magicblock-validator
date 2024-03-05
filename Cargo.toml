@@ -10,8 +10,8 @@ members = [
   "sleipnir-messaging",
   "sleipnir-mutator",
   "sleipnir-processor",
-  # "sleipnir-rpc-client",
-  # "sleipnir-rpc-client-api",
+  "sleipnir-rpc-client",
+  "sleipnir-rpc-client-api",
   "sleipnir-stage-banking",
   "sleipnir-stage-fetch",
   "sleipnir-stage-verify",
@@ -64,8 +64,8 @@ sleipnir-bank = { path = "./sleipnir-bank" }
 sleipnir-messaging = { path = "./sleipnir-messaging" }
 sleipnir-mutator = { path = "./sleipnir-mutator" }
 sleipnir-program = { path = "./programs/sleipnir" }
-# sleipnir-rpc-client = { path = "./sleipnir-rpc-client" }
-# sleipnir-rpc-client-api = { path = "./sleipnir-rpc-client-api" }
+sleipnir-rpc-client = { path = "./sleipnir-rpc-client" }
+sleipnir-rpc-client-api = { path = "./sleipnir-rpc-client-api" }
 sleipnir-stage-verify = { path = "./sleipnir-stage-verify" }
 sleipnir-tokens = { path = "./sleipnir-tokens" }
 sleipnir-streamer = { path = "./sleipnir-streamer" }
