@@ -8,13 +8,10 @@ pub enum MutatorError {
     ParsePubkeyError(#[from] solana_sdk::pubkey::ParsePubkeyError),
 
     #[error("RpcClientError: '{0}' ({0:?})")]
-    RpcClientError(#[from] solana_rpc_client_api::client_error::Error),
+    RpcClientError(#[from] sleipnir_rpc_client_api::client_error::Error),
 
     #[error("StdError: '{0}' ({0:?})")]
     StdError(#[from] Box<dyn std::error::Error>),
-
-    #[error("LuzidCoreError: '{0}' ({0:?})")]
-    LuzidCoreError(#[from] luzid_core::errors::LuzidCoreError),
 
     #[error("Invalid cluster '{0}'")]
     InvalidCluster(String),

@@ -1,9 +1,10 @@
 use std::{str::FromStr, sync::Arc};
 
-use solana_program::bpf_loader_upgradeable;
-use solana_rpc_client::rpc_client::RpcClient;
+use crate::AccountModification;
+use sleipnir_rpc_client::rpc_client::RpcClient;
 use solana_sdk::{
-    commitment_config::CommitmentConfig, genesis_config::ClusterType, pubkey::Pubkey,
+    bpf_loader_upgradeable, commitment_config::CommitmentConfig, genesis_config::ClusterType,
+    pubkey::Pubkey,
 };
 
 use crate::errors::{MutatorError, MutatorResult};

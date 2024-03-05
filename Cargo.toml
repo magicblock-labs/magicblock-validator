@@ -10,6 +10,8 @@ members = [
   "sleipnir-messaging",
   "sleipnir-mutator",
   "sleipnir-processor",
+  # "sleipnir-rpc-client",
+  # "sleipnir-rpc-client-api",
   "sleipnir-stage-banking",
   "sleipnir-stage-fetch",
   "sleipnir-stage-verify",
@@ -62,6 +64,8 @@ sleipnir-bank = { path = "./sleipnir-bank" }
 sleipnir-messaging = { path = "./sleipnir-messaging" }
 sleipnir-mutator = { path = "./sleipnir-mutator" }
 sleipnir-program = { path = "./programs/sleipnir" }
+# sleipnir-rpc-client = { path = "./sleipnir-rpc-client" }
+# sleipnir-rpc-client-api = { path = "./sleipnir-rpc-client-api" }
 sleipnir-stage-verify = { path = "./sleipnir-stage-verify" }
 sleipnir-tokens = { path = "./sleipnir-tokens" }
 sleipnir-streamer = { path = "./sleipnir-streamer" }
@@ -79,6 +83,8 @@ solana-metrics = { git = "https://github.com/solana-labs/solana", rev = "30adda4
 solana-perf = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-perf" }
 solana-program-runtime = { path = "./solana/program-runtime" }
 solana-rayon-threadlimit = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-rayon-threadlimit" }
+solana-rpc-client = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-rpc-client" }
+solana-rpc-client-api = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-rpc-client-api" }
 solana-streamer = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-streamer" }
 solana-sdk = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-sdk" }
 solana-svm = { path = "./solana/svm" }
