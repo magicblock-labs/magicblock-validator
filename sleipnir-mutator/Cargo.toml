@@ -1,0 +1,18 @@
+[package]
+name = "mutator"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+chainparser = { workspace = true }
+log = { workspace = true }
+sleipnir-program = { workspace = true }
+solana-sdk = { workspace = true }
+thiserror = { workspace = true }
