@@ -11,9 +11,8 @@ edition.workspace = true
 doctest = false
 
 [dependencies]
-chainparser = { workspace = true }
 log = { workspace = true }
 sleipnir-program = { workspace = true }
-# sleipnir-rpc-client = { workspace = true }
+sleipnir-rpc-client = { workspace = true }
 solana-sdk = { workspace = true }
 thiserror = { workspace = true }
