@@ -161,7 +161,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn test_system_transfer() {
+    async fn test_system_transfer_enough_funds() {
         init_logger();
         let tx_processor = BankingStageTransactionsProcessor::default();
         let payers = create_funded_accounts(&tx_processor.bank, 1, Some(LAMPORTS_PER_SOL));
@@ -175,5 +175,34 @@ mod tests {
         let tx = result.transactions.values().next().unwrap();
         assert_eq!(tx.signatures().len(), 1);
         assert_eq!(tx.message().account_keys().len(), 3);
+
+        let status = tx_processor
+            .bank
+            .get_signature_status(&tx.signatures()[0])
+            .unwrap();
+        assert!(status.is_ok());
+    }
+
+    #[tokio::test]
+    async fn test_system_transfer_not_enough_funds() {
+        init_logger();
+        let tx_processor = BankingStageTransactionsProcessor::default();
+        let payers = create_funded_accounts(&tx_processor.bank, 1, Some(890_850_000));
+        let start_hash = tx_processor.bank.last_blockhash();
+        let to = Pubkey::new_unique();
+        let tx = system_transaction::transfer(&payers[0], &to, 890_880_000, start_hash);
+        let result = tx_processor.process(vec![tx]).unwrap();
+
+        assert_eq!(result.len(), 1);
+
+        let tx = result.transactions.values().next().unwrap();
+        assert_eq!(tx.signatures().len(), 1);
+        assert_eq!(tx.message().account_keys().len(), 3);
+
+        let status = tx_processor
+            .bank
+            .get_signature_status(&tx.signatures()[0])
+            .unwrap();
+        assert!(status.is_err());
     }
 }
