@@ -98,6 +98,8 @@ solana_rbpf = "=0.8.0"
 spl-token = "=4.0.1"
 spl-token-2022 = "=2.0.1"
 thiserror = "1.0.57"
+# Update solana-tokio patch below when updating this version
+tokio = "1.29.1"
 
 [patch.'https://github.com/solana-labs/solana']
 solana-program-runtime = { path = "./solana/program-runtime" }

@@ -8,4 +8,12 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-# solana-rpc-client = { workspace = true }
+async-trait = { workspace = true }
+log = { workspace = true }
+semver = { workspace = true }
+serde = { workspace = true }
+serde_derive = { workspace = true }
+serde_json = { workspace = true }
+sleipnir-rpc-client-api = { workspace = true }
+solana-sdk = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
