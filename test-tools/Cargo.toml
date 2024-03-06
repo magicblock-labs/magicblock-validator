@@ -1,0 +1,17 @@
+[package]
+name = "test-tools"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+crossbeam-channel = { workspace = true }
+sleipnir-bank = { workspace = true }
+sleipnir-messaging = { workspace = true }
+sleipnir-stage-banking = { workspace = true }
+sleipnir-transaction-status = { workspace = true }
+solana-perf = { workspace = true }
+solana-sdk = { workspace = true }

@@ -21,6 +21,7 @@ members = [
   "sleipnir-version",
   "solana/program-runtime",
   "solana/svm",
+  "test-tools",
 ]
 
 # This prevents a Travis CI error when building for Windows.
@@ -73,6 +74,7 @@ sleipnir-program = { path = "./programs/sleipnir" }
 sleipnir-rpc-client = { path = "./sleipnir-rpc-client" }
 sleipnir-rpc-client-api = { path = "./sleipnir-rpc-client-api" }
 sleipnir-rpc-sender = { path = "./sleipnir-rpc-sender" }
+sleipnir-stage-banking = { path = "./sleipnir-stage-banking" }
 sleipnir-stage-verify = { path = "./sleipnir-stage-verify" }
 sleipnir-tokens = { path = "./sleipnir-tokens" }
 sleipnir-streamer = { path = "./sleipnir-streamer" }
