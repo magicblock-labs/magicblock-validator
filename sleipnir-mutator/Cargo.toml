@@ -1,5 +1,5 @@
 [package]
-name = "mutator"
+name = "sleipnir-mutator"
 version.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -16,3 +16,8 @@ sleipnir-program = { workspace = true }
 sleipnir-rpc-client = { workspace = true }
 solana-sdk = { workspace = true }
 thiserror = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+sleipnir-bank = { workspace = true, features = ["dev-context-only-utils"] }
+sleipnir-program = { workspace = true }
