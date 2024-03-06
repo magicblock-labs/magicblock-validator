@@ -1,20 +1,9 @@
 use std::str::FromStr;
 
 use sleipnir_program::sleipnir_instruction;
-use solana_sdk::{
-    account::Account, commitment_config::CommitmentLevel, genesis_config::ClusterType,
-    pubkey::Pubkey,
-};
+use solana_sdk::{account::Account, commitment_config::CommitmentLevel, pubkey::Pubkey};
 
 use crate::errors::MutatorResult;
-
-#[derive(Debug)]
-pub enum MutatorSignal {
-    ClonedAccount {
-        cluster: ClusterType,
-        address: String,
-    },
-}
 
 #[derive(Default, Debug)]
 pub struct AccountModification {
