@@ -10,8 +10,8 @@ pub struct Mutator {
 }
 
 impl Mutator {
-    pub fn new(development_url: &str) -> Self {
-        let accounts_processor = AccountProcessor::new(development_url);
+    pub fn new() -> Self {
+        let accounts_processor = AccountProcessor::new();
         Self { accounts_processor }
     }
 
@@ -51,5 +51,11 @@ impl Mutator {
             .mods_to_clone_account(cluster, account_address)
             .await?;
         self.transaction_to_modify_accounts(mods_to_clone, recent_blockhash)
+    }
+}
+
+impl Default for Mutator {
+    fn default() -> Self {
+        Self::new()
     }
 }

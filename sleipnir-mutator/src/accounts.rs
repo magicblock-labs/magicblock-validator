@@ -18,26 +18,20 @@ pub struct AccountProcessor {
     client_testnet: Arc<RpcClient>,
     client_mainnet: Arc<RpcClient>,
     client_devnet: Arc<RpcClient>,
-    client_development: Arc<RpcClient>,
 }
 
 impl AccountProcessor {
-    pub fn new(development_url: &str) -> Self {
+    pub fn new() -> Self {
         let client_testnet =
             RpcClient::new_with_commitment(TESTNET_URL.to_string(), CommitmentConfig::confirmed());
         let client_mainnet =
             RpcClient::new_with_commitment(MAINNET_URL.to_string(), CommitmentConfig::confirmed());
         let client_devnet =
             RpcClient::new_with_commitment(DEVNET_URL.to_string(), CommitmentConfig::confirmed());
-        let client_development = RpcClient::new_with_commitment(
-            development_url.to_string(),
-            CommitmentConfig::confirmed(),
-        );
         Self {
             client_testnet: Arc::new(client_testnet),
             client_mainnet: Arc::new(client_mainnet),
             client_devnet: Arc::new(client_devnet),
-            client_development: Arc::new(client_development),
         }
     }
 
@@ -117,7 +111,7 @@ impl AccountProcessor {
             Testnet => self.client_testnet.clone(),
             MainnetBeta => self.client_mainnet.clone(),
             Devnet => self.client_devnet.clone(),
-            Development => self.client_development.clone(),
+            Development => panic!("Development cluster not supported when cloning accounts"),
         }
     }
 
@@ -135,6 +129,12 @@ impl AccountProcessor {
         } else {
             None
         }
+    }
+}
+
+impl Default for AccountProcessor {
+    fn default() -> Self {
+        Self::new()
     }
 }
 
