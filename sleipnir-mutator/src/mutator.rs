@@ -1,10 +1,6 @@
-mod account_modification;
-mod accounts;
-pub mod errors;
-
-pub use account_modification::AccountModification;
-pub use accounts::AccountProcessor;
-use errors::MutatorResult;
+use crate::account_modification::AccountModification;
+use crate::accounts::AccountProcessor;
+use crate::errors::MutatorResult;
 use sleipnir_program::sleipnir_instruction;
 use solana_sdk::{genesis_config::ClusterType, hash::Hash, transaction::Transaction};
 
@@ -44,7 +40,7 @@ impl Mutator {
     /// Downloads an account from the provided cluster and returns a transaction that
     /// that will apply modifications to the same account in development to match the
     /// state of the remote account.
-    pub fn transaction_to_clone_account_from_cluster(
+    pub async fn transaction_to_clone_account_from_cluster(
         &self,
         cluster: ClusterType,
         account_address: &str,
@@ -52,7 +48,8 @@ impl Mutator {
     ) -> MutatorResult<Transaction> {
         let mods_to_clone = self
             .accounts_processor
-            .mods_to_clone_account(cluster, account_address)?;
+            .mods_to_clone_account(cluster, account_address)
+            .await?;
         self.transaction_to_modify_accounts(mods_to_clone, recent_blockhash)
     }
 }

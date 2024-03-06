@@ -3,8 +3,8 @@ use std::{str::FromStr, sync::Arc};
 use crate::{chainparser, AccountModification};
 use sleipnir_rpc_client::rpc_client::RpcClient;
 use solana_sdk::{
-    bpf_loader_upgradeable, commitment_config::CommitmentConfig, genesis_config::ClusterType,
-    pubkey::Pubkey,
+    account::Account, bpf_loader_upgradeable, commitment_config::CommitmentConfig,
+    genesis_config::ClusterType, pubkey::Pubkey,
 };
 
 use crate::errors::{MutatorError, MutatorResult};
@@ -83,27 +83,14 @@ impl AccountProcessor {
         let idl_account_info = if account.executable {
             let (anchor_idl_address, shank_idl_address) = get_idl_addresses(account_address)?;
 
-            // 3.1. Download the executable account, try the anchor address first followed by shank
-            if let Some((idl_account, idl_account_address)) =
-                anchor_idl_address.and_then(|anchor_idl_address| {
-                    self.client_for_cluster(cluster)
-                        .get_account(&anchor_idl_address)
-                        .ok()
-                        .map(|account| (account, anchor_idl_address))
-                })
+            // 3.1. Download the IDL account, try the anchor address first followed by shank
+            if let Some(anchor_account_info) = self
+                .maybe_get_idl_account(cluster, anchor_idl_address)
+                .await
             {
-                Some((idl_account, idl_account_address))
-            } else if let Some((idl_account, idl_account_address)) =
-                shank_idl_address.and_then(|shank_idl_address| {
-                    self.client_for_cluster(cluster)
-                        .get_account(&shank_idl_address)
-                        .ok()
-                        .map(|account| (account, shank_idl_address))
-                })
-            {
-                Some((idl_account, idl_account_address))
+                Some(anchor_account_info)
             } else {
-                None
+                self.maybe_get_idl_account(cluster, shank_idl_address).await
             }
         } else {
             None
@@ -131,6 +118,22 @@ impl AccountProcessor {
             MainnetBeta => self.client_mainnet.clone(),
             Devnet => self.client_devnet.clone(),
             Development => self.client_development.clone(),
+        }
+    }
+
+    async fn maybe_get_idl_account(
+        &self,
+        cluster: ClusterType,
+        idl_address: Option<Pubkey>,
+    ) -> Option<(Account, Pubkey)> {
+        if let Some(idl_address) = idl_address {
+            self.client_for_cluster(cluster)
+                .get_account(&idl_address)
+                .await
+                .ok()
+                .map(|account| (account, idl_address))
+        } else {
+            None
         }
     }
 }
