@@ -8,6 +8,7 @@ TRACE_ARR=(
   "bank=trace,"
   "banking_stage=trace,"
   "solana_svm=trace,"
+  "test_tools=trace,"
 )
 
 DEBUG_ARR=(
@@ -19,6 +20,7 @@ DEBUG_ARR=(
   "bank=debug,"
   "banking_stage=debug,"
   "solana_svm=debug,"
+  "test_tools=debug,"
 )
 
 LOG_LEVEL='info'

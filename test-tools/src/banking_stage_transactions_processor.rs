@@ -132,12 +132,14 @@ fn track_transactions(
     let tx_status_handle = std::thread::spawn(move || {
         let transaction_status_receiver = transaction_status_receiver;
         while let Ok(TransactionStatusMessage::Batch(batch)) = transaction_status_receiver.recv() {
-            for tx in batch.transactions {
-                result
-                    .write()
-                    .unwrap()
-                    .transactions
-                    .insert(*tx.signature(), tx);
+            for (idx, tx) in batch.transactions.into_iter().enumerate() {
+                result.write().unwrap().transactions.insert(
+                    *tx.signature(),
+                    (
+                        tx,
+                        batch.execution_results.get(idx).cloned().unwrap().unwrap(),
+                    ),
+                );
             }
         }
     });
@@ -155,8 +157,10 @@ fn convert_from_old_verified(mut with_vers: Vec<(PacketBatch, Vec<u8>)>) -> Vec<
 
 #[cfg(test)]
 mod tests {
-    use sleipnir_bank::bank_dev_utils::{init_logger, transactions::create_funded_accounts};
+    use sleipnir_bank::bank_dev_utils::transactions::create_funded_accounts;
     use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, system_transaction};
+
+    use crate::diagnostics::{init_logger, log_exec_details};
 
     use super::*;
 
@@ -172,7 +176,7 @@ mod tests {
 
         assert_eq!(result.len(), 1);
 
-        let tx = result.transactions.values().next().unwrap();
+        let (tx, _) = result.transactions.values().next().unwrap();
         assert_eq!(tx.signatures().len(), 1);
         assert_eq!(tx.message().account_keys().len(), 3);
 
@@ -195,7 +199,7 @@ mod tests {
 
         assert_eq!(result.len(), 1);
 
-        let tx = result.transactions.values().next().unwrap();
+        let (tx, exec_details) = result.transactions.values().next().unwrap();
         assert_eq!(tx.signatures().len(), 1);
         assert_eq!(tx.message().account_keys().len(), 3);
 
@@ -204,5 +208,7 @@ mod tests {
             .get_signature_status(&tx.signatures()[0])
             .unwrap();
         assert!(status.is_err());
+
+        log_exec_details(exec_details);
     }
 }

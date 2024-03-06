@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use solana_accounts_db::transaction_results::TransactionExecutionDetails;
 use solana_sdk::{
     signature::Signature,
     transaction::{SanitizedTransaction, Transaction},
@@ -7,7 +8,7 @@ use solana_sdk::{
 
 #[derive(Default, Debug)]
 pub struct TransactionsProcessorProcessResult {
-    pub transactions: HashMap<Signature, SanitizedTransaction>,
+    pub transactions: HashMap<Signature, (SanitizedTransaction, TransactionExecutionDetails)>,
 }
 
 impl TransactionsProcessorProcessResult {

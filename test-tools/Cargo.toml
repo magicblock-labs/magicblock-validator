@@ -9,10 +9,13 @@ edition.workspace = true
 
 [dependencies]
 crossbeam-channel = { workspace = true }
+env_logger = { workspace = true }
+log = { workspace = true }
 sleipnir-bank = { workspace = true }
 sleipnir-messaging = { workspace = true }
 sleipnir-stage-banking = { workspace = true }
 sleipnir-transaction-status = { workspace = true }
+solana-accounts-db = { workspace = true }
 solana-perf = { workspace = true }
 solana-sdk = { workspace = true }
 
