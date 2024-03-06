@@ -5,7 +5,7 @@ use solana_sdk::{
     transaction::{SanitizedTransaction, Transaction},
 };
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct TransactionsProcessorProcessResult {
     pub transactions: HashMap<Signature, SanitizedTransaction>,
 }

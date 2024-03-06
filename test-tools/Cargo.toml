@@ -15,3 +15,8 @@ sleipnir-stage-banking = { workspace = true }
 sleipnir-transaction-status = { workspace = true }
 solana-perf = { workspace = true }
 solana-sdk = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+
+sleipnir-bank = { workspace = true, features = ["dev-context-only-utils"] }

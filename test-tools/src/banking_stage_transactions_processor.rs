@@ -40,7 +40,7 @@ impl Default for BankingStageTransactionsProcessorConfig {
 
 pub struct BankingStageTransactionsProcessor {
     config: BankingStageTransactionsProcessorConfig,
-    bank: Arc<Bank>,
+    pub bank: Arc<Bank>,
 }
 
 impl BankingStageTransactionsProcessor {
@@ -50,6 +50,12 @@ impl BankingStageTransactionsProcessor {
         let bank = Arc::new(bank);
 
         Self { config, bank }
+    }
+}
+
+impl Default for BankingStageTransactionsProcessor {
+    fn default() -> Self {
+        Self::new(BankingStageTransactionsProcessorConfig::default())
     }
 }
 
@@ -88,7 +94,7 @@ impl TransactionsProcessor for BankingStageTransactionsProcessor {
             .unwrap();
 
         // 4. Wait for Transactions to be Processed
-        let max_ticks = self.config.timeout_millis / 100;
+        let max_ticks = self.config.timeout_millis / 10;
         let mut tick = 0;
         loop {
             let num_received = result.read().unwrap().len();
@@ -102,6 +108,7 @@ impl TransactionsProcessor for BankingStageTransactionsProcessor {
                 ));
             }
             tick += 1;
+            std::thread::sleep(std::time::Duration::from_millis(10));
         }
 
         // 5. Shut all threads down
@@ -144,4 +151,29 @@ fn convert_from_old_verified(mut with_vers: Vec<(PacketBatch, Vec<u8>)>) -> Vec<
             .for_each(|(p, f)| p.meta_mut().set_discard(*f == 0))
     });
     with_vers.into_iter().map(|(b, _)| b).collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use sleipnir_bank::bank_dev_utils::{init_logger, transactions::create_funded_accounts};
+    use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, system_transaction};
+
+    use super::*;
+
+    #[tokio::test]
+    async fn test_system_transfer() {
+        init_logger();
+        let tx_processor = BankingStageTransactionsProcessor::default();
+        let payers = create_funded_accounts(&tx_processor.bank, 1, Some(LAMPORTS_PER_SOL));
+        let start_hash = tx_processor.bank.last_blockhash();
+        let to = Pubkey::new_unique();
+        let tx = system_transaction::transfer(&payers[0], &to, 890_880_000, start_hash);
+        let result = tx_processor.process(vec![tx]).unwrap();
+
+        assert_eq!(result.len(), 1);
+
+        let tx = result.transactions.values().next().unwrap();
+        assert_eq!(tx.signatures().len(), 1);
+        assert_eq!(tx.message().account_keys().len(), 3);
+    }
 }
