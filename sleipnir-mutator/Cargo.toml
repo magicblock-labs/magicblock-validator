@@ -21,3 +21,4 @@ thiserror = { workspace = true }
 tokio = { workspace = true }
 sleipnir-bank = { workspace = true, features = ["dev-context-only-utils"] }
 sleipnir-program = { workspace = true }
+test-tools = { workspace = true }
