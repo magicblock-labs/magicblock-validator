@@ -131,15 +131,25 @@ fn track_transactions(
     };
     let tx_status_handle = std::thread::spawn(move || {
         let transaction_status_receiver = transaction_status_receiver;
-        while let Ok(TransactionStatusMessage::Batch(batch)) = transaction_status_receiver.recv() {
-            for (idx, tx) in batch.transactions.into_iter().enumerate() {
-                result.write().unwrap().transactions.insert(
-                    *tx.signature(),
-                    (
-                        tx,
-                        batch.execution_results.get(idx).cloned().unwrap().unwrap(),
-                    ),
-                );
+        loop {
+            let status = transaction_status_receiver.recv();
+            match status {
+                Ok(TransactionStatusMessage::Batch(batch)) => {
+                    for (idx, tx) in batch.transactions.into_iter().enumerate() {
+                        result.write().unwrap().transactions.insert(
+                            *tx.signature(),
+                            (
+                                tx,
+                                batch.execution_results.get(idx).cloned().unwrap().unwrap(),
+                            ),
+                        );
+                    }
+                }
+                Err(_) => {
+                    // disconnected
+                    break;
+                }
+                other => panic!("Should never encounter other: {:?}", other),
             }
         }
     });
