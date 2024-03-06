@@ -8,6 +8,8 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
+base64 = { workspace = true }
+bs58 = { workspace = true }
 jsonrpc-core = { workspace = true }
 reqwest = { workspace = true, features = [
   "blocking",
@@ -26,3 +28,4 @@ solana-sdk = { workspace = true }
 solana-transaction-status = { workspace = true }
 sleipnir-version = { workspace = true }
 thiserror = { workspace = true }
+zstd = { workspace = true }

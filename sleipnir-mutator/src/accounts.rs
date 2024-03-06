@@ -41,7 +41,7 @@ impl AccountProcessor {
         }
     }
 
-    pub fn mods_to_clone_account(
+    pub async fn mods_to_clone_account(
         &self,
         cluster: ClusterType,
         account_address: &str,
@@ -52,7 +52,8 @@ impl AccountProcessor {
         let account_pubkey = Pubkey::from_str(account_address)?;
         let account = self
             .client_for_cluster(cluster)
-            .get_account(&account_pubkey)?;
+            .get_account(&account_pubkey)
+            .await?;
         //
         // 2. If the account is executable, find its executable address
         let executable_info = if account.executable {
@@ -61,7 +62,8 @@ impl AccountProcessor {
             // 2.1. Download the executable account
             let executable_account = self
                 .client_for_cluster(cluster)
-                .get_account(&executable_address)?;
+                .get_account(&executable_address)
+                .await?;
 
             // 2.2. If we didn't find it then something is off and cloning the program
             //      account won't make sense either
@@ -145,5 +147,5 @@ fn get_idl_addresses(
     program_id: &str,
 ) -> Result<(Option<Pubkey>, Option<Pubkey>), Box<dyn std::error::Error>> {
     let program_pubkey = Pubkey::from_str(program_id)?;
-    Ok(chainparser::idl::get_idl_addresses(&program_pubkey))
+    Ok(chainparser::get_idl_addresses(&program_pubkey))
 }
