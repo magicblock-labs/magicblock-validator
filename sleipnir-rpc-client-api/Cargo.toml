@@ -8,4 +8,19 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-solana-rpc-client-api = { workspace = true }
+reqwest = { workspace = true, features = [
+  "blocking",
+  "brotli",
+  "deflate",
+  "gzip",
+  "rustls-tls",
+  "json",
+] }
+semver = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+solana-account-decoder = { workspace = true }
+solana-sdk = { workspace = true }
+solana-transaction-status = { workspace = true }
+sleipnir-version = { workspace = true }
+thiserror = { workspace = true }

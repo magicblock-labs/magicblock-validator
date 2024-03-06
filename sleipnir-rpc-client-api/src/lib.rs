@@ -1,2 +1,3 @@
-// pub use solana_rpc_client_api::*;
-pub const MAYNEED_OUR_OWN_RPC_CLIENT_API: u8 = 1;
+pub mod client_error;
+pub mod request;
+pub mod response;
