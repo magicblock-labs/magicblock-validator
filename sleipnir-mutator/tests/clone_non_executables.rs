@@ -46,8 +46,6 @@ async fn clone_non_executable_without_data() {
 
     let (_, exec_details) = result.transactions.values().next().unwrap();
     log_exec_details(exec_details);
-    debug!(
-        "SolxTips account: {:#?}",
-        get_account_addr(tx_processor.bank(), SOLX_TIPS)
-    );
+    let solx_tips = get_account_addr(tx_processor.bank(), SOLX_TIPS).unwrap();
+    trace!("SolxTips account: {:#?}", solx_tips);
 }

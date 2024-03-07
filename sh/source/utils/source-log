@@ -6,7 +6,6 @@ TRACE_ARR=(
 	"sleipnir=trace,"
   "bank=trace,"
   "banking_stage=trace,"
-  "mutator=trace,"
   "solana_svm=trace,"
   "test_tools=trace,"
 )
@@ -23,14 +22,18 @@ DEBUG_ARR=(
 )
 
 LOG_LEVEL='info'
+TEST_LOG_LEVEL='info'
 if [[ $LOG == "DEBUG" ]]; then
 	IFS=''
 	LOG_LEVEL="${DEBUG_ARR[*]}"
+  TEST_LOG_LEVEL=$LOG
 elif [[ $LOG == "TRACE" ]]; then
 	IFS=''
 	LOG_LEVEL="${TRACE_ARR[*]}"
+  TEST_LOG_LEVEL=$LOG
 else
 	echo "LOG is not set to DEBUG or TRACE (defaulting to info)"
 fi
 
 export RUST_LOG=$LOG_LEVEL
+export RUST_TEST_LOG=$TEST_LOG_LEVEL
