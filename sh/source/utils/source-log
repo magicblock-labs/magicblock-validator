@@ -3,10 +3,10 @@
 TRACE_ARR=(
 	"warn,"
 	"geyser_plugin=trace,"
-	"sleipnir_bank=trace,"
-	"sleipnir_stage_banking=trace,"
+	"sleipnir=trace,"
   "bank=trace,"
   "banking_stage=trace,"
+  "mutator=trace,"
   "solana_svm=trace,"
   "test_tools=trace,"
 )
@@ -14,11 +14,10 @@ TRACE_ARR=(
 DEBUG_ARR=(
 	"warn,"
 	"geyser_plugin=debug,"
-	"sleipnir_bank=debug,"
-	"sleipnir_stage_banking=debug,"
-  "sleipnir_bank=debug,"
+	"sleipnir=debug,"
   "bank=debug,"
   "banking_stage=debug,"
+  "mutator=debug,"
   "solana_svm=debug,"
   "test_tools=debug,"
 )
