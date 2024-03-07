@@ -1,13 +1,39 @@
 use log::info;
 use solana_accounts_db::transaction_results::TransactionExecutionDetails;
+use std::{env, path::Path};
 
-pub fn init_logger() {
+// -----------------
+// init_logger
+// -----------------
+pub fn init_logger_for_test_path(full_path_to_test_file: &str) {
+    // In order to include logs from the test themselves we need to add the
+    // name of the test file (minus the extension) to the RUST_LOG filter
+    let mut rust_log = env::var(env_logger::DEFAULT_FILTER_ENV)
+        .ok()
+        .unwrap_or("".into());
+    if rust_log.ends_with(',') || rust_log.is_empty() {
+        let p = Path::new(full_path_to_test_file);
+        let file = p.file_stem().unwrap();
+        rust_log.push_str(&format!("{}=trace", file.to_str().unwrap()));
+        env::set_var(env_logger::DEFAULT_FILTER_ENV, rust_log);
+    }
+
     let _ = env_logger::builder()
         .format_timestamp_micros()
         .is_test(true)
         .try_init();
 }
 
+#[macro_export]
+macro_rules! init_logger {
+    () => {
+        $crate::diagnostics::init_logger_for_test_path(::std::file!());
+    };
+}
+
+// -----------------
+// Solana Logs
+// -----------------
 pub fn log_exec_details(transaction_results: &TransactionExecutionDetails) {
     info!("");
     info!("=============== Logs ===============");
