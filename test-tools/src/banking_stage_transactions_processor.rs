@@ -12,10 +12,7 @@ use sleipnir_messaging::{banking_tracer::BankingTracer, BankingPacketBatch};
 use sleipnir_stage_banking::banking_stage::BankingStage;
 use sleipnir_transaction_status::{TransactionStatusMessage, TransactionStatusSender};
 use solana_perf::packet::{to_packet_batches, PacketBatch};
-use solana_sdk::{
-    message,
-    transaction::{SanitizedTransaction, Transaction},
-};
+use solana_sdk::transaction::{SanitizedTransaction, Transaction};
 
 use crate::{
     traits::{TransactionsProcessor, TransactionsProcessorProcessResult},

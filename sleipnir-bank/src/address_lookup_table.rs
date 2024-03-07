@@ -18,6 +18,8 @@ impl AddressLoader for &Bank {
     ) -> Result<LoadedAddresses, AddressLoaderError> {
         let slot_hashes = self
             .transaction_processor
+            .read()
+            .unwrap()
             .sysvar_cache
             .read()
             .unwrap()

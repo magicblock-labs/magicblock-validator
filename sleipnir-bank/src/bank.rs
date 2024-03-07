@@ -129,7 +129,7 @@ pub struct Bank {
     pub rc: BankRc,
 
     /// Bank slot (i.e. block)
-    slot: Slot,
+    slot: AtomicU64,
 
     /// Bank epoch
     epoch: Epoch,
@@ -151,7 +151,7 @@ pub struct Bank {
 
     pub loaded_programs_cache: Arc<RwLock<LoadedPrograms<SimpleForkGraph>>>,
 
-    pub(super) transaction_processor: TransactionBatchProcessor<SimpleForkGraph>,
+    pub(crate) transaction_processor: RwLock<TransactionBatchProcessor<SimpleForkGraph>>,
 
     // Global configuration for how transaction logs should be collected across all banks
     pub transaction_log_collector_config: Arc<RwLock<TransactionLogCollectorConfig>>,
@@ -414,7 +414,7 @@ impl Bank {
 
         let mut bank = Self {
             rc: BankRc::new(accounts, Slot::default()),
-            slot: Slot::default(),
+            slot: AtomicU64::default(),
             epoch: Epoch::default(),
             epoch_schedule: EpochSchedule::default(),
             is_delta: AtomicBool::default(),
@@ -426,7 +426,7 @@ impl Bank {
             transaction_log_collector: Arc::<RwLock<TransactionLogCollector>>::default(),
             fee_structure: FeeStructure::default(),
             loaded_programs_cache,
-            transaction_processor: TransactionBatchProcessor::default(),
+            transaction_processor: Default::default(),
             status_cache: Arc::<RwLock<BankStatusCache>>::default(),
 
             // Counters
@@ -463,14 +463,14 @@ impl Bank {
             hash: RwLock::<Hash>::default(),
         };
 
-        bank.transaction_processor = TransactionBatchProcessor::new(
-            bank.slot,
+        bank.transaction_processor = RwLock::new(TransactionBatchProcessor::new(
+            bank.slot(),
             bank.epoch,
             bank.epoch_schedule.clone(),
             bank.fee_structure.clone(),
             bank.runtime_config.clone(),
             bank.loaded_programs_cache.clone(),
-        );
+        ));
 
         bank
     }
@@ -562,7 +562,7 @@ impl Bank {
         self.ticks_per_slot = genesis_config.ticks_per_slot();
         self.ns_per_slot = genesis_config.ns_per_slot();
         self.genesis_creation_time = genesis_config.creation_time;
-        self.max_tick_height = (self.slot + 1) * self.ticks_per_slot;
+        self.max_tick_height = (self.slot() + 1) * self.ticks_per_slot;
         self.slots_per_year = genesis_config.slots_per_year();
 
         self.epoch_schedule = genesis_config.epoch_schedule.clone();
@@ -577,20 +577,20 @@ impl Bank {
     // Slot and Epoch
     // -----------------
     pub fn slot(&self) -> Slot {
-        self.slot
+        self.slot.load(Ordering::Relaxed)
     }
 
-    pub fn advance_slot(&mut self) {
-        self.slot += 1;
-        self.transaction_processor = TransactionBatchProcessor::new(
-            self.slot,
-            self.epoch,
-            self.epoch_schedule.clone(),
-            self.fee_structure.clone(),
-            self.runtime_config.clone(),
-            self.loaded_programs_cache.clone(),
-        );
+    fn set_slot(&self, slot: Slot) {
+        self.slot.store(slot, Ordering::Relaxed);
+    }
 
+    pub fn advance_slot(&self) {
+        let next_slot = self.slot() + 1;
+        self.set_slot(next_slot);
+        self.transaction_processor
+            .write()
+            .unwrap()
+            .set_slot(next_slot);
         self.fill_missing_sysvar_cache_entries();
     }
 
@@ -817,11 +817,12 @@ impl Bank {
         // by the validator.
         let unix_timestamp = i64::try_from(get_epoch_secs()).expect("get_epoch_secs overflow");
 
+        let slot = self.slot();
         let clock = sysvar::clock::Clock {
-            slot: self.slot,
+            slot,
             epoch_start_timestamp,
-            epoch: self.epoch_schedule().get_epoch(self.slot),
-            leader_schedule_epoch: self.epoch_schedule().get_leader_schedule_epoch(self.slot),
+            epoch: self.epoch_schedule().get_epoch(slot),
+            leader_schedule_epoch: self.epoch_schedule().get_leader_schedule_epoch(slot),
             unix_timestamp,
         };
         self.update_sysvar_account(&sysvar::clock::id(), |account| {
@@ -1110,7 +1111,7 @@ impl Bank {
         self.add_builtin(
             program_id,
             name,
-            LoadedProgram::new_tombstone(self.slot, LoadedProgramType::Closed),
+            LoadedProgram::new_tombstone(self.slot(), LoadedProgramType::Closed),
         );
         debug!("Removed program {}", program_id);
     }
@@ -1241,6 +1242,8 @@ impl Bank {
         // 2. Load and execute sanitized transactions
         let sanitized_output = self
             .transaction_processor
+            .read()
+            .unwrap()
             .load_and_execute_sanitized_transactions(
                 self,
                 sanitized_txs,
@@ -1271,7 +1274,7 @@ impl Bank {
                 for key in tx.message().account_keys().iter() {
                     if debug_keys.contains(key) {
                         let result = execution_result.flattened_result();
-                        info!("slot: {} result: {:?} tx: {:?}", self.slot, result, tx);
+                        info!("slot: {} result: {:?} tx: {:?}", self.slot(), result, tx);
                         break;
                     }
                 }

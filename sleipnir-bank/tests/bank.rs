@@ -26,7 +26,7 @@ fn test_bank_one_noop_instruction() {
     init_logger();
 
     let (genesis_config, _) = create_genesis_config(u64::MAX);
-    let mut bank = Bank::new_for_tests(&genesis_config);
+    let bank = Bank::new_for_tests(&genesis_config);
     add_elf_program(&bank, &elfs::noop::ID);
 
     let tx = create_noop_transaction(&bank);
@@ -39,7 +39,7 @@ fn test_bank_solx_instructions() {
     init_logger();
 
     let (genesis_config, _) = create_genesis_config(u64::MAX);
-    let mut bank = Bank::new_for_tests(&genesis_config);
+    let bank = Bank::new_for_tests(&genesis_config);
     add_elf_program(&bank, &elfs::solanax::ID);
     let tx = create_solx_send_post_transaction(&bank);
     bank.advance_slot();
@@ -51,7 +51,7 @@ fn test_bank_sysvars_get() {
     init_logger();
 
     let (genesis_config, _) = create_genesis_config(u64::MAX);
-    let mut bank = Bank::new_for_tests(&genesis_config);
+    let bank = Bank::new_for_tests(&genesis_config);
     add_elf_program(&bank, &elfs::sysvars::ID);
     let tx = create_sysvars_get_transaction(&bank);
     bank.advance_slot();
@@ -63,7 +63,7 @@ fn test_bank_sysvars_from_account() {
     init_logger();
 
     let (genesis_config, _) = create_genesis_config(u64::MAX);
-    let mut bank = Bank::new_for_tests(&genesis_config);
+    let bank = Bank::new_for_tests(&genesis_config);
     add_elf_program(&bank, &elfs::sysvars::ID);
     let tx = create_sysvars_from_account_transaction(&bank);
     bank.advance_slot();

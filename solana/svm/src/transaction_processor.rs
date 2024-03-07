@@ -895,6 +895,10 @@ impl<FG: ForkGraph> TransactionBatchProcessor<FG> {
         }
         outer_instructions
     }
+
+    pub fn set_slot(&mut self, slot: Slot) {
+        self.slot = slot;
+    }
 }
 
 #[cfg(test)]

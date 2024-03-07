@@ -6,7 +6,8 @@ use {
 
 impl Bank {
     pub(crate) fn fill_missing_sysvar_cache_entries(&self) {
-        let mut sysvar_cache = self.transaction_processor.sysvar_cache.write().unwrap();
+        let tx_processor = self.transaction_processor.read().unwrap();
+        let mut sysvar_cache = tx_processor.sysvar_cache.write().unwrap();
         sysvar_cache.fill_missing_entries(|pubkey, callback| {
             if let Some(account) = self.get_account_with_fixed_root(pubkey) {
                 callback(account.data());
@@ -16,12 +17,15 @@ impl Bank {
 
     #[allow(dead_code)]
     pub(crate) fn reset_sysvar_cache(&self) {
-        let mut sysvar_cache = self.transaction_processor.sysvar_cache.write().unwrap();
+        let tx_processor = self.transaction_processor.read().unwrap();
+        let mut sysvar_cache = tx_processor.sysvar_cache.write().unwrap();
         sysvar_cache.reset();
     }
 
     pub fn get_sysvar_cache_for_tests(&self) -> SysvarCache {
         self.transaction_processor
+            .read()
+            .unwrap()
             .sysvar_cache
             .read()
             .unwrap()
