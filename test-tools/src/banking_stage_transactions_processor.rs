@@ -12,9 +12,15 @@ use sleipnir_messaging::{banking_tracer::BankingTracer, BankingPacketBatch};
 use sleipnir_stage_banking::banking_stage::BankingStage;
 use sleipnir_transaction_status::{TransactionStatusMessage, TransactionStatusSender};
 use solana_perf::packet::{to_packet_batches, PacketBatch};
-use solana_sdk::transaction::Transaction;
+use solana_sdk::{
+    message,
+    transaction::{SanitizedTransaction, Transaction},
+};
 
-use crate::traits::{TransactionsProcessor, TransactionsProcessorProcessResult};
+use crate::{
+    traits::{TransactionsProcessor, TransactionsProcessorProcessResult},
+    transaction::sanitized_into_transaction,
+};
 
 // NOTE: we could make this live inside sleipnir-stage-baking for the sole reason that
 // we could use it in there as well
@@ -119,6 +125,17 @@ impl TransactionsProcessor for BankingStageTransactionsProcessor {
         // 6. Return the processed transactions
         let transactions = result.write().unwrap().transactions.drain().collect();
         Ok(TransactionsProcessorProcessResult { transactions })
+    }
+
+    fn process_sanitized(
+        &self,
+        transactions: Vec<SanitizedTransaction>,
+    ) -> Result<TransactionsProcessorProcessResult, String> {
+        let transactions = transactions
+            .into_iter()
+            .map(sanitized_into_transaction)
+            .collect();
+        self.process(transactions)
     }
 
     fn bank(&self) -> &Bank {

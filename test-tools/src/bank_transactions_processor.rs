@@ -37,12 +37,18 @@ impl TransactionsProcessor for BankTransactionsProcessor {
         &self,
         transactions: Vec<Transaction>,
     ) -> Result<TransactionsProcessorProcessResult, String> {
-        let mut timings = ExecuteTimings::default();
-
         let transactions: Vec<SanitizedTransaction> = transactions
             .into_iter()
             .map(SanitizedTransaction::from_transaction_for_tests)
             .collect();
+        self.process_sanitized(transactions)
+    }
+
+    fn process_sanitized(
+        &self,
+        transactions: Vec<SanitizedTransaction>,
+    ) -> Result<TransactionsProcessorProcessResult, String> {
+        let mut timings = ExecuteTimings::default();
 
         let transaction_results = {
             let batch = self.bank.prepare_sanitized_batch(&transactions);

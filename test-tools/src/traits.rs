@@ -30,5 +30,10 @@ pub trait TransactionsProcessor {
         transactions: Vec<Transaction>,
     ) -> Result<TransactionsProcessorProcessResult, String>;
 
+    fn process_sanitized(
+        &self,
+        transactions: Vec<SanitizedTransaction>,
+    ) -> Result<TransactionsProcessorProcessResult, String>;
+
     fn bank(&self) -> &Bank;
 }
