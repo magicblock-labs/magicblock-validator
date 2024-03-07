@@ -201,6 +201,7 @@ async fn clone_solx_executable() {
 
     // 3. Run a transaction against the cloned program
     {
+        tx_processor.bank().advance_slot();
         let tx = create_solx_send_post_transaction(tx_processor.bank());
         let result = tx_processor.process_sanitized(vec![tx]).unwrap();
         debug!("Result: {:#?}", result);
