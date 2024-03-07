@@ -120,6 +120,10 @@ impl TransactionsProcessor for BankingStageTransactionsProcessor {
         let transactions = result.write().unwrap().transactions.drain().collect();
         Ok(TransactionsProcessorProcessResult { transactions })
     }
+
+    fn bank(&self) -> &Bank {
+        &self.bank
+    }
 }
 
 fn track_transactions(
@@ -170,13 +174,13 @@ mod tests {
     use sleipnir_bank::bank_dev_utils::transactions::create_funded_accounts;
     use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, system_transaction};
 
-    use crate::diagnostics::{init_logger, log_exec_details};
+    use crate::{diagnostics::log_exec_details, init_logger};
 
     use super::*;
 
     #[tokio::test]
     async fn test_system_transfer_enough_funds() {
-        init_logger();
+        init_logger!();
         let tx_processor = BankingStageTransactionsProcessor::default();
         let payers = create_funded_accounts(&tx_processor.bank, 1, Some(LAMPORTS_PER_SOL));
         let start_hash = tx_processor.bank.last_blockhash();
@@ -199,7 +203,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_system_transfer_not_enough_funds() {
-        init_logger();
+        init_logger!();
         let tx_processor = BankingStageTransactionsProcessor::default();
         let payers = create_funded_accounts(&tx_processor.bank, 1, Some(890_850_000));
         let start_hash = tx_processor.bank.last_blockhash();

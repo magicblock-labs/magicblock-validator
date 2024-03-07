@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use sleipnir_bank::bank::Bank;
 use solana_accounts_db::transaction_results::TransactionExecutionDetails;
 use solana_sdk::{
     signature::Signature,
@@ -28,4 +29,6 @@ pub trait TransactionsProcessor {
         &self,
         transactions: Vec<Transaction>,
     ) -> Result<TransactionsProcessorProcessResult, String>;
+
+    fn bank(&self) -> &Bank;
 }
