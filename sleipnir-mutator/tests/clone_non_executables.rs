@@ -214,8 +214,20 @@ async fn clone_solx_executable() {
 
     // 3. Run a transaction against the cloned program
     {
+        // Advancing here causes the below accounts to not be found
+        // tx_processor.bank().advance_slot();
+        let (tx, payer, post) = create_solx_send_post_transaction(tx_processor.bank());
+        let payer_acc = tx_processor.bank().get_account(&payer);
+        let post_acc = tx_processor.bank().get_account(&post);
+        debug!("Payer '{}': {:#?}", payer, payer_acc);
+        debug!("Post  '{}': {:#?}", post, post_acc);
+
         tx_processor.bank().advance_slot();
-        let tx = create_solx_send_post_transaction(tx_processor.bank());
+        // let payer_acc = tx_processor.bank().get_account(&payer);
+        // let post_acc = tx_processor.bank().get_account(&post);
+        // debug!("Payer '{}': {:#?}", payer, payer_acc);
+        // debug!("Post  '{}': {:#?}", post, post_acc);
+
         let result = tx_processor.process_sanitized(vec![tx]).unwrap();
         debug!("Result: {:#?}", result);
     }
