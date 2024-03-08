@@ -6,7 +6,7 @@ use {
         transaction_account_state_info::TransactionAccountStateInfo,
         transaction_error_metrics::TransactionErrorMetrics,
     },
-    log::debug,
+    log::*,
     percentage::Percentage,
     solana_accounts_db::{
         accounts::{LoadedTransaction, TransactionLoadResult},
@@ -210,6 +210,22 @@ impl<FG: ForkGraph> TransactionBatchProcessor<FG> {
             self.replenish_program_cache(callbacks, &program_accounts_map),
         ));
 
+        if log::log_enabled!(log::Level::Trace) {
+            let progs = programs_loaded_for_tx_batch.borrow();
+            trace!("Programs loaded at slot: {}", progs.slot());
+            for (pubkey, prog) in progs.iter() {
+                trace!(
+                    "> {:?} {} {} bytes, slots: {} deploy | {} effective | {} latest access",
+                    prog.program,
+                    pubkey,
+                    prog.account_size,
+                    prog.deployment_slot,
+                    prog.effective_slot,
+                    prog.latest_access_slot.load(Ordering::Relaxed)
+                );
+            }
+        }
+
         let mut load_time = Measure::start("accounts_load");
         let mut loaded_transactions = load_accounts(
             callbacks,
@@ -389,6 +405,11 @@ impl<FG: ForkGraph> TransactionBatchProcessor<FG> {
 
         let mut loaded_programs_for_txs = None;
         let mut program_to_store = None;
+        // NOTE(thlorenz): there is a bug in this code which causes the loop to never complete
+        // if a program cannot be inserted. (solana/program-runtime/src/loaded_programs.rs:968)
+        // This is because in that case missing_programs is never empty and the loop never breaks.
+        // It is hard to triage as it just causes the transaction execution be blocked.
+        // We should fix this at some point.
         loop {
             let (program_to_load, task_cookie, task_waiter) = {
                 // Lock the global cache.
