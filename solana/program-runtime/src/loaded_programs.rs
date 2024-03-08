@@ -21,7 +21,7 @@ use {
         saturating_add_assign,
     },
     std::{
-        collections::HashMap,
+        collections::{hash_map::Iter, HashMap},
         fmt::{Debug, Formatter},
         sync::{
             atomic::{AtomicU64, Ordering},
@@ -673,6 +673,10 @@ impl LoadedProgramsForTxBatch {
         other.entries.iter().for_each(|(key, entry)| {
             self.replenish(*key, entry.clone());
         })
+    }
+
+    pub fn iter(&self) -> Iter<'_, Pubkey, Arc<LoadedProgram>> {
+        self.entries.iter()
     }
 }
 
