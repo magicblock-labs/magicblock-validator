@@ -9,6 +9,10 @@ use solana_sdk::{
 
 use crate::errors::{MutatorError, MutatorResult};
 
+/// Adjusts the deployment slot for program data account when needed.
+/// This is necessary since the Cluster we clone this from has a different slot than
+/// our own validator and we need to make the deployment appear as if it happened at
+/// the current bank slot.
 pub fn adjust_deployment_slot(
     program_address: &Pubkey,
     programdata_address: &Pubkey,

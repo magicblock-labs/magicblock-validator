@@ -4,6 +4,7 @@ use log::*;
 use sleipnir_bank::bank_dev_utils::elfs;
 use sleipnir_bank::bank_dev_utils::transactions::create_solx_send_post_transaction;
 use solana_sdk::account::Account;
+use solana_sdk::clock::Slot;
 use solana_sdk::native_token::LAMPORTS_PER_SOL;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::transaction::Transaction;
@@ -30,12 +31,21 @@ fn fund_luzifer(bank: &Box<dyn TransactionsProcessor>) {
     fund_account_addr(bank.bank(), LUZIFER, u64::MAX / 2);
 }
 
-async fn verified_tx_to_clone_from_devnet(addr: &str, num_accounts_expected: usize) -> Transaction {
+async fn verified_tx_to_clone_from_devnet(
+    addr: &str,
+    slot: Slot,
+    num_accounts_expected: usize,
+) -> Transaction {
     let mutator = Mutator::default();
 
     let recent_blockhash = Hash::default();
     let tx = mutator
-        .transaction_to_clone_account_from_cluster(ClusterType::Devnet, addr, recent_blockhash)
+        .transaction_to_clone_account_from_cluster(
+            ClusterType::Devnet,
+            addr,
+            recent_blockhash,
+            slot,
+        )
         .await
         .expect("Failed to create clone transaction");
 
@@ -54,7 +64,8 @@ async fn clone_non_executable_without_data() {
     let tx_processor = transactions_processor();
     fund_luzifer(&tx_processor);
 
-    let tx = verified_tx_to_clone_from_devnet(SOLX_TIPS, 3).await;
+    let slot = tx_processor.bank().slot();
+    let tx = verified_tx_to_clone_from_devnet(SOLX_TIPS, slot, 3).await;
     let result = tx_processor.process(vec![tx]).unwrap();
 
     let (_, exec_details) = result.transactions.values().next().unwrap();
@@ -89,7 +100,8 @@ async fn clone_non_executable_with_data() {
     let tx_processor = transactions_processor();
     fund_luzifer(&tx_processor);
 
-    let tx = verified_tx_to_clone_from_devnet(SOLX_POST, 3).await;
+    let slot = tx_processor.bank().slot();
+    let tx = verified_tx_to_clone_from_devnet(SOLX_POST, slot, 3).await;
     let result = tx_processor.process(vec![tx]).unwrap();
 
     let (_, exec_details) = result.transactions.values().next().unwrap();
@@ -128,7 +140,8 @@ async fn clone_solx_executable() {
     // 1. Exec Clone Transaction
 
     {
-        let tx = verified_tx_to_clone_from_devnet(SOLX_PROG, 5).await;
+        let slot = tx_processor.bank().slot();
+        let tx = verified_tx_to_clone_from_devnet(SOLX_PROG, slot, 5).await;
         let result = tx_processor.process(vec![tx]).unwrap();
 
         let (_, exec_details) = result.transactions.values().next().unwrap();

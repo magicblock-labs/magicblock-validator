@@ -1,9 +1,9 @@
 use std::{str::FromStr, sync::Arc};
 
-use crate::{chainparser, AccountModification};
+use crate::{chainparser, program_account::adjust_deployment_slot, AccountModification};
 use sleipnir_rpc_client::rpc_client::RpcClient;
 use solana_sdk::{
-    account::Account, bpf_loader_upgradeable, commitment_config::CommitmentConfig,
+    account::Account, bpf_loader_upgradeable, clock::Slot, commitment_config::CommitmentConfig,
     genesis_config::ClusterType, pubkey::Pubkey,
 };
 
@@ -39,6 +39,7 @@ impl AccountProcessor {
         &self,
         cluster: ClusterType,
         account_address: &str,
+        slot: Slot,
     ) -> MutatorResult<Vec<AccountModification>> {
         // Fetch all accounts to clone
 
@@ -51,24 +52,32 @@ impl AccountProcessor {
         //
         // 2. If the account is executable, find its executable address
         let executable_info = if account.executable {
-            let executable_address = get_executable_address(account_address)?;
+            let executable_pubkey = get_executable_address(account_address)?;
 
             // 2.1. Download the executable account
-            let executable_account = self
+            let mut executable_account = self
                 .client_for_cluster(cluster)
-                .get_account(&executable_address)
+                .get_account(&executable_pubkey)
                 .await?;
 
             // 2.2. If we didn't find it then something is off and cloning the program
             //      account won't make sense either
             if executable_account.lamports == 0 {
                 return Err(MutatorError::CouldNotFindExecutableDataAccount(
-                    executable_address.to_string(),
+                    executable_pubkey.to_string(),
                     account_address.to_string(),
                 ));
             }
 
-            Some((executable_account, executable_address))
+            adjust_deployment_slot(
+                &account_pubkey,
+                &executable_pubkey,
+                &account,
+                Some(&mut executable_account),
+                slot,
+            )?;
+
+            Some((executable_account, executable_pubkey))
         } else {
             None
         };

@@ -2,7 +2,7 @@ use crate::account_modification::AccountModification;
 use crate::accounts::AccountProcessor;
 use crate::errors::MutatorResult;
 use sleipnir_program::sleipnir_instruction;
-use solana_sdk::{genesis_config::ClusterType, hash::Hash, transaction::Transaction};
+use solana_sdk::{clock::Slot, genesis_config::ClusterType, hash::Hash, transaction::Transaction};
 
 #[derive(Clone)]
 pub struct Mutator {
@@ -45,10 +45,11 @@ impl Mutator {
         cluster: ClusterType,
         account_address: &str,
         recent_blockhash: Hash,
+        slot: Slot,
     ) -> MutatorResult<Transaction> {
         let mods_to_clone = self
             .accounts_processor
-            .mods_to_clone_account(cluster, account_address)
+            .mods_to_clone_account(cluster, account_address, slot)
             .await?;
         self.transaction_to_modify_accounts(mods_to_clone, recent_blockhash)
     }
