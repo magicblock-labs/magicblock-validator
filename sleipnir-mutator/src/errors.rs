@@ -13,6 +13,9 @@ pub enum MutatorError {
     #[error("StdError: '{0}' ({0:?})")]
     StdError(#[from] Box<dyn std::error::Error>),
 
+    #[error(transparent)]
+    InstructionError(#[from] solana_sdk::instruction::InstructionError),
+
     #[error("Invalid cluster '{0}'")]
     InvalidCluster(String),
 
@@ -42,4 +45,13 @@ pub enum MutatorError {
 
     #[error("Could not find executable data account '{0}' for program account '{1}'")]
     CouldNotFindExecutableDataAccount(String, String),
+
+    #[error("The executable data of account '{1}' for program account '{1}' is does not hold program data")]
+    InvalidExecutableDataAccountData(String, String),
+
+    #[error("Not yet supporting cloning solana_loader_v4_program")]
+    NotYetSupportingCloningSolanaLoader4Programs,
+
+    #[error("No program data account provided for upgradeable loader program '{0}'")]
+    NoProgramDataAccountProvidedForUpgradeableLoaderProgram(String),
 }

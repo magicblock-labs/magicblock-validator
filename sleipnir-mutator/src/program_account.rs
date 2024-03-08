@@ -4,13 +4,18 @@ use solana_sdk::{
     account_utils::StateMut,
     bpf_loader_upgradeable::{self, UpgradeableLoaderState},
     loader_v4::{self, LoaderV4State},
+    pubkey::Pubkey,
 };
 
+use crate::errors::{MutatorError, MutatorResult};
+
 pub fn adjust_deployment_slot(
-    program_account: &mut Account,
-    programdata_account: &mut Option<Account>,
+    program_address: &Pubkey,
+    programdata_address: &Pubkey,
+    program_account: &Account,
+    programdata_account: Option<&mut Account>,
     deployment_slot: u64,
-) {
+) -> MutatorResult<()> {
     if loader_v4::check_id(&program_account.owner) {
         if let Ok(data) = solana_loader_v4_program::get_state(&program_account.data) {
             let LoaderV4State {
@@ -18,27 +23,28 @@ pub fn adjust_deployment_slot(
                 authority_address: _,
                 status: _,
             } = data;
-            todo!("Handle solana_loader_v4_program");
+            // TODO: figure out how to set state (only a get_state method exists)
+            // solana/svm/src/transaction_processor.rs :817
+            return Err(MutatorError::NotYetSupportingCloningSolanaLoader4Programs);
         }
     }
 
     if !bpf_loader_upgradeable::check_id(&program_account.owner) {
-        // solana/svm/src/transaction_processor.rs :830
-        todo!("Handle ProgramOfLoaderV1orV2");
+        // ProgramOfLoaderV1orV2 has no deployment state as part the program data
+        return Ok(());
     }
 
-    if let Ok(UpgradeableLoaderState::Program {
+    if let UpgradeableLoaderState::Program {
         programdata_address,
-    }) = program_account.state()
+    } = program_account.state()?
     {
         match programdata_account {
             Some(programdata_account) => {
-                if let Ok(UpgradeableLoaderState::ProgramData {
+                if let UpgradeableLoaderState::ProgramData {
                     slot: slot_on_cluster,
                     upgrade_authority_address,
-                }) = programdata_account.state()
+                } = programdata_account.state()?
                 {
-                    // let data_offset = UpgradeableLoaderState::size_of_programdata_metadata();
                     let metadata = UpgradeableLoaderState::ProgramData {
                         slot: deployment_slot,
                         upgrade_authority_address,
@@ -49,21 +55,32 @@ pub fn adjust_deployment_slot(
                         slot_on_cluster,
                         deployment_slot
                     );
-                    // TODO: figure out how to correctly update the data
-                    program_account.set_state(&metadata).unwrap();
+                    programdata_account.set_state(&metadata)?;
+                    Ok(())
                 } else {
-                    error!("Invalid ProgramData account");
+                    Err(MutatorError::InvalidExecutableDataAccountData(
+                        program_address.to_string(),
+                        programdata_address.to_string(),
+                    ))
                 }
             }
-            None => {
-                error!("For Upgradable account the program data account needs to be provided");
-            }
+            None => Err(
+                MutatorError::NoProgramDataAccountProvidedForUpgradeableLoaderProgram(
+                    program_address.to_string(),
+                ),
+            ),
         }
+    } else {
+        Err(MutatorError::InvalidExecutableDataAccountData(
+            program_address.to_string(),
+            programdata_address.to_string(),
+        ))
     }
 }
 
 #[cfg(test)]
 mod tests {
+    use assert_matches::assert_matches;
     use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
     use test_tools::init_logger;
 
@@ -79,10 +96,10 @@ mod tests {
         let program_addr = Pubkey::new_unique();
         let programdata_address = get_executable_address(&program_addr.to_string()).unwrap();
 
-        let program_data = vec![1, 2, 3, 4, 5];
+        let program_data = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
         let deployment_slot = 9999;
 
-        let mut program_account = {
+        let program_account = {
             let data = bincode::serialize(&UpgradeableLoaderState::Program {
                 programdata_address,
             })
@@ -96,7 +113,7 @@ mod tests {
             }
         };
 
-        let programdata_account = {
+        let mut programdata_account = {
             let mut data = bincode::serialize(&UpgradeableLoaderState::ProgramData {
                 slot: deployment_slot,
                 upgrade_authority_address: Some(upgrade_authority),
@@ -115,11 +132,31 @@ mod tests {
 
         let adjust_slot = 1000;
         adjust_deployment_slot(
-            &mut program_account,
-            &mut Some(programdata_account),
+            &program_addr,
+            &programdata_address,
+            &program_account,
+            Some(&mut programdata_account),
             adjust_slot,
-        );
+        )
+        .unwrap();
 
-        eprintln!("{:#?}", program_account);
+        let programdata_meta: UpgradeableLoaderState = programdata_account.state().unwrap();
+        let programdata_data = programdata_account.data
+            [UpgradeableLoaderState::size_of_programdata_metadata()..]
+            .to_vec();
+
+        // UpgradeAuthority is not changed, but slot is adjusted
+        assert_matches!(
+            programdata_meta,
+            UpgradeableLoaderState::ProgramData {
+                slot: s,
+                upgrade_authority_address: a,
+            } => {
+                assert_eq!(s, adjust_slot);
+                assert_eq!(a, Some(upgrade_authority));
+            }
+        );
+        // Executable data is unchanged
+        assert_eq!(programdata_data, program_data);
     }
 }
