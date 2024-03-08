@@ -26,45 +26,69 @@ fn create_account(slot: u64) -> AccountWithAddr {
 
 #[test]
 fn test_bank_store_get_accounts_across_slots() {
+    // This test ensures that no matter which slot we store an account, we can
+    // always get it in that same slot or later slots.
+    // This did not work until we properly updated the bank's ancestors when we
+    // advanace a slot.
     init_logger();
 
     let (genesis_config, _) = create_genesis_config(u64::MAX);
     let bank = Bank::new_for_tests(&genesis_config);
 
+    macro_rules! assert_account_stored {
+        ($acc: expr) => {
+            assert_eq!(
+                bank.get_account(&$acc.pubkey).unwrap(),
+                $acc.account.clone().into()
+            )
+        };
+    }
+
+    macro_rules! assert_account_not_stored {
+        ($acc: expr) => {
+            assert!(bank.get_account(&$acc.pubkey).is_none(),)
+        };
+    }
+
     let acc0 = create_account(0);
     let acc1 = create_account(1);
     let acc2 = create_account(2);
 
-    assert!(bank.get_account(&acc0.pubkey).is_none());
-    assert!(bank.get_account(&acc1.pubkey).is_none());
-    assert!(bank.get_account(&acc2.pubkey).is_none());
+    assert_account_not_stored!(acc0);
+    assert_account_not_stored!(acc1);
+    assert_account_not_stored!(acc2);
 
     // Slot 0
     {
         bank.store_account(&acc0.pubkey, &acc0.account);
-        eprintln!("0: acc0: {:?}", bank.get_account(&acc0.pubkey));
-        // assert_eq!(bank.get_account(&acc0.pubkey).unwrap(), acc0.account.into());
-        assert!(bank.get_account(&acc1.pubkey).is_none());
-        assert!(bank.get_account(&acc2.pubkey).is_none());
+        assert_account_stored!(acc0);
+        assert_account_not_stored!(acc1);
+        assert_account_not_stored!(acc2);
     }
 
     // Slot 1
     {
         bank.advance_slot();
         bank.store_account(&acc1.pubkey, &acc1.account);
-        eprintln!("1: acc0: {:?}", bank.get_account(&acc0.pubkey));
-        eprintln!("1: acc1: {:?}", bank.get_account(&acc1.pubkey));
-        eprintln!("1: acc2: {:?}", bank.get_account(&acc2.pubkey));
 
-        assert!(bank.get_account(&acc2.pubkey).is_none());
+        assert_account_stored!(acc0);
+        assert_account_stored!(acc1);
+        assert_account_not_stored!(acc2);
     }
 
     // Slot 2
     {
         bank.advance_slot();
         bank.store_account(&acc2.pubkey, &acc2.account);
-        eprintln!("2: acc0: {:?}", bank.get_account(&acc0.pubkey));
-        eprintln!("2: acc1: {:?}", bank.get_account(&acc1.pubkey));
-        eprintln!("2: acc2: {:?}", bank.get_account(&acc2.pubkey));
+        assert_account_stored!(acc0);
+        assert_account_stored!(acc1);
+        assert_account_stored!(acc2);
+    }
+    // Slot 3
+    {
+        bank.advance_slot();
+        assert_account_stored!(acc0);
+        assert_account_stored!(acc1);
+        assert_account_stored!(acc2);
     }
 }
