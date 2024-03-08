@@ -592,6 +592,9 @@ impl Bank {
             .write()
             .unwrap()
             .set_slot(next_slot);
+        let mut slots = self.readlock_ancestors().unwrap().keys();
+        slots.push(next_slot);
+        *self.ancestors.write().unwrap() = Ancestors::from(slots);
         self.fill_missing_sysvar_cache_entries();
     }
 
