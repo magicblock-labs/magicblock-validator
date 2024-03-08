@@ -30,7 +30,7 @@ impl AddressLoader for &Bank {
             .iter()
             .map(|address_table_lookup| {
                 self.rc.accounts.load_lookup_table_addresses(
-                    &self.ancestors,
+                    &self.readlock_ancestors().unwrap(),
                     address_table_lookup,
                     &slot_hashes,
                 )

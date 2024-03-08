@@ -236,8 +236,9 @@ pub struct Bank {
     blockhash_queue: RwLock<BlockhashQueue>,
 
     /// The set of parents including this bank
-    /// NOTE: we're planning to only have this bank
-    pub ancestors: Ancestors,
+    /// NOTE: we only have one bank, but this is just a Bit representation
+    /// of a Vec<Slot> and seems necessary
+    pub ancestors: RwLock<Ancestors>,
 
     // -----------------
     // Synchronization
@@ -260,7 +261,7 @@ impl TransactionProcessingCallback for Bank {
         self.rc
             .accounts
             .accounts_db
-            .account_matches_owners(&self.ancestors, account, owners)
+            .account_matches_owners(&self.readlock_ancestors().unwrap(), account, owners)
             .ok()
     }
 
@@ -268,7 +269,7 @@ impl TransactionProcessingCallback for Bank {
         self.rc
             .accounts
             .accounts_db
-            .load_with_fixed_root(&self.ancestors, pubkey)
+            .load_with_fixed_root(&self.readlock_ancestors().unwrap(), pubkey)
             .map(|(acc, _)| acc)
     }
 
@@ -358,7 +359,7 @@ impl Bank {
 
         let accounts = Accounts::new(Arc::new(accounts_db));
         let mut bank = Self::default_with_accounts(accounts);
-        bank.ancestors = Ancestors::from(vec![bank.slot()]);
+        bank.ancestors = RwLock::new(Ancestors::from(vec![bank.slot()]));
         bank.transaction_debug_keys = debug_keys;
         bank.runtime_config = runtime_config;
 
@@ -451,7 +452,7 @@ impl Bank {
             slots_per_year: f64::default(),
 
             // For TransactionProcessingCallback
-            ancestors: Ancestors::default(),
+            ancestors: RwLock::new(Ancestors::default()),
             blockhash_queue: RwLock::<BlockhashQueue>::default(),
             feature_set: Arc::<FeatureSet>::default(),
             rent_collector: RentCollector::default(),
@@ -574,7 +575,7 @@ impl Bank {
     }
 
     // -----------------
-    // Slot and Epoch
+    // Slot, Epoch and Ancestors
     // -----------------
     pub fn slot(&self) -> Slot {
         self.slot.load(Ordering::Relaxed)
@@ -600,6 +601,15 @@ impl Bank {
 
     pub fn epoch_schedule(&self) -> &EpochSchedule {
         &self.epoch_schedule
+    }
+
+    pub fn readlock_ancestors(
+        &self,
+    ) -> std::prelude::v1::Result<
+        RwLockReadGuard<'_, Ancestors>,
+        std::sync::PoisonError<RwLockReadGuard<'_, Ancestors>>,
+    > {
+        self.ancestors.read()
     }
 
     // -----------------
@@ -628,7 +638,7 @@ impl Bank {
     }
 
     pub fn get_account_modified_slot(&self, pubkey: &Pubkey) -> Option<(AccountSharedData, Slot)> {
-        self.load_slow(&self.ancestors, pubkey)
+        self.load_slow(&self.readlock_ancestors().unwrap(), pubkey)
     }
 
     pub fn get_account_with_fixed_root(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
@@ -640,7 +650,7 @@ impl Bank {
         &self,
         pubkey: &Pubkey,
     ) -> Option<(AccountSharedData, Slot)> {
-        self.load_slow_with_fixed_root(&self.ancestors, pubkey)
+        self.load_slow_with_fixed_root(&self.readlock_ancestors().unwrap(), pubkey)
     }
 
     fn load_slow(
@@ -1830,7 +1840,7 @@ impl Bank {
         // TODO: this currently behaves as if we had multiple banks and/or forks
         // we should simplify this to get info from the current bank only
         let rcache = self.status_cache.read().unwrap();
-        rcache.get_status_any_blockhash(signature, &self.ancestors)
+        rcache.get_status_any_blockhash(signature, &self.readlock_ancestors().unwrap())
     }
 
     pub fn get_signature_status(&self, signature: &Signature) -> Option<Result<()>> {

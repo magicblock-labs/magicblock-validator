@@ -87,7 +87,7 @@ impl Consumer {
             .rc
             .accounts
             .accounts_db
-            .load_with_fixed_root(&bank.ancestors, fee_payer)
+            .load_with_fixed_root(&bank.readlock_ancestors().unwrap(), fee_payer)
             .ok_or(TransactionError::AccountNotFound)?;
 
         validate_fee_payer(
