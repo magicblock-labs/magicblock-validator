@@ -138,7 +138,9 @@ impl Default for AccountProcessor {
     }
 }
 
-fn get_executable_address(program_id: &str) -> Result<Pubkey, Box<dyn std::error::Error>> {
+pub(crate) fn get_executable_address(
+    program_id: &str,
+) -> Result<Pubkey, Box<dyn std::error::Error>> {
     let program_pubkey = Pubkey::from_str(program_id)?;
     let bpf_loader_id = bpf_loader_upgradeable::id();
     let seeds = &[program_pubkey.as_ref()];

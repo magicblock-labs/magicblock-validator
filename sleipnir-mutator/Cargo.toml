@@ -14,11 +14,13 @@ doctest = false
 log = { workspace = true }
 sleipnir-program = { workspace = true }
 sleipnir-rpc-client = { workspace = true }
+solana-loader-v4-program = { workspace = true }
 solana-sdk = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
 assert_matches = { workspace = true }
+bincode = { workspace = true }
 tokio = { workspace = true }
 sleipnir-bank = { workspace = true, features = ["dev-context-only-utils"] }
 sleipnir-program = { workspace = true }
