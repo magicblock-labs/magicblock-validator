@@ -11,7 +11,7 @@ use log::{debug, info};
 use serde::Serialize;
 use sleipnir_bank::{
     bank::Bank,
-    bank_dev_utils::{init_logger, transactions::create_funded_accounts},
+    bank_dev_utils::transactions::create_funded_accounts,
     genesis_utils::{create_genesis_config, GenesisConfigInfo},
 };
 use sleipnir_messaging::banking_tracer::BankingTracer;
@@ -25,6 +25,7 @@ use solana_sdk::{
     signature::{Keypair, Signature},
     system_transaction,
 };
+use test_tools_core::init_logger;
 
 const LOG_MSGS_BYTE_LIMT: Option<usize> = None;
 
@@ -83,7 +84,7 @@ fn track_transaction_sigs(
 
 #[test]
 fn test_banking_stage_shutdown1() {
-    init_logger();
+    init_logger!();
 
     let genesis_config_info = create_genesis_config(u64::MAX);
     let bank = Bank::new_for_tests(&genesis_config_info.genesis_config);
@@ -99,7 +100,7 @@ fn test_banking_stage_shutdown1() {
 
 #[test]
 fn test_banking_stage_with_transaction_status_sender_tracking_signatures() {
-    init_logger();
+    init_logger!();
     solana_logger::setup();
 
     const SEND_CHUNK_SIZE: usize = 100;
@@ -193,7 +194,7 @@ fn test_banking_stage_with_transaction_status_sender_tracking_signatures() {
 
 #[test]
 fn test_banking_stage_transfer_from_non_existing_account() {
-    init_logger();
+    init_logger!();
     solana_logger::setup();
 
     const SEND_CHUNK_SIZE: usize = 100;
@@ -273,7 +274,7 @@ fn test_banking_stage_transfer_from_non_existing_account() {
 // -----------------
 #[test]
 fn test_banking_stage_with_transaction_status_sender_perf() {
-    init_logger();
+    init_logger!();
     solana_logger::setup();
 
     const SEND_CHUNK_SIZE: usize = 100;

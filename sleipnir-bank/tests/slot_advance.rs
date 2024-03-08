@@ -1,11 +1,11 @@
 #![cfg(feature = "dev-context-only-utils")]
 
 use sleipnir_bank::bank::Bank;
-use sleipnir_bank::bank_dev_utils::init_logger;
 use solana_sdk::account::Account;
 use solana_sdk::genesis_config::create_genesis_config;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::system_program;
+use test_tools_core::init_logger;
 
 struct AccountWithAddr {
     pub pubkey: Pubkey,
@@ -30,7 +30,7 @@ fn test_bank_store_get_accounts_across_slots() {
     // always get it in that same slot or later slots.
     // This did not work until we properly updated the bank's ancestors when we
     // advanace a slot.
-    init_logger();
+    init_logger!();
 
     let (genesis_config, _) = create_genesis_config(u64::MAX);
     let bank = Bank::new_for_tests(&genesis_config);

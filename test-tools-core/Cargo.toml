@@ -1,0 +1,17 @@
+[package]
+name = "test-tools-core"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+# Test tools that don't depend on any sleipnir crates and thus can be used
+# by all of them
+
+[dependencies]
+env_logger = { workspace = true }
+log = { workspace = true }
+solana-sdk = { workspace = true }
+solana-accounts-db = { workspace = true }

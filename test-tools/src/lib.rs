@@ -5,7 +5,7 @@ use traits::TransactionsProcessor;
 pub mod account;
 pub mod bank_transactions_processor;
 pub mod banking_stage_transactions_processor;
-pub mod diagnostics;
+pub use test_tools_core::*;
 pub mod traits;
 pub mod transaction;
 
