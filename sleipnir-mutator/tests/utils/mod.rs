@@ -7,13 +7,17 @@ use test_tools::account::fund_account_addr;
 use test_tools::traits::TransactionsProcessor;
 
 pub const SOLX_PROG: &str = "SoLXmnP9JvL6vJ7TN1VqtTxqsc2izmPfF9CsMDEuRzJ";
+#[allow(dead_code)] // used in tests
 pub const SOLX_EXEC: &str = "J1ct2BY6srXCDMngz5JxkX3sHLwCqGPhy9FiJBc8nuwk";
+#[allow(dead_code)] // used in tests
 pub const SOLX_IDL: &str = "EgrsyMAsGYMKjcnTvnzmpJtq3hpmXznKQXk21154TsaS";
+#[allow(dead_code)] // used in tests
 pub const SOLX_TIPS: &str = "SoLXtipsYqzgFguFCX6vw3JCtMChxmMacWdTpz2noRX";
+#[allow(dead_code)] // used in tests
 pub const SOLX_POST: &str = "5eYk1TwtEwsUTqF9FHhm6tdmvu45csFkKbC4W217TAts";
 const LUZIFER: &str = "LuzifKo4E6QCF5r4uQmqbyko7zLS5WgayynivnCbtzk";
 
-pub fn fund_luzifer(bank: &Box<dyn TransactionsProcessor>) {
+pub fn fund_luzifer(bank: &dyn TransactionsProcessor) {
     // TODO: we need to fund Luzifer at startup instead of doing it here
     fund_account_addr(bank.bank(), LUZIFER, u64::MAX / 2);
 }

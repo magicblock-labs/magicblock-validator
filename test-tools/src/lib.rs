@@ -11,8 +11,8 @@ pub mod transaction;
 
 pub fn transactions_processor() -> Box<dyn TransactionsProcessor> {
     if std::env::var("PROCESSOR_BANK").is_ok() {
-        Box::new(BankTransactionsProcessor::default())
+        Box::<BankTransactionsProcessor>::default()
     } else {
-        Box::new(BankingStageTransactionsProcessor::default())
+        Box::<BankingStageTransactionsProcessor>::default()
     }
 }

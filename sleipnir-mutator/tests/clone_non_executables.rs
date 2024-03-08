@@ -22,7 +22,7 @@ async fn clone_non_executable_without_data() {
     init_logger!();
 
     let tx_processor = transactions_processor();
-    fund_luzifer(&tx_processor);
+    fund_luzifer(&*tx_processor);
 
     let slot = tx_processor.bank().slot();
     let tx = verified_tx_to_clone_from_devnet(SOLX_TIPS, slot, 3).await;
@@ -58,7 +58,7 @@ async fn clone_non_executable_with_data() {
     init_logger!();
 
     let tx_processor = transactions_processor();
-    fund_luzifer(&tx_processor);
+    fund_luzifer(&*tx_processor);
 
     let slot = tx_processor.bank().slot();
     let tx = verified_tx_to_clone_from_devnet(SOLX_POST, slot, 3).await;

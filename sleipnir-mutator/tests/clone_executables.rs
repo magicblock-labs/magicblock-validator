@@ -20,7 +20,7 @@ async fn clone_solx_executable() {
     init_logger!();
 
     let tx_processor = transactions_processor();
-    fund_luzifer(&tx_processor);
+    fund_luzifer(&*tx_processor);
 
     // 1. Exec Clone Transaction
 

@@ -10,7 +10,7 @@ use solana_sdk::{
 
 pub fn fund_account(bank: &Bank, pubkey: &Pubkey, lamports: u64) {
     bank.store_account(
-        &pubkey,
+        pubkey,
         &Account {
             lamports,
             data: vec![],
