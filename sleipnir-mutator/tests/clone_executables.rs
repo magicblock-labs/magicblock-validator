@@ -99,6 +99,8 @@ async fn clone_solx_executable() {
 
     // 3. Run a transaction against the cloned program
     {
+        // For a deployed program: `effective_slot = deployed_slot + 1`
+        // Therefore to activate it we need to advance a slot
         tx_processor.bank().advance_slot();
 
         // TODO: I'm not sure why payer/post seem backwards here
@@ -120,6 +122,11 @@ async fn clone_solx_executable() {
             assert_eq!(tx.signatures().len(), 2);
             assert_eq!(tx.message().account_keys().len(), 4);
 
+            let sig_status = tx_processor.bank().get_signature_status(&sig);
+            assert!(sig_status.is_some());
+            assert_matches!(sig_status.as_ref().unwrap(), Ok(()));
+        }
+        {
             let payer_acc = tx_processor.bank().get_account(&payer).unwrap();
             let post_acc = tx_processor.bank().get_account(&post).unwrap();
             assert_eq!(post_acc.data().len(), 1180);
@@ -127,11 +134,6 @@ async fn clone_solx_executable() {
             debug!("Post account: {:#?}", post_acc);
             // 1000000000
             //  999990000
-
-            tx_processor.bank().advance_slot();
-            // TODO: we get None for sig_status here
-            let sig_status = transactions_processor().bank().get_signature_status(&sig);
-            debug!("Signature status: {:#?}", sig_status);
         }
     }
 }
