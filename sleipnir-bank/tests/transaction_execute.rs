@@ -1,5 +1,6 @@
 #![cfg(feature = "dev-context-only-utils")]
 
+use assert_matches::assert_matches;
 use log::*;
 use sleipnir_bank::bank::Bank;
 use sleipnir_bank::bank_dev_utils::elfs;
@@ -45,6 +46,7 @@ fn test_bank_solx_instructions() {
     let bank = Bank::new_for_tests(&genesis_config);
     add_elf_program(&bank, &elfs::solanax::ID);
     let (tx, post, payer) = create_solx_send_post_transaction(&bank);
+    let sig = *tx.signature();
     bank.advance_slot();
     execute_transactions(&bank, vec![tx]);
 
@@ -53,6 +55,10 @@ fn test_bank_solx_instructions() {
     assert_eq!(post_acc.data().len(), 1180);
     debug!("Payer account: {:#?}", payer_acc);
     debug!("Post account: {:#?}", post_acc);
+
+    let sig_status = bank.get_signature_status(&sig);
+    assert!(sig_status.is_some());
+    assert_matches!(sig_status.as_ref().unwrap(), Ok(()));
 }
 
 #[test]

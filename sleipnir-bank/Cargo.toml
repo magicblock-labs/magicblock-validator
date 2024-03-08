@@ -29,6 +29,7 @@ solana-svm = { workspace = true }
 solana-system-program = { workspace = true }
 
 [dev-dependencies]
+assert_matches = { workspace = true }
 env_logger = { workspace = true }
 rayon = { workspace = true }
 
