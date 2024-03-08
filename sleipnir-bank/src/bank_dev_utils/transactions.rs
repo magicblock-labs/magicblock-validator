@@ -94,11 +94,11 @@ fn create_noop_instruction(program_id: &Pubkey, funded_accounts: &[Keypair]) -> 
 // SolanaX
 pub fn create_solx_send_post_transaction(bank: &Bank) -> (SanitizedTransaction, Pubkey, Pubkey) {
     let funded_accounts = create_funded_accounts(bank, 2, Some(LAMPORTS_PER_SOL));
-    let instruction = create_solx_send_post_instruction(&elfs::solanax::id(), &funded_accounts);
-    let message = Message::new(&[instruction], Some(&funded_accounts[0].pubkey()));
     let payer = &funded_accounts[0];
     let post = &funded_accounts[1];
-    let transaction = Transaction::new(&[&payer, &post], message, bank.last_blockhash());
+    let instruction = create_solx_send_post_instruction(&elfs::solanax::id(), &funded_accounts);
+    let message = Message::new(&[instruction], Some(&payer.pubkey()));
+    let transaction = Transaction::new(&[payer, post], message, bank.last_blockhash());
     (
         SanitizedTransaction::try_from_legacy_transaction(transaction).unwrap(),
         payer.pubkey(),

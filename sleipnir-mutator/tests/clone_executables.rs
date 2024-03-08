@@ -1,7 +1,7 @@
 use log::*;
 use sleipnir_bank::bank_dev_utils::elfs;
 use sleipnir_bank::bank_dev_utils::transactions::create_solx_send_post_transaction;
-use solana_sdk::account::Account;
+use solana_sdk::account::{Account, ReadableAccount};
 use solana_sdk::bpf_loader_upgradeable;
 use test_tools::{init_logger, transactions_processor};
 
@@ -99,21 +99,39 @@ async fn clone_solx_executable() {
 
     // 3. Run a transaction against the cloned program
     {
-        // Advancing here causes the below accounts to not be found
-        // tx_processor.bank().advance_slot();
-        let (tx, payer, post) = create_solx_send_post_transaction(tx_processor.bank());
-        let payer_acc = tx_processor.bank().get_account(&payer);
-        let post_acc = tx_processor.bank().get_account(&post);
-        debug!("Payer '{}': {:#?}", payer, payer_acc);
-        debug!("Post  '{}': {:#?}", post, post_acc);
-
         tx_processor.bank().advance_slot();
-        // let payer_acc = tx_processor.bank().get_account(&payer);
-        // let post_acc = tx_processor.bank().get_account(&post);
-        // debug!("Payer '{}': {:#?}", payer, payer_acc);
-        // debug!("Post  '{}': {:#?}", post, post_acc);
+
+        // TODO: I'm not sure why payer/post seem backwards here
+        // However the lamports don't make sesne even then as the post account was
+        // debited  and the payer account did not change lamports at all
+        let (tx, post, payer) = create_solx_send_post_transaction(tx_processor.bank());
+        {
+            let payer_acc = tx_processor.bank().get_account(&payer).unwrap();
+            let post_acc = tx_processor.bank().get_account(&post).unwrap();
+            debug!("Payer account: {:#?}", payer_acc);
+            debug!("Post account: {:#?}", post_acc);
+        }
 
         let result = tx_processor.process_sanitized(vec![tx]).unwrap();
-        debug!("Result: {:#?}", result);
+        assert_eq!(result.len(), 1);
+        for (sig, (tx, exec_details)) in result.transactions {
+            log_exec_details(&exec_details);
+            assert!(exec_details.status.is_ok());
+            assert_eq!(tx.signatures().len(), 2);
+            assert_eq!(tx.message().account_keys().len(), 4);
+
+            let payer_acc = tx_processor.bank().get_account(&payer).unwrap();
+            let post_acc = tx_processor.bank().get_account(&post).unwrap();
+            assert_eq!(post_acc.data().len(), 1180);
+            debug!("Payer account: {:#?}", payer_acc);
+            debug!("Post account: {:#?}", post_acc);
+            // 1000000000
+            //  999990000
+
+            tx_processor.bank().advance_slot();
+            // TODO: we get None for sig_status here
+            let sig_status = transactions_processor().bank().get_signature_status(&sig);
+            debug!("Signature status: {:#?}", sig_status);
+        }
     }
 }
