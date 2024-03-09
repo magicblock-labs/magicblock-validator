@@ -33,6 +33,27 @@ pub fn create_accounts(num: usize) -> Vec<Keypair> {
     (0..num).into_par_iter().map(|_| Keypair::new()).collect()
 }
 
+pub fn create_funded_account(bank: &Bank, lamports: Option<u64>) -> Keypair {
+    let account = Keypair::new();
+    let lamports = lamports.unwrap_or_else(|| {
+        let rent_exempt_reserve = Rent::default().minimum_balance(0);
+        rent_exempt_reserve + LAMPORTS_PER_SIGNATURE
+    });
+
+    bank.store_account(
+        &account.pubkey(),
+        &Account {
+            lamports,
+            data: vec![],
+            owner: system_program::id(),
+            executable: false,
+            rent_epoch: Epoch::MAX,
+        },
+    );
+
+    account
+}
+
 pub fn create_funded_accounts(bank: &Bank, num: usize, lamports: Option<u64>) -> Vec<Keypair> {
     let accounts = create_accounts(num);
     let lamports = lamports.unwrap_or_else(|| {
@@ -93,7 +114,9 @@ fn create_noop_instruction(program_id: &Pubkey, funded_accounts: &[Keypair]) -> 
 
 // SolanaX
 pub fn create_solx_send_post_transaction(bank: &Bank) -> (SanitizedTransaction, Pubkey, Pubkey) {
-    let funded_accounts = create_funded_accounts(bank, 2, Some(LAMPORTS_PER_SOL));
+    let account1 = create_funded_account(bank, Some(LAMPORTS_PER_SOL));
+    let account2 = Keypair::new();
+    let funded_accounts = vec![account1, account2];
     let payer = &funded_accounts[0];
     let post = &funded_accounts[1];
     let instruction = create_solx_send_post_instruction(&elfs::solanax::id(), &funded_accounts);
