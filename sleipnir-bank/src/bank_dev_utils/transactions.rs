@@ -1,12 +1,14 @@
 use std::collections::HashSet;
 
 use crate::bank::{Bank, TransactionExecutionRecordingOpts};
+use crate::transaction_results::TransactionBalancesSet;
 use crate::LAMPORTS_PER_SIGNATURE;
 use log::{debug, error, info, trace, warn};
 use rayon::{
     iter::IndexedParallelIterator,
     prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
 };
+use solana_accounts_db::transaction_results::TransactionResults;
 use solana_program_runtime::timings::ExecuteTimings;
 use solana_sdk::{
     account::Account,
@@ -107,6 +109,22 @@ pub fn create_system_transfer_transactions(bank: &Bank, num: usize) -> Vec<Sanit
         })
         .map(SanitizedTransaction::from_transaction_for_tests)
         .collect()
+}
+
+pub fn create_system_allocate_transaction(
+    bank: &Bank,
+    fund_lamports: u64,
+    space: u64,
+) -> (SanitizedTransaction, Pubkey, Pubkey) {
+    let payer = create_funded_account(bank, Some(fund_lamports));
+    let rent_exempt_reserve = Rent::default().minimum_balance(space as usize);
+    let account = create_funded_account(bank, Some(rent_exempt_reserve));
+    let tx = system_transaction::allocate(&payer, &account, bank.last_blockhash(), space);
+    (
+        SanitizedTransaction::from_transaction_for_tests(tx),
+        payer.pubkey(),
+        account.pubkey(),
+    )
 }
 
 // Noop
@@ -220,7 +238,10 @@ fn create_sysvars_from_account_instruction(
 // -----------------
 // Transactions
 // -----------------
-pub fn execute_transactions(bank: &Bank, txs: Vec<SanitizedTransaction>) {
+pub fn execute_transactions(
+    bank: &Bank,
+    txs: Vec<SanitizedTransaction>,
+) -> (TransactionResults, TransactionBalancesSet) {
     let batch = bank.prepare_sanitized_batch(&txs);
 
     let mut timings = ExecuteTimings::default();
@@ -288,4 +309,6 @@ pub fn execute_transactions(bank: &Bank, txs: Vec<SanitizedTransaction>) {
         }
     }
     info!("");
+
+    (transaction_results, transaction_balances)
 }
