@@ -6,12 +6,13 @@ use sleipnir_bank::bank::Bank;
 use sleipnir_bank::bank_dev_utils::elfs;
 use sleipnir_bank::bank_dev_utils::elfs::add_elf_program;
 use sleipnir_bank::bank_dev_utils::transactions::{
-    create_noop_transaction, create_solx_send_post_transaction,
-    create_system_transfer_transactions, create_sysvars_from_account_transaction,
-    create_sysvars_get_transaction, execute_transactions,
+    create_noop_transaction, create_solx_send_post_transaction, create_system_transfer_transaction,
+    create_sysvars_from_account_transaction, create_sysvars_get_transaction, execute_transactions,
 };
+use sleipnir_bank::LAMPORTS_PER_SIGNATURE;
 use solana_sdk::account::ReadableAccount;
 use solana_sdk::genesis_config::create_genesis_config;
+use solana_sdk::native_token::LAMPORTS_PER_SOL;
 use test_tools_core::init_logger;
 
 #[test]
@@ -21,8 +22,21 @@ fn test_bank_one_system_instruction() {
     let (genesis_config, _) = create_genesis_config(u64::MAX);
     let bank = Bank::new_for_tests(&genesis_config);
 
-    let txs = create_system_transfer_transactions(&bank, 1);
-    execute_transactions(&bank, txs);
+    let (tx, from, to) =
+        create_system_transfer_transaction(&bank, LAMPORTS_PER_SOL, LAMPORTS_PER_SOL / 5);
+    execute_transactions(&bank, vec![tx]);
+
+    let from_acc = bank.get_account(&from).unwrap();
+    let to_acc = bank.get_account(&to).unwrap();
+
+    assert_eq!(
+        from_acc.lamports(),
+        LAMPORTS_PER_SOL - LAMPORTS_PER_SOL / 5 - LAMPORTS_PER_SIGNATURE
+    );
+    assert_eq!(to_acc.lamports(), LAMPORTS_PER_SOL / 5);
+
+    assert_eq!(bank.get_balance(&from), from_acc.lamports());
+    assert_eq!(bank.get_balance(&to), to_acc.lamports());
 }
 
 #[test]

@@ -80,6 +80,21 @@ pub fn create_funded_accounts(bank: &Bank, num: usize, lamports: Option<u64>) ->
 // -----------------
 // System Program
 // -----------------
+pub fn create_system_transfer_transaction(
+    bank: &Bank,
+    fund_lamports: u64,
+    send_lamports: u64,
+) -> (SanitizedTransaction, Pubkey, Pubkey) {
+    let from = create_funded_account(bank, Some(fund_lamports));
+    let to = Pubkey::new_unique();
+    let tx = system_transaction::transfer(&from, &to, send_lamports, bank.last_blockhash());
+    (
+        SanitizedTransaction::from_transaction_for_tests(tx),
+        from.pubkey(),
+        to,
+    )
+}
+
 pub fn create_system_transfer_transactions(bank: &Bank, num: usize) -> Vec<SanitizedTransaction> {
     let funded_accounts = create_funded_accounts(bank, 2 * num, None);
     funded_accounts
