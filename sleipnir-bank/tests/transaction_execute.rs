@@ -131,7 +131,7 @@ fn test_bank_solx_instructions() {
     add_elf_program(&bank, &elfs::solanax::ID);
 
     // 2. Prepare Transaction and advance slot to activate solanax program
-    let (tx, SolanaxPostAccounts { author, post }) = create_solx_send_post_transaction(&bank);
+    let (tx, SolanaxPostAccounts { author: _, post }) = create_solx_send_post_transaction(&bank);
     let sig = *tx.signature();
 
     bank.advance_slot();

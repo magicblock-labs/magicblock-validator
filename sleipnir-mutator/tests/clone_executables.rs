@@ -1,8 +1,13 @@
 use log::*;
 use sleipnir_bank::bank_dev_utils::elfs;
-use sleipnir_bank::bank_dev_utils::transactions::create_solx_send_post_transaction;
+use sleipnir_bank::bank_dev_utils::transactions::{
+    create_solx_send_post_transaction, SolanaxPostAccounts,
+};
+use sleipnir_bank::transaction_results::TransactionBalancesSet;
+use sleipnir_bank::LAMPORTS_PER_SIGNATURE;
 use solana_sdk::account::{Account, ReadableAccount};
 use solana_sdk::bpf_loader_upgradeable;
+use solana_sdk::native_token::LAMPORTS_PER_SOL;
 use test_tools::{init_logger, transactions_processor};
 
 use assert_matches::assert_matches;
@@ -23,7 +28,6 @@ async fn clone_solx_executable() {
     fund_luzifer(&*tx_processor);
 
     // 1. Exec Clone Transaction
-
     {
         let slot = tx_processor.bank().slot();
         let tx = verified_tx_to_clone_from_devnet(SOLX_PROG, slot, 5).await;
@@ -103,37 +107,47 @@ async fn clone_solx_executable() {
         // Therefore to activate it we need to advance a slot
         tx_processor.bank().advance_slot();
 
-        // TODO: I'm not sure why payer/post seem backwards here
-        // However the lamports don't make sesne even then as the post account was
-        // debited  and the payer account did not change lamports at all
-        let (tx, post, payer) = create_solx_send_post_transaction(tx_processor.bank());
-        {
-            let payer_acc = tx_processor.bank().get_account(&payer).unwrap();
-            let post_acc = tx_processor.bank().get_account(&post).unwrap();
-            debug!("Payer account: {:#?}", payer_acc);
-            debug!("Post account: {:#?}", post_acc);
-        }
+        let (tx, SolanaxPostAccounts { author: _, post }) =
+            create_solx_send_post_transaction(tx_processor.bank());
+        let sig = tx.signature().clone();
 
         let result = tx_processor.process_sanitized(vec![tx]).unwrap();
         assert_eq!(result.len(), 1);
-        for (sig, (tx, exec_details)) in result.transactions {
-            log_exec_details(&exec_details);
-            assert!(exec_details.status.is_ok());
-            assert_eq!(tx.signatures().len(), 2);
-            assert_eq!(tx.message().account_keys().len(), 4);
 
-            let sig_status = tx_processor.bank().get_signature_status(&sig);
-            assert!(sig_status.is_some());
-            assert_matches!(sig_status.as_ref().unwrap(), Ok(()));
-        }
-        {
-            let payer_acc = tx_processor.bank().get_account(&payer).unwrap();
-            let post_acc = tx_processor.bank().get_account(&post).unwrap();
-            assert_eq!(post_acc.data().len(), 1180);
-            debug!("Payer account: {:#?}", payer_acc);
-            debug!("Post account: {:#?}", post_acc);
-            // 1000000000
-            //  999990000
-        }
+        // Transaction
+        let (tx, exec_details) = result.transactions.get(&sig).unwrap();
+
+        log_exec_details(&exec_details);
+        assert!(exec_details.status.is_ok());
+        assert_eq!(tx.signatures().len(), 2);
+        assert_eq!(tx.message().account_keys().len(), 4);
+
+        // Signature Status
+        let sig_status = tx_processor.bank().get_signature_status(&sig);
+        assert!(sig_status.is_some());
+        assert_matches!(sig_status.as_ref().unwrap(), Ok(()));
+
+        // Accounts
+        let post_acc = tx_processor.bank().get_account(&post).unwrap();
+        assert_eq!(post_acc.data().len(), 1180);
+        assert_eq!(post_acc.owner(), &elfs::solanax::ID);
+
+        // Balances
+        assert_eq!(result.balances.len(), 1);
+        let balances = &result.balances[0];
+        assert_matches!(
+            balances,
+            TransactionBalancesSet {
+                pre_balances: pre,
+                post_balances: post,
+            } => {
+                assert_eq!(pre.len(), 1);
+                assert_eq!(pre[0], [LAMPORTS_PER_SOL, 9103680, 1, 1141440]);
+
+                assert_eq!(post.len(), 1);
+                assert_eq!(post[0], [LAMPORTS_PER_SOL - 2* LAMPORTS_PER_SIGNATURE , 9103680, 1, 1141440]);
+
+            }
+        );
     }
 }
