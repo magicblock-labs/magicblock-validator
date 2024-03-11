@@ -22,7 +22,6 @@ static ELFS: &[(Pubkey, Pubkey, &[u8])] = &[
     (
         noop::ID,
         solana_sdk::bpf_loader_upgradeable::ID,
-        // solana_sdk::bpf_loader::ID,
         include_bytes!("../../tests/utils/elfs/noop.so"),
     ),
     (
