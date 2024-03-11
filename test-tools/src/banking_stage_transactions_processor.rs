@@ -121,7 +121,11 @@ impl TransactionsProcessor for BankingStageTransactionsProcessor {
 
         // 6. Return the processed transactions
         let transactions = result.write().unwrap().transactions.drain().collect();
-        Ok(TransactionsProcessorProcessResult { transactions })
+        let balances = result.write().unwrap().balances.drain(0..).collect();
+        Ok(TransactionsProcessorProcessResult {
+            transactions,
+            balances,
+        })
     }
 
     fn process_sanitized(
@@ -153,6 +157,7 @@ fn track_transactions(
             let status = transaction_status_receiver.recv();
             match status {
                 Ok(TransactionStatusMessage::Batch(batch)) => {
+                    result.write().unwrap().balances.push(batch.balances);
                     for (idx, tx) in batch.transactions.into_iter().enumerate() {
                         result.write().unwrap().transactions.insert(
                             *tx.signature(),

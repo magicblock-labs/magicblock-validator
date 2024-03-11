@@ -50,10 +50,10 @@ impl TransactionsProcessor for BankTransactionsProcessor {
     ) -> Result<TransactionsProcessorProcessResult, String> {
         let mut timings = ExecuteTimings::default();
 
-        let transaction_results = {
+        let (transaction_results, balances) = {
             let batch = self.bank.prepare_sanitized_batch(&transactions);
 
-            let (transaction_results, _) = self.bank.load_execute_and_commit_transactions(
+            let (transaction_results, balances) = self.bank.load_execute_and_commit_transactions(
                 &batch,
                 MAX_PROCESSING_AGE,
                 true,
@@ -61,7 +61,7 @@ impl TransactionsProcessor for BankTransactionsProcessor {
                 &mut timings,
                 None,
             );
-            transaction_results
+            (transaction_results, balances)
         };
 
         let TransactionResults {
@@ -74,7 +74,10 @@ impl TransactionsProcessor for BankTransactionsProcessor {
             .map(|(tx, res)| (*tx.signature(), (tx, res.details().cloned().unwrap())))
             .collect::<HashMap<_, _>>();
 
-        Ok(TransactionsProcessorProcessResult { transactions })
+        Ok(TransactionsProcessorProcessResult {
+            transactions,
+            balances: vec![balances],
+        })
     }
 
     fn bank(&self) -> &Bank {
