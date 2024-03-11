@@ -146,19 +146,28 @@ fn create_noop_instruction(program_id: &Pubkey, funded_accounts: &[Keypair]) -> 
 }
 
 // SolanaX
-pub fn create_solx_send_post_transaction(bank: &Bank) -> (SanitizedTransaction, Pubkey, Pubkey) {
-    let account1 = create_funded_account(bank, Some(LAMPORTS_PER_SOL));
-    let account2 = Keypair::new();
-    let funded_accounts = vec![account1, account2];
-    let payer = &funded_accounts[0];
-    let post = &funded_accounts[1];
-    let instruction = create_solx_send_post_instruction(&elfs::solanax::id(), &funded_accounts);
-    let message = Message::new(&[instruction], Some(&payer.pubkey()));
-    let transaction = Transaction::new(&[payer, post], message, bank.last_blockhash());
+pub struct SolanaxPostAccounts {
+    pub post: Pubkey,
+    pub author: Pubkey,
+}
+pub fn create_solx_send_post_transaction(
+    bank: &Bank,
+) -> (SanitizedTransaction, SolanaxPostAccounts) {
+    let accounts = vec![
+        create_funded_account(bank, Some(Rent::default().minimum_balance(1180))),
+        create_funded_account(bank, Some(LAMPORTS_PER_SOL)),
+    ];
+    let post = &accounts[0];
+    let author = &accounts[1];
+    let instruction = create_solx_send_post_instruction(&elfs::solanax::id(), &accounts);
+    let message = Message::new(&[instruction], Some(&author.pubkey()));
+    let transaction = Transaction::new(&[author, post], message, bank.last_blockhash());
     (
         SanitizedTransaction::try_from_legacy_transaction(transaction).unwrap(),
-        payer.pubkey(),
-        post.pubkey(),
+        SolanaxPostAccounts {
+            post: post.pubkey(),
+            author: author.pubkey(),
+        },
     )
 }
 

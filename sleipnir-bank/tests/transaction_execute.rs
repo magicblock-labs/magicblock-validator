@@ -1,14 +1,13 @@
 #![cfg(feature = "dev-context-only-utils")]
 
 use assert_matches::assert_matches;
-use log::*;
 use sleipnir_bank::bank::Bank;
 use sleipnir_bank::bank_dev_utils::elfs;
 use sleipnir_bank::bank_dev_utils::elfs::add_elf_program;
 use sleipnir_bank::bank_dev_utils::transactions::{
     create_noop_transaction, create_solx_send_post_transaction, create_system_allocate_transaction,
     create_system_transfer_transaction, create_sysvars_from_account_transaction,
-    create_sysvars_get_transaction, execute_transactions,
+    create_sysvars_get_transaction, execute_transactions, SolanaxPostAccounts,
 };
 use sleipnir_bank::transaction_results::TransactionBalancesSet;
 use sleipnir_bank::LAMPORTS_PER_SIGNATURE;
@@ -65,7 +64,7 @@ fn test_bank_system_transfer_instruction() {
 }
 
 #[test]
-fn test_bank_system_acllocate_instruction() {
+fn test_bank_system_allocate_instruction() {
     init_logger!();
 
     let (genesis_config, _) = create_genesis_config(u64::MAX);
@@ -126,24 +125,47 @@ fn test_bank_one_noop_instruction() {
 fn test_bank_solx_instructions() {
     init_logger!();
 
+    // 1. Init Bank and load solanax program
     let (genesis_config, _) = create_genesis_config(u64::MAX);
     let bank = Bank::new_for_tests(&genesis_config);
     add_elf_program(&bank, &elfs::solanax::ID);
-    let (tx, payer, post) = create_solx_send_post_transaction(&bank);
 
+    // 2. Prepare Transaction and advance slot to activate solanax program
+    let (tx, SolanaxPostAccounts { author, post }) = create_solx_send_post_transaction(&bank);
     let sig = *tx.signature();
+
     bank.advance_slot();
 
-    debug!("payer: {}", payer);
-    debug!("post: {}", post);
-    execute_transactions(&bank, vec![tx]);
+    // 3. Execute Transaction
+    let (results, balances) = execute_transactions(&bank, vec![tx]);
 
-    let payer_acc = bank.get_account(&payer);
-    let post_acc = bank.get_account(&post);
-    // assert_eq!(post_acc.data().len(), 1180);
-    debug!("Payer account: {:#?}", payer_acc);
-    debug!("Post account: {:#?}", post_acc);
+    // 4. Check results
+    let result = &results.execution_results[0];
+    assert_matches!(result.details().unwrap().status, Ok(()));
 
+    // Accounts
+    let post_acc = bank.get_account(&post).unwrap();
+
+    assert_eq!(post_acc.data().len(), 1180);
+    assert_eq!(post_acc.owner(), &elfs::solanax::ID);
+
+    // Balances
+    assert_matches!(
+        balances,
+        TransactionBalancesSet {
+            pre_balances: pre,
+            post_balances: post,
+        } => {
+            assert_eq!(pre.len(), 1);
+            assert_eq!(pre[0], [LAMPORTS_PER_SOL, 9103680, 1, 1141440]);
+
+            assert_eq!(post.len(), 1);
+            assert_eq!(post[0], [LAMPORTS_PER_SOL - 2* LAMPORTS_PER_SIGNATURE , 9103680, 1, 1141440]);
+
+        }
+    );
+
+    // Signature Status
     let sig_status = bank.get_signature_status(&sig);
     assert!(sig_status.is_some());
     assert_matches!(sig_status.as_ref().unwrap(), Ok(()));
