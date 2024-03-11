@@ -10,6 +10,7 @@ use rayon::{
 };
 use solana_accounts_db::transaction_results::TransactionResults;
 use solana_program_runtime::timings::ExecuteTimings;
+use solana_sdk::sysvar;
 use solana_sdk::{
     account::Account,
     clock::MAX_PROCESSING_AGE,
@@ -240,6 +241,7 @@ fn create_sysvars_from_account_instruction(
             #[allow(deprecated)]
             AccountMeta::new_readonly(recent_blockhashes::id(), false),
             AccountMeta::new_readonly(last_restart_slot::id(), false),
+            AccountMeta::new_readonly(sysvar::instructions::id(), false),
         ],
     )
 }
