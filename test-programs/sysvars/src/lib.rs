@@ -3,11 +3,14 @@ use solana_program::{
     clock::Clock,
     entrypoint::ProgramResult,
     epoch_schedule::EpochSchedule,
+    instruction::get_processed_sibling_instruction,
     msg,
     pubkey::Pubkey,
     rent::Rent,
     sysvar::{
-        instructions::{load_current_index_checked, load_instruction_at_checked},
+        instructions::{
+            get_instruction_relative, load_current_index_checked, load_instruction_at_checked,
+        },
         Sysvar,
     },
 };
@@ -84,11 +87,24 @@ fn process_sysvar_from_account(program_id: &Pubkey, accounts: &[AccountInfo]) ->
     // NOTE: data.len: 0
     msg!("{:?}", last_restart_slot_account);
 
-    let ix_idx = load_current_index_checked(ix_introspections_account)?;
-    msg!("Instruction index: {}", ix_idx);
+    // -----------------
+    // Instruction Inspection
+    // -----------------
+    let current_ix_idx = load_current_index_checked(ix_introspections_account)?;
+    msg!("Instruction index: {}", current_ix_idx);
 
-    let ix_info = load_instruction_at_checked(ix_idx as usize, ix_introspections_account)?;
+    let ix_before = get_instruction_relative(-1, ix_introspections_account)?;
+    let ix_after = get_instruction_relative(1, ix_introspections_account)?;
+    // let ix_sibling = get_processed_sibling_instruction(current_ix_idx as usize)
+    // .expect("Should have sibling instruction");
+
+    let ix_info = load_instruction_at_checked(current_ix_idx as usize, ix_introspections_account)?;
     msg!("Instruction info: {:?}", ix_info);
+    msg!("Instruction before: {:?}", ix_before);
+    msg!("Instruction after: {:?}", ix_after);
+    // msg!("Instruction sibling: {:?}", ix_sibling);
+
+    // assert_eq!(ix_sibling, ix_before);
 
     Ok(())
 }

@@ -10,7 +10,6 @@ use rayon::{
 };
 use solana_accounts_db::transaction_results::TransactionResults;
 use solana_program_runtime::timings::ExecuteTimings;
-use solana_sdk::sysvar;
 use solana_sdk::{
     account::Account,
     clock::MAX_PROCESSING_AGE,
@@ -26,6 +25,7 @@ use solana_sdk::{
     sysvar::{clock, epoch_schedule, fees, last_restart_slot, recent_blockhashes, rent},
     transaction::{SanitizedTransaction, Transaction},
 };
+use solana_sdk::{system_instruction, sysvar};
 
 use super::elfs;
 
@@ -215,24 +215,39 @@ fn create_sysvars_get_instruction(program_id: &Pubkey, funded_accounts: &[Keypai
 }
 
 pub fn create_sysvars_from_account_transaction(bank: &Bank) -> SanitizedTransaction {
-    let funded_accounts = create_funded_accounts(bank, 2, None);
-    let instruction =
-        create_sysvars_from_account_instruction(&elfs::sysvars::id(), &funded_accounts);
-    let message = Message::new(&[instruction], None);
+    // This instruction checks for sibling instructions
+    // which is why we need to add it some
+
+    let payer = create_funded_account(bank, Some(LAMPORTS_PER_SOL));
+
+    // 1. System Transfer Instruction before Sysvar Instruction
+    let transfer_to = Pubkey::new_unique();
+    let transfer_ix =
+        system_instruction::transfer(&payer.pubkey(), &transfer_to, LAMPORTS_PER_SOL / 10);
+
+    // 2. Sysvar Instruction
+    let sysvar_ix = create_sysvars_from_account_instruction(&elfs::sysvars::id(), &payer.pubkey());
+
+    // 3. System Allocate Instruction after Sysvar Instruction
+    let allocate_to = Pubkey::new_unique();
+    let allocate_ix = system_instruction::allocate(&allocate_to, 99);
+
+    // 4. Run all Instructions as part of one Transaction
+    let message = Message::new(
+        &[transfer_ix, sysvar_ix, allocate_ix],
+        Some(&payer.pubkey()),
+    );
     let transaction = Transaction::new_unsigned(message);
     SanitizedTransaction::try_from_legacy_transaction(transaction).unwrap()
 }
 
-fn create_sysvars_from_account_instruction(
-    program_id: &Pubkey,
-    funded_accounts: &[Keypair],
-) -> Instruction {
+fn create_sysvars_from_account_instruction(program_id: &Pubkey, payer: &Pubkey) -> Instruction {
     let ix_bytes: Vec<u8> = vec![0x01];
     Instruction::new_with_bytes(
         *program_id,
         &ix_bytes,
         vec![
-            AccountMeta::new(funded_accounts[0].pubkey(), true),
+            AccountMeta::new(*payer, true),
             AccountMeta::new_readonly(clock::id(), false),
             AccountMeta::new_readonly(rent::id(), false),
             AccountMeta::new_readonly(epoch_schedule::id(), false),
