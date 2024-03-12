@@ -118,7 +118,7 @@ async fn clone_solx_executable() {
 
         let (tx, SolanaxPostAccounts { author: _, post }) =
             create_solx_send_post_transaction(tx_processor.bank());
-        let sig = tx.signature().clone();
+        let sig = *tx.signature();
 
         let result = tx_processor.process_sanitized(vec![tx]).unwrap();
         assert_eq!(result.len(), 1);
@@ -126,7 +126,7 @@ async fn clone_solx_executable() {
         // Transaction
         let (tx, exec_details) = result.transactions.get(&sig).unwrap();
 
-        log_exec_details(&exec_details);
+        log_exec_details(exec_details);
         assert!(exec_details.status.is_ok());
         assert_eq!(tx.signatures().len(), 2);
         assert_eq!(tx.message().account_keys().len(), 4);

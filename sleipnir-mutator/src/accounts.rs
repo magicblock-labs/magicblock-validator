@@ -1,169 +1,113 @@
-use std::{str::FromStr, sync::Arc};
+use std::str::FromStr;
 
 use sleipnir_rpc_client::rpc_client::RpcClient;
 use solana_sdk::{
     account::Account, bpf_loader_upgradeable, clock::Slot,
-    commitment_config::CommitmentConfig, genesis_config::ClusterType,
-    pubkey::Pubkey,
+    commitment_config::CommitmentConfig, pubkey::Pubkey,
 };
 
 use crate::{
     chainparser,
     errors::{MutatorError, MutatorResult},
     program_account::adjust_deployment_slot,
-    AccountModification,
+    AccountModification, Cluster,
 };
 
-const TESTNET_URL: &str = "https://api.testnet.solana.com";
-const MAINNET_URL: &str = "https://api.mainnet-beta.solana.com";
-const DEVNET_URL: &str = "https://api.devnet.solana.com";
+pub async fn mods_to_clone_account(
+    cluster: &Cluster,
+    account_address: &str,
+    slot: Slot,
+) -> MutatorResult<Vec<AccountModification>> {
+    // Fetch all accounts to clone
 
-#[derive(Clone)]
-pub struct AccountProcessor {
-    client_testnet: Arc<RpcClient>,
-    client_mainnet: Arc<RpcClient>,
-    client_devnet: Arc<RpcClient>,
-}
+    // 1. Download the account info
+    let account_pubkey = Pubkey::from_str(account_address)?;
+    let account = client_for_cluster(cluster)
+        .get_account(&account_pubkey)
+        .await?;
+    //
+    // 2. If the account is executable, find its executable address
+    let executable_info = if account.executable {
+        let executable_pubkey = get_executable_address(account_address)?;
 
-impl AccountProcessor {
-    pub fn new() -> Self {
-        let client_testnet = RpcClient::new_with_commitment(
-            TESTNET_URL.to_string(),
-            CommitmentConfig::confirmed(),
-        );
-        let client_mainnet = RpcClient::new_with_commitment(
-            MAINNET_URL.to_string(),
-            CommitmentConfig::confirmed(),
-        );
-        let client_devnet = RpcClient::new_with_commitment(
-            DEVNET_URL.to_string(),
-            CommitmentConfig::confirmed(),
-        );
-        Self {
-            client_testnet: Arc::new(client_testnet),
-            client_mainnet: Arc::new(client_mainnet),
-            client_devnet: Arc::new(client_devnet),
-        }
-    }
-
-    pub async fn mods_to_clone_account(
-        &self,
-        cluster: ClusterType,
-        account_address: &str,
-        slot: Slot,
-    ) -> MutatorResult<Vec<AccountModification>> {
-        // Fetch all accounts to clone
-
-        // 1. Download the account info
-        let account_pubkey = Pubkey::from_str(account_address)?;
-        let account = self
-            .client_for_cluster(cluster)
-            .get_account(&account_pubkey)
+        // 2.1. Download the executable account
+        let mut executable_account = client_for_cluster(cluster)
+            .get_account(&executable_pubkey)
             .await?;
-        //
-        // 2. If the account is executable, find its executable address
-        let executable_info = if account.executable {
-            let executable_pubkey = get_executable_address(account_address)?;
 
-            // 2.1. Download the executable account
-            let mut executable_account = self
-                .client_for_cluster(cluster)
-                .get_account(&executable_pubkey)
-                .await?;
-
-            // 2.2. If we didn't find it then something is off and cloning the program
-            //      account won't make sense either
-            if executable_account.lamports == 0 {
-                return Err(MutatorError::CouldNotFindExecutableDataAccount(
-                    executable_pubkey.to_string(),
-                    account_address.to_string(),
-                ));
-            }
-
-            adjust_deployment_slot(
-                &account_pubkey,
-                &executable_pubkey,
-                &account,
-                Some(&mut executable_account),
-                slot,
-            )?;
-
-            Some((executable_account, executable_pubkey))
-        } else {
-            None
-        };
-
-        // 3. If the account is executable, try to find its IDL account
-        let idl_account_info = if account.executable {
-            let (anchor_idl_address, shank_idl_address) =
-                get_idl_addresses(account_address)?;
-
-            // 3.1. Download the IDL account, try the anchor address first followed by shank
-            if let Some(anchor_account_info) = self
-                .maybe_get_idl_account(cluster, anchor_idl_address)
-                .await
-            {
-                Some(anchor_account_info)
-            } else {
-                self.maybe_get_idl_account(cluster, shank_idl_address).await
-            }
-        } else {
-            None
-        };
-
-        // 4. Convert to a vec of account modifications to apply
-        Ok(vec![
-            Some(AccountModification::from((&account, account_address))),
-            executable_info.map(|(account, address)| {
-                AccountModification::from((
-                    &account,
-                    address.to_string().as_str(),
-                ))
-            }),
-            idl_account_info.map(|(account, address)| {
-                AccountModification::from((
-                    &account,
-                    address.to_string().as_str(),
-                ))
-            }),
-        ]
-        .into_iter()
-        .flatten()
-        .collect::<Vec<AccountModification>>())
-    }
-
-    pub fn client_for_cluster(&self, cluster: ClusterType) -> Arc<RpcClient> {
-        use ClusterType::*;
-        match cluster {
-            Testnet => self.client_testnet.clone(),
-            MainnetBeta => self.client_mainnet.clone(),
-            Devnet => self.client_devnet.clone(),
-            Development => panic!(
-                "Development cluster not supported when cloning accounts"
-            ),
+        // 2.2. If we didn't find it then something is off and cloning the program
+        //      account won't make sense either
+        if executable_account.lamports == 0 {
+            return Err(MutatorError::CouldNotFindExecutableDataAccount(
+                executable_pubkey.to_string(),
+                account_address.to_string(),
+            ));
         }
-    }
 
-    async fn maybe_get_idl_account(
-        &self,
-        cluster: ClusterType,
-        idl_address: Option<Pubkey>,
-    ) -> Option<(Account, Pubkey)> {
-        if let Some(idl_address) = idl_address {
-            self.client_for_cluster(cluster)
-                .get_account(&idl_address)
-                .await
-                .ok()
-                .map(|account| (account, idl_address))
+        adjust_deployment_slot(
+            &account_pubkey,
+            &executable_pubkey,
+            &account,
+            Some(&mut executable_account),
+            slot,
+        )?;
+
+        Some((executable_account, executable_pubkey))
+    } else {
+        None
+    };
+
+    // 3. If the account is executable, try to find its IDL account
+    let idl_account_info = if account.executable {
+        let (anchor_idl_address, shank_idl_address) =
+            get_idl_addresses(account_address)?;
+
+        // 3.1. Download the IDL account, try the anchor address first followed by shank
+        if let Some(anchor_account_info) =
+            maybe_get_idl_account(cluster, anchor_idl_address).await
+        {
+            Some(anchor_account_info)
         } else {
-            None
+            maybe_get_idl_account(cluster, shank_idl_address).await
         }
-    }
+    } else {
+        None
+    };
+
+    // 4. Convert to a vec of account modifications to apply
+    Ok(vec![
+        Some(AccountModification::from((&account, account_address))),
+        executable_info.map(|(account, address)| {
+            AccountModification::from((&account, address.to_string().as_str()))
+        }),
+        idl_account_info.map(|(account, address)| {
+            AccountModification::from((&account, address.to_string().as_str()))
+        }),
+    ]
+    .into_iter()
+    .flatten()
+    .collect::<Vec<AccountModification>>())
 }
 
-impl Default for AccountProcessor {
-    fn default() -> Self {
-        Self::new()
+fn client_for_cluster(cluster: &Cluster) -> RpcClient {
+    RpcClient::new_with_commitment(
+        cluster.url().to_string(),
+        CommitmentConfig::confirmed(),
+    )
+}
+
+async fn maybe_get_idl_account(
+    cluster: &Cluster,
+    idl_address: Option<Pubkey>,
+) -> Option<(Account, Pubkey)> {
+    if let Some(idl_address) = idl_address {
+        client_for_cluster(cluster)
+            .get_account(&idl_address)
+            .await
+            .ok()
+            .map(|account| (account, idl_address))
+    } else {
+        None
     }
 }
 

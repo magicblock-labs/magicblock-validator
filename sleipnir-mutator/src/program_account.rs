@@ -93,7 +93,7 @@ mod tests {
     use test_tools::init_logger;
 
     use super::*;
-    use crate::get_executable_address;
+    use crate::accounts::get_executable_address;
 
     #[test]
     fn upgradable_loader_program_slot() {

@@ -1,4 +1,4 @@
-use sleipnir_mutator::Mutator;
+use sleipnir_mutator::mutator;
 use sleipnir_program::sleipnir_authority_id;
 use solana_sdk::{
     clock::Slot, genesis_config::ClusterType, hash::Hash,
@@ -27,18 +27,15 @@ pub async fn verified_tx_to_clone_from_devnet(
     slot: Slot,
     num_accounts_expected: usize,
 ) -> Transaction {
-    let mutator = Mutator::default();
-
     let recent_blockhash = Hash::default();
-    let tx = mutator
-        .transaction_to_clone_account_from_cluster(
-            ClusterType::Devnet,
-            addr,
-            recent_blockhash,
-            slot,
-        )
-        .await
-        .expect("Failed to create clone transaction");
+    let tx = mutator::transaction_to_clone_account_from_cluster(
+        &ClusterType::Devnet.into(),
+        addr,
+        recent_blockhash,
+        slot,
+    )
+    .await
+    .expect("Failed to create clone transaction");
 
     assert!(tx.is_signed());
     assert_eq!(tx.signatures.len(), 1);
