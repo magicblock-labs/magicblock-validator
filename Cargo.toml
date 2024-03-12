@@ -10,6 +10,7 @@ members = [
   "sleipnir-messaging",
   "sleipnir-mutator",
   "sleipnir-processor",
+  "sleipnir-rpc",
   "sleipnir-rpc-client",
   "sleipnir-rpc-client-api",
   "sleipnir-stage-banking",
@@ -51,6 +52,9 @@ env_logger = "0.11.2"
 histogram = "0.6.9"
 itertools = "0.10.5"
 jsonrpc-core = "18.0.0"
+jsonrpc-core-client = "18.0.0"
+jsonrpc-derive = "18.0.0"
+jsonrpc-http-server = "18.0.0"
 lazy_static = "1.4.0"
 libc = "0.2.153"
 libsecp256k1 = "0.6.0"
@@ -94,6 +98,7 @@ solana-metrics = { git = "https://github.com/solana-labs/solana", rev = "30adda4
 solana-perf = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-perf" }
 solana-program-runtime = { path = "./solana/program-runtime" }
 solana-rayon-threadlimit = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-rayon-threadlimit" }
+solana-rpc-client-api = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-rpc-client-api" }
 solana-streamer = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-streamer" }
 solana-sdk = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-sdk" }
 solana-svm = { path = "./solana/svm" }
