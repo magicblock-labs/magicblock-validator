@@ -1,12 +1,12 @@
 // NOTE: from rpc-client-api/src/request.rs
-use {
-    crate::response::RpcSimulateTransactionResult,
-    serde::{Deserialize, Serialize},
-    serde_json::{json, Value},
-    solana_sdk::{clock::Slot, pubkey::Pubkey},
-    std::fmt,
-    thiserror::Error,
-};
+use std::fmt;
+
+use serde::{Deserialize, Serialize};
+use serde_json::{json, Value};
+use solana_sdk::{clock::Slot, pubkey::Pubkey};
+use thiserror::Error;
+
+use crate::response::RpcSimulateTransactionResult;
 
 #[derive(Debug, PartialEq, Eq, Hash, Clone, Copy)]
 pub enum RpcRequest {
@@ -23,9 +23,15 @@ pub enum RpcRequest {
     GetBlocksWithLimit,
     GetBlockTime,
     GetClusterNodes,
-    #[deprecated(since = "1.7.0", note = "Please use RpcRequest::GetBlock instead")]
+    #[deprecated(
+        since = "1.7.0",
+        note = "Please use RpcRequest::GetBlock instead"
+    )]
     GetConfirmedBlock,
-    #[deprecated(since = "1.7.0", note = "Please use RpcRequest::GetBlocks instead")]
+    #[deprecated(
+        since = "1.7.0",
+        note = "Please use RpcRequest::GetBlocks instead"
+    )]
     GetConfirmedBlocks,
     #[deprecated(
         since = "1.7.0",
@@ -135,12 +141,18 @@ impl fmt::Display for RpcRequest {
             RpcRequest::GetClusterNodes => "getClusterNodes",
             RpcRequest::GetConfirmedBlock => "getConfirmedBlock",
             RpcRequest::GetConfirmedBlocks => "getConfirmedBlocks",
-            RpcRequest::GetConfirmedBlocksWithLimit => "getConfirmedBlocksWithLimit",
-            RpcRequest::GetConfirmedSignaturesForAddress2 => "getConfirmedSignaturesForAddress2",
+            RpcRequest::GetConfirmedBlocksWithLimit => {
+                "getConfirmedBlocksWithLimit"
+            }
+            RpcRequest::GetConfirmedSignaturesForAddress2 => {
+                "getConfirmedSignaturesForAddress2"
+            }
             RpcRequest::GetConfirmedTransaction => "getConfirmedTransaction",
             RpcRequest::GetEpochInfo => "getEpochInfo",
             RpcRequest::GetEpochSchedule => "getEpochSchedule",
-            RpcRequest::GetFeeCalculatorForBlockhash => "getFeeCalculatorForBlockhash",
+            RpcRequest::GetFeeCalculatorForBlockhash => {
+                "getFeeCalculatorForBlockhash"
+            }
             RpcRequest::GetFeeForMessage => "getFeeForMessage",
             RpcRequest::GetFeeRateGovernor => "getFeeRateGovernor",
             RpcRequest::GetFees => "getFees",
@@ -156,12 +168,18 @@ impl fmt::Display for RpcRequest {
             RpcRequest::GetLeaderSchedule => "getLeaderSchedule",
             RpcRequest::GetMaxRetransmitSlot => "getMaxRetransmitSlot",
             RpcRequest::GetMaxShredInsertSlot => "getMaxShredInsertSlot",
-            RpcRequest::GetMinimumBalanceForRentExemption => "getMinimumBalanceForRentExemption",
+            RpcRequest::GetMinimumBalanceForRentExemption => {
+                "getMinimumBalanceForRentExemption"
+            }
             RpcRequest::GetMultipleAccounts => "getMultipleAccounts",
             RpcRequest::GetProgramAccounts => "getProgramAccounts",
             RpcRequest::GetRecentBlockhash => "getRecentBlockhash",
-            RpcRequest::GetRecentPerformanceSamples => "getRecentPerformanceSamples",
-            RpcRequest::GetRecentPrioritizationFees => "getRecentPrioritizationFees",
+            RpcRequest::GetRecentPerformanceSamples => {
+                "getRecentPerformanceSamples"
+            }
+            RpcRequest::GetRecentPrioritizationFees => {
+                "getRecentPrioritizationFees"
+            }
             RpcRequest::GetHighestSnapshotSlot => "getHighestSnapshotSlot",
             RpcRequest::GetSnapshotSlot => "getSnapshotSlot",
             RpcRequest::GetSignaturesForAddress => "getSignaturesForAddress",
@@ -170,14 +188,18 @@ impl fmt::Display for RpcRequest {
             RpcRequest::GetSlotLeader => "getSlotLeader",
             RpcRequest::GetSlotLeaders => "getSlotLeaders",
             RpcRequest::GetStakeActivation => "getStakeActivation",
-            RpcRequest::GetStakeMinimumDelegation => "getStakeMinimumDelegation",
+            RpcRequest::GetStakeMinimumDelegation => {
+                "getStakeMinimumDelegation"
+            }
             RpcRequest::GetStorageTurn => "getStorageTurn",
             RpcRequest::GetStorageTurnRate => "getStorageTurnRate",
             RpcRequest::GetSlotsPerSegment => "getSlotsPerSegment",
             RpcRequest::GetStoragePubkeysForSlot => "getStoragePubkeysForSlot",
             RpcRequest::GetSupply => "getSupply",
             RpcRequest::GetTokenAccountBalance => "getTokenAccountBalance",
-            RpcRequest::GetTokenAccountsByDelegate => "getTokenAccountsByDelegate",
+            RpcRequest::GetTokenAccountsByDelegate => {
+                "getTokenAccountsByDelegate"
+            }
             RpcRequest::GetTokenAccountsByOwner => "getTokenAccountsByOwner",
             RpcRequest::GetTokenSupply => "getTokenSupply",
             RpcRequest::GetTokenLargestAccounts => "getTokenLargestAccounts",
@@ -280,10 +302,9 @@ pub enum TokenAccountsFilter {
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        solana_sdk::commitment_config::{CommitmentConfig, CommitmentLevel},
-    };
+    use solana_sdk::commitment_config::{CommitmentConfig, CommitmentLevel};
+
+    use super::*;
 
     #[test]
     fn test_build_request_json() {
@@ -347,12 +368,14 @@ mod tests {
         // Test request with CommitmentConfig and no params
         #[allow(deprecated)]
         let test_request = RpcRequest::GetRecentBlockhash;
-        let request = test_request.build_request_json(1, json!([commitment_config]));
+        let request =
+            test_request.build_request_json(1, json!([commitment_config]));
         assert_eq!(request["params"], json!([commitment_config.clone()]));
 
         // Test request with CommitmentConfig and params
         let test_request = RpcRequest::GetBalance;
-        let request = test_request.build_request_json(1, json!([addr, commitment_config]));
+        let request = test_request
+            .build_request_json(1, json!([addr, commitment_config]));
         assert_eq!(request["params"], json!([addr, commitment_config]));
 
         // NOTE: removed token related test

@@ -13,8 +13,12 @@ use sleipnir_bank::{
 };
 use solana_accounts_db::transaction_results::TransactionResults;
 use solana_measure::measure::Measure;
-use solana_program_runtime::timings::{ExecuteTimingType, ExecuteTimings, ThreadExecuteTimings};
-use solana_sdk::{clock::MAX_PROCESSING_AGE, pubkey::Pubkey, transaction::Result};
+use solana_program_runtime::timings::{
+    ExecuteTimingType, ExecuteTimings, ThreadExecuteTimings,
+};
+use solana_sdk::{
+    clock::MAX_PROCESSING_AGE, pubkey::Pubkey, transaction::Result,
+};
 use solana_transaction_status::token_balances::TransactionTokenBalancesSet;
 
 use crate::{
@@ -91,8 +95,9 @@ fn execute_batches_internal(
     use solana_measure::measure;
 
     assert!(!batches.is_empty());
-    let execution_timings_per_thread: Mutex<HashMap<usize, ThreadExecuteTimings>> =
-        Mutex::new(HashMap::new());
+    let execution_timings_per_thread: Mutex<
+        HashMap<usize, ThreadExecuteTimings>,
+    > = Mutex::new(HashMap::new());
 
     let mut execute_batches_elapsed = Measure::start("execute_batches_elapsed");
     let results: Vec<Result<()>> = PAR_THREAD_POOL.install(|| {
@@ -147,7 +152,9 @@ fn execute_batches_internal(
     first_err(&results)?;
 
     Ok(ExecuteBatchesInternalMetrics {
-        execution_timings_per_thread: execution_timings_per_thread.into_inner().unwrap(),
+        execution_timings_per_thread: execution_timings_per_thread
+            .into_inner()
+            .unwrap(),
         total_batches_len: batches.len() as u64,
         execute_batches_us: execute_batches_elapsed.as_us(),
     })
@@ -182,14 +189,15 @@ pub fn execute_batch(
         enable_return_data_recording: transaction_status_sender.is_some(),
     };
     let collect_balances = transaction_status_sender.is_some();
-    let (tx_results, balances) = batch.bank().load_execute_and_commit_transactions(
-        batch,
-        MAX_PROCESSING_AGE,
-        collect_balances,
-        recording_opts,
-        timings,
-        log_messages_bytes_limit,
-    );
+    let (tx_results, balances) =
+        batch.bank().load_execute_and_commit_transactions(
+            batch,
+            MAX_PROCESSING_AGE,
+            collect_balances,
+            recording_opts,
+            timings,
+            log_messages_bytes_limit,
+        );
 
     // NOTE: left out find_and_send_votes
 
@@ -209,8 +217,10 @@ pub fn execute_batch(
             vec![]
         };
 
-        let token_balances =
-            TransactionTokenBalancesSet::new(pre_token_balances, post_token_balances);
+        let token_balances = TransactionTokenBalancesSet::new(
+            pre_token_balances,
+            post_token_balances,
+        );
 
         transaction_status_sender.send_transaction_status_batch(
             bank.clone(),

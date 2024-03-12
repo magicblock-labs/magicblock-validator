@@ -1,8 +1,7 @@
 // NOTE: from core/src/banking_stage/read_write_account_set.rs
-use {
-    solana_sdk::{message::SanitizedMessage, pubkey::Pubkey},
-    std::collections::HashSet,
-};
+use std::collections::HashSet;
+
+use solana_sdk::{message::SanitizedMessage, pubkey::Pubkey};
 
 /// Wrapper struct to accumulate locks for a batch of transactions.
 #[derive(Debug, Default)]
@@ -33,17 +32,16 @@ impl ReadWriteAccountSet {
     /// Add all account locks.
     /// Returns true if all account locks were available and false otherwise.
     pub fn take_locks(&mut self, message: &SanitizedMessage) -> bool {
-        message
-            .account_keys()
-            .iter()
-            .enumerate()
-            .fold(true, |all_available, (index, pubkey)| {
+        message.account_keys().iter().enumerate().fold(
+            true,
+            |all_available, (index, pubkey)| {
                 if message.is_writable(index) {
                     all_available & self.add_write(pubkey)
                 } else {
                     all_available & self.add_read(pubkey)
                 }
-            })
+            },
+        )
     }
 
     /// Clears the read and write sets
@@ -84,7 +82,9 @@ impl ReadWriteAccountSet {
 #[cfg(test)]
 mod tests {
     // NOTE: removed some tests that had dependency on ledger
-    use {super::ReadWriteAccountSet, solana_sdk::pubkey::Pubkey};
+    use solana_sdk::pubkey::Pubkey;
+
+    use super::ReadWriteAccountSet;
 
     #[test]
     pub fn test_write_write_conflict() {

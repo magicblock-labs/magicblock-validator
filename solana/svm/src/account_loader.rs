@@ -1,41 +1,44 @@
-use {
-    crate::{
-        account_overrides::AccountOverrides, account_rent_state::RentState,
-        transaction_error_metrics::TransactionErrorMetrics,
-        transaction_processor::TransactionProcessingCallback,
+use std::{collections::HashMap, num::NonZeroUsize};
+
+use itertools::Itertools;
+use log::warn;
+use solana_accounts_db::accounts::{
+    LoadedTransaction, TransactionLoadResult, TransactionRent,
+};
+use solana_program_runtime::{
+    compute_budget_processor::process_compute_budget_instructions,
+    loaded_programs::LoadedProgramsForTxBatch,
+};
+use solana_sdk::{
+    account::{
+        create_executable_meta, is_builtin, is_executable, Account,
+        AccountSharedData, ReadableAccount, WritableAccount,
     },
-    itertools::Itertools,
-    log::warn,
-    solana_accounts_db::accounts::{LoadedTransaction, TransactionLoadResult, TransactionRent},
-    solana_program_runtime::{
-        compute_budget_processor::process_compute_budget_instructions,
-        loaded_programs::LoadedProgramsForTxBatch,
-    },
-    solana_sdk::{
-        account::{
-            create_executable_meta, is_builtin, is_executable, Account, AccountSharedData,
-            ReadableAccount, WritableAccount,
-        },
-        feature_set::{self, include_loaded_accounts_data_size_in_fee_calculation},
-        fee::FeeStructure,
-        message::SanitizedMessage,
-        native_loader,
-        nonce::State as NonceState,
-        nonce_info::{NonceFull, NoncePartial},
-        pubkey::Pubkey,
-        rent::RentDue,
-        rent_collector::{RentCollector, RENT_EXEMPT_RENT_EPOCH},
-        rent_debits::RentDebits,
-        saturating_add_assign,
-        sysvar::{self, instructions::construct_instructions_data},
-        transaction::{self, Result, SanitizedTransaction, TransactionError},
-        transaction_context::IndexOfAccount,
-    },
-    solana_system_program::{get_system_account_kind, SystemAccountKind},
-    std::{collections::HashMap, num::NonZeroUsize},
+    feature_set::{self, include_loaded_accounts_data_size_in_fee_calculation},
+    fee::FeeStructure,
+    message::SanitizedMessage,
+    native_loader,
+    nonce::State as NonceState,
+    nonce_info::{NonceFull, NoncePartial},
+    pubkey::Pubkey,
+    rent::RentDue,
+    rent_collector::{RentCollector, RENT_EXEMPT_RENT_EPOCH},
+    rent_debits::RentDebits,
+    saturating_add_assign,
+    sysvar::{self, instructions::construct_instructions_data},
+    transaction::{self, Result, SanitizedTransaction, TransactionError},
+    transaction_context::IndexOfAccount,
+};
+use solana_system_program::{get_system_account_kind, SystemAccountKind};
+
+use crate::{
+    account_overrides::AccountOverrides, account_rent_state::RentState,
+    transaction_error_metrics::TransactionErrorMetrics,
+    transaction_processor::TransactionProcessingCallback,
 };
 
-pub type TransactionCheckResult = (transaction::Result<()>, Option<NoncePartial>, Option<u64>);
+pub type TransactionCheckResult =
+    (transaction::Result<()>, Option<NoncePartial>, Option<u64>);
 
 #[allow(clippy::too_many_arguments)]
 pub fn load_accounts<CB: TransactionProcessingCallback>(
@@ -269,13 +272,16 @@ fn load_transaction_accounts<CB: TransactionProcessingCallback>(
                 return Ok(account_indices);
             }
 
-            let account_found = accounts_found.get(program_index).unwrap_or(&true);
+            let account_found =
+                accounts_found.get(program_index).unwrap_or(&true);
             if !account_found {
                 error_counters.account_not_found += 1;
                 return Err(TransactionError::ProgramAccountNotFound);
             }
 
-            if !(is_builtin(program_account) || is_executable(program_account, &feature_set)) {
+            if !(is_builtin(program_account)
+                || is_executable(program_account, &feature_set))
+            {
                 error_counters.invalid_program_for_execution += 1;
                 return Err(TransactionError::InvalidProgramForExecution);
             }
@@ -293,13 +299,17 @@ fn load_transaction_accounts<CB: TransactionProcessingCallback>(
                 builtins_start_index.saturating_add(owner_index)
             } else {
                 let owner_index = accounts.len();
-                if let Some(owner_account) = callbacks.get_account_shared_data(owner_id) {
+                if let Some(owner_account) =
+                    callbacks.get_account_shared_data(owner_id)
+                {
                     if !native_loader::check_id(owner_account.owner())
                         || !(is_builtin(&owner_account)
                             || is_executable(&owner_account, &feature_set))
                     {
                         error_counters.invalid_program_for_execution += 1;
-                        return Err(TransactionError::InvalidProgramForExecution);
+                        return Err(
+                            TransactionError::InvalidProgramForExecution,
+                        );
                     }
                     accumulate_and_check_loaded_account_data_size(
                         &mut accumulated_accounts_data_size,
@@ -336,12 +346,14 @@ fn load_transaction_accounts<CB: TransactionProcessingCallback>(
 fn get_requested_loaded_accounts_data_size_limit(
     tx: &SanitizedTransaction,
 ) -> Result<Option<NonZeroUsize>> {
-    let compute_budget_limits =
-        process_compute_budget_instructions(tx.message().program_instructions_iter())
-            .unwrap_or_default();
+    let compute_budget_limits = process_compute_budget_instructions(
+        tx.message().program_instructions_iter(),
+    )
+    .unwrap_or_default();
     // sanitize against setting size limit to zero
     NonZeroUsize::new(
-        usize::try_from(compute_budget_limits.loaded_accounts_bytes).unwrap_or_default(),
+        usize::try_from(compute_budget_limits.loaded_accounts_bytes)
+            .unwrap_or_default(),
     )
     .map_or(
         Err(TransactionError::InvalidLoadedAccountsDataSizeLimit),
@@ -376,9 +388,16 @@ fn accumulate_and_check_loaded_account_data_size(
     requested_loaded_accounts_data_size_limit: Option<NonZeroUsize>,
     error_counters: &mut TransactionErrorMetrics,
 ) -> Result<()> {
-    if let Some(requested_loaded_accounts_data_size) = requested_loaded_accounts_data_size_limit {
-        saturating_add_assign!(*accumulated_loaded_accounts_data_size, account_data_size);
-        if *accumulated_loaded_accounts_data_size > requested_loaded_accounts_data_size.get() {
+    if let Some(requested_loaded_accounts_data_size) =
+        requested_loaded_accounts_data_size_limit
+    {
+        saturating_add_assign!(
+            *accumulated_loaded_accounts_data_size,
+            account_data_size
+        );
+        if *accumulated_loaded_accounts_data_size
+            > requested_loaded_accounts_data_size.get()
+        {
             error_counters.max_loaded_accounts_data_size_exceeded += 1;
             Err(TransactionError::MaxLoadedAccountsDataSizeExceeded)
         } else {
@@ -401,10 +420,11 @@ pub fn validate_fee_payer(
         error_counters.account_not_found += 1;
         return Err(TransactionError::AccountNotFound);
     }
-    let system_account_kind = get_system_account_kind(payer_account).ok_or_else(|| {
-        error_counters.invalid_account_for_fee += 1;
-        TransactionError::InvalidAccountForFee
-    })?;
+    let system_account_kind = get_system_account_kind(payer_account)
+        .ok_or_else(|| {
+            error_counters.invalid_account_for_fee += 1;
+            TransactionError::InvalidAccountForFee
+        })?;
     let min_balance = match system_account_kind {
         SystemAccountKind::System => 0,
         SystemAccountKind::Nonce => {
@@ -423,12 +443,14 @@ pub fn validate_fee_payer(
             TransactionError::InsufficientFundsForFee
         })?;
 
-    let payer_pre_rent_state = RentState::from_account(payer_account, &rent_collector.rent);
+    let payer_pre_rent_state =
+        RentState::from_account(payer_account, &rent_collector.rent);
     payer_account
         .checked_sub_lamports(fee)
         .map_err(|_| TransactionError::InsufficientFundsForFee)?;
 
-    let payer_post_rent_state = RentState::from_account(payer_account, &rent_collector.rent);
+    let payer_post_rent_state =
+        RentState::from_account(payer_account, &rent_collector.rent);
     RentState::check_rent_state_with_account(
         &payer_pre_rent_state,
         &payer_post_rent_state,
@@ -438,7 +460,9 @@ pub fn validate_fee_payer(
     )
 }
 
-pub fn construct_instructions_account(message: &SanitizedMessage) -> AccountSharedData {
+pub fn construct_instructions_account(
+    message: &SanitizedMessage,
+) -> AccountSharedData {
     AccountSharedData::from(Account {
         data: construct_instructions_data(&message.decompile_instructions()),
         owner: sysvar::id(),
@@ -448,33 +472,35 @@ pub fn construct_instructions_account(message: &SanitizedMessage) -> AccountShar
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        nonce::state::Versions as NonceVersions,
-        solana_accounts_db::{accounts::Accounts, accounts_db::AccountsDb, ancestors::Ancestors},
-        solana_program_runtime::{
-            compute_budget_processor,
-            prioritization_fee::{PrioritizationFeeDetails, PrioritizationFeeType},
-        },
-        solana_sdk::{
-            account::{AccountSharedData, WritableAccount},
-            bpf_loader_upgradeable,
-            compute_budget::ComputeBudgetInstruction,
-            epoch_schedule::EpochSchedule,
-            feature_set::FeatureSet,
-            hash::Hash,
-            instruction::CompiledInstruction,
-            message::{Message, SanitizedMessage},
-            nonce,
-            rent::Rent,
-            rent_collector::RentCollector,
-            signature::{Keypair, Signer},
-            system_program, sysvar,
-            transaction::{Result, Transaction, TransactionError},
-            transaction_context::TransactionAccount,
-        },
-        std::{convert::TryFrom, sync::Arc},
+    use std::{convert::TryFrom, sync::Arc};
+
+    use nonce::state::Versions as NonceVersions;
+    use solana_accounts_db::{
+        accounts::Accounts, accounts_db::AccountsDb, ancestors::Ancestors,
     };
+    use solana_program_runtime::{
+        compute_budget_processor,
+        prioritization_fee::{PrioritizationFeeDetails, PrioritizationFeeType},
+    };
+    use solana_sdk::{
+        account::{AccountSharedData, WritableAccount},
+        bpf_loader_upgradeable,
+        compute_budget::ComputeBudgetInstruction,
+        epoch_schedule::EpochSchedule,
+        feature_set::FeatureSet,
+        hash::Hash,
+        instruction::CompiledInstruction,
+        message::{Message, SanitizedMessage},
+        nonce,
+        rent::Rent,
+        rent_collector::RentCollector,
+        signature::{Keypair, Signer},
+        system_program, sysvar,
+        transaction::{Result, Transaction, TransactionError},
+        transaction_context::TransactionAccount,
+    };
+
+    use super::*;
 
     struct TestCallbacks {
         accounts: Accounts,
@@ -484,11 +510,18 @@ mod tests {
     }
 
     impl TransactionProcessingCallback for TestCallbacks {
-        fn account_matches_owners(&self, _account: &Pubkey, _owners: &[Pubkey]) -> Option<usize> {
+        fn account_matches_owners(
+            &self,
+            _account: &Pubkey,
+            _owners: &[Pubkey],
+        ) -> Option<usize> {
             None
         }
 
-        fn get_account_shared_data(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
+        fn get_account_shared_data(
+            &self,
+            pubkey: &Pubkey,
+        ) -> Option<AccountSharedData> {
             self.accounts
                 .load_without_fixed_root(&self.ancestors, pubkey)
                 .map(|(acc, _slot)| acc)
@@ -523,7 +556,8 @@ mod tests {
         }
 
         let ancestors = vec![(0, 0)].into_iter().collect();
-        feature_set.deactivate(&feature_set::disable_rent_fees_collection::id());
+        feature_set
+            .deactivate(&feature_set::disable_rent_fees_collection::id());
         let sanitized_tx = SanitizedTransaction::from_transaction_for_tests(tx);
         let callbacks = TestCallbacks {
             accounts,
@@ -607,7 +641,8 @@ mod tests {
             instructions,
         );
 
-        let loaded_accounts = load_accounts_aux_test(tx, &accounts, &mut error_counters);
+        let loaded_accounts =
+            load_accounts_aux_test(tx, &accounts, &mut error_counters);
 
         assert_eq!(error_counters.account_not_found, 1);
         assert_eq!(loaded_accounts.len(), 1);
@@ -641,7 +676,8 @@ mod tests {
             instructions,
         );
 
-        let loaded_accounts = load_accounts_aux_test(tx, &accounts, &mut error_counters);
+        let loaded_accounts =
+            load_accounts_aux_test(tx, &accounts, &mut error_counters);
 
         assert_eq!(error_counters.account_not_found, 1);
         assert_eq!(loaded_accounts.len(), 1);
@@ -676,9 +712,11 @@ mod tests {
         let fee = FeeStructure::default().calculate_fee(
             &message,
             lamports_per_signature,
-            &process_compute_budget_instructions(message.program_instructions_iter())
-                .unwrap_or_default()
-                .into(),
+            &process_compute_budget_instructions(
+                message.program_instructions_iter(),
+            )
+            .unwrap_or_default()
+            .into(),
             false,
         );
         assert_eq!(fee, lamports_per_signature);
@@ -707,7 +745,8 @@ mod tests {
         let keypair = Keypair::new();
         let key0 = keypair.pubkey();
 
-        let account = AccountSharedData::new(1, 1, &solana_sdk::pubkey::new_rand()); // <-- owner is not the system program
+        let account =
+            AccountSharedData::new(1, 1, &solana_sdk::pubkey::new_rand()); // <-- owner is not the system program
         accounts.push((key0, account));
 
         let instructions = vec![CompiledInstruction::new(1, &(), vec![0])];
@@ -719,7 +758,8 @@ mod tests {
             instructions,
         );
 
-        let loaded_accounts = load_accounts_aux_test(tx, &accounts, &mut error_counters);
+        let loaded_accounts =
+            load_accounts_aux_test(tx, &accounts, &mut error_counters);
 
         assert_eq!(error_counters.invalid_account_for_fee, 1);
         assert_eq!(loaded_accounts.len(), 1);
@@ -742,13 +782,16 @@ mod tests {
                 ..Rent::default()
             },
         );
-        let min_balance = rent_collector.rent.minimum_balance(NonceState::size());
+        let min_balance =
+            rent_collector.rent.minimum_balance(NonceState::size());
         let nonce = Keypair::new();
         let mut accounts = vec![(
             nonce.pubkey(),
             AccountSharedData::new_data(
                 min_balance + lamports_per_signature,
-                &NonceVersions::new(NonceState::Initialized(nonce::state::Data::default())),
+                &NonceVersions::new(NonceState::Initialized(
+                    nonce::state::Data::default(),
+                )),
                 &system_program::id(),
             )
             .unwrap(),
@@ -836,8 +879,12 @@ mod tests {
             instructions,
         );
 
-        let loaded_accounts =
-            load_accounts_with_excluded_features(tx, &accounts, &mut error_counters, None);
+        let loaded_accounts = load_accounts_with_excluded_features(
+            tx,
+            &accounts,
+            &mut error_counters,
+            None,
+        );
 
         assert_eq!(error_counters.account_not_found, 0);
         assert_eq!(loaded_accounts.len(), 1);
@@ -878,7 +925,8 @@ mod tests {
             instructions,
         );
 
-        let loaded_accounts = load_accounts_aux_test(tx, &accounts, &mut error_counters);
+        let loaded_accounts =
+            load_accounts_aux_test(tx, &accounts, &mut error_counters);
 
         assert_eq!(error_counters.account_not_found, 1);
         assert_eq!(loaded_accounts.len(), 1);
@@ -912,7 +960,8 @@ mod tests {
             instructions,
         );
 
-        let loaded_accounts = load_accounts_aux_test(tx, &accounts, &mut error_counters);
+        let loaded_accounts =
+            load_accounts_aux_test(tx, &accounts, &mut error_counters);
 
         assert_eq!(error_counters.invalid_program_for_execution, 1);
         assert_eq!(loaded_accounts.len(), 1);
@@ -961,8 +1010,12 @@ mod tests {
             instructions,
         );
 
-        let loaded_accounts =
-            load_accounts_with_excluded_features(tx, &accounts, &mut error_counters, None);
+        let loaded_accounts = load_accounts_with_excluded_features(
+            tx,
+            &accounts,
+            &mut error_counters,
+            None,
+        );
 
         assert_eq!(error_counters.account_not_found, 0);
         assert_eq!(loaded_accounts.len(), 1);
@@ -973,15 +1026,21 @@ mod tests {
                 assert_eq!(loaded_transaction.program_indices.len(), 2);
                 assert_eq!(loaded_transaction.program_indices[0].len(), 1);
                 assert_eq!(loaded_transaction.program_indices[1].len(), 2);
-                for program_indices in loaded_transaction.program_indices.iter() {
-                    for (i, program_index) in program_indices.iter().enumerate() {
+                for program_indices in loaded_transaction.program_indices.iter()
+                {
+                    for (i, program_index) in program_indices.iter().enumerate()
+                    {
                         // +1 to skip first not loader account
                         assert_eq!(
-                            loaded_transaction.accounts[*program_index as usize].0,
+                            loaded_transaction.accounts
+                                [*program_index as usize]
+                                .0,
                             accounts[i + 1].0
                         );
                         assert_eq!(
-                            loaded_transaction.accounts[*program_index as usize].1,
+                            loaded_transaction.accounts
+                                [*program_index as usize]
+                                .1,
                             accounts[i + 1].1
                         );
                     }
@@ -1063,7 +1122,8 @@ mod tests {
             instructions,
         );
 
-        let loaded_accounts = load_accounts_no_store(accounts, tx, Some(&account_overrides));
+        let loaded_accounts =
+            load_accounts_no_store(accounts, tx, Some(&account_overrides));
         assert_eq!(loaded_accounts.len(), 1);
         let loaded_transaction = loaded_accounts[0].0.as_ref().unwrap();
         assert_eq!(loaded_transaction.accounts[0].0, keypair.pubkey());
@@ -1128,22 +1188,25 @@ mod tests {
             expected_result: &Result<Option<NonZeroUsize>>,
         ) {
             let payer_keypair = Keypair::new();
-            let tx = SanitizedTransaction::from_transaction_for_tests(Transaction::new(
-                &[&payer_keypair],
-                Message::new(instructions, Some(&payer_keypair.pubkey())),
-                Hash::default(),
-            ));
+            let tx = SanitizedTransaction::from_transaction_for_tests(
+                Transaction::new(
+                    &[&payer_keypair],
+                    Message::new(instructions, Some(&payer_keypair.pubkey())),
+                    Hash::default(),
+                ),
+            );
             assert_eq!(
                 *expected_result,
                 get_requested_loaded_accounts_data_size_limit(&tx)
             );
         }
 
-        let tx_not_set_limit = &[solana_sdk::instruction::Instruction::new_with_bincode(
-            Pubkey::new_unique(),
-            &0_u8,
-            vec![],
-        )];
+        let tx_not_set_limit =
+            &[solana_sdk::instruction::Instruction::new_with_bincode(
+                Pubkey::new_unique(),
+                &0_u8,
+                vec![],
+            )];
         let tx_set_limit_99 =
             &[
                 solana_sdk::compute_budget::ComputeBudgetInstruction::set_loaded_accounts_data_size_limit(99u32),
@@ -1164,7 +1227,8 @@ mod tests {
         ));
         let result_requested_limit: Result<Option<NonZeroUsize>> =
             Ok(Some(NonZeroUsize::new(99).unwrap()));
-        let result_invalid_limit = Err(TransactionError::InvalidLoadedAccountsDataSizeLimit);
+        let result_invalid_limit =
+            Err(TransactionError::InvalidLoadedAccountsDataSizeLimit);
 
         // the results should be:
         //    if tx doesn't set limit, then default limit (64MiB)
@@ -1190,12 +1254,15 @@ mod tests {
         let keypair = Keypair::new();
         let key0 = keypair.pubkey();
         // set up account with balance of `prioritization_fee`
-        let account = AccountSharedData::new(prioritization_fee, 0, &Pubkey::default());
+        let account =
+            AccountSharedData::new(prioritization_fee, 0, &Pubkey::default());
         let accounts = vec![(key0, account)];
 
         let instructions = &[
             ComputeBudgetInstruction::set_compute_unit_limit(request_units),
-            ComputeBudgetInstruction::set_compute_unit_price(request_unit_price),
+            ComputeBudgetInstruction::set_compute_unit_price(
+                request_unit_price,
+            ),
         ];
         let tx = Transaction::new(
             &[&keypair],
@@ -1207,9 +1274,11 @@ mod tests {
         let fee = FeeStructure::default().calculate_fee(
             &message,
             lamports_per_signature,
-            &process_compute_budget_instructions(message.program_instructions_iter())
-                .unwrap_or_default()
-                .into(),
+            &process_compute_budget_instructions(
+                message.program_instructions_iter(),
+            )
+            .unwrap_or_default()
+            .into(),
             false,
         );
         assert_eq!(fee, lamports_per_signature + prioritization_fee);
@@ -1248,12 +1317,18 @@ mod tests {
         let mut account = if test_parameter.is_nonce {
             AccountSharedData::new_data(
                 test_parameter.payer_init_balance,
-                &NonceVersions::new(NonceState::Initialized(nonce::state::Data::default())),
+                &NonceVersions::new(NonceState::Initialized(
+                    nonce::state::Data::default(),
+                )),
                 &system_program::id(),
             )
             .unwrap()
         } else {
-            AccountSharedData::new(test_parameter.payer_init_balance, 0, &system_program::id())
+            AccountSharedData::new(
+                test_parameter.payer_init_balance,
+                0,
+                &system_program::id(),
+            )
         };
         let result = validate_fee_payer(
             &payer_account_keys.pubkey(),
@@ -1279,7 +1354,8 @@ mod tests {
                 ..Rent::default()
             },
         );
-        let min_balance = rent_collector.rent.minimum_balance(NonceState::size());
+        let min_balance =
+            rent_collector.rent.minimum_balance(NonceState::size());
         let fee = 5_000;
 
         // If payer account has sufficient balance, expect successful fee deduction,
@@ -1325,7 +1401,9 @@ mod tests {
                         is_nonce,
                         payer_init_balance: min_balance + fee - 1,
                         fee,
-                        expected_result: Err(TransactionError::InsufficientFundsForFee),
+                        expected_result: Err(
+                            TransactionError::InsufficientFundsForFee,
+                        ),
                         payer_post_balance: min_balance + fee - 1,
                     },
                     &rent_collector,

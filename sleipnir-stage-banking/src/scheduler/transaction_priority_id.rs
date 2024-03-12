@@ -1,9 +1,8 @@
 // NOTE: from core/src/banking_stage/transaction_scheduler/transaction_priority_id.rs
-use {
-    prio_graph::TopLevelId,
-    sleipnir_messaging::scheduler_messages::TransactionId,
-    std::hash::{Hash, Hasher},
-};
+use std::hash::{Hash, Hasher};
+
+use prio_graph::TopLevelId;
+use sleipnir_messaging::scheduler_messages::TransactionId;
 
 /// A unique identifier tied with priority ordering for a transaction/packet:
 ///     - `id` has no effect on ordering

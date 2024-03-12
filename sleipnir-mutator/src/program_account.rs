@@ -21,7 +21,9 @@ pub fn adjust_deployment_slot(
     deployment_slot: u64,
 ) -> MutatorResult<()> {
     if loader_v4::check_id(&program_account.owner) {
-        if let Ok(data) = solana_loader_v4_program::get_state(&program_account.data) {
+        if let Ok(data) =
+            solana_loader_v4_program::get_state(&program_account.data)
+        {
             let LoaderV4State {
                 slot: _,
                 authority_address: _,
@@ -29,7 +31,9 @@ pub fn adjust_deployment_slot(
             } = data;
             // TODO: figure out how to set state (only a get_state method exists)
             // solana/svm/src/transaction_processor.rs :817
-            return Err(MutatorError::NotYetSupportingCloningSolanaLoader4Programs);
+            return Err(
+                MutatorError::NotYetSupportingCloningSolanaLoader4Programs,
+            );
         }
     }
 
@@ -88,9 +92,8 @@ mod tests {
     use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
     use test_tools::init_logger;
 
-    use crate::get_executable_address;
-
     use super::*;
+    use crate::get_executable_address;
 
     #[test]
     fn upgradable_loader_program_slot() {
@@ -98,7 +101,8 @@ mod tests {
 
         let upgrade_authority = Pubkey::new_unique();
         let program_addr = Pubkey::new_unique();
-        let programdata_address = get_executable_address(&program_addr.to_string()).unwrap();
+        let programdata_address =
+            get_executable_address(&program_addr.to_string()).unwrap();
 
         let program_data = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
         let deployment_slot = 9999;
@@ -118,11 +122,12 @@ mod tests {
         };
 
         let mut programdata_account = {
-            let mut data = bincode::serialize(&UpgradeableLoaderState::ProgramData {
-                slot: deployment_slot,
-                upgrade_authority_address: Some(upgrade_authority),
-            })
-            .unwrap();
+            let mut data =
+                bincode::serialize(&UpgradeableLoaderState::ProgramData {
+                    slot: deployment_slot,
+                    upgrade_authority_address: Some(upgrade_authority),
+                })
+                .unwrap();
             data.extend_from_slice(&program_data);
 
             Account {
@@ -144,7 +149,8 @@ mod tests {
         )
         .unwrap();
 
-        let programdata_meta: UpgradeableLoaderState = programdata_account.state().unwrap();
+        let programdata_meta: UpgradeableLoaderState =
+            programdata_account.state().unwrap();
         let programdata_data = programdata_account.data
             [UpgradeableLoaderState::size_of_programdata_metadata()..]
             .to_vec();

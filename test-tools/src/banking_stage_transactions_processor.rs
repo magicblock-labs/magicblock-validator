@@ -10,7 +10,9 @@ use sleipnir_bank::{
 };
 use sleipnir_messaging::{banking_tracer::BankingTracer, BankingPacketBatch};
 use sleipnir_stage_banking::banking_stage::BankingStage;
-use sleipnir_transaction_status::{TransactionStatusMessage, TransactionStatusSender};
+use sleipnir_transaction_status::{
+    TransactionStatusMessage, TransactionStatusSender,
+};
 use solana_perf::packet::{to_packet_batches, PacketBatch};
 use solana_sdk::transaction::{SanitizedTransaction, Transaction};
 
@@ -48,7 +50,8 @@ pub struct BankingStageTransactionsProcessor {
 
 impl BankingStageTransactionsProcessor {
     pub fn new(config: BankingStageTransactionsProcessorConfig) -> Self {
-        let GenesisConfigInfo { genesis_config, .. } = create_genesis_config(u64::MAX);
+        let GenesisConfigInfo { genesis_config, .. } =
+            create_genesis_config(u64::MAX);
         let bank = Bank::new_for_tests(&genesis_config);
         let bank = Arc::new(bank);
 
@@ -69,10 +72,13 @@ impl TransactionsProcessor for BankingStageTransactionsProcessor {
     ) -> Result<TransactionsProcessorProcessResult, String> {
         // 1. Track Transaction Execution
         let banking_tracer = BankingTracer::new_disabled();
-        let (non_vote_sender, non_vote_receiver) = banking_tracer.create_channel_non_vote();
+        let (non_vote_sender, non_vote_receiver) =
+            banking_tracer.create_channel_non_vote();
 
-        let result = Arc::<RwLock<TransactionsProcessorProcessResult>>::default();
-        let (transaction_status_sender, tx_status_thread) = track_transactions(result.clone());
+        let result =
+            Arc::<RwLock<TransactionsProcessorProcessResult>>::default();
+        let (transaction_status_sender, tx_status_thread) =
+            track_transactions(result.clone());
 
         let banking_stage = BankingStage::new(
             non_vote_receiver,
@@ -83,7 +89,8 @@ impl TransactionsProcessor for BankingStageTransactionsProcessor {
         );
 
         // 2. Create Packet Batches from Transactions
-        let packet_batches = to_packet_batches(&transactions, self.config.send_chunk_size);
+        let packet_batches =
+            to_packet_batches(&transactions, self.config.send_chunk_size);
         let packet_batches = packet_batches
             .into_iter()
             .map(|batch| (batch, vec![1u8]))
@@ -120,7 +127,8 @@ impl TransactionsProcessor for BankingStageTransactionsProcessor {
         tx_status_thread.join().unwrap();
 
         // 6. Return the processed transactions
-        let transactions = result.write().unwrap().transactions.drain().collect();
+        let transactions =
+            result.write().unwrap().transactions.drain().collect();
         let balances = result.write().unwrap().balances.drain(0..).collect();
         Ok(TransactionsProcessorProcessResult {
             transactions,
@@ -158,12 +166,18 @@ fn track_transactions(
             match status {
                 Ok(TransactionStatusMessage::Batch(batch)) => {
                     result.write().unwrap().balances.push(batch.balances);
-                    for (idx, tx) in batch.transactions.into_iter().enumerate() {
+                    for (idx, tx) in batch.transactions.into_iter().enumerate()
+                    {
                         result.write().unwrap().transactions.insert(
                             *tx.signature(),
                             (
                                 tx,
-                                batch.execution_results.get(idx).cloned().unwrap().unwrap(),
+                                batch
+                                    .execution_results
+                                    .get(idx)
+                                    .cloned()
+                                    .unwrap()
+                                    .unwrap(),
                             ),
                         );
                     }
@@ -179,7 +193,9 @@ fn track_transactions(
     (transaction_status_sender, tx_status_handle)
 }
 
-fn convert_from_old_verified(mut with_vers: Vec<(PacketBatch, Vec<u8>)>) -> Vec<PacketBatch> {
+fn convert_from_old_verified(
+    mut with_vers: Vec<(PacketBatch, Vec<u8>)>,
+) -> Vec<PacketBatch> {
     with_vers.iter_mut().for_each(|(b, v)| {
         b.iter_mut()
             .zip(v)
@@ -191,20 +207,30 @@ fn convert_from_old_verified(mut with_vers: Vec<(PacketBatch, Vec<u8>)>) -> Vec<
 #[cfg(test)]
 mod tests {
     use sleipnir_bank::bank_dev_utils::transactions::create_funded_accounts;
-    use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, system_transaction};
-
-    use crate::{diagnostics::log_exec_details, init_logger};
+    use solana_sdk::{
+        native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, system_transaction,
+    };
 
     use super::*;
+    use crate::{diagnostics::log_exec_details, init_logger};
 
     #[tokio::test]
     async fn test_system_transfer_enough_funds() {
         init_logger!();
         let tx_processor = BankingStageTransactionsProcessor::default();
-        let payers = create_funded_accounts(&tx_processor.bank, 1, Some(LAMPORTS_PER_SOL));
+        let payers = create_funded_accounts(
+            &tx_processor.bank,
+            1,
+            Some(LAMPORTS_PER_SOL),
+        );
         let start_hash = tx_processor.bank.last_blockhash();
         let to = Pubkey::new_unique();
-        let tx = system_transaction::transfer(&payers[0], &to, 890_880_000, start_hash);
+        let tx = system_transaction::transfer(
+            &payers[0],
+            &to,
+            890_880_000,
+            start_hash,
+        );
         let result = tx_processor.process(vec![tx]).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -224,10 +250,16 @@ mod tests {
     async fn test_system_transfer_not_enough_funds() {
         init_logger!();
         let tx_processor = BankingStageTransactionsProcessor::default();
-        let payers = create_funded_accounts(&tx_processor.bank, 1, Some(890_850_000));
+        let payers =
+            create_funded_accounts(&tx_processor.bank, 1, Some(890_850_000));
         let start_hash = tx_processor.bank.last_blockhash();
         let to = Pubkey::new_unique();
-        let tx = system_transaction::transfer(&payers[0], &to, 890_880_000, start_hash);
+        let tx = system_transaction::transfer(
+            &payers[0],
+            &to,
+            890_880_000,
+            start_hash,
+        );
         let result = tx_processor.process(vec![tx]).unwrap();
 
         assert_eq!(result.len(), 1);

@@ -1,8 +1,8 @@
 // NOTE: copied from bank/sysvar_cache.rs and tests removed
-use {
-    super::bank::Bank, solana_program_runtime::sysvar_cache::SysvarCache,
-    solana_sdk::account::ReadableAccount,
-};
+use solana_program_runtime::sysvar_cache::SysvarCache;
+use solana_sdk::account::ReadableAccount;
+
+use super::bank::Bank;
 
 impl Bank {
     pub(crate) fn fill_missing_sysvar_cache_entries(&self) {

@@ -1,12 +1,16 @@
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use solana_sdk::{
     account::{AccountSharedData, InheritableAccountFields, ReadableAccount},
     clock::INITIAL_RENT_EPOCH,
 };
-use std::time::{SystemTime, UNIX_EPOCH};
 
 /// Compute how much an account has changed size.  This function is useful when the data size delta
 /// needs to be computed and passed to an `update_accounts_data_size_delta` function.
-pub(super) fn calculate_data_size_delta(old_data_size: usize, new_data_size: usize) -> i64 {
+pub(super) fn calculate_data_size_delta(
+    old_data_size: usize,
+    new_data_size: usize,
+) -> i64 {
     assert!(old_data_size <= i64::MAX as usize);
     assert!(new_data_size <= i64::MAX as usize);
     let old_data_size = old_data_size as i64;

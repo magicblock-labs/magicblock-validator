@@ -1,20 +1,27 @@
 #![cfg(feature = "dev-context-only-utils")]
 
 use assert_matches::assert_matches;
-use sleipnir_bank::bank::Bank;
-use sleipnir_bank::bank_dev_utils::elfs;
-use sleipnir_bank::bank_dev_utils::elfs::add_elf_program;
-use sleipnir_bank::bank_dev_utils::transactions::{
-    create_noop_transaction, create_solx_send_post_transaction, create_system_allocate_transaction,
-    create_system_transfer_transaction, create_sysvars_from_account_transaction,
-    create_sysvars_get_transaction, execute_transactions, SolanaxPostAccounts,
+use sleipnir_bank::{
+    bank::Bank,
+    bank_dev_utils::{
+        elfs,
+        elfs::add_elf_program,
+        transactions::{
+            create_noop_transaction, create_solx_send_post_transaction,
+            create_system_allocate_transaction,
+            create_system_transfer_transaction,
+            create_sysvars_from_account_transaction,
+            create_sysvars_get_transaction, execute_transactions,
+            SolanaxPostAccounts,
+        },
+    },
+    transaction_results::TransactionBalancesSet,
+    LAMPORTS_PER_SIGNATURE,
 };
-use sleipnir_bank::transaction_results::TransactionBalancesSet;
-use sleipnir_bank::LAMPORTS_PER_SIGNATURE;
-use solana_sdk::account::ReadableAccount;
-use solana_sdk::genesis_config::create_genesis_config;
-use solana_sdk::native_token::LAMPORTS_PER_SOL;
-use solana_sdk::rent::Rent;
+use solana_sdk::{
+    account::ReadableAccount, genesis_config::create_genesis_config,
+    native_token::LAMPORTS_PER_SOL, rent::Rent,
+};
 use test_tools_core::init_logger;
 
 #[test]
@@ -24,8 +31,11 @@ fn test_bank_system_transfer_instruction() {
     let (genesis_config, _) = create_genesis_config(u64::MAX);
     let bank = Bank::new_for_tests(&genesis_config);
 
-    let (tx, from, to) =
-        create_system_transfer_transaction(&bank, LAMPORTS_PER_SOL, LAMPORTS_PER_SOL / 5);
+    let (tx, from, to) = create_system_transfer_transaction(
+        &bank,
+        LAMPORTS_PER_SOL,
+        LAMPORTS_PER_SOL / 5,
+    );
     let (results, balances) = execute_transactions(&bank, vec![tx]);
 
     const FROM_AFTER_BALANCE: u64 =
@@ -73,7 +83,8 @@ fn test_bank_system_allocate_instruction() {
     const SPACE: u64 = 100;
     let rent: u64 = Rent::default().minimum_balance(SPACE as usize);
 
-    let (tx, payer, account) = create_system_allocate_transaction(&bank, LAMPORTS_PER_SOL, SPACE);
+    let (tx, payer, account) =
+        create_system_allocate_transaction(&bank, LAMPORTS_PER_SOL, SPACE);
     let (results, balances) = execute_transactions(&bank, vec![tx]);
 
     // Result
@@ -131,7 +142,8 @@ fn test_bank_solx_instructions() {
     add_elf_program(&bank, &elfs::solanax::ID);
 
     // 2. Prepare Transaction and advance slot to activate solanax program
-    let (tx, SolanaxPostAccounts { author: _, post }) = create_solx_send_post_transaction(&bank);
+    let (tx, SolanaxPostAccounts { author: _, post }) =
+        create_solx_send_post_transaction(&bank);
     let sig = *tx.signature();
 
     bank.advance_slot();

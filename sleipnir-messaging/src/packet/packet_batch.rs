@@ -1,18 +1,19 @@
 // NOTE: from perf/src/packet.rs
 //! The `packet_batch` module defines data structures and methods to pull data from the network.
 
-use bincode::Options;
-use log::{error, trace};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
-use solana_frozen_abi_macro::AbiExample;
-use solana_perf::{cuda_runtime::PinnedVec, recycler::Recycler};
-pub use solana_sdk::packet::{Packet, PACKET_DATA_SIZE};
 use std::{
     io::Read,
     net::SocketAddr,
     ops::{Index, IndexMut},
     slice::{Iter, IterMut, SliceIndex},
 };
+
+use bincode::Options;
+use log::{error, trace};
+use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use solana_frozen_abi_macro::AbiExample;
+use solana_perf::{cuda_runtime::PinnedVec, recycler::Recycler};
+pub use solana_sdk::packet::{Packet, PACKET_DATA_SIZE};
 
 pub const NUM_PACKETS: usize = 1024 * 8;
 
@@ -78,14 +79,22 @@ impl PacketBatch {
         name: &'static str,
         dests_and_data: &[(SocketAddr, T)],
     ) -> Self {
-        let mut batch = Self::new_unpinned_with_recycler(recycler, dests_and_data.len(), name);
+        let mut batch = Self::new_unpinned_with_recycler(
+            recycler,
+            dests_and_data.len(),
+            name,
+        );
         batch
             .packets
             .resize(dests_and_data.len(), Packet::default());
 
-        for ((addr, data), packet) in dests_and_data.iter().zip(batch.packets.iter_mut()) {
+        for ((addr, data), packet) in
+            dests_and_data.iter().zip(batch.packets.iter_mut())
+        {
             if !addr.ip().is_unspecified() && addr.port() != 0 {
-                if let Err(e) = Packet::populate_packet(packet, Some(addr), &data) {
+                if let Err(e) =
+                    Packet::populate_packet(packet, Some(addr), &data)
+                {
                     // TODO: This should never happen. Instead the caller should
                     // break the payload into smaller messages, and here any errors
                     // should be propagated.
@@ -103,7 +112,8 @@ impl PacketBatch {
         name: &'static str,
         mut packets: Vec<Packet>,
     ) -> Self {
-        let mut batch = Self::new_unpinned_with_recycler(recycler, packets.len(), name);
+        let mut batch =
+            Self::new_unpinned_with_recycler(recycler, packets.len(), name);
         batch.packets.append(&mut packets);
         batch
     }
@@ -194,14 +204,20 @@ impl From<PacketBatch> for Vec<Packet> {
     }
 }
 
-pub fn to_packet_batches<T: Serialize>(items: &[T], chunk_size: usize) -> Vec<PacketBatch> {
+pub fn to_packet_batches<T: Serialize>(
+    items: &[T],
+    chunk_size: usize,
+) -> Vec<PacketBatch> {
     items
         .chunks(chunk_size)
         .map(|batch_items| {
             let mut batch = PacketBatch::with_capacity(batch_items.len());
             batch.resize(batch_items.len(), Packet::default());
-            for (item, packet) in batch_items.iter().zip(batch.packets.iter_mut()) {
-                Packet::populate_packet(packet, None, item).expect("serialize request");
+            for (item, packet) in
+                batch_items.iter().zip(batch.packets.iter_mut())
+            {
+                Packet::populate_packet(packet, None, item)
+                    .expect("serialize request");
             }
             batch
         })
@@ -229,20 +245,20 @@ where
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        solana_sdk::{
-            hash::Hash,
-            signature::{Keypair, Signer},
-            system_transaction,
-        },
+    use solana_sdk::{
+        hash::Hash,
+        signature::{Keypair, Signer},
+        system_transaction,
     };
+
+    use super::*;
 
     #[test]
     fn test_to_packet_batches() {
         let keypair = Keypair::new();
         let hash = Hash::new(&[1; 32]);
-        let tx = system_transaction::transfer(&keypair, &keypair.pubkey(), 1, hash);
+        let tx =
+            system_transaction::transfer(&keypair, &keypair.pubkey(), 1, hash);
         let rv = to_packet_batches_for_tests(&[tx.clone(); 1]);
         assert_eq!(rv.len(), 1);
         assert_eq!(rv[0].len(), 1);
@@ -263,7 +279,8 @@ mod tests {
     fn test_to_packets_pinning() {
         let recycler = PacketBatchRecycler::default();
         for i in 0..2 {
-            let _first_packets = PacketBatch::new_with_recycler(&recycler, i + 1, "first one");
+            let _first_packets =
+                PacketBatch::new_with_recycler(&recycler, i + 1, "first one");
         }
     }
 }

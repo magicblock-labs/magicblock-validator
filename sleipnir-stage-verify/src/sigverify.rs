@@ -4,14 +4,20 @@
 //! to the GPU.
 //!
 
-use sleipnir_messaging::sigverify_packet_stats::SigverifyTracerPacketStats;
-use sleipnir_messaging::{BankingPacketBatch, BankingPacketSender};
-use solana_perf::sigverify::{init, TxOffset};
-use {
-    crate::sigverify_stage::{SigVerifier, SigVerifyServiceError},
-    solana_perf::{cuda_runtime::PinnedVec, packet::PacketBatch, recycler::Recycler, sigverify},
-    solana_sdk::packet::Packet,
+use sleipnir_messaging::{
+    sigverify_packet_stats::SigverifyTracerPacketStats, BankingPacketBatch,
+    BankingPacketSender,
 };
+use solana_perf::{
+    cuda_runtime::PinnedVec,
+    packet::PacketBatch,
+    recycler::Recycler,
+    sigverify,
+    sigverify::{init, TxOffset},
+};
+use solana_sdk::packet::Packet;
+
+use crate::sigverify_stage::{SigVerifier, SigVerifyServiceError};
 
 pub struct TransactionSigVerifier {
     packet_sender: BankingPacketSender,
@@ -84,7 +90,8 @@ impl SigVerifier for TransactionSigVerifier {
         &mut self,
         packet_batches: Vec<PacketBatch>,
     ) -> Result<(), SigVerifyServiceError<Self::SendType>> {
-        let tracer_packet_stats_to_send = std::mem::take(&mut self.tracer_packet_stats);
+        let tracer_packet_stats_to_send =
+            std::mem::take(&mut self.tracer_packet_stats);
         self.packet_sender.send(BankingPacketBatch::new((
             packet_batches,
             Some(tracer_packet_stats_to_send),

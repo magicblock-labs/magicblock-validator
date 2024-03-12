@@ -1,10 +1,6 @@
 // NOTE: Adapted from core/src/banking_stage/consumer.rs
-use crate::{
-    committer::{CommitTransactionDetails, Committer},
-    metrics::LeaderExecuteAndCommitTimings,
-    qos_service::QosService,
-    results::{ExecuteAndCommitTransactionsOutput, ProcessTransactionBatchOutput},
-};
+use std::{collections::HashMap, sync::Arc};
+
 use itertools::Itertools;
 use log::trace;
 use sleipnir_bank::{
@@ -17,7 +13,8 @@ use sleipnir_tokens::token_balances::collect_token_balances;
 use sleipnir_transaction_status::token_balances::TransactionTokenBalance;
 use solana_measure::measure_us;
 use solana_program_runtime::{
-    compute_budget_processor::process_compute_budget_instructions, timings::ExecuteTimings,
+    compute_budget_processor::process_compute_budget_instructions,
+    timings::ExecuteTimings,
 };
 use solana_sdk::{
     clock::MAX_PROCESSING_AGE,
@@ -27,10 +24,19 @@ use solana_sdk::{
     transaction::{SanitizedTransaction, TransactionError},
 };
 use solana_svm::{
-    account_loader::validate_fee_payer, transaction_error_metrics::TransactionErrorMetrics,
+    account_loader::validate_fee_payer,
+    transaction_error_metrics::TransactionErrorMetrics,
     transaction_processor::TransactionProcessingCallback,
 };
-use std::{collections::HashMap, sync::Arc};
+
+use crate::{
+    committer::{CommitTransactionDetails, Committer},
+    metrics::LeaderExecuteAndCommitTimings,
+    qos_service::QosService,
+    results::{
+        ExecuteAndCommitTransactionsOutput, ProcessTransactionBatchOutput,
+    },
+};
 
 /// Consumer will create chunks of transactions from buffer with up to this size.
 pub const TARGET_NUM_TRANSACTIONS_PER_BATCH: usize = 64;
@@ -73,8 +79,10 @@ impl Consumer {
         error_counters: &mut TransactionErrorMetrics,
     ) -> Result<(), TransactionError> {
         let fee_payer = message.fee_payer();
-        let budget_limits =
-            process_compute_budget_instructions(message.program_instructions_iter())?.into();
+        let budget_limits = process_compute_budget_instructions(
+            message.program_instructions_iter(),
+        )?
+        .into();
         let fee = bank.fee_structure.calculate_fee(
             message,
             bank.get_lamports_per_signature(),
@@ -87,7 +95,10 @@ impl Consumer {
             .rc
             .accounts
             .accounts_db
-            .load_with_fixed_root(&bank.readlock_ancestors().unwrap(), fee_payer)
+            .load_with_fixed_root(
+                &bank.readlock_ancestors().unwrap(),
+                fee_payer,
+            )
             .ok_or(TransactionError::AccountNotFound)?;
 
         validate_fee_payer(
@@ -109,28 +120,36 @@ impl Consumer {
         // Need to filter out transactions since they were sanitized earlier.
         // This means that the transaction may cross and epoch boundary (not allowed),
         //  or account lookup tables may have been closed.
-        let pre_results = txs.iter().zip(max_slot_ages).map(|(tx, max_slot_age)| {
-            if *max_slot_age < bank.slot() {
-                // Attempt re-sanitization after epoch-cross.
-                // Re-sanitized transaction should be equal to the original transaction,
-                // but whether it will pass sanitization needs to be checked.
-                let resanitized_tx =
-                    bank.fully_verify_transaction(tx.to_versioned_transaction())?;
-                if resanitized_tx != *tx {
-                    // Sanitization before/after epoch give different transaction data - do not execute.
-                    return Err(TransactionError::ResanitizationNeeded);
+        let pre_results =
+            txs.iter().zip(max_slot_ages).map(|(tx, max_slot_age)| {
+                if *max_slot_age < bank.slot() {
+                    // Attempt re-sanitization after epoch-cross.
+                    // Re-sanitized transaction should be equal to the original transaction,
+                    // but whether it will pass sanitization needs to be checked.
+                    let resanitized_tx = bank.fully_verify_transaction(
+                        tx.to_versioned_transaction(),
+                    )?;
+                    if resanitized_tx != *tx {
+                        // Sanitization before/after epoch give different transaction data - do not execute.
+                        return Err(TransactionError::ResanitizationNeeded);
+                    }
+                } else {
+                    // Any transaction executed between sanitization time and now may have closed the lookup table(s).
+                    // Above re-sanitization already loads addresses, so don't need to re-check in that case.
+                    let lookup_tables =
+                        tx.message().message_address_table_lookups();
+                    if !lookup_tables.is_empty() {
+                        bank.load_addresses(lookup_tables)?;
+                    }
                 }
-            } else {
-                // Any transaction executed between sanitization time and now may have closed the lookup table(s).
-                // Above re-sanitization already loads addresses, so don't need to re-check in that case.
-                let lookup_tables = tx.message().message_address_table_lookups();
-                if !lookup_tables.is_empty() {
-                    bank.load_addresses(lookup_tables)?;
-                }
-            }
-            Ok(())
-        });
-        self.process_and_record_transactions_with_pre_results(bank, txs, 0, pre_results)
+                Ok(())
+            });
+        self.process_and_record_transactions_with_pre_results(
+            bank,
+            txs,
+            0,
+            pre_results,
+        )
     }
 
     fn process_and_record_transactions_with_pre_results(
@@ -141,24 +160,26 @@ impl Consumer {
         pre_results: impl Iterator<Item = Result<(), TransactionError>>,
     ) -> ProcessTransactionBatchOutput {
         let (
-            (transaction_qos_cost_results, cost_model_throttled_transactions_count),
+            (
+                transaction_qos_cost_results,
+                cost_model_throttled_transactions_count,
+            ),
             cost_model_us,
-        ) = measure_us!(self.qos_service.select_and_accumulate_transaction_costs(
-            bank,
-            txs,
-            pre_results
-        ));
+        ) = measure_us!(self
+            .qos_service
+            .select_and_accumulate_transaction_costs(bank, txs, pre_results));
 
         // Only lock accounts for those transactions are selected for the block;
         // Once accounts are locked, other threads cannot encode transactions that will modify the
         // same account state
-        let (batch, lock_us) = measure_us!(bank.prepare_sanitized_batch_with_results(
-            txs,
-            transaction_qos_cost_results.iter().map(|r| match r {
-                Ok(_cost) => Ok(()),
-                Err(err) => Err(err.clone()),
-            })
-        ));
+        let (batch, lock_us) = measure_us!(bank
+            .prepare_sanitized_batch_with_results(
+                txs,
+                transaction_qos_cost_results.iter().map(|r| match r {
+                    Ok(_cost) => Ok(()),
+                    Err(err) => Err(err.clone()),
+                })
+            ));
         // retryable_txs includes AccountInUse, WouldExceedMaxBlockCostLimit
         // WouldExceedMaxAccountCostLimit, WouldExceedMaxVoteCostLimit
         // and WouldExceedMaxAccountDataCostLimit
@@ -202,8 +223,9 @@ impl Consumer {
             .iter_mut()
             .for_each(|x| *x += chunk_offset);
 
-        let (cu, us) =
-            Self::accumulate_execute_units_and_time(&execute_and_commit_timings.execute_timings);
+        let (cu, us) = Self::accumulate_execute_units_and_time(
+            &execute_and_commit_timings.execute_timings,
+        );
         self.qos_service.accumulate_actual_execute_cu(cu);
         self.qos_service.accumulate_actual_execute_time(us);
 
@@ -230,8 +252,10 @@ impl Consumer {
         bank: &Arc<Bank>,
         batch: &TransactionBatch,
     ) -> ExecuteAndCommitTransactionsOutput {
-        let transaction_status_sender_enabled = self.committer.transaction_status_sender_enabled();
-        let mut execute_and_commit_timings = LeaderExecuteAndCommitTimings::default();
+        let transaction_status_sender_enabled =
+            self.committer.transaction_status_sender_enabled();
+        let mut execute_and_commit_timings =
+            LeaderExecuteAndCommitTimings::default();
 
         let mut pre_balance_info = PreBalanceInfo::default();
         let (_, collect_balances_us) = measure_us!({
@@ -239,8 +263,11 @@ impl Consumer {
             // pre-balances for native and token programs.
             if transaction_status_sender_enabled {
                 pre_balance_info.native = bank.collect_balances(batch);
-                pre_balance_info.token =
-                    collect_token_balances(bank, batch, &mut pre_balance_info.mint_decimals)
+                pre_balance_info.token = collect_token_balances(
+                    bank,
+                    batch,
+                    &mut pre_balance_info.mint_decimals,
+                )
             }
         });
         execute_and_commit_timings.collect_balances_us = collect_balances_us;
@@ -251,15 +278,17 @@ impl Consumer {
             .filter_map(|transaction| {
                 let round_compute_unit_price_enabled = false; // TODO get from working_bank.feature_set
                 transaction
-                    .get_compute_budget_details(round_compute_unit_price_enabled)
+                    .get_compute_budget_details(
+                        round_compute_unit_price_enabled,
+                    )
                     .map(|details| details.compute_unit_price)
             })
             .minmax();
         let (min_prioritization_fees, max_prioritization_fees) =
             min_max.into_option().unwrap_or_default();
 
-        let (load_and_execute_transactions_output, load_execute_us) = measure_us!(bank
-            .load_and_execute_transactions(
+        let (load_and_execute_transactions_output, load_execute_us) =
+            measure_us!(bank.load_and_execute_transactions(
                 batch,
                 MAX_PROCESSING_AGE,
                 TransactionExecutionRecordingOpts::recording_all_if(
@@ -308,28 +337,32 @@ impl Consumer {
 
         // Originally this was the result of record_transactions
         let starting_transaction_index = None;
-        let (commit_time_us, commit_transaction_statuses) = if executed_transactions_count != 0 {
-            self.committer.commit_transactions(
-                batch,
-                &mut loaded_transactions,
-                execution_results,
-                last_blockhash,
-                lamports_per_signature,
-                starting_transaction_index,
-                bank,
-                &mut pre_balance_info,
-                &mut execute_and_commit_timings,
-                signature_count,
-                executed_transactions_count,
-                executed_non_vote_transactions_count,
-                executed_with_successful_result_count,
-            )
-        } else {
-            (
-                0,
-                vec![CommitTransactionDetails::NotCommitted; execution_results.len()],
-            )
-        };
+        let (commit_time_us, commit_transaction_statuses) =
+            if executed_transactions_count != 0 {
+                self.committer.commit_transactions(
+                    batch,
+                    &mut loaded_transactions,
+                    execution_results,
+                    last_blockhash,
+                    lamports_per_signature,
+                    starting_transaction_index,
+                    bank,
+                    &mut pre_balance_info,
+                    &mut execute_and_commit_timings,
+                    signature_count,
+                    executed_transactions_count,
+                    executed_non_vote_transactions_count,
+                    executed_with_successful_result_count,
+                )
+            } else {
+                (
+                    0,
+                    vec![
+                        CommitTransactionDetails::NotCommitted;
+                        execution_results.len()
+                    ],
+                )
+            };
 
         drop(freeze_lock);
 
@@ -364,7 +397,9 @@ impl Consumer {
         }
     }
 
-    fn accumulate_execute_units_and_time(execute_timings: &ExecuteTimings) -> (u64, u64) {
+    fn accumulate_execute_units_and_time(
+        execute_timings: &ExecuteTimings,
+    ) -> (u64, u64) {
         execute_timings.details.per_program_timings.values().fold(
             (0, 0),
             |(units, times), program_timings| {

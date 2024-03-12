@@ -1,21 +1,20 @@
 // NOTE: from runtime/src/genesis_utils.rs
 // heavily updated to remove vote + stake related code as well as cluster type (defaulting to mainnet)
-use {
-    solana_accounts_db::inline_spl_token,
-    solana_sdk::{
-        account::{Account, AccountSharedData},
-        feature::{self, Feature},
-        feature_set::FeatureSet,
-        fee_calculator::FeeRateGovernor,
-        genesis_config::{ClusterType, GenesisConfig},
-        native_token::sol_to_lamports,
-        pubkey::Pubkey,
-        rent::Rent,
-        signature::{Keypair, Signer},
-        stake::state::StakeStateV2,
-        system_program,
-    },
-    std::borrow::Borrow,
+use std::borrow::Borrow;
+
+use solana_accounts_db::inline_spl_token;
+use solana_sdk::{
+    account::{Account, AccountSharedData},
+    feature::{self, Feature},
+    feature_set::FeatureSet,
+    fee_calculator::FeeRateGovernor,
+    genesis_config::{ClusterType, GenesisConfig},
+    native_token::sol_to_lamports,
+    pubkey::Pubkey,
+    rent::Rent,
+    signature::{Keypair, Signer},
+    stake::state::StakeStateV2,
+    system_program,
 };
 
 // Default amount received by the validator
@@ -82,7 +81,10 @@ pub fn create_genesis_config_with_vote_accounts(
     mint_lamports: u64,
     voting_keypairs: &[impl Borrow<ValidatorVoteKeypairs>],
 ) -> GenesisConfigInfo {
-    create_genesis_config_with_vote_accounts_and_cluster_type(mint_lamports, voting_keypairs)
+    create_genesis_config_with_vote_accounts_and_cluster_type(
+        mint_lamports,
+        voting_keypairs,
+    )
 }
 
 pub fn create_genesis_config_with_vote_accounts_and_cluster_type(
@@ -108,10 +110,12 @@ pub fn create_genesis_config_with_vote_accounts_and_cluster_type(
     };
 
     for validator_voting_keypairs in voting_keypairs[1..].iter() {
-        let node_pubkey = validator_voting_keypairs.borrow().node_keypair.pubkey();
+        let node_pubkey =
+            validator_voting_keypairs.borrow().node_keypair.pubkey();
 
         // Create accounts
-        let node_account = Account::new(VALIDATOR_LAMPORTS, 0, &system_program::id());
+        let node_account =
+            Account::new(VALIDATOR_LAMPORTS, 0, &system_program::id());
         // Put newly created accounts into genesis
         genesis_config_info
             .genesis_config
@@ -152,14 +156,20 @@ pub fn activate_all_features(genesis_config: &mut GenesisConfig) {
     }
 }
 
-pub fn activate_feature(genesis_config: &mut GenesisConfig, feature_id: Pubkey) {
+pub fn activate_feature(
+    genesis_config: &mut GenesisConfig,
+    feature_id: Pubkey,
+) {
     genesis_config.accounts.insert(
         feature_id,
         Account::from(feature::create_account(
             &Feature {
                 activated_at: Some(0),
             },
-            std::cmp::max(genesis_config.rent.minimum_balance(Feature::size_of()), 1),
+            std::cmp::max(
+                genesis_config.rent.minimum_balance(Feature::size_of()),
+                1,
+            ),
         )),
     );
 }
@@ -183,14 +193,16 @@ pub fn create_genesis_config_with_leader_ex(
         AccountSharedData::new(validator_lamports, 0, &system_program::id()),
     ));
 
-    let native_mint_account = solana_sdk::account::AccountSharedData::from(Account {
-        owner: inline_spl_token::id(),
-        data: inline_spl_token::native_mint::ACCOUNT_DATA.to_vec(),
-        lamports: sol_to_lamports(1.),
-        executable: false,
-        rent_epoch: 1,
-    });
-    initial_accounts.push((inline_spl_token::native_mint::id(), native_mint_account));
+    let native_mint_account =
+        solana_sdk::account::AccountSharedData::from(Account {
+            owner: inline_spl_token::id(),
+            data: inline_spl_token::native_mint::ACCOUNT_DATA.to_vec(),
+            lamports: sol_to_lamports(1.),
+            executable: false,
+            rent_epoch: 1,
+        });
+    initial_accounts
+        .push((inline_spl_token::native_mint::id(), native_mint_account));
 
     let mut genesis_config = GenesisConfig {
         accounts: initial_accounts

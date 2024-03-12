@@ -1,15 +1,14 @@
 // NOTE: copied from  runtime/src/bank/address_lookup_table.rs
-use {
-    super::bank::Bank,
-    solana_sdk::{
-        address_lookup_table::error::AddressLookupError,
-        message::{
-            v0::{LoadedAddresses, MessageAddressTableLookup},
-            AddressLoaderError,
-        },
-        transaction::AddressLoader,
+use solana_sdk::{
+    address_lookup_table::error::AddressLookupError,
+    message::{
+        v0::{LoadedAddresses, MessageAddressTableLookup},
+        AddressLoaderError,
     },
+    transaction::AddressLoader,
 };
+
+use super::bank::Bank;
 
 impl AddressLoader for &Bank {
     fn load_addresses(

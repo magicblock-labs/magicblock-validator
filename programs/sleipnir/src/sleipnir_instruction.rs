@@ -1,21 +1,25 @@
 use std::collections::HashMap;
 
+use num_derive::{FromPrimitive, ToPrimitive};
 use serde::{Deserialize, Serialize};
 use solana_sdk::{
     decode_error::DecodeError,
     hash::Hash,
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
+    signer::Signer,
+    transaction::Transaction,
 };
-use solana_sdk::{signer::Signer, transaction::Transaction};
-use {
-    num_derive::{FromPrimitive, ToPrimitive},
-    thiserror::Error,
+use thiserror::Error;
+
+use crate::{
+    sleipnir_authority, sleipnir_authority_id,
+    sleipnir_processor::set_account_mod_data,
 };
 
-use crate::{sleipnir_authority, sleipnir_authority_id, sleipnir_processor::set_account_mod_data};
-
-#[derive(Error, Debug, Serialize, Clone, PartialEq, Eq, FromPrimitive, ToPrimitive)]
+#[derive(
+    Error, Debug, Serialize, Clone, PartialEq, Eq, FromPrimitive, ToPrimitive,
+)]
 pub enum SleipnirError {
     #[error("need at least one account to modify")]
     NoAccountsToModify,
@@ -82,8 +86,10 @@ pub fn modify_accounts(
 pub(crate) fn modify_accounts_instruction(
     keyed_account_mods: Vec<(Pubkey, AccountModification)>,
 ) -> Instruction {
-    let mut account_metas = vec![AccountMeta::new(sleipnir_authority().pubkey(), true)];
-    let mut account_mods: HashMap<Pubkey, AccountModificationForInstruction> = HashMap::new();
+    let mut account_metas =
+        vec![AccountMeta::new(sleipnir_authority().pubkey(), true)];
+    let mut account_mods: HashMap<Pubkey, AccountModificationForInstruction> =
+        HashMap::new();
     for (pubkey, account_mod) in keyed_account_mods {
         account_metas.push(AccountMeta::new(pubkey, false));
         let data_key = account_mod.data.map(set_account_mod_data);
@@ -103,7 +109,10 @@ pub(crate) fn modify_accounts_instruction(
     )
 }
 
-fn into_transaction(instruction: Instruction, recent_blockhash: Hash) -> Transaction {
+fn into_transaction(
+    instruction: Instruction,
+    recent_blockhash: Hash,
+) -> Transaction {
     let signers = &[&sleipnir_authority()];
     Transaction::new_signed_with_payer(
         &[instruction],

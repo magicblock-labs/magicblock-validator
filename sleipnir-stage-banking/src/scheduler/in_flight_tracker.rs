@@ -1,8 +1,10 @@
 // NOTE: from core/src/banking_stage/transaction_scheduler/in_flight_tracker.rs
-use {
-    super::{batch_id_generator::BatchIdGenerator, thread_aware_account_locks::ThreadId},
-    sleipnir_messaging::scheduler_messages::TransactionBatchId,
-    std::collections::HashMap,
+use std::collections::HashMap;
+
+use sleipnir_messaging::scheduler_messages::TransactionBatchId;
+
+use super::{
+    batch_id_generator::BatchIdGenerator, thread_aware_account_locks::ThreadId,
 };
 
 /// Tracks the number of transactions that are in flight for each thread.

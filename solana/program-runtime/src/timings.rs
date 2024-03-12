@@ -1,12 +1,11 @@
-use {
-    core::fmt,
-    enum_iterator::Sequence,
-    solana_sdk::{clock::Slot, pubkey::Pubkey, saturating_add_assign},
-    std::{
-        collections::HashMap,
-        ops::{Index, IndexMut},
-    },
+use core::fmt;
+use std::{
+    collections::HashMap,
+    ops::{Index, IndexMut},
 };
+
+use enum_iterator::Sequence;
+use solana_sdk::{clock::Slot, pubkey::Pubkey, saturating_add_assign};
 
 #[derive(Default, Debug, PartialEq, Eq)]
 pub struct ProgramTiming {
@@ -19,11 +18,21 @@ pub struct ProgramTiming {
 }
 
 impl ProgramTiming {
-    pub fn coalesce_error_timings(&mut self, current_estimated_program_cost: u64) {
-        for tx_error_compute_consumed in self.errored_txs_compute_consumed.drain(..) {
-            let compute_units_update =
-                std::cmp::max(current_estimated_program_cost, tx_error_compute_consumed);
-            saturating_add_assign!(self.accumulated_units, compute_units_update);
+    pub fn coalesce_error_timings(
+        &mut self,
+        current_estimated_program_cost: u64,
+    ) {
+        for tx_error_compute_consumed in
+            self.errored_txs_compute_consumed.drain(..)
+        {
+            let compute_units_update = std::cmp::max(
+                current_estimated_program_cost,
+                tx_error_compute_consumed,
+            );
+            saturating_add_assign!(
+                self.accumulated_units,
+                compute_units_update
+            );
             saturating_add_assign!(self.count, 1);
         }
     }
@@ -35,7 +44,10 @@ impl ProgramTiming {
         // Clones the entire vector, maybe not great...
         self.errored_txs_compute_consumed
             .extend(other.errored_txs_compute_consumed.clone());
-        saturating_add_assign!(self.total_errored_units, other.total_errored_units);
+        saturating_add_assign!(
+            self.total_errored_units,
+            other.total_errored_units
+        );
     }
 }
 
@@ -326,11 +338,18 @@ impl ExecuteTimings {
             .accumulate(&other.execute_accessories);
     }
 
-    pub fn saturating_add_in_place(&mut self, timing_type: ExecuteTimingType, value_to_add: u64) {
+    pub fn saturating_add_in_place(
+        &mut self,
+        timing_type: ExecuteTimingType,
+        value_to_add: u64,
+    ) {
         let idx = timing_type as usize;
         match self.metrics.0.get_mut(idx) {
             Some(elem) => *elem = elem.saturating_add(value_to_add),
-            None => debug_assert!(idx < ExecuteTimingType::CARDINALITY, "Index out of bounds"),
+            None => debug_assert!(
+                idx < ExecuteTimingType::CARDINALITY,
+                "Index out of bounds"
+            ),
         }
     }
 }
@@ -367,14 +386,23 @@ pub struct ExecuteAccessoryTimings {
 
 impl ExecuteAccessoryTimings {
     pub fn accumulate(&mut self, other: &ExecuteAccessoryTimings) {
-        saturating_add_assign!(self.feature_set_clone_us, other.feature_set_clone_us);
+        saturating_add_assign!(
+            self.feature_set_clone_us,
+            other.feature_set_clone_us
+        );
         saturating_add_assign!(
             self.compute_budget_process_transaction_us,
             other.compute_budget_process_transaction_us
         );
         saturating_add_assign!(self.get_executors_us, other.get_executors_us);
-        saturating_add_assign!(self.process_message_us, other.process_message_us);
-        saturating_add_assign!(self.update_executors_us, other.update_executors_us);
+        saturating_add_assign!(
+            self.process_message_us,
+            other.process_message_us
+        );
+        saturating_add_assign!(
+            self.update_executors_us,
+            other.update_executors_us
+        );
         self.process_instructions
             .accumulate(&other.process_instructions);
     }
@@ -406,8 +434,14 @@ impl ExecuteDetailsTimings {
             self.get_or_create_executor_us,
             other.get_or_create_executor_us
         );
-        saturating_add_assign!(self.changed_account_count, other.changed_account_count);
-        saturating_add_assign!(self.total_account_count, other.total_account_count);
+        saturating_add_assign!(
+            self.changed_account_count,
+            other.changed_account_count
+        );
+        saturating_add_assign!(
+            self.total_account_count,
+            other.total_account_count
+        );
         saturating_add_assign!(
             self.create_executor_register_syscalls_us,
             other.create_executor_register_syscalls_us
@@ -425,7 +459,8 @@ impl ExecuteDetailsTimings {
             other.create_executor_jit_compile_us
         );
         for (id, other) in &other.per_program_timings {
-            let program_timing = self.per_program_timings.entry(*id).or_default();
+            let program_timing =
+                self.per_program_timings.entry(*id).or_default();
             program_timing.accumulate_program_timings(other);
         }
     }
@@ -437,8 +472,10 @@ impl ExecuteDetailsTimings {
         compute_units_consumed: u64,
         is_error: bool,
     ) {
-        let program_timing = self.per_program_timings.entry(*program_id).or_default();
-        program_timing.accumulated_us = program_timing.accumulated_us.saturating_add(us);
+        let program_timing =
+            self.per_program_timings.entry(*program_id).or_default();
+        program_timing.accumulated_us =
+            program_timing.accumulated_us.saturating_add(us);
         if is_error {
             program_timing
                 .errored_txs_compute_consumed
@@ -508,7 +545,11 @@ mod tests {
         let program_id = Pubkey::new_unique();
         let us = 100;
         let compute_units_consumed = 1;
-        construct_execute_timings_with_program(&program_id, us, compute_units_consumed);
+        construct_execute_timings_with_program(
+            &program_id,
+            us,
+            compute_units_consumed,
+        );
     }
 
     #[test]
@@ -521,7 +562,11 @@ mod tests {
 
         // Construct another separate instance of ExecuteDetailsTimings with non default fields
         let mut other_execute_details_timings =
-            construct_execute_timings_with_program(&program_id, us, compute_units_consumed);
+            construct_execute_timings_with_program(
+                &program_id,
+                us,
+                compute_units_consumed,
+            );
         let account_count = 1;
         other_execute_details_timings.serialize_us = us;
         other_execute_details_timings.create_vm_us = us;

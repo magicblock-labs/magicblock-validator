@@ -1,6 +1,7 @@
 // NOTE: copied from bank.rs:294
 use solana_accounts_db::{
-    accounts::TransactionLoadResult, transaction_results::TransactionExecutionResult,
+    accounts::TransactionLoadResult,
+    transaction_results::TransactionExecutionResult,
 };
 use solana_svm::transaction_error_metrics::TransactionErrorMetrics;
 
@@ -29,7 +30,10 @@ pub struct TransactionBalancesSet {
 }
 
 impl TransactionBalancesSet {
-    pub fn new(pre_balances: TransactionBalances, post_balances: TransactionBalances) -> Self {
+    pub fn new(
+        pre_balances: TransactionBalances,
+        post_balances: TransactionBalances,
+    ) -> Self {
         assert_eq!(pre_balances.len(), post_balances.len());
         Self {
             pre_balances,

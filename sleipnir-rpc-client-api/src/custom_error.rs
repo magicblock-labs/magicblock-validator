@@ -1,28 +1,31 @@
 // NOTE: from rpc-client-api/src/custom_error.rs
 //! Implementation defined RPC server errors
-use {
-    crate::response::RpcSimulateTransactionResult,
-    jsonrpc_core::{Error, ErrorCode},
-    serde::{Deserialize, Serialize},
-    solana_sdk::clock::Slot,
-    solana_transaction_status::EncodeError,
-    thiserror::Error,
-};
+use jsonrpc_core::{Error, ErrorCode};
+use serde::{Deserialize, Serialize};
+use solana_sdk::clock::Slot;
+use solana_transaction_status::EncodeError;
+use thiserror::Error;
+
+use crate::response::RpcSimulateTransactionResult;
 
 // Keep in sync with https://github.com/solana-labs/solana-web3.js/blob/master/src/errors.ts
 pub const JSON_RPC_SERVER_ERROR_BLOCK_CLEANED_UP: i64 = -32001;
-pub const JSON_RPC_SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE: i64 = -32002;
-pub const JSON_RPC_SERVER_ERROR_TRANSACTION_SIGNATURE_VERIFICATION_FAILURE: i64 = -32003;
+pub const JSON_RPC_SERVER_ERROR_SEND_TRANSACTION_PREFLIGHT_FAILURE: i64 =
+    -32002;
+pub const JSON_RPC_SERVER_ERROR_TRANSACTION_SIGNATURE_VERIFICATION_FAILURE:
+    i64 = -32003;
 pub const JSON_RPC_SERVER_ERROR_BLOCK_NOT_AVAILABLE: i64 = -32004;
 pub const JSON_RPC_SERVER_ERROR_NODE_UNHEALTHY: i64 = -32005;
-pub const JSON_RPC_SERVER_ERROR_TRANSACTION_PRECOMPILE_VERIFICATION_FAILURE: i64 = -32006;
+pub const JSON_RPC_SERVER_ERROR_TRANSACTION_PRECOMPILE_VERIFICATION_FAILURE:
+    i64 = -32006;
 pub const JSON_RPC_SERVER_ERROR_SLOT_SKIPPED: i64 = -32007;
 pub const JSON_RPC_SERVER_ERROR_NO_SNAPSHOT: i64 = -32008;
 pub const JSON_RPC_SERVER_ERROR_LONG_TERM_STORAGE_SLOT_SKIPPED: i64 = -32009;
 pub const JSON_RPC_SERVER_ERROR_KEY_EXCLUDED_FROM_SECONDARY_INDEX: i64 = -32010;
 pub const JSON_RPC_SERVER_ERROR_TRANSACTION_HISTORY_NOT_AVAILABLE: i64 = -32011;
 pub const JSON_RPC_SCAN_ERROR: i64 = -32012;
-pub const JSON_RPC_SERVER_ERROR_TRANSACTION_SIGNATURE_LEN_MISMATCH: i64 = -32013;
+pub const JSON_RPC_SERVER_ERROR_TRANSACTION_SIGNATURE_LEN_MISMATCH: i64 =
+    -32013;
 pub const JSON_RPC_SERVER_ERROR_BLOCK_STATUS_NOT_AVAILABLE_YET: i64 = -32014;
 pub const JSON_RPC_SERVER_ERROR_UNSUPPORTED_TRANSACTION_VERSION: i64 = -32015;
 pub const JSON_RPC_SERVER_ERROR_MIN_CONTEXT_SLOT_NOT_REACHED: i64 = -32016;
@@ -46,7 +49,9 @@ pub enum RpcCustomError {
     #[error("NodeUnhealthy")]
     NodeUnhealthy { num_slots_behind: Option<Slot> },
     #[error("TransactionPrecompileVerificationFailure")]
-    TransactionPrecompileVerificationFailure(solana_sdk::transaction::TransactionError),
+    TransactionPrecompileVerificationFailure(
+        solana_sdk::transaction::TransactionError,
+    ),
     #[error("SlotSkipped")]
     SlotSkipped { slot: Slot },
     #[error("NoSnapshot")]

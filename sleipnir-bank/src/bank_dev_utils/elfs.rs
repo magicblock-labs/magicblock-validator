@@ -1,4 +1,3 @@
-use crate::bank::Bank;
 use log::debug;
 use solana_sdk::{
     account::{Account, AccountSharedData},
@@ -6,6 +5,8 @@ use solana_sdk::{
     pubkey::Pubkey,
     rent::Rent,
 };
+
+use crate::bank::Bank;
 
 pub mod noop {
     solana_sdk::declare_id!("nooPu5P1NcgyXypBLNiH6VWBet5XtpPMKjCCN6CbDpW");
@@ -42,18 +43,23 @@ pub fn elf_accounts() -> Vec<(Pubkey, AccountSharedData)> {
         .flat_map(|(program_id, loader_id, elf)| {
             let mut accounts = vec![];
             let data = if *loader_id == solana_sdk::bpf_loader_upgradeable::ID {
-                let (programdata_address, _) =
-                    Pubkey::find_program_address(&[program_id.as_ref()], loader_id);
-                let mut program_data = bincode::serialize(&UpgradeableLoaderState::ProgramData {
-                    slot: 0,
-                    upgrade_authority_address: Some(Pubkey::default()),
-                })
-                .unwrap();
+                let (programdata_address, _) = Pubkey::find_program_address(
+                    &[program_id.as_ref()],
+                    loader_id,
+                );
+                let mut program_data =
+                    bincode::serialize(&UpgradeableLoaderState::ProgramData {
+                        slot: 0,
+                        upgrade_authority_address: Some(Pubkey::default()),
+                    })
+                    .unwrap();
                 program_data.extend_from_slice(elf);
                 accounts.push((
                     programdata_address,
                     AccountSharedData::from(Account {
-                        lamports: rent.minimum_balance(program_data.len()).max(1),
+                        lamports: rent
+                            .minimum_balance(program_data.len())
+                            .max(1),
                         data: program_data,
                         owner: *loader_id,
                         executable: false,
@@ -82,7 +88,9 @@ pub fn elf_accounts() -> Vec<(Pubkey, AccountSharedData)> {
         .collect()
 }
 
-pub fn elf_accounts_for(program_id: &Pubkey) -> Vec<(Pubkey, AccountSharedData)> {
+pub fn elf_accounts_for(
+    program_id: &Pubkey,
+) -> Vec<(Pubkey, AccountSharedData)> {
     let program = elf_accounts()
         .into_iter()
         .find(|(id, _)| id == program_id)

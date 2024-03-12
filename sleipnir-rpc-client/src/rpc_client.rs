@@ -1,4 +1,6 @@
 // NOTE: adapted from rpc-client/src/nonblocking/rpc_client.rs
+use std::{sync::RwLock, time::Duration};
+
 use log::trace;
 use serde_json::{json, Value};
 use sleipnir_rpc_client_api::{
@@ -7,8 +9,9 @@ use sleipnir_rpc_client_api::{
     request::{RpcError, RpcRequest},
     response::{Response, RpcResult},
 };
-use solana_sdk::{account::Account, commitment_config::CommitmentConfig, pubkey::Pubkey};
-use std::{sync::RwLock, time::Duration};
+use solana_sdk::{
+    account::Account, commitment_config::CommitmentConfig, pubkey::Pubkey,
+};
 
 use crate::{http_sender::HttpSender, rpc_sender::RpcSender};
 
@@ -77,7 +80,10 @@ impl RpcClient {
     /// let commitment_config = CommitmentConfig::processed();
     /// let client = RpcClient::new_with_commitment(url, commitment_config);
     /// ```
-    pub fn new_with_commitment(url: String, commitment_config: CommitmentConfig) -> Self {
+    pub fn new_with_commitment(
+        url: String,
+        commitment_config: CommitmentConfig,
+    ) -> Self {
         Self::new_sender(
             HttpSender::new(url),
             RpcClientConfig::with_commitment(commitment_config),
@@ -132,7 +138,10 @@ impl RpcClient {
         self.get_account_with_commitment(pubkey, self.commitment())
             .await?
             .value
-            .ok_or_else(|| RpcError::ForUser(format!("AccountNotFound: pubkey={pubkey}")).into())
+            .ok_or_else(|| {
+                RpcError::ForUser(format!("AccountNotFound: pubkey={pubkey}"))
+                    .into()
+            })
     }
 
     /// Returns all information associated with the account of the provided pubkey.
@@ -254,16 +263,20 @@ impl RpcClient {
         response
             .map(|result_json: Value| {
                 if result_json.is_null() {
-                    return Err(
-                        RpcError::ForUser(format!("AccountNotFound: pubkey={pubkey}")).into(),
-                    );
+                    return Err(RpcError::ForUser(format!(
+                        "AccountNotFound: pubkey={pubkey}"
+                    ))
+                    .into());
                 }
                 let Response {
                     context,
                     value: rpc_account,
-                } = serde_json::from_value::<Response<Option<UiAccount>>>(result_json)?;
+                } = serde_json::from_value::<Response<Option<UiAccount>>>(
+                    result_json,
+                )?;
                 trace!("Response account {:?} {:?}", pubkey, rpc_account);
-                let account = rpc_account.and_then(|rpc_account| rpc_account.decode());
+                let account =
+                    rpc_account.and_then(|rpc_account| rpc_account.decode());
 
                 Ok(Response {
                     context,
@@ -294,7 +307,11 @@ impl RpcClient {
         self.config.commitment_config
     }
 
-    pub async fn send<T>(&self, request: RpcRequest, params: Value) -> ClientResult<T>
+    pub async fn send<T>(
+        &self,
+        request: RpcRequest,
+        params: Value,
+    ) -> ClientResult<T>
     where
         T: serde::de::DeserializeOwned,
     {

@@ -1,12 +1,10 @@
-use {
-    log::*,
-    solana_sdk::{
-        account::{AccountSharedData, ReadableAccount},
-        pubkey::Pubkey,
-        rent::Rent,
-        transaction::{Result, TransactionError},
-        transaction_context::{IndexOfAccount, TransactionContext},
-    },
+use log::*;
+use solana_sdk::{
+    account::{AccountSharedData, ReadableAccount},
+    pubkey::Pubkey,
+    rent::Rent,
+    transaction::{Result, TransactionError},
+    transaction_context::{IndexOfAccount, TransactionContext},
 };
 
 #[derive(Debug, PartialEq, Eq)]
@@ -50,14 +48,18 @@ impl RentState {
                         lamports: pre_lamports,
                     } => {
                         // Cannot remain RentPaying if resized or credited.
-                        post_data_size == pre_data_size && post_lamports <= pre_lamports
+                        post_data_size == pre_data_size
+                            && post_lamports <= pre_lamports
                     }
                 }
             }
         }
     }
 
-    fn submit_rent_state_metrics(pre_rent_state: &Self, post_rent_state: &Self) {
+    fn submit_rent_state_metrics(
+        pre_rent_state: &Self,
+        post_rent_state: &Self,
+    ) {
         match (pre_rent_state, post_rent_state) {
             (&RentState::Uninitialized, &RentState::RentPaying { .. }) => {
                 inc_new_counter_info!("rent_paying_err-new_account", 1);
@@ -78,7 +80,9 @@ impl RentState {
         transaction_context: &TransactionContext,
         index: IndexOfAccount,
     ) -> Result<()> {
-        if let Some((pre_rent_state, post_rent_state)) = pre_rent_state.zip(post_rent_state) {
+        if let Some((pre_rent_state, post_rent_state)) =
+            pre_rent_state.zip(post_rent_state)
+        {
             let expect_msg =
                 "account must exist at TransactionContext index if rent-states are Some";
             Self::check_rent_state_with_account(
@@ -122,17 +126,21 @@ impl RentState {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, solana_sdk::pubkey::Pubkey};
+    use solana_sdk::pubkey::Pubkey;
+
+    use super::*;
 
     #[test]
     fn test_from_account() {
         let program_id = Pubkey::new_unique();
-        let uninitialized_account = AccountSharedData::new(0, 0, &Pubkey::default());
+        let uninitialized_account =
+            AccountSharedData::new(0, 0, &Pubkey::default());
 
         let account_data_size = 100;
 
         let rent = Rent::free();
-        let rent_exempt_account = AccountSharedData::new(1, account_data_size, &program_id); // if rent is free, all accounts with non-zero lamports and non-empty data are rent-exempt
+        let rent_exempt_account =
+            AccountSharedData::new(1, account_data_size, &program_id); // if rent is free, all accounts with non-zero lamports and non-empty data are rent-exempt
 
         assert_eq!(
             RentState::from_account(&uninitialized_account, &rent),
@@ -176,65 +184,73 @@ mod tests {
     #[test]
     fn test_transition_allowed_from() {
         let post_rent_state = RentState::Uninitialized;
-        assert!(post_rent_state.transition_allowed_from(&RentState::Uninitialized));
-        assert!(post_rent_state.transition_allowed_from(&RentState::RentExempt));
         assert!(
-            post_rent_state.transition_allowed_from(&RentState::RentPaying {
+            post_rent_state.transition_allowed_from(&RentState::Uninitialized)
+        );
+        assert!(post_rent_state.transition_allowed_from(&RentState::RentExempt));
+        assert!(post_rent_state.transition_allowed_from(
+            &RentState::RentPaying {
                 data_size: 0,
                 lamports: 1,
-            })
-        );
+            }
+        ));
 
         let post_rent_state = RentState::RentExempt;
-        assert!(post_rent_state.transition_allowed_from(&RentState::Uninitialized));
-        assert!(post_rent_state.transition_allowed_from(&RentState::RentExempt));
         assert!(
-            post_rent_state.transition_allowed_from(&RentState::RentPaying {
+            post_rent_state.transition_allowed_from(&RentState::Uninitialized)
+        );
+        assert!(post_rent_state.transition_allowed_from(&RentState::RentExempt));
+        assert!(post_rent_state.transition_allowed_from(
+            &RentState::RentPaying {
                 data_size: 0,
                 lamports: 1,
-            })
-        );
+            }
+        ));
         let post_rent_state = RentState::RentPaying {
             data_size: 2,
             lamports: 5,
         };
-        assert!(!post_rent_state.transition_allowed_from(&RentState::Uninitialized));
-        assert!(!post_rent_state.transition_allowed_from(&RentState::RentExempt));
         assert!(
-            !post_rent_state.transition_allowed_from(&RentState::RentPaying {
+            !post_rent_state.transition_allowed_from(&RentState::Uninitialized)
+        );
+        assert!(
+            !post_rent_state.transition_allowed_from(&RentState::RentExempt)
+        );
+        assert!(!post_rent_state.transition_allowed_from(
+            &RentState::RentPaying {
                 data_size: 3,
                 lamports: 5
-            })
-        );
-        assert!(
-            !post_rent_state.transition_allowed_from(&RentState::RentPaying {
+            }
+        ));
+        assert!(!post_rent_state.transition_allowed_from(
+            &RentState::RentPaying {
                 data_size: 1,
                 lamports: 5
-            })
-        );
+            }
+        ));
         // Transition is always allowed if there is no account data resize or
         // change in account's lamports.
-        assert!(
-            post_rent_state.transition_allowed_from(&RentState::RentPaying {
+        assert!(post_rent_state.transition_allowed_from(
+            &RentState::RentPaying {
                 data_size: 2,
                 lamports: 5
-            })
-        );
+            }
+        ));
         // Transition is always allowed if there is no account data resize and
         // account's lamports is reduced.
-        assert!(
-            post_rent_state.transition_allowed_from(&RentState::RentPaying {
+        assert!(post_rent_state.transition_allowed_from(
+            &RentState::RentPaying {
                 data_size: 2,
                 lamports: 7
-            })
-        );
+            }
+        ));
         // Transition is not allowed if the account is credited with more
         // lamports and remains rent-paying.
-        assert!(
-            !post_rent_state.transition_allowed_from(&RentState::RentPaying {
+        assert!(!post_rent_state.transition_allowed_from(
+            &RentState::RentPaying {
                 data_size: 2,
                 lamports: 3
-            }),
-        );
+            }
+        ),);
     }
 }

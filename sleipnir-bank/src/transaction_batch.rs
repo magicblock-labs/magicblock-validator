@@ -1,9 +1,9 @@
 // NOTE: exact copy of runtime/src/transaction_batch.rs
-use {
-    crate::bank::Bank,
-    solana_sdk::transaction::{Result, SanitizedTransaction},
-    std::borrow::Cow,
-};
+use std::borrow::Cow;
+
+use solana_sdk::transaction::{Result, SanitizedTransaction};
+
+use crate::bank::Bank;
 
 // Represents the results of trying to lock a set of accounts
 pub struct TransactionBatch<'a, 'b> {

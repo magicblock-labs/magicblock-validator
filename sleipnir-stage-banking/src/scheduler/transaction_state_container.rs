@@ -1,13 +1,13 @@
 // NOTE: from core/src/banking_stage/transaction_scheduler/transaction_state_container.rs
-use {
-    super::{
-        transaction_priority_id::TransactionPriorityId,
-        transaction_state::{SanitizedTransactionTTL, TransactionState},
-    },
-    itertools::MinMaxResult,
-    min_max_heap::MinMaxHeap,
-    sleipnir_messaging::scheduler_messages::TransactionId,
-    std::collections::HashMap,
+use std::collections::HashMap;
+
+use itertools::MinMaxResult;
+use min_max_heap::MinMaxHeap;
+use sleipnir_messaging::scheduler_messages::TransactionId;
+
+use super::{
+    transaction_priority_id::TransactionPriorityId,
+    transaction_state::{SanitizedTransactionTTL, TransactionState},
 };
 
 /// This structure will hold `TransactionState` for the entirety of a
@@ -85,7 +85,10 @@ impl TransactionStateContainer {
     /// Take `SanitizedTransactionTTL` by id.
     /// This transitions the transaction to `Pending` state.
     /// Panics if the transaction does not exist.
-    pub(crate) fn take_transaction(&mut self, id: &TransactionId) -> SanitizedTransactionTTL {
+    pub(crate) fn take_transaction(
+        &mut self,
+        id: &TransactionId,
+    ) -> SanitizedTransactionTTL {
         self.id_to_transaction_state
             .get_mut(id)
             .expect("transaction must exist")
@@ -119,7 +122,10 @@ impl TransactionStateContainer {
         let transaction_state = self
             .get_mut_transaction_state(&transaction_id)
             .expect("transaction must exist");
-        let priority_id = TransactionPriorityId::new(transaction_state.priority(), transaction_id);
+        let priority_id = TransactionPriorityId::new(
+            transaction_state.priority(),
+            transaction_id,
+        );
         transaction_state.transition_to_unprocessed(transaction_ttl);
         self.push_id_into_queue(priority_id);
     }
@@ -127,7 +133,10 @@ impl TransactionStateContainer {
     /// Pushes a transaction id into the priority queue. If the queue is full, the lowest priority
     /// transaction will be dropped (removed from the queue and map).
     /// Returns `true` if a packet was dropped due to capacity limits.
-    pub(crate) fn push_id_into_queue(&mut self, priority_id: TransactionPriorityId) -> bool {
+    pub(crate) fn push_id_into_queue(
+        &mut self,
+        priority_id: TransactionPriorityId,
+    ) -> bool {
         if self.remaining_queue_capacity() == 0 {
             let popped_id = self.priority_queue.push_pop_min(priority_id);
             self.remove_by_id(&popped_id.id);
@@ -158,19 +167,18 @@ impl TransactionStateContainer {
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        solana_sdk::{
-            compute_budget::ComputeBudgetInstruction,
-            hash::Hash,
-            message::Message,
-            signature::Keypair,
-            signer::Signer,
-            slot_history::Slot,
-            system_instruction,
-            transaction::{SanitizedTransaction, Transaction},
-        },
+    use solana_sdk::{
+        compute_budget::ComputeBudgetInstruction,
+        hash::Hash,
+        message::Message,
+        signature::Keypair,
+        signer::Signer,
+        slot_history::Slot,
+        system_instruction,
+        transaction::{SanitizedTransaction, Transaction},
     };
+
+    use super::*;
 
     /// Returns (transaction_ttl, priority, cost)
     fn test_transaction(priority: u64) -> (SanitizedTransactionTTL, u64, u64) {
@@ -184,11 +192,9 @@ mod tests {
             ComputeBudgetInstruction::set_compute_unit_price(priority),
         ];
         let message = Message::new(&ixs, Some(&from_keypair.pubkey()));
-        let tx = SanitizedTransaction::from_transaction_for_tests(Transaction::new(
-            &[&from_keypair],
-            message,
-            Hash::default(),
-        ));
+        let tx = SanitizedTransaction::from_transaction_for_tests(
+            Transaction::new(&[&from_keypair], message, Hash::default()),
+        );
         let transaction_ttl = SanitizedTransactionTTL {
             transaction: tx,
             max_age_slot: Slot::MAX,
@@ -197,7 +203,10 @@ mod tests {
         (transaction_ttl, priority, TEST_TRANSACTION_COST)
     }
 
-    fn push_to_container(container: &mut TransactionStateContainer, num: usize) {
+    fn push_to_container(
+        container: &mut TransactionStateContainer,
+        num: usize,
+    ) {
         for id in 0..num as u64 {
             let priority = id;
             let (transaction_ttl, priority, cost) = test_transaction(priority);

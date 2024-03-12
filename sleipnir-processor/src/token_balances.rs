@@ -11,7 +11,6 @@ use solana_sdk::{account::ReadableAccount, pubkey::Pubkey};
 use solana_transaction_status::{
     token_balances::TransactionTokenBalances, TransactionTokenBalance,
 };
-
 use spl_token_2022::{
     extension::StateWithExtensions,
     state::{Account as TokenAccount, Mint},
@@ -32,7 +31,9 @@ pub fn collect_token_balances(
         let mut transaction_balances: Vec<TransactionTokenBalance> = vec![];
         if has_token_program {
             for (index, account_id) in account_keys.iter().enumerate() {
-                if transaction.message().is_invoked(index) || is_known_spl_token_id(account_id) {
+                if transaction.message().is_invoked(index)
+                    || is_known_spl_token_id(account_id)
+                {
                     continue;
                 }
 
@@ -41,8 +42,11 @@ pub fn collect_token_balances(
                     ui_token_amount,
                     owner,
                     program_id,
-                }) = collect_token_balance_from_account(bank, account_id, mint_decimals)
-                {
+                }) = collect_token_balance_from_account(
+                    bank,
+                    account_id,
+                    mint_decimals,
+                ) {
                     transaction_balances.push(TransactionTokenBalance {
                         account_index: index as u8,
                         mint,
@@ -100,7 +104,8 @@ fn collect_token_balance_from_account(
         return None;
     }
 
-    let token_account = StateWithExtensions::<TokenAccount>::unpack(account.data()).ok()?;
+    let token_account =
+        StateWithExtensions::<TokenAccount>::unpack(account.data()).ok()?;
     let mint = token_account.base.mint;
 
     let decimals = mint_decimals.get(&mint).cloned().or_else(|| {
@@ -112,7 +117,10 @@ fn collect_token_balance_from_account(
     Some(TokenBalanceData {
         mint: token_account.base.mint.to_string(),
         owner: token_account.base.owner.to_string(),
-        ui_token_amount: token_amount_to_ui_amount(token_account.base.amount, decimals),
+        ui_token_amount: token_amount_to_ui_amount(
+            token_account.base.amount,
+            decimals,
+        ),
         program_id: account.owner().to_string(),
     })
 }

@@ -1,8 +1,13 @@
-use crate::account_modification::AccountModification;
-use crate::accounts::AccountProcessor;
-use crate::errors::MutatorResult;
 use sleipnir_program::sleipnir_instruction;
-use solana_sdk::{clock::Slot, genesis_config::ClusterType, hash::Hash, transaction::Transaction};
+use solana_sdk::{
+    clock::Slot, genesis_config::ClusterType, hash::Hash,
+    transaction::Transaction,
+};
+
+use crate::{
+    account_modification::AccountModification, accounts::AccountProcessor,
+    errors::MutatorResult,
+};
 
 #[derive(Clone)]
 pub struct Mutator {
@@ -25,8 +30,8 @@ impl Mutator {
         let modifications = modificiations
             .into_iter()
             .map(|modification| {
-                let (pubkey, modification) =
-                    modification.try_into_sleipnir_program_account_modification()?;
+                let (pubkey, modification) = modification
+                    .try_into_sleipnir_program_account_modification()?;
                 Ok((pubkey, modification))
             })
             .collect::<MutatorResult<Vec<_>>>()?;

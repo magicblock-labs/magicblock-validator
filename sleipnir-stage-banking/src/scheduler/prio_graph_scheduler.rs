@@ -1,27 +1,29 @@
 // NOTE: from core/src/banking_stage/transaction_scheduler/prio_graph_scheduler.rs
-use {
-    super::{
-        in_flight_tracker::InFlightTracker,
-        scheduler_error::SchedulerError,
-        thread_aware_account_locks::{ThreadAwareAccountLocks, ThreadId, ThreadSet},
-        transaction_priority_id::TransactionPriorityId,
-        transaction_state::SanitizedTransactionTTL,
-        transaction_state_container::TransactionStateContainer,
+use crossbeam_channel::{Receiver, Sender, TryRecvError};
+use itertools::izip;
+use prio_graph::{AccessKind, PrioGraph};
+use sleipnir_messaging::scheduler_messages::{
+    ConsumeWork, FinishedConsumeWork, TransactionBatchId, TransactionId,
+};
+use solana_measure::measure_us;
+use solana_sdk::{
+    pubkey::Pubkey, saturating_add_assign, slot_history::Slot,
+    transaction::SanitizedTransaction,
+};
+
+use super::{
+    in_flight_tracker::InFlightTracker,
+    scheduler_error::SchedulerError,
+    thread_aware_account_locks::{
+        ThreadAwareAccountLocks, ThreadId, ThreadSet,
     },
-    crate::{
-        consumer::TARGET_NUM_TRANSACTIONS_PER_BATCH, read_write_account_set::ReadWriteAccountSet,
-    },
-    crossbeam_channel::{Receiver, Sender, TryRecvError},
-    itertools::izip,
-    prio_graph::{AccessKind, PrioGraph},
-    sleipnir_messaging::scheduler_messages::{
-        ConsumeWork, FinishedConsumeWork, TransactionBatchId, TransactionId,
-    },
-    solana_measure::measure_us,
-    solana_sdk::{
-        pubkey::Pubkey, saturating_add_assign, slot_history::Slot,
-        transaction::SanitizedTransaction,
-    },
+    transaction_priority_id::TransactionPriorityId,
+    transaction_state::SanitizedTransactionTTL,
+    transaction_state_container::TransactionStateContainer,
+};
+use crate::{
+    consumer::TARGET_NUM_TRANSACTIONS_PER_BATCH,
+    read_write_account_set::ReadWriteAccountSet,
 };
 
 pub(crate) struct PrioGraphScheduler {
@@ -77,66 +79,78 @@ impl PrioGraphScheduler {
         // these transactions to be scheduled before them.
         let mut unschedulable_ids = Vec::new();
         let mut blocking_locks = ReadWriteAccountSet::default();
-        let mut prio_graph = PrioGraph::new(|id: &TransactionPriorityId, _graph_node| *id);
+        let mut prio_graph =
+            PrioGraph::new(|id: &TransactionPriorityId, _graph_node| *id);
 
         // Track metrics on filter.
         let mut num_filtered_out: usize = 0;
         let mut total_filter_time_us: u64 = 0;
 
         let mut window_budget = self.look_ahead_window_size;
-        let mut chunked_pops = |container: &mut TransactionStateContainer,
-                                prio_graph: &mut PrioGraph<_, _, _, _>,
-                                window_budget: &mut usize| {
-            while *window_budget > 0 {
-                const MAX_FILTER_CHUNK_SIZE: usize = 128;
-                let mut filter_array = [true; MAX_FILTER_CHUNK_SIZE];
-                let mut ids = Vec::with_capacity(MAX_FILTER_CHUNK_SIZE);
-                let mut txs = Vec::with_capacity(MAX_FILTER_CHUNK_SIZE);
+        let mut chunked_pops =
+            |container: &mut TransactionStateContainer,
+             prio_graph: &mut PrioGraph<_, _, _, _>,
+             window_budget: &mut usize| {
+                while *window_budget > 0 {
+                    const MAX_FILTER_CHUNK_SIZE: usize = 128;
+                    let mut filter_array = [true; MAX_FILTER_CHUNK_SIZE];
+                    let mut ids = Vec::with_capacity(MAX_FILTER_CHUNK_SIZE);
+                    let mut txs = Vec::with_capacity(MAX_FILTER_CHUNK_SIZE);
 
-                let chunk_size = (*window_budget).min(MAX_FILTER_CHUNK_SIZE);
-                for _ in 0..chunk_size {
-                    if let Some(id) = container.pop() {
-                        ids.push(id);
-                    } else {
+                    let chunk_size =
+                        (*window_budget).min(MAX_FILTER_CHUNK_SIZE);
+                    for _ in 0..chunk_size {
+                        if let Some(id) = container.pop() {
+                            ids.push(id);
+                        } else {
+                            break;
+                        }
+                    }
+                    *window_budget = window_budget.saturating_sub(chunk_size);
+
+                    ids.iter().for_each(|id| {
+                        let transaction =
+                            container.get_transaction_ttl(&id.id).unwrap();
+                        txs.push(&transaction.transaction);
+                    });
+
+                    let (_, filter_us) = measure_us!(pre_graph_filter(
+                        &txs,
+                        &mut filter_array[..chunk_size]
+                    ));
+                    saturating_add_assign!(total_filter_time_us, filter_us);
+
+                    for (id, filter_result) in
+                        ids.iter().zip(&filter_array[..chunk_size])
+                    {
+                        if *filter_result {
+                            let transaction =
+                                container.get_transaction_ttl(&id.id).unwrap();
+                            prio_graph.insert_transaction(
+                                *id,
+                                Self::get_transaction_account_access(
+                                    transaction,
+                                ),
+                            );
+                        } else {
+                            saturating_add_assign!(num_filtered_out, 1);
+                            container.remove_by_id(&id.id);
+                        }
+                    }
+
+                    if ids.len() != chunk_size {
                         break;
                     }
                 }
-                *window_budget = window_budget.saturating_sub(chunk_size);
-
-                ids.iter().for_each(|id| {
-                    let transaction = container.get_transaction_ttl(&id.id).unwrap();
-                    txs.push(&transaction.transaction);
-                });
-
-                let (_, filter_us) =
-                    measure_us!(pre_graph_filter(&txs, &mut filter_array[..chunk_size]));
-                saturating_add_assign!(total_filter_time_us, filter_us);
-
-                for (id, filter_result) in ids.iter().zip(&filter_array[..chunk_size]) {
-                    if *filter_result {
-                        let transaction = container.get_transaction_ttl(&id.id).unwrap();
-                        prio_graph.insert_transaction(
-                            *id,
-                            Self::get_transaction_account_access(transaction),
-                        );
-                    } else {
-                        saturating_add_assign!(num_filtered_out, 1);
-                        container.remove_by_id(&id.id);
-                    }
-                }
-
-                if ids.len() != chunk_size {
-                    break;
-                }
-            }
-        };
+            };
 
         // Create the initial look-ahead window.
         // Check transactions against filter, remove from container if it fails.
         chunked_pops(container, &mut prio_graph, &mut window_budget);
 
-        let mut unblock_this_batch =
-            Vec::with_capacity(self.consume_work_senders.len() * TARGET_NUM_TRANSACTIONS_PER_BATCH);
+        let mut unblock_this_batch = Vec::with_capacity(
+            self.consume_work_senders.len() * TARGET_NUM_TRANSACTIONS_PER_BATCH,
+        );
         const MAX_TRANSACTIONS_PER_SCHEDULING_PASS: usize = 100_000;
         let mut num_scheduled: usize = 0;
         let mut num_sent: usize = 0;
@@ -152,11 +166,14 @@ impl PrioGraphScheduler {
 
                 // Should always be in the container, during initial testing phase panic.
                 // Later, we can replace with a continue in case this does happen.
-                let Some(transaction_state) = container.get_mut_transaction_state(&id.id) else {
+                let Some(transaction_state) =
+                    container.get_mut_transaction_state(&id.id)
+                else {
                     panic!("transaction state must exist")
                 };
 
-                let transaction = &transaction_state.transaction_ttl().transaction;
+                let transaction =
+                    &transaction_state.transaction_ttl().transaction;
                 if !pre_lock_filter(transaction) {
                     container.remove_by_id(&id.id);
                     continue;
@@ -171,7 +188,8 @@ impl PrioGraphScheduler {
                 }
 
                 // Schedule the transaction if it can be.
-                let transaction_locks = transaction.get_account_locks_unchecked();
+                let transaction_locks =
+                    transaction.get_account_locks_unchecked();
                 let Some(thread_id) = self.account_locks.try_lock_accounts(
                     transaction_locks.writable.into_iter(),
                     transaction_locks.readonly.into_iter(),
@@ -192,7 +210,8 @@ impl PrioGraphScheduler {
 
                 saturating_add_assign!(num_scheduled, 1);
 
-                let sanitized_transaction_ttl = transaction_state.transition_to_pending();
+                let sanitized_transaction_ttl =
+                    transaction_state.transition_to_pending();
                 let cost = transaction_state.cost();
 
                 let SanitizedTransactionTTL {
@@ -206,8 +225,13 @@ impl PrioGraphScheduler {
                 saturating_add_assign!(batches.total_cus[thread_id], cost);
 
                 // If target batch size is reached, send only this batch.
-                if batches.ids[thread_id].len() >= TARGET_NUM_TRANSACTIONS_PER_BATCH {
-                    saturating_add_assign!(num_sent, self.send_batch(&mut batches, thread_id)?);
+                if batches.ids[thread_id].len()
+                    >= TARGET_NUM_TRANSACTIONS_PER_BATCH
+                {
+                    saturating_add_assign!(
+                        num_sent,
+                        self.send_batch(&mut batches, thread_id)?
+                    );
                 }
 
                 if num_scheduled >= MAX_TRANSACTIONS_PER_SCHEDULING_PASS {
@@ -263,7 +287,8 @@ impl PrioGraphScheduler {
         let mut total_num_transactions: usize = 0;
         let mut total_num_retryable: usize = 0;
         loop {
-            let (num_transactions, num_retryable) = self.try_receive_completed(container)?;
+            let (num_transactions, num_retryable) =
+                self.try_receive_completed(container)?;
             if num_transactions == 0 {
                 break;
             }
@@ -297,7 +322,8 @@ impl PrioGraphScheduler {
                 self.complete_batch(batch_id, &transactions);
 
                 // Retryable transactions should be inserted back into the container
-                let mut retryable_iter = retryable_indexes.into_iter().peekable();
+                let mut retryable_iter =
+                    retryable_indexes.into_iter().peekable();
                 for (index, (id, transaction, max_age_slot)) in
                     izip!(ids, transactions, max_age_slots).enumerate()
                 {
@@ -320,9 +346,11 @@ impl PrioGraphScheduler {
                 Ok((num_transactions, num_retryable))
             }
             Err(TryRecvError::Empty) => Ok((0, 0)),
-            Err(TryRecvError::Disconnected) => Err(SchedulerError::DisconnectedRecvChannel(
-                "finished consume work",
-            )),
+            Err(TryRecvError::Disconnected) => {
+                Err(SchedulerError::DisconnectedRecvChannel(
+                    "finished consume work",
+                ))
+            }
         }
     }
 
@@ -346,7 +374,10 @@ impl PrioGraphScheduler {
 
     /// Send all batches of transactions to the worker threads.
     /// Returns the number of transactions sent.
-    fn send_batches(&mut self, batches: &mut Batches) -> Result<usize, SchedulerError> {
+    fn send_batches(
+        &mut self,
+        batches: &mut Batches,
+    ) -> Result<usize, SchedulerError> {
         (0..self.consume_work_senders.len())
             .map(|thread_index| self.send_batch(batches, thread_index))
             .sum()
@@ -363,11 +394,14 @@ impl PrioGraphScheduler {
             return Ok(0);
         }
 
-        let (ids, transactions, max_age_slots, total_cus) = batches.take_batch(thread_index);
+        let (ids, transactions, max_age_slots, total_cus) =
+            batches.take_batch(thread_index);
 
-        let batch_id = self
-            .in_flight_tracker
-            .track_batch(ids.len(), total_cus, thread_index);
+        let batch_id = self.in_flight_tracker.track_batch(
+            ids.len(),
+            total_cus,
+            thread_index,
+        );
 
         let num_scheduled = ids.len();
         let work = ConsumeWork {
@@ -378,7 +412,9 @@ impl PrioGraphScheduler {
         };
         self.consume_work_senders[thread_index]
             .send(work)
-            .map_err(|_| SchedulerError::DisconnectedSendChannel("consume work sender"))?;
+            .map_err(|_| {
+                SchedulerError::DisconnectedSendChannel("consume work sender")
+            })?;
 
         Ok(num_scheduled)
     }
@@ -401,7 +437,8 @@ impl PrioGraphScheduler {
             .map(|thread_id| {
                 (
                     thread_id,
-                    batches_per_thread[thread_id].len() + in_flight_per_thread[thread_id],
+                    batches_per_thread[thread_id].len()
+                        + in_flight_per_thread[thread_id],
                 )
             })
             .min_by(|a, b| a.1.cmp(&b.1))
@@ -451,9 +488,22 @@ struct Batches {
 impl Batches {
     fn new(num_threads: usize) -> Self {
         Self {
-            ids: vec![Vec::with_capacity(TARGET_NUM_TRANSACTIONS_PER_BATCH); num_threads],
-            transactions: vec![Vec::with_capacity(TARGET_NUM_TRANSACTIONS_PER_BATCH); num_threads],
-            max_age_slots: vec![Vec::with_capacity(TARGET_NUM_TRANSACTIONS_PER_BATCH); num_threads],
+            ids: vec![
+                Vec::with_capacity(TARGET_NUM_TRANSACTIONS_PER_BATCH);
+                num_threads
+            ],
+            transactions: vec![
+                Vec::with_capacity(
+                    TARGET_NUM_TRANSACTIONS_PER_BATCH
+                );
+                num_threads
+            ],
+            max_age_slots: vec![
+                Vec::with_capacity(
+                    TARGET_NUM_TRANSACTIONS_PER_BATCH
+                );
+                num_threads
+            ],
             total_cus: vec![0; num_threads],
         }
     }
@@ -487,18 +537,19 @@ impl Batches {
 
 #[cfg(test)]
 mod tests {
+    use std::borrow::Borrow;
+
     use assert_matches::assert_matches;
-    use {
-        super::*,
-        crate::consumer::TARGET_NUM_TRANSACTIONS_PER_BATCH,
-        crossbeam_channel::{unbounded, Receiver},
-        itertools::Itertools,
-        solana_sdk::{
-            compute_budget::ComputeBudgetInstruction, hash::Hash, message::Message, pubkey::Pubkey,
-            signature::Keypair, signer::Signer, system_instruction, transaction::Transaction,
-        },
-        std::borrow::Borrow,
+    use crossbeam_channel::{unbounded, Receiver};
+    use itertools::Itertools;
+    use solana_sdk::{
+        compute_budget::ComputeBudgetInstruction, hash::Hash, message::Message,
+        pubkey::Pubkey, signature::Keypair, signer::Signer, system_instruction,
+        transaction::Transaction,
     };
+
+    use super::*;
+    use crate::consumer::TARGET_NUM_TRANSACTIONS_PER_BATCH;
 
     macro_rules! txid {
         ($value:expr) => {
@@ -521,9 +572,12 @@ mod tests {
     ) {
         let (consume_work_senders, consume_work_receivers) =
             (0..num_threads).map(|_| unbounded()).unzip();
-        let (finished_consume_work_sender, finished_consume_work_receiver) = unbounded();
-        let scheduler =
-            PrioGraphScheduler::new(consume_work_senders, finished_consume_work_receiver);
+        let (finished_consume_work_sender, finished_consume_work_receiver) =
+            unbounded();
+        let scheduler = PrioGraphScheduler::new(
+            consume_work_senders,
+            finished_consume_work_receiver,
+        );
         (
             scheduler,
             consume_work_receivers,
@@ -542,9 +596,12 @@ mod tests {
             .map(|pubkey| *pubkey.borrow())
             .zip(std::iter::repeat(lamports))
             .collect_vec();
-        let mut ixs =
-            system_instruction::transfer_many(&from_keypair.pubkey(), &to_pubkeys_lamports);
-        let prioritization = ComputeBudgetInstruction::set_compute_unit_price(priority);
+        let mut ixs = system_instruction::transfer_many(
+            &from_keypair.pubkey(),
+            &to_pubkeys_lamports,
+        );
+        let prioritization =
+            ComputeBudgetInstruction::set_compute_unit_price(priority);
         ixs.push(prioritization);
         let message = Message::new(&ixs, Some(&from_keypair.pubkey()));
         let tx = Transaction::new(&[from_keypair], message, Hash::default());
@@ -600,7 +657,10 @@ mod tests {
             .unzip()
     }
 
-    fn test_pre_graph_filter(_txs: &[&SanitizedTransaction], results: &mut [bool]) {
+    fn test_pre_graph_filter(
+        _txs: &[&SanitizedTransaction],
+        results: &mut [bool],
+    ) {
         results.fill(true);
     }
 
@@ -610,26 +670,41 @@ mod tests {
 
     #[test]
     fn test_schedule_disconnected_channel() {
-        let (mut scheduler, work_receivers, _finished_work_sender) = create_test_frame(1);
-        let mut container = create_container([(&Keypair::new(), &[Pubkey::new_unique()], 1, 1)]);
+        let (mut scheduler, work_receivers, _finished_work_sender) =
+            create_test_frame(1);
+        let mut container = create_container([(
+            &Keypair::new(),
+            &[Pubkey::new_unique()],
+            1,
+            1,
+        )]);
 
         drop(work_receivers); // explicitly drop receivers
         assert_matches!(
-            scheduler.schedule(&mut container, test_pre_graph_filter, test_pre_lock_filter),
+            scheduler.schedule(
+                &mut container,
+                test_pre_graph_filter,
+                test_pre_lock_filter
+            ),
             Err(SchedulerError::DisconnectedSendChannel(_))
         );
     }
 
     #[test]
     fn test_schedule_single_threaded_no_conflicts() {
-        let (mut scheduler, work_receivers, _finished_work_sender) = create_test_frame(1);
+        let (mut scheduler, work_receivers, _finished_work_sender) =
+            create_test_frame(1);
         let mut container = create_container([
             (&Keypair::new(), &[Pubkey::new_unique()], 1, 1),
             (&Keypair::new(), &[Pubkey::new_unique()], 2, 2),
         ]);
 
         let scheduling_summary = scheduler
-            .schedule(&mut container, test_pre_graph_filter, test_pre_lock_filter)
+            .schedule(
+                &mut container,
+                test_pre_graph_filter,
+                test_pre_lock_filter,
+            )
             .unwrap();
         assert_eq!(scheduling_summary.num_scheduled, 2);
         assert_eq!(scheduling_summary.num_unschedulable, 0);
@@ -638,7 +713,8 @@ mod tests {
 
     #[test]
     fn test_schedule_single_threaded_conflict() {
-        let (mut scheduler, work_receivers, _finished_work_sender) = create_test_frame(1);
+        let (mut scheduler, work_receivers, _finished_work_sender) =
+            create_test_frame(1);
         let pubkey = Pubkey::new_unique();
         let mut container = create_container([
             (&Keypair::new(), &[pubkey], 1, 1),
@@ -646,7 +722,11 @@ mod tests {
         ]);
 
         let scheduling_summary = scheduler
-            .schedule(&mut container, test_pre_graph_filter, test_pre_lock_filter)
+            .schedule(
+                &mut container,
+                test_pre_graph_filter,
+                test_pre_lock_filter,
+            )
             .unwrap();
         assert_eq!(scheduling_summary.num_scheduled, 2);
         assert_eq!(scheduling_summary.num_unschedulable, 0);
@@ -658,7 +738,8 @@ mod tests {
 
     #[test]
     fn test_schedule_consume_single_threaded_multi_batch() {
-        let (mut scheduler, work_receivers, _finished_work_sender) = create_test_frame(1);
+        let (mut scheduler, work_receivers, _finished_work_sender) =
+            create_test_frame(1);
         let mut container = create_container(
             (0..4 * TARGET_NUM_TRANSACTIONS_PER_BATCH)
                 .map(|i| (Keypair::new(), [Pubkey::new_unique()], i as u64, 1)),
@@ -666,7 +747,11 @@ mod tests {
 
         // expect 4 full batches to be scheduled
         let scheduling_summary = scheduler
-            .schedule(&mut container, test_pre_graph_filter, test_pre_lock_filter)
+            .schedule(
+                &mut container,
+                test_pre_graph_filter,
+                test_pre_lock_filter,
+            )
             .unwrap();
         assert_eq!(
             scheduling_summary.num_scheduled,
@@ -683,12 +768,18 @@ mod tests {
 
     #[test]
     fn test_schedule_simple_thread_selection() {
-        let (mut scheduler, work_receivers, _finished_work_sender) = create_test_frame(2);
-        let mut container =
-            create_container((0..4).map(|i| (Keypair::new(), [Pubkey::new_unique()], 1, i)));
+        let (mut scheduler, work_receivers, _finished_work_sender) =
+            create_test_frame(2);
+        let mut container = create_container(
+            (0..4).map(|i| (Keypair::new(), [Pubkey::new_unique()], 1, i)),
+        );
 
         let scheduling_summary = scheduler
-            .schedule(&mut container, test_pre_graph_filter, test_pre_lock_filter)
+            .schedule(
+                &mut container,
+                test_pre_graph_filter,
+                test_pre_lock_filter,
+            )
             .unwrap();
         assert_eq!(scheduling_summary.num_scheduled, 4);
         assert_eq!(scheduling_summary.num_unschedulable, 0);
@@ -698,7 +789,8 @@ mod tests {
 
     #[test]
     fn test_schedule_priority_guard() {
-        let (mut scheduler, work_receivers, finished_work_sender) = create_test_frame(2);
+        let (mut scheduler, work_receivers, finished_work_sender) =
+            create_test_frame(2);
         // intentionally shorten the look-ahead window to cause unschedulable conflicts
         scheduler.look_ahead_window_size = 2;
 
@@ -729,7 +821,11 @@ mod tests {
         // not have knowledge of the joining at transaction [4] until after [0] and [1]
         // have been scheduled.
         let scheduling_summary = scheduler
-            .schedule(&mut container, test_pre_graph_filter, test_pre_lock_filter)
+            .schedule(
+                &mut container,
+                test_pre_graph_filter,
+                test_pre_lock_filter,
+            )
             .unwrap();
         assert_eq!(scheduling_summary.num_scheduled, 4);
         assert_eq!(scheduling_summary.num_unschedulable, 2);
@@ -742,7 +838,11 @@ mod tests {
 
         // Cannot schedule even on next pass because of lock conflicts
         let scheduling_summary = scheduler
-            .schedule(&mut container, test_pre_graph_filter, test_pre_lock_filter)
+            .schedule(
+                &mut container,
+                test_pre_graph_filter,
+                test_pre_lock_filter,
+            )
             .unwrap();
         assert_eq!(scheduling_summary.num_scheduled, 0);
         assert_eq!(scheduling_summary.num_unschedulable, 2);
@@ -756,7 +856,11 @@ mod tests {
             .unwrap();
         scheduler.receive_completed(&mut container).unwrap();
         let scheduling_summary = scheduler
-            .schedule(&mut container, test_pre_graph_filter, test_pre_lock_filter)
+            .schedule(
+                &mut container,
+                test_pre_graph_filter,
+                test_pre_lock_filter,
+            )
             .unwrap();
         assert_eq!(scheduling_summary.num_scheduled, 2);
         assert_eq!(scheduling_summary.num_unschedulable, 0);
@@ -769,7 +873,8 @@ mod tests {
 
     #[test]
     fn test_schedule_pre_lock_filter() {
-        let (mut scheduler, work_receivers, _finished_work_sender) = create_test_frame(1);
+        let (mut scheduler, work_receivers, _finished_work_sender) =
+            create_test_frame(1);
         let pubkey = Pubkey::new_unique();
         let keypair = Keypair::new();
         let mut container = create_container([
@@ -779,8 +884,9 @@ mod tests {
         ]);
 
         // 2nd transaction should be filtered out and dropped before locking.
-        let pre_lock_filter =
-            |tx: &SanitizedTransaction| tx.message().fee_payer() != &keypair.pubkey();
+        let pre_lock_filter = |tx: &SanitizedTransaction| {
+            tx.message().fee_payer() != &keypair.pubkey()
+        };
         let scheduling_summary = scheduler
             .schedule(&mut container, test_pre_graph_filter, pre_lock_filter)
             .unwrap();

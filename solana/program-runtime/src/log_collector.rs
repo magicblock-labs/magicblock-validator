@@ -1,5 +1,6 @@
-pub use log;
 use std::{cell::RefCell, rc::Rc};
+
+pub use log;
 
 const LOG_MESSAGES_BYTES_LIMIT: usize = 10 * 1000;
 

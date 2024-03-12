@@ -17,9 +17,9 @@ use solana_accounts_db::{
     transaction_results::{TransactionExecutionResult, TransactionResults},
 };
 use solana_measure::measure_us;
+use solana_sdk::{hash::Hash, saturating_add_assign};
 
 use crate::{consumer::PreBalanceInfo, metrics::LeaderExecuteAndCommitTimings};
-use solana_sdk::{hash::Hash, saturating_add_assign};
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum CommitTransactionDetails {
@@ -36,7 +36,9 @@ pub struct Committer {
 }
 
 impl Committer {
-    pub fn new(transaction_status_sender: Option<TransactionStatusSender>) -> Self {
+    pub fn new(
+        transaction_status_sender: Option<TransactionStatusSender>,
+    ) -> Self {
         Self {
             transaction_status_sender,
         }
@@ -64,22 +66,26 @@ impl Committer {
         executed_with_successful_result_count: usize,
     ) -> (u64, Vec<CommitTransactionDetails>) {
         // NOTE: omitted executed_transactions aggregation since we don't update prioritzation_fee_cache
-        let (tx_results, commit_time_us) = measure_us!(bank.commit_transactions(
-            batch.sanitized_transactions(),
-            loaded_transactions,
-            execution_results,
-            last_blockhash,
-            lamports_per_signature,
-            CommitTransactionCounts {
-                committed_transactions_count: executed_transactions_count as u64,
-                committed_non_vote_transactions_count: executed_non_vote_transactions_count as u64,
-                committed_with_failure_result_count: executed_transactions_count
-                    .saturating_sub(executed_with_successful_result_count)
-                    as u64,
-                signature_count,
-            },
-            &mut execute_and_commit_timings.execute_timings,
-        ));
+        let (tx_results, commit_time_us) = measure_us!(bank
+            .commit_transactions(
+                batch.sanitized_transactions(),
+                loaded_transactions,
+                execution_results,
+                last_blockhash,
+                lamports_per_signature,
+                CommitTransactionCounts {
+                    committed_transactions_count: executed_transactions_count
+                        as u64,
+                    committed_non_vote_transactions_count:
+                        executed_non_vote_transactions_count as u64,
+                    committed_with_failure_result_count:
+                        executed_transactions_count.saturating_sub(
+                            executed_with_successful_result_count
+                        ) as u64,
+                    signature_count,
+                },
+                &mut execute_and_commit_timings.execute_timings,
+            ));
         execute_and_commit_timings.commit_us = commit_time_us;
 
         let commit_transaction_statuses = tx_results
@@ -104,7 +110,8 @@ impl Committer {
             );
             // NOTE: removed self.prioritization_fee_cache.update
         });
-        execute_and_commit_timings.find_and_send_votes_us = find_and_send_votes_us;
+        execute_and_commit_timings.find_and_send_votes_us =
+            find_and_send_votes_us;
         (commit_time_us, commit_transaction_statuses)
     }
 
@@ -116,12 +123,17 @@ impl Committer {
         pre_balance_info: &mut PreBalanceInfo,
         starting_transaction_index: Option<usize>,
     ) {
-        if let Some(transaction_status_sender) = &self.transaction_status_sender {
+        if let Some(transaction_status_sender) = &self.transaction_status_sender
+        {
             let txs = batch.sanitized_transactions().to_vec();
             let post_balances = bank.collect_balances(batch);
-            let post_token_balances =
-                collect_token_balances(bank, batch, &mut pre_balance_info.mint_decimals);
-            let mut transaction_index = starting_transaction_index.unwrap_or_default();
+            let post_token_balances = collect_token_balances(
+                bank,
+                batch,
+                &mut pre_balance_info.mint_decimals,
+            );
+            let mut transaction_index =
+                starting_transaction_index.unwrap_or_default();
             let batch_transaction_indexes: Vec<_> = tx_results
                 .execution_results
                 .iter()

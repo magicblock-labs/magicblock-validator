@@ -9,7 +9,8 @@ use solana_sdk::{
 
 #[derive(Default, Debug)]
 pub struct TransactionsProcessorProcessResult {
-    pub transactions: HashMap<Signature, (SanitizedTransaction, TransactionExecutionDetails)>,
+    pub transactions:
+        HashMap<Signature, (SanitizedTransaction, TransactionExecutionDetails)>,
     pub balances: Vec<TransactionBalancesSet>,
 }
 

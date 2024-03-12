@@ -1,19 +1,19 @@
 // NOTE: from rpc-client-api/src/response.rs without vote/token related parts
-use {
-    crate::client_error,
-    serde::{Deserialize, Deserializer, Serialize, Serializer},
-    solana_account_decoder::UiAccount,
-    solana_sdk::{
-        clock::{Slot, UnixTimestamp},
-        transaction::{Result, TransactionError},
-    },
-    solana_transaction_status::{
-        ConfirmedTransactionStatusWithSignature, TransactionConfirmationStatus, UiConfirmedBlock,
-        UiInnerInstructions, UiTransactionReturnData,
-    },
-    std::{fmt, str::FromStr},
-    thiserror::Error,
+use std::{fmt, str::FromStr};
+
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
+use solana_account_decoder::UiAccount;
+use solana_sdk::{
+    clock::{Slot, UnixTimestamp},
+    transaction::{Result, TransactionError},
 };
+use solana_transaction_status::{
+    ConfirmedTransactionStatusWithSignature, TransactionConfirmationStatus,
+    UiConfirmedBlock, UiInnerInstructions, UiTransactionReturnData,
+};
+use thiserror::Error;
+
+use crate::client_error;
 
 // -----------------
 // OptionalContext
@@ -85,7 +85,10 @@ impl Default for RpcApiVersion {
 }
 
 impl Serialize for RpcApiVersion {
-    fn serialize<S>(&self, serializer: S) -> std::result::Result<S::Ok, S::Error>
+    fn serialize<S>(
+        &self,
+        serializer: S,
+    ) -> std::result::Result<S::Ok, S::Error>
     where
         S: Serializer,
     {
@@ -255,7 +258,9 @@ pub struct RpcConfirmedTransactionStatusWithSignature {
     pub confirmation_status: Option<TransactionConfirmationStatus>,
 }
 
-impl From<ConfirmedTransactionStatusWithSignature> for RpcConfirmedTransactionStatusWithSignature {
+impl From<ConfirmedTransactionStatusWithSignature>
+    for RpcConfirmedTransactionStatusWithSignature
+{
     fn from(value: ConfirmedTransactionStatusWithSignature) -> Self {
         let ConfirmedTransactionStatusWithSignature {
             signature,

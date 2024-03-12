@@ -1,20 +1,24 @@
+use std::sync::Arc;
+
 #[allow(deprecated)]
 use solana_sdk::sysvar::{
-    fees::Fees, last_restart_slot::LastRestartSlot, recent_blockhashes::RecentBlockhashes,
+    fees::Fees, last_restart_slot::LastRestartSlot,
+    recent_blockhashes::RecentBlockhashes,
 };
-use {
-    crate::invoke_context::InvokeContext,
-    solana_sdk::{
-        instruction::InstructionError,
-        pubkey::Pubkey,
-        sysvar::{
-            clock::Clock, epoch_rewards::EpochRewards, epoch_schedule::EpochSchedule, rent::Rent,
-            slot_hashes::SlotHashes, stake_history::StakeHistory, Sysvar, SysvarId,
-        },
-        transaction_context::{IndexOfAccount, InstructionContext, TransactionContext},
+use solana_sdk::{
+    instruction::InstructionError,
+    pubkey::Pubkey,
+    sysvar::{
+        clock::Clock, epoch_rewards::EpochRewards,
+        epoch_schedule::EpochSchedule, rent::Rent, slot_hashes::SlotHashes,
+        stake_history::StakeHistory, Sysvar, SysvarId,
     },
-    std::sync::Arc,
+    transaction_context::{
+        IndexOfAccount, InstructionContext, TransactionContext,
+    },
 };
+
+use crate::invoke_context::InvokeContext;
 
 #[cfg(RUSTC_WITH_SPECIALIZATION)]
 impl ::solana_frozen_abi::abi_example::AbiExample for SysvarCache {
@@ -50,7 +54,9 @@ impl SysvarCache {
         self.clock = Some(Arc::new(clock));
     }
 
-    pub fn get_epoch_schedule(&self) -> Result<Arc<EpochSchedule>, InstructionError> {
+    pub fn get_epoch_schedule(
+        &self,
+    ) -> Result<Arc<EpochSchedule>, InstructionError> {
         self.epoch_schedule
             .clone()
             .ok_or(InstructionError::UnsupportedSysvar)
@@ -60,7 +66,9 @@ impl SysvarCache {
         self.epoch_schedule = Some(Arc::new(epoch_schedule));
     }
 
-    pub fn get_epoch_rewards(&self) -> Result<Arc<EpochRewards>, InstructionError> {
+    pub fn get_epoch_rewards(
+        &self,
+    ) -> Result<Arc<EpochRewards>, InstructionError> {
         self.epoch_rewards
             .clone()
             .ok_or(InstructionError::UnsupportedSysvar)
@@ -90,13 +98,18 @@ impl SysvarCache {
         self.rent = Some(Arc::new(rent));
     }
 
-    pub fn get_last_restart_slot(&self) -> Result<Arc<LastRestartSlot>, InstructionError> {
+    pub fn get_last_restart_slot(
+        &self,
+    ) -> Result<Arc<LastRestartSlot>, InstructionError> {
         self.last_restart_slot
             .clone()
             .ok_or(InstructionError::UnsupportedSysvar)
     }
 
-    pub fn set_last_restart_slot(&mut self, last_restart_slot: LastRestartSlot) {
+    pub fn set_last_restart_slot(
+        &mut self,
+        last_restart_slot: LastRestartSlot,
+    ) {
         self.last_restart_slot = Some(Arc::new(last_restart_slot));
     }
 
@@ -112,7 +125,9 @@ impl SysvarCache {
 
     #[deprecated]
     #[allow(deprecated)]
-    pub fn get_recent_blockhashes(&self) -> Result<Arc<RecentBlockhashes>, InstructionError> {
+    pub fn get_recent_blockhashes(
+        &self,
+    ) -> Result<Arc<RecentBlockhashes>, InstructionError> {
         self.recent_blockhashes
             .clone()
             .ok_or(InstructionError::UnsupportedSysvar)
@@ -120,11 +135,16 @@ impl SysvarCache {
 
     #[deprecated]
     #[allow(deprecated)]
-    pub fn set_recent_blockhashes(&mut self, recent_blockhashes: RecentBlockhashes) {
+    pub fn set_recent_blockhashes(
+        &mut self,
+        recent_blockhashes: RecentBlockhashes,
+    ) {
         self.recent_blockhashes = Some(Arc::new(recent_blockhashes));
     }
 
-    pub fn get_stake_history(&self) -> Result<Arc<StakeHistory>, InstructionError> {
+    pub fn get_stake_history(
+        &self,
+    ) -> Result<Arc<StakeHistory>, InstructionError> {
         self.stake_history
             .clone()
             .ok_or(InstructionError::UnsupportedSysvar)
@@ -226,8 +246,13 @@ pub mod get_sysvar_with_account_check {
         instruction_account_index: IndexOfAccount,
     ) -> Result<(), InstructionError> {
         let index_in_transaction = instruction_context
-            .get_index_of_instruction_account_in_transaction(instruction_account_index)?;
-        if !S::check_id(transaction_context.get_key_of_account_at_index(index_in_transaction)?) {
+            .get_index_of_instruction_account_in_transaction(
+                instruction_account_index,
+            )?;
+        if !S::check_id(
+            transaction_context
+                .get_key_of_account_at_index(index_in_transaction)?,
+        ) {
             return Err(InstructionError::InvalidArgument);
         }
         Ok(())

@@ -1,21 +1,28 @@
-use log::*;
-use sleipnir_bank::bank_dev_utils::elfs;
-use sleipnir_bank::bank_dev_utils::transactions::{
-    create_solx_send_post_transaction, SolanaxPostAccounts,
-};
-use sleipnir_bank::transaction_results::TransactionBalancesSet;
-use sleipnir_bank::LAMPORTS_PER_SIGNATURE;
-use solana_sdk::account::{Account, ReadableAccount};
-use solana_sdk::bpf_loader_upgradeable;
-use solana_sdk::native_token::LAMPORTS_PER_SOL;
-use test_tools::{init_logger, transactions_processor};
-
 use assert_matches::assert_matches;
-use test_tools::account::get_account_addr;
-use test_tools::diagnostics::log_exec_details;
+use log::*;
+use sleipnir_bank::{
+    bank_dev_utils::{
+        elfs,
+        transactions::{
+            create_solx_send_post_transaction, SolanaxPostAccounts,
+        },
+    },
+    transaction_results::TransactionBalancesSet,
+    LAMPORTS_PER_SIGNATURE,
+};
+use solana_sdk::{
+    account::{Account, ReadableAccount},
+    bpf_loader_upgradeable,
+    native_token::LAMPORTS_PER_SOL,
+};
+use test_tools::{
+    account::get_account_addr, diagnostics::log_exec_details, init_logger,
+    transactions_processor,
+};
 
 use crate::utils::{
-    fund_luzifer, verified_tx_to_clone_from_devnet, SOLX_EXEC, SOLX_IDL, SOLX_PROG,
+    fund_luzifer, verified_tx_to_clone_from_devnet, SOLX_EXEC, SOLX_IDL,
+    SOLX_PROG,
 };
 
 mod utils;
@@ -39,14 +46,16 @@ async fn clone_solx_executable() {
 
     // 2. Verify that all accounts were added to the validator
     {
-        let solx_prog: Account = get_account_addr(tx_processor.bank(), SOLX_PROG)
-            .unwrap()
-            .into();
+        let solx_prog: Account =
+            get_account_addr(tx_processor.bank(), SOLX_PROG)
+                .unwrap()
+                .into();
         trace!("SolxProg account: {:#?}", solx_prog);
 
-        let solx_exec: Account = get_account_addr(tx_processor.bank(), SOLX_EXEC)
-            .unwrap()
-            .into();
+        let solx_exec: Account =
+            get_account_addr(tx_processor.bank(), SOLX_EXEC)
+                .unwrap()
+                .into();
         trace!("SolxExec account: {:#?}", solx_exec);
 
         let solx_idl: Account = get_account_addr(tx_processor.bank(), SOLX_IDL)

@@ -1,14 +1,15 @@
 // NOTE: from rpc-client-api/src/client_error.rs
 
+use std::io;
+
 pub use reqwest;
-use {
-    crate::{request, response},
-    solana_sdk::{
-        signature::SignerError, transaction::TransactionError, transport::TransportError,
-    },
-    std::io,
-    thiserror::Error as ThisError,
+use solana_sdk::{
+    signature::SignerError, transaction::TransactionError,
+    transport::TransportError,
 };
+use thiserror::Error as ThisError;
+
+use crate::{request, response};
 
 #[derive(ThisError, Debug)]
 pub enum ErrorKind {
@@ -35,7 +36,8 @@ impl ErrorKind {
                 data:
                     request::RpcResponseErrorData::SendTransactionPreflightFailure(
                         response::RpcSimulateTransactionResult {
-                            err: Some(tx_err), ..
+                            err: Some(tx_err),
+                            ..
                         },
                     ),
                 ..
@@ -50,7 +52,9 @@ impl From<TransportError> for ErrorKind {
     fn from(err: TransportError) -> Self {
         match err {
             TransportError::IoError(err) => Self::Io(err),
-            TransportError::TransactionError(err) => Self::TransactionError(err),
+            TransportError::TransactionError(err) => {
+                Self::TransactionError(err)
+            }
             TransportError::Custom(err) => Self::Custom(err),
         }
     }
@@ -80,7 +84,10 @@ pub struct Error {
 }
 
 impl Error {
-    pub fn new_with_request(kind: ErrorKind, request: request::RpcRequest) -> Self {
+    pub fn new_with_request(
+        kind: ErrorKind,
+        request: request::RpcRequest,
+    ) -> Self {
         Self {
             request: Some(request),
             kind,

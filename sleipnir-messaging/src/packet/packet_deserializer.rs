@@ -1,15 +1,16 @@
 use std::time::{Duration, Instant};
 
-use super::sigverify_packet_stats::SigverifyTracerPacketStats;
 use crossbeam_channel::RecvTimeoutError;
 use log::trace;
 use solana_perf::packet::PacketBatch;
 
-use crate::{
-    messages::immutable_deserialized_packet::ImmutableDeserializedPacket, BankingPacketReceiver,
+use super::{
+    sigverify_packet_stats::SigverifyTracerPacketStats, BankingPacketBatch,
 };
-
-use super::BankingPacketBatch;
+use crate::{
+    messages::immutable_deserialized_packet::ImmutableDeserializedPacket,
+    BankingPacketReceiver,
+};
 
 /// Results from deserializing packet batches.
 pub struct ReceivePacketResults {
@@ -41,7 +42,8 @@ impl PacketDeserializer {
         recv_timeout: Duration,
         capacity: usize,
     ) -> Result<ReceivePacketResults, RecvTimeoutError> {
-        let (packet_count, packet_batches) = self.receive_until(recv_timeout, capacity)?;
+        let (packet_count, packet_batches) =
+            self.receive_until(recv_timeout, capacity)?;
 
         // Note: this can be removed after feature `round_compute_unit_price` is activated in
         // mainnet-beta
@@ -64,14 +66,17 @@ impl PacketDeserializer {
         let mut passed_sigverify_count: usize = 0;
         let mut failed_sigverify_count: usize = 0;
         let mut deserialized_packets = Vec::with_capacity(packet_count);
-        let mut aggregated_tracer_packet_stats_option = None::<SigverifyTracerPacketStats>;
+        let mut aggregated_tracer_packet_stats_option =
+            None::<SigverifyTracerPacketStats>;
 
         for banking_batch in banking_batches {
             for packet_batch in &banking_batch.0 {
-                let packet_indexes = Self::generate_packet_indexes(packet_batch);
+                let packet_indexes =
+                    Self::generate_packet_indexes(packet_batch);
 
                 passed_sigverify_count += packet_indexes.len();
-                failed_sigverify_count += packet_batch.len().saturating_sub(packet_indexes.len());
+                failed_sigverify_count +=
+                    packet_batch.len().saturating_sub(packet_indexes.len());
 
                 deserialized_packets.extend(Self::deserialize_packets(
                     packet_batch,
@@ -84,11 +89,13 @@ impl PacketDeserializer {
                 if let Some(aggregated_tracer_packet_stats) =
                     &mut aggregated_tracer_packet_stats_option
                 {
-                    aggregated_tracer_packet_stats.aggregate(tracer_packet_stats);
+                    aggregated_tracer_packet_stats
+                        .aggregate(tracer_packet_stats);
                 } else {
                     // BankingPacketBatch is owned by Arc; so we have to clone its internal field
                     // (SigverifyTracerPacketStats).
-                    aggregated_tracer_packet_stats_option = Some(tracer_packet_stats.clone());
+                    aggregated_tracer_packet_stats_option =
+                        Some(tracer_packet_stats.clone());
                 }
             }
         }
@@ -126,7 +133,9 @@ impl PacketDeserializer {
                 .sum::<usize>();
             messages.push(message);
 
-            if start.elapsed() >= recv_timeout || num_packets_received >= packet_count_upperbound {
+            if start.elapsed() >= recv_timeout
+                || num_packets_received >= packet_count_upperbound
+            {
                 break;
             }
         }
@@ -160,22 +169,27 @@ impl PacketDeserializer {
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        solana_perf::packet::to_packet_batches,
-        solana_sdk::{
-            hash::Hash, pubkey::Pubkey, signature::Keypair, system_transaction,
-            transaction::Transaction,
-        },
+    use solana_perf::packet::to_packet_batches;
+    use solana_sdk::{
+        hash::Hash, pubkey::Pubkey, signature::Keypair, system_transaction,
+        transaction::Transaction,
     };
 
+    use super::*;
+
     fn random_transfer() -> Transaction {
-        system_transaction::transfer(&Keypair::new(), &Pubkey::new_unique(), 1, Hash::default())
+        system_transaction::transfer(
+            &Keypair::new(),
+            &Pubkey::new_unique(),
+            1,
+            Hash::default(),
+        )
     }
 
     #[test]
     fn test_deserialize_and_collect_packets_empty() {
-        let results = PacketDeserializer::deserialize_and_collect_packets(0, &[], false);
+        let results =
+            PacketDeserializer::deserialize_and_collect_packets(0, &[], false);
         assert_eq!(results.deserialized_packets.len(), 0);
         assert!(results.new_tracer_stats_option.is_none());
         assert_eq!(results.passed_sigverify_count, 0);

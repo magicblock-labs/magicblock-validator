@@ -14,10 +14,11 @@ use sleipnir_bank::{
     bank_dev_utils::transactions::create_funded_accounts,
     genesis_utils::{create_genesis_config, GenesisConfigInfo},
 };
-use sleipnir_messaging::banking_tracer::BankingTracer;
-use sleipnir_messaging::BankingPacketBatch;
+use sleipnir_messaging::{banking_tracer::BankingTracer, BankingPacketBatch};
 use sleipnir_stage_banking::banking_stage::BankingStage;
-use sleipnir_transaction_status::{TransactionStatusMessage, TransactionStatusSender};
+use sleipnir_transaction_status::{
+    TransactionStatusMessage, TransactionStatusSender,
+};
 use solana_measure::measure::Measure;
 use solana_perf::packet::{to_packet_batches, PacketBatch};
 use solana_sdk::{
@@ -29,7 +30,9 @@ use test_tools_core::init_logger;
 
 const LOG_MSGS_BYTE_LIMT: Option<usize> = None;
 
-fn convert_from_old_verified(mut with_vers: Vec<(PacketBatch, Vec<u8>)>) -> Vec<PacketBatch> {
+fn convert_from_old_verified(
+    mut with_vers: Vec<(PacketBatch, Vec<u8>)>,
+) -> Vec<PacketBatch> {
     with_vers.iter_mut().for_each(|(b, v)| {
         b.iter_mut()
             .zip(v)
@@ -48,9 +51,12 @@ fn watch_transaction_status(
     });
     let tx_status_thread = std::thread::spawn(move || {
         let transaction_status_receiver = transaction_status_receiver;
-        while let Ok(TransactionStatusMessage::Batch(batch)) = transaction_status_receiver.recv() {
+        while let Ok(TransactionStatusMessage::Batch(batch)) =
+            transaction_status_receiver.recv()
+        {
             debug!("received batch: {:#?}", batch);
-            tx_received_counter.fetch_add(batch.transactions.len() as u64, Ordering::Relaxed);
+            tx_received_counter
+                .fetch_add(batch.transactions.len() as u64, Ordering::Relaxed);
             // Each status has exactly one transaction
             for balance in &batch.balances.post_balances {
                 let funded = balance[1];
@@ -71,8 +77,11 @@ fn track_transaction_sigs(
     });
     let tx_status_thread = std::thread::spawn(move || {
         let transaction_status_receiver = transaction_status_receiver;
-        while let Ok(TransactionStatusMessage::Batch(batch)) = transaction_status_receiver.recv() {
-            tx_received_counter.fetch_add(batch.transactions.len() as u64, Ordering::Relaxed);
+        while let Ok(TransactionStatusMessage::Batch(batch)) =
+            transaction_status_receiver.recv()
+        {
+            tx_received_counter
+                .fetch_add(batch.transactions.len() as u64, Ordering::Relaxed);
             for tx in batch.transactions {
                 let mut sigs = sigs.write().unwrap();
                 sigs.push(*tx.signature());
@@ -91,9 +100,16 @@ fn test_banking_stage_shutdown1() {
     let bank = Arc::new(bank);
 
     let banking_tracer = BankingTracer::new_disabled();
-    let (non_vote_sender, non_vote_receiver) = banking_tracer.create_channel_non_vote();
+    let (non_vote_sender, non_vote_receiver) =
+        banking_tracer.create_channel_non_vote();
 
-    let banking_stage = BankingStage::new(non_vote_receiver, None, LOG_MSGS_BYTE_LIMT, bank, None);
+    let banking_stage = BankingStage::new(
+        non_vote_receiver,
+        None,
+        LOG_MSGS_BYTE_LIMT,
+        bank,
+        None,
+    );
     drop(non_vote_sender);
     banking_stage.join().unwrap();
 }
@@ -105,21 +121,25 @@ fn test_banking_stage_with_transaction_status_sender_tracking_signatures() {
 
     const SEND_CHUNK_SIZE: usize = 100;
 
-    let GenesisConfigInfo { genesis_config, .. } = create_genesis_config(u64::MAX);
+    let GenesisConfigInfo { genesis_config, .. } =
+        create_genesis_config(u64::MAX);
     let bank = Bank::new_for_tests(&genesis_config);
     let start_hash = bank.last_blockhash();
     let bank = Arc::new(bank);
 
     let banking_tracer = BankingTracer::new_disabled();
-    let (non_vote_sender, non_vote_receiver) = banking_tracer.create_channel_non_vote();
+    let (non_vote_sender, non_vote_receiver) =
+        banking_tracer.create_channel_non_vote();
 
     // Create the banking stage
     debug!("Creating banking stage...");
 
     let receive_results_counter = Arc::<AtomicU64>::default();
     let signatures = Arc::<RwLock<Vec<Signature>>>::default();
-    let (transaction_status_sender, tx_status_thread) =
-        track_transaction_sigs(receive_results_counter.clone(), signatures.clone());
+    let (transaction_status_sender, tx_status_thread) = track_transaction_sigs(
+        receive_results_counter.clone(),
+        signatures.clone(),
+    );
     let banking_stage = BankingStage::new(
         non_vote_receiver,
         transaction_status_sender,
@@ -131,7 +151,8 @@ fn test_banking_stage_with_transaction_status_sender_tracking_signatures() {
     // Create Transactions
     debug!("Creating transactions...");
     let fully_funded_tx = {
-        let payer = create_funded_accounts(&bank, 1, Some(LAMPORTS_PER_SOL)).remove(0);
+        let payer =
+            create_funded_accounts(&bank, 1, Some(LAMPORTS_PER_SOL)).remove(0);
         let to = solana_sdk::pubkey::Pubkey::new_unique();
         system_transaction::transfer(&payer, &to, 890_880_000, start_hash)
     };
@@ -199,21 +220,25 @@ fn test_banking_stage_transfer_from_non_existing_account() {
 
     const SEND_CHUNK_SIZE: usize = 100;
 
-    let GenesisConfigInfo { genesis_config, .. } = create_genesis_config(u64::MAX);
+    let GenesisConfigInfo { genesis_config, .. } =
+        create_genesis_config(u64::MAX);
     let bank = Bank::new_for_tests(&genesis_config);
     let start_hash = bank.last_blockhash();
     let bank = Arc::new(bank);
 
     let banking_tracer = BankingTracer::new_disabled();
-    let (non_vote_sender, non_vote_receiver) = banking_tracer.create_channel_non_vote();
+    let (non_vote_sender, non_vote_receiver) =
+        banking_tracer.create_channel_non_vote();
 
     // Create the banking stage
     debug!("Creating banking stage...");
 
     let receive_results_counter = Arc::<AtomicU64>::default();
     let signatures = Arc::<RwLock<Vec<Signature>>>::default();
-    let (transaction_status_sender, tx_status_thread) =
-        track_transaction_sigs(receive_results_counter.clone(), signatures.clone());
+    let (transaction_status_sender, tx_status_thread) = track_transaction_sigs(
+        receive_results_counter.clone(),
+        signatures.clone(),
+    );
     let banking_stage = BankingStage::new(
         non_vote_receiver,
         transaction_status_sender,
@@ -296,9 +321,11 @@ fn test_banking_stage_with_transaction_status_sender_perf() {
         })
         .collect::<Vec<_>>();
 
-    let mut results: Vec<BenchmarkTransactionsResult> = Vec::with_capacity(permutations.len());
+    let mut results: Vec<BenchmarkTransactionsResult> =
+        Vec::with_capacity(permutations.len());
     for (num_transactions, batch_size) in permutations {
-        let num_payers: u64 = (num_transactions / thread_count).min(thread_count).max(1);
+        let num_payers: u64 =
+            (num_transactions / thread_count).min(thread_count).max(1);
         let config = BenchmarkTransactionsConfig {
             num_transactions,
             num_payers,
@@ -308,7 +335,8 @@ fn test_banking_stage_with_transaction_status_sender_perf() {
         let result = run_bench_transactions(config);
         results.push(result);
     }
-    let mut wtr = csv::Writer::from_path("/tmp/out.csv").expect("Failed to create CSV writer");
+    let mut wtr = csv::Writer::from_path("/tmp/out.csv")
+        .expect("Failed to create CSV writer");
     for result in &results {
         wtr.serialize(result).expect("Failed to serialize");
     }
@@ -332,15 +360,19 @@ struct BenchmarkTransactionsResult {
     pub execute_batches_and_receive_results_elapsed_ms: u64,
 }
 
-fn run_bench_transactions(config: BenchmarkTransactionsConfig) -> BenchmarkTransactionsResult {
+fn run_bench_transactions(
+    config: BenchmarkTransactionsConfig,
+) -> BenchmarkTransactionsResult {
     info!("{:#?}", config);
-    let GenesisConfigInfo { genesis_config, .. } = create_genesis_config(u64::MAX);
+    let GenesisConfigInfo { genesis_config, .. } =
+        create_genesis_config(u64::MAX);
     let bank = Bank::new_for_tests(&genesis_config);
     let start_hash = bank.last_blockhash();
     let bank = Arc::new(bank);
 
     let banking_tracer = BankingTracer::new_disabled();
-    let (non_vote_sender, non_vote_receiver) = banking_tracer.create_channel_non_vote();
+    let (non_vote_sender, non_vote_receiver) =
+        banking_tracer.create_channel_non_vote();
 
     // 1. Fund an account so we can send 2 good transactions in a single batch.
     debug!("1. funding payers...");
@@ -356,7 +388,10 @@ fn run_bench_transactions(config: BenchmarkTransactionsConfig) -> BenchmarkTrans
     let tx_received_counter = Arc::<AtomicU64>::default();
     let tx_funded = Arc::<AtomicU64>::default();
     let (transaction_status_sender, tx_status_thread) =
-        watch_transaction_status(tx_received_counter.clone(), tx_funded.clone());
+        watch_transaction_status(
+            tx_received_counter.clone(),
+            tx_funded.clone(),
+        );
     let banking_stage = BankingStage::new(
         non_vote_receiver,
         transaction_status_sender,
@@ -374,7 +409,12 @@ fn run_bench_transactions(config: BenchmarkTransactionsConfig) -> BenchmarkTrans
             (
                 to,
                 // We're abusing the post balance as tx id
-                system_transaction::transfer(payer, &to, 890_880_000 + idx, start_hash),
+                system_transaction::transfer(
+                    payer,
+                    &to,
+                    890_880_000 + idx,
+                    start_hash,
+                ),
             )
         })
         .unzip::<_, _, Vec<_>, Vec<_>>();
@@ -435,8 +475,10 @@ fn run_bench_transactions(config: BenchmarkTransactionsConfig) -> BenchmarkTrans
         let min_us = times.iter().map(|(_, ns)| ns).min().unwrap();
         let max_ms = times.iter().map(|(ms, _)| ms).max().unwrap();
         let max_us = times.iter().map(|(_, ns)| ns).max().unwrap();
-        let average_ms = times.iter().map(|(ms, _)| ms).sum::<u128>() / times.len() as u128;
-        let average_us = times.iter().map(|(_, us)| us).sum::<u128>() / times.len() as u128;
+        let average_ms =
+            times.iter().map(|(ms, _)| ms).sum::<u128>() / times.len() as u128;
+        let average_us =
+            times.iter().map(|(_, us)| us).sum::<u128>() / times.len() as u128;
         debug!(
             "txs {}, batch_size: {} -> min: {}ms {}us, max: {}ms {}us, average: {}ms {}us",
             config.num_transactions,
@@ -455,7 +497,7 @@ fn run_bench_transactions(config: BenchmarkTransactionsConfig) -> BenchmarkTrans
         num_payers: config.num_payers,
         send_chunk_size: config.send_chunk_size,
         batch_chunk_size: config.batch_chunk_size,
-        execute_batches_and_receive_results_elapsed_ms: execute_batches_and_receive_results_elapsed
-            .as_ms(),
+        execute_batches_and_receive_results_elapsed_ms:
+            execute_batches_and_receive_results_elapsed.as_ms(),
     }
 }

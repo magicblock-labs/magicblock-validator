@@ -1,26 +1,20 @@
 // NOTE: from core/src/banking_stage/transaction_scheduler/scheduler_controller.rs
 // with lots of pieces removed that we don't need
-use crate::scheduler::transaction_state::SanitizedTransactionTTL;
-use crate::{
-    consts::TOTAL_BUFFERED_PACKETS,
-    consumer::Consumer,
-    metrics::{ConsumeWorkerMetrics, SchedulerCountMetrics, SchedulerTimingMetrics},
-};
-
-use sleipnir_messaging::immutable_deserialized_packet::ImmutableDeserializedPacket;
-use sleipnir_messaging::packet_deserializer::PacketDeserializer;
-
-use solana_program_runtime::compute_budget_processor::process_compute_budget_instructions;
-use solana_sdk::feature_set::include_loaded_accounts_data_size_in_fee_calculation;
 use std::{sync::Arc, time::Duration};
 
 use crossbeam_channel::RecvTimeoutError;
 use sleipnir_bank::bank::Bank;
-
+use sleipnir_messaging::{
+    immutable_deserialized_packet::ImmutableDeserializedPacket,
+    packet_deserializer::PacketDeserializer,
+};
 use solana_cost_model::cost_model::CostModel;
 use solana_measure::measure_us;
+use solana_program_runtime::compute_budget_processor::process_compute_budget_instructions;
 use solana_sdk::{
-    clock::MAX_PROCESSING_AGE, fee::FeeBudgetLimits, saturating_add_assign,
+    clock::MAX_PROCESSING_AGE,
+    feature_set::include_loaded_accounts_data_size_in_fee_calculation,
+    fee::FeeBudgetLimits, saturating_add_assign,
     transaction::SanitizedTransaction,
 };
 use solana_svm::transaction_error_metrics::TransactionErrorMetrics;
@@ -29,6 +23,14 @@ use super::{
     prio_graph_scheduler::PrioGraphScheduler, scheduler_error::SchedulerError,
     transaction_id_generator::TransactionIdGenerator,
     transaction_state_container::TransactionStateContainer,
+};
+use crate::{
+    consts::TOTAL_BUFFERED_PACKETS,
+    consumer::Consumer,
+    metrics::{
+        ConsumeWorkerMetrics, SchedulerCountMetrics, SchedulerTimingMetrics,
+    },
+    scheduler::transaction_state::SanitizedTransactionTTL,
 };
 
 // Removed:
@@ -80,7 +82,9 @@ impl SchedulerController {
             packet_receiver: packet_deserializer,
             bank,
             transaction_id_generator: TransactionIdGenerator::default(),
-            container: TransactionStateContainer::with_capacity(TOTAL_BUFFERED_PACKETS),
+            container: TransactionStateContainer::with_capacity(
+                TOTAL_BUFFERED_PACKETS,
+            ),
             scheduler,
             count_metrics: SchedulerCountMetrics::default(),
             timing_metrics: SchedulerTimingMetrics::default(),
@@ -116,11 +120,14 @@ impl SchedulerController {
     /// only include the BufferedPacketsDecision::Consumed variant here
     fn process_transactions(&mut self) -> Result<(), SchedulerError> {
         let working_bank = &self.bank;
-        let (scheduling_summary, schedule_time_us) = measure_us!(self.scheduler.schedule(
-            &mut self.container,
-            |txs, results| { Self::pre_graph_filter(txs, results, working_bank) },
-            |_| true // no pre-lock filter for now
-        )?);
+        let (scheduling_summary, schedule_time_us) =
+            measure_us!(self.scheduler.schedule(
+                &mut self.container,
+                |txs, results| {
+                    Self::pre_graph_filter(txs, results, working_bank)
+                },
+                |_| true // no pre-lock filter for now
+            )?);
         saturating_add_assign!(
             self.count_metrics.num_scheduled,
             scheduling_summary.num_scheduled
@@ -137,12 +144,19 @@ impl SchedulerController {
             self.timing_metrics.schedule_filter_time_us,
             scheduling_summary.filter_time_us
         );
-        saturating_add_assign!(self.timing_metrics.schedule_time_us, schedule_time_us);
+        saturating_add_assign!(
+            self.timing_metrics.schedule_time_us,
+            schedule_time_us
+        );
 
         Ok(())
     }
 
-    fn pre_graph_filter(transactions: &[&SanitizedTransaction], results: &mut [bool], bank: &Bank) {
+    fn pre_graph_filter(
+        transactions: &[&SanitizedTransaction],
+        results: &mut [bool],
+        bank: &Bank,
+    ) {
         let lock_results = vec![Ok(()); transactions.len()];
         let mut error_counters = TransactionErrorMetrics::default();
         let check_results = bank.check_transactions(
@@ -157,11 +171,17 @@ impl SchedulerController {
             .zip(transactions)
             .map(|((result, _nonce, _lamports), tx)| {
                 result?; // if there's already error do nothing
-                Consumer::check_fee_payer_unlocked(bank, tx.message(), &mut error_counters)
+                Consumer::check_fee_payer_unlocked(
+                    bank,
+                    tx.message(),
+                    &mut error_counters,
+                )
             })
             .collect();
 
-        for (fee_check_result, result) in fee_check_results.into_iter().zip(results.iter_mut()) {
+        for (fee_check_result, result) in
+            fee_check_results.into_iter().zip(results.iter_mut())
+        {
             *result = fee_check_result.is_ok();
         }
     }
@@ -214,9 +234,14 @@ impl SchedulerController {
                 &mut error_counters,
             );
 
-            for ((result, _nonce, _lamports), id) in check_results.into_iter().zip(chunk.iter()) {
+            for ((result, _nonce, _lamports), id) in
+                check_results.into_iter().zip(chunk.iter())
+            {
                 if result.is_err() {
-                    saturating_add_assign!(self.count_metrics.num_dropped_on_age_and_status, 1);
+                    saturating_add_assign!(
+                        self.count_metrics.num_dropped_on_age_and_status,
+                        1
+                    );
                     self.container.remove_by_id(&id.id);
                 }
             }
@@ -226,8 +251,13 @@ impl SchedulerController {
     /// Receives completed transactions from the workers and updates metrics.
     fn receive_completed(&mut self) -> Result<(), SchedulerError> {
         let ((num_transactions, num_retryable), receive_completed_time_us) =
-            measure_us!(self.scheduler.receive_completed(&mut self.container)?);
-        saturating_add_assign!(self.count_metrics.num_finished, num_transactions);
+            measure_us!(self
+                .scheduler
+                .receive_completed(&mut self.container)?);
+        saturating_add_assign!(
+            self.count_metrics.num_finished,
+            num_transactions
+        );
         saturating_add_assign!(self.count_metrics.num_retryable, num_retryable);
         saturating_add_assign!(
             self.timing_metrics.receive_completed_time_us,
@@ -239,7 +269,8 @@ impl SchedulerController {
     /// Returns whether the packet receiver is still connected.
     // NOTE: only kept code path based on `BufferedPacketsDecision::Consume`
     fn receive_and_buffer_packets(&mut self) -> bool {
-        let remaining_queue_capacity = self.container.remaining_queue_capacity();
+        let remaining_queue_capacity =
+            self.container.remaining_queue_capacity();
 
         const MAX_PACKET_RECEIVE_TIME: Duration = Duration::from_millis(100);
         let (recv_timeout, should_buffer) = {
@@ -256,17 +287,27 @@ impl SchedulerController {
         let (received_packet_results, receive_time_us) = measure_us!(self
             .packet_receiver
             .receive_packets(recv_timeout, remaining_queue_capacity));
-        saturating_add_assign!(self.timing_metrics.receive_time_us, receive_time_us);
+        saturating_add_assign!(
+            self.timing_metrics.receive_time_us,
+            receive_time_us
+        );
 
         match received_packet_results {
             Ok(receive_packet_results) => {
-                let num_received_packets = receive_packet_results.deserialized_packets.len();
-                saturating_add_assign!(self.count_metrics.num_received, num_received_packets);
+                let num_received_packets =
+                    receive_packet_results.deserialized_packets.len();
+                saturating_add_assign!(
+                    self.count_metrics.num_received,
+                    num_received_packets
+                );
                 if should_buffer {
-                    let (_, buffer_time_us) = measure_us!(
-                        self.buffer_packets(receive_packet_results.deserialized_packets)
+                    let (_, buffer_time_us) = measure_us!(self.buffer_packets(
+                        receive_packet_results.deserialized_packets
+                    ));
+                    saturating_add_assign!(
+                        self.timing_metrics.buffer_time_us,
+                        buffer_time_us
                     );
-                    saturating_add_assign!(self.timing_metrics.buffer_time_us, buffer_time_us);
                 } else {
                     saturating_add_assign!(
                         self.count_metrics.num_dropped_on_receive,
@@ -285,8 +326,10 @@ impl SchedulerController {
         // Sanitize packets, generate IDs, and insert into the container.
         // NOTE: this gets working_bank from bank_forks in original
         let bank = &self.bank;
-        let last_slot_in_epoch = bank.epoch_schedule().get_last_slot_in_epoch(bank.epoch());
-        let transaction_account_lock_limit = bank.get_transaction_account_lock_limit();
+        let last_slot_in_epoch =
+            bank.epoch_schedule().get_last_slot_in_epoch(bank.epoch());
+        let transaction_account_lock_limit =
+            bank.get_transaction_account_lock_limit();
         let feature_set = &bank.feature_set;
 
         let chunk_size: usize = self.chunk_size;
@@ -298,7 +341,10 @@ impl SchedulerController {
             let mut post_sanitization_count: usize = 0;
             let (transactions, fee_budget_limits_vec): (Vec<_>, Vec<_>) = chunk
                 .iter()
-                .filter_map(|packet| packet.build_sanitized_transaction(feature_set, bank.as_ref()))
+                .filter_map(|packet| {
+                    packet
+                        .build_sanitized_transaction(feature_set, bank.as_ref())
+                })
                 .inspect(|_| saturating_add_assign!(post_sanitization_count, 1))
                 .filter(|tx| {
                     SanitizedTransaction::validate_account_locks(
@@ -308,9 +354,11 @@ impl SchedulerController {
                     .is_ok()
                 })
                 .filter_map(|tx| {
-                    process_compute_budget_instructions(tx.message().program_instructions_iter())
-                        .map(|compute_budget| (tx, compute_budget.into()))
-                        .ok()
+                    process_compute_budget_instructions(
+                        tx.message().program_instructions_iter(),
+                    )
+                    .map(|compute_budget| (tx, compute_budget.into()))
+                    .ok()
                 })
                 .unzip();
 
@@ -332,8 +380,11 @@ impl SchedulerController {
                 saturating_add_assign!(post_transaction_check_count, 1);
                 let transaction_id = self.transaction_id_generator.next();
 
-                let (priority, cost) =
-                    Self::calculate_priority_and_cost(&transaction, &fee_budget_limits, bank);
+                let (priority, cost) = Self::calculate_priority_and_cost(
+                    &transaction,
+                    &fee_budget_limits,
+                    bank,
+                );
                 let transaction_ttl = SanitizedTransactionTTL {
                     transaction,
                     max_age_slot: last_slot_in_epoch,
@@ -345,17 +396,21 @@ impl SchedulerController {
                     priority,
                     cost,
                 ) {
-                    saturating_add_assign!(self.count_metrics.num_dropped_on_capacity, 1);
+                    saturating_add_assign!(
+                        self.count_metrics.num_dropped_on_capacity,
+                        1
+                    );
                 }
                 saturating_add_assign!(self.count_metrics.num_buffered, 1);
             }
 
             // Update metrics for transactions that were dropped.
-            let num_dropped_on_sanitization = chunk.len().saturating_sub(post_sanitization_count);
-            let num_dropped_on_lock_validation =
-                post_sanitization_count.saturating_sub(post_lock_validation_count);
-            let num_dropped_on_transaction_checks =
-                post_lock_validation_count.saturating_sub(post_transaction_check_count);
+            let num_dropped_on_sanitization =
+                chunk.len().saturating_sub(post_sanitization_count);
+            let num_dropped_on_lock_validation = post_sanitization_count
+                .saturating_sub(post_lock_validation_count);
+            let num_dropped_on_transaction_checks = post_lock_validation_count
+                .saturating_sub(post_transaction_check_count);
 
             saturating_add_assign!(
                 self.count_metrics.num_dropped_on_sanitization,
@@ -395,13 +450,15 @@ impl SchedulerController {
         fee_budget_limits: &FeeBudgetLimits,
         bank: &Bank,
     ) -> (u64, u64) {
-        let cost = CostModel::calculate_cost(transaction, &bank.feature_set).sum();
+        let cost =
+            CostModel::calculate_cost(transaction, &bank.feature_set).sum();
         let fee = bank.fee_structure.calculate_fee(
             transaction.message(),
             5_000, // this just needs to be non-zero
             fee_budget_limits,
-            bank.feature_set
-                .is_active(&include_loaded_accounts_data_size_in_fee_calculation::id()),
+            bank.feature_set.is_active(
+                &include_loaded_accounts_data_size_in_fee_calculation::id(),
+            ),
         );
 
         // We need a multiplier here to avoid rounding down too aggressively.

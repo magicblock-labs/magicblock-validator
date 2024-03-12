@@ -1,12 +1,14 @@
 // NOTE: copied from bank.rs:335
+use std::collections::{HashMap, HashSet};
+
 use serde::{Deserialize, Serialize};
 use solana_frozen_abi_macro::{AbiEnumVisitor, AbiExample};
 use solana_sdk::{pubkey::Pubkey, signature::Signature, transaction::Result};
 use solana_svm::transaction_processor::TransactionLogMessages;
-use std::collections::HashMap;
-use std::collections::HashSet;
 
-#[derive(Serialize, Deserialize, AbiExample, AbiEnumVisitor, Debug, PartialEq, Eq)]
+#[derive(
+    Serialize, Deserialize, AbiExample, AbiEnumVisitor, Debug, PartialEq, Eq,
+)]
 pub enum TransactionLogCollectorFilter {
     All,
     AllWithVotes,
@@ -52,12 +54,14 @@ impl TransactionLogCollector {
     ) -> Option<Vec<TransactionLogInfo>> {
         match address {
             None => Some(self.logs.clone()),
-            Some(address) => self.mentioned_address_map.get(address).map(|log_indices| {
-                log_indices
-                    .iter()
-                    .filter_map(|i| self.logs.get(*i).cloned())
-                    .collect()
-            }),
+            Some(address) => {
+                self.mentioned_address_map.get(address).map(|log_indices| {
+                    log_indices
+                        .iter()
+                        .filter_map(|i| self.logs.get(*i).cloned())
+                        .collect()
+                })
+            }
         }
     }
 }

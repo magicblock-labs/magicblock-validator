@@ -1,10 +1,10 @@
 #![cfg(feature = "dev-context-only-utils")]
 
 use sleipnir_bank::bank::Bank;
-use solana_sdk::account::Account;
-use solana_sdk::genesis_config::create_genesis_config;
-use solana_sdk::pubkey::Pubkey;
-use solana_sdk::system_program;
+use solana_sdk::{
+    account::Account, genesis_config::create_genesis_config, pubkey::Pubkey,
+    system_program,
+};
 use test_tools_core::init_logger;
 
 struct AccountWithAddr {

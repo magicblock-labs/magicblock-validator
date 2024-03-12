@@ -2,11 +2,10 @@
 #![cfg_attr(RUSTC_WITH_SPECIALIZATION, feature(min_specialization))]
 
 extern crate serde_derive;
-use {
-    serde_derive::{Deserialize, Serialize},
-    solana_sdk::{sanitize::Sanitize, serde_varint},
-    std::{convert::TryInto, fmt},
-};
+use std::{convert::TryInto, fmt};
+
+use serde_derive::{Deserialize, Serialize};
+use solana_sdk::{sanitize::Sanitize, serde_varint};
 #[macro_use]
 extern crate solana_frozen_abi_macro;
 
@@ -36,7 +35,11 @@ pub struct Version {
 
 impl Version {
     pub fn as_semver_version(&self) -> semver::Version {
-        semver::Version::new(self.major as u64, self.minor as u64, self.patch as u64)
+        semver::Version::new(
+            self.major as u64,
+            self.minor as u64,
+            self.patch as u64,
+        )
     }
 
     fn client(&self) -> ClientId {
@@ -59,7 +62,8 @@ impl Default for Version {
             major: env!("CARGO_PKG_VERSION_MAJOR").parse().unwrap(),
             minor: env!("CARGO_PKG_VERSION_MINOR").parse().unwrap(),
             patch: env!("CARGO_PKG_VERSION_PATCH").parse().unwrap(),
-            commit: compute_commit(option_env!("CI_COMMIT")).unwrap_or_default(),
+            commit: compute_commit(option_env!("CI_COMMIT"))
+                .unwrap_or_default(),
             feature_set,
             // Other client implementations need to modify this line.
             client: u16::try_from(ClientId::SolanaLabs).unwrap(),
@@ -111,7 +115,9 @@ impl TryFrom<ClientId> for u16 {
             ClientId::JitoLabs => Ok(1u16),
             ClientId::Firedancer => Ok(2u16),
             ClientId::Sleipnir => Ok(3u16),
-            ClientId::Unknown(client @ 0u16..=3u16) => Err(format!("Invalid client: {client}")),
+            ClientId::Unknown(client @ 0u16..=3u16) => {
+                Err(format!("Invalid client: {client}"))
+            }
             ClientId::Unknown(client) => Ok(client),
         }
     }

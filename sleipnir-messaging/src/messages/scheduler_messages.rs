@@ -1,9 +1,8 @@
 // NOTE: from core/src/banking_stage/scheduler_messages.rs  with forward related code removed
 #![allow(dead_code)]
-use {
-    solana_sdk::{clock::Slot, transaction::SanitizedTransaction},
-    std::fmt::Display,
-};
+use std::fmt::Display;
+
+use solana_sdk::{clock::Slot, transaction::SanitizedTransaction};
 
 /// A unique identifier for a transaction batch.
 #[derive(Clone, Copy, Debug, Hash, PartialEq, Eq)]

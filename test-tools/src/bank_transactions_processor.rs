@@ -11,7 +11,9 @@ use solana_sdk::{
     transaction::{SanitizedTransaction, Transaction},
 };
 
-use crate::traits::{TransactionsProcessor, TransactionsProcessorProcessResult};
+use crate::traits::{
+    TransactionsProcessor, TransactionsProcessorProcessResult,
+};
 
 #[derive(Debug)]
 pub struct BankTransactionsProcessor {
@@ -53,14 +55,15 @@ impl TransactionsProcessor for BankTransactionsProcessor {
         let (transaction_results, balances) = {
             let batch = self.bank.prepare_sanitized_batch(&transactions);
 
-            let (transaction_results, balances) = self.bank.load_execute_and_commit_transactions(
-                &batch,
-                MAX_PROCESSING_AGE,
-                true,
-                TransactionExecutionRecordingOpts::recording_logs(),
-                &mut timings,
-                None,
-            );
+            let (transaction_results, balances) =
+                self.bank.load_execute_and_commit_transactions(
+                    &batch,
+                    MAX_PROCESSING_AGE,
+                    true,
+                    TransactionExecutionRecordingOpts::recording_logs(),
+                    &mut timings,
+                    None,
+                );
             (transaction_results, balances)
         };
 
@@ -71,7 +74,9 @@ impl TransactionsProcessor for BankTransactionsProcessor {
         let transactions = transactions
             .into_iter()
             .zip(execution_results)
-            .map(|(tx, res)| (*tx.signature(), (tx, res.details().cloned().unwrap())))
+            .map(|(tx, res)| {
+                (*tx.signature(), (tx, res.details().cloned().unwrap()))
+            })
             .collect::<HashMap<_, _>>();
 
         Ok(TransactionsProcessorProcessResult {
@@ -88,20 +93,30 @@ impl TransactionsProcessor for BankTransactionsProcessor {
 #[cfg(test)]
 mod tests {
     use sleipnir_bank::bank_dev_utils::transactions::create_funded_accounts;
-    use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, system_transaction};
-
-    use crate::{diagnostics::log_exec_details, init_logger};
+    use solana_sdk::{
+        native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, system_transaction,
+    };
 
     use super::*;
+    use crate::{diagnostics::log_exec_details, init_logger};
 
     #[tokio::test]
     async fn test_system_transfer_enough_funds() {
         init_logger!();
         let tx_processor = BankTransactionsProcessor::default();
-        let payers = create_funded_accounts(&tx_processor.bank, 1, Some(LAMPORTS_PER_SOL));
+        let payers = create_funded_accounts(
+            &tx_processor.bank,
+            1,
+            Some(LAMPORTS_PER_SOL),
+        );
         let start_hash = tx_processor.bank.last_blockhash();
         let to = Pubkey::new_unique();
-        let tx = system_transaction::transfer(&payers[0], &to, 890_880_000, start_hash);
+        let tx = system_transaction::transfer(
+            &payers[0],
+            &to,
+            890_880_000,
+            start_hash,
+        );
         let result = tx_processor.process(vec![tx]).unwrap();
 
         assert_eq!(result.len(), 1);
@@ -121,10 +136,16 @@ mod tests {
     async fn test_system_transfer_not_enough_funds() {
         init_logger!();
         let tx_processor = BankTransactionsProcessor::default();
-        let payers = create_funded_accounts(&tx_processor.bank, 1, Some(890_850_000));
+        let payers =
+            create_funded_accounts(&tx_processor.bank, 1, Some(890_850_000));
         let start_hash = tx_processor.bank.last_blockhash();
         let to = Pubkey::new_unique();
-        let tx = system_transaction::transfer(&payers[0], &to, 890_880_000, start_hash);
+        let tx = system_transaction::transfer(
+            &payers[0],
+            &to,
+            890_880_000,
+            start_hash,
+        );
         let result = tx_processor.process(vec![tx]).unwrap();
 
         assert_eq!(result.len(), 1);

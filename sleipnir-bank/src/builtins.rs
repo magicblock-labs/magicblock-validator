@@ -23,10 +23,14 @@ impl std::fmt::Debug for BuiltinPrototype {
 impl solana_frozen_abi::abi_example::AbiExample for BuiltinPrototype {
     fn example() -> Self {
         // BuiltinPrototype isn't serializable by definition.
-        solana_program_runtime::declare_process_instruction!(MockBuiltin, 0, |_invoke_context| {
-            // Do nothing
-            Ok(())
-        });
+        solana_program_runtime::declare_process_instruction!(
+            MockBuiltin,
+            0,
+            |_invoke_context| {
+                // Do nothing
+                Ok(())
+            }
+        );
         Self {
             feature_id: None,
             program_id: Pubkey::default(),

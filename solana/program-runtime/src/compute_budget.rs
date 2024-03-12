@@ -1,6 +1,9 @@
-use {
-    crate::compute_budget_processor::{self, process_compute_budget_instructions},
-    solana_sdk::{instruction::CompiledInstruction, pubkey::Pubkey, transaction::Result},
+use solana_sdk::{
+    instruction::CompiledInstruction, pubkey::Pubkey, transaction::Result,
+};
+
+use crate::compute_budget_processor::{
+    self, process_compute_budget_instructions,
 };
 
 #[cfg(RUSTC_WITH_SPECIALIZATION)]
@@ -160,7 +163,8 @@ impl ComputeBudget {
             curve25519_ristretto_multiply_cost: 2_208,
             curve25519_ristretto_msm_base_cost: 2303,
             curve25519_ristretto_msm_incremental_cost: 788,
-            heap_size: u32::try_from(solana_sdk::entrypoint::HEAP_LENGTH).unwrap(),
+            heap_size: u32::try_from(solana_sdk::entrypoint::HEAP_LENGTH)
+                .unwrap(),
             heap_cost: DEFAULT_HEAP_COST,
             mem_op_base_cost: 10,
             alt_bn128_addition_cost: 334,
@@ -181,9 +185,12 @@ impl ComputeBudget {
     pub fn try_from_instructions<'a>(
         instructions: impl Iterator<Item = (&'a Pubkey, &'a CompiledInstruction)>,
     ) -> Result<Self> {
-        let compute_budget_limits = process_compute_budget_instructions(instructions)?;
+        let compute_budget_limits =
+            process_compute_budget_instructions(instructions)?;
         Ok(ComputeBudget {
-            compute_unit_limit: u64::from(compute_budget_limits.compute_unit_limit),
+            compute_unit_limit: u64::from(
+                compute_budget_limits.compute_unit_limit,
+            ),
             heap_size: compute_budget_limits.updated_heap_bytes,
             ..ComputeBudget::default()
         })
@@ -213,7 +220,8 @@ impl ComputeBudget {
         let mul_result = self
             .poseidon_cost_coefficient_a
             .checked_mul(squared_inputs)?;
-        let final_result = mul_result.checked_add(self.poseidon_cost_coefficient_c)?;
+        let final_result =
+            mul_result.checked_add(self.poseidon_cost_coefficient_c)?;
 
         Some(final_result)
     }

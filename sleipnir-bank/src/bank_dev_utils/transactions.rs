@@ -1,12 +1,11 @@
 use std::collections::HashSet;
 
-use crate::bank::{Bank, TransactionExecutionRecordingOpts};
-use crate::transaction_results::TransactionBalancesSet;
-use crate::LAMPORTS_PER_SIGNATURE;
 use log::{debug, error, info, trace, warn};
 use rayon::{
     iter::IndexedParallelIterator,
-    prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
+    prelude::{
+        IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
+    },
 };
 use solana_accounts_db::transaction_results::TransactionResults;
 use solana_program_runtime::timings::ExecuteTimings;
@@ -21,13 +20,20 @@ use solana_sdk::{
     signature::Keypair,
     signer::Signer,
     stake_history::Epoch,
-    system_program, system_transaction,
-    sysvar::{clock, epoch_schedule, fees, last_restart_slot, recent_blockhashes, rent},
+    system_instruction, system_program, system_transaction, sysvar,
+    sysvar::{
+        clock, epoch_schedule, fees, last_restart_slot, recent_blockhashes,
+        rent,
+    },
     transaction::{SanitizedTransaction, Transaction},
 };
-use solana_sdk::{system_instruction, sysvar};
 
 use super::elfs;
+use crate::{
+    bank::{Bank, TransactionExecutionRecordingOpts},
+    transaction_results::TransactionBalancesSet,
+    LAMPORTS_PER_SIGNATURE,
+};
 
 // -----------------
 // Account Initialization
@@ -57,7 +63,11 @@ pub fn create_funded_account(bank: &Bank, lamports: Option<u64>) -> Keypair {
     account
 }
 
-pub fn create_funded_accounts(bank: &Bank, num: usize, lamports: Option<u64>) -> Vec<Keypair> {
+pub fn create_funded_accounts(
+    bank: &Bank,
+    num: usize,
+    lamports: Option<u64>,
+) -> Vec<Keypair> {
     let accounts = create_accounts(num);
     let lamports = lamports.unwrap_or_else(|| {
         let rent_exempt_reserve = Rent::default().minimum_balance(0);
@@ -90,7 +100,12 @@ pub fn create_system_transfer_transaction(
 ) -> (SanitizedTransaction, Pubkey, Pubkey) {
     let from = create_funded_account(bank, Some(fund_lamports));
     let to = Pubkey::new_unique();
-    let tx = system_transaction::transfer(&from, &to, send_lamports, bank.last_blockhash());
+    let tx = system_transaction::transfer(
+        &from,
+        &to,
+        send_lamports,
+        bank.last_blockhash(),
+    );
     (
         SanitizedTransaction::from_transaction_for_tests(tx),
         from.pubkey(),
@@ -98,7 +113,10 @@ pub fn create_system_transfer_transaction(
     )
 }
 
-pub fn create_system_transfer_transactions(bank: &Bank, num: usize) -> Vec<SanitizedTransaction> {
+pub fn create_system_transfer_transactions(
+    bank: &Bank,
+    num: usize,
+) -> Vec<SanitizedTransaction> {
     let funded_accounts = create_funded_accounts(bank, 2 * num, None);
     funded_accounts
         .into_par_iter()
@@ -106,7 +124,12 @@ pub fn create_system_transfer_transactions(bank: &Bank, num: usize) -> Vec<Sanit
         .map(|chunk| {
             let from = &chunk[0];
             let to = &chunk[1];
-            system_transaction::transfer(from, &to.pubkey(), 1, bank.last_blockhash())
+            system_transaction::transfer(
+                from,
+                &to.pubkey(),
+                1,
+                bank.last_blockhash(),
+            )
         })
         .map(SanitizedTransaction::from_transaction_for_tests)
         .collect()
@@ -120,7 +143,12 @@ pub fn create_system_allocate_transaction(
     let payer = create_funded_account(bank, Some(fund_lamports));
     let rent_exempt_reserve = Rent::default().minimum_balance(space as usize);
     let account = create_funded_account(bank, Some(rent_exempt_reserve));
-    let tx = system_transaction::allocate(&payer, &account, bank.last_blockhash(), space);
+    let tx = system_transaction::allocate(
+        &payer,
+        &account,
+        bank.last_blockhash(),
+        space,
+    );
     (
         SanitizedTransaction::from_transaction_for_tests(tx),
         payer.pubkey(),
@@ -131,13 +159,17 @@ pub fn create_system_allocate_transaction(
 // Noop
 pub fn create_noop_transaction(bank: &Bank) -> SanitizedTransaction {
     let funded_accounts = create_funded_accounts(bank, 2, None);
-    let instruction = create_noop_instruction(&elfs::noop::id(), &funded_accounts);
+    let instruction =
+        create_noop_instruction(&elfs::noop::id(), &funded_accounts);
     let message = Message::new(&[instruction], None);
     let transaction = Transaction::new_unsigned(message);
     SanitizedTransaction::try_from_legacy_transaction(transaction).unwrap()
 }
 
-fn create_noop_instruction(program_id: &Pubkey, funded_accounts: &[Keypair]) -> Instruction {
+fn create_noop_instruction(
+    program_id: &Pubkey,
+    funded_accounts: &[Keypair],
+) -> Instruction {
     let ix_bytes: Vec<u8> = Vec::new();
     Instruction::new_with_bytes(
         *program_id,
@@ -155,14 +187,19 @@ pub fn create_solx_send_post_transaction(
     bank: &Bank,
 ) -> (SanitizedTransaction, SolanaxPostAccounts) {
     let accounts = vec![
-        create_funded_account(bank, Some(Rent::default().minimum_balance(1180))),
+        create_funded_account(
+            bank,
+            Some(Rent::default().minimum_balance(1180)),
+        ),
         create_funded_account(bank, Some(LAMPORTS_PER_SOL)),
     ];
     let post = &accounts[0];
     let author = &accounts[1];
-    let instruction = create_solx_send_post_instruction(&elfs::solanax::id(), &accounts);
+    let instruction =
+        create_solx_send_post_instruction(&elfs::solanax::id(), &accounts);
     let message = Message::new(&[instruction], Some(&author.pubkey()));
-    let transaction = Transaction::new(&[author, post], message, bank.last_blockhash());
+    let transaction =
+        Transaction::new(&[author, post], message, bank.last_blockhash());
     (
         SanitizedTransaction::try_from_legacy_transaction(transaction).unwrap(),
         SolanaxPostAccounts {
@@ -199,13 +236,17 @@ fn create_solx_send_post_instruction(
 // Sysvars
 pub fn create_sysvars_get_transaction(bank: &Bank) -> SanitizedTransaction {
     let funded_accounts = create_funded_accounts(bank, 2, None);
-    let instruction = create_sysvars_get_instruction(&elfs::sysvars::id(), &funded_accounts);
+    let instruction =
+        create_sysvars_get_instruction(&elfs::sysvars::id(), &funded_accounts);
     let message = Message::new(&[instruction], None);
     let transaction = Transaction::new_unsigned(message);
     SanitizedTransaction::try_from_legacy_transaction(transaction).unwrap()
 }
 
-fn create_sysvars_get_instruction(program_id: &Pubkey, funded_accounts: &[Keypair]) -> Instruction {
+fn create_sysvars_get_instruction(
+    program_id: &Pubkey,
+    funded_accounts: &[Keypair],
+) -> Instruction {
     let ix_bytes: Vec<u8> = vec![0x00];
     Instruction::new_with_bytes(
         *program_id,
@@ -214,7 +255,9 @@ fn create_sysvars_get_instruction(program_id: &Pubkey, funded_accounts: &[Keypai
     )
 }
 
-pub fn create_sysvars_from_account_transaction(bank: &Bank) -> SanitizedTransaction {
+pub fn create_sysvars_from_account_transaction(
+    bank: &Bank,
+) -> SanitizedTransaction {
     // This instruction checks for relative instructions
     // which is why we need to add them around the sysvar instruction
 
@@ -222,11 +265,17 @@ pub fn create_sysvars_from_account_transaction(bank: &Bank) -> SanitizedTransact
 
     // 1. System Transfer Instruction before Sysvar Instruction
     let transfer_to = Pubkey::new_unique();
-    let transfer_ix =
-        system_instruction::transfer(&payer.pubkey(), &transfer_to, LAMPORTS_PER_SOL / 10);
+    let transfer_ix = system_instruction::transfer(
+        &payer.pubkey(),
+        &transfer_to,
+        LAMPORTS_PER_SOL / 10,
+    );
 
     // 2. Sysvar Instruction
-    let sysvar_ix = create_sysvars_from_account_instruction(&elfs::sysvars::id(), &payer.pubkey());
+    let sysvar_ix = create_sysvars_from_account_instruction(
+        &elfs::sysvars::id(),
+        &payer.pubkey(),
+    );
 
     // 3. System Allocate Instruction after Sysvar Instruction
     let allocate_to = Keypair::new();
@@ -237,11 +286,18 @@ pub fn create_sysvars_from_account_transaction(bank: &Bank) -> SanitizedTransact
         &[transfer_ix, sysvar_ix, allocate_ix],
         Some(&payer.pubkey()),
     );
-    let transaction = Transaction::new(&[&payer, &allocate_to], message, bank.last_blockhash());
+    let transaction = Transaction::new(
+        &[&payer, &allocate_to],
+        message,
+        bank.last_blockhash(),
+    );
     SanitizedTransaction::try_from_legacy_transaction(transaction).unwrap()
 }
 
-fn create_sysvars_from_account_instruction(program_id: &Pubkey, payer: &Pubkey) -> Instruction {
+fn create_sysvars_from_account_instruction(
+    program_id: &Pubkey,
+    payer: &Pubkey,
+) -> Instruction {
     let ix_bytes: Vec<u8> = vec![0x01];
     Instruction::new_with_bytes(
         *program_id,
@@ -271,14 +327,15 @@ pub fn execute_transactions(
     let batch = bank.prepare_sanitized_batch(&txs);
 
     let mut timings = ExecuteTimings::default();
-    let (transaction_results, transaction_balances) = bank.load_execute_and_commit_transactions(
-        &batch,
-        MAX_PROCESSING_AGE,
-        true,
-        TransactionExecutionRecordingOpts::recording_logs(),
-        &mut timings,
-        None,
-    );
+    let (transaction_results, transaction_balances) = bank
+        .load_execute_and_commit_transactions(
+            &batch,
+            MAX_PROCESSING_AGE,
+            true,
+            TransactionExecutionRecordingOpts::recording_logs(),
+            &mut timings,
+            None,
+        );
 
     trace!("{:#?}", txs);
     trace!("{:#?}", transaction_results.execution_results);
@@ -328,7 +385,9 @@ pub fn execute_transactions(
     info!("");
     info!("=============== Logs ===============");
     for res in transaction_results.execution_results.iter() {
-        if let Some(logs) = res.details().as_ref().and_then(|x| x.log_messages.as_ref()) {
+        if let Some(logs) =
+            res.details().as_ref().and_then(|x| x.log_messages.as_ref())
+        {
             for log in logs {
                 info!("> {log}");
             }

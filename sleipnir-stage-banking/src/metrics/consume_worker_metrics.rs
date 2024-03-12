@@ -6,9 +6,10 @@ use solana_metrics::datapoint_info;
 use solana_sdk::timing::AtomicInterval;
 use solana_svm::transaction_error_metrics::TransactionErrorMetrics;
 
-use crate::results::{ExecuteAndCommitTransactionsOutput, ProcessTransactionBatchOutput};
-
 use super::LeaderExecuteAndCommitTimings;
+use crate::results::{
+    ExecuteAndCommitTransactionsOutput, ProcessTransactionBatchOutput,
+};
 
 /// Metrics tracking number of packets processed by the consume worker.
 /// These are atomic, and intended to be reported by the scheduling thread
@@ -58,7 +59,10 @@ impl ConsumeWorkerMetrics {
     ) {
         self.count_metrics
             .cost_model_throttled_transactions_count
-            .fetch_add(*cost_model_throttled_transactions_count, Ordering::Relaxed);
+            .fetch_add(
+                *cost_model_throttled_transactions_count,
+                Ordering::Relaxed,
+            );
         self.timing_metrics
             .cost_model_us
             .fetch_add(*cost_model_us, Ordering::Relaxed);
@@ -83,13 +87,19 @@ impl ConsumeWorkerMetrics {
     ) {
         self.count_metrics
             .transactions_attempted_execution_count
-            .fetch_add(*transactions_attempted_execution_count, Ordering::Relaxed);
+            .fetch_add(
+                *transactions_attempted_execution_count,
+                Ordering::Relaxed,
+            );
         self.count_metrics
             .executed_transactions_count
             .fetch_add(*executed_transactions_count, Ordering::Relaxed);
         self.count_metrics
             .executed_with_successful_result_count
-            .fetch_add(*executed_with_successful_result_count, Ordering::Relaxed);
+            .fetch_add(
+                *executed_with_successful_result_count,
+                Ordering::Relaxed,
+            );
         self.count_metrics
             .retryable_transaction_count
             .fetch_add(retryable_transaction_indexes.len(), Ordering::Relaxed);
@@ -219,7 +229,10 @@ impl ConsumeWorkerMetrics {
             .fetch_add(*invalid_program_for_execution, Ordering::Relaxed);
         self.error_metrics
             .not_allowed_during_cluster_maintenance
-            .fetch_add(*not_allowed_during_cluster_maintenance, Ordering::Relaxed);
+            .fetch_add(
+                *not_allowed_during_cluster_maintenance,
+                Ordering::Relaxed,
+            );
         self.error_metrics
             .invalid_writable_account
             .fetch_add(*invalid_writable_account, Ordering::Relaxed);
@@ -237,13 +250,22 @@ impl ConsumeWorkerMetrics {
             .fetch_add(*would_exceed_max_vote_cost_limit, Ordering::Relaxed);
         self.error_metrics
             .would_exceed_account_data_block_limit
-            .fetch_add(*would_exceed_account_data_block_limit, Ordering::Relaxed);
+            .fetch_add(
+                *would_exceed_account_data_block_limit,
+                Ordering::Relaxed,
+            );
         self.error_metrics
             .max_loaded_accounts_data_size_exceeded
-            .fetch_add(*max_loaded_accounts_data_size_exceeded, Ordering::Relaxed);
+            .fetch_add(
+                *max_loaded_accounts_data_size_exceeded,
+                Ordering::Relaxed,
+            );
         self.error_metrics
             .program_execution_temporarily_restricted
-            .fetch_add(*program_execution_temporarily_restricted, Ordering::Relaxed);
+            .fetch_add(
+                *program_execution_temporarily_restricted,
+                Ordering::Relaxed,
+            );
     }
 }
 

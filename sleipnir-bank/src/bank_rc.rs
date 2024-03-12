@@ -3,9 +3,11 @@
 #![allow(unused_variables)]
 
 // NOTE: copied from runtime/src/bank.rs:252
-use crate::bank::Bank;
-use solana_accounts_db::accounts::Accounts;
 use std::sync::{atomic::AtomicU64, Arc, RwLock};
+
+use solana_accounts_db::accounts::Accounts;
+
+use crate::bank::Bank;
 
 #[derive(Debug)]
 pub struct BankRc {

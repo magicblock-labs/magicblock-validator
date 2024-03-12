@@ -2,13 +2,13 @@
 //!
 //! The format of these log messages should not be modified to avoid breaking downstream consumers
 //! of program logging
-use {
-    crate::{ic_logger_msg, log_collector::LogCollector},
-    base64::{prelude::BASE64_STANDARD, Engine},
-    itertools::Itertools,
-    solana_sdk::pubkey::Pubkey,
-    std::{cell::RefCell, rc::Rc},
-};
+use std::{cell::RefCell, rc::Rc};
+
+use base64::{prelude::BASE64_STANDARD, Engine};
+use itertools::Itertools;
+use solana_sdk::pubkey::Pubkey;
+
+use crate::{ic_logger_msg, log_collector::LogCollector};
 
 /// Log a program invoke.
 ///
@@ -39,7 +39,10 @@ pub fn program_invoke(
 /// ```
 ///
 /// That is, any program-generated output is guaranteed to be prefixed by "Program log: "
-pub fn program_log(log_collector: &Option<Rc<RefCell<LogCollector>>>, message: &str) {
+pub fn program_log(
+    log_collector: &Option<Rc<RefCell<LogCollector>>>,
+    message: &str,
+) {
     ic_logger_msg!(log_collector, "Program log: {}", message);
 }
 
@@ -52,7 +55,10 @@ pub fn program_log(log_collector: &Option<Rc<RefCell<LogCollector>>>, message: &
 /// ```
 ///
 /// That is, any program-generated output is guaranteed to be prefixed by "Program data: "
-pub fn program_data(log_collector: &Option<Rc<RefCell<LogCollector>>>, data: &[&[u8]]) {
+pub fn program_data(
+    log_collector: &Option<Rc<RefCell<LogCollector>>>,
+    data: &[&[u8]],
+) {
     ic_logger_msg!(
         log_collector,
         "Program data: {}",
@@ -90,7 +96,10 @@ pub fn program_return(
 /// ```notrust
 /// "Program <address> success"
 /// ```
-pub fn program_success(log_collector: &Option<Rc<RefCell<LogCollector>>>, program_id: &Pubkey) {
+pub fn program_success(
+    log_collector: &Option<Rc<RefCell<LogCollector>>>,
+    program_id: &Pubkey,
+) {
     ic_logger_msg!(log_collector, "Program {} success", program_id);
 }
 

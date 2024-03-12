@@ -42,11 +42,12 @@ pub(super) fn get_first_error(
 // get_max_thread_count to match number of threads in the old code.
 // see: https://github.com/solana-labs/solana/pull/24853
 lazy_static! {
-    pub(super) static ref PAR_THREAD_POOL: ThreadPool = rayon::ThreadPoolBuilder::new()
-        .num_threads(get_max_thread_count())
-        .thread_name(|i| format!("solBstoreProc{i:02}"))
-        .build()
-        .unwrap();
+    pub(super) static ref PAR_THREAD_POOL: ThreadPool =
+        rayon::ThreadPoolBuilder::new()
+            .num_threads(get_max_thread_count())
+            .thread_name(|i| format!("solBstoreProc{i:02}"))
+            .build()
+            .unwrap();
 }
 
 pub(super) fn first_err(results: &[Result<()>]) -> Result<()> {

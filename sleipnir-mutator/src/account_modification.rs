@@ -1,7 +1,9 @@
 use std::str::FromStr;
 
 use sleipnir_program::sleipnir_instruction;
-use solana_sdk::{account::Account, commitment_config::CommitmentLevel, pubkey::Pubkey};
+use solana_sdk::{
+    account::Account, commitment_config::CommitmentLevel, pubkey::Pubkey,
+};
 
 use crate::errors::MutatorResult;
 
@@ -31,7 +33,8 @@ impl From<(&Account, &str)> for AccountModification {
 impl AccountModification {
     pub fn try_into_sleipnir_program_account_modification(
         self,
-    ) -> MutatorResult<(Pubkey, sleipnir_instruction::AccountModification)> {
+    ) -> MutatorResult<(Pubkey, sleipnir_instruction::AccountModification)>
+    {
         let pubkey = Pubkey::from_str(&self.account_address)?;
         let owner = self
             .owner

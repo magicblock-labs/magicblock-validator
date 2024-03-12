@@ -3,29 +3,32 @@
 //! The `banking_stage` processes Transaction messages. It is intended to be used
 //! to construct a software pipeline. The stage uses all available CPU cores and
 //! can do its processing in parallel with signature verification on the GPU.
-use crate::committer::Committer;
-use crate::consumer::ConsumeWorker;
-use crate::consumer::Consumer;
-use crate::qos_service::QosService;
-use crate::scheduler::prio_graph_scheduler::PrioGraphScheduler;
-use crate::scheduler::scheduler_controller::SchedulerController;
-use crate::scheduler::scheduler_error::SchedulerError;
-use crossbeam_channel::unbounded;
-use crossbeam_channel::Receiver;
-use crossbeam_channel::Sender;
+use std::{
+    cmp, env,
+    sync::{Arc, RwLock},
+    thread,
+    thread::{Builder, JoinHandle},
+};
+
+use crossbeam_channel::{unbounded, Receiver, Sender};
 use log::warn;
 use sleipnir_bank::bank::Bank;
+use sleipnir_messaging::{
+    packet_deserializer::PacketDeserializer, BankingPacketReceiver,
+};
 use sleipnir_transaction_status::TransactionStatusSender;
 use solana_perf::data_budget::DataBudget;
-use std::cmp;
-use std::env;
-use std::sync::Arc;
-use std::sync::RwLock;
-use std::thread;
-use std::thread::Builder;
-use std::thread::JoinHandle;
-use sleipnir_messaging::BankingPacketReceiver;
-use sleipnir_messaging::packet_deserializer::PacketDeserializer;
+
+use crate::{
+    committer::Committer,
+    consumer::{ConsumeWorker, Consumer},
+    qos_service::QosService,
+    scheduler::{
+        prio_graph_scheduler::PrioGraphScheduler,
+        scheduler_controller::SchedulerController,
+        scheduler_error::SchedulerError,
+    },
+};
 
 // Fixed thread size seems to be fastest on GCP setup
 pub const NUM_THREADS: u32 = 6;
@@ -129,8 +132,10 @@ impl BankingStage {
 
         // Spawn the central scheduler thread
         bank_thread_hdls.push({
-            let packet_deserializer = PacketDeserializer::new(non_vote_receiver);
-            let scheduler = PrioGraphScheduler::new(work_senders, finished_work_receiver);
+            let packet_deserializer =
+                PacketDeserializer::new(non_vote_receiver);
+            let scheduler =
+                PrioGraphScheduler::new(work_senders, finished_work_receiver);
             let scheduler_controller = SchedulerController::new(
                 packet_deserializer,
                 bank.clone(),

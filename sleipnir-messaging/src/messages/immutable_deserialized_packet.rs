@@ -1,22 +1,23 @@
 #![allow(dead_code)]
-use {
-    sleipnir_bank::get_compute_budget_details::{ComputeBudgetDetails, GetComputeBudgetDetails},
-    solana_sdk::packet::Packet,
-    solana_sdk::{
-        feature_set,
-        hash::Hash,
-        message::Message,
-        sanitize::SanitizeError,
-        short_vec::decode_shortu16_len,
-        signature::Signature,
-        transaction::{
-            AddressLoader, SanitizedTransaction, SanitizedVersionedTransaction,
-            VersionedTransaction,
-        },
-    },
-    std::{cmp::Ordering, mem::size_of, sync::Arc},
-    thiserror::Error,
+use std::{cmp::Ordering, mem::size_of, sync::Arc};
+
+use sleipnir_bank::get_compute_budget_details::{
+    ComputeBudgetDetails, GetComputeBudgetDetails,
 };
+use solana_sdk::{
+    feature_set,
+    hash::Hash,
+    message::Message,
+    packet::Packet,
+    sanitize::SanitizeError,
+    short_vec::decode_shortu16_len,
+    signature::Signature,
+    transaction::{
+        AddressLoader, SanitizedTransaction, SanitizedVersionedTransaction,
+        VersionedTransaction,
+    },
+};
+use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum DeserializedPacketError {
@@ -49,18 +50,23 @@ pub struct ImmutableDeserializedPacket {
 
 impl ImmutableDeserializedPacket {
     pub fn new(packet: Packet) -> Result<Self, DeserializedPacketError> {
-        let versioned_transaction: VersionedTransaction = packet.deserialize_slice(..)?;
+        let versioned_transaction: VersionedTransaction =
+            packet.deserialize_slice(..)?;
         let message_bytes = packet_message(&packet)?;
         let message_hash = Message::hash_raw_message(message_bytes);
 
-        Self::new_from_versioned_transaction(versioned_transaction, Some(message_hash))
+        Self::new_from_versioned_transaction(
+            versioned_transaction,
+            Some(message_hash),
+        )
     }
 
     pub fn new_from_versioned_transaction(
         versioned_transaction: VersionedTransaction,
         hash: Option<Hash>,
     ) -> Result<Self, DeserializedPacketError> {
-        let sanitized_transaction = SanitizedVersionedTransaction::try_from(versioned_transaction)?;
+        let sanitized_transaction =
+            SanitizedVersionedTransaction::try_from(versioned_transaction)?;
 
         let round_compute_unit_price = true;
         let compute_budget_details = sanitized_transaction
@@ -69,8 +75,9 @@ impl ImmutableDeserializedPacket {
 
         // NOTE: removed vote transaction case
 
-        let message_hash =
-            hash.unwrap_or_else(|| sanitized_transaction.get_message().message.hash());
+        let message_hash = hash.unwrap_or_else(|| {
+            sanitized_transaction.get_message().message.hash()
+        });
 
         Ok(Self {
             transaction: sanitized_transaction,

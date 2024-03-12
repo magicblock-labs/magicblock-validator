@@ -6,23 +6,25 @@
 //! how transactions are included in blocks, and optimize those blocks.
 //!
 
-use crate::{
-    batch_transaction_details::BatchedTransactionDetails, committer::CommitTransactionDetails,
-};
+use std::sync::atomic::{AtomicU64, Ordering};
+
 use log::debug;
 use sleipnir_bank::bank::Bank;
+use solana_cost_model::{
+    cost_model::CostModel, transaction_cost::TransactionCost,
+};
+use solana_measure::measure::Measure;
 use solana_metrics::datapoint_info;
+use solana_sdk::{
+    clock::Slot,
+    feature_set::FeatureSet,
+    saturating_add_assign,
+    transaction::{self, SanitizedTransaction, TransactionError},
+};
 
-use {
-    solana_cost_model::{cost_model::CostModel, transaction_cost::TransactionCost},
-    solana_measure::measure::Measure,
-    solana_sdk::{
-        clock::Slot,
-        feature_set::FeatureSet,
-        saturating_add_assign,
-        transaction::{self, SanitizedTransaction, TransactionError},
-    },
-    std::sync::atomic::{AtomicU64, Ordering},
+use crate::{
+    batch_transaction_details::BatchedTransactionDetails,
+    committer::CommitTransactionDetails,
 };
 
 // QosService is local to each banking thread, each instance of QosService provides services to
@@ -51,16 +53,22 @@ impl QosService {
         transactions: &[SanitizedTransaction],
         pre_results: impl Iterator<Item = transaction::Result<()>>,
     ) -> (Vec<transaction::Result<TransactionCost>>, usize) {
-        let transaction_costs =
-            self.compute_transaction_costs(&bank.feature_set, transactions.iter(), pre_results);
-        let (transactions_qos_cost_results, num_included) = self.select_transactions_per_cost(
+        let transaction_costs = self.compute_transaction_costs(
+            &bank.feature_set,
             transactions.iter(),
-            transaction_costs.into_iter(),
-            bank,
+            pre_results,
         );
-        self.accumulate_estimated_transaction_costs(&Self::accumulate_batched_transaction_costs(
-            transactions_qos_cost_results.iter(),
-        ));
+        let (transactions_qos_cost_results, num_included) = self
+            .select_transactions_per_cost(
+                transactions.iter(),
+                transaction_costs.into_iter(),
+                bank,
+            );
+        self.accumulate_estimated_transaction_costs(
+            &Self::accumulate_batched_transaction_costs(
+                transactions_qos_cost_results.iter(),
+            ),
+        );
         let cost_model_throttled_transactions_count =
             transactions.len().saturating_sub(num_included);
 
@@ -81,7 +89,9 @@ impl QosService {
         let mut compute_cost_time = Measure::start("compute_cost_time");
         let txs_costs: Vec<_> = transactions
             .zip(pre_results)
-            .map(|(tx, pre_result)| pre_result.map(|()| CostModel::calculate_cost(tx, feature_set)))
+            .map(|(tx, pre_result)| {
+                pre_result.map(|()| CostModel::calculate_cost(tx, feature_set))
+            })
             .collect();
         compute_cost_time.stop();
         self.metrics
@@ -101,7 +111,9 @@ impl QosService {
     fn select_transactions_per_cost<'a>(
         &self,
         transactions: impl Iterator<Item = &'a SanitizedTransaction>,
-        transactions_costs: impl Iterator<Item = transaction::Result<TransactionCost>>,
+        transactions_costs: impl Iterator<
+            Item = transaction::Result<TransactionCost>,
+        >,
         bank: &Bank,
     ) -> (Vec<transaction::Result<TransactionCost>>, usize) {
         let mut cost_tracking_time = Measure::start("cost_tracking_time");
@@ -140,11 +152,14 @@ impl QosService {
     /// Updates the transaction costs for committed transactions. Does not handle removing costs
     /// for transactions that didn't get recorded or committed
     pub fn update_costs<'a>(
-        transaction_cost_results: impl Iterator<Item = &'a transaction::Result<TransactionCost>>,
+        transaction_cost_results: impl Iterator<
+            Item = &'a transaction::Result<TransactionCost>,
+        >,
         transaction_committed_status: Option<&Vec<CommitTransactionDetails>>,
         bank: &Bank,
     ) {
-        if let Some(transaction_committed_status) = transaction_committed_status {
+        if let Some(transaction_committed_status) = transaction_committed_status
+        {
             Self::update_committed_transaction_costs(
                 transaction_cost_results,
                 transaction_committed_status,
@@ -155,22 +170,30 @@ impl QosService {
 
     /// Removes transaction costs from the cost tracker if not committed or recorded
     pub fn remove_costs<'a>(
-        transaction_cost_results: impl Iterator<Item = &'a transaction::Result<TransactionCost>>,
+        transaction_cost_results: impl Iterator<
+            Item = &'a transaction::Result<TransactionCost>,
+        >,
         transaction_committed_status: Option<&Vec<CommitTransactionDetails>>,
         bank: &Bank,
     ) {
         match transaction_committed_status {
-            Some(transaction_committed_status) => Self::remove_uncommitted_transaction_costs(
-                transaction_cost_results,
-                transaction_committed_status,
-                bank,
-            ),
-            None => Self::remove_transaction_costs(transaction_cost_results, bank),
+            Some(transaction_committed_status) => {
+                Self::remove_uncommitted_transaction_costs(
+                    transaction_cost_results,
+                    transaction_committed_status,
+                    bank,
+                )
+            }
+            None => {
+                Self::remove_transaction_costs(transaction_cost_results, bank)
+            }
         }
     }
 
     fn remove_uncommitted_transaction_costs<'a>(
-        transaction_cost_results: impl Iterator<Item = &'a transaction::Result<TransactionCost>>,
+        transaction_cost_results: impl Iterator<
+            Item = &'a transaction::Result<TransactionCost>,
+        >,
         transaction_committed_status: &Vec<CommitTransactionDetails>,
         bank: &Bank,
     ) {
@@ -181,7 +204,9 @@ impl QosService {
                 // Only transactions that the qos service included have to be
                 // checked for update
                 if let Ok(tx_cost) = tx_cost {
-                    if *transaction_committed_details == CommitTransactionDetails::NotCommitted {
+                    if *transaction_committed_details
+                        == CommitTransactionDetails::NotCommitted
+                    {
                         cost_tracker.remove(tx_cost)
                     }
                 }
@@ -189,7 +214,9 @@ impl QosService {
     }
 
     fn update_committed_transaction_costs<'a>(
-        transaction_cost_results: impl Iterator<Item = &'a transaction::Result<TransactionCost>>,
+        transaction_cost_results: impl Iterator<
+            Item = &'a transaction::Result<TransactionCost>,
+        >,
         transaction_committed_status: &Vec<CommitTransactionDetails>,
         bank: &Bank,
     ) {
@@ -200,17 +227,21 @@ impl QosService {
                 // Only transactions that the qos service included have to be
                 // checked for update
                 if let Ok(tx_cost) = tx_cost {
-                    if let CommitTransactionDetails::Committed { compute_units } =
-                        transaction_committed_details
+                    if let CommitTransactionDetails::Committed {
+                        compute_units,
+                    } = transaction_committed_details
                     {
-                        cost_tracker.update_execution_cost(tx_cost, *compute_units)
+                        cost_tracker
+                            .update_execution_cost(tx_cost, *compute_units)
                     }
                 }
             });
     }
 
     fn remove_transaction_costs<'a>(
-        transaction_cost_results: impl Iterator<Item = &'a transaction::Result<TransactionCost>>,
+        transaction_cost_results: impl Iterator<
+            Item = &'a transaction::Result<TransactionCost>,
+        >,
         bank: &Bank,
     ) {
         let mut cost_tracker = bank.write_cost_tracker().unwrap();
@@ -319,9 +350,12 @@ impl QosService {
     // rollup transaction cost details, eg signature_cost, write_lock_cost, data_bytes_cost and
     // execution_cost from the batch of transactions selected for block.
     fn accumulate_batched_transaction_costs<'a>(
-        transactions_costs: impl Iterator<Item = &'a transaction::Result<TransactionCost>>,
+        transactions_costs: impl Iterator<
+            Item = &'a transaction::Result<TransactionCost>,
+        >,
     ) -> BatchedTransactionDetails {
-        let mut batched_transaction_details = BatchedTransactionDetails::default();
+        let mut batched_transaction_details =
+            BatchedTransactionDetails::default();
         transactions_costs.for_each(|cost| match cost {
             Ok(cost) => {
                 saturating_add_assign!(
@@ -505,7 +539,9 @@ impl QosServiceMetrics {
                 ),
                 (
                     "estimated_signature_cu",
-                    self.stats.estimated_signature_cu.swap(0, Ordering::Relaxed),
+                    self.stats
+                        .estimated_signature_cu
+                        .swap(0, Ordering::Relaxed),
                     i64
                 ),
                 (
@@ -543,7 +579,9 @@ impl QosServiceMetrics {
                 ),
                 (
                     "actual_execute_time_us",
-                    self.stats.actual_execute_time_us.swap(0, Ordering::Relaxed),
+                    self.stats
+                        .actual_execute_time_us
+                        .swap(0, Ordering::Relaxed),
                     i64
                 ),
             );
@@ -594,19 +632,19 @@ impl QosServiceMetrics {
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        crate::genesis_utils::create_genesis_config,
-        itertools::Itertools,
-        sleipnir_bank::genesis_utils::GenesisConfigInfo,
-        solana_cost_model::transaction_cost::UsageCostDetails,
-        solana_sdk::{
-            hash::Hash,
-            signature::{Keypair, Signer},
-            system_transaction,
-        },
-        std::sync::Arc,
+    use std::sync::Arc;
+
+    use itertools::Itertools;
+    use sleipnir_bank::genesis_utils::GenesisConfigInfo;
+    use solana_cost_model::transaction_cost::UsageCostDetails;
+    use solana_sdk::{
+        hash::Hash,
+        signature::{Keypair, Signer},
+        system_transaction,
     };
+
+    use super::*;
+    use crate::genesis_utils::create_genesis_config;
 
     #[test]
     fn test_compute_transaction_costs() {
@@ -615,7 +653,12 @@ mod tests {
         // make a vec of txs
         let keypair = Keypair::new();
         let transfer_tx = SanitizedTransaction::from_transaction_for_tests(
-            system_transaction::transfer(&keypair, &keypair.pubkey(), 1, Hash::default()),
+            system_transaction::transfer(
+                &keypair,
+                &keypair.pubkey(),
+                1,
+                Hash::default(),
+            ),
         );
         let txs = vec![transfer_tx.clone(), transfer_tx];
 
@@ -634,7 +677,11 @@ mod tests {
             .map(|(index, cost)| {
                 assert_eq!(
                     cost.as_ref().unwrap().sum(),
-                    CostModel::calculate_cost(&txs[index], &FeatureSet::all_enabled()).sum()
+                    CostModel::calculate_cost(
+                        &txs[index],
+                        &FeatureSet::all_enabled()
+                    )
+                    .sum()
                 );
             })
             .collect_vec();
@@ -643,15 +690,22 @@ mod tests {
     #[test]
     fn test_select_transactions_per_cost() {
         solana_logger::setup();
-        let GenesisConfigInfo { genesis_config, .. } = create_genesis_config(10);
+        let GenesisConfigInfo { genesis_config, .. } =
+            create_genesis_config(10);
         let bank = Arc::new(Bank::new_for_tests(&genesis_config));
 
         let keypair = Keypair::new();
         let transfer_tx = SanitizedTransaction::from_transaction_for_tests(
-            system_transaction::transfer(&keypair, &keypair.pubkey(), 1, Hash::default()),
+            system_transaction::transfer(
+                &keypair,
+                &keypair.pubkey(),
+                1,
+                Hash::default(),
+            ),
         );
         let transfer_tx_cost =
-            CostModel::calculate_cost(&transfer_tx, &FeatureSet::all_enabled()).sum();
+            CostModel::calculate_cost(&transfer_tx, &FeatureSet::all_enabled())
+                .sum();
 
         // make a vec of txs
         let txs = vec![transfer_tx.clone(), transfer_tx];
@@ -668,8 +722,11 @@ mod tests {
         bank.write_cost_tracker()
             .unwrap()
             .set_limits(cost_limit, cost_limit, cost_limit);
-        let (results, num_selected) =
-            qos_service.select_transactions_per_cost(txs.iter(), txs_costs.into_iter(), &bank);
+        let (results, num_selected) = qos_service.select_transactions_per_cost(
+            txs.iter(),
+            txs_costs.into_iter(),
+            &bank,
+        );
         assert_eq!(num_selected, 2);
 
         // verify that first transfer tx and first vote are allowed
@@ -683,7 +740,8 @@ mod tests {
     #[test]
     fn test_update_and_remove_transaction_costs_committed() {
         solana_logger::setup();
-        let GenesisConfigInfo { genesis_config, .. } = create_genesis_config(10);
+        let GenesisConfigInfo { genesis_config, .. } =
+            create_genesis_config(10);
         let bank = Arc::new(Bank::new_for_tests(&genesis_config));
 
         // make some transfer transactions
@@ -691,7 +749,12 @@ mod tests {
         let transaction_count = 5;
         let keypair = Keypair::new();
         let transfer_tx = SanitizedTransaction::from_transaction_for_tests(
-            system_transaction::transfer(&keypair, &keypair.pubkey(), 1, Hash::default()),
+            system_transaction::transfer(
+                &keypair,
+                &keypair.pubkey(),
+                1,
+                Hash::default(),
+            ),
         );
         let txs: Vec<SanitizedTransaction> = (0..transaction_count)
             .map(|_| transfer_tx.clone())
@@ -710,24 +773,37 @@ mod tests {
                 .iter()
                 .map(|cost| cost.as_ref().unwrap().sum())
                 .sum();
-            let (qos_cost_results, _num_included) =
-                qos_service.select_transactions_per_cost(txs.iter(), txs_costs.into_iter(), &bank);
+            let (qos_cost_results, _num_included) = qos_service
+                .select_transactions_per_cost(
+                    txs.iter(),
+                    txs_costs.into_iter(),
+                    &bank,
+                );
             assert_eq!(
                 total_txs_cost,
                 bank.read_cost_tracker().unwrap().block_cost()
             );
             // all transactions are committed with actual units more than estimated
-            let commited_status: Vec<CommitTransactionDetails> = qos_cost_results
-                .iter()
-                .map(|tx_cost| CommitTransactionDetails::Committed {
-                    compute_units: tx_cost.as_ref().unwrap().bpf_execution_cost()
-                        + execute_units_adjustment,
-                })
-                .collect();
-            let final_txs_cost = total_txs_cost + execute_units_adjustment * transaction_count;
+            let commited_status: Vec<CommitTransactionDetails> =
+                qos_cost_results
+                    .iter()
+                    .map(|tx_cost| CommitTransactionDetails::Committed {
+                        compute_units: tx_cost
+                            .as_ref()
+                            .unwrap()
+                            .bpf_execution_cost()
+                            + execute_units_adjustment,
+                    })
+                    .collect();
+            let final_txs_cost =
+                total_txs_cost + execute_units_adjustment * transaction_count;
 
             // All transactions are committed, no costs should be removed
-            QosService::remove_costs(qos_cost_results.iter(), Some(&commited_status), &bank);
+            QosService::remove_costs(
+                qos_cost_results.iter(),
+                Some(&commited_status),
+                &bank,
+            );
             assert_eq!(
                 total_txs_cost,
                 bank.read_cost_tracker().unwrap().block_cost()
@@ -737,7 +813,11 @@ mod tests {
                 bank.read_cost_tracker().unwrap().transaction_count()
             );
 
-            QosService::update_costs(qos_cost_results.iter(), Some(&commited_status), &bank);
+            QosService::update_costs(
+                qos_cost_results.iter(),
+                Some(&commited_status),
+                &bank,
+            );
             assert_eq!(
                 final_txs_cost,
                 bank.read_cost_tracker().unwrap().block_cost()
@@ -752,7 +832,8 @@ mod tests {
     #[test]
     fn test_update_and_remove_transaction_costs_not_committed() {
         solana_logger::setup();
-        let GenesisConfigInfo { genesis_config, .. } = create_genesis_config(10);
+        let GenesisConfigInfo { genesis_config, .. } =
+            create_genesis_config(10);
         let bank = Arc::new(Bank::new_for_tests(&genesis_config));
 
         // make some transfer transactions
@@ -760,7 +841,12 @@ mod tests {
         let transaction_count = 5;
         let keypair = Keypair::new();
         let transfer_tx = SanitizedTransaction::from_transaction_for_tests(
-            system_transaction::transfer(&keypair, &keypair.pubkey(), 1, Hash::default()),
+            system_transaction::transfer(
+                &keypair,
+                &keypair.pubkey(),
+                1,
+                Hash::default(),
+            ),
         );
         let txs: Vec<SanitizedTransaction> = (0..transaction_count)
             .map(|_| transfer_tx.clone())
@@ -778,8 +864,12 @@ mod tests {
                 .iter()
                 .map(|cost| cost.as_ref().unwrap().sum())
                 .sum();
-            let (qos_cost_results, _num_included) =
-                qos_service.select_transactions_per_cost(txs.iter(), txs_costs.into_iter(), &bank);
+            let (qos_cost_results, _num_included) = qos_service
+                .select_transactions_per_cost(
+                    txs.iter(),
+                    txs_costs.into_iter(),
+                    &bank,
+                );
             assert_eq!(
                 total_txs_cost,
                 bank.read_cost_tracker().unwrap().block_cost()
@@ -798,14 +888,18 @@ mod tests {
 
             QosService::remove_costs(qos_cost_results.iter(), None, &bank);
             assert_eq!(0, bank.read_cost_tracker().unwrap().block_cost());
-            assert_eq!(0, bank.read_cost_tracker().unwrap().transaction_count());
+            assert_eq!(
+                0,
+                bank.read_cost_tracker().unwrap().transaction_count()
+            );
         }
     }
 
     #[test]
     fn test_update_and_remove_transaction_costs_mixed_execution() {
         solana_logger::setup();
-        let GenesisConfigInfo { genesis_config, .. } = create_genesis_config(10);
+        let GenesisConfigInfo { genesis_config, .. } =
+            create_genesis_config(10);
         let bank = Arc::new(Bank::new_for_tests(&genesis_config));
 
         // make some transfer transactions
@@ -813,7 +907,12 @@ mod tests {
         let transaction_count = 5;
         let keypair = Keypair::new();
         let transfer_tx = SanitizedTransaction::from_transaction_for_tests(
-            system_transaction::transfer(&keypair, &keypair.pubkey(), 1, Hash::default()),
+            system_transaction::transfer(
+                &keypair,
+                &keypair.pubkey(),
+                1,
+                Hash::default(),
+            ),
         );
         let txs: Vec<SanitizedTransaction> = (0..transaction_count)
             .map(|_| transfer_tx.clone())
@@ -832,30 +931,46 @@ mod tests {
                 .iter()
                 .map(|cost| cost.as_ref().unwrap().sum())
                 .sum();
-            let (qos_cost_results, _num_included) =
-                qos_service.select_transactions_per_cost(txs.iter(), txs_costs.into_iter(), &bank);
+            let (qos_cost_results, _num_included) = qos_service
+                .select_transactions_per_cost(
+                    txs.iter(),
+                    txs_costs.into_iter(),
+                    &bank,
+                );
             assert_eq!(
                 total_txs_cost,
                 bank.read_cost_tracker().unwrap().block_cost()
             );
             // Half of transactions are not committed, the rest with cost adjustment
-            let commited_status: Vec<CommitTransactionDetails> = qos_cost_results
-                .iter()
-                .enumerate()
-                .map(|(n, tx_cost)| {
-                    if n % 2 == 0 {
-                        CommitTransactionDetails::NotCommitted
-                    } else {
-                        CommitTransactionDetails::Committed {
-                            compute_units: tx_cost.as_ref().unwrap().bpf_execution_cost()
-                                + execute_units_adjustment,
+            let commited_status: Vec<CommitTransactionDetails> =
+                qos_cost_results
+                    .iter()
+                    .enumerate()
+                    .map(|(n, tx_cost)| {
+                        if n % 2 == 0 {
+                            CommitTransactionDetails::NotCommitted
+                        } else {
+                            CommitTransactionDetails::Committed {
+                                compute_units: tx_cost
+                                    .as_ref()
+                                    .unwrap()
+                                    .bpf_execution_cost()
+                                    + execute_units_adjustment,
+                            }
                         }
-                    }
-                })
-                .collect();
+                    })
+                    .collect();
 
-            QosService::remove_costs(qos_cost_results.iter(), Some(&commited_status), &bank);
-            QosService::update_costs(qos_cost_results.iter(), Some(&commited_status), &bank);
+            QosService::remove_costs(
+                qos_cost_results.iter(),
+                Some(&commited_status),
+                &bank,
+            );
+            QosService::update_costs(
+                qos_cost_results.iter(),
+                Some(&commited_status),
+                &bank,
+            );
 
             // assert the final block cost
             let mut expected_final_txs_count = 0u64;
@@ -907,10 +1022,13 @@ mod tests {
         let expected_signatures = signature_cost * (num_txs / 2);
         let expected_write_locks = write_lock_cost * (num_txs / 2);
         let expected_data_bytes = data_bytes_cost * (num_txs / 2);
-        let expected_builtins_execution_costs = builtins_execution_cost * (num_txs / 2);
+        let expected_builtins_execution_costs =
+            builtins_execution_cost * (num_txs / 2);
         let expected_bpf_execution_costs = bpf_execution_cost * (num_txs / 2);
         let batched_transaction_details =
-            QosService::accumulate_batched_transaction_costs(tx_cost_results.iter());
+            QosService::accumulate_batched_transaction_costs(
+                tx_cost_results.iter(),
+            );
         assert_eq!(
             expected_signatures,
             batched_transaction_details.costs.batched_signature_cost

@@ -1,10 +1,8 @@
-use {
-    solana_program_runtime::compute_budget_processor::process_compute_budget_instructions,
-    solana_sdk::{
-        instruction::CompiledInstruction,
-        pubkey::Pubkey,
-        transaction::{SanitizedTransaction, SanitizedVersionedTransaction},
-    },
+use solana_program_runtime::compute_budget_processor::process_compute_budget_instructions;
+use solana_sdk::{
+    instruction::CompiledInstruction,
+    pubkey::Pubkey,
+    transaction::{SanitizedTransaction, SanitizedVersionedTransaction},
 };
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -23,10 +21,13 @@ pub trait GetComputeBudgetDetails {
         instructions: impl Iterator<Item = (&'a Pubkey, &'a CompiledInstruction)>,
         _round_compute_unit_price_enabled: bool,
     ) -> Option<ComputeBudgetDetails> {
-        let compute_budget_limits = process_compute_budget_instructions(instructions).ok()?;
+        let compute_budget_limits =
+            process_compute_budget_instructions(instructions).ok()?;
         Some(ComputeBudgetDetails {
             compute_unit_price: compute_budget_limits.compute_unit_price,
-            compute_unit_limit: u64::from(compute_budget_limits.compute_unit_limit),
+            compute_unit_limit: u64::from(
+                compute_budget_limits.compute_unit_limit,
+            ),
         })
     }
 }
@@ -57,33 +58,38 @@ impl GetComputeBudgetDetails for SanitizedTransaction {
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        solana_sdk::{
-            compute_budget::ComputeBudgetInstruction,
-            message::Message,
-            pubkey::Pubkey,
-            signature::{Keypair, Signer},
-            system_instruction,
-            transaction::{Transaction, VersionedTransaction},
-        },
+    use solana_sdk::{
+        compute_budget::ComputeBudgetInstruction,
+        message::Message,
+        pubkey::Pubkey,
+        signature::{Keypair, Signer},
+        system_instruction,
+        transaction::{Transaction, VersionedTransaction},
     };
+
+    use super::*;
 
     #[test]
     fn test_get_compute_budget_details_with_valid_request_heap_frame_tx() {
         let keypair = Keypair::new();
         let transaction = Transaction::new_unsigned(Message::new(
             &[
-                system_instruction::transfer(&keypair.pubkey(), &Pubkey::new_unique(), 1),
+                system_instruction::transfer(
+                    &keypair.pubkey(),
+                    &Pubkey::new_unique(),
+                    1,
+                ),
                 ComputeBudgetInstruction::request_heap_frame(32 * 1024),
             ],
             Some(&keypair.pubkey()),
         ));
 
         // assert for SanitizedVersionedTransaction
-        let versioned_transaction = VersionedTransaction::from(transaction.clone());
+        let versioned_transaction =
+            VersionedTransaction::from(transaction.clone());
         let sanitized_versioned_transaction =
-            SanitizedVersionedTransaction::try_new(versioned_transaction).unwrap();
+            SanitizedVersionedTransaction::try_new(versioned_transaction)
+                .unwrap();
         assert_eq!(
             sanitized_versioned_transaction.get_compute_budget_details(false),
             Some(ComputeBudgetDetails {
@@ -96,7 +102,8 @@ mod tests {
 
         // assert for SanitizedTransaction
         let sanitized_transaction =
-            SanitizedTransaction::try_from_legacy_transaction(transaction).unwrap();
+            SanitizedTransaction::try_from_legacy_transaction(transaction)
+                .unwrap();
         assert_eq!(
             sanitized_transaction.get_compute_budget_details(false),
             Some(ComputeBudgetDetails {
@@ -114,16 +121,22 @@ mod tests {
         let keypair = Keypair::new();
         let transaction = Transaction::new_unsigned(Message::new(
             &[
-                system_instruction::transfer(&keypair.pubkey(), &Pubkey::new_unique(), 1),
+                system_instruction::transfer(
+                    &keypair.pubkey(),
+                    &Pubkey::new_unique(),
+                    1,
+                ),
                 ComputeBudgetInstruction::set_compute_unit_limit(requested_cu),
             ],
             Some(&keypair.pubkey()),
         ));
 
         // assert for SanitizedVersionedTransaction
-        let versioned_transaction = VersionedTransaction::from(transaction.clone());
+        let versioned_transaction =
+            VersionedTransaction::from(transaction.clone());
         let sanitized_versioned_transaction =
-            SanitizedVersionedTransaction::try_new(versioned_transaction).unwrap();
+            SanitizedVersionedTransaction::try_new(versioned_transaction)
+                .unwrap();
         assert_eq!(
             sanitized_versioned_transaction.get_compute_budget_details(false),
             Some(ComputeBudgetDetails {
@@ -134,7 +147,8 @@ mod tests {
 
         // assert for SanitizedTransaction
         let sanitized_transaction =
-            SanitizedTransaction::try_from_legacy_transaction(transaction).unwrap();
+            SanitizedTransaction::try_from_legacy_transaction(transaction)
+                .unwrap();
         assert_eq!(
             sanitized_transaction.get_compute_budget_details(false),
             Some(ComputeBudgetDetails {
@@ -150,16 +164,24 @@ mod tests {
         let keypair = Keypair::new();
         let transaction = Transaction::new_unsigned(Message::new(
             &[
-                system_instruction::transfer(&keypair.pubkey(), &Pubkey::new_unique(), 1),
-                ComputeBudgetInstruction::set_compute_unit_price(requested_price),
+                system_instruction::transfer(
+                    &keypair.pubkey(),
+                    &Pubkey::new_unique(),
+                    1,
+                ),
+                ComputeBudgetInstruction::set_compute_unit_price(
+                    requested_price,
+                ),
             ],
             Some(&keypair.pubkey()),
         ));
 
         // assert for SanitizedVersionedTransaction
-        let versioned_transaction = VersionedTransaction::from(transaction.clone());
+        let versioned_transaction =
+            VersionedTransaction::from(transaction.clone());
         let sanitized_versioned_transaction =
-            SanitizedVersionedTransaction::try_new(versioned_transaction).unwrap();
+            SanitizedVersionedTransaction::try_new(versioned_transaction)
+                .unwrap();
         assert_eq!(
             sanitized_versioned_transaction.get_compute_budget_details(false),
             Some(ComputeBudgetDetails {
@@ -172,7 +194,8 @@ mod tests {
 
         // assert for SanitizedTransaction
         let sanitized_transaction =
-            SanitizedTransaction::try_from_legacy_transaction(transaction).unwrap();
+            SanitizedTransaction::try_from_legacy_transaction(transaction)
+                .unwrap();
         assert_eq!(
             sanitized_transaction.get_compute_budget_details(false),
             Some(ComputeBudgetDetails {

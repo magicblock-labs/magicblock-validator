@@ -35,17 +35,38 @@ impl TransactionErrorMetrics {
     pub fn accumulate(&mut self, other: &TransactionErrorMetrics) {
         saturating_add_assign!(self.total, other.total);
         saturating_add_assign!(self.account_in_use, other.account_in_use);
-        saturating_add_assign!(self.too_many_account_locks, other.too_many_account_locks);
-        saturating_add_assign!(self.account_loaded_twice, other.account_loaded_twice);
+        saturating_add_assign!(
+            self.too_many_account_locks,
+            other.too_many_account_locks
+        );
+        saturating_add_assign!(
+            self.account_loaded_twice,
+            other.account_loaded_twice
+        );
         saturating_add_assign!(self.account_not_found, other.account_not_found);
-        saturating_add_assign!(self.blockhash_not_found, other.blockhash_not_found);
+        saturating_add_assign!(
+            self.blockhash_not_found,
+            other.blockhash_not_found
+        );
         saturating_add_assign!(self.blockhash_too_old, other.blockhash_too_old);
-        saturating_add_assign!(self.call_chain_too_deep, other.call_chain_too_deep);
+        saturating_add_assign!(
+            self.call_chain_too_deep,
+            other.call_chain_too_deep
+        );
         saturating_add_assign!(self.already_processed, other.already_processed);
         saturating_add_assign!(self.instruction_error, other.instruction_error);
-        saturating_add_assign!(self.insufficient_funds, other.insufficient_funds);
-        saturating_add_assign!(self.invalid_account_for_fee, other.invalid_account_for_fee);
-        saturating_add_assign!(self.invalid_account_index, other.invalid_account_index);
+        saturating_add_assign!(
+            self.insufficient_funds,
+            other.insufficient_funds
+        );
+        saturating_add_assign!(
+            self.invalid_account_for_fee,
+            other.invalid_account_for_fee
+        );
+        saturating_add_assign!(
+            self.invalid_account_index,
+            other.invalid_account_index
+        );
         saturating_add_assign!(
             self.invalid_program_for_execution,
             other.invalid_program_for_execution

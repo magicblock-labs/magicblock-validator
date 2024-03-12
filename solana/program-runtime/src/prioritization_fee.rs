@@ -14,13 +14,19 @@ pub struct PrioritizationFeeDetails {
 }
 
 impl PrioritizationFeeDetails {
-    pub fn new(fee_type: PrioritizationFeeType, compute_unit_limit: u64) -> Self {
+    pub fn new(
+        fee_type: PrioritizationFeeType,
+        compute_unit_limit: u64,
+    ) -> Self {
         match fee_type {
             PrioritizationFeeType::ComputeUnitPrice(compute_unit_price) => {
-                let micro_lamport_fee: MicroLamports =
-                    (compute_unit_price as u128).saturating_mul(compute_unit_limit as u128);
+                let micro_lamport_fee: MicroLamports = (compute_unit_price
+                    as u128)
+                    .saturating_mul(compute_unit_limit as u128);
                 let fee = micro_lamport_fee
-                    .saturating_add(MICRO_LAMPORTS_PER_LAMPORT.saturating_sub(1) as u128)
+                    .saturating_add(
+                        MICRO_LAMPORTS_PER_LAMPORT.saturating_sub(1) as u128,
+                    )
                     .checked_div(MICRO_LAMPORTS_PER_LAMPORT as u128)
                     .and_then(|fee| u64::try_from(fee).ok())
                     .unwrap_or(u64::MAX);
@@ -44,7 +50,10 @@ impl PrioritizationFeeDetails {
 
 #[cfg(test)]
 mod test {
-    use super::{PrioritizationFeeDetails as FeeDetails, PrioritizationFeeType as FeeType, *};
+    use super::{
+        PrioritizationFeeDetails as FeeDetails,
+        PrioritizationFeeType as FeeType, *,
+    };
 
     #[test]
     fn test_new_with_no_fee() {
@@ -59,7 +68,10 @@ mod test {
     #[test]
     fn test_new_with_compute_unit_price() {
         assert_eq!(
-            FeeDetails::new(FeeType::ComputeUnitPrice(MICRO_LAMPORTS_PER_LAMPORT - 1), 1),
+            FeeDetails::new(
+                FeeType::ComputeUnitPrice(MICRO_LAMPORTS_PER_LAMPORT - 1),
+                1
+            ),
             FeeDetails {
                 fee: 1,
                 compute_unit_price: MICRO_LAMPORTS_PER_LAMPORT - 1,
@@ -68,7 +80,10 @@ mod test {
         );
 
         assert_eq!(
-            FeeDetails::new(FeeType::ComputeUnitPrice(MICRO_LAMPORTS_PER_LAMPORT), 1),
+            FeeDetails::new(
+                FeeType::ComputeUnitPrice(MICRO_LAMPORTS_PER_LAMPORT),
+                1
+            ),
             FeeDetails {
                 fee: 1,
                 compute_unit_price: MICRO_LAMPORTS_PER_LAMPORT,
@@ -76,7 +91,10 @@ mod test {
         );
 
         assert_eq!(
-            FeeDetails::new(FeeType::ComputeUnitPrice(MICRO_LAMPORTS_PER_LAMPORT + 1), 1),
+            FeeDetails::new(
+                FeeType::ComputeUnitPrice(MICRO_LAMPORTS_PER_LAMPORT + 1),
+                1
+            ),
             FeeDetails {
                 fee: 2,
                 compute_unit_price: MICRO_LAMPORTS_PER_LAMPORT + 1,

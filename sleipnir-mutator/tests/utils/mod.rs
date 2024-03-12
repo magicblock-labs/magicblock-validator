@@ -1,10 +1,10 @@
 use sleipnir_mutator::Mutator;
 use sleipnir_program::sleipnir_authority_id;
-use solana_sdk::clock::Slot;
-use solana_sdk::transaction::Transaction;
-use solana_sdk::{genesis_config::ClusterType, hash::Hash};
-use test_tools::account::fund_account_addr;
-use test_tools::traits::TransactionsProcessor;
+use solana_sdk::{
+    clock::Slot, genesis_config::ClusterType, hash::Hash,
+    transaction::Transaction,
+};
+use test_tools::{account::fund_account_addr, traits::TransactionsProcessor};
 
 pub const SOLX_PROG: &str = "SoLXmnP9JvL6vJ7TN1VqtTxqsc2izmPfF9CsMDEuRzJ";
 #[allow(dead_code)] // used in tests

@@ -1,12 +1,11 @@
 // NOTE: from core/src/banking_stage/transaction_scheduler/thread_aware_account_locks.rs
-use {
-    solana_sdk::pubkey::Pubkey,
-    std::{
-        collections::{hash_map::Entry, HashMap},
-        fmt::{Debug, Display},
-        ops::{BitAnd, BitAndAssign, Sub},
-    },
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    fmt::{Debug, Display},
+    ops::{BitAnd, BitAndAssign, Sub},
 };
+
+use solana_sdk::pubkey::Pubkey;
 
 pub(crate) const MAX_THREADS: usize = u64::BITS as usize;
 
@@ -79,7 +78,11 @@ impl ThreadAwareAccountLocks {
         )? & allowed_threads;
         (!schedulable_threads.is_empty()).then(|| {
             let thread_id = thread_selector(schedulable_threads);
-            self.lock_accounts(write_account_locks, read_account_locks, thread_id);
+            self.lock_accounts(
+                write_account_locks,
+                read_account_locks,
+                thread_id,
+            );
             thread_id
         })
     }
@@ -142,7 +145,10 @@ impl ThreadAwareAccountLocks {
     /// If only read-locked, the only write-schedulable thread is if a single thread
     ///   holds all read locks. Otherwise, no threads are write-schedulable.
     /// If only read-locked, all threads are read-schedulable.
-    fn schedulable_threads<const WRITE: bool>(&self, account: &Pubkey) -> ThreadSet {
+    fn schedulable_threads<const WRITE: bool>(
+        &self,
+        account: &Pubkey,
+    ) -> ThreadSet {
         match (self.write_locks.get(account), self.read_locks.get(account)) {
             (None, None) => ThreadSet::any(self.num_threads),
             (None, Some(read_locks)) => {
@@ -389,7 +395,9 @@ impl ThreadSet {
     }
 
     #[inline(always)]
-    pub(crate) fn contained_threads_iter(self) -> impl Iterator<Item = ThreadId> {
+    pub(crate) fn contained_threads_iter(
+        self,
+    ) -> impl Iterator<Item = ThreadId> {
         (0..MAX_THREADS).filter(move |thread_id| self.contains(*thread_id))
     }
 
@@ -500,11 +508,17 @@ mod tests {
         let locks = ThreadAwareAccountLocks::new(TEST_NUM_THREADS);
 
         assert_eq!(
-            locks.accounts_schedulable_threads([&pk1].into_iter(), std::iter::empty()),
+            locks.accounts_schedulable_threads(
+                [&pk1].into_iter(),
+                std::iter::empty()
+            ),
             Some(TEST_ANY_THREADS)
         );
         assert_eq!(
-            locks.accounts_schedulable_threads(std::iter::empty(), [&pk1].into_iter()),
+            locks.accounts_schedulable_threads(
+                std::iter::empty(),
+                [&pk1].into_iter()
+            ),
             Some(TEST_ANY_THREADS)
         );
     }
@@ -517,11 +531,17 @@ mod tests {
 
         locks.write_lock_account(&pk1, 2);
         assert_eq!(
-            locks.accounts_schedulable_threads([&pk1, &pk2].into_iter(), std::iter::empty()),
+            locks.accounts_schedulable_threads(
+                [&pk1, &pk2].into_iter(),
+                std::iter::empty()
+            ),
             Some(ThreadSet::only(2))
         );
         assert_eq!(
-            locks.accounts_schedulable_threads(std::iter::empty(), [&pk1, &pk2].into_iter()),
+            locks.accounts_schedulable_threads(
+                std::iter::empty(),
+                [&pk1, &pk2].into_iter()
+            ),
             Some(ThreadSet::only(2))
         );
     }
@@ -534,21 +554,33 @@ mod tests {
 
         locks.read_lock_account(&pk1, 2);
         assert_eq!(
-            locks.accounts_schedulable_threads([&pk1, &pk2].into_iter(), std::iter::empty()),
+            locks.accounts_schedulable_threads(
+                [&pk1, &pk2].into_iter(),
+                std::iter::empty()
+            ),
             Some(ThreadSet::only(2))
         );
         assert_eq!(
-            locks.accounts_schedulable_threads(std::iter::empty(), [&pk1, &pk2].into_iter()),
+            locks.accounts_schedulable_threads(
+                std::iter::empty(),
+                [&pk1, &pk2].into_iter()
+            ),
             Some(TEST_ANY_THREADS)
         );
 
         locks.read_lock_account(&pk1, 0);
         assert_eq!(
-            locks.accounts_schedulable_threads([&pk1, &pk2].into_iter(), std::iter::empty()),
+            locks.accounts_schedulable_threads(
+                [&pk1, &pk2].into_iter(),
+                std::iter::empty()
+            ),
             None
         );
         assert_eq!(
-            locks.accounts_schedulable_threads(std::iter::empty(), [&pk1, &pk2].into_iter()),
+            locks.accounts_schedulable_threads(
+                std::iter::empty(),
+                [&pk1, &pk2].into_iter()
+            ),
             Some(TEST_ANY_THREADS)
         );
     }
@@ -562,11 +594,17 @@ mod tests {
         locks.read_lock_account(&pk1, 2);
         locks.write_lock_account(&pk1, 2);
         assert_eq!(
-            locks.accounts_schedulable_threads([&pk1, &pk2].into_iter(), std::iter::empty()),
+            locks.accounts_schedulable_threads(
+                [&pk1, &pk2].into_iter(),
+                std::iter::empty()
+            ),
             Some(ThreadSet::only(2))
         );
         assert_eq!(
-            locks.accounts_schedulable_threads(std::iter::empty(), [&pk1, &pk2].into_iter()),
+            locks.accounts_schedulable_threads(
+                std::iter::empty(),
+                [&pk1, &pk2].into_iter()
+            ),
             Some(ThreadSet::only(2))
         );
     }
@@ -659,7 +697,11 @@ mod tests {
     fn test_lock_accounts_invalid_thread() {
         let pk1 = Pubkey::new_unique();
         let mut locks = ThreadAwareAccountLocks::new(TEST_NUM_THREADS);
-        locks.lock_accounts([&pk1].into_iter(), std::iter::empty(), TEST_NUM_THREADS);
+        locks.lock_accounts(
+            [&pk1].into_iter(),
+            std::iter::empty(),
+            TEST_NUM_THREADS,
+        );
     }
 
     #[test]

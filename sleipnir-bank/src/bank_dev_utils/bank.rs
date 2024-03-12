@@ -3,14 +3,18 @@ use std::{borrow::Cow, path::PathBuf, sync::Arc};
 
 use solana_accounts_db::{
     accounts::Accounts,
-    accounts_db::{AccountShrinkThreshold, AccountsDb, ACCOUNTS_DB_CONFIG_FOR_TESTING},
+    accounts_db::{
+        AccountShrinkThreshold, AccountsDb, ACCOUNTS_DB_CONFIG_FOR_TESTING,
+    },
     accounts_index::AccountSecondaryIndexes,
 };
-use solana_sdk::transaction::{MessageHash, Result};
 use solana_sdk::{
     genesis_config::GenesisConfig,
     pubkey::Pubkey,
-    transaction::{SanitizedTransaction, Transaction, VersionedTransaction},
+    transaction::{
+        MessageHash, Result, SanitizedTransaction, Transaction,
+        VersionedTransaction,
+    },
 };
 use solana_svm::runtime_config::RuntimeConfig;
 
@@ -32,7 +36,10 @@ impl Bank {
     }
 
     pub fn new_for_tests(genesis_config: &GenesisConfig) -> Self {
-        Self::new_for_tests_with_config(genesis_config, BankTestConfig::default())
+        Self::new_for_tests_with_config(
+            genesis_config,
+            BankTestConfig::default(),
+        )
     }
 
     pub fn new_for_tests_with_config(
@@ -89,16 +96,20 @@ impl Bank {
     }
 
     /// Prepare a transaction batch from a list of legacy transactions. Used for tests only.
-    pub fn prepare_batch_for_tests(&self, txs: Vec<Transaction>) -> TransactionBatch {
-        let transaction_account_lock_limit = self.get_transaction_account_lock_limit();
+    pub fn prepare_batch_for_tests(
+        &self,
+        txs: Vec<Transaction>,
+    ) -> TransactionBatch {
+        let transaction_account_lock_limit =
+            self.get_transaction_account_lock_limit();
         let sanitized_txs = txs
             .into_iter()
             .map(SanitizedTransaction::from_transaction_for_tests)
             .collect::<Vec<_>>();
-        let lock_results = self
-            .rc
-            .accounts
-            .lock_accounts(sanitized_txs.iter(), transaction_account_lock_limit);
+        let lock_results = self.rc.accounts.lock_accounts(
+            sanitized_txs.iter(),
+            transaction_account_lock_limit,
+        );
         TransactionBatch::new(lock_results, self, Cow::Owned(sanitized_txs))
     }
 
@@ -121,7 +132,10 @@ impl Bank {
     ///
     /// Panics if any of the transactions do not pass sanitization checks.
     #[must_use]
-    pub fn process_entry_transactions(&self, txs: Vec<VersionedTransaction>) -> Vec<Result<()>> {
+    pub fn process_entry_transactions(
+        &self,
+        txs: Vec<VersionedTransaction>,
+    ) -> Vec<Result<()>> {
         self.try_process_entry_transactions(txs).unwrap()
     }
 
@@ -158,10 +172,20 @@ impl Bank {
 
     /// Prepare a transaction batch from a list of versioned transactions from
     /// an entry. Used for tests only.
-    pub fn prepare_entry_batch(&self, txs: Vec<VersionedTransaction>) -> Result<TransactionBatch> {
+    pub fn prepare_entry_batch(
+        &self,
+        txs: Vec<VersionedTransaction>,
+    ) -> Result<TransactionBatch> {
         let sanitized_txs = txs
             .into_iter()
-            .map(|tx| SanitizedTransaction::try_create(tx, MessageHash::Compute, None, self))
+            .map(|tx| {
+                SanitizedTransaction::try_create(
+                    tx,
+                    MessageHash::Compute,
+                    None,
+                    self,
+                )
+            })
             .collect::<Result<Vec<_>>>()?;
         let tx_account_lock_limit = self.get_transaction_account_lock_limit();
         let lock_results = self
@@ -185,7 +209,9 @@ impl Bank {
 
     /// This is only valid to call from tests.
     /// block until initial accounts hash verification has completed
-    pub fn wait_for_initial_accounts_hash_verification_completed_for_tests(&self) {
+    pub fn wait_for_initial_accounts_hash_verification_completed_for_tests(
+        &self,
+    ) {
         self.rc
             .accounts
             .accounts_db

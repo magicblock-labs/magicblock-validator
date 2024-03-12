@@ -52,6 +52,8 @@ pub enum MutatorError {
     #[error("Not yet supporting cloning solana_loader_v4_program")]
     NotYetSupportingCloningSolanaLoader4Programs,
 
-    #[error("No program data account provided for upgradeable loader program '{0}'")]
+    #[error(
+        "No program data account provided for upgradeable loader program '{0}'"
+    )]
     NoProgramDataAccountProvidedForUpgradeableLoaderProgram(String),
 }

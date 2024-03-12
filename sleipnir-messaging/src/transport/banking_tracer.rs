@@ -2,13 +2,12 @@
 use std::sync::Arc;
 
 use crossbeam_channel::{unbounded, Receiver};
-use crate::BankingPacketReceiver;
-use crate::BankingPacketBatch;
 
 use super::{
     traced_sender::{ActiveTracer, ChannelLabel, TracedSender},
     BankingPacketSender,
 };
+use crate::{BankingPacketBatch, BankingPacketReceiver};
 
 pub struct BankingTracer {
     active_tracer: Option<ActiveTracer>,
@@ -21,11 +20,16 @@ impl BankingTracer {
         })
     }
 
-    fn create_channel(&self, label: ChannelLabel) -> (BankingPacketSender, BankingPacketReceiver) {
+    fn create_channel(
+        &self,
+        label: ChannelLabel,
+    ) -> (BankingPacketSender, BankingPacketReceiver) {
         Self::channel(label, self.active_tracer.as_ref().cloned())
     }
 
-    pub fn create_channel_non_vote(&self) -> (BankingPacketSender, BankingPacketReceiver) {
+    pub fn create_channel_non_vote(
+        &self,
+    ) -> (BankingPacketSender, BankingPacketReceiver) {
         self.create_channel(ChannelLabel::NonVote)
     }
 

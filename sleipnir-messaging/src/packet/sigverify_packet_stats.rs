@@ -2,7 +2,9 @@ use serde::{Deserialize, Serialize};
 use solana_frozen_abi_macro::AbiExample;
 use solana_sdk::saturating_add_assign;
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, AbiExample)]
+#[derive(
+    Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize, AbiExample,
+)]
 pub struct SigverifyTracerPacketStats {
     pub total_removed_before_sigverify_stage: usize,
     pub total_tracer_packets_received_in_sigverify_stage: usize,

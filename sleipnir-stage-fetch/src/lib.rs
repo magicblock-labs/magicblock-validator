@@ -3,24 +3,24 @@
 //! The `fetch_stage` batches input from a UDP socket and sends it to a channel.
 mod errors;
 
-use {
-    crate::errors::{Error, Result},
-    crossbeam_channel::{unbounded, RecvTimeoutError},
-    sleipnir_streamer::streamer::{
-        self, PacketBatchReceiver, PacketBatchSender, StreamerReceiveStats,
+use std::{
+    net::UdpSocket,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
     },
-    solana_perf::{packet::PacketBatchRecycler, recycler::Recycler},
-    solana_sdk::packet::{Packet, PacketFlags},
-    std::{
-        net::UdpSocket,
-        sync::{
-            atomic::{AtomicBool, Ordering},
-            Arc,
-        },
-        thread::{self, sleep, Builder, JoinHandle},
-        time::Duration,
-    },
+    thread::{self, sleep, Builder, JoinHandle},
+    time::Duration,
 };
+
+use crossbeam_channel::{unbounded, RecvTimeoutError};
+use sleipnir_streamer::streamer::{
+    self, PacketBatchReceiver, PacketBatchSender, StreamerReceiveStats,
+};
+use solana_perf::{packet::PacketBatchRecycler, recycler::Recycler};
+use solana_sdk::packet::{Packet, PacketFlags};
+
+use crate::errors::{Error, Result};
 
 pub const DEFAULT_TPU_ENABLE_UDP: bool = false;
 
@@ -73,8 +73,10 @@ impl FetchStage {
         tpu_enable_udp: bool,
     ) -> Self {
         let tx_sockets = sockets.into_iter().map(Arc::new).collect();
-        let tpu_forwards_sockets = tpu_forwards_sockets.into_iter().map(Arc::new).collect();
-        let tpu_vote_sockets = tpu_vote_sockets.into_iter().map(Arc::new).collect();
+        let tpu_forwards_sockets =
+            tpu_forwards_sockets.into_iter().map(Arc::new).collect();
+        let tpu_vote_sockets =
+            tpu_vote_sockets.into_iter().map(Arc::new).collect();
         Self::new_multi_socket(
             tx_sockets,
             tpu_forwards_sockets,
@@ -163,7 +165,8 @@ impl FetchStage {
             Vec::default()
         };
 
-        let tpu_forward_stats = Arc::new(StreamerReceiveStats::new("tpu_forwards_receiver"));
+        let tpu_forward_stats =
+            Arc::new(StreamerReceiveStats::new("tpu_forwards_receiver"));
         let tpu_forwards_threads: Vec<_> = if tpu_enable_udp {
             tpu_forwards_sockets
                 .into_iter()
@@ -184,7 +187,8 @@ impl FetchStage {
             Vec::default()
         };
 
-        let tpu_vote_stats = Arc::new(StreamerReceiveStats::new("tpu_vote_receiver"));
+        let tpu_vote_stats =
+            Arc::new(StreamerReceiveStats::new("tpu_vote_receiver"));
         let tpu_vote_threads: Vec<_> = tpu_vote_sockets
             .into_iter()
             .map(|socket| {
@@ -206,9 +210,13 @@ impl FetchStage {
         let fwd_thread_hdl = Builder::new()
             .name("solFetchStgFwRx".to_string())
             .spawn(move || loop {
-                if let Err(e) = Self::handle_forwarded_packets(&forward_receiver, &sender) {
+                if let Err(e) =
+                    Self::handle_forwarded_packets(&forward_receiver, &sender)
+                {
                     match e {
-                        Error::RecvTimeout(RecvTimeoutError::Disconnected) => break,
+                        Error::RecvTimeout(RecvTimeoutError::Disconnected) => {
+                            break
+                        }
                         Error::RecvTimeout(RecvTimeoutError::Timeout) => (),
                         Error::Recv(_) => break,
                         Error::Send => break,

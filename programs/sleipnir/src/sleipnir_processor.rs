@@ -7,41 +7,50 @@ use std::{
 };
 
 use lazy_static::lazy_static;
-use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
+use solana_program_runtime::{
+    declare_process_instruction, ic_msg, invoke_context::InvokeContext,
+};
 use solana_sdk::{
     account::{ReadableAccount, WritableAccount},
+    instruction::InstructionError,
+    program_utils::limited_deserialize,
+    pubkey::Pubkey,
     signer::Signer,
+    system_program,
     transaction_context::TransactionContext,
 };
-use solana_sdk::{instruction::InstructionError, pubkey::Pubkey, system_program};
 
 use crate::{
     sleipnir_authority,
-    sleipnir_instruction::{AccountModificationForInstruction, SleipnirError, SleipnirInstruction},
-};
-
-use {
-    solana_program_runtime::declare_process_instruction,
-    solana_sdk::program_utils::limited_deserialize,
+    sleipnir_instruction::{
+        AccountModificationForInstruction, SleipnirError, SleipnirInstruction,
+    },
 };
 pub const DEFAULT_COMPUTE_UNITS: u64 = 150;
 
-declare_process_instruction!(Entrypoint, DEFAULT_COMPUTE_UNITS, |invoke_context| {
-    let transaction_context = &invoke_context.transaction_context;
-    let instruction_context = transaction_context.get_current_instruction_context()?;
-    let instruction_data = instruction_context.get_instruction_data();
-    let instruction = limited_deserialize(instruction_data)?;
-    let signers = instruction_context.get_signers(transaction_context)?;
+declare_process_instruction!(
+    Entrypoint,
+    DEFAULT_COMPUTE_UNITS,
+    |invoke_context| {
+        let transaction_context = &invoke_context.transaction_context;
+        let instruction_context =
+            transaction_context.get_current_instruction_context()?;
+        let instruction_data = instruction_context.get_instruction_data();
+        let instruction = limited_deserialize(instruction_data)?;
+        let signers = instruction_context.get_signers(transaction_context)?;
 
-    match instruction {
-        SleipnirInstruction::ModifyAccounts(mut account_mods) => mutate_accounts(
-            signers,
-            invoke_context,
-            transaction_context,
-            &mut account_mods,
-        ),
+        match instruction {
+            SleipnirInstruction::ModifyAccounts(mut account_mods) => {
+                mutate_accounts(
+                    signers,
+                    invoke_context,
+                    transaction_context,
+                    &mut account_mods,
+                )
+            }
+        }
     }
-});
+);
 
 lazy_static! {
     /// In order to modify large data chunks we cannot include all the data as part of the
@@ -108,19 +117,26 @@ fn mutate_accounts(
                     accounts_to_mod_len,
                     account_mods_len
                 );
-            return Err(SleipnirError::AccountsToModifyNotMatchingAccountModifications.into());
+            return Err(
+                SleipnirError::AccountsToModifyNotMatchingAccountModifications
+                    .into(),
+            );
         }
 
         // 1.4. Check that first account is the Sleipnir authority
-        let sleipnir_authority_key = transaction_context.get_key_of_account_at_index(0)?;
+        let sleipnir_authority_key =
+            transaction_context.get_key_of_account_at_index(0)?;
         if sleipnir_authority_key != &sleipnir_authority {
             ic_msg!(
                 invoke_context,
                 "MutateAccounts: first account must be the Sleipnir authority"
             );
-            return Err(SleipnirError::FirstAccountNeedsToBeSleipnirAuthority.into());
+            return Err(
+                SleipnirError::FirstAccountNeedsToBeSleipnirAuthority.into()
+            );
         }
-        let sleipnir_authority_acc = transaction_context.get_account_at_index(0)?;
+        let sleipnir_authority_acc =
+            transaction_context.get_account_at_index(0)?;
         if sleipnir_authority_acc
             .borrow()
             .owner()
@@ -130,7 +146,10 @@ fn mutate_accounts(
                 invoke_context,
                 "MutateAccounts: Sleipnir authority needs to be owned by the system program"
             );
-            return Err(SleipnirError::SleipnirAuthorityNeedsToBeOwnedBySystemProgram.into());
+            return Err(
+                SleipnirError::SleipnirAuthorityNeedsToBeOwnedBySystemProgram
+                    .into(),
+            );
         }
         sleipnir_authority_acc
     };
@@ -142,7 +161,8 @@ fn mutate_accounts(
         // NOTE: first account is the Sleipnir authority, account mods start at second account
         let account_idx = idx + 1;
         let account = transaction_context.get_account_at_index(account_idx)?;
-        let account_key = transaction_context.get_key_of_account_at_index(account_idx)?;
+        let account_key =
+            transaction_context.get_key_of_account_at_index(account_idx)?;
 
         let mut modification = account_mods.remove(account_key).ok_or_else(|| {
             ic_msg!(

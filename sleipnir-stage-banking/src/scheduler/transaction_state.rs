@@ -40,7 +40,11 @@ pub(crate) enum TransactionState {
 
 impl TransactionState {
     /// Creates a new `TransactionState` in the `Unprocessed` state.
-    pub(crate) fn new(transaction_ttl: SanitizedTransactionTTL, priority: u64, cost: u64) -> Self {
+    pub(crate) fn new(
+        transaction_ttl: SanitizedTransactionTTL,
+        priority: u64,
+        cost: u64,
+    ) -> Self {
         Self::Unprocessed {
             transaction_ttl,
             priority,
@@ -95,9 +99,14 @@ impl TransactionState {
     /// # Panics
     /// This method will panic if the transaction is already in the `Unprocessed`
     ///   state, as this is an invalid state transition.
-    pub(crate) fn transition_to_unprocessed(&mut self, transaction_ttl: SanitizedTransactionTTL) {
+    pub(crate) fn transition_to_unprocessed(
+        &mut self,
+        transaction_ttl: SanitizedTransactionTTL,
+    ) {
         match self.take() {
-            TransactionState::Unprocessed { .. } => panic!("already unprocessed"),
+            TransactionState::Unprocessed { .. } => {
+                panic!("already unprocessed")
+            }
             TransactionState::Pending { priority, cost } => {
                 *self = Self::Unprocessed {
                     transaction_ttl,
@@ -136,13 +145,13 @@ impl TransactionState {
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        solana_sdk::{
-            compute_budget::ComputeBudgetInstruction, hash::Hash, message::Message,
-            signature::Keypair, signer::Signer, system_instruction, transaction::Transaction,
-        },
+    use solana_sdk::{
+        compute_budget::ComputeBudgetInstruction, hash::Hash, message::Message,
+        signature::Keypair, signer::Signer, system_instruction,
+        transaction::Transaction,
     };
+
+    use super::*;
 
     fn create_transaction_state(compute_unit_price: u64) -> TransactionState {
         let from_keypair = Keypair::new();
@@ -152,7 +161,9 @@ mod tests {
                 &solana_sdk::pubkey::new_rand(),
                 1,
             ),
-            ComputeBudgetInstruction::set_compute_unit_price(compute_unit_price),
+            ComputeBudgetInstruction::set_compute_unit_price(
+                compute_unit_price,
+            ),
         ];
         let message = Message::new(&ixs, Some(&from_keypair.pubkey()));
         let tx = Transaction::new(&[&from_keypair], message, Hash::default());
@@ -162,7 +173,11 @@ mod tests {
             max_age_slot: Slot::MAX,
         };
         const TEST_TRANSACTION_COST: u64 = 5000;
-        TransactionState::new(transaction_ttl, compute_unit_price, TEST_TRANSACTION_COST)
+        TransactionState::new(
+            transaction_ttl,
+            compute_unit_price,
+            TEST_TRANSACTION_COST,
+        )
     }
 
     #[test]

@@ -1,19 +1,24 @@
 #![allow(dead_code)]
 use std::collections::HashMap;
 
-use solana_program_runtime::timings::{ExecuteTimingType, ExecuteTimings, ThreadExecuteTimings};
+use solana_program_runtime::timings::{
+    ExecuteTimingType, ExecuteTimings, ThreadExecuteTimings,
+};
 use solana_sdk::saturating_add_assign;
 
 // NOTE: copied from ledger/src/blockstore_processor.rs :218
 #[derive(Default)]
 pub struct ExecuteBatchesInternalMetrics {
-    pub(super) execution_timings_per_thread: HashMap<usize, ThreadExecuteTimings>,
+    pub(super) execution_timings_per_thread:
+        HashMap<usize, ThreadExecuteTimings>,
     pub(super) total_batches_len: u64,
     pub(super) execute_batches_us: u64,
 }
 
 impl ExecuteBatchesInternalMetrics {
-    pub fn new_with_timings_from_all_threads(execute_timings: ExecuteTimings) -> Self {
+    pub fn new_with_timings_from_all_threads(
+        execute_timings: ExecuteTimings,
+    ) -> Self {
         const DUMMY_THREAD_INDEX: usize = 999;
         let mut new = Self::default();
         new.execution_timings_per_thread.insert(
@@ -54,7 +59,10 @@ impl BatchExecutionTiming {
         saturating_add_assign!(*wall_clock_us, new_batch.execute_batches_us);
 
         use ExecuteTimingType::{NumExecuteBatches, TotalBatchesLen};
-        totals.saturating_add_in_place(TotalBatchesLen, new_batch.total_batches_len);
+        totals.saturating_add_in_place(
+            TotalBatchesLen,
+            new_batch.total_batches_len,
+        );
         totals.saturating_add_in_place(NumExecuteBatches, 1);
 
         for thread_times in new_batch.execution_timings_per_thread.values() {

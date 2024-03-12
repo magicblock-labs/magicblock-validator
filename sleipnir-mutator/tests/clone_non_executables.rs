@@ -1,18 +1,19 @@
 use std::str::FromStr;
 
-use log::*;
-use solana_sdk::account::Account;
-use solana_sdk::native_token::LAMPORTS_PER_SOL;
-use solana_sdk::pubkey::Pubkey;
-use solana_sdk::system_program;
-use test_tools::{init_logger, transactions_processor};
-
 use assert_matches::assert_matches;
-use test_tools::account::get_account_addr;
-use test_tools::diagnostics::log_exec_details;
+use log::*;
+use solana_sdk::{
+    account::Account, native_token::LAMPORTS_PER_SOL, pubkey::Pubkey,
+    system_program,
+};
+use test_tools::{
+    account::get_account_addr, diagnostics::log_exec_details, init_logger,
+    transactions_processor,
+};
 
 use crate::utils::{
-    fund_luzifer, verified_tx_to_clone_from_devnet, SOLX_POST, SOLX_PROG, SOLX_TIPS,
+    fund_luzifer, verified_tx_to_clone_from_devnet, SOLX_POST, SOLX_PROG,
+    SOLX_TIPS,
 };
 
 mod utils;

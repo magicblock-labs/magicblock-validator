@@ -1,9 +1,8 @@
 //! A transport for RPC calls.
-use {
-    async_trait::async_trait,
-    sleipnir_rpc_client_api::{client_error::Result, request::RpcRequest},
-    std::time::Duration,
-};
+use std::time::Duration;
+
+use async_trait::async_trait;
+use sleipnir_rpc_client_api::{client_error::Result, request::RpcRequest};
 
 #[derive(Default, Clone)]
 pub struct RpcTransportStats {

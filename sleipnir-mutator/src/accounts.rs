@@ -1,13 +1,18 @@
 use std::{str::FromStr, sync::Arc};
 
-use crate::{chainparser, program_account::adjust_deployment_slot, AccountModification};
 use sleipnir_rpc_client::rpc_client::RpcClient;
 use solana_sdk::{
-    account::Account, bpf_loader_upgradeable, clock::Slot, commitment_config::CommitmentConfig,
-    genesis_config::ClusterType, pubkey::Pubkey,
+    account::Account, bpf_loader_upgradeable, clock::Slot,
+    commitment_config::CommitmentConfig, genesis_config::ClusterType,
+    pubkey::Pubkey,
 };
 
-use crate::errors::{MutatorError, MutatorResult};
+use crate::{
+    chainparser,
+    errors::{MutatorError, MutatorResult},
+    program_account::adjust_deployment_slot,
+    AccountModification,
+};
 
 const TESTNET_URL: &str = "https://api.testnet.solana.com";
 const MAINNET_URL: &str = "https://api.mainnet-beta.solana.com";
@@ -22,12 +27,18 @@ pub struct AccountProcessor {
 
 impl AccountProcessor {
     pub fn new() -> Self {
-        let client_testnet =
-            RpcClient::new_with_commitment(TESTNET_URL.to_string(), CommitmentConfig::confirmed());
-        let client_mainnet =
-            RpcClient::new_with_commitment(MAINNET_URL.to_string(), CommitmentConfig::confirmed());
-        let client_devnet =
-            RpcClient::new_with_commitment(DEVNET_URL.to_string(), CommitmentConfig::confirmed());
+        let client_testnet = RpcClient::new_with_commitment(
+            TESTNET_URL.to_string(),
+            CommitmentConfig::confirmed(),
+        );
+        let client_mainnet = RpcClient::new_with_commitment(
+            MAINNET_URL.to_string(),
+            CommitmentConfig::confirmed(),
+        );
+        let client_devnet = RpcClient::new_with_commitment(
+            DEVNET_URL.to_string(),
+            CommitmentConfig::confirmed(),
+        );
         Self {
             client_testnet: Arc::new(client_testnet),
             client_mainnet: Arc::new(client_mainnet),
@@ -84,7 +95,8 @@ impl AccountProcessor {
 
         // 3. If the account is executable, try to find its IDL account
         let idl_account_info = if account.executable {
-            let (anchor_idl_address, shank_idl_address) = get_idl_addresses(account_address)?;
+            let (anchor_idl_address, shank_idl_address) =
+                get_idl_addresses(account_address)?;
 
             // 3.1. Download the IDL account, try the anchor address first followed by shank
             if let Some(anchor_account_info) = self
@@ -103,10 +115,16 @@ impl AccountProcessor {
         Ok(vec![
             Some(AccountModification::from((&account, account_address))),
             executable_info.map(|(account, address)| {
-                AccountModification::from((&account, address.to_string().as_str()))
+                AccountModification::from((
+                    &account,
+                    address.to_string().as_str(),
+                ))
             }),
             idl_account_info.map(|(account, address)| {
-                AccountModification::from((&account, address.to_string().as_str()))
+                AccountModification::from((
+                    &account,
+                    address.to_string().as_str(),
+                ))
             }),
         ]
         .into_iter()
@@ -120,7 +138,9 @@ impl AccountProcessor {
             Testnet => self.client_testnet.clone(),
             MainnetBeta => self.client_mainnet.clone(),
             Devnet => self.client_devnet.clone(),
-            Development => panic!("Development cluster not supported when cloning accounts"),
+            Development => panic!(
+                "Development cluster not supported when cloning accounts"
+            ),
         }
     }
 
@@ -153,7 +173,8 @@ pub(crate) fn get_executable_address(
     let program_pubkey = Pubkey::from_str(program_id)?;
     let bpf_loader_id = bpf_loader_upgradeable::id();
     let seeds = &[program_pubkey.as_ref()];
-    let (executable_address, _) = Pubkey::find_program_address(seeds, &bpf_loader_id);
+    let (executable_address, _) =
+        Pubkey::find_program_address(seeds, &bpf_loader_id);
     Ok(executable_address)
 }
 

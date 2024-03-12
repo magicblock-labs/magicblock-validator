@@ -1,13 +1,16 @@
 // NOTE: copied from ledger/src/blockstore_processor.rs:1819
 
-use crossbeam_channel::Sender;
-use log::trace;
 use std::sync::Arc;
 
+use crossbeam_channel::Sender;
+use log::trace;
 use sleipnir_bank::{bank::Bank, transaction_results::TransactionBalancesSet};
-use solana_accounts_db::transaction_results::TransactionExecutionDetails;
-use solana_accounts_db::transaction_results::TransactionExecutionResult;
-use solana_sdk::{clock::Slot, rent_debits::RentDebits, transaction::SanitizedTransaction};
+use solana_accounts_db::transaction_results::{
+    TransactionExecutionDetails, TransactionExecutionResult,
+};
+use solana_sdk::{
+    clock::Slot, rent_debits::RentDebits, transaction::SanitizedTransaction,
+};
 use solana_transaction_status::token_balances::TransactionTokenBalancesSet;
 
 #[allow(clippy::large_enum_variant)]
@@ -45,15 +48,17 @@ impl TransactionStatusSender {
     ) {
         let slot = bank.slot();
 
-        if let Err(e) = self
-            .sender
-            .send(TransactionStatusMessage::Batch(TransactionStatusBatch {
+        if let Err(e) = self.sender.send(TransactionStatusMessage::Batch(
+            TransactionStatusBatch {
                 bank,
                 transactions,
                 execution_results: execution_results
                     .into_iter()
                     .map(|result| match result {
-                        TransactionExecutionResult::Executed { details, .. } => Some(details),
+                        TransactionExecutionResult::Executed {
+                            details,
+                            ..
+                        } => Some(details),
                         TransactionExecutionResult::NotExecuted(_) => None,
                     })
                     .collect(),
@@ -61,8 +66,8 @@ impl TransactionStatusSender {
                 token_balances,
                 rent_debits,
                 transaction_indexes,
-            }))
-        {
+            },
+        )) {
             trace!(
                 "Slot {} transaction_status send batch failed: {:?}",
                 slot,

@@ -2,12 +2,13 @@ use std::sync::{atomic::Ordering, Arc};
 
 use crossbeam_channel::{Receiver, RecvError, SendError, Sender};
 use sleipnir_bank::bank::Bank;
+use sleipnir_messaging::scheduler_messages::{
+    ConsumeWork, FinishedConsumeWork,
+};
 use thiserror::Error;
 
-use crate::metrics::ConsumeWorkerMetrics;
-use sleipnir_messaging::scheduler_messages::{ConsumeWork, FinishedConsumeWork};
-
 use super::Consumer;
+use crate::metrics::ConsumeWorkerMetrics;
 
 #[derive(Debug, Error)]
 pub enum ConsumeWorkerError {
@@ -57,7 +58,10 @@ impl ConsumeWorker {
         }
     }
 
-    fn consume_loop(&self, work: ConsumeWork) -> Result<(), ConsumeWorkerError> {
+    fn consume_loop(
+        &self,
+        work: ConsumeWork,
+    ) -> Result<(), ConsumeWorkerError> {
         // NOTE: removed get_consumer_bank from leader_bank_notifier with timeout
 
         for work in try_drain_iter(work, &self.consume_receiver) {
@@ -69,7 +73,11 @@ impl ConsumeWorker {
     }
 
     /// Consume a single batch.
-    fn consume(&self, bank: &Arc<Bank>, work: ConsumeWork) -> Result<(), ConsumeWorkerError> {
+    fn consume(
+        &self,
+        bank: &Arc<Bank>,
+        work: ConsumeWork,
+    ) -> Result<(), ConsumeWorkerError> {
         let output = self.consumer.process_and_record_aged_transactions(
             bank,
             &work.transactions,
@@ -93,6 +101,9 @@ impl ConsumeWorker {
 
 /// Helper function to create an non-blocking iterator over work in the receiver,
 /// starting with the given work item.
-fn try_drain_iter<T>(work: T, receiver: &Receiver<T>) -> impl Iterator<Item = T> + '_ {
+fn try_drain_iter<T>(
+    work: T,
+    receiver: &Receiver<T>,
+) -> impl Iterator<Item = T> + '_ {
     std::iter::once(work).chain(receiver.try_iter())
 }

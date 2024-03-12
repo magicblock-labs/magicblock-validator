@@ -1,9 +1,9 @@
 // NOTE: pieces extracted from rpc-client-api/src/config.rs
+use std::{io::Read, str::FromStr};
+
 use base64::{prelude::BASE64_STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use std::{io::Read, str::FromStr};
-
 use solana_sdk::{
     account::WritableAccount,
     clock::{Epoch, Slot},
@@ -95,7 +95,9 @@ impl UiAccountData {
     pub fn decode(&self) -> Option<Vec<u8>> {
         match self {
             UiAccountData::Json(_) => None,
-            UiAccountData::LegacyBinary(blob) => bs58::decode(blob).into_vec().ok(),
+            UiAccountData::LegacyBinary(blob) => {
+                bs58::decode(blob).into_vec().ok()
+            }
             UiAccountData::Binary(blob, encoding) => match encoding {
                 UiAccountEncoding::Base58 => bs58::decode(blob).into_vec().ok(),
                 UiAccountEncoding::Base64 => BASE64_STANDARD.decode(blob).ok(),
@@ -103,12 +105,16 @@ impl UiAccountData {
                     BASE64_STANDARD.decode(blob).ok().and_then(|zstd_data| {
                         let mut data = vec![];
                         zstd::stream::read::Decoder::new(zstd_data.as_slice())
-                            .and_then(|mut reader| reader.read_to_end(&mut data))
+                            .and_then(|mut reader| {
+                                reader.read_to_end(&mut data)
+                            })
                             .map(|_| data)
                             .ok()
                     })
                 }
-                UiAccountEncoding::Binary | UiAccountEncoding::JsonParsed => None,
+                UiAccountEncoding::Binary | UiAccountEncoding::JsonParsed => {
+                    None
+                }
             },
         }
     }

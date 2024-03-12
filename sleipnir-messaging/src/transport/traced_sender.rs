@@ -20,7 +20,9 @@ pub enum TracedEvent {
     BlockAndBankHash(Slot, Hash, Hash),
 }
 
-#[derive(Serialize, Deserialize, Debug, Clone, Copy, AbiExample, AbiEnumVisitor)]
+#[derive(
+    Serialize, Deserialize, Debug, Clone, Copy, AbiExample, AbiEnumVisitor,
+)]
 pub enum ChannelLabel {
     NonVote,
     TpuVote,
@@ -57,7 +59,10 @@ impl TracedSender {
         }
     }
 
-    pub fn send(&self, batch: BankingPacketBatch) -> Result<(), SendError<BankingPacketBatch>> {
+    pub fn send(
+        &self,
+        batch: BankingPacketBatch,
+    ) -> Result<(), SendError<BankingPacketBatch>> {
         if let Some(ActiveTracer { trace_sender, exit }) = &self.active_tracer {
             if !exit.load(Ordering::Relaxed) {
                 trace_sender
