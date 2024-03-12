@@ -12,5 +12,6 @@ jsonrpc-core = { workspace = true }
 jsonrpc-core-client = { workspace = true }
 jsonrpc-derive = { workspace = true }
 jsonrpc-http-server = { workspace = true }
+# sleipnir-transaction-status = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
