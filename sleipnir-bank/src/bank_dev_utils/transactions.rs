@@ -215,8 +215,8 @@ fn create_sysvars_get_instruction(program_id: &Pubkey, funded_accounts: &[Keypai
 }
 
 pub fn create_sysvars_from_account_transaction(bank: &Bank) -> SanitizedTransaction {
-    // This instruction checks for sibling instructions
-    // which is why we need to add it some
+    // This instruction checks for relative instructions
+    // which is why we need to add them around the sysvar instruction
 
     let payer = create_funded_account(bank, Some(LAMPORTS_PER_SOL));
 
@@ -229,15 +229,15 @@ pub fn create_sysvars_from_account_transaction(bank: &Bank) -> SanitizedTransact
     let sysvar_ix = create_sysvars_from_account_instruction(&elfs::sysvars::id(), &payer.pubkey());
 
     // 3. System Allocate Instruction after Sysvar Instruction
-    let allocate_to = Pubkey::new_unique();
-    let allocate_ix = system_instruction::allocate(&allocate_to, 99);
+    let allocate_to = Keypair::new();
+    let allocate_ix = system_instruction::allocate(&allocate_to.pubkey(), 99);
 
     // 4. Run all Instructions as part of one Transaction
     let message = Message::new(
         &[transfer_ix, sysvar_ix, allocate_ix],
         Some(&payer.pubkey()),
     );
-    let transaction = Transaction::new_unsigned(message);
+    let transaction = Transaction::new(&[&payer, &allocate_to], message, bank.last_blockhash());
     SanitizedTransaction::try_from_legacy_transaction(transaction).unwrap()
 }
 
