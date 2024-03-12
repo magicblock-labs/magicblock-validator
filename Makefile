@@ -17,8 +17,11 @@ test-bank:
 list:
 	@LC_ALL=C $(MAKE) -pRrq -f $(firstword $(MAKEFILE_LIST)) : 2>/dev/null | awk -v RS= -F: '/(^|\n)# Files(\n|$$)/,/(^|\n)# Finished Make data base/ {if ($$1 !~ "^[#.]") {print $$1}}' | sort | egrep -v -e '^[^[:alnum:]]' -e '^$@$$'
 
+ex-clone-custom:
+	cargo run --package=sleipnir-mutator --example clone_solx_custom
+
 fmt:
 	cargo +nightly fmt -- --config-path rustfmt-nightly.toml
 
 .PHONY:
-	list test test-log test-bank fmt
+	list test test-log test-bank fmt ex-clone-custom
