@@ -5,7 +5,7 @@ use base64::{prelude::BASE64_STANDARD, Engine};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use solana_sdk::{
-    account::WritableAccount,
+    account::{ReadableAccount, WritableAccount},
     clock::{Epoch, Slot},
     commitment_config::CommitmentConfig,
     pubkey::Pubkey,
@@ -17,7 +17,9 @@ pub struct RpcAccountInfoConfig {
     pub encoding: Option<UiAccountEncoding>,
     pub data_slice: Option<UiDataSliceConfig>,
     #[serde(flatten)]
+    /// Commitment is ignored in our validator
     pub commitment: Option<CommitmentConfig>,
+    /// Min context slot is ignored in our validator
     pub min_context_slot: Option<Slot>,
 }
 
@@ -70,6 +72,16 @@ impl UiAccount {
             self.executable,
             self.rent_epoch,
         ))
+    }
+
+    pub fn encode<T: ReadableAccount>(
+        _pubkey: &Pubkey,
+        _account: &T,
+        _encoding: UiAccountEncoding,
+        _additional_data: Option<String /*AccountAdditionalData*/>,
+        _data_slice_config: Option<UiDataSliceConfig>,
+    ) -> Self {
+        todo!("UiAccount::encode")
     }
 }
 

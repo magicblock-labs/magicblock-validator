@@ -2,7 +2,7 @@
 //! The `rpc` module implements the Solana RPC interface.
 use jsonrpc_core::Result;
 use jsonrpc_derive::rpc;
-use solana_rpc_client_api::{
+use sleipnir_rpc_client_api::{
     config::RpcContextConfig,
     response::Response as RpcResponse,
     response::{RpcIdentity, RpcSnapshotSlotInfo, RpcVersionInfo},

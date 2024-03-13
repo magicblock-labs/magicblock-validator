@@ -1,3 +1,7 @@
+mod accounts;
+// TODO
+// mod full;
+mod account_resolver;
 mod json_rpc_request_processor;
-mod rpc_full;
-mod rpc_minimal;
+mod traits;
+mod utils;

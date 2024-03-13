@@ -98,7 +98,6 @@ solana-metrics = { git = "https://github.com/solana-labs/solana", rev = "30adda4
 solana-perf = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-perf" }
 solana-program-runtime = { path = "./solana/program-runtime" }
 solana-rayon-threadlimit = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-rayon-threadlimit" }
-solana-rpc-client-api = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-rpc-client-api" }
 solana-streamer = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-streamer" }
 solana-sdk = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-sdk" }
 solana-svm = { path = "./solana/svm" }
