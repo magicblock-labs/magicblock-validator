@@ -9,7 +9,7 @@ pub mod get_compute_budget_details;
 mod status_cache;
 mod sysvar_cache;
 pub mod transaction_batch;
-mod transaction_logs;
+pub mod transaction_logs;
 pub mod transaction_results;
 
 pub use consts::LAMPORTS_PER_SIGNATURE;

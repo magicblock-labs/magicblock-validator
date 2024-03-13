@@ -17,6 +17,7 @@ use solana_perf::packet::{to_packet_batches, PacketBatch};
 use solana_sdk::transaction::{SanitizedTransaction, Transaction};
 
 use crate::{
+    bank::bank_for_tests,
     traits::{TransactionsProcessor, TransactionsProcessorProcessResult},
     transaction::sanitized_into_transaction,
 };
@@ -52,7 +53,7 @@ impl BankingStageTransactionsProcessor {
     pub fn new(config: BankingStageTransactionsProcessorConfig) -> Self {
         let GenesisConfigInfo { genesis_config, .. } =
             create_genesis_config(u64::MAX);
-        let bank = Bank::new_for_tests(&genesis_config);
+        let bank = bank_for_tests(&genesis_config);
         let bank = Arc::new(bank);
 
         Self { config, bank }

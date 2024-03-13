@@ -19,6 +19,7 @@ solana-accounts-db = { workspace = true }
 solana-perf = { workspace = true }
 solana-program-runtime = { workspace = true }
 solana-sdk = { workspace = true }
+solana-svm = { workspace = true }
 test-tools-core = { workspace = true }
 
 [dev-dependencies]

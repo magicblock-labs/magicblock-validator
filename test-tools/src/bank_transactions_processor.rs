@@ -11,8 +11,9 @@ use solana_sdk::{
     transaction::{SanitizedTransaction, Transaction},
 };
 
-use crate::traits::{
-    TransactionsProcessor, TransactionsProcessorProcessResult,
+use crate::{
+    bank::bank_for_tests,
+    traits::{TransactionsProcessor, TransactionsProcessorProcessResult},
 };
 
 #[derive(Debug)]
@@ -29,7 +30,7 @@ impl BankTransactionsProcessor {
 impl Default for BankTransactionsProcessor {
     fn default() -> Self {
         let genesis_config = create_genesis_config(u64::MAX).genesis_config;
-        let bank = Arc::new(Bank::new_for_tests(&genesis_config));
+        let bank = Arc::new(bank_for_tests(&genesis_config));
         Self::new(bank)
     }
 }
