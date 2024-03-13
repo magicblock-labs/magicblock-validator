@@ -10,13 +10,15 @@ use solana_account_decoder::parse_token::{
 };
 use solana_measure::measure::Measure;
 use solana_metrics::datapoint_debug;
-use solana_sdk::{account::ReadableAccount, pubkey::Pubkey};
+use solana_sdk::{
+    account::ReadableAccount, program_error::ProgramError, pubkey::Pubkey,
+};
 use spl_token_2022::{
     extension::StateWithExtensions,
     state::{Account as TokenAccount, Mint},
 };
 
-fn get_mint_decimals(bank: &Bank, mint: &Pubkey) -> Option<u8> {
+pub fn get_mint_decimals(bank: &Bank, mint: &Pubkey) -> Option<u8> {
     if mint == &spl_token::native_mint::id() {
         Some(spl_token::native_mint::DECIMALS)
     } else {
@@ -26,12 +28,12 @@ fn get_mint_decimals(bank: &Bank, mint: &Pubkey) -> Option<u8> {
             return None;
         }
 
-        let decimals = StateWithExtensions::<Mint>::unpack(mint_account.data())
-            .map(|mint| mint.base.decimals)
-            .ok()?;
-
-        Some(decimals)
+        get_mint_decimals_from_data(mint_account.data()).ok()
     }
+}
+
+pub fn get_mint_decimals_from_data(data: &[u8]) -> Result<u8, ProgramError> {
+    StateWithExtensions::<Mint>::unpack(data).map(|mint| mint.base.decimals)
 }
 
 pub fn collect_token_balances(

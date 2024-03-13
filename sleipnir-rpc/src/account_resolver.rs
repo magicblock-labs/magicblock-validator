@@ -6,6 +6,7 @@ use {
     sleipnir_rpc_client_api::config::{
         UiAccount, UiAccountEncoding, UiDataSliceConfig,
     },
+    sleipnir_tokens::token_balances::get_mint_decimals_from_data,
     solana_account_decoder::{
         parse_account_data::AccountAdditionalData,
         parse_token::{get_token_account_mint, is_known_spl_token_id},
@@ -91,7 +92,7 @@ pub(crate) fn get_parsed_token_account(
     // only used for simulation results
     overwrite_accounts: Option<&HashMap<Pubkey, AccountSharedData>>,
 ) -> UiAccount {
-    let _additional_data = get_token_account_mint(account.data())
+    let additional_data = get_token_account_mint(account.data())
         .and_then(|mint_pubkey| {
             get_account_from_overwrites_or_bank(
                 &mint_pubkey,
@@ -100,27 +101,17 @@ pub(crate) fn get_parsed_token_account(
             )
         })
         .map(|mint_account| AccountAdditionalData {
-            spl_token_decimals: get_mint_decimals(mint_account.data()).ok(),
+            spl_token_decimals: get_mint_decimals_from_data(
+                mint_account.data(),
+            )
+            .ok(),
         });
 
     UiAccount::encode(
         pubkey,
         &account,
         UiAccountEncoding::JsonParsed,
-        None, // additional_data,
+        additional_data,
         None,
     )
-}
-
-fn get_mint_decimals(_data: &[u8]) -> Result<u8> {
-    todo!("get_mint_decimals")
-    /*
-        StateWithExtensions::<Mint>::unpack(data)
-            .map_err(|_| {
-                Error::invalid_params(
-                    "Invalid param: Token mint could not be unpacked".to_string(),
-                )
-            })
-            .map(|mint| mint.base.decimals)
-    */
 }
