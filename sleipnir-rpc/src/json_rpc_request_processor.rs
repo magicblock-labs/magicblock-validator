@@ -15,6 +15,7 @@ use sleipnir_rpc_client_api::{
 use solana_sdk::pubkey::Pubkey;
 
 use crate::account_resolver::get_encoded_account;
+use crate::rpc_health::RpcHealth;
 use crate::utils::new_response;
 
 //TODO: send_transaction_service
@@ -41,6 +42,7 @@ pub struct JsonRpcRequestProcessor {
     bank: Arc<Bank>,
     pub(crate) config: JsonRpcConfig,
     transaction_sender: Arc<Mutex<Sender<TransactionInfo>>>,
+    pub(crate) health: Arc<RpcHealth>,
 }
 impl Metadata for JsonRpcRequestProcessor {}
 
@@ -48,6 +50,7 @@ impl JsonRpcRequestProcessor {
     pub fn new(
         bank: Arc<Bank>,
         config: JsonRpcConfig,
+        health: Arc<RpcHealth>,
     ) -> (Self, Receiver<TransactionInfo>) {
         let (sender, receiver) = unbounded();
         let transaction_sender = Arc::new(Mutex::new(sender));
@@ -56,6 +59,7 @@ impl JsonRpcRequestProcessor {
                 bank,
                 config,
                 transaction_sender,
+                health,
             },
             receiver,
         )

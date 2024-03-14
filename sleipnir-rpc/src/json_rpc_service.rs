@@ -17,6 +17,7 @@ use solana_perf::thread::renice_this_thread;
 
 use crate::{
     json_rpc_request_processor::{JsonRpcConfig, JsonRpcRequestProcessor},
+    rpc_health::RpcHealth,
     rpc_request_middleware::RpcRequestMiddleware,
     utils::MAX_REQUEST_BODY_SIZE,
 };
@@ -38,8 +39,12 @@ impl JsonRpcService {
         let runtime = get_runtime(&config);
         let rpc_niceness_adj = config.rpc_niceness_adj;
 
+        let startup_verification_complete =
+            Arc::clone(bank.get_startup_verification_complete());
+        let health = Arc::new(RpcHealth::new(startup_verification_complete));
+
         let (request_processor, _receiver) =
-            JsonRpcRequestProcessor::new(bank, config);
+            JsonRpcRequestProcessor::new(bank, config, health.clone());
 
         let (close_handle_sender, close_handle_receiver) = unbounded();
         let thread_hdl = thread::Builder::new()
@@ -53,7 +58,7 @@ impl JsonRpcService {
                 // TODO: full_api :506
 
                 // NOTE: left out obsolete_v1_7_api
-                let request_middleware = RpcRequestMiddleware;
+                let request_middleware = RpcRequestMiddleware::new(health.clone());
 
                 let server = ServerBuilder::with_meta_extractor(
                     io,

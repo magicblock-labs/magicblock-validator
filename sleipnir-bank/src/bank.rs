@@ -2150,6 +2150,21 @@ impl Bank {
     }
 
     // -----------------
+    // Health
+    // -----------------
+    /// Returns true when startup accounts hash verification has completed or never had to run in background.
+    pub fn get_startup_verification_complete(&self) -> &Arc<AtomicBool> {
+        // TODO(thlorenz): this seems to never get verified at this point, i.e. /health always
+        // returns 'unknown'
+        &self
+            .rc
+            .accounts
+            .accounts_db
+            .verify_accounts_hash_in_bg
+            .verified
+    }
+
+    // -----------------
     // Accessors
     // -----------------
     pub fn read_cost_tracker(
