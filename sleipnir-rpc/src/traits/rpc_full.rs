@@ -6,13 +6,12 @@ use sleipnir_rpc_client_api::{
     config::{
         RpcBlocksConfigWrapper, RpcContextConfig, RpcEpochConfig,
         RpcRequestAirdropConfig, RpcSendTransactionConfig,
-        RpcSignaturesForAddressConfig, RpcSimulateTransactionConfig,
+        RpcSignaturesForAddressConfig,
     },
     response::{
         Response as RpcResponse, RpcBlockhash,
         RpcConfirmedTransactionStatusWithSignature, RpcContactInfo,
         RpcInflationReward, RpcPerfSample, RpcPrioritizationFee,
-        RpcSimulateTransactionResult,
     },
 };
 use solana_sdk::{
@@ -78,6 +77,7 @@ pub trait Full {
         config: Option<RpcSendTransactionConfig>,
     ) -> Result<String>;
 
+    /* TODO: Not yet supporting transaction simulation
     #[rpc(meta, name = "simulateTransaction")]
     fn simulate_transaction(
         &self,
@@ -85,6 +85,7 @@ pub trait Full {
         data: String,
         config: Option<RpcSimulateTransactionConfig>,
     ) -> Result<RpcResponse<RpcSimulateTransactionResult>>;
+    */
 
     #[rpc(meta, name = "minimumLedgerSlot")]
     fn minimum_ledger_slot(&self, meta: Self::Metadata) -> Result<Slot>;
