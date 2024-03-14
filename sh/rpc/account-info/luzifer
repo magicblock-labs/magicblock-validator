@@ -1,0 +1,14 @@
+# vi: ft=sh
+curl --location 'http://localhost:8899' \
+--header 'Content-Type: application/json' \
+--data '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "getAccountInfo",
+    "params": [
+        "LuzifKo4E6QCF5r4uQmqbyko7zLS5WgayynivnCbtzk",
+        {
+            "encoding": "base58"
+        }
+    ]
+}'

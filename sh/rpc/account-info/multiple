@@ -1,0 +1,19 @@
+# vi: ft=sh
+curl --location 'http://localhost:8899' \
+--header 'Content-Type: application/json' \
+--data '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "getMultipleAccounts",
+    "params": [
+        [
+            "LuzifKo4E6QCF5r4uQmqbyko7zLS5WgayynivnCbtzk",
+            "Luzid11111111111111111111111111111111111111",
+            "SysvarC1ock11111111111111111111111111111111",
+            "11111111111111111111111111111111"
+        ],
+        {
+            "encoding": "base58"
+        }
+    ]
+}'

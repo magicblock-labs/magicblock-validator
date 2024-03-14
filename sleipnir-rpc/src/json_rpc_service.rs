@@ -16,9 +16,11 @@ use sleipnir_bank::bank::Bank;
 use solana_perf::thread::renice_this_thread;
 
 use crate::{
+    accounts::AccountsDataImpl,
     json_rpc_request_processor::{JsonRpcConfig, JsonRpcRequestProcessor},
     rpc_health::RpcHealth,
     rpc_request_middleware::RpcRequestMiddleware,
+    traits::rpc_accounts::AccountsData,
     utils::MAX_REQUEST_BODY_SIZE,
 };
 
@@ -53,6 +55,8 @@ impl JsonRpcService {
                 renice_this_thread(rpc_niceness_adj).unwrap();
 
                 let mut io = MetaIoHandler::default();
+
+                io.extend_with(AccountsDataImpl.to_delegate());
 
                 // io.extend_with(rpc_minimal::MinimalImpl.todelegate());
                 // TODO: full_api :506
