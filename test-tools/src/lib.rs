@@ -3,7 +3,7 @@ use banking_stage_transactions_processor::BankingStageTransactionsProcessor;
 use traits::TransactionsProcessor;
 
 pub mod account;
-mod bank;
+pub mod bank;
 pub mod bank_transactions_processor;
 pub mod banking_stage_transactions_processor;
 pub use test_tools_core::*;

@@ -3,6 +3,7 @@ mod accounts;
 // mod full;
 mod account_resolver;
 mod json_rpc_request_processor;
-mod json_rpc_service;
+pub mod json_rpc_service;
+mod rpc_request_middleware;
 mod traits;
 mod utils;

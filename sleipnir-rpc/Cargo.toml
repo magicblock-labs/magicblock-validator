@@ -23,3 +23,6 @@ solana-sdk = { workspace = true }
 solana-perf = { workspace = true }
 
 tokio = { workspace = true, features = ["full"] }
+
+[dev-dependencies]
+test-tools = { workspace = true }
