@@ -8,6 +8,7 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
+crossbeam-channel = { workspace = true }
 log = { workspace = true }
 jsonrpc-core = { workspace = true }
 jsonrpc-core-client = { workspace = true }
@@ -19,3 +20,6 @@ sleipnir-rpc-client-api = { workspace = true }
 sleipnir-tokens = { workspace = true }
 solana-account-decoder = { workspace = true }
 solana-sdk = { workspace = true }
+solana-perf = { workspace = true }
+
+tokio = { workspace = true, features = ["full"] }

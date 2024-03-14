@@ -5,6 +5,8 @@ use sleipnir_rpc_client_api::response::{
 };
 use solana_sdk::pubkey::Pubkey;
 
+pub const MAX_REQUEST_BODY_SIZE: usize = 50 * (1 << 10); // 50kB
+
 pub(crate) fn verify_pubkey(input: &str) -> Result<Pubkey> {
     input
         .parse()

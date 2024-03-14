@@ -1,5 +1,10 @@
+#![allow(dead_code)]
 use std::sync::Arc;
+use std::sync::Mutex;
 
+use crossbeam_channel::unbounded;
+use crossbeam_channel::Receiver;
+use crossbeam_channel::Sender;
 use jsonrpc_core::Metadata;
 use jsonrpc_core::Result;
 use sleipnir_bank::bank::Bank;
@@ -11,6 +16,9 @@ use solana_sdk::pubkey::Pubkey;
 
 use crate::account_resolver::get_encoded_account;
 use crate::utils::new_response;
+
+//TODO: send_transaction_service
+pub struct TransactionInfo;
 
 // NOTE: from rpc/src/rpc.rs :140
 #[derive(Debug, Default, Clone)]
@@ -32,10 +40,27 @@ pub struct JsonRpcConfig {
 pub struct JsonRpcRequestProcessor {
     bank: Arc<Bank>,
     pub(crate) config: JsonRpcConfig,
+    transaction_sender: Arc<Mutex<Sender<TransactionInfo>>>,
 }
 impl Metadata for JsonRpcRequestProcessor {}
 
 impl JsonRpcRequestProcessor {
+    pub fn new(
+        bank: Arc<Bank>,
+        config: JsonRpcConfig,
+    ) -> (Self, Receiver<TransactionInfo>) {
+        let (sender, receiver) = unbounded();
+        let transaction_sender = Arc::new(Mutex::new(sender));
+        (
+            Self {
+                bank,
+                config,
+                transaction_sender,
+            },
+            receiver,
+        )
+    }
+
     pub fn get_account_info(
         &self,
         pubkey: &Pubkey,
