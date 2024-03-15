@@ -3,8 +3,10 @@ use jsonrpc_core::Result;
 use jsonrpc_derive::rpc;
 use sleipnir_rpc_client_api::{
     config::RpcContextConfig,
-    response::Response as RpcResponse,
-    response::{RpcIdentity, RpcSnapshotSlotInfo, RpcVersionInfo},
+    response::{
+        Response as RpcResponse, RpcIdentity, RpcSnapshotSlotInfo,
+        RpcVersionInfo,
+    },
 };
 use solana_sdk::{epoch_info::EpochInfo, slot_history::Slot};
 

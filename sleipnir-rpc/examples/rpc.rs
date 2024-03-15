@@ -1,4 +1,3 @@
-use log::*;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     process,
@@ -6,6 +5,7 @@ use std::{
     time::Duration,
 };
 
+use log::*;
 use sleipnir_bank::{bank::Bank, genesis_utils::create_genesis_config};
 use sleipnir_rpc::json_rpc_service::JsonRpcService;
 use test_tools::{

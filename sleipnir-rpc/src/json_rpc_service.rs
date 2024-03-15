@@ -1,26 +1,25 @@
-use crossbeam_channel::unbounded;
-// NOTE: from rpc/src/rpc_service.rs
-use log::*;
 use std::{
     net::SocketAddr,
     sync::Arc,
     thread::{self, JoinHandle},
 };
 
+use crossbeam_channel::unbounded;
 use jsonrpc_core::MetaIoHandler;
 use jsonrpc_http_server::{
     hyper, AccessControlAllowOrigin, CloseHandle, DomainsValidation,
     ServerBuilder,
 };
+// NOTE: from rpc/src/rpc_service.rs
+use log::*;
 use sleipnir_bank::bank::Bank;
 use solana_perf::thread::renice_this_thread;
 
 use crate::{
-    handlers::accounts::AccountsDataImpl,
-    handlers::accounts_scan::AccountsScanImpl,
-    handlers::bank_data::BankDataImpl,
-    handlers::full::FullImpl,
-    handlers::minimal::MinimalImpl,
+    handlers::{
+        accounts::AccountsDataImpl, accounts_scan::AccountsScanImpl,
+        bank_data::BankDataImpl, full::FullImpl, minimal::MinimalImpl,
+    },
     json_rpc_request_processor::{JsonRpcConfig, JsonRpcRequestProcessor},
     rpc_health::RpcHealth,
     rpc_request_middleware::RpcRequestMiddleware,

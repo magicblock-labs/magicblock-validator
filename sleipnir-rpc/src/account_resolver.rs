@@ -1,22 +1,21 @@
 // NOTE: from rpc/src/rpc.rs :2287 and rpc/src/rpc/account_resolver.rs
 #![allow(dead_code)]
-use {
-    jsonrpc_core::{error, Result},
-    sleipnir_bank::bank::Bank,
-    sleipnir_rpc_client_api::config::{
-        UiAccount, UiAccountEncoding, UiDataSliceConfig,
-    },
-    sleipnir_tokens::token_balances::get_mint_decimals_from_data,
-    solana_account_decoder::{
-        parse_account_data::AccountAdditionalData,
-        parse_token::{get_token_account_mint, is_known_spl_token_id},
-        MAX_BASE58_BYTES,
-    },
-    solana_sdk::{
-        account::{AccountSharedData, ReadableAccount},
-        pubkey::Pubkey,
-    },
-    std::collections::HashMap,
+use std::collections::HashMap;
+
+use jsonrpc_core::{error, Result};
+use sleipnir_bank::bank::Bank;
+use sleipnir_rpc_client_api::config::{
+    UiAccount, UiAccountEncoding, UiDataSliceConfig,
+};
+use sleipnir_tokens::token_balances::get_mint_decimals_from_data;
+use solana_account_decoder::{
+    parse_account_data::AccountAdditionalData,
+    parse_token::{get_token_account_mint, is_known_spl_token_id},
+    MAX_BASE58_BYTES,
+};
+use solana_sdk::{
+    account::{AccountSharedData, ReadableAccount},
+    pubkey::Pubkey,
 };
 
 pub(crate) fn get_account_from_overwrites_or_bank(

@@ -1,33 +1,27 @@
 #![allow(dead_code)]
-use std::sync::Arc;
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 
-use crossbeam_channel::unbounded;
-use crossbeam_channel::Receiver;
-use crossbeam_channel::Sender;
-use jsonrpc_core::Metadata;
-use jsonrpc_core::Result;
+use crossbeam_channel::{unbounded, Receiver, Sender};
+use jsonrpc_core::{Metadata, Result};
 use sleipnir_bank::bank::Bank;
-use sleipnir_rpc_client_api::config::RpcContextConfig;
-use sleipnir_rpc_client_api::filter::RpcFilterType;
-use sleipnir_rpc_client_api::response::OptionalContext;
-use sleipnir_rpc_client_api::response::RpcBlockhash;
-use sleipnir_rpc_client_api::response::RpcKeyedAccount;
 use sleipnir_rpc_client_api::{
-    config::{RpcAccountInfoConfig, UiAccount, UiAccountEncoding},
-    response::Response as RpcResponse,
+    config::{
+        RpcAccountInfoConfig, RpcContextConfig, UiAccount, UiAccountEncoding,
+    },
+    filter::RpcFilterType,
+    response::{
+        OptionalContext, Response as RpcResponse, RpcBlockhash, RpcKeyedAccount,
+    },
 };
 use solana_accounts_db::accounts_index::AccountSecondaryIndexes;
-use solana_sdk::clock::Slot;
-use solana_sdk::epoch_schedule::EpochSchedule;
-use solana_sdk::pubkey::Pubkey;
+use solana_sdk::{clock::Slot, epoch_schedule::EpochSchedule, pubkey::Pubkey};
 
-use crate::account_resolver::encode_account;
-use crate::account_resolver::get_encoded_account;
-use crate::filters::get_filtered_program_accounts;
-use crate::filters::optimize_filters;
-use crate::rpc_health::RpcHealth;
-use crate::utils::new_response;
+use crate::{
+    account_resolver::{encode_account, get_encoded_account},
+    filters::{get_filtered_program_accounts, optimize_filters},
+    rpc_health::RpcHealth,
+    utils::new_response,
+};
 
 //TODO: send_transaction_service
 pub struct TransactionInfo;

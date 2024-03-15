@@ -5,10 +5,6 @@ use sleipnir_rpc_client_api::{
     custom_error::RpcCustomError,
     filter::{Memcmp, MemcmpEncodedBytes, RpcFilterType},
 };
-use spl_token_2022::{
-    solana_program::program_pack::Pack, state::Account as TokenAccount,
-};
-
 use solana_account_decoder::parse_token::is_known_spl_token_id;
 use solana_accounts_db::{
     accounts_index::{
@@ -22,6 +18,9 @@ use solana_accounts_db::{
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
     pubkey::{Pubkey, PUBKEY_BYTES},
+};
+use spl_token_2022::{
+    solana_program::program_pack::Pack, state::Account as TokenAccount,
 };
 
 use crate::RpcCustomResult;

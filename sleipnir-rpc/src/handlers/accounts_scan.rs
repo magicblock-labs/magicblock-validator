@@ -1,15 +1,16 @@
 // NOTE: from rpc/src/rpc.rs :3168
-use crate::{
-    filters::verify_filter,
-    json_rpc_request_processor::JsonRpcRequestProcessor,
-    traits::rpc_accounts_scan::AccountsScan, utils::verify_pubkey,
-};
 use jsonrpc_core::{Error, Result};
 use log::*;
 use sleipnir_rpc_client_api::{
     config::RpcProgramAccountsConfig,
     request::MAX_GET_PROGRAM_ACCOUNT_FILTERS,
     response::{OptionalContext, RpcKeyedAccount},
+};
+
+use crate::{
+    filters::verify_filter,
+    json_rpc_request_processor::JsonRpcRequestProcessor,
+    traits::rpc_accounts_scan::AccountsScan, utils::verify_pubkey,
 };
 
 pub struct AccountsScanImpl;

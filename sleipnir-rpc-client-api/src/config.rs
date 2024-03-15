@@ -1,12 +1,11 @@
 // NOTE: pieces extracted from rpc-client-api/src/config.rs
 use serde::{Deserialize, Serialize};
+pub use solana_account_decoder::{
+    UiAccount, UiAccountEncoding, UiDataSliceConfig,
+};
 use solana_sdk::{
     clock::{Epoch, Slot},
     commitment_config::{CommitmentConfig, CommitmentLevel},
-};
-
-pub use solana_account_decoder::{
-    UiAccount, UiAccountEncoding, UiDataSliceConfig,
 };
 use solana_transaction_status::UiTransactionEncoding;
 

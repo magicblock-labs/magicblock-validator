@@ -1,10 +1,9 @@
-use sleipnir_rpc_client_api::{
-    config::RpcAccountInfoConfig, config::UiAccount,
-    response::Response as RpcResponse,
-};
-
 use jsonrpc_core::Result;
 use jsonrpc_derive::rpc;
+use sleipnir_rpc_client_api::{
+    config::{RpcAccountInfoConfig, UiAccount},
+    response::Response as RpcResponse,
+};
 
 #[rpc]
 pub trait AccountsData {
