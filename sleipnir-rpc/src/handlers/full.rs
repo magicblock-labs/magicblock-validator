@@ -67,7 +67,7 @@ impl Full for FullImpl {
                 sample_period_secs: (RECENT_PERF_SAMPLES_WINDOW_MILLIS / 1000)
                     as u16,
                 num_non_vote_transactions: None,
-                num_slots: slot,
+                num_slots: num_slots as u64,
             })
             .collect();
         Ok(samples)
@@ -109,7 +109,7 @@ impl Full for FullImpl {
         meta: Self::Metadata,
         slot: Slot,
     ) -> BoxFuture<Result<Option<UnixTimestamp>>> {
-        todo!("get_block_time")
+        Box::pin(async move { meta.get_block_time(slot).await })
     }
 
     fn get_blocks(

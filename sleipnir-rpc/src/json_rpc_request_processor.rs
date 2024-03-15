@@ -1,11 +1,12 @@
 #![allow(dead_code)]
+use log::*;
 use std::{
     sync::{Arc, Mutex},
     time::Duration,
 };
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
-use jsonrpc_core::{Metadata, Result};
+use jsonrpc_core::{Error, ErrorCode, Metadata, Result};
 use sleipnir_bank::bank::Bank;
 use sleipnir_rpc_client_api::{
     config::{
@@ -17,7 +18,11 @@ use sleipnir_rpc_client_api::{
     },
 };
 use solana_accounts_db::accounts_index::AccountSecondaryIndexes;
-use solana_sdk::{clock::Slot, epoch_schedule::EpochSchedule, pubkey::Pubkey};
+use solana_sdk::{
+    clock::{Slot, UnixTimestamp},
+    epoch_schedule::EpochSchedule,
+    pubkey::Pubkey,
+};
 
 use crate::{
     account_resolver::{encode_account, get_encoded_account},
@@ -209,6 +214,36 @@ impl JsonRpcRequestProcessor {
     pub async fn get_first_available_block(&self) -> Slot {
         // We don't have a blockstore but need to support this request
         0
+    }
+
+    pub async fn get_block_time(
+        &self,
+        slot: Slot,
+    ) -> Result<Option<UnixTimestamp>> {
+        // Here we differ entirely from the way this is calculated for Solana
+        // since for a single node we aren't too worried about clock drift and such.
+        // So what we do instead is look at the current time the bank determines and subtract
+        // the (duration_slot * (slot - current_slot)) from it.
+
+        let current_slot = self.bank.slot();
+        if slot > current_slot {
+            // We could predict the timestamp of a future block, but I doubt that makes sens
+            Err(Error {
+                code: ErrorCode::InvalidRequest,
+                message: "Requested slot is in the future".to_string(),
+                data: None,
+            })
+        } else {
+            // Expressed as Unix time (i.e. seconds since the Unix epoch).
+            let current_time = self.bank.clock().unix_timestamp;
+            let slot_diff = current_slot - slot;
+            let secs_diff = (slot_diff as u128
+                * self.config.slot_duration.as_millis())
+                / 1_000;
+            let timestamp = current_time - secs_diff as i64;
+
+            Ok(Some(timestamp))
+        }
     }
 
     // -----------------
