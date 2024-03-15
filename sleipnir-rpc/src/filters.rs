@@ -47,6 +47,7 @@ pub(crate) fn verify_filter(input: &RpcFilterType) -> Result<()> {
 /// owner.
 /// NOTE: `optimize_filters()` should almost always be called before using this method because of
 /// the strict match on `MemcmpEncodedBytes::Bytes`.
+#[allow(unused)]
 pub(crate) fn get_spl_token_owner_filter(
     program_id: &Pubkey,
     filters: &[RpcFilterType],
@@ -114,6 +115,7 @@ pub(crate) fn get_spl_token_owner_filter(
 /// mint.
 /// NOTE: `optimize_filters()` should almost always be called before using this method because of
 /// the strict match on `MemcmpEncodedBytes::Bytes`.
+#[allow(unused)]
 fn get_spl_token_mint_filter(
     program_id: &Pubkey,
     filters: &[RpcFilterType],

@@ -16,12 +16,12 @@ use sleipnir_bank::bank::Bank;
 use solana_perf::thread::renice_this_thread;
 
 use crate::{
-    accounts::AccountsDataImpl,
-    accounts_scan::AccountsScanImpl,
-    bank_data::BankDataImpl,
-    full::FullImpl,
+    handlers::accounts::AccountsDataImpl,
+    handlers::accounts_scan::AccountsScanImpl,
+    handlers::bank_data::BankDataImpl,
+    handlers::full::FullImpl,
+    handlers::minimal::MinimalImpl,
     json_rpc_request_processor::{JsonRpcConfig, JsonRpcRequestProcessor},
-    minimal::MinimalImpl,
     rpc_health::RpcHealth,
     rpc_request_middleware::RpcRequestMiddleware,
     traits::{

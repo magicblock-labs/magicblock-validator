@@ -1,6 +1,5 @@
 // NOTE: from rpc/src/rpc.rs :2791
 use jsonrpc_core::Result;
-use jsonrpc_derive::rpc;
 use log::*;
 use solana_sdk::{
     commitment_config::CommitmentConfig, epoch_schedule::EpochSchedule,
