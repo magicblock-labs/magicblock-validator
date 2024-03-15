@@ -17,6 +17,7 @@ use sleipnir_rpc_client_api::{
     response::Response as RpcResponse,
 };
 use solana_accounts_db::accounts_index::AccountSecondaryIndexes;
+use solana_sdk::clock::Slot;
 use solana_sdk::pubkey::Pubkey;
 
 use crate::account_resolver::encode_account;
@@ -199,5 +200,13 @@ impl JsonRpcRequestProcessor {
                 last_valid_block_height,
             },
         ))
+    }
+
+    // -----------------
+    // Block
+    // -----------------
+    pub async fn get_first_available_block(&self) -> Slot {
+        // We don't have a blockstore but need to support this request
+        0
     }
 }

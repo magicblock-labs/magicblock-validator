@@ -125,7 +125,7 @@ impl Full for FullImpl {
         &self,
         meta: Self::Metadata,
     ) -> BoxFuture<Result<Slot>> {
-        todo!("get_first_available_block")
+        Box::pin(async move { Ok(meta.get_first_available_block().await) })
     }
 
     fn get_latest_blockhash(
