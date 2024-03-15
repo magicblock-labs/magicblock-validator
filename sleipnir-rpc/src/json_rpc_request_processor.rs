@@ -1,5 +1,4 @@
 #![allow(dead_code)]
-use log::*;
 use std::{
     sync::{Arc, Mutex},
     time::Duration,
@@ -10,11 +9,13 @@ use jsonrpc_core::{Error, ErrorCode, Metadata, Result};
 use sleipnir_bank::bank::Bank;
 use sleipnir_rpc_client_api::{
     config::{
-        RpcAccountInfoConfig, RpcContextConfig, UiAccount, UiAccountEncoding,
+        RpcAccountInfoConfig, RpcContextConfig, RpcSupplyConfig, UiAccount,
+        UiAccountEncoding,
     },
     filter::RpcFilterType,
     response::{
-        OptionalContext, Response as RpcResponse, RpcBlockhash, RpcKeyedAccount,
+        OptionalContext, Response as RpcResponse, RpcBlockhash,
+        RpcKeyedAccount, RpcSupply,
     },
 };
 use solana_accounts_db::accounts_index::AccountSecondaryIndexes;
@@ -29,6 +30,7 @@ use crate::{
     filters::{get_filtered_program_accounts, optimize_filters},
     rpc_health::RpcHealth,
     utils::new_response,
+    RpcCustomResult,
 };
 
 //TODO: send_transaction_service
@@ -268,6 +270,47 @@ impl JsonRpcRequestProcessor {
     ) -> Result<u64> {
         let bank = self.get_bank_with_config(config)?;
         Ok(bank.transaction_count())
+    }
+
+    pub fn get_supply(
+        &self,
+        config: Option<RpcSupplyConfig>,
+    ) -> RpcCustomResult<RpcResponse<RpcSupply>> {
+        let config = config.unwrap_or_default();
+        let bank = &self.bank;
+        // Our validator doesn't have any accounts that are considered
+        // non-circulating. See runtime/src/non_circulating_supply.rs :83
+        // We kept the remaining code as intact as possible, but should simplify
+        // later once we're sure we won't ever have non-circulating accounts.
+        struct NonCirculatingSupply {
+            lamports: u64,
+            accounts: Vec<Pubkey>,
+        }
+        let non_circulating_supply = NonCirculatingSupply {
+            lamports: 0,
+            accounts: vec![],
+        };
+        let total_supply = bank.capitalization();
+        let non_circulating_accounts =
+            if config.exclude_non_circulating_accounts_list {
+                vec![]
+            } else {
+                non_circulating_supply
+                    .accounts
+                    .iter()
+                    .map(|pubkey| pubkey.to_string())
+                    .collect()
+            };
+
+        Ok(new_response(
+            bank,
+            RpcSupply {
+                total: total_supply,
+                circulating: total_supply - non_circulating_supply.lamports,
+                non_circulating: non_circulating_supply.lamports,
+                non_circulating_accounts,
+            },
+        ))
     }
 
     // -----------------

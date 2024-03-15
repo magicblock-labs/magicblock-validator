@@ -1,7 +1,12 @@
 // NOTE: from rpc/src/rpc.rs :3109
 use jsonrpc_core::Result;
 use jsonrpc_derive::rpc;
-use sleipnir_rpc_client_api::response::{OptionalContext, RpcKeyedAccount};
+use sleipnir_rpc_client_api::{
+    config::RpcSupplyConfig,
+    response::{
+        OptionalContext, Response as RpcResponse, RpcKeyedAccount, RpcSupply,
+    },
+};
 
 #[rpc]
 pub trait AccountsScan {
@@ -17,6 +22,13 @@ pub trait AccountsScan {
         >,
     ) -> Result<OptionalContext<Vec<RpcKeyedAccount>>>;
 
+    #[rpc(meta, name = "getSupply")]
+    fn get_supply(
+        &self,
+        meta: Self::Metadata,
+        config: Option<RpcSupplyConfig>,
+    ) -> Result<RpcResponse<RpcSupply>>;
+
     /* TODO(thlorenz): add those later
     #[rpc(meta, name = "getLargestAccounts")]
     fn get_largest_accounts(
@@ -24,13 +36,6 @@ pub trait AccountsScan {
         meta: Self::Metadata,
         config: Option<RpcLargestAccountsConfig>,
     ) -> Result<RpcResponse<Vec<RpcAccountBalance>>>;
-
-    #[rpc(meta, name = "getSupply")]
-    fn get_supply(
-        &self,
-        meta: Self::Metadata,
-        config: Option<RpcSupplyConfig>,
-    ) -> Result<RpcResponse<RpcSupply>>;
 
     // SPL Token-specific RPC endpoints
     // See https://github.com/solana-labs/solana-program-library/releases/tag/token-v2.0.0 for

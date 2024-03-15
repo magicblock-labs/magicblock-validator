@@ -2,9 +2,11 @@
 use jsonrpc_core::{Error, Result};
 use log::*;
 use sleipnir_rpc_client_api::{
-    config::RpcProgramAccountsConfig,
+    config::{RpcProgramAccountsConfig, RpcSupplyConfig},
     request::MAX_GET_PROGRAM_ACCOUNT_FILTERS,
-    response::{OptionalContext, RpcKeyedAccount},
+    response::{
+        OptionalContext, Response as RpcResponse, RpcKeyedAccount, RpcSupply,
+    },
 };
 
 use crate::{
@@ -46,5 +48,14 @@ impl AccountsScan for AccountsScanImpl {
             verify_filter(filter)?;
         }
         meta.get_program_accounts(&program_id, config, filters, with_context)
+    }
+
+    fn get_supply(
+        &self,
+        meta: Self::Metadata,
+        config: Option<RpcSupplyConfig>,
+    ) -> Result<RpcResponse<RpcSupply>> {
+        debug!("get_supply rpc request received");
+        Ok(meta.get_supply(config)?)
     }
 }

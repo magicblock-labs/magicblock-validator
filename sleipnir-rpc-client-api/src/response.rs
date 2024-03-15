@@ -267,8 +267,16 @@ pub struct RpcAccountBalance {
     pub lamports: u64,
 }
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcSupply {
+    pub total: u64,
+    pub circulating: u64,
+    pub non_circulating: u64,
+    pub non_circulating_accounts: Vec<String>,
+}
+
 // NOTE: left out
-// - RpcSupply
 // - StakeActivationState
 // - RpcStakeActivation
 // - RpcTokenAccountBalance

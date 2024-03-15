@@ -2353,4 +2353,9 @@ impl Bank {
     pub fn freeze_lock(&self) -> RwLockReadGuard<Hash> {
         self.hash.read().unwrap()
     }
+
+    /// Return the total capitalization of the Bank
+    pub fn capitalization(&self) -> u64 {
+        self.capitalization.load(Ordering::Relaxed)
+    }
 }
