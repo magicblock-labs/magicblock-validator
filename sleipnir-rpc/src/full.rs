@@ -1,15 +1,16 @@
+// NOTE: from rpc/src/rpc.rs :3432
 use jsonrpc_core::{BoxFuture, Result};
+use log::*;
 use sleipnir_rpc_client_api::{
     config::{
         RpcBlocksConfigWrapper, RpcContextConfig, RpcEpochConfig,
         RpcRequestAirdropConfig, RpcSendTransactionConfig,
-        RpcSignaturesForAddressConfig, RpcSimulateTransactionConfig,
+        RpcSignaturesForAddressConfig,
     },
     response::{
         Response as RpcResponse, RpcBlockhash,
         RpcConfirmedTransactionStatusWithSignature, RpcContactInfo,
         RpcInflationReward, RpcPerfSample, RpcPrioritizationFee,
-        RpcSimulateTransactionResult,
     },
 };
 use solana_sdk::{
@@ -33,14 +34,14 @@ impl Full for FullImpl {
         address_strs: Vec<String>,
         config: Option<RpcEpochConfig>,
     ) -> BoxFuture<Result<Vec<Option<RpcInflationReward>>>> {
-        todo!()
+        todo!("get_inflation_reward")
     }
 
     fn get_cluster_nodes(
         &self,
         meta: Self::Metadata,
     ) -> Result<Vec<RpcContactInfo>> {
-        todo!()
+        todo!("get_cluster_nodes")
     }
 
     fn get_recent_performance_samples(
@@ -48,15 +49,15 @@ impl Full for FullImpl {
         meta: Self::Metadata,
         limit: Option<usize>,
     ) -> Result<Vec<RpcPerfSample>> {
-        todo!()
+        todo!("get_recent_performance_samples")
     }
 
     fn get_max_retransmit_slot(&self, meta: Self::Metadata) -> Result<Slot> {
-        todo!()
+        todo!("get_max_retransmit_slot")
     }
 
     fn get_max_shred_insert_slot(&self, meta: Self::Metadata) -> Result<Slot> {
-        todo!()
+        todo!("get_max_shred_insert_slot")
     }
 
     fn request_airdrop(
@@ -66,7 +67,7 @@ impl Full for FullImpl {
         lamports: u64,
         config: Option<RpcRequestAirdropConfig>,
     ) -> Result<String> {
-        todo!()
+        todo!("request_airdrop")
     }
 
     fn send_transaction(
@@ -75,20 +76,11 @@ impl Full for FullImpl {
         data: String,
         config: Option<RpcSendTransactionConfig>,
     ) -> Result<String> {
-        todo!()
-    }
-
-    fn simulate_transaction(
-        &self,
-        meta: Self::Metadata,
-        data: String,
-        config: Option<RpcSimulateTransactionConfig>,
-    ) -> Result<RpcResponse<RpcSimulateTransactionResult>> {
-        todo!()
+        todo!("send_transaction")
     }
 
     fn minimum_ledger_slot(&self, meta: Self::Metadata) -> Result<Slot> {
-        todo!()
+        todo!("minimum_ledger_slot")
     }
 
     fn get_block_time(
@@ -96,7 +88,7 @@ impl Full for FullImpl {
         meta: Self::Metadata,
         slot: Slot,
     ) -> BoxFuture<Result<Option<UnixTimestamp>>> {
-        todo!()
+        todo!("get_block_time")
     }
 
     fn get_blocks(
@@ -106,7 +98,7 @@ impl Full for FullImpl {
         config: Option<RpcBlocksConfigWrapper>,
         commitment: Option<CommitmentConfig>,
     ) -> BoxFuture<Result<Vec<Slot>>> {
-        todo!()
+        todo!("get_blocks")
     }
 
     fn get_blocks_with_limit(
@@ -116,7 +108,7 @@ impl Full for FullImpl {
         limit: usize,
         commitment: Option<CommitmentConfig>,
     ) -> BoxFuture<Result<Vec<Slot>>> {
-        todo!()
+        todo!("get_blocks_with_limit")
     }
 
     fn get_signatures_for_address(
@@ -126,22 +118,23 @@ impl Full for FullImpl {
         config: Option<RpcSignaturesForAddressConfig>,
     ) -> BoxFuture<Result<Vec<RpcConfirmedTransactionStatusWithSignature>>>
     {
-        todo!()
+        todo!("get_signatures_for_address")
     }
 
     fn get_first_available_block(
         &self,
         meta: Self::Metadata,
     ) -> BoxFuture<Result<Slot>> {
-        todo!()
+        todo!("get_first_available_block")
     }
 
     fn get_latest_blockhash(
         &self,
         meta: Self::Metadata,
-        config: Option<RpcContextConfig>,
+        _config: Option<RpcContextConfig>,
     ) -> Result<RpcResponse<RpcBlockhash>> {
-        todo!()
+        debug!("get_latest_blockhash rpc request received");
+        meta.get_latest_blockhash()
     }
 
     fn is_blockhash_valid(
@@ -150,7 +143,7 @@ impl Full for FullImpl {
         blockhash: String,
         config: Option<RpcContextConfig>,
     ) -> Result<RpcResponse<bool>> {
-        todo!()
+        todo!("is_blockhash_valid")
     }
 
     fn get_fee_for_message(
@@ -159,7 +152,7 @@ impl Full for FullImpl {
         data: String,
         config: Option<RpcContextConfig>,
     ) -> Result<RpcResponse<Option<u64>>> {
-        todo!()
+        todo!("get_fee_for_message")
     }
 
     fn get_stake_minimum_delegation(
@@ -167,7 +160,7 @@ impl Full for FullImpl {
         meta: Self::Metadata,
         config: Option<RpcContextConfig>,
     ) -> Result<RpcResponse<u64>> {
-        todo!()
+        todo!("get_stake_minimum_delegation")
     }
 
     fn get_recent_prioritization_fees(
@@ -175,6 +168,6 @@ impl Full for FullImpl {
         meta: Self::Metadata,
         pubkey_strs: Option<Vec<String>>,
     ) -> Result<Vec<RpcPrioritizationFee>> {
-        todo!()
+        todo!("get_recent_prioritization_fees")
     }
 }

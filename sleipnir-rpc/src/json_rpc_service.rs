@@ -17,10 +17,11 @@ use solana_perf::thread::renice_this_thread;
 
 use crate::{
     accounts::AccountsDataImpl,
+    full::FullImpl,
     json_rpc_request_processor::{JsonRpcConfig, JsonRpcRequestProcessor},
     rpc_health::RpcHealth,
     rpc_request_middleware::RpcRequestMiddleware,
-    traits::rpc_accounts::AccountsData,
+    traits::{rpc_accounts::AccountsData, rpc_full::Full},
     utils::MAX_REQUEST_BODY_SIZE,
 };
 
@@ -57,11 +58,8 @@ impl JsonRpcService {
                 let mut io = MetaIoHandler::default();
 
                 io.extend_with(AccountsDataImpl.to_delegate());
+                io.extend_with(FullImpl.to_delegate());
 
-                // io.extend_with(rpc_minimal::MinimalImpl.todelegate());
-                // TODO: full_api :506
-
-                // NOTE: left out obsolete_v1_7_api
                 let request_middleware = RpcRequestMiddleware::new(health.clone());
 
                 let server = ServerBuilder::with_meta_extractor(

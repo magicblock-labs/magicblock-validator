@@ -53,7 +53,7 @@ use solana_sdk::{
     fee::FeeStructure,
     fee_calculator::FeeRateGovernor,
     genesis_config::GenesisConfig,
-    hash::Hash,
+    hash::{Hash, Hasher},
     message::SanitizedMessage,
     native_loader,
     nonce::{self, state::DurableNonce, NONCED_TX_MARKER_IX_INDEX},
@@ -623,16 +623,42 @@ impl Bank {
     }
 
     pub fn advance_slot(&self) {
+        // 1. Determine next slot and set it
         let next_slot = self.slot() + 1;
         self.set_slot(next_slot);
+
+        // 2. Update transaction processor with new slot
         self.transaction_processor
             .write()
             .unwrap()
             .set_slot(next_slot);
+
+        // 3. update ancestors to include new slot
         let mut slots = self.readlock_ancestors().unwrap().keys();
         slots.push(next_slot);
         *self.ancestors.write().unwrap() = Ancestors::from(slots);
+
+        // 4. Update sysvars
         self.fill_missing_sysvar_cache_entries();
+
+        // 5. Determine next blockhahs
+        let blockhash = {
+            // In the Solana implementation there is a lot of logic going on to determine the next
+            // blockhash, however we don't really produce any blocks, so any new hash will do.
+            // Therefore we derive it from the previous hash and the current slot.
+            let current_hash = self.last_blockhash();
+            let mut hasher = Hasher::default();
+            hasher.hash(&current_hash.as_ref());
+            hasher.hash(&next_slot.to_le_bytes());
+            hasher.result()
+        };
+
+        // 6. Register the new blockhash with the blockhash queue
+        let mut blockhash_queue = self.blockhash_queue.write().unwrap();
+        blockhash_queue.register_hash(
+            &blockhash,
+            self.fee_rate_governor.lamports_per_signature,
+        );
     }
 
     pub fn epoch(&self) -> Epoch {
@@ -667,6 +693,22 @@ impl Bank {
     /// Return the last block hash registered.
     pub fn last_blockhash(&self) -> Hash {
         self.blockhash_queue.read().unwrap().last_hash()
+    }
+
+    pub fn get_blockhash_last_valid_block_height(
+        &self,
+        blockhash: &Hash,
+    ) -> Option<Slot> {
+        let blockhash_queue = self.blockhash_queue.read().unwrap();
+        // This calculation will need to be updated to consider epoch boundaries if BlockhashQueue
+        // length is made variable by epoch
+        blockhash_queue.get_hash_age(blockhash).map(|age| {
+            // Since we don't produce blocks ATM, we consider the current slot
+            // to be our block height
+            let block_height = self.slot();
+            // TODO(thlorenz): we end up with 300 here if slot is 0
+            block_height + blockhash_queue.get_max_age() as u64 - age
+        })
     }
 
     // -----------------

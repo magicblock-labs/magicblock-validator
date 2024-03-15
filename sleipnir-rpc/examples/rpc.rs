@@ -1,7 +1,9 @@
 use log::*;
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
+    process,
     sync::Arc,
+    time::Duration,
 };
 
 use sleipnir_bank::{bank::Bank, genesis_utils::create_genesis_config};
@@ -21,11 +23,34 @@ async fn main() {
     init_logger!();
 
     let genesis_config = create_genesis_config(u64::MAX).genesis_config;
-    let bank = bank_for_tests(&genesis_config);
+    let bank = {
+        let bank = bank_for_tests(&genesis_config);
+        Arc::new(bank)
+    };
     fund_luzifer(&bank);
     let rpc_socket =
         SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8899);
+    let tick_duration = Duration::from_millis(100);
+    info!(
+        "Adding Slot ticker for {}ms slots",
+        tick_duration.as_millis()
+    );
+    init_slot_ticker(bank.clone(), tick_duration);
+
+    info!(
+        "Launching JSON RPC service with pid {} at {:?}",
+        process::id(),
+        rpc_socket
+    );
     let _json_rpc_service =
-        JsonRpcService::new(rpc_socket, Arc::new(bank)).unwrap();
+        JsonRpcService::new(rpc_socket, bank.clone()).unwrap();
     info!("Launched JSON RPC service at {:?}", rpc_socket);
+}
+
+fn init_slot_ticker(bank: Arc<Bank>, tick_duration: Duration) {
+    let bank = bank.clone();
+    std::thread::spawn(move || loop {
+        std::thread::sleep(tick_duration);
+        bank.advance_slot();
+    });
 }

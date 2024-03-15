@@ -8,6 +8,8 @@ use crossbeam_channel::Sender;
 use jsonrpc_core::Metadata;
 use jsonrpc_core::Result;
 use sleipnir_bank::bank::Bank;
+use sleipnir_rpc_client_api::config::RpcContextConfig;
+use sleipnir_rpc_client_api::response::RpcBlockhash;
 use sleipnir_rpc_client_api::{
     config::{RpcAccountInfoConfig, UiAccount, UiAccountEncoding},
     response::Response as RpcResponse,
@@ -65,6 +67,9 @@ impl JsonRpcRequestProcessor {
         )
     }
 
+    // -----------------
+    // Accounts
+    // -----------------
     pub fn get_account_info(
         &self,
         pubkey: &Pubkey,
@@ -104,5 +109,23 @@ impl JsonRpcRequestProcessor {
             })
             .collect::<Result<Vec<_>>>()?;
         Ok(new_response(&self.bank, accounts))
+    }
+
+    // -----------------
+    // BlockHash
+    // -----------------
+    pub fn get_latest_blockhash(&self) -> Result<RpcResponse<RpcBlockhash>> {
+        let bank = &self.bank;
+        let blockhash = bank.last_blockhash();
+        let last_valid_block_height = bank
+            .get_blockhash_last_valid_block_height(&blockhash)
+            .expect("bank blockhash queue should contain blockhash");
+        Ok(new_response(
+            &bank,
+            RpcBlockhash {
+                blockhash: blockhash.to_string(),
+                last_valid_block_height,
+            },
+        ))
     }
 }
