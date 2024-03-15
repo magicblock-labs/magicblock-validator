@@ -647,6 +647,7 @@ impl Bank {
         *self.ancestors.write().unwrap() = Ancestors::from(slots);
 
         // 4. Update sysvars
+        self.update_clock(self.genesis_creation_time);
         self.fill_missing_sysvar_cache_entries();
 
         // 5. Determine next blockhahs
@@ -1050,6 +1051,9 @@ impl Bank {
         // by the validator.
         let unix_timestamp =
             i64::try_from(get_epoch_secs()).expect("get_epoch_secs overflow");
+
+        // I checked this against crate::bank_helpers::get_sys_time_in_secs();
+        // and confirmed that the timestamps match
 
         let slot = self.slot();
         let clock = sysvar::clock::Clock {

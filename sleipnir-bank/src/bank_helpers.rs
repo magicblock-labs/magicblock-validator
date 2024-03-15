@@ -49,3 +49,14 @@ pub fn get_epoch_millis() -> u128 {
         .unwrap()
         .as_millis()
 }
+
+#[allow(dead_code)] // needed when double checking clock calculation
+pub(crate) fn get_sys_time_in_secs() -> i64 {
+    match SystemTime::now().duration_since(SystemTime::UNIX_EPOCH) {
+        Ok(n) => {
+            let secs = n.as_secs();
+            i64::try_from(secs).expect("SystemTime greater i64::MAX")
+        }
+        Err(_) => panic!("SystemTime before UNIX EPOCH!"),
+    }
+}
