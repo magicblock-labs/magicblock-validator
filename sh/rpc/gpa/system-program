@@ -1,0 +1,17 @@
+# vi: ft=sh
+curl --location 'http://localhost:8899' \
+--header 'Content-Type: application/json' \
+--data '{
+    "jsonrpc": "2.0",
+    "id": 1,
+    "method": "getProgramAccounts",
+    "params": [
+        "11111111111111111111111111111111",
+        {
+            "dataSlice": {
+                "offset": 0,
+                "length": 0
+            }
+        }
+    ]
+}'
