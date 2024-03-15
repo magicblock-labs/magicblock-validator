@@ -8,7 +8,6 @@ use crossbeam_channel::Sender;
 use jsonrpc_core::Metadata;
 use jsonrpc_core::Result;
 use sleipnir_bank::bank::Bank;
-use sleipnir_rpc_client_api::config::RpcContextConfig;
 use sleipnir_rpc_client_api::response::RpcBlockhash;
 use sleipnir_rpc_client_api::{
     config::{RpcAccountInfoConfig, UiAccount, UiAccountEncoding},
