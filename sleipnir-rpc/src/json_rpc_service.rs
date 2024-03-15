@@ -37,9 +37,11 @@ pub struct JsonRpcService {
 
 impl JsonRpcService {
     #[allow(clippy::too_many_arguments)]
-    pub fn new(rpc_addr: SocketAddr, bank: Arc<Bank>) -> Result<Self, String> {
-        let config = JsonRpcConfig::default();
-
+    pub fn new(
+        rpc_addr: SocketAddr,
+        bank: Arc<Bank>,
+        config: JsonRpcConfig,
+    ) -> Result<Self, String> {
         let max_request_body_size = config
             .max_request_body_size
             .unwrap_or(MAX_REQUEST_BODY_SIZE);

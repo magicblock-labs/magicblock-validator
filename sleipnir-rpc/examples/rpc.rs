@@ -7,7 +7,9 @@ use std::{
 
 use log::*;
 use sleipnir_bank::{bank::Bank, genesis_utils::create_genesis_config};
-use sleipnir_rpc::json_rpc_service::JsonRpcService;
+use sleipnir_rpc::{
+    json_rpc_request_processor::JsonRpcConfig, json_rpc_service::JsonRpcService,
+};
 use test_tools::{
     account::fund_account_addr, bank::bank_for_tests, init_logger,
 };
@@ -42,8 +44,12 @@ async fn main() {
         process::id(),
         rpc_socket
     );
+    let config = JsonRpcConfig {
+        slot_duration: tick_duration,
+        ..Default::default()
+    };
     let _json_rpc_service =
-        JsonRpcService::new(rpc_socket, bank.clone()).unwrap();
+        JsonRpcService::new(rpc_socket, bank.clone(), config).unwrap();
     info!("Launched JSON RPC service at {:?}", rpc_socket);
 }
 

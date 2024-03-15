@@ -79,7 +79,8 @@ impl Minimal for MinimalImpl {
         meta: Self::Metadata,
         config: Option<RpcContextConfig>,
     ) -> Result<u64> {
-        todo!("get_transaction_count")
+        debug!("get_transaction_count rpc request received");
+        meta.get_transaction_count(config.unwrap_or_default())
     }
 
     fn get_version(&self, meta: Self::Metadata) -> Result<RpcVersionInfo> {

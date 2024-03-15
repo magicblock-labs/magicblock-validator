@@ -22,6 +22,9 @@ use crate::{
     json_rpc_request_processor::JsonRpcRequestProcessor, traits::rpc_full::Full,
 };
 
+// Solana shows the last 60secs worth of samples
+const RECENT_PERF_SAMPLES_WINDOW_MILLIS: u32 = 60_000;
+
 pub struct FullImpl;
 
 #[allow(unused_variables)]
@@ -49,7 +52,25 @@ impl Full for FullImpl {
         meta: Self::Metadata,
         limit: Option<usize>,
     ) -> Result<Vec<RpcPerfSample>> {
-        todo!("get_recent_performance_samples")
+        debug!("get_recent_performance_samples request received");
+
+        // TODO(thlorenz): we don't have a blockstore, so we just make up some numbers here
+        let bank = meta.get_bank()?;
+        let num_slots = RECENT_PERF_SAMPLES_WINDOW_MILLIS
+            / meta.config.slot_duration.as_millis() as u32;
+        let current_slot = bank.slot();
+        let min_slot = (current_slot.saturating_sub(num_slots as u64)).max(0);
+        let samples = (min_slot..=current_slot)
+            .map(|slot| RpcPerfSample {
+                slot,
+                num_transactions: 0,
+                sample_period_secs: (RECENT_PERF_SAMPLES_WINDOW_MILLIS / 1000)
+                    as u16,
+                num_non_vote_transactions: None,
+                num_slots: slot,
+            })
+            .collect();
+        Ok(samples)
     }
 
     fn get_max_retransmit_slot(&self, meta: Self::Metadata) -> Result<Slot> {

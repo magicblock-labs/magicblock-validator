@@ -1,5 +1,8 @@
 #![allow(dead_code)]
-use std::sync::{Arc, Mutex};
+use std::{
+    sync::{Arc, Mutex},
+    time::Duration,
+};
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use jsonrpc_core::{Metadata, Result};
@@ -40,6 +43,8 @@ pub struct JsonRpcConfig {
     pub account_indexes: AccountSecondaryIndexes,
     /// Disable the health check, used for tests and TestValidator
     pub disable_health_check: bool,
+
+    pub slot_duration: Duration,
 }
 
 // NOTE: from rpc/src/rpc.rs :193
@@ -214,8 +219,20 @@ impl JsonRpcRequestProcessor {
         _config: RpcContextConfig,
     ) -> Result<Arc<Bank>> {
         // We only have one bank, so the config isn't important to us
+        self.get_bank()
+    }
+
+    pub fn get_bank(&self) -> Result<Arc<Bank>> {
         let bank = self.bank.clone();
         Ok(bank)
+    }
+
+    pub fn get_transaction_count(
+        &self,
+        config: RpcContextConfig,
+    ) -> Result<u64> {
+        let bank = self.get_bank_with_config(config)?;
+        Ok(bank.transaction_count())
     }
 
     // -----------------
