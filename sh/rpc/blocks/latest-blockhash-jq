@@ -5,12 +5,7 @@ curl --location 'http://localhost:8899'   \
   {
     "id":1,
     "jsonrpc":"2.0",
-    "method":"getLatestBlockhash",
-    "params":[
-      {
-        "commitment":"processed"
-      }
-    ]
+    "method":"getLatestBlockhash"
   }
 '                                         \
   --silent                                \

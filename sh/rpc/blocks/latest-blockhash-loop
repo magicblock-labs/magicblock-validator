@@ -7,12 +7,7 @@ for (( c=1; c<=$ITER; c++ )) do
 	{
 	  "id":1,
 	  "jsonrpc":"2.0",
-	  "method":"getLatestBlockhash",
-	  "params":[
-		{
-		  "commitment":"processed"
-		}
-	  ]
+	  "method":"getLatestBlockhash"
 	}
   '                                         \
 	--silent                                \
