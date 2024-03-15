@@ -46,7 +46,10 @@ use solana_sdk::{
         create_executable_meta, from_account, Account, AccountSharedData,
         ReadableAccount, WritableAccount,
     },
-    clock::{BankId, Epoch, Slot, UnixTimestamp, MAX_PROCESSING_AGE},
+    clock::{
+        BankId, Epoch, Slot, SlotIndex, UnixTimestamp, MAX_PROCESSING_AGE,
+    },
+    epoch_info::EpochInfo,
     epoch_schedule::EpochSchedule,
     feature,
     feature_set::{
@@ -653,7 +656,7 @@ impl Bank {
             // Therefore we derive it from the previous hash and the current slot.
             let current_hash = self.last_blockhash();
             let mut hasher = Hasher::default();
-            hasher.hash(&current_hash.as_ref());
+            hasher.hash(current_hash.as_ref());
             hasher.hash(&next_slot.to_le_bytes());
             hasher.result()
         };
@@ -672,6 +675,44 @@ impl Bank {
 
     pub fn epoch_schedule(&self) -> &EpochSchedule {
         &self.epoch_schedule
+    }
+
+    /// given a slot, return the epoch and offset into the epoch this slot falls
+    /// e.g. with a fixed number for slots_per_epoch, the calculation is simply:
+    ///
+    ///  ( slot/slots_per_epoch, slot % slots_per_epoch )
+    pub fn get_epoch_and_slot_index(&self, slot: Slot) -> (Epoch, SlotIndex) {
+        self.epoch_schedule().get_epoch_and_slot_index(slot)
+    }
+
+    pub fn get_epoch_info(&self) -> EpochInfo {
+        let absolute_slot = self.slot();
+        let block_height = self.block_height();
+        let (epoch, slot_index) = self.get_epoch_and_slot_index(absolute_slot);
+        // One Epoch is roughly 2 days long and the Solana validator has a slot / 400ms
+        // So, 2 days * 24 hours * 60 minutes * 60 seconds / 0.4 seconds = 432,000 slots
+        let slots_in_epoch = self.get_slots_in_epoch(epoch);
+        let transaction_count = Some(self.transaction_count());
+        EpochInfo {
+            epoch,
+            slot_index,
+            slots_in_epoch,
+            absolute_slot,
+            block_height,
+            transaction_count,
+        }
+    }
+
+    /// Return the number of slots per epoch for the given epoch
+    pub fn get_slots_in_epoch(&self, epoch: Epoch) -> u64 {
+        self.epoch_schedule().get_slots_in_epoch(epoch)
+    }
+
+    /// Return the block_height of this bank
+    /// The number of blocks beneath the current block.
+    /// The first block after the genesis block has height one.
+    pub fn block_height(&self) -> u64 {
+        self.slot()
     }
 
     pub fn readlock_ancestors(
@@ -710,9 +751,7 @@ impl Bank {
         blockhash_queue.get_hash_age(blockhash).map(|age| {
             // Since we don't produce blocks ATM, we consider the current slot
             // to be our block height
-            let block_height = self.slot();
-            // TODO(thlorenz): we end up with slot + 300 here, not sure if that is correct
-            block_height + blockhash_queue.get_max_age() as u64 - age
+            self.block_height() + blockhash_queue.get_max_age() as u64 - age
         })
     }
 
