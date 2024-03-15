@@ -126,6 +126,13 @@ pub struct RpcBlockhash {
 // - RpcInflationGovernor
 // - RpcInflationRate
 
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcKeyedAccount {
+    pub pubkey: String,
+    pub account: UiAccount,
+}
+
 // NOTE: left out
 // - SlotInfo
 // - SlotTransactionStats
