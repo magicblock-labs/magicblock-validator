@@ -14,9 +14,11 @@ use std::{
 
 use log::{debug, info, trace};
 use solana_accounts_db::{
-    accounts::{Accounts, TransactionLoadResult},
+    accounts::{Accounts, PubkeyAccountSlot, TransactionLoadResult},
     accounts_db::{AccountShrinkThreshold, AccountsDb, AccountsDbConfig},
-    accounts_index::{AccountSecondaryIndexes, ZeroLamport},
+    accounts_index::{
+        AccountSecondaryIndexes, IndexKey, ScanConfig, ScanResult, ZeroLamport,
+    },
     accounts_update_notifier_interface::AccountsUpdateNotifier,
     ancestors::Ancestors,
     blockhash_queue::BlockhashQueue,
@@ -44,7 +46,7 @@ use solana_sdk::{
         create_executable_meta, from_account, Account, AccountSharedData,
         ReadableAccount, WritableAccount,
     },
-    clock::{Epoch, Slot, UnixTimestamp, MAX_PROCESSING_AGE},
+    clock::{BankId, Epoch, Slot, UnixTimestamp, MAX_PROCESSING_AGE},
     epoch_schedule::EpochSchedule,
     feature,
     feature_set::{
@@ -143,6 +145,8 @@ pub struct Bank {
 
     /// Bank slot (i.e. block)
     slot: AtomicU64,
+
+    bank_id: BankId,
 
     /// Bank epoch
     epoch: Epoch,
@@ -443,6 +447,7 @@ impl Bank {
         let mut bank = Self {
             rc: BankRc::new(accounts, Slot::default()),
             slot: AtomicU64::default(),
+            bank_id: BankId::default(),
             epoch: Epoch::default(),
             epoch_schedule: EpochSchedule::default(),
             is_delta: AtomicBool::default(),
@@ -902,6 +907,85 @@ impl Bank {
 
     pub fn read_balance(account: &AccountSharedData) -> u64 {
         account.lamports()
+    }
+
+    // -----------------
+    // GetProgramAccounts
+    // -----------------
+    pub fn get_program_accounts(
+        &self,
+        program_id: &Pubkey,
+        config: &ScanConfig,
+    ) -> ScanResult<Vec<TransactionAccount>> {
+        self.rc.accounts.load_by_program(
+            &self.ancestors.read().unwrap(),
+            self.bank_id,
+            program_id,
+            config,
+        )
+    }
+
+    pub fn get_filtered_program_accounts<F: Fn(&AccountSharedData) -> bool>(
+        &self,
+        program_id: &Pubkey,
+        filter: F,
+        config: &ScanConfig,
+    ) -> ScanResult<Vec<TransactionAccount>> {
+        self.rc.accounts.load_by_program_with_filter(
+            &self.ancestors.read().unwrap(),
+            self.bank_id,
+            program_id,
+            filter,
+            config,
+        )
+    }
+
+    pub fn get_filtered_indexed_accounts<F: Fn(&AccountSharedData) -> bool>(
+        &self,
+        index_key: &IndexKey,
+        filter: F,
+        config: &ScanConfig,
+        byte_limit_for_scan: Option<usize>,
+    ) -> ScanResult<Vec<TransactionAccount>> {
+        self.rc.accounts.load_by_index_key_with_filter(
+            &self.ancestors.read().unwrap(),
+            self.bank_id,
+            index_key,
+            filter,
+            config,
+            byte_limit_for_scan,
+        )
+    }
+
+    pub fn account_indexes_include_key(&self, key: &Pubkey) -> bool {
+        self.rc.accounts.account_indexes_include_key(key)
+    }
+
+    /// Returns all the accounts this bank can load
+    pub fn get_all_accounts(&self) -> ScanResult<Vec<PubkeyAccountSlot>> {
+        self.rc
+            .accounts
+            .load_all(&self.ancestors.read().unwrap(), self.bank_id)
+    }
+
+    // Scans all the accounts this bank can load, applying `scan_func`
+    pub fn scan_all_accounts<F>(&self, scan_func: F) -> ScanResult<()>
+    where
+        F: FnMut(Option<(&Pubkey, AccountSharedData, Slot)>),
+    {
+        self.rc.accounts.scan_all(
+            &self.ancestors.read().unwrap(),
+            self.bank_id,
+            scan_func,
+        )
+    }
+
+    pub fn byte_limit_for_scans(&self) -> Option<usize> {
+        self.rc
+            .accounts
+            .accounts_db
+            .accounts_index
+            .scan_results_limit_bytes
     }
 
     // -----------------
