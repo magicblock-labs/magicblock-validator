@@ -1,0 +1,17 @@
+# vi: ft=sh
+curl --location 'http://localhost:8899'   \
+--header 'Content-Type: application/json' \
+--data '
+  {
+    "id":1,
+    "jsonrpc":"2.0",
+    "method":"getLatestBlockhash",
+    "params":[
+      {
+        "commitment":"processed"
+      }
+    ]
+  }
+'                                         \
+  --silent                                \
+  | jq '{ slot: .result.context.slot, blockhash: .result.value.blockhash }'
