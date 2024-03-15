@@ -706,7 +706,7 @@ impl Bank {
             // Since we don't produce blocks ATM, we consider the current slot
             // to be our block height
             let block_height = self.slot();
-            // TODO(thlorenz): we end up with 300 here if slot is 0
+            // TODO(thlorenz): we end up with slot + 300 here, not sure if that is correct
             block_height + blockhash_queue.get_max_age() as u64 - age
         })
     }
