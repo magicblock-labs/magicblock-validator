@@ -1,0 +1,20 @@
+# vi: ft=sh
+ITER=${1:-100}
+for (( c=1; c<=$ITER; c++ )) do
+  curl --location 'http://localhost:8899'   \
+  --header 'Content-Type: application/json' \
+  --data '
+	{
+	  "id":1,
+	  "jsonrpc":"2.0",
+	  "method":"getLatestBlockhash",
+	  "params":[
+		{
+		  "commitment":"processed"
+		}
+	  ]
+	}
+  '                                         \
+	--silent                                \
+	| jq '{ slot: .result.context.slot, blockhash: .result.value.blockhash }'
+done
