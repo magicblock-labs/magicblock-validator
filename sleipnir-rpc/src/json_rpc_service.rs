@@ -18,13 +18,15 @@ use solana_perf::thread::renice_this_thread;
 use crate::{
     accounts::AccountsDataImpl,
     accounts_scan::AccountsScanImpl,
+    bank_data::BankDataImpl,
     full::FullImpl,
     json_rpc_request_processor::{JsonRpcConfig, JsonRpcRequestProcessor},
+    minimal::MinimalImpl,
     rpc_health::RpcHealth,
     rpc_request_middleware::RpcRequestMiddleware,
     traits::{
         rpc_accounts::AccountsData, rpc_accounts_scan::AccountsScan,
-        rpc_full::Full,
+        rpc_bank_data::BankData, rpc_full::Full, rpc_minimal::Minimal,
     },
     utils::MAX_REQUEST_BODY_SIZE,
 };
@@ -64,6 +66,8 @@ impl JsonRpcService {
                 io.extend_with(AccountsDataImpl.to_delegate());
                 io.extend_with(AccountsScanImpl.to_delegate());
                 io.extend_with(FullImpl.to_delegate());
+                io.extend_with(BankDataImpl.to_delegate());
+                io.extend_with(MinimalImpl.to_delegate());
 
                 let request_middleware = RpcRequestMiddleware::new(health.clone());
 

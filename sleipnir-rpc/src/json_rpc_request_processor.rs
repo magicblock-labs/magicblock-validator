@@ -8,6 +8,7 @@ use crossbeam_channel::Sender;
 use jsonrpc_core::Metadata;
 use jsonrpc_core::Result;
 use sleipnir_bank::bank::Bank;
+use sleipnir_rpc_client_api::config::RpcContextConfig;
 use sleipnir_rpc_client_api::filter::RpcFilterType;
 use sleipnir_rpc_client_api::response::OptionalContext;
 use sleipnir_rpc_client_api::response::RpcBlockhash;
@@ -18,6 +19,7 @@ use sleipnir_rpc_client_api::{
 };
 use solana_accounts_db::accounts_index::AccountSecondaryIndexes;
 use solana_sdk::clock::Slot;
+use solana_sdk::epoch_schedule::EpochSchedule;
 use solana_sdk::pubkey::Pubkey;
 
 use crate::account_resolver::encode_account;
@@ -155,7 +157,7 @@ impl JsonRpcRequestProcessor {
             }
             */
             get_filtered_program_accounts(
-                &bank,
+                bank,
                 program_id,
                 &self.config.account_indexes,
                 filters,
@@ -179,7 +181,7 @@ impl JsonRpcRequestProcessor {
             .collect::<Result<Vec<_>>>()?;
 
         Ok(match with_context {
-            true => OptionalContext::Context(new_response(&bank, accounts)),
+            true => OptionalContext::Context(new_response(bank, accounts)),
             false => OptionalContext::NoContext(accounts),
         })
     }
@@ -194,7 +196,7 @@ impl JsonRpcRequestProcessor {
             .get_blockhash_last_valid_block_height(&blockhash)
             .expect("bank blockhash queue should contain blockhash");
         Ok(new_response(
-            &bank,
+            bank,
             RpcBlockhash {
                 blockhash: blockhash.to_string(),
                 last_valid_block_height,
@@ -208,5 +210,26 @@ impl JsonRpcRequestProcessor {
     pub async fn get_first_available_block(&self) -> Slot {
         // We don't have a blockstore but need to support this request
         0
+    }
+
+    // -----------------
+    // Bank
+    // -----------------
+    pub fn get_bank_with_config(
+        &self,
+        _config: RpcContextConfig,
+    ) -> Result<Arc<Bank>> {
+        // We only have one bank, so the config isn't important to us
+        let bank = self.bank.clone();
+        Ok(bank)
+    }
+
+    // -----------------
+    // Epoch
+    // -----------------
+    pub fn get_epoch_schedule(&self) -> EpochSchedule {
+        // Since epoch schedule data comes from the genesis config, any commitment level should be
+        // fine
+        self.bank.epoch_schedule().clone()
     }
 }

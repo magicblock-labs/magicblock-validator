@@ -1,5 +1,4 @@
 // NOTE: from rpc/src/rpc.rs
-//! The `rpc` module implements the Solana RPC interface.
 use jsonrpc_core::Result;
 use jsonrpc_derive::rpc;
 use sleipnir_rpc_client_api::{
