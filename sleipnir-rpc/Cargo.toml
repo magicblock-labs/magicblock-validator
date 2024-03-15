@@ -19,8 +19,11 @@ sleipnir-bank = { workspace = true }
 sleipnir-rpc-client-api = { workspace = true }
 sleipnir-tokens = { workspace = true }
 solana-account-decoder = { workspace = true }
+solana-accounts-db = { workspace = true }
 solana-sdk = { workspace = true }
 solana-perf = { workspace = true }
+
+spl-token-2022 = { workspace = true }
 
 tokio = { workspace = true, features = ["full"] }
 

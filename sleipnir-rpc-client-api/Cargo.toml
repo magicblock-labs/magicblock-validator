@@ -27,5 +27,6 @@ solana-account-decoder = { workspace = true }
 solana-sdk = { workspace = true }
 solana-transaction-status = { workspace = true }
 sleipnir-version = { workspace = true }
+spl-token-2022 = { workspace = true }
 thiserror = { workspace = true }
 zstd = { workspace = true }

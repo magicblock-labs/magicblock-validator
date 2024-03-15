@@ -10,6 +10,8 @@ pub use solana_account_decoder::{
 };
 use solana_transaction_status::UiTransactionEncoding;
 
+use crate::filter::RpcFilterType;
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RpcAccountInfoConfig {
@@ -20,6 +22,15 @@ pub struct RpcAccountInfoConfig {
     pub commitment: Option<CommitmentConfig>,
     /// Min context slot is ignored in our validator
     pub min_context_slot: Option<Slot>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcProgramAccountsConfig {
+    pub filters: Option<Vec<RpcFilterType>>,
+    #[serde(flatten)]
+    pub account_config: RpcAccountInfoConfig,
+    pub with_context: Option<bool>,
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

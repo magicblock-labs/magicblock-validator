@@ -8,14 +8,21 @@ use crossbeam_channel::Sender;
 use jsonrpc_core::Metadata;
 use jsonrpc_core::Result;
 use sleipnir_bank::bank::Bank;
+use sleipnir_rpc_client_api::filter::RpcFilterType;
+use sleipnir_rpc_client_api::response::OptionalContext;
 use sleipnir_rpc_client_api::response::RpcBlockhash;
+use sleipnir_rpc_client_api::response::RpcKeyedAccount;
 use sleipnir_rpc_client_api::{
     config::{RpcAccountInfoConfig, UiAccount, UiAccountEncoding},
     response::Response as RpcResponse,
 };
+use solana_accounts_db::accounts_index::AccountSecondaryIndexes;
 use solana_sdk::pubkey::Pubkey;
 
+use crate::account_resolver::encode_account;
 use crate::account_resolver::get_encoded_account;
+use crate::filters::get_filtered_program_accounts;
+use crate::filters::optimize_filters;
 use crate::rpc_health::RpcHealth;
 use crate::utils::new_response;
 
@@ -33,6 +40,7 @@ pub struct JsonRpcConfig {
     pub rpc_niceness_adj: i8,
     pub full_api: bool,
     pub max_request_body_size: Option<usize>,
+    pub account_indexes: AccountSecondaryIndexes,
     /// Disable the health check, used for tests and TestValidator
     pub disable_health_check: bool,
 }
@@ -108,6 +116,71 @@ impl JsonRpcRequestProcessor {
             })
             .collect::<Result<Vec<_>>>()?;
         Ok(new_response(&self.bank, accounts))
+    }
+
+    pub fn get_program_accounts(
+        &self,
+        program_id: &Pubkey,
+        config: Option<RpcAccountInfoConfig>,
+        mut filters: Vec<RpcFilterType>,
+        with_context: bool,
+    ) -> Result<OptionalContext<Vec<RpcKeyedAccount>>> {
+        let RpcAccountInfoConfig {
+            encoding,
+            data_slice: data_slice_config,
+            ..
+        } = config.unwrap_or_default();
+
+        let bank = &self.bank;
+
+        let encoding = encoding.unwrap_or(UiAccountEncoding::Binary);
+
+        optimize_filters(&mut filters);
+
+        let keyed_accounts = {
+            /* TODO(thlorenz): finish token account support
+            if let Some(owner) =
+                get_spl_token_owner_filter(program_id, &filters)
+            {
+                self.get_filtered_spl_token_accounts_by_owner(
+                    &bank, program_id, &owner, filters,
+                )?
+            }
+            if let Some(mint) = get_spl_token_mint_filter(program_id, &filters)
+            {
+                self.get_filtered_spl_token_accounts_by_mint(
+                    &bank, program_id, &mint, filters,
+                )?
+            }
+            */
+            get_filtered_program_accounts(
+                &bank,
+                program_id,
+                &self.config.account_indexes,
+                filters,
+            )?
+        };
+        // TODO: possibly JSON parse the accounts
+
+        let accounts = keyed_accounts
+            .into_iter()
+            .map(|(pubkey, account)| {
+                Ok(RpcKeyedAccount {
+                    pubkey: pubkey.to_string(),
+                    account: encode_account(
+                        &account,
+                        &pubkey,
+                        encoding,
+                        data_slice_config,
+                    )?,
+                })
+            })
+            .collect::<Result<Vec<_>>>()?;
+
+        Ok(match with_context {
+            true => OptionalContext::Context(new_response(&bank, accounts)),
+            false => OptionalContext::NoContext(accounts),
+        })
     }
 
     // -----------------
