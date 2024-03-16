@@ -32,6 +32,16 @@ pub struct RpcProgramAccountsConfig {
     pub with_context: Option<bool>,
 }
 
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcGetVoteAccountsConfig {
+    pub vote_pubkey: Option<String>, // validator vote address, as a base-58 encoded string
+    #[serde(flatten)]
+    pub commitment: Option<CommitmentConfig>,
+    pub keep_unstaked_delinquents: Option<bool>,
+    pub delinquent_slot_distance: Option<u64>,
+}
+
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct RpcSupplyConfig {

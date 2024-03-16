@@ -226,10 +226,46 @@ pub struct RpcIdentity {
     pub identity: String,
 }
 
-// NOTE: left out
-// - RpcVote
-// - RpcVoteAccountStatus
-// - RpcVoteAccountInfo
+// NOTE: left out RpcVote
+
+// -----------------
+// RpcVoteAccountStatus
+// -----------------
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcVoteAccountStatus {
+    pub current: Vec<RpcVoteAccountInfo>,
+    pub delinquent: Vec<RpcVoteAccountInfo>,
+}
+
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcVoteAccountInfo {
+    /// Vote account address, as base-58 encoded string
+    pub vote_pubkey: String,
+
+    /// The validator identity, as base-58 encoded string
+    pub node_pubkey: String,
+
+    /// The current stake, in lamports, delegated to this vote account
+    pub activated_stake: u64,
+
+    /// An 8-bit integer used as a fraction (commission/MAX_U8) for rewards payout
+    pub commission: u8,
+
+    /// Whether this account is staked for the current epoch
+    pub epoch_vote_account: bool,
+
+    /// Latest history of earned credits for up to `MAX_RPC_VOTE_ACCOUNT_INFO_EPOCH_CREDITS_HISTORY` epochs
+    ///   each tuple is (Epoch, credits, prev_credits)
+    pub epoch_credits: Vec<(Epoch, u64, u64)>,
+
+    /// Most recent slot voted on by this vote account (0 if no votes exist)
+    pub last_vote: u64,
+
+    /// Current root slot for this vote account (0 if no root slot exists)
+    pub root_slot: Slot,
+}
 
 // -----------------
 // RpcSignatureConfirmation

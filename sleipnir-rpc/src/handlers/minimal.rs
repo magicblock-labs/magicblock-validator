@@ -2,10 +2,10 @@
 use jsonrpc_core::Result;
 use log::*;
 use sleipnir_rpc_client_api::{
-    config::RpcContextConfig,
+    config::{RpcContextConfig, RpcGetVoteAccountsConfig},
     response::{
         Response as RpcResponse, RpcIdentity, RpcSnapshotSlotInfo,
-        RpcVersionInfo,
+        RpcVersionInfo, RpcVoteAccountStatus,
     },
 };
 use solana_sdk::{epoch_info::EpochInfo, slot_history::Slot};
@@ -81,6 +81,17 @@ impl Minimal for MinimalImpl {
     ) -> Result<u64> {
         debug!("get_transaction_count rpc request received");
         meta.get_transaction_count(config.unwrap_or_default())
+    }
+
+    fn get_vote_accounts(
+        &self,
+        meta: Self::Metadata,
+        config: Option<RpcGetVoteAccountsConfig>,
+    ) -> Result<RpcVoteAccountStatus> {
+        Ok(RpcVoteAccountStatus {
+            current: vec![],
+            delinquent: vec![],
+        })
     }
 
     fn get_version(&self, meta: Self::Metadata) -> Result<RpcVersionInfo> {

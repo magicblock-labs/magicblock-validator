@@ -2,10 +2,10 @@
 use jsonrpc_core::Result;
 use jsonrpc_derive::rpc;
 use sleipnir_rpc_client_api::{
-    config::RpcContextConfig,
+    config::{RpcContextConfig, RpcGetVoteAccountsConfig},
     response::{
         Response as RpcResponse, RpcIdentity, RpcSnapshotSlotInfo,
-        RpcVersionInfo,
+        RpcVersionInfo, RpcVoteAccountStatus,
     },
 };
 use solana_sdk::{epoch_info::EpochInfo, slot_history::Slot};
@@ -67,4 +67,13 @@ pub trait Minimal {
 
     #[rpc(meta, name = "getVersion")]
     fn get_version(&self, meta: Self::Metadata) -> Result<RpcVersionInfo>;
+
+    // Even though we don't have vote accounts we need to
+    // support this call as otherwise explorers don't work
+    #[rpc(meta, name = "getVoteAccounts")]
+    fn get_vote_accounts(
+        &self,
+        meta: Self::Metadata,
+        config: Option<RpcGetVoteAccountsConfig>,
+    ) -> Result<RpcVoteAccountStatus>;
 }
