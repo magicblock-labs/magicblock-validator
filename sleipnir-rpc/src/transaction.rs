@@ -12,6 +12,7 @@ use solana_sdk::{
     packet::PACKET_DATA_SIZE,
     pubkey::Pubkey,
     signature::Signature,
+    system_transaction,
     transaction::{MessageHash, SanitizedTransaction, VersionedTransaction},
 };
 use solana_transaction_status::TransactionBinaryEncoding;
@@ -96,10 +97,34 @@ pub(crate) fn sanitize_transaction(
     .map_err(|err| Error::invalid_params(format!("invalid transaction: {err}")))
 }
 
+pub(crate) fn airdrop_transaction(
+    meta: &JsonRpcRequestProcessor,
+    pubkey: Pubkey,
+    lamports: u64,
+) -> Result<String> {
+    debug!("request_airdrop rpc request received");
+    let bank = meta.get_bank()?;
+    let blockhash = bank.last_blockhash();
+    let transaction = system_transaction::transfer(
+        &meta.faucet_keypair,
+        &pubkey,
+        lamports,
+        blockhash,
+    );
+
+    let transaction =
+        SanitizedTransaction::try_from_legacy_transaction(transaction)
+            .map_err(|err| {
+                Error::invalid_params(format!("invalid transaction: {err}"))
+            })?;
+    let signature = *transaction.signature();
+    send_transaction(meta, signature, transaction, 0, None, None)
+}
+
 // TODO(thlorenz): for now we execute the transaction directly with the bank
 // however we need to send this or at least use the batch processor
 pub(crate) fn send_transaction(
-    meta: JsonRpcRequestProcessor,
+    meta: &JsonRpcRequestProcessor,
     signature: Signature,
     sanitized_transaction: SanitizedTransaction,
     // wire_transaction: Vec<u8>,
@@ -114,7 +139,7 @@ pub(crate) fn send_transaction(
         .load_execute_and_commit_transactions(
             &batch,
             MAX_PROCESSING_AGE,
-            false,
+            true,
             Default::default(),
             &mut Default::default(),
             None,

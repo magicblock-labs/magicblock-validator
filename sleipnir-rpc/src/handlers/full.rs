@@ -92,9 +92,10 @@ impl Full for FullImpl {
         meta: Self::Metadata,
         pubkey_str: String,
         lamports: u64,
-        config: Option<RpcRequestAirdropConfig>,
+        _config: Option<RpcRequestAirdropConfig>,
     ) -> Result<String> {
-        todo!("request_airdrop")
+        debug!("request_airdrop rpc request received");
+        meta.request_airdrop(pubkey_str, lamports)
     }
 
     fn send_transaction(
@@ -155,7 +156,7 @@ impl Full for FullImpl {
         // TODO(thlorenz): leaving out if !skip_preflight part
 
         send_transaction(
-            meta,
+            &meta,
             signature,
             // wire_transaction,
             transaction,

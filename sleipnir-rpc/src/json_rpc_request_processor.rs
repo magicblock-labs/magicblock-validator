@@ -23,17 +23,19 @@ use solana_sdk::{
     clock::{Slot, UnixTimestamp},
     epoch_schedule::EpochSchedule,
     pubkey::Pubkey,
+    signature::Keypair,
 };
 
 use crate::{
     account_resolver::{encode_account, get_encoded_account},
     filters::{get_filtered_program_accounts, optimize_filters},
     rpc_health::RpcHealth,
+    transaction::airdrop_transaction,
     utils::new_response,
     RpcCustomResult,
 };
 
-//TODO: send_transaction_service
+// TODO: send_transaction_service
 pub struct TransactionInfo;
 
 // NOTE: from rpc/src/rpc.rs :140
@@ -61,14 +63,16 @@ pub struct JsonRpcRequestProcessor {
     pub(crate) config: JsonRpcConfig,
     transaction_sender: Arc<Mutex<Sender<TransactionInfo>>>,
     pub(crate) health: Arc<RpcHealth>,
+    pub faucet_keypair: Arc<Keypair>,
 }
 impl Metadata for JsonRpcRequestProcessor {}
 
 impl JsonRpcRequestProcessor {
     pub fn new(
         bank: Arc<Bank>,
-        config: JsonRpcConfig,
         health: Arc<RpcHealth>,
+        faucet_keypair: Keypair,
+        config: JsonRpcConfig,
     ) -> (Self, Receiver<TransactionInfo>) {
         let (sender, receiver) = unbounded();
         let transaction_sender = Arc::new(Mutex::new(sender));
@@ -78,6 +82,7 @@ impl JsonRpcRequestProcessor {
                 config,
                 transaction_sender,
                 health,
+                faucet_keypair: Arc::new(faucet_keypair),
             },
             receiver,
         )
@@ -320,5 +325,21 @@ impl JsonRpcRequestProcessor {
         // Since epoch schedule data comes from the genesis config, any commitment level should be
         // fine
         self.bank.epoch_schedule().clone()
+    }
+
+    // -----------------
+    // Transactions
+    // -----------------
+    pub fn request_airdrop(
+        &self,
+        pubkey_str: String,
+        lamports: u64,
+    ) -> Result<String> {
+        let pubkey = pubkey_str.parse().map_err(|e| Error {
+            code: ErrorCode::InvalidParams,
+            message: format!("Invalid pubkey: {}", e),
+            data: None,
+        })?;
+        airdrop_transaction(self, pubkey, lamports)
     }
 }

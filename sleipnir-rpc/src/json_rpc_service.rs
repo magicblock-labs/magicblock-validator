@@ -14,6 +14,7 @@ use jsonrpc_http_server::{
 use log::*;
 use sleipnir_bank::bank::Bank;
 use solana_perf::thread::renice_this_thread;
+use solana_sdk::signature::Keypair;
 
 use crate::{
     handlers::{
@@ -40,6 +41,7 @@ impl JsonRpcService {
     pub fn new(
         rpc_addr: SocketAddr,
         bank: Arc<Bank>,
+        faucet_keypair: Keypair,
         config: JsonRpcConfig,
     ) -> Result<Self, String> {
         let max_request_body_size = config
@@ -53,8 +55,12 @@ impl JsonRpcService {
             Arc::clone(bank.get_startup_verification_complete());
         let health = Arc::new(RpcHealth::new(startup_verification_complete));
 
-        let (request_processor, _receiver) =
-            JsonRpcRequestProcessor::new(bank, config, health.clone());
+        let (request_processor, _receiver) = JsonRpcRequestProcessor::new(
+            bank,
+            health.clone(),
+            faucet_keypair,
+            config,
+        );
 
         let (close_handle_sender, close_handle_receiver) = unbounded();
         let thread_hdl = thread::Builder::new()
