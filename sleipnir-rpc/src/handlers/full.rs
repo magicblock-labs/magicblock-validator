@@ -1,5 +1,5 @@
 // NOTE: from rpc/src/rpc.rs :3432
-use jsonrpc_core::{BoxFuture, Result};
+use jsonrpc_core::{BoxFuture, Error, Result};
 use log::*;
 use sleipnir_rpc_client_api::{
     config::{
@@ -14,12 +14,18 @@ use sleipnir_rpc_client_api::{
     },
 };
 use solana_sdk::{
-    clock::{Slot, UnixTimestamp},
+    clock::{Slot, UnixTimestamp, MAX_RECENT_BLOCKHASHES},
     commitment_config::CommitmentConfig,
+    transaction::VersionedTransaction,
 };
+use solana_transaction_status::UiTransactionEncoding;
 
 use crate::{
-    json_rpc_request_processor::JsonRpcRequestProcessor, traits::rpc_full::Full,
+    json_rpc_request_processor::JsonRpcRequestProcessor,
+    traits::rpc_full::Full,
+    transaction::{
+        decode_and_deserialize, sanitize_transaction, send_transaction,
+    },
 };
 
 // Solana shows the last 60secs worth of samples
@@ -97,7 +103,66 @@ impl Full for FullImpl {
         data: String,
         config: Option<RpcSendTransactionConfig>,
     ) -> Result<String> {
-        todo!("send_transaction")
+        debug!("send_transaction rpc request received");
+        let RpcSendTransactionConfig {
+            skip_preflight,
+            preflight_commitment,
+            encoding,
+            max_retries,
+            min_context_slot,
+        } = config.unwrap_or_default();
+
+        let tx_encoding = encoding.unwrap_or(UiTransactionEncoding::Base58);
+        let binary_encoding = tx_encoding.into_binary_encoding().ok_or_else(|| {
+                Error::invalid_params(format!(
+                    "unsupported encoding: {tx_encoding}. Supported encodings: base58, base64"
+                ))
+            })?;
+        let (wire_transaction, unsanitized_tx) = decode_and_deserialize::<
+            VersionedTransaction,
+        >(
+            data, binary_encoding
+        )?;
+
+        let preflight_commitment = preflight_commitment
+            .map(|commitment| CommitmentConfig { commitment });
+        let preflight_bank = &*meta.get_bank_with_config(RpcContextConfig {
+            commitment: preflight_commitment,
+            min_context_slot,
+        })?;
+
+        let transaction = sanitize_transaction(unsanitized_tx, preflight_bank)?;
+        let signature = *transaction.signature();
+
+        let mut last_valid_block_height = preflight_bank
+            .get_blockhash_last_valid_block_height(
+                transaction.message().recent_blockhash(),
+            )
+            .unwrap_or(0);
+
+        let durable_nonce_info = transaction
+            .get_durable_nonce()
+            .map(|&pubkey| (pubkey, *transaction.message().recent_blockhash()));
+        if durable_nonce_info.is_some() {
+            // While it uses a defined constant, this last_valid_block_height value is chosen arbitrarily.
+            // It provides a fallback timeout for durable-nonce transaction retries in case of
+            // malicious packing of the retry queue. Durable-nonce transactions are otherwise
+            // retried until the nonce is advanced.
+            last_valid_block_height =
+                preflight_bank.block_height() + MAX_RECENT_BLOCKHASHES as u64;
+        }
+
+        // TODO(thlorenz): leaving out if !skip_preflight part
+
+        send_transaction(
+            meta,
+            signature,
+            // wire_transaction,
+            transaction,
+            last_valid_block_height,
+            durable_nonce_info,
+            max_retries,
+        )
     }
 
     fn minimum_ledger_slot(&self, meta: Self::Metadata) -> Result<Slot> {
