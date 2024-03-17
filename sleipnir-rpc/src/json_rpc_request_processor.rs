@@ -1,5 +1,4 @@
 #![allow(dead_code)]
-use log::*;
 use std::{
     sync::{Arc, Mutex},
     time::Duration,
@@ -7,6 +6,7 @@ use std::{
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use jsonrpc_core::{Error, ErrorCode, Metadata, Result};
+use log::*;
 use sleipnir_bank::bank::Bank;
 use sleipnir_rpc_client_api::{
     config::{

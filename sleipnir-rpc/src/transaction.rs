@@ -1,9 +1,9 @@
-use log::*;
 use std::any::type_name;
 
 use base64::{prelude::BASE64_STANDARD, Engine};
 use bincode::Options;
 use jsonrpc_core::{Error, Result};
+use log::*;
 use solana_metrics::inc_new_counter_info;
 use solana_sdk::{
     clock::MAX_PROCESSING_AGE,
