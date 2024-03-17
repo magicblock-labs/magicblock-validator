@@ -1,11 +1,11 @@
 // NOTE: from rpc/src/rpc.rs :3432
-use jsonrpc_core::{BoxFuture, Error, Result};
+use jsonrpc_core::{futures::future, BoxFuture, Error, Result};
 use log::*;
 use sleipnir_rpc_client_api::{
     config::{
-        RpcBlocksConfigWrapper, RpcContextConfig, RpcEpochConfig,
-        RpcRequestAirdropConfig, RpcSendTransactionConfig,
-        RpcSignaturesForAddressConfig,
+        RpcBlocksConfigWrapper, RpcContextConfig, RpcEncodingConfigWrapper,
+        RpcEpochConfig, RpcRequestAirdropConfig, RpcSendTransactionConfig,
+        RpcSignaturesForAddressConfig, RpcTransactionConfig,
     },
     response::{
         Response as RpcResponse, RpcBlockhash,
@@ -18,13 +18,16 @@ use solana_sdk::{
     commitment_config::CommitmentConfig,
     transaction::VersionedTransaction,
 };
-use solana_transaction_status::UiTransactionEncoding;
+use solana_transaction_status::{
+    EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding,
+};
 
 use crate::{
     json_rpc_request_processor::JsonRpcRequestProcessor,
     traits::rpc_full::Full,
     transaction::{
         decode_and_deserialize, sanitize_transaction, send_transaction,
+        verify_signature,
     },
 };
 
@@ -176,6 +179,23 @@ impl Full for FullImpl {
         slot: Slot,
     ) -> BoxFuture<Result<Option<UnixTimestamp>>> {
         Box::pin(async move { meta.get_block_time(slot).await })
+    }
+
+    fn get_transaction(
+        &self,
+        meta: Self::Metadata,
+        signature_str: String,
+        config: Option<RpcEncodingConfigWrapper<RpcTransactionConfig>>,
+    ) -> BoxFuture<Result<Option<EncodedConfirmedTransactionWithStatusMeta>>>
+    {
+        debug!("get_transaction rpc request received: {:?}", signature_str);
+        let signature = verify_signature(&signature_str);
+        if let Err(err) = signature {
+            return Box::pin(future::err(err));
+        }
+        Box::pin(async move {
+            meta.get_transaction(signature.unwrap(), config).await
+        })
     }
 
     fn get_blocks(

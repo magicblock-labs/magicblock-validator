@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+use log::*;
 use std::{
     sync::{Arc, Mutex},
     time::Duration,
@@ -9,8 +10,8 @@ use jsonrpc_core::{Error, ErrorCode, Metadata, Result};
 use sleipnir_bank::bank::Bank;
 use sleipnir_rpc_client_api::{
     config::{
-        RpcAccountInfoConfig, RpcContextConfig, RpcSupplyConfig, UiAccount,
-        UiAccountEncoding,
+        RpcAccountInfoConfig, RpcContextConfig, RpcEncodingConfigWrapper,
+        RpcSupplyConfig, RpcTransactionConfig, UiAccount, UiAccountEncoding,
     },
     filter::RpcFilterType,
     response::{
@@ -23,7 +24,10 @@ use solana_sdk::{
     clock::{Slot, UnixTimestamp},
     epoch_schedule::EpochSchedule,
     pubkey::Pubkey,
-    signature::Keypair,
+    signature::{Keypair, Signature},
+};
+use solana_transaction_status::{
+    EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding,
 };
 
 use crate::{
@@ -253,6 +257,11 @@ impl JsonRpcRequestProcessor {
         }
     }
 
+    pub fn get_block_height(&self, config: RpcContextConfig) -> Result<u64> {
+        let bank = self.get_bank_with_config(config)?;
+        Ok(bank.block_height())
+    }
+
     // -----------------
     // Bank
     // -----------------
@@ -341,5 +350,23 @@ impl JsonRpcRequestProcessor {
             data: None,
         })?;
         airdrop_transaction(self, pubkey, lamports)
+    }
+    pub async fn get_transaction(
+        &self,
+        _signature: Signature,
+        config: Option<RpcEncodingConfigWrapper<RpcTransactionConfig>>,
+    ) -> Result<Option<EncodedConfirmedTransactionWithStatusMeta>> {
+        let config = config
+            .map(|config| config.convert_to_current())
+            .unwrap_or_default();
+        let _encoding = config.encoding.unwrap_or(UiTransactionEncoding::Json);
+        // Omit commitment checks
+
+        // TODO(thlorenz): transactions are retrieved either from the blockstore or bigtable ledger
+        // storage. We have none of those currently, thus return nothing for now
+        // See: rpc/src/rpc.rs :1479
+
+        warn!("get_transaction not yet supported");
+        Ok(None)
     }
 }

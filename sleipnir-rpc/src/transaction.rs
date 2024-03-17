@@ -150,3 +150,9 @@ pub(crate) fn send_transaction(
 
     Ok(signature.to_string())
 }
+
+pub(crate) fn verify_signature(input: &str) -> Result<Signature> {
+    input
+        .parse()
+        .map_err(|e| Error::invalid_params(format!("Invalid param: {e:?}")))
+}

@@ -64,7 +64,8 @@ impl Minimal for MinimalImpl {
         meta: Self::Metadata,
         config: Option<RpcContextConfig>,
     ) -> Result<u64> {
-        todo!("get_block_height")
+        debug!("get_block_height rpc request received");
+        meta.get_block_height(config.unwrap_or_default())
     }
 
     fn get_highest_snapshot_slot(

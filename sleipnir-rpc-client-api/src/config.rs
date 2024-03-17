@@ -92,6 +92,68 @@ pub struct RpcSignaturesForAddressConfig {
     pub min_context_slot: Option<Slot>,
 }
 
+// -----------------
+// RpcEncodingConfig
+// -----------------
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(untagged)]
+pub enum RpcEncodingConfigWrapper<T> {
+    Deprecated(Option<UiTransactionEncoding>),
+    Current(Option<T>),
+}
+
+impl<T: EncodingConfig + Default + Copy> RpcEncodingConfigWrapper<T> {
+    pub fn convert_to_current(&self) -> T {
+        match self {
+            RpcEncodingConfigWrapper::Deprecated(encoding) => {
+                T::new_with_encoding(encoding)
+            }
+            RpcEncodingConfigWrapper::Current(config) => {
+                config.unwrap_or_default()
+            }
+        }
+    }
+
+    pub fn convert<U: EncodingConfig + From<T>>(
+        &self,
+    ) -> RpcEncodingConfigWrapper<U> {
+        match self {
+            RpcEncodingConfigWrapper::Deprecated(encoding) => {
+                RpcEncodingConfigWrapper::Deprecated(*encoding)
+            }
+            RpcEncodingConfigWrapper::Current(config) => {
+                RpcEncodingConfigWrapper::Current(
+                    config.map(|config| config.into()),
+                )
+            }
+        }
+    }
+}
+
+pub trait EncodingConfig {
+    fn new_with_encoding(encoding: &Option<UiTransactionEncoding>) -> Self;
+}
+
+#[derive(
+    Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize,
+)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcTransactionConfig {
+    pub encoding: Option<UiTransactionEncoding>,
+    #[serde(flatten)]
+    pub commitment: Option<CommitmentConfig>,
+    pub max_supported_transaction_version: Option<u8>,
+}
+
+impl EncodingConfig for RpcTransactionConfig {
+    fn new_with_encoding(encoding: &Option<UiTransactionEncoding>) -> Self {
+        Self {
+            encoding: *encoding,
+            ..Self::default()
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(untagged)]
 pub enum RpcBlocksConfigWrapper {

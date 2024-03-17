@@ -4,9 +4,9 @@ use jsonrpc_core::{BoxFuture, Result};
 use jsonrpc_derive::rpc;
 use sleipnir_rpc_client_api::{
     config::{
-        RpcBlocksConfigWrapper, RpcContextConfig, RpcEpochConfig,
-        RpcRequestAirdropConfig, RpcSendTransactionConfig,
-        RpcSignaturesForAddressConfig,
+        RpcBlocksConfigWrapper, RpcContextConfig, RpcEncodingConfigWrapper,
+        RpcEpochConfig, RpcRequestAirdropConfig, RpcSendTransactionConfig,
+        RpcSignaturesForAddressConfig, RpcTransactionConfig,
     },
     response::{
         Response as RpcResponse, RpcBlockhash,
@@ -18,6 +18,7 @@ use solana_sdk::{
     clock::UnixTimestamp, commitment_config::CommitmentConfig,
     slot_history::Slot,
 };
+use solana_transaction_status::EncodedConfirmedTransactionWithStatusMeta;
 
 #[rpc]
 pub trait Full {
@@ -125,7 +126,6 @@ pub trait Full {
         commitment: Option<CommitmentConfig>,
     ) -> BoxFuture<Result<Vec<Slot>>>;
 
-    /* TODO: Needs solana_transaction_status::EncodedConfirmedTransactionWithStatusMeta
     #[rpc(meta, name = "getTransaction")]
     fn get_transaction(
         &self,
@@ -133,7 +133,6 @@ pub trait Full {
         signature_str: String,
         config: Option<RpcEncodingConfigWrapper<RpcTransactionConfig>>,
     ) -> BoxFuture<Result<Option<EncodedConfirmedTransactionWithStatusMeta>>>;
-    */
 
     #[rpc(meta, name = "getSignaturesForAddress")]
     fn get_signatures_for_address(
