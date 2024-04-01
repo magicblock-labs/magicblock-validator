@@ -93,6 +93,7 @@ solana-bpf-loader-program = { git = "https://github.com/solana-labs/solana", rev
 solana-cost-model = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-cost-model" }
 solana-frozen-abi = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-frozen-abi" }
 solana-frozen-abi-macro = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-frozen-abi-macro" }
+solana-geyser-plugin-manager = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-geyser-plugin-manager" }
 solana-loader-v4-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-loader-v4-program" }
 solana-logger = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-logger" }
 solana-measure = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-measure" }

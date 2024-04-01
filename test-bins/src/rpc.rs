@@ -16,7 +16,10 @@ use test_tools::{
     bank::bank_for_tests,
     init_logger,
 };
+
+use crate::geyser::init_geyser_service;
 const LUZIFER: &str = "LuzifKo4E6QCF5r4uQmqbyko7zLS5WgayynivnCbtzk";
+mod geyser;
 
 fn fund_luzifer(bank: &Bank) {
     // TODO: we need to fund Luzifer at startup instead of doing it here
@@ -34,8 +37,13 @@ async fn main() {
     init_logger!();
 
     let genesis_config = create_genesis_config(u64::MAX).genesis_config;
+    let geyser_service =
+        init_geyser_service().expect("Failed to init geyser service");
     let bank = {
-        let bank = bank_for_tests(&genesis_config, None);
+        let bank = bank_for_tests(
+            &genesis_config,
+            geyser_service.get_accounts_update_notifier(),
+        );
         Arc::new(bank)
     };
     fund_luzifer(&bank);
