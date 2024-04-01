@@ -77,6 +77,7 @@ sleipnir-bank = { path = "./sleipnir-bank" }
 sleipnir-messaging = { path = "./sleipnir-messaging" }
 sleipnir-mutator = { path = "./sleipnir-mutator" }
 sleipnir-program = { path = "./programs/sleipnir" }
+sleipnir-rpc = { path = "./sleipnir-rpc" }
 sleipnir-rpc-client = { path = "./sleipnir-rpc-client" }
 sleipnir-rpc-client-api = { path = "./sleipnir-rpc-client-api" }
 sleipnir-rpc-sender = { path = "./sleipnir-rpc-sender" }
