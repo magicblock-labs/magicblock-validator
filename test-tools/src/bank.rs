@@ -6,13 +6,17 @@ use sleipnir_bank::{
 use solana_accounts_db::{
     accounts_db::{AccountShrinkThreshold, ACCOUNTS_DB_CONFIG_FOR_TESTING},
     accounts_index::AccountSecondaryIndexes,
+    accounts_update_notifier_interface::AccountsUpdateNotifier,
 };
 use solana_sdk::{genesis_config::GenesisConfig, pubkey::Pubkey};
 use solana_svm::runtime_config::RuntimeConfig;
 
 // Lots is almost duplicate of /Volumes/d/dev/mb/validator/x-validator/sleipnir-bank/src/bank_dev_utils/bank.rs
 // in order to make it accessible without needing the feature flag
-pub fn bank_for_tests(genesis_config: &GenesisConfig) -> Bank {
+pub fn bank_for_tests(
+    genesis_config: &GenesisConfig,
+    accounts_update_notifier: Option<AccountsUpdateNotifier>,
+) -> Bank {
     let shrink_ratio = AccountShrinkThreshold::default();
 
     let runtime_config = Arc::new(RuntimeConfig::default());
@@ -29,7 +33,7 @@ pub fn bank_for_tests(genesis_config: &GenesisConfig) -> Bank {
         shrink_ratio,
         false,
         Some(ACCOUNTS_DB_CONFIG_FOR_TESTING),
-        None,
+        accounts_update_notifier,
         Some(Pubkey::new_unique()),
         Arc::default(),
     );

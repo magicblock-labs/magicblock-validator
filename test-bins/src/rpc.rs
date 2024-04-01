@@ -35,7 +35,7 @@ async fn main() {
 
     let genesis_config = create_genesis_config(u64::MAX).genesis_config;
     let bank = {
-        let bank = bank_for_tests(&genesis_config);
+        let bank = bank_for_tests(&genesis_config, None);
         Arc::new(bank)
     };
     fund_luzifer(&bank);

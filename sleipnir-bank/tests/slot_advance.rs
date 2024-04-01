@@ -33,7 +33,7 @@ fn test_bank_store_get_accounts_across_slots() {
     init_logger!();
 
     let (genesis_config, _) = create_genesis_config(u64::MAX);
-    let bank = Bank::new_for_tests(&genesis_config);
+    let bank = Bank::new_for_tests(&genesis_config, None);
 
     macro_rules! assert_account_stored {
         ($acc: expr) => {

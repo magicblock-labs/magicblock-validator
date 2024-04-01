@@ -7,6 +7,7 @@ use solana_accounts_db::{
         AccountShrinkThreshold, AccountsDb, ACCOUNTS_DB_CONFIG_FOR_TESTING,
     },
     accounts_index::AccountSecondaryIndexes,
+    accounts_update_notifier_interface::AccountsUpdateNotifier,
 };
 use solana_sdk::{
     genesis_config::GenesisConfig,
@@ -35,21 +36,27 @@ impl Bank {
         Self::default_with_accounts(accounts)
     }
 
-    pub fn new_for_tests(genesis_config: &GenesisConfig) -> Self {
+    pub fn new_for_tests(
+        genesis_config: &GenesisConfig,
+        accounts_update_notifier: Option<AccountsUpdateNotifier>,
+    ) -> Self {
         Self::new_for_tests_with_config(
             genesis_config,
             BankTestConfig::default(),
+            accounts_update_notifier,
         )
     }
 
     pub fn new_for_tests_with_config(
         genesis_config: &GenesisConfig,
         test_config: BankTestConfig,
+        accounts_update_notifier: Option<AccountsUpdateNotifier>,
     ) -> Self {
         Self::new_with_config_for_tests(
             genesis_config,
             test_config.secondary_indexes,
             AccountShrinkThreshold::default(),
+            accounts_update_notifier,
         )
     }
 
@@ -57,6 +64,7 @@ impl Bank {
         genesis_config: &GenesisConfig,
         account_indexes: AccountSecondaryIndexes,
         shrink_ratio: AccountShrinkThreshold,
+        accounts_update_notifier: Option<AccountsUpdateNotifier>,
     ) -> Self {
         Self::new_with_paths_for_tests(
             genesis_config,
@@ -64,6 +72,7 @@ impl Bank {
             Vec::new(),
             account_indexes,
             shrink_ratio,
+            accounts_update_notifier,
         )
     }
 
@@ -73,6 +82,7 @@ impl Bank {
         paths: Vec<PathBuf>,
         account_indexes: AccountSecondaryIndexes,
         shrink_ratio: AccountShrinkThreshold,
+        accounts_update_notifier: Option<AccountsUpdateNotifier>,
     ) -> Self {
         let bank = Self::new_with_paths(
             genesis_config,
@@ -84,7 +94,7 @@ impl Bank {
             shrink_ratio,
             false,
             Some(ACCOUNTS_DB_CONFIG_FOR_TESTING),
-            None,
+            accounts_update_notifier,
             Some(Pubkey::new_unique()),
             Arc::default(),
         );
