@@ -2,13 +2,15 @@
 use {
     crate::geyser_plugin_manager::GeyserPluginManager,
     log::*,
+    sleipnir_rpc::transaction_notifier_interface::TransactionNotifier,
     solana_geyser_plugin_interface::geyser_plugin_interface::{
         ReplicaTransactionInfoV2, ReplicaTransactionInfoVersions,
     },
     solana_measure::measure::Measure,
     solana_metrics::*,
-    solana_rpc::transaction_notifier_interface::TransactionNotifier,
-    solana_sdk::{clock::Slot, signature::Signature, transaction::SanitizedTransaction},
+    solana_sdk::{
+        clock::Slot, signature::Signature, transaction::SanitizedTransaction,
+    },
     solana_transaction_status::TransactionStatusMeta,
     std::sync::{Arc, RwLock},
 };
@@ -30,7 +32,8 @@ impl TransactionNotifier for TransactionNotifierImpl {
         transaction_status_meta: &TransactionStatusMeta,
         transaction: &SanitizedTransaction,
     ) {
-        let mut measure = Measure::start("geyser-plugin-notify_plugins_of_transaction_info");
+        let mut measure =
+            Measure::start("geyser-plugin-notify_plugins_of_transaction_info");
         let transaction_log_info = Self::build_replica_transaction_info(
             index,
             signature,

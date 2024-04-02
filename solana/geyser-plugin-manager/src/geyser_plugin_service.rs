@@ -1,22 +1,19 @@
 use {
     crate::{
         accounts_update_notifier::AccountsUpdateNotifierImpl,
-        block_metadata_notifier::BlockMetadataNotifierImpl,
-        block_metadata_notifier_interface::BlockMetadataNotifierArc,
-        entry_notifier::EntryNotifierImpl,
-        geyser_plugin_manager::{GeyserPluginManager, GeyserPluginManagerRequest},
-        slot_status_notifier::SlotStatusNotifierImpl,
-        slot_status_observer::SlotStatusObserver,
+        geyser_plugin_manager::{
+            GeyserPluginManager, GeyserPluginManagerRequest,
+        },
         transaction_notifier::TransactionNotifierImpl,
     },
     crossbeam_channel::Receiver,
     log::*,
-    solana_accounts_db::accounts_update_notifier_interface::AccountsUpdateNotifier,
-    solana_ledger::entry_notifier_interface::EntryNotifierArc,
-    solana_rpc::{
-        optimistically_confirmed_bank_tracker::SlotNotification,
+    // solana_ledger::entry_notifier_interface::EntryNotifierArc,
+    sleipnir_rpc::{
+        // optimistically_confirmed_bank_tracker::SlotNotification,
         transaction_notifier_interface::TransactionNotifierArc,
     },
+    solana_accounts_db::accounts_update_notifier_interface::AccountsUpdateNotifier,
     std::{
         path::{Path, PathBuf},
         sync::{
@@ -31,12 +28,12 @@ use {
 
 /// The service managing the Geyser plugin workflow.
 pub struct GeyserPluginService {
-    slot_status_observer: Option<SlotStatusObserver>,
+    // slot_status_observer: Option<SlotStatusObserver>,
     plugin_manager: Arc<RwLock<GeyserPluginManager>>,
     accounts_update_notifier: Option<AccountsUpdateNotifier>,
     transaction_notifier: Option<TransactionNotifierArc>,
-    entry_notifier: Option<EntryNotifierArc>,
-    block_metadata_notifier: Option<BlockMetadataNotifierArc>,
+    // entry_notifier: Option<EntryNotifierArc>,
+    // block_metadata_notifier: Option<BlockMetadataNotifierArc>,
 }
 
 impl GeyserPluginService {
@@ -53,14 +50,18 @@ impl GeyserPluginService {
     ///    The rest of the JSON fields' definition is up to to the concrete plugin implementation
     ///    It is usually used to configure the connection information for the external data store.
     pub fn new(
-        confirmed_bank_receiver: Receiver<SlotNotification>,
+        // confirmed_bank_receiver: Receiver<SlotNotification>,
         geyser_plugin_config_files: &[PathBuf],
     ) -> Result<Self, GeyserPluginServiceError> {
-        Self::new_with_receiver(confirmed_bank_receiver, geyser_plugin_config_files, None)
+        Self::new_with_receiver(
+            // confirmed_bank_receiver,
+            geyser_plugin_config_files,
+            None,
+        )
     }
 
     pub fn new_with_receiver(
-        confirmed_bank_receiver: Receiver<SlotNotification>,
+        // confirmed_bank_receiver: Receiver<SlotNotification>,
         geyser_plugin_config_files: &[PathBuf],
         rpc_to_plugin_manager_receiver_and_exit: Option<(
             Receiver<GeyserPluginManagerRequest>,
@@ -79,8 +80,10 @@ impl GeyserPluginService {
 
         let account_data_notifications_enabled =
             plugin_manager.account_data_notifications_enabled();
-        let transaction_notifications_enabled = plugin_manager.transaction_notifications_enabled();
-        let entry_notifications_enabled = plugin_manager.entry_notifications_enabled();
+        let transaction_notifications_enabled =
+            plugin_manager.transaction_notifications_enabled();
+        let _entry_notifications_enabled =
+            plugin_manager.entry_notifications_enabled();
         let plugin_manager = Arc::new(RwLock::new(plugin_manager));
 
         let accounts_update_notifier: Option<AccountsUpdateNotifier> =
@@ -94,18 +97,22 @@ impl GeyserPluginService {
 
         let transaction_notifier: Option<TransactionNotifierArc> =
             if transaction_notifications_enabled {
-                let transaction_notifier = TransactionNotifierImpl::new(plugin_manager.clone());
+                let transaction_notifier =
+                    TransactionNotifierImpl::new(plugin_manager.clone());
                 Some(Arc::new(transaction_notifier))
             } else {
                 None
             };
 
-        let entry_notifier: Option<EntryNotifierArc> = if entry_notifications_enabled {
-            let entry_notifier = EntryNotifierImpl::new(plugin_manager.clone());
-            Some(Arc::new(entry_notifier))
-        } else {
-            None
-        };
+        /*
+        let entry_notifier: Option<EntryNotifierArc> =
+            if entry_notifications_enabled {
+                let entry_notifier =
+                    EntryNotifierImpl::new(plugin_manager.clone());
+                Some(Arc::new(entry_notifier))
+            } else {
+                None
+            };
 
         let (slot_status_observer, block_metadata_notifier): (
             Option<SlotStatusObserver>,
@@ -114,8 +121,10 @@ impl GeyserPluginService {
             || transaction_notifications_enabled
             || entry_notifications_enabled
         {
-            let slot_status_notifier = SlotStatusNotifierImpl::new(plugin_manager.clone());
-            let slot_status_notifier = Arc::new(RwLock::new(slot_status_notifier));
+            let slot_status_notifier =
+                SlotStatusNotifierImpl::new(plugin_manager.clone());
+            let slot_status_notifier =
+                Arc::new(RwLock::new(slot_status_notifier));
             (
                 Some(SlotStatusObserver::new(
                     confirmed_bank_receiver,
@@ -128,21 +137,28 @@ impl GeyserPluginService {
         } else {
             (None, None)
         };
+        */
 
         // Initialize plugin manager rpc handler thread if needed
-        if let Some((request_receiver, exit)) = rpc_to_plugin_manager_receiver_and_exit {
+        if let Some((request_receiver, exit)) =
+            rpc_to_plugin_manager_receiver_and_exit
+        {
             let plugin_manager = plugin_manager.clone();
-            Self::start_manager_rpc_handler(plugin_manager, request_receiver, exit)
+            Self::start_manager_rpc_handler(
+                plugin_manager,
+                request_receiver,
+                exit,
+            )
         };
 
         info!("Started GeyserPluginService");
         Ok(GeyserPluginService {
-            slot_status_observer,
+            // slot_status_observer,
             plugin_manager,
             accounts_update_notifier,
             transaction_notifier,
-            entry_notifier,
-            block_metadata_notifier,
+            // entry_notifier,
+            // block_metadata_notifier,
         })
     }
 
@@ -152,11 +168,15 @@ impl GeyserPluginService {
     ) -> Result<(), GeyserPluginServiceError> {
         plugin_manager
             .load_plugin(geyser_plugin_config_file)
-            .map_err(|e| GeyserPluginServiceError::FailedToLoadPlugin(e.into()))?;
+            .map_err(|e| {
+                GeyserPluginServiceError::FailedToLoadPlugin(e.into())
+            })?;
         Ok(())
     }
 
-    pub fn get_accounts_update_notifier(&self) -> Option<AccountsUpdateNotifier> {
+    pub fn get_accounts_update_notifier(
+        &self,
+    ) -> Option<AccountsUpdateNotifier> {
         self.accounts_update_notifier.clone()
     }
 
@@ -164,18 +184,20 @@ impl GeyserPluginService {
         self.transaction_notifier.clone()
     }
 
-    pub fn get_entry_notifier(&self) -> Option<EntryNotifierArc> {
-        self.entry_notifier.clone()
-    }
+    // pub fn get_entry_notifier(&self) -> Option<EntryNotifierArc> {
+    //     self.entry_notifier.clone()
+    // }
 
-    pub fn get_block_metadata_notifier(&self) -> Option<BlockMetadataNotifierArc> {
-        self.block_metadata_notifier.clone()
-    }
+    // pub fn get_block_metadata_notifier(
+    //     &self,
+    // ) -> Option<BlockMetadataNotifierArc> {
+    //     self.block_metadata_notifier.clone()
+    // }
 
     pub fn join(self) -> thread::Result<()> {
-        if let Some(mut slot_status_observer) = self.slot_status_observer {
-            slot_status_observer.join()?;
-        }
+        // if let Some(mut slot_status_observer) = self.slot_status_observer {
+        //     slot_status_observer.join()?;
+        // }
         self.plugin_manager.write().unwrap().unload();
         Ok(())
     }
