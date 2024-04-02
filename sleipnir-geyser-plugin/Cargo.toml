@@ -1,0 +1,13 @@
+[package]
+name = "sleipnir-geyser-plugin"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+log = { workspace = true }
+solana-geyser-plugin-interface = { workspace = true }
+solana-sdk = { workspace = true }
