@@ -119,13 +119,12 @@ impl GeyserPluginManager {
     ) -> JsonRpcResult<String> {
         // First load plugin
         let (mut new_plugin, new_lib, new_config_file) =
-            load_plugin_from_config(geyser_plugin_config_file.as_ref()).map_err(|e| {
-                jsonrpc_core::Error {
+            load_plugin_from_config(geyser_plugin_config_file.as_ref())
+                .map_err(|e| jsonrpc_core::Error {
                     code: ErrorCode::InvalidRequest,
                     message: format!("Failed to load plugin: {e}"),
                     data: None,
-                }
-            })?;
+                })?;
 
         // Then see if a plugin with this name already exists. If so, abort
         if self
@@ -173,7 +172,9 @@ impl GeyserPluginManager {
             // If we don't find one return an error
             return Err(jsonrpc_core::error::Error {
                 code: ErrorCode::InvalidRequest,
-                message: String::from("The plugin you requested to unload is not loaded"),
+                message: String::from(
+                    "The plugin you requested to unload is not loaded",
+                ),
                 data: None,
             });
         };
@@ -187,7 +188,11 @@ impl GeyserPluginManager {
     /// Checks for a plugin with a given `name`.
     /// If it exists, first unload it.
     /// Then, attempt to load a new plugin
-    pub(crate) fn reload_plugin(&mut self, name: &str, config_file: &str) -> JsonRpcResult<()> {
+    pub(crate) fn reload_plugin(
+        &mut self,
+        name: &str,
+        config_file: &str,
+    ) -> JsonRpcResult<()> {
         // Check if any plugin names match this one
         let Some(idx) = self
             .plugins
@@ -197,7 +202,9 @@ impl GeyserPluginManager {
             // If we don't find one return an error
             return Err(jsonrpc_core::error::Error {
                 code: ErrorCode::InvalidRequest,
-                message: String::from("The plugin you requested to reload is not loaded"),
+                message: String::from(
+                    "The plugin you requested to reload is not loaded",
+                ),
                 data: None,
             });
         };
@@ -209,10 +216,12 @@ impl GeyserPluginManager {
         // Try to load plugin, library
         // SAFETY: It is up to the validator to ensure this is a valid plugin library.
         let (mut new_plugin, new_lib, new_parsed_config_file) =
-            load_plugin_from_config(config_file.as_ref()).map_err(|err| jsonrpc_core::Error {
-                code: ErrorCode::InvalidRequest,
-                message: err.to_string(),
-                data: None,
+            load_plugin_from_config(config_file.as_ref()).map_err(|err| {
+                jsonrpc_core::Error {
+                    code: ErrorCode::InvalidRequest,
+                    message: err.to_string(),
+                    data: None,
+                }
             })?;
 
         // Then see if a plugin with this name already exists. If so, abort
@@ -269,7 +278,9 @@ impl GeyserPluginManager {
 }
 
 // Initialize logging for the plugin
-fn setup_logger_for_plugin(new_plugin: &dyn GeyserPlugin) -> Result<(), jsonrpc_core::Error> {
+fn setup_logger_for_plugin(
+    new_plugin: &dyn GeyserPlugin,
+) -> Result<(), jsonrpc_core::Error> {
     new_plugin
         .setup_logger(log::logger(), log::max_level())
         .map_err(|setup_logger_err| jsonrpc_core::Error {
@@ -374,11 +385,12 @@ pub(crate) fn load_plugin_from_config(
         .ok_or(GeyserPluginManagerError::LibPathNotSet)?;
     let mut libpath = PathBuf::from(libpath);
     if libpath.is_relative() {
-        let config_dir = geyser_plugin_config_file.parent().ok_or_else(|| {
-            GeyserPluginManagerError::CannotOpenConfigFile(format!(
-                "Failed to resolve parent of {geyser_plugin_config_file:?}",
-            ))
-        })?;
+        let config_dir =
+            geyser_plugin_config_file.parent().ok_or_else(|| {
+                GeyserPluginManagerError::CannotOpenConfigFile(format!(
+                    "Failed to resolve parent of {geyser_plugin_config_file:?}",
+                ))
+            })?;
         libpath = config_dir.join(libpath);
     }
 
@@ -390,11 +402,13 @@ pub(crate) fn load_plugin_from_config(
         .ok_or(GeyserPluginManagerError::InvalidPluginPath)?;
 
     let (plugin, lib) = unsafe {
-        let lib = Library::new(libpath)
-            .map_err(|e| GeyserPluginManagerError::PluginLoadError(e.to_string()))?;
-        let constructor: Symbol<PluginConstructor> = lib
-            .get(b"_create_plugin")
-            .map_err(|e| GeyserPluginManagerError::PluginLoadError(e.to_string()))?;
+        let lib = Library::new(libpath).map_err(|e| {
+            GeyserPluginManagerError::PluginLoadError(e.to_string())
+        })?;
+        let constructor: Symbol<PluginConstructor> =
+            lib.get(b"_create_plugin").map_err(|e| {
+                GeyserPluginManagerError::PluginLoadError(e.to_string())
+            })?;
         let plugin_raw = constructor();
         (Box::from_raw(plugin_raw), lib)
     };
@@ -440,7 +454,8 @@ pub(crate) fn load_plugin_from_config(
 mod tests {
     use {
         crate::geyser_plugin_manager::{
-            GeyserPluginManager, LoadedGeyserPlugin, TESTPLUGIN2_CONFIG, TESTPLUGIN_CONFIG,
+            GeyserPluginManager, LoadedGeyserPlugin, TESTPLUGIN2_CONFIG,
+            TESTPLUGIN_CONFIG,
         },
         libloading::Library,
         solana_geyser_plugin_interface::geyser_plugin_interface::GeyserPlugin,
@@ -491,14 +506,16 @@ mod tests {
 
         // No plugins are loaded, this should fail
         let mut plugin_manager_lock = plugin_manager.write().unwrap();
-        let reload_result = plugin_manager_lock.reload_plugin(DUMMY_NAME, DUMMY_CONFIG);
+        let reload_result =
+            plugin_manager_lock.reload_plugin(DUMMY_NAME, DUMMY_CONFIG);
         assert_eq!(
             reload_result.unwrap_err().message,
             "The plugin you requested to reload is not loaded"
         );
 
         // Mock having loaded plugin (TestPlugin)
-        let (mut plugin, lib, config) = dummy_plugin_and_library(TestPlugin, DUMMY_CONFIG);
+        let (mut plugin, lib, config) =
+            dummy_plugin_and_library(TestPlugin, DUMMY_CONFIG);
         plugin.on_load(config, false).unwrap();
         plugin_manager_lock.plugins.push(plugin);
         plugin_manager_lock.libs.push(lib);
@@ -508,14 +525,16 @@ mod tests {
 
         // Try wrong name (same error)
         const WRONG_NAME: &str = "wrong_name";
-        let reload_result = plugin_manager_lock.reload_plugin(WRONG_NAME, DUMMY_CONFIG);
+        let reload_result =
+            plugin_manager_lock.reload_plugin(WRONG_NAME, DUMMY_CONFIG);
         assert_eq!(
             reload_result.unwrap_err().message,
             "The plugin you requested to reload is not loaded"
         );
 
         // Now try a (dummy) reload, replacing TestPlugin with TestPlugin2
-        let reload_result = plugin_manager_lock.reload_plugin(DUMMY_NAME, TESTPLUGIN2_CONFIG);
+        let reload_result =
+            plugin_manager_lock.reload_plugin(DUMMY_NAME, TESTPLUGIN2_CONFIG);
         assert!(reload_result.is_ok());
 
         // The plugin is now replaced with ANOTHER_DUMMY_NAME
@@ -533,12 +552,14 @@ mod tests {
 
         // Load two plugins
         // First
-        let (mut plugin, lib, config) = dummy_plugin_and_library(TestPlugin, TESTPLUGIN_CONFIG);
+        let (mut plugin, lib, config) =
+            dummy_plugin_and_library(TestPlugin, TESTPLUGIN_CONFIG);
         plugin.on_load(config, false).unwrap();
         plugin_manager_lock.plugins.push(plugin);
         plugin_manager_lock.libs.push(lib);
         // Second
-        let (mut plugin, lib, config) = dummy_plugin_and_library(TestPlugin2, TESTPLUGIN2_CONFIG);
+        let (mut plugin, lib, config) =
+            dummy_plugin_and_library(TestPlugin2, TESTPLUGIN2_CONFIG);
         plugin.on_load(config, false).unwrap();
         plugin_manager_lock.plugins.push(plugin);
         plugin_manager_lock.libs.push(lib);

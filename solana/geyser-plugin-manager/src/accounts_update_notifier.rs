@@ -33,16 +33,25 @@ impl AccountsUpdateNotifierInterface for AccountsUpdateNotifierImpl {
         pubkey: &Pubkey,
         write_version: u64,
     ) {
-        if let Some(account_info) =
-            self.accountinfo_from_shared_account_data(account, txn, pubkey, write_version)
-        {
+        if let Some(account_info) = self.accountinfo_from_shared_account_data(
+            account,
+            txn,
+            pubkey,
+            write_version,
+        ) {
             self.notify_plugins_of_account_update(account_info, slot, false);
         }
     }
 
-    fn notify_account_restore_from_snapshot(&self, slot: Slot, account: &StoredAccountMeta) {
-        let mut measure_all = Measure::start("geyser-plugin-notify-account-restore-all");
-        let mut measure_copy = Measure::start("geyser-plugin-copy-stored-account-info");
+    fn notify_account_restore_from_snapshot(
+        &self,
+        slot: Slot,
+        account: &StoredAccountMeta,
+    ) {
+        let mut measure_all =
+            Measure::start("geyser-plugin-notify-account-restore-all");
+        let mut measure_copy =
+            Measure::start("geyser-plugin-copy-stored-account-info");
 
         let account = self.accountinfo_from_stored_account_meta(account);
         measure_copy.stop();
@@ -74,7 +83,8 @@ impl AccountsUpdateNotifierInterface for AccountsUpdateNotifierImpl {
         }
 
         for plugin in plugin_manager.plugins.iter() {
-            let mut measure = Measure::start("geyser-plugin-end-of-restore-from-snapshot");
+            let mut measure =
+                Measure::start("geyser-plugin-end-of-restore-from-snapshot");
             match plugin.notify_end_of_startup() {
                 Err(err) => {
                     error!(
@@ -145,7 +155,8 @@ impl AccountsUpdateNotifierImpl {
         slot: Slot,
         is_startup: bool,
     ) {
-        let mut measure2 = Measure::start("geyser-plugin-notify_plugins_of_account_update");
+        let mut measure2 =
+            Measure::start("geyser-plugin-notify_plugins_of_account_update");
         let plugin_manager = self.plugin_manager.read().unwrap();
 
         if plugin_manager.plugins.is_empty() {
