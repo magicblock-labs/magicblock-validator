@@ -1,1 +1,1 @@
-mod plugin;
+pub mod plugin;

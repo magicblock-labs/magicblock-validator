@@ -18,7 +18,7 @@ DEBUG_ARR=(
   "bank=debug,"
   "banking_stage=debug,"
   "mutator=debug,"
-  "solana_geyser_plugin_manager=trace,"
+  "solana_geyser_plugin_manager=debug,"
   "solana_svm=debug,"
   "test_tools=debug,"
 )

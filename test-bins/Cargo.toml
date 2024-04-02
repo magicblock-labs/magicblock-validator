@@ -12,6 +12,7 @@ edition.workspace = true
 crossbeam-channel = { workspace = true }
 log = { workspace = true }
 sleipnir-bank = { workspace = true }
+sleipnir-geyser-plugin = { workspace = true }
 sleipnir-rpc = { workspace = true }
 solana-geyser-plugin-manager = { workspace = true }
 solana-sdk = { workspace = true }
