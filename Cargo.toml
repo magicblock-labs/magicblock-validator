@@ -80,6 +80,7 @@ sleipnir-bank = { path = "./sleipnir-bank" }
 sleipnir-geyser-plugin = { path = "./sleipnir-geyser-plugin" }
 sleipnir-messaging = { path = "./sleipnir-messaging" }
 sleipnir-mutator = { path = "./sleipnir-mutator" }
+sleipnir-processor = { path = "./sleipnir-processor" }
 sleipnir-program = { path = "./programs/sleipnir" }
 sleipnir-rpc = { path = "./sleipnir-rpc" }
 sleipnir-rpc-client = { path = "./sleipnir-rpc-client" }

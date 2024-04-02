@@ -4,9 +4,12 @@ use base64::{prelude::BASE64_STANDARD, Engine};
 use bincode::Options;
 use jsonrpc_core::{Error, Result};
 use log::*;
+use sleipnir_processor::batch_processor::{
+    execute_batch, TransactionBatchWithIndexes,
+};
 use solana_metrics::inc_new_counter_info;
+use solana_program_runtime::timings::ExecuteTimings;
 use solana_sdk::{
-    clock::MAX_PROCESSING_AGE,
     hash::Hash,
     message::AddressLoader,
     packet::PACKET_DATA_SIZE,
@@ -135,18 +138,21 @@ pub(crate) fn send_transaction(
     let bank = &meta.get_bank()?;
     let txs = [sanitized_transaction];
     let batch = bank.prepare_sanitized_batch(&txs);
-    let (_tx_result, tx_balances_set) = bank
-        .load_execute_and_commit_transactions(
-            &batch,
-            MAX_PROCESSING_AGE,
-            true,
-            Default::default(),
-            &mut Default::default(),
-            None,
-        );
+    let batch_with_indexes = TransactionBatchWithIndexes {
+        batch,
+        transaction_indexes: vec![0],
+    };
+
+    let mut timings = ExecuteTimings::default();
+    execute_batch(&batch_with_indexes, bank, None, &mut timings, None)
+        .map_err(|err| jsonrpc_core::Error {
+            code: jsonrpc_core::ErrorCode::InternalError,
+            message: err.to_string(),
+            data: None,
+        })?;
 
     // debug!("{:#?}", tx_result);
-    debug!("{:#?}", tx_balances_set);
+    // debug!("{:#?}", tx_balances_set);
 
     Ok(signature.to_string())
 }
