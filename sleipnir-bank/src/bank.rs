@@ -386,7 +386,6 @@ impl Bank {
             account_indexes,
             shrink_ratio,
             accounts_db_config,
-            // @@@ accounts_update_notifier taken care of here
             accounts_update_notifier,
             exit,
         );

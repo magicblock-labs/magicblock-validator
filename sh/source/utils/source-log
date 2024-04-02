@@ -6,6 +6,7 @@ TRACE_ARR=(
 	"sleipnir=trace,"
   "bank=trace,"
   "banking_stage=trace,"
+  "solana_geyser_plugin_manager=trace,"
   "solana_svm=trace,"
   "test_tools=trace,"
 )
@@ -17,6 +18,7 @@ DEBUG_ARR=(
   "bank=debug,"
   "banking_stage=debug,"
   "mutator=debug,"
+  "solana_geyser_plugin_manager=trace,"
   "solana_svm=debug,"
   "test_tools=debug,"
 )

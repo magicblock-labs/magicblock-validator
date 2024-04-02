@@ -13,7 +13,7 @@ use sleipnir_rpc::{
 use solana_sdk::{signature::Keypair, signer::Signer};
 use test_tools::{
     account::{fund_account, fund_account_addr},
-    bank::bank_for_tests,
+    bank::bank_for_tests_with_paths,
     init_logger,
 };
 
@@ -40,9 +40,10 @@ async fn main() {
     let geyser_service =
         init_geyser_service().expect("Failed to init geyser service");
     let bank = {
-        let bank = bank_for_tests(
+        let bank = bank_for_tests_with_paths(
             &genesis_config,
             geyser_service.get_accounts_update_notifier(),
+            vec!["/tmp/sleipnir-rpc-bin"],
         );
         Arc::new(bank)
     };
