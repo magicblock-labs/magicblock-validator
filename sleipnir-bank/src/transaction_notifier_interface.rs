@@ -3,10 +3,11 @@ use {
         clock::Slot, signature::Signature, transaction::SanitizedTransaction,
     },
     solana_transaction_status::TransactionStatusMeta,
+    std::fmt::Debug,
     std::sync::Arc,
 };
 
-pub trait TransactionNotifier {
+pub trait TransactionNotifier: Debug {
     fn notify_transaction(
         &self,
         slot: Slot,

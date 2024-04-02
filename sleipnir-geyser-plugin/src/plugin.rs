@@ -4,7 +4,7 @@ use solana_geyser_plugin_interface::geyser_plugin_interface::{
     ReplicaEntryInfoVersions, ReplicaTransactionInfoVersions, Result,
     SlotStatus,
 };
-use solana_sdk::{clock::Slot, pubkey::Pubkey, sysvar::clock};
+use solana_sdk::{clock::Slot, pubkey::Pubkey};
 
 #[derive(Debug)]
 pub struct GrpcGeyserPlugin;
@@ -47,7 +47,7 @@ impl GeyserPlugin for GrpcGeyserPlugin {
         if account.txn.is_some() {
             debug!(
                 "update_account '{}': {:#?}",
-                Pubkey::new(account.pubkey),
+                Pubkey::try_from(account.pubkey).unwrap(),
                 account
             );
         }

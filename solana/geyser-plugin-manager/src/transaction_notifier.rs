@@ -2,7 +2,7 @@
 use {
     crate::geyser_plugin_manager::GeyserPluginManager,
     log::*,
-    sleipnir_rpc::transaction_notifier_interface::TransactionNotifier,
+    sleipnir_bank::transaction_notifier_interface::TransactionNotifier,
     solana_geyser_plugin_interface::geyser_plugin_interface::{
         ReplicaTransactionInfoV2, ReplicaTransactionInfoVersions,
     },
@@ -19,6 +19,7 @@ use {
 /// at the validator startup. TransactionStatusService invokes the notify_transaction method
 /// for new transactions. The implementation in turn invokes the notify_transaction of each
 /// plugin enabled with transaction notification managed by the GeyserPluginManager.
+#[derive(Debug)]
 pub(crate) struct TransactionNotifierImpl {
     plugin_manager: Arc<RwLock<GeyserPluginManager>>,
 }

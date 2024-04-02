@@ -9,7 +9,6 @@ mod rpc_health;
 mod rpc_request_middleware;
 mod traits;
 mod transaction;
-pub mod transaction_notifier_interface;
 mod utils;
 
 pub(crate) type RpcCustomResult<T> = std::result::Result<T, RpcCustomError>;

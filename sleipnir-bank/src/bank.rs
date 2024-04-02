@@ -105,6 +105,7 @@ use crate::{
         TransactionLogCollector, TransactionLogCollectorConfig,
         TransactionLogCollectorFilter, TransactionLogInfo,
     },
+    transaction_notifier_interface::TransactionNotifierArc,
     transaction_results::{
         LoadAndExecuteTransactionsOutput, TransactionBalances,
         TransactionBalancesSet,
@@ -273,6 +274,11 @@ pub struct Bank {
     // Cost
     // -----------------
     cost_tracker: RwLock<CostTracker>,
+
+    // -----------------
+    // Geyser
+    // -----------------
+    transaction_notifier: Option<TransactionNotifierArc>,
 }
 
 // -----------------
@@ -499,6 +505,9 @@ impl Bank {
 
             // Synchronization
             hash: RwLock::<Hash>::default(),
+
+            // Geyser
+            transaction_notifier: Option::<TransactionNotifierArc>::default(),
         };
 
         bank.transaction_processor =

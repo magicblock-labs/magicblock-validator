@@ -9,7 +9,7 @@ use {
     crossbeam_channel::Receiver,
     log::*,
     // solana_ledger::entry_notifier_interface::EntryNotifierArc,
-    sleipnir_rpc::transaction_notifier_interface::TransactionNotifierArc,
+    sleipnir_bank::transaction_notifier_interface::TransactionNotifierArc,
     solana_accounts_db::accounts_update_notifier_interface::AccountsUpdateNotifier,
     std::{
         path::{Path, PathBuf},
