@@ -2,17 +2,14 @@ use {
     crate::{
         accounts_update_notifier::AccountsUpdateNotifierImpl,
         geyser_plugin_manager::{
-            GeyserPluginManager, GeyserPluginManagerRequest,
+            GeyserPluginManager, GeyserPluginManagerRequest, LoadedGeyserPlugin,
         },
         transaction_notifier::TransactionNotifierImpl,
     },
     crossbeam_channel::Receiver,
     log::*,
     // solana_ledger::entry_notifier_interface::EntryNotifierArc,
-    sleipnir_rpc::{
-        // optimistically_confirmed_bank_tracker::SlotNotification,
-        transaction_notifier_interface::TransactionNotifierArc,
-    },
+    sleipnir_rpc::transaction_notifier_interface::TransactionNotifierArc,
     solana_accounts_db::accounts_update_notifier_interface::AccountsUpdateNotifier,
     std::{
         path::{Path, PathBuf},
@@ -50,12 +47,16 @@ impl GeyserPluginService {
     ///    The rest of the JSON fields' definition is up to to the concrete plugin implementation
     ///    It is usually used to configure the connection information for the external data store.
     pub fn new(
+        // NOTE: we don't care about confirmed banks since we have a single
+        // bank validator
         // confirmed_bank_receiver: Receiver<SlotNotification>,
         geyser_plugin_config_files: &[PathBuf],
+        geyser_loaded_plugins: Vec<LoadedGeyserPlugin>,
     ) -> Result<Self, GeyserPluginServiceError> {
         Self::new_with_receiver(
             // confirmed_bank_receiver,
             geyser_plugin_config_files,
+            geyser_loaded_plugins,
             None,
         )
     }
@@ -63,6 +64,7 @@ impl GeyserPluginService {
     pub fn new_with_receiver(
         // confirmed_bank_receiver: Receiver<SlotNotification>,
         geyser_plugin_config_files: &[PathBuf],
+        geyser_loaded_plugins: Vec<LoadedGeyserPlugin>,
         rpc_to_plugin_manager_receiver_and_exit: Option<(
             Receiver<GeyserPluginManagerRequest>,
             Arc<AtomicBool>,
@@ -72,7 +74,8 @@ impl GeyserPluginService {
             "Starting GeyserPluginService from config files: {:?}",
             geyser_plugin_config_files
         );
-        let mut plugin_manager = GeyserPluginManager::new();
+        let mut plugin_manager =
+            GeyserPluginManager::new_with_plugins(geyser_loaded_plugins);
 
         for geyser_plugin_config_file in geyser_plugin_config_files {
             Self::load_plugin(&mut plugin_manager, geyser_plugin_config_file)?;

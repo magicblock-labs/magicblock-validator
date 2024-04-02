@@ -51,8 +51,12 @@ pub struct GeyserPluginManager {
 
 impl GeyserPluginManager {
     pub fn new() -> Self {
+        GeyserPluginManager::new_with_plugins(Vec::default())
+    }
+
+    pub fn new_with_plugins(plugins: Vec<LoadedGeyserPlugin>) -> Self {
         GeyserPluginManager {
-            plugins: Vec::default(),
+            plugins,
             libs: Vec::default(),
         }
     }
