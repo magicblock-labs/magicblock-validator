@@ -17,5 +17,4 @@ tonic = { workspace = true }
 
 [build-dependencies]
 anyhow = { workspace = true }
-protobuf-src = { workspace = true }
 tonic-build = { workspace = true }
