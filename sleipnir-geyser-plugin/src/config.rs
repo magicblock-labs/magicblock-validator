@@ -8,7 +8,7 @@ use {
     tokio::sync::Semaphore,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Default, Clone)]
 pub struct Config {
     pub grpc: ConfigGrpc,
     /// Action on block re-construction error
