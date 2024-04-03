@@ -29,7 +29,6 @@ fn test_bank_system_transfer_instruction() {
     init_logger!();
 
     let (genesis_config, _) = create_genesis_config(u64::MAX);
-    // TODO: @@@ pass accounts update notifier
     let bank = Bank::new_for_tests(&genesis_config, None);
 
     let (tx, from, to) = create_system_transfer_transaction(
