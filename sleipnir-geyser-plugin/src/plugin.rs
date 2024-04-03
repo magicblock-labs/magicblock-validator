@@ -30,7 +30,6 @@ use crate::{
 // -----------------
 #[derive(Debug)]
 pub struct PluginInner {
-    runtime: Runtime,
     grpc_channel: mpsc::UnboundedSender<Message>,
     grpc_shutdown: Arc<Notify>,
 }
@@ -51,19 +50,28 @@ pub struct GrpcGeyserPlugin {
 }
 
 impl GrpcGeyserPlugin {
-    pub fn new(config: Config) -> Self {
-        Self {
-            config,
-            inner: None,
-        }
+    pub async fn create(config: Config) -> PluginResult<Self> {
+        let (grpc_channel, grpc_shutdown) =
+            GrpcService::create(config.grpc.clone(), config.block_fail_action)
+                .await
+                .map_err(GeyserPluginError::Custom)?;
+        let inner = Some(PluginInner {
+            grpc_channel,
+            grpc_shutdown,
+        });
+        Ok(Self { config, inner })
     }
 
     fn with_inner<F>(&self, f: F) -> PluginResult<()>
     where
         F: FnOnce(&PluginInner) -> PluginResult<()>,
     {
-        let inner = self.inner.as_ref().expect("initialized");
-        f(inner)
+        if let Some(inner) = self.inner.as_ref() {
+            f(inner)
+        } else {
+            // warn!("PluginInner is not initialized");
+            Ok(())
+        }
     }
 }
 
@@ -77,35 +85,7 @@ impl GeyserPlugin for GrpcGeyserPlugin {
         _config_file: &str,
         _is_reload: bool,
     ) -> PluginResult<()> {
-        let config = &self.config;
-
-        // Create inner
-        let runtime = Builder::new_multi_thread()
-            .thread_name_fn(|| {
-                static ATOMIC_ID: AtomicUsize = AtomicUsize::new(0);
-                let id = ATOMIC_ID.fetch_add(1, Ordering::Relaxed);
-                format!("solGeyserGrpc{id:02}")
-            })
-            .enable_all()
-            .build()
-            .map_err(|error| GeyserPluginError::Custom(Box::new(error)))?;
-
-        let (grpc_channel, grpc_shutdown) = runtime.block_on(async move {
-            let (grpc_channel, grpc_shutdown) = GrpcService::create(
-                config.grpc.clone(),
-                config.block_fail_action,
-            )
-            .await
-            .map_err(GeyserPluginError::Custom)?;
-            Ok::<_, GeyserPluginError>((grpc_channel, grpc_shutdown))
-        })?;
-
-        self.inner = Some(PluginInner {
-            runtime,
-            grpc_channel,
-            grpc_shutdown,
-        });
-
+        info!("Loaded plugin: {}", self.name());
         Ok(())
     }
 
@@ -113,8 +93,8 @@ impl GeyserPlugin for GrpcGeyserPlugin {
         if let Some(inner) = self.inner.take() {
             inner.grpc_shutdown.notify_one();
             drop(inner.grpc_channel);
-            inner.runtime.shutdown_timeout(Duration::from_secs(30));
         }
+        info!("Unoaded plugin: {}", self.name());
     }
 
     fn update_account(
@@ -123,28 +103,28 @@ impl GeyserPlugin for GrpcGeyserPlugin {
         slot: Slot,
         is_startup: bool,
     ) -> PluginResult<()> {
-        let account = match account {
-            ReplicaAccountInfoVersions::V0_0_1(_info) => {
-                unreachable!(
-                    "ReplicaAccountInfoVersions::V0_0_1 is not supported"
-                )
-            }
-            ReplicaAccountInfoVersions::V0_0_2(_info) => {
-                unreachable!(
-                    "ReplicaAccountInfoVersions::V0_0_2 is not supported"
-                )
-            }
-            ReplicaAccountInfoVersions::V0_0_3(info) => info,
-        };
-
-        if account.txn.is_some() {
-            debug!(
-                "update_account '{}': {:?}",
-                Pubkey::try_from(account.pubkey).unwrap(),
-                account
-            );
+        if is_startup {
+            return Ok(());
         }
-        Ok(())
+        self.with_inner(|inner| {
+            let account = match account {
+                ReplicaAccountInfoVersions::V0_0_1(_info) => {
+                    unreachable!(
+                        "ReplicaAccountInfoVersions::V0_0_1 is not supported"
+                    )
+                }
+                ReplicaAccountInfoVersions::V0_0_2(_info) => {
+                    unreachable!(
+                        "ReplicaAccountInfoVersions::V0_0_2 is not supported"
+                    )
+                }
+                ReplicaAccountInfoVersions::V0_0_3(info) => info,
+            };
+            let message = Message::Account((account, slot, is_startup).into());
+            inner.send_message(message);
+
+            Ok(())
+        })
     }
 
     fn notify_end_of_startup(&self) -> PluginResult<()> {

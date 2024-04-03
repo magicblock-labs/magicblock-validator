@@ -39,8 +39,9 @@ async fn main() {
     init_logger!();
 
     let genesis_config = create_genesis_config(u64::MAX).genesis_config;
-    let geyser_service =
-        init_geyser_service().expect("Failed to init geyser service");
+    let geyser_service = init_geyser_service()
+        .await
+        .expect("Failed to init geyser service");
 
     let transaction_notifier = geyser_service
         .get_transaction_notifier()

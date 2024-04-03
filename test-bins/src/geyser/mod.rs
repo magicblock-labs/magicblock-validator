@@ -1,5 +1,6 @@
 use crossbeam_channel::Receiver;
 use itertools::izip;
+use log::*;
 use sleipnir_bank::transaction_notifier_interface::TransactionNotifierArc;
 use sleipnir_geyser_plugin::plugin::GrpcGeyserPlugin;
 use sleipnir_transaction_status::{
@@ -12,14 +13,19 @@ use solana_geyser_plugin_manager::{
     geyser_plugin_service::{GeyserPluginService, GeyserPluginServiceError},
 };
 
-pub fn init_geyser_service(
+pub async fn init_geyser_service(
 ) -> Result<GeyserPluginService, GeyserPluginServiceError> {
-    let grpc_plugin = LoadedGeyserPlugin::new(
-        Box::new(GrpcGeyserPlugin::new(Default::default())),
-        None,
-    );
+    let grpc_plugin = {
+        let plugin = GrpcGeyserPlugin::create(Default::default())
+            .await
+            .map_err(|err| {
+                error!("Failed to load geyser plugin: {:?}", err);
+                err
+            })
+            .expect("Failed to load grpc geyser plugin");
+        LoadedGeyserPlugin::new(Box::new(plugin), None)
+    };
     let geyser_service = GeyserPluginService::new(&[], vec![grpc_plugin])?;
-
     Ok(geyser_service)
 }
 
