@@ -1,0 +1,21 @@
+[package]
+name = "geyser-grpc-proto"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+bincode = { workspace = true }
+prost = { workspace = true }
+solana-account-decoder = { workspace = true }
+solana-sdk = { workspace = true }
+solana-transaction-status = { workspace = true }
+tonic = { workspace = true }
+
+[build-dependencies]
+anyhow = { workspace = true }
+protobuf-src = { workspace = true }
+tonic-build = { workspace = true }
