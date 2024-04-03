@@ -40,7 +40,7 @@ impl Default for ConfigGrpc {
         Self {
             address: SocketAddr::new(
                 IpAddr::V4(Ipv4Addr::new(0, 0, 0, 0)),
-                1000,
+                10_000,
             ),
             max_decoding_message_size: MAX_DECODING_MESSAGE_SIZE_DEFAULT,
             channel_capacity: CHANNEL_CAPACITY_DEFAULT,
