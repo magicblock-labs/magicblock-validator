@@ -146,17 +146,21 @@ impl GeyserPlugin for GrpcGeyserPlugin {
         transaction: ReplicaTransactionInfoVersions,
         slot: Slot,
     ) -> PluginResult<()> {
-        let transaction = match transaction {
-            ReplicaTransactionInfoVersions::V0_0_1(_info) => {
-                unreachable!(
-                    "ReplicaAccountInfoVersions::V0_0_1 is not supported"
-                )
-            }
-            ReplicaTransactionInfoVersions::V0_0_2(info) => info,
-        };
+        self.with_inner(|inner| {
+            let transaction = match transaction {
+                ReplicaTransactionInfoVersions::V0_0_1(_info) => {
+                    unreachable!(
+                        "ReplicaAccountInfoVersions::V0_0_1 is not supported"
+                    )
+                }
+                ReplicaTransactionInfoVersions::V0_0_2(info) => info,
+            };
 
-        debug!("notify_transaction: {:?}", transaction);
-        Ok(())
+            let message = Message::Transaction((transaction, slot).into());
+            inner.send_message(message);
+
+            Ok(())
+        })
     }
 
     fn notify_entry(
