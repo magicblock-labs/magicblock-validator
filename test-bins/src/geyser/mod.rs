@@ -3,8 +3,8 @@ use itertools::izip;
 use sleipnir_bank::transaction_notifier_interface::TransactionNotifierArc;
 use sleipnir_geyser_plugin::plugin::GrpcGeyserPlugin;
 use sleipnir_transaction_status::{
-    map_inner_instructions, Reward, TransactionStatusBatch,
-    TransactionStatusMessage, TransactionStatusMeta,
+    map_inner_instructions, TransactionStatusBatch, TransactionStatusMessage,
+    TransactionStatusMeta,
 };
 use solana_accounts_db::transaction_results::TransactionExecutionDetails;
 use solana_geyser_plugin_manager::{
@@ -50,8 +50,8 @@ impl GeyserTransactionNotifyListener {
                             execution_results,
                             balances,
                             token_balances,
-                            rent_debits,
                             transaction_indexes,
+                            ..
                         },
                     ) => {
                         let slot = bank.slot();
@@ -62,7 +62,6 @@ impl GeyserTransactionNotifyListener {
                             post_balances,
                             pre_token_balances,
                             post_token_balances,
-                            rent_debits,
                             transaction_index,
                         ) in izip!(
                             transactions,
@@ -71,7 +70,6 @@ impl GeyserTransactionNotifyListener {
                             balances.post_balances,
                             token_balances.pre_token_balances,
                             token_balances.post_token_balances,
-                            rent_debits,
                             transaction_indexes,
                         ) {
                             if let Some(details) = execution_result {
@@ -100,21 +98,8 @@ impl GeyserTransactionNotifyListener {
                                     Some(pre_token_balances);
                                 let post_token_balances =
                                     Some(post_token_balances);
-                                let rewards = Some(
-                                    rent_debits
-                                        .into_unordered_rewards_iter()
-                                        .map(|(pubkey, reward_info)| Reward {
-                                            pubkey: pubkey.to_string(),
-                                            lamports: reward_info.lamports,
-                                            post_balance: reward_info
-                                                .post_balance,
-                                            reward_type: Some(
-                                                reward_info.reward_type,
-                                            ),
-                                            commission: reward_info.commission,
-                                        })
-                                        .collect(),
-                                );
+                                // NOTE: we don't charge rent and rewards are based on rent_debits
+                                let rewards = None;
                                 let loaded_addresses =
                                     transaction.get_loaded_addresses();
                                 let transaction_status_meta =

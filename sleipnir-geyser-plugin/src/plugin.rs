@@ -46,7 +46,7 @@ impl GeyserPlugin for GrpcGeyserPlugin {
 
         if account.txn.is_some() {
             debug!(
-                "update_account '{}': {:#?}",
+                "update_account '{}': {:?}",
                 Pubkey::try_from(account.pubkey).unwrap(),
                 account
             );
