@@ -11,6 +11,7 @@ edition.workspace = true
 anyhow = { workspace = true }
 crossbeam-channel = { workspace = true }
 geyser-grpc-proto = { workspace = true }
+hostname = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }

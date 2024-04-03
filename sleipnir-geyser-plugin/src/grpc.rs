@@ -3,7 +3,6 @@ use {
     crate::{
         config::{ConfigBlockFailAction, ConfigGrpc},
         filters::{Filter, FilterAccountsDataSlice},
-        prom::{self, CONNECTIONS_TOTAL, MESSAGE_QUEUE_SIZE},
         version::GrpcVersionInfo,
     },
     geyser_grpc_proto::{
@@ -863,8 +862,6 @@ impl GrpcService {
         loop {
             tokio::select! {
                 Some(message) = messages_rx.recv() => {
-                    MESSAGE_QUEUE_SIZE.dec();
-
                     // Update blocks info
                     if let Some(blocks_meta_tx) = &blocks_meta_tx {
                         if matches!(message, Message::Slot(_) | Message::BlockMeta(_)) {
@@ -912,7 +909,6 @@ impl GrpcService {
                                                     }
                                                     let reason = reasons.join(",");
 
-                                                    prom::update_invalid_blocks(format!("failed reconstruct {reason}"));
                                                     match block_fail_action {
                                                         ConfigBlockFailAction::Log => {
                                                             error!("failed reconstruct #{slot} {reason}");
@@ -939,7 +935,6 @@ impl GrpcService {
 
                         // If we already build Block message, new message will be a problem
                         if slot_messages.sealed && !(matches!(message, Message::Entry(_)) && slot_messages.entries_count == 0) {
-                            prom::update_invalid_blocks(format!("unexpected message {}", message.kind()));
                             match block_fail_action {
                                 ConfigBlockFailAction::Log => {
                                     error!("unexpected message #{} -- {} (invalid order)", message.get_slot(), message.kind());
@@ -954,7 +949,6 @@ impl GrpcService {
                     match &message {
                         Message::BlockMeta(msg) => {
                             if slot_messages.block_meta.is_some() {
-                                prom::update_invalid_blocks("unexpected message: BlockMeta (duplicate)");
                                 match block_fail_action {
                                     ConfigBlockFailAction::Log => {
                                         error!("unexpected message #{} -- BlockMeta (duplicate)", message.get_slot());
@@ -1117,7 +1111,6 @@ impl GrpcService {
         )>,
         drop_client: impl FnOnce(),
     ) {
-        CONNECTIONS_TOTAL.inc();
         info!("client #{id}: new");
 
         let mut is_alive = true;
@@ -1151,13 +1144,10 @@ impl GrpcService {
 
             while is_alive {
                 let message = match snapshot_rx.try_recv() {
-                    Ok(message) => {
-                        MESSAGE_QUEUE_SIZE.dec();
-                        match message {
-                            Some(message) => message,
-                            None => break,
-                        }
-                    }
+                    Ok(message) => match message {
+                        Some(message) => message,
+                        None => break,
+                    },
                     Err(crossbeam_channel::TryRecvError::Empty) => {
                         sleep(Duration::from_millis(1)).await;
                         continue;
@@ -1245,7 +1235,6 @@ impl GrpcService {
         }
 
         info!("client #{id}: removed");
-        CONNECTIONS_TOTAL.dec();
         drop_client();
     }
 }
