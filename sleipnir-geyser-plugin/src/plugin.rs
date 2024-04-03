@@ -1,27 +1,120 @@
+#![allow(unused)]
+
+use std::{
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
+
 use log::*;
 use solana_geyser_plugin_interface::geyser_plugin_interface::{
-    GeyserPlugin, ReplicaAccountInfoVersions, ReplicaBlockInfoVersions,
-    ReplicaEntryInfoVersions, ReplicaTransactionInfoVersions, Result,
-    SlotStatus,
+    GeyserPlugin, GeyserPluginError, ReplicaAccountInfoVersions,
+    ReplicaBlockInfoVersions, ReplicaEntryInfoVersions,
+    ReplicaTransactionInfoVersions, Result as PluginResult, SlotStatus,
 };
 use solana_sdk::{clock::Slot, pubkey::Pubkey};
+use tokio::{
+    runtime::{Builder, Runtime},
+    sync::{mpsc, Notify},
+};
 
+use crate::{
+    config::Config,
+    grpc::{GrpcService, Message},
+};
+
+// -----------------
+// PluginInner
+// -----------------
 #[derive(Debug)]
-pub struct GrpcGeyserPlugin;
+pub struct PluginInner {
+    runtime: Runtime,
+    grpc_channel: mpsc::UnboundedSender<Message>,
+    grpc_shutdown: Arc<Notify>,
+}
 
-#[allow(unused)]
+impl PluginInner {
+    fn send_message(&self, message: Message) {
+        let _ = self.grpc_channel.send(message);
+    }
+}
+
+// -----------------
+// GrpcGeyserPlugin
+// -----------------
+#[derive(Debug, Default)]
+pub struct GrpcGeyserPlugin {
+    config: Config,
+    inner: Option<PluginInner>,
+}
+
+impl GrpcGeyserPlugin {
+    pub fn new(config: Config) -> Self {
+        Self {
+            config,
+            inner: None,
+        }
+    }
+
+    fn with_inner<F>(&self, f: F) -> PluginResult<()>
+    where
+        F: FnOnce(&PluginInner) -> PluginResult<()>,
+    {
+        let inner = self.inner.as_ref().expect("initialized");
+        f(inner)
+    }
+}
+
 impl GeyserPlugin for GrpcGeyserPlugin {
     fn name(&self) -> &'static str {
         concat!(env!("CARGO_PKG_NAME"), "-", env!("CARGO_PKG_VERSION"))
     }
 
-    fn on_load(&mut self, _config_file: &str, _is_reload: bool) -> Result<()> {
-        debug!("Loading plugin");
+    fn on_load(
+        &mut self,
+        _config_file: &str,
+        _is_reload: bool,
+    ) -> PluginResult<()> {
+        let config = &self.config;
+
+        // Create inner
+        let runtime = Builder::new_multi_thread()
+            .thread_name_fn(|| {
+                static ATOMIC_ID: AtomicUsize = AtomicUsize::new(0);
+                let id = ATOMIC_ID.fetch_add(1, Ordering::Relaxed);
+                format!("solGeyserGrpc{id:02}")
+            })
+            .enable_all()
+            .build()
+            .map_err(|error| GeyserPluginError::Custom(Box::new(error)))?;
+
+        let (grpc_channel, grpc_shutdown) = runtime.block_on(async move {
+            let (grpc_channel, grpc_shutdown) = GrpcService::create(
+                config.grpc.clone(),
+                config.block_fail_action,
+            )
+            .await
+            .map_err(GeyserPluginError::Custom)?;
+            Ok::<_, GeyserPluginError>((grpc_channel, grpc_shutdown))
+        })?;
+
+        self.inner = Some(PluginInner {
+            runtime,
+            grpc_channel,
+            grpc_shutdown,
+        });
+
         Ok(())
     }
 
     fn on_unload(&mut self) {
-        debug!("Unloading plugin");
+        if let Some(inner) = self.inner.take() {
+            inner.grpc_shutdown.notify_one();
+            drop(inner.grpc_channel);
+            inner.runtime.shutdown_timeout(Duration::from_secs(30));
+        }
     }
 
     fn update_account(
@@ -29,7 +122,7 @@ impl GeyserPlugin for GrpcGeyserPlugin {
         account: ReplicaAccountInfoVersions,
         slot: Slot,
         is_startup: bool,
-    ) -> Result<()> {
+    ) -> PluginResult<()> {
         let account = match account {
             ReplicaAccountInfoVersions::V0_0_1(_info) => {
                 unreachable!(
@@ -54,7 +147,7 @@ impl GeyserPlugin for GrpcGeyserPlugin {
         Ok(())
     }
 
-    fn notify_end_of_startup(&self) -> Result<()> {
+    fn notify_end_of_startup(&self) -> PluginResult<()> {
         debug!("End of startup");
         Ok(())
     }
@@ -64,7 +157,7 @@ impl GeyserPlugin for GrpcGeyserPlugin {
         slot: Slot,
         parent: Option<u64>,
         status: SlotStatus,
-    ) -> Result<()> {
+    ) -> PluginResult<()> {
         Ok(())
     }
 
@@ -72,7 +165,7 @@ impl GeyserPlugin for GrpcGeyserPlugin {
         &self,
         transaction: ReplicaTransactionInfoVersions,
         slot: Slot,
-    ) -> Result<()> {
+    ) -> PluginResult<()> {
         let transaction = match transaction {
             ReplicaTransactionInfoVersions::V0_0_1(_info) => {
                 unreachable!(
@@ -86,14 +179,17 @@ impl GeyserPlugin for GrpcGeyserPlugin {
         Ok(())
     }
 
-    fn notify_entry(&self, entry: ReplicaEntryInfoVersions) -> Result<()> {
+    fn notify_entry(
+        &self,
+        entry: ReplicaEntryInfoVersions,
+    ) -> PluginResult<()> {
         Ok(())
     }
 
     fn notify_block_metadata(
         &self,
         blockinfo: ReplicaBlockInfoVersions,
-    ) -> Result<()> {
+    ) -> PluginResult<()> {
         Ok(())
     }
 
