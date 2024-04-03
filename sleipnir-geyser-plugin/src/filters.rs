@@ -51,7 +51,17 @@ impl Filter {
     pub fn new(
         config: &SubscribeRequest,
         limit: &ConfigGrpcFilters,
+        normalizing_commitment: bool,
     ) -> anyhow::Result<Self> {
+        let commitment = if normalizing_commitment {
+            // Since we don't have commitment levels we need to default levels
+            // to 'processed' as that is the only update we ever get for a transaction
+            // for instance.
+            // NOTE: that 'processed' is also the default when no filter is passed
+            CommitmentLevel::Processed
+        } else {
+            Self::decode_commitment(config.commitment)?
+        };
         Ok(Self {
             accounts: FilterAccounts::new(&config.accounts, &limit.accounts)?,
             slots: FilterSlots::new(&config.slots, &limit.slots)?,
@@ -65,7 +75,7 @@ impl Filter {
                 &config.blocks_meta,
                 &limit.blocks_meta,
             )?,
-            commitment: Self::decode_commitment(config.commitment)?,
+            commitment,
             accounts_data_slice: FilterAccountsDataSlice::create(
                 &config.accounts_data_slice,
             )?,
@@ -916,6 +926,8 @@ mod tests {
         std::collections::HashMap,
     };
 
+    const NORMALIZE_COMMITMENT: bool = false;
+
     fn create_message_transaction(
         keypair: &Keypair,
         account_keys: Vec<Pubkey>,
@@ -977,7 +989,7 @@ mod tests {
             ping: None,
         };
         let limit = ConfigGrpcFilters::default();
-        let filter = Filter::new(&config, &limit);
+        let filter = Filter::new(&config, &limit, NORMALIZE_COMMITMENT);
         assert!(filter.is_ok());
     }
 
@@ -1007,7 +1019,7 @@ mod tests {
         };
         let mut limit = ConfigGrpcFilters::default();
         limit.accounts.any = false;
-        let filter = Filter::new(&config, &limit);
+        let filter = Filter::new(&config, &limit, NORMALIZE_COMMITMENT);
         // filter should fail
         assert!(filter.is_err());
     }
@@ -1041,7 +1053,7 @@ mod tests {
         };
         let mut limit = ConfigGrpcFilters::default();
         limit.transactions.any = false;
-        let filter = Filter::new(&config, &limit);
+        let filter = Filter::new(&config, &limit, NORMALIZE_COMMITMENT);
         // filter should fail
         assert!(filter.is_err());
     }
@@ -1074,7 +1086,7 @@ mod tests {
         };
         let mut limit = ConfigGrpcFilters::default();
         limit.transactions.any = false;
-        let filter_res = Filter::new(&config, &limit);
+        let filter_res = Filter::new(&config, &limit, NORMALIZE_COMMITMENT);
         // filter should succeed
         assert!(filter_res.is_ok());
     }
@@ -1113,7 +1125,8 @@ mod tests {
             ping: None,
         };
         let limit = ConfigGrpcFilters::default();
-        let filter = Filter::new(&config, &limit).unwrap();
+        let filter =
+            Filter::new(&config, &limit, NORMALIZE_COMMITMENT).unwrap();
 
         let message_transaction = create_message_transaction(
             &keypair_b,
@@ -1159,7 +1172,8 @@ mod tests {
             ping: None,
         };
         let limit = ConfigGrpcFilters::default();
-        let filter = Filter::new(&config, &limit).unwrap();
+        let filter =
+            Filter::new(&config, &limit, NORMALIZE_COMMITMENT).unwrap();
 
         let message_transaction = create_message_transaction(
             &keypair_b,
@@ -1205,7 +1219,8 @@ mod tests {
             ping: None,
         };
         let limit = ConfigGrpcFilters::default();
-        let filter = Filter::new(&config, &limit).unwrap();
+        let filter =
+            Filter::new(&config, &limit, NORMALIZE_COMMITMENT).unwrap();
 
         let message_transaction = create_message_transaction(
             &keypair_b,
@@ -1257,7 +1272,8 @@ mod tests {
             ping: None,
         };
         let limit = ConfigGrpcFilters::default();
-        let filter = Filter::new(&config, &limit).unwrap();
+        let filter =
+            Filter::new(&config, &limit, NORMALIZE_COMMITMENT).unwrap();
 
         let message_transaction = create_message_transaction(
             &keypair_x,
@@ -1309,7 +1325,8 @@ mod tests {
             ping: None,
         };
         let limit = ConfigGrpcFilters::default();
-        let filter = Filter::new(&config, &limit).unwrap();
+        let filter =
+            Filter::new(&config, &limit, NORMALIZE_COMMITMENT).unwrap();
 
         let message_transaction = create_message_transaction(
             &keypair_x,

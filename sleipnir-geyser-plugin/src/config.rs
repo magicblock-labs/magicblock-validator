@@ -29,6 +29,9 @@ pub struct ConfigGrpc {
     pub unary_disabled: bool,
     /// Limits for possible filters
     pub filters: ConfigGrpcFilters,
+    /// Normalizes filter commitment levels to 'processed' no matter
+    /// what actual commitment level was passed by the user
+    pub normalize_commitment_level: bool,
 }
 
 const MAX_DECODING_MESSAGE_SIZE_DEFAULT: usize = 4 * 1024 * 1024;
@@ -47,6 +50,7 @@ impl Default for ConfigGrpc {
             unary_concurrency_limit: UNARY_CONCURRENCY_LIMIT_DEFAULT,
             unary_disabled: Default::default(),
             filters: Default::default(),
+            normalize_commitment_level: true,
         }
     }
 }

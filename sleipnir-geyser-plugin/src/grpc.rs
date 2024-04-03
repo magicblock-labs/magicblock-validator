@@ -841,6 +841,7 @@ impl GrpcService {
         block_fail_action: ConfigBlockFailAction,
     ) {
         const PROCESSED_MESSAGES_MAX: usize = 31;
+        // TODO(thlorenz): @@@ This could become a bottleneck affecting latency
         const PROCESSED_MESSAGES_SLEEP: Duration = Duration::from_millis(10);
 
         let mut messages: BTreeMap<u64, SlotMessages> = Default::default();
@@ -1192,6 +1193,7 @@ impl Geyser for GrpcService {
                 ping: None,
             },
             &self.config.filters,
+            self.config.normalize_commitment_level,
         )
         .expect("empty filter");
         let (stream_tx, stream_rx) =
@@ -1235,6 +1237,7 @@ impl Geyser for GrpcService {
         let incoming_stream_tx = stream_tx.clone();
         let incoming_client_tx = client_tx;
         let incoming_exit = Arc::clone(&notify_exit2);
+        let normalize_commitment_level = self.config.normalize_commitment_level;
         tokio::spawn(async move {
             let exit = incoming_exit.notified();
             tokio::pin!(exit);
@@ -1246,7 +1249,7 @@ impl Geyser for GrpcService {
                     }
                     message = request.get_mut().message() => match message {
                         Ok(Some(request)) => {
-                            if let Err(error) = match Filter::new(&request, &config_filters_limit) {
+                            if let Err(error) = match Filter::new(&request, &config_filters_limit, normalize_commitment_level) {
                                 Ok(filter) => match incoming_client_tx.send(Some(filter)) {
                                     Ok(()) => Ok(()),
                                     Err(error) => Err(error.to_string()),
