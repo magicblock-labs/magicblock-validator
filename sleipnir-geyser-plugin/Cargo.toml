@@ -8,6 +8,7 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
+crossbeam-channel = { workspace = true }
 geyser-grpc-proto = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true }
