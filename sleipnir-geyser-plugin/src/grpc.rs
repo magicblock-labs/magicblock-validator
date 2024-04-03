@@ -43,17 +43,13 @@ use {
         },
     },
     tokio::{
-        fs,
         sync::{broadcast, mpsc, Mutex, Notify, RwLock, Semaphore},
         time::{sleep, Duration, Instant},
     },
     tokio_stream::wrappers::ReceiverStream,
     tonic::{
         codec::CompressionEncoding,
-        transport::{
-            server::{Server, TcpIncoming},
-            Identity, ServerTlsConfig,
-        },
+        transport::server::{Server, TcpIncoming},
         Request, Response, Result as TonicResult, Status, Streaming,
     },
     tonic_health::server::health_reporter,
@@ -771,7 +767,7 @@ impl GrpcService {
     pub async fn create(
         config: ConfigGrpc,
         block_fail_action: ConfigBlockFailAction,
-        is_reload: bool,
+        _is_reload: bool,
     ) -> Result<
         (
             Option<crossbeam_channel::Sender<Option<Message>>>,
@@ -788,14 +784,7 @@ impl GrpcService {
         )?;
 
         // Snapshot channel
-        let (snapshot_tx, snapshot_rx) =
-            match config.snapshot_plugin_channel_capacity {
-                Some(cap) if !is_reload => {
-                    let (tx, rx) = crossbeam_channel::bounded(cap);
-                    (Some(tx), Some(rx))
-                }
-                _ => (None, None),
-            };
+        let (snapshot_tx, snapshot_rx) = (None, None);
 
         // Blocks meta storage
         let (blocks_meta, blocks_meta_tx) = if config.unary_disabled {
@@ -810,16 +799,7 @@ impl GrpcService {
         let (broadcast_tx, _) = broadcast::channel(config.channel_capacity);
 
         // gRPC server builder with optional TLS
-        let mut server_builder = Server::builder();
-        if let Some(tls_config) = &config.tls_config {
-            let (cert, key) = tokio::try_join!(
-                fs::read(&tls_config.cert_path),
-                fs::read(&tls_config.key_path)
-            )?;
-            server_builder = server_builder.tls_config(
-                ServerTlsConfig::new().identity(Identity::from_pem(cert, key)),
-            )?;
-        }
+        let server_builder = Server::builder();
 
         // Create Server
         let max_decoding_message_size = config.max_decoding_message_size;
@@ -1295,11 +1275,8 @@ impl Geyser for GrpcService {
         )
         .expect("empty filter");
         let snapshot_rx = self.snapshot_rx.lock().await.take();
-        let (stream_tx, stream_rx) = mpsc::channel(if snapshot_rx.is_some() {
-            self.config.snapshot_client_channel_capacity
-        } else {
-            self.config.channel_capacity
-        });
+        let (stream_tx, stream_rx) =
+            mpsc::channel(self.config.channel_capacity);
         let (client_tx, client_rx) = mpsc::unbounded_channel();
         let notify_exit1 = Arc::new(Notify::new());
         let notify_exit2 = Arc::new(Notify::new());
