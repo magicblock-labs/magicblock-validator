@@ -64,7 +64,7 @@ impl GeyserPluginService {
     pub fn new_with_receiver(
         // confirmed_bank_receiver: Receiver<SlotNotification>,
         geyser_plugin_config_files: &[PathBuf],
-        geyser_loaded_plugins: Vec<LoadedGeyserPlugin>,
+        mut geyser_loaded_plugins: Vec<LoadedGeyserPlugin>,
         rpc_to_plugin_manager_receiver_and_exit: Option<(
             Receiver<GeyserPluginManagerRequest>,
             Arc<AtomicBool>,
@@ -74,6 +74,12 @@ impl GeyserPluginService {
             "Starting GeyserPluginService from config files: {:?}",
             geyser_plugin_config_files
         );
+        for loaded_plugin in geyser_loaded_plugins.iter_mut() {
+            loaded_plugin.on_load("<builtin>", false).map_err(|e| {
+                GeyserPluginServiceError::FailedToLoadPlugin(e.into())
+            })?;
+        }
+
         let mut plugin_manager =
             GeyserPluginManager::new_with_plugins(geyser_loaded_plugins);
 
