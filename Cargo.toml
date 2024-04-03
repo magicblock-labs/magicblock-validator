@@ -121,11 +121,14 @@ spl-token = "=4.0.1"
 spl-token-2022 = "=2.0.1"
 test-tools = { path = "./test-tools" }
 test-tools-core = { path = "./test-tools-core" }
-tonic = "0.11.0"
-tonic-build = "0.11.0"
 thiserror = "1.0.57"
 # Update solana-tokio patch below when updating this version
 tokio = "1.29.1"
+tokio-stream = "0.1.15"
+# Tonic version 11 conflicts with lower level deps of solana
+tonic = "0.10.2"
+tonic-build = "0.10.2"
+tonic-health = "0.10.2"
 zstd = "0.11.2"
 
 [patch.'https://github.com/solana-labs/solana']
