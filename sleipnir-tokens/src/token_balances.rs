@@ -2,8 +2,8 @@
 use std::collections::HashMap;
 
 use sleipnir_bank::{bank::Bank, transaction_batch::TransactionBatch};
-use sleipnir_transaction_status::token_balances::{
-    TransactionTokenBalance, TransactionTokenBalances,
+use sleipnir_transaction_status::{
+    token_balances::TransactionTokenBalances, TransactionTokenBalance,
 };
 use solana_account_decoder::parse_token::{
     is_known_spl_token_id, token_amount_to_ui_amount, UiTokenAmount,

@@ -2,15 +2,15 @@
 use std::collections::HashMap;
 
 use sleipnir_bank::{bank::Bank, transaction_batch::TransactionBatch};
+use sleipnir_transaction_status::{
+    token_balances::TransactionTokenBalances, TransactionTokenBalance,
+};
 use solana_account_decoder::parse_token::{
     is_known_spl_token_id, token_amount_to_ui_amount, UiTokenAmount,
 };
 use solana_measure::measure::Measure;
 use solana_metrics::datapoint_debug;
 use solana_sdk::{account::ReadableAccount, pubkey::Pubkey};
-use solana_transaction_status::{
-    token_balances::TransactionTokenBalances, TransactionTokenBalance,
-};
 use spl_token_2022::{
     extension::StateWithExtensions,
     state::{Account as TokenAccount, Mint},

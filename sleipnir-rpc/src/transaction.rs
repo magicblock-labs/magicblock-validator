@@ -124,8 +124,7 @@ pub(crate) fn airdrop_transaction(
     send_transaction(meta, signature, transaction, 0, None, None)
 }
 
-// TODO(thlorenz): for now we execute the transaction directly with the bank
-// however we need to send this or at least use the batch processor
+// TODO(thlorenz): for now we execute the transaction directly via a single batch
 pub(crate) fn send_transaction(
     meta: &JsonRpcRequestProcessor,
     signature: Signature,
@@ -144,12 +143,18 @@ pub(crate) fn send_transaction(
     };
 
     let mut timings = ExecuteTimings::default();
-    execute_batch(&batch_with_indexes, bank, None, &mut timings, None)
-        .map_err(|err| jsonrpc_core::Error {
-            code: jsonrpc_core::ErrorCode::InternalError,
-            message: err.to_string(),
-            data: None,
-        })?;
+    execute_batch(
+        &batch_with_indexes,
+        bank,
+        meta.transaction_status_sender(),
+        &mut timings,
+        None,
+    )
+    .map_err(|err| jsonrpc_core::Error {
+        code: jsonrpc_core::ErrorCode::InternalError,
+        message: err.to_string(),
+        data: None,
+    })?;
 
     // debug!("{:#?}", tx_result);
     // debug!("{:#?}", tx_balances_set);

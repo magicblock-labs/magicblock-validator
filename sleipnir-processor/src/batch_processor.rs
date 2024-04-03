@@ -11,6 +11,9 @@ use sleipnir_bank::{
     bank::{Bank, TransactionExecutionRecordingOpts},
     transaction_batch::TransactionBatch,
 };
+use sleipnir_transaction_status::{
+    token_balances::TransactionTokenBalancesSet, TransactionStatusSender,
+};
 use solana_accounts_db::transaction_results::TransactionResults;
 use solana_measure::measure::Measure;
 use solana_program_runtime::timings::{
@@ -19,12 +22,10 @@ use solana_program_runtime::timings::{
 use solana_sdk::{
     clock::MAX_PROCESSING_AGE, pubkey::Pubkey, transaction::Result,
 };
-use solana_transaction_status::token_balances::TransactionTokenBalancesSet;
 
 use crate::{
     metrics::{BatchExecutionTiming, ExecuteBatchesInternalMetrics},
     token_balances::collect_token_balances,
-    transaction_status::TransactionStatusSender,
     utils::{first_err, get_first_error, PAR_THREAD_POOL},
 };
 
@@ -206,7 +207,6 @@ pub fn execute_batch(
         fee_collection_results,
         execution_results,
         rent_debits,
-        ..
     } = tx_results;
 
     if let Some(transaction_status_sender) = transaction_status_sender {

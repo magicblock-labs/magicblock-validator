@@ -10,7 +10,7 @@ use sleipnir_bank::{
     transaction_results::LoadAndExecuteTransactionsOutput,
 };
 use sleipnir_tokens::token_balances::collect_token_balances;
-use sleipnir_transaction_status::token_balances::TransactionTokenBalance;
+use sleipnir_transaction_status::TransactionTokenBalance;
 use solana_measure::measure_us;
 use solana_program_runtime::{
     compute_budget_processor::process_compute_budget_instructions,

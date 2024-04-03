@@ -19,6 +19,7 @@ use sleipnir_rpc_client_api::{
         RpcKeyedAccount, RpcSupply,
     },
 };
+use sleipnir_transaction_status::TransactionStatusSender;
 use solana_accounts_db::accounts_index::AccountSecondaryIndexes;
 use solana_sdk::{
     clock::{Slot, UnixTimestamp},
@@ -58,6 +59,10 @@ pub struct JsonRpcConfig {
     pub disable_health_check: bool,
 
     pub slot_duration: Duration,
+
+    /// Allows updating  Geyser or similar when transactions are processed
+    /// Could go into send_transaction_service once we built that
+    pub transaction_status_sender: Option<TransactionStatusSender>,
 }
 
 // NOTE: from rpc/src/rpc.rs :193
@@ -368,5 +373,11 @@ impl JsonRpcRequestProcessor {
 
         warn!("get_transaction not yet supported");
         Ok(None)
+    }
+
+    pub fn transaction_status_sender(
+        &self,
+    ) -> Option<&TransactionStatusSender> {
+        self.config.transaction_status_sender.as_ref()
     }
 }

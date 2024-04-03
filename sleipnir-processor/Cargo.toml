@@ -20,7 +20,7 @@ solana-measure = { workspace = true }
 solana-metrics = { workspace = true }
 solana-program-runtime = { workspace = true }
 solana-sdk = { workspace = true }
-solana-transaction-status = { workspace = true }
+sleipnir-transaction-status = { workspace = true }
 spl-token = { workspace = true }
 spl-token-2022 = { workspace = true }
 

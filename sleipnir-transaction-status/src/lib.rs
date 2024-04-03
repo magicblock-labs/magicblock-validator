@@ -1,5 +1,3 @@
-// NOTE: copied from ledger/src/blockstore_processor.rs:1819
-
 use std::sync::Arc;
 
 use crossbeam_channel::Sender;
@@ -12,15 +10,8 @@ use solana_sdk::{
     clock::Slot, rent_debits::RentDebits, transaction::SanitizedTransaction,
 };
 
-pub mod token_balances {
-    pub use solana_transaction_status::{
-        token_balances::{
-            TransactionTokenBalances, TransactionTokenBalancesSet,
-        },
-        TransactionTokenBalance,
-    };
-}
-use token_balances::TransactionTokenBalancesSet;
+use solana_transaction_status::token_balances::TransactionTokenBalancesSet;
+pub use solana_transaction_status::*;
 
 #[allow(clippy::large_enum_variant)]
 #[derive(Debug)]
@@ -29,6 +20,7 @@ pub enum TransactionStatusMessage {
     Freeze(Slot),
 }
 
+// NOTE: copied from ledger/src/blockstore_processor.rs:1819
 pub struct TransactionStatusBatch {
     pub bank: Arc<Bank>,
     pub transactions: Vec<SanitizedTransaction>,

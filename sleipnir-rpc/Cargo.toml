@@ -23,6 +23,7 @@ sleipnir-bank = { workspace = true }
 sleipnir-processor = { workspace = true }
 sleipnir-rpc-client-api = { workspace = true }
 sleipnir-tokens = { workspace = true }
+sleipnir-transaction-status = { workspace = true }
 sleipnir-version = { workspace = true }
 solana-account-decoder = { workspace = true }
 solana-accounts-db = { workspace = true }
