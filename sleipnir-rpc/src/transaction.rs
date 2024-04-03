@@ -139,7 +139,12 @@ pub(crate) fn send_transaction(
     let batch = bank.prepare_sanitized_batch(&txs);
     let batch_with_indexes = TransactionBatchWithIndexes {
         batch,
-        transaction_indexes: vec![0],
+        // TODO(thlorenz): figure out how to properly derive transaction_indexes
+        transaction_indexes: txs
+            .iter()
+            .enumerate()
+            .map(|(idx, _)| idx)
+            .collect(),
     };
 
     let mut timings = ExecuteTimings::default();
