@@ -20,10 +20,7 @@ use tokio::{
     sync::{mpsc, Notify},
 };
 
-use crate::{
-    config::Config,
-    grpc::{GrpcService, Message},
-};
+use crate::{config::Config, grpc::GrpcService, grpc_messages::Message};
 
 // -----------------
 // PluginInner

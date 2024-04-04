@@ -7,7 +7,7 @@ use {
             ConfigGrpcFiltersEntry, ConfigGrpcFiltersSlots,
             ConfigGrpcFiltersTransactions,
         },
-        grpc::{
+        grpc_messages::{
             Message, MessageAccount, MessageBlock, MessageBlockMeta,
             MessageEntry, MessageRef, MessageSlot, MessageTransaction,
         },
@@ -908,7 +908,9 @@ mod tests {
         crate::{
             config::ConfigGrpcFilters,
             filters::Filter,
-            grpc::{Message, MessageTransaction, MessageTransactionInfo},
+            grpc_messages::{
+                Message, MessageTransaction, MessageTransactionInfo,
+            },
         },
         geyser_grpc_proto::geyser::{
             SubscribeRequest, SubscribeRequestFilterAccounts,
