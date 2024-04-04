@@ -1,12 +1,17 @@
 #![allow(unused)]
 use log::*;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
+use tonic::{Result as TonicResult, Status};
 
-use geyser_grpc_proto::geyser::CommitmentLevel;
+use geyser_grpc_proto::geyser::{
+    CommitmentLevel, SubscribeRequest, SubscribeRequestFilterAccounts,
+    SubscribeUpdate,
+};
 use tokio::sync::{broadcast, mpsc, Notify};
 
 use crate::{
     config::{ConfigBlockFailAction, ConfigGrpc},
+    filters::Filter,
     grpc::GrpcService,
     grpc_messages::{BlockMetaStorage, Message},
 };
@@ -14,6 +19,7 @@ use crate::{
 #[derive(Debug)]
 pub struct RpcService {
     grpc_service: GrpcService,
+    config: ConfigGrpc,
 }
 
 impl RpcService {
@@ -37,6 +43,7 @@ impl RpcService {
         let (broadcast_tx, _) = broadcast::channel(config.channel_capacity);
 
         let rpc_service = Self {
+            config: config.clone(),
             grpc_service: GrpcService::new(
                 config,
                 blocks_meta,
@@ -58,14 +65,68 @@ impl RpcService {
         let shutdown_grpc = Arc::clone(&shutdown);
         // TODO: create Server
 
-        let id = 0;
-        tokio::spawn(Self::client_loop(id, broadcast_tx.subscribe()));
+        {
+            // NOTE: this would run for each subscription that comes in
+            let id = 0;
+            let (stream_tx, mut stream_rx) =
+                mpsc::channel(rpc_service.config.channel_capacity);
+            tokio::spawn(async move {
+                loop {
+                    match stream_rx.recv().await {
+                        Some(msg) => {
+                            // TODO: here we would send to RPC sub
+                            debug!("client: #{id} -> {:?}", msg);
+                        }
+                        None => error!("empty message"),
+                    }
+                }
+            });
+            let filter = Filter::new(
+                &SubscribeRequest {
+                    accounts: {
+                        let mut accounts = HashMap::new();
+                        accounts.insert(
+                            "start".to_string(),
+                            SubscribeRequestFilterAccounts {
+                                account: vec![
+                                "SoLXmnP9JvL6vJ7TN1VqtTxqsc2izmPfF9CsMDEuRzJ"
+                                    .to_string(),
+                            ],
+                                owner: vec![],
+                                filters: vec![],
+                            },
+                        );
+                        accounts
+                    },
+                    slots: HashMap::new(),
+                    transactions: HashMap::new(),
+                    blocks: HashMap::new(),
+                    blocks_meta: HashMap::new(),
+                    entry: HashMap::new(),
+                    commitment: None,
+                    accounts_data_slice: Vec::new(),
+                    ping: None,
+                },
+                &rpc_service.config.filters,
+                rpc_service.config.normalize_commitment_level,
+            )
+            .expect("empty filter");
+
+            tokio::spawn(Self::client_loop(
+                id,
+                filter,
+                stream_tx,
+                broadcast_tx.subscribe(),
+            ));
+        }
 
         Ok((messages_tx, shutdown, rpc_service))
     }
 
     async fn client_loop(
         id: usize,
+        mut filter: Filter,
+        stream_tx: mpsc::Sender<TonicResult<SubscribeUpdate>>,
         mut messages_rx: broadcast::Receiver<(
             CommitmentLevel,
             Arc<Vec<Message>>,
@@ -87,7 +148,26 @@ impl RpcService {
                             break 'outer;
                         }
                     };
-                    debug!("RPC messages: {:?}", messages);
+                    if commitment == filter.get_commitment_level() {
+                        for message in messages.iter() {
+                            for message in filter.get_update(message, Some(commitment)) {
+                                match stream_tx.try_send(Ok(message)) {
+                                    Ok(()) => {}
+                                    Err(mpsc::error::TrySendError::Full(_)) => {
+                                        error!("client #{id}: lagged to send update");
+                                         tokio::spawn(async move {
+                                             let _ = stream_tx.send(Err(Status::internal("lagged"))).await;
+                                         });
+                                        break 'outer;
+                                    }
+                                    Err(mpsc::error::TrySendError::Closed(_)) => {
+                                        error!("client #{id}: stream closed");
+                                        break 'outer;
+                                    }
+                                }
+                            }
+                        }
+                    }
                 }
             }
         }
