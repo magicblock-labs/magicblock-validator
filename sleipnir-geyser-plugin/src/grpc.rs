@@ -45,6 +45,19 @@ pub struct GrpcService {
 }
 
 impl GrpcService {
+    pub(crate) fn new(
+        config: ConfigGrpc,
+        blocks_meta: Option<BlockMetaStorage>,
+        broadcast_tx: broadcast::Sender<(CommitmentLevel, Arc<Vec<Message>>)>,
+    ) -> Self {
+        Self {
+            config,
+            blocks_meta,
+            subscribe_id: AtomicUsize::new(0),
+            broadcast_tx,
+        }
+    }
+
     #[allow(clippy::type_complexity)]
     pub async fn create(
         config: ConfigGrpc,
@@ -77,12 +90,11 @@ impl GrpcService {
 
         // Create Server
         let max_decoding_message_size = config.max_decoding_message_size;
-        let service = GeyserServer::new(Self {
+        let service = GeyserServer::new(Self::new(
             config,
             blocks_meta,
-            subscribe_id: AtomicUsize::new(0),
-            broadcast_tx: broadcast_tx.clone(),
-        })
+            broadcast_tx.clone(),
+        ))
         .accept_compressed(CompressionEncoding::Gzip)
         .send_compressed(CompressionEncoding::Gzip)
         .max_decoding_message_size(max_decoding_message_size);
@@ -118,7 +130,7 @@ impl GrpcService {
         Ok((messages_tx, shutdown))
     }
 
-    async fn geyser_loop(
+    pub(crate) async fn geyser_loop(
         mut messages_rx: mpsc::UnboundedReceiver<Message>,
         blocks_meta_tx: Option<mpsc::UnboundedSender<Message>>,
         broadcast_tx: broadcast::Sender<(CommitmentLevel, Arc<Vec<Message>>)>,
@@ -668,6 +680,9 @@ impl GrpcService {
     }
 }
 
+// -----------------
+// Server Trait Implementation
+// -----------------
 #[tonic::async_trait]
 impl Geyser for GrpcService {
     type SubscribeStream = ReceiverStream<TonicResult<SubscribeUpdate>>;
