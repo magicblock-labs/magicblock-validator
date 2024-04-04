@@ -21,7 +21,8 @@ use tokio::{
 };
 
 use crate::{
-    config::Config, grpc::GrpcService, grpc_messages::Message, rpc::RpcService,
+    config::Config, grpc::GrpcService, grpc_messages::Message,
+    rpc::GeyserRpcService,
 };
 
 // -----------------
@@ -45,12 +46,11 @@ impl PluginInner {
 // -----------------
 // GrpcGeyserPlugin
 // -----------------
-#[derive(Debug, Default)]
+#[derive(Debug)]
 pub struct GrpcGeyserPlugin {
     config: Config,
     inner: Option<PluginInner>,
-    // TODO: just here for now to keep it alive
-    rpc_service: Option<RpcService>,
+    rpc_service: Arc<GeyserRpcService>,
 }
 
 impl GrpcGeyserPlugin {
@@ -60,10 +60,13 @@ impl GrpcGeyserPlugin {
                 .await
                 .map_err(GeyserPluginError::Custom)?;
         let (rpc_channel, rpc_shutdown, rpc_service) =
-            RpcService::create(config.grpc.clone(), config.block_fail_action)
-                .await
-                .map_err(GeyserPluginError::Custom)?;
-        let rpc_service = Some(rpc_service);
+            GeyserRpcService::create(
+                config.grpc.clone(),
+                config.block_fail_action,
+            )
+            .await
+            .map_err(GeyserPluginError::Custom)?;
+        let rpc_service = Arc::new(rpc_service);
         let inner = Some(PluginInner {
             grpc_channel,
             grpc_shutdown,
@@ -75,6 +78,10 @@ impl GrpcGeyserPlugin {
             inner,
             rpc_service,
         })
+    }
+
+    pub fn rpc(&self) -> Arc<GeyserRpcService> {
+        self.rpc_service.clone()
     }
 
     fn with_inner<F>(&self, f: F) -> PluginResult<()>

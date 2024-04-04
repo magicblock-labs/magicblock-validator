@@ -1,6 +1,12 @@
 #![allow(unused)]
 use log::*;
-use std::{collections::HashMap, sync::Arc};
+use std::{
+    collections::HashMap,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
 use tonic::{Result as TonicResult, Status};
 
 use geyser_grpc_proto::geyser::{
@@ -17,12 +23,14 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct RpcService {
+pub struct GeyserRpcService {
     grpc_service: GrpcService,
     config: ConfigGrpc,
+    broadcast_tx: broadcast::Sender<(CommitmentLevel, Arc<Vec<Message>>)>,
+    subscribe_id: AtomicU64,
 }
 
-impl RpcService {
+impl GeyserRpcService {
     pub async fn create(
         config: ConfigGrpc,
         block_fail_action: ConfigBlockFailAction,
@@ -43,6 +51,8 @@ impl RpcService {
         let (broadcast_tx, _) = broadcast::channel(config.channel_capacity);
 
         let rpc_service = Self {
+            subscribe_id: AtomicU64::new(0),
+            broadcast_tx: broadcast_tx.clone(),
             config: config.clone(),
             grpc_service: GrpcService::new(
                 config,
@@ -60,71 +70,72 @@ impl RpcService {
             block_fail_action,
         ));
 
-        // Run Server
+        // TODO: should Geyser handle shutdown or the piece that instantiates
+        // the RPC service?
         let shutdown = Arc::new(Notify::new());
-        let shutdown_grpc = Arc::clone(&shutdown);
-        // TODO: create Server
-
-        {
-            // NOTE: this would run for each subscription that comes in
-            let id = 0;
-            let (stream_tx, mut stream_rx) =
-                mpsc::channel(rpc_service.config.channel_capacity);
-            tokio::spawn(async move {
-                loop {
-                    match stream_rx.recv().await {
-                        Some(msg) => {
-                            // TODO: here we would send to RPC sub
-                            debug!("client: #{id} -> {:?}", msg);
-                        }
-                        None => error!("empty message"),
-                    }
-                }
-            });
-            let filter = Filter::new(
-                &SubscribeRequest {
-                    accounts: {
-                        let mut accounts = HashMap::new();
-                        accounts.insert(
-                            "start".to_string(),
-                            SubscribeRequestFilterAccounts {
-                                account: vec![
-                                "SoLXmnP9JvL6vJ7TN1VqtTxqsc2izmPfF9CsMDEuRzJ"
-                                    .to_string(),
-                            ],
-                                owner: vec![],
-                                filters: vec![],
-                            },
-                        );
-                        accounts
-                    },
-                    slots: HashMap::new(),
-                    transactions: HashMap::new(),
-                    blocks: HashMap::new(),
-                    blocks_meta: HashMap::new(),
-                    entry: HashMap::new(),
-                    commitment: None,
-                    accounts_data_slice: Vec::new(),
-                    ping: None,
-                },
-                &rpc_service.config.filters,
-                rpc_service.config.normalize_commitment_level,
-            )
-            .expect("empty filter");
-
-            tokio::spawn(Self::client_loop(
-                id,
-                filter,
-                stream_tx,
-                broadcast_tx.subscribe(),
-            ));
-        }
-
         Ok((messages_tx, shutdown, rpc_service))
     }
 
+    // -----------------
+    // Subscriptions
+    // -----------------
+    fn next_id(&self) -> u64 {
+        self.subscribe_id.fetch_add(1, Ordering::SeqCst)
+    }
+
+    pub fn account_subscribe(
+        &self,
+        account_subscription: HashMap<String, SubscribeRequestFilterAccounts>,
+    ) -> u64 {
+        let filter = Filter::new(
+            &SubscribeRequest {
+                accounts: account_subscription,
+                slots: HashMap::new(),
+                transactions: HashMap::new(),
+                blocks: HashMap::new(),
+                blocks_meta: HashMap::new(),
+                entry: HashMap::new(),
+                commitment: None,
+                accounts_data_slice: Vec::new(),
+                ping: None,
+            },
+            &self.config.filters,
+            self.config.normalize_commitment_level,
+        )
+        .expect("empty filter");
+
+        self.subscribe_impl(filter)
+    }
+
+    fn subscribe_impl(&self, filter: Filter) -> u64 {
+        // NOTE: this would run for each subscription that comes in
+        let id = self.next_id();
+        let (stream_tx, mut stream_rx) =
+            mpsc::channel(self.config.channel_capacity);
+        tokio::spawn(async move {
+            loop {
+                match stream_rx.recv().await {
+                    Some(msg) => {
+                        // TODO: here we would send to RPC sub
+                        debug!("client: #{id} -> {:?}", msg);
+                    }
+                    None => error!("empty message"),
+                }
+            }
+        });
+
+        tokio::spawn(Self::client_loop(
+            id,
+            filter,
+            stream_tx,
+            self.broadcast_tx.subscribe(),
+        ));
+
+        id
+    }
+
     async fn client_loop(
-        id: usize,
+        id: u64,
         mut filter: Filter,
         stream_tx: mpsc::Sender<TonicResult<SubscribeUpdate>>,
         mut messages_rx: broadcast::Receiver<(

@@ -6,6 +6,7 @@ use std::{
 };
 
 use crossbeam_channel::unbounded;
+use geyser_grpc_proto::geyser::SubscribeRequestFilterAccounts;
 use log::*;
 use sleipnir_bank::{bank::Bank, genesis_utils::create_genesis_config};
 use sleipnir_rpc::{
@@ -39,7 +40,7 @@ async fn main() {
     init_logger!();
 
     let genesis_config = create_genesis_config(u64::MAX).genesis_config;
-    let geyser_service = init_geyser_service()
+    let (geyser_service, geyser_rpc_service) = init_geyser_service()
         .await
         .expect("Failed to init geyser service");
 
@@ -86,6 +87,24 @@ async fn main() {
         }),
         ..Default::default()
     };
+
+    let account_subscription = {
+        let mut accounts = std::collections::HashMap::new();
+        accounts.insert(
+            "start".to_string(),
+            SubscribeRequestFilterAccounts {
+                account: vec![
+                    "SoLXmnP9JvL6vJ7TN1VqtTxqsc2izmPfF9CsMDEuRzJ".to_string()
+                ],
+                owner: vec![],
+                filters: vec![],
+            },
+        );
+        accounts
+    };
+    let sub_id = geyser_rpc_service.account_subscribe(account_subscription);
+    info!("Subscribed to account with id: {}", sub_id);
+
     let _json_rpc_service =
         JsonRpcService::new(rpc_socket, bank.clone(), faucet_keypair, config)
             .unwrap();

@@ -1,8 +1,10 @@
+use std::sync::Arc;
+
 use crossbeam_channel::Receiver;
 use itertools::izip;
 use log::*;
 use sleipnir_bank::transaction_notifier_interface::TransactionNotifierArc;
-use sleipnir_geyser_plugin::plugin::GrpcGeyserPlugin;
+use sleipnir_geyser_plugin::{plugin::GrpcGeyserPlugin, rpc::GeyserRpcService};
 use sleipnir_transaction_status::{
     map_inner_instructions, TransactionStatusBatch, TransactionStatusMessage,
     TransactionStatusMeta,
@@ -13,9 +15,11 @@ use solana_geyser_plugin_manager::{
     geyser_plugin_service::{GeyserPluginService, GeyserPluginServiceError},
 };
 
-pub async fn init_geyser_service(
-) -> Result<GeyserPluginService, GeyserPluginServiceError> {
-    let grpc_plugin = {
+pub async fn init_geyser_service() -> Result<
+    (GeyserPluginService, Arc<GeyserRpcService>),
+    GeyserPluginServiceError,
+> {
+    let (grpc_plugin, rpc_service) = {
         let plugin = GrpcGeyserPlugin::create(Default::default())
             .await
             .map_err(|err| {
@@ -23,10 +27,11 @@ pub async fn init_geyser_service(
                 err
             })
             .expect("Failed to load grpc geyser plugin");
-        LoadedGeyserPlugin::new(Box::new(plugin), None)
+        let rpc_service = plugin.rpc();
+        (LoadedGeyserPlugin::new(Box::new(plugin), None), rpc_service)
     };
     let geyser_service = GeyserPluginService::new(&[], vec![grpc_plugin])?;
-    Ok(geyser_service)
+    Ok((geyser_service, rpc_service))
 }
 
 pub struct GeyserTransactionNotifyListener {
