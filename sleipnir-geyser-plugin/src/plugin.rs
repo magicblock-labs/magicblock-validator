@@ -20,7 +20,9 @@ use tokio::{
     sync::{mpsc, Notify},
 };
 
-use crate::{config::Config, grpc::GrpcService, grpc_messages::Message};
+use crate::{
+    config::Config, grpc::GrpcService, grpc_messages::Message, rpc::RpcService,
+};
 
 // -----------------
 // PluginInner
@@ -29,11 +31,14 @@ use crate::{config::Config, grpc::GrpcService, grpc_messages::Message};
 pub struct PluginInner {
     grpc_channel: mpsc::UnboundedSender<Message>,
     grpc_shutdown: Arc<Notify>,
+    rpc_channel: mpsc::UnboundedSender<Message>,
+    rpc_shutdown: Arc<Notify>,
 }
 
 impl PluginInner {
     fn send_message(&self, message: Message) {
-        let _ = self.grpc_channel.send(message);
+        let _ = self.grpc_channel.send(message.clone());
+        let _ = self.rpc_channel.send(message);
     }
 }
 
@@ -44,6 +49,8 @@ impl PluginInner {
 pub struct GrpcGeyserPlugin {
     config: Config,
     inner: Option<PluginInner>,
+    // TODO: just here for now to keep it alive
+    rpc_service: Option<RpcService>,
 }
 
 impl GrpcGeyserPlugin {
@@ -52,11 +59,22 @@ impl GrpcGeyserPlugin {
             GrpcService::create(config.grpc.clone(), config.block_fail_action)
                 .await
                 .map_err(GeyserPluginError::Custom)?;
+        let (rpc_channel, rpc_shutdown, rpc_service) =
+            RpcService::create(config.grpc.clone(), config.block_fail_action)
+                .await
+                .map_err(GeyserPluginError::Custom)?;
+        let rpc_service = Some(rpc_service);
         let inner = Some(PluginInner {
             grpc_channel,
             grpc_shutdown,
+            rpc_channel,
+            rpc_shutdown,
         });
-        Ok(Self { config, inner })
+        Ok(Self {
+            config,
+            inner,
+            rpc_service,
+        })
     }
 
     fn with_inner<F>(&self, f: F) -> PluginResult<()>
@@ -89,7 +107,9 @@ impl GeyserPlugin for GrpcGeyserPlugin {
     fn on_unload(&mut self) {
         if let Some(inner) = self.inner.take() {
             inner.grpc_shutdown.notify_one();
+            inner.rpc_shutdown.notify_one();
             drop(inner.grpc_channel);
+            drop(inner.rpc_channel);
         }
         info!("Unoaded plugin: {}", self.name());
     }

@@ -1,5 +1,8 @@
+#![allow(unused)]
+use log::*;
 use std::sync::Arc;
 
+use geyser_grpc_proto::geyser::CommitmentLevel;
 use tokio::sync::{broadcast, mpsc, Notify};
 
 use crate::{
@@ -46,7 +49,7 @@ impl RpcService {
         tokio::spawn(GrpcService::geyser_loop(
             messages_rx,
             blocks_meta_tx,
-            broadcast_tx,
+            broadcast_tx.clone(),
             block_fail_action,
         ));
 
@@ -55,6 +58,38 @@ impl RpcService {
         let shutdown_grpc = Arc::clone(&shutdown);
         // TODO: create Server
 
+        let id = 0;
+        tokio::spawn(Self::client_loop(id, broadcast_tx.subscribe()));
+
         Ok((messages_tx, shutdown, rpc_service))
+    }
+
+    async fn client_loop(
+        id: usize,
+        mut messages_rx: broadcast::Receiver<(
+            CommitmentLevel,
+            Arc<Vec<Message>>,
+        )>,
+    ) {
+        'outer: loop {
+            tokio::select! {
+                message = messages_rx.recv() => {
+                    let (commitment, messages) = match message {
+                        Ok((commitment, messages)) => (commitment, messages),
+                        Err(broadcast::error::RecvError::Closed) => {
+                            break 'outer;
+                        },
+                        Err(broadcast::error::RecvError::Lagged(_)) => {
+                            info!("client #{id}: lagged to receive geyser messages");
+                            // tokio::spawn(async move {
+                            //     let _ = stream_tx.send(Err(Status::internal("lagged"))).await;
+                            // });
+                            break 'outer;
+                        }
+                    };
+                    debug!("RPC messages: {:?}", messages);
+                }
+            }
+        }
     }
 }
