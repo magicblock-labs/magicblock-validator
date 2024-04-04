@@ -453,16 +453,15 @@ impl GrpcService {
         info!("client #{id}: removed");
         drop_client();
     }
-}
 
-#[tonic::async_trait]
-impl Geyser for GrpcService {
-    type SubscribeStream = ReceiverStream<TonicResult<SubscribeUpdate>>;
-
-    async fn subscribe(
+    // -----------------
+    // Methods/Subscription Implementations
+    // -----------------
+    pub(crate) async fn subscribe_impl(
         &self,
         mut request: Request<Streaming<SubscribeRequest>>,
-    ) -> TonicResult<Response<Self::SubscribeStream>> {
+    ) -> TonicResult<Response<ReceiverStream<TonicResult<SubscribeUpdate>>>>
+    {
         let id = self.subscribe_id.fetch_add(1, Ordering::Relaxed);
         let filter = Filter::new(
             &SubscribeRequest {
@@ -575,7 +574,7 @@ impl Geyser for GrpcService {
         Ok(Response::new(ReceiverStream::new(stream_rx)))
     }
 
-    async fn ping(
+    async fn ping_impl(
         &self,
         request: Request<PingRequest>,
     ) -> Result<Response<PongResponse>, Status> {
@@ -584,7 +583,7 @@ impl Geyser for GrpcService {
         Ok(Response::new(response))
     }
 
-    async fn get_latest_blockhash(
+    async fn get_latest_blockhash_impl(
         &self,
         request: Request<GetLatestBlockhashRequest>,
     ) -> Result<Response<GetLatestBlockhashResponse>, Status> {
@@ -608,7 +607,7 @@ impl Geyser for GrpcService {
         }
     }
 
-    async fn get_block_height(
+    async fn get_block_height_impl(
         &self,
         request: Request<GetBlockHeightRequest>,
     ) -> Result<Response<GetBlockHeightResponse>, Status> {
@@ -628,7 +627,7 @@ impl Geyser for GrpcService {
         }
     }
 
-    async fn get_slot(
+    async fn get_slot_impl(
         &self,
         request: Request<GetSlotRequest>,
     ) -> Result<Response<GetSlotResponse>, Status> {
@@ -644,7 +643,7 @@ impl Geyser for GrpcService {
         }
     }
 
-    async fn is_blockhash_valid(
+    async fn is_blockhash_valid_impl(
         &self,
         request: Request<IsBlockhashValidRequest>,
     ) -> Result<Response<IsBlockhashValidResponse>, Status> {
@@ -658,7 +657,7 @@ impl Geyser for GrpcService {
         }
     }
 
-    async fn get_version(
+    async fn get_version_impl(
         &self,
         _request: Request<GetVersionRequest>,
     ) -> Result<Response<GetVersionResponse>, Status> {
@@ -666,5 +665,59 @@ impl Geyser for GrpcService {
             version: serde_json::to_string(&GrpcVersionInfo::default())
                 .unwrap(),
         }))
+    }
+}
+
+#[tonic::async_trait]
+impl Geyser for GrpcService {
+    type SubscribeStream = ReceiverStream<TonicResult<SubscribeUpdate>>;
+
+    async fn subscribe(
+        &self,
+        request: Request<Streaming<SubscribeRequest>>,
+    ) -> TonicResult<Response<Self::SubscribeStream>> {
+        self.subscribe_impl(request).await
+    }
+
+    async fn ping(
+        &self,
+        request: Request<PingRequest>,
+    ) -> Result<Response<PongResponse>, Status> {
+        self.ping_impl(request).await
+    }
+
+    async fn get_latest_blockhash(
+        &self,
+        request: Request<GetLatestBlockhashRequest>,
+    ) -> Result<Response<GetLatestBlockhashResponse>, Status> {
+        self.get_latest_blockhash_impl(request).await
+    }
+
+    async fn get_block_height(
+        &self,
+        request: Request<GetBlockHeightRequest>,
+    ) -> Result<Response<GetBlockHeightResponse>, Status> {
+        self.get_block_height_impl(request).await
+    }
+
+    async fn get_slot(
+        &self,
+        request: Request<GetSlotRequest>,
+    ) -> Result<Response<GetSlotResponse>, Status> {
+        self.get_slot_impl(request).await
+    }
+
+    async fn is_blockhash_valid(
+        &self,
+        request: Request<IsBlockhashValidRequest>,
+    ) -> Result<Response<IsBlockhashValidResponse>, Status> {
+        self.is_blockhash_valid_impl(request).await
+    }
+
+    async fn get_version(
+        &self,
+        request: Request<GetVersionRequest>,
+    ) -> Result<Response<GetVersionResponse>, Status> {
+        self.get_version_impl(request).await
     }
 }
