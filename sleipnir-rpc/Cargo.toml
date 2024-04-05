@@ -37,6 +37,7 @@ solana-transaction-status = { workspace = true }
 
 spl-token-2022 = { workspace = true }
 
+thiserror = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
 
 [dev-dependencies]

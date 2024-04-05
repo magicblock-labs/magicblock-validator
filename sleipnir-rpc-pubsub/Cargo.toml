@@ -1,0 +1,19 @@
+[package]
+name = "sleipnir-rpc-pubsub"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+log = { workspace = true }
+jsonrpc-core = { workspace = true }
+jsonrpc-pubsub = { workspace = true }
+jsonrpc-ws-server = { workspace = true }
+serde = { workspace = true }
+serde_json = { workspace = true }
+sleipnir-rpc-client-api = { workspace = true }
+solana-sdk = { workspace = true }
+tokio = { workspace = true }

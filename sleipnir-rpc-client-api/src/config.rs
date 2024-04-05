@@ -170,3 +170,14 @@ pub struct RpcContextConfig {
     pub commitment: Option<CommitmentConfig>,
     pub min_context_slot: Option<Slot>,
 }
+
+// -----------------
+// Subscriptions
+// -----------------
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcSignatureSubscribeConfig {
+    #[serde(flatten)]
+    pub commitment: Option<CommitmentConfig>,
+    pub enable_received_notification: Option<bool>,
+}

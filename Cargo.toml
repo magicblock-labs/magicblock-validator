@@ -15,6 +15,7 @@ members = [
   "sleipnir-rpc",
   "sleipnir-rpc-client",
   "sleipnir-rpc-client-api",
+  "sleipnir-rpc-pubsub",
   "sleipnir-stage-banking",
   "sleipnir-stage-fetch",
   "sleipnir-stage-verify",
@@ -64,6 +65,8 @@ jsonrpc-core = "18.0.0"
 jsonrpc-core-client = "18.0.0"
 jsonrpc-derive = "18.0.0"
 jsonrpc-http-server = "18.0.0"
+jsonrpc-pubsub = "18.0.0"
+jsonrpc-ws-server = "18.0.0"
 lazy_static = "1.4.0"
 libc = "0.2.153"
 libloading = "0.7.4"
@@ -92,6 +95,7 @@ sleipnir-program = { path = "./programs/sleipnir" }
 sleipnir-rpc = { path = "./sleipnir-rpc" }
 sleipnir-rpc-client = { path = "./sleipnir-rpc-client" }
 sleipnir-rpc-client-api = { path = "./sleipnir-rpc-client-api" }
+sleipnir-rpc-pubsub = { path = "./sleipnir-rpc-pubsub" }
 sleipnir-rpc-sender = { path = "./sleipnir-rpc-sender" }
 sleipnir-stage-banking = { path = "./sleipnir-stage-banking" }
 sleipnir-stage-verify = { path = "./sleipnir-stage-verify" }

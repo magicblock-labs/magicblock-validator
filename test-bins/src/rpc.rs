@@ -10,10 +10,9 @@ use geyser_grpc_proto::geyser::SubscribeRequestFilterAccounts;
 use log::*;
 use sleipnir_bank::{bank::Bank, genesis_utils::create_genesis_config};
 use sleipnir_rpc::{
-    json_rpc_request_processor::JsonRpcConfig,
-    json_rpc_service::JsonRpcService,
-    rpc_pubsub_service::{PubSubConfig, PubSubService},
+    json_rpc_request_processor::JsonRpcConfig, json_rpc_service::JsonRpcService,
 };
+use sleipnir_rpc_pubsub::pubsub_service::{RpcPubsubConfig, RpcPubsubService};
 use sleipnir_transaction_status::TransactionStatusSender;
 use solana_sdk::{signature::Keypair, signer::Signer};
 use test_tools::{
@@ -104,16 +103,14 @@ async fn main() {
     }
     // PubSub Service
     {
-        let config = PubSubConfig::default();
-        let pubsub_service = PubSubService::new(config);
-        let pubsub_socket =
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8900);
-        let _ = pubsub_service.listen(pubsub_socket).await.unwrap();
-        info!(
-            "Launched PubSubService service with pid {} at {:?}",
-            process::id(),
-            pubsub_socket
-        );
+        tokio::task::spawn_blocking(|| {
+            RpcPubsubService::new(RpcPubsubConfig::default())
+                .add_signature_subscribe()
+                .start()
+                .expect("Failed to start PubSub service");
+        })
+        .await
+        .expect("Task panicked")
     }
 
     {
