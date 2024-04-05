@@ -6,6 +6,7 @@ mod handlers;
 pub mod json_rpc_request_processor;
 pub mod json_rpc_service;
 mod rpc_health;
+pub mod rpc_pubsub_service;
 mod rpc_request_middleware;
 mod traits;
 mod transaction;

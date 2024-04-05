@@ -10,7 +10,9 @@ use geyser_grpc_proto::geyser::SubscribeRequestFilterAccounts;
 use log::*;
 use sleipnir_bank::{bank::Bank, genesis_utils::create_genesis_config};
 use sleipnir_rpc::{
-    json_rpc_request_processor::JsonRpcConfig, json_rpc_service::JsonRpcService,
+    json_rpc_request_processor::JsonRpcConfig,
+    json_rpc_service::JsonRpcService,
+    rpc_pubsub_service::{PubSubConfig, PubSubService},
 };
 use sleipnir_transaction_status::TransactionStatusSender;
 use solana_sdk::{signature::Keypair, signer::Signer};
@@ -66,8 +68,6 @@ async fn main() {
     fund_luzifer(&bank);
     let faucet_keypair = fund_faucet(&bank);
 
-    let rpc_socket =
-        SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8899);
     let tick_duration = Duration::from_millis(100);
     info!(
         "Adding Slot ticker for {}ms slots",
@@ -75,40 +75,68 @@ async fn main() {
     );
     init_slot_ticker(bank.clone(), tick_duration);
 
-    info!(
-        "Launching JSON RPC service with pid {} at {:?}",
-        process::id(),
-        rpc_socket
-    );
-    let config = JsonRpcConfig {
-        slot_duration: tick_duration,
-        transaction_status_sender: Some(TransactionStatusSender {
-            sender: transaction_sndr,
-        }),
-        ..Default::default()
-    };
+    // JSON RPC Service
+    {
+        let config = JsonRpcConfig {
+            slot_duration: tick_duration,
+            transaction_status_sender: Some(TransactionStatusSender {
+                sender: transaction_sndr,
+            }),
+            ..Default::default()
+        };
+        let rpc_socket =
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8899);
 
-    let account_subscription = {
-        let mut accounts = std::collections::HashMap::new();
-        accounts.insert(
-            "start".to_string(),
-            SubscribeRequestFilterAccounts {
-                account: vec![
-                    "SoLXmnP9JvL6vJ7TN1VqtTxqsc2izmPfF9CsMDEuRzJ".to_string()
-                ],
-                owner: vec![],
-                filters: vec![],
-            },
-        );
-        accounts
-    };
-    let sub_id = geyser_rpc_service.account_subscribe(account_subscription);
-    info!("Subscribed to account with id: {}", sub_id);
-
-    let _json_rpc_service =
-        JsonRpcService::new(rpc_socket, bank.clone(), faucet_keypair, config)
+        tokio::spawn(async move {
+            let _json_rpc_service = JsonRpcService::new(
+                rpc_socket,
+                bank.clone(),
+                faucet_keypair,
+                config,
+            )
             .unwrap();
-    info!("Launched JSON RPC service at {:?}", rpc_socket);
+        });
+        info!(
+            "Launched JSON RPC service with pid {} at {:?}",
+            process::id(),
+            rpc_socket
+        );
+    }
+    // PubSub Service
+    {
+        let config = PubSubConfig::default();
+        let pubsub_service = PubSubService::new(config);
+        let pubsub_socket =
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8900);
+        tokio::spawn(async move {
+            let _ = pubsub_service.listen(pubsub_socket).await.unwrap();
+        });
+        info!(
+            "Launched PubSubService service with pid {} at {:?}",
+            process::id(),
+            pubsub_socket
+        );
+    }
+
+    {
+        let account_subscription = {
+            let mut accounts = std::collections::HashMap::new();
+            accounts.insert(
+                "start".to_string(),
+                SubscribeRequestFilterAccounts {
+                    account: vec![
+                        "SoLXmnP9JvL6vJ7TN1VqtTxqsc2izmPfF9CsMDEuRzJ"
+                            .to_string(),
+                    ],
+                    owner: vec![],
+                    filters: vec![],
+                },
+            );
+            accounts
+        };
+        let sub_id = geyser_rpc_service.account_subscribe(account_subscription);
+        info!("Subscribed to account with id: {}", sub_id);
+    }
 }
 
 fn init_slot_ticker(bank: Arc<Bank>, tick_duration: Duration) {
