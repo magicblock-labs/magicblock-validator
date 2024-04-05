@@ -140,16 +140,22 @@ impl RpcPubsubService {
     }
 
     pub fn spawn(config: RpcPubsubConfig) {
-        info!(
-            "Launching PubSubService service with pid {} at {:?}",
-            std::process::id(),
-            config.socket()
-        );
+        let socket = format!("{:?}", config.socket());
+
+        // NOTE: using tokio task here results in service not listening
         std::thread::spawn(move || {
-            let _json_rpc_service = RpcPubsubService::new(config)
+            RpcPubsubService::new(config)
                 .add_signature_subscribe()
                 .start()
+                .unwrap()
+                .wait()
                 .unwrap();
         });
+
+        info!(
+            "Launched PubSubService service with pid {} at {}",
+            std::process::id(),
+            socket,
+        );
     }
 }
