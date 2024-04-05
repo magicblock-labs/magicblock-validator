@@ -95,92 +95,11 @@ impl RpcPubsubService {
                         }
                     };
                     debug!("{:#?}", signature_params);
-
-                    let sub = geyser_sub_for_transaction_signature(
-                        signature_params.signature().to_string(),
+                    handle_signature_subscribe(
+                        subscriber,
+                        signature_params,
+                        geyser_rpc_service.clone(),
                     );
-                    debug!("{:#?}", sub);
-
-                    let geyser_rpc_service = geyser_rpc_service.clone();
-
-                    let rt = match Builder::new_multi_thread()
-                        .thread_name("pubsubSignatureSubscribe")
-                        .enable_all()
-                        .build() {
-                            Ok(rt) => rt,
-                            Err(err) => {
-                                error!(
-                                    "Failed to create runtime for subscription: {:?}",
-                                    err
-                                );
-                                subscriber
-                                    .reject(jsonrpc_core::Error {
-                                        code: jsonrpc_core::ErrorCode::InternalError,
-                                        message: format!(
-                                            "Failed to create runtime for subscription: {:?}",
-                                            err
-                                        ),
-                                        data: None,
-                                    })
-                                    .unwrap();
-                                return;
-                            }
-                        };
-                    rt.block_on(async move {
-                        let sub_id = match geyser_rpc_service.transaction_subscribe(sub)
-                            {
-                                Ok(id) => id,
-                                Err(err) => {
-                                    error!(
-                                        "Failed to subscribe to signature: {:?}",
-                                        err
-                                    );
-                                    subscriber
-                                        .reject(jsonrpc_core::Error {
-                                            code: jsonrpc_core::ErrorCode::InvalidRequest,
-                                            message: format!("Could not convert to proper GRPC sub {:?}", err),
-                                            data: None,
-                                        })
-                                        .unwrap();
-                                    return;
-                                }
-                            };
-
-                        let sink = subscriber
-                            .assign_id(SubscriptionId::Number(sub_id))
-                            .unwrap();
-
-                        info!("Got sink");
-                        loop {
-                            let res = ResponseWithSubscriptionId {
-                                result: Response {
-                                    context: RpcResponseContext::new(0),
-                                    value:
-                                        RpcSignatureResult::ProcessedSignature(
-                                            ProcessedSignatureResult {
-                                                err: None,
-                                            },
-                                        ),
-                                },
-                                subscription: 0,
-                            };
-
-                            info!("Sending response: {:?}", res);
-                            match sink.notify(res.into_params_map()) {
-                                Ok(_) => {
-                                    tokio::time::sleep(
-                                        tokio::time::Duration::from_millis(1000),
-                                    ).await;
-                                }
-                                Err(_) => {
-                                    debug!(
-                                    "Subscription has ended, finishing."
-                                );
-                                    break;
-                                }
-                            }
-                        }
-                    });
                 },
             ),
             (
@@ -227,4 +146,93 @@ impl RpcPubsubService {
             socket,
         );
     }
+}
+
+// -----------------
+// Handlers
+// -----------------
+fn handle_signature_subscribe(
+    subscriber: Subscriber,
+    signature_params: SignatureParams,
+    geyser_rpc_service: Arc<GeyserRpcService>,
+) {
+    let sub = geyser_sub_for_transaction_signature(
+        signature_params.signature().to_string(),
+    );
+    debug!("{:#?}", sub);
+
+    let geyser_rpc_service = geyser_rpc_service.clone();
+
+    std::thread::spawn(move || {
+        let rt = match Builder::new_multi_thread()
+            .thread_name("pubsubSignatureSubscribe")
+            .enable_all()
+            .build()
+        {
+            Ok(rt) => rt,
+            Err(err) => {
+                error!("Failed to create runtime for subscription: {:?}", err);
+                subscriber
+                    .reject(jsonrpc_core::Error {
+                        code: jsonrpc_core::ErrorCode::InternalError,
+                        message: format!(
+                            "Failed to create runtime for subscription: {:?}",
+                            err
+                        ),
+                        data: None,
+                    })
+                    .unwrap();
+                return;
+            }
+        };
+        rt.block_on(async move {
+            let sub_id = match geyser_rpc_service.transaction_subscribe(sub) {
+                Ok(id) => id,
+                Err(err) => {
+                    error!("Failed to subscribe to signature: {:?}", err);
+                    subscriber
+                        .reject(jsonrpc_core::Error {
+                            code: jsonrpc_core::ErrorCode::InvalidRequest,
+                            message: format!(
+                                "Could not convert to proper GRPC sub {:?}",
+                                err
+                            ),
+                            data: None,
+                        })
+                        .unwrap();
+                    return;
+                }
+            };
+
+            let sink = subscriber
+                .assign_id(SubscriptionId::Number(sub_id))
+                .unwrap();
+
+            loop {
+                let res = ResponseWithSubscriptionId {
+                    result: Response {
+                        context: RpcResponseContext::new(0),
+                        value: RpcSignatureResult::ProcessedSignature(
+                            ProcessedSignatureResult { err: None },
+                        ),
+                    },
+                    subscription: sub_id,
+                };
+
+                info!("Sending response: {:?}", res);
+                match sink.notify(res.into_params_map()) {
+                    Ok(_) => {
+                        tokio::time::sleep(tokio::time::Duration::from_millis(
+                            5000,
+                        ))
+                        .await;
+                    }
+                    Err(_) => {
+                        debug!("Subscription has ended, finishing.");
+                        break;
+                    }
+                }
+            }
+        });
+    });
 }
