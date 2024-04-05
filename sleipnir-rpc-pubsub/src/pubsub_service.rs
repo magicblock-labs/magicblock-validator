@@ -1,7 +1,9 @@
 use jsonrpc_ws_server::{RequestContext, Server, ServerBuilder};
 use log::*;
 use serde_json::Value;
+use sleipnir_geyser_plugin::rpc::GeyserRpcService;
 use std::{net::SocketAddr, sync::Arc};
+use tokio::runtime::Builder;
 
 use jsonrpc_core::{futures, BoxFuture, MetaIoHandler, Params};
 use jsonrpc_pubsub::{PubSubHandler, Session, Subscriber, SubscriptionId};
@@ -14,7 +16,10 @@ use sleipnir_rpc_client_api::{
 };
 use solana_sdk::rpc_port::DEFAULT_RPC_PUBSUB_PORT;
 
-use crate::pubsub_types::{ResponseWithSubscriptionId, SignatureParams};
+use crate::{
+    conversions::geyser_sub_for_transaction_signature,
+    pubsub_types::{ResponseWithSubscriptionId, SignatureParams},
+};
 
 pub struct RpcPubsubConfig {
     socket: SocketAddr,
@@ -35,22 +40,31 @@ impl RpcPubsubConfig {
 }
 
 pub struct RpcPubsubService {
+    geyser_rpc_service: Arc<GeyserRpcService>,
     config: RpcPubsubConfig,
     io: PubSubHandler<Arc<Session>>,
 }
 
 impl RpcPubsubService {
-    pub fn new(config: RpcPubsubConfig) -> Self {
+    pub fn new(
+        config: RpcPubsubConfig,
+        geyser_rpc_service: Arc<GeyserRpcService>,
+    ) -> Self {
         let io = PubSubHandler::new(MetaIoHandler::default());
-        Self { config, io }
+        Self {
+            config,
+            io,
+            geyser_rpc_service,
+        }
     }
 
     pub fn add_signature_subscribe(mut self) -> Self {
+        let geyser_rpc_service = self.geyser_rpc_service.clone();
         self.io.add_subscription(
             "signatureNotification",
             (
                 "signatureSubscribe",
-                |params: Params, _, subscriber: Subscriber| {
+                move |params: Params, _, subscriber: Subscriber| {
                     if params == Params::None {
                         subscriber
                             .reject(jsonrpc_core::Error {
@@ -82,16 +96,31 @@ impl RpcPubsubService {
                     };
                     debug!("{:#?}", signature_params);
 
-                    std::thread::spawn(move || {
-                        let sink = subscriber
-                            .assign_id(SubscriptionId::Number(0))
-                            .unwrap();
+                    let sub = geyser_sub_for_transaction_signature(
+                        signature_params.signature().to_string(),
+                    );
+                    debug!("{:#?}", sub);
 
-                        loop {
-                            std::thread::sleep(
-                                std::time::Duration::from_millis(1000),
-                            );
-                            let res = ResponseWithSubscriptionId {
+                    let geyser_rpc_service = geyser_rpc_service.clone();
+
+                    Builder::new_current_thread()
+                        .thread_name("pubsubSignatureSubscribe")
+                        .enable_all()
+                        .build()
+                        .unwrap()
+                        .spawn(async move {
+                            let sub_id =
+                                geyser_rpc_service.transaction_subscribe(sub);
+
+                            let sink = subscriber
+                                .assign_id(SubscriptionId::Number(sub_id))
+                                .unwrap();
+
+                            loop {
+                                std::thread::sleep(
+                                    std::time::Duration::from_millis(1000),
+                                );
+                                let res = ResponseWithSubscriptionId {
                                 result: Response {
                                     context: RpcResponseContext::new(0),
                                     value:
@@ -104,17 +133,17 @@ impl RpcPubsubService {
                                 subscription: 0,
                             };
 
-                            match sink.notify(res.into_params_map()) {
-                                Ok(_) => {}
-                                Err(_) => {
-                                    debug!(
+                                match sink.notify(res.into_params_map()) {
+                                    Ok(_) => {}
+                                    Err(_) => {
+                                        debug!(
                                         "Subscription has ended, finishing."
                                     );
-                                    break;
+                                        break;
+                                    }
                                 }
                             }
-                        }
-                    });
+                        });
                 },
             ),
             (
@@ -139,12 +168,15 @@ impl RpcPubsubService {
         .start(&self.config.socket)
     }
 
-    pub fn spawn(config: RpcPubsubConfig) {
+    pub fn spawn(
+        config: RpcPubsubConfig,
+        geyser_rpc_service: Arc<GeyserRpcService>,
+    ) {
         let socket = format!("{:?}", config.socket());
 
         // NOTE: using tokio task here results in service not listening
         std::thread::spawn(move || {
-            RpcPubsubService::new(config)
+            RpcPubsubService::new(config, geyser_rpc_service)
                 .add_signature_subscribe()
                 .start()
                 .unwrap()

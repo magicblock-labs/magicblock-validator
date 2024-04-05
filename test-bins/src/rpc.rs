@@ -102,7 +102,10 @@ async fn main() {
         );
     }
     // PubSub Service
-    RpcPubsubService::spawn(RpcPubsubConfig::default());
+    RpcPubsubService::spawn(
+        RpcPubsubConfig::default(),
+        geyser_rpc_service.clone(),
+    );
 
     {
         let account_subscription = {

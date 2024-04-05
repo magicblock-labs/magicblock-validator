@@ -9,27 +9,22 @@ use sleipnir_rpc_client_api::{
 // AccountParams
 // -----------------
 #[derive(Serialize, Deserialize, Debug)]
-#[serde(untagged)]
-pub enum AccountParam {
-    Address(String),
-    Config(RpcAccountInfoConfig),
-}
-
-#[derive(Serialize, Deserialize, Debug)]
-pub struct AccountParams(pub Vec<AccountParam>);
+pub struct AccountParams((String, RpcAccountInfoConfig));
 
 // -----------------
-// SignatureParam
+// SignatureParams
 // -----------------
 #[derive(Serialize, Deserialize, Debug)]
-#[serde(untagged)]
-pub enum SignatureParam {
-    Address(String),
-    Config(RpcSignatureSubscribeConfig),
-}
+pub struct SignatureParams(String, RpcSignatureSubscribeConfig);
+impl SignatureParams {
+    pub fn signature(&self) -> &str {
+        &self.0
+    }
 
-#[derive(Serialize, Deserialize, Debug)]
-pub struct SignatureParams(pub Vec<SignatureParam>);
+    pub fn config(&self) -> &RpcSignatureSubscribeConfig {
+        &self.1
+    }
+}
 
 // -----------------
 // ResponseWithSubscriptionId
