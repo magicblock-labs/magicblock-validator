@@ -113,7 +113,7 @@ impl GeyserRpcService {
             String,
             SubscribeRequestFilterTransactions,
         >,
-    ) -> u64 {
+    ) -> anyhow::Result<u64> {
         let filter = Filter::new(
             &SubscribeRequest {
                 accounts: HashMap::new(),
@@ -128,10 +128,9 @@ impl GeyserRpcService {
             },
             &self.config.filters,
             self.config.normalize_commitment_level,
-        )
-        .expect("empty filter");
+        )?;
 
-        self.subscribe_impl(filter)
+        Ok(self.subscribe_impl(filter))
     }
 
     fn subscribe_impl(&self, filter: Filter) -> u64 {

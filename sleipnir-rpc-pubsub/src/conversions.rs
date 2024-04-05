@@ -6,7 +6,7 @@ pub fn geyser_sub_for_transaction_signature(
     signature: String,
 ) -> HashMap<String, SubscribeRequestFilterTransactions> {
     let tx_sub = SubscribeRequestFilterTransactions {
-        vote: None,
+        vote: Some(false),
         failed: None,
         signature: Some(signature),
         account_include: vec![],

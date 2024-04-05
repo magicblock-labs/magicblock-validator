@@ -49,7 +49,13 @@ impl Default for ConfigGrpc {
             channel_capacity: CHANNEL_CAPACITY_DEFAULT,
             unary_concurrency_limit: UNARY_CONCURRENCY_LIMIT_DEFAULT,
             unary_disabled: Default::default(),
-            filters: Default::default(),
+            filters: ConfigGrpcFilters {
+                transactions: ConfigGrpcFiltersTransactions {
+                    any: false,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
             normalize_commitment_level: true,
         }
     }
