@@ -126,9 +126,8 @@ impl RpcPubsubService {
                                 return;
                             }
                         };
-                    rt.spawn(async move {
-                            let sub_id = match geyser_rpc_service
-                                .transaction_subscribe(sub)
+                    rt.block_on(async move {
+                        let sub_id = match geyser_rpc_service.transaction_subscribe(sub)
                             {
                                 Ok(id) => id,
                                 Err(err) => {
@@ -147,15 +146,13 @@ impl RpcPubsubService {
                                 }
                             };
 
-                            let sink = subscriber
-                                .assign_id(SubscriptionId::Number(sub_id))
-                                .unwrap();
+                        let sink = subscriber
+                            .assign_id(SubscriptionId::Number(sub_id))
+                            .unwrap();
 
-                            loop {
-                                tokio::time::sleep(
-                                    tokio::time::Duration::from_millis(1000),
-                                ).await;
-                                let res = ResponseWithSubscriptionId {
+                        info!("Got sink");
+                        loop {
+                            let res = ResponseWithSubscriptionId {
                                 result: Response {
                                     context: RpcResponseContext::new(0),
                                     value:
@@ -168,17 +165,22 @@ impl RpcPubsubService {
                                 subscription: 0,
                             };
 
-                                match sink.notify(res.into_params_map()) {
-                                    Ok(_) => {}
-                                    Err(_) => {
-                                        debug!(
-                                        "Subscription has ended, finishing."
-                                    );
-                                        break;
-                                    }
+                            info!("Sending response: {:?}", res);
+                            match sink.notify(res.into_params_map()) {
+                                Ok(_) => {
+                                    tokio::time::sleep(
+                                        tokio::time::Duration::from_millis(1000),
+                                    ).await;
+                                }
+                                Err(_) => {
+                                    debug!(
+                                    "Subscription has ended, finishing."
+                                );
+                                    break;
                                 }
                             }
-                        });
+                        }
+                    });
                 },
             ),
             (
