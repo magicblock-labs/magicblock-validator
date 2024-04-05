@@ -20,7 +20,6 @@ use test_tools::{
     bank::bank_for_tests_with_paths,
     init_logger,
 };
-use tokio::runtime::Runtime;
 
 use crate::geyser::{init_geyser_service, GeyserTransactionNotifyListener};
 const LUZIFER: &str = "LuzifKo4E6QCF5r4uQmqbyko7zLS5WgayynivnCbtzk";
@@ -37,17 +36,14 @@ fn fund_faucet(bank: &Bank) -> Keypair {
     faucet
 }
 
-fn main() {
+#[tokio::main]
+async fn main() {
     init_logger!();
-    let rt = Runtime::new().unwrap();
 
     let genesis_config = create_genesis_config(u64::MAX).genesis_config;
-    let (geyser_service, geyser_rpc_service) = rt.block_on(async {
-        let (geyser_service, geyser_rpc_service) = init_geyser_service()
-            .await
-            .expect("Failed to init geyser service");
-        (geyser_service, geyser_rpc_service)
-    });
+    let (geyser_service, geyser_rpc_service) = init_geyser_service()
+        .await
+        .expect("Failed to init geyser service");
 
     let transaction_notifier = geyser_service
         .get_transaction_notifier()
@@ -90,7 +86,7 @@ fn main() {
         let rpc_socket =
             SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8899);
 
-        rt.spawn(async move {
+        tokio::spawn(async move {
             let _json_rpc_service = JsonRpcService::new(
                 rpc_socket,
                 bank.clone(),
@@ -105,39 +101,28 @@ fn main() {
             rpc_socket
         );
     }
-    /*
-        // PubSub Service
-        {
-            tokio::task::spawn_blocking(|| {
-                RpcPubsubService::new(RpcPubsubConfig::default())
-                    .add_signature_subscribe()
-                    .start()
-                    .expect("Failed to start PubSub service");
-            })
-            .await
-            .expect("Task panicked")
-        }
+    // PubSub Service
+    RpcPubsubService::spawn(RpcPubsubConfig::default());
 
-        {
-            let account_subscription = {
-                let mut accounts = std::collections::HashMap::new();
-                accounts.insert(
-                    "start".to_string(),
-                    SubscribeRequestFilterAccounts {
-                        account: vec![
-                            "SoLXmnP9JvL6vJ7TN1VqtTxqsc2izmPfF9CsMDEuRzJ"
-                                .to_string(),
-                        ],
-                        owner: vec![],
-                        filters: vec![],
-                    },
-                );
-                accounts
-            };
-            let sub_id = geyser_rpc_service.account_subscribe(account_subscription);
-            info!("Subscribed to account with id: {}", sub_id);
-        }
-    */
+    {
+        let account_subscription = {
+            let mut accounts = std::collections::HashMap::new();
+            accounts.insert(
+                "start".to_string(),
+                SubscribeRequestFilterAccounts {
+                    account: vec![
+                        "SoLXmnP9JvL6vJ7TN1VqtTxqsc2izmPfF9CsMDEuRzJ"
+                            .to_string(),
+                    ],
+                    owner: vec![],
+                    filters: vec![],
+                },
+            );
+            accounts
+        };
+        let sub_id = geyser_rpc_service.account_subscribe(account_subscription);
+        info!("Subscribed to account with id: {}", sub_id);
+    }
 }
 
 fn init_slot_ticker(bank: Arc<Bank>, tick_duration: Duration) {
