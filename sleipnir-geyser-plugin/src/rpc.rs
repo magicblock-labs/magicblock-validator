@@ -11,7 +11,7 @@ use tonic::{Result as TonicResult, Status};
 
 use geyser_grpc_proto::geyser::{
     CommitmentLevel, SubscribeRequest, SubscribeRequestFilterAccounts,
-    SubscribeUpdate,
+    SubscribeRequestFilterTransactions, SubscribeUpdate,
 };
 use tokio::sync::{broadcast, mpsc, Notify};
 
@@ -92,6 +92,33 @@ impl GeyserRpcService {
                 accounts: account_subscription,
                 slots: HashMap::new(),
                 transactions: HashMap::new(),
+                blocks: HashMap::new(),
+                blocks_meta: HashMap::new(),
+                entry: HashMap::new(),
+                commitment: None,
+                accounts_data_slice: Vec::new(),
+                ping: None,
+            },
+            &self.config.filters,
+            self.config.normalize_commitment_level,
+        )
+        .expect("empty filter");
+
+        self.subscribe_impl(filter)
+    }
+
+    pub fn transaction_subscribe(
+        &self,
+        transaction_subscription: HashMap<
+            String,
+            SubscribeRequestFilterTransactions,
+        >,
+    ) -> u64 {
+        let filter = Filter::new(
+            &SubscribeRequest {
+                accounts: HashMap::new(),
+                slots: HashMap::new(),
+                transactions: transaction_subscription,
                 blocks: HashMap::new(),
                 blocks_meta: HashMap::new(),
                 entry: HashMap::new(),
