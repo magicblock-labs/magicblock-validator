@@ -43,19 +43,46 @@ impl PubSubService {
         Self { config }
     }
 
+    pub fn listen_thread(&self, listen_address: SocketAddr) {
+        let thread_hdl = std::thread::Builder::new()
+            .name("solJsonRpcSvc".to_string())
+            .spawn(move || {
+                let listener =
+                    std::net::TcpListener::bind(listen_address).unwrap();
+                loop {
+                    eprintln!("Waiting for connection...");
+                    match listener.accept() {
+                        Ok((socket, addr)) => {
+                            info!("Accepted connection from: {:?}", addr);
+                        }
+                        Err(e) => error!("couldn't accept connection: {:?}", e),
+                    }
+                }
+            });
+    }
+
     pub async fn listen(&self, listen_address: SocketAddr) -> io::Result<()> {
         let listener = tokio::net::TcpListener::bind(&listen_address).await?;
-        loop {
-            eprintln!("Waiting for connection...");
-            tokio::select! {
-                result = listener.accept() => match result {
-                    Ok((socket, addr)) => {
-                        info!("Accepted connection from: {:?}", addr);
+
+        tokio::spawn(async move {
+            loop {
+                tokio::select! {
+                    result = listener.accept() => match result {
+                        Ok((socket, addr)) => {
+                            info!("Accepted connection from: {:?}", addr);
+                        }
+                        Err(e) => error!("couldn't accept connection: {:?}", e),
                     }
-                    Err(e) => error!("couldn't accept connection: {:?}", e),
+                    // TODO: tripwire
                 }
-                // TODO: tripwire
             }
-        }
+        })
+        // TODO(thlorenz): @@@ if I don't await here the listener does not accept any connections
+        // For now this is ok, but we may need into creating separate runtimes from the main
+        // validator binary instead of annotating main with #[tokio::main] (multithread flavor did
+        // not work either)
+        .await?;
+
+        Ok(())
     }
 }

@@ -108,9 +108,7 @@ async fn main() {
         let pubsub_service = PubSubService::new(config);
         let pubsub_socket =
             SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8900);
-        tokio::spawn(async move {
-            let _ = pubsub_service.listen(pubsub_socket).await.unwrap();
-        });
+        let _ = pubsub_service.listen(pubsub_socket).await.unwrap();
         info!(
             "Launched PubSubService service with pid {} at {:?}",
             process::id(),
