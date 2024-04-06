@@ -215,7 +215,7 @@ fn handle_signature_subscribe(
                         // TODO: handle errors
                         let update = update.unwrap();
                         let slot = slot_from_update(&update).unwrap_or(0);
-                        debug!("Received signature result: {:#?}", update);
+                        debug!("Received signature result: {:?}", update);
                         let res = ResponseWithSubscriptionId {
                             result: Response {
                                 context: RpcResponseContext::new(slot),
@@ -225,7 +225,7 @@ fn handle_signature_subscribe(
                             },
                             subscription: sub_id,
                         };
-                        info!("Sending response: {:?}", res);
+                        debug!("Sending response: {:?}", res);
                         if let Err(err) = sink.notify(res.into_params_map()) {
                             debug!(
                                 "Subscription has ended, finishing {:?}.",

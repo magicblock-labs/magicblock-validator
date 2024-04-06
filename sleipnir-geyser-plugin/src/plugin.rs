@@ -178,7 +178,7 @@ impl GeyserPlugin for GrpcGeyserPlugin {
             };
             // TODO(thlorenz): @@@ Aweful hack to allow subscribe _before_ we send out the
             // message
-            std::thread::sleep(Duration::from_secs(1));
+            std::thread::sleep(Duration::from_millis(20));
             debug!("tx: '{}'", transaction.signature);
 
             let message = Message::Transaction((transaction, slot).into());
