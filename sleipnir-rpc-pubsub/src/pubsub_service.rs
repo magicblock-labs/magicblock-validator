@@ -17,7 +17,7 @@ use sleipnir_rpc_client_api::{
 use solana_sdk::rpc_port::DEFAULT_RPC_PUBSUB_PORT;
 
 use crate::{
-    conversions::geyser_sub_for_transaction_signature,
+    conversions::{geyser_sub_for_transaction_signature, slot_from_update},
     pubsub_types::{ResponseWithSubscriptionId, SignatureParams},
 };
 
@@ -186,49 +186,56 @@ fn handle_signature_subscribe(
             }
         };
         rt.block_on(async move {
-            let sub_id = match geyser_rpc_service.transaction_subscribe(sub) {
-                Ok(id) => id,
-                Err(err) => {
-                    error!("Failed to subscribe to signature: {:?}", err);
-                    subscriber
-                        .reject(jsonrpc_core::Error {
-                            code: jsonrpc_core::ErrorCode::InvalidRequest,
-                            message: format!(
-                                "Could not convert to proper GRPC sub {:?}",
-                                err
-                            ),
-                            data: None,
-                        })
-                        .unwrap();
-                    return;
-                }
-            };
+            let (sub_id, mut rx) =
+                match geyser_rpc_service.transaction_subscribe(sub) {
+                    Ok(res) => res,
+                    Err(err) => {
+                        error!("Failed to subscribe to signature: {:?}", err);
+                        subscriber
+                            .reject(jsonrpc_core::Error {
+                                code: jsonrpc_core::ErrorCode::InvalidRequest,
+                                message: format!(
+                                    "Could not convert to proper GRPC sub {:?}",
+                                    err
+                                ),
+                                data: None,
+                            })
+                            .unwrap();
+                        return;
+                    }
+                };
 
             let sink = subscriber
                 .assign_id(SubscriptionId::Number(sub_id))
                 .unwrap();
 
             loop {
-                let res = ResponseWithSubscriptionId {
-                    result: Response {
-                        context: RpcResponseContext::new(0),
-                        value: RpcSignatureResult::ProcessedSignature(
-                            ProcessedSignatureResult { err: None },
-                        ),
-                    },
-                    subscription: sub_id,
-                };
-
-                info!("Sending response: {:?}", res);
-                match sink.notify(res.into_params_map()) {
-                    Ok(_) => {
-                        tokio::time::sleep(tokio::time::Duration::from_millis(
-                            5000,
-                        ))
-                        .await;
+                match rx.recv().await {
+                    Some(update) => {
+                        // TODO: handle errors
+                        let update = update.unwrap();
+                        let slot = slot_from_update(&update).unwrap_or(0);
+                        debug!("Received signature result: {:#?}", update);
+                        let res = ResponseWithSubscriptionId {
+                            result: Response {
+                                context: RpcResponseContext::new(slot),
+                                value: RpcSignatureResult::ProcessedSignature(
+                                    ProcessedSignatureResult { err: None },
+                                ),
+                            },
+                            subscription: sub_id,
+                        };
+                        info!("Sending response: {:?}", res);
+                        if let Err(err) = sink.notify(res.into_params_map()) {
+                            debug!(
+                                "Subscription has ended, finishing {:?}.",
+                                err
+                            );
+                            break;
+                        }
                     }
-                    Err(_) => {
-                        debug!("Subscription has ended, finishing.");
+                    None => {
+                        debug!("Underlying Subscription has ended, finishing.");
                         break;
                     }
                 }

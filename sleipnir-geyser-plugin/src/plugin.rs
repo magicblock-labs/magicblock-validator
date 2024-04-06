@@ -88,12 +88,9 @@ impl GrpcGeyserPlugin {
     where
         F: FnOnce(&PluginInner) -> PluginResult<()>,
     {
-        if let Some(inner) = self.inner.as_ref() {
-            f(inner)
-        } else {
-            // warn!("PluginInner is not initialized");
-            Ok(())
-        }
+        let inner =
+            self.inner.as_ref().expect("PluginInner is not initialized");
+        f(inner)
     }
 }
 
@@ -179,6 +176,10 @@ impl GeyserPlugin for GrpcGeyserPlugin {
                 }
                 ReplicaTransactionInfoVersions::V0_0_2(info) => info,
             };
+            // TODO(thlorenz): @@@ Aweful hack to allow subscribe _before_ we send out the
+            // message
+            std::thread::sleep(Duration::from_secs(1));
+            debug!("tx: '{}'", transaction.signature);
 
             let message = Message::Transaction((transaction, slot).into());
             inner.send_message(message);

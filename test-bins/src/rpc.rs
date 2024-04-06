@@ -107,25 +107,27 @@ async fn main() {
         geyser_rpc_service.clone(),
     );
 
-    {
-        let account_subscription = {
-            let mut accounts = std::collections::HashMap::new();
-            accounts.insert(
-                "start".to_string(),
-                SubscribeRequestFilterAccounts {
-                    account: vec![
-                        "SoLXmnP9JvL6vJ7TN1VqtTxqsc2izmPfF9CsMDEuRzJ"
-                            .to_string(),
-                    ],
-                    owner: vec![],
-                    filters: vec![],
-                },
-            );
-            accounts
-        };
-        let sub_id = geyser_rpc_service.account_subscribe(account_subscription);
-        info!("Subscribed to account with id: {}", sub_id);
-    }
+    /*
+        {
+            let account_subscription = {
+                let mut accounts = std::collections::HashMap::new();
+                accounts.insert(
+                    "start".to_string(),
+                    SubscribeRequestFilterAccounts {
+                        account: vec![
+                            "SoLXmnP9JvL6vJ7TN1VqtTxqsc2izmPfF9CsMDEuRzJ"
+                                .to_string(),
+                        ],
+                        owner: vec![],
+                        filters: vec![],
+                    },
+                );
+                accounts
+            };
+            let sub_id = geyser_rpc_service.account_subscribe(account_subscription);
+            info!("Subscribed to account with id: {}", sub_id);
+        }
+    */
 }
 
 fn init_slot_ticker(bank: Arc<Bank>, tick_duration: Duration) {

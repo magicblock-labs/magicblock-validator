@@ -4,6 +4,7 @@ use std::{
     collections::HashMap,
     sync::{
         atomic::{AtomicU64, Ordering},
+        mpsc::Receiver,
         Arc,
     },
 };
@@ -86,7 +87,8 @@ impl GeyserRpcService {
     pub fn account_subscribe(
         &self,
         account_subscription: HashMap<String, SubscribeRequestFilterAccounts>,
-    ) -> u64 {
+    ) -> anyhow::Result<(u64, mpsc::Receiver<Result<SubscribeUpdate, Status>>)>
+    {
         let filter = Filter::new(
             &SubscribeRequest {
                 accounts: account_subscription,
@@ -101,10 +103,9 @@ impl GeyserRpcService {
             },
             &self.config.filters,
             self.config.normalize_commitment_level,
-        )
-        .expect("empty filter");
+        )?;
 
-        self.subscribe_impl(filter)
+        Ok(self.subscribe_impl(filter))
     }
 
     pub fn transaction_subscribe(
@@ -113,7 +114,8 @@ impl GeyserRpcService {
             String,
             SubscribeRequestFilterTransactions,
         >,
-    ) -> anyhow::Result<u64> {
+    ) -> anyhow::Result<(u64, mpsc::Receiver<Result<SubscribeUpdate, Status>>)>
+    {
         let filter = Filter::new(
             &SubscribeRequest {
                 accounts: HashMap::new(),
@@ -133,22 +135,28 @@ impl GeyserRpcService {
         Ok(self.subscribe_impl(filter))
     }
 
-    fn subscribe_impl(&self, filter: Filter) -> u64 {
+    fn subscribe_impl(
+        &self,
+        filter: Filter,
+    ) -> (u64, mpsc::Receiver<Result<SubscribeUpdate, Status>>) {
         // NOTE: this would run for each subscription that comes in
         let id = self.next_id();
         let (stream_tx, mut stream_rx) =
             mpsc::channel(self.config.channel_capacity);
-        tokio::spawn(async move {
-            loop {
-                match stream_rx.recv().await {
-                    Some(msg) => {
-                        // TODO: here we would send to RPC sub
-                        debug!("client: #{id} -> {:?}", msg);
-                    }
-                    None => error!("empty message"),
-                }
-            }
-        });
+
+        // let mut stream_rx: mpsc::Receiver<Result<SubscribeUpdate, Status>> =
+        //     stream_rx;
+        // tokio::spawn(async move {
+        //     loop {
+        //         match stream_rx.recv().await {
+        //             Some(msg) => {
+        //                 // TODO: here we would send to RPC sub
+        //                 debug!("client: #{id} -> {:?}", msg);
+        //             }
+        //             None => error!("empty message"),
+        //         }
+        //     }
+        // });
 
         tokio::spawn(Self::client_loop(
             id,
@@ -157,7 +165,7 @@ impl GeyserRpcService {
             self.broadcast_tx.subscribe(),
         ));
 
-        id
+        (id, stream_rx)
     }
 
     async fn client_loop(
