@@ -75,7 +75,7 @@ async fn main() {
     init_slot_ticker(bank.clone(), tick_duration);
 
     // JSON RPC Service
-    {
+    let json_rpc_service = {
         let config = JsonRpcConfig {
             slot_duration: tick_duration,
             transaction_status_sender: Some(TransactionStatusSender {
@@ -86,7 +86,9 @@ async fn main() {
         let rpc_socket =
             SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8899);
 
-        tokio::spawn(async move {
+        // This service needs to run on its own thread as otherwise it affects
+        // other tokio runtimes, i.e. the one of the GeyserPlugin
+        let hdl = std::thread::spawn(move || {
             let _json_rpc_service = JsonRpcService::new(
                 rpc_socket,
                 bank.clone(),
@@ -100,34 +102,15 @@ async fn main() {
             process::id(),
             rpc_socket
         );
-    }
+        hdl
+    };
     // PubSub Service
     RpcPubsubService::spawn(
         RpcPubsubConfig::default(),
         geyser_rpc_service.clone(),
     );
 
-    /*
-        {
-            let account_subscription = {
-                let mut accounts = std::collections::HashMap::new();
-                accounts.insert(
-                    "start".to_string(),
-                    SubscribeRequestFilterAccounts {
-                        account: vec![
-                            "SoLXmnP9JvL6vJ7TN1VqtTxqsc2izmPfF9CsMDEuRzJ"
-                                .to_string(),
-                        ],
-                        owner: vec![],
-                        filters: vec![],
-                    },
-                );
-                accounts
-            };
-            let sub_id = geyser_rpc_service.account_subscribe(account_subscription);
-            info!("Subscribed to account with id: {}", sub_id);
-        }
-    */
+    json_rpc_service.join().unwrap();
 }
 
 fn init_slot_ticker(bank: Arc<Bank>, tick_duration: Duration) {
