@@ -21,6 +21,7 @@ sleipnir-transaction-status = { workspace = true }
 solana-geyser-plugin-interface = { workspace = true }
 solana-sdk = { workspace = true }
 spl-token-2022 = { workspace = true, features = ["no-entrypoint"] }
+stretto = { workspace = true, features = ["sync"] }
 tokio = { workspace = true, features = ["rt-multi-thread", "macros", "fs"] }
 tokio-stream = { workspace = true }
 tonic = { workspace = true, features = ["gzip", "tls", "tls-roots"] }

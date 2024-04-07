@@ -8,6 +8,10 @@ use std::{
     time::Duration,
 };
 
+use crate::{
+    config::Config, grpc::GrpcService, grpc_messages::Message,
+    rpc::GeyserRpcService,
+};
 use log::*;
 use solana_geyser_plugin_interface::geyser_plugin_interface::{
     GeyserPlugin, GeyserPluginError, ReplicaAccountInfoVersions,
@@ -15,14 +19,10 @@ use solana_geyser_plugin_interface::geyser_plugin_interface::{
     ReplicaTransactionInfoVersions, Result as PluginResult, SlotStatus,
 };
 use solana_sdk::{clock::Slot, pubkey::Pubkey};
+use stretto::Cache;
 use tokio::{
     runtime::{Builder, Runtime},
     sync::{mpsc, Notify},
-};
-
-use crate::{
-    config::Config, grpc::GrpcService, grpc_messages::Message,
-    rpc::GeyserRpcService,
 };
 
 // -----------------
@@ -38,6 +38,7 @@ pub struct PluginInner {
 
 impl PluginInner {
     fn send_message(&self, message: Message) {
+        // TODO: If we store + send Arc<Message> we can avoid cloning here
         let _ = self.grpc_channel.send(message.clone());
         let _ = self.rpc_channel.send(message);
     }
@@ -46,11 +47,22 @@ impl PluginInner {
 // -----------------
 // GrpcGeyserPlugin
 // -----------------
-#[derive(Debug)]
 pub struct GrpcGeyserPlugin {
     config: Config,
     inner: Option<PluginInner>,
     rpc_service: Arc<GeyserRpcService>,
+    transactions_cache: Cache<String, Message>,
+}
+
+impl std::fmt::Debug for GrpcGeyserPlugin {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GrpcGeyserPlugin")
+            .field("config", &self.config)
+            .field("inner", &self.inner)
+            .field("rpc_service", &self.rpc_service)
+            .field("transactions_cache_size", &self.transactions_cache.len())
+            .finish()
+    }
 }
 
 impl GrpcGeyserPlugin {
@@ -59,10 +71,22 @@ impl GrpcGeyserPlugin {
             GrpcService::create(config.grpc.clone(), config.block_fail_action)
                 .await
                 .map_err(GeyserPluginError::Custom)?;
+        let transactions_cache = {
+            // Dgraph's developers have seen good performance in setting this to 10x the number of
+            // items you expect to keep in the cache when full
+            let num_counters = 10_000;
+
+            // if max_cost is 100 and a new item with a cost of 1 increases total cache cost to
+            // 101, 1 item will be evicted
+            let max_cost = 10_000;
+            Cache::new(num_counters, max_cost)
+                .map_err(|err| GeyserPluginError::Custom(Box::new(err)))?
+        };
         let (rpc_channel, rpc_shutdown, rpc_service) =
             GeyserRpcService::create(
                 config.grpc.clone(),
                 config.block_fail_action,
+                transactions_cache.clone(),
             )
             .await
             .map_err(GeyserPluginError::Custom)?;
@@ -73,10 +97,12 @@ impl GrpcGeyserPlugin {
             rpc_channel,
             rpc_shutdown,
         });
+
         Ok(Self {
             config,
             inner,
             rpc_service,
+            transactions_cache,
         })
     }
 
@@ -91,6 +117,13 @@ impl GrpcGeyserPlugin {
         let inner =
             self.inner.as_ref().expect("PluginInner is not initialized");
         f(inner)
+    }
+
+    pub fn get_transaction(&self, signature: &str) -> Option<Message> {
+        self.transactions_cache
+            .get(signature)
+            .as_ref()
+            .map(|v| v.value().clone())
     }
 }
 
@@ -176,12 +209,21 @@ impl GeyserPlugin for GrpcGeyserPlugin {
                 }
                 ReplicaTransactionInfoVersions::V0_0_2(info) => info,
             };
-            // TODO(thlorenz): @@@ Aweful hack to allow subscribe _before_ we send out the
-            // message
-            std::thread::sleep(Duration::from_millis(20));
             debug!("tx: '{}'", transaction.signature);
 
             let message = Message::Transaction((transaction, slot).into());
+            self.transactions_cache.insert_with_ttl(
+                transaction.signature.to_string(),
+                // TODO: If we store + send Arc<Message> we can avoid cloning here
+                message.clone(),
+                1,
+                Duration::from_millis(500),
+            );
+
+            // We don't call transactions_cache.wait(); here which takes about 1ms
+            // to not slow down the plugin, however by the time a notification referring
+            // to this transaction comes in we expect this cache update to have gone through
+
             inner.send_message(message);
 
             Ok(())

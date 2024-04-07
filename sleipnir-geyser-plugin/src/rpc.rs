@@ -8,6 +8,7 @@ use std::{
         Arc,
     },
 };
+use stretto::Cache;
 use tonic::{Result as TonicResult, Status};
 
 use geyser_grpc_proto::geyser::{
@@ -23,18 +24,32 @@ use crate::{
     grpc_messages::{BlockMetaStorage, Message},
 };
 
-#[derive(Debug)]
 pub struct GeyserRpcService {
     grpc_service: GrpcService,
     config: ConfigGrpc,
     broadcast_tx: broadcast::Sender<(CommitmentLevel, Arc<Vec<Message>>)>,
     subscribe_id: AtomicU64,
+
+    transactions_cache: Cache<String, Message>,
+}
+
+impl std::fmt::Debug for GeyserRpcService {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("GeyserRpcService")
+            .field("grpc_service", &self.grpc_service)
+            .field("config", &self.config)
+            .field("broadcast_tx", &self.broadcast_tx)
+            .field("subscribe_id", &self.subscribe_id)
+            .field("transactions_cache_size", &self.transactions_cache.len())
+            .finish()
+    }
 }
 
 impl GeyserRpcService {
     pub async fn create(
         config: ConfigGrpc,
         block_fail_action: ConfigBlockFailAction,
+        transactions_cache: Cache<String, Message>,
     ) -> Result<
         (mpsc::UnboundedSender<Message>, Arc<Notify>, Self),
         Box<dyn std::error::Error + Send + Sync>,
@@ -60,6 +75,7 @@ impl GeyserRpcService {
                 blocks_meta,
                 broadcast_tx.clone(),
             ),
+            transactions_cache,
         };
 
         // Run geyser message loop
@@ -116,6 +132,7 @@ impl GeyserRpcService {
         >,
     ) -> anyhow::Result<(u64, mpsc::Receiver<Result<SubscribeUpdate, Status>>)>
     {
+        debug!("tx sub, cache size {}", self.transactions_cache.len());
         let filter = Filter::new(
             &SubscribeRequest {
                 accounts: HashMap::new(),
