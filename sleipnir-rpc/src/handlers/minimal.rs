@@ -24,9 +24,9 @@ impl Minimal for MinimalImpl {
         &self,
         meta: Self::Metadata,
         pubkey_str: String,
-        config: Option<RpcContextConfig>,
+        _config: Option<RpcContextConfig>,
     ) -> Result<RpcResponse<u64>> {
-        todo!("get_balance")
+        meta.get_balance(pubkey_str)
     }
 
     fn get_epoch_info(

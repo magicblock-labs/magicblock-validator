@@ -1,11 +1,12 @@
 #![allow(dead_code)]
 use std::{
+    str::FromStr,
     sync::{Arc, Mutex},
     time::Duration,
 };
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
-use jsonrpc_core::{Error, ErrorCode, Metadata, Result};
+use jsonrpc_core::{Error, ErrorCode, Metadata, Result, Value};
 use log::*;
 use sleipnir_bank::bank::Bank;
 use sleipnir_rpc_client_api::{
@@ -204,6 +205,16 @@ impl JsonRpcRequestProcessor {
             true => OptionalContext::Context(new_response(bank, accounts)),
             false => OptionalContext::NoContext(accounts),
         })
+    }
+
+    pub fn get_balance(&self, pubkey_str: String) -> Result<RpcResponse<u64>> {
+        let pubkey = Pubkey::from_str(&pubkey_str).map_err(|e| Error {
+            code: ErrorCode::InvalidParams,
+            message: format!("Invalid pubkey: {}", e),
+            data: Some(Value::String(pubkey_str)),
+        })?;
+        let balance = self.bank.get_balance(&pubkey);
+        Ok(new_response(&self.bank, balance))
     }
 
     // -----------------
