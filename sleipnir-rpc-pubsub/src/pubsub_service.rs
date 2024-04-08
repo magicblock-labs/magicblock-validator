@@ -3,7 +3,7 @@ use log::*;
 use serde_json::Value;
 use sleipnir_geyser_plugin::rpc::GeyserRpcService;
 use std::{net::SocketAddr, str::FromStr, sync::Arc};
-use tokio::runtime::Builder;
+use tokio::runtime::{Builder, Runtime};
 
 use jsonrpc_core::{futures, BoxFuture, MetaIoHandler, Params};
 use jsonrpc_pubsub::{PubSubHandler, Session, Subscriber, SubscriptionId};
@@ -130,8 +130,7 @@ impl RpcPubsubService {
     ) {
         let socket = format!("{:?}", config.socket());
 
-        // NOTE: using tokio task here results in service not listening
-        std::thread::spawn(move || {
+        tokio::spawn(async move {
             RpcPubsubService::new(config, geyser_rpc_service)
                 .add_signature_subscribe()
                 .start()
@@ -157,89 +156,125 @@ fn handle_signature_subscribe(
     geyser_rpc_service: Arc<GeyserRpcService>,
 ) {
     let geyser_rpc_service = geyser_rpc_service.clone();
-
     std::thread::spawn(move || {
-        let rt = match Builder::new_multi_thread()
-            .thread_name("pubsubSignatureSubscribe")
-            .enable_all()
-            .build()
+        if let Some((rt, subscriber)) =
+            try_create_subscription_runtime("subSignatureRt", subscriber)
         {
-            Ok(rt) => rt,
-            Err(err) => {
-                error!("Failed to create runtime for subscription: {:?}", err);
-                subscriber
-                    .reject(jsonrpc_core::Error {
-                        code: jsonrpc_core::ErrorCode::InternalError,
-                        message: format!(
-                            "Failed to create runtime for subscription: {:?}",
-                            err
-                        ),
-                        data: None,
-                    })
-                    .unwrap();
-                return;
-            }
-        };
-        rt.block_on(async move {
-            let sigstr = signature_params.signature();
-            let sub = geyser_sub_for_transaction_signature(sigstr.to_string());
-            // TODO: handle error here
-            let sig = Signature::from_str(sigstr).unwrap();
+            rt.block_on(async move {
+                let sigstr = signature_params.signature();
+                let sub =
+                    geyser_sub_for_transaction_signature(sigstr.to_string());
 
-            let (sub_id, mut rx) =
-                match geyser_rpc_service.transaction_subscribe(sub, &sig) {
-                    Ok(res) => res,
+                let sig = match Signature::from_str(sigstr) {
+                    Ok(sig) => sig,
                     Err(err) => {
-                        error!("Failed to subscribe to signature: {:?}", err);
-                        subscriber
-                            .reject(jsonrpc_core::Error {
-                                code: jsonrpc_core::ErrorCode::InvalidRequest,
-                                message: format!(
-                                    "Could not convert to proper GRPC sub {:?}",
-                                    err
-                                ),
-                                data: None,
-                            })
-                            .unwrap();
+                        reject_internal_error(
+                            subscriber,
+                            "Invalid Signature",
+                            err,
+                        );
                         return;
                     }
                 };
 
-            let sink = subscriber
-                .assign_id(SubscriptionId::Number(sub_id))
-                .unwrap();
+                let (sub_id, mut rx) =
+                    match geyser_rpc_service.transaction_subscribe(sub, &sig) {
+                        Ok(res) => res,
+                        Err(err) => {
+                            reject_internal_error(
+                                subscriber,
+                                "Failed to subscribe to signature",
+                                err,
+                            );
+                            return;
+                        }
+                    };
 
-            loop {
-                match rx.recv().await {
-                    Some(update) => {
-                        // TODO: handle errors
-                        let update = update.unwrap();
-                        let slot = slot_from_update(&update).unwrap_or(0);
-                        debug!("Received signature result: {:?}", update);
-                        let res = ResponseWithSubscriptionId {
-                            result: Response {
-                                context: RpcResponseContext::new(slot),
-                                value: RpcSignatureResult::ProcessedSignature(
-                                    ProcessedSignatureResult { err: None },
-                                ),
-                            },
-                            subscription: sub_id,
-                        };
-                        debug!("Sending response: {:?}", res);
-                        if let Err(err) = sink.notify(res.into_params_map()) {
+                let sink = subscriber
+                    .assign_id(SubscriptionId::Number(sub_id))
+                    .unwrap();
+
+                loop {
+                    match rx.recv().await {
+                        Some(update) => {
+                            // TODO: handle errors
+                            let update = update.unwrap();
+                            let slot = slot_from_update(&update).unwrap_or(0);
+                            debug!("Received signature result: {:?}", update);
+                            let res = ResponseWithSubscriptionId {
+                                result: Response {
+                                    context: RpcResponseContext::new(slot),
+                                    value:
+                                        RpcSignatureResult::ProcessedSignature(
+                                            ProcessedSignatureResult {
+                                                err: None,
+                                            },
+                                        ),
+                                },
+                                subscription: sub_id,
+                            };
+                            debug!("Sending response: {:?}", res);
+                            if let Err(err) = sink.notify(res.into_params_map())
+                            {
+                                debug!(
+                                    "Subscription has ended, finishing {:?}.",
+                                    err
+                                );
+                                break;
+                            }
+                        }
+                        None => {
                             debug!(
-                                "Subscription has ended, finishing {:?}.",
-                                err
+                                "Underlying Subscription has ended, finishing."
                             );
                             break;
                         }
                     }
-                    None => {
-                        debug!("Underlying Subscription has ended, finishing.");
-                        break;
-                    }
                 }
-            }
-        });
+            });
+        }
     });
+}
+
+// -----------------
+// Helpers
+// -----------------
+fn try_create_subscription_runtime(
+    name: &str,
+    subscriber: Subscriber,
+) -> Option<(Runtime, Subscriber)> {
+    match Builder::new_multi_thread()
+        .thread_name(name)
+        .enable_all()
+        .build()
+    {
+        Ok(rt) => Some((rt, subscriber)),
+        Err(err) => {
+            error!("Failed to create runtime for subscription: {:?}", err);
+            reject_internal_error(
+                subscriber,
+                "Failed to create runtime for subscription",
+                err,
+            );
+            None
+        }
+    }
+}
+
+fn reject_internal_error<T: std::fmt::Debug>(
+    subscriber: Subscriber,
+    msg: &str,
+    err: T,
+) -> Subscriber {
+    if let Err(reject_err) = subscriber.reject(jsonrpc_core::Error {
+        code: jsonrpc_core::ErrorCode::InternalError,
+        message: format!("{msg}: {:?}", err),
+        data: None,
+    }) {
+        error!(
+            "Failed to reject subscriber: {:?}, encountered {:?}",
+            err, reject_err
+        );
+    };
+    subscriber
 }
