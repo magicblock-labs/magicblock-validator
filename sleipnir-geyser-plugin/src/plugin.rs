@@ -71,17 +71,11 @@ impl GrpcGeyserPlugin {
             GrpcService::create(config.grpc.clone(), config.block_fail_action)
                 .await
                 .map_err(GeyserPluginError::Custom)?;
-        let transactions_cache = {
-            // Dgraph's developers have seen good performance in setting this to 10x the number of
-            // items you expect to keep in the cache when full
-            let num_counters = 10_000;
-
-            // if max_cost is 100 and a new item with a cost of 1 increases total cache cost to
-            // 101, 1 item will be evicted
-            let max_cost = 10_000;
-            Cache::new(num_counters, max_cost)
-                .map_err(|err| GeyserPluginError::Custom(Box::new(err)))?
-        };
+        let transactions_cache = Cache::new(
+            config.transactions_cache_num_counters,
+            config.transactions_cache_max_cost,
+        )
+        .map_err(|err| GeyserPluginError::Custom(Box::new(err)))?;
         let (rpc_channel, rpc_shutdown, rpc_service) =
             GeyserRpcService::create(
                 config.grpc.clone(),
@@ -209,7 +203,7 @@ impl GeyserPlugin for GrpcGeyserPlugin {
                 // TODO: If we store + send Arc<Message> we can avoid cloning here
                 message.clone(),
                 1,
-                Duration::from_millis(500),
+                self.config.transactions_cache_ttl,
             );
 
             // We don't call transactions_cache.wait(); here which takes about 1ms
