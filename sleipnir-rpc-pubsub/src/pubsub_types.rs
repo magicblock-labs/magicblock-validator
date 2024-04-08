@@ -21,6 +21,7 @@ impl SignatureParams {
         &self.0
     }
 
+    #[allow(unused)]
     pub fn config(&self) -> &RpcSignatureSubscribeConfig {
         &self.1
     }

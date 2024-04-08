@@ -1,5 +1,6 @@
 #![allow(unused)]
 use log::*;
+use solana_sdk::signature::Signature;
 use std::{
     collections::HashMap,
     sync::{
@@ -30,7 +31,7 @@ pub struct GeyserRpcService {
     broadcast_tx: broadcast::Sender<(CommitmentLevel, Arc<Vec<Message>>)>,
     subscribe_id: AtomicU64,
 
-    transactions_cache: Cache<String, Message>,
+    transactions_cache: Cache<Signature, Message>,
 }
 
 impl std::fmt::Debug for GeyserRpcService {
@@ -46,10 +47,11 @@ impl std::fmt::Debug for GeyserRpcService {
 }
 
 impl GeyserRpcService {
-    pub async fn create(
+    #[allow(clippy::type_complexity)]
+    pub fn create(
         config: ConfigGrpc,
         block_fail_action: ConfigBlockFailAction,
-        transactions_cache: Cache<String, Message>,
+        transactions_cache: Cache<Signature, Message>,
     ) -> Result<
         (mpsc::UnboundedSender<Message>, Arc<Notify>, Self),
         Box<dyn std::error::Error + Send + Sync>,
@@ -121,7 +123,7 @@ impl GeyserRpcService {
             self.config.normalize_commitment_level,
         )?;
 
-        Ok(self.subscribe_impl(filter))
+        Ok(self.subscribe_impl(filter, None))
     }
 
     pub fn transaction_subscribe(
@@ -130,6 +132,7 @@ impl GeyserRpcService {
             String,
             SubscribeRequestFilterTransactions,
         >,
+        signature: &Signature,
     ) -> anyhow::Result<(u64, mpsc::Receiver<Result<SubscribeUpdate, Status>>)>
     {
         debug!("tx sub, cache size {}", self.transactions_cache.len());
@@ -148,43 +151,40 @@ impl GeyserRpcService {
             &self.config.filters,
             self.config.normalize_commitment_level,
         )?;
+        let msgs = self
+            .transactions_cache
+            .get(signature)
+            .as_ref()
+            .map(|val| Arc::new(vec![val.value().clone()]));
+        let sub_update = self.subscribe_impl(filter, msgs);
 
-        Ok(self.subscribe_impl(filter))
+        Ok(sub_update)
     }
 
     fn subscribe_impl(
         &self,
         filter: Filter,
+        initial_messages: Option<Arc<Vec<Message>>>,
     ) -> (u64, mpsc::Receiver<Result<SubscribeUpdate, Status>>) {
-        // NOTE: this would run for each subscription that comes in
         let id = self.next_id();
         let (stream_tx, mut stream_rx) =
             mpsc::channel(self.config.channel_capacity);
-
-        // let mut stream_rx: mpsc::Receiver<Result<SubscribeUpdate, Status>> =
-        //     stream_rx;
-        // tokio::spawn(async move {
-        //     loop {
-        //         match stream_rx.recv().await {
-        //             Some(msg) => {
-        //                 // TODO: here we would send to RPC sub
-        //                 debug!("client: #{id} -> {:?}", msg);
-        //             }
-        //             None => error!("empty message"),
-        //         }
-        //     }
-        // });
 
         tokio::spawn(Self::client_loop(
             id,
             filter,
             stream_tx,
             self.broadcast_tx.subscribe(),
+            initial_messages,
         ));
 
         (id, stream_rx)
     }
 
+    /// Sends messages that could be interesting to the subscriber and then listend for more
+    /// messages.
+    /// By using the same transport as future messages we ensure to use the same logic WRT
+    /// filters.
     async fn client_loop(
         id: u64,
         mut filter: Filter,
@@ -193,7 +193,22 @@ impl GeyserRpcService {
             CommitmentLevel,
             Arc<Vec<Message>>,
         )>,
+        mut initial_messages: Option<Arc<Vec<Message>>>,
     ) {
+        // 1. Send initial messages that were cached from previous updates
+        if let Some(messages) = initial_messages.take() {
+            let exit = handle_messages(
+                id,
+                &filter,
+                filter.get_commitment_level(),
+                messages,
+                &stream_tx,
+            );
+            if exit {
+                return;
+            }
+        }
+        // 2. Listen for future updates
         'outer: loop {
             tokio::select! {
                 message = messages_rx.recv() => {
@@ -210,28 +225,45 @@ impl GeyserRpcService {
                             break 'outer;
                         }
                     };
-                    if commitment == filter.get_commitment_level() {
-                        for message in messages.iter() {
-                            for message in filter.get_update(message, Some(commitment)) {
-                                match stream_tx.try_send(Ok(message)) {
-                                    Ok(()) => {}
-                                    Err(mpsc::error::TrySendError::Full(_)) => {
-                                        error!("client #{id}: lagged to send update");
-                                         tokio::spawn(async move {
-                                             let _ = stream_tx.send(Err(Status::internal("lagged"))).await;
-                                         });
-                                        break 'outer;
-                                    }
-                                    Err(mpsc::error::TrySendError::Closed(_)) => {
-                                        error!("client #{id}: stream closed");
-                                        break 'outer;
-                                    }
-                                }
-                            }
-                        }
+                    let exit_loop = handle_messages(id, &filter, commitment, messages, &stream_tx);
+                    if exit_loop {
+                        break 'outer;
                     }
                 }
             }
         }
     }
+}
+
+fn handle_messages(
+    id: u64,
+    filter: &Filter,
+    commitment: CommitmentLevel,
+    messages: Arc<Vec<Message>>,
+    stream_tx: &mpsc::Sender<TonicResult<SubscribeUpdate>>,
+) -> bool {
+    if commitment == filter.get_commitment_level() {
+        for message in messages.iter() {
+            for message in filter.get_update(message, Some(commitment)) {
+                match stream_tx.try_send(Ok(message)) {
+                    Ok(()) => {}
+                    Err(mpsc::error::TrySendError::Full(_)) => {
+                        error!("client #{id}: lagged to send update");
+                        let stream_tx = stream_tx.clone();
+                        tokio::spawn(async move {
+                            let _ = stream_tx
+                                .send(Err(Status::internal("lagged")))
+                                .await;
+                        });
+                        return true;
+                    }
+                    Err(mpsc::error::TrySendError::Closed(_)) => {
+                        error!("client #{id}: stream closed");
+                        return true;
+                    }
+                }
+            }
+        }
+    }
+    false
 }

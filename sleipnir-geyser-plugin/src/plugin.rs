@@ -18,7 +18,7 @@ use solana_geyser_plugin_interface::geyser_plugin_interface::{
     ReplicaBlockInfoVersions, ReplicaEntryInfoVersions,
     ReplicaTransactionInfoVersions, Result as PluginResult, SlotStatus,
 };
-use solana_sdk::{clock::Slot, pubkey::Pubkey};
+use solana_sdk::{clock::Slot, pubkey::Pubkey, signature::Signature};
 use stretto::Cache;
 use tokio::{
     runtime::{Builder, Runtime},
@@ -51,7 +51,7 @@ pub struct GrpcGeyserPlugin {
     config: Config,
     inner: Option<PluginInner>,
     rpc_service: Arc<GeyserRpcService>,
-    transactions_cache: Cache<String, Message>,
+    transactions_cache: Cache<Signature, Message>,
 }
 
 impl std::fmt::Debug for GrpcGeyserPlugin {
@@ -88,7 +88,6 @@ impl GrpcGeyserPlugin {
                 config.block_fail_action,
                 transactions_cache.clone(),
             )
-            .await
             .map_err(GeyserPluginError::Custom)?;
         let rpc_service = Arc::new(rpc_service);
         let inner = Some(PluginInner {
@@ -117,13 +116,6 @@ impl GrpcGeyserPlugin {
         let inner =
             self.inner.as_ref().expect("PluginInner is not initialized");
         f(inner)
-    }
-
-    pub fn get_transaction(&self, signature: &str) -> Option<Message> {
-        self.transactions_cache
-            .get(signature)
-            .as_ref()
-            .map(|v| v.value().clone())
     }
 }
 
@@ -213,7 +205,7 @@ impl GeyserPlugin for GrpcGeyserPlugin {
 
             let message = Message::Transaction((transaction, slot).into());
             self.transactions_cache.insert_with_ttl(
-                transaction.signature.to_string(),
+                *transaction.signature,
                 // TODO: If we store + send Arc<Message> we can avoid cloning here
                 message.clone(),
                 1,
@@ -223,7 +215,6 @@ impl GeyserPlugin for GrpcGeyserPlugin {
             // We don't call transactions_cache.wait(); here which takes about 1ms
             // to not slow down the plugin, however by the time a notification referring
             // to this transaction comes in we expect this cache update to have gone through
-
             inner.send_message(message);
 
             Ok(())

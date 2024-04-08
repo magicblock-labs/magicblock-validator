@@ -2,7 +2,7 @@ use jsonrpc_ws_server::{RequestContext, Server, ServerBuilder};
 use log::*;
 use serde_json::Value;
 use sleipnir_geyser_plugin::rpc::GeyserRpcService;
-use std::{net::SocketAddr, sync::Arc};
+use std::{net::SocketAddr, str::FromStr, sync::Arc};
 use tokio::runtime::Builder;
 
 use jsonrpc_core::{futures, BoxFuture, MetaIoHandler, Params};
@@ -14,7 +14,7 @@ use sleipnir_rpc_client_api::{
         RpcSignatureResult,
     },
 };
-use solana_sdk::rpc_port::DEFAULT_RPC_PUBSUB_PORT;
+use solana_sdk::{rpc_port::DEFAULT_RPC_PUBSUB_PORT, signature::Signature};
 
 use crate::{
     conversions::{geyser_sub_for_transaction_signature, slot_from_update},
@@ -156,11 +156,6 @@ fn handle_signature_subscribe(
     signature_params: SignatureParams,
     geyser_rpc_service: Arc<GeyserRpcService>,
 ) {
-    let sub = geyser_sub_for_transaction_signature(
-        signature_params.signature().to_string(),
-    );
-    debug!("{:#?}", sub);
-
     let geyser_rpc_service = geyser_rpc_service.clone();
 
     std::thread::spawn(move || {
@@ -186,8 +181,13 @@ fn handle_signature_subscribe(
             }
         };
         rt.block_on(async move {
+            let sigstr = signature_params.signature();
+            let sub = geyser_sub_for_transaction_signature(sigstr.to_string());
+            // TODO: handle error here
+            let sig = Signature::from_str(sigstr).unwrap();
+
             let (sub_id, mut rx) =
-                match geyser_rpc_service.transaction_subscribe(sub) {
+                match geyser_rpc_service.transaction_subscribe(sub, &sig) {
                     Ok(res) => res,
                     Err(err) => {
                         error!("Failed to subscribe to signature: {:?}", err);

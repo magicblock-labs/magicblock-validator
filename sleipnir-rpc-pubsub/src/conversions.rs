@@ -25,7 +25,7 @@ pub fn slot_from_update(update: &SubscribeUpdate) -> Option<u64> {
     update.update_oneof.as_ref().map(|oneof| {
         use UpdateOneof::*;
         match oneof {
-            Account(acc) => todo!("slot_from_update.Account"),
+            Account(_) => todo!("slot_from_update.Account"),
             Slot(slot) => slot.slot,
             Transaction(tx) => tx.slot,
             Block(_) => todo!("slot_from_update.Block"),

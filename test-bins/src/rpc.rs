@@ -6,7 +6,6 @@ use std::{
 };
 
 use crossbeam_channel::unbounded;
-use geyser_grpc_proto::geyser::SubscribeRequestFilterAccounts;
 use log::*;
 use sleipnir_bank::{bank::Bank, genesis_utils::create_genesis_config};
 use sleipnir_rpc::{
