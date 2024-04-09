@@ -20,8 +20,9 @@ use solana_sdk::{
 
 use crate::{
     conversions::{
-        geyser_sub_for_account, geyser_sub_for_transaction_signature,
-        slot_from_update, subscribe_update_into_slot_response,
+        geyser_sub_for_account, geyser_sub_for_slot_update,
+        geyser_sub_for_transaction_signature, slot_from_update,
+        subscribe_update_into_slot_response,
         subscribe_update_try_into_ui_account,
     },
     pubsub_types::{
@@ -413,8 +414,9 @@ fn handle_slot_subscribe(
             try_create_subscription_runtime("slotSubRt", subscriber)
         {
             rt.block_on(async move {
+                let sub = geyser_sub_for_slot_update();
                 let (sub_id, mut rx) =
-                    match geyser_rpc_service.slot_subscribe() {
+                    match geyser_rpc_service.slot_subscribe(sub) {
                         Ok(res) => res,
                         Err(err) => {
                             reject_internal_error(
@@ -430,7 +432,6 @@ fn handle_slot_subscribe(
                     loop {
                         match rx.recv().await {
                             Some(Ok(update)) => {
-                                debug!("Received slot update: {:?}", update);
                                 let slot_response = match subscribe_update_into_slot_response(
                                     update,
                                 ) {
@@ -444,7 +445,7 @@ fn handle_slot_subscribe(
                                     slot_response,
                                     sub_id,
                                 );
-                                debug!("Sending response: {:?}", res);
+                                trace!("Sending Slot update response: {:?}", res);
                                 if let Err(err) = sink.notify(res.into_params_map())
                                 {
                                     debug!(

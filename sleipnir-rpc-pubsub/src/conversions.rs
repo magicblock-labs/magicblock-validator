@@ -2,8 +2,8 @@ use std::collections::HashMap;
 
 use geyser_grpc_proto::geyser::{
     subscribe_update::UpdateOneof, SubscribeRequestFilterAccounts,
-    SubscribeRequestFilterTransactions, SubscribeUpdate,
-    SubscribeUpdateAccount,
+    SubscribeRequestFilterSlots, SubscribeRequestFilterTransactions,
+    SubscribeUpdate, SubscribeUpdateAccount,
 };
 use sleipnir_rpc_client_api::config::{
     UiAccount, UiAccountEncoding, UiDataSliceConfig,
@@ -38,6 +38,16 @@ pub fn geyser_sub_for_account(
     };
     let mut map = HashMap::new();
     map.insert("account".to_string(), account_sub);
+    map
+}
+
+pub fn geyser_sub_for_slot_update(
+) -> HashMap<String, SubscribeRequestFilterSlots> {
+    let slot_sub = SubscribeRequestFilterSlots {
+        filter_by_commitment: Some(false),
+    };
+    let mut map = HashMap::new();
+    map.insert("slot".to_string(), slot_sub);
     map
 }
 

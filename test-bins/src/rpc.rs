@@ -59,6 +59,7 @@ async fn main() {
         let bank = bank_for_tests_with_paths(
             &genesis_config,
             geyser_service.get_accounts_update_notifier(),
+            geyser_service.get_slot_status_notifier(),
             vec!["/tmp/sleipnir-rpc-bin"],
         );
         Arc::new(bank)

@@ -17,6 +17,7 @@ use geyser_grpc_proto::geyser::{
     SubscribeRequestFilterTransactions, SubscribeUpdate,
 };
 use tokio::sync::{broadcast, mpsc, Notify};
+use geyser_grpc_proto::prelude::{SubscribeRequestFilterSlots, SubscribeUpdateSlot};
 
 use crate::{
     config::{ConfigBlockFailAction, ConfigGrpc},
@@ -174,13 +175,14 @@ impl GeyserRpcService {
 
     pub fn slot_subscribe(
         &self,
+        slot_subscription: HashMap<String, SubscribeRequestFilterSlots>,
     ) -> anyhow::Result<(u64, mpsc::Receiver<Result<SubscribeUpdate, Status>>)>
     {
         // We don't filter by slot for the RPC interface
         let filter = Filter::new(
             &SubscribeRequest {
                 accounts: HashMap::new(),
-                slots: HashMap::new(),
+                slots: slot_subscription,
                 transactions: HashMap::new(),
                 blocks: HashMap::new(),
                 blocks_meta: HashMap::new(),
