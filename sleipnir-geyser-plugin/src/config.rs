@@ -22,6 +22,13 @@ pub struct Config {
     /// if max_cost is 100 and a new item with a cost of 1 increases total cache cost to
     /// 101, 1 item will be evicted
     pub transactions_cache_max_cost: i64,
+
+    /// TTL of cached account messages
+    pub accounts_cache_ttl: Duration,
+    /// See [Config::transactions_cache_num_counters].
+    pub accounts_cache_num_counters: usize,
+    /// See [Config::transactions_cache_max_cost].
+    pub accounts_cache_max_cost: i64,
 }
 
 impl Default for Config {
@@ -30,12 +37,14 @@ impl Default for Config {
             grpc: Default::default(),
             block_fail_action: Default::default(),
             transactions_cache_ttl: Duration::from_millis(500),
-
             // Dgraph's developers have seen good performance in setting this to 10x the number of
             // items you expect to keep in the cache when full
             transactions_cache_num_counters: 10_000,
-
             transactions_cache_max_cost: 10_000,
+
+            accounts_cache_ttl: Duration::from_millis(500),
+            accounts_cache_num_counters: 10_000,
+            accounts_cache_max_cost: 10_000,
         }
     }
 }

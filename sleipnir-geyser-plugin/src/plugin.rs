@@ -52,6 +52,7 @@ pub struct GrpcGeyserPlugin {
     inner: Option<PluginInner>,
     rpc_service: Arc<GeyserRpcService>,
     transactions_cache: Cache<Signature, Message>,
+    accounts_cache: Cache<Pubkey, Message>,
 }
 
 impl std::fmt::Debug for GrpcGeyserPlugin {
@@ -61,6 +62,7 @@ impl std::fmt::Debug for GrpcGeyserPlugin {
             .field("inner", &self.inner)
             .field("rpc_service", &self.rpc_service)
             .field("transactions_cache_size", &self.transactions_cache.len())
+            .field("accounts_cache_size", &self.accounts_cache.len())
             .finish()
     }
 }
@@ -76,11 +78,19 @@ impl GrpcGeyserPlugin {
             config.transactions_cache_max_cost,
         )
         .map_err(|err| GeyserPluginError::Custom(Box::new(err)))?;
+
+        let accounts_cache = Cache::new(
+            config.accounts_cache_num_counters,
+            config.accounts_cache_max_cost,
+        )
+        .map_err(|err| GeyserPluginError::Custom(Box::new(err)))?;
+
         let (rpc_channel, rpc_shutdown, rpc_service) =
             GeyserRpcService::create(
                 config.grpc.clone(),
                 config.block_fail_action,
                 transactions_cache.clone(),
+                accounts_cache.clone(),
             )
             .map_err(GeyserPluginError::Custom)?;
         let rpc_service = Arc::new(rpc_service);
@@ -96,6 +106,7 @@ impl GrpcGeyserPlugin {
             inner,
             rpc_service,
             transactions_cache,
+            accounts_cache,
         })
     }
 
@@ -160,8 +171,24 @@ impl GeyserPlugin for GrpcGeyserPlugin {
                 }
                 ReplicaAccountInfoVersions::V0_0_3(info) => info,
             };
-            let message = Message::Account((account, slot, is_startup).into());
-            inner.send_message(message);
+
+            match Pubkey::try_from(account.pubkey) {
+                Ok(pubkey) => {
+                    let message =
+                        Message::Account((account, slot, is_startup).into());
+                    self.accounts_cache.insert_with_ttl(
+                        pubkey,
+                        message.clone(),
+                        1,
+                        self.config.accounts_cache_ttl,
+                    );
+                    inner.send_message(message);
+                }
+                Err(err) => error!(
+                    "Encountered invalid pubkey for account update: {}",
+                    err
+                ),
+            };
 
             Ok(())
         })

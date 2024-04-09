@@ -1,6 +1,6 @@
 #![allow(unused)]
 use log::*;
-use solana_sdk::signature::Signature;
+use solana_sdk::{pubkey::Pubkey, signature::Signature};
 use std::{
     collections::HashMap,
     sync::{
@@ -32,6 +32,7 @@ pub struct GeyserRpcService {
     subscribe_id: AtomicU64,
 
     transactions_cache: Cache<Signature, Message>,
+    accounts_cache: Cache<Pubkey, Message>,
 }
 
 impl std::fmt::Debug for GeyserRpcService {
@@ -52,6 +53,7 @@ impl GeyserRpcService {
         config: ConfigGrpc,
         block_fail_action: ConfigBlockFailAction,
         transactions_cache: Cache<Signature, Message>,
+        accounts_cache: Cache<Pubkey, Message>,
     ) -> Result<
         (mpsc::UnboundedSender<Message>, Arc<Notify>, Self),
         Box<dyn std::error::Error + Send + Sync>,
@@ -78,6 +80,7 @@ impl GeyserRpcService {
                 broadcast_tx.clone(),
             ),
             transactions_cache,
+            accounts_cache,
         };
 
         // Run geyser message loop
@@ -102,9 +105,10 @@ impl GeyserRpcService {
         self.subscribe_id.fetch_add(1, Ordering::SeqCst)
     }
 
-    pub fn account_subscribe(
+    pub fn accounts_subscribe(
         &self,
         account_subscription: HashMap<String, SubscribeRequestFilterAccounts>,
+        pubkey: &Pubkey,
     ) -> anyhow::Result<(u64, mpsc::Receiver<Result<SubscribeUpdate, Status>>)>
     {
         let filter = Filter::new(
@@ -123,7 +127,14 @@ impl GeyserRpcService {
             self.config.normalize_commitment_level,
         )?;
 
-        Ok(self.subscribe_impl(filter, None))
+        let msgs = self
+            .accounts_cache
+            .get(pubkey)
+            .as_ref()
+            .map(|val| Arc::new(vec![val.value().clone()]));
+        let sub_update = self.subscribe_impl(filter, msgs);
+
+        Ok(sub_update)
     }
 
     pub fn transaction_subscribe(
