@@ -2,7 +2,7 @@ use jsonrpc_core::Params;
 use serde::{Deserialize, Serialize};
 use sleipnir_rpc_client_api::{
     config::{RpcAccountInfoConfig, RpcSignatureSubscribeConfig},
-    response::Response,
+    response::{Response, RpcResponseContext},
 };
 
 // -----------------
@@ -32,8 +32,21 @@ impl SignatureParams {
 // -----------------
 #[derive(Serialize, Debug)]
 pub struct ResponseWithSubscriptionId<T: Serialize> {
-    pub result: Response<T>,
+    pub response: Response<T>,
     pub subscription: u64,
+}
+
+impl<T: Serialize> ResponseWithSubscriptionId<T> {
+    pub fn new(result: T, slot: u64, subscription: u64) -> Self {
+        let response = Response {
+            context: RpcResponseContext::new(slot),
+            value: result,
+        };
+        Self {
+            response,
+            subscription,
+        }
+    }
 }
 
 impl<T: Serialize> ResponseWithSubscriptionId<T> {
@@ -41,7 +54,7 @@ impl<T: Serialize> ResponseWithSubscriptionId<T> {
         let mut map = serde_json::Map::new();
         map.insert(
             "result".to_string(),
-            serde_json::to_value(self.result).unwrap(),
+            serde_json::to_value(self.response).unwrap(),
         );
         map.insert(
             "subscription".to_string(),
