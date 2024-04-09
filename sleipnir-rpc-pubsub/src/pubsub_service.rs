@@ -4,7 +4,10 @@ use serde::de::DeserializeOwned;
 use serde_json::Value;
 use sleipnir_geyser_plugin::rpc::GeyserRpcService;
 use std::{net::SocketAddr, str::FromStr, sync::Arc};
-use tokio::runtime::{Builder, Runtime};
+use tokio::{
+    runtime::{Builder, Runtime},
+    sync::broadcast,
+};
 
 use jsonrpc_core::{futures, BoxFuture, MetaIoHandler, Params};
 use jsonrpc_pubsub::{
@@ -53,6 +56,7 @@ pub struct RpcPubsubService {
     geyser_rpc_service: Arc<GeyserRpcService>,
     config: RpcPubsubConfig,
     io: PubSubHandler<Arc<Session>>,
+    unsub_tx: Arc<broadcast::Sender<u64>>,
 }
 
 impl RpcPubsubService {
@@ -61,10 +65,13 @@ impl RpcPubsubService {
         geyser_rpc_service: Arc<GeyserRpcService>,
     ) -> Self {
         let io = PubSubHandler::new(MetaIoHandler::default());
+        let (unsub_tx, _) = broadcast::channel(100);
+        let unsub_tx = Arc::new(unsub_tx);
         Self {
             config,
             io,
             geyser_rpc_service,
+            unsub_tx,
         }
     }
 
@@ -145,9 +152,9 @@ impl RpcPubsubService {
     }
 
     fn add_slot_subscribe(mut self) -> Self {
-        let geyser_rpc_service = self.geyser_rpc_service.clone();
-        self.io.add_subscription(
-            "slotNotification",
+        let subscribe = {
+            let geyser_rpc_service = self.geyser_rpc_service.clone();
+            let unsub_tx = self.unsub_tx.clone();
             (
                 "slotSubscribe",
                 move |params: Params, _, subscriber: Subscriber| {
@@ -157,19 +164,41 @@ impl RpcPubsubService {
                             None => return,
                         };
 
-                    handle_slot_subscribe(subscriber, &geyser_rpc_service);
+                    handle_slot_subscribe(
+                        subscriber,
+                        &geyser_rpc_service,
+                        unsub_tx.subscribe(),
+                    );
                 },
-            ),
+            )
+        };
+        let unsubscribe = {
+            let unsub_tx = self.unsub_tx.clone();
             (
                 "slotUnsubscribe",
-                |id: SubscriptionId,
-                 _meta|
-                 -> BoxFuture<jsonrpc_core::Result<Value>> {
-                    debug!("Closing subscription {:?}", id);
+                move |id: SubscriptionId,
+                    _meta|
+                    -> BoxFuture<jsonrpc_core::Result<Value>> {
+                    match id {
+                        SubscriptionId::Number(id) => {
+                            let _ = unsub_tx.send(id).map_err(|err| {
+                                error!(
+                                    "Failed to send unsubscription signal: {:?}",
+                                    err
+                                )
+                            });
+                        }
+                        SubscriptionId::String(_) => {
+                            unreachable!("We only create subs with numbers")
+                        }
+                    }
                     Box::pin(futures::future::ready(Ok(Value::Bool(true))))
                 },
-            ),
-        );
+            )
+        };
+
+        self.io
+            .add_subscription("slotNotification", subscribe, unsubscribe);
         self
     }
 
@@ -407,6 +436,7 @@ fn handle_signature_subscribe(
 fn handle_slot_subscribe(
     subscriber: Subscriber,
     geyser_rpc_service: &Arc<GeyserRpcService>,
+    mut unsub_rx: broadcast::Receiver<u64>,
 ) {
     let geyser_rpc_service = geyser_rpc_service.clone();
     std::thread::spawn(move || {
@@ -430,45 +460,59 @@ fn handle_slot_subscribe(
 
                 if let Some(sink) = assign_sub_id(subscriber, sub_id) {
                     loop {
-                        match rx.recv().await {
-                            Some(Ok(update)) => {
-                                let slot_response = match subscribe_update_into_slot_response(
-                                    update,
-                                ) {
-                                    Some(slot_response) => slot_response,
+                        tokio::select! {
+                            val = rx.recv() => {
+                                match val {
+                                    Some(Ok(update)) => {
+                                        let slot_response = match subscribe_update_into_slot_response(
+                                            update,
+                                        ) {
+                                            Some(slot_response) => slot_response,
+                                            None => {
+                                                debug!("No slot in update, skipping.");
+                                                continue;
+                                            }
+                                        };
+                                        let res = ReponseNoContextWithSubscriptionId::new(
+                                            slot_response,
+                                            sub_id,
+                                        );
+                                        trace!("Sending Slot update response: {:?}", res);
+                                        if let Err(err) = sink.notify(res.into_params_map())
+                                        {
+                                            debug!(
+                                                "Subscription has ended, finishing {:?}.",
+                                                err
+                                            );
+                                            break;
+                                        }
+                                    }
+                                    Some(Err(status)) => {
+                                        let failed_to_notify = sink_notify_error(&sink, format!(
+                                            "Failed to receive signature update: {:?}",
+                                            status
+                                        ));
+                                        if failed_to_notify {
+                                            break;
+                                        }
+                                    }
                                     None => {
-                                        debug!("No slot in update, skipping.");
-                                        continue;
+                                        debug!(
+                                            "Underlying Subscription has ended, finishing."
+                                        );
+                                        break;
                                     }
                                 };
-                                let res = ReponseNoContextWithSubscriptionId::new(
-                                    slot_response,
-                                    sub_id,
-                                );
-                                trace!("Sending Slot update response: {:?}", res);
-                                if let Err(err) = sink.notify(res.into_params_map())
-                                {
-                                    debug!(
-                                        "Subscription has ended, finishing {:?}.",
-                                        err
-                                    );
-                                    break;
-                                }
                             }
-                            Some(Err(status)) => {
-                                let failed_to_notify = sink_notify_error(&sink, format!(
-                                    "Failed to receive signature update: {:?}",
-                                    status
-                                ));
-                                if failed_to_notify {
-                                    break;
+                            val = unsub_rx.recv() => {
+                                match val {
+                                    Ok(id) if id == sub_id => {
+                                        debug!("Received unsubscription request for: {:?}", id);
+                                        break;
+                                    },
+                                    Err(err) => debug!("Failed to receive unsubscription signal: {:?}", err),
+                                    _ => {}
                                 }
-                            }
-                            None => {
-                                debug!(
-                                    "Underlying Subscription has ended, finishing."
-                                );
-                                break;
                             }
                         }
                     }
