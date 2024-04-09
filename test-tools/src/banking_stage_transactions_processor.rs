@@ -53,7 +53,7 @@ impl BankingStageTransactionsProcessor {
     pub fn new(config: BankingStageTransactionsProcessorConfig) -> Self {
         let GenesisConfigInfo { genesis_config, .. } =
             create_genesis_config(u64::MAX);
-        let bank = bank_for_tests(&genesis_config, None);
+        let bank = bank_for_tests(&genesis_config, None, None);
         let bank = Arc::new(bank);
 
         Self { config, bank }

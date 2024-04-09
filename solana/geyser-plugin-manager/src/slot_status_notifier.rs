@@ -1,6 +1,7 @@
 use {
     crate::geyser_plugin_manager::GeyserPluginManager,
     log::*,
+    sleipnir_bank::slot_status_notifier_interface::SlotStatusNotifier,
     solana_geyser_plugin_interface::geyser_plugin_interface::SlotStatus,
     solana_measure::measure::Measure,
     solana_metrics::*,
@@ -8,43 +9,22 @@ use {
     std::sync::{Arc, RwLock},
 };
 
-pub trait SlotStatusNotifierInterface {
-    /// Notified when a slot is optimistically confirmed
-    fn notify_slot_confirmed(&self, slot: Slot, parent: Option<Slot>);
-
-    /// Notified when a slot is marked frozen.
-    fn notify_slot_processed(&self, slot: Slot, parent: Option<Slot>);
-
-    /// Notified when a slot is rooted.
-    fn notify_slot_rooted(&self, slot: Slot, parent: Option<Slot>);
-}
-
-pub type SlotStatusNotifier = Arc<RwLock<dyn SlotStatusNotifierInterface + Sync + Send>>;
-
+#[derive(Debug)]
 pub struct SlotStatusNotifierImpl {
     plugin_manager: Arc<RwLock<GeyserPluginManager>>,
-}
-
-impl SlotStatusNotifierInterface for SlotStatusNotifierImpl {
-    fn notify_slot_confirmed(&self, slot: Slot, parent: Option<Slot>) {
-        self.notify_slot_status(slot, parent, SlotStatus::Confirmed);
-    }
-
-    fn notify_slot_processed(&self, slot: Slot, parent: Option<Slot>) {
-        self.notify_slot_status(slot, parent, SlotStatus::Processed);
-    }
-
-    fn notify_slot_rooted(&self, slot: Slot, parent: Option<Slot>) {
-        self.notify_slot_status(slot, parent, SlotStatus::Rooted);
-    }
 }
 
 impl SlotStatusNotifierImpl {
     pub fn new(plugin_manager: Arc<RwLock<GeyserPluginManager>>) -> Self {
         Self { plugin_manager }
     }
+}
 
-    pub fn notify_slot_status(&self, slot: Slot, parent: Option<Slot>, slot_status: SlotStatus) {
+impl SlotStatusNotifier for SlotStatusNotifierImpl {
+    fn notify_slot_status(&self, slot: Slot, parent: Option<Slot>) {
+        // We use a single bank only
+        let slot_status: SlotStatus = SlotStatus::Processed;
+
         let plugin_manager = self.plugin_manager.read().unwrap();
         if plugin_manager.plugins.is_empty() {
             return;

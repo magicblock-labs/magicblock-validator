@@ -96,7 +96,8 @@ fn test_banking_stage_shutdown1() {
     init_logger!();
 
     let genesis_config_info = create_genesis_config(u64::MAX);
-    let bank = Bank::new_for_tests(&genesis_config_info.genesis_config, None);
+    let bank =
+        Bank::new_for_tests(&genesis_config_info.genesis_config, None, None);
     let bank = Arc::new(bank);
 
     let banking_tracer = BankingTracer::new_disabled();
@@ -123,7 +124,7 @@ fn test_banking_stage_with_transaction_status_sender_tracking_signatures() {
 
     let GenesisConfigInfo { genesis_config, .. } =
         create_genesis_config(u64::MAX);
-    let bank = Bank::new_for_tests(&genesis_config, None);
+    let bank = Bank::new_for_tests(&genesis_config, None, None);
     let start_hash = bank.last_blockhash();
     let bank = Arc::new(bank);
 
@@ -222,7 +223,7 @@ fn test_banking_stage_transfer_from_non_existing_account() {
 
     let GenesisConfigInfo { genesis_config, .. } =
         create_genesis_config(u64::MAX);
-    let bank = Bank::new_for_tests(&genesis_config, None);
+    let bank = Bank::new_for_tests(&genesis_config, None, None);
     let start_hash = bank.last_blockhash();
     let bank = Arc::new(bank);
 
@@ -366,7 +367,7 @@ fn run_bench_transactions(
     info!("{:#?}", config);
     let GenesisConfigInfo { genesis_config, .. } =
         create_genesis_config(u64::MAX);
-    let bank = Bank::new_for_tests(&genesis_config, None);
+    let bank = Bank::new_for_tests(&genesis_config, None, None);
     let start_hash = bank.last_blockhash();
     let bank = Arc::new(bank);
 

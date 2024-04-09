@@ -99,6 +99,7 @@ use crate::{
     bank_rc::BankRc,
     builtins::{BuiltinPrototype, BUILTINS},
     consts::LAMPORTS_PER_SIGNATURE,
+    slot_status_notifier_interface::SlotStatusNotifierArc,
     status_cache::StatusCache,
     transaction_batch::TransactionBatch,
     transaction_logs::{
@@ -273,6 +274,11 @@ pub struct Bank {
     // Cost
     // -----------------
     cost_tracker: RwLock<CostTracker>,
+
+    // -----------------
+    // Geyser
+    // -----------------
+    slot_status_notifier: Option<SlotStatusNotifierArc>,
 }
 
 // -----------------
@@ -377,6 +383,7 @@ impl Bank {
         debug_do_not_add_builtins: bool,
         accounts_db_config: Option<AccountsDbConfig>,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
+        slot_status_notifier: Option<SlotStatusNotifierArc>,
         #[allow(unused)] collector_id_for_tests: Option<Pubkey>,
         exit: Arc<AtomicBool>,
     ) -> Self {
@@ -395,6 +402,7 @@ impl Bank {
         bank.ancestors = RwLock::new(Ancestors::from(vec![bank.slot()]));
         bank.transaction_debug_keys = debug_keys;
         bank.runtime_config = runtime_config;
+        bank.slot_status_notifier = slot_status_notifier;
 
         #[cfg(not(feature = "dev-context-only-utils"))]
         bank.process_genesis_config(genesis_config);
@@ -499,6 +507,9 @@ impl Bank {
 
             // Synchronization
             hash: RwLock::<Hash>::default(),
+
+            // Geyser
+            slot_status_notifier: Option::<SlotStatusNotifierArc>::default(),
         };
 
         bank.transaction_processor =
@@ -668,6 +679,12 @@ impl Bank {
             &blockhash,
             self.fee_rate_governor.lamports_per_signature,
         );
+
+        // 7. Notify Geyser Service
+        if let Some(slot_status_notifier) = &self.slot_status_notifier {
+            slot_status_notifier
+                .notify_slot_status(next_slot, Some(next_slot - 1));
+        }
     }
 
     pub fn epoch(&self) -> Epoch {

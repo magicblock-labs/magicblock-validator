@@ -692,7 +692,7 @@ mod tests {
         solana_logger::setup();
         let GenesisConfigInfo { genesis_config, .. } =
             create_genesis_config(10);
-        let bank = Arc::new(Bank::new_for_tests(&genesis_config, None));
+        let bank = Arc::new(Bank::new_for_tests(&genesis_config, None, None));
 
         let keypair = Keypair::new();
         let transfer_tx = SanitizedTransaction::from_transaction_for_tests(
@@ -742,7 +742,7 @@ mod tests {
         solana_logger::setup();
         let GenesisConfigInfo { genesis_config, .. } =
             create_genesis_config(10);
-        let bank = Arc::new(Bank::new_for_tests(&genesis_config, None));
+        let bank = Arc::new(Bank::new_for_tests(&genesis_config, None, None));
 
         // make some transfer transactions
         // calculate their costs, apply to cost_tracker
@@ -834,7 +834,7 @@ mod tests {
         solana_logger::setup();
         let GenesisConfigInfo { genesis_config, .. } =
             create_genesis_config(10);
-        let bank = Arc::new(Bank::new_for_tests(&genesis_config, None));
+        let bank = Arc::new(Bank::new_for_tests(&genesis_config, None, None));
 
         // make some transfer transactions
         // calculate their costs, apply to cost_tracker
@@ -900,7 +900,7 @@ mod tests {
         solana_logger::setup();
         let GenesisConfigInfo { genesis_config, .. } =
             create_genesis_config(10);
-        let bank = Arc::new(Bank::new_for_tests(&genesis_config, None));
+        let bank = Arc::new(Bank::new_for_tests(&genesis_config, None, None));
 
         // make some transfer transactions
         // calculate their costs, apply to cost_tracker

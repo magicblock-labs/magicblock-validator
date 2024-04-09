@@ -2,7 +2,8 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use sleipnir_bank::{
-    bank::Bank, transaction_logs::TransactionLogCollectorFilter,
+    bank::Bank, slot_status_notifier_interface::SlotStatusNotifierArc,
+    transaction_logs::TransactionLogCollectorFilter,
 };
 use solana_accounts_db::{
     accounts_db::{AccountShrinkThreshold, ACCOUNTS_DB_CONFIG_FOR_TESTING},
@@ -20,6 +21,7 @@ use solana_svm::runtime_config::RuntimeConfig;
 pub fn bank_for_tests_with_paths(
     genesis_config: &GenesisConfig,
     accounts_update_notifier: Option<AccountsUpdateNotifier>,
+    slot_status_notifier: Option<SlotStatusNotifierArc>,
     paths: Vec<&str>,
 ) -> Bank {
     let shrink_ratio = AccountShrinkThreshold::default();
@@ -39,6 +41,7 @@ pub fn bank_for_tests_with_paths(
         false,
         Some(ACCOUNTS_DB_CONFIG_FOR_TESTING),
         accounts_update_notifier,
+        slot_status_notifier,
         Some(Pubkey::new_unique()),
         Arc::default(),
     );
@@ -52,6 +55,12 @@ pub fn bank_for_tests_with_paths(
 pub fn bank_for_tests(
     genesis_config: &GenesisConfig,
     accounts_update_notifier: Option<AccountsUpdateNotifier>,
+    slot_status_notifier: Option<SlotStatusNotifierArc>,
 ) -> Bank {
-    bank_for_tests_with_paths(genesis_config, accounts_update_notifier, vec![])
+    bank_for_tests_with_paths(
+        genesis_config,
+        accounts_update_notifier,
+        slot_status_notifier,
+        vec![],
+    )
 }

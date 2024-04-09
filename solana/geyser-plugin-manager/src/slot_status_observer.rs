@@ -1,7 +1,7 @@
 use {
     crate::slot_status_notifier::SlotStatusNotifier,
     crossbeam_channel::Receiver,
-    solana_rpc::optimistically_confirmed_bank_tracker::SlotNotification,
+    solana_sdk::clock::Slot,
     std::{
         sync::{
             atomic::{AtomicBool, Ordering},
@@ -19,17 +19,19 @@ pub(crate) struct SlotStatusObserver {
 
 impl SlotStatusObserver {
     pub fn new(
-        bank_notification_receiver: Receiver<SlotNotification>,
+        bank_notification_receiver: Receiver<Slot>,
         slot_status_notifier: SlotStatusNotifier,
     ) -> Self {
         let exit_updated_slot_server = Arc::new(AtomicBool::new(false));
 
         Self {
-            bank_notification_receiver_service: Some(Self::run_bank_notification_receiver(
-                bank_notification_receiver,
-                exit_updated_slot_server.clone(),
-                slot_status_notifier,
-            )),
+            bank_notification_receiver_service: Some(
+                Self::run_bank_notification_receiver(
+                    bank_notification_receiver,
+                    exit_updated_slot_server.clone(),
+                    slot_status_notifier,
+                ),
+            ),
             exit_updated_slot_server,
         }
     }
@@ -43,7 +45,7 @@ impl SlotStatusObserver {
     }
 
     fn run_bank_notification_receiver(
-        bank_notification_receiver: Receiver<SlotNotification>,
+        bank_notification_receiver: Receiver<Slot>,
         exit: Arc<AtomicBool>,
         slot_status_notifier: SlotStatusNotifier,
     ) -> JoinHandle<()> {
@@ -52,26 +54,15 @@ impl SlotStatusObserver {
             .spawn(move || {
                 while !exit.load(Ordering::Relaxed) {
                     if let Ok(slot) = bank_notification_receiver.recv() {
-                        match slot {
-                            SlotNotification::OptimisticallyConfirmed(slot) => {
-                                slot_status_notifier
-                                    .read()
-                                    .unwrap()
-                                    .notify_slot_confirmed(slot, None);
-                            }
-                            SlotNotification::Frozen((slot, parent)) => {
-                                slot_status_notifier
-                                    .read()
-                                    .unwrap()
-                                    .notify_slot_processed(slot, Some(parent));
-                            }
-                            SlotNotification::Root((slot, parent)) => {
-                                slot_status_notifier
-                                    .read()
-                                    .unwrap()
-                                    .notify_slot_rooted(slot, Some(parent));
-                            }
-                        }
+                        // We simplified the implementation here since we only have a single bank
+                        // The original implementation was considering OptimisticallyConfirmed,
+                        // Frozen, Root
+                        let parent_slot =
+                            if slot > 0 { Some(slot - 1) } else { None };
+                        slot_status_notifier
+                            .read()
+                            .unwrap()
+                            .notify_slot_confirmed(slot, parent_slot);
                     }
                 }
             })

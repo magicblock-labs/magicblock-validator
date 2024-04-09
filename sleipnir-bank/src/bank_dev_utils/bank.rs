@@ -20,7 +20,8 @@ use solana_sdk::{
 use solana_svm::runtime_config::RuntimeConfig;
 
 use crate::{
-    bank::Bank, transaction_batch::TransactionBatch,
+    bank::Bank, slot_status_notifier_interface::SlotStatusNotifierArc,
+    transaction_batch::TransactionBatch,
     transaction_logs::TransactionLogCollectorFilter,
 };
 
@@ -39,11 +40,13 @@ impl Bank {
     pub fn new_for_tests(
         genesis_config: &GenesisConfig,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
+        slot_status_notifier: Option<SlotStatusNotifierArc>,
     ) -> Self {
         Self::new_for_tests_with_config(
             genesis_config,
             BankTestConfig::default(),
             accounts_update_notifier,
+            slot_status_notifier,
         )
     }
 
@@ -51,12 +54,14 @@ impl Bank {
         genesis_config: &GenesisConfig,
         test_config: BankTestConfig,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
+        slot_status_notifier: Option<SlotStatusNotifierArc>,
     ) -> Self {
         Self::new_with_config_for_tests(
             genesis_config,
             test_config.secondary_indexes,
             AccountShrinkThreshold::default(),
             accounts_update_notifier,
+            slot_status_notifier,
         )
     }
 
@@ -65,6 +70,7 @@ impl Bank {
         account_indexes: AccountSecondaryIndexes,
         shrink_ratio: AccountShrinkThreshold,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
+        slot_status_notifier: Option<SlotStatusNotifierArc>,
     ) -> Self {
         Self::new_with_paths_for_tests(
             genesis_config,
@@ -73,6 +79,7 @@ impl Bank {
             account_indexes,
             shrink_ratio,
             accounts_update_notifier,
+            slot_status_notifier,
         )
     }
 
@@ -83,6 +90,7 @@ impl Bank {
         account_indexes: AccountSecondaryIndexes,
         shrink_ratio: AccountShrinkThreshold,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
+        slot_status_notifier: Option<SlotStatusNotifierArc>,
     ) -> Self {
         let bank = Self::new_with_paths(
             genesis_config,
@@ -95,6 +103,7 @@ impl Bank {
             false,
             Some(ACCOUNTS_DB_CONFIG_FOR_TESTING),
             accounts_update_notifier,
+            slot_status_notifier,
             Some(Pubkey::new_unique()),
             Arc::default(),
         );

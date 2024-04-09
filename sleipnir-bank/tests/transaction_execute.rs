@@ -29,7 +29,7 @@ fn test_bank_system_transfer_instruction() {
     init_logger!();
 
     let (genesis_config, _) = create_genesis_config(u64::MAX);
-    let bank = Bank::new_for_tests(&genesis_config, None);
+    let bank = Bank::new_for_tests(&genesis_config, None, None);
 
     let (tx, from, to) = create_system_transfer_transaction(
         &bank,
@@ -78,7 +78,7 @@ fn test_bank_system_allocate_instruction() {
     init_logger!();
 
     let (genesis_config, _) = create_genesis_config(u64::MAX);
-    let bank = Bank::new_for_tests(&genesis_config, None);
+    let bank = Bank::new_for_tests(&genesis_config, None, None);
 
     const SPACE: u64 = 100;
     let rent: u64 = Rent::default().minimum_balance(SPACE as usize);
@@ -124,7 +124,7 @@ fn test_bank_one_noop_instruction() {
     init_logger!();
 
     let (genesis_config, _) = create_genesis_config(u64::MAX);
-    let bank = Bank::new_for_tests(&genesis_config, None);
+    let bank = Bank::new_for_tests(&genesis_config, None, None);
     add_elf_program(&bank, &elfs::noop::ID);
 
     let tx = create_noop_transaction(&bank);
@@ -138,7 +138,7 @@ fn test_bank_solx_instructions() {
 
     // 1. Init Bank and load solanax program
     let (genesis_config, _) = create_genesis_config(u64::MAX);
-    let bank = Bank::new_for_tests(&genesis_config, None);
+    let bank = Bank::new_for_tests(&genesis_config, None, None);
     add_elf_program(&bank, &elfs::solanax::ID);
 
     // 2. Prepare Transaction and advance slot to activate solanax program
@@ -188,7 +188,7 @@ fn test_bank_sysvars_get() {
     init_logger!();
 
     let (genesis_config, _) = create_genesis_config(u64::MAX);
-    let bank = Bank::new_for_tests(&genesis_config, None);
+    let bank = Bank::new_for_tests(&genesis_config, None, None);
     add_elf_program(&bank, &elfs::sysvars::ID);
     let tx = create_sysvars_get_transaction(&bank);
     bank.advance_slot();
@@ -200,7 +200,7 @@ fn test_bank_sysvars_from_account() {
     init_logger!();
 
     let (genesis_config, _) = create_genesis_config(u64::MAX);
-    let bank = Bank::new_for_tests(&genesis_config, None);
+    let bank = Bank::new_for_tests(&genesis_config, None, None);
     add_elf_program(&bank, &elfs::sysvars::ID);
     let tx = create_sysvars_from_account_transaction(&bank);
     bank.advance_slot();
