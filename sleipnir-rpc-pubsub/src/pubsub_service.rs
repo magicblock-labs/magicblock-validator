@@ -21,10 +21,12 @@ use solana_sdk::{
 use crate::{
     conversions::{
         geyser_sub_for_account, geyser_sub_for_transaction_signature,
-        slot_from_update, subscribe_update_try_into_ui_account,
+        slot_from_update, subscribe_update_into_slot_response,
+        subscribe_update_try_into_ui_account,
     },
     pubsub_types::{
-        AccountParams, ResponseWithSubscriptionId, SignatureParams,
+        AccountParams, ReponseNoContextWithSubscriptionId,
+        ResponseWithSubscriptionId, SignatureParams,
     },
 };
 
@@ -141,6 +143,35 @@ impl RpcPubsubService {
         self
     }
 
+    fn add_slot_subscribe(mut self) -> Self {
+        let geyser_rpc_service = self.geyser_rpc_service.clone();
+        self.io.add_subscription(
+            "slotNotification",
+            (
+                "slotSubscribe",
+                move |params: Params, _, subscriber: Subscriber| {
+                    let subscriber =
+                        match ensure_empty_params(subscriber, &params) {
+                            Some(subscriber) => subscriber,
+                            None => return,
+                        };
+
+                    handle_slot_subscribe(subscriber, &geyser_rpc_service);
+                },
+            ),
+            (
+                "slotUnsubscribe",
+                |id: SubscriptionId,
+                 _meta|
+                 -> BoxFuture<jsonrpc_core::Result<Value>> {
+                    debug!("Closing subscription {:?}", id);
+                    Box::pin(futures::future::ready(Ok(Value::Bool(true))))
+                },
+            ),
+        );
+        self
+    }
+
     #[allow(clippy::result_large_err)]
     pub fn start(self) -> jsonrpc_ws_server::Result<Server> {
         ServerBuilder::with_meta_extractor(
@@ -160,6 +191,7 @@ impl RpcPubsubService {
             RpcPubsubService::new(config, geyser_rpc_service)
                 .add_signature_subscribe()
                 .add_account_subscribe()
+                .add_slot_subscribe()
                 .start()
                 .unwrap()
                 .wait()
@@ -177,7 +209,6 @@ impl RpcPubsubService {
 // -----------------
 // Handlers
 // -----------------
-#[allow(unused)]
 fn handle_account_subscribe(
     subscriber: Subscriber,
     account_params: AccountParams,
@@ -372,6 +403,80 @@ fn handle_signature_subscribe(
     });
 }
 
+fn handle_slot_subscribe(
+    subscriber: Subscriber,
+    geyser_rpc_service: &Arc<GeyserRpcService>,
+) {
+    let geyser_rpc_service = geyser_rpc_service.clone();
+    std::thread::spawn(move || {
+        if let Some((rt, subscriber)) =
+            try_create_subscription_runtime("slotSubRt", subscriber)
+        {
+            rt.block_on(async move {
+                let (sub_id, mut rx) =
+                    match geyser_rpc_service.slot_subscribe() {
+                        Ok(res) => res,
+                        Err(err) => {
+                            reject_internal_error(
+                                subscriber,
+                                "Failed to subscribe to slot",
+                                Some(err),
+                            );
+                            return;
+                        }
+                    };
+
+                if let Some(sink) = assign_sub_id(subscriber, sub_id) {
+                    loop {
+                        match rx.recv().await {
+                            Some(Ok(update)) => {
+                                debug!("Received slot update: {:?}", update);
+                                let slot_response = match subscribe_update_into_slot_response(
+                                    update,
+                                ) {
+                                    Some(slot_response) => slot_response,
+                                    None => {
+                                        debug!("No slot in update, skipping.");
+                                        continue;
+                                    }
+                                };
+                                let res = ReponseNoContextWithSubscriptionId::new(
+                                    slot_response,
+                                    sub_id,
+                                );
+                                debug!("Sending response: {:?}", res);
+                                if let Err(err) = sink.notify(res.into_params_map())
+                                {
+                                    debug!(
+                                        "Subscription has ended, finishing {:?}.",
+                                        err
+                                    );
+                                    break;
+                                }
+                            }
+                            Some(Err(status)) => {
+                                let failed_to_notify = sink_notify_error(&sink, format!(
+                                    "Failed to receive signature update: {:?}",
+                                    status
+                                ));
+                                if failed_to_notify {
+                                    break;
+                                }
+                            }
+                            None => {
+                                debug!(
+                                    "Underlying Subscription has ended, finishing."
+                                );
+                                break;
+                            }
+                        }
+                    }
+                }
+            })
+        }
+    });
+}
+
 // -----------------
 // Helpers
 // -----------------
@@ -406,6 +511,22 @@ fn ensure_params(
         None
     } else {
         Some(subscriber)
+    }
+}
+
+fn ensure_empty_params(
+    subscriber: Subscriber,
+    params: &Params,
+) -> Option<Subscriber> {
+    if params == &Params::None {
+        Some(subscriber)
+    } else {
+        reject_parse_error(
+            subscriber,
+            "Parameters should be empty",
+            None::<()>,
+        );
+        None
     }
 }
 

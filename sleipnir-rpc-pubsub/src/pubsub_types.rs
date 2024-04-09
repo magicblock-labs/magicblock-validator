@@ -55,6 +55,51 @@ impl SignatureParams {
 }
 
 // -----------------
+// SlotResponse
+// -----------------
+#[derive(Serialize, Debug)]
+pub struct SlotResponse {
+    pub parent: u64,
+    pub root: u64,
+    pub slot: u64,
+}
+
+// -----------------
+// ReponseNoContextWithSubscriptionId
+// -----------------
+#[derive(Serialize, Debug)]
+pub struct ReponseNoContextWithSubscriptionId<T: Serialize> {
+    pub response: T,
+    pub subscription: u64,
+}
+
+impl<T: Serialize> ReponseNoContextWithSubscriptionId<T> {
+    pub fn new(result: T, subscription: u64) -> Self {
+        Self {
+            response: result,
+            subscription,
+        }
+    }
+
+    fn into_value_map(self) -> serde_json::Map<String, serde_json::Value> {
+        let mut map = serde_json::Map::new();
+        map.insert(
+            "result".to_string(),
+            serde_json::to_value(self.response).unwrap(),
+        );
+        map.insert(
+            "subscription".to_string(),
+            serde_json::to_value(self.subscription).unwrap(),
+        );
+        map
+    }
+
+    pub fn into_params_map(self) -> Params {
+        Params::Map(self.into_value_map())
+    }
+}
+
+// -----------------
 // ResponseWithSubscriptionId
 // -----------------
 #[derive(Serialize, Debug)]

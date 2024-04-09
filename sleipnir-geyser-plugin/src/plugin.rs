@@ -9,7 +9,9 @@ use std::{
 };
 
 use crate::{
-    config::Config, grpc::GrpcService, grpc_messages::Message,
+    config::Config,
+    grpc::GrpcService,
+    grpc_messages::{Message, MessageSlot},
     rpc::GeyserRpcService,
 };
 use log::*;
@@ -205,7 +207,11 @@ impl GeyserPlugin for GrpcGeyserPlugin {
         parent: Option<u64>,
         status: SlotStatus,
     ) -> PluginResult<()> {
-        Ok(())
+        self.with_inner(|inner| {
+            let message = Message::Slot((slot, parent, status).into());
+            inner.send_message(message);
+            Ok(())
+        })
     }
 
     fn notify_transaction(

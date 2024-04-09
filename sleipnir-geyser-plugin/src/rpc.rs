@@ -172,6 +172,31 @@ impl GeyserRpcService {
         Ok(sub_update)
     }
 
+    pub fn slot_subscribe(
+        &self,
+    ) -> anyhow::Result<(u64, mpsc::Receiver<Result<SubscribeUpdate, Status>>)>
+    {
+        // We don't filter by slot for the RPC interface
+        let filter = Filter::new(
+            &SubscribeRequest {
+                accounts: HashMap::new(),
+                slots: HashMap::new(),
+                transactions: HashMap::new(),
+                blocks: HashMap::new(),
+                blocks_meta: HashMap::new(),
+                entry: HashMap::new(),
+                commitment: None,
+                accounts_data_slice: Vec::new(),
+                ping: None,
+            },
+            &self.config.filters,
+            self.config.normalize_commitment_level,
+        )?;
+        let sub_update = self.subscribe_impl(filter, None);
+
+        Ok(sub_update)
+    }
+
     fn subscribe_impl(
         &self,
         filter: Filter,

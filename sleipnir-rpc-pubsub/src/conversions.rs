@@ -10,6 +10,8 @@ use sleipnir_rpc_client_api::config::{
 };
 use solana_sdk::{account::Account, pubkey::Pubkey};
 
+use crate::pubsub_types::SlotResponse;
+
 pub fn geyser_sub_for_transaction_signature(
     signature: String,
 ) -> HashMap<String, SubscribeRequestFilterTransactions> {
@@ -26,7 +28,6 @@ pub fn geyser_sub_for_transaction_signature(
     map
 }
 
-#[allow(unused)]
 pub fn geyser_sub_for_account(
     account: String,
 ) -> HashMap<String, SubscribeRequestFilterAccounts> {
@@ -57,7 +58,33 @@ pub fn slot_from_update(update: &SubscribeUpdate) -> Option<u64> {
 }
 
 // -----------------
-// Subscribe Account into UIAccount
+// Subscribe Update into SlotResponse
+// -----------------
+pub fn subscribe_update_into_slot_response(
+    update: SubscribeUpdate,
+) -> Option<SlotResponse> {
+    update.update_oneof.and_then(|oneof| {
+        use UpdateOneof::*;
+        match oneof {
+            Account(_) => None,
+            Slot(slot) => Some(SlotResponse {
+                parent: slot.parent(),
+                // We have a single bank
+                root: slot.slot,
+                slot: slot.slot,
+            }),
+            Transaction(_) => None,
+            Block(_) => None,
+            Ping(_) => None,
+            Pong(_) => None,
+            BlockMeta(_) => None,
+            Entry(_) => None,
+        }
+    })
+}
+
+// -----------------
+// Subscribe Update into UIAccount
 // -----------------
 pub fn subscribe_update_try_into_ui_account(
     update: SubscribeUpdate,
