@@ -67,7 +67,11 @@ async fn main() {
     fund_luzifer(&bank);
     let faucet_keypair = fund_faucet(&bank);
 
-    let tick_duration = Duration::from_millis(100);
+    let tick_millis = std::env::var("SLOT_MS")
+        .map(|s| s.parse::<u64>().expect("SLOT_MS needs to be a number"))
+        .unwrap_or(100);
+
+    let tick_duration = Duration::from_millis(tick_millis);
     info!(
         "Adding Slot ticker for {}ms slots",
         tick_duration.as_millis()
