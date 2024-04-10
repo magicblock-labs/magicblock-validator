@@ -42,14 +42,14 @@ impl AccountParams {
 // SignatureParams
 // -----------------
 #[derive(Serialize, Deserialize, Debug)]
-pub struct SignatureParams(String, RpcSignatureSubscribeConfig);
+pub struct SignatureParams(String, Option<RpcSignatureSubscribeConfig>);
 impl SignatureParams {
     pub fn signature(&self) -> &str {
         &self.0
     }
 
     #[allow(unused)]
-    pub fn config(&self) -> &RpcSignatureSubscribeConfig {
+    pub fn config(&self) -> &Option<RpcSignatureSubscribeConfig> {
         &self.1
     }
 }
