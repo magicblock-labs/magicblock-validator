@@ -109,7 +109,7 @@ impl RpcPubsubService {
                 move |id: SubscriptionId,
                  _meta|
                  -> BoxFuture<jsonrpc_core::Result<Value>> {
-                    handle_unsubscribe(id, &unsub_tx)
+                    handle_unsubscribe(id, &unsub_tx, true)
                 },
             )
         };
@@ -156,7 +156,7 @@ impl RpcPubsubService {
                 move |id: SubscriptionId,
                  _meta|
                  -> BoxFuture<jsonrpc_core::Result<Value>> {
-                    handle_unsubscribe(id, &unsub_tx)
+                    handle_unsubscribe(id, &unsub_tx, false)
                 },
             )
         };
@@ -173,7 +173,7 @@ impl RpcPubsubService {
                 "slotSubscribe",
                 move |params: Params, _, subscriber: Subscriber| {
                     let subscriber =
-                        match ensure_empty_params(subscriber, &params) {
+                        match ensure_empty_params(subscriber, &params, true) {
                             Some(subscriber) => subscriber,
                             None => return,
                         };
@@ -193,7 +193,7 @@ impl RpcPubsubService {
                 move |id: SubscriptionId,
                     _meta|
                     -> BoxFuture<jsonrpc_core::Result<Value>> {
-                    handle_unsubscribe(id, &unsub_tx)
+                    handle_unsubscribe(id, &unsub_tx, false)
                 },
             )
         };
@@ -240,14 +240,18 @@ impl RpcPubsubService {
 fn handle_unsubscribe(
     id: SubscriptionId,
     unsub_tx: &broadcast::Sender<u64>,
+    oneshot_sub: bool,
 ) -> std::pin::Pin<
     Box<futures::prelude::future::Ready<Result<Value, jsonrpc_core::Error>>>,
 > {
     match id {
         SubscriptionId::Number(id) => {
-            let _ = unsub_tx.send(id).map_err(|err| {
-                error!("Failed to send unsubscription signal: {:?}", err)
-            });
+            let res = unsub_tx.send(id);
+            if !oneshot_sub {
+                let _ = res.map_err(|err| {
+                    error!("Failed to send unsubscription signal: {:?}", err)
+                });
+            }
         }
         SubscriptionId::String(_) => {
             unreachable!("We only support subs with number id")
@@ -440,11 +444,13 @@ fn handle_signature_subscribe(
                                         if let Err(err) = sink.notify(res.into_params_map())
                                         {
                                             debug!(
-                                                "Subscription has ended, finishing {:?}.",
+                                                "Subscription has ended {:?}.",
                                                 err
                                             );
-                                            break;
                                         }
+                                        // single notification subscription
+                                        // see: https://solana.com/docs/rpc/websocket/signaturesubscribe
+                                        break;
                                     }
                                     Some(Err(status)) => {
                                         let failed_to_notify = sink_notify_error(&sink, format!(
@@ -610,8 +616,12 @@ fn ensure_params(
 fn ensure_empty_params(
     subscriber: Subscriber,
     params: &Params,
+    warn: bool,
 ) -> Option<Subscriber> {
     if params == &Params::None {
+        Some(subscriber)
+    } else if warn {
+        warn!("Parameters should be empty");
         Some(subscriber)
     } else {
         reject_parse_error(
