@@ -68,6 +68,12 @@ pub struct RpcRequestAirdropConfig {
     pub commitment: Option<CommitmentConfig>,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcSignatureStatusConfig {
+    pub search_transaction_history: bool,
+}
+
 #[derive(
     Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize,
 )]

@@ -12,8 +12,10 @@ use sleipnir_bank::bank::Bank;
 use sleipnir_rpc_client_api::{
     config::{
         RpcAccountInfoConfig, RpcContextConfig, RpcEncodingConfigWrapper,
-        RpcSupplyConfig, RpcTransactionConfig, UiAccount, UiAccountEncoding,
+        RpcSignatureStatusConfig, RpcSupplyConfig, RpcTransactionConfig,
+        UiAccount, UiAccountEncoding,
     },
+    custom_error::RpcCustomError,
     filter::RpcFilterType,
     response::{
         OptionalContext, Response as RpcResponse, RpcBlockhash,
@@ -29,7 +31,8 @@ use solana_sdk::{
     signature::{Keypair, Signature},
 };
 use solana_transaction_status::{
-    EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding,
+    EncodedConfirmedTransactionWithStatusMeta, TransactionStatus,
+    UiTransactionEncoding,
 };
 
 use crate::{
@@ -367,6 +370,7 @@ impl JsonRpcRequestProcessor {
         })?;
         airdrop_transaction(self, pubkey, lamports)
     }
+
     pub async fn get_transaction(
         &self,
         _signature: Signature,
@@ -390,5 +394,45 @@ impl JsonRpcRequestProcessor {
         &self,
     ) -> Option<&TransactionStatusSender> {
         self.config.transaction_status_sender.as_ref()
+    }
+
+    pub async fn get_signature_statuses(
+        &self,
+        signatures: Vec<Signature>,
+        config: Option<RpcSignatureStatusConfig>,
+    ) -> Result<RpcResponse<Vec<Option<TransactionStatus>>>> {
+        let mut statuses: Vec<Option<TransactionStatus>> = vec![];
+
+        let search_transaction_history = config
+            .map(|x| x.search_transaction_history)
+            .unwrap_or(false);
+        if search_transaction_history
+            && !self.config.enable_rpc_transaction_history
+        {
+            return Err(RpcCustomError::TransactionHistoryNotAvailable.into());
+        }
+        for signature in signatures {
+            let status = self.get_transaction_status(signature);
+            // NOTE: we have no blockstore nor bigtable ledger storage to query older transactions
+            // from, see: solana/rpc/src/rpc.rs:1436
+            statuses.push(status);
+        }
+
+        Ok(new_response(&self.bank, statuses))
+    }
+
+    fn get_transaction_status(
+        &self,
+        signature: Signature,
+    ) -> Option<TransactionStatus> {
+        let (slot, status) = self.bank.get_signature_status_slot(&signature)?;
+        let err = status.clone().err();
+        Some(TransactionStatus {
+            slot,
+            status,
+            err,
+            confirmations: None,
+            confirmation_status: None,
+        })
     }
 }

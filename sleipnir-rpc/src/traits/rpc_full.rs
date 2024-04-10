@@ -6,7 +6,8 @@ use sleipnir_rpc_client_api::{
     config::{
         RpcBlocksConfigWrapper, RpcContextConfig, RpcEncodingConfigWrapper,
         RpcEpochConfig, RpcRequestAirdropConfig, RpcSendTransactionConfig,
-        RpcSignaturesForAddressConfig, RpcTransactionConfig,
+        RpcSignatureStatusConfig, RpcSignaturesForAddressConfig,
+        RpcTransactionConfig,
     },
     response::{
         Response as RpcResponse, RpcBlockhash,
@@ -18,7 +19,9 @@ use solana_sdk::{
     clock::UnixTimestamp, commitment_config::CommitmentConfig,
     slot_history::Slot,
 };
-use solana_transaction_status::EncodedConfirmedTransactionWithStatusMeta;
+use solana_transaction_status::{
+    EncodedConfirmedTransactionWithStatusMeta, TransactionStatus,
+};
 
 #[rpc]
 pub trait Full {
@@ -45,7 +48,6 @@ pub trait Full {
         limit: Option<usize>,
     ) -> Result<Vec<RpcPerfSample>>;
 
-    /* TODO: Needs solana_transaction_statusTransactionStatus
     #[rpc(meta, name = "getSignatureStatuses")]
     fn get_signature_statuses(
         &self,
@@ -53,7 +55,6 @@ pub trait Full {
         signature_strs: Vec<String>,
         config: Option<RpcSignatureStatusConfig>,
     ) -> BoxFuture<Result<RpcResponse<Vec<Option<TransactionStatus>>>>>;
-    */
 
     #[rpc(meta, name = "getMaxRetransmitSlot")]
     fn get_max_retransmit_slot(&self, meta: Self::Metadata) -> Result<Slot>;
