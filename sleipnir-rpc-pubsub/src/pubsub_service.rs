@@ -2,6 +2,7 @@ use jsonrpc_ws_server::{RequestContext, Server, ServerBuilder};
 use log::*;
 use serde::de::DeserializeOwned;
 use serde_json::Value;
+use sleipnir_bank::bank::Bank;
 use sleipnir_geyser_plugin::rpc::GeyserRpcService;
 use std::{net::SocketAddr, str::FromStr, sync::Arc};
 use tokio::{
@@ -19,6 +20,7 @@ use sleipnir_rpc_client_api::{
 };
 use solana_sdk::{
     pubkey::Pubkey, rpc_port::DEFAULT_RPC_PUBSUB_PORT, signature::Signature,
+    transaction::TransactionError,
 };
 
 use crate::{
@@ -57,12 +59,14 @@ pub struct RpcPubsubService {
     config: RpcPubsubConfig,
     io: PubSubHandler<Arc<Session>>,
     unsub_tx: Arc<broadcast::Sender<u64>>,
+    bank: Arc<Bank>,
 }
 
 impl RpcPubsubService {
     pub fn new(
         config: RpcPubsubConfig,
         geyser_rpc_service: Arc<GeyserRpcService>,
+        bank: Arc<Bank>,
     ) -> Self {
         let io = PubSubHandler::new(MetaIoHandler::default());
         let (unsub_tx, _) = broadcast::channel(100);
@@ -72,6 +76,7 @@ impl RpcPubsubService {
             io,
             geyser_rpc_service,
             unsub_tx,
+            bank,
         }
     }
 
@@ -79,6 +84,7 @@ impl RpcPubsubService {
         let subscribe = {
             let geyser_rpc_service = self.geyser_rpc_service.clone();
             let unsub_tx = self.unsub_tx.clone();
+            let bank = self.bank.clone();
             (
                 "signatureSubscribe",
                 move |params: Params, _, subscriber: Subscriber| {
@@ -91,11 +97,11 @@ impl RpcPubsubService {
                             return;
                         }
                     };
-
                     handle_signature_subscribe(
                         subscriber,
                         signature_params,
                         &geyser_rpc_service,
+                        &bank,
                         unsub_tx.subscribe(),
                     );
                 },
@@ -215,11 +221,12 @@ impl RpcPubsubService {
     pub fn spawn(
         config: RpcPubsubConfig,
         geyser_rpc_service: Arc<GeyserRpcService>,
+        bank: Arc<Bank>,
     ) {
         let socket = format!("{:?}", config.socket());
 
         tokio::spawn(async move {
-            RpcPubsubService::new(config, geyser_rpc_service)
+            RpcPubsubService::new(config, geyser_rpc_service, bank)
                 .add_signature_subscribe()
                 .add_account_subscribe()
                 .add_slot_subscribe()
@@ -390,30 +397,28 @@ fn handle_signature_subscribe(
     subscriber: Subscriber,
     signature_params: SignatureParams,
     geyser_rpc_service: &Arc<GeyserRpcService>,
+    bank: &Arc<Bank>,
     mut unsub_rx: broadcast::Receiver<u64>,
 ) {
     let geyser_rpc_service = geyser_rpc_service.clone();
+
+    let sigstr = signature_params.signature();
+    let sub = geyser_sub_for_transaction_signature(sigstr.to_string());
+
+    let sig = match Signature::from_str(sigstr) {
+        Ok(sig) => sig,
+        Err(err) => {
+            reject_internal_error(subscriber, "Invalid Signature", Some(err));
+            return;
+        }
+    };
+
+    let bank = bank.clone();
     std::thread::spawn(move || {
         if let Some((rt, subscriber)) =
             try_create_subscription_runtime("signatureSubRt", subscriber)
         {
             rt.block_on(async move {
-                let sigstr = signature_params.signature();
-                let sub =
-                    geyser_sub_for_transaction_signature(sigstr.to_string());
-
-                let sig = match Signature::from_str(sigstr) {
-                    Ok(sig) => sig,
-                    Err(err) => {
-                        reject_internal_error(
-                            subscriber,
-                            "Invalid Signature",
-                            Some(err),
-                        );
-                        return;
-                    }
-                };
-
                 let (sub_id, mut rx) =
                     match geyser_rpc_service.transaction_subscribe(sub, &sig) {
                         Ok(res) => res,
@@ -428,26 +433,17 @@ fn handle_signature_subscribe(
                     };
 
                 if let Some(sink) = assign_sub_id(subscriber, sub_id) {
+                    if let Some((slot, res)) = bank.get_signature_status_slot(&sig) {
+                        info!("Sending initial signature status: {} {:?}", slot, res);
+                        sink_notify_transaction_result(&sink, slot, sub_id, res.err());
+                    }
                     loop {
                         tokio::select! {
                             val = rx.recv() => {
                                 match val {
                                     Some(Ok(update)) => {
                                         let slot = slot_from_update(&update).unwrap_or(0);
-                                        let res = ResponseWithSubscriptionId::new(
-                                            RpcSignatureResult::ProcessedSignature(
-                                                ProcessedSignatureResult { err: None },
-                                            ),
-                                            slot,
-                                            sub_id,
-                                        );
-                                        if let Err(err) = sink.notify(res.into_params_map())
-                                        {
-                                            debug!(
-                                                "Subscription has ended {:?}.",
-                                                err
-                                            );
-                                        }
+                                        sink_notify_transaction_result(&sink, slot, sub_id, None);
                                         // single notification subscription
                                         // see: https://solana.com/docs/rpc/websocket/signaturesubscribe
                                         break;
@@ -718,6 +714,24 @@ fn sink_notify_error(sink: &Sink, msg: String) -> bool {
         true
     } else {
         false
+    }
+}
+
+fn sink_notify_transaction_result(
+    sink: &Sink,
+    slot: u64,
+    sub_id: u64,
+    err: Option<TransactionError>,
+) {
+    let res = ResponseWithSubscriptionId::new(
+        RpcSignatureResult::ProcessedSignature(ProcessedSignatureResult {
+            err,
+        }),
+        slot,
+        sub_id,
+    );
+    if let Err(err) = sink.notify(res.into_params_map()) {
+        debug!("Subscription has ended {:?}.", err);
     }
 }
 

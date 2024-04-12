@@ -92,15 +92,18 @@ async fn main() {
 
         // This service needs to run on its own thread as otherwise it affects
         // other tokio runtimes, i.e. the one of the GeyserPlugin
-        let hdl = std::thread::spawn(move || {
-            let _json_rpc_service = JsonRpcService::new(
-                rpc_socket,
-                bank.clone(),
-                faucet_keypair,
-                config,
-            )
-            .unwrap();
-        });
+        let hdl = {
+            let bank = bank.clone();
+            std::thread::spawn(move || {
+                let _json_rpc_service = JsonRpcService::new(
+                    rpc_socket,
+                    bank,
+                    faucet_keypair,
+                    config,
+                )
+                .unwrap();
+            })
+        };
         info!(
             "Launched JSON RPC service with pid {} at {:?}",
             process::id(),
@@ -112,6 +115,7 @@ async fn main() {
     RpcPubsubService::spawn(
         RpcPubsubConfig::default(),
         geyser_rpc_service.clone(),
+        bank.clone(),
     );
 
     json_rpc_service.join().unwrap();
