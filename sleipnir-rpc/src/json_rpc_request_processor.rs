@@ -282,6 +282,13 @@ impl JsonRpcRequestProcessor {
     }
 
     // -----------------
+    // Slot
+    // -----------------
+    pub fn get_slot(&self, config: RpcContextConfig) -> Result<Slot> {
+        let bank = self.get_bank_with_config(config)?;
+        Ok(bank.slot())
+    }
+    // -----------------
     // Bank
     // -----------------
     pub fn get_bank_with_config(

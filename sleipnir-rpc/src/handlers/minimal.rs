@@ -56,7 +56,8 @@ impl Minimal for MinimalImpl {
         meta: Self::Metadata,
         config: Option<RpcContextConfig>,
     ) -> Result<Slot> {
-        todo!("get_slot")
+        debug!("get_slot rpc request received");
+        meta.get_slot(config.unwrap_or_default())
     }
 
     fn get_block_height(
