@@ -18,12 +18,13 @@ use sleipnir_rpc_client_api::{
 use solana_sdk::{
     clock::{Slot, UnixTimestamp, MAX_RECENT_BLOCKHASHES},
     commitment_config::CommitmentConfig,
+    message::{SanitizedMessage, SanitizedVersionedMessage, VersionedMessage},
     signature::Signature,
     transaction::VersionedTransaction,
 };
 use solana_transaction_status::{
-    EncodedConfirmedTransactionWithStatusMeta, TransactionStatus,
-    UiTransactionEncoding,
+    EncodedConfirmedTransactionWithStatusMeta, TransactionBinaryEncoding,
+    TransactionStatus, UiTransactionEncoding,
 };
 
 use crate::{
@@ -33,6 +34,7 @@ use crate::{
         decode_and_deserialize, sanitize_transaction, send_transaction,
         verify_signature,
     },
+    utils::new_response,
 };
 
 // Solana shows the last 60secs worth of samples
@@ -292,7 +294,27 @@ impl Full for FullImpl {
         data: String,
         config: Option<RpcContextConfig>,
     ) -> Result<RpcResponse<Option<u64>>> {
-        todo!("get_fee_for_message")
+        debug!("get_fee_for_message rpc request received");
+        let (_, message) = decode_and_deserialize::<VersionedMessage>(
+            data,
+            TransactionBinaryEncoding::Base64,
+        )?;
+        let bank = &*meta.get_bank_with_config(config.unwrap_or_default())?;
+        let sanitized_versioned_message =
+            SanitizedVersionedMessage::try_from(message).map_err(|err| {
+                Error::invalid_params(format!(
+                    "invalid transaction message: {err}"
+                ))
+            })?;
+        let sanitized_message =
+            SanitizedMessage::try_new(sanitized_versioned_message, bank)
+                .map_err(|err| {
+                    Error::invalid_params(format!(
+                        "invalid transaction message: {err}"
+                    ))
+                })?;
+        let fee = bank.get_fee_for_message(&sanitized_message);
+        Ok(new_response(bank, fee))
     }
 
     fn get_stake_minimum_delegation(
