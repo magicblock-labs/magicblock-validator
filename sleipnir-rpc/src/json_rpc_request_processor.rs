@@ -347,8 +347,18 @@ impl JsonRpcRequestProcessor {
     }
 
     // -----------------
-    // Epoch
+    // BankData
     // -----------------
+    pub fn get_minimum_balance_for_rent_exemption(
+        &self,
+        data_len: usize,
+    ) -> Result<u64> {
+        let bank = &self.bank;
+
+        let balance = bank.get_minimum_balance_for_rent_exemption(data_len);
+        Ok(balance)
+    }
+
     pub fn get_epoch_schedule(&self) -> EpochSchedule {
         // Since epoch schedule data comes from the genesis config, any commitment level should be
         // fine

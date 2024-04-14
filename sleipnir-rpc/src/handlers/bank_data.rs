@@ -19,9 +19,10 @@ impl BankData for BankDataImpl {
         &self,
         meta: Self::Metadata,
         data_len: usize,
-        commitment: Option<CommitmentConfig>,
+        _commitment: Option<CommitmentConfig>,
     ) -> Result<u64> {
-        todo!("get_minimum_balance_for_rent_exemption")
+        debug!("get_minimum_balance_for_rent_exemption rpc request received");
+        meta.get_minimum_balance_for_rent_exemption(data_len)
     }
 
     fn get_epoch_schedule(
