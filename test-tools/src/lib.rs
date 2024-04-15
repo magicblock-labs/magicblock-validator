@@ -7,6 +7,7 @@ pub mod bank;
 pub mod bank_transactions_processor;
 pub mod banking_stage_transactions_processor;
 pub use test_tools_core::*;
+pub mod programs;
 pub mod traits;
 pub mod transaction;
 

@@ -18,6 +18,7 @@ use test_tools::{
     account::{fund_account, fund_account_addr},
     bank::bank_for_tests_with_paths,
     init_logger,
+    programs::load_programs_from_string_config,
 };
 
 use crate::geyser::{init_geyser_service, GeyserTransactionNotifyListener};
@@ -65,6 +66,8 @@ async fn main() {
         Arc::new(bank)
     };
     fund_luzifer(&bank);
+    load_programs_from_env(&bank).unwrap();
+
     let faucet_keypair = fund_faucet(&bank);
 
     let tick_millis = std::env::var("SLOT_MS")
@@ -127,4 +130,14 @@ fn init_slot_ticker(bank: Arc<Bank>, tick_duration: Duration) {
         std::thread::sleep(tick_duration);
         bank.advance_slot();
     });
+}
+
+fn load_programs_from_env(
+    bank: &Bank,
+) -> Result<(), Box<dyn std::error::Error>> {
+    if let Some(programs) = std::env::var("PROGRAMS").ok() {
+        Ok(load_programs_from_string_config(bank, &programs)?)
+    } else {
+        Ok(())
+    }
 }
