@@ -155,6 +155,9 @@ pub struct Bank {
     /// Bank epoch
     epoch: Epoch,
 
+    /// Validator Identity
+    identity_id: Pubkey,
+
     /// initialized from genesis
     pub(crate) epoch_schedule: EpochSchedule,
 
@@ -384,7 +387,7 @@ impl Bank {
         accounts_db_config: Option<AccountsDbConfig>,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
         slot_status_notifier: Option<SlotStatusNotifierArc>,
-        #[allow(unused)] collector_id_for_tests: Option<Pubkey>,
+        identity_id: Pubkey,
         exit: Arc<AtomicBool>,
     ) -> Self {
         let accounts_db = AccountsDb::new_with_config(
@@ -404,10 +407,7 @@ impl Bank {
         bank.runtime_config = runtime_config;
         bank.slot_status_notifier = slot_status_notifier;
 
-        #[cfg(not(feature = "dev-context-only-utils"))]
-        bank.process_genesis_config(genesis_config);
-        #[cfg(feature = "dev-context-only-utils")]
-        bank.process_genesis_config(genesis_config, collector_id_for_tests);
+        bank.process_genesis_config(genesis_config, identity_id);
 
         bank.finish_init(
             genesis_config,
@@ -474,6 +474,7 @@ impl Bank {
             loaded_programs_cache,
             transaction_processor: Default::default(),
             status_cache: Arc::<RwLock<BankStatusCache>>::default(),
+            identity_id: Pubkey::default(),
 
             // Counters
             transaction_count: AtomicU64::default(),
@@ -588,8 +589,7 @@ impl Bank {
     fn process_genesis_config(
         &mut self,
         genesis_config: &GenesisConfig,
-        #[cfg(feature = "dev-context-only-utils")]
-        collector_id_for_tests: Option<Pubkey>,
+        identity_id: Pubkey,
     ) {
         // Bootstrap validator collects fees until `new_from_parent` is called.
         self.fee_rate_governor = genesis_config.fee_rate_governor.clone();
@@ -622,12 +622,17 @@ impl Bank {
         self.slots_per_year = genesis_config.slots_per_year();
 
         self.epoch_schedule = genesis_config.epoch_schedule.clone();
+        self.identity_id = identity_id;
 
         // Add additional builtin programs specified in the genesis config
         for (name, program_id) in &genesis_config.native_instruction_processors
         {
             self.add_builtin_account(name, program_id, false);
         }
+    }
+
+    pub fn get_identity(&self) -> Pubkey {
+        self.identity_id
     }
 
     // -----------------

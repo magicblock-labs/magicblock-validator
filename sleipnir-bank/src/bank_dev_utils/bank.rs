@@ -104,7 +104,7 @@ impl Bank {
             Some(ACCOUNTS_DB_CONFIG_FOR_TESTING),
             accounts_update_notifier,
             slot_status_notifier,
-            Some(Pubkey::new_unique()),
+            Pubkey::new_unique(),
             Arc::default(),
         );
         bank.transaction_log_collector_config

@@ -7,7 +7,10 @@ use std::{
 
 use crossbeam_channel::unbounded;
 use log::*;
-use sleipnir_bank::{bank::Bank, genesis_utils::create_genesis_config};
+use sleipnir_bank::{
+    bank::Bank,
+    genesis_utils::{create_genesis_config, GenesisConfigInfo},
+};
 use sleipnir_rpc::{
     json_rpc_request_processor::JsonRpcConfig, json_rpc_service::JsonRpcService,
 };
@@ -40,7 +43,11 @@ fn fund_faucet(bank: &Bank) -> Keypair {
 async fn main() {
     init_logger!();
 
-    let genesis_config = create_genesis_config(u64::MAX).genesis_config;
+    let GenesisConfigInfo {
+        genesis_config,
+        validator_pubkey,
+        ..
+    } = create_genesis_config(u64::MAX);
     let (geyser_service, geyser_rpc_service) = init_geyser_service()
         .await
         .expect("Failed to init geyser service");
@@ -61,6 +68,7 @@ async fn main() {
             &genesis_config,
             geyser_service.get_accounts_update_notifier(),
             geyser_service.get_slot_status_notifier(),
+            validator_pubkey,
             vec!["/tmp/sleipnir-rpc-bin"],
         );
         Arc::new(bank)

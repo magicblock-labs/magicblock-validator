@@ -22,6 +22,7 @@ pub fn bank_for_tests_with_paths(
     genesis_config: &GenesisConfig,
     accounts_update_notifier: Option<AccountsUpdateNotifier>,
     slot_status_notifier: Option<SlotStatusNotifierArc>,
+    identity_id: Pubkey,
     paths: Vec<&str>,
 ) -> Bank {
     let shrink_ratio = AccountShrinkThreshold::default();
@@ -42,7 +43,7 @@ pub fn bank_for_tests_with_paths(
         Some(ACCOUNTS_DB_CONFIG_FOR_TESTING),
         accounts_update_notifier,
         slot_status_notifier,
-        Some(Pubkey::new_unique()),
+        identity_id,
         Arc::default(),
     );
     bank.transaction_log_collector_config
@@ -61,6 +62,7 @@ pub fn bank_for_tests(
         genesis_config,
         accounts_update_notifier,
         slot_status_notifier,
+        Pubkey::new_unique(),
         vec![],
     )
 }

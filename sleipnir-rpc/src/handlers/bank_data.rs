@@ -1,8 +1,12 @@
 // NOTE: from rpc/src/rpc.rs :2791
-use jsonrpc_core::Result;
+use jsonrpc_core::{Error, Result};
 use log::*;
+use sleipnir_rpc_client_api::{
+    config::RpcContextConfig, request::MAX_GET_SLOT_LEADERS,
+};
 use solana_sdk::{
-    commitment_config::CommitmentConfig, epoch_schedule::EpochSchedule,
+    clock::Slot, commitment_config::CommitmentConfig,
+    epoch_schedule::EpochSchedule,
 };
 
 use crate::{
@@ -31,5 +35,41 @@ impl BankData for BankDataImpl {
     ) -> Result<EpochSchedule> {
         debug!("get_epoch_schedule rpc request received");
         Ok(meta.get_epoch_schedule())
+    }
+
+    fn get_slot_leader(
+        &self,
+        meta: Self::Metadata,
+        config: Option<RpcContextConfig>,
+    ) -> Result<String> {
+        debug!("get_slot_leader rpc request received");
+        Ok(meta
+            .get_slot_leader(config.unwrap_or_default())?
+            .to_string())
+    }
+
+    fn get_slot_leaders(
+        &self,
+        meta: Self::Metadata,
+        start_slot: Slot,
+        limit: u64,
+    ) -> Result<Vec<String>> {
+        debug!(
+            "get_slot_leaders rpc request received (start: {} limit: {})",
+            start_slot, limit
+        );
+
+        let limit = limit as usize;
+        if limit > MAX_GET_SLOT_LEADERS {
+            return Err(Error::invalid_params(format!(
+                "Invalid limit; max {MAX_GET_SLOT_LEADERS}"
+            )));
+        }
+
+        Ok(meta
+            .get_slot_leaders(start_slot, limit)?
+            .into_iter()
+            .map(|identity| identity.to_string())
+            .collect())
     }
 }

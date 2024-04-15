@@ -288,6 +288,29 @@ impl JsonRpcRequestProcessor {
         let bank = self.get_bank_with_config(config)?;
         Ok(bank.slot())
     }
+
+    pub fn get_slot_leaders(
+        &self,
+        start_slot: Slot,
+        limit: usize,
+    ) -> Result<Vec<Pubkey>> {
+        let slot = self.bank.slot();
+        if start_slot > slot {
+            return Err(Error::invalid_params(format!(
+                "Start slot {start_slot} is in the future; current is {slot}"
+            )));
+        }
+
+        // We are a single node validator and thus always the leader
+        let slot_leader = self.bank.get_identity();
+        Ok(vec![slot_leader; limit])
+    }
+
+    pub fn get_slot_leader(&self, config: RpcContextConfig) -> Result<Pubkey> {
+        let bank = self.get_bank_with_config(config)?;
+        Ok(bank.get_identity())
+    }
+
     // -----------------
     // Bank
     // -----------------

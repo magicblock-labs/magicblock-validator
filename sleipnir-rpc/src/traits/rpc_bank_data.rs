@@ -1,6 +1,7 @@
 // NOTE: from rpc/src/rpc.rs :2741
 use jsonrpc_core::Result;
 use jsonrpc_derive::rpc;
+use sleipnir_rpc_client_api::config::RpcContextConfig;
 use solana_sdk::{
     commitment_config::CommitmentConfig, epoch_schedule::EpochSchedule,
 };
@@ -36,7 +37,6 @@ pub trait BankData {
     fn get_epoch_schedule(&self, meta: Self::Metadata)
         -> Result<EpochSchedule>;
 
-    /*
     #[rpc(meta, name = "getSlotLeader")]
     fn get_slot_leader(
         &self,
@@ -48,10 +48,11 @@ pub trait BankData {
     fn get_slot_leaders(
         &self,
         meta: Self::Metadata,
-        start_slot: Slot,
+        start_slot: solana_sdk::clock::Slot,
         limit: u64,
     ) -> Result<Vec<String>>;
 
+    /*
     #[rpc(meta, name = "getBlockProduction")]
     fn get_block_production(
         &self,
