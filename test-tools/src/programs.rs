@@ -95,7 +95,7 @@ pub fn add_loadables(
     debug!("Loading programs: {:#?}", progs);
 
     let progs: Vec<(Pubkey, Pubkey, Vec<u8>)> = progs
-        .into_iter()
+        .iter()
         .map(|prog| {
             let full_path = Path::new(&prog.full_path);
             let elf = std::fs::read(full_path)?;
@@ -110,7 +110,7 @@ pub fn add_loadables(
 
 pub fn add_programs_bytes(bank: &Bank, progs: &[(Pubkey, Pubkey, &[u8])]) {
     let elf_program_accounts = progs
-        .into_iter()
+        .iter()
         .map(|prog| elf_program_account_from(*prog))
         .collect::<Vec<_>>();
     add_programs(bank, &elf_program_accounts);
@@ -118,7 +118,7 @@ pub fn add_programs_bytes(bank: &Bank, progs: &[(Pubkey, Pubkey, &[u8])]) {
 
 fn add_programs_vecs(bank: &Bank, progs: &[(Pubkey, Pubkey, Vec<u8>)]) {
     let elf_program_accounts = progs
-        .into_iter()
+        .iter()
         .map(|(id, loader_id, vec)| {
             elf_program_account_from((*id, *loader_id, &vec))
         })
@@ -127,7 +127,7 @@ fn add_programs_vecs(bank: &Bank, progs: &[(Pubkey, Pubkey, Vec<u8>)]) {
 }
 
 fn add_programs(bank: &Bank, progs: &[ElfProgramAccount]) {
-    for elf_program_account in progs.into_iter() {
+    for elf_program_account in progs {
         let ElfProgramAccount {
             program_exec,
             program_data,

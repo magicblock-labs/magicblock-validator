@@ -135,7 +135,7 @@ fn init_slot_ticker(bank: Arc<Bank>, tick_duration: Duration) {
 fn load_programs_from_env(
     bank: &Bank,
 ) -> Result<(), Box<dyn std::error::Error>> {
-    if let Some(programs) = std::env::var("PROGRAMS").ok() {
+    if let Ok(programs) = std::env::var("PROGRAMS") {
         Ok(load_programs_from_string_config(bank, &programs)?)
     } else {
         Ok(())
