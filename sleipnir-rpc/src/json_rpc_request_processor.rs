@@ -1,5 +1,6 @@
 #![allow(dead_code)]
 use std::{
+    net::SocketAddr,
     str::FromStr,
     sync::{Arc, Mutex},
     time::Duration,
@@ -18,7 +19,7 @@ use sleipnir_rpc_client_api::{
     custom_error::RpcCustomError,
     filter::RpcFilterType,
     response::{
-        OptionalContext, Response as RpcResponse, RpcBlockhash,
+        OptionalContext, Response as RpcResponse, RpcBlockhash, RpcContactInfo,
         RpcKeyedAccount, RpcSupply,
     },
 };
@@ -67,6 +68,8 @@ pub struct JsonRpcConfig {
     /// Allows updating  Geyser or similar when transactions are processed
     /// Could go into send_transaction_service once we built that
     pub transaction_status_sender: Option<TransactionStatusSender>,
+    pub rpc_socket_addr: Option<SocketAddr>,
+    pub pubsub_socket_addr: Option<SocketAddr>,
 }
 
 // NOTE: from rpc/src/rpc.rs :193
@@ -434,6 +437,27 @@ impl JsonRpcRequestProcessor {
         &self,
     ) -> Option<&TransactionStatusSender> {
         self.config.transaction_status_sender.as_ref()
+    }
+
+    pub fn get_cluster_nodes(&self) -> Vec<RpcContactInfo> {
+        let identity_id = self.bank.get_identity();
+
+        let feature_set = u32::from_le_bytes(
+            solana_sdk::feature_set::ID.as_ref()[..4]
+                .try_into()
+                .unwrap(),
+        );
+        vec![RpcContactInfo {
+            pubkey: identity_id.to_string(),
+            gossip: None,
+            tpu: None,
+            tpu_quic: None,
+            rpc: self.config.rpc_socket_addr,
+            pubsub: self.config.pubsub_socket_addr,
+            version: Some(sleipnir_version::version!().to_string()),
+            feature_set: Some(feature_set),
+            shred_version: None,
+        }]
     }
 
     pub async fn get_signature_statuses(

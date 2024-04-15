@@ -55,13 +55,6 @@ impl Full for FullImpl {
         todo!("get_inflation_reward")
     }
 
-    fn get_cluster_nodes(
-        &self,
-        meta: Self::Metadata,
-    ) -> Result<Vec<RpcContactInfo>> {
-        todo!("get_cluster_nodes")
-    }
-
     fn get_recent_performance_samples(
         &self,
         meta: Self::Metadata,
@@ -86,6 +79,14 @@ impl Full for FullImpl {
             })
             .collect();
         Ok(samples)
+    }
+
+    fn get_cluster_nodes(
+        &self,
+        meta: Self::Metadata,
+    ) -> Result<Vec<RpcContactInfo>> {
+        debug!("get_cluster_nodes rpc request received");
+        Ok(meta.get_cluster_nodes())
     }
 
     fn get_signature_statuses(

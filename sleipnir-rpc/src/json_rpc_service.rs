@@ -1,5 +1,4 @@
 use std::{
-    net::SocketAddr,
     sync::Arc,
     thread::{self, JoinHandle},
 };
@@ -39,11 +38,14 @@ pub struct JsonRpcService {
 impl JsonRpcService {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
-        rpc_addr: SocketAddr,
         bank: Arc<Bank>,
         faucet_keypair: Keypair,
         config: JsonRpcConfig,
     ) -> Result<Self, String> {
+        let rpc_addr = config
+            .rpc_socket_addr
+            .ok_or_else(|| "JSON RPC socket required".to_string())?;
+
         let max_request_body_size = config
             .max_request_body_size
             .unwrap_or(MAX_REQUEST_BODY_SIZE);
