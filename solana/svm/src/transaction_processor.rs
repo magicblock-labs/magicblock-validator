@@ -442,8 +442,10 @@ impl<FG: ForkGraph> TransactionBatchProcessor<FG> {
         // NOTE(thlorenz): there is a bug in this code which causes the loop to never complete
         // if a program cannot be inserted. (solana/program-runtime/src/loaded_programs.rs:968)
         // This is because in that case missing_programs is never empty and the loop never breaks.
-        // It is hard to triage as it just causes the transaction execution be blocked.
-        // We should fix this at some point.
+        // I fixed the condition in which this happens, i.e. a program could not be added when the
+        // deploy slot was too recent and I suppose that if the slots ticks and after my fix
+        // correctly updates the `root_slot` of the loaded programs cache then the loop will
+        // eventually exit, but we should keep an eye on this.
         loop {
             let (program_to_load, task_cookie, task_waiter) = {
                 // Lock the global cache.
