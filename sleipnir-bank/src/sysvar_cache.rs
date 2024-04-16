@@ -1,6 +1,6 @@
 // NOTE: copied from bank/sysvar_cache.rs and tests removed
 use solana_program_runtime::sysvar_cache::SysvarCache;
-use solana_sdk::account::ReadableAccount;
+use solana_sdk::{account::ReadableAccount, clock::Clock};
 
 use super::bank::Bank;
 
@@ -13,6 +13,11 @@ impl Bank {
                 callback(account.data());
             }
         });
+    }
+
+    pub(crate) fn set_clock_in_sysvar_cache(&self, clock: Clock) {
+        let tx_processor = self.transaction_processor.read().unwrap();
+        tx_processor.sysvar_cache.write().unwrap().set_clock(clock);
     }
 
     #[allow(dead_code)]

@@ -1105,6 +1105,7 @@ impl Bank {
                 inherit_specially_retained_account_fields(account),
             )
         });
+        self.set_clock_in_sysvar_cache(clock);
     }
 
     fn update_rent(&self) {
