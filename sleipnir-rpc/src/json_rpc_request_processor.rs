@@ -329,12 +329,11 @@ impl JsonRpcRequestProcessor {
         _config: RpcContextConfig,
     ) -> Result<Arc<Bank>> {
         // We only have one bank, so the config isn't important to us
-        self.get_bank()
+        Ok(self.get_bank())
     }
 
-    pub fn get_bank(&self) -> Result<Arc<Bank>> {
-        let bank = self.bank.clone();
-        Ok(bank)
+    pub fn get_bank(&self) -> Arc<Bank> {
+        self.bank.clone()
     }
 
     pub fn get_transaction_count(

@@ -63,7 +63,7 @@ impl Full for FullImpl {
         debug!("get_recent_performance_samples request received");
 
         // TODO(thlorenz): we don't have a blockstore, so we just make up some numbers here
-        let bank = meta.get_bank()?;
+        let bank = meta.get_bank();
         let num_slots = RECENT_PERF_SAMPLES_WINDOW_MILLIS
             / meta.config.slot_duration.as_millis() as u32;
         let current_slot = bank.slot();
@@ -71,6 +71,7 @@ impl Full for FullImpl {
         let samples = (min_slot..=current_slot)
             .map(|slot| RpcPerfSample {
                 slot,
+                // TODO(thlorenz): @@@blockstore once we support it we can provide this
                 num_transactions: 0,
                 sample_period_secs: (RECENT_PERF_SAMPLES_WINDOW_MILLIS / 1000)
                     as u16,

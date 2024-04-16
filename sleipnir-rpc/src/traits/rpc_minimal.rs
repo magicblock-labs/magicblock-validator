@@ -2,10 +2,13 @@
 use jsonrpc_core::Result;
 use jsonrpc_derive::rpc;
 use sleipnir_rpc_client_api::{
-    config::{RpcContextConfig, RpcGetVoteAccountsConfig},
+    config::{
+        RpcContextConfig, RpcGetVoteAccountsConfig, RpcLeaderScheduleConfig,
+        RpcLeaderScheduleConfigWrapper,
+    },
     response::{
-        Response as RpcResponse, RpcIdentity, RpcSnapshotSlotInfo,
-        RpcVersionInfo, RpcVoteAccountStatus,
+        Response as RpcResponse, RpcIdentity, RpcLeaderSchedule,
+        RpcSnapshotSlotInfo, RpcVersionInfo, RpcVoteAccountStatus,
     },
 };
 use solana_sdk::{epoch_info::EpochInfo, slot_history::Slot};
@@ -67,6 +70,14 @@ pub trait Minimal {
 
     #[rpc(meta, name = "getVersion")]
     fn get_version(&self, meta: Self::Metadata) -> Result<RpcVersionInfo>;
+
+    #[rpc(meta, name = "getLeaderSchedule")]
+    fn get_leader_schedule(
+        &self,
+        meta: Self::Metadata,
+        options: Option<RpcLeaderScheduleConfigWrapper>,
+        config: Option<RpcLeaderScheduleConfig>,
+    ) -> Result<Option<RpcLeaderSchedule>>;
 
     // Even though we don't have vote accounts we need to
     // support this call as otherwise explorers don't work

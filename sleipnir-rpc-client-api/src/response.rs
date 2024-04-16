@@ -1,5 +1,5 @@
 // NOTE: from rpc-client-api/src/response.rs without vote/token related parts
-use std::{fmt, net::SocketAddr, str::FromStr};
+use std::{collections::HashMap, fmt, net::SocketAddr, str::FromStr};
 
 use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use solana_account_decoder::UiAccount;
@@ -414,5 +414,11 @@ pub struct RpcPrioritizationFee {
     pub slot: Slot,
     pub prioritization_fee: u64,
 }
+
+// -----------------
+// RpcLeaderSchedule
+// -----------------
+/// Map of leader base58 identity pubkeys to the slot indices relative to the first epoch slot
+pub type RpcLeaderSchedule = HashMap<String, Vec<usize>>;
 
 // NOTE: left out tests (rpc_perf_sample_serializes_num_non_vote_transactions)

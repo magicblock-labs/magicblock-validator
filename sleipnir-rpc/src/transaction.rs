@@ -106,7 +106,7 @@ pub(crate) fn airdrop_transaction(
     lamports: u64,
 ) -> Result<String> {
     debug!("request_airdrop rpc request received");
-    let bank = meta.get_bank()?;
+    let bank = meta.get_bank();
     let blockhash = bank.last_blockhash();
     let transaction = system_transaction::transfer(
         &meta.faucet_keypair,
@@ -134,7 +134,7 @@ pub(crate) fn send_transaction(
     _durable_nonce_info: Option<(Pubkey, Hash)>,
     _max_retries: Option<usize>,
 ) -> Result<String> {
-    let bank = &meta.get_bank()?;
+    let bank = &meta.get_bank();
     let txs = [sanitized_transaction];
     let batch = bank.prepare_sanitized_batch(&txs);
     let batch_with_indexes = TransactionBatchWithIndexes {
