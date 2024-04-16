@@ -1,5 +1,7 @@
 #![cfg(feature = "dev-context-only-utils")]
 
+#[allow(unused_imports)]
+use log::*;
 use sleipnir_bank::bank::Bank;
 use solana_sdk::{
     account::Account, genesis_config::create_genesis_config, pubkey::Pubkey,
@@ -91,4 +93,25 @@ fn test_bank_store_get_accounts_across_slots() {
         assert_account_stored!(acc1);
         assert_account_stored!(acc2);
     }
+}
+
+#[test]
+fn test_bank_advances_slot_in_clock_sysvar() {
+    init_logger!();
+
+    let (genesis_config, _) = create_genesis_config(u64::MAX);
+    let bank = Bank::new_for_tests(&genesis_config, None, None);
+
+    assert_eq!(bank.clock().slot, 0);
+
+    bank.advance_slot();
+    assert_eq!(bank.clock().slot, 1);
+
+    bank.advance_slot();
+    assert_eq!(bank.clock().slot, 2);
+
+    bank.advance_slot();
+    bank.advance_slot();
+    bank.advance_slot();
+    assert_eq!(bank.clock().slot, 5);
 }
