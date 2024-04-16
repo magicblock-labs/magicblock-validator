@@ -437,6 +437,9 @@ impl Bank {
         // it via bank.transaction_processor.sysvar_cache.write().unwrap().set_clock(), etc.
         bank.fill_missing_sysvar_cache_entries();
 
+        // We don't have anything to verify at this point, so declare it done
+        bank.set_startup_verification_complete();
+
         bank
     }
 
@@ -2358,14 +2361,20 @@ impl Bank {
     // -----------------
     /// Returns true when startup accounts hash verification has completed or never had to run in background.
     pub fn get_startup_verification_complete(&self) -> &Arc<AtomicBool> {
-        // TODO(thlorenz): this seems to never get verified at this point, i.e. /health always
-        // returns 'unknown'
         &self
             .rc
             .accounts
             .accounts_db
             .verify_accounts_hash_in_bg
             .verified
+    }
+
+    pub fn set_startup_verification_complete(&self) {
+        self.rc
+            .accounts
+            .accounts_db
+            .verify_accounts_hash_in_bg
+            .verification_complete()
     }
 
     // -----------------

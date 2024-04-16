@@ -13,6 +13,7 @@ pub enum RpcHealthStatus {
 pub struct RpcHealth {
     startup_verification_complete: Arc<AtomicBool>,
 }
+
 impl RpcHealth {
     pub(crate) fn new(startup_verification_complete: Arc<AtomicBool>) -> Self {
         Self {

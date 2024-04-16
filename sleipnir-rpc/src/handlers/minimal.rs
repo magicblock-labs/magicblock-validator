@@ -3,6 +3,7 @@ use jsonrpc_core::Result;
 use log::*;
 use sleipnir_rpc_client_api::{
     config::{RpcContextConfig, RpcGetVoteAccountsConfig},
+    custom_error::RpcCustomError,
     response::{
         Response as RpcResponse, RpcIdentity, RpcSnapshotSlotInfo,
         RpcVersionInfo, RpcVoteAccountStatus,
@@ -12,7 +13,7 @@ use solana_sdk::{epoch_info::EpochInfo, slot_history::Slot};
 
 use crate::{
     json_rpc_request_processor::JsonRpcRequestProcessor,
-    traits::rpc_minimal::Minimal,
+    rpc_health::RpcHealthStatus, traits::rpc_minimal::Minimal,
 };
 
 pub struct MinimalImpl;
@@ -44,7 +45,13 @@ impl Minimal for MinimalImpl {
     }
 
     fn get_health(&self, meta: Self::Metadata) -> Result<String> {
-        todo!("get_health")
+        match meta.health.check() {
+            RpcHealthStatus::Ok => Ok("ok".to_string()),
+            RpcHealthStatus::Unknown => Err(RpcCustomError::NodeUnhealthy {
+                num_slots_behind: None,
+            }
+            .into()),
+        }
     }
 
     fn get_identity(&self, meta: Self::Metadata) -> Result<RpcIdentity> {
