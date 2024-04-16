@@ -1,39 +1,39 @@
 // Adapted yellowstone-grpc/yellowstone-grpc-geyser/src/grpc.rs
-use {
-    crate::grpc_messages::*,
-    crate::{
-        config::{ConfigBlockFailAction, ConfigGrpc},
-        filters::Filter,
-        version::GrpcVersionInfo,
+use std::{
+    collections::{BTreeMap, HashMap},
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
     },
-    geyser_grpc_proto::prelude::{
-        geyser_server::{Geyser, GeyserServer},
-        subscribe_update::UpdateOneof,
-        CommitmentLevel, GetBlockHeightRequest, GetBlockHeightResponse,
-        GetLatestBlockhashRequest, GetLatestBlockhashResponse, GetSlotRequest,
-        GetSlotResponse, GetVersionRequest, GetVersionResponse,
-        IsBlockhashValidRequest, IsBlockhashValidResponse, PingRequest,
-        PongResponse, SubscribeRequest, SubscribeUpdate, SubscribeUpdatePing,
-    },
-    log::{error, info},
-    std::{
-        collections::{BTreeMap, HashMap},
-        sync::{
-            atomic::{AtomicUsize, Ordering},
-            Arc,
-        },
-    },
-    tokio::{
-        sync::{broadcast, mpsc, Notify},
-        time::{sleep, Duration, Instant},
-    },
-    tokio_stream::wrappers::ReceiverStream,
-    tonic::{
-        codec::CompressionEncoding,
-        transport::server::{Server, TcpIncoming},
-        Request, Response, Result as TonicResult, Status, Streaming,
-    },
-    tonic_health::server::health_reporter,
+};
+
+use geyser_grpc_proto::prelude::{
+    geyser_server::{Geyser, GeyserServer},
+    subscribe_update::UpdateOneof,
+    CommitmentLevel, GetBlockHeightRequest, GetBlockHeightResponse,
+    GetLatestBlockhashRequest, GetLatestBlockhashResponse, GetSlotRequest,
+    GetSlotResponse, GetVersionRequest, GetVersionResponse,
+    IsBlockhashValidRequest, IsBlockhashValidResponse, PingRequest,
+    PongResponse, SubscribeRequest, SubscribeUpdate, SubscribeUpdatePing,
+};
+use log::{error, info};
+use tokio::{
+    sync::{broadcast, mpsc, Notify},
+    time::{sleep, Duration, Instant},
+};
+use tokio_stream::wrappers::ReceiverStream;
+use tonic::{
+    codec::CompressionEncoding,
+    transport::server::{Server, TcpIncoming},
+    Request, Response, Result as TonicResult, Status, Streaming,
+};
+use tonic_health::server::health_reporter;
+
+use crate::{
+    config::{ConfigBlockFailAction, ConfigGrpc},
+    filters::Filter,
+    grpc_messages::*,
+    version::GrpcVersionInfo,
 };
 
 #[derive(Debug)]

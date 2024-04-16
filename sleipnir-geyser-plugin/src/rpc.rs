@@ -1,6 +1,4 @@
 #![allow(unused)]
-use log::*;
-use solana_sdk::{pubkey::Pubkey, signature::Signature};
 use std::{
     collections::HashMap,
     sync::{
@@ -9,15 +7,19 @@ use std::{
         Arc,
     },
 };
-use stretto::Cache;
-use tonic::{Result as TonicResult, Status};
 
-use geyser_grpc_proto::geyser::{
-    CommitmentLevel, SubscribeRequest, SubscribeRequestFilterAccounts,
-    SubscribeRequestFilterTransactions, SubscribeUpdate,
+use geyser_grpc_proto::{
+    geyser::{
+        CommitmentLevel, SubscribeRequest, SubscribeRequestFilterAccounts,
+        SubscribeRequestFilterTransactions, SubscribeUpdate,
+    },
+    prelude::{SubscribeRequestFilterSlots, SubscribeUpdateSlot},
 };
+use log::*;
+use solana_sdk::{pubkey::Pubkey, signature::Signature};
+use stretto::Cache;
 use tokio::sync::{broadcast, mpsc, Notify};
-use geyser_grpc_proto::prelude::{SubscribeRequestFilterSlots, SubscribeUpdateSlot};
+use tonic::{Result as TonicResult, Status};
 
 use crate::{
     config::{ConfigBlockFailAction, ConfigGrpc},

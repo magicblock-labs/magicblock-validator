@@ -1,29 +1,29 @@
-use {
-    crate::{
-        accounts_update_notifier::AccountsUpdateNotifierImpl,
-        geyser_plugin_manager::{
-            GeyserPluginManager, GeyserPluginManagerRequest, LoadedGeyserPlugin,
-        },
-        slot_status_notifier::SlotStatusNotifierImpl,
-        transaction_notifier::TransactionNotifierImpl,
+use std::{
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, RwLock,
     },
-    crossbeam_channel::Receiver,
-    log::*,
-    sleipnir_bank::{
-        slot_status_notifier_interface::SlotStatusNotifierArc,
-        transaction_notifier_interface::TransactionNotifierArc,
+    thread,
+    time::Duration,
+};
+
+use crossbeam_channel::Receiver;
+use log::*;
+use sleipnir_bank::{
+    slot_status_notifier_interface::SlotStatusNotifierArc,
+    transaction_notifier_interface::TransactionNotifierArc,
+};
+use solana_accounts_db::accounts_update_notifier_interface::AccountsUpdateNotifier;
+use thiserror::Error;
+
+use crate::{
+    accounts_update_notifier::AccountsUpdateNotifierImpl,
+    geyser_plugin_manager::{
+        GeyserPluginManager, GeyserPluginManagerRequest, LoadedGeyserPlugin,
     },
-    solana_accounts_db::accounts_update_notifier_interface::AccountsUpdateNotifier,
-    std::{
-        path::{Path, PathBuf},
-        sync::{
-            atomic::{AtomicBool, Ordering},
-            Arc, RwLock,
-        },
-        thread,
-        time::Duration,
-    },
-    thiserror::Error,
+    slot_status_notifier::SlotStatusNotifierImpl,
+    transaction_notifier::TransactionNotifierImpl,
 };
 
 /// The service managing the Geyser plugin workflow.

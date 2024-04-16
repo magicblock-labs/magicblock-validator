@@ -1,14 +1,13 @@
-use {
-    jsonrpc_core::{ErrorCode, Result as JsonRpcResult},
-    libloading::Library,
-    log::*,
-    solana_geyser_plugin_interface::geyser_plugin_interface::GeyserPlugin,
-    std::{
-        ops::{Deref, DerefMut},
-        path::Path,
-    },
-    tokio::sync::oneshot::Sender as OneShotSender,
+use std::{
+    ops::{Deref, DerefMut},
+    path::Path,
 };
+
+use jsonrpc_core::{ErrorCode, Result as JsonRpcResult};
+use libloading::Library;
+use log::*;
+use solana_geyser_plugin_interface::geyser_plugin_interface::GeyserPlugin;
+use tokio::sync::oneshot::Sender as OneShotSender;
 
 #[derive(Debug)]
 pub struct LoadedGeyserPlugin {
@@ -456,14 +455,14 @@ pub(crate) fn load_plugin_from_config(
 
 #[cfg(test)]
 mod tests {
-    use {
-        crate::geyser_plugin_manager::{
-            GeyserPluginManager, LoadedGeyserPlugin, TESTPLUGIN2_CONFIG,
-            TESTPLUGIN_CONFIG,
-        },
-        libloading::Library,
-        solana_geyser_plugin_interface::geyser_plugin_interface::GeyserPlugin,
-        std::sync::{Arc, RwLock},
+    use std::sync::{Arc, RwLock};
+
+    use libloading::Library;
+    use solana_geyser_plugin_interface::geyser_plugin_interface::GeyserPlugin;
+
+    use crate::geyser_plugin_manager::{
+        GeyserPluginManager, LoadedGeyserPlugin, TESTPLUGIN2_CONFIG,
+        TESTPLUGIN_CONFIG,
     };
 
     pub(super) fn dummy_plugin_and_library<P: GeyserPlugin>(

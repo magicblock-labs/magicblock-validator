@@ -1,6 +1,6 @@
-use log::*;
 use std::{error::Error, io, path::Path};
 
+use log::*;
 use sleipnir_bank::bank::Bank;
 use solana_sdk::{
     account::{Account, AccountSharedData},

@@ -1,33 +1,32 @@
 // Adapted yellowstone-grpc/yellowstone-grpc-geyser/src/grpc.rs
-use {
-    crate::filters::FilterAccountsDataSlice,
-    geyser_grpc_proto::{
-        convert_to,
-        prelude::{
-            subscribe_update::UpdateOneof, CommitmentLevel,
-            IsBlockhashValidResponse, SubscribeUpdateAccount,
-            SubscribeUpdateAccountInfo, SubscribeUpdateBlock,
-            SubscribeUpdateBlockMeta, SubscribeUpdateEntry,
-            SubscribeUpdateSlot, SubscribeUpdateTransaction,
-            SubscribeUpdateTransactionInfo,
-        },
+use std::{collections::HashMap, sync::Arc};
+
+use geyser_grpc_proto::{
+    convert_to,
+    prelude::{
+        subscribe_update::UpdateOneof, CommitmentLevel,
+        IsBlockhashValidResponse, SubscribeUpdateAccount,
+        SubscribeUpdateAccountInfo, SubscribeUpdateBlock,
+        SubscribeUpdateBlockMeta, SubscribeUpdateEntry, SubscribeUpdateSlot,
+        SubscribeUpdateTransaction, SubscribeUpdateTransactionInfo,
     },
-    log::error,
-    sleipnir_transaction_status::{Reward, TransactionStatusMeta},
-    solana_geyser_plugin_interface::geyser_plugin_interface::{
-        ReplicaAccountInfoV3, ReplicaBlockInfoV3, ReplicaEntryInfoV2,
-        ReplicaTransactionInfoV2, SlotStatus,
-    },
-    solana_sdk::{
-        clock::{UnixTimestamp, MAX_RECENT_BLOCKHASHES},
-        pubkey::Pubkey,
-        signature::Signature,
-        transaction::SanitizedTransaction,
-    },
-    std::{collections::HashMap, sync::Arc},
-    tokio::sync::{mpsc, RwLock, Semaphore},
-    tonic::{Response, Status},
 };
+use log::error;
+use sleipnir_transaction_status::{Reward, TransactionStatusMeta};
+use solana_geyser_plugin_interface::geyser_plugin_interface::{
+    ReplicaAccountInfoV3, ReplicaBlockInfoV3, ReplicaEntryInfoV2,
+    ReplicaTransactionInfoV2, SlotStatus,
+};
+use solana_sdk::{
+    clock::{UnixTimestamp, MAX_RECENT_BLOCKHASHES},
+    pubkey::Pubkey,
+    signature::Signature,
+    transaction::SanitizedTransaction,
+};
+use tokio::sync::{mpsc, RwLock, Semaphore};
+use tonic::{Response, Status};
+
+use crate::filters::FilterAccountsDataSlice;
 
 #[derive(Debug, Clone)]
 pub struct MessageAccountInfo {

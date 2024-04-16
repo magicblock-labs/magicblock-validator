@@ -1,5 +1,4 @@
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use sleipnir_bank::{
     bank::Bank, slot_status_notifier_interface::SlotStatusNotifierArc,

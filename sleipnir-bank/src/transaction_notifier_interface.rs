@@ -1,11 +1,9 @@
-use {
-    solana_sdk::{
-        clock::Slot, signature::Signature, transaction::SanitizedTransaction,
-    },
-    solana_transaction_status::TransactionStatusMeta,
-    std::fmt::Debug,
-    std::sync::Arc,
+use std::{fmt::Debug, sync::Arc};
+
+use solana_sdk::{
+    clock::Slot, signature::Signature, transaction::SanitizedTransaction,
 };
+use solana_transaction_status::TransactionStatusMeta;
 
 pub trait TransactionNotifier: Debug {
     fn notify_transaction(

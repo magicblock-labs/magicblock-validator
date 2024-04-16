@@ -1,13 +1,13 @@
-use {
-    crate::geyser_plugin_manager::GeyserPluginManager,
-    log::*,
-    sleipnir_bank::slot_status_notifier_interface::SlotStatusNotifier,
-    solana_geyser_plugin_interface::geyser_plugin_interface::SlotStatus,
-    solana_measure::measure::Measure,
-    solana_metrics::*,
-    solana_sdk::clock::Slot,
-    std::sync::{Arc, RwLock},
-};
+use std::sync::{Arc, RwLock};
+
+use log::*;
+use sleipnir_bank::slot_status_notifier_interface::SlotStatusNotifier;
+use solana_geyser_plugin_interface::geyser_plugin_interface::SlotStatus;
+use solana_measure::measure::Measure;
+use solana_metrics::*;
+use solana_sdk::clock::Slot;
+
+use crate::geyser_plugin_manager::GeyserPluginManager;
 
 #[derive(Debug)]
 pub struct SlotStatusNotifierImpl {

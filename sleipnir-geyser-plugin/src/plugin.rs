@@ -8,12 +8,6 @@ use std::{
     time::Duration,
 };
 
-use crate::{
-    config::Config,
-    grpc::GrpcService,
-    grpc_messages::{Message, MessageSlot},
-    rpc::GeyserRpcService,
-};
 use log::*;
 use solana_geyser_plugin_interface::geyser_plugin_interface::{
     GeyserPlugin, GeyserPluginError, ReplicaAccountInfoVersions,
@@ -25,6 +19,13 @@ use stretto::Cache;
 use tokio::{
     runtime::{Builder, Runtime},
     sync::{mpsc, Notify},
+};
+
+use crate::{
+    config::Config,
+    grpc::GrpcService,
+    grpc_messages::{Message, MessageSlot},
+    rpc::GeyserRpcService,
 };
 
 // -----------------

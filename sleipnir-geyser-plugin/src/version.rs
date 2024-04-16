@@ -1,4 +1,6 @@
-use {serde::Serialize, std::env};
+use std::env;
+
+use serde::Serialize;
 
 #[derive(Debug, Serialize)]
 pub struct Version {

@@ -1,36 +1,34 @@
 // Adapted from yellowstone-grpc/yellowstone-grpc-geyser/src/filters.rs
-use {
-    crate::{
-        config::{
-            ConfigGrpcFilters, ConfigGrpcFiltersAccounts,
-            ConfigGrpcFiltersBlocks, ConfigGrpcFiltersBlocksMeta,
-            ConfigGrpcFiltersEntry, ConfigGrpcFiltersSlots,
-            ConfigGrpcFiltersTransactions,
-        },
-        grpc_messages::{
-            Message, MessageAccount, MessageBlock, MessageBlockMeta,
-            MessageEntry, MessageRef, MessageSlot, MessageTransaction,
-        },
+use std::{
+    collections::{HashMap, HashSet},
+    str::FromStr,
+};
+
+use base64::{engine::general_purpose::STANDARD as base64_engine, Engine};
+use geyser_grpc_proto::prelude::{
+    subscribe_request_filter_accounts_filter::Filter as AccountsFilterDataOneof,
+    subscribe_request_filter_accounts_filter_memcmp::Data as AccountsFilterMemcmpOneof,
+    subscribe_update::UpdateOneof, CommitmentLevel, SubscribeRequest,
+    SubscribeRequestAccountsDataSlice, SubscribeRequestFilterAccounts,
+    SubscribeRequestFilterAccountsFilter, SubscribeRequestFilterBlocks,
+    SubscribeRequestFilterBlocksMeta, SubscribeRequestFilterEntry,
+    SubscribeRequestFilterSlots, SubscribeRequestFilterTransactions,
+    SubscribeUpdate, SubscribeUpdatePong,
+};
+use solana_sdk::{pubkey::Pubkey, signature::Signature};
+use spl_token_2022::{
+    generic_token_account::GenericTokenAccount, state::Account as TokenAccount,
+};
+
+use crate::{
+    config::{
+        ConfigGrpcFilters, ConfigGrpcFiltersAccounts, ConfigGrpcFiltersBlocks,
+        ConfigGrpcFiltersBlocksMeta, ConfigGrpcFiltersEntry,
+        ConfigGrpcFiltersSlots, ConfigGrpcFiltersTransactions,
     },
-    base64::{engine::general_purpose::STANDARD as base64_engine, Engine},
-    geyser_grpc_proto::prelude::{
-        subscribe_request_filter_accounts_filter::Filter as AccountsFilterDataOneof,
-        subscribe_request_filter_accounts_filter_memcmp::Data as AccountsFilterMemcmpOneof,
-        subscribe_update::UpdateOneof, CommitmentLevel, SubscribeRequest,
-        SubscribeRequestAccountsDataSlice, SubscribeRequestFilterAccounts,
-        SubscribeRequestFilterAccountsFilter, SubscribeRequestFilterBlocks,
-        SubscribeRequestFilterBlocksMeta, SubscribeRequestFilterEntry,
-        SubscribeRequestFilterSlots, SubscribeRequestFilterTransactions,
-        SubscribeUpdate, SubscribeUpdatePong,
-    },
-    solana_sdk::{pubkey::Pubkey, signature::Signature},
-    spl_token_2022::{
-        generic_token_account::GenericTokenAccount,
-        state::Account as TokenAccount,
-    },
-    std::{
-        collections::{HashMap, HashSet},
-        str::FromStr,
+    grpc_messages::{
+        Message, MessageAccount, MessageBlock, MessageBlockMeta, MessageEntry,
+        MessageRef, MessageSlot, MessageTransaction,
     },
 };
 
@@ -904,28 +902,25 @@ impl FilterAccountsDataSlice {
 
 #[cfg(test)]
 mod tests {
-    use {
-        crate::{
-            config::ConfigGrpcFilters,
-            filters::Filter,
-            grpc_messages::{
-                Message, MessageTransaction, MessageTransactionInfo,
-            },
-        },
-        geyser_grpc_proto::geyser::{
-            SubscribeRequest, SubscribeRequestFilterAccounts,
-            SubscribeRequestFilterTransactions,
-        },
-        sleipnir_transaction_status::TransactionStatusMeta,
-        solana_sdk::{
-            hash::Hash,
-            message::Message as SolMessage,
-            message::{v0::LoadedAddresses, MessageHeader},
-            pubkey::Pubkey,
-            signer::{keypair::Keypair, Signer},
-            transaction::{SanitizedTransaction, Transaction},
-        },
-        std::collections::HashMap,
+    use std::collections::HashMap;
+
+    use geyser_grpc_proto::geyser::{
+        SubscribeRequest, SubscribeRequestFilterAccounts,
+        SubscribeRequestFilterTransactions,
+    };
+    use sleipnir_transaction_status::TransactionStatusMeta;
+    use solana_sdk::{
+        hash::Hash,
+        message::{v0::LoadedAddresses, Message as SolMessage, MessageHeader},
+        pubkey::Pubkey,
+        signer::{keypair::Keypair, Signer},
+        transaction::{SanitizedTransaction, Transaction},
+    };
+
+    use crate::{
+        config::ConfigGrpcFilters,
+        filters::Filter,
+        grpc_messages::{Message, MessageTransaction, MessageTransactionInfo},
     };
 
     const NORMALIZE_COMMITMENT: bool = false;

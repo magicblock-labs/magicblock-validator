@@ -1,13 +1,12 @@
 // Adapted from yellowstone-grpc/yellowstone-grpc-geyser/src/config.rs
-use {
-    solana_sdk::pubkey::Pubkey,
-    std::{
-        collections::HashSet,
-        net::{IpAddr, Ipv4Addr, SocketAddr},
-        time::Duration,
-    },
-    tokio::sync::Semaphore,
+use std::{
+    collections::HashSet,
+    net::{IpAddr, Ipv4Addr, SocketAddr},
+    time::Duration,
 };
+
+use solana_sdk::pubkey::Pubkey;
+use tokio::sync::Semaphore;
 
 #[derive(Debug, Clone)]
 pub struct Config {
