@@ -45,7 +45,8 @@ impl Minimal for MinimalImpl {
     }
 
     fn get_genesis_hash(&self, meta: Self::Metadata) -> Result<String> {
-        todo!("get_genesis_hash")
+        debug!("get_genesis_hash rpc request received");
+        Ok(meta.genesis_hash.to_string())
     }
 
     fn get_health(&self, meta: Self::Metadata) -> Result<String> {

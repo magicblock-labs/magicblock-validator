@@ -110,8 +110,13 @@ async fn main() {
         let hdl = {
             let bank = bank.clone();
             std::thread::spawn(move || {
-                let _json_rpc_service =
-                    JsonRpcService::new(bank, faucet_keypair, config).unwrap();
+                let _json_rpc_service = JsonRpcService::new(
+                    bank,
+                    faucet_keypair,
+                    genesis_config.hash(),
+                    config,
+                )
+                .unwrap();
             })
         };
         info!(

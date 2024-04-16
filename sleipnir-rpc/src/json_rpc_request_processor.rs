@@ -28,6 +28,7 @@ use solana_accounts_db::accounts_index::AccountSecondaryIndexes;
 use solana_sdk::{
     clock::{Slot, UnixTimestamp},
     epoch_schedule::EpochSchedule,
+    hash::Hash,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
 };
@@ -79,6 +80,7 @@ pub struct JsonRpcRequestProcessor {
     pub(crate) config: JsonRpcConfig,
     transaction_sender: Arc<Mutex<Sender<TransactionInfo>>>,
     pub(crate) health: Arc<RpcHealth>,
+    pub(crate) genesis_hash: Hash,
     pub faucet_keypair: Arc<Keypair>,
 }
 impl Metadata for JsonRpcRequestProcessor {}
@@ -88,6 +90,7 @@ impl JsonRpcRequestProcessor {
         bank: Arc<Bank>,
         health: Arc<RpcHealth>,
         faucet_keypair: Keypair,
+        genesis_hash: Hash,
         config: JsonRpcConfig,
     ) -> (Self, Receiver<TransactionInfo>) {
         let (sender, receiver) = unbounded();
@@ -99,6 +102,7 @@ impl JsonRpcRequestProcessor {
                 transaction_sender,
                 health,
                 faucet_keypair: Arc::new(faucet_keypair),
+                genesis_hash,
             },
             receiver,
         )

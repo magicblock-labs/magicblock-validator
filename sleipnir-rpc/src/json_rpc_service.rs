@@ -13,7 +13,7 @@ use jsonrpc_http_server::{
 use log::*;
 use sleipnir_bank::bank::Bank;
 use solana_perf::thread::renice_this_thread;
-use solana_sdk::signature::Keypair;
+use solana_sdk::{hash::Hash, signature::Keypair};
 
 use crate::{
     handlers::{
@@ -40,6 +40,7 @@ impl JsonRpcService {
     pub fn new(
         bank: Arc<Bank>,
         faucet_keypair: Keypair,
+        genesis_hash: Hash,
         config: JsonRpcConfig,
     ) -> Result<Self, String> {
         let rpc_addr = config
@@ -61,6 +62,7 @@ impl JsonRpcService {
             bank,
             health.clone(),
             faucet_keypair,
+            genesis_hash,
             config,
         );
 
