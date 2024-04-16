@@ -315,6 +315,13 @@ impl JsonRpcRequestProcessor {
     }
 
     // -----------------
+    // Stats
+    // -----------------
+    pub fn get_identity(&self) -> Pubkey {
+        self.bank.get_identity()
+    }
+
+    // -----------------
     // Bank
     // -----------------
     pub fn get_bank_with_config(

@@ -55,7 +55,11 @@ impl Minimal for MinimalImpl {
     }
 
     fn get_identity(&self, meta: Self::Metadata) -> Result<RpcIdentity> {
-        todo!("get_identity")
+        debug!("get_identity rpc request received");
+        let identity = meta.get_identity();
+        Ok(RpcIdentity {
+            identity: identity.to_string(),
+        })
     }
 
     fn get_slot(
