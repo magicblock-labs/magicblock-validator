@@ -1,20 +1,21 @@
+use std::{net::SocketAddr, sync::Arc, thread};
+
 use jsonrpc_core::{futures, BoxFuture, MetaIoHandler, Params};
+use jsonrpc_pubsub::{
+    PubSubHandler, Session, Subscriber, SubscriptionId, UnsubscribeRpcMethod,
+};
+use jsonrpc_ws_server::{RequestContext, Server, ServerBuilder};
 use log::*;
 use serde_json::Value;
 use sleipnir_bank::bank::Bank;
 use sleipnir_geyser_plugin::rpc::GeyserRpcService;
 use solana_sdk::rpc_port::DEFAULT_RPC_PUBSUB_PORT;
-use std::{net::SocketAddr, sync::Arc, thread};
 
 use crate::{
     errors::{ensure_and_try_parse_params, ensure_empty_params},
     pubsub_api::PubsubApi,
     types::{AccountParams, SignatureParams},
 };
-use jsonrpc_pubsub::{
-    PubSubHandler, Session, Subscriber, SubscriptionId, UnsubscribeRpcMethod,
-};
-use jsonrpc_ws_server::{RequestContext, Server, ServerBuilder};
 
 // -----------------
 // PubsubConfig
