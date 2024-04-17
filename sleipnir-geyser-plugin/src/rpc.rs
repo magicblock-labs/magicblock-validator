@@ -169,6 +169,9 @@ impl GeyserRpcService {
             .get(signature)
             .as_ref()
             .map(|val| Arc::new(vec![val.value().clone()]));
+        if msgs.as_ref().map(|val| val.len()).unwrap_or(0) > 0 {
+            trace!("tx in cache '{}'", signature);
+        }
         let sub_update = self.subscribe_impl(filter, subid, unsubscriber, msgs);
 
         Ok(sub_update)
