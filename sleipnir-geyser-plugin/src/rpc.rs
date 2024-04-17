@@ -112,6 +112,7 @@ impl GeyserRpcService {
         &self,
         account_subscription: HashMap<String, SubscribeRequestFilterAccounts>,
         pubkey: &Pubkey,
+        subid: Option<u64>,
     ) -> anyhow::Result<(u64, mpsc::Receiver<Result<SubscribeUpdate, Status>>)>
     {
         let filter = Filter::new(
@@ -135,7 +136,7 @@ impl GeyserRpcService {
             .get(pubkey)
             .as_ref()
             .map(|val| Arc::new(vec![val.value().clone()]));
-        let sub_update = self.subscribe_impl(filter, msgs);
+        let sub_update = self.subscribe_impl(filter, subid, msgs);
 
         Ok(sub_update)
     }
@@ -147,6 +148,7 @@ impl GeyserRpcService {
             SubscribeRequestFilterTransactions,
         >,
         signature: &Signature,
+        subid: Option<u64>,
     ) -> anyhow::Result<(u64, mpsc::Receiver<Result<SubscribeUpdate, Status>>)>
     {
         debug!("tx sub, cache size {}", self.transactions_cache.len());
@@ -170,7 +172,7 @@ impl GeyserRpcService {
             .get(signature)
             .as_ref()
             .map(|val| Arc::new(vec![val.value().clone()]));
-        let sub_update = self.subscribe_impl(filter, msgs);
+        let sub_update = self.subscribe_impl(filter, subid, msgs);
 
         Ok(sub_update)
     }
@@ -178,6 +180,7 @@ impl GeyserRpcService {
     pub fn slot_subscribe(
         &self,
         slot_subscription: HashMap<String, SubscribeRequestFilterSlots>,
+        subid: Option<u64>,
     ) -> anyhow::Result<(u64, mpsc::Receiver<Result<SubscribeUpdate, Status>>)>
     {
         // We don't filter by slot for the RPC interface
@@ -196,7 +199,7 @@ impl GeyserRpcService {
             &self.config.filters,
             self.config.normalize_commitment_level,
         )?;
-        let sub_update = self.subscribe_impl(filter, None);
+        let sub_update = self.subscribe_impl(filter, subid, None);
 
         Ok(sub_update)
     }
@@ -204,9 +207,10 @@ impl GeyserRpcService {
     fn subscribe_impl(
         &self,
         filter: Filter,
+        subid: Option<u64>,
         initial_messages: Option<Arc<Vec<Message>>>,
     ) -> (u64, mpsc::Receiver<Result<SubscribeUpdate, Status>>) {
-        let id = self.next_id();
+        let id = subid.unwrap_or_else(|| self.next_id());
         let (stream_tx, mut stream_rx) =
             mpsc::channel(self.config.channel_capacity);
 

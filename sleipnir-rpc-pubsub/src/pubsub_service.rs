@@ -298,7 +298,7 @@ fn handle_account_subscribe(
                 };
 
                 let (sub_id, mut rx) =
-                    match geyser_rpc_service.accounts_subscribe(sub, &pubkey) {
+                    match geyser_rpc_service.accounts_subscribe(sub, &pubkey, None) {
                         Ok(res) => res,
                         Err(err) => {
                             reject_internal_error(
@@ -420,7 +420,7 @@ fn handle_signature_subscribe(
         {
             rt.block_on(async move {
                 let (sub_id, mut rx) =
-                    match geyser_rpc_service.transaction_subscribe(sub, &sig) {
+                    match geyser_rpc_service.transaction_subscribe(sub, &sig, None) {
                         Ok(res) => res,
                         Err(err) => {
                             reject_internal_error(
@@ -496,7 +496,7 @@ fn handle_slot_subscribe(
             rt.block_on(async move {
                 let sub = geyser_sub_for_slot_update();
                 let (sub_id, mut rx) =
-                    match geyser_rpc_service.slot_subscribe(sub) {
+                    match geyser_rpc_service.slot_subscribe(sub, None) {
                         Ok(res) => res,
                         Err(err) => {
                             reject_internal_error(
