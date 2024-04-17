@@ -11,10 +11,10 @@ use sleipnir_bank::{
     bank::Bank,
     genesis_utils::{create_genesis_config, GenesisConfigInfo},
 };
+use sleipnir_pubsub::pubsub_service::{PubsubConfig, PubsubService};
 use sleipnir_rpc::{
     json_rpc_request_processor::JsonRpcConfig, json_rpc_service::JsonRpcService,
 };
-use sleipnir_rpc_pubsub::pubsub_service::{RpcPubsubConfig, RpcPubsubService};
 use sleipnir_transaction_status::TransactionStatusSender;
 use solana_sdk::{signature::Keypair, signer::Signer};
 use test_tools::{
@@ -89,7 +89,7 @@ async fn main() {
     );
     init_slot_ticker(bank.clone(), tick_duration);
 
-    let pubsub_config = RpcPubsubConfig::default();
+    let pubsub_config = PubsubConfig::default();
     // JSON RPC Service
     let json_rpc_service = {
         let rpc_socket_addr =
@@ -127,13 +127,14 @@ async fn main() {
         hdl
     };
     // PubSub Service
-    RpcPubsubService::spawn(
+    let pubsub_service = PubsubService::spawn(
         pubsub_config,
         geyser_rpc_service.clone(),
         bank.clone(),
     );
 
     json_rpc_service.join().unwrap();
+    pubsub_service.join().unwrap();
 }
 
 fn init_slot_ticker(bank: Arc<Bank>, tick_duration: Duration) {

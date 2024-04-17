@@ -12,6 +12,7 @@ members = [
   "sleipnir-messaging",
   "sleipnir-mutator",
   "sleipnir-processor",
+  "sleipnir-pubsub",
   "sleipnir-rpc",
   "sleipnir-rpc-client",
   "sleipnir-rpc-client-api",
@@ -92,6 +93,7 @@ sleipnir-messaging = { path = "./sleipnir-messaging" }
 sleipnir-mutator = { path = "./sleipnir-mutator" }
 sleipnir-processor = { path = "./sleipnir-processor" }
 sleipnir-program = { path = "./programs/sleipnir" }
+sleipnir-pubsub = { path = "./sleipnir-pubsub" }
 sleipnir-rpc = { path = "./sleipnir-rpc" }
 sleipnir-rpc-client = { path = "./sleipnir-rpc-client" }
 sleipnir-rpc-client-api = { path = "./sleipnir-rpc-client-api" }
@@ -133,6 +135,7 @@ thiserror = "1.0.57"
 # Update solana-tokio patch below when updating this version
 tokio = "1.29.1"
 tokio-stream = "0.1.15"
+tokio-util = "0.7.10"
 # Tonic version 11 conflicts with lower level deps of solana
 tonic = "0.10.2"
 tonic-build = "0.10.2"
