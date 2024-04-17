@@ -228,7 +228,7 @@ impl GeyserRpcService {
     /// By using the same transport as future messages we ensure to use the same logic WRT
     /// filters.
     async fn client_loop(
-        id: u64,
+        subid: u64,
         mut filter: Filter,
         stream_tx: mpsc::Sender<TonicResult<SubscribeUpdate>>,
         unsubscriber: CancellationToken,
@@ -241,7 +241,8 @@ impl GeyserRpcService {
         // 1. Send initial messages that were cached from previous updates
         if let Some(messages) = initial_messages.take() {
             let exit = handle_messages(
-                id,
+                subid,
+                unsubscriber.clone(),
                 &filter,
                 filter.get_commitment_level(),
                 messages,
@@ -253,6 +254,7 @@ impl GeyserRpcService {
         }
         // 2. Listen for future updates
         'outer: loop {
+            let unsubscriber = unsubscriber.clone();
             tokio::select! {
                 message = messages_rx.recv() => {
                     let (commitment, messages) = match message {
@@ -261,14 +263,21 @@ impl GeyserRpcService {
                             break 'outer;
                         },
                         Err(broadcast::error::RecvError::Lagged(_)) => {
-                            info!("client #{id}: lagged to receive geyser messages");
+                            info!("client #{subid}: lagged to receive geyser messages");
                             // tokio::spawn(async move {
                             //     let _ = stream_tx.send(Err(Status::internal("lagged"))).await;
                             // });
                             break 'outer;
                         }
                     };
-                    let exit_loop = handle_messages(id, &filter, commitment, messages, &stream_tx);
+                    let exit_loop = handle_messages(
+                        subid,
+                        unsubscriber,
+                        &filter,
+                        commitment,
+                        messages,
+                        &stream_tx
+                    );
                     if exit_loop {
                         break 'outer;
                     }
@@ -282,7 +291,8 @@ impl GeyserRpcService {
 }
 
 fn handle_messages(
-    id: u64,
+    subid: u64,
+    unsubscriber: CancellationToken,
     filter: &Filter,
     commitment: CommitmentLevel,
     messages: Arc<Vec<Message>>,
@@ -291,10 +301,13 @@ fn handle_messages(
     if commitment == filter.get_commitment_level() {
         for message in messages.iter() {
             for message in filter.get_update(message, Some(commitment)) {
+                if unsubscriber.is_cancelled() {
+                    return true;
+                }
                 match stream_tx.try_send(Ok(message)) {
                     Ok(()) => {}
                     Err(mpsc::error::TrySendError::Full(_)) => {
-                        error!("client #{id}: lagged to send update");
+                        error!("client #{subid}: lagged to send update");
                         let stream_tx = stream_tx.clone();
                         tokio::spawn(async move {
                             let _ = stream_tx
@@ -303,8 +316,21 @@ fn handle_messages(
                         });
                         return true;
                     }
-                    Err(mpsc::error::TrySendError::Closed(_)) => {
-                        error!("client #{id}: stream closed");
+                    Err(mpsc::error::TrySendError::Closed(status)) => {
+                        // This happens more often than we'd like.
+                        // This could either be due to the client not properly unsubscribing,
+                        // or due to the fact that the cancellation future doesn't get polled
+                        // while we're processing code synchronously here.
+                        // However it isn't critical as we know to stop the client subscription
+                        // loop in either case.
+                        trace!(
+                            "client #{subid}: stream closed {}",
+                            if unsubscriber.is_cancelled() {
+                                "cancelled"
+                            } else {
+                                "uncancelled"
+                            }
+                        );
                         return true;
                     }
                 }
