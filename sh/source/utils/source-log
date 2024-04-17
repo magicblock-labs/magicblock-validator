@@ -23,9 +23,25 @@ DEBUG_ARR=(
   "test_tools=debug,"
 )
 
+INFO_ARR=(
+	"warn,"
+	"geyser_plugin=info,"
+	"sleipnir=info,"
+  "bank=info,"
+  "banking_stage=info,"
+  "mutator=info,"
+  "solana_geyser_plugin_manager=info,"
+  "solana_svm=info,"
+  "test_tools=info,"
+)
+
 LOG_LEVEL='info'
 TEST_LOG_LEVEL='info'
-if [[ $LOG == "DEBUG" ]]; then
+if [[ $LOG == "INFO" ]]; then
+	IFS=''
+	LOG_LEVEL="${INFO_ARR[*]}"
+  TEST_LOG_LEVEL=$LOG
+elif [[ $LOG == "DEBUG" ]]; then
 	IFS=''
 	LOG_LEVEL="${DEBUG_ARR[*]}"
   TEST_LOG_LEVEL=$LOG
@@ -34,7 +50,7 @@ elif [[ $LOG == "TRACE" ]]; then
 	LOG_LEVEL="${TRACE_ARR[*]}"
   TEST_LOG_LEVEL=$LOG
 else
-	echo "LOG is not set to DEBUG or TRACE (defaulting to info)"
+	echo "LOG is not set to DEBUG or TRACE (defaulting to 'info')"
 fi
 
 export RUST_LOG=$LOG_LEVEL
