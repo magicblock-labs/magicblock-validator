@@ -9,6 +9,7 @@ use sleipnir_rpc_client_api::response::{
     ProcessedSignatureResult, RpcSignatureResult,
 };
 use solana_sdk::{signature::Signature, transaction::TransactionError};
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     conversions::{geyser_sub_for_transaction_signature, slot_from_update},
@@ -20,6 +21,7 @@ use crate::{
 pub async fn handle_signature_subscribe(
     subid: u64,
     subscriber: Subscriber,
+    unsubscriber: CancellationToken,
     params: &SignatureParams,
     geyser_service: &GeyserRpcService,
     bank: &Bank,
@@ -35,18 +37,22 @@ pub async fn handle_signature_subscribe(
         }
     };
 
-    let (_, mut geyser_rx) =
-        match geyser_service.transaction_subscribe(sub, &sig, Some(subid)) {
-            Ok(res) => res,
-            Err(err) => {
-                reject_internal_error(
-                    subscriber,
-                    "Failed to subscribe to signature",
-                    Some(err),
-                );
-                return;
-            }
-        };
+    let mut geyser_rx = match geyser_service.transaction_subscribe(
+        sub,
+        subid,
+        unsubscriber,
+        &sig,
+    ) {
+        Ok(res) => res,
+        Err(err) => {
+            reject_internal_error(
+                subscriber,
+                "Failed to subscribe to signature",
+                Some(err),
+            );
+            return;
+        }
+    };
 
     if let Some(sink) = assign_sub_id(subscriber, subid) {
         if let Some((slot, res)) = bank.get_signature_status_slot(&sig) {

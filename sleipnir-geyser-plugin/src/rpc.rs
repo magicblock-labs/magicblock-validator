@@ -19,6 +19,7 @@ use log::*;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 use stretto::Cache;
 use tokio::sync::{broadcast, mpsc, Notify};
+use tokio_util::sync::CancellationToken;
 use tonic::{Result as TonicResult, Status};
 
 use crate::{
@@ -104,17 +105,13 @@ impl GeyserRpcService {
     // -----------------
     // Subscriptions
     // -----------------
-    fn next_id(&self) -> u64 {
-        self.subscribe_id.fetch_add(1, Ordering::SeqCst)
-    }
-
     pub fn accounts_subscribe(
         &self,
         account_subscription: HashMap<String, SubscribeRequestFilterAccounts>,
+        subid: u64,
+        unsubscriber: CancellationToken,
         pubkey: &Pubkey,
-        subid: Option<u64>,
-    ) -> anyhow::Result<(u64, mpsc::Receiver<Result<SubscribeUpdate, Status>>)>
-    {
+    ) -> anyhow::Result<mpsc::Receiver<Result<SubscribeUpdate, Status>>> {
         let filter = Filter::new(
             &SubscribeRequest {
                 accounts: account_subscription,
@@ -136,8 +133,8 @@ impl GeyserRpcService {
             .get(pubkey)
             .as_ref()
             .map(|val| Arc::new(vec![val.value().clone()]));
-        let sub_update = self.subscribe_impl(filter, subid, msgs);
 
+        let sub_update = self.subscribe_impl(filter, subid, unsubscriber, msgs);
         Ok(sub_update)
     }
 
@@ -147,10 +144,10 @@ impl GeyserRpcService {
             String,
             SubscribeRequestFilterTransactions,
         >,
+        subid: u64,
+        unsubscriber: CancellationToken,
         signature: &Signature,
-        subid: Option<u64>,
-    ) -> anyhow::Result<(u64, mpsc::Receiver<Result<SubscribeUpdate, Status>>)>
-    {
+    ) -> anyhow::Result<mpsc::Receiver<Result<SubscribeUpdate, Status>>> {
         debug!("tx sub, cache size {}", self.transactions_cache.len());
         let filter = Filter::new(
             &SubscribeRequest {
@@ -172,7 +169,7 @@ impl GeyserRpcService {
             .get(signature)
             .as_ref()
             .map(|val| Arc::new(vec![val.value().clone()]));
-        let sub_update = self.subscribe_impl(filter, subid, msgs);
+        let sub_update = self.subscribe_impl(filter, subid, unsubscriber, msgs);
 
         Ok(sub_update)
     }
@@ -180,9 +177,9 @@ impl GeyserRpcService {
     pub fn slot_subscribe(
         &self,
         slot_subscription: HashMap<String, SubscribeRequestFilterSlots>,
-        subid: Option<u64>,
-    ) -> anyhow::Result<(u64, mpsc::Receiver<Result<SubscribeUpdate, Status>>)>
-    {
+        subid: u64,
+        unsubscriber: CancellationToken,
+    ) -> anyhow::Result<mpsc::Receiver<Result<SubscribeUpdate, Status>>> {
         // We don't filter by slot for the RPC interface
         let filter = Filter::new(
             &SubscribeRequest {
@@ -199,7 +196,7 @@ impl GeyserRpcService {
             &self.config.filters,
             self.config.normalize_commitment_level,
         )?;
-        let sub_update = self.subscribe_impl(filter, subid, None);
+        let sub_update = self.subscribe_impl(filter, subid, unsubscriber, None);
 
         Ok(sub_update)
     }
@@ -207,22 +204,23 @@ impl GeyserRpcService {
     fn subscribe_impl(
         &self,
         filter: Filter,
-        subid: Option<u64>,
+        subid: u64,
+        unsubscriber: CancellationToken,
         initial_messages: Option<Arc<Vec<Message>>>,
-    ) -> (u64, mpsc::Receiver<Result<SubscribeUpdate, Status>>) {
-        let id = subid.unwrap_or_else(|| self.next_id());
+    ) -> mpsc::Receiver<Result<SubscribeUpdate, Status>> {
         let (stream_tx, mut stream_rx) =
             mpsc::channel(self.config.channel_capacity);
 
         tokio::spawn(Self::client_loop(
-            id,
+            subid,
             filter,
             stream_tx,
+            unsubscriber,
             self.broadcast_tx.subscribe(),
             initial_messages,
         ));
 
-        (id, stream_rx)
+        stream_rx
     }
 
     /// Sends messages that could be interesting to the subscriber and then listend for more
@@ -233,6 +231,7 @@ impl GeyserRpcService {
         id: u64,
         mut filter: Filter,
         stream_tx: mpsc::Sender<TonicResult<SubscribeUpdate>>,
+        unsubscriber: CancellationToken,
         mut messages_rx: broadcast::Receiver<(
             CommitmentLevel,
             Arc<Vec<Message>>,
@@ -274,8 +273,9 @@ impl GeyserRpcService {
                         break 'outer;
                     }
                 }
-            // TODO(thlorenz): @@@pubsub we need to be able to cancel the subscription
-            // via a cancellation token
+                _ = unsubscriber.cancelled() => {
+                    break 'outer;
+                }
             }
         }
     }

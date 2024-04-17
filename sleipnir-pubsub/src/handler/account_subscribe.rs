@@ -4,6 +4,7 @@ use log::*;
 use sleipnir_geyser_plugin::rpc::GeyserRpcService;
 use sleipnir_rpc_client_api::config::UiAccountEncoding;
 use solana_sdk::pubkey::Pubkey;
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     conversions::{
@@ -18,6 +19,7 @@ use crate::{
 pub async fn handle_account_subscribe(
     subid: u64,
     subscriber: Subscriber,
+    unsubscriber: CancellationToken,
     params: &AccountParams,
     geyser_service: &GeyserRpcService,
 ) {
@@ -31,18 +33,22 @@ pub async fn handle_account_subscribe(
         }
     };
 
-    let (_, mut geyser_rx) =
-        match geyser_service.accounts_subscribe(sub, &pubkey, Some(subid)) {
-            Ok(res) => res,
-            Err(err) => {
-                reject_internal_error(
-                    subscriber,
-                    "Failed to subscribe to signature",
-                    Some(err),
-                );
-                return;
-            }
-        };
+    let mut geyser_rx = match geyser_service.accounts_subscribe(
+        sub,
+        subid,
+        unsubscriber,
+        &pubkey,
+    ) {
+        Ok(res) => res,
+        Err(err) => {
+            reject_internal_error(
+                subscriber,
+                "Failed to subscribe to signature",
+                Some(err),
+            );
+            return;
+        }
+    };
 
     if let Some(sink) = assign_sub_id(subscriber, subid) {
         loop {

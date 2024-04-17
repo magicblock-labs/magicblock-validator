@@ -36,8 +36,10 @@ pub async fn handle_subscription(
                 _ = handle_account_subscribe(
                         subid,
                         subscriber,
+                        unsubscriber.clone(),
                         &params,
-                        &geyser_service) => {
+                        &geyser_service,
+                    ) => {
                 },
             };
             let elapsed = start.elapsed();
@@ -55,6 +57,7 @@ pub async fn handle_subscription(
                 _ = handle_slot_subscribe(
                         subid,
                         subscriber,
+                        unsubscriber.clone(),
                         &geyser_service) => {
                 },
             };
@@ -76,6 +79,7 @@ pub async fn handle_subscription(
                 _ = handle_signature_subscribe(
                         subid,
                         subscriber,
+                        unsubscriber.clone(),
                         &params,
                         &geyser_service,
                         &bank) => {

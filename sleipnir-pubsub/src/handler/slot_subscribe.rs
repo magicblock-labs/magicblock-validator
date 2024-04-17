@@ -2,6 +2,7 @@ use geyser_grpc_proto::{geyser, tonic::Status};
 use jsonrpc_pubsub::{Sink, Subscriber};
 use log::*;
 use sleipnir_geyser_plugin::rpc::GeyserRpcService;
+use tokio_util::sync::CancellationToken;
 
 use crate::{
     conversions::{
@@ -15,12 +16,13 @@ use crate::{
 pub async fn handle_slot_subscribe(
     subid: u64,
     subscriber: Subscriber,
+    unsubscriber: CancellationToken,
     geyser_service: &GeyserRpcService,
 ) {
     let sub = geyser_sub_for_slot_update();
 
-    let (_, mut geyser_rx) =
-        match geyser_service.slot_subscribe(sub, Some(subid)) {
+    let mut geyser_rx =
+        match geyser_service.slot_subscribe(sub, subid, unsubscriber) {
             Ok(res) => res,
             Err(err) => {
                 reject_internal_error(
