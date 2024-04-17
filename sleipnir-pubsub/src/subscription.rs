@@ -14,14 +14,18 @@ pub enum SubscriptionRequest {
         geyser_service: Arc<GeyserRpcService>,
         params: AccountParams,
     },
+    SlotSubscribe {
+        subscriber: Subscriber,
+        geyser_service: Arc<GeyserRpcService>,
+    },
 }
 
 impl SubscriptionRequest {
     pub fn into_subscriber(self) -> Subscriber {
+        use SubscriptionRequest::*;
         match self {
-            SubscriptionRequest::AccountSubscribe { subscriber, .. } => {
-                subscriber
-            }
+            AccountSubscribe { subscriber, .. } => subscriber,
+            SlotSubscribe { subscriber, .. } => subscriber,
         }
     }
 }

@@ -7,10 +7,13 @@ use solana_sdk::rpc_port::DEFAULT_RPC_PUBSUB_PORT;
 use std::{net::SocketAddr, sync::Arc, thread};
 
 use crate::{
-    errors::ensure_and_try_parse_params, pubsub_api::PubsubApi,
+    errors::{ensure_and_try_parse_params, ensure_empty_params},
+    pubsub_api::PubsubApi,
     types::AccountParams,
 };
-use jsonrpc_pubsub::{PubSubHandler, Session, Subscriber, SubscriptionId};
+use jsonrpc_pubsub::{
+    PubSubHandler, Session, Subscriber, SubscriptionId, UnsubscribeRpcMethod,
+};
 use jsonrpc_ws_server::{RequestContext, Server, ServerBuilder};
 
 // -----------------
@@ -57,7 +60,7 @@ impl PubsubService {
             bank,
         };
 
-        service.add_account_subscribe()
+        service.add_account_subscribe().add_slot_subscribe()
     }
 
     #[allow(clippy::result_large_err)]
@@ -91,7 +94,6 @@ impl PubsubService {
     }
 
     fn add_account_subscribe(mut self) -> Self {
-        let io = &mut self.io;
         let subscribe = {
             let api = self.api.clone();
             let geyser_service = self.geyser_service.clone();
@@ -115,24 +117,9 @@ impl PubsubService {
                 };
             }
         };
+        let unsubscribe = self.create_unsubscribe();
 
-        let unsubscribe = {
-            let actor = self.api.clone();
-            move |id: SubscriptionId,
-                  _session: Option<Arc<Session>>|
-                  -> BoxFuture<jsonrpc_core::Result<Value>> {
-                match id {
-                    SubscriptionId::Number(id) => {
-                        actor.unsubscribe(id);
-                    }
-                    SubscriptionId::String(_) => {
-                        warn!("subscription id should be a number")
-                    }
-                }
-                Box::pin(futures::future::ready(Ok(Value::Bool(true))))
-            }
-        };
-
+        let io = &mut self.io;
         io.add_subscription(
             "accountNotification",
             ("accountSubscribe", subscribe),
@@ -140,5 +127,52 @@ impl PubsubService {
         );
 
         self
+    }
+
+    fn add_slot_subscribe(mut self) -> Self {
+        let subscribe = {
+            let api = self.api.clone();
+            let geyser_service = self.geyser_service.clone();
+            move |params: Params, _, subscriber: Subscriber| {
+                let subscriber =
+                    match ensure_empty_params(subscriber, &params, true) {
+                        Some(subscriber) => subscriber,
+                        None => return,
+                    };
+
+                if let Err(err) =
+                    api.slot_subscribe(subscriber, geyser_service.clone())
+                {
+                    error!("Failed to handle solt subscribe: {:?}", err);
+                };
+            }
+        };
+        let unsubscribe = self.create_unsubscribe();
+
+        let io = &mut self.io;
+        io.add_subscription(
+            "slotNotification",
+            ("slotSubscribe", subscribe),
+            ("slotUnsubscribe", unsubscribe),
+        );
+
+        self
+    }
+
+    fn create_unsubscribe(&self) -> impl UnsubscribeRpcMethod<Arc<Session>> {
+        let actor = self.api.clone();
+        move |id: SubscriptionId,
+              _session: Option<Arc<Session>>|
+              -> BoxFuture<jsonrpc_core::Result<Value>> {
+            match id {
+                SubscriptionId::Number(id) => {
+                    actor.unsubscribe(id);
+                }
+                SubscriptionId::String(_) => {
+                    warn!("subscription id should be a number")
+                }
+            }
+            Box::pin(futures::future::ready(Ok(Value::Bool(true))))
+        }
     }
 }

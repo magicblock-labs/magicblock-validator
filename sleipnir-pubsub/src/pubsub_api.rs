@@ -103,18 +103,22 @@ impl PubsubApi {
                 params,
                 geyser_service,
             })
-            .map_err(|err| {
-                let err_msg = format!("{:?}", err);
-                let subscription = err.0;
-                let subscriber = subscription.into_subscriber();
-                reject_internal_error(
-                    subscriber,
-                    "Failed to subscribe",
-                    Some(err_msg.clone()),
-                );
+            .map_err(map_send_error)?;
 
-                PubsubError::FailedToSendSubscription(err_msg)
-            })?;
+        Ok(())
+    }
+
+    pub fn slot_subscribe(
+        &self,
+        subscriber: Subscriber,
+        geyser_service: Arc<GeyserRpcService>,
+    ) -> PubsubResult<()> {
+        self.subscribe
+            .blocking_send(SubscriptionRequest::SlotSubscribe {
+                subscriber,
+                geyser_service,
+            })
+            .map_err(map_send_error)?;
 
         Ok(())
     }
@@ -122,4 +126,19 @@ impl PubsubApi {
     pub fn unsubscribe(&self, id: u64) {
         self.unsubscribe_tokens.unsubscribe(id);
     }
+}
+
+fn map_send_error(
+    err: mpsc::error::SendError<SubscriptionRequest>,
+) -> PubsubError {
+    let err_msg = format!("{:?}", err);
+    let subscription = err.0;
+    let subscriber = subscription.into_subscriber();
+    reject_internal_error(
+        subscriber,
+        "Failed to subscribe",
+        Some(err_msg.clone()),
+    );
+
+    PubsubError::FailedToSendSubscription(err_msg)
 }

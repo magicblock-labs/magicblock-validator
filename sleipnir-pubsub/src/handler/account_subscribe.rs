@@ -54,7 +54,7 @@ pub async fn handle_account_subscribe(
                                 &sink,
                                 subid,
                                 update,
-                                &params) {
+                                params) {
                                 break;
                             }
                         }
@@ -102,7 +102,7 @@ fn handle_account_geyser_update(
                         "Failed to convert update to UiAccount: {:?}",
                         err
                     );
-                    let failed_to_notify = sink_notify_error(&sink, msg);
+                    let failed_to_notify = sink_notify_error(sink, msg);
                     return failed_to_notify;
                 }
             };
@@ -116,12 +116,9 @@ fn handle_account_geyser_update(
                 false
             }
         }
-        Err(status) => {
-            let failed_to_notify = sink_notify_error(
-                sink,
-                format!("Failed to receive signature update: {:?}", status),
-            );
-            failed_to_notify
-        }
+        Err(status) => sink_notify_error(
+            sink,
+            format!("Failed to receive signature update: {:?}", status),
+        ),
     }
 }
