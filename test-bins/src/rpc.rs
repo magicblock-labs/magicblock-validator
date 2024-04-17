@@ -43,6 +43,9 @@ fn fund_faucet(bank: &Bank) -> Keypair {
 async fn main() {
     init_logger!();
 
+    #[cfg(feature = "tokio-console")]
+    console_subscriber::init();
+
     let GenesisConfigInfo {
         genesis_config,
         validator_pubkey,

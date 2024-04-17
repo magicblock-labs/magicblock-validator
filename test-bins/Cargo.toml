@@ -8,7 +8,7 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-
+console-subscriber = { workspace = true, optional = true }
 crossbeam-channel = { workspace = true }
 log = { workspace = true }
 geyser-grpc-proto = { workspace = true }
@@ -28,3 +28,7 @@ tokio = { workspace = true }
 [[bin]]
 name = "rpc"
 path = "src/rpc.rs"
+
+[features]
+default = []
+tokio-console = ["console-subscriber"]

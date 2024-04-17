@@ -29,5 +29,14 @@ ex-rpc-release:
 fmt:
 	cargo +nightly fmt -- --config-path rustfmt-nightly.toml
 
+## Changing the Rust config causes everything to rebuild
+## In order to avoid that add the below inside a <workspace-root>/.cargo/config.toml
+# ```
+# [build]
+# rustflags = ["--cfg", "tokio_unstable"]
+# ```
+tokio-console:
+	RUSTFLAGS="--cfg tokio_unstable" cargo run --release --features=tokio-console
+
 .PHONY:
-	list test test-log test-bank fmt ex-clone-custom ex-rpc ex-rpc-release
+	list test test-log test-bank fmt ex-clone-custom ex-rpc ex-rpc-release tokio-console
