@@ -9,7 +9,7 @@ use std::{net::SocketAddr, sync::Arc, thread};
 use crate::{
     errors::{ensure_and_try_parse_params, ensure_empty_params},
     pubsub_api::PubsubApi,
-    types::AccountParams,
+    types::{AccountParams, SignatureParams},
 };
 use jsonrpc_pubsub::{
     PubSubHandler, Session, Subscriber, SubscriptionId, UnsubscribeRpcMethod,
@@ -60,7 +60,10 @@ impl PubsubService {
             bank,
         };
 
-        service.add_account_subscribe().add_slot_subscribe()
+        service
+            .add_account_subscribe()
+            .add_slot_subscribe()
+            .add_signature_subscribe()
     }
 
     #[allow(clippy::result_large_err)]
@@ -143,7 +146,7 @@ impl PubsubService {
                 if let Err(err) =
                     api.slot_subscribe(subscriber, geyser_service.clone())
                 {
-                    error!("Failed to handle solt subscribe: {:?}", err);
+                    error!("Failed to handle slot subscribe: {:?}", err);
                 };
             }
         };
@@ -154,6 +157,42 @@ impl PubsubService {
             "slotNotification",
             ("slotSubscribe", subscribe),
             ("slotUnsubscribe", unsubscribe),
+        );
+
+        self
+    }
+
+    fn add_signature_subscribe(mut self) -> Self {
+        let subscribe = {
+            let api = self.api.clone();
+            let geyser_service = self.geyser_service.clone();
+            let bank = self.bank.clone();
+            move |params: Params, _, subscriber: Subscriber| {
+                let (subscriber, params): (Subscriber, SignatureParams) =
+                    match ensure_and_try_parse_params(subscriber, params) {
+                        Some((subscriber, params)) => (subscriber, params),
+                        None => {
+                            return;
+                        }
+                    };
+
+                if let Err(err) = api.signature_subscribe(
+                    subscriber,
+                    params,
+                    geyser_service.clone(),
+                    bank.clone(),
+                ) {
+                    error!("Failed to handle signature subscribe: {:?}", err);
+                };
+            }
+        };
+        let unsubscribe = self.create_unsubscribe();
+
+        let io = &mut self.io;
+        io.add_subscription(
+            "signatureNotification",
+            ("signatureSubscribe", subscribe),
+            ("signatureUnsubscribe", unsubscribe),
         );
 
         self

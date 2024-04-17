@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use jsonrpc_pubsub::Subscriber;
 use log::*;
+use sleipnir_bank::bank::Bank;
 use sleipnir_geyser_plugin::rpc::GeyserRpcService;
 use tokio::{sync::mpsc, task::JoinSet};
 
@@ -9,7 +10,7 @@ use crate::{
     errors::{reject_internal_error, PubsubError, PubsubResult},
     handler::handle_subscription,
     subscription::SubscriptionRequest,
-    types::AccountParams,
+    types::{AccountParams, SignatureParams},
     unsubscribe_tokens::UnsubscribeTokens,
 };
 
@@ -98,7 +99,7 @@ impl PubsubApi {
         geyser_service: Arc<GeyserRpcService>,
     ) -> PubsubResult<()> {
         self.subscribe
-            .blocking_send(SubscriptionRequest::AccountSubscribe {
+            .blocking_send(SubscriptionRequest::Account {
                 subscriber,
                 params,
                 geyser_service,
@@ -114,9 +115,28 @@ impl PubsubApi {
         geyser_service: Arc<GeyserRpcService>,
     ) -> PubsubResult<()> {
         self.subscribe
-            .blocking_send(SubscriptionRequest::SlotSubscribe {
+            .blocking_send(SubscriptionRequest::Slot {
                 subscriber,
                 geyser_service,
+            })
+            .map_err(map_send_error)?;
+
+        Ok(())
+    }
+
+    pub fn signature_subscribe(
+        &self,
+        subscriber: Subscriber,
+        params: SignatureParams,
+        geyser_service: Arc<GeyserRpcService>,
+        bank: Arc<Bank>,
+    ) -> PubsubResult<()> {
+        self.subscribe
+            .blocking_send(SubscriptionRequest::Signature {
+                subscriber,
+                params,
+                geyser_service,
+                bank,
             })
             .map_err(map_send_error)?;
 
