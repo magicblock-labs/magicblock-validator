@@ -13,6 +13,7 @@ log = { workspace = true }
 byteorder = { workspace = true }
 num_cpus = { workspace = true }
 serde = { workspace = true }
+solana-metrics = { workspace = true }
 solana-sdk = { workspace = true }
 thiserror = { workspace = true }
 
