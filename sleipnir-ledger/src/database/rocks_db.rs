@@ -222,7 +222,7 @@ impl Rocks {
 #[cfg(test)]
 mod tests {
     use {
-        super::*, crate::blockstore::columns::columns, rocksdb::Options,
+        super::*, crate::database::columns::columns, rocksdb::Options,
         std::path::PathBuf, tempfile::tempdir,
     };
 

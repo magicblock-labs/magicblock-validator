@@ -3,7 +3,7 @@ use std::{collections::HashSet, path::Path};
 
 use rocksdb::{ColumnFamilyDescriptor, Options, DB};
 
-use crate::blockstore::{columns, options::AccessType};
+use crate::database::{columns, options::AccessType};
 
 use super::{
     columns::{Column, ColumnName},
