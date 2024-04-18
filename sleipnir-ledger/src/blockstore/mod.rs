@@ -1,8 +1,11 @@
 mod cf_descriptors;
 mod columns;
 mod consts;
+pub mod db;
 pub mod errors;
+mod iterator;
 mod meta;
 mod options;
 mod rocks_db;
 mod rocksdb_options;
+mod write_batch;

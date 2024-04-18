@@ -1,10 +1,16 @@
 use std::{fs, path::Path};
 
-use rocksdb::DB;
+use rocksdb::{
+    ColumnFamily, DBIterator, DBPinnableSlice, DBRawIterator,
+    IteratorMode as RocksIteratorMode, LiveFile, Options,
+    WriteBatch as RWriteBatch, DB,
+};
 
 use super::{
     cf_descriptors::cf_descriptors,
-    errors::BlockstoreResult,
+    columns::Column,
+    errors::{BlockstoreError, BlockstoreResult},
+    iterator::IteratorMode,
     options::{AccessType, BlockstoreOptions},
     rocksdb_options::get_rocksdb_options,
 };
@@ -13,8 +19,8 @@ use super::{
 // Rocks
 // -----------------
 #[derive(Debug)]
-struct Rocks {
-    db: rocksdb::DB,
+pub struct Rocks {
+    pub db: rocksdb::DB,
     access_type: AccessType,
 }
 
@@ -39,6 +45,177 @@ impl Rocks {
         // TODO(thlorenz): @@@rocksdb do we need to configure compaction?
 
         Ok(Self { db, access_type })
+    }
+
+    pub fn destroy(path: &Path) -> BlockstoreResult<()> {
+        DB::destroy(&Options::default(), path)?;
+
+        Ok(())
+    }
+
+    pub fn cf_handle(&self, cf: &str) -> &ColumnFamily {
+        self.db
+            .cf_handle(cf)
+            .expect("should never get an unknown column")
+    }
+
+    pub fn get_cf(
+        &self,
+        cf: &ColumnFamily,
+        key: &[u8],
+    ) -> BlockstoreResult<Option<Vec<u8>>> {
+        let opt = self.db.get_cf(cf, key)?;
+        Ok(opt)
+    }
+
+    pub fn get_pinned_cf(
+        &self,
+        cf: &ColumnFamily,
+        key: &[u8],
+    ) -> BlockstoreResult<Option<DBPinnableSlice>> {
+        let opt = self.db.get_pinned_cf(cf, key)?;
+        Ok(opt)
+    }
+
+    pub fn put_cf(
+        &self,
+        cf: &ColumnFamily,
+        key: &[u8],
+        value: &[u8],
+    ) -> BlockstoreResult<()> {
+        self.db.put_cf(cf, key, value)?;
+        Ok(())
+    }
+
+    pub fn multi_get_cf(
+        &self,
+        cf: &ColumnFamily,
+        keys: Vec<&[u8]>,
+    ) -> Vec<BlockstoreResult<Option<DBPinnableSlice>>> {
+        let values = self
+            .db
+            .batched_multi_get_cf(cf, keys, false)
+            .into_iter()
+            .map(|result| match result {
+                Ok(opt) => Ok(opt),
+                Err(e) => Err(BlockstoreError::RocksDb(e)),
+            })
+            .collect::<Vec<_>>();
+        values
+    }
+
+    pub fn delete_cf(
+        &self,
+        cf: &ColumnFamily,
+        key: &[u8],
+    ) -> BlockstoreResult<()> {
+        self.db.delete_cf(cf, key)?;
+        Ok(())
+    }
+
+    /// Delete files whose slot range is within \[`from`, `to`\].
+    pub fn delete_file_in_range_cf(
+        &self,
+        cf: &ColumnFamily,
+        from_key: &[u8],
+        to_key: &[u8],
+    ) -> BlockstoreResult<()> {
+        self.db.delete_file_in_range_cf(cf, from_key, to_key)?;
+        Ok(())
+    }
+
+    pub fn iterator_cf<C>(
+        &self,
+        cf: &ColumnFamily,
+        iterator_mode: IteratorMode<C::Index>,
+    ) -> DBIterator
+    where
+        C: Column,
+    {
+        let start_key;
+        let iterator_mode = match iterator_mode {
+            IteratorMode::From(start_from, direction) => {
+                start_key = C::key(start_from);
+                RocksIteratorMode::From(&start_key, direction)
+            }
+            IteratorMode::Start => RocksIteratorMode::Start,
+            IteratorMode::End => RocksIteratorMode::End,
+        };
+        self.db.iterator_cf(cf, iterator_mode)
+    }
+
+    pub fn iterator_cf_raw_key(
+        &self,
+        cf: &ColumnFamily,
+        iterator_mode: IteratorMode<Vec<u8>>,
+    ) -> DBIterator {
+        let start_key;
+        let iterator_mode = match iterator_mode {
+            IteratorMode::From(start_from, direction) => {
+                start_key = start_from;
+                RocksIteratorMode::From(&start_key, direction)
+            }
+            IteratorMode::Start => RocksIteratorMode::Start,
+            IteratorMode::End => RocksIteratorMode::End,
+        };
+        self.db.iterator_cf(cf, iterator_mode)
+    }
+
+    pub fn raw_iterator_cf(&self, cf: &ColumnFamily) -> DBRawIterator {
+        self.db.raw_iterator_cf(cf)
+    }
+
+    pub fn batch(&self) -> RWriteBatch {
+        RWriteBatch::default()
+    }
+
+    pub fn write(&self, batch: RWriteBatch) -> BlockstoreResult<()> {
+        // let op_start_instant = maybe_enable_rocksdb_perf(
+        //     self.column_options.rocks_perf_sample_interval,
+        //     &self.write_batch_perf_status,
+        // );
+        let result = self.db.write(batch);
+        // if let Some(op_start_instant) = op_start_instant {
+        //     report_rocksdb_write_perf(
+        //         PERF_METRIC_OP_NAME_WRITE_BATCH, // We use write_batch as cf_name for write batch.
+        //         PERF_METRIC_OP_NAME_WRITE_BATCH, // op_name
+        //         &op_start_instant.elapsed(),
+        //         &self.column_options,
+        //     );
+        // }
+        match result {
+            Ok(_) => Ok(()),
+            Err(e) => Err(BlockstoreError::RocksDb(e)),
+        }
+    }
+
+    pub fn is_primary_access(&self) -> bool {
+        self.access_type == AccessType::Primary
+            || self.access_type == AccessType::PrimaryForMaintenance
+    }
+
+    /// Retrieves the specified RocksDB integer property of the current
+    /// column family.
+    ///
+    /// Full list of properties that return int values could be found
+    /// [here](https://github.com/facebook/rocksdb/blob/08809f5e6cd9cc4bc3958dd4d59457ae78c76660/include/rocksdb/db.h#L654-L689).
+    pub fn get_int_property_cf(
+        &self,
+        cf: &ColumnFamily,
+        name: &'static std::ffi::CStr,
+    ) -> BlockstoreResult<i64> {
+        match self.db.property_int_value_cf(cf, name) {
+            Ok(Some(value)) => Ok(value.try_into().unwrap()),
+            Ok(None) => Ok(0),
+            Err(e) => Err(BlockstoreError::RocksDb(e)),
+        }
+    }
+
+    pub fn live_files_metadata(&self) -> BlockstoreResult<Vec<LiveFile>> {
+        match self.db.live_files() {
+            Ok(live_files) => Ok(live_files),
+            Err(e) => Err(BlockstoreError::RocksDb(e)),
+        }
     }
 }
 

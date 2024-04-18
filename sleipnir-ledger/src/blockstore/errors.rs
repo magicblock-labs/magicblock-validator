@@ -8,4 +8,6 @@ pub enum BlockstoreError {
     RocksDb(#[from] rocksdb::Error),
     #[error("io error: {0}")]
     Io(#[from] std::io::Error),
+    #[error("serialization error: {0}")]
+    Serialize(#[from] Box<bincode::ErrorKind>),
 }
