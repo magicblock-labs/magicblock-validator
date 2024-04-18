@@ -15,7 +15,7 @@ use solana_geyser_plugin_interface::geyser_plugin_interface::{
     ReplicaTransactionInfoVersions, Result as PluginResult, SlotStatus,
 };
 use solana_sdk::{clock::Slot, pubkey::Pubkey, signature::Signature};
-use stretto::Cache;
+use stretto::{Cache, CacheBuilder};
 use tokio::{
     runtime::{Builder, Runtime},
     sync::{mpsc, Notify},
@@ -76,16 +76,25 @@ impl GrpcGeyserPlugin {
             GrpcService::create(config.grpc.clone(), config.block_fail_action)
                 .await
                 .map_err(GeyserPluginError::Custom)?;
-        let transactions_cache = Cache::new(
+        let transactions_cache = CacheBuilder::new(
             config.transactions_cache_num_counters,
-            config.transactions_cache_max_cost,
+            config.transactions_cache_max_cached_items,
         )
+        .set_cleanup_duration(Duration::from_secs(1))
+        // This is very important as otherwise we see the cache being considered "full"
+        // with very few items in it ~(transactions_cache_max_cost / 350)
+        // As a result items added at that point weren't cached.
+        .set_ignore_internal_cost(true)
+        .finalize()
         .map_err(|err| GeyserPluginError::Custom(Box::new(err)))?;
 
-        let accounts_cache = Cache::new(
+        let accounts_cache = CacheBuilder::new(
             config.accounts_cache_num_counters,
-            config.accounts_cache_max_cost,
+            config.accounts_cache_max_cached_bytes,
         )
+        .set_cleanup_duration(Duration::from_secs(1))
+        .set_ignore_internal_cost(false)
+        .finalize()
         .map_err(|err| GeyserPluginError::Custom(Box::new(err)))?;
 
         let (rpc_channel, rpc_shutdown, rpc_service) =
@@ -182,9 +191,35 @@ impl GeyserPlugin for GrpcGeyserPlugin {
                     self.accounts_cache.insert_with_ttl(
                         pubkey,
                         message.clone(),
-                        1,
+                        account.data.len().try_into().unwrap_or(i64::MAX),
                         self.config.accounts_cache_ttl,
                     );
+
+                    // See notes in notify_transaction around perf concerns
+                    self.accounts_cache.wait();
+
+                    if let Some(interval) =
+                        std::option_env!("DIAG_GEYSER_ACC_CACHE_INTERVAL")
+                    {
+                        let interval = interval.parse::<usize>().unwrap();
+                        if self.accounts_cache.get(&pubkey).is_none() {
+                            error!(
+                                "Account not cached '{}', cache size {}",
+                                pubkey,
+                                self.accounts_cache.len()
+                            );
+                        }
+
+                        static COUNTER: AtomicUsize = AtomicUsize::new(0);
+                        let count = COUNTER.fetch_add(1, Ordering::SeqCst);
+                        if count % interval == 0 {
+                            info!(
+                                "AccountsCache size: {}, accounts: {}",
+                                self.accounts_cache.len(),
+                                count,
+                            );
+                        }
+                    }
                     inner.send_message(message);
                 }
                 Err(err) => error!(
@@ -229,7 +264,7 @@ impl GeyserPlugin for GrpcGeyserPlugin {
                 }
                 ReplicaTransactionInfoVersions::V0_0_2(info) => info,
             };
-            debug!("tx: '{}'", transaction.signature);
+            trace!("tx: '{}'", transaction.signature);
 
             let message = Message::Transaction((transaction, slot).into());
             self.transactions_cache.insert_with_ttl(
@@ -239,6 +274,46 @@ impl GeyserPlugin for GrpcGeyserPlugin {
                 1,
                 self.config.transactions_cache_ttl,
             );
+            // We sacrifice a bit of per to avoid the following race condition:
+            //   1. Transaction is added to the cache, but not fully committed
+            //   2. Notification is sent
+            //   3. Subscription comes in and doesn't find the transaction in the cache
+            //   4. Notification is never sent again and thus the subscription misses it
+            //
+            // If this wait becomes a perf bottleneck we could use another approach:
+            //   - subscription comes in and listens to the notification stream
+            //   - at the same time it has an interval tokio::sleep which periodically
+            //     checks the cache until it finds an update it hasn't seen yet and or
+            //     a max cache check duration elapses
+            //   - that way it'd discover the items in the cache even if they get processed
+            //     and inserted after the notification
+            self.transactions_cache.wait();
+
+            if let Some(interval) =
+                std::option_env!("DIAG_GEYSER_TX_CACHE_INTERVAL")
+            {
+                let interval = interval.parse::<usize>().unwrap();
+                if self.transactions_cache.get(transaction.signature).is_none()
+                {
+                    let sig =
+                        crate::utils::short_signature(transaction.signature);
+                    error!(
+                        "Item not cached '{}', cache size {}",
+                        sig,
+                        self.transactions_cache.len()
+                    );
+                }
+
+                static COUNTER: AtomicUsize = AtomicUsize::new(0);
+                let count = COUNTER.fetch_add(1, Ordering::SeqCst);
+                if count % interval == 0 {
+                    info!(
+                        "TransactionCache size: {}, transactions: {}",
+                        self.transactions_cache.len(),
+                        count
+                    );
+                }
+            }
 
             // We don't call transactions_cache.wait(); here which takes about 1ms
             // to not slow down the plugin, however by the time a notification referring

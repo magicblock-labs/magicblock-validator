@@ -10,8 +10,9 @@ use std::{
 
 use geyser_grpc_proto::{
     geyser::{
-        CommitmentLevel, SubscribeRequest, SubscribeRequestFilterAccounts,
-        SubscribeRequestFilterTransactions, SubscribeUpdate,
+        subscribe_update::UpdateOneof, CommitmentLevel, SubscribeRequest,
+        SubscribeRequestFilterAccounts, SubscribeRequestFilterTransactions,
+        SubscribeUpdate,
     },
     prelude::{SubscribeRequestFilterSlots, SubscribeUpdateSlot},
 };
@@ -27,6 +28,10 @@ use crate::{
     filters::Filter,
     grpc::GrpcService,
     grpc_messages::{BlockMetaStorage, Message},
+    utils::{
+        short_signature, short_signature_from_sub_update,
+        short_signature_from_vec,
+    },
 };
 
 pub struct GeyserRpcService {
@@ -148,7 +153,6 @@ impl GeyserRpcService {
         unsubscriber: CancellationToken,
         signature: &Signature,
     ) -> anyhow::Result<mpsc::Receiver<Result<SubscribeUpdate, Status>>> {
-        debug!("tx sub, cache size {}", self.transactions_cache.len());
         let filter = Filter::new(
             &SubscribeRequest {
                 accounts: HashMap::new(),
@@ -169,9 +173,13 @@ impl GeyserRpcService {
             .get(signature)
             .as_ref()
             .map(|val| Arc::new(vec![val.value().clone()]));
-        if msgs.as_ref().map(|val| val.len()).unwrap_or(0) > 0 {
-            trace!("tx in cache '{}'", signature);
+
+        if log::log_enabled!(log::Level::Trace)
+            && msgs.as_ref().map(|val| val.is_empty()).unwrap_or_default()
+        {
+            trace!("tx cache miss: '{}'", short_signature(signature));
         }
+
         let sub_update = self.subscribe_impl(filter, subid, unsubscriber, msgs);
 
         Ok(sub_update)
@@ -306,6 +314,16 @@ fn handle_messages(
             for message in filter.get_update(message, Some(commitment)) {
                 if unsubscriber.is_cancelled() {
                     return true;
+                }
+                if log::log_enabled!(log::Level::Trace) {
+                    if let Some(UpdateOneof::Transaction(tx)) =
+                        message.update_oneof.as_ref()
+                    {
+                        trace!(
+                            "sending tx: '{}'",
+                            short_signature_from_sub_update(tx)
+                        );
+                    };
                 }
                 match stream_tx.try_send(Ok(message)) {
                     Ok(()) => {}
