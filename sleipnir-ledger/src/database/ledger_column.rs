@@ -23,11 +23,11 @@ pub struct LedgerColumn<C>
 where
     C: Column + ColumnName,
 {
-    backend: Arc<Rocks>,
-    column: PhantomData<C>,
+    pub backend: Arc<Rocks>,
+    pub column: PhantomData<C>,
     pub column_options: Arc<LedgerColumnOptions>,
-    read_perf_status: PerfSamplingStatus,
-    write_perf_status: PerfSamplingStatus,
+    pub read_perf_status: PerfSamplingStatus,
+    pub write_perf_status: PerfSamplingStatus,
 }
 
 impl<C: Column + ColumnName> LedgerColumn<C> {

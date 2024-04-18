@@ -1,13 +1,16 @@
 use bincode::deserialize;
 use rocksdb::{ColumnFamily, DBRawIterator, LiveFile};
 use solana_sdk::clock::Slot;
-use std::{path::Path, sync::Arc};
+use std::{marker::PhantomData, path::Path, sync::Arc};
+
+use crate::metrics::PerfSamplingStatus;
 
 use super::{
     columns::{columns, Column, ColumnName, TypedColumn},
     errors::BlockstoreResult,
     iterator::IteratorMode,
-    options::BlockstoreOptions,
+    ledger_column::LedgerColumn,
+    options::{BlockstoreOptions, LedgerColumnOptions},
     rocks_db::Rocks,
     write_batch::WriteBatch,
 };
@@ -16,7 +19,7 @@ use super::{
 pub struct Database {
     backend: Arc<Rocks>,
     path: Arc<Path>,
-    // column_options: Arc<LedgerColumnOptions>,
+    column_options: Arc<LedgerColumnOptions>,
 }
 
 impl Database {
@@ -24,13 +27,13 @@ impl Database {
         path: &Path,
         options: BlockstoreOptions,
     ) -> BlockstoreResult<Self> {
-        // let column_options = Arc::new(options.column_options.clone());
+        let column_options = Arc::new(options.column_options.clone());
         let backend = Arc::new(Rocks::open(path, options)?);
 
         Ok(Database {
             backend,
             path: Arc::from(path),
-            // column_options,
+            column_options,
         })
     }
 
@@ -78,6 +81,19 @@ impl Database {
         self.backend.cf_handle(C::NAME)
     }
 
+    pub fn column<C>(&self) -> LedgerColumn<C>
+    where
+        C: Column + ColumnName,
+    {
+        LedgerColumn {
+            backend: Arc::clone(&self.backend),
+            column: PhantomData,
+            column_options: Arc::clone(&self.column_options),
+            read_perf_status: PerfSamplingStatus::default(),
+            write_perf_status: PerfSamplingStatus::default(),
+        }
+    }
+
     #[inline]
     pub fn raw_iterator_cf(
         &self,
@@ -101,8 +117,7 @@ impl Database {
     }
 
     pub fn storage_size(&self) -> BlockstoreResult<u64> {
-        todo!("storage_size after adding fs_extra crate")
-        // Ok(fs_extra::dir::get_size(&self.path)?)
+        Ok(fs_extra::dir::get_size(&self.path)?)
     }
 
     /// Adds a \[`from`, `to`\] range that deletes all entries between the `from` slot

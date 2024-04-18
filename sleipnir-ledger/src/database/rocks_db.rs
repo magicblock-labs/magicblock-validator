@@ -245,6 +245,7 @@ mod tests {
         {
             let options = BlockstoreOptions {
                 access_type: AccessType::Primary,
+                ..Default::default()
             };
             let mut rocks = Rocks::open(db_path, options).unwrap();
 
@@ -260,6 +261,7 @@ mod tests {
         {
             let options = BlockstoreOptions {
                 access_type: AccessType::Primary,
+                ..Default::default()
             };
             let _ = Rocks::open(db_path, options).unwrap();
         }

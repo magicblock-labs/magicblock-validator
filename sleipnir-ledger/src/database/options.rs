@@ -21,6 +21,7 @@ pub enum AccessType {
 pub struct BlockstoreOptions {
     // The access type of blockstore. Default: Primary
     pub access_type: AccessType,
+    pub column_options: LedgerColumnOptions,
 }
 
 impl Default for BlockstoreOptions {
@@ -30,6 +31,7 @@ impl Default for BlockstoreOptions {
     fn default() -> Self {
         Self {
             access_type: AccessType::Primary,
+            column_options: LedgerColumnOptions::default(),
         }
     }
 }
@@ -82,6 +84,11 @@ impl LedgerColumnOptions {
     }
 }
 
+// -----------------
+// ShredStorageType
+// -----------------
+pub const BLOCKSTORE_DIRECTORY_ROCKS_LEVEL: &str = "rocksdb";
+
 #[derive(Debug, Default, Clone)]
 pub enum ShredStorageType {
     // Stores shreds under RocksDB's default compaction (level).
@@ -90,6 +97,18 @@ pub enum ShredStorageType {
     // NOTE: we aren't supporting experimental BlockstoreRocksFifoOptions
 }
 
+impl ShredStorageType {
+    /// The directory under `ledger_path` to the underlying blockstore.
+    pub fn blockstore_directory(&self) -> &str {
+        match self {
+            ShredStorageType::RocksLevel => BLOCKSTORE_DIRECTORY_ROCKS_LEVEL,
+        }
+    }
+}
+
+// -----------------
+// BlockstoreCompressionType
+// -----------------
 #[derive(Debug, Default, Clone)]
 pub enum BlockstoreCompressionType {
     #[default]

@@ -1,11 +1,11 @@
-mod cf_descriptors;
+pub mod cf_descriptors;
 pub mod columns;
 mod consts;
 pub mod db;
 pub mod errors;
-mod iterator;
+pub mod iterator;
 pub mod ledger_column;
-mod meta;
+pub mod meta;
 pub mod options;
 mod rocks_db;
 mod rocksdb_options;
