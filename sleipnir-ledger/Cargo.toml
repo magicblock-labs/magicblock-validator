@@ -1,0 +1,31 @@
+[package]
+name = "sleipnir-ledger"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+bincode = { workspace = true }
+log = { workspace = true }
+byteorder = { workspace = true }
+num_cpus = { workspace = true }
+serde = { workspace = true }
+solana-sdk = { workspace = true }
+thiserror = { workspace = true }
+
+[dependencies.rocksdb]
+# Avoid the vendored bzip2 within rocksdb-sys that can cause linker conflicts
+# when also using the bzip2 crate
+version = "0.22.0"
+default-features = false
+features = ["lz4"]
+
+[dev-dependencies]
+tempfile = { workspace = true }
+test-tools-core = { workspace = true }
+
+[build-dependencies]
+rustc_version = { workspace = true }

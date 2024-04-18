@@ -9,6 +9,7 @@ members = [
   "programs/sleipnir",
   "sleipnir-bank",
   "sleipnir-geyser-plugin",
+  "sleipnir-ledger",
   "sleipnir-messaging",
   "sleipnir-mutator",
   "sleipnir-processor",
@@ -49,6 +50,7 @@ async-trait = "0.1.77"
 base64 = "0.21.7"
 bincode = "1.3.3"
 bs58 = "0.4.0"
+byteorder = "1.5.0"
 cargo-lock = "9.0.0"
 console-subscriber = "0.2.0"
 crossbeam-channel = "0.5.11"
@@ -74,6 +76,7 @@ libloading = "0.7.4"
 libsecp256k1 = "0.6.0"
 log = "0.4.20"
 min-max-heap = "1.3.0"
+num_cpus = "1.16.0"
 num-derive = "0.4"
 num-traits = "0.2"
 percentage = "0.1.0"
@@ -128,6 +131,7 @@ solana_rbpf = "=0.8.0"
 spl-token = "=4.0.1"
 spl-token-2022 = "=2.0.1"
 stretto = "0.8.3"
+tempfile = "3.10.1"
 test-tools = { path = "./test-tools" }
 test-tools-core = { path = "./test-tools-core" }
 thiserror = "1.0.57"
