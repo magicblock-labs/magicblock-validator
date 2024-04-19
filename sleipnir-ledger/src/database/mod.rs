@@ -2,7 +2,6 @@ pub mod cf_descriptors;
 pub mod columns;
 mod consts;
 pub mod db;
-pub mod errors;
 pub mod iterator;
 pub mod ledger_column;
 pub mod meta;

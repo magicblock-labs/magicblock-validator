@@ -9,7 +9,7 @@ use std::{path::PathBuf, sync::Arc};
 
 use crate::database::columns as cf;
 use crate::database::db::Database;
-use crate::database::errors::BlockstoreResult;
+use crate::errors::BlockstoreResult;
 use crate::database::iterator::IteratorMode;
 use crate::database::ledger_column::LedgerColumn;
 use crate::database::meta::TransactionStatusIndexMeta;

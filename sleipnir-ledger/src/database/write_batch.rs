@@ -2,10 +2,8 @@ use bincode::serialize;
 use rocksdb::{ColumnFamily, WriteBatch as RWriteBatch};
 use std::collections::HashMap;
 
-use super::{
-    columns::{Column, ColumnName, TypedColumn},
-    errors::BlockstoreResult,
-};
+use super::columns::{Column, ColumnName, TypedColumn};
+use crate::errors::BlockstoreResult;
 
 pub struct WriteBatch<'a> {
     pub write_batch: RWriteBatch,

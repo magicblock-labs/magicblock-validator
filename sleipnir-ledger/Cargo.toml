@@ -12,6 +12,7 @@ bincode = { workspace = true }
 log = { workspace = true }
 byteorder = { workspace = true }
 fs_extra = { workspace = true }
+libc = { workspace = true }
 num_cpus = { workspace = true }
 serde = { workspace = true }
 solana-measure = { workspace = true }

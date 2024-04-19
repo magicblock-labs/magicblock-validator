@@ -9,11 +9,11 @@ use rocksdb::{
 use super::{
     cf_descriptors::cf_descriptors,
     columns::Column,
-    errors::{BlockstoreError, BlockstoreResult},
     iterator::IteratorMode,
     options::{AccessType, BlockstoreOptions},
     rocksdb_options::get_rocksdb_options,
 };
+use crate::errors::{BlockstoreError, BlockstoreResult};
 
 // -----------------
 // Rocks

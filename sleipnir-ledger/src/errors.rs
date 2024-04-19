@@ -12,4 +12,6 @@ pub enum BlockstoreError {
     FsExtraError(#[from] fs_extra::error::Error),
     #[error("serialization error: {0}")]
     Serialize(#[from] Box<bincode::ErrorKind>),
+    #[error("unable to set open file descriptor limit")]
+    UnableToSetOpenFileDescriptorLimit,
 }
