@@ -14,10 +14,13 @@ byteorder = { workspace = true }
 fs_extra = { workspace = true }
 libc = { workspace = true }
 num_cpus = { workspace = true }
+prost = { workspace = true }
 serde = { workspace = true }
 solana-measure = { workspace = true }
 solana-metrics = { workspace = true }
 solana-sdk = { workspace = true }
+solana-storage-proto = { workspace = true }
+solana-transaction-status = { workspace = true }
 thiserror = { workspace = true }
 
 [dependencies.rocksdb]

@@ -12,6 +12,10 @@ pub enum BlockstoreError {
     FsExtraError(#[from] fs_extra::error::Error),
     #[error("serialization error: {0}")]
     Serialize(#[from] Box<bincode::ErrorKind>),
+    #[error("protobuf encode error: {0}")]
+    ProtobufEncodeError(#[from] prost::EncodeError),
+    #[error("protobuf decode error: {0}")]
+    ProtobufDecodeError(#[from] prost::DecodeError),
     #[error("unable to set open file descriptor limit")]
     UnableToSetOpenFileDescriptorLimit,
 }

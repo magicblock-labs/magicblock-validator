@@ -3,13 +3,15 @@ use std::{marker::PhantomData, sync::Arc};
 use crate::errors::BlockstoreResult;
 
 use super::{
-    columns::{Column, ColumnName, TypedColumn},
+    columns::{Column, ColumnName, ProtobufColumn, TypedColumn},
     iterator::IteratorMode,
     options::LedgerColumnOptions,
     rocks_db::Rocks,
 };
 use bincode::{deserialize, serialize};
+use prost::Message;
 use rocksdb::{properties as RocksProperties, ColumnFamily};
+use serde::de::DeserializeOwned;
 use solana_sdk::clock::Slot;
 
 use crate::metrics::{
@@ -331,6 +333,99 @@ where
                 &self.column_options,
             );
         }
+        result
+    }
+}
+
+impl<C> LedgerColumn<C>
+where
+    C: ProtobufColumn + ColumnName,
+{
+    pub fn get_protobuf_or_bincode<T: DeserializeOwned + Into<C::Type>>(
+        &self,
+        key: C::Index,
+    ) -> BlockstoreResult<Option<C::Type>> {
+        self.get_raw_protobuf_or_bincode::<T>(&C::key(key))
+    }
+
+    pub(crate) fn get_raw_protobuf_or_bincode<
+        T: DeserializeOwned + Into<C::Type>,
+    >(
+        &self,
+        key: &[u8],
+    ) -> BlockstoreResult<Option<C::Type>> {
+        let is_perf_enabled = maybe_enable_rocksdb_perf(
+            self.column_options.rocks_perf_sample_interval,
+            &self.read_perf_status,
+        );
+        let result = self.backend.get_pinned_cf(self.handle(), key);
+        if let Some(op_start_instant) = is_perf_enabled {
+            report_rocksdb_read_perf(
+                C::NAME,
+                PERF_METRIC_OP_NAME_GET,
+                &op_start_instant.elapsed(),
+                &self.column_options,
+            );
+        }
+
+        if let Some(pinnable_slice) = result? {
+            let value = match C::Type::decode(pinnable_slice.as_ref()) {
+                Ok(value) => value,
+                Err(_) => deserialize::<T>(pinnable_slice.as_ref())?.into(),
+            };
+            Ok(Some(value))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn get_protobuf(
+        &self,
+        key: C::Index,
+    ) -> BlockstoreResult<Option<C::Type>> {
+        let is_perf_enabled = maybe_enable_rocksdb_perf(
+            self.column_options.rocks_perf_sample_interval,
+            &self.read_perf_status,
+        );
+        let result = self.backend.get_pinned_cf(self.handle(), &C::key(key));
+        if let Some(op_start_instant) = is_perf_enabled {
+            report_rocksdb_read_perf(
+                C::NAME,
+                PERF_METRIC_OP_NAME_GET,
+                &op_start_instant.elapsed(),
+                &self.column_options,
+            );
+        }
+
+        if let Some(pinnable_slice) = result? {
+            Ok(Some(C::Type::decode(pinnable_slice.as_ref())?))
+        } else {
+            Ok(None)
+        }
+    }
+
+    pub fn put_protobuf(
+        &self,
+        key: C::Index,
+        value: &C::Type,
+    ) -> BlockstoreResult<()> {
+        let mut buf = Vec::with_capacity(value.encoded_len());
+        value.encode(&mut buf)?;
+
+        let is_perf_enabled = maybe_enable_rocksdb_perf(
+            self.column_options.rocks_perf_sample_interval,
+            &self.write_perf_status,
+        );
+        let result = self.backend.put_cf(self.handle(), &C::key(key), &buf);
+        if let Some(op_start_instant) = is_perf_enabled {
+            report_rocksdb_write_perf(
+                C::NAME,
+                PERF_METRIC_OP_NAME_PUT,
+                &op_start_instant.elapsed(),
+                &self.column_options,
+            );
+        }
+
         result
     }
 }

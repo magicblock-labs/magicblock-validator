@@ -27,8 +27,10 @@ pub fn cf_descriptors(
 ) -> Vec<ColumnFamilyDescriptor> {
     use columns::*;
 
-    let mut cf_descriptors =
-        vec![new_cf_descriptor::<TransactionStatusIndex>(options)];
+    let mut cf_descriptors = vec![
+        new_cf_descriptor::<TransactionStatusIndex>(options),
+        new_cf_descriptor::<TransactionStatus>(options),
+    ];
 
     // If the access type is Secondary, we don't need to open all of the
     // columns so we can just return immediately.
