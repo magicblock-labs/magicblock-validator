@@ -7,7 +7,8 @@ use std::{
 use bincode::deserialize;
 use log::*;
 use solana_measure::measure::Measure;
-use solana_sdk::clock::Slot;
+use solana_sdk::{clock::Slot, pubkey::Pubkey, signature::Signature};
+use solana_transaction_status::TransactionStatusMeta;
 
 use crate::{
     database::{
@@ -15,7 +16,7 @@ use crate::{
         ledger_column::LedgerColumn, meta::TransactionStatusIndexMeta,
         options::LedgerOptions,
     },
-    errors::LedgerError,
+    errors::{LedgerError, LedgerResult},
     store::utils::adjust_ulimit_nofile,
 };
 
@@ -151,6 +152,17 @@ impl Store {
     pub fn is_primary_access(&self) -> bool {
         self.db.is_primary_access()
     }
+
+    // -----------------
+    // TransactionStatus
+    // -----------------
+    pub fn read_transaction_status(
+        &self,
+        index: (Signature, Slot),
+    ) -> LedgerResult<Option<TransactionStatusMeta>> {
+        let result = self.transaction_status_cf.get_protobuf(index)?;
+        Ok(result.and_then(|meta| meta.try_into().ok()))
+    }
 }
 
 #[cfg(test)]
@@ -253,8 +265,8 @@ mod tests {
         let compute_units_consumed_2 = Some(42u64);
 
         // result not found
-        assert!(transaction_status_cf
-            .get_protobuf((Signature::default(), 0))
+        assert!(store
+            .read_transaction_status((Signature::default(), 0))
             .unwrap()
             .is_none());
 
@@ -294,11 +306,9 @@ mod tests {
             loaded_addresses,
             return_data,
             compute_units_consumed,
-        } = transaction_status_cf
-            .get_protobuf((Signature::default(), 0))
+        } = store
+            .read_transaction_status((Signature::default(), 0))
             .unwrap()
-            .unwrap()
-            .try_into()
             .unwrap();
         assert_eq!(status, Err(TransactionError::AccountNotFound));
         assert_eq!(fee, 5u64);
@@ -347,11 +357,9 @@ mod tests {
             loaded_addresses,
             return_data,
             compute_units_consumed,
-        } = transaction_status_cf
-            .get_protobuf((Signature::from([2u8; 64]), 9))
+        } = store
+            .read_transaction_status((Signature::from([2u8; 64]), 9))
             .unwrap()
-            .unwrap()
-            .try_into()
             .unwrap();
 
         // deserialize
