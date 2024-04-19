@@ -7,13 +7,14 @@ use std::path::Path;
 use std::sync::RwLock;
 use std::{path::PathBuf, sync::Arc};
 
+use crate::blockstore::utils::adjust_ulimit_nofile;
 use crate::database::columns as cf;
 use crate::database::db::Database;
-use crate::errors::BlockstoreResult;
 use crate::database::iterator::IteratorMode;
 use crate::database::ledger_column::LedgerColumn;
 use crate::database::meta::TransactionStatusIndexMeta;
 use crate::database::options::BlockstoreOptions;
+use crate::errors::BlockstoreResult;
 
 pub struct Blockstore {
     ledger_path: PathBuf,
@@ -60,8 +61,7 @@ impl Blockstore {
                 .shred_storage_type
                 .blockstore_directory(),
         );
-        // TODO:
-        // adjust_ulimit_nofile(options.enforce_ulimit_nofile)?;
+        adjust_ulimit_nofile(options.enforce_ulimit_nofile)?;
 
         // Open the database
         let mut measure = Measure::start("blockstore open");

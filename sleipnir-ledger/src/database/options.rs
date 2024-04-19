@@ -21,6 +21,9 @@ pub enum AccessType {
 pub struct BlockstoreOptions {
     // The access type of blockstore. Default: Primary
     pub access_type: AccessType,
+    // When opening the Blockstore, determines whether to error or not if the
+    // desired open file descriptor limit cannot be configured. Default: true.
+    pub enforce_ulimit_nofile: bool,
     pub column_options: LedgerColumnOptions,
 }
 
@@ -31,6 +34,7 @@ impl Default for BlockstoreOptions {
     fn default() -> Self {
         Self {
             access_type: AccessType::Primary,
+            enforce_ulimit_nofile: true,
             column_options: LedgerColumnOptions::default(),
         }
     }
