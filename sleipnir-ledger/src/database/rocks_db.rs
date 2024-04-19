@@ -214,10 +214,13 @@ impl Rocks {
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*, crate::database::columns::columns, rocksdb::Options,
-        std::path::PathBuf, tempfile::tempdir,
-    };
+    use std::path::PathBuf;
+
+    use rocksdb::Options;
+    use tempfile::tempdir;
+
+    use super::*;
+    use crate::database::columns::columns;
 
     #[test]
     fn test_cf_names_and_descriptors_equal_length() {

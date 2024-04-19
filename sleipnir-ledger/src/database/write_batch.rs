@@ -1,10 +1,10 @@
-use bincode::serialize;
-use rocksdb::{ColumnFamily, WriteBatch as RWriteBatch};
 use std::collections::HashMap;
 
-use crate::errors::LedgerError;
+use bincode::serialize;
+use rocksdb::{ColumnFamily, WriteBatch as RWriteBatch};
 
 use super::columns::{Column, ColumnName, TypedColumn};
+use crate::errors::LedgerError;
 
 pub struct WriteBatch<'a> {
     pub write_batch: RWriteBatch,

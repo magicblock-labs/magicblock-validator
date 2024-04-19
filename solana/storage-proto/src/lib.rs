@@ -1,17 +1,17 @@
-use {
-    serde::{Deserialize, Serialize},
-    solana_account_decoder::{
-        parse_token::{real_number_string_trimmed, UiTokenAmount},
-        StringAmount,
-    },
-    solana_sdk::{
-        deserialize_utils::default_on_eof, message::v0::LoadedAddresses, transaction::Result,
-        transaction_context::TransactionReturnData,
-    },
-    solana_transaction_status::{
-        InnerInstructions, Reward, RewardType, TransactionStatusMeta, TransactionTokenBalance,
-    },
-    std::str::FromStr,
+use std::str::FromStr;
+
+use serde::{Deserialize, Serialize};
+use solana_account_decoder::{
+    parse_token::{real_number_string_trimmed, UiTokenAmount},
+    StringAmount,
+};
+use solana_sdk::{
+    deserialize_utils::default_on_eof, message::v0::LoadedAddresses,
+    transaction::Result, transaction_context::TransactionReturnData,
+};
+use solana_transaction_status::{
+    InnerInstructions, Reward, RewardType, TransactionStatusMeta,
+    TransactionTokenBalance,
 };
 
 pub mod convert;
@@ -82,8 +82,10 @@ impl From<StoredTokenAmount> for UiTokenAmount {
             decimals,
             amount,
         } = value;
-        let ui_amount_string =
-            real_number_string_trimmed(u64::from_str(&amount).unwrap_or(0), decimals);
+        let ui_amount_string = real_number_string_trimmed(
+            u64::from_str(&amount).unwrap_or(0),
+            decimals,
+        );
         Self {
             ui_amount: Some(ui_amount),
             decimals,
@@ -202,12 +204,15 @@ impl From<StoredTransactionStatusMeta> for TransactionStatusMeta {
             post_balances,
             inner_instructions,
             log_messages,
-            pre_token_balances: pre_token_balances
-                .map(|balances| balances.into_iter().map(|balance| balance.into()).collect()),
-            post_token_balances: post_token_balances
-                .map(|balances| balances.into_iter().map(|balance| balance.into()).collect()),
-            rewards: rewards
-                .map(|rewards| rewards.into_iter().map(|reward| reward.into()).collect()),
+            pre_token_balances: pre_token_balances.map(|balances| {
+                balances.into_iter().map(|balance| balance.into()).collect()
+            }),
+            post_token_balances: post_token_balances.map(|balances| {
+                balances.into_iter().map(|balance| balance.into()).collect()
+            }),
+            rewards: rewards.map(|rewards| {
+                rewards.into_iter().map(|reward| reward.into()).collect()
+            }),
             loaded_addresses: LoadedAddresses::default(),
             return_data,
             compute_units_consumed,
@@ -217,7 +222,9 @@ impl From<StoredTransactionStatusMeta> for TransactionStatusMeta {
 
 impl TryFrom<TransactionStatusMeta> for StoredTransactionStatusMeta {
     type Error = bincode::Error;
-    fn try_from(value: TransactionStatusMeta) -> std::result::Result<Self, Self::Error> {
+    fn try_from(
+        value: TransactionStatusMeta,
+    ) -> std::result::Result<Self, Self::Error> {
         let TransactionStatusMeta {
             status,
             fee,
@@ -236,9 +243,10 @@ impl TryFrom<TransactionStatusMeta> for StoredTransactionStatusMeta {
         if !loaded_addresses.is_empty() {
             // Deprecated bincode serialized status metadata doesn't support
             // loaded addresses.
-            return Err(
-                bincode::ErrorKind::Custom("Bincode serialization is deprecated".into()).into(),
-            );
+            return Err(bincode::ErrorKind::Custom(
+                "Bincode serialization is deprecated".into(),
+            )
+            .into());
         }
 
         Ok(Self {
@@ -248,12 +256,15 @@ impl TryFrom<TransactionStatusMeta> for StoredTransactionStatusMeta {
             post_balances,
             inner_instructions,
             log_messages,
-            pre_token_balances: pre_token_balances
-                .map(|balances| balances.into_iter().map(|balance| balance.into()).collect()),
-            post_token_balances: post_token_balances
-                .map(|balances| balances.into_iter().map(|balance| balance.into()).collect()),
-            rewards: rewards
-                .map(|rewards| rewards.into_iter().map(|reward| reward.into()).collect()),
+            pre_token_balances: pre_token_balances.map(|balances| {
+                balances.into_iter().map(|balance| balance.into()).collect()
+            }),
+            post_token_balances: post_token_balances.map(|balances| {
+                balances.into_iter().map(|balance| balance.into()).collect()
+            }),
+            rewards: rewards.map(|rewards| {
+                rewards.into_iter().map(|reward| reward.into()).collect()
+            }),
             return_data,
             compute_units_consumed,
         })

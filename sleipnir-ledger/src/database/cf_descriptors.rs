@@ -1,9 +1,7 @@
-use log::*;
 use std::{collections::HashSet, path::Path};
 
+use log::*;
 use rocksdb::{ColumnFamilyDescriptor, Options, DB};
-
-use crate::database::{columns, options::AccessType};
 
 use super::{
     columns::{Column, ColumnName},
@@ -11,6 +9,7 @@ use super::{
     options::LedgerOptions,
     rocksdb_options::should_disable_auto_compactions,
 };
+use crate::database::{columns, options::AccessType};
 
 /// Create the column family (CF) descriptors necessary to open the database.
 ///

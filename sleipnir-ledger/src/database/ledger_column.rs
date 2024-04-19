@@ -1,17 +1,17 @@
 use std::{marker::PhantomData, sync::Arc};
 
-use super::{
-    columns::{Column, ColumnName, ProtobufColumn, TypedColumn},
-    iterator::IteratorMode,
-    options::LedgerColumnOptions,
-    rocks_db::Rocks,
-};
 use bincode::{deserialize, serialize};
 use prost::Message;
 use rocksdb::{properties as RocksProperties, ColumnFamily};
 use serde::de::DeserializeOwned;
 use solana_sdk::clock::Slot;
 
+use super::{
+    columns::{Column, ColumnName, ProtobufColumn, TypedColumn},
+    iterator::IteratorMode,
+    options::LedgerColumnOptions,
+    rocks_db::Rocks,
+};
 use crate::{
     errors::LedgerError,
     metrics::{

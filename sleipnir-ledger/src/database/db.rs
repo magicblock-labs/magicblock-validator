@@ -1,7 +1,8 @@
+use std::{marker::PhantomData, path::Path, sync::Arc};
+
 use bincode::deserialize;
 use rocksdb::{ColumnFamily, DBRawIterator, LiveFile};
 use solana_sdk::clock::Slot;
-use std::{marker::PhantomData, path::Path, sync::Arc};
 
 use super::{
     columns::{columns, Column, ColumnName, TypedColumn},
@@ -11,7 +12,6 @@ use super::{
     rocks_db::Rocks,
     write_batch::WriteBatch,
 };
-
 use crate::{errors::LedgerError, metrics::PerfSamplingStatus};
 
 #[derive(Debug)]

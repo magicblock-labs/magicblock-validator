@@ -1,5 +1,6 @@
-use super::options::AccessType;
 use rocksdb::Options;
+
+use super::options::AccessType;
 
 pub fn get_rocksdb_options(access_type: &AccessType) -> Options {
     let mut options = Options::default();
