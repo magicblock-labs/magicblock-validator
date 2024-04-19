@@ -30,6 +30,7 @@ pub fn cf_descriptors(
         new_cf_descriptor::<TransactionStatus>(options),
         new_cf_descriptor::<AddressSignatures>(options),
         new_cf_descriptor::<TransactionStatusIndex>(options),
+        new_cf_descriptor::<Blocktime>(options),
     ];
 
     // If the access type is Secondary, we don't need to open all of the

@@ -39,6 +39,7 @@ pub struct Store {
     transaction_status_cf: LedgerColumn<cf::TransactionStatus>,
     address_signatures_cf: LedgerColumn<cf::AddressSignatures>,
     transaction_status_index_cf: LedgerColumn<cf::TransactionStatusIndex>,
+    blocktime_cf: LedgerColumn<cf::Blocktime>,
 
     highest_primary_index_slot: RwLock<Option<Slot>>,
 
@@ -91,6 +92,7 @@ impl Store {
         let transaction_status_cf = db.column();
         let address_signatures_cf = db.column();
         let transaction_status_index_cf = db.column();
+        let blocktime_cf = db.column();
 
         let db = Arc::new(db);
 
@@ -106,6 +108,7 @@ impl Store {
             transaction_status_cf,
             address_signatures_cf,
             transaction_status_index_cf,
+            blocktime_cf,
 
             highest_primary_index_slot: RwLock::<Option<Slot>>::default(),
 
@@ -126,6 +129,7 @@ impl Store {
         self.transaction_status_cf.submit_rocksdb_cf_metrics();
         self.address_signatures_cf.submit_rocksdb_cf_metrics();
         self.transaction_status_index_cf.submit_rocksdb_cf_metrics();
+        self.blocktime_cf.submit_rocksdb_cf_metrics();
     }
 
     fn cleanup_old_entries(&self) -> std::result::Result<(), LedgerError> {
@@ -176,6 +180,28 @@ impl Store {
         self.db.is_primary_access()
     }
 
+    // -----------------
+    // BlockTime
+    // -----------------
+
+    // NOTE: we kept the term block time even tough we don't produce blocks.
+    // As far as we are concerned these are just the time when we advanced to
+    // a specific slot.
+    pub fn cache_block_time(
+        &self,
+        slot: Slot,
+        timestamp: solana_sdk::clock::UnixTimestamp,
+    ) -> LedgerResult<()> {
+        self.blocktime_cf.put(slot, &timestamp)
+    }
+
+    fn get_block_time(
+        &self,
+        slot: Slot,
+    ) -> LedgerResult<Option<solana_sdk::clock::UnixTimestamp>> {
+        // let _lock = self.check_lowest_cleanup_slot(slot)?;
+        self.blocktime_cf.get(slot)
+    }
     // -----------------
     // TransactionStatus
     // -----------------
@@ -350,6 +376,8 @@ impl Store {
 // -----------------
 #[cfg(test)]
 mod tests {
+    use std::time::{Duration, Instant};
+
     use solana_sdk::{
         instruction::CompiledInstruction,
         message::v0::LoadedAddresses,
@@ -415,13 +443,30 @@ mod tests {
     }
 
     #[test]
-    fn test_persist_transaction_status() {
+    fn test_persist_block_time() {
         init_logger!();
 
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Store::open(ledger_path.path()).unwrap();
 
-        let transaction_status_cf = &store.transaction_status_cf;
+        let slot_0 = 5;
+        let slot_1 = slot_0 + 1;
+        let slot_2 = slot_1 + 1;
+        assert!(store.cache_block_time(0, slot_0).is_ok());
+        assert!(store.cache_block_time(1, slot_1).is_ok());
+        assert!(store.cache_block_time(2, slot_2).is_ok());
+
+        assert_eq!(store.get_block_time(0).unwrap().unwrap(), slot_0);
+        assert_eq!(store.get_block_time(1).unwrap().unwrap(), slot_1);
+        assert_eq!(store.get_block_time(2).unwrap().unwrap(), slot_2);
+    }
+
+    #[test]
+    fn test_persist_transaction_status() {
+        init_logger!();
+
+        let ledger_path = get_tmp_ledger_path_auto_delete!();
+        let store = Store::open(ledger_path.path()).unwrap();
 
         let pre_balances_vec = vec![1, 2, 3];
         let post_balances_vec = vec![3, 2, 1];

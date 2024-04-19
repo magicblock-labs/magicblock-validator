@@ -14,6 +14,8 @@ const ADDRESS_SIGNATURES_CF: &str = "address_signatures";
 /// This column family is used for tracking the active primary index for columns that for
 /// query performance reasons should not be indexed by Slot.
 const TRANSACTION_STATUS_INDEX_CF: &str = "transaction_status_index";
+/// Column family for Blocktime
+const BLOCKTIME_CF: &str = "blocktime";
 
 // TODO(thlorenz): @@@ledger add items we need
 
@@ -38,6 +40,12 @@ pub struct AddressSignatures;
 /// * value type: [`blockstore_meta::TransactionStatusIndexMeta`]
 pub struct TransactionStatusIndex;
 
+/// The block time column
+///
+/// * index type: `u64` (see [`SlotColumn`])
+/// * value type: [`UnixTimestamp`]
+pub struct Blocktime;
+
 // When adding a new column ...
 // - Add struct below and implement `Column` and `ColumnName` traits
 // - Add descriptor in Rocks::cf_descriptors() and name in Rocks::columns()
@@ -50,6 +58,7 @@ pub fn columns() -> Vec<&'static str> {
         TransactionStatus::NAME,
         AddressSignatures::NAME,
         TransactionStatusIndex::NAME,
+        Blocktime::NAME,
     ]
 }
 
@@ -86,6 +95,40 @@ impl TypedColumn for TransactionStatusIndex {
 
 pub trait ProtobufColumn: Column {
     type Type: prost::Message + Default;
+}
+
+/// SlotColumn is a trait for slot-based column families.  Its index is
+/// essentially Slot (or more generally speaking, has a 1:1 mapping to Slot).
+///
+/// The clean-up of any LedgerColumn that implements SlotColumn is managed by
+/// `LedgerCleanupService`, which will periodically deprecate and purge
+/// oldest entries that are older than the latest root in order to maintain the
+/// configured --limit-ledger-size under the validator argument.
+pub trait SlotColumn<Index = Slot> {}
+
+impl<T: SlotColumn> Column for T {
+    type Index = Slot;
+
+    /// Converts a u64 Index to its RocksDB key.
+    fn key(slot: u64) -> Vec<u8> {
+        let mut key = vec![0; 8];
+        BigEndian::write_u64(&mut key[..], slot);
+        key
+    }
+
+    /// Converts a RocksDB key to its u64 Index.
+    fn index(key: &[u8]) -> u64 {
+        BigEndian::read_u64(&key[..8])
+    }
+
+    fn slot(index: Self::Index) -> Slot {
+        index
+    }
+
+    /// Converts a Slot to its u64 Index.
+    fn as_index(slot: Slot) -> u64 {
+        slot
+    }
 }
 
 // -----------------
@@ -313,4 +356,15 @@ impl Column for TransactionStatusIndex {
 }
 impl ColumnName for TransactionStatusIndex {
     const NAME: &'static str = TRANSACTION_STATUS_INDEX_CF;
+}
+
+// -----------------
+// Blocktime
+// -----------------
+impl SlotColumn for Blocktime {}
+impl ColumnName for Blocktime {
+    const NAME: &'static str = BLOCKTIME_CF;
+}
+impl TypedColumn for Blocktime {
+    type Type = solana_sdk::clock::UnixTimestamp;
 }
