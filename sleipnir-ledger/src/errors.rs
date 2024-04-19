@@ -18,6 +18,8 @@ pub enum LedgerError {
     ProtobufDecodeError(#[from] prost::DecodeError),
     #[error("unable to set open file descriptor limit")]
     UnableToSetOpenFileDescriptorLimit,
+    #[error("transaction status slot mismatch")]
+    TransactionStatusSlotMismatch,
     #[error("transaction-index overflow")]
     TransactionIndexOverflow,
 }

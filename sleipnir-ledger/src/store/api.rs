@@ -1,14 +1,22 @@
 use std::{
+    collections::HashSet,
     fs,
     path::{Path, PathBuf},
-    sync::{Arc, RwLock},
+    sync::{atomic::Ordering, Arc, RwLock},
 };
 
 use bincode::deserialize;
 use log::*;
+use rocksdb::Direction as IteratorDirection;
 use solana_measure::measure::Measure;
-use solana_sdk::{clock::Slot, pubkey::Pubkey, signature::Signature};
-use solana_transaction_status::TransactionStatusMeta;
+use solana_sdk::{
+    clock::Slot, pubkey::Pubkey, signature::Signature,
+    transaction::VersionedTransaction,
+};
+use solana_transaction_status::{
+    ConfirmedTransactionWithStatusMeta, TransactionStatusMeta,
+    TransactionWithStatusMeta, VersionedTransactionWithStatusMeta,
+};
 
 use crate::{
     database::{
@@ -20,6 +28,7 @@ use crate::{
         options::LedgerOptions,
     },
     errors::{LedgerError, LedgerResult},
+    metrics::LedgerRpcApiMetrics,
     store::utils::adjust_ulimit_nofile,
 };
 
@@ -32,6 +41,8 @@ pub struct Store {
     transaction_status_index_cf: LedgerColumn<cf::TransactionStatusIndex>,
 
     highest_primary_index_slot: RwLock<Option<Slot>>,
+
+    rpc_api_metrics: LedgerRpcApiMetrics,
 }
 
 impl Store {
@@ -97,6 +108,8 @@ impl Store {
             transaction_status_index_cf,
 
             highest_primary_index_slot: RwLock::<Option<Slot>>::default(),
+
+            rpc_api_metrics: LedgerRpcApiMetrics::default(),
         };
 
         blockstore.cleanup_old_entries()?;
@@ -166,6 +179,94 @@ impl Store {
     // -----------------
     // TransactionStatus
     // -----------------
+    /// Returns a complete transaction if it was processed in a root
+    /// Since we don't have forks, this means that it was processed
+    pub fn get_rooted_transaction(
+        &self,
+        signature: Signature,
+    ) -> LedgerResult<Option<ConfirmedTransactionWithStatusMeta>> {
+        self.rpc_api_metrics
+            .num_get_rooted_transaction
+            .fetch_add(1, Ordering::Relaxed);
+
+        self.get_transaction_with_status(signature, &HashSet::default())
+    }
+
+    fn get_transaction_with_status(
+        &self,
+        signature: Signature,
+        confirmed_unrooted_slots: &HashSet<Slot>,
+    ) -> LedgerResult<Option<ConfirmedTransactionWithStatusMeta>> {
+        if let Some((slot, meta)) =
+            self.get_transaction_status(signature, confirmed_unrooted_slots)?
+        {
+            let transaction =
+                self.find_transaction_in_slot(slot, signature)?
+                    .ok_or(LedgerError::TransactionStatusSlotMismatch)?; // Should not happen
+
+            // TODO: need blocktime_cf first and ensure it is updated
+            //       we should call it slot time since we don't have slots
+            //       but then we also need to update these for each slot
+            todo!()
+            /*
+            let block_time = self.get_block_time(slot)?;
+            Ok(Some(ConfirmedTransactionWithStatusMeta {
+                slot,
+                tx_with_meta: TransactionWithStatusMeta::Complete(
+                    VersionedTransactionWithStatusMeta { transaction, meta },
+                ),
+                block_time,
+            }))
+            */
+        } else {
+            Ok(None)
+        }
+    }
+
+    fn find_transaction_in_slot(
+        &self,
+        slot: Slot,
+        signature: Signature,
+    ) -> LedgerResult<Option<VersionedTransaction>> {
+        todo!()
+        /*
+        let slot_entries = self.get_slot_entries(slot, 0)?;
+        Ok(slot_entries
+            .iter()
+            .cloned()
+            .flat_map(|entry| entry.transactions)
+            .map(|transaction| {
+                if let Err(err) = transaction.sanitize() {
+                    warn!(
+                        "Blockstore::find_transaction_in_slot sanitize failed: {:?}, \
+                        slot: {:?}, \
+                        {:?}",
+                        err, slot, transaction,
+                    );
+                }
+                transaction
+            })
+            .find(|transaction| transaction.signatures[0] == signature))
+        */
+    }
+
+    /// Returns a transaction status
+    pub fn get_transaction_status(
+        &self,
+        signature: Signature,
+        confirmed_unrooted_slots: &HashSet<Slot>,
+    ) -> LedgerResult<Option<(Slot, TransactionStatusMeta)>> {
+        self.rpc_api_metrics
+            .num_get_transaction_status
+            .fetch_add(1, Ordering::Relaxed);
+
+        self.get_transaction_status_with_counter(
+            signature,
+            confirmed_unrooted_slots,
+        )
+        .map(|(status, _)| status)
+    }
+
     pub fn read_transaction_status(
         &self,
         index: (Signature, Slot),
@@ -201,6 +302,46 @@ impl Store {
             )?;
         }
         Ok(())
+    }
+
+    // Returns a transaction status, as well as a loop counter for unit testing
+    fn get_transaction_status_with_counter(
+        &self,
+        signature: Signature,
+        _confirmed_unrooted_slots: &HashSet<Slot>,
+    ) -> LedgerResult<(Option<(Slot, TransactionStatusMeta)>, u64)> {
+        let mut counter = 0;
+        // TODO:
+        // let (lock, _) = self.ensure_lowest_cleanup_slot();
+        let first_available_block = 0; // self.get_first_available_block()?;
+
+        let iterator = self.transaction_status_cf.iter_current_index_filtered(
+            IteratorMode::From(
+                (signature, first_available_block),
+                IteratorDirection::Forward,
+            ),
+        )?;
+        #[allow(clippy::never_loop)]
+        for ((sig, slot), _data) in iterator {
+            counter += 1;
+            if sig != signature {
+                break;
+            }
+            // Removed check if this is neither root or confirmed_unrooted_slots
+            // TODO: but now we don't loop anymore since we always drop to
+            // the below code
+            let status = self
+                .transaction_status_cf
+                .get_protobuf((signature, slot))?
+                .and_then(|status| status.try_into().ok())
+                .map(|status| (slot, status));
+            return Ok((status, counter));
+        }
+        // Removed alternative of finding the status
+
+        // drop(lock);
+
+        Ok((None, counter))
     }
 }
 
@@ -332,8 +473,7 @@ mod tests {
                 loaded_addresses: test_loaded_addresses.clone(),
                 return_data: Some(test_return_data.clone()),
                 compute_units_consumed: compute_units_consumed_1,
-            }
-            .into();
+            };
             assert!(store
                 .write_transaction_status(
                     slot,
@@ -394,8 +534,7 @@ mod tests {
                 loaded_addresses: test_loaded_addresses.clone(),
                 return_data: Some(test_return_data.clone()),
                 compute_units_consumed: compute_units_consumed_2,
-            }
-            .into();
+            };
             assert!(store
                 .write_transaction_status(
                     slot,

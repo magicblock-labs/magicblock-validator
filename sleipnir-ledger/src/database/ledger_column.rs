@@ -7,13 +7,15 @@ use serde::de::DeserializeOwned;
 use solana_sdk::clock::Slot;
 
 use super::{
-    columns::{Column, ColumnName, ProtobufColumn, TypedColumn},
+    columns::{
+        Column, ColumnIndexDeprecation, ColumnName, ProtobufColumn, TypedColumn,
+    },
     iterator::IteratorMode,
     options::LedgerColumnOptions,
     rocks_db::Rocks,
 };
 use crate::{
-    errors::LedgerError,
+    errors::{LedgerError, LedgerResult},
     metrics::{
         maybe_enable_rocksdb_perf, report_rocksdb_read_perf,
         report_rocksdb_write_perf, BlockstoreRocksDbColumnFamilyMetrics,
@@ -447,5 +449,45 @@ where
         }
 
         result
+    }
+}
+
+impl<C> LedgerColumn<C>
+where
+    C: ColumnIndexDeprecation + ColumnName,
+{
+    pub(crate) fn iter_current_index_filtered(
+        &self,
+        iterator_mode: IteratorMode<C::Index>,
+    ) -> LedgerResult<impl Iterator<Item = (C::Index, Box<[u8]>)> + '_> {
+        let cf = self.handle();
+        let iter = self.backend.iterator_cf::<C>(cf, iterator_mode);
+        Ok(iter.filter_map(|pair| {
+            let (key, value) = pair.unwrap();
+            C::try_current_index(&key).ok().map(|index| (index, value))
+        }))
+    }
+
+    pub(crate) fn iter_deprecated_index_filtered(
+        &self,
+        iterator_mode: IteratorMode<C::DeprecatedIndex>,
+    ) -> LedgerResult<impl Iterator<Item = (C::DeprecatedIndex, Box<[u8]>)> + '_>
+    {
+        let cf = self.handle();
+        let iterator_mode_raw_key = match iterator_mode {
+            IteratorMode::Start => IteratorMode::Start,
+            IteratorMode::End => IteratorMode::End,
+            IteratorMode::From(start_from, direction) => {
+                let raw_key = C::deprecated_key(start_from);
+                IteratorMode::From(raw_key, direction)
+            }
+        };
+        let iter = self.backend.iterator_cf_raw_key(cf, iterator_mode_raw_key);
+        Ok(iter.filter_map(|pair| {
+            let (key, value) = pair.unwrap();
+            C::try_deprecated_index(&key)
+                .ok()
+                .map(|index| (index, value))
+        }))
     }
 }
