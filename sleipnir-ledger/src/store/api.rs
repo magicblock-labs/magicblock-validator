@@ -442,32 +442,7 @@ mod tests {
         };
     }
 
-    #[test]
-    fn test_persist_block_time() {
-        init_logger!();
-
-        let ledger_path = get_tmp_ledger_path_auto_delete!();
-        let store = Store::open(ledger_path.path()).unwrap();
-
-        let slot_0 = 5;
-        let slot_1 = slot_0 + 1;
-        let slot_2 = slot_1 + 1;
-        assert!(store.cache_block_time(0, slot_0).is_ok());
-        assert!(store.cache_block_time(1, slot_1).is_ok());
-        assert!(store.cache_block_time(2, slot_2).is_ok());
-
-        assert_eq!(store.get_block_time(0).unwrap().unwrap(), slot_0);
-        assert_eq!(store.get_block_time(1).unwrap().unwrap(), slot_1);
-        assert_eq!(store.get_block_time(2).unwrap().unwrap(), slot_2);
-    }
-
-    #[test]
-    fn test_persist_transaction_status() {
-        init_logger!();
-
-        let ledger_path = get_tmp_ledger_path_auto_delete!();
-        let store = Store::open(ledger_path.path()).unwrap();
-
+    fn create_transaction_status_meta(fee: u64) -> TransactionStatusMeta {
         let pre_balances_vec = vec![1, 2, 3];
         let post_balances_vec = vec![3, 2, 1];
         let inner_instructions_vec = vec![InnerInstructions {
@@ -492,6 +467,51 @@ mod tests {
         let compute_units_consumed_1 = Some(3812649u64);
         let compute_units_consumed_2 = Some(42u64);
 
+        TransactionStatusMeta {
+            status: solana_sdk::transaction::Result::<()>::Err(
+                TransactionError::AccountNotFound,
+            ),
+            fee,
+            pre_balances: pre_balances_vec.clone(),
+            post_balances: post_balances_vec.clone(),
+            inner_instructions: Some(inner_instructions_vec.clone()),
+            log_messages: Some(log_messages_vec.clone()),
+            pre_token_balances: Some(pre_token_balances_vec.clone()),
+            post_token_balances: Some(post_token_balances_vec.clone()),
+            rewards: Some(rewards_vec.clone()),
+            loaded_addresses: test_loaded_addresses,
+            return_data: Some(test_return_data.clone()),
+            compute_units_consumed: compute_units_consumed_1,
+        }
+    }
+
+    #[test]
+    fn test_persist_block_time() {
+        init_logger!();
+
+        let ledger_path = get_tmp_ledger_path_auto_delete!();
+        let store = Store::open(ledger_path.path()).unwrap();
+
+        let slot_0 = 5;
+        let slot_1 = slot_0 + 1;
+        let slot_2 = slot_1 + 1;
+
+        assert!(store.cache_block_time(0, slot_0).is_ok());
+        assert!(store.cache_block_time(1, slot_1).is_ok());
+        assert!(store.cache_block_time(2, slot_2).is_ok());
+
+        assert_eq!(store.get_block_time(0).unwrap().unwrap(), slot_0);
+        assert_eq!(store.get_block_time(1).unwrap().unwrap(), slot_1);
+        assert_eq!(store.get_block_time(2).unwrap().unwrap(), slot_2);
+    }
+
+    #[test]
+    fn test_persist_transaction_status() {
+        init_logger!();
+
+        let ledger_path = get_tmp_ledger_path_auto_delete!();
+        let store = Store::open(ledger_path.path()).unwrap();
+
         // First Case
         {
             let (signature, slot) = (Signature::default(), 0);
@@ -503,126 +523,60 @@ mod tests {
                 .is_none());
 
             // insert value
-            let meta = TransactionStatusMeta {
-                status: solana_sdk::transaction::Result::<()>::Err(
-                    TransactionError::AccountNotFound,
-                ),
-                fee: 5u64,
-                pre_balances: pre_balances_vec.clone(),
-                post_balances: post_balances_vec.clone(),
-                inner_instructions: Some(inner_instructions_vec.clone()),
-                log_messages: Some(log_messages_vec.clone()),
-                pre_token_balances: Some(pre_token_balances_vec.clone()),
-                post_token_balances: Some(post_token_balances_vec.clone()),
-                rewards: Some(rewards_vec.clone()),
-                loaded_addresses: test_loaded_addresses.clone(),
-                return_data: Some(test_return_data.clone()),
-                compute_units_consumed: compute_units_consumed_1,
-            };
+            let meta = create_transaction_status_meta(5);
+            let writable_addresses = meta.loaded_addresses.writable.clone();
+            let readonly_addresses = meta.loaded_addresses.writable.clone();
             assert!(store
                 .write_transaction_status(
                     slot,
                     signature,
-                    test_loaded_addresses.writable.iter().collect(),
-                    test_loaded_addresses.readonly.iter().collect(),
-                    meta,
+                    writable_addresses.iter().collect(),
+                    readonly_addresses.iter().collect(),
+                    meta.clone(),
                     0,
                 )
                 .is_ok());
 
             // result found
-            let TransactionStatusMeta {
-                status,
-                fee,
-                pre_balances,
-                post_balances,
-                inner_instructions,
-                log_messages,
-                pre_token_balances,
-                post_token_balances,
-                rewards,
-                loaded_addresses,
-                return_data,
-                compute_units_consumed,
-            } = store
-                .read_transaction_status((Signature::default(), 0))
+            let found = store
+                .read_transaction_status((signature, slot))
                 .unwrap()
                 .unwrap();
-            assert_eq!(status, Err(TransactionError::AccountNotFound));
-            assert_eq!(fee, 5u64);
-            assert_eq!(pre_balances, pre_balances_vec);
-            assert_eq!(post_balances, post_balances_vec);
-            assert_eq!(inner_instructions.unwrap(), inner_instructions_vec);
-            assert_eq!(log_messages.unwrap(), log_messages_vec);
-            assert_eq!(pre_token_balances.unwrap(), pre_token_balances_vec);
-            assert_eq!(post_token_balances.unwrap(), post_token_balances_vec);
-            assert_eq!(rewards.unwrap(), rewards_vec);
-            assert_eq!(loaded_addresses, test_loaded_addresses);
-            assert_eq!(return_data.unwrap(), test_return_data);
-            assert_eq!(compute_units_consumed, compute_units_consumed_1);
+            assert_eq!(found, meta);
         }
 
         // Second Case
         {
             // insert value
             let (signature, slot) = (Signature::from([2u8; 64]), 9);
-            let meta = TransactionStatusMeta {
-                status: solana_sdk::transaction::Result::<()>::Ok(()),
-                fee: 9u64,
-                pre_balances: pre_balances_vec.clone(),
-                post_balances: post_balances_vec.clone(),
-                inner_instructions: Some(inner_instructions_vec.clone()),
-                log_messages: Some(log_messages_vec.clone()),
-                pre_token_balances: Some(pre_token_balances_vec.clone()),
-                post_token_balances: Some(post_token_balances_vec.clone()),
-                rewards: Some(rewards_vec.clone()),
-                loaded_addresses: test_loaded_addresses.clone(),
-                return_data: Some(test_return_data.clone()),
-                compute_units_consumed: compute_units_consumed_2,
-            };
+            let meta = create_transaction_status_meta(9);
+            let writable_addresses = meta.loaded_addresses.writable.clone();
+            let readonly_addresses = meta.loaded_addresses.writable.clone();
             assert!(store
                 .write_transaction_status(
                     slot,
                     signature,
-                    test_loaded_addresses.writable.iter().collect(),
-                    test_loaded_addresses.readonly.iter().collect(),
-                    meta,
+                    writable_addresses.iter().collect(),
+                    readonly_addresses.iter().collect(),
+                    meta.clone(),
                     0,
                 )
                 .is_ok());
 
             // result found
-            let TransactionStatusMeta {
-                status,
-                fee,
-                pre_balances,
-                post_balances,
-                inner_instructions,
-                log_messages,
-                pre_token_balances,
-                post_token_balances,
-                rewards,
-                loaded_addresses,
-                return_data,
-                compute_units_consumed,
-            } = store
-                .read_transaction_status((Signature::from([2u8; 64]), 9))
+            let found = store
+                .read_transaction_status((signature, slot))
                 .unwrap()
                 .unwrap();
-
-            // deserialize
-            assert_eq!(status, Ok(()));
-            assert_eq!(fee, 9u64);
-            assert_eq!(pre_balances, pre_balances_vec);
-            assert_eq!(post_balances, post_balances_vec);
-            assert_eq!(inner_instructions.unwrap(), inner_instructions_vec);
-            assert_eq!(log_messages.unwrap(), log_messages_vec);
-            assert_eq!(pre_token_balances.unwrap(), pre_token_balances_vec);
-            assert_eq!(post_token_balances.unwrap(), post_token_balances_vec);
-            assert_eq!(rewards.unwrap(), rewards_vec);
-            assert_eq!(loaded_addresses, test_loaded_addresses);
-            assert_eq!(return_data.unwrap(), test_return_data);
-            assert_eq!(compute_units_consumed, compute_units_consumed_2);
+            assert_eq!(found, meta);
         }
+    }
+
+    #[test]
+    fn test_get_transaction_status_for_slot() {
+        init_logger!();
+
+        let ledger_path = get_tmp_ledger_path_auto_delete!();
+        let store = Store::open(ledger_path.path()).unwrap();
     }
 }
