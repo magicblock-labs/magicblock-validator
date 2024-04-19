@@ -71,7 +71,7 @@ impl Full for FullImpl {
         let samples = (min_slot..=current_slot)
             .map(|slot| RpcPerfSample {
                 slot,
-                // TODO(thlorenz): @@@blockstore once we support it we can provide this
+                // TODO(thlorenz): @@@ledger once we support it we can provide this
                 num_transactions: 0,
                 sample_period_secs: (RECENT_PERF_SAMPLES_WINDOW_MILLIS / 1000)
                     as u16,

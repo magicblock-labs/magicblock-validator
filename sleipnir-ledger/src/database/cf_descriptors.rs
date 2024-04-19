@@ -27,8 +27,9 @@ pub fn cf_descriptors(
     use columns::*;
 
     let mut cf_descriptors = vec![
-        new_cf_descriptor::<TransactionStatusIndex>(options),
         new_cf_descriptor::<TransactionStatus>(options),
+        new_cf_descriptor::<AddressSignatures>(options),
+        new_cf_descriptor::<TransactionStatusIndex>(options),
     ];
 
     // If the access type is Secondary, we don't need to open all of the
@@ -111,7 +112,7 @@ fn get_cf_options<C: 'static + Column + ColumnName>(
         cf_options.set_disable_auto_compactions(true);
     }
 
-    // TODO(thlorenz): @@@blockstore do we need this?
+    // TODO(thlorenz): @@@ledger do we need this?
     // process_cf_options_advanced::<C>(&mut cf_options, &options.column_options);
 
     cf_options

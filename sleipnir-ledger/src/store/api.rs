@@ -25,6 +25,7 @@ pub struct Store {
     db: Arc<Database>,
 
     transaction_status_cf: LedgerColumn<cf::TransactionStatus>,
+    address_signatures_cf: LedgerColumn<cf::AddressSignatures>,
     transaction_status_index_cf: LedgerColumn<cf::TransactionStatusIndex>,
 
     highest_primary_index_slot: RwLock<Option<Slot>>,
@@ -74,6 +75,7 @@ impl Store {
         let db = Database::open(&blockstore_path, options)?;
 
         let transaction_status_cf = db.column();
+        let address_signatures_cf = db.column();
         let transaction_status_index_cf = db.column();
 
         let db = Arc::new(db);
@@ -86,7 +88,9 @@ impl Store {
         let blockstore = Store {
             ledger_path: ledger_path.to_path_buf(),
             db,
+
             transaction_status_cf,
+            address_signatures_cf,
             transaction_status_index_cf,
 
             highest_primary_index_slot: RwLock::<Option<Slot>>::default(),
@@ -103,6 +107,8 @@ impl Store {
     ///
     /// [`BlockstoreRocksDbColumnFamilyMetrics`]: crate::blockstore_metrics::BlockstoreRocksDbColumnFamilyMetrics
     pub fn submit_rocksdb_cf_metrics_for_all_cfs(&self) {
+        self.transaction_status_cf.submit_rocksdb_cf_metrics();
+        self.address_signatures_cf.submit_rocksdb_cf_metrics();
         self.transaction_status_index_cf.submit_rocksdb_cf_metrics();
     }
 
@@ -120,6 +126,7 @@ impl Store {
             self.transaction_status_index_cf
                 .put(1, &TransactionStatusIndexMeta::default())?;
         }
+        // Left out cleanup by "old software" since we won't encounter that
         Ok(())
     }
 

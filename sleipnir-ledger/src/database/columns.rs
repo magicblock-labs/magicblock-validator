@@ -1,26 +1,21 @@
 use byteorder::{BigEndian, ByteOrder};
 use prost::Message;
 use serde::{de::DeserializeOwned, Serialize};
-use solana_sdk::{clock::Slot, signature::Signature};
+use solana_sdk::{clock::Slot, pubkey::Pubkey, signature::Signature};
 use solana_storage_proto::convert::generated;
 
 use super::meta;
 
 /// Column family for Transaction Status
 const TRANSACTION_STATUS_CF: &str = "transaction_status";
+/// Column family for Address Signatures
+const ADDRESS_SIGNATURES_CF: &str = "address_signatures";
 /// Column family for the Transaction Status Index.
 /// This column family is used for tracking the active primary index for columns that for
 /// query performance reasons should not be indexed by Slot.
 const TRANSACTION_STATUS_INDEX_CF: &str = "transaction_status_index";
 
-// TODO(thlorenz): @@@blockstore add items we need
-
-#[derive(Debug)]
-/// The transaction status index column.
-///
-/// * index type: `u64` (see [`SlotColumn`])
-/// * value type: [`blockstore_meta::TransactionStatusIndexMeta`]
-pub struct TransactionStatusIndex;
+// TODO(thlorenz): @@@ledger add items we need
 
 #[derive(Debug)]
 /// The transaction status column
@@ -28,6 +23,20 @@ pub struct TransactionStatusIndex;
 /// * index type: `(`[`Signature`]`, `[`Slot`])`
 /// * value type: [`generated::TransactionStatusMeta`]
 pub struct TransactionStatus;
+
+#[derive(Debug)]
+/// The address signatures column
+///
+/// * index type: `(`[`Pubkey`]`, `[`Slot`]`, u32, `[`Signature`]`)`
+/// * value type: [`blockstore_meta::AddressSignatureMeta`]
+pub struct AddressSignatures;
+
+#[derive(Debug)]
+/// The transaction status index column.
+///
+/// * index type: `u64` (see [`SlotColumn`])
+/// * value type: [`blockstore_meta::TransactionStatusIndexMeta`]
+pub struct TransactionStatusIndex;
 
 // When adding a new column ...
 // - Add struct below and implement `Column` and `ColumnName` traits
@@ -37,7 +46,11 @@ pub struct TransactionStatus;
 // - Account for column in `analyze_storage()` in ledger-tool/src/main.rs
 
 pub fn columns() -> Vec<&'static str> {
-    vec![TransactionStatus::NAME, TransactionStatusIndex::NAME]
+    vec![
+        TransactionStatus::NAME,
+        AddressSignatures::NAME,
+        TransactionStatusIndex::NAME,
+    ]
 }
 
 // -----------------
@@ -61,6 +74,10 @@ pub trait ColumnName {
 
 pub trait TypedColumn: Column {
     type Type: Serialize + DeserializeOwned;
+}
+
+impl TypedColumn for AddressSignatures {
+    type Type = meta::AddressSignatureMeta;
 }
 
 impl TypedColumn for TransactionStatusIndex {
@@ -105,6 +122,89 @@ pub trait ColumnIndexDeprecation: Column {
             // executed.
             Self::as_index(0)
         }
+    }
+}
+
+// -----------------
+// AddressSignatures
+// -----------------
+impl Column for AddressSignatures {
+    type Index = (Pubkey, Slot, u32, Signature);
+
+    fn key(
+        (pubkey, slot, transaction_index, signature): Self::Index,
+    ) -> Vec<u8> {
+        let mut key = vec![0; Self::CURRENT_INDEX_LEN];
+        key[0..32].copy_from_slice(&pubkey.as_ref()[0..32]);
+        BigEndian::write_u64(&mut key[32..40], slot);
+        BigEndian::write_u32(&mut key[40..44], transaction_index);
+        key[44..108].copy_from_slice(&signature.as_ref()[0..64]);
+        key
+    }
+
+    fn index(key: &[u8]) -> Self::Index {
+        <AddressSignatures as ColumnIndexDeprecation>::index(key)
+    }
+
+    fn slot(index: Self::Index) -> Slot {
+        index.1
+    }
+
+    // The AddressSignatures column is not keyed by slot so this method is meaningless
+    // See Column::as_index() declaration for more details
+    fn as_index(_index: u64) -> Self::Index {
+        (Pubkey::default(), 0, 0, Signature::default())
+    }
+}
+impl ColumnName for AddressSignatures {
+    const NAME: &'static str = ADDRESS_SIGNATURES_CF;
+}
+
+impl ColumnIndexDeprecation for AddressSignatures {
+    const DEPRECATED_INDEX_LEN: usize = 112;
+    const CURRENT_INDEX_LEN: usize = 108;
+    type DeprecatedIndex = (u64, Pubkey, Slot, Signature);
+
+    fn deprecated_key(
+        (primary_index, pubkey, slot, signature): Self::DeprecatedIndex,
+    ) -> Vec<u8> {
+        let mut key = vec![0; Self::DEPRECATED_INDEX_LEN];
+        BigEndian::write_u64(&mut key[0..8], primary_index);
+        key[8..40].clone_from_slice(&pubkey.as_ref()[0..32]);
+        BigEndian::write_u64(&mut key[40..48], slot);
+        key[48..112].clone_from_slice(&signature.as_ref()[0..64]);
+        key
+    }
+
+    fn try_deprecated_index(
+        key: &[u8],
+    ) -> std::result::Result<Self::DeprecatedIndex, IndexError> {
+        if key.len() != Self::DEPRECATED_INDEX_LEN {
+            return Err(IndexError::UnpackError);
+        }
+        let primary_index = BigEndian::read_u64(&key[0..8]);
+        let pubkey = Pubkey::try_from(&key[8..40]).unwrap();
+        let slot = BigEndian::read_u64(&key[40..48]);
+        let signature = Signature::try_from(&key[48..112]).unwrap();
+        Ok((primary_index, pubkey, slot, signature))
+    }
+
+    fn try_current_index(
+        key: &[u8],
+    ) -> std::result::Result<Self::Index, IndexError> {
+        if key.len() != Self::CURRENT_INDEX_LEN {
+            return Err(IndexError::UnpackError);
+        }
+        let pubkey = Pubkey::try_from(&key[0..32]).unwrap();
+        let slot = BigEndian::read_u64(&key[32..40]);
+        let transaction_index = BigEndian::read_u32(&key[40..44]);
+        let signature = Signature::try_from(&key[44..108]).unwrap();
+        Ok((pubkey, slot, transaction_index, signature))
+    }
+
+    fn convert_index(deprecated_index: Self::DeprecatedIndex) -> Self::Index {
+        let (_primary_index, pubkey, slot, signature) = deprecated_index;
+        (pubkey, slot, 0, signature)
     }
 }
 
