@@ -25,6 +25,7 @@ members = [
   "sleipnir-transaction-status",
   "sleipnir-version",
   "solana/program-runtime",
+  "solana/storage-proto",
   "solana/svm",
   "test-bins",
   "test-tools",
@@ -126,6 +127,7 @@ solana-rayon-threadlimit = { git = "https://github.com/solana-labs/solana", rev 
 solana-streamer = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-streamer" }
 solana-sdk = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-sdk" }
 solana-svm = { path = "./solana/svm" }
+solana-storage-proto = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-storage-proto" }
 solana-system-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-system-program" }
 solana-transaction-status = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-transaction-status" }
 solana_rbpf = "=0.8.0"
@@ -150,6 +152,8 @@ zstd = "0.11.2"
 [patch.'https://github.com/solana-labs/solana']
 solana-program-runtime = { path = "./solana/program-runtime" }
 solana-svm = { path = "./solana/svm" }
+# This one we just copied in order to match the prost version
+solana-storage-proto = { path = "./solana/storage-proto" }
 
 
 [patch.crates-io]
