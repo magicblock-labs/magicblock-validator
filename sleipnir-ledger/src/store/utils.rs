@@ -1,17 +1,16 @@
-use crate::errors::BlockstoreResult;
+use crate::errors::LedgerError;
 
 #[cfg(not(unix))]
 pub fn adjust_ulimit_nofile(
     _enforce_ulimit_nofile: bool,
-) -> BlockstoreResult<()> {
+) -> std::result::Result<(), LedgerError> {
     Ok(())
 }
 
 #[cfg(unix)]
 pub fn adjust_ulimit_nofile(
     enforce_ulimit_nofile: bool,
-) -> BlockstoreResult<()> {
-    use crate::errors::BlockstoreError;
+) -> std::result::Result<(), LedgerError> {
     use log::*;
 
     // Rocks DB likes to have many open files.  The default open file descriptor limit is
@@ -49,9 +48,7 @@ pub fn adjust_ulimit_nofile(
                 );
             }
             if enforce_ulimit_nofile {
-                return Err(
-                    BlockstoreError::UnableToSetOpenFileDescriptorLimit,
-                );
+                return Err(LedgerError::UnableToSetOpenFileDescriptorLimit);
             }
         }
 

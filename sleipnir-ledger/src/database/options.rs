@@ -16,9 +16,9 @@ pub enum AccessType {
 }
 
 // -----------------
-// BlockstoreOptions
+// LedgerOptions
 // -----------------
-pub struct BlockstoreOptions {
+pub struct LedgerOptions {
     // The access type of blockstore. Default: Primary
     pub access_type: AccessType,
     // When opening the Blockstore, determines whether to error or not if the
@@ -27,7 +27,7 @@ pub struct BlockstoreOptions {
     pub column_options: LedgerColumnOptions,
 }
 
-impl Default for BlockstoreOptions {
+impl Default for LedgerOptions {
     /// The default options are the values used by [`Blockstore::open`].
     ///
     /// [`Blockstore::open`]: crate::blockstore::Blockstore::open

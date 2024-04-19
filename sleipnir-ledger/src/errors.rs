@@ -1,9 +1,9 @@
 use thiserror::Error;
 
-pub type BlockstoreResult<T> = std::result::Result<T, BlockstoreError>;
+pub type LedgerResult<T> = std::result::Result<T, LedgerError>;
 
 #[derive(Error, Debug)]
-pub enum BlockstoreError {
+pub enum LedgerError {
     #[error("RocksDB error: {0}")]
     RocksDb(#[from] rocksdb::Error),
     #[error("io error: {0}")]

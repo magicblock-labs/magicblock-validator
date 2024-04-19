@@ -7,12 +7,12 @@ use super::{
     columns::{columns, Column, ColumnName, TypedColumn},
     iterator::IteratorMode,
     ledger_column::LedgerColumn,
-    options::{BlockstoreOptions, LedgerColumnOptions},
+    options::{LedgerColumnOptions, LedgerOptions},
     rocks_db::Rocks,
     write_batch::WriteBatch,
 };
-use crate::errors::BlockstoreResult;
-use crate::metrics::PerfSamplingStatus;
+
+use crate::{errors::LedgerError, metrics::PerfSamplingStatus};
 
 #[derive(Debug)]
 pub struct Database {
@@ -24,8 +24,8 @@ pub struct Database {
 impl Database {
     pub fn open(
         path: &Path,
-        options: BlockstoreOptions,
-    ) -> BlockstoreResult<Self> {
+        options: LedgerOptions,
+    ) -> std::result::Result<Self, LedgerError> {
         let column_options = Arc::new(options.column_options.clone());
         let backend = Arc::new(Rocks::open(path, options)?);
 
@@ -36,13 +36,16 @@ impl Database {
         })
     }
 
-    pub fn destroy(path: &Path) -> BlockstoreResult<()> {
+    pub fn destroy(path: &Path) -> std::result::Result<(), LedgerError> {
         Rocks::destroy(path)?;
 
         Ok(())
     }
 
-    pub fn get<C>(&self, key: C::Index) -> BlockstoreResult<Option<C::Type>>
+    pub fn get<C>(
+        &self,
+        key: C::Index,
+    ) -> std::result::Result<Option<C::Type>, LedgerError>
     where
         C: TypedColumn + ColumnName,
     {
@@ -60,7 +63,10 @@ impl Database {
     pub fn iter<C>(
         &self,
         iterator_mode: IteratorMode<C::Index>,
-    ) -> BlockstoreResult<impl Iterator<Item = (C::Index, Box<[u8]>)> + '_>
+    ) -> std::result::Result<
+        impl Iterator<Item = (C::Index, Box<[u8]>)> + '_,
+        LedgerError,
+    >
     where
         C: Column + ColumnName,
     {
@@ -97,11 +103,11 @@ impl Database {
     pub fn raw_iterator_cf(
         &self,
         cf: &ColumnFamily,
-    ) -> BlockstoreResult<DBRawIterator> {
+    ) -> std::result::Result<DBRawIterator, LedgerError> {
         Ok(self.backend.raw_iterator_cf(cf))
     }
 
-    pub fn batch(&self) -> BlockstoreResult<WriteBatch> {
+    pub fn batch(&self) -> std::result::Result<WriteBatch, LedgerError> {
         let write_batch = self.backend.batch();
         let map = columns()
             .into_iter()
@@ -111,11 +117,14 @@ impl Database {
         Ok(WriteBatch { write_batch, map })
     }
 
-    pub fn write(&self, batch: WriteBatch) -> BlockstoreResult<()> {
+    pub fn write(
+        &self,
+        batch: WriteBatch,
+    ) -> std::result::Result<(), LedgerError> {
         self.backend.write(batch.write_batch)
     }
 
-    pub fn storage_size(&self) -> BlockstoreResult<u64> {
+    pub fn storage_size(&self) -> std::result::Result<u64, LedgerError> {
         Ok(fs_extra::dir::get_size(&self.path)?)
     }
 
@@ -127,7 +136,7 @@ impl Database {
         batch: &mut WriteBatch,
         from: Slot,
         to: Slot,
-    ) -> BlockstoreResult<()>
+    ) -> std::result::Result<(), LedgerError>
     where
         C: Column + ColumnName,
     {
@@ -147,7 +156,7 @@ impl Database {
         &self,
         from: Slot,
         to: Slot,
-    ) -> BlockstoreResult<()>
+    ) -> std::result::Result<(), LedgerError>
     where
         C: Column + ColumnName,
     {
@@ -162,7 +171,9 @@ impl Database {
         self.backend.is_primary_access()
     }
 
-    pub fn live_files_metadata(&self) -> BlockstoreResult<Vec<LiveFile>> {
+    pub fn live_files_metadata(
+        &self,
+    ) -> std::result::Result<Vec<LiveFile>, LedgerError> {
         self.backend.live_files_metadata()
     }
 

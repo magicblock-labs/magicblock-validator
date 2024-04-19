@@ -8,7 +8,7 @@ use crate::database::{columns, options::AccessType};
 use super::{
     columns::{Column, ColumnName},
     consts,
-    options::BlockstoreOptions,
+    options::LedgerOptions,
     rocksdb_options::should_disable_auto_compactions,
 };
 
@@ -23,7 +23,7 @@ use super::{
 /// did not have knowledge of that new column.
 pub fn cf_descriptors(
     path: &Path,
-    options: &BlockstoreOptions,
+    options: &LedgerOptions,
 ) -> Vec<ColumnFamilyDescriptor> {
     use columns::*;
 
@@ -80,14 +80,14 @@ pub fn cf_descriptors(
 }
 
 fn new_cf_descriptor<C: 'static + Column + ColumnName>(
-    options: &BlockstoreOptions,
+    options: &LedgerOptions,
 ) -> ColumnFamilyDescriptor {
     ColumnFamilyDescriptor::new(C::NAME, get_cf_options::<C>(options))
 }
 
 // FROM ledger/src/blockstore_db.rs :2010
 fn get_cf_options<C: 'static + Column + ColumnName>(
-    options: &BlockstoreOptions,
+    options: &LedgerOptions,
 ) -> Options {
     let mut cf_options = Options::default();
     // 256 * 8 = 2GB. 6 of these columns should take at most 12GB of RAM

@@ -2,8 +2,9 @@ use bincode::serialize;
 use rocksdb::{ColumnFamily, WriteBatch as RWriteBatch};
 use std::collections::HashMap;
 
+use crate::errors::LedgerError;
+
 use super::columns::{Column, ColumnName, TypedColumn};
-use crate::errors::BlockstoreResult;
 
 pub struct WriteBatch<'a> {
     pub write_batch: RWriteBatch,
@@ -15,7 +16,7 @@ impl<'a> WriteBatch<'a> {
         &mut self,
         key: C::Index,
         bytes: &[u8],
-    ) -> BlockstoreResult<()> {
+    ) -> std::result::Result<(), LedgerError> {
         self.write_batch
             .put_cf(self.get_cf::<C>(), C::key(key), bytes);
         Ok(())
@@ -24,14 +25,14 @@ impl<'a> WriteBatch<'a> {
     pub fn delete<C: Column + ColumnName>(
         &mut self,
         key: C::Index,
-    ) -> BlockstoreResult<()> {
+    ) -> std::result::Result<(), LedgerError> {
         self.delete_raw::<C>(&C::key(key))
     }
 
     pub(crate) fn delete_raw<C: Column + ColumnName>(
         &mut self,
         key: &[u8],
-    ) -> BlockstoreResult<()> {
+    ) -> std::result::Result<(), LedgerError> {
         self.write_batch.delete_cf(self.get_cf::<C>(), key);
         Ok(())
     }
@@ -40,7 +41,7 @@ impl<'a> WriteBatch<'a> {
         &mut self,
         key: C::Index,
         value: &C::Type,
-    ) -> BlockstoreResult<()> {
+    ) -> std::result::Result<(), LedgerError> {
         let serialized_value = serialize(&value)?;
         self.write_batch.put_cf(
             self.get_cf::<C>(),
@@ -66,7 +67,7 @@ impl<'a> WriteBatch<'a> {
         cf: &ColumnFamily,
         from: C::Index,
         to: C::Index, // exclusive
-    ) -> BlockstoreResult<()> {
+    ) -> std::result::Result<(), LedgerError> {
         self.write_batch
             .delete_range_cf(cf, C::key(from), C::key(to));
         Ok(())

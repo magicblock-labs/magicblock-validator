@@ -1,7 +1,5 @@
 use std::{marker::PhantomData, sync::Arc};
 
-use crate::errors::BlockstoreResult;
-
 use super::{
     columns::{Column, ColumnName, ProtobufColumn, TypedColumn},
     iterator::IteratorMode,
@@ -14,11 +12,14 @@ use rocksdb::{properties as RocksProperties, ColumnFamily};
 use serde::de::DeserializeOwned;
 use solana_sdk::clock::Slot;
 
-use crate::metrics::{
-    maybe_enable_rocksdb_perf, report_rocksdb_read_perf,
-    report_rocksdb_write_perf, BlockstoreRocksDbColumnFamilyMetrics,
-    PerfSamplingStatus, BLOCKSTORE_METRICS_ERROR, PERF_METRIC_OP_NAME_GET,
-    PERF_METRIC_OP_NAME_MULTI_GET, PERF_METRIC_OP_NAME_PUT,
+use crate::{
+    errors::LedgerError,
+    metrics::{
+        maybe_enable_rocksdb_perf, report_rocksdb_read_perf,
+        report_rocksdb_write_perf, BlockstoreRocksDbColumnFamilyMetrics,
+        PerfSamplingStatus, BLOCKSTORE_METRICS_ERROR, PERF_METRIC_OP_NAME_GET,
+        PERF_METRIC_OP_NAME_MULTI_GET, PERF_METRIC_OP_NAME_PUT,
+    },
 };
 
 #[derive(Debug)]
@@ -96,7 +97,7 @@ where
     pub fn get_bytes(
         &self,
         key: C::Index,
-    ) -> BlockstoreResult<Option<Vec<u8>>> {
+    ) -> std::result::Result<Option<Vec<u8>>, LedgerError> {
         let is_perf_enabled = maybe_enable_rocksdb_perf(
             self.column_options.rocks_perf_sample_interval,
             &self.read_perf_status,
@@ -116,7 +117,7 @@ where
     pub fn multi_get_bytes(
         &self,
         keys: Vec<C::Index>,
-    ) -> Vec<BlockstoreResult<Option<Vec<u8>>>> {
+    ) -> Vec<std::result::Result<Option<Vec<u8>>, LedgerError>> {
         let rocks_keys: Vec<_> =
             keys.into_iter().map(|key| C::key(key)).collect();
         {
@@ -139,7 +140,7 @@ where
                     },
                     Err(e) => Err(e),
                 })
-                .collect::<Vec<BlockstoreResult<Option<_>>>>();
+                .collect::<Vec<std::result::Result<Option<_>, LedgerError>>>();
             if let Some(op_start_instant) = is_perf_enabled {
                 // use multi-get instead
                 report_rocksdb_read_perf(
@@ -157,8 +158,10 @@ where
     pub fn iter(
         &self,
         iterator_mode: IteratorMode<C::Index>,
-    ) -> BlockstoreResult<impl Iterator<Item = (C::Index, Box<[u8]>)> + '_>
-    {
+    ) -> std::result::Result<
+        impl Iterator<Item = (C::Index, Box<[u8]>)> + '_,
+        LedgerError,
+    > {
         let cf = self.handle();
         let iter = self.backend.iterator_cf::<C>(cf, iterator_mode);
         Ok(iter.map(|pair| {
@@ -167,7 +170,11 @@ where
         }))
     }
 
-    pub fn compact_range(&self, from: Slot, to: Slot) -> BlockstoreResult<bool>
+    pub fn compact_range(
+        &self,
+        from: Slot,
+        to: Slot,
+    ) -> std::result::Result<bool, LedgerError>
     where
         C::Index: PartialOrd + Copy,
     {
@@ -184,7 +191,7 @@ where
     }
 
     #[cfg(test)]
-    pub fn is_empty(&self) -> BlockstoreResult<bool> {
+    pub fn is_empty(&self) -> std::result::Result<bool, LedgerError> {
         let mut iter = self.backend.raw_iterator_cf(self.handle());
         iter.seek_to_first();
         Ok(!iter.valid())
@@ -194,7 +201,7 @@ where
         &self,
         key: C::Index,
         value: &[u8],
-    ) -> BlockstoreResult<()> {
+    ) -> std::result::Result<(), LedgerError> {
         let is_perf_enabled = maybe_enable_rocksdb_perf(
             self.column_options.rocks_perf_sample_interval,
             &self.write_perf_status,
@@ -219,11 +226,14 @@ where
     pub fn get_int_property(
         &self,
         name: &'static std::ffi::CStr,
-    ) -> BlockstoreResult<i64> {
+    ) -> std::result::Result<i64, LedgerError> {
         self.backend.get_int_property_cf(self.handle(), name)
     }
 
-    pub fn delete(&self, key: C::Index) -> BlockstoreResult<()> {
+    pub fn delete(
+        &self,
+        key: C::Index,
+    ) -> std::result::Result<(), LedgerError> {
         let is_perf_enabled = maybe_enable_rocksdb_perf(
             self.column_options.rocks_perf_sample_interval,
             &self.write_perf_status,
@@ -248,7 +258,7 @@ where
     pub fn multi_get(
         &self,
         keys: Vec<C::Index>,
-    ) -> Vec<BlockstoreResult<Option<C::Type>>> {
+    ) -> Vec<std::result::Result<Option<C::Type>, LedgerError>> {
         let rocks_keys: Vec<_> =
             keys.into_iter().map(|key| C::key(key)).collect();
         {
@@ -271,7 +281,7 @@ where
                     },
                     Err(e) => Err(e),
                 })
-                .collect::<Vec<BlockstoreResult<Option<_>>>>();
+                .collect::<Vec<std::result::Result<Option<_>, LedgerError>>>();
             if let Some(op_start_instant) = is_perf_enabled {
                 // use multi-get instead
                 report_rocksdb_read_perf(
@@ -286,11 +296,17 @@ where
         }
     }
 
-    pub fn get(&self, key: C::Index) -> BlockstoreResult<Option<C::Type>> {
+    pub fn get(
+        &self,
+        key: C::Index,
+    ) -> std::result::Result<Option<C::Type>, LedgerError> {
         self.get_raw(&C::key(key))
     }
 
-    pub fn get_raw(&self, key: &[u8]) -> BlockstoreResult<Option<C::Type>> {
+    pub fn get_raw(
+        &self,
+        key: &[u8],
+    ) -> std::result::Result<Option<C::Type>, LedgerError> {
         let mut result = Ok(None);
         let is_perf_enabled = maybe_enable_rocksdb_perf(
             self.column_options.rocks_perf_sample_interval,
@@ -314,7 +330,11 @@ where
         result
     }
 
-    pub fn put(&self, key: C::Index, value: &C::Type) -> BlockstoreResult<()> {
+    pub fn put(
+        &self,
+        key: C::Index,
+        value: &C::Type,
+    ) -> std::result::Result<(), LedgerError> {
         let is_perf_enabled = maybe_enable_rocksdb_perf(
             self.column_options.rocks_perf_sample_interval,
             &self.write_perf_status,
@@ -344,7 +364,7 @@ where
     pub fn get_protobuf_or_bincode<T: DeserializeOwned + Into<C::Type>>(
         &self,
         key: C::Index,
-    ) -> BlockstoreResult<Option<C::Type>> {
+    ) -> std::result::Result<Option<C::Type>, LedgerError> {
         self.get_raw_protobuf_or_bincode::<T>(&C::key(key))
     }
 
@@ -353,7 +373,7 @@ where
     >(
         &self,
         key: &[u8],
-    ) -> BlockstoreResult<Option<C::Type>> {
+    ) -> std::result::Result<Option<C::Type>, LedgerError> {
         let is_perf_enabled = maybe_enable_rocksdb_perf(
             self.column_options.rocks_perf_sample_interval,
             &self.read_perf_status,
@@ -382,7 +402,7 @@ where
     pub fn get_protobuf(
         &self,
         key: C::Index,
-    ) -> BlockstoreResult<Option<C::Type>> {
+    ) -> std::result::Result<Option<C::Type>, LedgerError> {
         let is_perf_enabled = maybe_enable_rocksdb_perf(
             self.column_options.rocks_perf_sample_interval,
             &self.read_perf_status,
@@ -408,7 +428,7 @@ where
         &self,
         key: C::Index,
         value: &C::Type,
-    ) -> BlockstoreResult<()> {
+    ) -> std::result::Result<(), LedgerError> {
         let mut buf = Vec::with_capacity(value.encoded_len());
         value.encode(&mut buf)?;
 

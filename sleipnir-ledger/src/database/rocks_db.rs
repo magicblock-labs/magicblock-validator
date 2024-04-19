@@ -10,10 +10,10 @@ use super::{
     cf_descriptors::cf_descriptors,
     columns::Column,
     iterator::IteratorMode,
-    options::{AccessType, BlockstoreOptions},
+    options::{AccessType, LedgerOptions},
     rocksdb_options::get_rocksdb_options,
 };
-use crate::errors::{BlockstoreError, BlockstoreResult};
+use crate::errors::{LedgerError, LedgerResult};
 
 // -----------------
 // Rocks
@@ -25,10 +25,7 @@ pub struct Rocks {
 }
 
 impl Rocks {
-    pub fn open(
-        path: &Path,
-        options: BlockstoreOptions,
-    ) -> BlockstoreResult<Self> {
+    pub fn open(path: &Path, options: LedgerOptions) -> LedgerResult<Self> {
         let access_type = options.access_type.clone();
         fs::create_dir_all(path)?;
 
@@ -47,7 +44,7 @@ impl Rocks {
         Ok(Self { db, access_type })
     }
 
-    pub fn destroy(path: &Path) -> BlockstoreResult<()> {
+    pub fn destroy(path: &Path) -> LedgerResult<()> {
         DB::destroy(&Options::default(), path)?;
 
         Ok(())
@@ -63,7 +60,7 @@ impl Rocks {
         &self,
         cf: &ColumnFamily,
         key: &[u8],
-    ) -> BlockstoreResult<Option<Vec<u8>>> {
+    ) -> LedgerResult<Option<Vec<u8>>> {
         let opt = self.db.get_cf(cf, key)?;
         Ok(opt)
     }
@@ -72,7 +69,7 @@ impl Rocks {
         &self,
         cf: &ColumnFamily,
         key: &[u8],
-    ) -> BlockstoreResult<Option<DBPinnableSlice>> {
+    ) -> LedgerResult<Option<DBPinnableSlice>> {
         let opt = self.db.get_pinned_cf(cf, key)?;
         Ok(opt)
     }
@@ -82,7 +79,7 @@ impl Rocks {
         cf: &ColumnFamily,
         key: &[u8],
         value: &[u8],
-    ) -> BlockstoreResult<()> {
+    ) -> LedgerResult<()> {
         self.db.put_cf(cf, key, value)?;
         Ok(())
     }
@@ -91,24 +88,20 @@ impl Rocks {
         &self,
         cf: &ColumnFamily,
         keys: Vec<&[u8]>,
-    ) -> Vec<BlockstoreResult<Option<DBPinnableSlice>>> {
+    ) -> Vec<LedgerResult<Option<DBPinnableSlice>>> {
         let values = self
             .db
             .batched_multi_get_cf(cf, keys, false)
             .into_iter()
             .map(|result| match result {
                 Ok(opt) => Ok(opt),
-                Err(e) => Err(BlockstoreError::RocksDb(e)),
+                Err(e) => Err(LedgerError::RocksDb(e)),
             })
             .collect::<Vec<_>>();
         values
     }
 
-    pub fn delete_cf(
-        &self,
-        cf: &ColumnFamily,
-        key: &[u8],
-    ) -> BlockstoreResult<()> {
+    pub fn delete_cf(&self, cf: &ColumnFamily, key: &[u8]) -> LedgerResult<()> {
         self.db.delete_cf(cf, key)?;
         Ok(())
     }
@@ -119,7 +112,7 @@ impl Rocks {
         cf: &ColumnFamily,
         from_key: &[u8],
         to_key: &[u8],
-    ) -> BlockstoreResult<()> {
+    ) -> LedgerResult<()> {
         self.db.delete_file_in_range_cf(cf, from_key, to_key)?;
         Ok(())
     }
@@ -169,7 +162,7 @@ impl Rocks {
         RWriteBatch::default()
     }
 
-    pub fn write(&self, batch: RWriteBatch) -> BlockstoreResult<()> {
+    pub fn write(&self, batch: RWriteBatch) -> LedgerResult<()> {
         // let op_start_instant = maybe_enable_rocksdb_perf(
         //     self.column_options.rocks_perf_sample_interval,
         //     &self.write_batch_perf_status,
@@ -185,7 +178,7 @@ impl Rocks {
         // }
         match result {
             Ok(_) => Ok(()),
-            Err(e) => Err(BlockstoreError::RocksDb(e)),
+            Err(e) => Err(LedgerError::RocksDb(e)),
         }
     }
 
@@ -203,18 +196,18 @@ impl Rocks {
         &self,
         cf: &ColumnFamily,
         name: &'static std::ffi::CStr,
-    ) -> BlockstoreResult<i64> {
+    ) -> LedgerResult<i64> {
         match self.db.property_int_value_cf(cf, name) {
             Ok(Some(value)) => Ok(value.try_into().unwrap()),
             Ok(None) => Ok(0),
-            Err(e) => Err(BlockstoreError::RocksDb(e)),
+            Err(e) => Err(LedgerError::RocksDb(e)),
         }
     }
 
-    pub fn live_files_metadata(&self) -> BlockstoreResult<Vec<LiveFile>> {
+    pub fn live_files_metadata(&self) -> LedgerResult<Vec<LiveFile>> {
         match self.db.live_files() {
             Ok(live_files) => Ok(live_files),
-            Err(e) => Err(BlockstoreError::RocksDb(e)),
+            Err(e) => Err(LedgerError::RocksDb(e)),
         }
     }
 }
@@ -229,7 +222,7 @@ mod tests {
     #[test]
     fn test_cf_names_and_descriptors_equal_length() {
         let path = PathBuf::default();
-        let options = BlockstoreOptions::default();
+        let options = LedgerOptions::default();
         // The names and descriptors don't need to be in the same order for our use cases;
         // however, there should be the same number of each. For example, adding a new column
         // should update both lists.
@@ -243,7 +236,7 @@ mod tests {
 
         // Open with Primary to create the new database
         {
-            let options = BlockstoreOptions {
+            let options = LedgerOptions {
                 access_type: AccessType::Primary,
                 ..Default::default()
             };
@@ -259,7 +252,7 @@ mod tests {
         // Opening with either Secondary or Primary access should succeed,
         // even though the Rocks code is unaware of "new_column"
         {
-            let options = BlockstoreOptions {
+            let options = LedgerOptions {
                 access_type: AccessType::Primary,
                 ..Default::default()
             };

@@ -7,16 +7,17 @@ use std::path::Path;
 use std::sync::RwLock;
 use std::{path::PathBuf, sync::Arc};
 
-use crate::blockstore::utils::adjust_ulimit_nofile;
 use crate::database::columns as cf;
 use crate::database::db::Database;
 use crate::database::iterator::IteratorMode;
 use crate::database::ledger_column::LedgerColumn;
 use crate::database::meta::TransactionStatusIndexMeta;
-use crate::database::options::BlockstoreOptions;
-use crate::errors::BlockstoreResult;
+use crate::database::options::LedgerOptions;
 
-pub struct Blockstore {
+use crate::errors::LedgerError;
+use crate::store::utils::adjust_ulimit_nofile;
+
+pub struct Store {
     ledger_path: PathBuf,
     db: Arc<Database>,
 
@@ -26,7 +27,7 @@ pub struct Blockstore {
     highest_primary_index_slot: RwLock<Option<Slot>>,
 }
 
-impl Blockstore {
+impl Store {
     pub fn db(self) -> Arc<Database> {
         self.db
     }
@@ -40,21 +41,21 @@ impl Blockstore {
     }
 
     /// Opens a Ledger in directory, provides "infinite" window of shreds
-    pub fn open(ledger_path: &Path) -> BlockstoreResult<Self> {
-        Self::do_open(ledger_path, BlockstoreOptions::default())
+    pub fn open(ledger_path: &Path) -> std::result::Result<Self, LedgerError> {
+        Self::do_open(ledger_path, LedgerOptions::default())
     }
 
     pub fn open_with_options(
         ledger_path: &Path,
-        options: BlockstoreOptions,
-    ) -> BlockstoreResult<Self> {
+        options: LedgerOptions,
+    ) -> std::result::Result<Self, LedgerError> {
         Self::do_open(ledger_path, options)
     }
 
     fn do_open(
         ledger_path: &Path,
-        options: BlockstoreOptions,
-    ) -> BlockstoreResult<Self> {
+        options: LedgerOptions,
+    ) -> std::result::Result<Self, LedgerError> {
         fs::create_dir_all(ledger_path)?;
         let blockstore_path = ledger_path.join(
             options
@@ -79,7 +80,7 @@ impl Blockstore {
         measure.stop();
         info!("Opening blockstore done; {measure}");
 
-        let blockstore = Blockstore {
+        let blockstore = Store {
             ledger_path: ledger_path.to_path_buf(),
             db,
             transaction_status_cf,
@@ -102,7 +103,7 @@ impl Blockstore {
         self.transaction_status_index_cf.submit_rocksdb_cf_metrics();
     }
 
-    fn cleanup_old_entries(&self) -> BlockstoreResult<()> {
+    fn cleanup_old_entries(&self) -> std::result::Result<(), LedgerError> {
         if !self.is_primary_access() {
             return Ok(());
         }
@@ -123,7 +124,9 @@ impl Blockstore {
         *self.highest_primary_index_slot.write().unwrap() = slot;
     }
 
-    fn update_highest_primary_index_slot(&self) -> BlockstoreResult<()> {
+    fn update_highest_primary_index_slot(
+        &self,
+    ) -> std::result::Result<(), LedgerError> {
         let iterator =
             self.transaction_status_index_cf.iter(IteratorMode::Start)?;
         let mut highest_primary_index_slot = None;
@@ -218,9 +221,9 @@ mod tests {
         init_logger!();
 
         let ledger_path = get_tmp_ledger_path_auto_delete!();
-        let blockstore = Blockstore::open(ledger_path.path()).unwrap();
+        let store = Store::open(ledger_path.path()).unwrap();
 
-        let transaction_status_cf = &blockstore.transaction_status_cf;
+        let transaction_status_cf = &store.transaction_status_cf;
 
         let pre_balances_vec = vec![1, 2, 3];
         let post_balances_vec = vec![3, 2, 1];
