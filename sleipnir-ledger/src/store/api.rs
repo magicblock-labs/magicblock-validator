@@ -12,8 +12,11 @@ use solana_transaction_status::TransactionStatusMeta;
 
 use crate::{
     database::{
-        columns as cf, db::Database, iterator::IteratorMode,
-        ledger_column::LedgerColumn, meta::TransactionStatusIndexMeta,
+        columns as cf,
+        db::Database,
+        iterator::IteratorMode,
+        ledger_column::LedgerColumn,
+        meta::{AddressSignatureMeta, TransactionStatusIndexMeta},
         options::LedgerOptions,
     },
     errors::{LedgerError, LedgerResult},
@@ -170,8 +173,40 @@ impl Store {
         let result = self.transaction_status_cf.get_protobuf(index)?;
         Ok(result.and_then(|meta| meta.try_into().ok()))
     }
+
+    pub fn write_transaction_status(
+        &self,
+        slot: Slot,
+        signature: Signature,
+        writable_keys: Vec<&Pubkey>,
+        readonly_keys: Vec<&Pubkey>,
+        status: TransactionStatusMeta,
+        transaction_index: usize,
+    ) -> LedgerResult<()> {
+        let status = status.into();
+        let transaction_index = u32::try_from(transaction_index)
+            .map_err(|_| LedgerError::TransactionIndexOverflow)?;
+        self.transaction_status_cf
+            .put_protobuf((signature, slot), &status)?;
+        for address in writable_keys {
+            self.address_signatures_cf.put(
+                (*address, slot, transaction_index, signature),
+                &AddressSignatureMeta { writeable: true },
+            )?;
+        }
+        for address in readonly_keys {
+            self.address_signatures_cf.put(
+                (*address, slot, transaction_index, signature),
+                &AddressSignatureMeta { writeable: false },
+            )?;
+        }
+        Ok(())
+    }
 }
 
+// -----------------
+// Tests
+// -----------------
 #[cfg(test)]
 mod tests {
     use solana_sdk::{
@@ -271,116 +306,139 @@ mod tests {
         let compute_units_consumed_1 = Some(3812649u64);
         let compute_units_consumed_2 = Some(42u64);
 
-        // result not found
-        assert!(store
-            .read_transaction_status((Signature::default(), 0))
-            .unwrap()
-            .is_none());
+        // First Case
+        {
+            let (signature, slot) = (Signature::default(), 0);
 
-        // insert value
-        let status = TransactionStatusMeta {
-            status: solana_sdk::transaction::Result::<()>::Err(
-                TransactionError::AccountNotFound,
-            ),
-            fee: 5u64,
-            pre_balances: pre_balances_vec.clone(),
-            post_balances: post_balances_vec.clone(),
-            inner_instructions: Some(inner_instructions_vec.clone()),
-            log_messages: Some(log_messages_vec.clone()),
-            pre_token_balances: Some(pre_token_balances_vec.clone()),
-            post_token_balances: Some(post_token_balances_vec.clone()),
-            rewards: Some(rewards_vec.clone()),
-            loaded_addresses: test_loaded_addresses.clone(),
-            return_data: Some(test_return_data.clone()),
-            compute_units_consumed: compute_units_consumed_1,
+            // result not found
+            assert!(store
+                .read_transaction_status((Signature::default(), 0))
+                .unwrap()
+                .is_none());
+
+            // insert value
+            let meta = TransactionStatusMeta {
+                status: solana_sdk::transaction::Result::<()>::Err(
+                    TransactionError::AccountNotFound,
+                ),
+                fee: 5u64,
+                pre_balances: pre_balances_vec.clone(),
+                post_balances: post_balances_vec.clone(),
+                inner_instructions: Some(inner_instructions_vec.clone()),
+                log_messages: Some(log_messages_vec.clone()),
+                pre_token_balances: Some(pre_token_balances_vec.clone()),
+                post_token_balances: Some(post_token_balances_vec.clone()),
+                rewards: Some(rewards_vec.clone()),
+                loaded_addresses: test_loaded_addresses.clone(),
+                return_data: Some(test_return_data.clone()),
+                compute_units_consumed: compute_units_consumed_1,
+            }
+            .into();
+            assert!(store
+                .write_transaction_status(
+                    slot,
+                    signature,
+                    test_loaded_addresses.writable.iter().collect(),
+                    test_loaded_addresses.readonly.iter().collect(),
+                    meta,
+                    0,
+                )
+                .is_ok());
+
+            // result found
+            let TransactionStatusMeta {
+                status,
+                fee,
+                pre_balances,
+                post_balances,
+                inner_instructions,
+                log_messages,
+                pre_token_balances,
+                post_token_balances,
+                rewards,
+                loaded_addresses,
+                return_data,
+                compute_units_consumed,
+            } = store
+                .read_transaction_status((Signature::default(), 0))
+                .unwrap()
+                .unwrap();
+            assert_eq!(status, Err(TransactionError::AccountNotFound));
+            assert_eq!(fee, 5u64);
+            assert_eq!(pre_balances, pre_balances_vec);
+            assert_eq!(post_balances, post_balances_vec);
+            assert_eq!(inner_instructions.unwrap(), inner_instructions_vec);
+            assert_eq!(log_messages.unwrap(), log_messages_vec);
+            assert_eq!(pre_token_balances.unwrap(), pre_token_balances_vec);
+            assert_eq!(post_token_balances.unwrap(), post_token_balances_vec);
+            assert_eq!(rewards.unwrap(), rewards_vec);
+            assert_eq!(loaded_addresses, test_loaded_addresses);
+            assert_eq!(return_data.unwrap(), test_return_data);
+            assert_eq!(compute_units_consumed, compute_units_consumed_1);
         }
-        .into();
-        assert!(transaction_status_cf
-            .put_protobuf((Signature::default(), 0), &status)
-            .is_ok());
 
-        // result found
-        let TransactionStatusMeta {
-            status,
-            fee,
-            pre_balances,
-            post_balances,
-            inner_instructions,
-            log_messages,
-            pre_token_balances,
-            post_token_balances,
-            rewards,
-            loaded_addresses,
-            return_data,
-            compute_units_consumed,
-        } = store
-            .read_transaction_status((Signature::default(), 0))
-            .unwrap()
-            .unwrap();
-        assert_eq!(status, Err(TransactionError::AccountNotFound));
-        assert_eq!(fee, 5u64);
-        assert_eq!(pre_balances, pre_balances_vec);
-        assert_eq!(post_balances, post_balances_vec);
-        assert_eq!(inner_instructions.unwrap(), inner_instructions_vec);
-        assert_eq!(log_messages.unwrap(), log_messages_vec);
-        assert_eq!(pre_token_balances.unwrap(), pre_token_balances_vec);
-        assert_eq!(post_token_balances.unwrap(), post_token_balances_vec);
-        assert_eq!(rewards.unwrap(), rewards_vec);
-        assert_eq!(loaded_addresses, test_loaded_addresses);
-        assert_eq!(return_data.unwrap(), test_return_data);
-        assert_eq!(compute_units_consumed, compute_units_consumed_1);
+        // Second Case
+        {
+            // insert value
+            let (signature, slot) = (Signature::from([2u8; 64]), 9);
+            let meta = TransactionStatusMeta {
+                status: solana_sdk::transaction::Result::<()>::Ok(()),
+                fee: 9u64,
+                pre_balances: pre_balances_vec.clone(),
+                post_balances: post_balances_vec.clone(),
+                inner_instructions: Some(inner_instructions_vec.clone()),
+                log_messages: Some(log_messages_vec.clone()),
+                pre_token_balances: Some(pre_token_balances_vec.clone()),
+                post_token_balances: Some(post_token_balances_vec.clone()),
+                rewards: Some(rewards_vec.clone()),
+                loaded_addresses: test_loaded_addresses.clone(),
+                return_data: Some(test_return_data.clone()),
+                compute_units_consumed: compute_units_consumed_2,
+            }
+            .into();
+            assert!(store
+                .write_transaction_status(
+                    slot,
+                    signature,
+                    test_loaded_addresses.writable.iter().collect(),
+                    test_loaded_addresses.readonly.iter().collect(),
+                    meta,
+                    0,
+                )
+                .is_ok());
 
-        // insert value
-        let status = TransactionStatusMeta {
-            status: solana_sdk::transaction::Result::<()>::Ok(()),
-            fee: 9u64,
-            pre_balances: pre_balances_vec.clone(),
-            post_balances: post_balances_vec.clone(),
-            inner_instructions: Some(inner_instructions_vec.clone()),
-            log_messages: Some(log_messages_vec.clone()),
-            pre_token_balances: Some(pre_token_balances_vec.clone()),
-            post_token_balances: Some(post_token_balances_vec.clone()),
-            rewards: Some(rewards_vec.clone()),
-            loaded_addresses: test_loaded_addresses.clone(),
-            return_data: Some(test_return_data.clone()),
-            compute_units_consumed: compute_units_consumed_2,
+            // result found
+            let TransactionStatusMeta {
+                status,
+                fee,
+                pre_balances,
+                post_balances,
+                inner_instructions,
+                log_messages,
+                pre_token_balances,
+                post_token_balances,
+                rewards,
+                loaded_addresses,
+                return_data,
+                compute_units_consumed,
+            } = store
+                .read_transaction_status((Signature::from([2u8; 64]), 9))
+                .unwrap()
+                .unwrap();
+
+            // deserialize
+            assert_eq!(status, Ok(()));
+            assert_eq!(fee, 9u64);
+            assert_eq!(pre_balances, pre_balances_vec);
+            assert_eq!(post_balances, post_balances_vec);
+            assert_eq!(inner_instructions.unwrap(), inner_instructions_vec);
+            assert_eq!(log_messages.unwrap(), log_messages_vec);
+            assert_eq!(pre_token_balances.unwrap(), pre_token_balances_vec);
+            assert_eq!(post_token_balances.unwrap(), post_token_balances_vec);
+            assert_eq!(rewards.unwrap(), rewards_vec);
+            assert_eq!(loaded_addresses, test_loaded_addresses);
+            assert_eq!(return_data.unwrap(), test_return_data);
+            assert_eq!(compute_units_consumed, compute_units_consumed_2);
         }
-        .into();
-        assert!(transaction_status_cf
-            .put_protobuf((Signature::from([2u8; 64]), 9), &status,)
-            .is_ok());
-
-        // result found
-        let TransactionStatusMeta {
-            status,
-            fee,
-            pre_balances,
-            post_balances,
-            inner_instructions,
-            log_messages,
-            pre_token_balances,
-            post_token_balances,
-            rewards,
-            loaded_addresses,
-            return_data,
-            compute_units_consumed,
-        } = store
-            .read_transaction_status((Signature::from([2u8; 64]), 9))
-            .unwrap()
-            .unwrap();
-
-        // deserialize
-        assert_eq!(status, Ok(()));
-        assert_eq!(fee, 9u64);
-        assert_eq!(pre_balances, pre_balances_vec);
-        assert_eq!(post_balances, post_balances_vec);
-        assert_eq!(inner_instructions.unwrap(), inner_instructions_vec);
-        assert_eq!(log_messages.unwrap(), log_messages_vec);
-        assert_eq!(pre_token_balances.unwrap(), pre_token_balances_vec);
-        assert_eq!(post_token_balances.unwrap(), post_token_balances_vec);
-        assert_eq!(rewards.unwrap(), rewards_vec);
-        assert_eq!(loaded_addresses, test_loaded_addresses);
-        assert_eq!(return_data.unwrap(), test_return_data);
-        assert_eq!(compute_units_consumed, compute_units_consumed_2);
     }
 }
