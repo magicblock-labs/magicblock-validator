@@ -717,30 +717,62 @@ mod tests {
             Some(block_time_uno),
             None,
         );
-        // TODO: write blocktime
+
+        let (tx_dos, sanitized_dos) = create_confirmed_transaction(
+            sig_dos,
+            slot_dos,
+            9,
+            Some(block_time_dos),
+            None,
+        );
 
         // 0. Neither transaction is in the store
         assert!(store
-            .get_confirmed_transaction(sig_uno, 100)
+            .get_confirmed_transaction(sig_uno, 0)
             .unwrap()
             .is_none());
         assert!(store
-            .get_confirmed_transaction(sig_dos, 200)
+            .get_confirmed_transaction(sig_dos, 0)
             .unwrap()
             .is_none());
 
-        // 1. Write first transaction
-        store.write_confirmed_transaction(
-            sig_uno,
-            slot_uno,
-            sanitized_uno.clone(),
-            tx_uno.tx_with_meta.get_status_meta().unwrap(),
-        );
+        // 1. Write first transaction and block time for relevant slot
+        assert!(store
+            .write_confirmed_transaction(
+                sig_uno,
+                slot_uno,
+                sanitized_uno.clone(),
+                tx_uno.tx_with_meta.get_status_meta().unwrap(),
+            )
+            .is_ok());
+        assert!(store.cache_block_time(slot_uno, block_time_uno).is_ok());
 
+        // Get first transaction by signature providing low enough slot
         let tx = store.get_complete_transaction(sig_uno, 0).unwrap().unwrap();
-        debug!("{:#?}", tx);
-        debug!("{:#?}", tx_uno);
-        // assert_eq!(tx.slot, slot_uno);
-        // assert_eq!(tx, tx_uno);
+        assert_eq!(tx, tx_uno);
+
+        // Get first transaction by signature providing slot that's too high
+        assert!(store
+            .get_complete_transaction(sig_uno, slot_uno + 1)
+            .unwrap()
+            .is_none());
+
+        // 2. Write second transaction and block time for relevant slot
+        assert!(store
+            .write_confirmed_transaction(
+                sig_dos,
+                slot_dos,
+                sanitized_dos.clone(),
+                tx_dos.tx_with_meta.get_status_meta().unwrap(),
+            )
+            .is_ok());
+        assert!(store.cache_block_time(slot_dos, block_time_dos).is_ok());
+
+        // Get second transaction by signature providing slot at which it was stored
+        let tx = store
+            .get_complete_transaction(sig_dos, slot_dos)
+            .unwrap()
+            .unwrap();
+        assert_eq!(tx, tx_dos);
     }
 }
