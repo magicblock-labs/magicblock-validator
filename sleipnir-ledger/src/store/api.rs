@@ -10,15 +10,19 @@ use log::*;
 use rocksdb::Direction as IteratorDirection;
 use solana_measure::measure::Measure;
 use solana_sdk::{
-    clock::Slot, pubkey::Pubkey, signature::Signature,
-    transaction::VersionedTransaction,
+    clock::{Slot, UnixTimestamp},
+    pubkey::Pubkey,
+    signature::Signature,
+    transaction::{SanitizedTransaction, VersionedTransaction},
 };
+use solana_storage_proto::convert::generated::{self, ConfirmedTransaction};
 use solana_transaction_status::{
     ConfirmedTransactionWithStatusMeta, TransactionStatusMeta,
     TransactionWithStatusMeta, VersionedTransactionWithStatusMeta,
 };
 
 use crate::{
+    conversions::confirmed_transaction,
     database::{
         columns as cf,
         db::Database,
@@ -40,6 +44,7 @@ pub struct Store {
     address_signatures_cf: LedgerColumn<cf::AddressSignatures>,
     transaction_status_index_cf: LedgerColumn<cf::TransactionStatusIndex>,
     blocktime_cf: LedgerColumn<cf::Blocktime>,
+    confirmed_transaction: LedgerColumn<cf::ConfirmedTransaction>,
 
     highest_primary_index_slot: RwLock<Option<Slot>>,
 
@@ -93,6 +98,7 @@ impl Store {
         let address_signatures_cf = db.column();
         let transaction_status_index_cf = db.column();
         let blocktime_cf = db.column();
+        let confirmed_transaction = db.column();
 
         let db = Arc::new(db);
 
@@ -109,6 +115,7 @@ impl Store {
             address_signatures_cf,
             transaction_status_index_cf,
             blocktime_cf,
+            confirmed_transaction,
 
             highest_primary_index_slot: RwLock::<Option<Slot>>::default(),
 
@@ -202,95 +209,115 @@ impl Store {
         // let _lock = self.check_lowest_cleanup_slot(slot)?;
         self.blocktime_cf.get(slot)
     }
+
     // -----------------
-    // TransactionStatus
+    // Transaction
     // -----------------
-    /// Returns a complete transaction if it was processed in a root
-    /// Since we don't have forks, this means that it was processed
-    pub fn get_rooted_transaction(
+
+    pub fn get_complete_transaction(
         &self,
         signature: Signature,
+        highest_confirmed_slot: Slot,
     ) -> LedgerResult<Option<ConfirmedTransactionWithStatusMeta>> {
-        self.rpc_api_metrics
-            .num_get_rooted_transaction
-            .fetch_add(1, Ordering::Relaxed);
-
-        self.get_transaction_with_status(signature, &HashSet::default())
-    }
-
-    fn get_transaction_with_status(
-        &self,
-        signature: Signature,
-        confirmed_unrooted_slots: &HashSet<Slot>,
-    ) -> LedgerResult<Option<ConfirmedTransactionWithStatusMeta>> {
-        if let Some((slot, meta)) =
-            self.get_transaction_status(signature, confirmed_unrooted_slots)?
+        match self
+            .get_confirmed_transaction(signature, highest_confirmed_slot)?
         {
-            let transaction =
-                self.find_transaction_in_slot(slot, signature)?
-                    .ok_or(LedgerError::TransactionStatusSlotMismatch)?; // Should not happen
-
-            // TODO: need blocktime_cf first and ensure it is updated
-            //       we should call it slot time since we don't have slots
-            //       but then we also need to update these for each slot
-            todo!()
-            /*
-            let block_time = self.get_block_time(slot)?;
-            Ok(Some(ConfirmedTransactionWithStatusMeta {
-                slot,
-                tx_with_meta: TransactionWithStatusMeta::Complete(
-                    VersionedTransactionWithStatusMeta { transaction, meta },
-                ),
-                block_time,
-            }))
-            */
-        } else {
-            Ok(None)
+            Some((slot, tx)) => {
+                let block_time = self.get_block_time(slot)?;
+                let tx =
+                    confirmed_transaction::from_generated_confirmed_transaction(
+                        slot, tx, block_time,
+                    );
+                Ok(Some(tx))
+            }
+            None => Ok(None),
         }
     }
 
-    fn find_transaction_in_slot(
+    /// Returns a confirmed transaction and the slot at which it was confirmed
+    fn get_confirmed_transaction(
         &self,
-        slot: Slot,
         signature: Signature,
-    ) -> LedgerResult<Option<VersionedTransaction>> {
-        todo!()
-        /*
-        let slot_entries = self.get_slot_entries(slot, 0)?;
-        Ok(slot_entries
-            .iter()
-            .cloned()
-            .flat_map(|entry| entry.transactions)
-            .map(|transaction| {
-                if let Err(err) = transaction.sanitize() {
-                    warn!(
-                        "Blockstore::find_transaction_in_slot sanitize failed: {:?}, \
-                        slot: {:?}, \
-                        {:?}",
-                        err, slot, transaction,
-                    );
-                }
-                transaction
-            })
-            .find(|transaction| transaction.signatures[0] == signature))
-        */
+        highest_confirmed_slot: Slot,
+    ) -> LedgerResult<Option<(Slot, ConfirmedTransaction)>> {
+        self.rpc_api_metrics
+            .num_get_complete_transaction
+            .fetch_add(1, Ordering::Relaxed);
+
+        let mut iterator = self
+            .confirmed_transaction
+            .iter_current_index_filtered(IteratorMode::From(
+                (signature, highest_confirmed_slot),
+                IteratorDirection::Forward,
+            ))?;
+
+        let confirmed_transaction = match iterator.next() {
+            Some(((signature, slot), _data)) => self
+                .confirmed_transaction
+                .get_protobuf((signature, slot))?
+                .map(|tx| (slot, tx)),
+            None => None,
+        };
+        Ok(confirmed_transaction)
     }
 
+    /// Writes a confirmed transaction pieced together from the provided inputs
+    /// * `signature` - Signature of the transaction
+    /// * `slot` - Slot at which the transaction was confirmed
+    /// * `transaction` - Transaction to be written, we take a SanititizedTransaction here
+    ///                   since that is what we get provided by Geyser
+    /// * `status` - status of the transaction
+    pub fn write_confirmed_transaction(
+        &self,
+        signature: Signature,
+        slot: Slot,
+        transaction: SanitizedTransaction,
+        status: TransactionStatusMeta,
+    ) -> LedgerResult<()> {
+        let versioned = transaction.to_versioned_transaction();
+        let tx = generated::ConfirmedTransaction {
+            transaction: Some(versioned.into()),
+            meta: Some(status.into()),
+        };
+        self.confirmed_transaction
+            .put_protobuf((signature, slot), &tx)?;
+        Ok(())
+    }
+
+    fn read_confirmed_transaction(
+        &self,
+        index: (Signature, Slot),
+    ) -> LedgerResult<Option<generated::ConfirmedTransaction>> {
+        let result = self.confirmed_transaction.get_protobuf(index)?;
+        Ok(result)
+    }
+
+    // -----------------
+    // TransactionStatus
+    // -----------------
     /// Returns a transaction status
     pub fn get_transaction_status(
         &self,
         signature: Signature,
-        confirmed_unrooted_slots: &HashSet<Slot>,
     ) -> LedgerResult<Option<(Slot, TransactionStatusMeta)>> {
         self.rpc_api_metrics
             .num_get_transaction_status
             .fetch_add(1, Ordering::Relaxed);
 
-        self.get_transaction_status_with_counter(
-            signature,
-            confirmed_unrooted_slots,
-        )
-        .map(|(status, _)| status)
+        let mut iterator =
+            self.transaction_status_cf.iter_current_index_filtered(
+                IteratorMode::From((signature, 0), IteratorDirection::Forward),
+            )?;
+
+        let result = match iterator.next() {
+            Some(((signature, slot), _data)) => self
+                .transaction_status_cf
+                .get_protobuf((signature, slot))?
+                .and_then(|status| status.try_into().ok())
+                .map(|status| (slot, status)),
+            None => None,
+        };
+        Ok(result)
     }
 
     pub fn read_transaction_status(
@@ -329,46 +356,6 @@ impl Store {
         }
         Ok(())
     }
-
-    // Returns a transaction status, as well as a loop counter for unit testing
-    fn get_transaction_status_with_counter(
-        &self,
-        signature: Signature,
-        _confirmed_unrooted_slots: &HashSet<Slot>,
-    ) -> LedgerResult<(Option<(Slot, TransactionStatusMeta)>, u64)> {
-        let mut counter = 0;
-        // TODO:
-        // let (lock, _) = self.ensure_lowest_cleanup_slot();
-        let first_available_block = 0; // self.get_first_available_block()?;
-
-        let iterator = self.transaction_status_cf.iter_current_index_filtered(
-            IteratorMode::From(
-                (signature, first_available_block),
-                IteratorDirection::Forward,
-            ),
-        )?;
-        #[allow(clippy::never_loop)]
-        for ((sig, slot), _data) in iterator {
-            counter += 1;
-            if sig != signature {
-                break;
-            }
-            // Removed check if this is neither root or confirmed_unrooted_slots
-            // TODO: but now we don't loop anymore since we always drop to
-            // the below code
-            let status = self
-                .transaction_status_cf
-                .get_protobuf((signature, slot))?
-                .and_then(|status| status.try_into().ok())
-                .map(|status| (slot, status));
-            return Ok((status, counter));
-        }
-        // Removed alternative of finding the status
-
-        // drop(lock);
-
-        Ok((None, counter))
-    }
 }
 
 // -----------------
@@ -379,8 +366,12 @@ mod tests {
     use std::time::{Duration, Instant};
 
     use solana_sdk::{
-        instruction::CompiledInstruction,
-        message::v0::LoadedAddresses,
+        clock::UnixTimestamp,
+        instruction::{CompiledInstruction, InstructionError},
+        message::{
+            v0::{self, LoadedAddresses},
+            MessageHeader, SimpleAddressLoader, VersionedMessage,
+        },
         pubkey::Pubkey,
         signature::{Keypair, Signature},
         signer::Signer,
@@ -388,7 +379,8 @@ mod tests {
         transaction_context::TransactionReturnData,
     };
     use solana_transaction_status::{
-        InnerInstruction, InnerInstructions, TransactionStatusMeta,
+        ConfirmedTransactionWithStatusMeta, InnerInstruction,
+        InnerInstructions, TransactionStatusMeta,
     };
     use tempfile::{Builder, TempDir};
     use test_tools_core::init_logger;
@@ -469,7 +461,10 @@ mod tests {
 
         TransactionStatusMeta {
             status: solana_sdk::transaction::Result::<()>::Err(
-                TransactionError::AccountNotFound,
+                TransactionError::InstructionError(
+                    99,
+                    InstructionError::Custom(69),
+                ),
             ),
             fee,
             pre_balances: pre_balances_vec.clone(),
@@ -483,6 +478,63 @@ mod tests {
             return_data: Some(test_return_data.clone()),
             compute_units_consumed: compute_units_consumed_1,
         }
+    }
+
+    fn create_confirmed_transaction(
+        signature: Signature,
+        slot: Slot,
+        fee: u64,
+        block_time: Option<UnixTimestamp>,
+        tx_signatures: Option<Vec<Signature>>,
+    ) -> (ConfirmedTransactionWithStatusMeta, SanitizedTransaction) {
+        let meta = create_transaction_status_meta(fee);
+        let writable_addresses = meta.loaded_addresses.writable.clone();
+        let readonly_addresses = meta.loaded_addresses.readonly.clone();
+        let num_readonly_unsigned_accounts = readonly_addresses.len() as u8 - 1;
+        let signatures = tx_signatures.unwrap_or_else(|| {
+            vec![Signature::new_unique(), Signature::new_unique()]
+        });
+        let msg = v0::Message {
+            account_keys: [writable_addresses, readonly_addresses].concat(),
+            header: MessageHeader {
+                num_required_signatures: signatures.len() as u8,
+                num_readonly_signed_accounts: 1,
+                num_readonly_unsigned_accounts,
+            },
+            ..Default::default()
+        };
+        let transaction = VersionedTransaction {
+            signatures,
+            message: VersionedMessage::V0(msg),
+        };
+        let tx_with_meta = VersionedTransactionWithStatusMeta {
+            transaction: transaction.clone(),
+            meta: meta.clone(),
+        };
+        let tx_with_meta = TransactionWithStatusMeta::Complete(tx_with_meta);
+
+        let sanitized_transaction = SanitizedTransaction::try_new(
+            transaction
+                .try_into()
+                .map_err(|e| {
+                    error!("VersionedTransaction::try_into failed: {:?}", e)
+                })
+                .unwrap(),
+            Default::default(),
+            false,
+            SimpleAddressLoader::Enabled(meta.loaded_addresses.clone()),
+        )
+        .map_err(|e| error!("SanitizedTransaction::try_new failed: {:?}", e))
+        .unwrap();
+
+        (
+            ConfirmedTransactionWithStatusMeta {
+                slot,
+                block_time,
+                tx_with_meta,
+            },
+            sanitized_transaction,
+        )
     }
 
     #[test]
@@ -573,10 +625,122 @@ mod tests {
     }
 
     #[test]
-    fn test_get_transaction_status_for_slot() {
+    fn test_get_transaction_status_by_signature() {
         init_logger!();
 
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Store::open(ledger_path.path()).unwrap();
+
+        let (sig_uno, slot_uno) = (Signature::default(), 0);
+        let (sig_dos, slot_dos) = (Signature::from([2u8; 64]), 9);
+
+        // result not found
+        assert!(store
+            .read_transaction_status((Signature::default(), 0))
+            .unwrap()
+            .is_none());
+
+        // insert value
+        let status_uno = create_transaction_status_meta(5);
+        let writable_addresses = status_uno.loaded_addresses.writable.clone();
+        let readonly_addresses = status_uno.loaded_addresses.writable.clone();
+        assert!(store
+            .write_transaction_status(
+                slot_uno,
+                sig_uno,
+                writable_addresses.iter().collect(),
+                readonly_addresses.iter().collect(),
+                status_uno.clone(),
+                0,
+            )
+            .is_ok());
+
+        // Finds by matching signature
+        {
+            let (slot, status) =
+                store.get_transaction_status(sig_uno).unwrap().unwrap();
+            assert_eq!(slot, slot_uno);
+            assert_eq!(status, status_uno);
+
+            // Does not find it by other signature
+            assert!(store.get_transaction_status(sig_dos).unwrap().is_none());
+        }
+
+        // Add a status for the other signature
+        let status_dos = create_transaction_status_meta(5);
+        let writable_addresses = status_dos.loaded_addresses.writable.clone();
+        let readonly_addresses = status_dos.loaded_addresses.writable.clone();
+        assert!(store
+            .write_transaction_status(
+                slot_dos,
+                sig_dos,
+                writable_addresses.iter().collect(),
+                readonly_addresses.iter().collect(),
+                status_dos.clone(),
+                0,
+            )
+            .is_ok());
+
+        // First still there
+        {
+            let (slot, status) =
+                store.get_transaction_status(sig_uno).unwrap().unwrap();
+            assert_eq!(slot, slot_uno);
+            assert_eq!(status, status_uno);
+        }
+
+        // Second one is found now as well
+        {
+            let (slot, status) =
+                store.get_transaction_status(sig_dos).unwrap().unwrap();
+            assert_eq!(slot, slot_dos);
+            assert_eq!(status, status_dos);
+        }
+    }
+
+    #[test]
+    fn test_get_complete_transaction_by_signature() {
+        init_logger!();
+
+        let ledger_path = get_tmp_ledger_path_auto_delete!();
+        let store = Store::open(ledger_path.path()).unwrap();
+
+        let (sig_uno, slot_uno, block_time_uno) =
+            (Signature::default(), 0, 100);
+        let (sig_dos, slot_dos, block_time_dos) =
+            (Signature::from([2u8; 64]), 9, 200);
+
+        let (tx_uno, sanitized_uno) = create_confirmed_transaction(
+            sig_uno,
+            slot_uno,
+            5,
+            Some(block_time_uno),
+            None,
+        );
+        // TODO: write blocktime
+
+        // 0. Neither transaction is in the store
+        assert!(store
+            .get_confirmed_transaction(sig_uno, 100)
+            .unwrap()
+            .is_none());
+        assert!(store
+            .get_confirmed_transaction(sig_dos, 200)
+            .unwrap()
+            .is_none());
+
+        // 1. Write first transaction
+        store.write_confirmed_transaction(
+            sig_uno,
+            slot_uno,
+            sanitized_uno.clone(),
+            tx_uno.tx_with_meta.get_status_meta().unwrap(),
+        );
+
+        let tx = store.get_complete_transaction(sig_uno, 0).unwrap().unwrap();
+        debug!("{:#?}", tx);
+        debug!("{:#?}", tx_uno);
+        // assert_eq!(tx.slot, slot_uno);
+        // assert_eq!(tx, tx_uno);
     }
 }

@@ -467,27 +467,4 @@ where
             C::try_current_index(&key).ok().map(|index| (index, value))
         }))
     }
-
-    pub(crate) fn iter_deprecated_index_filtered(
-        &self,
-        iterator_mode: IteratorMode<C::DeprecatedIndex>,
-    ) -> LedgerResult<impl Iterator<Item = (C::DeprecatedIndex, Box<[u8]>)> + '_>
-    {
-        let cf = self.handle();
-        let iterator_mode_raw_key = match iterator_mode {
-            IteratorMode::Start => IteratorMode::Start,
-            IteratorMode::End => IteratorMode::End,
-            IteratorMode::From(start_from, direction) => {
-                let raw_key = C::deprecated_key(start_from);
-                IteratorMode::From(raw_key, direction)
-            }
-        };
-        let iter = self.backend.iterator_cf_raw_key(cf, iterator_mode_raw_key);
-        Ok(iter.filter_map(|pair| {
-            let (key, value) = pair.unwrap();
-            C::try_deprecated_index(&key)
-                .ok()
-                .map(|index| (index, value))
-        }))
-    }
 }

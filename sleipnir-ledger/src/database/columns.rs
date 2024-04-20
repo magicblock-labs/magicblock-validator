@@ -16,6 +16,8 @@ const ADDRESS_SIGNATURES_CF: &str = "address_signatures";
 const TRANSACTION_STATUS_INDEX_CF: &str = "transaction_status_index";
 /// Column family for Blocktime
 const BLOCKTIME_CF: &str = "blocktime";
+/// Column family for Confirmed Transaction
+const CONFIRMED_TRANSACTION_CF: &str = "confirmed_transaction";
 
 // TODO(thlorenz): @@@ledger add items we need
 
@@ -46,6 +48,16 @@ pub struct TransactionStatusIndex;
 /// * value type: [`UnixTimestamp`]
 pub struct Blocktime;
 
+/// The transaction with status column
+///
+/// NOTE: this doesn't exist in the original solana validator
+///       as there instructions come in as shreds and are pieced
+///       together from them
+///
+/// * index type: `(`[`Signature`]`, `[`Slot`])`
+/// * value type: [`generated::ConfirmedTransaction`]
+pub struct ConfirmedTransaction;
+
 // When adding a new column ...
 // - Add struct below and implement `Column` and `ColumnName` traits
 // - Add descriptor in Rocks::cf_descriptors() and name in Rocks::columns()
@@ -59,6 +71,7 @@ pub fn columns() -> Vec<&'static str> {
         AddressSignatures::NAME,
         TransactionStatusIndex::NAME,
         Blocktime::NAME,
+        ConfirmedTransaction::NAME,
     ]
 }
 
@@ -367,4 +380,72 @@ impl ColumnName for Blocktime {
 }
 impl TypedColumn for Blocktime {
     type Type = solana_sdk::clock::UnixTimestamp;
+}
+
+// -----------------
+// ConfirmedTransaction
+// -----------------
+impl Column for ConfirmedTransaction {
+    // Same key as TransactionStatus
+    type Index = <TransactionStatus as Column>::Index;
+
+    fn key((signature, slot): Self::Index) -> Vec<u8> {
+        <TransactionStatus as Column>::key((signature, slot))
+    }
+
+    fn index(key: &[u8]) -> Self::Index {
+        <TransactionStatus as Column>::index(key)
+    }
+
+    fn slot(index: Self::Index) -> Slot {
+        <TransactionStatus as Column>::slot(index)
+    }
+
+    // Like TransactionStatus the ConfirmedTransactoin column is not keyed
+    // by slot so this method is meaningless
+    fn as_index(slot: Slot) -> Self::Index {
+        <TransactionStatus as Column>::as_index(slot)
+    }
+}
+
+impl ColumnName for ConfirmedTransaction {
+    const NAME: &'static str = CONFIRMED_TRANSACTION_CF;
+}
+
+impl ProtobufColumn for ConfirmedTransaction {
+    type Type = generated::ConfirmedTransaction;
+}
+
+// Even though it is deprecated it is needed to implement iter_current_index_filtered
+impl ColumnIndexDeprecation for ConfirmedTransaction {
+    // Same key as TransactionStatus
+    type DeprecatedIndex =
+        <TransactionStatus as ColumnIndexDeprecation>::DeprecatedIndex;
+
+    const DEPRECATED_INDEX_LEN: usize =
+        <TransactionStatus as ColumnIndexDeprecation>::DEPRECATED_INDEX_LEN;
+    const CURRENT_INDEX_LEN: usize =
+        <TransactionStatus as ColumnIndexDeprecation>::CURRENT_INDEX_LEN;
+
+    fn deprecated_key(index: Self::DeprecatedIndex) -> Vec<u8> {
+        <TransactionStatus as ColumnIndexDeprecation>::deprecated_key(index)
+    }
+
+    fn try_deprecated_index(
+        key: &[u8],
+    ) -> std::result::Result<Self::DeprecatedIndex, IndexError> {
+        <TransactionStatus as ColumnIndexDeprecation>::try_deprecated_index(key)
+    }
+
+    fn try_current_index(
+        key: &[u8],
+    ) -> std::result::Result<Self::Index, IndexError> {
+        <TransactionStatus as ColumnIndexDeprecation>::try_current_index(key)
+    }
+
+    fn convert_index(deprecated_index: Self::DeprecatedIndex) -> Self::Index {
+        <TransactionStatus as ColumnIndexDeprecation>::convert_index(
+            deprecated_index,
+        )
+    }
 }
