@@ -17,6 +17,7 @@ use solana_sdk::{
 };
 use solana_storage_proto::convert::generated::{self, ConfirmedTransaction};
 use solana_transaction_status::{
+    ConfirmedTransactionStatusWithSignature,
     ConfirmedTransactionWithStatusMeta, TransactionStatusMeta,
     TransactionWithStatusMeta, VersionedTransactionWithStatusMeta,
 };
@@ -36,6 +37,12 @@ use crate::{
     store::utils::adjust_ulimit_nofile,
 };
 
+#[derive(Default)]
+pub struct SignatureInfosForAddress {
+    pub infos: Vec<ConfirmedTransactionStatusWithSignature>,
+    pub found_before: bool,
+}
+
 pub struct Store {
     ledger_path: PathBuf,
     db: Arc<Database>,
@@ -48,6 +55,7 @@ pub struct Store {
 
     highest_primary_index_slot: RwLock<Option<Slot>>,
 
+    pub lowest_cleanup_slot: RwLock<Slot>,
     rpc_api_metrics: LedgerRpcApiMetrics,
 }
 
@@ -119,6 +127,7 @@ impl Store {
 
             highest_primary_index_slot: RwLock::<Option<Slot>>::default(),
 
+            lowest_cleanup_slot: RwLock::<Slot>::default(),
             rpc_api_metrics: LedgerRpcApiMetrics::default(),
         };
 
@@ -140,6 +149,9 @@ impl Store {
         self.transaction_cf.submit_rocksdb_cf_metrics();
     }
 
+    // -----------------
+    // Utility
+    // -----------------
     fn cleanup_old_entries(&self) -> std::result::Result<(), LedgerError> {
         if !self.is_primary_access() {
             return Ok(());
@@ -188,6 +200,26 @@ impl Store {
         self.db.is_primary_access()
     }
 
+    /// Acquires the lock of `lowest_cleanup_slot` and returns the tuple of
+    /// the held lock and the lowest available slot.
+    ///
+    /// This function ensures a consistent result by using lowest_cleanup_slot
+    /// as the lower bound for reading columns that do not employ strong read
+    /// consistency with slot-based delete_range.
+    fn ensure_lowest_cleanup_slot(
+        &self,
+    ) -> (std::sync::RwLockReadGuard<Slot>, Slot) {
+        let lowest_cleanup_slot = self.lowest_cleanup_slot.read().unwrap();
+        let lowest_available_slot = (*lowest_cleanup_slot)
+            .checked_add(1)
+            .expect("overflow from trusted value");
+
+        // Make caller hold this lock properly; otherwise LedgerCleanupService can purge/compact
+        // needed slots here at any given moment.
+        // Blockstore callers, like rpc, can process concurrent read queries
+        (lowest_cleanup_slot, lowest_available_slot)
+    }
+
     // -----------------
     // BlockTime
     // -----------------
@@ -209,6 +241,102 @@ impl Store {
     ) -> LedgerResult<Option<solana_sdk::clock::UnixTimestamp>> {
         // let _lock = self.check_lowest_cleanup_slot(slot)?;
         self.blocktime_cf.get(slot)
+    }
+
+    // -----------------
+    // Signatures
+    // -----------------
+
+    pub fn get_confirmed_signatures_for_address(
+        &self,
+        address: Pubkey,
+        highest_slot: Slot, // highest_confirmed_slot
+        before: Option<Signature>,
+        until: Option<Signature>,
+        limit: usize,
+    ) -> LedgerResult<SignatureInfosForAddress> {
+        self.rpc_api_metrics
+            .num_get_confirmed_signatures_for_address
+            .fetch_add(1, Ordering::Relaxed);
+
+        // Original implementation uses a more complex ancestor iterator
+        // since here we could have missing slots and slots on different forks.
+        // That then results in confirmed_unrooted_slots, however we don't have to
+        // deal with that since we don't have forks and simple consecutive slots
+
+        let mut get_before_slot_timer = Measure::start("get_before_slot_timer");
+        let (slot, mut before_excluded_signatures) = match before {
+            None => (highest_slot, None),
+            Some(before) => {
+                let transaction_status =
+                    self.get_transaction_status(before, highest_slot)?;
+                match transaction_status {
+                    None => return Ok(SignatureInfosForAddress::default()),
+                    Some((slot, _)) => {
+                        let mut slot_signatures =
+                            self.get_slot_signatures_rev(slot)?;
+                        if let Some(pos) =
+                            slot_signatures.iter().position(|&x| x == before)
+                        {
+                            slot_signatures.truncate(pos + 1);
+                        }
+
+                        (
+                            slot,
+                            Some(
+                                slot_signatures
+                                    .into_iter()
+                                    .collect::<HashSet<_>>(),
+                            ),
+                        )
+                    }
+                }
+            }
+        };
+
+        get_before_slot_timer.stop();
+
+        todo!()
+    }
+
+    // Returns all signatures for an address in a particular slot, regardless of whether that slot
+    // has been rooted. The transactions will be ordered by their occurrence in the block
+    fn find_address_signatures_for_slot(
+        &self,
+        pubkey: Pubkey,
+        slot: Slot,
+    ) -> LedgerResult<Vec<(Slot, Signature)>> {
+        let (lock, lowest_available_slot) = self.ensure_lowest_cleanup_slot();
+        let mut signatures: Vec<(Slot, Signature)> = vec![];
+        if slot < lowest_available_slot {
+            return Ok(signatures);
+        }
+
+        let index_iterator = self
+            .address_signatures_cf
+            .iter_current_index_filtered(IteratorMode::From(
+                (pubkey, slot, 0, Signature::default()),
+                IteratorDirection::Forward,
+            ))?;
+        for ((address, transaction_slot, _transaction_index, signature), _) in
+            index_iterator
+        {
+            // The iterator starts at exact (pubkey, slot, ..), but will keep iterating and match
+            // keys with different pubkey and slot which is why we break once we hit one
+            if transaction_slot > slot || address != pubkey {
+                break;
+            }
+            signatures.push((slot, signature));
+        }
+        drop(lock);
+        Ok(signatures)
+    }
+
+    fn get_slot_signatures_rev(
+        &self,
+        slot: Slot,
+    ) -> LedgerResult<Vec<Signature>> {
+        todo!()
     }
 
     // -----------------
@@ -782,5 +910,117 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(tx, tx_dos);
+    }
+
+    #[test]
+    fn test_find_address_signatures() {
+        init_logger!();
+
+        let ledger_path = get_tmp_ledger_path_auto_delete!();
+        let store = Store::open(ledger_path.path()).unwrap();
+
+        // 1. Add some transaction statuses
+        // All addresses from a previous status are included in the next one to test
+        // addresses that are part of multiple transactions
+        let (signature_uno, slot_uno) = (Signature::new_unique(), 10);
+        let (read_uno, write_uno) = {
+            let meta = create_transaction_status_meta(5);
+            let read_uno = meta.loaded_addresses.readonly[0];
+            let write_uno = meta.loaded_addresses.writable[0];
+            assert!(store
+                .write_transaction_status(
+                    slot_uno,
+                    signature_uno,
+                    meta.clone(),
+                    0,
+                )
+                .is_ok());
+            (read_uno, write_uno)
+        };
+
+        let (signature_dos, slot_dos) = (Signature::new_unique(), 20);
+        let signature_dos_2 = Signature::new_unique();
+        let (read_dos, write_dos) = {
+            let mut meta = create_transaction_status_meta(5);
+            let read_dos = meta.loaded_addresses.readonly[0];
+            let write_dos = meta.loaded_addresses.writable[0];
+            meta.loaded_addresses.readonly.push(read_uno);
+            meta.loaded_addresses.writable.push(write_uno);
+            assert!(store
+                .write_transaction_status(
+                    slot_dos,
+                    signature_dos,
+                    meta.clone(),
+                    0,
+                )
+                .is_ok());
+
+            // read_dos and write_dos are part of another transaction in the same slot
+            let mut meta = create_transaction_status_meta(8);
+            meta.loaded_addresses.readonly.push(read_dos);
+            meta.loaded_addresses.writable.push(write_dos);
+            assert!(store
+                .write_transaction_status(
+                    slot_dos,
+                    signature_dos_2,
+                    meta.clone(),
+                    1,
+                )
+                .is_ok());
+
+            (read_dos, write_dos)
+        };
+
+        let (signature_tres, slot_tres) = (Signature::new_unique(), 30);
+        let (read_tres, write_tres) = {
+            let mut meta = create_transaction_status_meta(5);
+            let read_tres = meta.loaded_addresses.readonly[0];
+            let write_tres = meta.loaded_addresses.writable[0];
+            meta.loaded_addresses.readonly.push(read_uno);
+            meta.loaded_addresses.writable.push(write_uno);
+            meta.loaded_addresses.readonly.push(read_dos);
+            meta.loaded_addresses.writable.push(write_dos);
+
+            assert!(store
+                .write_transaction_status(
+                    slot_tres,
+                    signature_tres,
+                    meta.clone(),
+                    0,
+                )
+                .is_ok());
+            (read_tres, write_tres)
+        };
+
+        // 2. Find them providing slot
+        {
+            let results = store
+                .find_address_signatures_for_slot(write_uno, slot_uno)
+                .unwrap();
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].0, slot_uno);
+            assert_eq!(results[0].1, signature_uno);
+
+            let results = store
+                .find_address_signatures_for_slot(write_uno, slot_tres)
+                .unwrap();
+            assert_eq!(results.len(), 1);
+            assert_eq!(results[0].0, slot_tres);
+            assert_eq!(results[0].1, signature_tres);
+
+            let results = store
+                .find_address_signatures_for_slot(read_dos, slot_dos)
+                .unwrap();
+            assert_eq!(results.len(), 2);
+            assert_eq!(results[0].0, slot_dos);
+            assert_eq!(results[0].1, signature_dos);
+            assert_eq!(results[1].0, slot_dos);
+            assert_eq!(results[1].1, signature_dos_2);
+
+            assert!(store
+                .find_address_signatures_for_slot(read_dos, slot_uno)
+                .unwrap()
+                .is_empty());
+        }
     }
 }

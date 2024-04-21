@@ -32,6 +32,7 @@ pub struct TransactionStatus;
 /// The address signatures column
 ///
 /// * index type: `(`[`Pubkey`]`, `[`Slot`]`, u32, `[`Signature`]`)`
+/// *                account addr,   slot,  tx index, tx signature
 /// * value type: [`blockstore_meta::AddressSignatureMeta`]
 pub struct AddressSignatures;
 
