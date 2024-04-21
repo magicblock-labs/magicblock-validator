@@ -46,6 +46,7 @@ fn tx_with_meta_from_generated(
         Some(meta) => {
             Complete(VersionedTransactionWithStatusMeta { transaction, meta })
         }
+        // TODO: @@@ledger
         None => todo!(), // MissingMetadata(transaction),
     }
 }
@@ -178,13 +179,17 @@ fn status_from_generated(
     match err {
         None => Ok(()),
         Some(err) => {
-            let e: TransactionError = bincode::deserialize(&err.err)
+            let e: Option<TransactionError> = bincode::deserialize(&err.err)
                 .map_err(|e| {
                     warn!("Invalid transaction error: {:?}", e);
                     e
                 })
-                .unwrap_or(TransactionError::AccountInUse);
-            transaction::Result::Err(e)
+                .ok();
+
+            match e {
+                Some(err) => transaction::Result::Err(err),
+                None => transaction::Result::Ok(()),
+            }
         }
     }
 }

@@ -55,8 +55,8 @@ pub struct Blocktime;
 ///       together from them
 ///
 /// * index type: `(`[`Signature`]`, `[`Slot`])`
-/// * value type: [`generated::ConfirmedTransaction`]
-pub struct ConfirmedTransaction;
+/// * value type: [`generated::Transaction`]
+pub struct Transaction;
 
 // When adding a new column ...
 // - Add struct below and implement `Column` and `ColumnName` traits
@@ -71,7 +71,7 @@ pub fn columns() -> Vec<&'static str> {
         AddressSignatures::NAME,
         TransactionStatusIndex::NAME,
         Blocktime::NAME,
-        ConfirmedTransaction::NAME,
+        Transaction::NAME,
     ]
 }
 
@@ -383,9 +383,9 @@ impl TypedColumn for Blocktime {
 }
 
 // -----------------
-// ConfirmedTransaction
+// Transaction
 // -----------------
-impl Column for ConfirmedTransaction {
+impl Column for Transaction {
     // Same key as TransactionStatus
     type Index = <TransactionStatus as Column>::Index;
 
@@ -408,16 +408,16 @@ impl Column for ConfirmedTransaction {
     }
 }
 
-impl ColumnName for ConfirmedTransaction {
+impl ColumnName for Transaction {
     const NAME: &'static str = CONFIRMED_TRANSACTION_CF;
 }
 
-impl ProtobufColumn for ConfirmedTransaction {
-    type Type = generated::ConfirmedTransaction;
+impl ProtobufColumn for Transaction {
+    type Type = generated::Transaction;
 }
 
 // Even though it is deprecated it is needed to implement iter_current_index_filtered
-impl ColumnIndexDeprecation for ConfirmedTransaction {
+impl ColumnIndexDeprecation for Transaction {
     // Same key as TransactionStatus
     type DeprecatedIndex =
         <TransactionStatus as ColumnIndexDeprecation>::DeprecatedIndex;

@@ -22,7 +22,7 @@ use solana_transaction_status::{
 };
 
 use crate::{
-    conversions::confirmed_transaction,
+    conversions::{self, transaction},
     database::{
         columns as cf,
         db::Database,
@@ -44,7 +44,7 @@ pub struct Store {
     address_signatures_cf: LedgerColumn<cf::AddressSignatures>,
     transaction_status_index_cf: LedgerColumn<cf::TransactionStatusIndex>,
     blocktime_cf: LedgerColumn<cf::Blocktime>,
-    confirmed_transaction: LedgerColumn<cf::ConfirmedTransaction>,
+    transaction_cf: LedgerColumn<cf::Transaction>,
 
     highest_primary_index_slot: RwLock<Option<Slot>>,
 
@@ -98,7 +98,7 @@ impl Store {
         let address_signatures_cf = db.column();
         let transaction_status_index_cf = db.column();
         let blocktime_cf = db.column();
-        let confirmed_transaction = db.column();
+        let transaction_cf = db.column();
 
         let db = Arc::new(db);
 
@@ -115,7 +115,7 @@ impl Store {
             address_signatures_cf,
             transaction_status_index_cf,
             blocktime_cf,
-            confirmed_transaction,
+            transaction_cf,
 
             highest_primary_index_slot: RwLock::<Option<Slot>>::default(),
 
@@ -137,6 +137,7 @@ impl Store {
         self.address_signatures_cf.submit_rocksdb_cf_metrics();
         self.transaction_status_index_cf.submit_rocksdb_cf_metrics();
         self.blocktime_cf.submit_rocksdb_cf_metrics();
+        self.transaction_cf.submit_rocksdb_cf_metrics();
     }
 
     fn cleanup_old_entries(&self) -> std::result::Result<(), LedgerError> {
@@ -213,7 +214,6 @@ impl Store {
     // -----------------
     // Transaction
     // -----------------
-
     pub fn get_complete_transaction(
         &self,
         signature: Signature,
@@ -224,10 +224,9 @@ impl Store {
         {
             Some((slot, tx)) => {
                 let block_time = self.get_block_time(slot)?;
-                let tx =
-                    confirmed_transaction::from_generated_confirmed_transaction(
-                        slot, tx, block_time,
-                    );
+                let tx = transaction::from_generated_confirmed_transaction(
+                    slot, tx, block_time,
+                );
                 Ok(Some(tx))
             }
             None => Ok(None),
@@ -244,21 +243,52 @@ impl Store {
             .num_get_complete_transaction
             .fetch_add(1, Ordering::Relaxed);
 
-        let mut iterator = self
-            .confirmed_transaction
-            .iter_current_index_filtered(IteratorMode::From(
-                (signature, highest_confirmed_slot),
-                IteratorDirection::Forward,
-            ))?;
+        let slot_and_meta =
+            self.get_transaction_status(signature, highest_confirmed_slot)?;
 
-        let confirmed_transaction = match iterator.next() {
-            Some(((signature, slot), _data)) => self
-                .confirmed_transaction
-                .get_protobuf((signature, slot))?
-                .map(|tx| (slot, tx)),
-            None => None,
+        let (slot, transaction, meta) = match slot_and_meta {
+            Some((slot, meta)) => {
+                let transaction = self.read_transaction((signature, slot))?;
+                match transaction {
+                    Some(transaction) => (slot, Some(transaction), Some(meta)),
+                    None => (slot, None, Some(meta)),
+                }
+            }
+            None => {
+                let mut iterator = self
+                    .transaction_cf
+                    .iter_current_index_filtered(IteratorMode::From(
+                        (signature, highest_confirmed_slot),
+                        IteratorDirection::Forward,
+                    ))?;
+                match iterator.next() {
+                    Some(((signature, slot), _data)) => {
+                        let slot_and_tx = self
+                            .transaction_cf
+                            .get_protobuf((signature, slot))?
+                            .map(|tx| (slot, tx));
+                        if let Some((slot, tx)) = slot_and_tx {
+                            (slot, Some(tx), None)
+                        } else {
+                            // We have a slot, but couldn't resolve a proper transaction
+                            return Ok(None);
+                        }
+                    }
+                    None => {
+                        // We found neither a transaction nor its status
+                        return Ok(None);
+                    }
+                }
+            }
         };
-        Ok(confirmed_transaction)
+
+        Ok(Some((
+            slot,
+            ConfirmedTransaction {
+                transaction,
+                meta: meta.map(|x| x.into()),
+            },
+        )))
     }
 
     /// Writes a confirmed transaction pieced together from the provided inputs
@@ -267,28 +297,35 @@ impl Store {
     /// * `transaction` - Transaction to be written, we take a SanititizedTransaction here
     ///                   since that is what we get provided by Geyser
     /// * `status` - status of the transaction
-    pub fn write_confirmed_transaction(
+    pub fn write_transaction(
         &self,
         signature: Signature,
         slot: Slot,
         transaction: SanitizedTransaction,
         status: TransactionStatusMeta,
+        transaction_index: usize,
     ) -> LedgerResult<()> {
+        // 1. Write Transaction Status
+        self.write_transaction_status(
+            slot,
+            signature,
+            status,
+            transaction_index,
+        );
+
+        // 2. Write Transaction
         let versioned = transaction.to_versioned_transaction();
-        let tx = generated::ConfirmedTransaction {
-            transaction: Some(versioned.into()),
-            meta: Some(status.into()),
-        };
-        self.confirmed_transaction
-            .put_protobuf((signature, slot), &tx)?;
+        let transaction: generated::Transaction = versioned.into();
+        self.transaction_cf
+            .put_protobuf((signature, slot), &transaction)?;
         Ok(())
     }
 
-    fn read_confirmed_transaction(
+    fn read_transaction(
         &self,
         index: (Signature, Slot),
-    ) -> LedgerResult<Option<generated::ConfirmedTransaction>> {
-        let result = self.confirmed_transaction.get_protobuf(index)?;
+    ) -> LedgerResult<Option<generated::Transaction>> {
+        let result = self.transaction_cf.get_protobuf(index)?;
         Ok(result)
     }
 
@@ -299,15 +336,18 @@ impl Store {
     pub fn get_transaction_status(
         &self,
         signature: Signature,
+        highest_confirmed_slot: Slot,
     ) -> LedgerResult<Option<(Slot, TransactionStatusMeta)>> {
         self.rpc_api_metrics
             .num_get_transaction_status
             .fetch_add(1, Ordering::Relaxed);
 
-        let mut iterator =
-            self.transaction_status_cf.iter_current_index_filtered(
-                IteratorMode::From((signature, 0), IteratorDirection::Forward),
-            )?;
+        let mut iterator = self
+            .transaction_status_cf
+            .iter_current_index_filtered(IteratorMode::From(
+                (signature, highest_confirmed_slot),
+                IteratorDirection::Forward,
+            ))?;
 
         let result = match iterator.next() {
             Some(((signature, slot), _data)) => self
@@ -328,32 +368,31 @@ impl Store {
         Ok(result.and_then(|meta| meta.try_into().ok()))
     }
 
-    pub fn write_transaction_status(
+    fn write_transaction_status(
         &self,
         slot: Slot,
         signature: Signature,
-        writable_keys: Vec<&Pubkey>,
-        readonly_keys: Vec<&Pubkey>,
         status: TransactionStatusMeta,
         transaction_index: usize,
     ) -> LedgerResult<()> {
-        let status = status.into();
         let transaction_index = u32::try_from(transaction_index)
             .map_err(|_| LedgerError::TransactionIndexOverflow)?;
-        self.transaction_status_cf
-            .put_protobuf((signature, slot), &status)?;
-        for address in writable_keys {
+        for address in &status.loaded_addresses.writable {
             self.address_signatures_cf.put(
                 (*address, slot, transaction_index, signature),
                 &AddressSignatureMeta { writeable: true },
             )?;
         }
-        for address in readonly_keys {
+        for address in &status.loaded_addresses.readonly {
             self.address_signatures_cf.put(
                 (*address, slot, transaction_index, signature),
                 &AddressSignatureMeta { writeable: false },
             )?;
         }
+
+        let status = status.into();
+        self.transaction_status_cf
+            .put_protobuf((signature, slot), &status)?;
         Ok(())
     }
 }
@@ -576,17 +615,8 @@ mod tests {
 
             // insert value
             let meta = create_transaction_status_meta(5);
-            let writable_addresses = meta.loaded_addresses.writable.clone();
-            let readonly_addresses = meta.loaded_addresses.writable.clone();
             assert!(store
-                .write_transaction_status(
-                    slot,
-                    signature,
-                    writable_addresses.iter().collect(),
-                    readonly_addresses.iter().collect(),
-                    meta.clone(),
-                    0,
-                )
+                .write_transaction_status(slot, signature, meta.clone(), 0,)
                 .is_ok());
 
             // result found
@@ -602,17 +632,8 @@ mod tests {
             // insert value
             let (signature, slot) = (Signature::from([2u8; 64]), 9);
             let meta = create_transaction_status_meta(9);
-            let writable_addresses = meta.loaded_addresses.writable.clone();
-            let readonly_addresses = meta.loaded_addresses.writable.clone();
             assert!(store
-                .write_transaction_status(
-                    slot,
-                    signature,
-                    writable_addresses.iter().collect(),
-                    readonly_addresses.iter().collect(),
-                    meta.clone(),
-                    0,
-                )
+                .write_transaction_status(slot, signature, meta.clone(), 0,)
                 .is_ok());
 
             // result found
@@ -642,49 +663,34 @@ mod tests {
 
         // insert value
         let status_uno = create_transaction_status_meta(5);
-        let writable_addresses = status_uno.loaded_addresses.writable.clone();
-        let readonly_addresses = status_uno.loaded_addresses.writable.clone();
         assert!(store
-            .write_transaction_status(
-                slot_uno,
-                sig_uno,
-                writable_addresses.iter().collect(),
-                readonly_addresses.iter().collect(),
-                status_uno.clone(),
-                0,
-            )
+            .write_transaction_status(slot_uno, sig_uno, status_uno.clone(), 0,)
             .is_ok());
 
         // Finds by matching signature
         {
             let (slot, status) =
-                store.get_transaction_status(sig_uno).unwrap().unwrap();
+                store.get_transaction_status(sig_uno, 0).unwrap().unwrap();
             assert_eq!(slot, slot_uno);
             assert_eq!(status, status_uno);
 
             // Does not find it by other signature
-            assert!(store.get_transaction_status(sig_dos).unwrap().is_none());
+            assert!(store
+                .get_transaction_status(sig_dos, 0)
+                .unwrap()
+                .is_none());
         }
 
         // Add a status for the other signature
         let status_dos = create_transaction_status_meta(5);
-        let writable_addresses = status_dos.loaded_addresses.writable.clone();
-        let readonly_addresses = status_dos.loaded_addresses.writable.clone();
         assert!(store
-            .write_transaction_status(
-                slot_dos,
-                sig_dos,
-                writable_addresses.iter().collect(),
-                readonly_addresses.iter().collect(),
-                status_dos.clone(),
-                0,
-            )
+            .write_transaction_status(slot_dos, sig_dos, status_dos.clone(), 0,)
             .is_ok());
 
         // First still there
         {
             let (slot, status) =
-                store.get_transaction_status(sig_uno).unwrap().unwrap();
+                store.get_transaction_status(sig_uno, 0).unwrap().unwrap();
             assert_eq!(slot, slot_uno);
             assert_eq!(status, status_uno);
         }
@@ -692,7 +698,7 @@ mod tests {
         // Second one is found now as well
         {
             let (slot, status) =
-                store.get_transaction_status(sig_dos).unwrap().unwrap();
+                store.get_transaction_status(sig_dos, 0).unwrap().unwrap();
             assert_eq!(slot, slot_dos);
             assert_eq!(status, status_dos);
         }
@@ -738,11 +744,12 @@ mod tests {
 
         // 1. Write first transaction and block time for relevant slot
         assert!(store
-            .write_confirmed_transaction(
+            .write_transaction(
                 sig_uno,
                 slot_uno,
                 sanitized_uno.clone(),
                 tx_uno.tx_with_meta.get_status_meta().unwrap(),
+                0,
             )
             .is_ok());
         assert!(store.cache_block_time(slot_uno, block_time_uno).is_ok());
@@ -759,11 +766,12 @@ mod tests {
 
         // 2. Write second transaction and block time for relevant slot
         assert!(store
-            .write_confirmed_transaction(
+            .write_transaction(
                 sig_dos,
                 slot_dos,
                 sanitized_dos.clone(),
                 tx_dos.tx_with_meta.get_status_meta().unwrap(),
+                0
             )
             .is_ok());
         assert!(store.cache_block_time(slot_dos, block_time_dos).is_ok());
