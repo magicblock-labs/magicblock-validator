@@ -1,3 +1,5 @@
+use solana_sdk::signature::Signature;
+
 use crate::errors::LedgerError;
 
 #[cfg(not(unix))]
@@ -56,4 +58,20 @@ pub fn adjust_ulimit_nofile(
     }
     info!("Maximum open file descriptors: {}", nofile.rlim_cur);
     Ok(())
+}
+
+pub fn short_signature_from_vec(sig: &[u8]) -> String {
+    match Signature::try_from(sig) {
+        Ok(sig) => short_signature(&sig),
+        Err(_) => "<invalid signature>".to_string(),
+    }
+}
+
+pub fn short_signature(sig: &Signature) -> String {
+    let sig_str = sig.to_string();
+    if sig_str.len() < 8 {
+        "<invalid signature>".to_string()
+    } else {
+        format!("{}..{}", &sig_str[..8], &sig_str[sig_str.len() - 8..])
+    }
 }

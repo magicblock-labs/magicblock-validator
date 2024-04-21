@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     fs,
     path::{Path, PathBuf},
     sync::{atomic::Ordering, Arc, RwLock},
@@ -37,7 +37,7 @@ use crate::{
     store::utils::adjust_ulimit_nofile,
 };
 
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct SignatureInfosForAddress {
     pub infos: Vec<ConfirmedTransactionStatusWithSignature>,
     pub found_before: bool,
@@ -247,9 +247,18 @@ impl Store {
     // Signatures
     // -----------------
 
+    /// Gets all signatures for a given address within the range described by
+    /// the provided args.
+    ///
+    /// - *`before`* - start searching backwards from this transaction signature
+    ///                If not provided the search starts from the top of the
+    ///                highest_slot
+    /// - *`until`* -  search until this transaction signature, if found before
+    ///                limit reached
+    /// - *`limit`* -  maximum number of signatures to return (max: 1000)
     pub fn get_confirmed_signatures_for_address(
         &self,
-        address: Pubkey,
+        pubkey: Pubkey,
         highest_slot: Slot, // highest_confirmed_slot
         before: Option<Signature>,
         until: Option<Signature>,
@@ -264,39 +273,109 @@ impl Store {
         // That then results in confirmed_unrooted_slots, however we don't have to
         // deal with that since we don't have forks and simple consecutive slots
 
-        let mut get_before_slot_timer = Measure::start("get_before_slot_timer");
-        let (slot, mut before_excluded_signatures) = match before {
-            None => (highest_slot, None),
-            Some(before) => {
-                let transaction_status =
-                    self.get_transaction_status(before, highest_slot)?;
-                match transaction_status {
-                    None => return Ok(SignatureInfosForAddress::default()),
-                    Some((slot, _)) => {
-                        let mut slot_signatures =
-                            self.get_slot_signatures_rev(slot)?;
-                        if let Some(pos) =
-                            slot_signatures.iter().position(|&x| x == before)
-                        {
-                            slot_signatures.truncate(pos + 1);
-                        }
+        // We also changed the approach to filter out the transactions we want
+        // (in between before and until)
+        debug!("Reverse searching ({}, {}, {})", pubkey, highest_slot, 0,);
+        let index_iterator = self
+            .address_signatures_cf
+            .iter_current_index_filtered(IteratorMode::From(
+                (pubkey, highest_slot, 0, Signature::default()),
+                IteratorDirection::Reverse,
+            ))?;
 
-                        (
-                            slot,
-                            Some(
-                                slot_signatures
-                                    .into_iter()
-                                    .collect::<HashSet<_>>(),
-                            ),
-                        )
-                    }
-                }
+        let mut found_before: bool = false;
+
+        let mut matching = Vec::new();
+        for ((address, transaction_slot, _transaction_index, signature), _) in
+            index_iterator
+        {
+            // Bail out if we reached the max number of signatures to collect
+            if matching.len() >= limit {
+                break;
             }
-        };
 
-        get_before_slot_timer.stop();
+            // Bail out if we reached the iterator space that doesn't match the address
+            if address != pubkey {
+                break;
+            }
+            matching.push((transaction_slot, signature));
 
-        todo!()
+            debug!(
+                "signature: {}, slot: {:?}, address: {}",
+                crate::store::utils::short_signature(&signature),
+                transaction_slot,
+                address
+            );
+        }
+
+        let mut blocktimes = HashMap::<Slot, UnixTimestamp>::new();
+        for (slot, signature) in &matching {
+            if blocktimes.contains_key(slot) {
+                continue;
+            }
+            if let Some(blocktime) = self.get_block_time(*slot)? {
+                blocktimes.insert(*slot, blocktime);
+            }
+        }
+
+        let mut infos = Vec::<ConfirmedTransactionStatusWithSignature>::new();
+        for (slot, signature) in matching {
+            let status = self
+                .read_transaction_status((signature, slot))?
+                .and_then(|x| x.status.err());
+            let block_time = blocktimes.get(&slot).cloned();
+            let info = ConfirmedTransactionStatusWithSignature {
+                slot,
+                signature,
+                block_time,
+                err: status,
+                // TODO: @@@ledger support memos
+                memo: None,
+            };
+            infos.push(info)
+        }
+
+        Ok(SignatureInfosForAddress {
+            infos,
+            found_before,
+        })
+
+        /*
+                let mut get_before_slot_timer = Measure::start("get_before_slot_timer");
+                let (slot, mut before_excluded_signatures) = match before {
+                    None => (highest_slot, None),
+                    Some(before) => {
+                        let transaction_status =
+                            self.get_transaction_status(before, highest_slot)?;
+                        match transaction_status {
+                            None => {
+                                debug!("Provided before signature not found, returning empty");
+                                return Ok(SignatureInfosForAddress::default());
+                            }
+                            Some((slot, _)) => {
+                                let mut slot_signatures =
+                                    self.get_slot_signatures_rev(slot)?;
+                                if let Some(pos) =
+                                    slot_signatures.iter().position(|&x| x == before)
+                                {
+                                    slot_signatures.truncate(pos + 1);
+                                }
+
+                                (
+                                    slot,
+                                    Some(
+                                        slot_signatures
+                                            .into_iter()
+                                            .collect::<HashSet<_>>(),
+                                    ),
+                                )
+                            }
+                        }
+                    }
+                };
+
+                get_before_slot_timer.stop();
+        */
     }
 
     // Returns all signatures for an address in a particular slot, regardless of whether that slot
@@ -336,7 +415,19 @@ impl Store {
         &self,
         slot: Slot,
     ) -> LedgerResult<Vec<Signature>> {
-        todo!()
+        let index_iterator = self
+            .transaction_status_cf
+            .iter_current_index_filtered(IteratorMode::From(
+                (Signature::default(), slot),
+                IteratorDirection::Forward,
+            ))?;
+        for ((signature, transaction_slot), _) in index_iterator {
+            // if transaction_slot > slot {
+            //     break;
+            // }
+            debug!("signature: {:?}, slot: {:?}", signature, transaction_slot);
+        }
+        Ok(vec![])
     }
 
     // -----------------
@@ -1022,5 +1113,109 @@ mod tests {
                 .unwrap()
                 .is_empty());
         }
+
+        // 3. Add a few more transactions
+        let (signature_cuatro, slot_cuatro) = (Signature::new_unique(), 31);
+        let (read_cuatro, write_cuatro) = {
+            let mut meta = create_transaction_status_meta(5);
+            let read_cuatro = meta.loaded_addresses.readonly[0];
+            let write_cuatro = meta.loaded_addresses.writable[0];
+            assert!(store
+                .write_transaction_status(
+                    slot_cuatro,
+                    signature_cuatro,
+                    meta.clone(),
+                    0,
+                )
+                .is_ok());
+            (read_cuatro, write_cuatro)
+        };
+
+        let (signature_cinco, slot_cinco) = (Signature::new_unique(), 31);
+        let (read_cinco, write_cinco) = {
+            let mut meta = create_transaction_status_meta(5);
+            let read_cinco = meta.loaded_addresses.readonly[0];
+            let write_cinco = meta.loaded_addresses.writable[0];
+            assert!(store
+                .write_transaction_status(
+                    slot_cinco,
+                    signature_cinco,
+                    meta.clone(),
+                    0,
+                )
+                .is_ok());
+            (read_cinco, write_cinco)
+        };
+
+        let (signature_seis, slot_seis) = (Signature::new_unique(), 32);
+        let (read_seis, write_seis) = {
+            let mut meta = create_transaction_status_meta(5);
+            let read_seis = meta.loaded_addresses.readonly[0];
+            let write_seis = meta.loaded_addresses.writable[0];
+            meta.loaded_addresses.readonly.push(read_uno);
+            meta.loaded_addresses.writable.push(write_uno);
+            assert!(store
+                .write_transaction_status(
+                    slot_seis,
+                    signature_seis,
+                    meta.clone(),
+                    0,
+                )
+                .is_ok());
+            (read_seis, write_seis)
+        };
+
+        // Now we have the following addresses be part of the following transactions
+        //
+        //   signature_uno   : read_uno, write_uno
+        //   signature_dos   : read_dos, write_dos, read_uno, write_uno
+        //   signature_dos_2 : read_dos, write_dos
+        //   signature_tres  : read_tres, write_tres, read_dos, write_dos, read_uno, write_uno
+        //   signature_cuatro: read_cuatro, write_cuatro
+        //   signature_cinco : read_cinco, write_cinco
+        //   signature_seis  : read_seis, write_seis, read_uno, write_uno
+        //
+        // Grouped by address:
+        //
+        //  read_uno | write_uno      : signature_uno, signature_dos, signature_tres, signature_seis
+        //  read_dos | write_dos      : signature_dos, signature_dos_2, signature_tres
+        //  read_tres | write_tres    : signature_tres
+        //  read_cuatro | write_cuatro: signature_cuatro
+        //  read_cinco | write_cinco  : signature_cinco
+        //  read_seis | write_seis    : signature_seis
+
+        // 3. Fill in block times
+        assert!(store.cache_block_time(slot_uno, 1).is_ok());
+        assert!(store.cache_block_time(slot_dos, 2).is_ok());
+        assert!(store.cache_block_time(slot_tres, 3).is_ok());
+        assert!(store.cache_block_time(slot_cuatro, 4).is_ok());
+        assert!(store.cache_block_time(slot_cinco, 5).is_ok());
+        assert!(store.cache_block_time(slot_seis, 6).is_ok());
+
+        // 4. Find signatures for address with default limits
+        let res = store
+            .get_confirmed_signatures_for_address(
+                read_cuatro,
+                slot_seis,
+                None,
+                None,
+                1000,
+            )
+            .unwrap();
+        assert_eq!(res.found_before, false);
+        assert_eq!(res.infos.len(), 1);
+        assert_eq!(
+            res.infos[0],
+            ConfirmedTransactionStatusWithSignature {
+                signature: signature_cuatro,
+                slot: 31,
+                err: Some(TransactionError::InstructionError(
+                    99,
+                    InstructionError::Custom(69)
+                )),
+                memo: None,
+                block_time: Some(5),
+            }
+        );
     }
 }
