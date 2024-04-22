@@ -24,4 +24,6 @@ pub enum LedgerError {
     TransactionIndexOverflow,
     #[error("Failed to convert transaction {0}")]
     TransactionConversionError(String),
+    #[error("slot cleaned up")]
+    SlotCleanedUp,
 }

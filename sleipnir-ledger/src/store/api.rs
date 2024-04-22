@@ -200,6 +200,29 @@ impl Store {
         self.db.is_primary_access()
     }
 
+    // -----------------
+    // Locking Lowest Cleanup Slot
+    // -----------------
+
+    /// Acquires the `lowest_cleanup_slot` lock and returns a tuple of the held lock
+    /// and lowest available slot.
+    ///
+    /// The function will return BlockstoreError::SlotCleanedUp if the input
+    /// `slot` has already been cleaned-up.
+    fn check_lowest_cleanup_slot(
+        &self,
+        slot: Slot,
+    ) -> LedgerResult<std::sync::RwLockReadGuard<Slot>> {
+        // lowest_cleanup_slot is the last slot that was not cleaned up by LedgerCleanupService
+        let lowest_cleanup_slot = self.lowest_cleanup_slot.read().unwrap();
+        if *lowest_cleanup_slot > 0 && *lowest_cleanup_slot >= slot {
+            return Err(LedgerError::SlotCleanedUp);
+        }
+        // Make caller hold this lock properly; otherwise LedgerCleanupService can purge/compact
+        // needed slots here at any given moment
+        Ok(lowest_cleanup_slot)
+    }
+
     /// Acquires the lock of `lowest_cleanup_slot` and returns the tuple of
     /// the held lock and the lowest available slot.
     ///
@@ -239,7 +262,7 @@ impl Store {
         &self,
         slot: Slot,
     ) -> LedgerResult<Option<solana_sdk::clock::UnixTimestamp>> {
-        // let _lock = self.check_lowest_cleanup_slot(slot)?;
+        let _lock = self.check_lowest_cleanup_slot(slot)?;
         self.blocktime_cf.get(slot)
     }
 
@@ -250,6 +273,12 @@ impl Store {
     /// Gets all signatures for a given address within the range described by
     /// the provided args.
     ///
+    /// * `highest_slot` - Highest slot to consider for the search inclusive.
+    ///                    Any signatures with a slot higher than this will be ignored.
+    ///                    In the original implementation this allows ignoring signatures
+    ///                    that haven't reached a specific commitment level yet.
+    ///                    For us it will be the current slot in most cases.
+    ///                    The slot determined for `before` overrides this when provided
     /// - *`before`* - start searching backwards from this transaction signature
     ///                If not provided the search starts from the top of the
     ///                highest_slot
@@ -275,37 +304,73 @@ impl Store {
 
         // We also changed the approach to filter out the transactions we want
         // (in between before and until)
-        debug!("Reverse searching ({}, {}, {})", pubkey, highest_slot, 0,);
-        let index_iterator = self
-            .address_signatures_cf
-            .iter_current_index_filtered(IteratorMode::From(
-                (pubkey, highest_slot, 0, Signature::default()),
-                IteratorDirection::Reverse,
-            ))?;
-
-        let mut found_before: bool = false;
 
         let mut matching = Vec::new();
-        for ((address, transaction_slot, _transaction_index, signature), _) in
-            index_iterator
+        let (found_before, start_slot) = match before {
+            Some(sig) => {
+                let res = self.get_transaction_status(sig, 0)?;
+                match res {
+                    // TODO: add same slot signaturess for the address that happened before the sig
+                    // to matching
+                    Some((slot, _meta)) => {
+                        // Ignore all transactions that happened at the same, or higher slot as the signature
+                        let start = slot.saturating_sub(1);
+                        // Ensure we respect the highest_slot start limit as well
+                        let start = start.min(highest_slot);
+                        (true, start)
+                    }
+                    None => (false, highest_slot),
+                }
+            }
+            None => (false, highest_slot),
+        };
+        debug!("Reverse searching ({}, {}, {})", pubkey, start_slot, 0,);
+
         {
-            // Bail out if we reached the max number of signatures to collect
-            if matching.len() >= limit {
-                break;
-            }
+            let (lock, _) = self.ensure_lowest_cleanup_slot();
+            let index_iterator = self
+                .address_signatures_cf
+                .iter_current_index_filtered(IteratorMode::From(
+                    // The reverse range is not inclusive of the start_slot itself it seems
+                    (pubkey, start_slot + 1, 0, Signature::default()),
+                    IteratorDirection::Reverse,
+                ))?;
 
-            // Bail out if we reached the iterator space that doesn't match the address
-            if address != pubkey {
-                break;
-            }
-            matching.push((transaction_slot, signature));
+            for (
+                (address, transaction_slot, _transaction_index, signature),
+                _,
+            ) in index_iterator
+            {
+                // Bail out if we reached the max number of signatures to collect
+                if matching.len() >= limit {
+                    break;
+                }
 
-            debug!(
-                "signature: {}, slot: {:?}, address: {}",
-                crate::store::utils::short_signature(&signature),
-                transaction_slot,
-                address
-            );
+                // Bail out if we reached the iterator space that doesn't match the address
+                if address != pubkey {
+                    break;
+                }
+
+                if transaction_slot > start_slot {
+                    debug!(
+                        "! signature: {}, slot: {} > {}, address: {}",
+                        crate::store::utils::short_signature(&signature),
+                        transaction_slot,
+                        start_slot,
+                        address
+                    );
+                    continue;
+                }
+
+                matching.push((transaction_slot, signature));
+
+                debug!(
+                    "signature: {}, slot: {:?}, address: {}",
+                    crate::store::utils::short_signature(&signature),
+                    transaction_slot,
+                    address
+                );
+            }
         }
 
         let mut blocktimes = HashMap::<Slot, UnixTimestamp>::new();
@@ -339,43 +404,6 @@ impl Store {
             infos,
             found_before,
         })
-
-        /*
-                let mut get_before_slot_timer = Measure::start("get_before_slot_timer");
-                let (slot, mut before_excluded_signatures) = match before {
-                    None => (highest_slot, None),
-                    Some(before) => {
-                        let transaction_status =
-                            self.get_transaction_status(before, highest_slot)?;
-                        match transaction_status {
-                            None => {
-                                debug!("Provided before signature not found, returning empty");
-                                return Ok(SignatureInfosForAddress::default());
-                            }
-                            Some((slot, _)) => {
-                                let mut slot_signatures =
-                                    self.get_slot_signatures_rev(slot)?;
-                                if let Some(pos) =
-                                    slot_signatures.iter().position(|&x| x == before)
-                                {
-                                    slot_signatures.truncate(pos + 1);
-                                }
-
-                                (
-                                    slot,
-                                    Some(
-                                        slot_signatures
-                                            .into_iter()
-                                            .collect::<HashSet<_>>(),
-                                    ),
-                                )
-                            }
-                        }
-                    }
-                };
-
-                get_before_slot_timer.stop();
-        */
     }
 
     // Returns all signatures for an address in a particular slot, regardless of whether that slot
@@ -544,7 +572,11 @@ impl Store {
         &self,
         index: (Signature, Slot),
     ) -> LedgerResult<Option<generated::Transaction>> {
-        let result = self.transaction_cf.get_protobuf(index)?;
+        let result = {
+            let (lock, lowest_available_slot) =
+                self.ensure_lowest_cleanup_slot();
+            self.transaction_cf.get_protobuf(index)
+        }?;
         Ok(result)
     }
 
@@ -552,29 +584,52 @@ impl Store {
     // TransactionStatus
     // -----------------
     /// Returns a transaction status
+    /// * `signature` - Signature of the transaction
+    /// * `min_slot` - Highest slot to consider for the search, i.e. the transaction
+    /// status was added at or after this slot (same as minContextSlot)
     pub fn get_transaction_status(
         &self,
         signature: Signature,
-        highest_confirmed_slot: Slot,
+        min_slot: Slot,
     ) -> LedgerResult<Option<(Slot, TransactionStatusMeta)>> {
-        self.rpc_api_metrics
-            .num_get_transaction_status
-            .fetch_add(1, Ordering::Relaxed);
+        let result = {
+            let (lock, lowest_available_slot) =
+                self.ensure_lowest_cleanup_slot();
+            self.rpc_api_metrics
+                .num_get_transaction_status
+                .fetch_add(1, Ordering::Relaxed);
 
-        let mut iterator = self
-            .transaction_status_cf
-            .iter_current_index_filtered(IteratorMode::From(
-                (signature, highest_confirmed_slot),
-                IteratorDirection::Forward,
-            ))?;
-
-        let result = match iterator.next() {
-            Some(((signature, slot), _data)) => self
+            let mut iterator = self
                 .transaction_status_cf
-                .get_protobuf((signature, slot))?
-                .and_then(|status| status.try_into().ok())
-                .map(|status| (slot, status)),
-            None => None,
+                .iter_current_index_filtered(IteratorMode::From(
+                    (signature, min_slot.max(lowest_available_slot)),
+                    IteratorDirection::Forward,
+                ))?;
+
+            let mut result = None;
+            for ((stat_signature, slot), _) in iterator {
+                if stat_signature == signature {
+                    debug!(
+                        "{} == {}",
+                        crate::store::utils::short_signature(&stat_signature),
+                        crate::store::utils::short_signature(&signature)
+                    );
+                    result = self
+                        .transaction_status_cf
+                        .get_protobuf((signature, slot))?
+                        .map(|status| {
+                            let status = status.try_into().unwrap();
+                            (slot, status)
+                        });
+                    break;
+                }
+                debug!(
+                    "{} != {}",
+                    crate::store::utils::short_signature(&stat_signature),
+                    crate::store::utils::short_signature(&signature)
+                );
+            }
+            result
         };
         Ok(result)
     }
@@ -583,7 +638,10 @@ impl Store {
         &self,
         index: (Signature, Slot),
     ) -> LedgerResult<Option<TransactionStatusMeta>> {
-        let result = self.transaction_status_cf.get_protobuf(index)?;
+        let result = {
+            let (lock, _) = self.ensure_lowest_cleanup_slot();
+            self.transaction_status_cf.get_protobuf(index)
+        }?;
         Ok(result.and_then(|meta| meta.try_into().ok()))
     }
 
@@ -1202,7 +1260,7 @@ mod tests {
                 1000,
             )
             .unwrap();
-        assert_eq!(res.found_before, false);
+        assert!(!res.found_before);
         assert_eq!(res.infos.len(), 1);
         assert_eq!(
             res.infos[0],
@@ -1217,5 +1275,69 @@ mod tests {
                 block_time: Some(5),
             }
         );
+
+        // 5. Find signatures with before/until configs
+        {
+            fn extract(
+                infos: Vec<ConfirmedTransactionStatusWithSignature>,
+            ) -> Vec<(Slot, Signature)> {
+                infos.into_iter().map(|x| (x.slot, x.signature)).collect()
+            }
+            // No before/after
+            let sigs = extract(
+                store
+                    .get_confirmed_signatures_for_address(
+                        read_uno, slot_seis, None, None, 1000,
+                    )
+                    .unwrap()
+                    .infos,
+            );
+            assert!(!res.found_before);
+            assert_eq!(
+                sigs,
+                vec![
+                    (slot_seis, signature_seis),
+                    (slot_tres, signature_tres),
+                    (slot_dos, signature_dos),
+                    (slot_uno, signature_uno),
+                ]
+            );
+
+            // Before signature tres
+            let res = store
+                .get_confirmed_signatures_for_address(
+                    read_uno,
+                    slot_seis,
+                    Some(signature_tres),
+                    None,
+                    1000,
+                )
+                .unwrap();
+            assert!(res.found_before);
+            assert_eq!(
+                extract(res.infos.clone()),
+                vec![(slot_dos, signature_dos), (slot_uno, signature_uno),]
+            );
+
+            // Before signature cuatro
+            let res = store
+                .get_confirmed_signatures_for_address(
+                    read_uno,
+                    slot_seis,
+                    Some(signature_cuatro),
+                    None,
+                    1000,
+                )
+                .unwrap();
+            assert!(res.found_before);
+            assert_eq!(
+                extract(res.infos.clone()),
+                vec![
+                    (slot_tres, signature_tres),
+                    (slot_dos, signature_dos),
+                    (slot_uno, signature_uno),
+                ]
+            );
+        }
     }
 }
