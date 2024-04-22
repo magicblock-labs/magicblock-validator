@@ -41,6 +41,7 @@ use crate::{
 pub struct SignatureInfosForAddress {
     pub infos: Vec<ConfirmedTransactionStatusWithSignature>,
     pub found_before: bool,
+    pub found_until: bool,
 }
 
 pub struct Store {
@@ -311,7 +312,6 @@ impl Store {
                 let res = self.get_transaction_status(sig, 0)?;
                 match res {
                     // TODO: add same slot signaturess for the address that happened before the sig
-                    // to matching
                     Some((slot, _meta)) => {
                         // Ignore all transactions that happened at the same, or higher slot as the signature
                         let start = slot.saturating_sub(1);
@@ -324,7 +324,27 @@ impl Store {
             }
             None => (false, highest_slot),
         };
-        debug!("Reverse searching ({}, {}, {})", pubkey, start_slot, 0,);
+
+        let (found_until, end_slot) = match until {
+            Some(sig) => {
+                let res = self.get_transaction_status(sig, 0)?;
+                match res {
+                    // TODO: add same slot signaturess for the address that happened after the sig
+                    Some((slot, _meta)) => {
+                        // Ignore all transactions that happened at the same, or lower slot as the signature
+                        let end = slot.saturating_add(1);
+                        (true, end)
+                    }
+                    None => (false, 0),
+                }
+            }
+            None => (false, 0),
+        };
+
+        debug!(
+            "Reverse searching ({}, {} -> {}, {})",
+            pubkey, start_slot, end_slot, 0,
+        );
 
         {
             let (lock, _) = self.ensure_lowest_cleanup_slot();
@@ -351,6 +371,12 @@ impl Store {
                     break;
                 }
 
+                // Bail out once we reached the lower end of the range for matching addresses
+                if transaction_slot < end_slot {
+                    break;
+                }
+
+                // The below only happens once we leave the range of our pubkey
                 if transaction_slot > start_slot {
                     debug!(
                         "! signature: {}, slot: {} > {}, address: {}",
@@ -403,6 +429,7 @@ impl Store {
         Ok(SignatureInfosForAddress {
             infos,
             found_before,
+            found_until,
         })
     }
 
@@ -1277,13 +1304,14 @@ mod tests {
         );
 
         // 5. Find signatures with before/until configs
+        fn extract(
+            infos: Vec<ConfirmedTransactionStatusWithSignature>,
+        ) -> Vec<(Slot, Signature)> {
+            infos.into_iter().map(|x| (x.slot, x.signature)).collect()
+        }
+
+        // No before/until
         {
-            fn extract(
-                infos: Vec<ConfirmedTransactionStatusWithSignature>,
-            ) -> Vec<(Slot, Signature)> {
-                infos.into_iter().map(|x| (x.slot, x.signature)).collect()
-            }
-            // No before/after
             let sigs = extract(
                 store
                     .get_confirmed_signatures_for_address(
@@ -1302,7 +1330,10 @@ mod tests {
                     (slot_uno, signature_uno),
                 ]
             );
+        }
 
+        // Before configured only
+        {
             // Before signature tres
             let res = store
                 .get_confirmed_signatures_for_address(
@@ -1337,6 +1368,81 @@ mod tests {
                     (slot_dos, signature_dos),
                     (slot_uno, signature_uno),
                 ]
+            );
+        }
+
+        // Until configured only
+        {
+            // Until signature tres
+            let res = store
+                .get_confirmed_signatures_for_address(
+                    read_uno,
+                    slot_seis,
+                    None,
+                    Some(signature_tres),
+                    1000,
+                )
+                .unwrap();
+            assert!(res.found_until);
+
+            assert_eq!(
+                extract(res.infos.clone()),
+                vec![(slot_seis, signature_seis),]
+            );
+
+            // Until signature dos
+            let res = store
+                .get_confirmed_signatures_for_address(
+                    read_uno,
+                    slot_seis,
+                    None,
+                    Some(signature_dos),
+                    1000,
+                )
+                .unwrap();
+            assert!(res.found_until);
+
+            assert_eq!(
+                extract(res.infos.clone()),
+                vec![(slot_seis, signature_seis), (slot_tres, signature_tres),]
+            );
+        }
+        // Before/Until configured
+        {
+            let res = store
+                .get_confirmed_signatures_for_address(
+                    read_uno,
+                    slot_seis,
+                    Some(signature_cuatro),
+                    Some(signature_dos),
+                    1000,
+                )
+                .unwrap();
+            assert!(res.found_before);
+            assert!(res.found_until);
+
+            assert_eq!(
+                extract(res.infos.clone()),
+                vec![(slot_tres, signature_tres),]
+            );
+        }
+
+        // Highest Slot lower than Before
+        {
+            let res = store
+                .get_confirmed_signatures_for_address(
+                    read_uno,
+                    slot_dos,
+                    Some(signature_cuatro),
+                    None,
+                    1000,
+                )
+                .unwrap();
+            assert!(res.found_before);
+
+            assert_eq!(
+                extract(res.infos.clone()),
+                vec![(slot_dos, signature_dos), (slot_uno, signature_uno),]
             );
         }
     }
