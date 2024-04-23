@@ -758,7 +758,7 @@ impl Store {
     // -----------------
     /// Returns a transaction status
     /// * `signature` - Signature of the transaction
-    /// * `min_slot` - Highest slot to consider for the search, i.e. the transaction
+    /// * `min_slot` - Lowest slot to consider for the search, i.e. the transaction
     /// status was added at or after this slot (same as minContextSlot)
     pub fn get_transaction_status(
         &self,
@@ -772,10 +772,11 @@ impl Store {
                 .num_get_transaction_status
                 .fetch_add(1, Ordering::Relaxed);
 
+            let start_slot = min_slot.max(lowest_available_slot);
             let mut iterator = self
                 .transaction_status_cf
                 .iter_current_index_filtered(IteratorMode::From(
-                    (signature, min_slot.max(lowest_available_slot)),
+                    (signature, start_slot),
                     IteratorDirection::Forward,
                 ))?;
 
@@ -1094,31 +1095,33 @@ mod tests {
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Store::open(ledger_path.path()).unwrap();
 
-        let (sig_uno, slot_uno) = (Signature::default(), 0);
-        let (sig_dos, slot_dos) = (Signature::from([2u8; 64]), 9);
+        let (sig_uno, slot_uno) = (Signature::default(), 10);
+        let (sig_dos, slot_dos) = (Signature::from([2u8; 64]), 20);
 
         // result not found
         assert!(store
-            .read_transaction_status((Signature::default(), 0))
+            .read_transaction_status((Signature::default(), slot_uno))
             .unwrap()
             .is_none());
 
         // insert value
         let status_uno = create_transaction_status_meta(5);
         assert!(store
-            .write_transaction_status(slot_uno, sig_uno, status_uno.clone(), 0,)
+            .write_transaction_status(slot_uno, sig_uno, status_uno.clone(), 0)
             .is_ok());
 
         // Finds by matching signature
         {
-            let (slot, status) =
-                store.get_transaction_status(sig_uno, 0).unwrap().unwrap();
+            let (slot, status) = store
+                .get_transaction_status(sig_uno, slot_uno - 5)
+                .unwrap()
+                .unwrap();
             assert_eq!(slot, slot_uno);
             assert_eq!(status, status_uno);
 
             // Does not find it by other signature
             assert!(store
-                .get_transaction_status(sig_dos, 0)
+                .get_transaction_status(sig_dos, slot_uno)
                 .unwrap()
                 .is_none());
         }
@@ -1154,9 +1157,9 @@ mod tests {
         let store = Store::open(ledger_path.path()).unwrap();
 
         let (sig_uno, slot_uno, block_time_uno) =
-            (Signature::default(), 0, 100);
+            (Signature::default(), 10, 100);
         let (sig_dos, slot_dos, block_time_dos) =
-            (Signature::from([2u8; 64]), 9, 200);
+            (Signature::from([2u8; 64]), 20, 200);
 
         let (tx_uno, sanitized_uno) = create_confirmed_transaction(
             sig_uno,
