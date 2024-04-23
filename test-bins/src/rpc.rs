@@ -25,10 +25,12 @@ use test_tools::{
     init_logger,
     programs::load_programs_from_string_config,
 };
+use utils::timestamp_in_secs;
 
 use crate::geyser::{init_geyser_service, GeyserTransactionNotifyListener};
 const LUZIFER: &str = "LuzifKo4E6QCF5r4uQmqbyko7zLS5WgayynivnCbtzk";
 mod geyser;
+mod utils;
 
 fn fund_luzifer(bank: &Bank) {
     // TODO: we need to fund Luzifer at startup instead of doing it here
@@ -99,7 +101,7 @@ async fn main() {
         "Adding Slot ticker for {}ms slots",
         tick_duration.as_millis()
     );
-    init_slot_ticker(bank.clone(), tick_duration);
+    init_slot_ticker(bank.clone(), ledger.clone(), tick_duration);
 
     let pubsub_config = PubsubConfig::default();
     // JSON RPC Service
@@ -150,11 +152,20 @@ async fn main() {
     pubsub_service.join().unwrap();
 }
 
-fn init_slot_ticker(bank: Arc<Bank>, tick_duration: Duration) {
+fn init_slot_ticker(
+    bank: Arc<Bank>,
+    ledger: Arc<Ledger>,
+    tick_duration: Duration,
+) {
     let bank = bank.clone();
     std::thread::spawn(move || loop {
         std::thread::sleep(tick_duration);
-        bank.advance_slot();
+        let slot = bank.advance_slot();
+        let _ = ledger
+            .cache_block_time(slot, timestamp_in_secs() as i64)
+            .map_err(|e| {
+                error!("Failed to cache block time: {:?}", e);
+            });
     });
 }
 

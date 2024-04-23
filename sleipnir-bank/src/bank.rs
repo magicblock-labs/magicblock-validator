@@ -658,7 +658,7 @@ impl Bank {
         self.slot.store(slot, Ordering::Relaxed);
     }
 
-    pub fn advance_slot(&self) {
+    pub fn advance_slot(&self) -> Slot {
         // 1. Determine next slot and set it
         let next_slot = self.slot() + 1;
         self.set_slot(next_slot);
@@ -705,6 +705,8 @@ impl Bank {
 
         // 8. Update loaded programs cache as otherwise we cannot deploy new programs
         self.sync_loaded_programs_cache_to_slot();
+
+        next_slot
     }
 
     pub fn epoch(&self) -> Epoch {
