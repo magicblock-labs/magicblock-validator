@@ -1,4 +1,5 @@
 #![allow(dead_code)]
+use log::*;
 use std::{
     net::SocketAddr,
     str::FromStr,
@@ -561,9 +562,8 @@ impl JsonRpcRequestProcessor {
             return Err(RpcCustomError::TransactionHistoryNotAvailable.into());
         }
         for signature in signatures {
-            let status = self.get_transaction_status(signature);
-            // NOTE: we have no blockstore nor bigtable ledger storage to query older transactions
-            // from, see: solana/rpc/src/rpc.rs:1436
+            let status = self
+                .get_transaction_status(signature, search_transaction_history);
             statuses.push(status);
         }
 
@@ -573,15 +573,38 @@ impl JsonRpcRequestProcessor {
     fn get_transaction_status(
         &self,
         signature: Signature,
+        search_transaction_history: bool,
     ) -> Option<TransactionStatus> {
-        let (slot, status) = self.bank.get_signature_status_slot(&signature)?;
+        let bank_result = self.bank.get_signature_status_slot(&signature);
+        let (slot, status) = if let Some(bank_result) = bank_result {
+            bank_result
+        } else if self.config.enable_rpc_transaction_history
+            && search_transaction_history
+        {
+            match self
+                .ledger
+                .get_transaction_status(signature, self.bank.slot())
+            {
+                Ok(Some((slot, status))) => (slot, status.status),
+                Err(err) => {
+                    warn!(
+                        "Error loading signature {} from ledger: {:?}",
+                        signature, err
+                    );
+                    return None;
+                }
+                _ => return None,
+            }
+        } else {
+            return None;
+        };
         let err = status.clone().err();
         Some(TransactionStatus {
             slot,
             status,
             err,
             confirmations: None,
-            confirmation_status: None,
+            confirmation_status: Some(TransactionConfirmationStatus::Finalized),
         })
     }
 }
