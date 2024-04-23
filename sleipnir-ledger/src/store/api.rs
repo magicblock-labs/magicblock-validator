@@ -342,7 +342,7 @@ impl Ledger {
         let (found_upper, include_upper, newest_slot, upper_slot) =
             match upper_limit_signature {
                 Some(sig) => {
-                    let res = self.get_transaction_status(sig, highest_slot)?;
+                    let res = self.get_transaction_status(sig, u64::MAX)?;
                     match res {
                         Some((slot, _meta)) => {
                             // Ignore all transactions that happened at the same, or higher slot as the signature
@@ -369,7 +369,8 @@ impl Ledger {
         let (found_lower, include_lower, oldest_slot, lower_slot) =
             match lower_limit_signature {
                 Some(sig) => {
-                    let res = self.get_transaction_status(sig, highest_slot)?;
+                    let res = self.get_transaction_status(sig, u64::MAX)?;
+                    // let res = self.get_transaction_status(sig, highest_slot)?;
                     match res {
                         Some((slot, _meta)) => {
                             // Ignore all transactions that happened at the same, or lower slot as the signature
@@ -725,6 +726,8 @@ impl Ledger {
                 .num_get_transaction_status
                 .fetch_add(1, Ordering::Relaxed);
 
+            // TODO: ledger@@@ would iterating in reverse be better here since
+            // most likely we'd be looking for a more recent transaction?
             let mut iterator = self
                 .transaction_status_cf
                 .iter_current_index_filtered(IteratorMode::From(
@@ -742,6 +745,10 @@ impl Ledger {
                             let status = status.try_into().unwrap();
                             (slot, status)
                         });
+                    break;
+                }
+                // Left the range of the signature we're looking for
+                if stat_signature != signature {
                     break;
                 }
             }
@@ -870,7 +877,9 @@ mod tests {
         };
     }
 
-    fn create_transaction_status_meta(fee: u64) -> TransactionStatusMeta {
+    fn create_transaction_status_meta(
+        fee: u64,
+    ) -> (TransactionStatusMeta, Vec<Pubkey>, Vec<Pubkey>) {
         let pre_balances_vec = vec![1, 2, 3];
         let post_balances_vec = vec![3, 2, 1];
         let inner_instructions_vec = vec![InnerInstructions {
@@ -884,10 +893,8 @@ mod tests {
         let pre_token_balances_vec = vec![];
         let post_token_balances_vec = vec![];
         let rewards_vec = vec![];
-        let test_loaded_addresses = LoadedAddresses {
-            writable: vec![Pubkey::new_unique()],
-            readonly: vec![Pubkey::new_unique()],
-        };
+        let writable_keys = vec![Pubkey::new_unique()];
+        let readonly_keys = vec![Pubkey::new_unique()];
         let test_return_data = TransactionReturnData {
             program_id: Pubkey::new_unique(),
             data: vec![1, 2, 3],
@@ -895,25 +902,29 @@ mod tests {
         let compute_units_consumed_1 = Some(3812649u64);
         let compute_units_consumed_2 = Some(42u64);
 
-        TransactionStatusMeta {
-            status: solana_sdk::transaction::Result::<()>::Err(
-                TransactionError::InstructionError(
-                    99,
-                    InstructionError::Custom(69),
+        (
+            TransactionStatusMeta {
+                status: solana_sdk::transaction::Result::<()>::Err(
+                    TransactionError::InstructionError(
+                        99,
+                        InstructionError::Custom(69),
+                    ),
                 ),
-            ),
-            fee,
-            pre_balances: pre_balances_vec.clone(),
-            post_balances: post_balances_vec.clone(),
-            inner_instructions: Some(inner_instructions_vec.clone()),
-            log_messages: Some(log_messages_vec.clone()),
-            pre_token_balances: Some(pre_token_balances_vec.clone()),
-            post_token_balances: Some(post_token_balances_vec.clone()),
-            rewards: Some(rewards_vec.clone()),
-            loaded_addresses: test_loaded_addresses,
-            return_data: Some(test_return_data.clone()),
-            compute_units_consumed: compute_units_consumed_1,
-        }
+                fee,
+                pre_balances: pre_balances_vec.clone(),
+                post_balances: post_balances_vec.clone(),
+                inner_instructions: Some(inner_instructions_vec.clone()),
+                log_messages: Some(log_messages_vec.clone()),
+                pre_token_balances: Some(pre_token_balances_vec.clone()),
+                post_token_balances: Some(post_token_balances_vec.clone()),
+                rewards: Some(rewards_vec.clone()),
+                loaded_addresses: Default::default(),
+                return_data: Some(test_return_data.clone()),
+                compute_units_consumed: compute_units_consumed_1,
+            },
+            writable_keys,
+            readonly_keys,
+        )
     }
 
     fn create_confirmed_transaction(
@@ -923,15 +934,14 @@ mod tests {
         block_time: Option<UnixTimestamp>,
         tx_signatures: Option<Vec<Signature>>,
     ) -> (ConfirmedTransactionWithStatusMeta, SanitizedTransaction) {
-        let meta = create_transaction_status_meta(fee);
-        let writable_addresses = meta.loaded_addresses.writable.clone();
-        let readonly_addresses = meta.loaded_addresses.readonly.clone();
-        let num_readonly_unsigned_accounts = readonly_addresses.len() as u8 - 1;
+        let (meta, writable_keys, readonly_keys) =
+            create_transaction_status_meta(fee);
+        let num_readonly_unsigned_accounts = readonly_keys.len() as u8 - 1;
         let signatures = tx_signatures.unwrap_or_else(|| {
             vec![Signature::new_unique(), Signature::new_unique()]
         });
         let msg = v0::Message {
-            account_keys: [writable_addresses, readonly_addresses].concat(),
+            account_keys: [writable_keys, readonly_keys].concat(),
             header: MessageHeader {
                 num_required_signatures: signatures.len() as u8,
                 num_readonly_signed_accounts: 1,
@@ -973,6 +983,12 @@ mod tests {
         )
     }
 
+    macro_rules! keys_as_ref {
+        ($keys:expr) => {
+            $keys.iter().collect()
+        };
+    }
+
     #[test]
     fn test_persist_block_time() {
         init_logger!();
@@ -1011,9 +1027,17 @@ mod tests {
                 .is_none());
 
             // insert value
-            let meta = create_transaction_status_meta(5);
+            let (meta, writable_keys, readonly_keys) =
+                create_transaction_status_meta(5);
             assert!(store
-                .write_transaction_status(slot, signature, meta.clone(), 0,)
+                .write_transaction_status(
+                    slot,
+                    signature,
+                    keys_as_ref!(writable_keys),
+                    keys_as_ref!(readonly_keys),
+                    meta.clone(),
+                    0,
+                )
                 .is_ok());
 
             // result found
@@ -1028,9 +1052,17 @@ mod tests {
         {
             // insert value
             let (signature, slot) = (Signature::from([2u8; 64]), 9);
-            let meta = create_transaction_status_meta(9);
+            let (meta, writable_keys, readonly_keys) =
+                create_transaction_status_meta(9);
             assert!(store
-                .write_transaction_status(slot, signature, meta.clone(), 0,)
+                .write_transaction_status(
+                    slot,
+                    signature,
+                    keys_as_ref!(writable_keys),
+                    keys_as_ref!(readonly_keys),
+                    meta.clone(),
+                    0,
+                )
                 .is_ok());
 
             // result found
@@ -1059,9 +1091,17 @@ mod tests {
             .is_none());
 
         // insert value
-        let status_uno = create_transaction_status_meta(5);
+        let (status_uno, writable_keys, readonly_keys) =
+            create_transaction_status_meta(5);
         assert!(store
-            .write_transaction_status(slot_uno, sig_uno, status_uno.clone(), 0)
+            .write_transaction_status(
+                slot_uno,
+                sig_uno,
+                keys_as_ref!(writable_keys),
+                keys_as_ref!(readonly_keys),
+                status_uno.clone(),
+                0
+            )
             .is_ok());
 
         // Finds by matching signature
@@ -1081,9 +1121,17 @@ mod tests {
         }
 
         // Add a status for the other signature
-        let status_dos = create_transaction_status_meta(5);
+        let (status_dos, writable_keys, readonly_keys) =
+            create_transaction_status_meta(5);
         assert!(store
-            .write_transaction_status(slot_dos, sig_dos, status_dos.clone(), 0,)
+            .write_transaction_status(
+                slot_dos,
+                sig_dos,
+                keys_as_ref!(writable_keys),
+                keys_as_ref!(readonly_keys),
+                status_dos.clone(),
+                0,
+            )
             .is_ok());
 
         // First still there
@@ -1193,13 +1241,16 @@ mod tests {
         // 1. Add some transaction statuses
         let (signature_uno, slot_uno) = (Signature::new_unique(), 10);
         let (read_uno, write_uno) = {
-            let meta = create_transaction_status_meta(5);
-            let read_uno = meta.loaded_addresses.readonly[0];
-            let write_uno = meta.loaded_addresses.writable[0];
+            let (meta, writable_keys, readonly_keys) =
+                create_transaction_status_meta(5);
+            let read_uno = readonly_keys[0];
+            let write_uno = writable_keys[0];
             assert!(store
                 .write_transaction_status(
                     slot_uno,
                     signature_uno,
+                    keys_as_ref!(writable_keys),
+                    keys_as_ref!(readonly_keys),
                     meta.clone(),
                     0,
                 )
@@ -1210,15 +1261,18 @@ mod tests {
         let (signature_dos, slot_dos) = (Signature::new_unique(), 20);
         let signature_dos_2 = Signature::new_unique();
         let (read_dos, write_dos) = {
-            let mut meta = create_transaction_status_meta(5);
-            let read_dos = meta.loaded_addresses.readonly[0];
-            let write_dos = meta.loaded_addresses.writable[0];
-            meta.loaded_addresses.readonly.push(read_uno);
-            meta.loaded_addresses.writable.push(write_uno);
+            let (mut meta, mut writable_keys, mut readonly_keys) =
+                create_transaction_status_meta(5);
+            let read_dos = readonly_keys[0];
+            let write_dos = writable_keys[0];
+            readonly_keys.push(read_uno);
+            writable_keys.push(write_uno);
             assert!(store
                 .write_transaction_status(
                     slot_dos,
                     signature_dos,
+                    keys_as_ref!(writable_keys),
+                    keys_as_ref!(readonly_keys),
                     meta.clone(),
                     0,
                 )
@@ -1227,13 +1281,16 @@ mod tests {
             // read_dos and write_dos are part of another transaction in the same slot
             // signature_dos_2 at times is captured via intra slot logic, but the focus
             // of this method is not intra slot
-            let mut meta = create_transaction_status_meta(8);
-            meta.loaded_addresses.readonly.push(read_dos);
-            meta.loaded_addresses.writable.push(write_dos);
+            let (mut meta, mut writable_keys, mut readonly_keys) =
+                create_transaction_status_meta(8);
+            readonly_keys.push(read_dos);
+            writable_keys.push(write_dos);
             assert!(store
                 .write_transaction_status(
                     slot_dos,
                     signature_dos_2,
+                    keys_as_ref!(writable_keys),
+                    keys_as_ref!(readonly_keys),
                     meta.clone(),
                     1,
                 )
@@ -1244,18 +1301,21 @@ mod tests {
 
         let (signature_tres, slot_tres) = (Signature::new_unique(), 30);
         let (read_tres, write_tres) = {
-            let mut meta = create_transaction_status_meta(5);
-            let read_tres = meta.loaded_addresses.readonly[0];
-            let write_tres = meta.loaded_addresses.writable[0];
-            meta.loaded_addresses.readonly.push(read_uno);
-            meta.loaded_addresses.writable.push(write_uno);
-            meta.loaded_addresses.readonly.push(read_dos);
-            meta.loaded_addresses.writable.push(write_dos);
+            let (mut meta, mut writable_keys, mut readonly_keys) =
+                create_transaction_status_meta(5);
+            let read_tres = readonly_keys[0];
+            let write_tres = writable_keys[0];
+            readonly_keys.push(read_uno);
+            writable_keys.push(write_uno);
+            readonly_keys.push(read_dos);
+            writable_keys.push(write_dos);
 
             assert!(store
                 .write_transaction_status(
                     slot_tres,
                     signature_tres,
+                    keys_as_ref!(writable_keys),
+                    keys_as_ref!(readonly_keys),
                     meta.clone(),
                     0,
                 )
@@ -1265,13 +1325,16 @@ mod tests {
 
         let (signature_cuatro, slot_cuatro) = (Signature::new_unique(), 31);
         let (read_cuatro, write_cuatro) = {
-            let mut meta = create_transaction_status_meta(5);
-            let read_cuatro = meta.loaded_addresses.readonly[0];
-            let write_cuatro = meta.loaded_addresses.writable[0];
+            let (mut meta, writable_keys, readonly_keys) =
+                create_transaction_status_meta(5);
+            let read_cuatro = readonly_keys[0];
+            let write_cuatro = writable_keys[0];
             assert!(store
                 .write_transaction_status(
                     slot_cuatro,
                     signature_cuatro,
+                    keys_as_ref!(writable_keys),
+                    keys_as_ref!(readonly_keys),
                     meta.clone(),
                     0,
                 )
@@ -1281,13 +1344,16 @@ mod tests {
 
         let (signature_cinco, slot_cinco) = (Signature::new_unique(), 31);
         let (read_cinco, write_cinco) = {
-            let mut meta = create_transaction_status_meta(5);
-            let read_cinco = meta.loaded_addresses.readonly[0];
-            let write_cinco = meta.loaded_addresses.writable[0];
+            let (mut meta, writable_keys, readonly_keys) =
+                create_transaction_status_meta(5);
+            let read_cinco = readonly_keys[0];
+            let write_cinco = writable_keys[0];
             assert!(store
                 .write_transaction_status(
                     slot_cinco,
                     signature_cinco,
+                    keys_as_ref!(writable_keys),
+                    keys_as_ref!(readonly_keys),
                     meta.clone(),
                     0,
                 )
@@ -1297,15 +1363,18 @@ mod tests {
 
         let (signature_seis, slot_seis) = (Signature::new_unique(), 32);
         let (read_seis, write_seis) = {
-            let mut meta = create_transaction_status_meta(5);
-            let read_seis = meta.loaded_addresses.readonly[0];
-            let write_seis = meta.loaded_addresses.writable[0];
-            meta.loaded_addresses.readonly.push(read_uno);
-            meta.loaded_addresses.writable.push(write_uno);
+            let (mut meta, mut writable_keys, mut readonly_keys) =
+                create_transaction_status_meta(5);
+            let read_seis = readonly_keys[0];
+            let write_seis = writable_keys[0];
+            readonly_keys.push(read_uno);
+            writable_keys.push(write_uno);
             assert!(store
                 .write_transaction_status(
                     slot_seis,
                     signature_seis,
+                    keys_as_ref!(writable_keys),
+                    keys_as_ref!(readonly_keys),
                     meta.clone(),
                     0,
                 )
@@ -1494,7 +1563,7 @@ mod tests {
             );
         }
 
-        // Highest Slot lower than Before
+        // Highest Slot lower than Upper Limit
         {
             let res = store
                 .get_confirmed_signatures_for_address(
@@ -1543,8 +1612,9 @@ mod tests {
         let mut current_slot = 0;
         let mut tx_idx = 0;
         let read_uno = {
-            let meta = create_transaction_status_meta(5);
-            let read_uno = meta.loaded_addresses.readonly[0];
+            let (meta, writable_keys, readonly_keys) =
+                create_transaction_status_meta(5);
+            let read_uno = readonly_keys[0];
             for (slot, signature) in &[
                 (slot1, sig1),
                 (slot1, sig2),
@@ -1563,6 +1633,8 @@ mod tests {
                     .write_transaction_status(
                         *slot,
                         *signature,
+                        keys_as_ref!(writable_keys.clone()),
+                        keys_as_ref!(readonly_keys.clone()),
                         meta.clone(),
                         tx_idx
                     )
@@ -1661,6 +1733,7 @@ mod tests {
                 1000,
             )
             .unwrap();
+        assert!(res.found_lower);
         assert_eq!(extract(res.infos.clone()), vec![]);
 
         // Find anything older than sig5 across slots
