@@ -452,7 +452,6 @@ impl Ledger {
                     "Reverse searching ({}, {} -> {}, {})",
                     pubkey, newest_slot, oldest_slot, 0,
                 );
-
                 let index_iterator = self
                     .address_signatures_cf
                     .iter_current_index_filtered(IteratorMode::From(
@@ -663,7 +662,7 @@ impl Ledger {
     /// * `signature` - Signature of the transaction
     /// * `slot` - Slot at which the transaction was confirmed
     /// * `transaction` - Transaction to be written, we take a SanititizedTransaction here
-    ///                   since that is what we get provided by Geyser
+    ///                   since that is what we provide Geyser as well
     /// * `status` - status of the transaction
     pub fn write_transaction(
         &self,
@@ -673,6 +672,7 @@ impl Ledger {
         status: TransactionStatusMeta,
         transaction_index: usize,
     ) -> LedgerResult<()> {
+        // TODO: extract and write memos (rpc/src/transaction_status_service.rs :175)
         // 1. Write Transaction Status
         self.write_transaction_status(
             slot,

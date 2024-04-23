@@ -1,3 +1,5 @@
+#![allow(deprecated)]
+
 // NOTE: pieces extracted from rpc-client-api/src/config.rs
 use serde::{Deserialize, Serialize};
 pub use solana_account_decoder::{
@@ -125,6 +127,20 @@ pub struct RpcSignaturesForAddressConfig {
     #[serde(flatten)]
     pub commitment: Option<CommitmentConfig>,
     pub min_context_slot: Option<Slot>,
+}
+
+#[deprecated(
+    since = "1.7.0",
+    note = "Please use RpcSignaturesForAddressConfig instead"
+)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcGetConfirmedSignaturesForAddress2Config {
+    pub before: Option<String>, // Signature as base-58 string
+    pub until: Option<String>,  // Signature as base-58 string
+    pub limit: Option<usize>,
+    #[serde(flatten)]
+    pub commitment: Option<CommitmentConfig>,
 }
 
 // -----------------

@@ -34,7 +34,7 @@ use crate::{
         decode_and_deserialize, sanitize_transaction, send_transaction,
         verify_signature,
     },
-    utils::new_response,
+    utils::{new_response, verify_and_parse_signatures_for_address_params},
 };
 
 // Solana shows the last 60secs worth of samples
@@ -262,7 +262,32 @@ impl Full for FullImpl {
         config: Option<RpcSignaturesForAddressConfig>,
     ) -> BoxFuture<Result<Vec<RpcConfirmedTransactionStatusWithSignature>>>
     {
-        todo!("get_signatures_for_address")
+        let config = config.unwrap_or_default();
+        let commitment = config.commitment;
+
+        let verification = verify_and_parse_signatures_for_address_params(
+            address,
+            config.before,
+            config.until,
+            config.limit,
+        );
+
+        match verification {
+            Err(err) => Box::pin(future::err(err)),
+            Ok((address, before, until, limit)) => Box::pin(async move {
+                meta.get_signatures_for_address(
+                    address,
+                    before,
+                    until,
+                    limit,
+                    RpcContextConfig {
+                        commitment,
+                        min_context_slot: None,
+                    },
+                )
+                .await
+            }),
+        }
     }
 
     fn get_first_available_block(

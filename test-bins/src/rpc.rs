@@ -11,12 +11,14 @@ use sleipnir_bank::{
     bank::Bank,
     genesis_utils::{create_genesis_config, GenesisConfigInfo},
 };
+use sleipnir_ledger::Ledger;
 use sleipnir_pubsub::pubsub_service::{PubsubConfig, PubsubService};
 use sleipnir_rpc::{
     json_rpc_request_processor::JsonRpcConfig, json_rpc_service::JsonRpcService,
 };
 use sleipnir_transaction_status::TransactionStatusSender;
 use solana_sdk::{signature::Keypair, signer::Signer};
+use tempfile::TempDir;
 use test_tools::{
     account::{fund_account, fund_account_addr},
     bank::bank_for_tests_with_paths,
@@ -59,12 +61,19 @@ async fn main() {
         .get_transaction_notifier()
         .expect("Failed to get transaction notifier from geyser service");
 
+    let ledger_path = TempDir::new().unwrap();
+    let ledger = Arc::new(
+        Ledger::open(ledger_path.path())
+            .expect("Expected to be able to open database ledger"),
+    );
+
     let (transaction_sndr, transaction_recvr) = unbounded();
     let transaction_listener = GeyserTransactionNotifyListener::new(
         transaction_notifier,
         transaction_recvr,
+        ledger.clone(),
     );
-    transaction_listener.run();
+    transaction_listener.run(true);
 
     let bank = {
         let bank = bank_for_tests_with_paths(
@@ -115,6 +124,7 @@ async fn main() {
             std::thread::spawn(move || {
                 let _json_rpc_service = JsonRpcService::new(
                     bank,
+                    ledger.clone(),
                     faucet_keypair,
                     genesis_config.hash(),
                     config,

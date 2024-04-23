@@ -20,6 +20,7 @@ jsonrpc-http-server = { workspace = true }
 serde = { workspace = true }
 serde_derive = { workspace = true }
 sleipnir-bank = { workspace = true }
+sleipnir-ledger = { workspace = true }
 sleipnir-processor = { workspace = true }
 sleipnir-rpc-client-api = { workspace = true }
 sleipnir-tokens = { workspace = true }

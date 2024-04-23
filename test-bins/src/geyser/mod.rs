@@ -5,6 +5,7 @@ use itertools::izip;
 use log::*;
 use sleipnir_bank::transaction_notifier_interface::TransactionNotifierArc;
 use sleipnir_geyser_plugin::{plugin::GrpcGeyserPlugin, rpc::GeyserRpcService};
+use sleipnir_ledger::Ledger;
 use sleipnir_transaction_status::{
     map_inner_instructions, TransactionStatusBatch, TransactionStatusMessage,
     TransactionStatusMeta,
@@ -37,23 +38,26 @@ pub async fn init_geyser_service() -> Result<
 pub struct GeyserTransactionNotifyListener {
     transaction_notifier: TransactionNotifierArc,
     transaction_recvr: Receiver<TransactionStatusMessage>,
-    // ledger: Arc<Ledger>,
+    ledger: Arc<Ledger>,
 }
 
 impl GeyserTransactionNotifyListener {
     pub fn new(
         transaction_notifier: TransactionNotifierArc,
         transaction_recvr: Receiver<TransactionStatusMessage>,
+        ledger: Arc<Ledger>,
     ) -> Self {
         Self {
             transaction_notifier,
             transaction_recvr,
+            ledger,
         }
     }
 
-    pub fn run(&self) {
+    pub fn run(&self, enable_rpc_transaction_history: bool) {
         let transaction_notifier = self.transaction_notifier.clone();
         let transaction_recvr = self.transaction_recvr.clone();
+        let ledger = self.ledger.clone();
         std::thread::spawn(move || {
             while let Ok(message) = transaction_recvr.recv() {
                 // Mostly from: rpc/src/transaction_status_service.rs
@@ -142,6 +146,16 @@ impl GeyserTransactionNotifyListener {
                                     &transaction_status_meta,
                                     &transaction,
                                 );
+                                if enable_rpc_transaction_history {
+                                    ledger.write_transaction(
+                                        *transaction.signature(),
+                                        slot,
+                                        transaction,
+                                        transaction_status_meta,
+                                        transaction_index,
+                                    )
+                                    .expect("Expect database write to succeed: TransactionStatus");
+                                }
                             }
                         }
                     }

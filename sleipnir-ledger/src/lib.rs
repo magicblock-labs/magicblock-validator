@@ -5,4 +5,4 @@ pub mod errors;
 mod metrics;
 mod store;
 
-pub use store::api::Ledger;
+pub use store::api::{Ledger, SignatureInfosForAddress};

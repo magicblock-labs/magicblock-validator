@@ -10,6 +10,7 @@ use crossbeam_channel::{unbounded, Receiver, Sender};
 use jsonrpc_core::{Error, ErrorCode, Metadata, Result, Value};
 use log::*;
 use sleipnir_bank::bank::Bank;
+use sleipnir_ledger::{Ledger, SignatureInfosForAddress};
 use sleipnir_rpc_client_api::{
     config::{
         RpcAccountInfoConfig, RpcContextConfig, RpcEncodingConfigWrapper,
@@ -19,7 +20,8 @@ use sleipnir_rpc_client_api::{
     custom_error::RpcCustomError,
     filter::RpcFilterType,
     response::{
-        OptionalContext, Response as RpcResponse, RpcBlockhash, RpcContactInfo,
+        OptionalContext, Response as RpcResponse, RpcBlockhash,
+        RpcConfirmedTransactionStatusWithSignature, RpcContactInfo,
         RpcKeyedAccount, RpcSupply,
     },
 };
@@ -33,8 +35,8 @@ use solana_sdk::{
     signature::{Keypair, Signature},
 };
 use solana_transaction_status::{
-    EncodedConfirmedTransactionWithStatusMeta, TransactionStatus,
-    UiTransactionEncoding,
+    EncodedConfirmedTransactionWithStatusMeta, TransactionConfirmationStatus,
+    TransactionStatus, UiTransactionEncoding,
 };
 
 use crate::{
@@ -77,9 +79,10 @@ pub struct JsonRpcConfig {
 #[derive(Clone)]
 pub struct JsonRpcRequestProcessor {
     bank: Arc<Bank>,
+    ledger: Arc<Ledger>,
+    pub(crate) health: Arc<RpcHealth>,
     pub(crate) config: JsonRpcConfig,
     transaction_sender: Arc<Mutex<Sender<TransactionInfo>>>,
-    pub(crate) health: Arc<RpcHealth>,
     pub(crate) genesis_hash: Hash,
     pub faucet_keypair: Arc<Keypair>,
 }
@@ -88,6 +91,7 @@ impl Metadata for JsonRpcRequestProcessor {}
 impl JsonRpcRequestProcessor {
     pub fn new(
         bank: Arc<Bank>,
+        ledger: Arc<Ledger>,
         health: Arc<RpcHealth>,
         faucet_keypair: Keypair,
         genesis_hash: Hash,
@@ -98,14 +102,71 @@ impl JsonRpcRequestProcessor {
         (
             Self {
                 bank,
+                ledger,
+                health,
                 config,
                 transaction_sender,
-                health,
                 faucet_keypair: Arc::new(faucet_keypair),
                 genesis_hash,
             },
             receiver,
         )
+    }
+
+    // -----------------
+    // Transaction Signatures
+    // -----------------
+    pub async fn get_signatures_for_address(
+        &self,
+        address: Pubkey,
+        before: Option<Signature>,
+        until: Option<Signature>,
+        limit: usize,
+        config: RpcContextConfig,
+    ) -> Result<Vec<RpcConfirmedTransactionStatusWithSignature>> {
+        let upper_limit = before;
+        let lower_limit = until;
+
+        let highest_slot = {
+            let min_context_slot = config.min_context_slot.unwrap_or_default();
+            let bank_slot = self.bank.slot();
+            if bank_slot < min_context_slot {
+                return Err(RpcCustomError::MinContextSlotNotReached {
+                    context_slot: bank_slot,
+                }
+                .into());
+            }
+            bank_slot
+        };
+
+        let SignatureInfosForAddress { infos, .. } = self
+            .ledger
+            .get_confirmed_signatures_for_address(
+                address,
+                highest_slot,
+                upper_limit,
+                lower_limit,
+                limit,
+            )
+            .map_err(|err| Error::invalid_params(format!("{err}")))?;
+
+        // NOTE: we don't support bigtable
+
+        let results = infos
+            .into_iter()
+            .map(|x| {
+                let mut item: RpcConfirmedTransactionStatusWithSignature =
+                    x.into();
+                // We don't have confirmation status, so we give it the most finalized one
+                item.confirmation_status =
+                    Some(TransactionConfirmationStatus::Finalized);
+                // We assume that the blocktime is always available instead of trying
+                // to resolve it via some bank forks (which we don't have)
+                item
+            })
+            .collect();
+
+        Ok(results)
     }
 
     // -----------------

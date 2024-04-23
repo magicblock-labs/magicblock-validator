@@ -12,20 +12,23 @@ use jsonrpc_http_server::{
 // NOTE: from rpc/src/rpc_service.rs
 use log::*;
 use sleipnir_bank::bank::Bank;
+use sleipnir_ledger::Ledger;
 use solana_perf::thread::renice_this_thread;
 use solana_sdk::{hash::Hash, signature::Keypair};
 
 use crate::{
     handlers::{
         accounts::AccountsDataImpl, accounts_scan::AccountsScanImpl,
-        bank_data::BankDataImpl, full::FullImpl, minimal::MinimalImpl,
+        bank_data::BankDataImpl, deprecated::DeprecatedImpl, full::FullImpl,
+        minimal::MinimalImpl,
     },
     json_rpc_request_processor::{JsonRpcConfig, JsonRpcRequestProcessor},
     rpc_health::RpcHealth,
     rpc_request_middleware::RpcRequestMiddleware,
     traits::{
         rpc_accounts::AccountsData, rpc_accounts_scan::AccountsScan,
-        rpc_bank_data::BankData, rpc_full::Full, rpc_minimal::Minimal,
+        rpc_bank_data::BankData, rpc_deprecated::Deprecated, rpc_full::Full,
+        rpc_minimal::Minimal,
     },
     utils::MAX_REQUEST_BODY_SIZE,
 };
@@ -39,6 +42,7 @@ impl JsonRpcService {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
         bank: Arc<Bank>,
+        ledger: Arc<Ledger>,
         faucet_keypair: Keypair,
         genesis_hash: Hash,
         config: JsonRpcConfig,
@@ -60,6 +64,7 @@ impl JsonRpcService {
 
         let (request_processor, _receiver) = JsonRpcRequestProcessor::new(
             bank,
+            ledger,
             health.clone(),
             faucet_keypair,
             genesis_hash,
@@ -79,6 +84,7 @@ impl JsonRpcService {
                 io.extend_with(FullImpl.to_delegate());
                 io.extend_with(BankDataImpl.to_delegate());
                 io.extend_with(MinimalImpl.to_delegate());
+                io.extend_with(DeprecatedImpl.to_delegate());
 
                 let request_middleware = RpcRequestMiddleware::new(health.clone());
 
