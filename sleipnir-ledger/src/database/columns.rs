@@ -91,7 +91,6 @@ pub fn columns() -> Vec<&'static str> {
         TransactionStatusIndex::NAME,
         Blocktime::NAME,
         Transaction::NAME,
-        SlotSignatures::NAME,
     ]
 }
 
