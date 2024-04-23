@@ -4,3 +4,5 @@ mod database;
 pub mod errors;
 mod metrics;
 mod store;
+
+pub use store::api::Ledger;

@@ -44,7 +44,7 @@ pub struct SignatureInfosForAddress {
     pub found_lower: bool,
 }
 
-pub struct Store {
+pub struct Ledger {
     ledger_path: PathBuf,
     db: Arc<Database>,
 
@@ -61,7 +61,7 @@ pub struct Store {
     rpc_api_metrics: LedgerRpcApiMetrics,
 }
 
-impl Store {
+impl Ledger {
     pub fn db(self) -> Arc<Database> {
         self.db
     }
@@ -91,7 +91,7 @@ impl Store {
         options: LedgerOptions,
     ) -> std::result::Result<Self, LedgerError> {
         fs::create_dir_all(ledger_path)?;
-        let blockstore_path = ledger_path.join(
+        let ledger_path = ledger_path.join(
             options
                 .column_options
                 .shred_storage_type
@@ -100,9 +100,9 @@ impl Store {
         adjust_ulimit_nofile(options.enforce_ulimit_nofile)?;
 
         // Open the database
-        let mut measure = Measure::start("blockstore open");
-        info!("Opening blockstore at {:?}", blockstore_path);
-        let db = Database::open(&blockstore_path, options)?;
+        let mut measure = Measure::start("ledger open");
+        info!("Opening ledger at {:?}", ledger_path);
+        let db = Database::open(&ledger_path, options)?;
 
         let transaction_status_cf = db.column();
         let address_signatures_cf = db.column();
@@ -116,9 +116,9 @@ impl Store {
         // NOTE: left out max root
 
         measure.stop();
-        info!("Opening blockstore done; {measure}");
+        info!("Opening ledger done; {measure}");
 
-        let blockstore = Store {
+        let ledger = Ledger {
             ledger_path: ledger_path.to_path_buf(),
             db,
 
@@ -135,10 +135,10 @@ impl Store {
             rpc_api_metrics: LedgerRpcApiMetrics::default(),
         };
 
-        blockstore.cleanup_old_entries()?;
-        blockstore.update_highest_primary_index_slot()?;
+        ledger.cleanup_old_entries()?;
+        ledger.update_highest_primary_index_slot()?;
 
-        Ok(blockstore)
+        Ok(ledger)
     }
 
     /// Collects and reports [`BlockstoreRocksDbColumnFamilyMetrics`] for the
@@ -972,7 +972,7 @@ mod tests {
         init_logger!();
 
         let ledger_path = get_tmp_ledger_path_auto_delete!();
-        let store = Store::open(ledger_path.path()).unwrap();
+        let store = Ledger::open(ledger_path.path()).unwrap();
 
         let slot_0 = 5;
         let slot_1 = slot_0 + 1;
@@ -992,7 +992,7 @@ mod tests {
         init_logger!();
 
         let ledger_path = get_tmp_ledger_path_auto_delete!();
-        let store = Store::open(ledger_path.path()).unwrap();
+        let store = Ledger::open(ledger_path.path()).unwrap();
 
         // First Case
         {
@@ -1041,7 +1041,7 @@ mod tests {
         init_logger!();
 
         let ledger_path = get_tmp_ledger_path_auto_delete!();
-        let store = Store::open(ledger_path.path()).unwrap();
+        let store = Ledger::open(ledger_path.path()).unwrap();
 
         let (sig_uno, slot_uno) = (Signature::default(), 10);
         let (sig_dos, slot_dos) = (Signature::from([2u8; 64]), 20);
@@ -1102,7 +1102,7 @@ mod tests {
         init_logger!();
 
         let ledger_path = get_tmp_ledger_path_auto_delete!();
-        let store = Store::open(ledger_path.path()).unwrap();
+        let store = Ledger::open(ledger_path.path()).unwrap();
 
         let (sig_uno, slot_uno, block_time_uno) =
             (Signature::default(), 10, 100);
@@ -1182,7 +1182,7 @@ mod tests {
         init_logger!();
 
         let ledger_path = get_tmp_ledger_path_auto_delete!();
-        let store = Store::open(ledger_path.path()).unwrap();
+        let store = Ledger::open(ledger_path.path()).unwrap();
 
         // 1. Add some transaction statuses
         let (signature_uno, slot_uno) = (Signature::new_unique(), 10);
@@ -1513,7 +1513,7 @@ mod tests {
         init_logger!();
 
         let ledger_path = get_tmp_ledger_path_auto_delete!();
-        let store = Store::open(ledger_path.path()).unwrap();
+        let store = Ledger::open(ledger_path.path()).unwrap();
 
         // Add the signatures such that we get the following all include the same address
         // for simplicity:

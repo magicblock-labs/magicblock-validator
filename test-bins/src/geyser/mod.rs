@@ -37,6 +37,7 @@ pub async fn init_geyser_service() -> Result<
 pub struct GeyserTransactionNotifyListener {
     transaction_notifier: TransactionNotifierArc,
     transaction_recvr: Receiver<TransactionStatusMessage>,
+    // ledger: Arc<Ledger>,
 }
 
 impl GeyserTransactionNotifyListener {

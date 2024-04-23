@@ -94,6 +94,7 @@ serde_derive = "1.0.103"
 serde_json = "1.0.113"
 sleipnir-bank = { path = "./sleipnir-bank" }
 sleipnir-geyser-plugin = { path = "./sleipnir-geyser-plugin" }
+sleipnir-ledger = { path = "./sleipnir-ledger" }
 sleipnir-messaging = { path = "./sleipnir-messaging" }
 sleipnir-mutator = { path = "./sleipnir-mutator" }
 sleipnir-processor = { path = "./sleipnir-processor" }
