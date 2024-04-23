@@ -115,6 +115,7 @@ async fn main() {
             }),
             rpc_socket_addr: Some(rpc_socket_addr),
             pubsub_socket_addr: Some(*pubsub_config.socket()),
+            enable_rpc_transaction_history: true,
 
             ..Default::default()
         };

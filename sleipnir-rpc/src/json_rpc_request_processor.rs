@@ -8,7 +8,6 @@ use std::{
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use jsonrpc_core::{Error, ErrorCode, Metadata, Result, Value};
-use log::*;
 use sleipnir_bank::bank::Bank;
 use sleipnir_ledger::{Ledger, SignatureInfosForAddress};
 use sleipnir_rpc_client_api::{
@@ -487,20 +486,35 @@ impl JsonRpcRequestProcessor {
 
     pub async fn get_transaction(
         &self,
-        _signature: Signature,
+        signature: Signature,
         config: Option<RpcEncodingConfigWrapper<RpcTransactionConfig>>,
     ) -> Result<Option<EncodedConfirmedTransactionWithStatusMeta>> {
         let config = config
             .map(|config| config.convert_to_current())
             .unwrap_or_default();
-        let _encoding = config.encoding.unwrap_or(UiTransactionEncoding::Json);
-        // Omit commitment checks
+        let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Json);
+        let max_supported_transaction_version =
+            config.max_supported_transaction_version;
 
-        // TODO(thlorenz): transactions are retrieved either from the blockstore or bigtable ledger
-        // storage. We have none of those currently, thus return nothing for now
-        // See: rpc/src/rpc.rs :1479
+        // NOTE: Omitting commitment check
 
-        warn!("get_transaction not yet supported");
+        if self.config.enable_rpc_transaction_history {
+            let highest_confirmed_slot = self.bank.slot();
+            let result = self
+                .ledger
+                .get_complete_transaction(signature, highest_confirmed_slot);
+
+            // NOTE: not supporting bigtable
+            if let Some(tx) = result.ok().flatten() {
+                // NOTE: we assume to always have a blocktime
+                let encoded = tx
+                    .encode(encoding, max_supported_transaction_version)
+                    .map_err(RpcCustomError::from)?;
+                return Ok(Some(encoded));
+            }
+        } else {
+            return Err(RpcCustomError::TransactionHistoryNotAvailable.into());
+        }
         Ok(None)
     }
 

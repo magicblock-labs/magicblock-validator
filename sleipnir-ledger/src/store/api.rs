@@ -342,7 +342,7 @@ impl Ledger {
         let (found_upper, include_upper, newest_slot, upper_slot) =
             match upper_limit_signature {
                 Some(sig) => {
-                    let res = self.get_transaction_status(sig, 0)?;
+                    let res = self.get_transaction_status(sig, highest_slot)?;
                     match res {
                         Some((slot, _meta)) => {
                             // Ignore all transactions that happened at the same, or higher slot as the signature
@@ -369,7 +369,7 @@ impl Ledger {
         let (found_lower, include_lower, oldest_slot, lower_slot) =
             match lower_limit_signature {
                 Some(sig) => {
-                    let res = self.get_transaction_status(sig, 0)?;
+                    let res = self.get_transaction_status(sig, highest_slot)?;
                     match res {
                         Some((slot, _meta)) => {
                             // Ignore all transactions that happened at the same, or lower slot as the signature
@@ -712,7 +712,7 @@ impl Ledger {
     /// Returns a transaction status
     /// * `signature` - Signature of the transaction
     /// * `min_slot` - Lowest slot to consider for the search, i.e. the transaction
-    /// status was added at or after this slot (same as minContextSlot)
+    /// status was added at or before this slot (same as minContextSlot)
     pub fn get_transaction_status(
         &self,
         signature: Signature,
@@ -725,17 +725,16 @@ impl Ledger {
                 .num_get_transaction_status
                 .fetch_add(1, Ordering::Relaxed);
 
-            let start_slot = min_slot.max(lowest_available_slot);
             let mut iterator = self
                 .transaction_status_cf
                 .iter_current_index_filtered(IteratorMode::From(
-                    (signature, start_slot),
+                    (signature, lowest_available_slot),
                     IteratorDirection::Forward,
                 ))?;
 
             let mut result = None;
             for ((stat_signature, slot), _) in iterator {
-                if stat_signature == signature {
+                if stat_signature == signature && slot <= min_slot {
                     result = self
                         .transaction_status_cf
                         .get_protobuf((signature, slot))?
