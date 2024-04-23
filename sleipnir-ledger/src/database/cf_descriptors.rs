@@ -29,6 +29,7 @@ pub fn cf_descriptors(
     let mut cf_descriptors = vec![
         new_cf_descriptor::<TransactionStatus>(options),
         new_cf_descriptor::<AddressSignatures>(options),
+        new_cf_descriptor::<SlotSignatures>(options),
         new_cf_descriptor::<TransactionStatusIndex>(options),
         new_cf_descriptor::<Blocktime>(options),
         new_cf_descriptor::<Transaction>(options),

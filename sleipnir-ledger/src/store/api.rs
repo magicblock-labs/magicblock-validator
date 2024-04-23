@@ -40,8 +40,8 @@ use crate::{
 #[derive(Default, Debug)]
 pub struct SignatureInfosForAddress {
     pub infos: Vec<ConfirmedTransactionStatusWithSignature>,
-    pub found_before: bool,
-    pub found_until: bool,
+    pub found_upper: bool,
+    pub found_lower: bool,
 }
 
 pub struct Store {
@@ -50,6 +50,7 @@ pub struct Store {
 
     transaction_status_cf: LedgerColumn<cf::TransactionStatus>,
     address_signatures_cf: LedgerColumn<cf::AddressSignatures>,
+    slot_signatures_cf: LedgerColumn<cf::SlotSignatures>,
     transaction_status_index_cf: LedgerColumn<cf::TransactionStatusIndex>,
     blocktime_cf: LedgerColumn<cf::Blocktime>,
     transaction_cf: LedgerColumn<cf::Transaction>,
@@ -105,6 +106,7 @@ impl Store {
 
         let transaction_status_cf = db.column();
         let address_signatures_cf = db.column();
+        let slot_signatures_cf = db.column();
         let transaction_status_index_cf = db.column();
         let blocktime_cf = db.column();
         let transaction_cf = db.column();
@@ -122,6 +124,7 @@ impl Store {
 
             transaction_status_cf,
             address_signatures_cf,
+            slot_signatures_cf,
             transaction_status_index_cf,
             blocktime_cf,
             transaction_cf,
@@ -145,6 +148,7 @@ impl Store {
     pub fn submit_rocksdb_cf_metrics_for_all_cfs(&self) {
         self.transaction_status_cf.submit_rocksdb_cf_metrics();
         self.address_signatures_cf.submit_rocksdb_cf_metrics();
+        self.slot_signatures_cf.submit_rocksdb_cf_metrics();
         self.transaction_status_index_cf.submit_rocksdb_cf_metrics();
         self.blocktime_cf.submit_rocksdb_cf_metrics();
         self.transaction_cf.submit_rocksdb_cf_metrics();
@@ -280,18 +284,41 @@ impl Store {
     ///                    that haven't reached a specific commitment level yet.
     ///                    For us it will be the current slot in most cases.
     ///                    The slot determined for `before` overrides this when provided
-    /// - *`before`* - start searching backwards from this transaction signature
-    ///                If not provided the search starts from the top of the
-    ///                highest_slot
-    /// - *`until`* -  search until this transaction signature, if found before
-    ///                limit reached
+    /// - *`upper_limit_signature`* - start searching backwards from this transaction
+    ///     signature. If not provided the search starts from the top of the highest_slot
+    /// - *`lower_limit_signature`* - search backwards until this transaction signature,
+    ///     if found before limit is reached
     /// - *`limit`* -  maximum number of signatures to return (max: 1000)
+    ///
+    /// ## Example
+    ///
+    /// Specifying the following:
+    ///
+    ///  ```rust
+    ///  let pubkey = "<my address>";
+    ///  let highest_slot = 0;
+    ///  let upper_limit_signature = Some(sig_upper);;
+    ///  let lower_limit_signature = Some(sig_lower);
+    ///  let limit = 100;
+    /// ```
+    ///
+    /// will find up to 100 signatures that are between upper and lower limit signatures
+    /// in this order which is from most recent to oldest:
+    ///
+    /// ```text
+    /// [
+    ///   <sigs in same slot as upper_limit_signature with lower transaction index>,
+    ///   <sigs with slot_lower_limit < slot < slot_upper_limit>
+    ///   <sigs in same slot as lower_limit_signature with higher transaction index>
+    /// ]
+    /// ```
+    ///
     pub fn get_confirmed_signatures_for_address(
         &self,
         pubkey: Pubkey,
         highest_slot: Slot, // highest_confirmed_slot
-        before: Option<Signature>,
-        until: Option<Signature>,
+        upper_limit_signature: Option<Signature>,
+        lower_limit_signature: Option<Signature>,
         limit: usize,
     ) -> LedgerResult<SignatureInfosForAddress> {
         self.rpc_api_metrics
@@ -304,101 +331,219 @@ impl Store {
         // deal with that since we don't have forks and simple consecutive slots
 
         // We also changed the approach to filter out the transactions we want
-        // (in between before and until)
+        // (in between upper and lower limit)
+        // We do this in the following steps assuming we have upper and lower limits:
 
-        let mut matching = Vec::new();
-        let (found_before, start_slot) = match before {
-            Some(sig) => {
-                let res = self.get_transaction_status(sig, 0)?;
-                match res {
-                    // TODO: add same slot signaturess for the address that happened before the sig
-                    Some((slot, _meta)) => {
-                        // Ignore all transactions that happened at the same, or higher slot as the signature
-                        let start = slot.saturating_sub(1);
-                        // Ensure we respect the highest_slot start limit as well
-                        let start = start.min(highest_slot);
-                        (true, start)
+        // 1. Determine upper limits
+        //
+        // newest_slot: the slot where we should start searching downwards from inclusive
+        // upper_slot: is the slot from which we should include transactions with lower
+        //             tx_index than the upper_limit_signature
+        let (found_upper, include_upper, newest_slot, upper_slot) =
+            match upper_limit_signature {
+                Some(sig) => {
+                    let res = self.get_transaction_status(sig, 0)?;
+                    match res {
+                        Some((slot, _meta)) => {
+                            // Ignore all transactions that happened at the same, or higher slot as the signature
+                            let start = slot.saturating_sub(1);
+                            // 1. Upper limit slot > highest slot -> don't include it
+                            // 2. Upper limit slot <= highest slot  -> include it
+                            let include_slot = slot <= highest_slot;
+
+                            // Ensure we respect the highest_slot start limit as well
+                            let start = start.min(highest_slot);
+                            (true, include_slot, start, slot)
+                        }
+                        None => (false, false, highest_slot, 0),
                     }
-                    None => (false, highest_slot),
                 }
-            }
-            None => (false, highest_slot),
-        };
+                None => (false, false, highest_slot, 0),
+            };
 
-        let (found_until, end_slot) = match until {
-            Some(sig) => {
-                let res = self.get_transaction_status(sig, 0)?;
-                match res {
-                    // TODO: add same slot signaturess for the address that happened after the sig
-                    Some((slot, _meta)) => {
-                        // Ignore all transactions that happened at the same, or lower slot as the signature
-                        let end = slot.saturating_add(1);
-                        (true, end)
+        // 2. Determine lower limits
+        //
+        // oldest_slot: the slot where we should stop searching downwards inclusive
+        // lower_slot: is the slot from which we should include transactions with higher
+        //             tx_index than the lower_limit_signature
+        let (found_lower, include_lower, oldest_slot, lower_slot) =
+            match lower_limit_signature {
+                Some(sig) => {
+                    let res = self.get_transaction_status(sig, 0)?;
+                    match res {
+                        Some((slot, _meta)) => {
+                            // Ignore all transactions that happened at the same, or lower slot as the signature
+                            let end = slot.saturating_add(1);
+
+                            // 1. Lower limit slot > highest slot -> don't include it
+                            // 2. Lower limit slot <= highest slot  -> include it
+                            let include_slot = slot <= highest_slot;
+                            (true, include_slot, end, slot)
+                        }
+                        None => (false, false, 0, 0),
                     }
-                    None => (false, 0),
                 }
-            }
-            None => (false, 0),
-        };
-
+                None => (false, false, 0, 0),
+            };
+        #[cfg(test)]
         debug!(
-            "Reverse searching ({}, {} -> {}, {})",
-            pubkey, start_slot, end_slot, 0,
+            "lower: {:?}, upper: {:?} (found, include, newest/oldest slot, slot)",
+            (found_upper, include_upper, newest_slot, upper_slot),
+            (found_lower, include_lower, oldest_slot, lower_slot)
         );
 
-        {
+        // 3. Find all matching (slot, signature) pairs sorted newest to oldest
+        let matching = {
+            let mut matching = Vec::new();
             let (lock, _) = self.ensure_lowest_cleanup_slot();
-            let index_iterator = self
-                .address_signatures_cf
-                .iter_current_index_filtered(IteratorMode::From(
-                    // The reverse range is not inclusive of the start_slot itself it seems
-                    (pubkey, start_slot + 1, 0, Signature::default()),
-                    IteratorDirection::Reverse,
-                ))?;
 
-            for (
-                (address, transaction_slot, _transaction_index, signature),
-                _,
-            ) in index_iterator
-            {
-                // Bail out if we reached the max number of signatures to collect
-                if matching.len() >= limit {
-                    break;
+            // The newest signatures are inside the slot that contains the upper
+            // limit signature if it was provided.
+            // We include the ones with lower tx_index than that signature.
+            let mut passed_signature = false;
+            if found_upper && include_upper {
+                // SAFETY: found_upper cannot be true if this is None
+                let upper_signature = upper_limit_signature.unwrap();
+
+                let index_iterator = self
+                    .slot_signatures_cf
+                    .iter_current_index_filtered(IteratorMode::From(
+                        (upper_slot, u32::MAX),
+                        IteratorDirection::Reverse,
+                    ))?;
+                for ((tx_slot, tx_idx), tx_signature) in index_iterator {
+                    // Bail out if we reached the max number of signatures to collect
+                    if matching.len() >= limit {
+                        break;
+                    }
+                    if tx_slot != upper_slot {
+                        break;
+                    }
+
+                    let tx_signature = Signature::try_from(&*tx_signature)?;
+                    if tx_signature == upper_signature {
+                        passed_signature = true;
+                        continue;
+                    }
+
+                    if passed_signature {
+                        #[cfg(test)]
+                        debug!(
+                            "upper - signature: {}, slot: {}+{}",
+                            crate::store::utils::short_signature(&tx_signature),
+                            tx_slot,
+                            tx_idx,
+                        );
+                        matching.push((tx_slot, tx_signature));
+                    }
                 }
+            }
 
-                // Bail out if we reached the iterator space that doesn't match the address
-                if address != pubkey {
-                    break;
-                }
+            // Next we add the signatures that are above the slot with the lowest signature
+            // and below the slot with the highest signature.
+            // If upper limit signature was not provided then the upper slot is the highest_slot
+            // If lower limit signature was not provided then we search until we found enough
+            // signatures to match the `limit` or run out of signatures entirely.
 
-                // Bail out once we reached the lower end of the range for matching addresses
-                if transaction_slot < end_slot {
-                    break;
-                }
-
-                // The below only happens once we leave the range of our pubkey
-                if transaction_slot > start_slot {
-                    debug!(
-                        "! signature: {}, slot: {} > {}, address: {}",
-                        crate::store::utils::short_signature(&signature),
-                        transaction_slot,
-                        start_slot,
-                        address
-                    );
-                    continue;
-                }
-
-                matching.push((transaction_slot, signature));
-
+            // Don't run this if the upper/lower limits already cover all slots
+            if newest_slot >= oldest_slot {
+                #[cfg(test)]
                 debug!(
-                    "signature: {}, slot: {:?}, address: {}",
+                    "Reverse searching ({}, {} -> {}, {})",
+                    pubkey, newest_slot, oldest_slot, 0,
+                );
+
+                let index_iterator = self
+                    .address_signatures_cf
+                    .iter_current_index_filtered(IteratorMode::From(
+                        // The reverse range is not inclusive of the start_slot itself it seems
+                        (pubkey, newest_slot, u32::MAX, Signature::default()),
+                        IteratorDirection::Reverse,
+                    ))?;
+
+                for ((address, tx_slot, _tx_idx, signature), _) in
+                    index_iterator
+                {
+                    // Bail out if we reached the max number of signatures to collect
+                    if matching.len() >= limit {
+                        break;
+                    }
+
+                    // Bail out if we reached the iterator space that doesn't match the address
+                    if address != pubkey {
+                        break;
+                    }
+
+                    // Bail out once we reached the lower end of the range for matching addresses
+                    if tx_slot < oldest_slot {
+                        break;
+                    }
+
+                    // The below only happens once we leave the range of our pubkey
+                    if tx_slot > newest_slot {
+                        #[cfg(test)]
+                        debug!(
+                            "! signature: {}, slot: {} > {}, address: {}",
+                            crate::store::utils::short_signature(&signature),
+                            tx_slot,
+                            newest_slot,
+                            address
+                        );
+                        continue;
+                    }
+
+                    #[cfg(test)]
+                    debug!(
+                    "in between - signature: {}, slot: {} > {}, address: {}",
                     crate::store::utils::short_signature(&signature),
-                    transaction_slot,
+                    tx_slot,
+                    newest_slot,
                     address
                 );
+                    matching.push((tx_slot, signature));
+                }
             }
-        }
 
+            // The oldest signatures are inside the slot that contains the lower
+            // limit signature if it was provided
+            if found_lower && include_lower {
+                // SAFETY: found_lower cannot be true if this is None
+                let lower_signature = lower_limit_signature.unwrap();
+
+                let index_iterator = self
+                    .slot_signatures_cf
+                    .iter_current_index_filtered(IteratorMode::From(
+                        (lower_slot, u32::MAX),
+                        IteratorDirection::Reverse,
+                    ))?;
+                for ((tx_slot, tx_idx), tx_signature) in index_iterator {
+                    // Bail out if we reached the max number of signatures to collect
+                    if matching.len() >= limit {
+                        break;
+                    }
+                    if tx_slot != lower_slot {
+                        break;
+                    }
+
+                    let tx_signature = Signature::try_from(&*tx_signature)?;
+                    if tx_signature == lower_signature {
+                        break;
+                    }
+
+                    debug!(
+                        "lower - signature: {}, slot: {}+{}",
+                        crate::store::utils::short_signature(&tx_signature),
+                        tx_slot,
+                        tx_idx,
+                    );
+                    matching.push((tx_slot, tx_signature));
+                }
+            }
+
+            matching
+        };
+
+        // 4. Resolve blocktimes for each slot we found signatures for
         let mut blocktimes = HashMap::<Slot, UnixTimestamp>::new();
         for (slot, signature) in &matching {
             if blocktimes.contains_key(slot) {
@@ -409,6 +554,7 @@ impl Store {
             }
         }
 
+        // 5. Build proper Status Infos from and return them
         let mut infos = Vec::<ConfirmedTransactionStatusWithSignature>::new();
         for (slot, signature) in matching {
             let status = self
@@ -428,8 +574,8 @@ impl Store {
 
         Ok(SignatureInfosForAddress {
             infos,
-            found_before,
-            found_until,
+            found_upper,
+            found_lower,
         })
     }
 
@@ -636,11 +782,6 @@ impl Store {
             let mut result = None;
             for ((stat_signature, slot), _) in iterator {
                 if stat_signature == signature {
-                    debug!(
-                        "{} == {}",
-                        crate::store::utils::short_signature(&stat_signature),
-                        crate::store::utils::short_signature(&signature)
-                    );
                     result = self
                         .transaction_status_cf
                         .get_protobuf((signature, slot))?
@@ -650,11 +791,6 @@ impl Store {
                         });
                     break;
                 }
-                debug!(
-                    "{} != {}",
-                    crate::store::utils::short_signature(&stat_signature),
-                    crate::store::utils::short_signature(&signature)
-                );
             }
             result
         };
@@ -693,6 +829,8 @@ impl Store {
                 &AddressSignatureMeta { writeable: false },
             )?;
         }
+        self.slot_signatures_cf
+            .put((slot, transaction_index), &signature)?;
 
         let status = status.into();
         self.transaction_status_cf
@@ -1089,15 +1227,13 @@ mod tests {
     }
 
     #[test]
-    fn test_find_address_signatures() {
+    fn test_find_address_signatures_no_intra_slot_limits() {
         init_logger!();
 
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Store::open(ledger_path.path()).unwrap();
 
         // 1. Add some transaction statuses
-        // All addresses from a previous status are included in the next one to test
-        // addresses that are part of multiple transactions
         let (signature_uno, slot_uno) = (Signature::new_unique(), 10);
         let (read_uno, write_uno) = {
             let meta = create_transaction_status_meta(5);
@@ -1287,7 +1423,7 @@ mod tests {
                 1000,
             )
             .unwrap();
-        assert!(!res.found_before);
+        assert!(!res.found_upper);
         assert_eq!(res.infos.len(), 1);
         assert_eq!(
             res.infos[0],
@@ -1320,7 +1456,7 @@ mod tests {
                     .unwrap()
                     .infos,
             );
-            assert!(!res.found_before);
+            assert!(!res.found_upper);
             assert_eq!(
                 sigs,
                 vec![
@@ -1344,7 +1480,7 @@ mod tests {
                     1000,
                 )
                 .unwrap();
-            assert!(res.found_before);
+            assert!(res.found_upper);
             assert_eq!(
                 extract(res.infos.clone()),
                 vec![(slot_dos, signature_dos), (slot_uno, signature_uno),]
@@ -1360,7 +1496,7 @@ mod tests {
                     1000,
                 )
                 .unwrap();
-            assert!(res.found_before);
+            assert!(res.found_upper);
             assert_eq!(
                 extract(res.infos.clone()),
                 vec![
@@ -1383,7 +1519,7 @@ mod tests {
                     1000,
                 )
                 .unwrap();
-            assert!(res.found_until);
+            assert!(res.found_lower);
 
             assert_eq!(
                 extract(res.infos.clone()),
@@ -1400,7 +1536,7 @@ mod tests {
                     1000,
                 )
                 .unwrap();
-            assert!(res.found_until);
+            assert!(res.found_lower);
 
             assert_eq!(
                 extract(res.infos.clone()),
@@ -1418,8 +1554,8 @@ mod tests {
                     1000,
                 )
                 .unwrap();
-            assert!(res.found_before);
-            assert!(res.found_until);
+            assert!(res.found_upper);
+            assert!(res.found_lower);
 
             assert_eq!(
                 extract(res.infos.clone()),
@@ -1438,12 +1574,255 @@ mod tests {
                     1000,
                 )
                 .unwrap();
-            assert!(res.found_before);
+            assert!(res.found_upper);
 
             assert_eq!(
                 extract(res.infos.clone()),
                 vec![(slot_dos, signature_dos), (slot_uno, signature_uno),]
             );
         }
+    }
+
+    #[test]
+    fn test_find_address_signatures_intra_slot_limits() {
+        init_logger!();
+
+        let ledger_path = get_tmp_ledger_path_auto_delete!();
+        let store = Store::open(ledger_path.path()).unwrap();
+
+        // Add the signatures such that we get the following all include the same address
+        // for simplicity:
+        //
+        // Slot1: sig1, sig2, sig3
+        // Slot2: sig4, sig5
+        // Slot3: sig6, sig7, sig8
+
+        // 1. Add transaction statuses
+        let (sig1, slot1) = (Signature::new_unique(), 10);
+        let sig2 = Signature::new_unique();
+        let sig3 = Signature::new_unique();
+
+        let (sig4, slot2) = (Signature::new_unique(), 11);
+        let sig5 = Signature::new_unique();
+
+        let (sig6, slot3) = (Signature::new_unique(), 12);
+        let sig7 = Signature::new_unique();
+        let sig8 = Signature::new_unique();
+
+        let mut current_slot = 0;
+        let mut tx_idx = 0;
+        let read_uno = {
+            let meta = create_transaction_status_meta(5);
+            let read_uno = meta.loaded_addresses.readonly[0];
+            for (slot, signature) in &[
+                (slot1, sig1),
+                (slot1, sig2),
+                (slot1, sig3),
+                (slot2, sig4),
+                (slot2, sig5),
+                (slot3, sig6),
+                (slot3, sig7),
+                (slot3, sig8),
+            ] {
+                if *slot != current_slot {
+                    current_slot = *slot;
+                    tx_idx = 0;
+                }
+                assert!(store
+                    .write_transaction_status(
+                        *slot,
+                        *signature,
+                        meta.clone(),
+                        tx_idx
+                    )
+                    .is_ok());
+                tx_idx += 1;
+            }
+
+            assert!(store.cache_block_time(slot1, 1).is_ok());
+            assert!(store.cache_block_time(slot2, 2).is_ok());
+            assert!(store.cache_block_time(slot3, 3).is_ok());
+            read_uno
+        };
+
+        fn extract(
+            infos: Vec<ConfirmedTransactionStatusWithSignature>,
+        ) -> Vec<(Slot, Signature)> {
+            infos.into_iter().map(|x| (x.slot, x.signature)).collect()
+        }
+
+        // Find anything older than sig3 (2, 1) in same slot
+        let res = store
+            .get_confirmed_signatures_for_address(
+                read_uno,
+                slot1,
+                Some(sig3),
+                None,
+                1000,
+            )
+            .unwrap();
+        assert_eq!(
+            extract(res.infos.clone()),
+            vec![(slot1, sig2), (slot1, sig1),]
+        );
+        // Find anything older than sig2 (1) in same slot
+        let res = store
+            .get_confirmed_signatures_for_address(
+                read_uno,
+                slot1,
+                Some(sig2),
+                None,
+                1000,
+            )
+            .unwrap();
+        assert_eq!(extract(res.infos.clone()), vec![(slot1, sig1),]);
+
+        // Find anything newer than sig6 (8, 7) in same slot
+        let res = store
+            .get_confirmed_signatures_for_address(
+                read_uno,
+                slot3,
+                None,
+                Some(sig6),
+                1000,
+            )
+            .unwrap();
+        assert_eq!(
+            extract(res.infos.clone()),
+            vec![(slot3, sig8), (slot3, sig7),]
+        );
+
+        // Find anything newer than sig7 (8) in same slot
+        let res = store
+            .get_confirmed_signatures_for_address(
+                read_uno,
+                slot3,
+                None,
+                Some(sig7),
+                1000,
+            )
+            .unwrap();
+        assert_eq!(extract(res.infos.clone()), vec![(slot3, sig8)]);
+
+        // Find anything newer than sig4 across slots
+        let res = store
+            .get_confirmed_signatures_for_address(
+                read_uno,
+                slot3,
+                None,
+                Some(sig4),
+                1000,
+            )
+            .unwrap();
+        assert_eq!(
+            extract(res.infos.clone()),
+            vec![(slot3, sig8), (slot3, sig7), (slot3, sig6), (slot2, sig5),]
+        );
+
+        // Find anyting newer than sig4 across slots, however highest_slot
+        // excludes any of them
+        let res = store
+            .get_confirmed_signatures_for_address(
+                read_uno,
+                slot1,
+                None,
+                Some(sig4),
+                1000,
+            )
+            .unwrap();
+        assert_eq!(extract(res.infos.clone()), vec![]);
+
+        // Find anything older than sig5 across slots
+        let res = store
+            .get_confirmed_signatures_for_address(
+                read_uno,
+                slot3,
+                Some(sig5),
+                None,
+                1000,
+            )
+            .unwrap();
+        assert_eq!(
+            extract(res.infos.clone()),
+            vec![(slot2, sig4), (slot1, sig3), (slot1, sig2), (slot1, sig1),]
+        );
+
+        // Find anything older than sig5 across slots, however highest
+        // slot exludes slot2
+        let res = store
+            .get_confirmed_signatures_for_address(
+                read_uno,
+                slot1,
+                Some(sig5),
+                None,
+                1000,
+            )
+            .unwrap();
+        assert_eq!(
+            extract(res.infos.clone()),
+            vec![(slot1, sig3), (slot1, sig2), (slot1, sig1),]
+        );
+
+        // Find anything in between sig2 and sig7
+        let res = store
+            .get_confirmed_signatures_for_address(
+                read_uno,
+                slot3,
+                Some(sig7),
+                Some(sig2),
+                1000,
+            )
+            .unwrap();
+        assert_eq!(
+            extract(res.infos.clone()),
+            vec![(slot3, sig6), (slot2, sig5), (slot2, sig4), (slot1, sig3),]
+        );
+
+        // Find anything in between sig2 and sig7, but highest slot
+        // exlcudes slot3
+        let res = store
+            .get_confirmed_signatures_for_address(
+                read_uno,
+                slot2,
+                Some(sig7),
+                Some(sig2),
+                1000,
+            )
+            .unwrap();
+        assert_eq!(
+            extract(res.infos.clone()),
+            vec![(slot2, sig5), (slot2, sig4), (slot1, sig3),]
+        );
+
+        // Find anything in between sig2 and sig7, but limit is 2
+        let res = store
+            .get_confirmed_signatures_for_address(
+                read_uno,
+                slot3,
+                Some(sig7),
+                Some(sig2),
+                2,
+            )
+            .unwrap();
+        assert_eq!(
+            extract(res.infos.clone()),
+            vec![(slot3, sig6), (slot2, sig5),]
+        );
+
+        // Find anything in between sig2 and sig7, but limit is 2 and
+        // highest_slot forces us to start at slot2
+        let res = store
+            .get_confirmed_signatures_for_address(
+                read_uno,
+                slot2,
+                Some(sig7),
+                Some(sig2),
+                2,
+            )
+            .unwrap();
+        assert_eq!(
+            extract(res.infos.clone()),
+            vec![(slot2, sig5), (slot2, sig4)]
+        );
     }
 }

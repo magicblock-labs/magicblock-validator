@@ -26,4 +26,6 @@ pub enum LedgerError {
     TransactionConversionError(String),
     #[error("slot cleaned up")]
     SlotCleanedUp,
+    #[error("try from slice error: {0}")]
+    TryFromSliceError(#[from] std::array::TryFromSliceError),
 }
