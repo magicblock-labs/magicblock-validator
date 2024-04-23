@@ -579,58 +579,6 @@ impl Store {
         })
     }
 
-    // Returns all signatures for an address in a particular slot, regardless of whether that slot
-    // has been rooted. The transactions will be ordered by their occurrence in the block
-    fn find_address_signatures_for_slot(
-        &self,
-        pubkey: Pubkey,
-        slot: Slot,
-    ) -> LedgerResult<Vec<(Slot, Signature)>> {
-        let (lock, lowest_available_slot) = self.ensure_lowest_cleanup_slot();
-        let mut signatures: Vec<(Slot, Signature)> = vec![];
-        if slot < lowest_available_slot {
-            return Ok(signatures);
-        }
-
-        let index_iterator = self
-            .address_signatures_cf
-            .iter_current_index_filtered(IteratorMode::From(
-                (pubkey, slot, 0, Signature::default()),
-                IteratorDirection::Forward,
-            ))?;
-        for ((address, transaction_slot, _transaction_index, signature), _) in
-            index_iterator
-        {
-            // The iterator starts at exact (pubkey, slot, ..), but will keep iterating and match
-            // keys with different pubkey and slot which is why we break once we hit one
-            if transaction_slot > slot || address != pubkey {
-                break;
-            }
-            signatures.push((slot, signature));
-        }
-        drop(lock);
-        Ok(signatures)
-    }
-
-    fn get_slot_signatures_rev(
-        &self,
-        slot: Slot,
-    ) -> LedgerResult<Vec<Signature>> {
-        let index_iterator = self
-            .transaction_status_cf
-            .iter_current_index_filtered(IteratorMode::From(
-                (Signature::default(), slot),
-                IteratorDirection::Forward,
-            ))?;
-        for ((signature, transaction_slot), _) in index_iterator {
-            // if transaction_slot > slot {
-            //     break;
-            // }
-            debug!("signature: {:?}, slot: {:?}", signature, transaction_slot);
-        }
-        Ok(vec![])
-    }
-
     // -----------------
     // Transaction
     // -----------------
@@ -1309,38 +1257,6 @@ mod tests {
             (read_tres, write_tres)
         };
 
-        // 2. Find them providing slot
-        {
-            let results = store
-                .find_address_signatures_for_slot(write_uno, slot_uno)
-                .unwrap();
-            assert_eq!(results.len(), 1);
-            assert_eq!(results[0].0, slot_uno);
-            assert_eq!(results[0].1, signature_uno);
-
-            let results = store
-                .find_address_signatures_for_slot(write_uno, slot_tres)
-                .unwrap();
-            assert_eq!(results.len(), 1);
-            assert_eq!(results[0].0, slot_tres);
-            assert_eq!(results[0].1, signature_tres);
-
-            let results = store
-                .find_address_signatures_for_slot(read_dos, slot_dos)
-                .unwrap();
-            assert_eq!(results.len(), 2);
-            assert_eq!(results[0].0, slot_dos);
-            assert_eq!(results[0].1, signature_dos);
-            assert_eq!(results[1].0, slot_dos);
-            assert_eq!(results[1].1, signature_dos_2);
-
-            assert!(store
-                .find_address_signatures_for_slot(read_dos, slot_uno)
-                .unwrap()
-                .is_empty());
-        }
-
-        // 3. Add a few more transactions
         let (signature_cuatro, slot_cuatro) = (Signature::new_unique(), 31);
         let (read_cuatro, write_cuatro) = {
             let mut meta = create_transaction_status_meta(5);
@@ -1410,7 +1326,7 @@ mod tests {
         //  read_cinco | write_cinco  : signature_cinco
         //  read_seis | write_seis    : signature_seis
 
-        // 3. Fill in block times
+        // 2. Fill in block times
         assert!(store.cache_block_time(slot_uno, 1).is_ok());
         assert!(store.cache_block_time(slot_dos, 2).is_ok());
         assert!(store.cache_block_time(slot_tres, 3).is_ok());
@@ -1418,7 +1334,7 @@ mod tests {
         assert!(store.cache_block_time(slot_cinco, 5).is_ok());
         assert!(store.cache_block_time(slot_seis, 6).is_ok());
 
-        // 4. Find signatures for address with default limits
+        // 3. Find signatures for address with default limits
         let res = store
             .get_confirmed_signatures_for_address(
                 read_cuatro,
@@ -1444,7 +1360,7 @@ mod tests {
             }
         );
 
-        // 5. Find signatures with before/until configs
+        // 4. Find signatures with before/until configs
         fn extract(
             infos: Vec<ConfirmedTransactionStatusWithSignature>,
         ) -> Vec<(Slot, Signature)> {
