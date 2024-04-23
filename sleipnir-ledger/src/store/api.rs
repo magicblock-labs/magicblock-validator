@@ -5,7 +5,7 @@ use std::{
     sync::{atomic::Ordering, Arc, RwLock},
 };
 
-use bincode::deserialize;
+use bincode::{deserialize, serialize};
 use log::*;
 use rocksdb::Direction as IteratorDirection;
 use solana_measure::measure::Measure;
@@ -29,7 +29,7 @@ use crate::{
         db::Database,
         iterator::IteratorMode,
         ledger_column::LedgerColumn,
-        meta::{AddressSignatureMeta, TransactionStatusIndexMeta},
+        meta::{AddressSignatureMeta, PerfSample, TransactionStatusIndexMeta},
         options::LedgerOptions,
     },
     errors::{LedgerError, LedgerResult},
@@ -54,6 +54,7 @@ pub struct Ledger {
     transaction_status_index_cf: LedgerColumn<cf::TransactionStatusIndex>,
     blocktime_cf: LedgerColumn<cf::Blocktime>,
     transaction_cf: LedgerColumn<cf::Transaction>,
+    perf_samples_cf: LedgerColumn<cf::PerfSamples>,
 
     highest_primary_index_slot: RwLock<Option<Slot>>,
 
@@ -110,6 +111,7 @@ impl Ledger {
         let transaction_status_index_cf = db.column();
         let blocktime_cf = db.column();
         let transaction_cf = db.column();
+        let perf_samples_cf = db.column();
 
         let db = Arc::new(db);
 
@@ -128,6 +130,7 @@ impl Ledger {
             transaction_status_index_cf,
             blocktime_cf,
             transaction_cf,
+            perf_samples_cf,
 
             highest_primary_index_slot: RwLock::<Option<Slot>>::default(),
 
@@ -141,7 +144,7 @@ impl Ledger {
         Ok(ledger)
     }
 
-    /// Collects and reports [`BlockstoreRocksDbColumnFamilyMetrics`] for the
+    /// Collects and reports [`BlockstoreRocksDbColumnFamilyMetrics`] for
     /// all the column families.
     ///
     /// [`BlockstoreRocksDbColumnFamilyMetrics`]: crate::blockstore_metrics::BlockstoreRocksDbColumnFamilyMetrics
@@ -152,6 +155,7 @@ impl Ledger {
         self.transaction_status_index_cf.submit_rocksdb_cf_metrics();
         self.blocktime_cf.submit_rocksdb_cf_metrics();
         self.transaction_cf.submit_rocksdb_cf_metrics();
+        self.perf_samples_cf.submit_rocksdb_cf_metrics();
     }
 
     // -----------------
@@ -798,6 +802,37 @@ impl Ledger {
         self.transaction_status_cf
             .put_protobuf((signature, slot), &status)?;
         Ok(())
+    }
+
+    // -----------------
+    // Perf
+    // -----------------
+    pub fn get_recent_perf_samples(
+        &self,
+        num: usize,
+    ) -> LedgerResult<Vec<(Slot, PerfSample)>> {
+        let samples = self
+            .db
+            .iter::<cf::PerfSamples>(IteratorMode::End)?
+            .take(num)
+            .map(|(slot, data)| {
+                deserialize::<PerfSample>(&data)
+                    .map(|sample| (slot, sample))
+                    .map_err(Into::into)
+            });
+
+        samples.collect()
+    }
+
+    pub fn write_perf_sample(
+        &self,
+        index: Slot,
+        perf_sample: PerfSample,
+    ) -> LedgerResult<()> {
+        // Always write as the current version.
+        let bytes = serialize(&perf_sample)
+            .expect("`PerfSample` can be serialized with `bincode`");
+        self.perf_samples_cf.put_bytes(index, &bytes)
     }
 }
 

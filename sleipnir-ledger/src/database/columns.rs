@@ -20,6 +20,8 @@ const TRANSACTION_STATUS_INDEX_CF: &str = "transaction_status_index";
 const BLOCKTIME_CF: &str = "blocktime";
 /// Column family for Confirmed Transaction
 const CONFIRMED_TRANSACTION_CF: &str = "confirmed_transaction";
+/// Column family for Performance Samples
+const PERF_SAMPLES_CF: &str = "perf_samples";
 
 // TODO(thlorenz): @@@ledger add items we need
 
@@ -76,6 +78,13 @@ pub struct Blocktime;
 /// * value type: [`generated::Transaction`]
 pub struct Transaction;
 
+#[derive(Debug)]
+/// The performance samples column
+///
+/// * index type: `u64` (see [`SlotColumn`])
+/// * value type: [`blockstore_meta::PerfSample`]
+pub struct PerfSamples;
+
 // When adding a new column ...
 // - Add struct below and implement `Column` and `ColumnName` traits
 // - Add descriptor in Rocks::cf_descriptors() and name in Rocks::columns()
@@ -91,6 +100,7 @@ pub fn columns() -> Vec<&'static str> {
         TransactionStatusIndex::NAME,
         Blocktime::NAME,
         Transaction::NAME,
+        PerfSamples::NAME,
     ]
 }
 
@@ -547,4 +557,12 @@ impl ColumnIndexDeprecation for Transaction {
             deprecated_index,
         )
     }
+}
+
+// -----------------
+// PerfSamples
+// -----------------
+impl SlotColumn for PerfSamples {}
+impl ColumnName for PerfSamples {
+    const NAME: &'static str = PERF_SAMPLES_CF;
 }
