@@ -1268,6 +1268,8 @@ mod tests {
                 .is_ok());
 
             // read_dos and write_dos are part of another transaction in the same slot
+            // signature_dos_2 at times is captured via intra slot logic, but the focus
+            // of this method is not intra slot
             let mut meta = create_transaction_status_meta(8);
             meta.loaded_addresses.readonly.push(read_dos);
             meta.loaded_addresses.writable.push(write_dos);
@@ -1540,7 +1542,11 @@ mod tests {
 
             assert_eq!(
                 extract(res.infos.clone()),
-                vec![(slot_seis, signature_seis), (slot_tres, signature_tres),]
+                vec![
+                    (slot_seis, signature_seis),
+                    (slot_tres, signature_tres),
+                    (slot_dos, signature_dos_2),
+                ]
             );
         }
         // Before/Until configured
@@ -1559,7 +1565,7 @@ mod tests {
 
             assert_eq!(
                 extract(res.infos.clone()),
-                vec![(slot_tres, signature_tres),]
+                vec![(slot_tres, signature_tres), (slot_dos, signature_dos_2)]
             );
         }
 
