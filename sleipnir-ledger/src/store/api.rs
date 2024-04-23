@@ -673,10 +673,15 @@ impl Ledger {
         transaction_index: usize,
     ) -> LedgerResult<()> {
         // TODO: extract and write memos (rpc/src/transaction_status_service.rs :175)
+
+        let tx_account_locks = transaction.get_account_locks_unchecked();
+
         // 1. Write Transaction Status
         self.write_transaction_status(
             slot,
             signature,
+            tx_account_locks.writable,
+            tx_account_locks.readonly,
             status,
             transaction_index,
         );
@@ -761,18 +766,20 @@ impl Ledger {
         &self,
         slot: Slot,
         signature: Signature,
+        writable_keys: Vec<&Pubkey>,
+        readonly_keys: Vec<&Pubkey>,
         status: TransactionStatusMeta,
         transaction_index: usize,
     ) -> LedgerResult<()> {
         let transaction_index = u32::try_from(transaction_index)
             .map_err(|_| LedgerError::TransactionIndexOverflow)?;
-        for address in &status.loaded_addresses.writable {
+        for address in writable_keys {
             self.address_signatures_cf.put(
                 (*address, slot, transaction_index, signature),
                 &AddressSignatureMeta { writeable: true },
             )?;
         }
-        for address in &status.loaded_addresses.readonly {
+        for address in readonly_keys {
             self.address_signatures_cf.put(
                 (*address, slot, transaction_index, signature),
                 &AddressSignatureMeta { writeable: false },
