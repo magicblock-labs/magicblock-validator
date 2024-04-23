@@ -62,7 +62,6 @@ impl Full for FullImpl {
     ) -> Result<Vec<RpcPerfSample>> {
         debug!("get_recent_performance_samples request received");
 
-        // TODO(thlorenz): we don't have a blockstore, so we just make up some numbers here
         let bank = meta.get_bank();
         let num_slots = RECENT_PERF_SAMPLES_WINDOW_MILLIS
             / meta.config.slot_duration.as_millis() as u32;
@@ -71,8 +70,9 @@ impl Full for FullImpl {
         let samples = (min_slot..=current_slot)
             .map(|slot| RpcPerfSample {
                 slot,
-                // TODO(thlorenz): @@@ledger once we support it we can provide this
-                num_transactions: 0,
+                // TODO: ledger@@@ actual needs to be only count of this slot
+                // which we'll get from ledger via get_recent_perf_samples
+                num_transactions: bank.transaction_count(),
                 sample_period_secs: (RECENT_PERF_SAMPLES_WINDOW_MILLIS / 1000)
                     as u16,
                 num_non_vote_transactions: None,
