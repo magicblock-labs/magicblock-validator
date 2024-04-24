@@ -633,15 +633,21 @@ impl Ledger {
                         IteratorDirection::Forward,
                     ))?;
                 match iterator.next() {
-                    Some(((signature, slot), _data)) => {
-                        let slot_and_tx = self
-                            .transaction_cf
-                            .get_protobuf((signature, slot))?
-                            .map(|tx| (slot, tx));
-                        if let Some((slot, tx)) = slot_and_tx {
-                            (slot, Some(tx), None)
+                    Some(((tx_signature, slot), _data)) => {
+                        if slot <= highest_confirmed_slot
+                            && tx_signature == signature
+                        {
+                            let slot_and_tx = self
+                                .transaction_cf
+                                .get_protobuf((tx_signature, slot))?
+                                .map(|tx| (slot, tx));
+                            if let Some((slot, tx)) = slot_and_tx {
+                                (slot, Some(tx), None)
+                            } else {
+                                // We have a slot, but couldn't resolve a proper transaction
+                                return Ok(None);
+                            }
                         } else {
-                            // We have a slot, but couldn't resolve a proper transaction
                             return Ok(None);
                         }
                     }
@@ -1226,13 +1232,16 @@ mod tests {
             .is_ok());
         assert!(store.cache_block_time(slot_uno, block_time_uno).is_ok());
 
-        // Get first transaction by signature providing low enough slot
-        let tx = store.get_complete_transaction(sig_uno, 0).unwrap().unwrap();
+        // Get first transaction by signature providing high enough slot
+        let tx = store
+            .get_complete_transaction(sig_uno, slot_uno)
+            .unwrap()
+            .unwrap();
         assert_eq!(tx, tx_uno);
 
-        // Get first transaction by signature providing slot that's too high
+        // Get first transaction by signature providing slot that's too low
         assert!(store
-            .get_complete_transaction(sig_uno, slot_uno + 1)
+            .get_complete_transaction(sig_uno, slot_uno - 1)
             .unwrap()
             .is_none());
 
