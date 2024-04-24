@@ -19,6 +19,8 @@ const TRANSACTION_STATUS_INDEX_CF: &str = "transaction_status_index";
 const BLOCKTIME_CF: &str = "blocktime";
 /// Column family for Confirmed Transaction
 const CONFIRMED_TRANSACTION_CF: &str = "confirmed_transaction";
+/// Column family for TransactionMemos
+const TRANSACTION_MEMOS_CF: &str = "transaction_memos";
 /// Column family for Performance Samples
 const PERF_SAMPLES_CF: &str = "perf_samples";
 
@@ -75,6 +77,12 @@ pub struct Blocktime;
 /// * value type: [`generated::Transaction`]
 pub struct Transaction;
 
+/// The transaction memos column
+///
+/// * index type: [`Signature`]
+/// * value type: [`String`]
+pub struct TransactionMemos;
+
 #[derive(Debug)]
 /// The performance samples column
 ///
@@ -97,6 +105,7 @@ pub fn columns() -> Vec<&'static str> {
         TransactionStatusIndex::NAME,
         Blocktime::NAME,
         Transaction::NAME,
+        TransactionMemos::NAME,
         PerfSamples::NAME,
     ]
 }
@@ -553,6 +562,73 @@ impl ColumnIndexDeprecation for Transaction {
         <TransactionStatus as ColumnIndexDeprecation>::convert_index(
             deprecated_index,
         )
+    }
+}
+
+// -----------------
+// TransactionMemos
+// -----------------
+impl TypedColumn for TransactionMemos {
+    type Type = String;
+}
+
+impl Column for TransactionMemos {
+    type Index = (Signature, Slot);
+
+    fn key((signature, slot): Self::Index) -> Vec<u8> {
+        let mut key = vec![0; Self::CURRENT_INDEX_LEN];
+        key[0..64].copy_from_slice(&signature.as_ref()[0..64]);
+        BigEndian::write_u64(&mut key[64..72], slot);
+        key
+    }
+
+    fn index(key: &[u8]) -> Self::Index {
+        <TransactionMemos as ColumnIndexDeprecation>::index(key)
+    }
+
+    fn slot(index: Self::Index) -> Slot {
+        index.1
+    }
+
+    fn as_index(index: u64) -> Self::Index {
+        (Signature::default(), index)
+    }
+}
+
+impl ColumnName for TransactionMemos {
+    const NAME: &'static str = TRANSACTION_MEMOS_CF;
+}
+
+impl ColumnIndexDeprecation for TransactionMemos {
+    const DEPRECATED_INDEX_LEN: usize = 64;
+    const CURRENT_INDEX_LEN: usize = 72;
+    type DeprecatedIndex = Signature;
+
+    fn deprecated_key(signature: Self::DeprecatedIndex) -> Vec<u8> {
+        let mut key = vec![0; Self::DEPRECATED_INDEX_LEN];
+        key[0..64].copy_from_slice(&signature.as_ref()[0..64]);
+        key
+    }
+
+    fn try_deprecated_index(
+        key: &[u8],
+    ) -> std::result::Result<Self::DeprecatedIndex, IndexError> {
+        Signature::try_from(&key[..64]).map_err(|_| IndexError::UnpackError)
+    }
+
+    fn try_current_index(
+        key: &[u8],
+    ) -> std::result::Result<Self::Index, IndexError> {
+        if key.len() != Self::CURRENT_INDEX_LEN {
+            return Err(IndexError::UnpackError);
+        }
+        let signature = Signature::try_from(&key[0..64]).unwrap();
+        let slot = BigEndian::read_u64(&key[64..72]);
+        Ok((signature, slot))
+    }
+
+    fn convert_index(deprecated_index: Self::DeprecatedIndex) -> Self::Index {
+        (deprecated_index, 0)
     }
 }
 

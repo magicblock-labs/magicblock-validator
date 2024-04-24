@@ -33,6 +33,7 @@ pub fn cf_descriptors(
         new_cf_descriptor::<TransactionStatusIndex>(options),
         new_cf_descriptor::<Blocktime>(options),
         new_cf_descriptor::<Transaction>(options),
+        new_cf_descriptor::<TransactionMemos>(options),
         new_cf_descriptor::<PerfSamples>(options),
     ];
 

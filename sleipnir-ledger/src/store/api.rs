@@ -53,6 +53,7 @@ pub struct Ledger {
     transaction_status_index_cf: LedgerColumn<cf::TransactionStatusIndex>,
     blocktime_cf: LedgerColumn<cf::Blocktime>,
     transaction_cf: LedgerColumn<cf::Transaction>,
+    transaction_memos_cf: LedgerColumn<cf::TransactionMemos>,
     perf_samples_cf: LedgerColumn<cf::PerfSamples>,
 
     highest_primary_index_slot: RwLock<Option<Slot>>,
@@ -110,6 +111,7 @@ impl Ledger {
         let transaction_status_index_cf = db.column();
         let blocktime_cf = db.column();
         let transaction_cf = db.column();
+        let transaction_memos_cf = db.column();
         let perf_samples_cf = db.column();
 
         let db = Arc::new(db);
@@ -129,6 +131,7 @@ impl Ledger {
             transaction_status_index_cf,
             blocktime_cf,
             transaction_cf,
+            transaction_memos_cf,
             perf_samples_cf,
 
             highest_primary_index_slot: RwLock::<Option<Slot>>::default(),
@@ -154,6 +157,7 @@ impl Ledger {
         self.transaction_status_index_cf.submit_rocksdb_cf_metrics();
         self.blocktime_cf.submit_rocksdb_cf_metrics();
         self.transaction_cf.submit_rocksdb_cf_metrics();
+        self.transaction_memos_cf.submit_rocksdb_cf_metrics();
         self.perf_samples_cf.submit_rocksdb_cf_metrics();
     }
 
@@ -563,14 +567,14 @@ impl Ledger {
             let status = self
                 .read_transaction_status((signature, slot))?
                 .and_then(|x| x.status.err());
+            let memo = self.read_transaction_memos(signature, slot)?;
             let block_time = blocktimes.get(&slot).cloned();
             let info = ConfirmedTransactionStatusWithSignature {
                 slot,
                 signature,
                 block_time,
                 err: status,
-                // TODO: @@@ledger support memos
-                memo: None,
+                memo,
             };
             infos.push(info)
         }
@@ -682,8 +686,6 @@ impl Ledger {
         status: TransactionStatusMeta,
         transaction_index: usize,
     ) -> LedgerResult<()> {
-        // TODO: extract and write memos (rpc/src/transaction_status_service.rs :175)
-
         let tx_account_locks = transaction.get_account_locks_unchecked();
 
         // 1. Write Transaction Status
@@ -716,6 +718,27 @@ impl Ledger {
     }
 
     // -----------------
+    // TransactionMemos
+    // -----------------
+    pub fn read_transaction_memos(
+        &self,
+        signature: Signature,
+        slot: Slot,
+    ) -> LedgerResult<Option<String>> {
+        let memos = self.transaction_memos_cf.get((signature, slot))?;
+        Ok(memos)
+    }
+
+    pub fn write_transaction_memos(
+        &self,
+        signature: &Signature,
+        slot: Slot,
+        memos: String,
+    ) -> LedgerResult<()> {
+        self.transaction_memos_cf.put((*signature, slot), &memos)
+    }
+
+    // -----------------
     // TransactionStatus
     // -----------------
     /// Returns a transaction status
@@ -734,8 +757,6 @@ impl Ledger {
                 .num_get_transaction_status
                 .fetch_add(1, Ordering::Relaxed);
 
-            // TODO: ledger@@@ would iterating in reverse be better here since
-            // most likely we'd be looking for a more recent transaction?
             let iterator = self
                 .transaction_status_cf
                 .iter_current_index_filtered(IteratorMode::From(
@@ -1866,5 +1887,105 @@ mod tests {
             extract(res.infos.clone()),
             vec![(slot2, sig5), (slot2, sig4)]
         );
+    }
+
+    #[test]
+    fn test_get_confirmed_signatures_with_memos() {
+        init_logger!();
+
+        let ledger_path = get_tmp_ledger_path_auto_delete!();
+        let store = Ledger::open(ledger_path.path()).unwrap();
+
+        let (sig_uno, slot_uno) = (Signature::new_unique(), 10);
+        let (sig_dos, slot_dos) = (Signature::new_unique(), 10);
+
+        let (tx_uno, sanitized_uno) =
+            create_confirmed_transaction(slot_uno, 5, Some(100), None);
+        let (tx_dos, sanitized_dos) =
+            create_confirmed_transaction(slot_dos, 5, Some(100), None);
+
+        // 1. Write transactions and block time + memo for relevant slot
+        {
+            assert!(store
+                .write_transaction(
+                    sig_uno,
+                    slot_uno,
+                    sanitized_uno.clone(),
+                    tx_uno.tx_with_meta.get_status_meta().unwrap(),
+                    0,
+                )
+                .is_ok());
+
+            assert!(store.cache_block_time(slot_uno, 100).is_ok());
+
+            assert!(store
+                .write_transaction_memos(
+                    &sig_uno,
+                    slot_uno,
+                    "Test Uno Memo".to_string()
+                )
+                .is_ok());
+        }
+
+        {
+            assert!(store
+                .write_transaction(
+                    sig_dos,
+                    slot_dos,
+                    sanitized_dos.clone(),
+                    tx_dos.tx_with_meta.get_status_meta().unwrap(),
+                    0,
+                )
+                .is_ok());
+            assert!(store.cache_block_time(slot_dos, 100).is_ok());
+            assert!(store
+                .write_transaction_memos(
+                    &sig_dos,
+                    slot_dos,
+                    "Test Dos Memo".to_string()
+                )
+                .is_ok());
+        }
+
+        // 2. Retrieve Confirmed Signatures and check for Memos
+        {
+            // Get first one directly
+            let memo = store.read_transaction_memos(sig_uno, slot_uno).unwrap();
+            assert_eq!(memo, Some("Test Uno Memo".to_string()));
+
+            // Make sure it's included when we get confirmed signatures
+            let address_uno = sanitized_uno.message().account_keys()[0];
+            let sig_info_uno = &store
+                .get_confirmed_signatures_for_address(
+                    address_uno,
+                    slot_uno,
+                    None,
+                    None,
+                    1000,
+                )
+                .unwrap()
+                .infos[0];
+            assert_eq!(sig_info_uno.memo, Some("Test Uno Memo".to_string()));
+        }
+
+        {
+            // Get second one directly
+            let memo = store.read_transaction_memos(sig_dos, slot_dos).unwrap();
+            assert_eq!(memo, Some("Test Dos Memo".to_string()));
+
+            // Make sure it's included when we get confirmed signatures
+            let address_dos = sanitized_dos.message().account_keys()[0];
+            let sig_info_dos = &store
+                .get_confirmed_signatures_for_address(
+                    address_dos,
+                    slot_dos,
+                    None,
+                    None,
+                    1000,
+                )
+                .unwrap()
+                .infos[0];
+            assert_eq!(sig_info_dos.memo, Some("Test Dos Memo".to_string()));
+        }
     }
 }

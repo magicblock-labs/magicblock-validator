@@ -7,8 +7,8 @@ use sleipnir_bank::transaction_notifier_interface::TransactionNotifierArc;
 use sleipnir_geyser_plugin::{plugin::GrpcGeyserPlugin, rpc::GeyserRpcService};
 use sleipnir_ledger::Ledger;
 use sleipnir_transaction_status::{
-    map_inner_instructions, TransactionStatusBatch, TransactionStatusMessage,
-    TransactionStatusMeta,
+    extract_and_fmt_memos, map_inner_instructions, TransactionStatusBatch,
+    TransactionStatusMessage, TransactionStatusMeta,
 };
 use solana_accounts_db::transaction_results::TransactionExecutionDetails;
 use solana_geyser_plugin_manager::{
@@ -147,6 +147,13 @@ impl GeyserTransactionNotifyListener {
                                     &transaction,
                                 );
                                 if enable_rpc_transaction_history {
+                                    if let Some(memos) = extract_and_fmt_memos(
+                                        transaction.message(),
+                                    ) {
+                                        ledger
+                                            .write_transaction_memos(transaction.signature(), slot, memos)
+                                            .expect("Expect database write to succeed: TransactionMemos");
+                                    }
                                     ledger.write_transaction(
                                         *transaction.signature(),
                                         slot,
