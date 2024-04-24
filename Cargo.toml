@@ -12,6 +12,7 @@ members = [
   "sleipnir-ledger",
   "sleipnir-messaging",
   "sleipnir-mutator",
+  "sleipnir-perf-service",
   "sleipnir-processor",
   "sleipnir-pubsub",
   "sleipnir-rpc",
@@ -123,6 +124,7 @@ solana-logger = { git = "https://github.com/solana-labs/solana", rev = "30adda4a
 solana-measure = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-measure" }
 solana-metrics = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-metrics" }
 solana-perf = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-perf" }
+sleipnir-perf-service = { path = "./sleipnir-perf-service" }
 solana-program-runtime = { path = "./solana/program-runtime" }
 solana-rayon-threadlimit = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-rayon-threadlimit" }
 solana-streamer = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-streamer" }

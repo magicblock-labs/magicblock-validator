@@ -16,6 +16,7 @@ itertools = { workspace = true }
 sleipnir-bank = { workspace = true }
 sleipnir-ledger = { workspace = true }
 sleipnir-geyser-plugin = { workspace = true }
+sleipnir-perf-service = { workspace = true }
 sleipnir-processor = { workspace = true }
 sleipnir-pubsub = { workspace = true }
 sleipnir-rpc = { workspace = true }

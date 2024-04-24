@@ -827,10 +827,10 @@ impl Ledger {
     pub fn write_perf_sample(
         &self,
         index: Slot,
-        perf_sample: PerfSample,
+        perf_sample: &PerfSample,
     ) -> LedgerResult<()> {
         // Always write as the current version.
-        let bytes = serialize(&perf_sample)
+        let bytes = serialize(perf_sample)
             .expect("`PerfSample` can be serialized with `bincode`");
         self.perf_samples_cf.put_bytes(index, &bytes)
     }

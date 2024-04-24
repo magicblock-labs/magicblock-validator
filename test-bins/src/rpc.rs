@@ -1,7 +1,7 @@
 use std::{
     net::{IpAddr, Ipv4Addr, SocketAddr},
     process,
-    sync::Arc,
+    sync::{atomic::AtomicBool, Arc},
     time::Duration,
 };
 
@@ -12,6 +12,7 @@ use sleipnir_bank::{
     genesis_utils::{create_genesis_config, GenesisConfigInfo},
 };
 use sleipnir_ledger::Ledger;
+use sleipnir_perf_service::SamplePerformanceService;
 use sleipnir_pubsub::pubsub_service::{PubsubConfig, PubsubService};
 use sleipnir_rpc::{
     json_rpc_request_processor::JsonRpcConfig, json_rpc_service::JsonRpcService,
@@ -49,6 +50,8 @@ async fn main() {
 
     #[cfg(feature = "tokio-console")]
     console_subscriber::init();
+
+    let exit = Arc::<AtomicBool>::default();
 
     let GenesisConfigInfo {
         genesis_config,
@@ -90,6 +93,7 @@ async fn main() {
     fund_luzifer(&bank);
     load_programs_from_env(&bank).unwrap();
 
+    SamplePerformanceService::new(&bank, &ledger, exit);
     let faucet_keypair = fund_faucet(&bank);
 
     let tick_millis = std::env::var("SLOT_MS")
