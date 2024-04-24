@@ -10,7 +10,7 @@ const TRANSACTION_STATUS_CF: &str = "transaction_status";
 /// Column family for Address Signatures
 const ADDRESS_SIGNATURES_CF: &str = "address_signatures";
 /// Column family for Slot Signatures
-const SLOT_SIGNATURES_CF: &str = "slot_singatures";
+const SLOT_SIGNATURES_CF: &str = "slot_signatures";
 /// Column family for the Transaction Status Index.
 /// This column family is used for tracking the active primary index for columns that for
 /// query performance reasons should not be indexed by Slot.
