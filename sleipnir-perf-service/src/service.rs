@@ -1,19 +1,18 @@
 // NOTE: from core/src/sample_performance_service.rs
-use crate::stats_snapshot::StatsSnapshot;
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    thread::{self, sleep, Builder, JoinHandle},
+    time::{Duration, Instant},
+};
+
 use log::*;
 use sleipnir_bank::bank::Bank;
+use sleipnir_ledger::{Ledger, PerfSample};
 
-use {
-    sleipnir_ledger::{Ledger, PerfSample},
-    std::{
-        sync::{
-            atomic::{AtomicBool, Ordering},
-            Arc,
-        },
-        thread::{self, sleep, Builder, JoinHandle},
-        time::{Duration, Instant},
-    },
-};
+use crate::stats_snapshot::StatsSnapshot;
 
 const SAMPLE_INTERVAL: Duration = Duration::from_secs(60);
 const SLEEP_INTERVAL: Duration = Duration::from_millis(500);

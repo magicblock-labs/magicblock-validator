@@ -1,5 +1,4 @@
 #![allow(dead_code)]
-use log::*;
 use std::{
     net::SocketAddr,
     str::FromStr,
@@ -9,6 +8,7 @@ use std::{
 
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use jsonrpc_core::{Error, ErrorCode, Metadata, Result, Value};
+use log::*;
 use sleipnir_bank::bank::Bank;
 use sleipnir_ledger::{Ledger, SignatureInfosForAddress};
 use sleipnir_rpc_client_api::{
