@@ -639,3 +639,12 @@ impl SlotColumn for PerfSamples {}
 impl ColumnName for PerfSamples {
     const NAME: &'static str = PERF_SAMPLES_CF;
 }
+
+// -----------------
+// Column Configuration
+// -----------------
+
+// Returns true if the column family enables compression.
+pub fn should_enable_compression<C: 'static + Column + ColumnName>() -> bool {
+    C::NAME == TransactionStatus::NAME
+}

@@ -1,3 +1,5 @@
+use rocksdb::DBCompressionType as RocksCompressionType;
+
 // -----------------
 // AccessType
 // -----------------
@@ -53,7 +55,7 @@ pub struct LedgerColumnOptions {
 
     // Determine the way to compress column families which are eligible for
     // compression.
-    pub compression_type: BlockstoreCompressionType,
+    pub compression_type: LedgerCompressionType,
 
     // Control how often RocksDB read/write performance samples are collected.
     // If the value is greater than 0, then RocksDB read/write perf sample
@@ -65,7 +67,7 @@ impl Default for LedgerColumnOptions {
     fn default() -> Self {
         Self {
             shred_storage_type: ShredStorageType::RocksLevel,
-            compression_type: BlockstoreCompressionType::default(),
+            compression_type: LedgerCompressionType::default(),
             rocks_perf_sample_interval: 0,
         }
     }
@@ -80,10 +82,10 @@ impl LedgerColumnOptions {
 
     pub fn get_compression_type_string(&self) -> &'static str {
         match self.compression_type {
-            BlockstoreCompressionType::None => "None",
-            BlockstoreCompressionType::Snappy => "Snappy",
-            BlockstoreCompressionType::Lz4 => "Lz4",
-            BlockstoreCompressionType::Zlib => "Zlib",
+            LedgerCompressionType::None => "None",
+            LedgerCompressionType::Snappy => "Snappy",
+            LedgerCompressionType::Lz4 => "Lz4",
+            LedgerCompressionType::Zlib => "Zlib",
         }
     }
 }
@@ -114,10 +116,21 @@ impl ShredStorageType {
 // BlockstoreCompressionType
 // -----------------
 #[derive(Debug, Default, Clone)]
-pub enum BlockstoreCompressionType {
+pub enum LedgerCompressionType {
     #[default]
     None,
     Snappy,
     Lz4,
     Zlib,
+}
+
+impl LedgerCompressionType {
+    pub(crate) fn to_rocksdb_compression_type(&self) -> RocksCompressionType {
+        match self {
+            Self::None => RocksCompressionType::None,
+            Self::Snappy => RocksCompressionType::Snappy,
+            Self::Lz4 => RocksCompressionType::Lz4,
+            Self::Zlib => RocksCompressionType::Zlib,
+        }
+    }
 }

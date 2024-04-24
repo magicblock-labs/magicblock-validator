@@ -1,12 +1,12 @@
 use std::{collections::HashSet, path::Path};
 
 use log::*;
-use rocksdb::{ColumnFamilyDescriptor, Options, DB};
+use rocksdb::{ColumnFamilyDescriptor, DBCompressionType, Options, DB};
 
 use super::{
-    columns::{Column, ColumnName},
+    columns::{should_enable_compression, Column, ColumnName},
     consts,
-    options::LedgerOptions,
+    options::{LedgerColumnOptions, LedgerOptions},
     rocksdb_options::should_disable_auto_compactions,
 };
 use crate::database::{columns, options::AccessType};
@@ -117,5 +117,24 @@ fn get_cf_options<C: 'static + Column + ColumnName>(
         cf_options.set_disable_auto_compactions(true);
     }
 
+    process_cf_options_advanced::<C>(&mut cf_options, &options.column_options);
+
     cf_options
+}
+
+fn process_cf_options_advanced<C: 'static + Column + ColumnName>(
+    cf_options: &mut Options,
+    column_options: &LedgerColumnOptions,
+) {
+    // Explicitly disable compression on all columns by default
+    // See https://docs.rs/rocksdb/0.21.0/rocksdb/struct.Options.html#method.set_compression_type
+    cf_options.set_compression_type(DBCompressionType::None);
+
+    if should_enable_compression::<C>() {
+        cf_options.set_compression_type(
+            column_options
+                .compression_type
+                .to_rocksdb_compression_type(),
+        );
+    }
 }

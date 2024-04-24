@@ -39,8 +39,6 @@ impl Rocks {
             _ => unreachable!("Only primary access is supported"),
         };
 
-        // TODO(thlorenz): @@@rocksdb do we need to configure compaction?
-
         Ok(Self { db, access_type })
     }
 
