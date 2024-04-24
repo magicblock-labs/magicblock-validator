@@ -22,8 +22,6 @@ const CONFIRMED_TRANSACTION_CF: &str = "confirmed_transaction";
 /// Column family for Performance Samples
 const PERF_SAMPLES_CF: &str = "perf_samples";
 
-// TODO(thlorenz): @@@ledger add items we need
-
 #[derive(Debug)]
 /// The transaction status column
 ///

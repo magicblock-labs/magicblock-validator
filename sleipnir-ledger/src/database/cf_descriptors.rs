@@ -116,8 +116,5 @@ fn get_cf_options<C: 'static + Column + ColumnName>(
         cf_options.set_disable_auto_compactions(true);
     }
 
-    // TODO(thlorenz): @@@ledger do we need this?
-    // process_cf_options_advanced::<C>(&mut cf_options, &options.column_options);
-
     cf_options
 }
