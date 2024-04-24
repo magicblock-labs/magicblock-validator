@@ -5,6 +5,7 @@ mod filters;
 mod handlers;
 pub mod json_rpc_request_processor;
 pub mod json_rpc_service;
+mod perf;
 mod rpc_health;
 mod rpc_request_middleware;
 mod traits;

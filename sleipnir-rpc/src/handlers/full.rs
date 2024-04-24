@@ -29,6 +29,7 @@ use solana_transaction_status::{
 
 use crate::{
     json_rpc_request_processor::JsonRpcRequestProcessor,
+    perf::rpc_perf_sample_from,
     traits::rpc_full::Full,
     transaction::{
         decode_and_deserialize, sanitize_transaction, send_transaction,
@@ -37,8 +38,7 @@ use crate::{
     utils::{new_response, verify_and_parse_signatures_for_address_params},
 };
 
-// Solana shows the last 60secs worth of samples
-const RECENT_PERF_SAMPLES_WINDOW_MILLIS: u32 = 60_000;
+const PERFORMANCE_SAMPLES_LIMIT: usize = 720;
 
 pub struct FullImpl;
 
@@ -62,24 +62,23 @@ impl Full for FullImpl {
     ) -> Result<Vec<RpcPerfSample>> {
         debug!("get_recent_performance_samples request received");
 
-        let bank = meta.get_bank();
-        let num_slots = RECENT_PERF_SAMPLES_WINDOW_MILLIS
-            / meta.config.slot_duration.as_millis() as u32;
-        let current_slot = bank.slot();
-        let min_slot = (current_slot.saturating_sub(num_slots as u64)).max(0);
-        let samples = (min_slot..=current_slot)
-            .map(|slot| RpcPerfSample {
-                slot,
-                // TODO: ledger@@@ actual needs to be only count of this slot
-                // which we'll get from ledger via get_recent_perf_samples
-                num_transactions: bank.transaction_count(),
-                sample_period_secs: (RECENT_PERF_SAMPLES_WINDOW_MILLIS / 1000)
-                    as u16,
-                num_non_vote_transactions: None,
-                num_slots: num_slots as u64,
-            })
-            .collect();
-        Ok(samples)
+        let limit = limit.unwrap_or(PERFORMANCE_SAMPLES_LIMIT);
+        if limit > PERFORMANCE_SAMPLES_LIMIT {
+            return Err(Error::invalid_params(format!(
+                "Invalid limit; max {PERFORMANCE_SAMPLES_LIMIT}"
+            )));
+        }
+
+        Ok(meta
+            .ledger
+            .get_recent_perf_samples(limit)
+            .map_err(|err| {
+                warn!("get_recent_performance_samples failed: {:?}", err);
+                Error::invalid_request()
+            })?
+            .into_iter()
+            .map(|(slot, sample)| rpc_perf_sample_from((slot, sample)))
+            .collect())
     }
 
     fn get_cluster_nodes(

@@ -47,6 +47,8 @@ impl SamplePerformanceService {
         let mut snapshot = StatsSnapshot::from_bank(bank);
         let mut last_sample_time = Instant::now();
 
+        // NOTE: we'll have a different mechanism via tokio cancellation token
+        // to exit these long running tasks
         while !exit.load(Ordering::Relaxed) {
             let elapsed = last_sample_time.elapsed();
             if elapsed >= SAMPLE_INTERVAL {

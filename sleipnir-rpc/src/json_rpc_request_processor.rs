@@ -79,7 +79,7 @@ pub struct JsonRpcConfig {
 #[derive(Clone)]
 pub struct JsonRpcRequestProcessor {
     bank: Arc<Bank>,
-    ledger: Arc<Ledger>,
+    pub(crate) ledger: Arc<Ledger>,
     pub(crate) health: Arc<RpcHealth>,
     pub(crate) config: JsonRpcConfig,
     transaction_sender: Arc<Mutex<Sender<TransactionInfo>>>,
