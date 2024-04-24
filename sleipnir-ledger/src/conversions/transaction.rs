@@ -6,11 +6,11 @@ use solana_sdk::{
     instruction::CompiledInstruction,
     message::{
         v0::{self, LoadedAddresses},
-        MessageHeader, VersionedMessage,
+        Message, MessageHeader, VersionedMessage,
     },
     pubkey::Pubkey,
     signature::Signature,
-    transaction::{self, TransactionError, VersionedTransaction},
+    transaction::{self, Transaction, TransactionError, VersionedTransaction},
     transaction_context::TransactionReturnData,
 };
 use solana_storage_proto::convert::generated;
@@ -36,25 +36,57 @@ fn tx_with_meta_from_generated(
     tx: generated::ConfirmedTransaction,
 ) -> TransactionWithStatusMeta {
     let meta = tx.meta.map(tx_meta_from_generated);
-    let transaction = tx.transaction.map(tx_from_generated).expect(
-        "Never should store confirmed transaction without a transaction",
-    );
 
     use TransactionWithStatusMeta::*;
     match meta {
         Some(meta) => {
+            let transaction = tx.transaction.map(versioned_tx_from_generated).expect(
+                "Never should store confirmed transaction without a transaction",
+            );
             Complete(VersionedTransactionWithStatusMeta { transaction, meta })
         }
-        // TODO: @@@ledger
-        None => todo!(), // MissingMetadata(transaction),
+        None => {
+            let transaction = tx.transaction.map(tx_from_generated).expect(
+                "Never should store confirmed transaction without a transaction",
+            );
+            MissingMetadata(transaction)
+        }
     }
 }
 
 // -----------------
 // Transaction Conversions
 // -----------------
-fn tx_from_generated(tx: generated::Transaction) -> VersionedTransaction {
+fn tx_from_generated(tx: generated::Transaction) -> Transaction {
     let message = tx.message.map(message_from_generated).unwrap_or_default();
+    let signatures = signatures_from_slices(tx.signatures);
+    Transaction {
+        signatures,
+        message,
+    }
+}
+fn message_from_generated(msg: generated::Message) -> Message {
+    let account_keys = pubkeys_from_slices(msg.account_keys);
+    let recent_blockhash = Hash::new(&msg.recent_blockhash);
+    Message {
+        account_keys,
+        recent_blockhash,
+        header: msg.header.map(header_from_generated).unwrap_or_default(),
+        instructions: msg
+            .instructions
+            .into_iter()
+            .map(compiled_instruction_from_generated)
+            .collect(),
+    }
+}
+
+fn versioned_tx_from_generated(
+    tx: generated::Transaction,
+) -> VersionedTransaction {
+    let message = tx
+        .message
+        .map(versioned_message_from_generated)
+        .unwrap_or_default();
     let signatures = signatures_from_slices(tx.signatures);
     VersionedTransaction {
         signatures,
@@ -62,7 +94,9 @@ fn tx_from_generated(tx: generated::Transaction) -> VersionedTransaction {
     }
 }
 
-fn message_from_generated(msg: generated::Message) -> VersionedMessage {
+fn versioned_message_from_generated(
+    msg: generated::Message,
+) -> VersionedMessage {
     let account_keys = pubkeys_from_slices(msg.account_keys);
     let recent_blockhash = Hash::new(&msg.recent_blockhash);
     let message = v0::Message {
