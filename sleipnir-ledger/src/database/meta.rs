@@ -1,5 +1,5 @@
 use serde::{Deserialize, Serialize};
-use solana_sdk::{clock::Slot, message::v0::LoadedAddresses};
+use solana_sdk::clock::Slot;
 
 #[derive(Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
 pub struct TransactionStatusIndexMeta {

@@ -1,5 +1,5 @@
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fs,
     path::{Path, PathBuf},
     sync::{atomic::Ordering, Arc, RwLock},
@@ -13,17 +13,16 @@ use solana_sdk::{
     clock::{Slot, UnixTimestamp},
     pubkey::Pubkey,
     signature::Signature,
-    transaction::{SanitizedTransaction, VersionedTransaction},
+    transaction::SanitizedTransaction,
 };
 use solana_storage_proto::convert::generated::{self, ConfirmedTransaction};
 use solana_transaction_status::{
     ConfirmedTransactionStatusWithSignature,
     ConfirmedTransactionWithStatusMeta, TransactionStatusMeta,
-    TransactionWithStatusMeta, VersionedTransactionWithStatusMeta,
 };
 
 use crate::{
-    conversions::{self, transaction},
+    conversions::transaction,
     database::{
         columns as cf,
         db::Database,
@@ -400,7 +399,7 @@ impl Ledger {
         // 3. Find all matching (slot, signature) pairs sorted newest to oldest
         let matching = {
             let mut matching = Vec::new();
-            let (lock, _) = self.ensure_lowest_cleanup_slot();
+            let (_lock, _) = self.ensure_lowest_cleanup_slot();
 
             // The newest signatures are inside the slot that contains the upper
             // limit signature if it was provided.
@@ -416,7 +415,7 @@ impl Ledger {
                         (upper_slot, u32::MAX),
                         IteratorDirection::Reverse,
                     ))?;
-                for ((tx_slot, tx_idx), tx_signature) in index_iterator {
+                for ((tx_slot, _tx_idx), tx_signature) in index_iterator {
                     // Bail out if we reached the max number of signatures to collect
                     if matching.len() >= limit {
                         break;
@@ -437,7 +436,7 @@ impl Ledger {
                             "upper - signature: {}, slot: {}+{}",
                             crate::store::utils::short_signature(&tx_signature),
                             tx_slot,
-                            tx_idx,
+                            _tx_idx,
                         );
                         matching.push((tx_slot, tx_signature));
                     }
@@ -549,7 +548,7 @@ impl Ledger {
 
         // 4. Resolve blocktimes for each slot we found signatures for
         let mut blocktimes = HashMap::<Slot, UnixTimestamp>::new();
-        for (slot, signature) in &matching {
+        for (slot, _signature) in &matching {
             if blocktimes.contains_key(slot) {
                 continue;
             }
@@ -689,7 +688,7 @@ impl Ledger {
             tx_account_locks.readonly,
             status,
             transaction_index,
-        );
+        )?;
 
         // 2. Write Transaction
         let versioned = transaction.to_versioned_transaction();
@@ -704,8 +703,7 @@ impl Ledger {
         index: (Signature, Slot),
     ) -> LedgerResult<Option<generated::Transaction>> {
         let result = {
-            let (lock, lowest_available_slot) =
-                self.ensure_lowest_cleanup_slot();
+            let (_lock, _) = self.ensure_lowest_cleanup_slot();
             self.transaction_cf.get_protobuf(index)
         }?;
         Ok(result)
@@ -724,7 +722,7 @@ impl Ledger {
         min_slot: Slot,
     ) -> LedgerResult<Option<(Slot, TransactionStatusMeta)>> {
         let result = {
-            let (lock, lowest_available_slot) =
+            let (_lock, lowest_available_slot) =
                 self.ensure_lowest_cleanup_slot();
             self.rpc_api_metrics
                 .num_get_transaction_status
@@ -732,7 +730,7 @@ impl Ledger {
 
             // TODO: ledger@@@ would iterating in reverse be better here since
             // most likely we'd be looking for a more recent transaction?
-            let mut iterator = self
+            let iterator = self
                 .transaction_status_cf
                 .iter_current_index_filtered(IteratorMode::From(
                     (signature, lowest_available_slot),
@@ -766,7 +764,7 @@ impl Ledger {
         index: (Signature, Slot),
     ) -> LedgerResult<Option<TransactionStatusMeta>> {
         let result = {
-            let (lock, _) = self.ensure_lowest_cleanup_slot();
+            let (_lock, _) = self.ensure_lowest_cleanup_slot();
             self.transaction_status_cf.get_protobuf(index)
         }?;
         Ok(result.and_then(|meta| meta.try_into().ok()))
@@ -841,24 +839,20 @@ impl Ledger {
 // -----------------
 #[cfg(test)]
 mod tests {
-    use std::time::{Duration, Instant};
-
     use solana_sdk::{
         clock::UnixTimestamp,
         instruction::{CompiledInstruction, InstructionError},
-        message::{
-            v0::{self, LoadedAddresses},
-            MessageHeader, SimpleAddressLoader, VersionedMessage,
-        },
+        message::{v0, MessageHeader, SimpleAddressLoader, VersionedMessage},
         pubkey::Pubkey,
         signature::{Keypair, Signature},
         signer::Signer,
-        transaction::TransactionError,
+        transaction::{TransactionError, VersionedTransaction},
         transaction_context::TransactionReturnData,
     };
     use solana_transaction_status::{
         ConfirmedTransactionWithStatusMeta, InnerInstruction,
-        InnerInstructions, TransactionStatusMeta,
+        InnerInstructions, TransactionStatusMeta, TransactionWithStatusMeta,
+        VersionedTransactionWithStatusMeta,
     };
     use tempfile::{Builder, TempDir};
     use test_tools_core::init_logger;
@@ -935,7 +929,6 @@ mod tests {
             data: vec![1, 2, 3],
         };
         let compute_units_consumed_1 = Some(3812649u64);
-        let compute_units_consumed_2 = Some(42u64);
 
         (
             TransactionStatusMeta {
@@ -963,7 +956,6 @@ mod tests {
     }
 
     fn create_confirmed_transaction(
-        signature: Signature,
         slot: Slot,
         fee: u64,
         block_time: Option<UnixTimestamp>,
@@ -1199,7 +1191,6 @@ mod tests {
             (Signature::from([2u8; 64]), 20, 200);
 
         let (tx_uno, sanitized_uno) = create_confirmed_transaction(
-            sig_uno,
             slot_uno,
             5,
             Some(block_time_uno),
@@ -1207,7 +1198,6 @@ mod tests {
         );
 
         let (tx_dos, sanitized_dos) = create_confirmed_transaction(
-            sig_dos,
             slot_dos,
             9,
             Some(block_time_dos),
@@ -1296,7 +1286,7 @@ mod tests {
         let (signature_dos, slot_dos) = (Signature::new_unique(), 20);
         let signature_dos_2 = Signature::new_unique();
         let (read_dos, write_dos) = {
-            let (mut meta, mut writable_keys, mut readonly_keys) =
+            let (meta, mut writable_keys, mut readonly_keys) =
                 create_transaction_status_meta(5);
             let read_dos = readonly_keys[0];
             let write_dos = writable_keys[0];
@@ -1316,7 +1306,7 @@ mod tests {
             // read_dos and write_dos are part of another transaction in the same slot
             // signature_dos_2 at times is captured via intra slot logic, but the focus
             // of this method is not intra slot
-            let (mut meta, mut writable_keys, mut readonly_keys) =
+            let (meta, mut writable_keys, mut readonly_keys) =
                 create_transaction_status_meta(8);
             readonly_keys.push(read_dos);
             writable_keys.push(write_dos);
@@ -1335,8 +1325,8 @@ mod tests {
         };
 
         let (signature_tres, slot_tres) = (Signature::new_unique(), 30);
-        let (read_tres, write_tres) = {
-            let (mut meta, mut writable_keys, mut readonly_keys) =
+        let (_read_tres, _write_tres) = {
+            let (meta, mut writable_keys, mut readonly_keys) =
                 create_transaction_status_meta(5);
             let read_tres = readonly_keys[0];
             let write_tres = writable_keys[0];
@@ -1359,8 +1349,8 @@ mod tests {
         };
 
         let (signature_cuatro, slot_cuatro) = (Signature::new_unique(), 31);
-        let (read_cuatro, write_cuatro) = {
-            let (mut meta, writable_keys, readonly_keys) =
+        let (read_cuatro, _write_cuatro) = {
+            let (meta, writable_keys, readonly_keys) =
                 create_transaction_status_meta(5);
             let read_cuatro = readonly_keys[0];
             let write_cuatro = writable_keys[0];
@@ -1378,8 +1368,8 @@ mod tests {
         };
 
         let (signature_cinco, slot_cinco) = (Signature::new_unique(), 31);
-        let (read_cinco, write_cinco) = {
-            let (mut meta, writable_keys, readonly_keys) =
+        let (_read_cinco, _write_cinco) = {
+            let (meta, writable_keys, readonly_keys) =
                 create_transaction_status_meta(5);
             let read_cinco = readonly_keys[0];
             let write_cinco = writable_keys[0];
@@ -1397,8 +1387,8 @@ mod tests {
         };
 
         let (signature_seis, slot_seis) = (Signature::new_unique(), 32);
-        let (read_seis, write_seis) = {
-            let (mut meta, mut writable_keys, mut readonly_keys) =
+        let (_read_seis, _write_seis) = {
+            let (meta, mut writable_keys, mut readonly_keys) =
                 create_transaction_status_meta(5);
             let read_seis = readonly_keys[0];
             let write_seis = writable_keys[0];

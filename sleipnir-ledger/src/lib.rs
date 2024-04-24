@@ -1,4 +1,3 @@
-#![allow(unused)]
 mod conversions;
 mod database;
 pub mod errors;

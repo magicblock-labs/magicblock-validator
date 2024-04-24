@@ -60,13 +60,6 @@ pub fn adjust_ulimit_nofile(
     Ok(())
 }
 
-pub fn short_signature_from_vec(sig: &[u8]) -> String {
-    match Signature::try_from(sig) {
-        Ok(sig) => short_signature(&sig),
-        Err(_) => "<invalid signature>".to_string(),
-    }
-}
-
 pub fn short_signature(sig: &Signature) -> String {
     let sig_str = sig.to_string();
     if sig_str.len() < 8 {

@@ -1,5 +1,5 @@
 use byteorder::{BigEndian, ByteOrder};
-use prost::Message;
+
 use serde::{de::DeserializeOwned, Serialize};
 use solana_sdk::{clock::Slot, pubkey::Pubkey, signature::Signature};
 use solana_storage_proto::convert::generated;
