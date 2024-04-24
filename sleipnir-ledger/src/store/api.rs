@@ -1140,7 +1140,7 @@ mod tests {
         // Finds by matching signature
         {
             let (slot, status) = store
-                .get_transaction_status(sig_uno, slot_uno - 5)
+                .get_transaction_status(sig_uno, slot_uno + 5)
                 .unwrap()
                 .unwrap();
             assert_eq!(slot, slot_uno);
@@ -1169,16 +1169,20 @@ mod tests {
 
         // First still there
         {
-            let (slot, status) =
-                store.get_transaction_status(sig_uno, 0).unwrap().unwrap();
+            let (slot, status) = store
+                .get_transaction_status(sig_uno, slot_uno)
+                .unwrap()
+                .unwrap();
             assert_eq!(slot, slot_uno);
             assert_eq!(status, status_uno);
         }
 
         // Second one is found now as well
         {
-            let (slot, status) =
-                store.get_transaction_status(sig_dos, 0).unwrap().unwrap();
+            let (slot, status) = store
+                .get_transaction_status(sig_dos, slot_dos)
+                .unwrap()
+                .unwrap();
             assert_eq!(slot, slot_dos);
             assert_eq!(status, status_dos);
         }
