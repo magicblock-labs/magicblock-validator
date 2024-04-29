@@ -660,7 +660,8 @@ impl Bank {
 
     pub fn advance_slot(&self) -> Slot {
         // 1. Determine next slot and set it
-        let next_slot = self.slot() + 1;
+        let slot = self.slot();
+        let next_slot = slot + 1;
         self.set_slot(next_slot);
 
         // 2. Update transaction processor with new slot
@@ -705,6 +706,17 @@ impl Bank {
 
         // 8. Update loaded programs cache as otherwise we cannot deploy new programs
         self.sync_loaded_programs_cache_to_slot();
+
+        // 9. Currently the memory size is increasing while our validator is running
+        //    see docs/memory-issue.md. Thus we help this a bit by cleaning up regularly
+        //    At 50ms/slot we clean up about every 5 mins
+        const CACHE_CLEAR_INTERVAL: u64 = 6000;
+        if next_slot % CACHE_CLEAR_INTERVAL == 0 {
+            self.status_cache
+                .write()
+                .unwrap()
+                .clear_lte(next_slot - CACHE_CLEAR_INTERVAL);
+        }
 
         next_slot
     }
