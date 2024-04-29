@@ -156,4 +156,10 @@ impl<T: Clone> StatusCache<T> {
             .or_insert((key_index, vec![]));
         hash_entry.push((key_slice, res))
     }
+
+    pub(crate) fn clear_lte(&mut self, slot: Slot) {
+        self.cache.retain(|_, (x, _, _)| *x > slot);
+        self.roots.retain(|x| *x > slot);
+        self.slot_deltas.retain(|x, _| *x > slot);
+    }
 }
