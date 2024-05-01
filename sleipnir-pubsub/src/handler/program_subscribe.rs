@@ -27,8 +27,6 @@ pub async fn handle_program_subscribe(
         }
     };
 
-    info!("Sub {:#?}", sub);
-
     let mut geyser_rx =
         match geyser_service.accounts_subscribe(sub, subid, unsubscriber, None)
         {

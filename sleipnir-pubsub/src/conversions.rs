@@ -11,18 +11,22 @@ use geyser_grpc_proto::geyser::{
 };
 use sleipnir_rpc_client_api::{
     config::{
-        RpcProgramAccountsConfig, UiAccount, UiAccountEncoding,
-        UiDataSliceConfig,
+        RpcProgramAccountsConfig, RpcTransactionLogsFilter, UiAccount,
+        UiAccountEncoding, UiDataSliceConfig,
     },
     filter::{MemcmpEncodedBytes, RpcFilterType},
+    response::RpcLogsResponse,
 };
-use solana_sdk::{account::Account, pubkey::Pubkey};
+use solana_sdk::{account::Account, pubkey::Pubkey, signature::Signature};
 
 use crate::{
     errors::{PubsubError, PubsubResult},
     types::SlotResponse,
 };
 
+// -----------------
+// geyser_sub_for_transaction_signature
+// -----------------
 pub fn geyser_sub_for_transaction_signature(
     signature: String,
 ) -> HashMap<String, SubscribeRequestFilterTransactions> {
@@ -39,6 +43,42 @@ pub fn geyser_sub_for_transaction_signature(
     map
 }
 
+pub fn try_geyser_sub_for_transaction_logs(
+    logs_filter: &RpcTransactionLogsFilter,
+) -> PubsubResult<HashMap<String, SubscribeRequestFilterTransactions>> {
+    let mut tx_sub = SubscribeRequestFilterTransactions {
+        vote: None,
+        failed: None,
+        signature: None,
+        account_include: vec![],
+        account_exclude: vec![],
+        account_required: vec![],
+    };
+
+    use RpcTransactionLogsFilter::*;
+    match logs_filter {
+        All => tx_sub.vote = Some(false),
+        AllWithVotes => tx_sub.vote = Some(true),
+        Mentions(accs) => {
+            if accs.len() > 1 {
+                return Err(PubsubError::InvalidParam(
+                    "Only one account mention can be specified in logs filter."
+                        .to_string(),
+                    format!("{:?}", accs),
+                ));
+            }
+            tx_sub.account_required = accs.clone();
+        }
+    }
+
+    let mut map = HashMap::new();
+    map.insert("transaction_logs".to_string(), tx_sub);
+    Ok(map)
+}
+
+// -----------------
+// geyser_sub_for_account
+// -----------------
 pub fn geyser_sub_for_account(
     account: String,
 ) -> HashMap<String, SubscribeRequestFilterAccounts> {
@@ -52,6 +92,9 @@ pub fn geyser_sub_for_account(
     map
 }
 
+// -----------------
+// try_geyser_sub_for_program
+// -----------------
 pub fn try_geyser_sub_for_program(
     program_id: String,
     config: &Option<RpcProgramAccountsConfig>,
@@ -240,4 +283,46 @@ fn ui_account_from_subscribe_account_info(
     let ui_account =
         UiAccount::encode(&pubkey, &account, encoding, None, data_slice_config);
     Ok(Some((pubkey, ui_account)))
+}
+
+// -----------------
+// Subscribe Update into Logs
+// -----------------
+pub fn try_subscribe_update_into_logs(
+    update: SubscribeUpdate,
+) -> PubsubResult<Option<RpcLogsResponse>> {
+    use UpdateOneof::*;
+    let tx = match update.update_oneof {
+        Some(Transaction(tx)) => match tx.transaction {
+            Some(tx) => tx,
+            None => return Ok(None),
+        },
+        _ => return Ok(None),
+    };
+
+    let signature = Signature::try_from(tx.signature)
+        .map_err(|err| {
+            PubsubError::InvalidTransactionSignature(format!("{:?}", err))
+        })?
+        .to_string();
+
+    let meta = match tx.meta {
+        Some(meta) => meta,
+        None => return Ok(None),
+    };
+
+    let logs = meta.log_messages;
+    let err = meta
+        .err
+        .map(|err| bincode::deserialize(&err.err))
+        .transpose()
+        .map_err(|err| {
+            PubsubError::CouldNotConvertTransactionError(err.to_string())
+        })?;
+
+    Ok(Some(RpcLogsResponse {
+        signature,
+        err,
+        logs,
+    }))
 }

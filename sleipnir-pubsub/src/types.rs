@@ -3,7 +3,8 @@ use serde::{Deserialize, Serialize};
 use sleipnir_rpc_client_api::{
     config::{
         RpcAccountInfoConfig, RpcProgramAccountsConfig,
-        RpcSignatureSubscribeConfig, UiAccountEncoding, UiDataSliceConfig,
+        RpcSignatureSubscribeConfig, RpcTransactionLogsConfig,
+        RpcTransactionLogsFilter, UiAccountEncoding, UiDataSliceConfig,
     },
     response::{Response, RpcResponseContext},
 };
@@ -103,6 +104,25 @@ impl SignatureParams {
 
     #[allow(unused)]
     pub fn config(&self) -> &Option<RpcSignatureSubscribeConfig> {
+        &self.1
+    }
+}
+
+// -----------------
+// LogsParams
+// -----------------
+#[derive(Serialize, Deserialize, Debug)]
+pub struct LogsParams(
+    RpcTransactionLogsFilter,
+    Option<RpcTransactionLogsConfig>,
+);
+
+impl LogsParams {
+    pub fn filter(&self) -> &RpcTransactionLogsFilter {
+        &self.0
+    }
+
+    pub fn config(&self) -> &Option<RpcTransactionLogsConfig> {
         &self.1
     }
 }

@@ -5,7 +5,7 @@ use log::*;
 use sleipnir_bank::bank::Bank;
 use sleipnir_geyser_plugin::rpc::GeyserRpcService;
 
-use crate::types::{AccountParams, ProgramParams, SignatureParams};
+use crate::types::{AccountParams, LogsParams, ProgramParams, SignatureParams};
 
 pub enum SubscriptionRequest {
     Account {
@@ -28,6 +28,11 @@ pub enum SubscriptionRequest {
         params: SignatureParams,
         bank: Arc<Bank>,
     },
+    Logs {
+        subscriber: Subscriber,
+        params: LogsParams,
+        geyser_service: Arc<GeyserRpcService>,
+    },
 }
 
 impl SubscriptionRequest {
@@ -38,6 +43,7 @@ impl SubscriptionRequest {
             Program { subscriber, .. } => subscriber,
             Slot { subscriber, .. } => subscriber,
             Signature { subscriber, .. } => subscriber,
+            Logs { subscriber, .. } => subscriber,
         }
     }
 }

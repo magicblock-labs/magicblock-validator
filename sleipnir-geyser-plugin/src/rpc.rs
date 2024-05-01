@@ -152,7 +152,7 @@ impl GeyserRpcService {
         >,
         subid: u64,
         unsubscriber: CancellationToken,
-        signature: &Signature,
+        signature: Option<&Signature>,
     ) -> anyhow::Result<mpsc::Receiver<Result<SubscribeUpdate, Status>>> {
         let filter = Filter::new(
             &SubscribeRequest {
@@ -169,17 +169,20 @@ impl GeyserRpcService {
             &self.config.filters,
             self.config.normalize_commitment_level,
         )?;
-        let msgs = self
-            .transactions_cache
-            .get(signature)
-            .as_ref()
-            .map(|val| Arc::new(vec![val.value().clone()]));
+        let msgs = signature.and_then(|signature| {
+            let msgs = self
+                .transactions_cache
+                .get(signature)
+                .as_ref()
+                .map(|val| Arc::new(vec![val.value().clone()]));
 
-        if log::log_enabled!(log::Level::Trace)
-            && msgs.as_ref().map(|val| val.is_empty()).unwrap_or_default()
-        {
-            trace!("tx cache miss: '{}'", short_signature(signature));
-        }
+            if log::log_enabled!(log::Level::Trace)
+                && msgs.as_ref().map(|val| val.is_empty()).unwrap_or_default()
+            {
+                trace!("tx cache miss: '{}'", short_signature(signature));
+            }
+            msgs
+        });
 
         let sub_update = self.subscribe_impl(filter, subid, unsubscriber, msgs);
 

@@ -14,7 +14,7 @@ use solana_sdk::rpc_port::DEFAULT_RPC_PUBSUB_PORT;
 use crate::{
     errors::{ensure_and_try_parse_params, ensure_empty_params},
     pubsub_api::PubsubApi,
-    types::{AccountParams, ProgramParams, SignatureParams},
+    types::{AccountParams, LogsParams, ProgramParams, SignatureParams},
 };
 
 // -----------------
@@ -66,6 +66,7 @@ impl PubsubService {
             .add_program_subscribe()
             .add_slot_subscribe()
             .add_signature_subscribe()
+            .add_logs_subscribe()
     }
 
     #[allow(clippy::result_large_err)]
@@ -231,6 +232,42 @@ impl PubsubService {
             "signatureNotification",
             ("signatureSubscribe", subscribe),
             ("signatureUnsubscribe", unsubscribe),
+        );
+
+        self
+    }
+
+    fn add_logs_subscribe(mut self) -> Self {
+        let subscribe = {
+            let api = self.api.clone();
+            let geyser_service = self.geyser_service.clone();
+            move |params: Params, _, subscriber: Subscriber| {
+                let (subscriber, logs_params): (Subscriber, LogsParams) =
+                    match ensure_and_try_parse_params(subscriber, params) {
+                        Some((subscriber, params)) => (subscriber, params),
+                        None => {
+                            return;
+                        }
+                    };
+
+                debug!("{:#?}", logs_params);
+
+                if let Err(err) = api.logs_subscribe(
+                    subscriber,
+                    logs_params,
+                    geyser_service.clone(),
+                ) {
+                    error!("Failed to handle logs subscribe: {:?}", err);
+                };
+            }
+        };
+        let unsubscribe = self.create_unsubscribe();
+
+        let io = &mut self.io;
+        io.add_subscription(
+            "logsNotification",
+            ("logsSubscribe", subscribe),
+            ("logsUnsubscribe", unsubscribe),
         );
 
         self

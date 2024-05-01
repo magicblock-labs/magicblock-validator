@@ -188,6 +188,17 @@ pub struct RpcContactInfo {
 // - RpcBlockProduction
 
 // -----------------
+// RpcLogsResponse
+// -----------------
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct RpcLogsResponse {
+    pub signature: String, // Signature as base58 string
+    pub err: Option<TransactionError>,
+    pub logs: Vec<String>,
+}
+
+// -----------------
 // RpcVersionInfo
 // -----------------
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq)]

@@ -11,6 +11,10 @@ pub enum PubsubError {
     FailedToSendSubscription(String),
     #[error("Invalid param: {0} ({1})")]
     InvalidParam(String, String),
+    #[error("Failed to convert transaction error: {0}")]
+    CouldNotConvertTransactionError(String),
+    #[error("Tried to parse invalid signature: {0}")]
+    InvalidTransactionSignature(String),
 }
 
 pub type PubsubResult<T> = Result<T, PubsubError>;

@@ -41,7 +41,7 @@ pub async fn handle_signature_subscribe(
         sub,
         subid,
         unsubscriber,
-        &sig,
+        Some(&sig),
     ) {
         Ok(res) => res,
         Err(err) => {
