@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 // NOTE: from rpc/src/rpc.rs :3432
 use jsonrpc_core::{futures::future, BoxFuture, Error, Result};
 use log::*;
@@ -18,6 +20,7 @@ use sleipnir_rpc_client_api::{
 use solana_sdk::{
     clock::{Slot, UnixTimestamp, MAX_RECENT_BLOCKHASHES},
     commitment_config::CommitmentConfig,
+    hash::Hash,
     message::{SanitizedMessage, SanitizedVersionedMessage, VersionedMessage},
     signature::Signature,
     transaction::VersionedTransaction,
@@ -311,7 +314,13 @@ impl Full for FullImpl {
         blockhash: String,
         config: Option<RpcContextConfig>,
     ) -> Result<RpcResponse<bool>> {
-        todo!("is_blockhash_valid")
+        debug!("is_blockhash_valid rpc request received");
+        let min_context_slot =
+            config.and_then(|config| config.min_context_slot);
+        let blockhash = Hash::from_str(&blockhash)
+            .map_err(|e| Error::invalid_params(format!("{e:?}")))?;
+
+        meta.is_blockhash_valid(&blockhash, min_context_slot)
     }
 
     fn get_fee_for_message(

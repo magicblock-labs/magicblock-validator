@@ -1247,6 +1247,16 @@ impl Bank {
         self.rent_collector.rent.minimum_balance(data_len).max(1)
     }
 
+    pub fn is_blockhash_valid(&self, hash: &Hash) -> bool {
+        let blockhash_queue = self.blockhash_queue.read().unwrap();
+        blockhash_queue.is_hash_valid(hash)
+    }
+
+    pub fn is_blockhash_valid_for_age(&self, hash: &Hash, age: usize) -> bool {
+        let blockhash_queue = self.blockhash_queue.read().unwrap();
+        blockhash_queue.is_hash_valid_for_age(hash, age)
+    }
+
     // -----------------
     // Features
     // -----------------

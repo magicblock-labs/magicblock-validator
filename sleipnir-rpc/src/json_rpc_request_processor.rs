@@ -306,6 +306,33 @@ impl JsonRpcRequestProcessor {
         ))
     }
 
+    pub fn is_blockhash_valid(
+        &self,
+        blockhash: &Hash,
+        min_context_slot: Option<u64>,
+    ) -> Result<RpcResponse<bool>> {
+        let bank = self.get_bank();
+        let age = match min_context_slot {
+            Some(min_slot) => {
+                let current_slot = bank.slot();
+                if min_slot > current_slot {
+                    return Err(Error::invalid_params(format!(
+                        "min_context_slot {min_slot} is in the future"
+                    )));
+                }
+                let age = current_slot - min_slot;
+                Some(age as usize)
+            }
+            None => None,
+        };
+        let is_valid = match age {
+            Some(age) => bank.is_blockhash_valid_for_age(blockhash, age),
+            None => bank.is_blockhash_valid(blockhash),
+        };
+
+        Ok(new_response(&bank, is_valid))
+    }
+
     // -----------------
     // Block
     // -----------------

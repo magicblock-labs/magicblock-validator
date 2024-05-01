@@ -33,8 +33,6 @@ pub async fn handle_logs_subscribe(
         }
     };
 
-    info!("Sub {:#?}", sub);
-
     let mut geyser_rx = match geyser_service.transaction_subscribe(
         sub,
         subid,
