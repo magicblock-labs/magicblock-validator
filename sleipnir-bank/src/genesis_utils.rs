@@ -1,10 +1,11 @@
 // NOTE: from runtime/src/genesis_utils.rs
 // heavily updated to remove vote + stake related code as well as cluster type (defaulting to mainnet)
-use std::borrow::Borrow;
+use std::{borrow::Borrow, time::UNIX_EPOCH};
 
 use solana_accounts_db::inline_spl_token;
 use solana_sdk::{
     account::{Account, AccountSharedData},
+    clock::UnixTimestamp,
     feature::{self, Feature},
     feature_set::FeatureSet,
     fee_calculator::FeeRateGovernor,
@@ -213,6 +214,7 @@ pub fn create_genesis_config_with_leader_ex(
         fee_rate_governor,
         rent,
         cluster_type: ClusterType::MainnetBeta,
+        creation_time: UNIX_EPOCH.elapsed().unwrap().as_secs() as UnixTimestamp,
         ..GenesisConfig::default()
     };
 

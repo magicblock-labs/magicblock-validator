@@ -114,6 +114,7 @@ async fn main() {
             SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8899);
         let config = JsonRpcConfig {
             slot_duration: tick_duration,
+            genesis_creation_time: genesis_config.creation_time,
             transaction_status_sender: Some(TransactionStatusSender {
                 sender: transaction_sndr,
             }),

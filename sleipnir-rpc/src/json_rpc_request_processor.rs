@@ -68,6 +68,9 @@ pub struct JsonRpcConfig {
 
     pub slot_duration: Duration,
 
+    /// when the network (bootstrap validator) was started relative to the UNIX Epoch
+    pub genesis_creation_time: UnixTimestamp,
+
     /// Allows updating  Geyser or similar when transactions are processed
     /// Could go into send_transaction_service once we built that
     pub transaction_status_sender: Option<TransactionStatusSender>,
@@ -314,14 +317,23 @@ impl JsonRpcRequestProcessor {
         let bank = self.get_bank();
         let age = match min_context_slot {
             Some(min_slot) => {
+                // The original implementation can rely on just the slot to determinine
+                // if the min context slot rule applies. It can do that since it can select
+                // the appropriate bank for it.
+                // In our case we have to estimate this by calculating the age the block hash
+                // can have based on the genesis creation time and the slot duration.
                 let current_slot = bank.slot();
                 if min_slot > current_slot {
                     return Err(Error::invalid_params(format!(
                         "min_context_slot {min_slot} is in the future"
                     )));
                 }
-                let age = current_slot - min_slot;
-                Some(age as usize)
+                let slot_diff = current_slot - min_slot;
+                let slot_diff_millis =
+                    (self.config.slot_duration.as_micros() as f64 / 1_000.0
+                        * (slot_diff as f64)) as u64;
+                let age = slot_diff_millis;
+                Some(age)
             }
             None => None,
         };

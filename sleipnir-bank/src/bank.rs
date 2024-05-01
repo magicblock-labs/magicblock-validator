@@ -1252,9 +1252,13 @@ impl Bank {
         blockhash_queue.is_hash_valid(hash)
     }
 
-    pub fn is_blockhash_valid_for_age(&self, hash: &Hash, age: usize) -> bool {
+    pub fn is_blockhash_valid_for_age(
+        &self,
+        hash: &Hash,
+        max_age: u64,
+    ) -> bool {
         let blockhash_queue = self.blockhash_queue.read().unwrap();
-        blockhash_queue.is_hash_valid_for_age(hash, age)
+        blockhash_queue.is_hash_valid_for_age(hash, max_age as usize)
     }
 
     // -----------------
