@@ -14,7 +14,10 @@ use solana_sdk::commitment_config::CommitmentLevel;
 // AccountParams
 // -----------------
 #[derive(Serialize, Deserialize, Debug)]
-pub struct AccountParams(String, Option<RpcAccountInfoConfig>);
+pub struct AccountParams(
+    String,
+    #[serde(default)] Option<RpcAccountInfoConfig>,
+);
 
 #[allow(unused)]
 impl AccountParams {
@@ -61,7 +64,10 @@ impl From<&AccountParams> for AccountDataConfig {
 // ProgramParams
 // -----------------
 #[derive(Serialize, Deserialize, Debug)]
-pub struct ProgramParams(String, Option<RpcProgramAccountsConfig>);
+pub struct ProgramParams(
+    String,
+    #[serde(default)] Option<RpcProgramAccountsConfig>,
+);
 impl ProgramParams {
     pub fn program_id(&self) -> &str {
         &self.0
@@ -96,7 +102,10 @@ impl From<&ProgramParams> for AccountDataConfig {
 // SignatureParams
 // -----------------
 #[derive(Serialize, Deserialize, Debug)]
-pub struct SignatureParams(String, Option<RpcSignatureSubscribeConfig>);
+pub struct SignatureParams(
+    String,
+    #[serde(default)] Option<RpcSignatureSubscribeConfig>,
+);
 impl SignatureParams {
     pub fn signature(&self) -> &str {
         &self.0
@@ -114,7 +123,7 @@ impl SignatureParams {
 #[derive(Serialize, Deserialize, Debug)]
 pub struct LogsParams(
     RpcTransactionLogsFilter,
-    Option<RpcTransactionLogsConfig>,
+    #[serde(default)] Option<RpcTransactionLogsConfig>,
 );
 
 impl LogsParams {
