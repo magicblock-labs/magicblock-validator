@@ -1,48 +1,47 @@
 use jsonrpc_pubsub::Subscriber;
 use log::*;
 use sleipnir_geyser_plugin::rpc::GeyserRpcService;
-use solana_sdk::pubkey::Pubkey;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    conversions::geyser_sub_for_account, errors::reject_internal_error,
+    conversions::try_geyser_sub_for_program, errors::reject_internal_error,
     handler::common::handle_account_geyser_update, subscription::assign_sub_id,
-    types::AccountParams,
+    types::ProgramParams,
 };
 
-pub async fn handle_account_subscribe(
+pub async fn handle_program_subscribe(
     subid: u64,
     subscriber: Subscriber,
     unsubscriber: CancellationToken,
-    params: &AccountParams,
+    params: &ProgramParams,
     geyser_service: &GeyserRpcService,
 ) {
-    let address = params.pubkey();
-    let sub = geyser_sub_for_account(address.to_string());
-    let pubkey = match Pubkey::try_from(address) {
-        Ok(pubkey) => pubkey,
+    let address = params.program_id();
+    let config = params.config();
+
+    let sub = match try_geyser_sub_for_program(address.to_string(), config) {
+        Ok(sub) => sub,
         Err(err) => {
-            reject_internal_error(subscriber, "Invalid Pubkey", Some(err));
+            reject_internal_error(subscriber, "Invalid config", Some(err));
             return;
         }
     };
 
-    let mut geyser_rx = match geyser_service.accounts_subscribe(
-        sub,
-        subid,
-        unsubscriber,
-        Some(&pubkey),
-    ) {
-        Ok(res) => res,
-        Err(err) => {
-            reject_internal_error(
-                subscriber,
-                "Failed to subscribe to signature",
-                Some(err),
-            );
-            return;
-        }
-    };
+    info!("Sub {:#?}", sub);
+
+    let mut geyser_rx =
+        match geyser_service.accounts_subscribe(sub, subid, unsubscriber, None)
+        {
+            Ok(res) => res,
+            Err(err) => {
+                reject_internal_error(
+                    subscriber,
+                    "Failed to subscribe to signature",
+                    Some(err),
+                );
+                return;
+            }
+        };
 
     if let Some(sink) = assign_sub_id(subscriber, subid) {
         loop {
@@ -55,7 +54,7 @@ pub async fn handle_account_subscribe(
                                 subid,
                                 update,
                                 params.into(),
-                                false,
+                                true,
                             ) {
                                 break;
                             }

@@ -2,8 +2,8 @@ use jsonrpc_core::Params;
 use serde::{Deserialize, Serialize};
 use sleipnir_rpc_client_api::{
     config::{
-        RpcAccountInfoConfig, RpcSignatureSubscribeConfig, UiAccountEncoding,
-        UiDataSliceConfig,
+        RpcAccountInfoConfig, RpcProgramAccountsConfig,
+        RpcSignatureSubscribeConfig, UiAccountEncoding, UiDataSliceConfig,
     },
     response::{Response, RpcResponseContext},
 };
@@ -37,6 +37,57 @@ impl AccountParams {
 
     fn config(&self) -> &Option<RpcAccountInfoConfig> {
         &self.1
+    }
+}
+
+pub struct AccountDataConfig {
+    pub encoding: Option<UiAccountEncoding>,
+    pub commitment: Option<CommitmentLevel>,
+    pub data_slice_config: Option<UiDataSliceConfig>,
+}
+
+impl From<&AccountParams> for AccountDataConfig {
+    fn from(params: &AccountParams) -> Self {
+        AccountDataConfig {
+            encoding: params.encoding(),
+            commitment: params.commitment(),
+            data_slice_config: params.data_slice_config(),
+        }
+    }
+}
+
+// -----------------
+// ProgramParams
+// -----------------
+#[derive(Serialize, Deserialize, Debug)]
+pub struct ProgramParams(String, Option<RpcProgramAccountsConfig>);
+impl ProgramParams {
+    pub fn program_id(&self) -> &str {
+        &self.0
+    }
+
+    pub fn config(&self) -> &Option<RpcProgramAccountsConfig> {
+        &self.1
+    }
+}
+
+impl From<&ProgramParams> for AccountDataConfig {
+    fn from(params: &ProgramParams) -> Self {
+        AccountDataConfig {
+            encoding: params
+                .config()
+                .as_ref()
+                .and_then(|c| c.account_config.encoding),
+            commitment: params
+                .config()
+                .as_ref()
+                .and_then(|c| c.account_config.commitment)
+                .map(|c| c.commitment),
+            data_slice_config: params
+                .config()
+                .as_ref()
+                .and_then(|c| c.account_config.data_slice),
+        }
     }
 }
 

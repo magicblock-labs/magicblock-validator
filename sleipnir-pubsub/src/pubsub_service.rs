@@ -14,7 +14,7 @@ use solana_sdk::rpc_port::DEFAULT_RPC_PUBSUB_PORT;
 use crate::{
     errors::{ensure_and_try_parse_params, ensure_empty_params},
     pubsub_api::PubsubApi,
-    types::{AccountParams, SignatureParams},
+    types::{AccountParams, ProgramParams, SignatureParams},
 };
 
 // -----------------
@@ -63,6 +63,7 @@ impl PubsubService {
 
         service
             .add_account_subscribe()
+            .add_program_subscribe()
             .add_slot_subscribe()
             .add_signature_subscribe()
     }
@@ -128,6 +129,42 @@ impl PubsubService {
             "accountNotification",
             ("accountSubscribe", subscribe),
             ("accountUnsubscribe", unsubscribe),
+        );
+
+        self
+    }
+
+    fn add_program_subscribe(mut self) -> Self {
+        let subscribe = {
+            let api = self.api.clone();
+            let geyser_service = self.geyser_service.clone();
+            move |params: Params, _, subscriber: Subscriber| {
+                let (subscriber, program_params): (Subscriber, ProgramParams) =
+                    match ensure_and_try_parse_params(subscriber, params) {
+                        Some((subscriber, params)) => (subscriber, params),
+                        None => {
+                            return;
+                        }
+                    };
+
+                debug!("{:#?}", program_params);
+
+                if let Err(err) = api.program_subscribe(
+                    subscriber,
+                    program_params,
+                    geyser_service.clone(),
+                ) {
+                    error!("Failed to handle program subscribe: {:?}", err);
+                };
+            }
+        };
+        let unsubscribe = self.create_unsubscribe();
+
+        let io = &mut self.io;
+        io.add_subscription(
+            "programNotification",
+            ("programSubscribe", subscribe),
+            ("programUnsubscribe", unsubscribe),
         );
 
         self

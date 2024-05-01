@@ -9,6 +9,8 @@ use thiserror::Error;
 pub enum PubsubError {
     #[error("Failed to confirm subscription: {0}")]
     FailedToSendSubscription(String),
+    #[error("Invalid param: {0} ({1})")]
+    InvalidParam(String, String),
 }
 
 pub type PubsubResult<T> = Result<T, PubsubError>;

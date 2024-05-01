@@ -115,7 +115,7 @@ impl GeyserRpcService {
         account_subscription: HashMap<String, SubscribeRequestFilterAccounts>,
         subid: u64,
         unsubscriber: CancellationToken,
-        pubkey: &Pubkey,
+        pubkey: Option<&Pubkey>,
     ) -> anyhow::Result<mpsc::Receiver<Result<SubscribeUpdate, Status>>> {
         let filter = Filter::new(
             &SubscribeRequest {
@@ -133,11 +133,12 @@ impl GeyserRpcService {
             self.config.normalize_commitment_level,
         )?;
 
-        let msgs = self
-            .accounts_cache
-            .get(pubkey)
-            .as_ref()
-            .map(|val| Arc::new(vec![val.value().clone()]));
+        let msgs = pubkey.and_then(|pubkey| {
+            self.accounts_cache
+                .get(pubkey)
+                .as_ref()
+                .map(|val| Arc::new(vec![val.value().clone()]))
+        });
 
         let sub_update = self.subscribe_impl(filter, subid, unsubscriber, msgs);
         Ok(sub_update)
