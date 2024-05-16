@@ -25,6 +25,7 @@ members = [
   "sleipnir-tokens",
   "sleipnir-transaction-status",
   "sleipnir-version",
+  "solana/accounts-db",
   "solana/program-runtime",
   "solana/storage-proto",
   "solana/svm",
@@ -111,7 +112,7 @@ sleipnir-tokens = { path = "./sleipnir-tokens" }
 sleipnir-streamer = { path = "./sleipnir-streamer" }
 sleipnir-transaction-status = { path = "./sleipnir-transaction-status" }
 sleipnir-version = { path = "./sleipnir-version" }
-solana-accounts-db = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-accounts-db" }
+solana-accounts-db = { path = "./solana/accounts-db" }
 solana-account-decoder = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-account-decoder" }
 solana-bpf-loader-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-bpf-loader-program" }
 solana-cost-model = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-cost-model" }
@@ -151,6 +152,40 @@ tonic-build = "0.10.2"
 tonic-health = "0.10.2"
 vergen = "8.3.1"
 zstd = "0.11.2"
+
+## Needed when using accounts-db copy
+blake3 = "1.5.0"
+bv = "0.11.1"
+bytemuck = "1.14.3"
+bzip2 = "0.4.4"
+dashmap = "5.5.3"
+ed25519-dalek = "=1.0.1"
+flate2 = "1.0.28"
+fnv = "1.0.7"
+im = "15.1.0"
+index_list = "0.2.11"
+indexmap = "2.2.3"
+lz4 = "1.24.0"
+memmap2 = "0.5.10"
+memoffset = "0.9"
+modular-bitfield = "0.11.2"
+num_enum = "0.7.2"
+ouroboros = "0.15.6"
+qualifier_attr = { version = "0.2.2", default-features = false }
+rand_chacha = "0.3.1"
+regex = "1.10.3"
+seqlock = "0.2.0"
+smallvec = "1.13.1"
+solana-bucket-map = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-bucket-map" }
+solana-config-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-config-program" }
+solana-nohash-hasher = "0.2.1"
+solana-stake-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-stake-program" }
+solana-vote-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-vote-program" }
+static_assertions = "1.1.0"
+strum = "0.24"
+strum_macros = "0.24"
+tar = "0.4.40"
+test-case = "3.3.1"
 
 [patch.'https://github.com/solana-labs/solana']
 solana-program-runtime = { path = "./solana/program-runtime" }
