@@ -14,8 +14,10 @@ pub struct Config {
     /// Action on block re-construction error
     pub block_fail_action: ConfigBlockFailAction,
     /// TTL of cached transaction messages
+    /// Only applies if [Config::cache_transactions] is `true`
     pub transactions_cache_ttl: Duration,
     /// number of 4-bit access counters to keep for admission and eviction
+    /// Only applies if [Config::cache_transactions] is `true`
     pub transactions_cache_num_counters: usize,
     /// Since we ignore internal_cost, in our case this is exactly the same as
     /// transactions_cache_max_cost which affects how eviction decisions are made
@@ -27,11 +29,14 @@ pub struct Config {
     /// since we cannot miss transaction signatures.
     /// Diagnose this cache and related settings by setting the `DIAG_GEYSER_TX_CACHE_INTERVAL`
     /// compile time environment var.
+    /// Only applies if [Config::cache_transactions] is `true`
     pub transactions_cache_max_cached_items: i64,
 
     /// TTL of cached account messages
+    /// Only applies if [Config::cache_accounts] is `true`
     pub accounts_cache_ttl: Duration,
     /// See [Config::transactions_cache_num_counters].
+    /// Only applies if [Config::cache_accounts] is `true`
     pub accounts_cache_num_counters: usize,
     /// See [Config::transactions_max_cached_items].
     /// By default it is set to 1GB
@@ -47,6 +52,11 @@ pub struct Config {
     /// Diagnose this cache and related settings by setting the `DIAG_GEYSER_ACC_CACHE_INTERVAL`
     /// compile time environment var.
     pub accounts_cache_max_cached_bytes: i64,
+
+    /// If to cache account updates (default: true)
+    pub cache_accounts: bool,
+    /// If to cache transaction updates (default: true)
+    pub cache_transactions: bool,
 }
 
 impl Default for Config {
@@ -63,6 +73,9 @@ impl Default for Config {
             accounts_cache_ttl: Duration::from_millis(500),
             accounts_cache_num_counters: 10_000,
             accounts_cache_max_cached_bytes: 1024 * 1024 * 1024, // 1GB
+
+            cache_accounts: true,
+            cache_transactions: true,
         }
     }
 }

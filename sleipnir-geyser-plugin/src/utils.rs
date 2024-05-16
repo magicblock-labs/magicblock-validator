@@ -1,5 +1,8 @@
 use geyser_grpc_proto::geyser::SubscribeUpdateTransaction;
-use solana_sdk::signature::Signature;
+use solana_sdk::{pubkey::Pubkey, signature::Signature};
+use stretto::Cache;
+
+use crate::grpc_messages::Message;
 
 pub fn short_signature_from_sub_update(
     tx: &SubscribeUpdateTransaction,
@@ -23,5 +26,34 @@ pub fn short_signature(sig: &Signature) -> String {
         "<invalid signature>".to_string()
     } else {
         format!("{}..{}", &sig_str[..8], &sig_str[sig_str.len() - 8..])
+    }
+}
+
+// -----------------
+// CacheState
+// -----------------
+#[derive(Debug, Default)]
+pub(crate) enum CacheState {
+    #[allow(dead_code)] // used when printing debug
+    Enabled(usize),
+    #[default]
+    Disabled,
+}
+
+impl From<Option<&Cache<Signature, Message>>> for CacheState {
+    fn from(cache: Option<&Cache<Signature, Message>>) -> Self {
+        match cache {
+            Some(cache) => CacheState::Enabled(cache.len()),
+            None => CacheState::Disabled,
+        }
+    }
+}
+
+impl From<Option<&Cache<Pubkey, Message>>> for CacheState {
+    fn from(cache: Option<&Cache<Pubkey, Message>>) -> Self {
+        match cache {
+            Some(cache) => CacheState::Enabled(cache.len()),
+            None => CacheState::Disabled,
+        }
     }
 }
