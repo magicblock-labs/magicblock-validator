@@ -26,6 +26,13 @@ ex-rpc:
 ex-rpc-release:
 	cargo run --release --package=sleipnir-rpc --example rpc
 
+run-release:
+	cargo run --release
+
+run-release-no-geyser-cache:
+	GEYSER_CACHE_DISABLE=accounts,transactions \
+	cargo run --release
+
 fmt:
 	cargo +nightly fmt -- --config-path rustfmt-nightly.toml
 

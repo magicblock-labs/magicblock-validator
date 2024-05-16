@@ -4,6 +4,7 @@ use crossbeam_channel::Receiver;
 use itertools::izip;
 use log::*;
 use sleipnir_bank::transaction_notifier_interface::TransactionNotifierArc;
+use sleipnir_geyser_plugin::config::Config as GeyserPluginConfig;
 use sleipnir_geyser_plugin::{plugin::GrpcGeyserPlugin, rpc::GeyserRpcService};
 use sleipnir_ledger::Ledger;
 use sleipnir_transaction_status::{
@@ -20,8 +21,23 @@ pub async fn init_geyser_service() -> Result<
     (GeyserPluginService, Arc<GeyserRpcService>),
     GeyserPluginServiceError,
 > {
+    let (cache_accounts, cache_transactions) =
+        match std::env::var("GEYSER_CACHE_DISABLE") {
+            Ok(val) => {
+                let cache_accounts = !val.contains("accounts");
+                let cache_transactions = !val.contains("transactions");
+                (cache_accounts, cache_transactions)
+            }
+            Err(_) => (true, true),
+        };
+    let config = GeyserPluginConfig {
+        cache_accounts,
+        cache_transactions,
+        ..Default::default()
+    };
+    debug!("Geyser plugin config: {:?}", config);
     let (grpc_plugin, rpc_service) = {
-        let plugin = GrpcGeyserPlugin::create(Default::default())
+        let plugin = GrpcGeyserPlugin::create(config)
             .await
             .map_err(|err| {
                 error!("Failed to load geyser plugin: {:?}", err);
