@@ -30,6 +30,7 @@ use crate::{
         Message, MessageAccount, MessageBlock, MessageBlockMeta, MessageEntry,
         MessageRef, MessageSlot, MessageTransaction,
     },
+    types::GeyserMessage,
 };
 
 #[derive(Debug, Clone)]
@@ -122,10 +123,10 @@ impl Filter {
 
     pub fn get_filters<'a>(
         &self,
-        message: &'a Message,
+        message: &'a GeyserMessage,
         commitment: Option<CommitmentLevel>,
     ) -> Vec<(Vec<String>, MessageRef<'a>)> {
-        match message {
+        match message.as_ref() {
             Message::Account(message) => self.accounts.get_filters(message),
             Message::Slot(message) => {
                 self.slots.get_filters(message, commitment)
@@ -143,7 +144,7 @@ impl Filter {
 
     pub fn get_update(
         &self,
-        message: &Message,
+        message: &GeyserMessage,
         commitment: Option<CommitmentLevel>,
     ) -> Vec<SubscribeUpdate> {
         self.get_filters(message, commitment)
@@ -902,7 +903,7 @@ impl FilterAccountsDataSlice {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
+    use std::{collections::HashMap, sync::Arc};
 
     use geyser_grpc_proto::geyser::{
         SubscribeRequest, SubscribeRequestFilterAccounts,
@@ -1129,7 +1130,7 @@ mod tests {
             &keypair_b,
             vec![account_key_b, account_key_a],
         );
-        let message = Message::Transaction(message_transaction);
+        let message = Arc::new(Message::Transaction(message_transaction));
         for (filters, _message) in filter.get_filters(&message, None) {
             assert!(!filters.is_empty());
         }
@@ -1176,7 +1177,7 @@ mod tests {
             &keypair_b,
             vec![account_key_b, account_key_a],
         );
-        let message = Message::Transaction(message_transaction);
+        let message = Arc::new(Message::Transaction(message_transaction));
         for (filters, _message) in filter.get_filters(&message, None) {
             assert!(!filters.is_empty());
         }
@@ -1223,7 +1224,7 @@ mod tests {
             &keypair_b,
             vec![account_key_b, account_key_a],
         );
-        let message = Message::Transaction(message_transaction);
+        let message = Arc::new(Message::Transaction(message_transaction));
         for (filters, _message) in filter.get_filters(&message, None) {
             assert!(filters.is_empty());
         }
@@ -1276,7 +1277,7 @@ mod tests {
             &keypair_x,
             vec![account_key_x, account_key_y, account_key_z],
         );
-        let message = Message::Transaction(message_transaction);
+        let message = Arc::new(Message::Transaction(message_transaction));
         for (filters, _message) in filter.get_filters(&message, None) {
             assert!(!filters.is_empty());
         }
@@ -1329,7 +1330,7 @@ mod tests {
             &keypair_x,
             vec![account_key_x, account_key_z],
         );
-        let message = Message::Transaction(message_transaction);
+        let message = Arc::new(Message::Transaction(message_transaction));
         for (filters, _message) in filter.get_filters(&message, None) {
             assert!(filters.is_empty());
         }

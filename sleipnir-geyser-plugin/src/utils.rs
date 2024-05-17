@@ -2,7 +2,7 @@ use geyser_grpc_proto::geyser::SubscribeUpdateTransaction;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 use stretto::Cache;
 
-use crate::grpc_messages::Message;
+use crate::types::GeyserMessage;
 
 pub fn short_signature_from_sub_update(
     tx: &SubscribeUpdateTransaction,
@@ -40,8 +40,8 @@ pub(crate) enum CacheState {
     Disabled,
 }
 
-impl From<Option<&Cache<Signature, Message>>> for CacheState {
-    fn from(cache: Option<&Cache<Signature, Message>>) -> Self {
+impl From<Option<&Cache<Signature, GeyserMessage>>> for CacheState {
+    fn from(cache: Option<&Cache<Signature, GeyserMessage>>) -> Self {
         match cache {
             Some(cache) => CacheState::Enabled(cache.len()),
             None => CacheState::Disabled,
@@ -49,8 +49,8 @@ impl From<Option<&Cache<Signature, Message>>> for CacheState {
     }
 }
 
-impl From<Option<&Cache<Pubkey, Message>>> for CacheState {
-    fn from(cache: Option<&Cache<Pubkey, Message>>) -> Self {
+impl From<Option<&Cache<Pubkey, GeyserMessage>>> for CacheState {
+    fn from(cache: Option<&Cache<Pubkey, GeyserMessage>>) -> Self {
         match cache {
             Some(cache) => CacheState::Enabled(cache.len()),
             None => CacheState::Disabled,

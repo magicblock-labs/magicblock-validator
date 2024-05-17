@@ -28,6 +28,7 @@ use crate::{
     filters::Filter,
     grpc::GrpcService,
     grpc_messages::{BlockMetaStorage, Message},
+    types::{GeyserMessage, GeyserMessages},
     utils::{
         short_signature, short_signature_from_sub_update,
         short_signature_from_vec, CacheState,
@@ -37,11 +38,11 @@ use crate::{
 pub struct GeyserRpcService {
     grpc_service: GrpcService,
     config: ConfigGrpc,
-    broadcast_tx: broadcast::Sender<(CommitmentLevel, Arc<Vec<Message>>)>,
+    broadcast_tx: broadcast::Sender<(CommitmentLevel, GeyserMessages)>,
     subscribe_id: AtomicU64,
 
-    transactions_cache: Option<Cache<Signature, Message>>,
-    accounts_cache: Option<Cache<Pubkey, Message>>,
+    transactions_cache: Option<Cache<Signature, GeyserMessage>>,
+    accounts_cache: Option<Cache<Pubkey, GeyserMessage>>,
 }
 
 impl std::fmt::Debug for GeyserRpcService {
@@ -64,10 +65,10 @@ impl GeyserRpcService {
     pub fn create(
         config: ConfigGrpc,
         block_fail_action: ConfigBlockFailAction,
-        transactions_cache: Option<Cache<Signature, Message>>,
-        accounts_cache: Option<Cache<Pubkey, Message>>,
+        transactions_cache: Option<Cache<Signature, GeyserMessage>>,
+        accounts_cache: Option<Cache<Pubkey, GeyserMessage>>,
     ) -> Result<
-        (mpsc::UnboundedSender<Message>, Arc<Notify>, Self),
+        (mpsc::UnboundedSender<GeyserMessage>, Arc<Notify>, Self),
         Box<dyn std::error::Error + Send + Sync>,
     > {
         // Blocks meta storage
@@ -230,7 +231,7 @@ impl GeyserRpcService {
         filter: Filter,
         subid: u64,
         unsubscriber: CancellationToken,
-        initial_messages: Option<Arc<Vec<Message>>>,
+        initial_messages: Option<GeyserMessages>,
     ) -> mpsc::Receiver<Result<SubscribeUpdate, Status>> {
         let (stream_tx, mut stream_rx) =
             mpsc::channel(self.config.channel_capacity);
@@ -256,11 +257,8 @@ impl GeyserRpcService {
         mut filter: Filter,
         stream_tx: mpsc::Sender<TonicResult<SubscribeUpdate>>,
         unsubscriber: CancellationToken,
-        mut messages_rx: broadcast::Receiver<(
-            CommitmentLevel,
-            Arc<Vec<Message>>,
-        )>,
-        mut initial_messages: Option<Arc<Vec<Message>>>,
+        mut messages_rx: broadcast::Receiver<(CommitmentLevel, GeyserMessages)>,
+        mut initial_messages: Option<GeyserMessages>,
     ) {
         // 1. Send initial messages that were cached from previous updates
         if let Some(messages) = initial_messages.take() {
@@ -319,7 +317,7 @@ fn handle_messages(
     unsubscriber: CancellationToken,
     filter: &Filter,
     commitment: CommitmentLevel,
-    messages: Arc<Vec<Message>>,
+    messages: GeyserMessages,
     stream_tx: &mpsc::Sender<TonicResult<SubscribeUpdate>>,
 ) -> bool {
     if commitment == filter.get_commitment_level() {

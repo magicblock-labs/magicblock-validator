@@ -4,8 +4,10 @@ use crossbeam_channel::Receiver;
 use itertools::izip;
 use log::*;
 use sleipnir_bank::transaction_notifier_interface::TransactionNotifierArc;
-use sleipnir_geyser_plugin::config::Config as GeyserPluginConfig;
-use sleipnir_geyser_plugin::{plugin::GrpcGeyserPlugin, rpc::GeyserRpcService};
+use sleipnir_geyser_plugin::{
+    config::Config as GeyserPluginConfig, plugin::GrpcGeyserPlugin,
+    rpc::GeyserRpcService,
+};
 use sleipnir_ledger::Ledger;
 use sleipnir_transaction_status::{
     extract_and_fmt_memos, map_inner_instructions, TransactionStatusBatch,

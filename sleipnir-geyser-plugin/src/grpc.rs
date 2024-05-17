@@ -33,6 +33,7 @@ use crate::{
     config::{ConfigBlockFailAction, ConfigGrpc},
     filters::Filter,
     grpc_messages::*,
+    types::{GeyserMessage, GeyserMessages},
     version::GrpcVersionInfo,
 };
 
@@ -41,14 +42,14 @@ pub struct GrpcService {
     config: ConfigGrpc,
     blocks_meta: Option<BlockMetaStorage>,
     subscribe_id: AtomicUsize,
-    broadcast_tx: broadcast::Sender<(CommitmentLevel, Arc<Vec<Message>>)>,
+    broadcast_tx: broadcast::Sender<(CommitmentLevel, GeyserMessages)>,
 }
 
 impl GrpcService {
     pub(crate) fn new(
         config: ConfigGrpc,
         blocks_meta: Option<BlockMetaStorage>,
-        broadcast_tx: broadcast::Sender<(CommitmentLevel, Arc<Vec<Message>>)>,
+        broadcast_tx: broadcast::Sender<(CommitmentLevel, GeyserMessages)>,
     ) -> Self {
         Self {
             config,
@@ -63,7 +64,7 @@ impl GrpcService {
         config: ConfigGrpc,
         block_fail_action: ConfigBlockFailAction,
     ) -> Result<
-        (mpsc::UnboundedSender<Message>, Arc<Notify>),
+        (mpsc::UnboundedSender<GeyserMessage>, Arc<Notify>),
         Box<dyn std::error::Error + Send + Sync>,
     > {
         // Bind service address
@@ -83,7 +84,10 @@ impl GrpcService {
         };
 
         // Messages to clients combined by commitment
-        let (broadcast_tx, _) = broadcast::channel(config.channel_capacity);
+        let (broadcast_tx, _): (
+            broadcast::Sender<(CommitmentLevel, GeyserMessages)>,
+            broadcast::Receiver<(CommitmentLevel, GeyserMessages)>,
+        ) = broadcast::channel(config.channel_capacity);
 
         // gRPC server builder
         let server_builder = Server::builder();
@@ -131,9 +135,9 @@ impl GrpcService {
     }
 
     pub(crate) async fn geyser_loop(
-        mut messages_rx: mpsc::UnboundedReceiver<Message>,
-        blocks_meta_tx: Option<mpsc::UnboundedSender<Message>>,
-        broadcast_tx: broadcast::Sender<(CommitmentLevel, Arc<Vec<Message>>)>,
+        mut messages_rx: mpsc::UnboundedReceiver<GeyserMessage>,
+        blocks_meta_tx: Option<mpsc::UnboundedSender<GeyserMessage>>,
+        broadcast_tx: broadcast::Sender<(CommitmentLevel, GeyserMessages)>,
         block_fail_action: ConfigBlockFailAction,
     ) {
         const PROCESSED_MESSAGES_MAX: usize = 31;
@@ -151,13 +155,13 @@ impl GrpcService {
                 Some(message) = messages_rx.recv() => {
                     // Update blocks info
                     if let Some(blocks_meta_tx) = &blocks_meta_tx {
-                        if matches!(message, Message::Slot(_) | Message::BlockMeta(_)) {
+                        if matches!(*message, Message::Slot(_) | Message::BlockMeta(_)) {
                             let _ = blocks_meta_tx.send(message.clone());
                         }
                     }
 
                     // Remove outdated block reconstruction info
-                    match &message {
+                    match *message {
                         // On startup we can receive few Confirmed/Finalized slots without BlockMeta message
                         // With saved first Processed slot we can ignore errors caused by startup process
                         Message::Slot(msg) if processed_first_slot.is_none() && msg.status == CommitmentLevel::Processed => {
@@ -217,11 +221,11 @@ impl GrpcService {
 
                     // Update block reconstruction info
                     let slot_messages = messages.entry(message.get_slot()).or_default();
-                    if !matches!(message, Message::Slot(_)) {
+                    if !matches!(*message, Message::Slot(_)) {
                         slot_messages.messages.push(Some(message.clone()));
 
                         // If we already build Block message, new message will be a problem
-                        if slot_messages.sealed && !(matches!(message, Message::Entry(_)) && slot_messages.entries_count == 0) {
+                        if slot_messages.sealed && !(matches!(*message, Message::Entry(_)) && slot_messages.entries_count == 0) {
                             match block_fail_action {
                                 ConfigBlockFailAction::Log => {
                                     error!("unexpected message #{} -- {} (invalid order)", message.get_slot(), message.kind());
@@ -233,7 +237,7 @@ impl GrpcService {
                         }
                     }
                     let mut sealed_block_msg = None;
-                    match &message {
+                    match message.as_ref() {
                         Message::BlockMeta(msg) => {
                             if slot_messages.block_meta.is_some() {
                                 match block_fail_action {
@@ -280,7 +284,7 @@ impl GrpcService {
                     }
 
                     for message in messages_vec {
-                        if let Message::Slot(slot) = message {
+                        if let Message::Slot(slot) = *message {
                             let (mut confirmed_messages, mut finalized_messages) = match slot.status {
                                 CommitmentLevel::Processed => {
                                     (Vec::with_capacity(1), Vec::with_capacity(1))
@@ -334,7 +338,7 @@ impl GrpcService {
                         } else {
                             let mut confirmed_messages = vec![];
                             let mut finalized_messages = vec![];
-                            if matches!(message, Message::Block(_)) {
+                            if matches!(*message, Message::Block(_)) {
                                 if let Some(slot_messages) = messages.get(&message.get_slot()) {
                                     if let Some(confirmed_at) = slot_messages.confirmed_at {
                                         confirmed_messages.extend(
@@ -391,10 +395,7 @@ impl GrpcService {
         mut filter: Filter,
         stream_tx: mpsc::Sender<TonicResult<SubscribeUpdate>>,
         mut client_rx: mpsc::UnboundedReceiver<Option<Filter>>,
-        mut messages_rx: broadcast::Receiver<(
-            CommitmentLevel,
-            Arc<Vec<Message>>,
-        )>,
+        mut messages_rx: broadcast::Receiver<(CommitmentLevel, GeyserMessages)>,
         drop_client: impl FnOnce(),
     ) {
         info!("client #{id}: new");

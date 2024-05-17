@@ -23,10 +23,13 @@ use solana_sdk::{
     signature::Signature,
     transaction::SanitizedTransaction,
 };
-use tokio::sync::{mpsc, RwLock, Semaphore};
+use tokio::sync::{
+    mpsc::{self, UnboundedReceiver, UnboundedSender},
+    RwLock, Semaphore,
+};
 use tonic::{Response, Status};
 
-use crate::filters::FilterAccountsDataSlice;
+use crate::{filters::FilterAccountsDataSlice, types::GeyserMessage};
 
 #[derive(Debug, Clone)]
 pub struct MessageAccountInfo {
@@ -505,9 +508,12 @@ pub(crate) struct BlockMetaStorage {
 impl BlockMetaStorage {
     pub(crate) fn new(
         unary_concurrency_limit: usize,
-    ) -> (Self, mpsc::UnboundedSender<Message>) {
+    ) -> (Self, mpsc::UnboundedSender<GeyserMessage>) {
         let inner = Arc::new(RwLock::new(BlockMetaStorageInner::default()));
-        let (tx, mut rx) = mpsc::unbounded_channel();
+        let (tx, mut rx): (
+            UnboundedSender<GeyserMessage>,
+            UnboundedReceiver<GeyserMessage>,
+        ) = mpsc::unbounded_channel();
 
         let storage = Arc::clone(&inner);
         tokio::spawn(async move {
@@ -515,7 +521,7 @@ impl BlockMetaStorage {
 
             while let Some(message) = rx.recv().await {
                 let mut storage = storage.write().await;
-                match message {
+                match message.as_ref() {
                     Message::Slot(msg) => {
                         match msg.status {
                             CommitmentLevel::Processed => {
@@ -578,7 +584,7 @@ impl BlockMetaStorage {
                         }
                     }
                     Message::BlockMeta(msg) => {
-                        storage.blocks.insert(msg.slot, msg);
+                        storage.blocks.insert(msg.slot, msg.clone());
                     }
                     msg => {
                         error!("invalid message in BlockMetaStorage: {msg:?}");
@@ -671,7 +677,7 @@ impl BlockMetaStorage {
 
 #[derive(Debug, Default)]
 pub(crate) struct SlotMessages {
-    pub(crate) messages: Vec<Option<Message>>, // Option is used for accounts with low write_version
+    pub(crate) messages: Vec<Option<GeyserMessage>>, // Option is used for accounts with low write_version
     pub(crate) block_meta: Option<MessageBlockMeta>,
     pub(crate) transactions: Vec<MessageTransactionInfo>,
     pub(crate) accounts_dedup: HashMap<Pubkey, (u64, usize)>, // (write_version, message_index)
@@ -683,7 +689,7 @@ pub(crate) struct SlotMessages {
 }
 
 impl SlotMessages {
-    pub fn try_seal(&mut self) -> Option<Message> {
+    pub fn try_seal(&mut self) -> Option<GeyserMessage> {
         if !self.sealed {
             if let Some(block_meta) = &self.block_meta {
                 let executed_transaction_count =
@@ -704,15 +710,15 @@ impl SlotMessages {
 
                     let mut accounts = Vec::with_capacity(self.messages.len());
                     for item in self.messages.iter().flatten() {
-                        if let Message::Account(account) = item {
+                        if let Message::Account(account) = item.as_ref() {
                             accounts.push(account.account.clone());
                         }
                     }
 
-                    let message = Message::Block(
+                    let message = Arc::new(Message::Block(
                         (block_meta.clone(), transactions, accounts, entries)
                             .into(),
-                    );
+                    ));
                     self.messages.push(Some(message.clone()));
 
                     self.sealed = true;

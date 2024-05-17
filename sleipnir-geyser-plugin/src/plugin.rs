@@ -26,6 +26,7 @@ use crate::{
     grpc::GrpcService,
     grpc_messages::{Message, MessageSlot},
     rpc::GeyserRpcService,
+    types::GeyserMessage,
     utils::CacheState,
 };
 
@@ -34,17 +35,16 @@ use crate::{
 // -----------------
 #[derive(Debug)]
 pub struct PluginInner {
-    grpc_channel: mpsc::UnboundedSender<Message>,
+    grpc_channel: mpsc::UnboundedSender<GeyserMessage>,
     grpc_shutdown: Arc<Notify>,
-    rpc_channel: mpsc::UnboundedSender<Message>,
+    rpc_channel: mpsc::UnboundedSender<GeyserMessage>,
     rpc_shutdown: Arc<Notify>,
 }
 
 impl PluginInner {
-    fn send_message(&self, message: Message) {
-        // TODO: If we store + send Arc<Message> we can avoid cloning here
+    fn send_message(&self, message: &GeyserMessage) {
         let _ = self.grpc_channel.send(message.clone());
-        let _ = self.rpc_channel.send(message);
+        let _ = self.rpc_channel.send(message.clone());
     }
 }
 
@@ -55,8 +55,8 @@ pub struct GrpcGeyserPlugin {
     config: Config,
     inner: Option<PluginInner>,
     rpc_service: Arc<GeyserRpcService>,
-    transactions_cache: Option<Cache<Signature, Message>>,
-    accounts_cache: Option<Cache<Pubkey, Message>>,
+    transactions_cache: Option<Cache<Signature, GeyserMessage>>,
+    accounts_cache: Option<Cache<Pubkey, GeyserMessage>>,
 }
 
 impl std::fmt::Debug for GrpcGeyserPlugin {
@@ -202,8 +202,9 @@ impl GeyserPlugin for GrpcGeyserPlugin {
 
             match Pubkey::try_from(account.pubkey) {
                 Ok(pubkey) => {
-                    let message =
-                        Message::Account((account, slot, is_startup).into());
+                    let message = Arc::new(Message::Account(
+                        (account, slot, is_startup).into(),
+                    ));
                     if let Some(accounts_cache) = self.accounts_cache.as_ref() {
                         accounts_cache.insert_with_ttl(
                             pubkey,
@@ -238,7 +239,7 @@ impl GeyserPlugin for GrpcGeyserPlugin {
                             }
                         }
                     }
-                    inner.send_message(message);
+                    inner.send_message(&message);
                 }
                 Err(err) => error!(
                     "Encountered invalid pubkey for account update: {}",
@@ -262,8 +263,9 @@ impl GeyserPlugin for GrpcGeyserPlugin {
         status: SlotStatus,
     ) -> PluginResult<()> {
         self.with_inner(|inner| {
-            let message = Message::Slot((slot, parent, status).into());
-            inner.send_message(message);
+            let message =
+                Arc::new(Message::Slot((slot, parent, status).into()));
+            inner.send_message(&message);
             Ok(())
         })
     }
@@ -284,11 +286,12 @@ impl GeyserPlugin for GrpcGeyserPlugin {
             };
             trace!("tx: '{}'", transaction.signature);
 
-            let message = Message::Transaction((transaction, slot).into());
+            let message =
+                Arc::new(Message::Transaction((transaction, slot).into()));
             if let Some(transactions_cache) = self.transactions_cache.as_ref() {
                 transactions_cache.insert_with_ttl(
                     *transaction.signature,
-                    // TODO: If we store + send Arc<Message> we can avoid cloning here
+                    // TODO: If we store + send GeyserMessage we can avoid cloning here
                     message.clone(),
                     1,
                     self.config.transactions_cache_ttl,
@@ -335,7 +338,7 @@ impl GeyserPlugin for GrpcGeyserPlugin {
                 }
             }
 
-            inner.send_message(message);
+            inner.send_message(&message);
 
             Ok(())
         })
