@@ -1,12 +1,11 @@
-use {
-    bytemuck::{AnyBitPattern, NoUninit},
-    std::{
-        fs::{File, OpenOptions},
-        io::{Read, Result as IoResult, Seek, SeekFrom, Write},
-        mem,
-        path::Path,
-    },
+use std::{
+    fs::{File, OpenOptions},
+    io::{Read, Result as IoResult, Seek, SeekFrom, Write},
+    mem,
+    path::Path,
 };
+
+use bytemuck::{AnyBitPattern, NoUninit};
 
 #[derive(Debug)]
 pub struct TieredStorageFile(pub File);
@@ -56,14 +55,18 @@ impl TieredStorageFile {
     /// and bytemuck's Pod and NoUninit for more information.
     pub unsafe fn write_type<T>(&self, value: &T) -> IoResult<usize> {
         let ptr = value as *const _ as *const u8;
-        let bytes = unsafe { std::slice::from_raw_parts(ptr, mem::size_of::<T>()) };
+        let bytes =
+            unsafe { std::slice::from_raw_parts(ptr, mem::size_of::<T>()) };
         self.write_bytes(bytes)
     }
 
     /// Reads a value of type `T` from the file.
     ///
     /// Type T must be plain ol' data.
-    pub fn read_pod<T: NoUninit + AnyBitPattern>(&self, value: &mut T) -> IoResult<()> {
+    pub fn read_pod<T: NoUninit + AnyBitPattern>(
+        &self,
+        value: &mut T,
+    ) -> IoResult<()> {
         // SAFETY: Since T is AnyBitPattern, it is safe to cast bytes to T.
         unsafe { self.read_type(value) }
     }
@@ -83,7 +86,8 @@ impl TieredStorageFile {
         // SAFETY: The caller ensures it is safe to cast bytes to T,
         // we ensure the size is safe by querying T directly,
         // and Rust ensures ptr is aligned.
-        let bytes = unsafe { std::slice::from_raw_parts_mut(ptr, mem::size_of::<T>()) };
+        let bytes =
+            unsafe { std::slice::from_raw_parts_mut(ptr, mem::size_of::<T>()) };
         self.read_bytes(bytes)
     }
 

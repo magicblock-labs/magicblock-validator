@@ -1,8 +1,8 @@
-use {
-    super::EpochAccountsHash,
-    solana_sdk::clock::Slot,
-    std::sync::{Condvar, Mutex},
-};
+use std::sync::{Condvar, Mutex};
+
+use solana_sdk::clock::Slot;
+
+use super::EpochAccountsHash;
 
 /// Manage the epoch accounts hash
 ///
@@ -33,7 +33,10 @@ impl Manager {
 
     /// Create a new epoch accounts hash manager, with the initial state set to Valid
     #[must_use]
-    pub fn new_valid(epoch_accounts_hash: EpochAccountsHash, slot: Slot) -> Self {
+    pub fn new_valid(
+        epoch_accounts_hash: EpochAccountsHash,
+        slot: Slot,
+    ) -> Self {
         Self::_new(State::Valid(epoch_accounts_hash, slot))
     }
 
@@ -47,7 +50,11 @@ impl Manager {
     }
 
     /// An epoch accounts hash calculation has completed; update our state
-    pub fn set_valid(&self, epoch_accounts_hash: EpochAccountsHash, slot: Slot) {
+    pub fn set_valid(
+        &self,
+        epoch_accounts_hash: EpochAccountsHash,
+        slot: Slot,
+    ) {
         let mut state = self.state.lock().unwrap();
         if let State::Valid(old_epoch_accounts_hash, old_slot) = &*state {
             panic!(
@@ -67,9 +74,15 @@ impl Manager {
         let mut state = self.state.lock().unwrap();
         loop {
             match &*state {
-                State::Valid(epoch_accounts_hash, _slot) => break *epoch_accounts_hash,
-                State::InFlight(_slot) => state = self.cvar.wait(state).unwrap(),
-                State::Invalid => panic!("The epoch accounts hash cannot be awaited when Invalid!"),
+                State::Valid(epoch_accounts_hash, _slot) => {
+                    break *epoch_accounts_hash
+                }
+                State::InFlight(_slot) => {
+                    state = self.cvar.wait(state).unwrap()
+                }
+                State::Invalid => panic!(
+                    "The epoch accounts hash cannot be awaited when Invalid!"
+                ),
             }
         }
     }
@@ -80,7 +93,9 @@ impl Manager {
     pub fn try_get_epoch_accounts_hash(&self) -> Option<EpochAccountsHash> {
         let state = self.state.lock().unwrap();
         match &*state {
-            State::Valid(epoch_accounts_hash, _slot) => Some(*epoch_accounts_hash),
+            State::Valid(epoch_accounts_hash, _slot) => {
+                Some(*epoch_accounts_hash)
+            }
             _ => None,
         }
     }
@@ -103,7 +118,11 @@ enum State {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, solana_sdk::hash::Hash, std::time::Duration};
+    use std::time::Duration;
+
+    use solana_sdk::hash::Hash;
+
+    use super::*;
 
     #[test]
     fn test_new_valid() {
@@ -143,14 +162,19 @@ mod tests {
     fn test_wait_epoch_accounts_hash() {
         // Test: State is Valid, no need to wait
         {
-            let epoch_accounts_hash = EpochAccountsHash::new(Hash::new_unique());
+            let epoch_accounts_hash =
+                EpochAccountsHash::new(Hash::new_unique());
             let manager = Manager::new_valid(epoch_accounts_hash, 5678);
-            assert_eq!(manager.wait_get_epoch_accounts_hash(), epoch_accounts_hash);
+            assert_eq!(
+                manager.wait_get_epoch_accounts_hash(),
+                epoch_accounts_hash
+            );
         }
 
         // Test: State is InFlight, must wait
         {
-            let epoch_accounts_hash = EpochAccountsHash::new(Hash::new_unique());
+            let epoch_accounts_hash =
+                EpochAccountsHash::new(Hash::new_unique());
             let manager = Manager::new_invalid();
             manager.set_in_flight(123);
 
@@ -160,7 +184,10 @@ mod tests {
                     manager.set_valid(epoch_accounts_hash, 5678)
                 });
                 assert!(manager.try_get_epoch_accounts_hash().is_none());
-                assert_eq!(manager.wait_get_epoch_accounts_hash(), epoch_accounts_hash);
+                assert_eq!(
+                    manager.wait_get_epoch_accounts_hash(),
+                    epoch_accounts_hash
+                );
                 assert!(manager.try_get_epoch_accounts_hash().is_some());
             });
         }

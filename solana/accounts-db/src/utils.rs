@@ -1,15 +1,14 @@
-use {
-    lazy_static,
-    log::*,
-    solana_measure::measure,
-    std::{
-        collections::HashSet,
-        fs,
-        path::{Path, PathBuf},
-        sync::Mutex,
-        thread,
-    },
+use std::{
+    collections::HashSet,
+    fs,
+    path::{Path, PathBuf},
+    sync::Mutex,
+    thread,
 };
+
+use lazy_static;
+use log::*;
+use solana_measure::measure;
 
 pub const ACCOUNTS_RUN_DIR: &str = "run";
 pub const ACCOUNTS_SNAPSHOT_DIR: &str = "snapshot";
@@ -24,7 +23,8 @@ pub fn create_all_accounts_run_and_snapshot_dirs(
     let mut snapshot_dirs = Vec::with_capacity(account_paths.len());
     for account_path in account_paths {
         // create the run/ and snapshot/ sub directories for each account_path
-        let (run_dir, snapshot_dir) = create_accounts_run_and_snapshot_dirs(account_path)?;
+        let (run_dir, snapshot_dir) =
+            create_accounts_run_and_snapshot_dirs(account_path)?;
         run_dirs.push(run_dir);
         snapshot_dirs.push(snapshot_dir);
     }
@@ -76,7 +76,8 @@ pub fn move_and_async_delete_path_contents(path: impl AsRef<Path>) {
 /// Then spawn a thread to delete the renamed path.
 pub fn move_and_async_delete_path(path: impl AsRef<Path>) {
     lazy_static! {
-        static ref IN_PROGRESS_DELETES: Mutex<HashSet<PathBuf>> = Mutex::new(HashSet::new());
+        static ref IN_PROGRESS_DELETES: Mutex<HashSet<PathBuf>> =
+            Mutex::new(HashSet::new());
     };
 
     // Grab the mutex so no new async delete threads can be spawned for this path.
@@ -121,9 +122,13 @@ pub fn move_and_async_delete_path(path: impl AsRef<Path>) {
         .name("solDeletePath".to_string())
         .spawn(move || {
             trace!("background deleting {}...", path_delete.display());
-            let (result, measure_delete) = measure!(fs::remove_dir_all(&path_delete));
+            let (result, measure_delete) =
+                measure!(fs::remove_dir_all(&path_delete));
             if let Err(err) = result {
-                panic!("Failed to async delete '{}': {err}", path_delete.display());
+                panic!(
+                    "Failed to async delete '{}': {err}",
+                    path_delete.display()
+                );
             }
             trace!(
                 "background deleting {}... Done, and{measure_delete}",
@@ -182,7 +187,9 @@ pub fn create_and_canonicalize_directories(
 
 #[cfg(test)]
 mod tests {
-    use {super::*, tempfile::TempDir};
+    use tempfile::TempDir;
+
+    use super::*;
 
     #[test]
     pub fn test_create_all_accounts_run_and_snapshot_dirs() {

@@ -1,12 +1,14 @@
-use {
-    crate::{
-        accounts_hash::AccountHash,
-        append_vec::AppendVecStoredAccountMeta,
-        storable_accounts::StorableAccounts,
-        tiered_storage::{hot::HotAccountMeta, readable::TieredReadableAccount},
-    },
-    solana_sdk::{account::ReadableAccount, hash::Hash, pubkey::Pubkey, stake_history::Epoch},
-    std::{borrow::Borrow, marker::PhantomData},
+use std::{borrow::Borrow, marker::PhantomData};
+
+use solana_sdk::{
+    account::ReadableAccount, hash::Hash, pubkey::Pubkey, stake_history::Epoch,
+};
+
+use crate::{
+    accounts_hash::AccountHash,
+    append_vec::AppendVecStoredAccountMeta,
+    storable_accounts::StorableAccounts,
+    tiered_storage::{hot::HotAccountMeta, readable::TieredReadableAccount},
 };
 
 pub type StoredMetaWriteVersion = u64;
@@ -77,18 +79,22 @@ impl<
     }
 
     /// get all account fields at 'index'
-    pub fn get(&self, index: usize) -> (Option<&T>, &Pubkey, &AccountHash, StoredMetaWriteVersion) {
+    pub fn get(
+        &self,
+        index: usize,
+    ) -> (Option<&T>, &Pubkey, &AccountHash, StoredMetaWriteVersion) {
         let account = self.accounts.account_default_if_zero_lamport(index);
         let pubkey = self.accounts.pubkey(index);
-        let (hash, write_version) = if self.accounts.has_hash_and_write_version() {
-            (
-                self.accounts.hash(index),
-                self.accounts.write_version(index),
-            )
-        } else {
-            let item = self.hashes_and_write_versions.as_ref().unwrap();
-            (item.0[index].borrow(), item.1[index])
-        };
+        let (hash, write_version) =
+            if self.accounts.has_hash_and_write_version() {
+                (
+                    self.accounts.hash(index),
+                    self.accounts.write_version(index),
+                )
+            } else {
+                let item = self.hashes_and_write_versions.as_ref().unwrap();
+                (item.0[index].borrow(), item.1[index])
+            };
         (account, pubkey, hash, write_version)
     }
 

@@ -1,14 +1,14 @@
-use {
-    crate::accounts_db::AccountStorageEntry,
-    log::*,
-    solana_measure::measure::Measure,
-    solana_sdk::clock::Slot,
-    std::{
-        collections::HashMap,
-        ops::{Bound, Range, RangeBounds},
-        sync::Arc,
-    },
+use std::{
+    collections::HashMap,
+    ops::{Bound, Range, RangeBounds},
+    sync::Arc,
 };
+
+use log::*;
+use solana_measure::measure::Measure;
+use solana_sdk::clock::Slot;
+
+use crate::accounts_db::AccountStorageEntry;
 
 /// Provide access to SnapshotStorageOnes by slot
 pub struct SortedStorages<'a> {
@@ -192,14 +192,13 @@ impl<'a> SortedStoragesIter<'a> {
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        crate::{
-            accounts_db::{AccountStorageEntry, AppendVecId},
-            accounts_file::AccountsFile,
-            append_vec::AppendVec,
-        },
-        std::sync::Arc,
+    use std::sync::Arc;
+
+    use super::*;
+    use crate::{
+        accounts_db::{AccountStorageEntry, AppendVecId},
+        accounts_file::AccountsFile,
+        append_vec::AppendVec,
     };
 
     impl<'a> SortedStorages<'a> {
@@ -220,7 +219,10 @@ mod tests {
             Self { range, storages }
         }
 
-        pub fn new_for_tests(storages: &[&'a Arc<AccountStorageEntry>], slots: &[Slot]) -> Self {
+        pub fn new_for_tests(
+            storages: &[&'a Arc<AccountStorageEntry>],
+            slots: &[Slot],
+        ) -> Self {
             assert_eq!(storages.len(), slots.len());
             SortedStorages::new_with_slots(
                 storages.iter().cloned().zip(slots.iter().cloned()),
@@ -233,10 +235,11 @@ mod tests {
     #[test]
     fn test_sorted_storages_range_iter() {
         let storages = SortedStorages::empty();
-        let check = |(slot, storages): (Slot, Option<&Arc<AccountStorageEntry>>)| {
-            assert!(storages.is_none());
-            slot
-        };
+        let check =
+            |(slot, storages): (Slot, Option<&Arc<AccountStorageEntry>>)| {
+                assert!(storages.is_none());
+                slot
+            };
         assert_eq!(
             (0..5).collect::<Vec<_>>(),
             storages.iter_range(&(..5)).map(check).collect::<Vec<_>>()
@@ -257,13 +260,14 @@ mod tests {
         // only item is slot 3
         let s1 = create_sample_store(1);
         let storages = SortedStorages::new_for_tests(&[&s1], &[3]);
-        let check = |(slot, storages): (Slot, Option<&Arc<AccountStorageEntry>>)| {
-            assert!(
-                (slot != 3) ^ storages.is_some(),
-                "slot: {slot}, storages: {storages:?}"
-            );
-            slot
-        };
+        let check =
+            |(slot, storages): (Slot, Option<&Arc<AccountStorageEntry>>)| {
+                assert!(
+                    (slot != 3) ^ storages.is_some(),
+                    "slot: {slot}, storages: {storages:?}"
+                );
+                slot
+            };
         for start in 0..5 {
             for end in 0..5 {
                 assert_eq!(
@@ -292,17 +296,20 @@ mod tests {
         let store2 = create_sample_store(2);
         let store4 = create_sample_store(4);
 
-        let storages = SortedStorages::new_for_tests(&[&store2, &store4], &[2, 4]);
-        let check = |(slot, storage): (Slot, Option<&Arc<AccountStorageEntry>>)| {
-            assert!(
-                (slot != 2 && slot != 4)
-                    ^ storage
-                        .map(|storage| storage.append_vec_id() == (slot as AppendVecId))
-                        .unwrap_or(false),
-                "slot: {slot}, storage: {storage:?}"
-            );
-            slot
-        };
+        let storages =
+            SortedStorages::new_for_tests(&[&store2, &store4], &[2, 4]);
+        let check =
+            |(slot, storage): (Slot, Option<&Arc<AccountStorageEntry>>)| {
+                assert!(
+                    (slot != 2 && slot != 4)
+                        ^ storage
+                            .map(|storage| storage.append_vec_id()
+                                == (slot as AppendVecId))
+                            .unwrap_or(false),
+                    "slot: {slot}, storage: {storage:?}"
+                );
+                slot
+            };
         for start in 0..5 {
             for end in 0..5 {
                 assert_eq!(
@@ -441,12 +448,20 @@ mod tests {
     }
 
     fn create_sample_store(id: AppendVecId) -> Arc<AccountStorageEntry> {
-        let tf = crate::append_vec::test_utils::get_append_vec_path("create_sample_store");
-        let (_temp_dirs, paths) = crate::accounts_db::get_temp_accounts_paths(1).unwrap();
+        let tf = crate::append_vec::test_utils::get_append_vec_path(
+            "create_sample_store",
+        );
+        let (_temp_dirs, paths) =
+            crate::accounts_db::get_temp_accounts_paths(1).unwrap();
         let size: usize = 123;
         let slot = 0;
-        let mut data = AccountStorageEntry::new(&paths[0], slot, id, size as u64);
-        let av = AccountsFile::AppendVec(AppendVec::new(&tf.path, true, 1024 * 1024));
+        let mut data =
+            AccountStorageEntry::new(&paths[0], slot, id, size as u64);
+        let av = AccountsFile::AppendVec(AppendVec::new(
+            &tf.path,
+            true,
+            1024 * 1024,
+        ));
         data.accounts = av;
 
         Arc::new(data)

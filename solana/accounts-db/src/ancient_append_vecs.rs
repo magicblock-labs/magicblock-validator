@@ -3,29 +3,34 @@
 //! 1. a slot that is older than an epoch old
 //! 2. multiple 'slots' squashed into a single older (ie. ancient) slot for convenience and performance
 //! Otherwise, an ancient append vec is the same as any other append vec
-use {
-    crate::{
-        account_storage::{meta::StoredAccountMeta, ShrinkInProgress},
-        accounts_db::{
-            AccountStorageEntry, AccountsDb, AliveAccounts, GetUniqueAccountsResult, ShrinkCollect,
-            ShrinkCollectAliveSeparatedByRefs, ShrinkStatsSub, StoreReclaims,
-        },
-        accounts_file::AccountsFile,
-        accounts_hash::AccountHash,
-        accounts_index::{AccountsIndexScanResult, ZeroLamport},
-        active_stats::ActiveStatItem,
-        append_vec::aligned_stored_size,
-        storable_accounts::{StorableAccounts, StorableAccountsBySlot},
+use std::{
+    collections::HashMap,
+    num::NonZeroU64,
+    sync::{atomic::Ordering, Arc, Mutex},
+};
+
+use rand::{thread_rng, Rng};
+use rayon::prelude::{
+    IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
+};
+use solana_measure::measure_us;
+use solana_sdk::{
+    account::ReadableAccount, clock::Slot, saturating_add_assign,
+};
+
+use crate::{
+    account_storage::{meta::StoredAccountMeta, ShrinkInProgress},
+    accounts_db::{
+        AccountStorageEntry, AccountsDb, AliveAccounts,
+        GetUniqueAccountsResult, ShrinkCollect,
+        ShrinkCollectAliveSeparatedByRefs, ShrinkStatsSub, StoreReclaims,
     },
-    rand::{thread_rng, Rng},
-    rayon::prelude::{IntoParallelIterator, IntoParallelRefIterator, ParallelIterator},
-    solana_measure::measure_us,
-    solana_sdk::{account::ReadableAccount, clock::Slot, saturating_add_assign},
-    std::{
-        collections::HashMap,
-        num::NonZeroU64,
-        sync::{atomic::Ordering, Arc, Mutex},
-    },
+    accounts_file::AccountsFile,
+    accounts_hash::AccountHash,
+    accounts_index::{AccountsIndexScanResult, ZeroLamport},
+    active_stats::ActiveStatItem,
+    append_vec::aligned_stored_size,
+    storable_accounts::{StorableAccounts, StorableAccountsBySlot},
 };
 
 /// ancient packing algorithm tuning per pass
@@ -89,7 +94,9 @@ impl AncientSlotInfos {
             let should_shrink = if capacity > 0 {
                 let alive_ratio = alive_bytes * 100 / capacity;
                 alive_ratio < 90
-                    || if can_randomly_shrink && thread_rng().gen_range(0..10000) == 0 {
+                    || if can_randomly_shrink
+                        && thread_rng().gen_range(0..10000) == 0
+                    {
                         was_randomly_shrunk = true;
                         true
                     } else {
@@ -105,7 +112,10 @@ impl AncientSlotInfos {
             if should_shrink {
                 // alive ratio is too low, so prioritize combining this slot with others
                 // to reduce disk space used
-                saturating_add_assign!(self.total_alive_bytes_shrink, alive_bytes);
+                saturating_add_assign!(
+                    self.total_alive_bytes_shrink,
+                    alive_bytes
+                );
                 self.shrink_indexes.push(self.all_infos.len());
             }
             self.all_infos.push(SlotInfo {
@@ -127,7 +137,10 @@ impl AncientSlotInfos {
         // 1. should_shrink: largest bytes saved above some cutoff of ratio
         self.choose_storages_to_shrink(tuning.percent_of_alive_shrunk_data);
         // 2. smallest files so we get the largest number of files to remove
-        self.filter_by_smallest_capacity(tuning.max_ancient_slots, tuning.ideal_storage_size);
+        self.filter_by_smallest_capacity(
+            tuning.max_ancient_slots,
+            tuning.ideal_storage_size,
+        );
     }
 
     // sort 'shrink_indexes' by most bytes saved, highest to lowest
@@ -142,12 +155,16 @@ impl AncientSlotInfos {
     }
 
     /// clear 'should_shrink' for storages after a cutoff to limit how many storages we shrink
-    fn clear_should_shrink_after_cutoff(&mut self, percent_of_alive_shrunk_data: u64) {
+    fn clear_should_shrink_after_cutoff(
+        &mut self,
+        percent_of_alive_shrunk_data: u64,
+    ) {
         let mut bytes_to_shrink_due_to_ratio = 0;
         // shrink enough slots to write 'percent_of_alive_shrunk_data'% of the total alive data
         // from slots that exceeded the shrink threshold.
         // The goal is to limit overall i/o in this pass while making progress.
-        let threshold_bytes = self.total_alive_bytes_shrink * percent_of_alive_shrunk_data / 100;
+        let threshold_bytes =
+            self.total_alive_bytes_shrink * percent_of_alive_shrunk_data / 100;
         for info_index in &self.shrink_indexes {
             let info = &mut self.all_infos[*info_index];
             if bytes_to_shrink_due_to_ratio >= threshold_bytes {
@@ -156,7 +173,10 @@ impl AncientSlotInfos {
                 // Mark it as false for 'should_shrink' so it gets evaluated solely based on # of files.
                 info.should_shrink = false;
             } else {
-                saturating_add_assign!(bytes_to_shrink_due_to_ratio, info.alive_bytes);
+                saturating_add_assign!(
+                    bytes_to_shrink_due_to_ratio,
+                    info.alive_bytes
+                );
             }
         }
     }
@@ -176,7 +196,11 @@ impl AncientSlotInfos {
     /// 'all_infos' are combined, the total number of storages <= 'max_storages'
     /// The idea is that 'all_infos' is sorted from smallest capacity to largest,
     /// but that isn't required for this function to be 'correct'.
-    fn truncate_to_max_storages(&mut self, max_storages: usize, ideal_storage_size: NonZeroU64) {
+    fn truncate_to_max_storages(
+        &mut self,
+        max_storages: usize,
+        ideal_storage_size: NonZeroU64,
+    ) {
         // these indexes into 'all_infos' are useless once we truncate 'all_infos', so make sure they're cleared out to avoid any issues
         self.shrink_indexes.clear();
         let total_storages = self.all_infos.len();
@@ -184,7 +208,8 @@ impl AncientSlotInfos {
         let low_threshold = max_storages * 50 / 100;
         for (i, info) in self.all_infos.iter().enumerate() {
             saturating_add_assign!(cumulative_bytes, info.alive_bytes);
-            let ancient_storages_required = (cumulative_bytes / ideal_storage_size + 1) as usize;
+            let ancient_storages_required =
+                (cumulative_bytes / ideal_storage_size + 1) as usize;
             let storages_remaining = total_storages - i - 1;
 
             // if the remaining uncombined storages and the # of resulting
@@ -205,7 +230,11 @@ impl AncientSlotInfos {
     /// Combining too many storages costs i/o and cpu so the goal is to find the sweet spot so
     /// that we make progress in cleaning/shrinking/combining but that we don't cause unnecessary
     /// churn.
-    fn filter_by_smallest_capacity(&mut self, max_storages: usize, ideal_storage_size: NonZeroU64) {
+    fn filter_by_smallest_capacity(
+        &mut self,
+        max_storages: usize,
+        ideal_storage_size: NonZeroU64,
+    ) {
         let total_storages = self.all_infos.len();
         if total_storages <= max_storages {
             // currently fewer storages than max, so nothing to shrink
@@ -253,7 +282,10 @@ impl AccountsDb {
             max_ancient_slots: 10_000,
             // re-combine/shrink 55% of the data savings this pass
             percent_of_alive_shrunk_data: 55,
-            ideal_storage_size: NonZeroU64::new(get_ancient_append_vec_capacity()).unwrap(),
+            ideal_storage_size: NonZeroU64::new(
+                get_ancient_append_vec_capacity(),
+            )
+            .unwrap(),
             can_randomly_shrink,
         };
 
@@ -261,13 +293,18 @@ impl AccountsDb {
 
         let mut stats_sub = ShrinkStatsSub::default();
 
-        let (_, total_us) = measure_us!(self.combine_ancient_slots_packed_internal(
-            sorted_slots,
-            tuning,
-            &mut stats_sub
-        ));
+        let (_, total_us) = measure_us!(self
+            .combine_ancient_slots_packed_internal(
+                sorted_slots,
+                tuning,
+                &mut stats_sub
+            ));
 
-        Self::update_shrink_stats(&self.shrink_ancient_stats.shrink_stats, stats_sub, false);
+        Self::update_shrink_stats(
+            &self.shrink_ancient_stats.shrink_stats,
+            stats_sub,
+            false,
+        );
         self.shrink_ancient_stats
             .total_us
             .fetch_add(total_us, Ordering::Relaxed);
@@ -288,7 +325,8 @@ impl AccountsDb {
             .iter()
             .map(|alive| alive.bytes)
             .sum::<usize>();
-        let required_ideal_packed = (alive_bytes as u64 / tuning.ideal_storage_size + 1) as usize;
+        let required_ideal_packed =
+            (alive_bytes as u64 / tuning.ideal_storage_size + 1) as usize;
         if alive_bytes == 0 {
             // nothing required, so no problem moving nothing
             return true;
@@ -315,7 +353,8 @@ impl AccountsDb {
         self.shrink_ancient_stats
             .slots_considered
             .fetch_add(sorted_slots.len() as u64, Ordering::Relaxed);
-        let ancient_slot_infos = self.collect_sort_filter_ancient_slots(sorted_slots, &tuning);
+        let ancient_slot_infos =
+            self.collect_sort_filter_ancient_slots(sorted_slots, &tuning);
 
         if ancient_slot_infos.all_infos.is_empty() {
             return; // nothing to do
@@ -325,15 +364,18 @@ impl AccountsDb {
                 &ancient_slot_infos.all_infos[..],
             );
 
-        let mut accounts_to_combine = self.calc_accounts_to_combine(&accounts_per_storage);
-        metrics.unpackable_slots_count += accounts_to_combine.unpackable_slots_count;
+        let mut accounts_to_combine =
+            self.calc_accounts_to_combine(&accounts_per_storage);
+        metrics.unpackable_slots_count +=
+            accounts_to_combine.unpackable_slots_count;
 
         let mut many_refs_newest = accounts_to_combine
             .accounts_to_combine
             .iter_mut()
             .filter_map(|alive| {
-                let newest_alive =
-                    std::mem::take(&mut alive.alive_accounts.many_refs_this_is_newest_alive);
+                let newest_alive = std::mem::take(
+                    &mut alive.alive_accounts.many_refs_this_is_newest_alive,
+                );
                 (!newest_alive.accounts.is_empty()).then_some(newest_alive)
             })
             .collect::<Vec<_>>();
@@ -362,10 +404,9 @@ impl AccountsDb {
         // Note the `chain` below combining the 2 types of refs.
         let pack = PackedAncientStorage::pack(
             many_refs_newest.iter().chain(
-                accounts_to_combine
-                    .accounts_to_combine
-                    .iter()
-                    .map(|shrink_collect| &shrink_collect.alive_accounts.one_ref),
+                accounts_to_combine.accounts_to_combine.iter().map(
+                    |shrink_collect| &shrink_collect.alive_accounts.one_ref,
+                ),
             ),
             tuning.ideal_storage_size,
         );
@@ -378,7 +419,8 @@ impl AccountsDb {
             return;
         }
 
-        let write_ancient_accounts = self.write_packed_storages(&accounts_to_combine, pack);
+        let write_ancient_accounts =
+            self.write_packed_storages(&accounts_to_combine, pack);
 
         self.finish_combine_ancient_slots_packed_internal(
             accounts_to_combine,
@@ -388,7 +430,10 @@ impl AccountsDb {
     }
 
     /// for each account in `unrefed_pubkeys`, in each `accounts_to_combine`, addref
-    fn addref_accounts_failed_to_shrink_ancient(&self, accounts_to_combine: AccountsToCombine) {
+    fn addref_accounts_failed_to_shrink_ancient(
+        &self,
+        accounts_to_combine: AccountsToCombine,
+    ) {
         self.thread_pool_clean.install(|| {
             accounts_to_combine
                 .accounts_to_combine
@@ -416,7 +461,8 @@ impl AccountsDb {
         slots: Vec<Slot>,
         tuning: &PackedAncientStorageTuning,
     ) -> AncientSlotInfos {
-        let mut ancient_slot_infos = self.calc_ancient_slot_info(slots, tuning.can_randomly_shrink);
+        let mut ancient_slot_infos =
+            self.calc_ancient_slot_info(slots, tuning.can_randomly_shrink);
 
         ancient_slot_infos.filter_ancient_slots(tuning);
         ancient_slot_infos
@@ -425,7 +471,11 @@ impl AccountsDb {
     /// create append vec of size 'bytes'
     /// write 'accounts_to_write' into it
     /// return shrink_in_progress and some metrics
-    fn write_ancient_accounts<'a, 'b: 'a, T: ReadableAccount + Sync + ZeroLamport + 'a>(
+    fn write_ancient_accounts<
+        'a,
+        'b: 'a,
+        T: ReadableAccount + Sync + ZeroLamport + 'a,
+    >(
         &'b self,
         bytes: u64,
         accounts_to_write: impl StorableAccounts<'a, T>,
@@ -434,13 +484,14 @@ impl AccountsDb {
         let target_slot = accounts_to_write.target_slot();
         let (shrink_in_progress, create_and_insert_store_elapsed_us) =
             measure_us!(self.get_store_for_shrink(target_slot, bytes));
-        let (store_accounts_timing, rewrite_elapsed_us) = measure_us!(self.store_accounts_frozen(
-            accounts_to_write,
-            None::<Vec<AccountHash>>,
-            shrink_in_progress.new_storage(),
-            None,
-            StoreReclaims::Ignore,
-        ));
+        let (store_accounts_timing, rewrite_elapsed_us) = measure_us!(self
+            .store_accounts_frozen(
+                accounts_to_write,
+                None::<Vec<AccountHash>>,
+                shrink_in_progress.new_storage(),
+                None,
+                StoreReclaims::Ignore,
+            ));
 
         write_ancient_accounts.metrics.accumulate(&ShrinkStatsSub {
             store_accounts_timing,
@@ -490,10 +541,14 @@ impl AccountsDb {
         accounts_to_combine: &'b AccountsToCombine<'b>,
         packed_contents: Vec<PackedAncientStorage<'b>>,
     ) -> WriteAncientAccounts<'a> {
-        let write_ancient_accounts = Mutex::new(WriteAncientAccounts::default());
+        let write_ancient_accounts =
+            Mutex::new(WriteAncientAccounts::default());
 
         // ok if we have more slots, but NOT ok if we have fewer slots than we have contents
-        assert!(accounts_to_combine.target_slots_sorted.len() >= packed_contents.len());
+        assert!(
+            accounts_to_combine.target_slots_sorted.len()
+                >= packed_contents.len()
+        );
         // write packed storages containing contents from many original slots
         // iterate slots in highest to lowest
         let packer = accounts_to_combine
@@ -516,7 +571,8 @@ impl AccountsDb {
 
         self.thread_pool_clean.install(|| {
             packer.par_iter().for_each(|(target_slot, pack)| {
-                let mut write_ancient_accounts_local = WriteAncientAccounts::default();
+                let mut write_ancient_accounts_local =
+                    WriteAncientAccounts::default();
                 self.shrink_ancient_stats
                     .bytes_ancient_created
                     .fetch_add(pack.bytes, Ordering::Relaxed);
@@ -535,7 +591,8 @@ impl AccountsDb {
             });
         });
 
-        let mut write_ancient_accounts = write_ancient_accounts.into_inner().unwrap();
+        let mut write_ancient_accounts =
+            write_ancient_accounts.into_inner().unwrap();
 
         // write new storages where contents were unable to move because ref_count > 1
         self.write_ancient_accounts_to_same_slot_multiple_refs(
@@ -554,10 +611,11 @@ impl AccountsDb {
         let mut accounts_to_combine = Vec::with_capacity(ancient_slots.len());
 
         for info in ancient_slots {
-            let unique_accounts = self.get_unique_accounts_from_storage_for_shrink(
-                &info.storage,
-                &self.shrink_ancient_stats.shrink_stats,
-            );
+            let unique_accounts = self
+                .get_unique_accounts_from_storage_for_shrink(
+                    &info.storage,
+                    &self.shrink_ancient_stats.shrink_stats,
+                );
             accounts_to_combine.push((info, unique_accounts));
         }
 
@@ -572,11 +630,13 @@ impl AccountsDb {
         mut write_ancient_accounts: WriteAncientAccounts,
         metrics: &mut ShrinkStatsSub,
     ) {
-        let mut dropped_roots = Vec::with_capacity(accounts_to_combine.accounts_to_combine.len());
+        let mut dropped_roots =
+            Vec::with_capacity(accounts_to_combine.accounts_to_combine.len());
         for shrink_collect in accounts_to_combine.accounts_to_combine {
             let slot = shrink_collect.slot;
 
-            let shrink_in_progress = write_ancient_accounts.shrinks_in_progress.remove(&slot);
+            let shrink_in_progress =
+                write_ancient_accounts.shrinks_in_progress.remove(&slot);
             if shrink_in_progress.is_none() {
                 dropped_roots.push(slot);
             }
@@ -603,7 +663,10 @@ impl AccountsDb {
     /// 'accounts_per_storage' should be sorted by slot
     fn calc_accounts_to_combine<'a>(
         &self,
-        accounts_per_storage: &'a Vec<(&'a SlotInfo, GetUniqueAccountsResult<'a>)>,
+        accounts_per_storage: &'a Vec<(
+            &'a SlotInfo,
+            GetUniqueAccountsResult<'a>,
+        )>,
     ) -> AccountsToCombine<'a> {
         let mut accounts_keep_slots = HashMap::default();
         let len = accounts_per_storage.len();
@@ -625,12 +688,14 @@ impl AccountsDb {
         });
 
         let mut remove = Vec::default();
-        for (i, (shrink_collect, (info, _unique_accounts))) in accounts_to_combine
-            .iter_mut()
-            .zip(accounts_per_storage.iter())
-            .enumerate()
+        for (i, (shrink_collect, (info, _unique_accounts))) in
+            accounts_to_combine
+                .iter_mut()
+                .zip(accounts_per_storage.iter())
+                .enumerate()
         {
-            let many_refs_old_alive = &mut shrink_collect.alive_accounts.many_refs_old_alive;
+            let many_refs_old_alive =
+                &mut shrink_collect.alive_accounts.many_refs_old_alive;
             if !many_refs_old_alive.accounts.is_empty() {
                 many_refs_old_alive.accounts.iter().for_each(|account| {
                     // these accounts could indicate clean bugs or low memory conditions where we are forced to flush non-roots
@@ -660,7 +725,8 @@ impl AccountsDb {
                     remove.push(i);
                     continue;
                 }
-                accounts_keep_slots.insert(info.slot, std::mem::take(many_refs_old_alive));
+                accounts_keep_slots
+                    .insert(info.slot, std::mem::take(many_refs_old_alive));
             } else {
                 // No alive accounts in this slot have a ref_count > 1. So, ALL alive accounts in this slot can be written to any other slot
                 // we find convenient. There is NO other instance of any account to conflict with.
@@ -692,7 +758,8 @@ impl AccountsDb {
             bytes: bytes_total,
             accounts: accounts_to_write,
         } = packed;
-        let accounts_to_write = StorableAccountsBySlot::new(target_slot, accounts_to_write);
+        let accounts_to_write =
+            StorableAccountsBySlot::new(target_slot, accounts_to_write);
 
         self.shrink_ancient_stats
             .bytes_ancient_created
@@ -701,7 +768,11 @@ impl AccountsDb {
             .shrink_stats
             .num_slots_shrunk
             .fetch_add(1, Ordering::Relaxed);
-        self.write_ancient_accounts(*bytes_total, accounts_to_write, write_ancient_accounts)
+        self.write_ancient_accounts(
+            *bytes_total,
+            accounts_to_write,
+            write_ancient_accounts,
+        )
     }
 
     /// For each slot and alive accounts in 'accounts_to_combine'
@@ -718,10 +789,17 @@ impl AccountsDb {
         for alive_accounts in accounts_to_combine {
             let packed = PackedAncientStorage {
                 bytes: alive_accounts.bytes as u64,
-                accounts: vec![(alive_accounts.slot, &alive_accounts.accounts[..])],
+                accounts: vec![(
+                    alive_accounts.slot,
+                    &alive_accounts.accounts[..],
+                )],
             };
 
-            self.write_one_packed_storage(&packed, alive_accounts.slot, write_ancient_accounts);
+            self.write_one_packed_storage(
+                &packed,
+                alive_accounts.slot,
+                write_ancient_accounts,
+            );
         }
     }
 }
@@ -741,7 +819,8 @@ struct AccountsToCombine<'a> {
     /// all the rest of alive accounts that can move slots and should be combined
     /// This includes all accounts with ref_count = 1 from the slots in 'accounts_keep_slots'.
     /// There is one entry here for each storage we are processing. Even if all accounts are in 'accounts_keep_slots'.
-    accounts_to_combine: Vec<ShrinkCollect<'a, ShrinkCollectAliveSeparatedByRefs<'a>>>,
+    accounts_to_combine:
+        Vec<ShrinkCollect<'a, ShrinkCollectAliveSeparatedByRefs<'a>>>,
     /// slots that contain alive accounts that can move into ANY other ancient slot
     /// these slots will NOT be in 'accounts_keep_slots'
     /// Some of these slots will have ancient append vecs created at them to contain everything in 'accounts_to_combine'
@@ -799,15 +878,20 @@ impl<'a> PackedAncientStorage<'a> {
                     bytes_total.saturating_add(bytes_remaining_this_slot);
                 let mut partial_inner_index_max_exclusive;
                 if bytes_total_with_this_slot <= ideal_size {
-                    partial_inner_index_max_exclusive = alive_accounts.accounts.len();
+                    partial_inner_index_max_exclusive =
+                        alive_accounts.accounts.len();
                     bytes_total = bytes_total_with_this_slot;
                 } else {
                     partial_inner_index_max_exclusive = partial_inner_index;
                     // adding all the alive accounts in this storage would exceed the ideal size, so we have to break these accounts up
                     // look at each account and stop when we exceed the ideal size
-                    while partial_inner_index_max_exclusive < alive_accounts.accounts.len() {
-                        let account = alive_accounts.accounts[partial_inner_index_max_exclusive];
-                        let account_size = aligned_stored_size(account.data().len());
+                    while partial_inner_index_max_exclusive
+                        < alive_accounts.accounts.len()
+                    {
+                        let account = alive_accounts.accounts
+                            [partial_inner_index_max_exclusive];
+                        let account_size =
+                            aligned_stored_size(account.data().len());
                         let new_size = bytes_total.saturating_add(account_size);
                         if new_size > ideal_size && bytes_total > 0 {
                             full = true;
@@ -816,7 +900,10 @@ impl<'a> PackedAncientStorage<'a> {
                             break;
                         }
                         // this account fits
-                        saturating_add_assign!(partial_bytes_written, account_size);
+                        saturating_add_assign!(
+                            partial_bytes_written,
+                            account_size
+                        );
                         bytes_total = new_size;
                         partial_inner_index_max_exclusive += 1;
                     }
@@ -827,8 +914,8 @@ impl<'a> PackedAncientStorage<'a> {
                     accounts_to_write.push((
                         alive_accounts.slot,
                         // maybe all alive accounts from the current or could be partial
-                        &alive_accounts.accounts
-                            [partial_inner_index..partial_inner_index_max_exclusive],
+                        &alive_accounts.accounts[partial_inner_index
+                            ..partial_inner_index_max_exclusive],
                     ));
                 }
                 // start next storage with the account we ended with
@@ -894,13 +981,15 @@ impl<'a> AccountsToStore<'a> {
             for (i, account) in accounts.iter().enumerate() {
                 let account_size = account.stored_size() as u64;
                 if available_bytes >= account_size {
-                    available_bytes = available_bytes.saturating_sub(account_size);
+                    available_bytes =
+                        available_bytes.saturating_sub(account_size);
                 } else if index_first_item_overflow == num_accounts {
                     // the # of accounts we have so far seen is the most that will fit in the current ancient append vec
                     index_first_item_overflow = i;
-                    bytes_primary =
-                        initial_available_bytes.saturating_sub(available_bytes as usize);
-                    bytes_overflow = alive_total_bytes.saturating_sub(bytes_primary);
+                    bytes_primary = initial_available_bytes
+                        .saturating_sub(available_bytes as usize);
+                    bytes_overflow =
+                        alive_total_bytes.saturating_sub(bytes_primary);
                     break;
                 }
             }
@@ -928,10 +1017,15 @@ impl<'a> AccountsToStore<'a> {
     }
 
     /// get the accounts to store in the given 'storage'
-    pub fn get(&self, storage: StorageSelector) -> &[&'a StoredAccountMeta<'a>] {
+    pub fn get(
+        &self,
+        storage: StorageSelector,
+    ) -> &[&'a StoredAccountMeta<'a>] {
         let range = match storage {
             StorageSelector::Primary => 0..self.index_first_item_overflow,
-            StorageSelector::Overflow => self.index_first_item_overflow..self.accounts.len(),
+            StorageSelector::Overflow => {
+                self.index_first_item_overflow..self.accounts.len()
+            }
         };
         &self.accounts[range]
     }
@@ -967,38 +1061,43 @@ pub const fn get_ancient_append_vec_capacity() -> u64 {
 /// is this a max-size append vec designed to be used as an ancient append vec?
 pub fn is_ancient(storage: &AccountsFile) -> bool {
     match storage {
-        AccountsFile::AppendVec(storage) => storage.capacity() >= get_ancient_append_vec_capacity(),
+        AccountsFile::AppendVec(storage) => {
+            storage.capacity() >= get_ancient_append_vec_capacity()
+        }
     }
 }
 
 #[cfg(test)]
 pub mod tests {
-    use {
-        super::*,
-        crate::{
-            account_info::{AccountInfo, StorageLocation},
-            account_storage::meta::{AccountMeta, StoredAccountMeta, StoredMeta},
-            accounts_db::{
-                get_temp_accounts_paths,
-                tests::{
-                    append_single_account_with_default_hash, compare_all_accounts,
-                    create_db_with_storages_and_index, create_storages_and_update_index,
-                    get_all_accounts, remove_account_for_tests, CAN_RANDOMLY_SHRINK_FALSE,
-                },
-                ShrinkCollectRefs, MAX_RECYCLE_STORES,
+    use std::ops::Range;
+
+    use solana_sdk::{
+        account::{AccountSharedData, ReadableAccount, WritableAccount},
+        hash::Hash,
+        pubkey::Pubkey,
+    };
+    use strum::IntoEnumIterator;
+    use strum_macros::EnumIter;
+
+    use super::*;
+    use crate::{
+        account_info::{AccountInfo, StorageLocation},
+        account_storage::meta::{AccountMeta, StoredAccountMeta, StoredMeta},
+        accounts_db::{
+            get_temp_accounts_paths,
+            tests::{
+                append_single_account_with_default_hash, compare_all_accounts,
+                create_db_with_storages_and_index,
+                create_storages_and_update_index, get_all_accounts,
+                remove_account_for_tests, CAN_RANDOMLY_SHRINK_FALSE,
             },
-            accounts_index::UpsertReclaim,
-            append_vec::{aligned_stored_size, AppendVec, AppendVecStoredAccountMeta},
-            storable_accounts::StorableAccountsBySlot,
+            ShrinkCollectRefs, MAX_RECYCLE_STORES,
         },
-        solana_sdk::{
-            account::{AccountSharedData, ReadableAccount, WritableAccount},
-            hash::Hash,
-            pubkey::Pubkey,
+        accounts_index::UpsertReclaim,
+        append_vec::{
+            aligned_stored_size, AppendVec, AppendVecStoredAccountMeta,
         },
-        std::ops::Range,
-        strum::IntoEnumIterator,
-        strum_macros::EnumIter,
+        storable_accounts::StorableAccountsBySlot,
     };
 
     fn get_sample_storages(
@@ -1011,9 +1110,12 @@ pub mod tests {
         Vec<SlotInfo>,
     ) {
         let alive = true;
-        let (db, slot1) = create_db_with_storages_and_index(alive, slots, account_data_size);
+        let (db, slot1) =
+            create_db_with_storages_and_index(alive, slots, account_data_size);
         let original_stores = (0..slots)
-            .filter_map(|slot| db.storage.get_slot_storage_entry((slot as Slot) + slot1))
+            .filter_map(|slot| {
+                db.storage.get_slot_storage_entry((slot as Slot) + slot1)
+            })
             .collect::<Vec<_>>();
         let slot_infos = original_stores
             .iter()
@@ -1037,10 +1139,9 @@ pub mod tests {
         one: impl Iterator<Item = &'a GetUniqueAccountsResult<'a>>,
     ) -> Vec<(Pubkey, AccountSharedData)> {
         one.flat_map(|result| {
-            result
-                .stored_accounts
-                .iter()
-                .map(|result| (*result.pubkey(), result.to_account_shared_data()))
+            result.stored_accounts.iter().map(|result| {
+                (*result.pubkey(), result.to_account_shared_data())
+            })
         })
         .collect()
     }
@@ -1049,14 +1150,19 @@ pub mod tests {
         one: impl Iterator<Item = &'a GetUniqueAccountsResult<'a>>,
         two: impl Iterator<Item = &'a GetUniqueAccountsResult<'a>>,
     ) {
-        compare_all_accounts(&unique_to_accounts(one), &unique_to_accounts(two));
+        compare_all_accounts(
+            &unique_to_accounts(one),
+            &unique_to_accounts(two),
+        );
     }
 
     #[test]
     fn test_write_packed_storages_empty() {
         let (db, _storages, _slots, _infos) = get_sample_storages(0, None);
-        let write_ancient_accounts =
-            db.write_packed_storages(&AccountsToCombine::default(), Vec::default());
+        let write_ancient_accounts = db.write_packed_storages(
+            &AccountsToCombine::default(),
+            Vec::default(),
+        );
         assert!(write_ancient_accounts.shrinks_in_progress.is_empty());
     }
 
@@ -1100,7 +1206,8 @@ pub mod tests {
                 (1, num_slots),
                 (get_ancient_append_vec_capacity(), 1.min(num_slots)),
             ] {
-                let (db, storages, slots, _infos) = get_sample_storages(num_slots, None);
+                let (db, storages, slots, _infos) =
+                    get_sample_storages(num_slots, None);
                 let original_results = storages
                     .iter()
                     .map(|store| db.get_unique_accounts_from_storage(store))
@@ -1111,11 +1218,16 @@ pub mod tests {
                     .iter()
                     .zip(slots_vec.iter().cloned())
                     .map(|(accounts, slot)| AliveAccounts {
-                        accounts: accounts.stored_accounts.iter().collect::<Vec<_>>(),
+                        accounts: accounts
+                            .stored_accounts
+                            .iter()
+                            .collect::<Vec<_>>(),
                         bytes: accounts
                             .stored_accounts
                             .iter()
-                            .map(|account| aligned_stored_size(account.data().len()))
+                            .map(|account| {
+                                aligned_stored_size(account.data().len())
+                            })
                             .sum(),
                         slot,
                     })
@@ -1149,7 +1261,8 @@ pub mod tests {
                 (account_size * 2, num_slots * total_accounts_per_storage / 2),
                 (get_ancient_append_vec_capacity(), 1.min(num_slots)),
             ] {
-                let (db, storages, slots, _infos) = get_sample_storages(num_slots, None);
+                let (db, storages, slots, _infos) =
+                    get_sample_storages(num_slots, None);
 
                 let account_template = storages
                     .first()
@@ -1197,11 +1310,16 @@ pub mod tests {
                     .iter()
                     .zip(slots_vec.iter().cloned())
                     .map(|(accounts, slot)| AliveAccounts {
-                        accounts: accounts.stored_accounts.iter().collect::<Vec<_>>(),
+                        accounts: accounts
+                            .stored_accounts
+                            .iter()
+                            .collect::<Vec<_>>(),
                         bytes: accounts
                             .stored_accounts
                             .iter()
-                            .map(|account| aligned_stored_size(account.data().len()))
+                            .map(|account| {
+                                aligned_stored_size(account.data().len())
+                            })
                             .sum(),
                         slot,
                     })
@@ -1221,13 +1339,18 @@ pub mod tests {
         }
     }
 
-    fn packed_to_compare(packed: &[PackedAncientStorage]) -> Vec<(Pubkey, AccountSharedData)> {
+    fn packed_to_compare(
+        packed: &[PackedAncientStorage],
+    ) -> Vec<(Pubkey, AccountSharedData)> {
         packed
             .iter()
             .flat_map(|packed| {
                 packed.accounts.iter().flat_map(|(_slot, stored_metas)| {
                     stored_metas.iter().map(|stored_meta| {
-                        (*stored_meta.pubkey(), stored_meta.to_account_shared_data())
+                        (
+                            *stored_meta.pubkey(),
+                            stored_meta.to_account_shared_data(),
+                        )
                     })
                 })
             })
@@ -1254,7 +1377,8 @@ pub mod tests {
                 account_size * 2,
                 get_ancient_append_vec_capacity(),
             ] {
-                let (db, storages, slots, _infos) = get_sample_storages(num_slots, None);
+                let (db, storages, slots, _infos) =
+                    get_sample_storages(num_slots, None);
 
                 let account_template = storages
                     .first()
@@ -1279,7 +1403,11 @@ pub mod tests {
                             .map(|_| {
                                 let pk = solana_sdk::pubkey::new_rand();
                                 let mut account = account_template.clone();
-                                account.set_data((0..data_size).map(|x| (x % 256) as u8).collect());
+                                account.set_data(
+                                    (0..data_size)
+                                        .map(|x| (x % 256) as u8)
+                                        .collect(),
+                                );
                                 data_size += 1;
                                 append_single_account_with_default_hash(
                                     storage,
@@ -1305,11 +1433,16 @@ pub mod tests {
                     .iter()
                     .zip(slots_vec.iter().cloned())
                     .map(|(accounts, slot)| AliveAccounts {
-                        accounts: accounts.stored_accounts.iter().collect::<Vec<_>>(),
+                        accounts: accounts
+                            .stored_accounts
+                            .iter()
+                            .collect::<Vec<_>>(),
                         bytes: accounts
                             .stored_accounts
                             .iter()
-                            .map(|account| aligned_stored_size(account.data().len()))
+                            .map(|account| {
+                                aligned_stored_size(account.data().len())
+                            })
                             .sum(),
                         slot,
                     })
@@ -1320,7 +1453,8 @@ pub mod tests {
                     NonZeroU64::new(ideal_size).unwrap(),
                 );
 
-                let largest_account_size = aligned_stored_size(data_size) as u64;
+                let largest_account_size =
+                    aligned_stored_size(data_size) as u64;
                 // all packed storages should be close to ideal size
                 result.iter().enumerate().for_each(|(i, packed)| {
                     if i + 1 < result.len() && ideal_size > largest_account_size {
@@ -1356,7 +1490,10 @@ pub mod tests {
                             .iter()
                             .map(|(_slot, accounts)| accounts
                                 .iter()
-                                .map(|account| aligned_stored_size(account.data().len()) as u64)
+                                .map(|account| aligned_stored_size(
+                                    account.data().len()
+                                )
+                                    as u64)
                                 .sum::<u64>())
                             .sum::<u64>()
                     );
@@ -1370,12 +1507,17 @@ pub mod tests {
         }
     }
 
-    fn unique_to_compare(unique: &[GetUniqueAccountsResult]) -> Vec<(Pubkey, AccountSharedData)> {
+    fn unique_to_compare(
+        unique: &[GetUniqueAccountsResult],
+    ) -> Vec<(Pubkey, AccountSharedData)> {
         unique
             .iter()
             .flat_map(|unique| {
                 unique.stored_accounts.iter().map(|stored_meta| {
-                    (*stored_meta.pubkey(), stored_meta.to_account_shared_data())
+                    (
+                        *stored_meta.pubkey(),
+                        stored_meta.to_account_shared_data(),
+                    )
                 })
             })
             .collect::<Vec<_>>()
@@ -1397,26 +1539,30 @@ pub mod tests {
         for in_shrink_candidate_slots in [false, true] {
             for all_slots_shrunk in [false, true] {
                 for num_slots in 0..3 {
-                    let (db, storages, slots, infos) = get_sample_storages(num_slots, None);
+                    let (db, storages, slots, infos) =
+                        get_sample_storages(num_slots, None);
                     let accounts_per_storage = infos
                         .iter()
-                        .zip(
-                            storages
-                                .iter()
-                                .map(|store| db.get_unique_accounts_from_storage(store)),
-                        )
+                        .zip(storages.iter().map(|store| {
+                            db.get_unique_accounts_from_storage(store)
+                        }))
                         .collect::<Vec<_>>();
 
-                    let accounts_to_combine = db.calc_accounts_to_combine(&accounts_per_storage);
+                    let accounts_to_combine =
+                        db.calc_accounts_to_combine(&accounts_per_storage);
                     let mut stats = ShrinkStatsSub::default();
-                    let mut write_ancient_accounts = WriteAncientAccounts::default();
+                    let mut write_ancient_accounts =
+                        WriteAncientAccounts::default();
 
                     slots.clone().for_each(|slot| {
                         db.add_root(slot);
                         let storage = db.storage.get_slot_storage_entry(slot);
                         assert!(storage.is_some());
                         if in_shrink_candidate_slots {
-                            db.shrink_candidate_slots.lock().unwrap().insert(slot);
+                            db.shrink_candidate_slots
+                                .lock()
+                                .unwrap()
+                                .insert(slot);
                         }
                     });
 
@@ -1445,7 +1591,11 @@ pub mod tests {
                     );
 
                     slots.clone().for_each(|slot| {
-                        assert!(!db.shrink_candidate_slots.lock().unwrap().contains(&slot));
+                        assert!(!db
+                            .shrink_candidate_slots
+                            .lock()
+                            .unwrap()
+                            .contains(&slot));
                     });
 
                     let roots_after = db
@@ -1501,17 +1651,23 @@ pub mod tests {
 
                             let original_results = storages
                                 .iter()
-                                .map(|store| db.get_unique_accounts_from_storage(store))
+                                .map(|store| {
+                                    db.get_unique_accounts_from_storage(store)
+                                })
                                 .collect::<Vec<_>>();
                             if two_refs {
                                 original_results.iter().for_each(|results| {
-                                    results.stored_accounts.iter().for_each(|account| {
-                                        let entry = db
-                                            .accounts_index
-                                            .get_account_read_entry(account.pubkey())
-                                            .unwrap();
-                                        entry.addref();
-                                    })
+                                    results.stored_accounts.iter().for_each(
+                                        |account| {
+                                            let entry = db
+                                                .accounts_index
+                                                .get_account_read_entry(
+                                                    account.pubkey(),
+                                                )
+                                                .unwrap();
+                                            entry.addref();
+                                        },
+                                    )
                                 });
                             }
 
@@ -1539,7 +1695,9 @@ pub mod tests {
                             }
                             let original_results = storages
                                 .iter()
-                                .map(|store| db.get_unique_accounts_from_storage(store))
+                                .map(|store| {
+                                    db.get_unique_accounts_from_storage(store)
+                                })
                                 .collect::<Vec<_>>();
 
                             let accounts_per_storage = infos
@@ -1547,8 +1705,10 @@ pub mod tests {
                                 .zip(original_results.into_iter())
                                 .collect::<Vec<_>>();
 
-                            let accounts_to_combine =
-                                db.calc_accounts_to_combine(&accounts_per_storage);
+                            let accounts_to_combine = db
+                                .calc_accounts_to_combine(
+                                    &accounts_per_storage,
+                                );
                             assert_eq!(
                                 accounts_to_combine.accounts_to_combine.len(),
                                 num_slots,
@@ -1565,49 +1725,60 @@ pub mod tests {
                             assert_eq!(
                                 accounts_to_combine.target_slots_sorted,
                                 if unsorted_slots {
-                                    slots_vec.iter().cloned().rev().collect::<Vec<_>>()
+                                    slots_vec
+                                        .iter()
+                                        .cloned()
+                                        .rev()
+                                        .collect::<Vec<_>>()
                                 } else {
                                     slots_vec.clone()
                                 }
                             );
-                            assert!(accounts_to_combine.accounts_keep_slots.is_empty());
-                            assert!(accounts_to_combine.accounts_to_combine.iter().all(
-                                |shrink_collect| shrink_collect
+                            assert!(accounts_to_combine
+                                .accounts_keep_slots
+                                .is_empty());
+                            assert!(accounts_to_combine
+                                .accounts_to_combine
+                                .iter()
+                                .all(|shrink_collect| shrink_collect
                                     .alive_accounts
                                     .many_refs_old_alive
                                     .accounts
-                                    .is_empty()
-                            ));
+                                    .is_empty()));
                             if two_refs {
-                                assert!(accounts_to_combine.accounts_to_combine.iter().all(
-                                    |shrink_collect| shrink_collect
+                                assert!(accounts_to_combine
+                                    .accounts_to_combine
+                                    .iter()
+                                    .all(|shrink_collect| shrink_collect
                                         .alive_accounts
                                         .one_ref
                                         .accounts
-                                        .is_empty()
-                                ));
-                                assert!(accounts_to_combine.accounts_to_combine.iter().all(
-                                    |shrink_collect| !shrink_collect
+                                        .is_empty()));
+                                assert!(accounts_to_combine
+                                    .accounts_to_combine
+                                    .iter()
+                                    .all(|shrink_collect| !shrink_collect
                                         .alive_accounts
                                         .many_refs_this_is_newest_alive
                                         .accounts
-                                        .is_empty()
-                                ));
+                                        .is_empty()));
                             } else {
-                                assert!(accounts_to_combine.accounts_to_combine.iter().all(
-                                    |shrink_collect| !shrink_collect
+                                assert!(accounts_to_combine
+                                    .accounts_to_combine
+                                    .iter()
+                                    .all(|shrink_collect| !shrink_collect
                                         .alive_accounts
                                         .one_ref
                                         .accounts
-                                        .is_empty()
-                                ));
-                                assert!(accounts_to_combine.accounts_to_combine.iter().all(
-                                    |shrink_collect| shrink_collect
+                                        .is_empty()));
+                                assert!(accounts_to_combine
+                                    .accounts_to_combine
+                                    .iter()
+                                    .all(|shrink_collect| shrink_collect
                                         .alive_accounts
                                         .many_refs_this_is_newest_alive
                                         .accounts
-                                        .is_empty()
-                                ));
+                                        .is_empty()));
                             }
 
                             // test write_ancient_accounts_to_same_slot_multiple_refs since we built interesting 'AccountsToCombine'
@@ -1623,11 +1794,16 @@ pub mod tests {
                                 }
                                 TestWriteMultipleRefs::PackedStorages => {
                                     let packed_contents = Vec::default();
-                                    db.write_packed_storages(&accounts_to_combine, packed_contents)
+                                    db.write_packed_storages(
+                                        &accounts_to_combine,
+                                        packed_contents,
+                                    )
                                 }
                             };
 
-                            assert!(write_ancient_accounts.shrinks_in_progress.is_empty());
+                            assert!(write_ancient_accounts
+                                .shrinks_in_progress
+                                .is_empty());
                         }
                     }
                 }
@@ -1645,7 +1821,8 @@ pub mod tests {
         for method in TestWriteMultipleRefs::iter() {
             let num_slots = 1;
             // creating 1 more sample slot/storage, but effectively act like 1 slot
-            let (db, mut storages, slots, infos) = get_sample_storages(num_slots + 1, None);
+            let (db, mut storages, slots, infos) =
+                get_sample_storages(num_slots + 1, None);
             let slots = slots.start..slots.start + 1;
             let storage = storages.first().unwrap().clone();
             let ignored_storage = storages.pop().unwrap();
@@ -1662,7 +1839,8 @@ pub mod tests {
                 .first()
                 .unwrap();
             let pk_with_2_refs = account_with_2_refs.pubkey();
-            let mut account_with_1_ref = account_with_2_refs.to_account_shared_data();
+            let mut account_with_1_ref =
+                account_with_2_refs.to_account_shared_data();
             account_with_1_ref.checked_add_lamports(1).unwrap();
             append_single_account_with_default_hash(
                 &storage,
@@ -1691,15 +1869,22 @@ pub mod tests {
                 .iter()
                 .map(|store| db.get_unique_accounts_from_storage(store))
                 .collect::<Vec<_>>();
-            assert_eq!(original_results.first().unwrap().stored_accounts.len(), 2);
+            assert_eq!(
+                original_results.first().unwrap().stored_accounts.len(),
+                2
+            );
             let accounts_per_storage = infos
                 .iter()
                 .zip(original_results.into_iter())
                 .collect::<Vec<_>>();
 
-            let accounts_to_combine = db.calc_accounts_to_combine(&accounts_per_storage);
+            let accounts_to_combine =
+                db.calc_accounts_to_combine(&accounts_per_storage);
             let slots_vec = slots.collect::<Vec<_>>();
-            assert_eq!(accounts_to_combine.accounts_to_combine.len(), num_slots);
+            assert_eq!(
+                accounts_to_combine.accounts_to_combine.len(),
+                num_slots
+            );
             // all accounts should be in many_refs
             let mut accounts_keep = accounts_to_combine
                 .accounts_keep_slots
@@ -1709,7 +1894,10 @@ pub mod tests {
             accounts_keep.sort_unstable();
             assert_eq!(accounts_keep, slots_vec);
             assert!(accounts_to_combine.target_slots_sorted.is_empty());
-            assert_eq!(accounts_to_combine.accounts_keep_slots.len(), num_slots);
+            assert_eq!(
+                accounts_to_combine.accounts_keep_slots.len(),
+                num_slots
+            );
             assert_eq!(
                 accounts_to_combine
                     .accounts_keep_slots
@@ -1743,29 +1931,28 @@ pub mod tests {
                     .collect::<Vec<_>>(),
                 vec![account_with_1_ref]
             );
-            assert!(accounts_to_combine
-                .accounts_to_combine
-                .iter()
-                .all(|shrink_collect| shrink_collect
+            assert!(accounts_to_combine.accounts_to_combine.iter().all(
+                |shrink_collect| shrink_collect
                     .alive_accounts
                     .many_refs_this_is_newest_alive
                     .accounts
-                    .is_empty()));
+                    .is_empty()
+            ));
             assert_eq!(accounts_to_combine.accounts_to_combine.len(), 1);
 
-            assert!(accounts_to_combine
-                .accounts_to_combine
-                .iter()
-                .all(|shrink_collect| shrink_collect
+            assert!(accounts_to_combine.accounts_to_combine.iter().all(
+                |shrink_collect| shrink_collect
                     .alive_accounts
                     .many_refs_old_alive
                     .accounts
-                    .is_empty()));
+                    .is_empty()
+            ));
 
             // test write_ancient_accounts_to_same_slot_multiple_refs since we built interesting 'AccountsToCombine'
             let write_ancient_accounts = match method {
                 TestWriteMultipleRefs::MultipleRefs => {
-                    let mut write_ancient_accounts = WriteAncientAccounts::default();
+                    let mut write_ancient_accounts =
+                        WriteAncientAccounts::default();
                     db.write_ancient_accounts_to_same_slot_multiple_refs(
                         accounts_to_combine.accounts_keep_slots.values(),
                         &mut write_ancient_accounts,
@@ -1774,10 +1961,16 @@ pub mod tests {
                 }
                 TestWriteMultipleRefs::PackedStorages => {
                     let packed_contents = Vec::default();
-                    db.write_packed_storages(&accounts_to_combine, packed_contents)
+                    db.write_packed_storages(
+                        &accounts_to_combine,
+                        packed_contents,
+                    )
                 }
             };
-            assert_eq!(write_ancient_accounts.shrinks_in_progress.len(), num_slots);
+            assert_eq!(
+                write_ancient_accounts.shrinks_in_progress.len(),
+                num_slots
+            );
             let mut shrinks_in_progress = write_ancient_accounts
                 .shrinks_in_progress
                 .iter()
@@ -1793,7 +1986,9 @@ pub mod tests {
             assert_eq!(
                 shrinks_in_progress
                     .iter()
-                    .map(|(_, shrink_in_progress)| shrink_in_progress.old_storage().append_vec_id())
+                    .map(|(_, shrink_in_progress)| shrink_in_progress
+                        .old_storage()
+                        .append_vec_id())
                     .collect::<Vec<_>>(),
                 storages
                     .iter()
@@ -1802,7 +1997,8 @@ pub mod tests {
             );
             // assert that we wrote the 2_ref account to the newly shrunk append vec
             let shrink_in_progress = shrinks_in_progress.first().unwrap().1;
-            let accounts_shrunk_same_slot = shrink_in_progress.new_storage().accounts.accounts(0);
+            let accounts_shrunk_same_slot =
+                shrink_in_progress.new_storage().accounts.accounts(0);
             assert_eq!(accounts_shrunk_same_slot.len(), 1);
             assert_eq!(
                 accounts_shrunk_same_slot.first().unwrap().pubkey(),
@@ -1827,7 +2023,8 @@ pub mod tests {
         // The result will be that the account, even though it has refcount > 1, can be moved to a newer slot.
         for method in TestWriteMultipleRefs::iter() {
             let num_slots = 1;
-            let (db, storages, slots, infos) = get_sample_storages(num_slots, None);
+            let (db, storages, slots, infos) =
+                get_sample_storages(num_slots, None);
             let original_results = storages
                 .iter()
                 .map(|store| db.get_unique_accounts_from_storage(store))
@@ -1842,7 +2039,8 @@ pub mod tests {
                 .first()
                 .unwrap();
             let pk_with_2_refs = account_with_2_refs.pubkey();
-            let mut account_with_1_ref = account_with_2_refs.to_account_shared_data();
+            let mut account_with_1_ref =
+                account_with_2_refs.to_account_shared_data();
             _ = account_with_1_ref.checked_add_lamports(1);
             append_single_account_with_default_hash(
                 &storage,
@@ -1867,15 +2065,22 @@ pub mod tests {
                 .iter()
                 .map(|store| db.get_unique_accounts_from_storage(store))
                 .collect::<Vec<_>>();
-            assert_eq!(original_results.first().unwrap().stored_accounts.len(), 2);
+            assert_eq!(
+                original_results.first().unwrap().stored_accounts.len(),
+                2
+            );
             let accounts_per_storage = infos
                 .iter()
                 .zip(original_results.into_iter())
                 .collect::<Vec<_>>();
 
-            let accounts_to_combine = db.calc_accounts_to_combine(&accounts_per_storage);
+            let accounts_to_combine =
+                db.calc_accounts_to_combine(&accounts_per_storage);
             let slots_vec = slots.collect::<Vec<_>>();
-            assert_eq!(accounts_to_combine.accounts_to_combine.len(), num_slots);
+            assert_eq!(
+                accounts_to_combine.accounts_to_combine.len(),
+                num_slots
+            );
             // all accounts should be in many_refs_this_is_newest_alive
             let mut accounts_keep = accounts_to_combine
                 .accounts_keep_slots
@@ -1886,7 +2091,10 @@ pub mod tests {
             assert_eq!(accounts_to_combine.target_slots_sorted, slots_vec);
             assert!(accounts_keep.is_empty());
             assert!(!accounts_to_combine.target_slots_sorted.is_empty());
-            assert_eq!(accounts_to_combine.accounts_to_combine.len(), num_slots);
+            assert_eq!(
+                accounts_to_combine.accounts_to_combine.len(),
+                num_slots
+            );
             assert_eq!(
                 accounts_to_combine
                     .accounts_to_combine
@@ -1922,19 +2130,19 @@ pub mod tests {
                     .collect::<Vec<_>>(),
                 vec![account_with_1_ref]
             );
-            assert!(accounts_to_combine
-                .accounts_to_combine
-                .iter()
-                .all(|shrink_collect| !shrink_collect
+            assert!(accounts_to_combine.accounts_to_combine.iter().all(
+                |shrink_collect| !shrink_collect
                     .alive_accounts
                     .many_refs_this_is_newest_alive
                     .accounts
-                    .is_empty()));
+                    .is_empty()
+            ));
 
             // test write_ancient_accounts_to_same_slot_multiple_refs since we built interesting 'AccountsToCombine'
             let write_ancient_accounts = match method {
                 TestWriteMultipleRefs::MultipleRefs => {
-                    let mut write_ancient_accounts = WriteAncientAccounts::default();
+                    let mut write_ancient_accounts =
+                        WriteAncientAccounts::default();
                     db.write_ancient_accounts_to_same_slot_multiple_refs(
                         accounts_to_combine.accounts_keep_slots.values(),
                         &mut write_ancient_accounts,
@@ -1943,7 +2151,10 @@ pub mod tests {
                 }
                 TestWriteMultipleRefs::PackedStorages => {
                     let packed_contents = Vec::default();
-                    db.write_packed_storages(&accounts_to_combine, packed_contents)
+                    db.write_packed_storages(
+                        &accounts_to_combine,
+                        packed_contents,
+                    )
                 }
             };
             assert!(write_ancient_accounts.shrinks_in_progress.is_empty());
@@ -1969,7 +2180,8 @@ pub mod tests {
     fn test_get_unique_accounts_from_storage_for_combining_ancient_slots() {
         for num_slots in 0..3 {
             for reverse in [false, true] {
-                let (db, storages, slots, mut infos) = get_sample_storages(num_slots, None);
+                let (db, storages, slots, mut infos) =
+                    get_sample_storages(num_slots, None);
                 let original_results = storages
                     .iter()
                     .map(|store| db.get_unique_accounts_from_storage(store))
@@ -1990,7 +2202,9 @@ pub mod tests {
                 );
                 compare_all_accounts(
                     &all_accounts,
-                    &unique_to_accounts(results.iter().map(|(_, accounts)| accounts)),
+                    &unique_to_accounts(
+                        results.iter().map(|(_, accounts)| accounts),
+                    ),
                 );
 
                 let map = |info: &SlotInfo| {
@@ -2047,15 +2261,16 @@ pub mod tests {
             pubkey,
             data_len: 43,
         };
-        let account = StoredAccountMeta::AppendVec(AppendVecStoredAccountMeta {
-            meta: &stored_meta,
-            // account data
-            account_meta: &account_meta,
-            data: account.data(),
-            offset,
-            stored_size: account_size,
-            hash: &hash,
-        });
+        let account =
+            StoredAccountMeta::AppendVec(AppendVecStoredAccountMeta {
+                meta: &stored_meta,
+                // account data
+                account_meta: &account_meta,
+                data: account.data(),
+                offset,
+                stored_size: account_size,
+                hash: &hash,
+            });
         let map = vec![&account];
         for (selector, available_bytes) in [
             (StorageSelector::Primary, account_size),
@@ -2063,8 +2278,12 @@ pub mod tests {
         ] {
             let slot = 1;
             let alive_total_bytes = account_size;
-            let accounts_to_store =
-                AccountsToStore::new(available_bytes as u64, &map, alive_total_bytes, slot);
+            let accounts_to_store = AccountsToStore::new(
+                available_bytes as u64,
+                &map,
+                alive_total_bytes,
+                slot,
+            );
             let accounts = accounts_to_store.get(selector);
             assert_eq!(
                 accounts.iter().collect::<Vec<_>>(),
@@ -2101,9 +2320,15 @@ pub mod tests {
             (get_ancient_append_vec_capacity(), true),
             (get_ancient_append_vec_capacity() - 1, false),
         ] {
-            let tf = crate::append_vec::test_utils::get_append_vec_path("test_is_ancient");
+            let tf = crate::append_vec::test_utils::get_append_vec_path(
+                "test_is_ancient",
+            );
             let (_temp_dirs, _paths) = get_temp_accounts_paths(1).unwrap();
-            let av = AccountsFile::AppendVec(AppendVec::new(&tf.path, true, size as usize));
+            let av = AccountsFile::AppendVec(AppendVec::new(
+                &tf.path,
+                true,
+                size as usize,
+            ));
 
             assert_eq!(expected_ancient, is_ancient(&av));
         }
@@ -2113,7 +2338,11 @@ pub mod tests {
         alive: bool,
         num_normal_slots: usize,
     ) -> (AccountsDb, Slot) {
-        let (db, slot1) = create_db_with_storages_and_index(alive, num_normal_slots + 1, None);
+        let (db, slot1) = create_db_with_storages_and_index(
+            alive,
+            num_normal_slots + 1,
+            None,
+        );
         let storage = db.storage.get_slot_storage_entry(slot1).unwrap();
         let created_accounts = db.get_unique_accounts_from_storage(&storage);
 
@@ -2132,7 +2361,11 @@ pub mod tests {
         (db, slot1)
     }
 
-    fn assert_storage_info(info: &SlotInfo, storage: &AccountStorageEntry, should_shrink: bool) {
+    fn assert_storage_info(
+        info: &SlotInfo,
+        storage: &AccountStorageEntry,
+        should_shrink: bool,
+    ) {
         assert_eq!(storage.append_vec_id(), info.storage.append_vec_id());
         assert_eq!(storage.slot(), info.slot);
         assert_eq!(storage.capacity(), info.capacity);
@@ -2155,17 +2388,25 @@ pub mod tests {
         for method in TestCollectInfo::iter() {
             // 1_040_000 is big enough relative to page size to cause shrink ratio to be triggered
             for data_size in [None, Some(1_040_000)] {
-                let (db, slot1) = create_db_with_storages_and_index(alive, slots, data_size);
+                let (db, slot1) =
+                    create_db_with_storages_and_index(alive, slots, data_size);
                 let mut infos = AncientSlotInfos::default();
                 let storage = db.storage.get_slot_storage_entry(slot1).unwrap();
                 let alive_bytes_expected = storage.alive_bytes();
                 match method {
                     TestCollectInfo::Add => {
                         // test lower level 'add'
-                        infos.add(slot1, Arc::clone(&storage), can_randomly_shrink);
+                        infos.add(
+                            slot1,
+                            Arc::clone(&storage),
+                            can_randomly_shrink,
+                        );
                     }
                     TestCollectInfo::CalcAncientSlotInfo => {
-                        infos = db.calc_ancient_slot_info(vec![slot1], can_randomly_shrink);
+                        infos = db.calc_ancient_slot_info(
+                            vec![slot1],
+                            can_randomly_shrink,
+                        );
                     }
                     TestCollectInfo::CollectSortFilterInfo => {
                         let tuning = PackedAncientStorageTuning {
@@ -2175,27 +2416,46 @@ pub mod tests {
                             ideal_storage_size: NonZeroU64::new(1).unwrap(),
                             can_randomly_shrink,
                         };
-                        infos = db.collect_sort_filter_ancient_slots(vec![slot1], &tuning);
+                        infos = db.collect_sort_filter_ancient_slots(
+                            vec![slot1],
+                            &tuning,
+                        );
                     }
                 }
                 assert_eq!(infos.all_infos.len(), 1);
                 let should_shrink = data_size.is_none();
-                assert_storage_info(infos.all_infos.first().unwrap(), &storage, should_shrink);
+                assert_storage_info(
+                    infos.all_infos.first().unwrap(),
+                    &storage,
+                    should_shrink,
+                );
                 if should_shrink {
                     // data size is so small compared to min aligned file size that the storage is marked as should_shrink
                     assert_eq!(
                         infos.shrink_indexes,
-                        if !matches!(method, TestCollectInfo::CollectSortFilterInfo) {
+                        if !matches!(
+                            method,
+                            TestCollectInfo::CollectSortFilterInfo
+                        ) {
                             vec![0]
                         } else {
                             Vec::default()
                         }
                     );
-                    assert_eq!(infos.total_alive_bytes, alive_bytes_expected as u64);
-                    assert_eq!(infos.total_alive_bytes_shrink, alive_bytes_expected as u64);
+                    assert_eq!(
+                        infos.total_alive_bytes,
+                        alive_bytes_expected as u64
+                    );
+                    assert_eq!(
+                        infos.total_alive_bytes_shrink,
+                        alive_bytes_expected as u64
+                    );
                 } else {
                     assert!(infos.shrink_indexes.is_empty());
-                    assert_eq!(infos.total_alive_bytes, alive_bytes_expected as u64);
+                    assert_eq!(
+                        infos.total_alive_bytes,
+                        alive_bytes_expected as u64
+                    );
                     assert_eq!(infos.total_alive_bytes_shrink, 0);
                 }
             }
@@ -2208,13 +2468,15 @@ pub mod tests {
         let alive = false;
         let slots = 1;
         for call_add in [false, true] {
-            let (db, slot1) = create_db_with_storages_and_index(alive, slots, None);
+            let (db, slot1) =
+                create_db_with_storages_and_index(alive, slots, None);
             let mut infos = AncientSlotInfos::default();
             let storage = db.storage.get_slot_storage_entry(slot1).unwrap();
             if call_add {
                 infos.add(slot1, Arc::clone(&storage), can_randomly_shrink);
             } else {
-                infos = db.calc_ancient_slot_info(vec![slot1], can_randomly_shrink);
+                infos =
+                    db.calc_ancient_slot_info(vec![slot1], can_randomly_shrink);
             }
             assert!(infos.all_infos.is_empty());
             assert!(infos.shrink_indexes.is_empty());
@@ -2230,17 +2492,25 @@ pub mod tests {
             for slots in 0..4 {
                 // 1_040_000 is big enough relative to page size to cause shrink ratio to be triggered
                 for data_size in [None, Some(1_040_000)] {
-                    let (db, slot1) = create_db_with_storages_and_index(alive, slots, data_size);
-                    let slot_vec = (slot1..(slot1 + slots as Slot)).collect::<Vec<_>>();
+                    let (db, slot1) = create_db_with_storages_and_index(
+                        alive, slots, data_size,
+                    );
+                    let slot_vec =
+                        (slot1..(slot1 + slots as Slot)).collect::<Vec<_>>();
                     let storages = slot_vec
                         .iter()
-                        .map(|slot| db.storage.get_slot_storage_entry(*slot).unwrap())
+                        .map(|slot| {
+                            db.storage.get_slot_storage_entry(*slot).unwrap()
+                        })
                         .collect::<Vec<_>>();
                     let alive_bytes_expected = storages
                         .iter()
                         .map(|storage| storage.alive_bytes() as u64)
                         .sum::<u64>();
-                    let infos = db.calc_ancient_slot_info(slot_vec.clone(), can_randomly_shrink);
+                    let infos = db.calc_ancient_slot_info(
+                        slot_vec.clone(),
+                        can_randomly_shrink,
+                    );
                     if !alive {
                         assert!(infos.all_infos.is_empty());
                         assert!(infos.shrink_indexes.is_empty());
@@ -2249,12 +2519,15 @@ pub mod tests {
                     } else {
                         assert_eq!(infos.all_infos.len(), slots);
                         let should_shrink = data_size.is_none();
-                        storages
-                            .iter()
-                            .zip(infos.all_infos.iter())
-                            .for_each(|(storage, info)| {
-                                assert_storage_info(info, storage, should_shrink);
-                            });
+                        storages.iter().zip(infos.all_infos.iter()).for_each(
+                            |(storage, info)| {
+                                assert_storage_info(
+                                    info,
+                                    storage,
+                                    should_shrink,
+                                );
+                            },
+                        );
                         if should_shrink {
                             // data size is so small compared to min aligned file size that the storage is marked as should_shrink
                             assert_eq!(
@@ -2265,11 +2538,20 @@ pub mod tests {
                                     .map(|(i, _)| i)
                                     .collect::<Vec<_>>()
                             );
-                            assert_eq!(infos.total_alive_bytes, alive_bytes_expected);
-                            assert_eq!(infos.total_alive_bytes_shrink, alive_bytes_expected);
+                            assert_eq!(
+                                infos.total_alive_bytes,
+                                alive_bytes_expected
+                            );
+                            assert_eq!(
+                                infos.total_alive_bytes_shrink,
+                                alive_bytes_expected
+                            );
                         } else {
                             assert!(infos.shrink_indexes.is_empty());
-                            assert_eq!(infos.total_alive_bytes, alive_bytes_expected);
+                            assert_eq!(
+                                infos.total_alive_bytes,
+                                alive_bytes_expected
+                            );
                             assert_eq!(infos.total_alive_bytes_shrink, 0);
                         }
                     }
@@ -2283,18 +2565,24 @@ pub mod tests {
         let can_randomly_shrink = false;
         for method in TestCollectInfo::iter() {
             for slot1_is_alive in [false, true] {
-                let alives = [false /*dummy*/, slot1_is_alive, !slot1_is_alive];
+                let alives =
+                    [false /*dummy*/, slot1_is_alive, !slot1_is_alive];
                 let slots = 2;
                 // 1_040_000 is big enough relative to page size to cause shrink ratio to be triggered
                 for data_size in [None, Some(1_040_000)] {
-                    let (db, slot1) =
-                        create_db_with_storages_and_index(true /*alive*/, slots, data_size);
+                    let (db, slot1) = create_db_with_storages_and_index(
+                        true, /*alive*/
+                        slots, data_size,
+                    );
                     assert_eq!(slot1, 1); // make sure index into alives will be correct
                     assert_eq!(alives[slot1 as usize], slot1_is_alive);
-                    let slot_vec = (slot1..(slot1 + slots as Slot)).collect::<Vec<_>>();
+                    let slot_vec =
+                        (slot1..(slot1 + slots as Slot)).collect::<Vec<_>>();
                     let storages = slot_vec
                         .iter()
-                        .map(|slot| db.storage.get_slot_storage_entry(*slot).unwrap())
+                        .map(|slot| {
+                            db.storage.get_slot_storage_entry(*slot).unwrap()
+                        })
                         .collect::<Vec<_>>();
                     storages.iter().for_each(|storage| {
                         let slot = storage.slot();
@@ -2318,9 +2606,11 @@ pub mod tests {
                         .sum::<u64>();
 
                     let infos = match method {
-                        TestCollectInfo::CalcAncientSlotInfo => {
-                            db.calc_ancient_slot_info(slot_vec.clone(), can_randomly_shrink)
-                        }
+                        TestCollectInfo::CalcAncientSlotInfo => db
+                            .calc_ancient_slot_info(
+                                slot_vec.clone(),
+                                can_randomly_shrink,
+                            ),
                         TestCollectInfo::Add => {
                             continue; // unsupportable
                         }
@@ -2332,7 +2622,10 @@ pub mod tests {
                                 ideal_storage_size: NonZeroU64::new(1).unwrap(),
                                 can_randomly_shrink,
                             };
-                            db.collect_sort_filter_ancient_slots(slot_vec.clone(), &tuning)
+                            db.collect_sort_filter_ancient_slots(
+                                slot_vec.clone(),
+                                &tuning,
+                            )
                         }
                     };
                     assert_eq!(infos.all_infos.len(), 1, "method: {method:?}");
@@ -2346,17 +2639,29 @@ pub mod tests {
                         // data size is so small compared to min aligned file size that the storage is marked as should_shrink
                         assert_eq!(
                             infos.shrink_indexes,
-                            if !matches!(method, TestCollectInfo::CollectSortFilterInfo) {
+                            if !matches!(
+                                method,
+                                TestCollectInfo::CollectSortFilterInfo
+                            ) {
                                 vec![0]
                             } else {
                                 Vec::default()
                             }
                         );
-                        assert_eq!(infos.total_alive_bytes, alive_bytes_expected);
-                        assert_eq!(infos.total_alive_bytes_shrink, alive_bytes_expected);
+                        assert_eq!(
+                            infos.total_alive_bytes,
+                            alive_bytes_expected
+                        );
+                        assert_eq!(
+                            infos.total_alive_bytes_shrink,
+                            alive_bytes_expected
+                        );
                     } else {
                         assert!(infos.shrink_indexes.is_empty());
-                        assert_eq!(infos.total_alive_bytes, alive_bytes_expected);
+                        assert_eq!(
+                            infos.total_alive_bytes,
+                            alive_bytes_expected
+                        );
                         assert_eq!(infos.total_alive_bytes_shrink, 0);
                     }
                 }
@@ -2365,7 +2670,8 @@ pub mod tests {
     }
 
     fn create_test_infos(count: usize) -> AncientSlotInfos {
-        let (db, slot1) = create_db_with_storages_and_index(true /*alive*/, 1, None);
+        let (db, slot1) =
+            create_db_with_storages_and_index(true /*alive*/, 1, None);
         let storage = db.storage.get_slot_storage_entry(slot1).unwrap();
         AncientSlotInfos {
             all_infos: (0..count)
@@ -2393,13 +2699,17 @@ pub mod tests {
         for method in TestSmallestCapacity::iter() {
             for max_storages in 1..3 {
                 // requesting N max storage, has 1 storage, N >= 1 so nothing to do
-                let ideal_storage_size_large = get_ancient_append_vec_capacity();
+                let ideal_storage_size_large =
+                    get_ancient_append_vec_capacity();
                 let mut infos = create_test_infos(1);
                 match method {
                     TestSmallestCapacity::FilterAncientSlots => {
                         let tuning = PackedAncientStorageTuning {
                             max_ancient_slots: max_storages,
-                            ideal_storage_size: NonZeroU64::new(ideal_storage_size_large).unwrap(),
+                            ideal_storage_size: NonZeroU64::new(
+                                ideal_storage_size_large,
+                            )
+                            .unwrap(),
                             // irrelevant since we clear 'shrink_indexes'
                             percent_of_alive_shrunk_data: 0,
                             can_randomly_shrink: false,
@@ -2438,7 +2748,8 @@ pub mod tests {
                 if reorder {
                     infos.all_infos.last_mut().unwrap().capacity = 0; // sort to beginning
                 }
-                infos.all_infos.last_mut().unwrap().alive_bytes = ideal_storage_size_large;
+                infos.all_infos.last_mut().unwrap().alive_bytes =
+                    ideal_storage_size_large;
                 // if we use max_storages = 3 or 4, then the low limit is 1 or 2. To get below 2 requires a result of 1, which packs everyone.
                 // This isn't what we want for this test. So, we make max_storages big enough that we can get to something reasonable (like 3)
                 // for a low mark.
@@ -2453,7 +2764,10 @@ pub mod tests {
                     TestSmallestCapacity::FilterAncientSlots => {
                         let tuning = PackedAncientStorageTuning {
                             max_ancient_slots: max_storages,
-                            ideal_storage_size: NonZeroU64::new(ideal_storage_size_large).unwrap(),
+                            ideal_storage_size: NonZeroU64::new(
+                                ideal_storage_size_large,
+                            )
+                            .unwrap(),
                             // irrelevant since we clear 'shrink_indexes'
                             percent_of_alive_shrunk_data: 0,
                             can_randomly_shrink: false,
@@ -2482,11 +2796,19 @@ pub mod tests {
     #[test]
     fn test_truncate_to_max_storages() {
         for filter in [false, true] {
-            let test = |infos: &mut AncientSlotInfos, max_storages, ideal_storage_size| {
+            let test = |infos: &mut AncientSlotInfos,
+                        max_storages,
+                        ideal_storage_size| {
                 if filter {
-                    infos.filter_by_smallest_capacity(max_storages, ideal_storage_size);
+                    infos.filter_by_smallest_capacity(
+                        max_storages,
+                        ideal_storage_size,
+                    );
                 } else {
-                    infos.truncate_to_max_storages(max_storages, ideal_storage_size);
+                    infos.truncate_to_max_storages(
+                        max_storages,
+                        ideal_storage_size,
+                    );
                 }
             };
             let ideal_storage_size_large = get_ancient_append_vec_capacity();
@@ -2594,15 +2916,19 @@ pub mod tests {
         let can_randomly_shrink = false;
         for method in TestCollectInfo::iter() {
             for slot1_shrink in [false, true] {
-                let shrinks = [false /*dummy*/, slot1_shrink, !slot1_shrink];
+                let shrinks =
+                    [false /*dummy*/, slot1_shrink, !slot1_shrink];
                 let slots = 2;
                 // 1_040_000 is big enough relative to page size to cause shrink ratio to be triggered
                 let data_sizes = shrinks
                     .iter()
                     .map(|shrink| (!shrink).then_some(1_040_000))
                     .collect::<Vec<_>>();
-                let (db, slot1) =
-                    create_db_with_storages_and_index(true /*alive*/, 1, data_sizes[1]);
+                let (db, slot1) = create_db_with_storages_and_index(
+                    true, /*alive*/
+                    1,
+                    data_sizes[1],
+                );
                 let dead_bytes = 184; // constant based on None data size
                 create_storages_and_update_index(
                     &db,
@@ -2615,11 +2941,13 @@ pub mod tests {
 
                 assert_eq!(slot1, 1); // make sure index into shrinks will be correct
                 assert_eq!(shrinks[slot1 as usize], slot1_shrink);
-                let slot_vec = (slot1..(slot1 + slots as Slot)).collect::<Vec<_>>();
+                let slot_vec =
+                    (slot1..(slot1 + slots as Slot)).collect::<Vec<_>>();
                 let storages = slot_vec
                     .iter()
                     .map(|slot| {
-                        let storage = db.storage.get_slot_storage_entry(*slot).unwrap();
+                        let storage =
+                            db.storage.get_slot_storage_entry(*slot).unwrap();
                         assert_eq!(*slot, storage.slot());
                         storage
                     })
@@ -2629,9 +2957,11 @@ pub mod tests {
                     .map(|storage| storage.alive_bytes() as u64)
                     .sum::<u64>();
                 let infos = match method {
-                    TestCollectInfo::CalcAncientSlotInfo => {
-                        db.calc_ancient_slot_info(slot_vec.clone(), can_randomly_shrink)
-                    }
+                    TestCollectInfo::CalcAncientSlotInfo => db
+                        .calc_ancient_slot_info(
+                            slot_vec.clone(),
+                            can_randomly_shrink,
+                        ),
                     TestCollectInfo::Add => {
                         continue; // unsupportable
                     }
@@ -2644,7 +2974,10 @@ pub mod tests {
                             can_randomly_shrink,
                         };
                         // note this can sort infos.all_infos
-                        db.collect_sort_filter_ancient_slots(slot_vec.clone(), &tuning)
+                        db.collect_sort_filter_ancient_slots(
+                            slot_vec.clone(),
+                            &tuning,
+                        )
                     }
                 };
 
@@ -2658,7 +2991,8 @@ pub mod tests {
                 // data size is so small compared to min aligned file size that the storage is marked as should_shrink
                 assert_eq!(
                     infos.shrink_indexes,
-                    if matches!(method, TestCollectInfo::CollectSortFilterInfo) {
+                    if matches!(method, TestCollectInfo::CollectSortFilterInfo)
+                    {
                         Vec::default()
                     } else {
                         shrinks
@@ -2714,24 +3048,33 @@ pub mod tests {
                         let (db, storages, slots, _infos) =
                             get_sample_storages(num_slots, data_size);
 
-                        let initial_accounts = get_all_accounts(&db, slots.clone());
+                        let initial_accounts =
+                            get_all_accounts(&db, slots.clone());
 
                         let accounts_vecs = storages
                             .iter()
-                            .map(|storage| (storage.slot(), storage.accounts.accounts(0)))
+                            .map(|storage| {
+                                (storage.slot(), storage.accounts.accounts(0))
+                            })
                             .collect::<Vec<_>>();
                         // reshape the data
                         let accounts_vecs2 = accounts_vecs
                             .iter()
-                            .map(|(slot, accounts)| (*slot, accounts.iter().collect::<Vec<_>>()))
+                            .map(|(slot, accounts)| {
+                                (*slot, accounts.iter().collect::<Vec<_>>())
+                            })
                             .collect::<Vec<_>>();
                         let accounts = accounts_vecs2
                             .iter()
                             .map(|(slot, accounts)| (*slot, &accounts[..]))
                             .collect::<Vec<_>>();
 
-                        let target_slot = slots.clone().nth(combine_into).unwrap_or(slots.start);
-                        let accounts_to_write = StorableAccountsBySlot::new(target_slot, &accounts);
+                        let target_slot = slots
+                            .clone()
+                            .nth(combine_into)
+                            .unwrap_or(slots.start);
+                        let accounts_to_write =
+                            StorableAccountsBySlot::new(target_slot, &accounts);
 
                         let bytes = storages
                             .iter()
@@ -2741,22 +3084,30 @@ pub mod tests {
                             bytes,
                             initial_accounts
                                 .iter()
-                                .map(|(_, account)| aligned_stored_size(account.data().len()) as u64)
+                                .map(|(_, account)| aligned_stored_size(
+                                    account.data().len()
+                                )
+                                    as u64)
                                 .sum::<u64>()
                         );
 
                         if num_slots > 0 {
-                            let mut write_ancient_accounts = WriteAncientAccounts::default();
+                            let mut write_ancient_accounts =
+                                WriteAncientAccounts::default();
 
                             match method {
-                                TestWriteAncient::AncientAccounts => db.write_ancient_accounts(
-                                    bytes,
-                                    accounts_to_write,
-                                    &mut write_ancient_accounts,
-                                ),
+                                TestWriteAncient::AncientAccounts => db
+                                    .write_ancient_accounts(
+                                        bytes,
+                                        accounts_to_write,
+                                        &mut write_ancient_accounts,
+                                    ),
 
                                 TestWriteAncient::OnePackedStorage => {
-                                    let packed = PackedAncientStorage { accounts, bytes };
+                                    let packed = PackedAncientStorage {
+                                        accounts,
+                                        bytes,
+                                    };
                                     db.write_one_packed_storage(
                                         &packed,
                                         target_slot,
@@ -2764,42 +3115,67 @@ pub mod tests {
                                     );
                                 }
                                 TestWriteAncient::PackedStorages => {
-                                    let packed = PackedAncientStorage { accounts, bytes };
-
-                                    let accounts_to_combine = AccountsToCombine {
-                                        // target slots are supposed to be read in reverse order, so test that
-                                        target_slots_sorted: vec![
-                                            Slot::MAX, // this asserts if it gets used
-                                            Slot::MAX,
-                                            target_slot,
-                                        ],
-                                        ..AccountsToCombine::default()
+                                    let packed = PackedAncientStorage {
+                                        accounts,
+                                        bytes,
                                     };
 
+                                    let accounts_to_combine =
+                                        AccountsToCombine {
+                                            // target slots are supposed to be read in reverse order, so test that
+                                            target_slots_sorted: vec![
+                                                Slot::MAX, // this asserts if it gets used
+                                                Slot::MAX,
+                                                target_slot,
+                                            ],
+                                            ..AccountsToCombine::default()
+                                        };
+
                                     write_ancient_accounts = db
-                                        .write_packed_storages(&accounts_to_combine, vec![packed]);
+                                        .write_packed_storages(
+                                            &accounts_to_combine,
+                                            vec![packed],
+                                        );
                                 }
                             };
-                            let mut result = write_ancient_accounts.shrinks_in_progress;
+                            let mut result =
+                                write_ancient_accounts.shrinks_in_progress;
                             let one = result.drain().collect::<Vec<_>>();
                             assert_eq!(1, one.len());
                             assert_eq!(target_slot, one.first().unwrap().0);
                             assert_eq!(
-                                one.first().unwrap().1.old_storage().append_vec_id(),
+                                one.first()
+                                    .unwrap()
+                                    .1
+                                    .old_storage()
+                                    .append_vec_id(),
                                 storages[combine_into].append_vec_id()
                             );
                             // make sure the single new append vec contains all the same accounts
-                            let accounts_in_new_storage =
-                                one.first().unwrap().1.new_storage().accounts.accounts(0);
+                            let accounts_in_new_storage = one
+                                .first()
+                                .unwrap()
+                                .1
+                                .new_storage()
+                                .accounts
+                                .accounts(0);
                             compare_all_accounts(
                                 &initial_accounts,
                                 &accounts_in_new_storage
                                     .into_iter()
-                                    .map(|meta| (*meta.pubkey(), meta.to_account_shared_data()))
+                                    .map(|meta| {
+                                        (
+                                            *meta.pubkey(),
+                                            meta.to_account_shared_data(),
+                                        )
+                                    })
                                     .collect::<Vec<_>>()[..],
                             );
                         }
-                        let all_accounts = get_all_accounts(&db, target_slot..(target_slot + 1));
+                        let all_accounts = get_all_accounts(
+                            &db,
+                            target_slot..(target_slot + 1),
+                        );
 
                         compare_all_accounts(&initial_accounts, &all_accounts);
                     }
@@ -2819,25 +3195,33 @@ pub mod tests {
     fn test_clear_should_shrink_after_cutoff_simple() {
         for swap in [false, true] {
             for method in TestShouldShrink::iter() {
-                for (percent_of_alive_shrunk_data, mut expected_infos) in
-                    [(0, 0), (9, 1), (10, 1), (89, 2), (90, 2), (91, 2), (100, 2)]
-                {
+                for (percent_of_alive_shrunk_data, mut expected_infos) in [
+                    (0, 0),
+                    (9, 1),
+                    (10, 1),
+                    (89, 2),
+                    (90, 2),
+                    (91, 2),
+                    (100, 2),
+                ] {
                     let mut infos = create_test_infos(2);
-                    infos
-                        .all_infos
-                        .iter_mut()
-                        .enumerate()
-                        .for_each(|(i, info)| {
+                    infos.all_infos.iter_mut().enumerate().for_each(
+                        |(i, info)| {
                             info.should_shrink = true;
                             info.capacity = ((i + 1) * 1000) as u64;
-                        });
+                        },
+                    );
                     infos.all_infos[0].alive_bytes = 100;
                     infos.all_infos[1].alive_bytes = 900;
                     if swap {
-                        infos.all_infos = infos.all_infos.into_iter().rev().collect();
+                        infos.all_infos =
+                            infos.all_infos.into_iter().rev().collect();
                     }
-                    infos.total_alive_bytes_shrink =
-                        infos.all_infos.iter().map(|info| info.alive_bytes).sum();
+                    infos.total_alive_bytes_shrink = infos
+                        .all_infos
+                        .iter()
+                        .map(|info| info.alive_bytes)
+                        .sum();
                     match method {
                         TestShouldShrink::FilterAncientSlots => {
                             let tuning = PackedAncientStorageTuning {
@@ -2851,20 +3235,28 @@ pub mod tests {
                             infos.filter_ancient_slots(&tuning);
                         }
                         TestShouldShrink::ClearShouldShrink => {
-                            infos.clear_should_shrink_after_cutoff(percent_of_alive_shrunk_data);
+                            infos.clear_should_shrink_after_cutoff(
+                                percent_of_alive_shrunk_data,
+                            );
                         }
                         TestShouldShrink::ChooseStoragesToShrink => {
-                            infos.choose_storages_to_shrink(percent_of_alive_shrunk_data);
+                            infos.choose_storages_to_shrink(
+                                percent_of_alive_shrunk_data,
+                            );
                         }
                     }
 
                     if expected_infos == 2 {
-                        let modify = if method == TestShouldShrink::FilterAncientSlots {
+                        let modify = if method
+                            == TestShouldShrink::FilterAncientSlots
+                        {
                             // filter_ancient_slots modifies in several ways and doesn't retain the values to compare
-                            percent_of_alive_shrunk_data == 89 || percent_of_alive_shrunk_data == 90
+                            percent_of_alive_shrunk_data == 89
+                                || percent_of_alive_shrunk_data == 90
                         } else {
                             infos.all_infos[infos.shrink_indexes[0]].alive_bytes
-                                >= infos.total_alive_bytes_shrink * percent_of_alive_shrunk_data
+                                >= infos.total_alive_bytes_shrink
+                                    * percent_of_alive_shrunk_data
                                     / 100
                         };
                         if modify {
@@ -2890,7 +3282,8 @@ pub mod tests {
 
     #[test]
     fn test_sort_shrink_indexes_by_bytes_saved() {
-        let (db, slot1) = create_db_with_storages_and_index(true /*alive*/, 1, None);
+        let (db, slot1) =
+            create_db_with_storages_and_index(true /*alive*/, 1, None);
         let storage = db.storage.get_slot_storage_entry(slot1).unwrap();
         // ignored
         let slot = 0;
@@ -2931,9 +3324,13 @@ pub mod tests {
         let alive = true;
         for num_slots in 0..4 {
             for max_ancient_slots in 0..4 {
-                let (db, slot1) = create_db_with_storages_and_index(alive, num_slots, None);
+                let (db, slot1) =
+                    create_db_with_storages_and_index(alive, num_slots, None);
                 let original_stores = (0..num_slots)
-                    .filter_map(|slot| db.storage.get_slot_storage_entry((slot as Slot) + slot1))
+                    .filter_map(|slot| {
+                        db.storage
+                            .get_slot_storage_entry((slot as Slot) + slot1)
+                    })
                     .collect::<Vec<_>>();
                 let original_results = original_stores
                     .iter()
@@ -2944,7 +3341,10 @@ pub mod tests {
                     percent_of_alive_shrunk_data: 0,
                     max_ancient_slots,
                     can_randomly_shrink,
-                    ideal_storage_size: NonZeroU64::new(get_ancient_append_vec_capacity()).unwrap(),
+                    ideal_storage_size: NonZeroU64::new(
+                        get_ancient_append_vec_capacity(),
+                    )
+                    .unwrap(),
                 };
                 db.combine_ancient_slots_packed_internal(
                     (0..num_slots).map(|slot| (slot as Slot) + slot1).collect(),
@@ -2958,12 +3358,17 @@ pub mod tests {
                 }
                 // any of the several slots could have been chosen to be re-used
                 let active_slots = (0..num_slots)
-                    .filter_map(|slot| db.storage.get_slot_storage_entry((slot as Slot) + slot1))
+                    .filter_map(|slot| {
+                        db.storage
+                            .get_slot_storage_entry((slot as Slot) + slot1)
+                    })
                     .count();
                 let mut expected_slots = (max_ancient_slots / 2).min(num_slots);
                 if max_ancient_slots >= num_slots {
                     expected_slots = num_slots;
-                } else if max_ancient_slots == 0 || num_slots > 0 && expected_slots == 0 {
+                } else if max_ancient_slots == 0
+                    || num_slots > 0 && expected_slots == 0
+                {
                     expected_slots = 1;
                 }
                 assert_eq!(
@@ -2977,14 +3382,21 @@ pub mod tests {
                 );
 
                 let stores = (0..num_slots)
-                    .filter_map(|slot| db.storage.get_slot_storage_entry((slot as Slot) + slot1))
+                    .filter_map(|slot| {
+                        db.storage
+                            .get_slot_storage_entry((slot as Slot) + slot1)
+                    })
                     .collect::<Vec<_>>();
                 let results = stores
                     .iter()
                     .map(|store| db.get_unique_accounts_from_storage(store))
                     .collect::<Vec<_>>();
-                let all_accounts = get_all_accounts(&db, slot1..(slot1 + num_slots as Slot));
-                compare_all_accounts(&vec_unique_to_accounts(&original_results), &all_accounts);
+                let all_accounts =
+                    get_all_accounts(&db, slot1..(slot1 + num_slots as Slot));
+                compare_all_accounts(
+                    &vec_unique_to_accounts(&original_results),
+                    &all_accounts,
+                );
                 compare_all_accounts(
                     &vec_unique_to_accounts(&results),
                     &get_all_accounts(&db, slot1..(slot1 + num_slots as Slot)),
@@ -2993,13 +3405,14 @@ pub mod tests {
         }
     }
 
-    fn vec_unique_to_accounts(one: &[GetUniqueAccountsResult]) -> Vec<(Pubkey, AccountSharedData)> {
+    fn vec_unique_to_accounts(
+        one: &[GetUniqueAccountsResult],
+    ) -> Vec<(Pubkey, AccountSharedData)> {
         one.iter()
             .flat_map(|result| {
-                result
-                    .stored_accounts
-                    .iter()
-                    .map(|result| (*result.pubkey(), result.to_account_shared_data()))
+                result.stored_accounts.iter().map(|result| {
+                    (*result.pubkey(), result.to_account_shared_data())
+                })
             })
             .collect()
     }
@@ -3012,18 +3425,28 @@ pub mod tests {
     }
 
     /// combines ALL possible slots in `sorted_slots`
-    fn combine_ancient_slots_packed_for_tests(db: &AccountsDb, sorted_slots: Vec<Slot>) {
+    fn combine_ancient_slots_packed_for_tests(
+        db: &AccountsDb,
+        sorted_slots: Vec<Slot>,
+    ) {
         // combine normal append vec(s) into packed ancient append vec
         let tuning = PackedAncientStorageTuning {
             max_ancient_slots: 0,
             // re-combine/shrink 55% of the data savings this pass
             percent_of_alive_shrunk_data: 55,
-            ideal_storage_size: NonZeroU64::new(get_ancient_append_vec_capacity()).unwrap(),
+            ideal_storage_size: NonZeroU64::new(
+                get_ancient_append_vec_capacity(),
+            )
+            .unwrap(),
             can_randomly_shrink: CAN_RANDOMLY_SHRINK_FALSE,
         };
 
         let mut stats_sub = ShrinkStatsSub::default();
-        db.combine_ancient_slots_packed_internal(sorted_slots, tuning, &mut stats_sub);
+        db.combine_ancient_slots_packed_internal(
+            sorted_slots,
+            tuning,
+            &mut stats_sub,
+        );
     }
 
     #[test]
@@ -3035,8 +3458,16 @@ pub mod tests {
         let db = AccountsDb::new_single_for_tests();
         let initial_slot = 0;
         // create append vecs that we'll fill the recycler with when we pack them into 1 packed append vec
-        create_storages_and_update_index(&db, None, initial_slot, MAX_RECYCLE_STORES, true, None);
-        let max_slot_inclusive = initial_slot + (MAX_RECYCLE_STORES as Slot) - 1;
+        create_storages_and_update_index(
+            &db,
+            None,
+            initial_slot,
+            MAX_RECYCLE_STORES,
+            true,
+            None,
+        );
+        let max_slot_inclusive =
+            initial_slot + (MAX_RECYCLE_STORES as Slot) - 1;
         let range = initial_slot..(max_slot_inclusive + 1);
         // storages with Arc::strong_count > 1 cannot be pulled out of the recycling bin, so hold refcounts so these storages are never re-used by the actual test code
         let _storages_hold_to_prevent_recycling = range
@@ -3044,14 +3475,24 @@ pub mod tests {
             .collect::<Vec<_>>();
 
         // fill up the recycler with storages
-        combine_ancient_slots_packed_for_tests(&db, (initial_slot..=max_slot_inclusive).collect());
+        combine_ancient_slots_packed_for_tests(
+            &db,
+            (initial_slot..=max_slot_inclusive).collect(),
+        );
 
         let mut starting_slot = max_slot_inclusive + 1;
         for num_normal_slots in 1..4 {
             let mut storages = vec![];
             // build an ancient append vec at slot 'ancient_slot'
             let ancient_slot = starting_slot;
-            create_storages_and_update_index(&db, None, ancient_slot, num_normal_slots, true, None);
+            create_storages_and_update_index(
+                &db,
+                None,
+                ancient_slot,
+                num_normal_slots,
+                true,
+                None,
+            );
             let max_slot_inclusive = ancient_slot + (num_normal_slots as Slot);
             let range = ancient_slot..(max_slot_inclusive + 1);
             storages.extend(
@@ -3082,7 +3523,14 @@ pub mod tests {
 
             // create a 2nd ancient append vec at 'next_slot'
             let next_slot = max_slot_inclusive + 1;
-            create_storages_and_update_index(&db, None, next_slot, num_normal_slots, true, None);
+            create_storages_and_update_index(
+                &db,
+                None,
+                next_slot,
+                num_normal_slots,
+                true,
+                None,
+            );
             let max_slot_inclusive = next_slot + (num_normal_slots as Slot);
             let range_all = ancient_slot..(max_slot_inclusive + 1);
             let range = next_slot..(max_slot_inclusive + 1);
@@ -3098,12 +3546,24 @@ pub mod tests {
                 &initial_accounts_all,
                 &get_all_accounts(&db, range_all.clone()),
             );
-            compare_all_accounts(&initial_accounts, &get_all_accounts(&db, range.clone()));
+            compare_all_accounts(
+                &initial_accounts,
+                &get_all_accounts(&db, range.clone()),
+            );
 
-            combine_ancient_slots_packed_for_tests(&db, range.clone().collect());
+            combine_ancient_slots_packed_for_tests(
+                &db,
+                range.clone().collect(),
+            );
 
-            compare_all_accounts(&initial_accounts_all, &get_all_accounts(&db, range_all));
-            compare_all_accounts(&initial_accounts, &get_all_accounts(&db, range));
+            compare_all_accounts(
+                &initial_accounts_all,
+                &get_all_accounts(&db, range_all),
+            );
+            compare_all_accounts(
+                &initial_accounts,
+                &get_all_accounts(&db, range),
+            );
 
             // verify only `storages` is holding a refcount to each storage we packed
             storages
@@ -3118,14 +3578,17 @@ pub mod tests {
     fn test_shrink_collect_alive_add() {
         let num_slots = 1;
         let data_size = None;
-        let (_db, storages, _slots, _infos) = get_sample_storages(num_slots, data_size);
+        let (_db, storages, _slots, _infos) =
+            get_sample_storages(num_slots, data_size);
 
         let account = storages[0].accounts.get_account(0).unwrap().0;
         let slot = 1;
         let capacity = 0;
         for i in 0..4usize {
             let mut alive_accounts =
-                ShrinkCollectAliveSeparatedByRefs::with_capacity(capacity, slot);
+                ShrinkCollectAliveSeparatedByRefs::with_capacity(
+                    capacity, slot,
+                );
             let lamports = 1;
 
             match i {
@@ -3134,7 +3597,10 @@ pub mod tests {
                     let slot_list = vec![];
                     alive_accounts.add(1, &account, &slot_list);
                     assert!(!alive_accounts.one_ref.accounts.is_empty());
-                    assert!(alive_accounts.many_refs_old_alive.accounts.is_empty());
+                    assert!(alive_accounts
+                        .many_refs_old_alive
+                        .accounts
+                        .is_empty());
                     assert!(alive_accounts
                         .many_refs_this_is_newest_alive
                         .accounts
@@ -3142,11 +3608,16 @@ pub mod tests {
                 }
                 1 => {
                     // non-empty slot list (but ignored) because slot_list = 1
-                    let slot_list =
-                        vec![(slot, AccountInfo::new(StorageLocation::Cached, lamports))];
+                    let slot_list = vec![(
+                        slot,
+                        AccountInfo::new(StorageLocation::Cached, lamports),
+                    )];
                     alive_accounts.add(2, &account, &slot_list);
                     assert!(alive_accounts.one_ref.accounts.is_empty());
-                    assert!(alive_accounts.many_refs_old_alive.accounts.is_empty());
+                    assert!(alive_accounts
+                        .many_refs_old_alive
+                        .accounts
+                        .is_empty());
                     assert!(!alive_accounts
                         .many_refs_this_is_newest_alive
                         .accounts
@@ -3155,7 +3626,10 @@ pub mod tests {
                 2 => {
                     // multiple slot list, ref_count=2, this is NOT newest alive, so many_refs_old_alive
                     let slot_list = vec![
-                        (slot, AccountInfo::new(StorageLocation::Cached, lamports)),
+                        (
+                            slot,
+                            AccountInfo::new(StorageLocation::Cached, lamports),
+                        ),
                         (
                             slot + 1,
                             AccountInfo::new(StorageLocation::Cached, lamports),
@@ -3163,7 +3637,10 @@ pub mod tests {
                     ];
                     alive_accounts.add(2, &account, &slot_list);
                     assert!(alive_accounts.one_ref.accounts.is_empty());
-                    assert!(!alive_accounts.many_refs_old_alive.accounts.is_empty());
+                    assert!(!alive_accounts
+                        .many_refs_old_alive
+                        .accounts
+                        .is_empty());
                     assert!(alive_accounts
                         .many_refs_this_is_newest_alive
                         .accounts
@@ -3172,7 +3649,10 @@ pub mod tests {
                 3 => {
                     // multiple slot list, ref_count=2, this is newest
                     let slot_list = vec![
-                        (slot, AccountInfo::new(StorageLocation::Cached, lamports)),
+                        (
+                            slot,
+                            AccountInfo::new(StorageLocation::Cached, lamports),
+                        ),
                         (
                             slot - 1,
                             AccountInfo::new(StorageLocation::Cached, lamports),
@@ -3180,7 +3660,10 @@ pub mod tests {
                     ];
                     alive_accounts.add(2, &account, &slot_list);
                     assert!(alive_accounts.one_ref.accounts.is_empty());
-                    assert!(alive_accounts.many_refs_old_alive.accounts.is_empty());
+                    assert!(alive_accounts
+                        .many_refs_old_alive
+                        .accounts
+                        .is_empty());
                     assert!(!alive_accounts
                         .many_refs_this_is_newest_alive
                         .accounts
@@ -3291,7 +3774,9 @@ pub mod tests {
                 expected_ref_counts.insert(*k, 3);
             });
 
-            let shrink_collect = ShrinkCollect::<ShrinkCollectAliveSeparatedByRefs> {
+            let shrink_collect = ShrinkCollect::<
+                ShrinkCollectAliveSeparatedByRefs,
+            > {
                 // the only interesting field
                 unrefed_pubkeys: unrefed_pubkeys.iter().collect(),
 
@@ -3318,7 +3803,10 @@ pub mod tests {
             db.accounts_index.scan(
                 unrefed_pubkeys.iter(),
                 |k, slot_refs, _entry| {
-                    assert_eq!(expected_ref_counts.remove(k).unwrap(), slot_refs.unwrap().1);
+                    assert_eq!(
+                        expected_ref_counts.remove(k).unwrap(),
+                        slot_refs.unwrap().1
+                    );
                     AccountsIndexScanResult::OnlyKeepInMemoryIfDirty
                 },
                 None,

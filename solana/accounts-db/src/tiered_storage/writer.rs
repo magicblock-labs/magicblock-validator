@@ -1,17 +1,19 @@
 //! docs/src/proposals/append-vec-storage.md
 
-use {
-    crate::{
-        account_storage::meta::{StorableAccountsWithHashesAndWriteVersions, StoredAccountInfo},
-        accounts_hash::AccountHash,
-        storable_accounts::StorableAccounts,
-        tiered_storage::{
-            error::TieredStorageError, file::TieredStorageFile, footer::TieredStorageFooter,
-            TieredStorageFormat, TieredStorageResult,
-        },
+use std::{borrow::Borrow, path::Path};
+
+use solana_sdk::account::ReadableAccount;
+
+use crate::{
+    account_storage::meta::{
+        StorableAccountsWithHashesAndWriteVersions, StoredAccountInfo,
     },
-    solana_sdk::account::ReadableAccount,
-    std::{borrow::Borrow, path::Path},
+    accounts_hash::AccountHash,
+    storable_accounts::StorableAccounts,
+    tiered_storage::{
+        error::TieredStorageError, file::TieredStorageFile,
+        footer::TieredStorageFooter, TieredStorageFormat, TieredStorageResult,
+    },
 };
 
 #[derive(Debug)]

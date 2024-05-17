@@ -1,23 +1,23 @@
 //! ReadOnlyAccountsCache used to store accounts, such as executable accounts,
 //! which can be large, loaded many times, and rarely change.
-use {
-    dashmap::{mapref::entry::Entry, DashMap},
-    index_list::{Index, IndexList},
-    solana_measure::measure_us,
-    solana_sdk::{
-        account::{AccountSharedData, ReadableAccount},
-        clock::Slot,
-        pubkey::Pubkey,
-        timing::timestamp,
-    },
-    std::sync::{
-        atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering},
-        Mutex,
-    },
+use std::sync::{
+    atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering},
+    Mutex,
+};
+
+use dashmap::{mapref::entry::Entry, DashMap};
+use index_list::{Index, IndexList};
+use solana_measure::measure_us;
+use solana_sdk::{
+    account::{AccountSharedData, ReadableAccount},
+    clock::Slot,
+    pubkey::Pubkey,
+    timing::timestamp,
 };
 
 const CACHE_ENTRY_SIZE: usize =
-    std::mem::size_of::<ReadOnlyAccountCacheEntry>() + 2 * std::mem::size_of::<ReadOnlyCacheKey>();
+    std::mem::size_of::<ReadOnlyAccountCacheEntry>()
+        + 2 * std::mem::size_of::<ReadOnlyCacheKey>();
 
 type ReadOnlyCacheKey = (Pubkey, Slot);
 
@@ -75,7 +75,10 @@ pub(crate) struct ReadOnlyAccountsCache {
 }
 
 impl ReadOnlyAccountsCache {
-    pub(crate) fn new(max_data_size: usize, ms_to_skip_lru_update: u32) -> Self {
+    pub(crate) fn new(
+        max_data_size: usize,
+        ms_to_skip_lru_update: u32,
+    ) -> Self {
         Self {
             max_data_size,
             cache: DashMap::default(),
@@ -100,7 +103,11 @@ impl ReadOnlyAccountsCache {
         self.cache.contains_key(&(*pubkey, slot))
     }
 
-    pub(crate) fn load(&self, pubkey: Pubkey, slot: Slot) -> Option<AccountSharedData> {
+    pub(crate) fn load(
+        &self,
+        pubkey: Pubkey,
+        slot: Slot,
+    ) -> Option<AccountSharedData> {
         let (account, load_us) = measure_us!({
             let key = (pubkey, slot);
             let Some(entry) = self.cache.get(&key) else {
@@ -111,14 +118,16 @@ impl ReadOnlyAccountsCache {
             // self.queue is modified while holding a reference to the cache entry;
             // so that another thread cannot write to the same key.
             // If we updated the eviction queue within this much time, then leave it where it is. We're likely to hit it again.
-            let update_lru = entry.ms_since_last_update() >= self.ms_to_skip_lru_update;
+            let update_lru =
+                entry.ms_since_last_update() >= self.ms_to_skip_lru_update;
             if update_lru {
                 let mut queue = self.queue.lock().unwrap();
                 queue.remove(entry.index());
                 entry.set_index(queue.insert_last(key));
-                entry
-                    .last_update_time
-                    .store(ReadOnlyAccountCacheEntry::timestamp(), Ordering::Release);
+                entry.last_update_time.store(
+                    ReadOnlyAccountCacheEntry::timestamp(),
+                    Ordering::Release,
+                );
             }
             let account = entry.account.clone();
             drop(entry);
@@ -133,7 +142,12 @@ impl ReadOnlyAccountsCache {
         CACHE_ENTRY_SIZE + account.data().len()
     }
 
-    pub(crate) fn store(&self, pubkey: Pubkey, slot: Slot, account: AccountSharedData) {
+    pub(crate) fn store(
+        &self,
+        pubkey: Pubkey,
+        slot: Slot,
+        account: AccountSharedData,
+    ) {
         let key = (pubkey, slot);
         let account_size = self.account_size(&account);
         self.data_size.fetch_add(account_size, Ordering::Relaxed);
@@ -160,7 +174,8 @@ impl ReadOnlyAccountsCache {
         // Evict entries from the front of the queue.
         let mut num_evicts = 0;
         while self.data_size.load(Ordering::Relaxed) > self.max_data_size {
-            let Some(&(pubkey, slot)) = self.queue.lock().unwrap().get_first() else {
+            let Some(&(pubkey, slot)) = self.queue.lock().unwrap().get_first()
+            else {
                 break;
             };
             num_evicts += 1;
@@ -169,7 +184,11 @@ impl ReadOnlyAccountsCache {
         self.stats.evicts.fetch_add(num_evicts, Ordering::Relaxed);
     }
 
-    pub(crate) fn remove(&self, pubkey: Pubkey, slot: Slot) -> Option<AccountSharedData> {
+    pub(crate) fn remove(
+        &self,
+        pubkey: Pubkey,
+        slot: Slot,
+    ) -> Option<AccountSharedData> {
         let (_, entry) = self.cache.remove(&(pubkey, slot))?;
         // self.queue should be modified only after removing the entry from the
         // cache, so that this is still safe if another thread writes to the
@@ -223,27 +242,33 @@ impl ReadOnlyAccountCacheEntry {
 
     /// ms since `last_update_time` timestamp
     fn ms_since_last_update(&self) -> u32 {
-        Self::timestamp().wrapping_sub(self.last_update_time.load(Ordering::Acquire))
+        Self::timestamp()
+            .wrapping_sub(self.last_update_time.load(Ordering::Acquire))
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        rand::{
-            seq::{IteratorRandom, SliceRandom},
-            Rng, SeedableRng,
-        },
-        rand_chacha::ChaChaRng,
-        solana_sdk::account::{accounts_equal, Account, WritableAccount},
-        std::{collections::HashMap, iter::repeat_with, sync::Arc},
+    use std::{collections::HashMap, iter::repeat_with, sync::Arc};
+
+    use rand::{
+        seq::{IteratorRandom, SliceRandom},
+        Rng, SeedableRng,
     };
+    use rand_chacha::ChaChaRng;
+    use solana_sdk::account::{accounts_equal, Account, WritableAccount};
+
+    use super::*;
     #[test]
     fn test_accountsdb_sizeof() {
         // size_of(arc(x)) does not return the size of x
-        assert!(std::mem::size_of::<Arc<u64>>() == std::mem::size_of::<Arc<u8>>());
-        assert!(std::mem::size_of::<Arc<u64>>() == std::mem::size_of::<Arc<[u8; 32]>>());
+        assert!(
+            std::mem::size_of::<Arc<u64>>() == std::mem::size_of::<Arc<u8>>()
+        );
+        assert!(
+            std::mem::size_of::<Arc<u64>>()
+                == std::mem::size_of::<Arc<[u8; 32]>>()
+        );
     }
 
     #[test]
@@ -252,8 +277,10 @@ mod tests {
         let per_account_size = CACHE_ENTRY_SIZE;
         let data_size = 100;
         let max = data_size + per_account_size;
-        let cache =
-            ReadOnlyAccountsCache::new(max, READ_ONLY_CACHE_MS_TO_SKIP_LRU_UPDATE_FOR_TESTS);
+        let cache = ReadOnlyAccountsCache::new(
+            max,
+            READ_ONLY_CACHE_MS_TO_SKIP_LRU_UPDATE_FOR_TESTS,
+        );
         let slot = 0;
         assert!(cache.load(Pubkey::default(), slot).is_none());
         assert_eq!(0, cache.cache_len());
@@ -288,8 +315,10 @@ mod tests {
 
         // can store 2 items, 3rd item kicks oldest item out
         let max = (data_size + per_account_size) * 2;
-        let cache =
-            ReadOnlyAccountsCache::new(max, READ_ONLY_CACHE_MS_TO_SKIP_LRU_UPDATE_FOR_TESTS);
+        let cache = ReadOnlyAccountsCache::new(
+            max,
+            READ_ONLY_CACHE_MS_TO_SKIP_LRU_UPDATE_FOR_TESTS,
+        );
         cache.store(key1, slot, account1.clone());
         assert_eq!(100 + per_account_size, cache.data_size());
         assert!(accounts_equal(&cache.load(key1, slot).unwrap(), &account1));
@@ -325,7 +354,8 @@ mod tests {
             MAX_CACHE_SIZE,
             READ_ONLY_CACHE_MS_TO_SKIP_LRU_UPDATE_FOR_TESTS,
         );
-        let slots: Vec<Slot> = repeat_with(|| rng.gen_range(0..1000)).take(5).collect();
+        let slots: Vec<Slot> =
+            repeat_with(|| rng.gen_range(0..1000)).take(5).collect();
         let pubkeys: Vec<Pubkey> = repeat_with(|| {
             let mut arr = [0u8; 32];
             rng.fill(&mut arr[..]);
@@ -333,7 +363,8 @@ mod tests {
         })
         .take(7)
         .collect();
-        let mut hash_map = HashMap::<ReadOnlyCacheKey, (AccountSharedData, usize)>::new();
+        let mut hash_map =
+            HashMap::<ReadOnlyCacheKey, (AccountSharedData, usize)>::new();
         for ix in 0..1000 {
             if rng.gen_bool(0.1) {
                 let key = *cache.cache.iter().choose(&mut rng).unwrap().key();

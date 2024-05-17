@@ -1,25 +1,25 @@
-use {
-    crate::tiered_storage::{
-        error::TieredStorageError,
-        file::TieredStorageFile,
-        index::IndexBlockFormat,
-        mmap_utils::{get_pod, get_type},
-        owners::OwnersBlockFormat,
-        TieredStorageResult,
-    },
-    bytemuck::{Pod, Zeroable},
-    memmap2::Mmap,
-    num_enum::TryFromPrimitiveError,
-    solana_sdk::{hash::Hash, pubkey::Pubkey},
-    std::{mem, path::Path},
-    thiserror::Error,
+use std::{mem, path::Path};
+
+use bytemuck::{Pod, Zeroable};
+use memmap2::Mmap;
+use num_enum::TryFromPrimitiveError;
+use solana_sdk::{hash::Hash, pubkey::Pubkey};
+use thiserror::Error;
+
+use crate::tiered_storage::{
+    error::TieredStorageError,
+    file::TieredStorageFile,
+    index::IndexBlockFormat,
+    mmap_utils::{get_pod, get_type},
+    owners::OwnersBlockFormat,
+    TieredStorageResult,
 };
 
 pub const FOOTER_FORMAT_VERSION: u64 = 1;
 
 /// The size of the footer struct + the magic number at the end.
-pub const FOOTER_SIZE: usize =
-    mem::size_of::<TieredStorageFooter>() + mem::size_of::<TieredStorageMagicNumber>();
+pub const FOOTER_SIZE: usize = mem::size_of::<TieredStorageFooter>()
+    + mem::size_of::<TieredStorageMagicNumber>();
 static_assertions::const_assert_eq!(mem::size_of::<TieredStorageFooter>(), 160);
 
 /// The size of the ending part of the footer.  This size should remain unchanged
@@ -190,7 +190,10 @@ impl TieredStorageFooter {
         Self::new_from_footer_block(&file)
     }
 
-    pub fn write_footer_block(&self, file: &TieredStorageFile) -> TieredStorageResult<()> {
+    pub fn write_footer_block(
+        &self,
+        file: &TieredStorageFile,
+    ) -> TieredStorageResult<()> {
         // SAFETY: The footer does not contain any uninitialized bytes.
         unsafe { file.write_type(self)? };
         file.write_pod(&TieredStorageMagicNumber::default())?;
@@ -198,13 +201,17 @@ impl TieredStorageFooter {
         Ok(())
     }
 
-    pub fn new_from_footer_block(file: &TieredStorageFile) -> TieredStorageResult<Self> {
+    pub fn new_from_footer_block(
+        file: &TieredStorageFile,
+    ) -> TieredStorageResult<Self> {
         file.seek_from_end(-(FOOTER_TAIL_SIZE as i64))?;
 
         let mut footer_version: u64 = 0;
         file.read_pod(&mut footer_version)?;
         if footer_version != FOOTER_FORMAT_VERSION {
-            return Err(TieredStorageError::InvalidFooterVersion(footer_version));
+            return Err(TieredStorageError::InvalidFooterVersion(
+                footer_version,
+            ));
         }
 
         let mut footer_size: u64 = 0;
@@ -235,12 +242,16 @@ impl TieredStorageFooter {
         Ok(footer)
     }
 
-    pub fn new_from_mmap(mmap: &Mmap) -> TieredStorageResult<&TieredStorageFooter> {
+    pub fn new_from_mmap(
+        mmap: &Mmap,
+    ) -> TieredStorageResult<&TieredStorageFooter> {
         let offset = mmap.len().saturating_sub(FOOTER_TAIL_SIZE);
 
         let (footer_version, offset) = get_pod::<u64>(mmap, offset)?;
         if *footer_version != FOOTER_FORMAT_VERSION {
-            return Err(TieredStorageError::InvalidFooterVersion(*footer_version));
+            return Err(TieredStorageError::InvalidFooterVersion(
+                *footer_version,
+            ));
         }
 
         let (&footer_size, offset) = get_pod::<u64>(mmap, offset)?;
@@ -251,7 +262,8 @@ impl TieredStorageFooter {
             ));
         }
 
-        let (magic_number, _offset) = get_pod::<TieredStorageMagicNumber>(mmap, offset)?;
+        let (magic_number, _offset) =
+            get_pod::<TieredStorageMagicNumber>(mmap, offset)?;
         if *magic_number != TieredStorageMagicNumber::default() {
             return Err(TieredStorageError::MagicNumberMismatch(
                 TieredStorageMagicNumber::default().0,
@@ -262,7 +274,8 @@ impl TieredStorageFooter {
         let footer_offset = mmap.len().saturating_sub(footer_size as usize);
         // SAFETY: We sanitize the footer to ensure all the bytes are
         // actually safe to interpret as a TieredStorageFooter.
-        let (footer, _offset) = unsafe { get_type::<TieredStorageFooter>(mmap, footer_offset)? };
+        let (footer, _offset) =
+            unsafe { get_type::<TieredStorageFooter>(mmap, footer_offset)? };
         Self::sanitize(footer)?;
 
         Ok(footer)
@@ -273,14 +286,17 @@ impl TieredStorageFooter {
     /// Since the various formats only have specific valid values, they must be sanitized
     /// prior to use.  This ensures the formats are valid to interpret as (rust) enums.
     fn sanitize(footer: &Self) -> Result<(), SanitizeFooterError> {
-        let account_meta_format_u16 =
-            unsafe { &*(&footer.account_meta_format as *const _ as *const u16) };
-        let owners_block_format_u16 =
-            unsafe { &*(&footer.owners_block_format as *const _ as *const u16) };
+        let account_meta_format_u16 = unsafe {
+            &*(&footer.account_meta_format as *const _ as *const u16)
+        };
+        let owners_block_format_u16 = unsafe {
+            &*(&footer.owners_block_format as *const _ as *const u16)
+        };
         let index_block_format_u16 =
             unsafe { &*(&footer.index_block_format as *const _ as *const u16) };
-        let account_block_format_u16 =
-            unsafe { &*(&footer.account_block_format as *const _ as *const u16) };
+        let account_block_format_u16 = unsafe {
+            &*(&footer.account_block_format as *const _ as *const u16)
+        };
 
         _ = AccountMetaFormat::try_from(*account_meta_format_u16)
             .map_err(SanitizeFooterError::InvalidAccountMetaFormat)?;
@@ -318,18 +334,20 @@ pub enum SanitizeFooterError {
     InvalidIndexBlockFormat(#[from] TryFromPrimitiveError<IndexBlockFormat>),
 
     #[error("invalid account block format: {0}")]
-    InvalidAccountBlockFormat(#[from] TryFromPrimitiveError<AccountBlockFormat>),
+    InvalidAccountBlockFormat(
+        #[from] TryFromPrimitiveError<AccountBlockFormat>,
+    ),
 }
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        crate::{
-            append_vec::test_utils::get_append_vec_path, tiered_storage::file::TieredStorageFile,
-        },
-        memoffset::offset_of,
-        solana_sdk::hash::Hash,
+    use memoffset::offset_of;
+    use solana_sdk::hash::Hash;
+
+    use super::*;
+    use crate::{
+        append_vec::test_utils::get_append_vec_path,
+        tiered_storage::file::TieredStorageFile,
     };
 
     #[test]
@@ -363,7 +381,8 @@ mod tests {
         // Reopen the same storage, and expect the persisted footer is
         // the same as what we have written.
         {
-            let footer = TieredStorageFooter::new_from_path(&path.path).unwrap();
+            let footer =
+                TieredStorageFooter::new_from_path(&path.path).unwrap();
             assert_eq!(expected_footer, footer);
         }
     }
@@ -436,7 +455,10 @@ mod tests {
         {
             let mut footer = TieredStorageFooter::default();
             unsafe {
-                std::ptr::write(&mut footer.index_block_format as *mut _ as *mut u16, 0xBAD0);
+                std::ptr::write(
+                    &mut footer.index_block_format as *mut _ as *mut u16,
+                    0xBAD0,
+                );
             }
             let result = TieredStorageFooter::sanitize(&footer);
             assert!(matches!(

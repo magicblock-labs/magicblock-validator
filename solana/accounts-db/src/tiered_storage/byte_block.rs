@@ -1,12 +1,13 @@
 //! The utility structs and functions for writing byte blocks for the
 //! accounts db tiered storage.
 
-use {
-    crate::tiered_storage::{footer::AccountBlockFormat, meta::AccountMetaOptionalFields},
-    std::{
-        io::{Cursor, Read, Result as IoResult, Write},
-        mem,
-    },
+use std::{
+    io::{Cursor, Read, Result as IoResult, Write},
+    mem,
+};
+
+use crate::tiered_storage::{
+    footer::AccountBlockFormat, meta::AccountMetaOptionalFields,
 };
 
 /// The encoder for the byte-block.
@@ -36,7 +37,9 @@ impl ByteBlockWriter {
     pub fn new(encoding: AccountBlockFormat) -> Self {
         Self {
             encoder: match encoding {
-                AccountBlockFormat::AlignedRaw => ByteBlockEncoder::Raw(Cursor::new(Vec::new())),
+                AccountBlockFormat::AlignedRaw => {
+                    ByteBlockEncoder::Raw(Cursor::new(Vec::new()))
+                }
                 AccountBlockFormat::Lz4 => ByteBlockEncoder::Lz4(
                     lz4::EncoderBuilder::new()
                         .level(0)
@@ -56,7 +59,10 @@ impl ByteBlockWriter {
     /// Write plain ol' data to the internal buffer of the ByteBlockWriter instance
     ///
     /// Prefer this over `write_type()`, as it prevents some undefined behavior.
-    pub fn write_pod<T: bytemuck::NoUninit>(&mut self, value: &T) -> IoResult<usize> {
+    pub fn write_pod<T: bytemuck::NoUninit>(
+        &mut self,
+        value: &T,
+    ) -> IoResult<usize> {
         // SAFETY: Since T is NoUninit, it does not contain any uninitialized bytes.
         unsafe { self.write_type(value) }
     }
@@ -137,7 +143,10 @@ pub struct ByteBlockReader;
 /// Returns None if `offset` + size_of::<T>() exceeds the size of the input byte_block.
 ///
 /// Type T must be plain ol' data to ensure no undefined behavior.
-pub fn read_pod<T: bytemuck::AnyBitPattern>(byte_block: &[u8], offset: usize) -> Option<&T> {
+pub fn read_pod<T: bytemuck::AnyBitPattern>(
+    byte_block: &[u8],
+    offset: usize,
+) -> Option<&T> {
     // SAFETY: Since T is AnyBitPattern, it is safe to cast bytes to T.
     unsafe { read_type(byte_block, offset) }
 }
@@ -176,7 +185,10 @@ impl ByteBlockReader {
     ///
     /// Note that calling this function with AccountBlockFormat::AlignedRaw encoding
     /// will result in panic as the input is already decoded.
-    pub fn decode(encoding: AccountBlockFormat, input: &[u8]) -> IoResult<Vec<u8>> {
+    pub fn decode(
+        encoding: AccountBlockFormat,
+        input: &[u8],
+    ) -> IoResult<Vec<u8>> {
         match encoding {
             AccountBlockFormat::Lz4 => {
                 let mut decoder = lz4::Decoder::new(input).unwrap();
@@ -184,18 +196,19 @@ impl ByteBlockReader {
                 decoder.read_to_end(&mut output)?;
                 Ok(output)
             }
-            AccountBlockFormat::AlignedRaw => panic!("the input buffer is already decoded"),
+            AccountBlockFormat::AlignedRaw => {
+                panic!("the input buffer is already decoded")
+            }
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        crate::accounts_hash::AccountHash,
-        solana_sdk::{hash::Hash, stake_history::Epoch},
-    };
+    use solana_sdk::{hash::Hash, stake_history::Epoch};
+
+    use super::*;
+    use crate::accounts_hash::AccountHash;
 
     fn read_type_unaligned<T>(buffer: &[u8], offset: usize) -> (T, usize) {
         let size = std::mem::size_of::<T>();
@@ -224,7 +237,8 @@ mod tests {
 
         assert_eq!(decoded_buffer.len(), mem::size_of::<u32>());
 
-        let (value_from_buffer, next) = read_type_unaligned::<u32>(&decoded_buffer, 0);
+        let (value_from_buffer, next) =
+            read_type_unaligned::<u32>(&decoded_buffer, 0);
         assert_eq!(value, value_from_buffer);
 
         if format != AccountBlockFormat::AlignedRaw {
@@ -306,7 +320,8 @@ mod tests {
         );
 
         // verify meta1 and its data
-        let (meta1_from_buffer, next1) = read_type_unaligned::<TestMetaStruct>(&decoded_buffer, 0);
+        let (meta1_from_buffer, next1) =
+            read_type_unaligned::<TestMetaStruct>(&decoded_buffer, 0);
         assert_eq!(test_metas[0], meta1_from_buffer);
         assert_eq!(
             test_data1,
@@ -358,7 +373,8 @@ mod tests {
         // of Some and None.
         for rent_epoch in [None, Some(test_epoch)] {
             for account_hash in [None, Some(&acc_hash)] {
-                some_count += rent_epoch.iter().count() + account_hash.iter().count();
+                some_count +=
+                    rent_epoch.iter().count() + account_hash.iter().count();
 
                 opt_fields_vec.push(AccountMetaOptionalFields {
                     rent_epoch,
@@ -391,13 +407,15 @@ mod tests {
         let mut offset = 0;
         for opt_fields in &opt_fields_vec {
             if let Some(expected_rent_epoch) = opt_fields.rent_epoch {
-                let rent_epoch = read_pod::<Epoch>(&decoded_buffer, offset).unwrap();
+                let rent_epoch =
+                    read_pod::<Epoch>(&decoded_buffer, offset).unwrap();
                 assert_eq!(*rent_epoch, expected_rent_epoch);
                 verified_count += 1;
                 offset += std::mem::size_of::<Epoch>();
             }
             if let Some(expected_hash) = opt_fields.account_hash {
-                let hash = read_pod::<AccountHash>(&decoded_buffer, offset).unwrap();
+                let hash =
+                    read_pod::<AccountHash>(&decoded_buffer, offset).unwrap();
                 assert_eq!(hash, expected_hash);
                 verified_count += 1;
                 offset += std::mem::size_of::<AccountHash>();

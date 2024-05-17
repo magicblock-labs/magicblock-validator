@@ -4,38 +4,42 @@
 //!
 //! <https://docs.solanalabs.com/implemented-proposals/persistent-account-storage>
 
-use {
-    crate::{
-        account_storage::meta::{
-            AccountMeta, StorableAccountsWithHashesAndWriteVersions, StoredAccountInfo,
-            StoredAccountMeta, StoredMeta, StoredMetaWriteVersion,
-        },
-        accounts_file::{AccountsFileError, MatchAccountOwnerError, Result, ALIGN_BOUNDARY_OFFSET},
-        accounts_hash::AccountHash,
-        storable_accounts::StorableAccounts,
-        u64_align,
+use std::{
+    borrow::Borrow,
+    convert::TryFrom,
+    fs::{remove_file, OpenOptions},
+    io::{Seek, SeekFrom, Write},
+    mem,
+    path::{Path, PathBuf},
+    sync::{
+        atomic::{AtomicU64, AtomicUsize, Ordering},
+        Mutex,
     },
-    log::*,
-    memmap2::MmapMut,
-    solana_sdk::{
-        account::{AccountSharedData, ReadableAccount},
-        clock::Slot,
-        pubkey::Pubkey,
-        stake_history::Epoch,
+};
+
+use log::*;
+use memmap2::MmapMut;
+use solana_sdk::{
+    account::{AccountSharedData, ReadableAccount},
+    clock::Slot,
+    pubkey::Pubkey,
+    stake_history::Epoch,
+};
+use thiserror::Error;
+
+use crate::{
+    account_storage::meta::{
+        AccountMeta, StorableAccountsWithHashesAndWriteVersions,
+        StoredAccountInfo, StoredAccountMeta, StoredMeta,
+        StoredMetaWriteVersion,
     },
-    std::{
-        borrow::Borrow,
-        convert::TryFrom,
-        fs::{remove_file, OpenOptions},
-        io::{Seek, SeekFrom, Write},
-        mem,
-        path::{Path, PathBuf},
-        sync::{
-            atomic::{AtomicU64, AtomicUsize, Ordering},
-            Mutex,
-        },
+    accounts_file::{
+        AccountsFileError, MatchAccountOwnerError, Result,
+        ALIGN_BOUNDARY_OFFSET,
     },
-    thiserror::Error,
+    accounts_hash::AccountHash,
+    storable_accounts::StorableAccounts,
+    u64_align,
 };
 
 pub mod test_utils;
@@ -95,7 +99,9 @@ impl<'append_vec> Iterator for AppendVecAccountsIter<'append_vec> {
     type Item = StoredAccountMeta<'append_vec>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some((account, next_offset)) = self.append_vec.get_account(self.offset) {
+        if let Some((account, next_offset)) =
+            self.append_vec.get_account(self.offset)
+        {
             self.offset = next_offset;
             Some(account)
         } else {
@@ -174,7 +180,8 @@ impl<'append_vec> AppendVecStoredAccountMeta<'append_vec> {
         // Yes, this really happens; see test_new_from_file_crafted_executable
         let executable_bool: &bool = &self.account_meta.executable;
         // UNSAFE: Force to interpret mmap-backed bool as u8 to really read the actual memory content
-        let executable_byte: &u8 = unsafe { &*(executable_bool as *const bool as *const u8) };
+        let executable_byte: &u8 =
+            unsafe { &*(executable_bool as *const bool as *const u8) };
         executable_byte
     }
 }
@@ -220,7 +227,8 @@ pub struct AppendVec {
 }
 
 lazy_static! {
-    pub static ref APPEND_VEC_MMAPPED_FILES_OPEN: AtomicU64 = AtomicU64::default();
+    pub static ref APPEND_VEC_MMAPPED_FILES_OPEN: AtomicU64 =
+        AtomicU64::default();
 }
 
 impl Drop for AppendVec {
@@ -292,7 +300,10 @@ impl AppendVec {
         }
     }
 
-    fn sanitize_len_and_size(current_len: usize, file_size: usize) -> Result<()> {
+    fn sanitize_len_and_size(
+        current_len: usize,
+        file_size: usize,
+    ) -> Result<()> {
         if file_size == 0 {
             Err(AccountsFileError::AppendVecError(
                 AppendVecError::FileSizeTooSmall(file_size),
@@ -347,7 +358,10 @@ impl AppendVec {
         format!("{slot}.{id}")
     }
 
-    pub fn new_from_file<P: AsRef<Path>>(path: P, current_len: usize) -> Result<(Self, usize)> {
+    pub fn new_from_file<P: AsRef<Path>>(
+        path: P,
+        current_len: usize,
+    ) -> Result<(Self, usize)> {
         let new = Self::new_from_file_unchecked(&path, current_len)?;
 
         let (sanitized, num_accounts) = new.sanitize_layout_and_length();
@@ -363,7 +377,10 @@ impl AppendVec {
     }
 
     /// Creates an appendvec from file without performing sanitize checks or counting the number of accounts
-    pub fn new_from_file_unchecked<P: AsRef<Path>>(path: P, current_len: usize) -> Result<Self> {
+    pub fn new_from_file_unchecked<P: AsRef<Path>>(
+        path: P,
+        current_len: usize,
+    ) -> Result<Self> {
         let file_size = std::fs::metadata(&path)?.len();
         Self::sanitize_len_and_size(current_len, file_size as usize)?;
 
@@ -408,7 +425,8 @@ impl AppendVec {
             offset = next_offset;
             num_accounts += 1;
         }
-        let aligned_current_len = u64_align!(self.current_len.load(Ordering::Acquire));
+        let aligned_current_len =
+            u64_align!(self.current_len.load(Ordering::Acquire));
 
         (offset == aligned_current_len, num_accounts)
     }
@@ -452,7 +470,11 @@ impl AppendVec {
     /// If there is sufficient space, then update `offset` and the internal `current_len` to the
     /// first byte after the copied data and return the starting position of the copied data.
     /// Otherwise return None and leave `offset` unchanged.
-    fn append_ptrs_locked(&self, offset: &mut usize, vals: &[(*const u8, usize)]) -> Option<usize> {
+    fn append_ptrs_locked(
+        &self,
+        offset: &mut usize,
+        vals: &[(*const u8, usize)],
+    ) -> Option<usize> {
         let mut end = *offset;
         for val in vals {
             end = u64_align!(end);
@@ -485,7 +507,10 @@ impl AppendVec {
     /// Return stored account metadata for the account at `offset` if its data doesn't overrun
     /// the internal buffer. Otherwise return None. Also return the offset of the first byte
     /// after the requested data that falls on a 64-byte boundary.
-    pub fn get_account(&self, offset: usize) -> Option<(StoredAccountMeta, usize)> {
+    pub fn get_account(
+        &self,
+        offset: usize,
+    ) -> Option<(StoredAccountMeta, usize)> {
         let (meta, next): (&StoredMeta, _) = self.get_type(offset)?;
         let (account_meta, next): (&AccountMeta, _) = self.get_type(next)?;
         let (hash, next): (&AccountHash, _) = self.get_type(next)?;
@@ -509,7 +534,8 @@ impl AppendVec {
         let offset = offset.checked_add(mem::size_of::<StoredMeta>())?;
         // u64_align! does an unchecked add for alignment. Check that it won't cause an overflow.
         offset.checked_add(ALIGN_BOUNDARY_OFFSET - 1)?;
-        let (account_meta, _): (&AccountMeta, _) = self.get_type(u64_align!(offset))?;
+        let (account_meta, _): (&AccountMeta, _) =
+            self.get_type(u64_align!(offset))?;
         Some(account_meta)
     }
 
@@ -592,7 +618,8 @@ impl AppendVec {
         let offsets_len = len - skip + 1;
         let mut offsets = Vec::with_capacity(offsets_len);
         for i in skip..len {
-            let (account, pubkey, hash, write_version_obsolete) = accounts.get(i);
+            let (account, pubkey, hash, write_version_obsolete) =
+                accounts.get(i);
             let account_meta = account
                 .map(|account| AccountMeta {
                     lamports: account.lamports(),
@@ -652,25 +679,30 @@ impl AppendVec {
 
 #[cfg(test)]
 pub mod tests {
-    use {
-        super::{test_utils::*, *},
-        assert_matches::assert_matches,
-        memoffset::offset_of,
-        rand::{thread_rng, Rng},
-        solana_sdk::{
-            account::{accounts_equal, Account, AccountSharedData, WritableAccount},
-            hash::Hash,
-            timing::duration_as_ms,
+    use std::{mem::ManuallyDrop, time::Instant};
+
+    use assert_matches::assert_matches;
+    use memoffset::offset_of;
+    use rand::{thread_rng, Rng};
+    use solana_sdk::{
+        account::{
+            accounts_equal, Account, AccountSharedData, WritableAccount,
         },
-        std::{mem::ManuallyDrop, time::Instant},
+        hash::Hash,
+        timing::duration_as_ms,
     };
+
+    use super::{test_utils::*, *};
 
     impl AppendVec {
         pub(crate) fn set_current_len_for_tests(&self, len: usize) {
             self.current_len.store(len, Ordering::Release);
         }
 
-        fn append_account_test(&self, data: &(StoredMeta, AccountSharedData)) -> Option<usize> {
+        fn append_account_test(
+            &self,
+            data: &(StoredMeta, AccountSharedData),
+        ) -> Option<usize> {
             let slot_ignored = Slot::MAX;
             let accounts = [(&data.0.pubkey, &data.1)];
             let slice = &accounts[..];
@@ -704,7 +736,9 @@ pub mod tests {
             unsafe {
                 #[allow(invalid_reference_casting)]
                 std::ptr::write(
-                    std::mem::transmute::<*const u64, *mut u64>(&self.meta.data_len),
+                    std::mem::transmute::<*const u64, *mut u64>(
+                        &self.meta.data_len,
+                    ),
                     new_data_len,
                 );
             }
@@ -713,7 +747,8 @@ pub mod tests {
         fn get_executable_byte(&self) -> u8 {
             let executable_bool: bool = self.executable();
             // UNSAFE: Force to interpret mmap-backed bool as u8 to really read the actual memory content
-            let executable_byte: u8 = unsafe { std::mem::transmute::<bool, u8>(executable_bool) };
+            let executable_byte: u8 =
+                unsafe { std::mem::transmute::<bool, u8>(executable_bool) };
             executable_byte
         }
 
@@ -722,7 +757,9 @@ pub mod tests {
             unsafe {
                 #[allow(invalid_reference_casting)]
                 std::ptr::write(
-                    std::mem::transmute::<*const bool, *mut u8>(&self.account_meta.executable),
+                    std::mem::transmute::<*const bool, *mut u8>(
+                        &self.account_meta.executable,
+                    ),
                     new_executable_byte,
                 );
             }
@@ -812,7 +849,8 @@ pub mod tests {
     }
 
     #[test]
-    fn test_storable_accounts_with_hashes_and_write_versions_hash_and_write_version() {
+    fn test_storable_accounts_with_hashes_and_write_versions_hash_and_write_version(
+    ) {
         // for (Slot, &'a [(&'a Pubkey, &'a T)])
         let account = AccountSharedData::default();
         let slot = 0 as Slot;
@@ -915,9 +953,11 @@ pub mod tests {
         };
         let def2 = AccountMeta::from(&def2_account);
         assert_eq!(&def1, &def2);
-        let def2 = AccountMeta::from(&AccountSharedData::from(def2_account.clone()));
+        let def2 =
+            AccountMeta::from(&AccountSharedData::from(def2_account.clone()));
         assert_eq!(&def1, &def2);
-        let def2 = AccountMeta::from(Some(&AccountSharedData::from(def2_account)));
+        let def2 =
+            AccountMeta::from(Some(&AccountSharedData::from(def2_account)));
         assert_eq!(&def1, &def2);
     }
 
@@ -930,7 +970,8 @@ pub mod tests {
 
     #[test]
     fn test_append_vec_new_from_file_bad_size() {
-        let file = get_append_vec_path("test_append_vec_new_from_file_bad_size");
+        let file =
+            get_append_vec_path("test_append_vec_new_from_file_bad_size");
         let path = &file.path;
 
         let _data = OpenOptions::new()
@@ -1050,7 +1091,8 @@ pub mod tests {
     fn test_account_matches_owners() {
         let path = get_append_vec_path("test_append_data");
         let av = AppendVec::new(&path.path, true, 1024 * 1024);
-        let owners: Vec<Pubkey> = (0..2).map(|_| Pubkey::new_unique()).collect();
+        let owners: Vec<Pubkey> =
+            (0..2).map(|_| Pubkey::new_unique()).collect();
 
         let mut account = create_test_account(5);
         account.1.set_owner(owners[0]);
@@ -1073,13 +1115,19 @@ pub mod tests {
 
         // tests for overflow
         assert_eq!(
-            av.account_matches_owners(usize::MAX - mem::size_of::<StoredMeta>(), &owners),
+            av.account_matches_owners(
+                usize::MAX - mem::size_of::<StoredMeta>(),
+                &owners
+            ),
             Err(MatchAccountOwnerError::UnableToLoad)
         );
 
         assert_eq!(
             av.account_matches_owners(
-                usize::MAX - mem::size_of::<StoredMeta>() - mem::size_of::<AccountMeta>() + 1,
+                usize::MAX
+                    - mem::size_of::<StoredMeta>()
+                    - mem::size_of::<AccountMeta>()
+                    + 1,
                 &owners
             ),
             Err(MatchAccountOwnerError::UnableToLoad)
@@ -1176,16 +1224,20 @@ pub mod tests {
         let accounts_len = 139;
         {
             let append_vec_data = [
-                0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 192, 118, 150, 1, 185, 209, 118,
-                82, 154, 222, 172, 202, 110, 26, 218, 140, 143, 96, 61, 43, 212, 73, 203, 7, 190,
-                88, 80, 222, 110, 114, 67, 254, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 97, 98, 99, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
-                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 3, 0, 0, 0, 0, 0, 0, 0, 192, 118, 150,
+                1, 185, 209, 118, 82, 154, 222, 172, 202, 110, 26, 218, 140,
+                143, 96, 61, 43, 212, 73, 203, 7, 190, 88, 80, 222, 110, 114,
+                67, 254, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 97, 98, 99, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+                0, 0,
             ];
 
             let f = std::fs::File::create(path).unwrap();
@@ -1210,7 +1262,9 @@ pub mod tests {
             av.append_account_test(&create_test_account(10)).unwrap();
 
             let accounts = av.accounts(0);
-            let StoredAccountMeta::AppendVec(account) = accounts.first().unwrap() else {
+            let StoredAccountMeta::AppendVec(account) =
+                accounts.first().unwrap()
+            else {
                 panic!("StoredAccountMeta can only be AppendVec in this test.");
             };
             account.set_data_len_unsafe(crafted_data_len);
@@ -1240,7 +1294,9 @@ pub mod tests {
             av.append_account_test(&create_test_account(10)).unwrap();
 
             let accounts = av.accounts(0);
-            let StoredAccountMeta::AppendVec(account) = accounts.first().unwrap() else {
+            let StoredAccountMeta::AppendVec(account) =
+                accounts.first().unwrap()
+            else {
                 panic!("StoredAccountMeta can only be AppendVec in this test.");
             };
             account.set_data_len_unsafe(too_large_data_len);
@@ -1287,7 +1343,9 @@ pub mod tests {
 
             // reload crafted accounts
             let accounts = av.accounts(0);
-            let StoredAccountMeta::AppendVec(account) = accounts.first().unwrap() else {
+            let StoredAccountMeta::AppendVec(account) =
+                accounts.first().unwrap()
+            else {
                 panic!("StoredAccountMeta can only be AppendVec in this test.");
             };
 

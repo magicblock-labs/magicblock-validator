@@ -31,12 +31,18 @@ impl PubkeyBinCalculator24 {
     #[inline]
     pub(crate) fn bin_from_pubkey(&self, pubkey: &Pubkey) -> usize {
         let as_ref = pubkey.as_ref();
-        ((as_ref[0] as usize) << 16 | (as_ref[1] as usize) << 8 | (as_ref[2] as usize))
+        ((as_ref[0] as usize) << 16
+            | (as_ref[1] as usize) << 8
+            | (as_ref[2] as usize))
             >> self.shift_bits
     }
 
     #[cfg(test)]
-    pub(crate) fn lowest_pubkey_from_bin(&self, mut bin: usize, bins: usize) -> Pubkey {
+    pub(crate) fn lowest_pubkey_from_bin(
+        &self,
+        mut bin: usize,
+        bins: usize,
+    ) -> Pubkey {
         assert!(bin < bins);
         bin <<= self.shift_bits;
         let mut pubkey = Pubkey::from([0; 32]);
@@ -69,7 +75,12 @@ pub mod tests {
             for bin in 0..bins {
                 assert_eq!(
                     bin as usize,
-                    calc.bin_from_pubkey(&calc.lowest_pubkey_from_bin(bin as usize, bins as usize))
+                    calc.bin_from_pubkey(
+                        &calc.lowest_pubkey_from_bin(
+                            bin as usize,
+                            bins as usize
+                        )
+                    )
                 );
             }
         }

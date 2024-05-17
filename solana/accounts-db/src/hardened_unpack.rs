@@ -1,24 +1,25 @@
-use {
-    bzip2::bufread::BzDecoder,
-    log::*,
-    rand::{thread_rng, Rng},
-    solana_sdk::genesis_config::{GenesisConfig, DEFAULT_GENESIS_ARCHIVE, DEFAULT_GENESIS_FILE},
-    std::{
-        collections::HashMap,
-        fs::{self, File},
-        io::{BufReader, Read},
-        path::{
-            Component::{self, CurDir, Normal},
-            Path, PathBuf,
-        },
-        time::Instant,
+use std::{
+    collections::HashMap,
+    fs::{self, File},
+    io::{BufReader, Read},
+    path::{
+        Component::{self, CurDir, Normal},
+        Path, PathBuf,
     },
-    tar::{
-        Archive,
-        EntryType::{Directory, GNUSparse, Regular},
-    },
-    thiserror::Error,
+    time::Instant,
 };
+
+use bzip2::bufread::BzDecoder;
+use log::*;
+use rand::{thread_rng, Rng};
+use solana_sdk::genesis_config::{
+    GenesisConfig, DEFAULT_GENESIS_ARCHIVE, DEFAULT_GENESIS_FILE,
+};
+use tar::{
+    Archive,
+    EntryType::{Directory, GNUSparse, Regular},
+};
+use thiserror::Error;
 
 #[derive(Error, Debug)]
 pub enum UnpackError {
@@ -35,17 +36,23 @@ pub type Result<T> = std::result::Result<T, UnpackError>;
 // note that this is directly related to the mmaped data size
 // so protect against insane value
 // This is the file size including holes for sparse files
-const MAX_SNAPSHOT_ARCHIVE_UNPACKED_APPARENT_SIZE: u64 = 64 * 1024 * 1024 * 1024 * 1024;
+const MAX_SNAPSHOT_ARCHIVE_UNPACKED_APPARENT_SIZE: u64 =
+    64 * 1024 * 1024 * 1024 * 1024;
 
 // 4 TiB;
 // This is the actually consumed disk usage for sparse files
-const MAX_SNAPSHOT_ARCHIVE_UNPACKED_ACTUAL_SIZE: u64 = 4 * 1024 * 1024 * 1024 * 1024;
+const MAX_SNAPSHOT_ARCHIVE_UNPACKED_ACTUAL_SIZE: u64 =
+    4 * 1024 * 1024 * 1024 * 1024;
 
 const MAX_SNAPSHOT_ARCHIVE_UNPACKED_COUNT: u64 = 5_000_000;
 pub const MAX_GENESIS_ARCHIVE_UNPACKED_SIZE: u64 = 10 * 1024 * 1024; // 10 MiB
 const MAX_GENESIS_ARCHIVE_UNPACKED_COUNT: u64 = 100;
 
-fn checked_total_size_sum(total_size: u64, entry_size: u64, limit_size: u64) -> Result<u64> {
+fn checked_total_size_sum(
+    total_size: u64,
+    entry_size: u64,
+    limit_size: u64,
+) -> Result<u64> {
     trace!(
         "checked_total_size_sum: {} + {} < {}",
         total_size,
@@ -61,7 +68,10 @@ fn checked_total_size_sum(total_size: u64, entry_size: u64, limit_size: u64) -> 
     Ok(total_size)
 }
 
-fn checked_total_count_increment(total_count: u64, limit_count: u64) -> Result<u64> {
+fn checked_total_count_increment(
+    total_count: u64,
+    limit_count: u64,
+) -> Result<u64> {
     let total_count = total_count + 1;
     if total_count > limit_count {
         return Err(UnpackError::Archive(format!(
@@ -73,7 +83,9 @@ fn checked_total_count_increment(total_count: u64, limit_count: u64) -> Result<u
 
 fn check_unpack_result(unpack_result: bool, path: String) -> Result<()> {
     if !unpack_result {
-        return Err(UnpackError::Archive(format!("failed to unpack: {path:?}")));
+        return Err(UnpackError::Archive(format!(
+            "failed to unpack: {path:?}"
+        )));
     }
     Ok(())
 }
@@ -119,8 +131,8 @@ where
         });
 
         // Reject old-style BSD directory entries that aren't explicitly tagged as directories
-        let legacy_dir_entry =
-            entry.header().as_ustar().is_none() && entry.path_bytes().ends_with(b"/");
+        let legacy_dir_entry = entry.header().as_ustar().is_none()
+            && entry.path_bytes().ends_with(b"/");
         let kind = entry.header().entry_type();
         let reject_legacy_dir_entry = legacy_dir_entry && (kind != Directory);
 
@@ -131,8 +143,8 @@ where
         }
 
         let parts: Vec<_> = parts.map(|p| p.unwrap()).collect();
-        let account_filename =
-            (parts.len() == 2 && parts[0] == "accounts").then(|| PathBuf::from(parts[1]));
+        let account_filename = (parts.len() == 2 && parts[0] == "accounts")
+            .then(|| PathBuf::from(parts[1]));
         let unpack_dir = match entry_checker(parts.as_slice(), kind) {
             UnpackPath::Invalid => {
                 return Err(UnpackError::Archive(format!(
@@ -225,7 +237,9 @@ fn sanitize_path(entry_path: &Path, dst: &Path) -> Result<Option<PathBuf>> {
                 // Leading '/' characters, root paths, and '.'
                 // components are just ignored and treated as "empty
                 // components"
-                Component::Prefix(..) | Component::RootDir | Component::CurDir => continue,
+                Component::Prefix(..)
+                | Component::RootDir
+                | Component::CurDir => continue,
 
                 // If any part of the filename is '..', then skip over
                 // unpacking the file to prevent directory traversal
@@ -271,7 +285,11 @@ fn validate_inside_dst(dst: &Path, file_dst: &Path) -> Result<PathBuf> {
         ))
     })?;
     let canon_target = dst.canonicalize().map_err(|err| {
-        UnpackError::Archive(format!("{} while canonicalizing {}", err, dst.display()))
+        UnpackError::Archive(format!(
+            "{} while canonicalizing {}",
+            err,
+            dst.display()
+        ))
     })?;
     if !canon_parent.starts_with(&canon_target) {
         return Err(UnpackError::Archive(format!(
@@ -312,7 +330,8 @@ pub fn unpack_snapshot<A: Read>(
         account_paths,
         parallel_selector,
         |file, path| {
-            unpacked_append_vec_map.insert(file.to_string(), path.join("accounts").join(file));
+            unpacked_append_vec_map
+                .insert(file.to_string(), path.join("accounts").join(file));
         },
         |_| {},
     )
@@ -375,7 +394,8 @@ where
                 };
                 if let ["accounts", file] = parts {
                     // Randomly distribute the accounts files about the available `account_paths`,
-                    let path_index = thread_rng().gen_range(0..account_paths.len());
+                    let path_index =
+                        thread_rng().gen_range(0..account_paths.len());
                     match account_paths
                         .get(path_index)
                         .map(|path_buf| path_buf.as_path())
@@ -430,7 +450,10 @@ fn like_storage(v: &str) -> bool {
     saw_numbers && periods == 1
 }
 
-fn is_valid_snapshot_archive_entry(parts: &[&str], kind: tar::EntryType) -> bool {
+fn is_valid_snapshot_archive_entry(
+    parts: &[&str],
+    kind: tar::EntryType,
+) -> bool {
     match (parts, kind) {
         (["version"], Regular) => true,
         (["accounts"], Directory) => true,
@@ -439,8 +462,16 @@ fn is_valid_snapshot_archive_entry(parts: &[&str], kind: tar::EntryType) -> bool
         (["snapshots"], Directory) => true,
         (["snapshots", "status_cache"], GNUSparse) => true,
         (["snapshots", "status_cache"], Regular) => true,
-        (["snapshots", dir, file], GNUSparse) if all_digits(dir) && all_digits(file) => true,
-        (["snapshots", dir, file], Regular) if all_digits(dir) && all_digits(file) => true,
+        (["snapshots", dir, file], GNUSparse)
+            if all_digits(dir) && all_digits(file) =>
+        {
+            true
+        }
+        (["snapshots", dir, file], Regular)
+            if all_digits(dir) && all_digits(file) =>
+        {
+            true
+        }
         (["snapshots", dir], Directory) if all_digits(dir) => true,
         _ => false,
     }
@@ -472,7 +503,8 @@ pub fn open_genesis_config(
                 ledger_path,
                 max_genesis_archive_unpacked_size,
             )?;
-            GenesisConfig::load(ledger_path).map_err(OpenGenesisConfigError::Load)
+            GenesisConfig::load(ledger_path)
+                .map_err(OpenGenesisConfigError::Load)
         }
     }
 }
@@ -539,11 +571,10 @@ fn is_valid_genesis_archive_entry<'a>(
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        assert_matches::assert_matches,
-        tar::{Builder, Header},
-    };
+    use assert_matches::assert_matches;
+    use tar::{Builder, Header};
+
+    use super::*;
 
     #[test]
     fn test_archive_is_valid_entry() {
@@ -648,31 +679,59 @@ mod tests {
     fn test_archive_is_valid_archive_entry() {
         let path = Path::new("");
         assert_eq!(
-            is_valid_genesis_archive_entry(path, &["genesis.bin"], tar::EntryType::Regular),
+            is_valid_genesis_archive_entry(
+                path,
+                &["genesis.bin"],
+                tar::EntryType::Regular
+            ),
             UnpackPath::Valid(path)
         );
         assert_eq!(
-            is_valid_genesis_archive_entry(path, &["genesis.bin"], tar::EntryType::GNUSparse,),
+            is_valid_genesis_archive_entry(
+                path,
+                &["genesis.bin"],
+                tar::EntryType::GNUSparse,
+            ),
             UnpackPath::Valid(path)
         );
         assert_eq!(
-            is_valid_genesis_archive_entry(path, &["rocksdb"], tar::EntryType::Directory),
+            is_valid_genesis_archive_entry(
+                path,
+                &["rocksdb"],
+                tar::EntryType::Directory
+            ),
             UnpackPath::Ignore
         );
         assert_eq!(
-            is_valid_genesis_archive_entry(path, &["rocksdb", "foo"], tar::EntryType::Regular),
+            is_valid_genesis_archive_entry(
+                path,
+                &["rocksdb", "foo"],
+                tar::EntryType::Regular
+            ),
             UnpackPath::Ignore
         );
         assert_eq!(
-            is_valid_genesis_archive_entry(path, &["rocksdb", "foo"], tar::EntryType::GNUSparse,),
+            is_valid_genesis_archive_entry(
+                path,
+                &["rocksdb", "foo"],
+                tar::EntryType::GNUSparse,
+            ),
             UnpackPath::Ignore
         );
         assert_eq!(
-            is_valid_genesis_archive_entry(path, &["rocksdb_fifo"], tar::EntryType::Directory),
+            is_valid_genesis_archive_entry(
+                path,
+                &["rocksdb_fifo"],
+                tar::EntryType::Directory
+            ),
             UnpackPath::Ignore
         );
         assert_eq!(
-            is_valid_genesis_archive_entry(path, &["rocksdb_fifo", "foo"], tar::EntryType::Regular),
+            is_valid_genesis_archive_entry(
+                path,
+                &["rocksdb_fifo", "foo"],
+                tar::EntryType::Regular
+            ),
             UnpackPath::Ignore
         );
         assert_eq!(
@@ -684,23 +743,43 @@ mod tests {
             UnpackPath::Ignore
         );
         assert_eq!(
-            is_valid_genesis_archive_entry(path, &["aaaa"], tar::EntryType::Regular),
+            is_valid_genesis_archive_entry(
+                path,
+                &["aaaa"],
+                tar::EntryType::Regular
+            ),
             UnpackPath::Invalid
         );
         assert_eq!(
-            is_valid_genesis_archive_entry(path, &["aaaa"], tar::EntryType::GNUSparse,),
+            is_valid_genesis_archive_entry(
+                path,
+                &["aaaa"],
+                tar::EntryType::GNUSparse,
+            ),
             UnpackPath::Invalid
         );
         assert_eq!(
-            is_valid_genesis_archive_entry(path, &["rocksdb"], tar::EntryType::Regular),
+            is_valid_genesis_archive_entry(
+                path,
+                &["rocksdb"],
+                tar::EntryType::Regular
+            ),
             UnpackPath::Invalid
         );
         assert_eq!(
-            is_valid_genesis_archive_entry(path, &["rocksdb"], tar::EntryType::GNUSparse,),
+            is_valid_genesis_archive_entry(
+                path,
+                &["rocksdb"],
+                tar::EntryType::GNUSparse,
+            ),
             UnpackPath::Invalid
         );
         assert_eq!(
-            is_valid_genesis_archive_entry(path, &["rocksdb", "foo"], tar::EntryType::Directory,),
+            is_valid_genesis_archive_entry(
+                path,
+                &["rocksdb", "foo"],
+                tar::EntryType::Directory,
+            ),
             UnpackPath::Invalid
         );
         assert_eq!(
@@ -728,11 +807,19 @@ mod tests {
             UnpackPath::Invalid
         );
         assert_eq!(
-            is_valid_genesis_archive_entry(path, &["rocksdb_fifo"], tar::EntryType::Regular),
+            is_valid_genesis_archive_entry(
+                path,
+                &["rocksdb_fifo"],
+                tar::EntryType::Regular
+            ),
             UnpackPath::Invalid
         );
         assert_eq!(
-            is_valid_genesis_archive_entry(path, &["rocksdb_fifo"], tar::EntryType::GNUSparse,),
+            is_valid_genesis_archive_entry(
+                path,
+                &["rocksdb_fifo"],
+                tar::EntryType::GNUSparse,
+            ),
             UnpackPath::Invalid
         );
         assert_eq!(
@@ -769,13 +856,17 @@ mod tests {
         );
     }
 
-    fn with_finalize_and_unpack<C>(archive: tar::Builder<Vec<u8>>, checker: C) -> Result<()>
+    fn with_finalize_and_unpack<C>(
+        archive: tar::Builder<Vec<u8>>,
+        checker: C,
+    ) -> Result<()>
     where
         C: Fn(&mut Archive<BufReader<&[u8]>>, &Path) -> Result<()>,
     {
         let data = archive.into_inner().unwrap();
         let reader = BufReader::new(&data[..]);
-        let mut archive: Archive<std::io::BufReader<&[u8]>> = Archive::new(reader);
+        let mut archive: Archive<std::io::BufReader<&[u8]>> =
+            Archive::new(reader);
         let temp_dir = tempfile::TempDir::new().unwrap();
 
         checker(&mut archive, temp_dir.path())?;
@@ -785,13 +876,24 @@ mod tests {
         Ok(())
     }
 
-    fn finalize_and_unpack_snapshot(archive: tar::Builder<Vec<u8>>) -> Result<()> {
+    fn finalize_and_unpack_snapshot(
+        archive: tar::Builder<Vec<u8>>,
+    ) -> Result<()> {
         with_finalize_and_unpack(archive, |a, b| {
-            unpack_snapshot_with_processors(a, b, &[PathBuf::new()], None, |_, _| {}, |_| {})
+            unpack_snapshot_with_processors(
+                a,
+                b,
+                &[PathBuf::new()],
+                None,
+                |_, _| {},
+                |_| {},
+            )
         })
     }
 
-    fn finalize_and_unpack_genesis(archive: tar::Builder<Vec<u8>>) -> Result<()> {
+    fn finalize_and_unpack_genesis(
+        archive: tar::Builder<Vec<u8>>,
+    ) -> Result<()> {
         with_finalize_and_unpack(archive, |a, b| {
             unpack_genesis(a, b, MAX_GENESIS_ARCHIVE_UNPACKED_SIZE)
         })
@@ -934,7 +1036,9 @@ mod tests {
                 if !entry?.unpack_in(path)? {
                     return Err(UnpackError::Archive("failed!".to_string()));
                 } else if !path.join(path).exists() {
-                    return Err(UnpackError::Archive("not existing!".to_string()));
+                    return Err(UnpackError::Archive(
+                        "not existing!".to_string(),
+                    ));
                 }
             }
             Ok(())
@@ -999,7 +1103,11 @@ mod tests {
 
     #[test]
     fn test_archive_checked_total_size_sum() {
-        let result = checked_total_size_sum(500, 500, MAX_SNAPSHOT_ARCHIVE_UNPACKED_ACTUAL_SIZE);
+        let result = checked_total_size_sum(
+            500,
+            500,
+            MAX_SNAPSHOT_ARCHIVE_UNPACKED_ACTUAL_SIZE,
+        );
         assert_matches!(result, Ok(1000));
 
         let result = checked_total_size_sum(
@@ -1018,11 +1126,16 @@ mod tests {
 
     #[test]
     fn test_archive_checked_total_size_count() {
-        let result = checked_total_count_increment(101, MAX_SNAPSHOT_ARCHIVE_UNPACKED_COUNT);
+        let result = checked_total_count_increment(
+            101,
+            MAX_SNAPSHOT_ARCHIVE_UNPACKED_COUNT,
+        );
         assert_matches!(result, Ok(102));
 
-        let result =
-            checked_total_count_increment(999_999_999_999, MAX_SNAPSHOT_ARCHIVE_UNPACKED_COUNT);
+        let result = checked_total_count_increment(
+            999_999_999_999,
+            MAX_SNAPSHOT_ARCHIVE_UNPACKED_COUNT,
+        );
         assert_matches!(
             result,
             Err(UnpackError::Archive(ref message))

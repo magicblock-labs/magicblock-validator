@@ -1,11 +1,11 @@
 //! Manage the map of slot -> append vec
 
-use {
-    crate::accounts_db::{AccountStorageEntry, AppendVecId},
-    dashmap::DashMap,
-    solana_sdk::clock::Slot,
-    std::sync::Arc,
-};
+use std::sync::Arc;
+
+use dashmap::DashMap;
+use solana_sdk::clock::Slot;
+
+use crate::accounts_db::{AccountStorageEntry, AppendVecId};
 
 pub mod meta;
 
@@ -53,15 +53,16 @@ impl AccountStorage {
         store_id: AppendVecId,
     ) -> Option<Arc<AccountStorageEntry>> {
         let lookup_in_map = || {
-            self.map
-                .get(&slot)
-                .and_then(|r| (r.id == store_id).then_some(Arc::clone(&r.storage)))
+            self.map.get(&slot).and_then(|r| {
+                (r.id == store_id).then_some(Arc::clone(&r.storage))
+            })
         };
 
         lookup_in_map()
             .or_else(|| {
                 self.shrink_in_progress_map.get(&slot).and_then(|entry| {
-                    (entry.value().append_vec_id() == store_id).then(|| Arc::clone(entry.value()))
+                    (entry.value().append_vec_id() == store_id)
+                        .then(|| Arc::clone(entry.value()))
                 })
             })
             .or_else(lookup_in_map)
@@ -74,7 +75,10 @@ impl AccountStorage {
 
     /// return the append vec for 'slot' if it exists
     /// This is only ever called when shrink is not possibly running and there is a max of 1 append vec per slot.
-    pub fn get_slot_storage_entry(&self, slot: Slot) -> Option<Arc<AccountStorageEntry>> {
+    pub fn get_slot_storage_entry(
+        &self,
+        slot: Slot,
+    ) -> Option<Arc<AccountStorageEntry>> {
         assert!(
             self.no_shrink_in_progress(),
             "self.no_shrink_in_progress(): {slot}"
@@ -261,7 +265,17 @@ impl<'a> ShrinkInProgress<'a> {
     }
 }
 
-#[derive(Debug, Eq, PartialEq, Copy, Clone, Deserialize, Serialize, AbiExample, AbiEnumVisitor)]
+#[derive(
+    Debug,
+    Eq,
+    PartialEq,
+    Copy,
+    Clone,
+    Deserialize,
+    Serialize,
+    AbiExample,
+    AbiEnumVisitor,
+)]
 pub enum AccountStorageStatus {
     Available = 0,
     Full = 1,
@@ -276,7 +290,9 @@ impl Default for AccountStorageStatus {
 
 #[cfg(test)]
 pub(crate) mod tests {
-    use {super::*, std::path::Path};
+    use std::path::Path;
+
+    use super::*;
 
     #[test]
     fn test_shrink_in_progress() {
@@ -343,7 +359,10 @@ pub(crate) mod tests {
     }
 
     impl AccountStorage {
-        fn get_test_storage_with_id(&self, id: AppendVecId) -> Arc<AccountStorageEntry> {
+        fn get_test_storage_with_id(
+            &self,
+            id: AppendVecId,
+        ) -> Arc<AccountStorageEntry> {
             let slot = 0;
             // add a map store
             let common_store_path = Path::new("");
@@ -391,7 +410,9 @@ pub(crate) mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "shrink_can_be_active || self.shrink_in_progress_map.is_empty()")]
+    #[should_panic(
+        expected = "shrink_can_be_active || self.shrink_in_progress_map.is_empty()"
+    )]
     fn test_remove_fail() {
         let storage = AccountStorage::default();
         storage
@@ -450,7 +471,8 @@ pub(crate) mod tests {
                 storage: sample_to_shrink,
             },
         );
-        let _shrinking_in_progress = storage.shrinking_in_progress(0, sample.clone());
+        let _shrinking_in_progress =
+            storage.shrinking_in_progress(0, sample.clone());
         storage.shrinking_in_progress(0, sample);
     }
 
@@ -471,7 +493,8 @@ pub(crate) mod tests {
                 storage: sample_to_shrink,
             },
         );
-        let shrinking_in_progress = storage.shrinking_in_progress(slot, sample.clone());
+        let shrinking_in_progress =
+            storage.shrinking_in_progress(slot, sample.clone());
         assert!(storage.map.contains_key(&slot));
         assert_eq!(
             id_to_shrink,

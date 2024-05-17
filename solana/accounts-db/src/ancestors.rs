@@ -1,9 +1,9 @@
-use {
-    crate::rolling_bit_field::RollingBitField,
-    core::fmt::{Debug, Formatter},
-    solana_sdk::clock::Slot,
-    std::collections::HashMap,
-};
+use core::fmt::{Debug, Formatter};
+use std::collections::HashMap;
+
+use solana_sdk::clock::Slot;
+
+use crate::rolling_bit_field::RollingBitField;
 
 pub type AncestorsForSerialization = HashMap<Slot, usize>;
 
@@ -108,7 +108,9 @@ impl std::iter::FromIterator<(Slot, usize)> for Ancestors {
 #[cfg(feature = "dev-context-only-utils")]
 impl From<Vec<(Slot, usize)>> for Ancestors {
     fn from(source: Vec<(Slot, usize)>) -> Ancestors {
-        Ancestors::from(source.into_iter().map(|(slot, _)| slot).collect::<Vec<_>>())
+        Ancestors::from(
+            source.into_iter().map(|(slot, _)| slot).collect::<Vec<_>>(),
+        )
     }
 }
 
@@ -121,10 +123,13 @@ impl Ancestors {
 
 #[cfg(test)]
 pub mod tests {
-    use {
-        super::*, crate::contains::Contains, log::*, solana_measure::measure::Measure,
-        std::collections::HashSet,
-    };
+    use std::collections::HashSet;
+
+    use log::*;
+    use solana_measure::measure::Measure;
+
+    use super::*;
+    use crate::contains::Contains;
 
     #[test]
     fn test_ancestors_permutations() {

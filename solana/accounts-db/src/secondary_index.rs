@@ -1,16 +1,15 @@
-use {
-    dashmap::{mapref::entry::Entry::Occupied, DashMap},
-    log::*,
-    solana_sdk::{pubkey::Pubkey, timing::AtomicInterval},
-    std::{
-        collections::HashSet,
-        fmt::Debug,
-        sync::{
-            atomic::{AtomicU64, Ordering},
-            RwLock,
-        },
+use std::{
+    collections::HashSet,
+    fmt::Debug,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        RwLock,
     },
 };
+
+use dashmap::{mapref::entry::Entry::Occupied, DashMap};
+use log::*;
+use solana_sdk::{pubkey::Pubkey, timing::AtomicInterval};
 
 // The only cases where an inner key should map to a different outer key is
 // if the key had different account data for the indexed key across different
@@ -100,7 +99,9 @@ impl SecondaryIndexEntry for RwLockSecondaryIndexEntry {
 }
 
 #[derive(Debug, Default)]
-pub struct SecondaryIndex<SecondaryIndexEntryType: SecondaryIndexEntry + Default + Sync + Send> {
+pub struct SecondaryIndex<
+    SecondaryIndexEntryType: SecondaryIndexEntry + Default + Sync + Send,
+> {
     metrics_name: &'static str,
     // Map from index keys to index values
     pub index: DashMap<Pubkey, SecondaryIndexEntryType>,
@@ -120,21 +121,22 @@ impl<SecondaryIndexEntryType: SecondaryIndexEntry + Default + Sync + Send>
 
     pub fn insert(&self, key: &Pubkey, inner_key: &Pubkey) {
         {
-            let pubkeys_map = self
-                .index
-                .get(key)
-                .unwrap_or_else(|| self.index.entry(*key).or_default().downgrade());
+            let pubkeys_map = self.index.get(key).unwrap_or_else(|| {
+                self.index.entry(*key).or_default().downgrade()
+            });
 
-            pubkeys_map.insert_if_not_exists(inner_key, &self.stats.num_inner_keys);
+            pubkeys_map
+                .insert_if_not_exists(inner_key, &self.stats.num_inner_keys);
         }
 
         {
-            let outer_keys = self.reverse_index.get(inner_key).unwrap_or_else(|| {
-                self.reverse_index
-                    .entry(*inner_key)
-                    .or_insert(RwLock::new(Vec::with_capacity(1)))
-                    .downgrade()
-            });
+            let outer_keys =
+                self.reverse_index.get(inner_key).unwrap_or_else(|| {
+                    self.reverse_index
+                        .entry(*inner_key)
+                        .or_insert(RwLock::new(Vec::with_capacity(1)))
+                        .downgrade()
+                });
 
             let should_insert = !outer_keys.read().unwrap().contains(key);
             if should_insert {
@@ -164,7 +166,11 @@ impl<SecondaryIndexEntryType: SecondaryIndexEntry + Default + Sync + Send>
     }
 
     // Only safe to call from `remove_by_inner_key()` due to asserts
-    fn remove_index_entries(&self, outer_key: &Pubkey, removed_inner_key: &Pubkey) {
+    fn remove_index_entries(
+        &self,
+        outer_key: &Pubkey,
+        removed_inner_key: &Pubkey,
+    ) {
         let is_outer_key_empty = {
             let inner_key_map = self
                 .index
@@ -195,8 +201,11 @@ impl<SecondaryIndexEntryType: SecondaryIndexEntry + Default + Sync + Send>
 
         // Check if the entry for `inner_key` in the reverse index is empty
         // and can be removed
-        if let Some((_, outer_keys_set)) = self.reverse_index.remove(inner_key) {
-            for removed_outer_key in outer_keys_set.into_inner().unwrap().into_iter() {
+        if let Some((_, outer_keys_set)) = self.reverse_index.remove(inner_key)
+        {
+            for removed_outer_key in
+                outer_keys_set.into_inner().unwrap().into_iter()
+            {
                 removed_outer_keys.insert(removed_outer_key);
             }
         }

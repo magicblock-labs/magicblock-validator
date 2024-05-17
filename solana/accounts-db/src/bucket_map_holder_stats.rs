@@ -1,13 +1,13 @@
-use {
-    crate::{
-        accounts_index::{DiskIndexValue, IndexValue},
-        bucket_map_holder::{Age, AtomicAge, BucketMapHolder},
-    },
-    solana_sdk::timing::AtomicInterval,
-    std::{
-        fmt::Debug,
-        sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
-    },
+use std::{
+    fmt::Debug,
+    sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering},
+};
+
+use solana_sdk::timing::AtomicInterval;
+
+use crate::{
+    accounts_index::{DiskIndexValue, IndexValue},
+    bucket_map_holder::{Age, AtomicAge, BucketMapHolder},
 };
 
 // stats logged every 10 s
@@ -69,7 +69,9 @@ impl BucketMapHolderStats {
     pub fn new(bins: usize) -> BucketMapHolderStats {
         BucketMapHolderStats {
             bins: bins as u64,
-            per_bucket_count: (0..bins).map(|_| AtomicUsize::default()).collect(),
+            per_bucket_count: (0..bins)
+                .map(|_| AtomicUsize::default())
+                .collect(),
             ..BucketMapHolderStats::default()
         }
     }
@@ -116,7 +118,8 @@ impl BucketMapHolderStats {
         let age_now = storage.current_age();
         let ages_flushed = storage.count_buckets_flushed() as u64;
         let last_age = self.last_age.swap(age_now, Ordering::Relaxed) as u64;
-        let last_ages_flushed = self.last_ages_flushed.swap(ages_flushed, Ordering::Relaxed);
+        let last_ages_flushed =
+            self.last_ages_flushed.swap(ages_flushed, Ordering::Relaxed);
         let mut age_now = age_now as u64;
         if last_age > age_now {
             // age wrapped
@@ -180,13 +183,17 @@ impl BucketMapHolderStats {
     /// The result is also an estimate because 'held_in_mem' is based on a stat that is swapped out when stats are reported.
     pub fn get_remaining_items_to_flush_estimate(&self) -> usize {
         let in_mem = self.count_in_mem.load(Ordering::Relaxed) as u64;
-        let held_in_mem = self.held_in_mem.slot_list_cached.load(Ordering::Relaxed)
-            + self.held_in_mem.slot_list_len.load(Ordering::Relaxed)
-            + self.held_in_mem.ref_count.load(Ordering::Relaxed);
+        let held_in_mem =
+            self.held_in_mem.slot_list_cached.load(Ordering::Relaxed)
+                + self.held_in_mem.slot_list_len.load(Ordering::Relaxed)
+                + self.held_in_mem.ref_count.load(Ordering::Relaxed);
         in_mem.saturating_sub(held_in_mem) as usize
     }
 
-    pub fn report_stats<T: IndexValue, U: DiskIndexValue + From<T> + Into<T>>(
+    pub fn report_stats<
+        T: IndexValue,
+        U: DiskIndexValue + From<T> + Into<T>,
+    >(
         &self,
         storage: &BucketMapHolder<T, U>,
     ) {
@@ -210,7 +217,10 @@ impl BucketMapHolderStats {
         let disk_per_bucket_counts = disk
             .map(|disk| {
                 (0..self.bins)
-                    .map(|i| disk.get_bucket_from_index(i as usize).bucket_len() as usize)
+                    .map(|i| {
+                        disk.get_bucket_from_index(i as usize).bucket_len()
+                            as usize
+                    })
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
@@ -221,7 +231,8 @@ impl BucketMapHolderStats {
 
         // all metrics during startup are written to a different data point
         let startup = storage.get_startup();
-        let was_startup = self.last_was_startup.swap(startup, Ordering::Relaxed);
+        let was_startup =
+            self.last_was_startup.swap(startup, Ordering::Relaxed);
 
         // sum of elapsed time in each thread
         let mut thread_time_elapsed_ms = elapsed_ms * storage.threads as u64;
@@ -280,7 +291,8 @@ impl BucketMapHolderStats {
                 (
                     "bg_waiting_percent",
                     Self::calc_percent(
-                        self.bg_waiting_us.swap(0, Ordering::Relaxed) / US_PER_MS,
+                        self.bg_waiting_us.swap(0, Ordering::Relaxed)
+                            / US_PER_MS,
                         thread_time_elapsed_ms
                     ),
                     f64
@@ -288,7 +300,8 @@ impl BucketMapHolderStats {
                 (
                     "bg_throttling_wait_percent",
                     Self::calc_percent(
-                        self.bg_throttling_wait_us.swap(0, Ordering::Relaxed) / US_PER_MS,
+                        self.bg_throttling_wait_us.swap(0, Ordering::Relaxed)
+                            / US_PER_MS,
                         thread_time_elapsed_ms
                     ),
                     f64
@@ -305,7 +318,9 @@ impl BucketMapHolderStats {
                 ),
                 (
                     "slot_list_cached",
-                    self.held_in_mem.slot_list_cached.swap(0, Ordering::Relaxed),
+                    self.held_in_mem
+                        .slot_list_cached
+                        .swap(0, Ordering::Relaxed),
                     i64
                 ),
                 ("min_in_bin_mem", in_mem_stats.0, i64),
@@ -428,55 +443,89 @@ impl BucketMapHolderStats {
                 ),
                 (
                     "disk_index_resizes",
-                    disk.map(|disk| disk.stats.index.resizes.swap(0, Ordering::Relaxed))
+                    disk.map(|disk| disk
+                        .stats
+                        .index
+                        .resizes
+                        .swap(0, Ordering::Relaxed))
                         .unwrap_or_default(),
                     i64
                 ),
                 (
                     "disk_index_failed_resizes",
-                    disk.map(|disk| disk.stats.index.failed_resizes.swap(0, Ordering::Relaxed))
+                    disk.map(|disk| disk
+                        .stats
+                        .index
+                        .failed_resizes
+                        .swap(0, Ordering::Relaxed))
                         .unwrap_or_default(),
                     i64
                 ),
                 (
                     "disk_index_max_size",
-                    disk.map(|disk| { disk.stats.index.max_size.swap(0, Ordering::Relaxed) })
-                        .unwrap_or_default(),
+                    disk.map(|disk| {
+                        disk.stats.index.max_size.swap(0, Ordering::Relaxed)
+                    })
+                    .unwrap_or_default(),
                     i64
                 ),
                 (
                     "disk_index_new_file_us",
-                    disk.map(|disk| disk.stats.index.new_file_us.swap(0, Ordering::Relaxed))
+                    disk.map(|disk| disk
+                        .stats
+                        .index
+                        .new_file_us
+                        .swap(0, Ordering::Relaxed))
                         .unwrap_or_default(),
                     i64
                 ),
                 (
                     "disk_index_resize_us",
-                    disk.map(|disk| disk.stats.index.resize_us.swap(0, Ordering::Relaxed))
+                    disk.map(|disk| disk
+                        .stats
+                        .index
+                        .resize_us
+                        .swap(0, Ordering::Relaxed))
                         .unwrap_or_default(),
                     i64
                 ),
                 (
                     "disk_index_flush_file_us",
-                    disk.map(|disk| disk.stats.index.flush_file_us.swap(0, Ordering::Relaxed))
+                    disk.map(|disk| disk
+                        .stats
+                        .index
+                        .flush_file_us
+                        .swap(0, Ordering::Relaxed))
                         .unwrap_or_default(),
                     i64
                 ),
                 (
                     "disk_index_index_file_size",
-                    disk.map(|disk| disk.stats.index.total_file_size.load(Ordering::Relaxed))
+                    disk.map(|disk| disk
+                        .stats
+                        .index
+                        .total_file_size
+                        .load(Ordering::Relaxed))
                         .unwrap_or_default(),
                     i64
                 ),
                 (
                     "disk_index_data_file_size",
-                    disk.map(|disk| disk.stats.data.total_file_size.load(Ordering::Relaxed))
+                    disk.map(|disk| disk
+                        .stats
+                        .data
+                        .total_file_size
+                        .load(Ordering::Relaxed))
                         .unwrap_or_default(),
                     i64
                 ),
                 (
                     "disk_index_data_file_count",
-                    disk.map(|disk| disk.stats.data.file_count.load(Ordering::Relaxed))
+                    disk.map(|disk| disk
+                        .stats
+                        .data
+                        .file_count
+                        .load(Ordering::Relaxed))
                         .unwrap_or_default(),
                     i64
                 ),
@@ -492,43 +541,69 @@ impl BucketMapHolderStats {
                 ),
                 (
                     "disk_index_flush_mmap_us",
-                    disk.map(|disk| disk.stats.index.mmap_us.swap(0, Ordering::Relaxed))
+                    disk.map(|disk| disk
+                        .stats
+                        .index
+                        .mmap_us
+                        .swap(0, Ordering::Relaxed))
                         .unwrap_or_default(),
                     i64
                 ),
                 (
                     "disk_data_resizes",
-                    disk.map(|disk| disk.stats.data.resizes.swap(0, Ordering::Relaxed))
+                    disk.map(|disk| disk
+                        .stats
+                        .data
+                        .resizes
+                        .swap(0, Ordering::Relaxed))
                         .unwrap_or_default(),
                     i64
                 ),
                 (
                     "disk_data_max_size",
-                    disk.map(|disk| { disk.stats.data.max_size.swap(0, Ordering::Relaxed) })
-                        .unwrap_or_default(),
+                    disk.map(|disk| {
+                        disk.stats.data.max_size.swap(0, Ordering::Relaxed)
+                    })
+                    .unwrap_or_default(),
                     i64
                 ),
                 (
                     "disk_data_new_file_us",
-                    disk.map(|disk| disk.stats.data.new_file_us.swap(0, Ordering::Relaxed))
+                    disk.map(|disk| disk
+                        .stats
+                        .data
+                        .new_file_us
+                        .swap(0, Ordering::Relaxed))
                         .unwrap_or_default(),
                     i64
                 ),
                 (
                     "disk_data_resize_us",
-                    disk.map(|disk| disk.stats.data.resize_us.swap(0, Ordering::Relaxed))
+                    disk.map(|disk| disk
+                        .stats
+                        .data
+                        .resize_us
+                        .swap(0, Ordering::Relaxed))
                         .unwrap_or_default(),
                     i64
                 ),
                 (
                     "disk_data_flush_file_us",
-                    disk.map(|disk| disk.stats.data.flush_file_us.swap(0, Ordering::Relaxed))
+                    disk.map(|disk| disk
+                        .stats
+                        .data
+                        .flush_file_us
+                        .swap(0, Ordering::Relaxed))
                         .unwrap_or_default(),
                     i64
                 ),
                 (
                     "disk_data_flush_mmap_us",
-                    disk.map(|disk| disk.stats.data.mmap_us.swap(0, Ordering::Relaxed))
+                    disk.map(|disk| disk
+                        .stats
+                        .data
+                        .mmap_us
+                        .swap(0, Ordering::Relaxed))
                         .unwrap_or_default(),
                     i64
                 ),
@@ -562,7 +637,8 @@ impl BucketMapHolderStats {
                 (
                     "bg_waiting_percent",
                     Self::calc_percent(
-                        self.bg_waiting_us.swap(0, Ordering::Relaxed) / US_PER_MS,
+                        self.bg_waiting_us.swap(0, Ordering::Relaxed)
+                            / US_PER_MS,
                         thread_time_elapsed_ms
                     ),
                     f64
@@ -570,7 +646,8 @@ impl BucketMapHolderStats {
                 (
                     "bg_throttling_wait_percent",
                     Self::calc_percent(
-                        self.bg_throttling_wait_us.swap(0, Ordering::Relaxed) / US_PER_MS,
+                        self.bg_throttling_wait_us.swap(0, Ordering::Relaxed)
+                            / US_PER_MS,
                         thread_time_elapsed_ms
                     ),
                     f64

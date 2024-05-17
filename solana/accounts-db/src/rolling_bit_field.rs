@@ -3,10 +3,10 @@
 //! Old key values are removed from the lesser values and do not accumulate.
 
 mod iterators;
-use {
-    bv::BitVec, iterators::RollingBitFieldOnesIter, solana_nohash_hasher::IntSet,
-    solana_sdk::clock::Slot,
-};
+use bv::BitVec;
+use iterators::RollingBitFieldOnesIter;
+use solana_nohash_hasher::IntSet;
+use solana_sdk::clock::Slot;
 
 #[derive(Debug, AbiExample, Clone)]
 pub struct RollingBitField {
@@ -131,7 +131,8 @@ impl RollingBitField {
                     self.max_exclusive = key + 1;
                 } else {
                     self.min = std::cmp::min(self.min, key);
-                    self.max_exclusive = std::cmp::max(self.max_exclusive, key + 1);
+                    self.max_exclusive =
+                        std::cmp::max(self.max_exclusive, key + 1);
                     assert!(
                         self.min + self.max_width >= self.max_exclusive,
                         "min: {}, max: {}, max_width: {}",
@@ -299,7 +300,12 @@ impl RollingBitField {
 
 #[cfg(test)]
 pub mod tests {
-    use {super::*, log::*, solana_measure::measure::Measure, std::collections::HashSet};
+    use std::collections::HashSet;
+
+    use log::*;
+    use solana_measure::measure::Measure;
+
+    use super::*;
 
     impl RollingBitField {
         pub fn clear(&mut self) {
@@ -699,14 +705,19 @@ pub mod tests {
                                         tester.bitfield.excess
                                     );*/
                                     assert!(
-                                        (reverse_slots && tester.bitfield.len() > 1)
+                                        (reverse_slots
+                                            && tester.bitfield.len() > 1)
                                             ^ tester.bitfield.excess.is_empty()
                                     );
                                 }
                                 if start > width * 2 {
-                                    assert!(!tester.bitfield.contains(&(start - width * 2)));
+                                    assert!(!tester
+                                        .bitfield
+                                        .contains(&(start - width * 2)));
                                 }
-                                assert!(!tester.bitfield.contains(&(start + width * 2)));
+                                assert!(!tester
+                                    .bitfield
+                                    .contains(&(start + width * 2)));
                                 let len = (slot2 - slot + 1) as usize;
                                 assert_eq!(tester.bitfield.len(), len);
                                 assert_eq!(tester.bitfield.count, len);
@@ -716,16 +727,21 @@ pub mod tests {
                                     let slot_use = maybe_reverse(slot);
                                     assert!(tester.remove(&slot_use));
                                     assert!(
-                                        (reverse_slots && !tester.bitfield.is_empty())
+                                        (reverse_slots
+                                            && !tester.bitfield.is_empty())
                                             ^ tester.bitfield.excess.is_empty()
                                     );
                                 }
                                 assert!(tester.bitfield.is_empty());
                                 assert_eq!(tester.bitfield.count, 0);
                                 if start > width * 2 {
-                                    assert!(!tester.bitfield.contains(&(start - width * 2)));
+                                    assert!(!tester
+                                        .bitfield
+                                        .contains(&(start - width * 2)));
                                 }
-                                assert!(!tester.bitfield.contains(&(start + width * 2)));
+                                assert!(!tester
+                                    .bitfield
+                                    .contains(&(start + width * 2)));
                             }
                         }
                     }

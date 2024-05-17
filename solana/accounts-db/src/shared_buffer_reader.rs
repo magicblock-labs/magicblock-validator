@@ -5,20 +5,20 @@
 //!  the buffer is recycled and reading ahead continues.
 //! A primary use case is the underlying reader being decompressing a file, which can be computationally expensive.
 //! The clients of SharedBufferReaders could be parallel instances which need access to the decompressed data.
-use {
-    crate::waitable_condvar::WaitableCondvar,
-    log::*,
-    solana_measure::measure::Measure,
-    std::{
-        io::*,
-        sync::{
-            atomic::{AtomicBool, Ordering},
-            Arc, Mutex, RwLock,
-        },
-        thread::{Builder, JoinHandle},
-        time::Duration,
+use std::{
+    io::*,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex, RwLock,
     },
+    thread::{Builder, JoinHandle},
+    time::Duration,
 };
+
+use log::*;
+use solana_measure::measure::Measure;
+
+use crate::waitable_condvar::WaitableCondvar;
 
 // tunable parameters:
 // # bytes allocated and populated by reading ahead
@@ -53,7 +53,11 @@ pub struct SharedBuffer {
 
 impl SharedBuffer {
     pub fn new<T: 'static + Read + std::marker::Send>(reader: T) -> Self {
-        Self::new_with_sizes(TOTAL_BUFFER_BUDGET_DEFAULT, CHUNK_SIZE_DEFAULT, reader)
+        Self::new_with_sizes(
+            TOTAL_BUFFER_BUDGET_DEFAULT,
+            CHUNK_SIZE_DEFAULT,
+            reader,
+        )
     }
     fn new_with_sizes<T: 'static + Read + std::marker::Send>(
         total_buffer_budget: usize,
@@ -74,12 +78,16 @@ impl SharedBuffer {
         let instance = Arc::new(instance);
         let bg_reader_data = instance.bg_reader_data.clone();
 
-        let handle = Builder::new()
-            .name("solCompFileRead".to_string())
-            .spawn(move || {
+        let handle = Builder::new().name("solCompFileRead".to_string()).spawn(
+            move || {
                 // importantly, this thread does NOT hold a refcount on the arc of 'instance'
-                bg_reader_data.read_entire_file_in_bg(reader, total_buffer_budget, chunk_size);
-            });
+                bg_reader_data.read_entire_file_in_bg(
+                    reader,
+                    total_buffer_budget,
+                    chunk_size,
+                );
+            },
+        );
         *instance.bg_reader_join_handle.lock().unwrap() = Some(handle.unwrap());
         Self { instance }
     }
@@ -102,7 +110,8 @@ pub struct SharedBufferReader {
 
 impl Drop for SharedBufferInternal {
     fn drop(&mut self) {
-        if let Some(handle) = self.bg_reader_join_handle.lock().unwrap().take() {
+        if let Some(handle) = self.bg_reader_join_handle.lock().unwrap().take()
+        {
             self.bg_reader_data.stop.store(true, Ordering::Relaxed);
             handle.join().unwrap();
         }
@@ -183,12 +192,15 @@ impl SharedBufferBgReader {
         let mut wait_us = 0;
         let mut total_bytes = 0;
         let mut error = SharedBufferReader::default_error();
-        let mut remaining_buffers_to_allocate = Self::num_buffers(total_buffer_budget, chunk_size);
+        let mut remaining_buffers_to_allocate =
+            Self::num_buffers(total_buffer_budget, chunk_size);
         loop {
             if self.stop.load(Ordering::Relaxed) {
                 // unsure what error is most appropriate here.
                 // bg reader was told to stop. All clients need to see that as an error if they try to read.
-                self.set_error(std::io::Error::from(std::io::ErrorKind::TimedOut));
+                self.set_error(std::io::Error::from(
+                    std::io::ErrorKind::TimedOut,
+                ));
                 break;
             }
             let mut buffers = self.buffers.write().unwrap();
@@ -205,7 +217,8 @@ impl SharedBufferBgReader {
                 Arc::new(vec![0; chunk_size])
             } else {
                 // nowhere to write, so wait for a buffer to become available
-                let mut wait_for_new_buffer = Measure::start("wait_for_new_buffer");
+                let mut wait_for_new_buffer =
+                    Measure::start("wait_for_new_buffer");
                 self.wait_for_new_buffer();
                 wait_for_new_buffer.stop();
                 wait_us += wait_for_new_buffer.as_us();
@@ -291,13 +304,15 @@ impl SharedBufferInternal {
     // when all of 'data' has been exhausted by clients, 1 client needs to transfer from 'newly_read_data' to 'data' one time.
     // returns true if any data was added to 'data'
     fn transfer_data_from_bg(&self) -> bool {
-        let mut from_lock = self.bg_reader_data.newly_read_data.write().unwrap();
+        let mut from_lock =
+            self.bg_reader_data.newly_read_data.write().unwrap();
         if from_lock.is_empty() {
             // no data available from bg
             return false;
         }
         // grab all data from bg
-        let mut newly_read_data: Vec<OneSharedBuffer> = std::mem::take(&mut *from_lock);
+        let mut newly_read_data: Vec<OneSharedBuffer> =
+            std::mem::take(&mut *from_lock);
         // append all data to fg
         let mut to_lock = self.data.write().unwrap();
         // from_lock has to be held until we have the to_lock lock. Otherwise, we can race with another reader and append to to_lock out of order.
@@ -356,9 +371,11 @@ impl SharedBufferReader {
         let mut indexes = self.instance.clients.write().unwrap();
         indexes[client_index] = new_buffer_index;
         drop(indexes);
-        let mut new_min = *self.instance.clients.read().unwrap().iter().min().unwrap();
+        let mut new_min =
+            *self.instance.clients.read().unwrap().iter().min().unwrap();
         // if new_min == usize::MAX, then every caller is done reading. We could shut down the bg reader and effectively drop everything.
-        new_min = std::cmp::min(new_min, self.instance.data.read().unwrap().len());
+        new_min =
+            std::cmp::min(new_min, self.instance.data.read().unwrap().len());
 
         // if any buffer indexes are now no longer used by any readers, then this reader was the last reader holding onto some indexes.
         if new_min > previous_buffer_index {
@@ -368,7 +385,10 @@ impl SharedBufferReader {
             for recycle in previous_buffer_index..new_min {
                 let remove = {
                     let mut data = self.instance.data.write().unwrap();
-                    std::mem::replace(&mut data[recycle], self.empty_buffer.clone())
+                    std::mem::replace(
+                        &mut data[recycle],
+                        self.empty_buffer.clone(),
+                    )
                 };
                 if remove.is_empty() {
                     continue; // another thread beat us swapping out this buffer, so nothing to recycle here
@@ -402,13 +422,16 @@ impl Read for SharedBufferReader {
             // this code is optimized for the common case where we can satisfy this entire read request from current_data without locks
             let source = &*self.current_data;
 
-            let remaining_source_len = source.len() - self.index_in_current_data;
-            let bytes_to_transfer = std::cmp::min(dest_len - offset_in_dest, remaining_source_len);
+            let remaining_source_len =
+                source.len() - self.index_in_current_data;
+            let bytes_to_transfer =
+                std::cmp::min(dest_len - offset_in_dest, remaining_source_len);
             // copy what we can
-            buf[offset_in_dest..(offset_in_dest + bytes_to_transfer)].copy_from_slice(
-                &source
-                    [self.index_in_current_data..(self.index_in_current_data + bytes_to_transfer)],
-            );
+            buf[offset_in_dest..(offset_in_dest + bytes_to_transfer)]
+                .copy_from_slice(
+                    &source[self.index_in_current_data
+                        ..(self.index_in_current_data + bytes_to_transfer)],
+                );
             self.index_in_current_data += bytes_to_transfer;
             offset_in_dest += bytes_to_transfer;
 
@@ -459,11 +482,15 @@ impl Read for SharedBufferReader {
                     // Since the bg reader could not satisfy our read, now is a good time to check to see if the bg reader encountered an error.
                     // Note this is a write lock because we want to get the actual error detected and return it here and avoid races with other readers if we tried a read and then subsequent write lock.
                     // This would be simpler if I could clone an io error.
-                    let mut error = instance.bg_reader_data.error.write().unwrap();
+                    let mut error =
+                        instance.bg_reader_data.error.write().unwrap();
                     if error.is_err() {
                         // replace the current error (with AN error instead of ok)
                         // return the original error
-                        return std::mem::replace(&mut *error, Err(Self::default_error()));
+                        return std::mem::replace(
+                            &mut *error,
+                            Err(Self::default_error()),
+                        );
                     }
                 }
 
@@ -480,11 +507,10 @@ impl Read for SharedBufferReader {
 
 #[cfg(test)]
 pub mod tests {
-    use {
-        super::*,
-        crossbeam_channel::{unbounded, Receiver},
-        rayon::prelude::*,
-    };
+    use crossbeam_channel::{unbounded, Receiver};
+    use rayon::prelude::*;
+
+    use super::*;
 
     type SimpleReaderReceiverType = Receiver<(Vec<u8>, Option<std::io::Error>)>;
     struct SimpleReader {
@@ -548,7 +574,9 @@ pub mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "SharedBufferReaders must all be created before the first one reads")]
+    #[should_panic(
+        expected = "SharedBufferReaders must all be created before the first one reads"
+    )]
     fn test_shared_buffer_start_too_late() {
         solana_logger::setup();
         let (sender, receiver) = unbounded();
@@ -746,7 +774,8 @@ pub mod tests {
         let file = SimpleReader::new(receiver);
         let budget_sz = 100;
         let chunk_sz = 10;
-        let shared_buffer = SharedBuffer::new_with_sizes(budget_sz, chunk_sz, file);
+        let shared_buffer =
+            SharedBuffer::new_with_sizes(budget_sz, chunk_sz, file);
         let size = budget_sz * 2;
         let mut reader = SharedBufferReader::new(&shared_buffer);
         // with the Read trait, we don't know we are eof until we get Ok(0) from the underlying reader.
@@ -770,8 +799,12 @@ pub mod tests {
         assert_eq!(sent, data);
     }
 
-    fn adjusted_buffer_size(total_buffer_budget: usize, chunk_size: usize) -> usize {
-        let num_buffers = SharedBufferBgReader::num_buffers(total_buffer_budget, chunk_size);
+    fn adjusted_buffer_size(
+        total_buffer_budget: usize,
+        chunk_size: usize,
+    ) -> usize {
+        let num_buffers =
+            SharedBufferBgReader::num_buffers(total_buffer_budget, chunk_size);
         num_buffers * chunk_size
     }
 
@@ -794,7 +827,8 @@ pub mod tests {
                 equivalent_buffer_sz * 2,
             ] {
                 for read_sz in [0, 1, chunk_sz - 1, chunk_sz, chunk_sz + 1] {
-                    let read_sz = if read_sz > 0 { Some(read_sz) } else { None };
+                    let read_sz =
+                        if read_sz > 0 { Some(read_sz) } else { None };
                     for reader_ct in 1..=3 {
                         for data_size in [
                             0,
@@ -812,13 +846,16 @@ pub mod tests {
                             budget_sz * 2 - 1,
                             budget_sz * 2 + 1,
                         ] {
-                            let adjusted_budget_sz = adjusted_buffer_size(budget_sz, chunk_sz);
+                            let adjusted_budget_sz =
+                                adjusted_buffer_size(budget_sz, chunk_sz);
                             let done_signal = vec![];
                             let (sender, receiver) = unbounded();
                             let file = SimpleReader::new(receiver);
-                            let shared_buffer =
-                                SharedBuffer::new_with_sizes(budget_sz, chunk_sz, file);
-                            let mut reader = SharedBufferReader::new(&shared_buffer);
+                            let shared_buffer = SharedBuffer::new_with_sizes(
+                                budget_sz, chunk_sz, file,
+                            );
+                            let mut reader =
+                                SharedBufferReader::new(&shared_buffer);
                             // with the Read trait, we don't know we are eof until we get Ok(0) from the underlying reader.
                             // This can't happen until we have enough space to store another chunk, thus we try to read another chunk and see the Ok(0) returned.
                             // Thus, we have to use data_size < adjusted_budget_sz here instead of <=
@@ -841,12 +878,18 @@ pub mod tests {
                             let handle = if parallel_reader {
                                 // Avoid to create more than the number of threads available in the
                                 // current rayon threadpool. Deadlock could happen otherwise.
-                                let threads = std::cmp::min(8, rayon::current_num_threads());
+                                let threads = std::cmp::min(
+                                    8,
+                                    rayon::current_num_threads(),
+                                );
                                 Some({
                                     let parallel = (0..threads)
                                         .map(|_| {
                                             // create before any reading starts
-                                            let reader_ = SharedBufferReader::new(&shared_buffer);
+                                            let reader_ =
+                                                SharedBufferReader::new(
+                                                    &shared_buffer,
+                                                );
                                             let sent_ = sent.clone();
                                             (reader_, sent_)
                                         })
@@ -856,7 +899,10 @@ pub mod tests {
                                         .spawn(move || {
                                             parallel.into_par_iter().for_each(
                                                 |(mut reader, sent)| {
-                                                    let data = test_read_all(&mut reader, read_sz);
+                                                    let data = test_read_all(
+                                                        &mut reader,
+                                                        read_sz,
+                                                    );
                                                     assert_eq!(
                                                         sent,
                                                         data,
@@ -898,7 +944,10 @@ pub mod tests {
                             // a 2nd reader would stall us if we exceed the total buffer size
                             if second_reader {
                                 // #2 will read valid bytes first and succeed, then get error
-                                let data = test_read_all(&mut reader2.unwrap(), read_sz);
+                                let data = test_read_all(
+                                    &mut reader2.unwrap(),
+                                    read_sz,
+                                );
                                 assert_eq!(sent, data);
                             }
                             if parallel_reader {

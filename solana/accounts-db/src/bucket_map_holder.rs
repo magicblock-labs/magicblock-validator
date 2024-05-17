@@ -1,36 +1,40 @@
-use {
-    crate::{
-        accounts_index::{AccountsIndexConfig, DiskIndexValue, IndexLimitMb, IndexValue},
-        bucket_map_holder_stats::BucketMapHolderStats,
-        in_mem_accounts_index::{InMemAccountsIndex, StartupStats},
-        waitable_condvar::WaitableCondvar,
+use std::{
+    fmt::Debug,
+    marker::PhantomData,
+    sync::{
+        atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
+        Arc,
     },
-    solana_bucket_map::bucket_map::{BucketMap, BucketMapConfig},
-    solana_measure::measure::Measure,
-    solana_sdk::{
-        clock::{Slot, DEFAULT_MS_PER_SLOT},
-        timing::AtomicInterval,
+    time::Duration,
+};
+
+use solana_bucket_map::bucket_map::{BucketMap, BucketMapConfig};
+use solana_measure::measure::Measure;
+use solana_sdk::{
+    clock::{Slot, DEFAULT_MS_PER_SLOT},
+    timing::AtomicInterval,
+};
+
+use crate::{
+    accounts_index::{
+        AccountsIndexConfig, DiskIndexValue, IndexLimitMb, IndexValue,
     },
-    std::{
-        fmt::Debug,
-        marker::PhantomData,
-        sync::{
-            atomic::{AtomicBool, AtomicU8, AtomicUsize, Ordering},
-            Arc,
-        },
-        time::Duration,
-    },
+    bucket_map_holder_stats::BucketMapHolderStats,
+    in_mem_accounts_index::{InMemAccountsIndex, StartupStats},
+    waitable_condvar::WaitableCondvar,
 };
 pub type Age = u8;
 pub type AtomicAge = AtomicU8;
-const _: () = assert!(std::mem::size_of::<Age>() == std::mem::size_of::<AtomicAge>());
+const _: () =
+    assert!(std::mem::size_of::<Age>() == std::mem::size_of::<AtomicAge>());
 
 const AGE_MS: u64 = DEFAULT_MS_PER_SLOT; // match one age per slot time
 
 // 10 GB limit for in-mem idx. In practice, we don't get this high. This tunes how aggressively to save items we expect to use soon.
 pub const DEFAULT_DISK_INDEX: Option<usize> = Some(10_000);
 
-pub struct BucketMapHolder<T: IndexValue, U: DiskIndexValue + From<T> + Into<T>> {
+pub struct BucketMapHolder<T: IndexValue, U: DiskIndexValue + From<T> + Into<T>>
+{
     pub disk: Option<BucketMap<(Slot, U)>>,
 
     pub count_buckets_flushed: AtomicUsize,
@@ -74,14 +78,18 @@ pub struct BucketMapHolder<T: IndexValue, U: DiskIndexValue + From<T> + Into<T>>
     pub(crate) startup_stats: Arc<StartupStats>,
 }
 
-impl<T: IndexValue, U: DiskIndexValue + From<T> + Into<T>> Debug for BucketMapHolder<T, U> {
+impl<T: IndexValue, U: DiskIndexValue + From<T> + Into<T>> Debug
+    for BucketMapHolder<T, U>
+{
     fn fmt(&self, _f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         Ok(())
     }
 }
 
 #[allow(clippy::mutex_atomic)]
-impl<T: IndexValue, U: DiskIndexValue + From<T> + Into<T>> BucketMapHolder<T, U> {
+impl<T: IndexValue, U: DiskIndexValue + From<T> + Into<T>>
+    BucketMapHolder<T, U>
+{
     /// is the accounts index using disk as a backing store
     pub fn is_disk_index_enabled(&self) -> bool {
         self.disk.is_some()
@@ -160,21 +168,29 @@ impl<T: IndexValue, U: DiskIndexValue + From<T> + Into<T>> BucketMapHolder<T, U>
     }
 
     pub fn bucket_flushed_at_current_age(&self, can_advance_age: bool) {
-        let count_buckets_flushed = 1 + self.count_buckets_flushed.fetch_add(1, Ordering::AcqRel);
+        let count_buckets_flushed =
+            1 + self.count_buckets_flushed.fetch_add(1, Ordering::AcqRel);
         if can_advance_age {
             self.maybe_advance_age_internal(
-                self.all_buckets_flushed_at_current_age_internal(count_buckets_flushed),
+                self.all_buckets_flushed_at_current_age_internal(
+                    count_buckets_flushed,
+                ),
             );
         }
     }
 
     /// have all buckets been flushed at the current age?
     pub fn all_buckets_flushed_at_current_age(&self) -> bool {
-        self.all_buckets_flushed_at_current_age_internal(self.count_buckets_flushed())
+        self.all_buckets_flushed_at_current_age_internal(
+            self.count_buckets_flushed(),
+        )
     }
 
     /// have all buckets been flushed at the current age?
-    fn all_buckets_flushed_at_current_age_internal(&self, count_buckets_flushed: usize) -> bool {
+    fn all_buckets_flushed_at_current_age_internal(
+        &self,
+        count_buckets_flushed: usize,
+    ) -> bool {
         count_buckets_flushed >= self.bins
     }
 
@@ -184,13 +200,19 @@ impl<T: IndexValue, U: DiskIndexValue + From<T> + Into<T>> BucketMapHolder<T, U>
 
     /// if all buckets are flushed at the current age and time has elapsed, then advance age
     pub fn maybe_advance_age(&self) -> bool {
-        self.maybe_advance_age_internal(self.all_buckets_flushed_at_current_age())
+        self.maybe_advance_age_internal(
+            self.all_buckets_flushed_at_current_age(),
+        )
     }
 
     /// if all buckets are flushed at the current age and time has elapsed, then advance age
-    fn maybe_advance_age_internal(&self, all_buckets_flushed_at_current_age: bool) -> bool {
+    fn maybe_advance_age_internal(
+        &self,
+        all_buckets_flushed_at_current_age: bool,
+    ) -> bool {
         // call has_age_interval_elapsed last since calling it modifies state on success
-        if all_buckets_flushed_at_current_age && self.has_age_interval_elapsed() {
+        if all_buckets_flushed_at_current_age && self.has_age_interval_elapsed()
+        {
             self.increment_age();
             true
         } else {
@@ -198,7 +220,11 @@ impl<T: IndexValue, U: DiskIndexValue + From<T> + Into<T>> BucketMapHolder<T, U>
         }
     }
 
-    pub fn new(bins: usize, config: &Option<AccountsIndexConfig>, threads: usize) -> Self {
+    pub fn new(
+        bins: usize,
+        config: &Option<AccountsIndexConfig>,
+        threads: usize,
+    ) -> Self {
         const DEFAULT_AGE_TO_STAY_IN_CACHE: Age = 5;
         let ages_to_stay_in_cache = config
             .as_ref()
@@ -207,11 +233,12 @@ impl<T: IndexValue, U: DiskIndexValue + From<T> + Into<T>> BucketMapHolder<T, U>
 
         let mut bucket_config = BucketMapConfig::new(bins);
         bucket_config.drives = config.as_ref().and_then(|config| {
-            bucket_config.restart_config_file = config.drives.as_ref().and_then(|drives| {
-                drives
-                    .first()
-                    .map(|drive| drive.join("accounts_index_restart"))
-            });
+            bucket_config.restart_config_file =
+                config.drives.as_ref().and_then(|drives| {
+                    drives
+                        .first()
+                        .map(|drive| drive.join("accounts_index_restart"))
+                });
             config.drives.clone()
         });
 
@@ -233,8 +260,9 @@ impl<T: IndexValue, U: DiskIndexValue + From<T> + Into<T>> BucketMapHolder<T, U>
                     .map(|config| config.started_from_validator)
                     .unwrap_or_default()
                 {
-                    if let Ok(_limit) = std::env::var("SOLANA_TEST_ACCOUNTS_INDEX_MEMORY_LIMIT_MB")
-                    {
+                    if let Ok(_limit) = std::env::var(
+                        "SOLANA_TEST_ACCOUNTS_INDEX_MEMORY_LIMIT_MB",
+                    ) {
                         // Note this env var means the opposite of the default. The default now is disk index is on.
                         // So, if this env var is set, DO NOT allocate with disk buckets if mem budget was not set, we were NOT started from validator, and env var was set
                         // we do not want the env var to have an effect when running the validator (only tests, benches, etc.)
@@ -299,15 +327,21 @@ impl<T: IndexValue, U: DiskIndexValue + From<T> + Into<T>> BucketMapHolder<T, U>
         bins_flushed: u64,
     ) -> Option<u64> {
         let target_percent = 90; // aim to finish in 90% of the allocated time
-        let remaining_ms = (interval_ms * target_percent / 100).saturating_sub(elapsed_ms);
+        let remaining_ms =
+            (interval_ms * target_percent / 100).saturating_sub(elapsed_ms);
         let remaining_bins = (self.bins as u64).saturating_sub(bins_flushed);
-        if remaining_bins == 0 || remaining_ms == 0 || elapsed_ms == 0 || bins_flushed == 0 {
+        if remaining_bins == 0
+            || remaining_ms == 0
+            || elapsed_ms == 0
+            || bins_flushed == 0
+        {
             // any of these conditions result in 'do not wait due to progress'
             return None;
         }
         let ms_per_s = 1_000;
         let rate_bins_per_s = bins_flushed * ms_per_s / elapsed_ms;
-        let expected_bins_processed_in_remaining_time = rate_bins_per_s * remaining_ms / ms_per_s;
+        let expected_bins_processed_in_remaining_time =
+            rate_bins_per_s * remaining_ms / ms_per_s;
         if expected_bins_processed_in_remaining_time > remaining_bins {
             // wait because we predict will finish prior to target
             Some(1)
@@ -355,7 +389,8 @@ impl<T: IndexValue, U: DiskIndexValue + From<T> + Into<T>> BucketMapHolder<T, U>
                 self.wait_dirty_or_aged.wait_timeout(Duration::from_millis(
                     self.stats.remaining_until_next_interval(),
                 ));
-            } else if self.should_thread_sleep() || throttling_wait_ms.is_some() {
+            } else if self.should_thread_sleep() || throttling_wait_ms.is_some()
+            {
                 let mut wait = std::cmp::min(
                     self.age_timer
                         .remaining_until_next_interval(self.age_interval_ms()),
@@ -366,9 +401,10 @@ impl<T: IndexValue, U: DiskIndexValue + From<T> + Into<T>> BucketMapHolder<T, U>
                     wait = wait.max(1);
                 }
                 if let Some(throttling_wait_ms) = throttling_wait_ms {
-                    self.stats
-                        .bg_throttling_wait_us
-                        .fetch_add(throttling_wait_ms * 1000, Ordering::Relaxed);
+                    self.stats.bg_throttling_wait_us.fetch_add(
+                        throttling_wait_ms * 1000,
+                        Ordering::Relaxed,
+                    );
                     wait = std::cmp::min(throttling_wait_ms, wait);
                 }
 
@@ -412,13 +448,21 @@ impl<T: IndexValue, U: DiskIndexValue + From<T> + Into<T>> BucketMapHolder<T, U>
 
 #[cfg(test)]
 pub mod tests {
-    use {super::*, rayon::prelude::*, std::time::Instant};
+    use std::time::Instant;
+
+    use rayon::prelude::*;
+
+    use super::*;
 
     #[test]
     fn test_next_bucket_to_flush() {
         solana_logger::setup();
         let bins = 4;
-        let test = BucketMapHolder::<u64, u64>::new(bins, &Some(AccountsIndexConfig::default()), 1);
+        let test = BucketMapHolder::<u64, u64>::new(
+            bins,
+            &Some(AccountsIndexConfig::default()),
+            1,
+        );
         let visited = (0..bins)
             .map(|_| AtomicUsize::default())
             .collect::<Vec<_>>();
@@ -441,7 +485,11 @@ pub mod tests {
     fn test_ages() {
         solana_logger::setup();
         let bins = 4;
-        let test = BucketMapHolder::<u64, u64>::new(bins, &Some(AccountsIndexConfig::default()), 1);
+        let test = BucketMapHolder::<u64, u64>::new(
+            bins,
+            &Some(AccountsIndexConfig::default()),
+            1,
+        );
         assert_eq!(0, test.current_age());
         assert_eq!(test.ages_to_stay_in_cache, test.future_age_to_flush(false));
         assert_eq!(Age::MAX, test.future_age_to_flush(true));
@@ -461,7 +509,11 @@ pub mod tests {
     fn test_age_increment() {
         solana_logger::setup();
         let bins = 4;
-        let test = BucketMapHolder::<u64, u64>::new(bins, &Some(AccountsIndexConfig::default()), 1);
+        let test = BucketMapHolder::<u64, u64>::new(
+            bins,
+            &Some(AccountsIndexConfig::default()),
+            1,
+        );
         for age in 0..513 {
             assert_eq!(test.current_age(), (age % 256) as Age);
 
@@ -482,28 +534,48 @@ pub mod tests {
     fn test_throttle() {
         solana_logger::setup();
         let bins = 128;
-        let test = BucketMapHolder::<u64, u64>::new(bins, &Some(AccountsIndexConfig::default()), 1);
+        let test = BucketMapHolder::<u64, u64>::new(
+            bins,
+            &Some(AccountsIndexConfig::default()),
+            1,
+        );
         let bins = test.bins as u64;
         let interval_ms = test.age_interval_ms();
         // 90% of time elapsed, all but 1 bins flushed, should not wait since we'll end up right on time
         let elapsed_ms = interval_ms * 89 / 100;
         let bins_flushed = bins - 1;
-        let result = test.throttling_wait_ms_internal(interval_ms, elapsed_ms, bins_flushed);
+        let result = test.throttling_wait_ms_internal(
+            interval_ms,
+            elapsed_ms,
+            bins_flushed,
+        );
         assert_eq!(result, None);
         // 10% of time, all bins but 1, should wait
         let elapsed_ms = interval_ms / 10;
         let bins_flushed = bins - 1;
-        let result = test.throttling_wait_ms_internal(interval_ms, elapsed_ms, bins_flushed);
+        let result = test.throttling_wait_ms_internal(
+            interval_ms,
+            elapsed_ms,
+            bins_flushed,
+        );
         assert_eq!(result, Some(1));
         // 5% of time, 8% of bins, should wait. target is 90%. These #s roughly work
         let elapsed_ms = interval_ms * 5 / 100;
         let bins_flushed = bins * 8 / 100;
-        let result = test.throttling_wait_ms_internal(interval_ms, elapsed_ms, bins_flushed);
+        let result = test.throttling_wait_ms_internal(
+            interval_ms,
+            elapsed_ms,
+            bins_flushed,
+        );
         assert_eq!(result, Some(1));
         // 11% of time, 12% of bins, should NOT wait. target is 90%. These #s roughly work
         let elapsed_ms = interval_ms * 11 / 100;
         let bins_flushed = bins * 12 / 100;
-        let result = test.throttling_wait_ms_internal(interval_ms, elapsed_ms, bins_flushed);
+        let result = test.throttling_wait_ms_internal(
+            interval_ms,
+            elapsed_ms,
+            bins_flushed,
+        );
         assert_eq!(result, None);
     }
 
@@ -522,7 +594,11 @@ pub mod tests {
     fn test_age_time() {
         solana_logger::setup();
         let bins = 1;
-        let test = BucketMapHolder::<u64, u64>::new(bins, &Some(AccountsIndexConfig::default()), 1);
+        let test = BucketMapHolder::<u64, u64>::new(
+            bins,
+            &Some(AccountsIndexConfig::default()),
+            1,
+        );
         let threads = 2;
         let time = AGE_MS * 8 / 3;
         let expected = (time / AGE_MS) as Age;
@@ -554,7 +630,11 @@ pub mod tests {
     fn test_age_broad() {
         solana_logger::setup();
         let bins = 4;
-        let test = BucketMapHolder::<u64, u64>::new(bins, &Some(AccountsIndexConfig::default()), 1);
+        let test = BucketMapHolder::<u64, u64>::new(
+            bins,
+            &Some(AccountsIndexConfig::default()),
+            1,
+        );
         assert_eq!(test.current_age(), 0);
         for _ in 0..bins {
             assert!(!test.all_buckets_flushed_at_current_age());

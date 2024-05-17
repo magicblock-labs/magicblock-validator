@@ -34,16 +34,15 @@ impl WaitableCondvar {
 
 #[cfg(test)]
 pub mod tests {
-    use {
-        super::*,
-        std::{
-            sync::{
-                atomic::{AtomicBool, Ordering},
-                Arc,
-            },
-            thread::Builder,
+    use std::{
+        sync::{
+            atomic::{AtomicBool, Ordering},
+            Arc,
         },
+        thread::Builder,
     };
+
+    use super::*;
     #[ignore]
     #[test]
     fn test_waitable_condvar() {

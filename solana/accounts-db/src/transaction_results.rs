@@ -1,17 +1,17 @@
 // Re-exported since these have moved to `solana_sdk`.
+use solana_program_runtime::loaded_programs::LoadedProgramsForTxBatch;
 #[deprecated(
     since = "1.18.0",
     note = "Please use `solana_sdk::inner_instruction` types instead"
 )]
-pub use solana_sdk::inner_instruction::{InnerInstruction, InnerInstructionsList};
-use {
-    solana_program_runtime::loaded_programs::LoadedProgramsForTxBatch,
-    solana_sdk::{
-        nonce_info::{NonceFull, NonceInfo},
-        rent_debits::RentDebits,
-        transaction::{self, TransactionError},
-        transaction_context::TransactionReturnData,
-    },
+pub use solana_sdk::inner_instruction::{
+    InnerInstruction, InnerInstructionsList,
+};
+use solana_sdk::{
+    nonce_info::{NonceFull, NonceInfo},
+    rent_debits::RentDebits,
+    transaction::{self, TransactionError},
+    transaction_context::TransactionReturnData,
 };
 
 pub struct TransactionResults {
@@ -100,7 +100,9 @@ impl From<&NonceFull> for DurableNonceFee {
 impl DurableNonceFee {
     pub fn lamports_per_signature(&self) -> Option<u64> {
         match self {
-            Self::Valid(lamports_per_signature) => Some(*lamports_per_signature),
+            Self::Valid(lamports_per_signature) => {
+                Some(*lamports_per_signature)
+            }
             Self::Invalid => None,
         }
     }

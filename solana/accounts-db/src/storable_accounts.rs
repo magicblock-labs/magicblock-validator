@@ -1,7 +1,8 @@
 //! trait for abstracting underlying storage of pubkey and account pairs to be written
-use {
-    crate::{account_storage::meta::StoredAccountMeta, accounts_hash::AccountHash},
-    solana_sdk::{account::ReadableAccount, clock::Slot, pubkey::Pubkey},
+use solana_sdk::{account::ReadableAccount, clock::Slot, pubkey::Pubkey};
+
+use crate::{
+    account_storage::meta::StoredAccountMeta, accounts_hash::AccountHash,
 };
 
 /// abstract access to pubkey, account, slot, target_slot of either:
@@ -68,7 +69,9 @@ pub struct StorableAccountsMovingSlots<'a, T: ReadableAccount + Sync> {
     pub old_slot: Slot,
 }
 
-impl<'a, T: ReadableAccount + Sync> StorableAccounts<'a, T> for StorableAccountsMovingSlots<'a, T> {
+impl<'a, T: ReadableAccount + Sync> StorableAccounts<'a, T>
+    for StorableAccountsMovingSlots<'a, T>
+{
     fn pubkey(&self, index: usize) -> &Pubkey {
         self.accounts[index].0
     }
@@ -87,7 +90,9 @@ impl<'a, T: ReadableAccount + Sync> StorableAccounts<'a, T> for StorableAccounts
     }
 }
 
-impl<'a, T: ReadableAccount + Sync> StorableAccounts<'a, T> for (Slot, &'a [(&'a Pubkey, &'a T)]) {
+impl<'a, T: ReadableAccount + Sync> StorableAccounts<'a, T>
+    for (Slot, &'a [(&'a Pubkey, &'a T)])
+{
     fn pubkey(&self, index: usize) -> &Pubkey {
         self.1[index].0
     }
@@ -106,7 +111,9 @@ impl<'a, T: ReadableAccount + Sync> StorableAccounts<'a, T> for (Slot, &'a [(&'a
     }
 }
 
-impl<'a, T: ReadableAccount + Sync> StorableAccounts<'a, T> for (Slot, &'a [&'a (Pubkey, T)]) {
+impl<'a, T: ReadableAccount + Sync> StorableAccounts<'a, T>
+    for (Slot, &'a [&'a (Pubkey, T)])
+{
     fn pubkey(&self, index: usize) -> &Pubkey {
         &self.1[index].0
     }
@@ -125,7 +132,9 @@ impl<'a, T: ReadableAccount + Sync> StorableAccounts<'a, T> for (Slot, &'a [&'a 
     }
 }
 
-impl<'a> StorableAccounts<'a, StoredAccountMeta<'a>> for (Slot, &'a [&'a StoredAccountMeta<'a>]) {
+impl<'a> StorableAccounts<'a, StoredAccountMeta<'a>>
+    for (Slot, &'a [&'a StoredAccountMeta<'a>])
+{
     fn pubkey(&self, index: usize) -> &Pubkey {
         self.account(index).pubkey()
     }
@@ -201,7 +210,9 @@ impl<'a> StorableAccountsBySlot<'a> {
     fn find_internal_index(&self, index: usize) -> (usize, usize) {
         // search offsets for the accounts slice that contains 'index'.
         // This could be a binary search.
-        for (offset_index, next_offset) in self.starting_offsets.iter().enumerate() {
+        for (offset_index, next_offset) in
+            self.starting_offsets.iter().enumerate()
+        {
             if next_offset > &index {
                 // offset of prior entry
                 let prior_offset = if offset_index > 0 {
@@ -216,7 +227,9 @@ impl<'a> StorableAccountsBySlot<'a> {
     }
 }
 
-impl<'a> StorableAccounts<'a, StoredAccountMeta<'a>> for StorableAccountsBySlot<'a> {
+impl<'a> StorableAccounts<'a, StoredAccountMeta<'a>>
+    for StorableAccountsBySlot<'a>
+{
     fn pubkey(&self, index: usize) -> &Pubkey {
         self.account(index).pubkey()
     }
@@ -282,16 +295,15 @@ impl<'a> StorableAccounts<'a, StoredAccountMeta<'a>>
 
 #[cfg(test)]
 pub mod tests {
-    use {
-        super::*,
-        crate::{
-            account_storage::meta::{AccountMeta, StoredAccountMeta, StoredMeta},
-            append_vec::AppendVecStoredAccountMeta,
-        },
-        solana_sdk::{
-            account::{accounts_equal, AccountSharedData, WritableAccount},
-            hash::Hash,
-        },
+    use solana_sdk::{
+        account::{accounts_equal, AccountSharedData, WritableAccount},
+        hash::Hash,
+    };
+
+    use super::*;
+    use crate::{
+        account_storage::meta::{AccountMeta, StoredAccountMeta, StoredMeta},
+        append_vec::AppendVecStoredAccountMeta,
     };
 
     fn compare<
@@ -334,14 +346,15 @@ pub mod tests {
         let offset = 99;
         let stored_size = 101;
         let hash = AccountHash(Hash::new_unique());
-        let stored_account = StoredAccountMeta::AppendVec(AppendVecStoredAccountMeta {
-            meta: &meta,
-            account_meta: &account_meta,
-            data: &data,
-            offset,
-            stored_size,
-            hash: &hash,
-        });
+        let stored_account =
+            StoredAccountMeta::AppendVec(AppendVecStoredAccountMeta {
+                meta: &meta,
+                account_meta: &account_meta,
+                data: &data,
+                offset,
+                stored_size,
+                hash: &hash,
+            });
 
         let test3 = (slot, &vec![&stored_account, &stored_account][..], slot);
         assert!(!test3.contains_multiple_slots());
@@ -389,29 +402,32 @@ pub mod tests {
                         let offset = 99;
                         let stored_size = 101;
                         let raw = &raw[entry as usize];
-                        raw2.push(StoredAccountMeta::AppendVec(AppendVecStoredAccountMeta {
-                            meta: &raw.3,
-                            account_meta: &raw.4,
-                            data: &data,
-                            offset,
-                            stored_size,
-                            hash: &hash,
-                        }));
+                        raw2.push(StoredAccountMeta::AppendVec(
+                            AppendVecStoredAccountMeta {
+                                meta: &raw.3,
+                                account_meta: &raw.4,
+                                data: &data,
+                                offset,
+                                stored_size,
+                                hash: &hash,
+                            },
+                        ));
                         raw4.push((raw.0, raw.1.clone()));
                     }
 
                     let mut two = Vec::new();
                     let mut three = Vec::new();
                     let mut four_pubkey_and_account_value = Vec::new();
-                    raw.iter()
-                        .zip(raw2.iter().zip(raw4.iter()))
-                        .for_each(|(raw, (raw2, raw4))| {
+                    raw.iter().zip(raw2.iter().zip(raw4.iter())).for_each(
+                        |(raw, (raw2, raw4))| {
                             two.push((&raw.0, &raw.1)); // 2 item tuple
                             three.push(raw2);
                             four_pubkey_and_account_value.push(raw4);
-                        });
+                        },
+                    );
                     let test2 = (target_slot, &two[..]);
-                    let test4 = (target_slot, &four_pubkey_and_account_value[..]);
+                    let test4 =
+                        (target_slot, &four_pubkey_and_account_value[..]);
 
                     let source_slot = starting_slot % max_slots;
                     let test3 = (target_slot, &three[..], source_slot);
@@ -422,7 +438,8 @@ pub mod tests {
                         old_slot,
                     };
                     let for_slice = [(old_slot, &three[..])];
-                    let test_moving_slots2 = StorableAccountsBySlot::new(target_slot, &for_slice);
+                    let test_moving_slots2 =
+                        StorableAccountsBySlot::new(target_slot, &for_slice);
                     compare(&test2, &test3);
                     compare(&test2, &test4);
                     compare(&test2, &test_moving_slots);
@@ -488,14 +505,16 @@ pub mod tests {
             for entry in 0..entries {
                 let offset = 99;
                 let stored_size = 101;
-                raw2.push(StoredAccountMeta::AppendVec(AppendVecStoredAccountMeta {
-                    meta: &raw[entry as usize].2,
-                    account_meta: &raw[entry as usize].3,
-                    data: &data,
-                    offset,
-                    stored_size,
-                    hash: &hashes[entry as usize],
-                }));
+                raw2.push(StoredAccountMeta::AppendVec(
+                    AppendVecStoredAccountMeta {
+                        meta: &raw[entry as usize].2,
+                        account_meta: &raw[entry as usize].3,
+                        data: &data,
+                        offset,
+                        stored_size,
+                        hash: &hashes[entry as usize],
+                    },
+                ));
             }
             let raw2_refs = raw2.iter().collect::<Vec<_>>();
 
@@ -503,10 +522,13 @@ pub mod tests {
             for entries0 in 0..=entries {
                 let remaining1 = entries.saturating_sub(entries0);
                 for entries1 in 0..=remaining1 {
-                    let remaining2 = entries.saturating_sub(entries0 + entries1);
+                    let remaining2 =
+                        entries.saturating_sub(entries0 + entries1);
                     for entries2 in 0..=remaining2 {
-                        let remaining3 = entries.saturating_sub(entries0 + entries1 + entries2);
-                        let entries_by_level = [entries0, entries1, entries2, remaining3];
+                        let remaining3 = entries
+                            .saturating_sub(entries0 + entries1 + entries2);
+                        let entries_by_level =
+                            [entries0, entries1, entries2, remaining3];
                         let mut overall_index = 0;
                         let mut expected_slots = Vec::default();
                         let slots_and_accounts = entries_by_level
@@ -516,25 +538,46 @@ pub mod tests {
                                 let slot = slot as Slot;
                                 let count = *count as usize;
                                 (overall_index < raw2.len()).then(|| {
-                                    let range = overall_index..(overall_index + count);
+                                    let range =
+                                        overall_index..(overall_index + count);
                                     let result = &raw2_refs[range.clone()];
-                                    range.for_each(|_| expected_slots.push(slot));
+                                    range.for_each(|_| {
+                                        expected_slots.push(slot)
+                                    });
                                     overall_index += count;
                                     (slot, result)
                                 })
                             })
                             .collect::<Vec<_>>();
-                        let storable = StorableAccountsBySlot::new(99, &slots_and_accounts[..]);
+                        let storable = StorableAccountsBySlot::new(
+                            99,
+                            &slots_and_accounts[..],
+                        );
                         assert!(storable.has_hash_and_write_version());
                         assert_eq!(99, storable.target_slot());
-                        assert_eq!(entries0 != entries, storable.contains_multiple_slots());
+                        assert_eq!(
+                            entries0 != entries,
+                            storable.contains_multiple_slots()
+                        );
                         (0..entries).for_each(|index| {
                             let index = index as usize;
                             assert_eq!(storable.account(index), &raw2[index]);
-                            assert_eq!(storable.pubkey(index), raw2[index].pubkey());
-                            assert_eq!(storable.hash(index), raw2[index].hash());
-                            assert_eq!(storable.slot(index), expected_slots[index]);
-                            assert_eq!(storable.write_version(index), raw2[index].write_version());
+                            assert_eq!(
+                                storable.pubkey(index),
+                                raw2[index].pubkey()
+                            );
+                            assert_eq!(
+                                storable.hash(index),
+                                raw2[index].hash()
+                            );
+                            assert_eq!(
+                                storable.slot(index),
+                                expected_slots[index]
+                            );
+                            assert_eq!(
+                                storable.write_version(index),
+                                raw2[index].write_version()
+                            );
                         })
                     }
                 }

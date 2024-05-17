@@ -1,18 +1,20 @@
-use {
-    crate::{
-        account_storage::meta::StoredAccountMeta,
-        accounts_file::MatchAccountOwnerError,
-        accounts_hash::AccountHash,
-        tiered_storage::{
-            footer::{AccountMetaFormat, TieredStorageFooter},
-            hot::HotStorageReader,
-            index::IndexOffset,
-            meta::TieredAccountMeta,
-            TieredStorageResult,
-        },
+use std::path::Path;
+
+use solana_sdk::{
+    account::ReadableAccount, pubkey::Pubkey, stake_history::Epoch,
+};
+
+use crate::{
+    account_storage::meta::StoredAccountMeta,
+    accounts_file::MatchAccountOwnerError,
+    accounts_hash::AccountHash,
+    tiered_storage::{
+        footer::{AccountMetaFormat, TieredStorageFooter},
+        hot::HotStorageReader,
+        index::IndexOffset,
+        meta::TieredAccountMeta,
+        TieredStorageResult,
     },
-    solana_sdk::{account::ReadableAccount, pubkey::Pubkey, stake_history::Epoch},
-    std::path::Path,
 };
 
 /// The struct that offers read APIs for accessing a TieredAccount.
@@ -31,7 +33,9 @@ pub struct TieredReadableAccount<'accounts_file, M: TieredAccountMeta> {
     pub account_block: &'accounts_file [u8],
 }
 
-impl<'accounts_file, M: TieredAccountMeta> TieredReadableAccount<'accounts_file, M> {
+impl<'accounts_file, M: TieredAccountMeta>
+    TieredReadableAccount<'accounts_file, M>
+{
     /// Returns the address of this account.
     pub fn address(&self) -> &'accounts_file Pubkey {
         self.address
@@ -97,7 +101,9 @@ impl TieredStorageReader {
     pub fn new_from_path(path: impl AsRef<Path>) -> TieredStorageResult<Self> {
         let footer = TieredStorageFooter::new_from_path(&path)?;
         match footer.account_meta_format {
-            AccountMetaFormat::Hot => Ok(Self::Hot(HotStorageReader::new_from_path(path)?)),
+            AccountMetaFormat::Hot => {
+                Ok(Self::Hot(HotStorageReader::new_from_path(path)?))
+            }
         }
     }
 

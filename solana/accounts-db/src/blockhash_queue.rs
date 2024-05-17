@@ -1,11 +1,11 @@
+use std::collections::HashMap;
+
+use serde::{Deserialize, Serialize};
 #[allow(deprecated)]
 use solana_sdk::sysvar::recent_blockhashes;
-use {
-    serde::{Deserialize, Serialize},
-    solana_sdk::{
-        clock::MAX_RECENT_BLOCKHASHES, fee_calculator::FeeCalculator, hash::Hash, timing::timestamp,
-    },
-    std::collections::HashMap,
+use solana_sdk::{
+    clock::MAX_RECENT_BLOCKHASHES, fee_calculator::FeeCalculator, hash::Hash,
+    timing::timestamp,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, AbiExample)]
@@ -66,7 +66,13 @@ impl BlockhashQueue {
     pub fn is_hash_valid_for_age(&self, hash: &Hash, max_age: usize) -> bool {
         self.ages
             .get(hash)
-            .map(|age| Self::is_hash_index_valid(self.last_hash_index, max_age, age.hash_index))
+            .map(|age| {
+                Self::is_hash_index_valid(
+                    self.last_hash_index,
+                    max_age,
+                    age.hash_index,
+                )
+            })
             .unwrap_or(false)
     }
 
@@ -89,7 +95,11 @@ impl BlockhashQueue {
         self.last_hash = Some(*hash);
     }
 
-    fn is_hash_index_valid(last_hash_index: u64, max_age: usize, hash_index: u64) -> bool {
+    fn is_hash_index_valid(
+        last_hash_index: u64,
+        max_age: usize,
+        hash_index: u64,
+    ) -> bool {
         last_hash_index - hash_index <= max_age as u64
     }
 
@@ -97,7 +107,11 @@ impl BlockhashQueue {
         self.last_hash_index += 1;
         if self.ages.len() >= self.max_age {
             self.ages.retain(|_, age| {
-                Self::is_hash_index_valid(self.last_hash_index, self.max_age, age.hash_index)
+                Self::is_hash_index_valid(
+                    self.last_hash_index,
+                    self.max_age,
+                    age.hash_index,
+                )
             });
         }
 
@@ -118,9 +132,15 @@ impl BlockhashQueue {
         note = "Please do not use, will no longer be available in the future"
     )]
     #[allow(deprecated)]
-    pub fn get_recent_blockhashes(&self) -> impl Iterator<Item = recent_blockhashes::IterItem> {
+    pub fn get_recent_blockhashes(
+        &self,
+    ) -> impl Iterator<Item = recent_blockhashes::IterItem> {
         (self.ages).iter().map(|(k, v)| {
-            recent_blockhashes::IterItem(v.hash_index, k, v.fee_calculator.lamports_per_signature)
+            recent_blockhashes::IterItem(
+                v.hash_index,
+                k,
+                v.fee_calculator.lamports_per_signature,
+            )
         })
     }
 
@@ -130,13 +150,12 @@ impl BlockhashQueue {
 }
 #[cfg(test)]
 mod tests {
+    use bincode::serialize;
     #[allow(deprecated)]
     use solana_sdk::sysvar::recent_blockhashes::IterItem;
-    use {
-        super::*,
-        bincode::serialize,
-        solana_sdk::{clock::MAX_RECENT_BLOCKHASHES, hash::hash},
-    };
+    use solana_sdk::{clock::MAX_RECENT_BLOCKHASHES, hash::hash};
+
+    use super::*;
 
     #[test]
     fn test_register_hash() {
@@ -191,8 +210,10 @@ mod tests {
         let recent_blockhashes = blockhash_queue.get_recent_blockhashes();
         // Verify that the returned hashes are most recent
         #[allow(deprecated)]
-        for IterItem(_slot, hash, _lamports_per_signature) in recent_blockhashes {
-            assert!(blockhash_queue.is_hash_valid_for_age(hash, MAX_RECENT_BLOCKHASHES));
+        for IterItem(_slot, hash, _lamports_per_signature) in recent_blockhashes
+        {
+            assert!(blockhash_queue
+                .is_hash_valid_for_age(hash, MAX_RECENT_BLOCKHASHES));
         }
     }
 

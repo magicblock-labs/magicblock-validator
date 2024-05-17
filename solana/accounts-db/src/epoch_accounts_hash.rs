@@ -7,7 +7,9 @@
 //!
 //! This results in all nodes effectively voting on the accounts state (at least) once per epoch.
 
-use {crate::accounts_hash::AccountsHash, solana_sdk::hash::Hash};
+use solana_sdk::hash::Hash;
+
+use crate::accounts_hash::AccountsHash;
 
 mod manager;
 pub use manager::Manager as EpochAccountsHashManager;

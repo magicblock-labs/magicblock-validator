@@ -2,13 +2,12 @@
 //! AccountInfo is not persisted anywhere between program runs.
 //! AccountInfo is purely runtime state.
 //! Note that AccountInfo is saved to disk buckets during runtime, but disk buckets are recreated at startup.
-use {
-    crate::{
-        accounts_db::AppendVecId,
-        accounts_file::ALIGN_BOUNDARY_OFFSET,
-        accounts_index::{IsCached, ZeroLamport},
-    },
-    modular_bitfield::prelude::*,
+use modular_bitfield::prelude::*;
+
+use crate::{
+    accounts_db::AppendVecId,
+    accounts_file::ALIGN_BOUNDARY_OFFSET,
+    accounts_index::{IsCached, ZeroLamport},
 };
 
 /// offset within an append vec to account data
@@ -36,7 +35,9 @@ impl StorageLocation {
                     StorageLocation::Cached => {
                         false // 1 cached, 1 not
                     }
-                    StorageLocation::AppendVec(_, other_offset) => other_offset == offset,
+                    StorageLocation::AppendVec(_, other_offset) => {
+                        other_offset == offset
+                    }
                 }
             }
         }
@@ -51,7 +52,9 @@ impl StorageLocation {
                     StorageLocation::Cached => {
                         false // 1 cached, 1 not
                     }
-                    StorageLocation::AppendVec(other_store_id, _) => other_store_id == store_id,
+                    StorageLocation::AppendVec(other_store_id, _) => {
+                        other_store_id == store_id
+                    }
                 }
             }
         }
@@ -133,9 +136,12 @@ impl AccountInfo {
                     CACHED_OFFSET, reduced_offset,
                     "illegal offset for non-cached item"
                 );
-                packed_offset_and_flags.set_offset_reduced(Self::get_reduced_offset(offset));
+                packed_offset_and_flags
+                    .set_offset_reduced(Self::get_reduced_offset(offset));
                 assert_eq!(
-                    Self::reduced_offset_to_offset(packed_offset_and_flags.offset_reduced()),
+                    Self::reduced_offset_to_offset(
+                        packed_offset_and_flags.offset_reduced()
+                    ),
                     offset,
                     "illegal offset"
                 );
@@ -188,7 +194,8 @@ impl AccountInfo {
 }
 #[cfg(test)]
 mod test {
-    use {super::*, crate::append_vec::MAXIMUM_APPEND_VEC_FILE_SIZE};
+    use super::*;
+    use crate::append_vec::MAXIMUM_APPEND_VEC_FILE_SIZE;
 
     #[test]
     fn test_limits() {
@@ -197,12 +204,14 @@ mod test {
             // MAXIMUM_APPEND_VEC_FILE_SIZE - 8 bytes would reference the very last 8 bytes in the file size. It makes no sense to reference that since element sizes are always more than 8.
             // MAXIMUM_APPEND_VEC_FILE_SIZE - 16 bytes would reference the second to last 8 bytes in the max file size. This is still likely meaningless, but it is 'valid' as far as the index
             // is concerned.
-            (MAXIMUM_APPEND_VEC_FILE_SIZE - 2 * (ALIGN_BOUNDARY_OFFSET as u64)) as Offset,
+            (MAXIMUM_APPEND_VEC_FILE_SIZE - 2 * (ALIGN_BOUNDARY_OFFSET as u64))
+                as Offset,
             0,
             ALIGN_BOUNDARY_OFFSET,
             4 * ALIGN_BOUNDARY_OFFSET,
         ] {
-            let info = AccountInfo::new(StorageLocation::AppendVec(0, offset), 0);
+            let info =
+                AccountInfo::new(StorageLocation::AppendVec(0, offset), 0);
             assert!(info.offset() == offset);
         }
     }
@@ -210,7 +219,8 @@ mod test {
     #[test]
     #[should_panic(expected = "illegal offset")]
     fn test_illegal_offset() {
-        let offset = (MAXIMUM_APPEND_VEC_FILE_SIZE - (ALIGN_BOUNDARY_OFFSET as u64)) as Offset;
+        let offset = (MAXIMUM_APPEND_VEC_FILE_SIZE
+            - (ALIGN_BOUNDARY_OFFSET as u64)) as Offset;
         AccountInfo::new(StorageLocation::AppendVec(0, offset), 0);
     }
 

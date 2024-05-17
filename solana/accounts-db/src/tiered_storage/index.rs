@@ -1,11 +1,10 @@
-use {
-    crate::tiered_storage::{
-        file::TieredStorageFile, footer::TieredStorageFooter, mmap_utils::get_pod,
-        TieredStorageResult,
-    },
-    bytemuck::{Pod, Zeroable},
-    memmap2::Mmap,
-    solana_sdk::pubkey::Pubkey,
+use bytemuck::{Pod, Zeroable};
+use memmap2::Mmap;
+use solana_sdk::pubkey::Pubkey;
+
+use crate::tiered_storage::{
+    file::TieredStorageFile, footer::TieredStorageFooter, mmap_utils::get_pod,
+    TieredStorageResult,
 };
 
 /// The in-memory struct for the writing index block.
@@ -114,7 +113,8 @@ impl IndexBlockFormat {
             Self::AddressesThenOffsets => {
                 debug_assert!(index_offset.0 < footer.account_entry_count);
                 footer.index_block_offset as usize
-                    + std::mem::size_of::<Pubkey>() * footer.account_entry_count as usize
+                    + std::mem::size_of::<Pubkey>()
+                        * footer.account_entry_count as usize
                     + std::mem::size_of::<Offset>() * index_offset.0 as usize
             }
         };
@@ -144,16 +144,16 @@ impl IndexBlockFormat {
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*,
-        crate::tiered_storage::{
-            file::TieredStorageFile,
-            hot::{HotAccountOffset, HOT_ACCOUNT_ALIGNMENT},
-        },
-        memmap2::MmapOptions,
-        rand::Rng,
-        std::fs::OpenOptions,
-        tempfile::TempDir,
+    use std::fs::OpenOptions;
+
+    use memmap2::MmapOptions;
+    use rand::Rng;
+    use tempfile::TempDir;
+
+    use super::*;
+    use crate::tiered_storage::{
+        file::TieredStorageFile,
+        hot::{HotAccountOffset, HOT_ACCOUNT_ALIGNMENT},
     };
 
     #[test]
@@ -183,7 +183,8 @@ mod tests {
         {
             let file = TieredStorageFile::new_writable(&path).unwrap();
             let indexer = IndexBlockFormat::AddressesThenOffsets;
-            let cursor = indexer.write_index_block(&file, &index_entries).unwrap();
+            let cursor =
+                indexer.write_index_block(&file, &index_entries).unwrap();
             footer.owners_block_offset = cursor as u64;
         }
 
@@ -196,7 +197,11 @@ mod tests {
         let mmap = unsafe { MmapOptions::new().map(&file).unwrap() };
         for (i, index_entry) in index_entries.iter().enumerate() {
             let account_offset = indexer
-                .get_account_offset::<HotAccountOffset>(&mmap, &footer, IndexOffset(i as u32))
+                .get_account_offset::<HotAccountOffset>(
+                    &mmap,
+                    &footer,
+                    IndexOffset(i as u32),
+                )
                 .unwrap();
             assert_eq!(index_entry.offset, account_offset);
             let address = indexer
@@ -235,7 +240,11 @@ mod tests {
         let mmap = unsafe { MmapOptions::new().map(&file).unwrap() };
         footer
             .index_block_format
-            .get_account_address(&mmap, &footer, IndexOffset(footer.account_entry_count))
+            .get_account_address(
+                &mmap,
+                &footer,
+                IndexOffset(footer.account_entry_count),
+            )
             .unwrap();
     }
 
@@ -252,7 +261,8 @@ mod tests {
             index_block_format: IndexBlockFormat::AddressesThenOffsets,
             index_block_offset: 1024,
             // only holds one index entry
-            owners_block_offset: 1024 + std::mem::size_of::<HotAccountOffset>() as u64,
+            owners_block_offset: 1024
+                + std::mem::size_of::<HotAccountOffset>() as u64,
             ..TieredStorageFooter::default()
         };
 
@@ -327,7 +337,8 @@ mod tests {
             index_block_format: IndexBlockFormat::AddressesThenOffsets,
             index_block_offset: 1024,
             // only holds one index entry
-            owners_block_offset: 1024 + std::mem::size_of::<HotAccountOffset>() as u64,
+            owners_block_offset: 1024
+                + std::mem::size_of::<HotAccountOffset>() as u64,
             ..TieredStorageFooter::default()
         };
 
@@ -348,7 +359,11 @@ mod tests {
         // the index block boundary.
         footer
             .index_block_format
-            .get_account_offset::<HotAccountOffset>(&mmap, &footer, IndexOffset(2))
+            .get_account_offset::<HotAccountOffset>(
+                &mmap,
+                &footer,
+                IndexOffset(2),
+            )
             .unwrap();
     }
 }

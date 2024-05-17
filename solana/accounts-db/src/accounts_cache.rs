@@ -1,21 +1,21 @@
-use {
-    crate::{accounts_db::AccountsDb, accounts_hash::AccountHash},
-    dashmap::DashMap,
-    seqlock::SeqLock,
-    solana_sdk::{
-        account::{AccountSharedData, ReadableAccount},
-        clock::Slot,
-        pubkey::Pubkey,
-    },
-    std::{
-        collections::BTreeSet,
-        ops::Deref,
-        sync::{
-            atomic::{AtomicBool, AtomicU64, Ordering},
-            Arc, RwLock,
-        },
+use std::{
+    collections::BTreeSet,
+    ops::Deref,
+    sync::{
+        atomic::{AtomicBool, AtomicU64, Ordering},
+        Arc, RwLock,
     },
 };
+
+use dashmap::DashMap;
+use seqlock::SeqLock;
+use solana_sdk::{
+    account::{AccountSharedData, ReadableAccount},
+    clock::Slot,
+    pubkey::Pubkey,
+};
+
+use crate::{accounts_db::AccountsDb, accounts_hash::AccountHash};
 
 pub type SlotCache = Arc<SlotCacheInner>;
 
@@ -65,7 +65,11 @@ impl SlotCacheInner {
         self.cache.iter().map(|item| *item.key()).collect()
     }
 
-    pub fn insert(&self, pubkey: &Pubkey, account: AccountSharedData) -> CachedAccount {
+    pub fn insert(
+        &self,
+        pubkey: &Pubkey,
+        account: AccountSharedData,
+    ) -> CachedAccount {
         let data_len = account.data().len() as u64;
         let item = Arc::new(CachedAccountInner {
             account,
@@ -143,7 +147,8 @@ impl CachedAccountInner {
         match hash {
             Some(hash) => hash,
             None => {
-                let hash = AccountsDb::hash_account(&self.account, &self.pubkey);
+                let hash =
+                    AccountsDb::hash_account(&self.account, &self.pubkey);
                 *self.hash.lock_write() = Some(hash);
                 hash
             }
@@ -208,7 +213,12 @@ impl AccountsCache {
         );
     }
 
-    pub fn store(&self, slot: Slot, pubkey: &Pubkey, account: AccountSharedData) -> CachedAccount {
+    pub fn store(
+        &self,
+        slot: Slot,
+        pubkey: &Pubkey,
+        account: AccountSharedData,
+    ) -> CachedAccount {
         let slot_cache = self.slot_cache(slot).unwrap_or_else(||
             // DashMap entry.or_insert() returns a RefMut, essentially a write lock,
             // which is dropped after this block ends, minimizing time held by the lock.
@@ -244,15 +254,20 @@ impl AccountsCache {
     }
 
     pub fn clear_roots(&self, max_root: Option<Slot>) -> BTreeSet<Slot> {
-        let mut w_maybe_unflushed_roots = self.maybe_unflushed_roots.write().unwrap();
+        let mut w_maybe_unflushed_roots =
+            self.maybe_unflushed_roots.write().unwrap();
         if let Some(max_root) = max_root {
             // `greater_than_max_root` contains all slots >= `max_root + 1`, or alternatively,
             // all slots > `max_root`. Meanwhile, `w_maybe_unflushed_roots` is left with all slots
             // <= `max_root`.
-            let greater_than_max_root = w_maybe_unflushed_roots.split_off(&(max_root + 1));
+            let greater_than_max_root =
+                w_maybe_unflushed_roots.split_off(&(max_root + 1));
             // After the replace, `w_maybe_unflushed_roots` contains slots > `max_root`, and
             // we return all slots <= `max_root`
-            std::mem::replace(&mut w_maybe_unflushed_roots, greater_than_max_root)
+            std::mem::replace(
+                &mut w_maybe_unflushed_roots,
+                greater_than_max_root,
+            )
         } else {
             std::mem::take(&mut *w_maybe_unflushed_roots)
         }

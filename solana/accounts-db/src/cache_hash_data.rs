@@ -1,19 +1,22 @@
 //! Cached data for hashing accounts
+use std::{
+    collections::HashSet,
+    fs::{self, remove_file, File, OpenOptions},
+    io::{Seek, SeekFrom, Write},
+    path::{Path, PathBuf},
+    sync::{atomic::Ordering, Arc, Mutex},
+};
+
+use bytemuck::{Pod, Zeroable};
+use memmap2::MmapMut;
+use solana_measure::measure::Measure;
+use solana_sdk::clock::Slot;
+
 #[cfg(test)]
 use crate::pubkey_bins::PubkeyBinCalculator24;
-use {
-    crate::{accounts_hash::CalculateHashIntermediate, cache_hash_data_stats::CacheHashDataStats},
-    bytemuck::{Pod, Zeroable},
-    memmap2::MmapMut,
-    solana_measure::measure::Measure,
-    solana_sdk::clock::Slot,
-    std::{
-        collections::HashSet,
-        fs::{self, remove_file, File, OpenOptions},
-        io::{Seek, SeekFrom, Write},
-        path::{Path, PathBuf},
-        sync::{atomic::Ordering, Arc, Mutex},
-    },
+use crate::{
+    accounts_hash::CalculateHashIntermediate,
+    cache_hash_data_stats::CacheHashDataStats,
 };
 
 pub type EntryType = CalculateHashIntermediate;
@@ -59,7 +62,9 @@ impl CacheHashDataFileReference {
         self.stats.read_us.fetch_add(m1.as_us(), Ordering::Relaxed);
         let header_size = std::mem::size_of::<Header>() as u64;
         if file_len < header_size {
-            return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof));
+            return Err(std::io::Error::from(
+                std::io::ErrorKind::UnexpectedEof,
+            ));
         }
 
         let cell_size = std::mem::size_of::<EntryType>() as u64;
@@ -81,7 +86,9 @@ impl CacheHashDataFileReference {
 
         let capacity = cell_size * (entries as u64) + header_size;
         if file_len < capacity {
-            return Err(std::io::Error::from(std::io::ErrorKind::UnexpectedEof));
+            return Err(std::io::Error::from(
+                std::io::ErrorKind::UnexpectedEof,
+            ));
         }
         cache_file.capacity = capacity;
         assert_eq!(
@@ -125,7 +132,8 @@ impl CacheHashDataFile {
         let mut m2 = Measure::start("decode");
         let slices = self.get_cache_hash_data();
         for d in slices {
-            let mut pubkey_to_bin_index = bin_calculator.bin_from_pubkey(&d.pubkey);
+            let mut pubkey_to_bin_index =
+                bin_calculator.bin_from_pubkey(&d.pubkey);
             assert!(
                 pubkey_to_bin_index >= start_bin_index,
                 "{pubkey_to_bin_index}, {start_bin_index}"
@@ -162,7 +170,8 @@ impl CacheHashDataFile {
 
     /// return byte offset of entry 'ix' into a slice which contains a header and at least ix elements
     fn get_element_offset_byte(&self, ix: u64) -> usize {
-        let start = (ix * self.cell_size) as usize + std::mem::size_of::<Header>();
+        let start =
+            (ix * self.cell_size) as usize + std::mem::size_of::<Header>();
         debug_assert_eq!(start % std::mem::align_of::<EntryType>(), 0);
         start
     }
@@ -172,7 +181,10 @@ impl CacheHashDataFile {
         bytemuck::from_bytes_mut(bytes)
     }
 
-    fn new_map(file: impl AsRef<Path>, capacity: u64) -> Result<MmapMut, std::io::Error> {
+    fn new_map(
+        file: impl AsRef<Path>,
+        capacity: u64,
+    ) -> Result<MmapMut, std::io::Error> {
         let mut data = OpenOptions::new()
             .read(true)
             .write(true)
@@ -205,7 +217,10 @@ impl Drop for CacheHashData {
 }
 
 impl CacheHashData {
-    pub(crate) fn new(cache_dir: PathBuf, deletion_policy: DeletionPolicy) -> CacheHashData {
+    pub(crate) fn new(
+        cache_dir: PathBuf,
+        deletion_policy: DeletionPolicy,
+    ) -> CacheHashData {
         std::fs::create_dir_all(&cache_dir).unwrap_or_else(|err| {
             panic!("error creating cache dir {}: {err}", cache_dir.display())
         });
@@ -236,7 +251,8 @@ impl CacheHashData {
                 // when calculating an incremental accounts hash, we only want to delete the unused
                 // cache files *that IAH considered*
                 old_cache_files.retain(|old_cache_file| {
-                    let Some(parsed_filename) = parse_filename(old_cache_file) else {
+                    let Some(parsed_filename) = parse_filename(old_cache_file)
+                    else {
                         // if parsing the cache filename fails, we *do* want to delete it
                         return true;
                     };
@@ -263,7 +279,8 @@ impl CacheHashData {
         if self.cache_dir.is_dir() {
             let dir = fs::read_dir(&self.cache_dir);
             if let Ok(dir) = dir {
-                let mut pre_existing = self.pre_existing_cache_files.lock().unwrap();
+                let mut pre_existing =
+                    self.pre_existing_cache_files.lock().unwrap();
                 for entry in dir.flatten() {
                     if let Some(name) = entry.path().file_name() {
                         pre_existing.insert(PathBuf::from(name));
@@ -303,7 +320,10 @@ impl CacheHashData {
         })
     }
 
-    fn pre_existing_cache_file_will_be_used(&self, file_name: impl AsRef<Path>) {
+    fn pre_existing_cache_file_will_be_used(
+        &self,
+        file_name: impl AsRef<Path>,
+    ) {
         self.pre_existing_cache_files
             .lock()
             .unwrap()
@@ -335,7 +355,8 @@ impl CacheHashData {
             .map(|x: &Vec<EntryType>| x.len())
             .collect::<Vec<_>>();
         let entries = entries.iter().sum::<usize>();
-        let capacity = cell_size * (entries as u64) + std::mem::size_of::<Header>() as u64;
+        let capacity =
+            cell_size * (entries as u64) + std::mem::size_of::<Header>() as u64;
 
         let mmap = CacheHashDataFile::new_map(&cache_path, capacity)?;
         m1.stop();
@@ -427,7 +448,10 @@ pub enum DeletionPolicy {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, crate::accounts_hash::AccountHash, rand::Rng};
+    use rand::Rng;
+
+    use super::*;
+    use crate::accounts_hash::AccountHash;
 
     impl CacheHashData {
         /// load from 'file_name' into 'accumulator'
@@ -470,7 +494,8 @@ mod tests {
         for bins in [1, 2, 4] {
             let bin_calculator = PubkeyBinCalculator24::new(bins);
             let num_points = 5;
-            let (data, _total_points) = generate_test_data(num_points, bins, &bin_calculator);
+            let (data, _total_points) =
+                generate_test_data(num_points, bins, &bin_calculator);
             for passes in [1, 2] {
                 let bins_per_pass = bins / passes;
                 if bins_per_pass == 0 {
@@ -485,15 +510,18 @@ mod tests {
                         };
                         let start_bin_this_pass = pass * bins_per_pass;
                         for bin in 0..bins_per_pass {
-                            let mut this_bin_data = data[bin + start_bin_this_pass].clone();
+                            let mut this_bin_data =
+                                data[bin + start_bin_this_pass].clone();
                             if flatten_data {
                                 data_this_pass[0].append(&mut this_bin_data);
                             } else {
                                 data_this_pass.push(this_bin_data);
                             }
                         }
-                        let cache =
-                            CacheHashData::new(cache_dir.clone(), DeletionPolicy::AllUnused);
+                        let cache = CacheHashData::new(
+                            cache_dir.clone(),
+                            DeletionPolicy::AllUnused,
+                        );
                         let file_name = PathBuf::from("test");
                         cache.save(&file_name, &data_this_pass).unwrap();
                         cache.get_cache_files();
@@ -506,9 +534,15 @@ mod tests {
                                 .collect::<Vec<_>>(),
                             vec![&file_name],
                         );
-                        let mut accum = (0..bins_per_pass).map(|_| vec![]).collect();
+                        let mut accum =
+                            (0..bins_per_pass).map(|_| vec![]).collect();
                         cache
-                            .load(&file_name, &mut accum, start_bin_this_pass, &bin_calculator)
+                            .load(
+                                &file_name,
+                                &mut accum,
+                                start_bin_this_pass,
+                                &bin_calculator,
+                            )
                             .unwrap();
                         if flatten_data {
                             bin_data(
@@ -569,7 +603,9 @@ mod tests {
                                 }
 
                                 CalculateHashIntermediate {
-                                    hash: AccountHash(solana_sdk::hash::Hash::new_unique()),
+                                    hash: AccountHash(
+                                        solana_sdk::hash::Hash::new_unique(),
+                                    ),
                                     lamports: ct as u64,
                                     pubkey: pk,
                                 }

@@ -1,11 +1,11 @@
 //! Code for stake and vote rewards
 
-use {
-    crate::storable_accounts::StorableAccounts,
-    solana_sdk::{
-        account::AccountSharedData, clock::Slot, pubkey::Pubkey, reward_info::RewardInfo,
-    },
+use solana_sdk::{
+    account::AccountSharedData, clock::Slot, pubkey::Pubkey,
+    reward_info::RewardInfo,
 };
+
+use crate::storable_accounts::StorableAccounts;
 
 #[derive(AbiExample, Debug, Serialize, Deserialize, Clone, PartialEq)]
 pub struct StakeReward {

@@ -1,20 +1,21 @@
-use {
-    crate::{
-        account_storage::meta::{
-            StorableAccountsWithHashesAndWriteVersions, StoredAccountInfo, StoredAccountMeta,
-        },
-        accounts_hash::AccountHash,
-        append_vec::{AppendVec, AppendVecError},
-        storable_accounts::StorableAccounts,
-        tiered_storage::error::TieredStorageError,
+use std::{
+    borrow::Borrow,
+    mem,
+    path::{Path, PathBuf},
+};
+
+use solana_sdk::{account::ReadableAccount, clock::Slot, pubkey::Pubkey};
+use thiserror::Error;
+
+use crate::{
+    account_storage::meta::{
+        StorableAccountsWithHashesAndWriteVersions, StoredAccountInfo,
+        StoredAccountMeta,
     },
-    solana_sdk::{account::ReadableAccount, clock::Slot, pubkey::Pubkey},
-    std::{
-        borrow::Borrow,
-        mem,
-        path::{Path, PathBuf},
-    },
-    thiserror::Error,
+    accounts_hash::AccountHash,
+    append_vec::{AppendVec, AppendVecError},
+    storable_accounts::StorableAccounts,
+    tiered_storage::error::TieredStorageError,
 };
 
 // Data placement should be aligned at the next boundary. Without alignment accessing the memory may
@@ -62,7 +63,10 @@ impl AccountsFile {
     ///
     /// The second element of the returned tuple is the number of accounts in the
     /// accounts file.
-    pub fn new_from_file(path: impl AsRef<Path>, current_len: usize) -> Result<(Self, usize)> {
+    pub fn new_from_file(
+        path: impl AsRef<Path>,
+        current_len: usize,
+    ) -> Result<(Self, usize)> {
         let (av, num_accounts) = AppendVec::new_from_file(path, current_len)?;
         Ok((Self::AppendVec(av), num_accounts))
     }
@@ -116,7 +120,10 @@ impl AccountsFile {
     /// Return (account metadata, next_index) pair for the account at the
     /// specified `index` if any.  Otherwise return None.   Also return the
     /// index of the next entry.
-    pub fn get_account(&self, index: usize) -> Option<(StoredAccountMeta<'_>, usize)> {
+    pub fn get_account(
+        &self,
+        index: usize,
+    ) -> Option<(StoredAccountMeta<'_>, usize)> {
         match self {
             Self::AppendVec(av) => av.get_account(index),
         }
@@ -193,7 +200,9 @@ impl<'a> Iterator for AccountsFileIter<'a> {
     type Item = StoredAccountMeta<'a>;
 
     fn next(&mut self) -> Option<Self::Item> {
-        if let Some((account, next_offset)) = self.file_entry.get_account(self.offset) {
+        if let Some((account, next_offset)) =
+            self.file_entry.get_account(self.offset)
+        {
             self.offset = next_offset;
             Some(account)
         } else {

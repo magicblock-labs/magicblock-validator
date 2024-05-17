@@ -1,6 +1,8 @@
 //! Iterators for RollingBitField
 
-use {super::RollingBitField, std::ops::Range};
+use std::ops::Range;
+
+use super::RollingBitField;
 
 /// Iterate over the 'set' bits of a RollingBitField
 #[derive(Debug)]
@@ -44,7 +46,9 @@ impl Iterator for RollingBitFieldOnesIter<'_> {
 
 #[cfg(test)]
 mod tests {
-    use {super::*, test_case::test_case};
+    use test_case::test_case;
+
+    use super::*;
 
     #[test_case(128, vec![]; "empty")]
     #[test_case(128, vec![128_007, 128_017, 128_107]; "without excess")]

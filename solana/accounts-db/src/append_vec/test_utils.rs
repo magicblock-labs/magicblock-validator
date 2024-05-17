@@ -1,10 +1,10 @@
 //! Helpers for AppendVec tests and benches
-use {
-    super::StoredMeta,
-    rand::{distributions::Alphanumeric, Rng},
-    solana_sdk::{account::AccountSharedData, pubkey::Pubkey},
-    std::path::PathBuf,
-};
+use std::path::PathBuf;
+
+use rand::{distributions::Alphanumeric, Rng};
+use solana_sdk::{account::AccountSharedData, pubkey::Pubkey};
+
+use super::StoredMeta;
 
 pub struct TempFile {
     pub path: PathBuf,
@@ -18,7 +18,8 @@ impl Drop for TempFile {
 }
 
 pub fn get_append_vec_dir() -> String {
-    std::env::var("FARF_DIR").unwrap_or_else(|_| "farf/append_vec_tests".to_string())
+    std::env::var("FARF_DIR")
+        .unwrap_or_else(|_| "farf/append_vec_tests".to_string())
 }
 
 pub fn get_append_vec_path(path: &str) -> TempFile {
@@ -37,7 +38,8 @@ pub fn get_append_vec_path(path: &str) -> TempFile {
 
 pub fn create_test_account(sample: usize) -> (StoredMeta, AccountSharedData) {
     let data_len = sample % 256;
-    let mut account = AccountSharedData::new(sample as u64, 0, &Pubkey::default());
+    let mut account =
+        AccountSharedData::new(sample as u64, 0, &Pubkey::default());
     account.set_data_from_slice(&vec![data_len as u8; data_len]);
     let stored_meta = StoredMeta {
         write_version_obsolete: 0,

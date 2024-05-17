@@ -1,14 +1,15 @@
-use {
-    crate::{
-        account_storage::meta::{StoredAccountMeta, StoredMeta},
-        accounts_db::AccountsDb,
-    },
-    solana_measure::measure::Measure,
-    solana_metrics::*,
-    solana_sdk::{
-        account::AccountSharedData, clock::Slot, pubkey::Pubkey, transaction::SanitizedTransaction,
-    },
-    std::collections::{HashMap, HashSet},
+use std::collections::{HashMap, HashSet};
+
+use solana_measure::measure::Measure;
+use solana_metrics::*;
+use solana_sdk::{
+    account::AccountSharedData, clock::Slot, pubkey::Pubkey,
+    transaction::SanitizedTransaction,
+};
+
+use crate::{
+    account_storage::meta::{StoredAccountMeta, StoredMeta},
+    accounts_db::AccountsDb,
 };
 
 #[derive(Default)]
@@ -48,14 +49,20 @@ impl AccountsDb {
 
         let mut slots = self.storage.all_slots();
         let mut notified_accounts: HashSet<Pubkey> = HashSet::default();
-        let mut notify_stats = GeyserPluginNotifyAtSnapshotRestoreStats::default();
+        let mut notify_stats =
+            GeyserPluginNotifyAtSnapshotRestoreStats::default();
 
         slots.sort_by(|a, b| b.cmp(a));
         for slot in slots {
-            self.notify_accounts_in_slot(slot, &mut notified_accounts, &mut notify_stats);
+            self.notify_accounts_in_slot(
+                slot,
+                &mut notified_accounts,
+                &mut notify_stats,
+            );
         }
 
-        let accounts_update_notifier = self.accounts_update_notifier.as_ref().unwrap();
+        let accounts_update_notifier =
+            self.accounts_update_notifier.as_ref().unwrap();
         accounts_update_notifier.notify_end_of_restore_from_snapshot();
         notify_stats.report();
     }
@@ -89,8 +96,10 @@ impl AccountsDb {
     ) {
         let storage_entry = self.storage.get_slot_storage_entry(slot).unwrap();
 
-        let mut accounts_to_stream: HashMap<Pubkey, StoredAccountMeta> = HashMap::default();
-        let mut measure_filter = Measure::start("accountsdb-plugin-filtering-accounts");
+        let mut accounts_to_stream: HashMap<Pubkey, StoredAccountMeta> =
+            HashMap::default();
+        let mut measure_filter =
+            Measure::start("accountsdb-plugin-filtering-accounts");
         let accounts = storage_entry.accounts.account_iter();
         let mut account_len = 0;
         accounts.for_each(|account| {
@@ -109,7 +118,12 @@ impl AccountsDb {
         measure_filter.stop();
         notify_stats.elapsed_filtering_us += measure_filter.as_us() as usize;
 
-        self.notify_filtered_accounts(slot, notified_accounts, accounts_to_stream, notify_stats);
+        self.notify_filtered_accounts(
+            slot,
+            notified_accounts,
+            accounts_to_stream,
+            notify_stats,
+        );
     }
 
     fn notify_filtered_accounts(
@@ -120,7 +134,8 @@ impl AccountsDb {
         notify_stats: &mut GeyserPluginNotifyAtSnapshotRestoreStats,
     ) {
         let notifier = self.accounts_update_notifier.as_ref().unwrap();
-        let mut measure_notify = Measure::start("accountsdb-plugin-notifying-accounts");
+        let mut measure_notify =
+            Measure::start("accountsdb-plugin-notifying-accounts");
         let local_write_version = 0;
         for (_, mut account) in accounts_to_stream.drain() {
             // We do not need to rely on the specific write_version read from the append vec.
@@ -133,16 +148,20 @@ impl AccountsDb {
                 ..*account.meta()
             };
             account.set_meta(&meta);
-            let mut measure_pure_notify = Measure::start("accountsdb-plugin-notifying-accounts");
+            let mut measure_pure_notify =
+                Measure::start("accountsdb-plugin-notifying-accounts");
             notifier.notify_account_restore_from_snapshot(slot, &account);
             measure_pure_notify.stop();
 
-            notify_stats.total_pure_notify += measure_pure_notify.as_us() as usize;
+            notify_stats.total_pure_notify +=
+                measure_pure_notify.as_us() as usize;
 
-            let mut measure_bookkeep = Measure::start("accountsdb-plugin-notifying-bookeeeping");
+            let mut measure_bookkeep =
+                Measure::start("accountsdb-plugin-notifying-bookeeeping");
             notified_accounts.insert(*account.pubkey());
             measure_bookkeep.stop();
-            notify_stats.total_pure_bookeeping += measure_bookkeep.as_us() as usize;
+            notify_stats.total_pure_bookeeping +=
+                measure_bookkeep.as_us() as usize;
         }
         notify_stats.notified_accounts += accounts_to_stream.len();
         measure_notify.stop();
@@ -152,29 +171,32 @@ impl AccountsDb {
 
 #[cfg(test)]
 pub mod tests {
-    use {
-        crate::{
-            account_storage::meta::StoredAccountMeta,
-            accounts_db::AccountsDb,
-            accounts_update_notifier_interface::{
-                AccountsUpdateNotifier, AccountsUpdateNotifierInterface,
-            },
-        },
-        dashmap::DashMap,
-        solana_sdk::{
-            account::{AccountSharedData, ReadableAccount},
-            clock::Slot,
-            pubkey::Pubkey,
-            transaction::SanitizedTransaction,
-        },
-        std::sync::{
-            atomic::{AtomicBool, Ordering},
-            Arc,
+    use std::sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    };
+
+    use dashmap::DashMap;
+    use solana_sdk::{
+        account::{AccountSharedData, ReadableAccount},
+        clock::Slot,
+        pubkey::Pubkey,
+        transaction::SanitizedTransaction,
+    };
+
+    use crate::{
+        account_storage::meta::StoredAccountMeta,
+        accounts_db::AccountsDb,
+        accounts_update_notifier_interface::{
+            AccountsUpdateNotifier, AccountsUpdateNotifierInterface,
         },
     };
 
     impl AccountsDb {
-        pub fn set_geyser_plugin_notifer(&mut self, notifier: Option<AccountsUpdateNotifier>) {
+        pub fn set_geyser_plugin_notifer(
+            &mut self,
+            notifier: Option<AccountsUpdateNotifier>,
+        ) {
             self.accounts_update_notifier = notifier;
         }
     }
@@ -203,7 +225,11 @@ pub mod tests {
 
         /// Notified when the AccountsDb is initialized at start when restored
         /// from a snapshot.
-        fn notify_account_restore_from_snapshot(&self, slot: Slot, account: &StoredAccountMeta) {
+        fn notify_account_restore_from_snapshot(
+            &self,
+            slot: Slot,
+            account: &StoredAccountMeta,
+        ) {
             self.accounts_notified
                 .entry(*account.pubkey())
                 .or_default()
@@ -221,20 +247,27 @@ pub mod tests {
         // Account with key1 is updated twice in the store -- should only get notified once.
         let key1 = solana_sdk::pubkey::new_rand();
         let mut account1_lamports: u64 = 1;
-        let account1 =
-            AccountSharedData::new(account1_lamports, 1, AccountSharedData::default().owner());
+        let account1 = AccountSharedData::new(
+            account1_lamports,
+            1,
+            AccountSharedData::default().owner(),
+        );
         let slot0 = 0;
         accounts.store_uncached(slot0, &[(&key1, &account1)]);
 
         account1_lamports = 2;
-        let account1 = AccountSharedData::new(account1_lamports, 1, account1.owner());
+        let account1 =
+            AccountSharedData::new(account1_lamports, 1, account1.owner());
         accounts.store_uncached(slot0, &[(&key1, &account1)]);
         let notifier = GeyserTestPlugin::default();
 
         let key2 = solana_sdk::pubkey::new_rand();
         let account2_lamports: u64 = 100;
-        let account2 =
-            AccountSharedData::new(account2_lamports, 1, AccountSharedData::default().owner());
+        let account2 = AccountSharedData::new(
+            account2_lamports,
+            1,
+            AccountSharedData::default().owner(),
+        );
 
         accounts.store_uncached(slot0, &[(&key2, &account2)]);
 
@@ -271,27 +304,37 @@ pub mod tests {
         // Account with key3 is updated in slot1, should get notified once
         let key1 = solana_sdk::pubkey::new_rand();
         let mut account1_lamports: u64 = 1;
-        let account1 =
-            AccountSharedData::new(account1_lamports, 1, AccountSharedData::default().owner());
+        let account1 = AccountSharedData::new(
+            account1_lamports,
+            1,
+            AccountSharedData::default().owner(),
+        );
         let slot0 = 0;
         accounts.store_uncached(slot0, &[(&key1, &account1)]);
 
         let key2 = solana_sdk::pubkey::new_rand();
         let account2_lamports: u64 = 200;
-        let account2 =
-            AccountSharedData::new(account2_lamports, 1, AccountSharedData::default().owner());
+        let account2 = AccountSharedData::new(
+            account2_lamports,
+            1,
+            AccountSharedData::default().owner(),
+        );
         accounts.store_uncached(slot0, &[(&key2, &account2)]);
 
         account1_lamports = 2;
         let slot1 = 1;
-        let account1 = AccountSharedData::new(account1_lamports, 1, account1.owner());
+        let account1 =
+            AccountSharedData::new(account1_lamports, 1, account1.owner());
         accounts.store_uncached(slot1, &[(&key1, &account1)]);
         let notifier = GeyserTestPlugin::default();
 
         let key3 = solana_sdk::pubkey::new_rand();
         let account3_lamports: u64 = 300;
-        let account3 =
-            AccountSharedData::new(account3_lamports, 1, AccountSharedData::default().owner());
+        let account3 = AccountSharedData::new(
+            account3_lamports,
+            1,
+            AccountSharedData::default().owner(),
+        );
         accounts.store_uncached(slot1, &[(&key3, &account3)]);
 
         let notifier = Arc::new(notifier);
@@ -340,26 +383,36 @@ pub mod tests {
         // Account with key3 is updated in slot1, should get notified once
         let key1 = solana_sdk::pubkey::new_rand();
         let account1_lamports1: u64 = 1;
-        let account1 =
-            AccountSharedData::new(account1_lamports1, 1, AccountSharedData::default().owner());
+        let account1 = AccountSharedData::new(
+            account1_lamports1,
+            1,
+            AccountSharedData::default().owner(),
+        );
         let slot0 = 0;
         accounts.store_cached((slot0, &[(&key1, &account1)][..]), None);
 
         let key2 = solana_sdk::pubkey::new_rand();
         let account2_lamports: u64 = 200;
-        let account2 =
-            AccountSharedData::new(account2_lamports, 1, AccountSharedData::default().owner());
+        let account2 = AccountSharedData::new(
+            account2_lamports,
+            1,
+            AccountSharedData::default().owner(),
+        );
         accounts.store_cached((slot0, &[(&key2, &account2)][..]), None);
 
         let account1_lamports2 = 2;
         let slot1 = 1;
-        let account1 = AccountSharedData::new(account1_lamports2, 1, account1.owner());
+        let account1 =
+            AccountSharedData::new(account1_lamports2, 1, account1.owner());
         accounts.store_cached((slot1, &[(&key1, &account1)][..]), None);
 
         let key3 = solana_sdk::pubkey::new_rand();
         let account3_lamports: u64 = 300;
-        let account3 =
-            AccountSharedData::new(account3_lamports, 1, AccountSharedData::default().owner());
+        let account3 = AccountSharedData::new(
+            account3_lamports,
+            1,
+            AccountSharedData::default().owner(),
+        );
         accounts.store_cached((slot1, &[(&key3, &account3)][..]), None);
 
         assert_eq!(notifier.accounts_notified.get(&key1).unwrap().len(), 2);

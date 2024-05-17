@@ -1,11 +1,10 @@
 //! The account meta and related structs for the tiered storage.
 
-use {
-    crate::{accounts_hash::AccountHash, tiered_storage::owners::OwnerOffset},
-    bytemuck::{Pod, Zeroable},
-    modular_bitfield::prelude::*,
-    solana_sdk::stake_history::Epoch,
-};
+use bytemuck::{Pod, Zeroable};
+use modular_bitfield::prelude::*;
+use solana_sdk::stake_history::Epoch;
+
+use crate::{accounts_hash::AccountHash, tiered_storage::owners::OwnerOffset};
 
 /// The struct that handles the account meta flags.
 #[bitfield(bits = 32)]
@@ -72,7 +71,10 @@ pub trait TieredAccountMeta: Sized {
 
     /// Returns the account hash by parsing the specified account block.  None
     /// will be returned if this account does not persist this optional field.
-    fn account_hash<'a>(&self, _account_block: &'a [u8]) -> Option<&'a AccountHash>;
+    fn account_hash<'a>(
+        &self,
+        _account_block: &'a [u8],
+    ) -> Option<&'a AccountHash>;
 
     /// Returns the offset of the optional fields based on the specified account
     /// block.
@@ -152,7 +154,9 @@ impl<'a> AccountMetaOptionalFields<'a> {
 
 #[cfg(test)]
 pub mod tests {
-    use {super::*, solana_sdk::hash::Hash};
+    use solana_sdk::hash::Hash;
+
+    use super::*;
 
     #[test]
     fn test_account_meta_flags_new() {
@@ -236,13 +240,14 @@ pub mod tests {
                 assert_eq!(
                     opt_fields.size(),
                     rent_epoch.map_or(0, |_| std::mem::size_of::<Epoch>())
-                        + account_hash.map_or(0, |_| std::mem::size_of::<AccountHash>())
+                        + account_hash
+                            .map_or(0, |_| std::mem::size_of::<AccountHash>())
                 );
                 assert_eq!(
                     opt_fields.size(),
-                    AccountMetaOptionalFields::size_from_flags(&AccountMetaFlags::new_from(
-                        &opt_fields
-                    ))
+                    AccountMetaOptionalFields::size_from_flags(
+                        &AccountMetaFlags::new_from(&opt_fields)
+                    )
                 );
             }
         }
@@ -256,8 +261,11 @@ pub mod tests {
         for rent_epoch in [None, Some(test_epoch)] {
             for account_hash in [None, Some(&acc_hash)] {
                 let rent_epoch_offset = 0;
-                let account_hash_offset =
-                    rent_epoch_offset + rent_epoch.as_ref().map(std::mem::size_of_val).unwrap_or(0);
+                let account_hash_offset = rent_epoch_offset
+                    + rent_epoch
+                        .as_ref()
+                        .map(std::mem::size_of_val)
+                        .unwrap_or(0);
                 let derived_size = account_hash_offset
                     + account_hash
                         .as_ref()

@@ -1,17 +1,16 @@
 #![cfg(test)]
 //! Helper functions for TieredStorage tests
-use {
-    crate::{
-        account_storage::meta::{StoredAccountMeta, StoredMeta},
-        accounts_hash::AccountHash,
-        tiered_storage::owners::OWNER_NO_OWNER,
-    },
-    solana_sdk::{
-        account::{Account, AccountSharedData, ReadableAccount},
-        hash::Hash,
-        pubkey::Pubkey,
-        rent_collector::RENT_EXEMPT_RENT_EPOCH,
-    },
+use solana_sdk::{
+    account::{Account, AccountSharedData, ReadableAccount},
+    hash::Hash,
+    pubkey::Pubkey,
+    rent_collector::RENT_EXEMPT_RENT_EPOCH,
+};
+
+use crate::{
+    account_storage::meta::{StoredAccountMeta, StoredMeta},
+    accounts_hash::AccountHash,
+    tiered_storage::owners::OWNER_NO_OWNER,
 };
 
 /// Create a test account based on the specified seed.
@@ -20,7 +19,9 @@ use {
 ///
 /// When the seed is zero, then a zero-lamport test account will be
 /// created.
-pub(super) fn create_test_account(seed: u64) -> (StoredMeta, AccountSharedData) {
+pub(super) fn create_test_account(
+    seed: u64,
+) -> (StoredMeta, AccountSharedData) {
     let data_byte = seed as u8;
     let owner_byte = u8::MAX - data_byte;
     let account = Account {

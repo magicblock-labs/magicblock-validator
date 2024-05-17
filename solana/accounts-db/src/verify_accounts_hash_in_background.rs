@@ -1,15 +1,14 @@
 //! at startup, verify accounts hash in the background
-use {
-    crate::waitable_condvar::WaitableCondvar,
-    std::{
-        sync::{
-            atomic::{AtomicBool, Ordering},
-            Arc, Mutex,
-        },
-        thread::JoinHandle,
-        time::Duration,
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
     },
+    thread::JoinHandle,
+    time::Duration,
 };
+
+use crate::waitable_condvar::WaitableCondvar;
 
 #[derive(Debug)]
 pub struct VerifyAccountsHashInBackground {
@@ -96,7 +95,9 @@ impl VerifyAccountsHashInBackground {
 
 #[cfg(test)]
 pub mod tests {
-    use {super::*, std::thread::Builder};
+    use std::thread::Builder;
+
+    use super::*;
 
     #[test]
     fn test_default() {
@@ -139,7 +140,9 @@ pub mod tests {
     }
 
     #[test]
-    #[should_panic(expected = "initial background accounts hash verification failed")]
+    #[should_panic(
+        expected = "initial background accounts hash verification failed"
+    )]
     fn test_panic() {
         let verify = Arc::new(VerifyAccountsHashInBackground::default());
         start_thread_and_return(&verify, false, || {});

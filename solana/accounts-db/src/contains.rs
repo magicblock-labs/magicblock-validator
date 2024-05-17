@@ -12,7 +12,9 @@ pub trait Contains<'a, T: Eq + Hash> {
     fn contains_iter(&'a self) -> Self::Iter;
 }
 
-impl<'a, T: 'a + Eq + Hash, U: 'a, S: BuildHasher> Contains<'a, T> for HashMap<T, U, S> {
+impl<'a, T: 'a + Eq + Hash, U: 'a, S: BuildHasher> Contains<'a, T>
+    for HashMap<T, U, S>
+{
     type Item = &'a T;
     type Iter = std::collections::hash_map::Keys<'a, T, U>;
 

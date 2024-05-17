@@ -1,11 +1,10 @@
-use {
-    crate::tiered_storage::{
-        file::TieredStorageFile, footer::TieredStorageFooter, mmap_utils::get_pod,
-        TieredStorageResult,
-    },
-    indexmap::set::IndexSet,
-    memmap2::Mmap,
-    solana_sdk::pubkey::Pubkey,
+use indexmap::set::IndexSet;
+use memmap2::Mmap;
+use solana_sdk::pubkey::Pubkey;
+
+use crate::tiered_storage::{
+    file::TieredStorageFile, footer::TieredStorageFooter, mmap_utils::get_pod,
+    TieredStorageResult,
 };
 
 /// The offset to an owner entry in the owners block.
@@ -115,10 +114,13 @@ impl<'a> OwnersTable<'a> {
 
 #[cfg(test)]
 mod tests {
-    use {
-        super::*, crate::tiered_storage::file::TieredStorageFile, memmap2::MmapOptions,
-        std::fs::OpenOptions, tempfile::TempDir,
-    };
+    use std::fs::OpenOptions;
+
+    use memmap2::MmapOptions;
+    use tempfile::TempDir;
+
+    use super::*;
+    use crate::tiered_storage::file::TieredStorageFile;
 
     #[test]
     fn test_owners_block() {

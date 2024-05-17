@@ -1,14 +1,17 @@
-use {
-    crate::{accounts_file::ALIGN_BOUNDARY_OFFSET, u64_align},
-    log::*,
-    memmap2::Mmap,
-    std::io::Result as IoResult,
-};
+use std::io::Result as IoResult;
+
+use log::*;
+use memmap2::Mmap;
+
+use crate::{accounts_file::ALIGN_BOUNDARY_OFFSET, u64_align};
 
 /// Borrows a value of type `T` from `mmap`
 ///
 /// Type T must be plain ol' data to ensure no undefined behavior.
-pub fn get_pod<T: bytemuck::AnyBitPattern>(mmap: &Mmap, offset: usize) -> IoResult<(&T, usize)> {
+pub fn get_pod<T: bytemuck::AnyBitPattern>(
+    mmap: &Mmap,
+    offset: usize,
+) -> IoResult<(&T, usize)> {
     // SAFETY: Since T is AnyBitPattern, it is safe to cast bytes to T.
     unsafe { get_type::<T>(mmap, offset) }
 }
@@ -36,7 +39,11 @@ pub unsafe fn get_type<T>(mmap: &Mmap, offset: usize) -> IoResult<(&T, usize)> {
 /// doesn't overrun the internal buffer. Otherwise return an Error.
 /// Also return the offset of the first byte after the requested data that
 /// falls on a 64-byte boundary.
-pub fn get_slice(mmap: &Mmap, offset: usize, size: usize) -> IoResult<(&[u8], usize)> {
+pub fn get_slice(
+    mmap: &Mmap,
+    offset: usize,
+    size: usize,
+) -> IoResult<(&[u8], usize)> {
     let (next, overflow) = offset.overflowing_add(size);
     if overflow || next > mmap.len() {
         error!(
