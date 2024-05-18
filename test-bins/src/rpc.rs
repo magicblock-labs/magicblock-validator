@@ -62,9 +62,7 @@ async fn main() {
         .await
         .expect("Failed to init geyser service");
 
-    let transaction_notifier = geyser_service
-        .get_transaction_notifier()
-        .expect("Failed to get transaction notifier from geyser service");
+    let transaction_notifier = geyser_service.get_transaction_notifier();
 
     let ledger_path = TempDir::new().unwrap();
     let ledger = Arc::new(

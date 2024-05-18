@@ -32,9 +32,20 @@ pub async fn init_geyser_service() -> Result<
             }
             Err(_) => (true, true),
         };
+    let (enable_account_notifications, enable_transaction_notifications) =
+        match std::env::var("GEYSER_DISABLE") {
+            Ok(val) => {
+                let enable_accounts = !val.contains("accounts");
+                let enable_transactions = !val.contains("transactions");
+                (enable_accounts, enable_transactions)
+            }
+            Err(_) => (true, true),
+        };
     let config = GeyserPluginConfig {
         cache_accounts,
         cache_transactions,
+        enable_account_notifications,
+        enable_transaction_notifications,
         ..Default::default()
     };
     debug!("Geyser plugin config: {:?}", config);
@@ -54,14 +65,14 @@ pub async fn init_geyser_service() -> Result<
 }
 
 pub struct GeyserTransactionNotifyListener {
-    transaction_notifier: TransactionNotifierArc,
+    transaction_notifier: Option<TransactionNotifierArc>,
     transaction_recvr: Receiver<TransactionStatusMessage>,
     ledger: Arc<Ledger>,
 }
 
 impl GeyserTransactionNotifyListener {
     pub fn new(
-        transaction_notifier: TransactionNotifierArc,
+        transaction_notifier: Option<TransactionNotifierArc>,
         transaction_recvr: Receiver<TransactionStatusMessage>,
         ledger: Arc<Ledger>,
     ) -> Self {
@@ -73,7 +84,10 @@ impl GeyserTransactionNotifyListener {
     }
 
     pub fn run(&self, enable_rpc_transaction_history: bool) {
-        let transaction_notifier = self.transaction_notifier.clone();
+        let transaction_notifier = match self.transaction_notifier {
+            Some(ref notifier) => notifier.clone(),
+            None => return,
+        };
         let transaction_recvr = self.transaction_recvr.clone();
         let ledger = self.ledger.clone();
         std::thread::spawn(move || {

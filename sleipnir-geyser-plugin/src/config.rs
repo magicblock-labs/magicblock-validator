@@ -57,6 +57,11 @@ pub struct Config {
     pub cache_accounts: bool,
     /// If to cache transaction updates (default: true)
     pub cache_transactions: bool,
+
+    /// If we should register to receive account notifications, (default: true)
+    pub enable_account_notifications: bool,
+    /// If we should register to receive tranaction notifications, (default: true)
+    pub enable_transaction_notifications: bool,
 }
 
 impl Default for Config {
@@ -76,6 +81,9 @@ impl Default for Config {
 
             cache_accounts: true,
             cache_transactions: true,
+
+            enable_account_notifications: true,
+            enable_transaction_notifications: true,
         }
     }
 }

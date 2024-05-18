@@ -358,11 +358,11 @@ impl GeyserPlugin for GrpcGeyserPlugin {
     }
 
     fn account_data_notifications_enabled(&self) -> bool {
-        true
+        self.config.enable_account_notifications
     }
 
     fn transaction_notifications_enabled(&self) -> bool {
-        true
+        self.config.enable_transaction_notifications
     }
 
     fn entry_notifications_enabled(&self) -> bool {

@@ -33,6 +33,10 @@ run-release-no-geyser-cache:
 	GEYSER_CACHE_DISABLE=accounts,transactions \
 	cargo run --release
 
+run-release-no-geyser:
+	GEYSER_DISABLE=accounts,transactions \
+	cargo run --release
+
 fmt:
 	cargo +nightly fmt -- --config-path rustfmt-nightly.toml
 
