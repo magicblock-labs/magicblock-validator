@@ -291,7 +291,6 @@ impl GeyserPlugin for GrpcGeyserPlugin {
             if let Some(transactions_cache) = self.transactions_cache.as_ref() {
                 transactions_cache.insert_with_ttl(
                     *transaction.signature,
-                    // TODO: If we store + send GeyserMessage we can avoid cloning here
                     message.clone(),
                     1,
                     self.config.transactions_cache_ttl,
