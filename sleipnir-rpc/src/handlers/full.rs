@@ -145,7 +145,7 @@ impl Full for FullImpl {
         meta: Self::Metadata,
         data: String,
         config: Option<RpcSendTransactionConfig>,
-    ) -> Result<String> {
+    ) -> BoxFuture<Result<String>> {
         debug!("send_transaction rpc request received");
         let RpcSendTransactionConfig {
             skip_preflight,
@@ -156,56 +156,21 @@ impl Full for FullImpl {
         } = config.unwrap_or_default();
 
         let tx_encoding = encoding.unwrap_or(UiTransactionEncoding::Base58);
-        let binary_encoding = tx_encoding.into_binary_encoding().ok_or_else(|| {
-                Error::invalid_params(format!(
-                    "unsupported encoding: {tx_encoding}. Supported encodings: base58, base64"
-                ))
-            })?;
-        let (wire_transaction, unsanitized_tx) = decode_and_deserialize::<
-            VersionedTransaction,
-        >(
-            data, binary_encoding
-        )?;
 
         let preflight_commitment = preflight_commitment
             .map(|commitment| CommitmentConfig { commitment });
-        let preflight_bank = &*meta.get_bank_with_config(RpcContextConfig {
-            commitment: preflight_commitment,
-            min_context_slot,
-        })?;
 
-        let transaction = sanitize_transaction(unsanitized_tx, preflight_bank)?;
-        let signature = *transaction.signature();
-
-        let mut last_valid_block_height = preflight_bank
-            .get_blockhash_last_valid_block_height(
-                transaction.message().recent_blockhash(),
+        Box::pin(async move {
+            send_transaction_impl(
+                &meta,
+                data,
+                preflight_commitment,
+                min_context_slot,
+                tx_encoding,
+                max_retries,
             )
-            .unwrap_or(0);
-
-        let durable_nonce_info = transaction
-            .get_durable_nonce()
-            .map(|&pubkey| (pubkey, *transaction.message().recent_blockhash()));
-        if durable_nonce_info.is_some() {
-            // While it uses a defined constant, this last_valid_block_height value is chosen arbitrarily.
-            // It provides a fallback timeout for durable-nonce transaction retries in case of
-            // malicious packing of the retry queue. Durable-nonce transactions are otherwise
-            // retried until the nonce is advanced.
-            last_valid_block_height =
-                preflight_bank.block_height() + MAX_RECENT_BLOCKHASHES as u64;
-        }
-
-        // TODO(thlorenz): leaving out if !skip_preflight part
-
-        send_transaction(
-            &meta,
-            signature,
-            // wire_transaction,
-            transaction,
-            last_valid_block_height,
-            durable_nonce_info,
-            max_retries,
-        )
+            .await
+        })
     }
 
     fn minimum_ledger_slot(&self, meta: Self::Metadata) -> Result<Slot> {
@@ -367,4 +332,58 @@ impl Full for FullImpl {
     ) -> Result<Vec<RpcPrioritizationFee>> {
         todo!("get_recent_prioritization_fees")
     }
+}
+
+async fn send_transaction_impl(
+    meta: &JsonRpcRequestProcessor,
+    data: String,
+    preflight_commitment: Option<CommitmentConfig>,
+    min_context_slot: Option<Slot>,
+    tx_encoding: UiTransactionEncoding,
+    max_retries: Option<usize>,
+) -> Result<String> {
+    let binary_encoding = tx_encoding.into_binary_encoding().ok_or_else(|| {
+                Error::invalid_params(format!(
+                    "unsupported encoding: {tx_encoding}. Supported encodings: base58, base64"
+                ))
+            })?;
+
+    let (_wire_transaction, unsanitized_tx) =
+        decode_and_deserialize::<VersionedTransaction>(data, binary_encoding)?;
+
+    let preflight_bank = &*meta.get_bank_with_config(RpcContextConfig {
+        commitment: preflight_commitment,
+        min_context_slot,
+    })?;
+    let transaction = sanitize_transaction(unsanitized_tx, preflight_bank)?;
+    let signature = *transaction.signature();
+
+    let mut last_valid_block_height = preflight_bank
+        .get_blockhash_last_valid_block_height(
+            transaction.message().recent_blockhash(),
+        )
+        .unwrap_or(0);
+
+    let durable_nonce_info = transaction
+        .get_durable_nonce()
+        .map(|&pubkey| (pubkey, *transaction.message().recent_blockhash()));
+    if durable_nonce_info.is_some() {
+        // While it uses a defined constant, this last_valid_block_height value is chosen arbitrarily.
+        // It provides a fallback timeout for durable-nonce transaction retries in case of
+        // malicious packing of the retry queue. Durable-nonce transactions are otherwise
+        // retried until the nonce is advanced.
+        last_valid_block_height =
+            preflight_bank.block_height() + MAX_RECENT_BLOCKHASHES as u64;
+    }
+
+    // TODO(thlorenz): leaving out if !skip_preflight part
+
+    send_transaction(
+        meta,
+        signature,
+        transaction,
+        last_valid_block_height,
+        durable_nonce_info,
+        max_retries,
+    )
 }

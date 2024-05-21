@@ -77,7 +77,7 @@ pub trait Full {
         meta: Self::Metadata,
         data: String,
         config: Option<RpcSendTransactionConfig>,
-    ) -> Result<String>;
+    ) -> BoxFuture<Result<String>>;
 
     /* TODO: Not yet supporting transaction simulation
     #[rpc(meta, name = "simulateTransaction")]
