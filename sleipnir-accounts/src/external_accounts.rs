@@ -103,6 +103,7 @@ impl ExternalReadonlyAccounts {
 // -----------------
 // ExternalWritableAccounts
 // -----------------
+#[derive(Default)]
 pub struct ExternalWritableAccounts(ExternalAccounts<ExternalWritableAccount>);
 
 impl Deref for ExternalWritableAccounts {

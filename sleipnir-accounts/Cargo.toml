@@ -12,4 +12,5 @@ async-trait = { workspace = true }
 conjunto-transwise = { workspace = true }
 sleipnir-mutator = { workspace = true }
 solana-sdk = { workspace = true }
+tokio = { workspace = true }
 thiserror = { workspace = true }

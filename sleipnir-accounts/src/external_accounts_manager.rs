@@ -10,18 +10,19 @@ use crate::{
     external_accounts::{ExternalReadonlyAccounts, ExternalWritableAccounts},
     traits::{AccountCloner, InternalAccountProvider},
 };
+
 pub struct ExternalAccountsManager<IAP, AC, VAP>
 where
     IAP: InternalAccountProvider,
     AC: AccountCloner,
     VAP: ValidatedAccountsProvider + TransactionAccountsExtractor,
 {
-    internal_account_provider: IAP,
-    account_cloner: AC,
-    validated_accounts_provider: VAP,
-    validate_config: ValidateAccountsConfig,
-    external_readonly_accounts: ExternalReadonlyAccounts,
-    external_writable_accounts: ExternalWritableAccounts,
+    pub internal_account_provider: IAP,
+    pub account_cloner: AC,
+    pub validated_accounts_provider: VAP,
+    pub validate_config: ValidateAccountsConfig,
+    pub external_readonly_accounts: ExternalReadonlyAccounts,
+    pub external_writable_accounts: ExternalWritableAccounts,
 }
 
 impl<IAP, AC, VAP> ExternalAccountsManager<IAP, AC, VAP>
@@ -39,6 +40,14 @@ where
             .validated_accounts_provider
             .accounts_from_sanitized_transaction(tx);
 
+        self.ensure_accounts_from_holder(accounts_holder).await
+    }
+
+    // Direct use for tests only
+    pub async fn ensure_accounts_from_holder(
+        &self,
+        accounts_holder: TransactionAccountsHolder,
+    ) -> AccountsResult<Vec<Signature>> {
         // 2. Remove all accounts we already track as external accounts
         //    and the ones that are found in our validator
         let new_readonly_accounts = accounts_holder
