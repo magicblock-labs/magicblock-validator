@@ -99,6 +99,7 @@ sleipnir-geyser-plugin = { path = "./sleipnir-geyser-plugin" }
 sleipnir-ledger = { path = "./sleipnir-ledger" }
 sleipnir-messaging = { path = "./sleipnir-messaging" }
 sleipnir-mutator = { path = "./sleipnir-mutator" }
+sleipnir-perf-service = { path = "./sleipnir-perf-service" }
 sleipnir-processor = { path = "./sleipnir-processor" }
 sleipnir-program = { path = "./programs/sleipnir" }
 sleipnir-pubsub = { path = "./sleipnir-pubsub" }
@@ -112,28 +113,27 @@ sleipnir-tokens = { path = "./sleipnir-tokens" }
 sleipnir-streamer = { path = "./sleipnir-streamer" }
 sleipnir-transaction-status = { path = "./sleipnir-transaction-status" }
 sleipnir-version = { path = "./sleipnir-version" }
-solana-accounts-db = { path = "./solana/accounts-db" }
-solana-account-decoder = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-account-decoder" }
-solana-bpf-loader-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-bpf-loader-program" }
-solana-cost-model = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-cost-model" }
-solana-frozen-abi = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-frozen-abi" }
-solana-frozen-abi-macro = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-frozen-abi-macro" }
-solana-geyser-plugin-interface = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-geyser-plugin-interface" }
-solana-geyser-plugin-manager = { path = "./solana/geyser-plugin-manager" }
-solana-loader-v4-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-loader-v4-program" }
-solana-logger = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-logger" }
-solana-measure = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-measure" }
-solana-metrics = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-metrics" }
-solana-perf = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-perf" }
-sleipnir-perf-service = { path = "./sleipnir-perf-service" }
-solana-program-runtime = { path = "./solana/program-runtime" }
-solana-rayon-threadlimit = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-rayon-threadlimit" }
-solana-streamer = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-streamer" }
-solana-sdk = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-sdk" }
-solana-svm = { path = "./solana/svm" }
-solana-storage-proto = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-storage-proto" }
-solana-system-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-system-program" }
-solana-transaction-status = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-transaction-status" }
+solana-accounts-db = { path = "./solana/accounts-db", version = "1.19.0" }
+solana-account-decoder = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-account-decoder", version = "1.19.0" }
+solana-bpf-loader-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-bpf-loader-program", version = "1.19.0" }
+solana-cost-model = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-cost-model", version = "1.19.0" }
+solana-frozen-abi = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-frozen-abi", version = "1.19.0" }
+solana-frozen-abi-macro = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-frozen-abi-macro", version = "1.19.0" }
+solana-geyser-plugin-interface = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-geyser-plugin-interface", version = "1.19.0" }
+solana-geyser-plugin-manager = { path = "./solana/geyser-plugin-manager", version = "1.19.0" }
+solana-loader-v4-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-loader-v4-program", version = "1.19.0" }
+solana-logger = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-logger", version = "1.19.0" }
+solana-measure = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-measure", version = "1.19.0" }
+solana-metrics = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-metrics", version = "1.19.0" }
+solana-perf = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-perf", version = "1.19.0" }
+solana-program-runtime = { path = "./solana/program-runtime", version = "1.19.0" }
+solana-rayon-threadlimit = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-rayon-threadlimit", version = "1.19.0" }
+solana-streamer = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-streamer", version = "1.19.0" }
+solana-sdk = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-sdk", version = "1.19.0" }
+solana-svm = { path = "./solana/svm", version = "1.19.0" }
+solana-storage-proto = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-storage-proto", version = "1.19.0" }
+solana-system-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-system-program", version = "1.19.0" }
+solana-transaction-status = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-transaction-status", version = "1.19.0" }
 solana_rbpf = "=0.8.0"
 spl-token = "=4.0.1"
 spl-token-2022 = "=2.0.1"
