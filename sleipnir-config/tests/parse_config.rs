@@ -1,6 +1,6 @@
 use sleipnir_config::{
-    AccountsConfig, CloneStrategy, ProgramConfig, ReadonlyMode, RpcConfig,
-    SleipnirConfig, ValidatorConfig, WritableMode,
+    AccountsConfig, CloneStrategy, ProgramConfig, ReadonlyMode, RemoteConfig,
+    RpcConfig, SleipnirConfig, ValidatorConfig, WritableMode,
 };
 
 #[test]
@@ -84,4 +84,23 @@ fn test_local_dev_with_programs_toml() {
             ..SleipnirConfig::default()
         }
     )
+}
+
+#[test]
+fn test_custom_remote_toml() {
+    let toml = include_str!("fixtures/07_custom-remote.toml");
+    let config = toml::from_str::<SleipnirConfig>(toml).unwrap();
+
+    assert_eq!(
+        config,
+        SleipnirConfig {
+            accounts: AccountsConfig {
+                remote: RemoteConfig::Custom(
+                    "http://localhost:8899".to_string()
+                ),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    );
 }

@@ -41,6 +41,7 @@ pub enum RemoteConfig {
     #[serde(alias = "local")]
     #[serde(alias = "localhost")]
     Development,
+    #[serde(untagged)]
     Custom(String),
 }
 
