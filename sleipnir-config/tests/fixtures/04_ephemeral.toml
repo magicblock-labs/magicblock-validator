@@ -1,0 +1,6 @@
+# We clone all programs and all writable accounts that are properly delegated
+# Otherwise we fail with account missing and/or not properly delegate.
+# We never create accounts at this point
+[accounts]
+clone = { readonly = "programs", writable = "delegated" }
+create = false

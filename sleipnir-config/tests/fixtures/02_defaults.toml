@@ -1,0 +1,11 @@
+# Defaults are optimized for local development in order to get started quickly
+
+[accounts]
+
+# devnet | mainnet/mainnet-beta | testnet | development/local custom(url)
+remote = "devnet"
+
+# readonly: all | programs  | none
+# writable: all | delegated | none (
+clone = { readonly = "programs", writable = "none" }
+create = true

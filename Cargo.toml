@@ -9,6 +9,7 @@ members = [
   "programs/sleipnir",
   "sleipnir-accounts",
   "sleipnir-bank",
+  "sleipnir-config",
   "sleipnir-geyser-plugin",
   "sleipnir-ledger",
   "sleipnir-messaging",
@@ -144,6 +145,7 @@ stretto = "0.8.3"
 tempfile = "3.10.1"
 test-tools = { path = "./test-tools" }
 test-tools-core = { path = "./test-tools-core" }
+toml = "0.8.13"
 thiserror = "1.0.57"
 # Update solana-tokio patch below when updating this version
 tokio = "1.29.1"

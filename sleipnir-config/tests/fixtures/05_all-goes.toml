@@ -1,0 +1,6 @@
+# All accounts are first looked up on chain and only the ones that are
+# not found are either created as part of the transaction or result in
+# account missing as usual
+[accounts]
+clone = { readonly = "all", writable = "all" }
+create = true

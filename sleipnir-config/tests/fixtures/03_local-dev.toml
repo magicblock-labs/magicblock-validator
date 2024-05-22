@@ -1,0 +1,6 @@
+# Programs are automatically cloned from devnet.
+# All others are expected to be there or need to be created as part of the transaction.
+[accounts]
+remote = "devnet"
+clone = { readonly = "programs", writable = "none" }
+create = true
