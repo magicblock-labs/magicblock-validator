@@ -2,6 +2,7 @@ use async_trait::async_trait;
 use sleipnir_processor::batch_processor::{
     execute_batch, TransactionBatchWithIndexes,
 };
+use sleipnir_transaction_status::TransactionStatusSender;
 use solana_sdk::{
     pubkey::Pubkey, signature::Signature, transaction::SanitizedTransaction,
 };
@@ -17,11 +18,20 @@ use crate::{errors::AccountsResult, AccountCloner};
 pub struct RemoteAccountCloner {
     cluster: Cluster,
     bank: Arc<Bank>,
+    transaction_status_sender: Option<TransactionStatusSender>,
 }
 
 impl RemoteAccountCloner {
-    pub fn new(cluster: Cluster, bank: Arc<Bank>) -> Self {
-        Self { cluster, bank }
+    pub fn new(
+        cluster: Cluster,
+        bank: Arc<Bank>,
+        transaction_status_sender: Option<TransactionStatusSender>,
+    ) -> Self {
+        Self {
+            cluster,
+            bank,
+            transaction_status_sender,
+        }
     }
 }
 
@@ -58,7 +68,7 @@ impl AccountCloner for RemoteAccountCloner {
         execute_batch(
             &batch_with_indexes,
             &self.bank,
-            None,
+            self.transaction_status_sender.as_ref(),
             &mut timings,
             None,
         )?;

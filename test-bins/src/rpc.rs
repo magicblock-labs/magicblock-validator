@@ -111,14 +111,15 @@ async fn main() {
     let pubsub_config = PubsubConfig::default();
     // JSON RPC Service
     let json_rpc_service = {
+        let transaction_status_sender = TransactionStatusSender {
+            sender: transaction_sndr,
+        };
         let rpc_socket_addr =
             SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8899);
         let config = JsonRpcConfig {
             slot_duration: tick_duration,
             genesis_creation_time: genesis_config.creation_time,
-            transaction_status_sender: Some(TransactionStatusSender {
-                sender: transaction_sndr,
-            }),
+            transaction_status_sender: Some(transaction_status_sender.clone()),
             rpc_socket_addr: Some(rpc_socket_addr),
             pubsub_socket_addr: Some(*pubsub_config.socket()),
             enable_rpc_transaction_history: true,
@@ -133,6 +134,7 @@ async fn main() {
             let accounts_manager = AccountsManager::try_new(
                 Cluster::Known(ClusterType::Devnet),
                 &bank,
+                Some(transaction_status_sender),
                 Default::default(),
             )
             .expect("Failed to create accounts manager");

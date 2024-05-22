@@ -1,4 +1,5 @@
 use log::*;
+use sleipnir_transaction_status::TransactionStatusSender;
 use std::sync::Arc;
 
 use conjunto_transwise::{
@@ -46,13 +47,18 @@ impl
     pub fn try_new(
         cluster: Cluster,
         bank: &Arc<Bank>,
+        transaction_status_sender: Option<TransactionStatusSender>,
         validate_config: ValidateAccountsConfig,
     ) -> AccountsResult<Self> {
         let internal_account_provider = BankAccountProvider::new(bank.clone());
         let rpc_cluster = try_rpc_cluster_from_cluster(&cluster)?;
         let rpc_provider_config = RpcProviderConfig::new(rpc_cluster, None);
 
-        let account_cloner = RemoteAccountCloner::new(cluster, bank.clone());
+        let account_cloner = RemoteAccountCloner::new(
+            cluster,
+            bank.clone(),
+            transaction_status_sender,
+        );
         let validated_accounts_provider = Transwise::new(rpc_provider_config);
 
         Ok(Self {
