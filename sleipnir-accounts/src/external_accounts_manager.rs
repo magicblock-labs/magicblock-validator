@@ -1,14 +1,21 @@
+use std::sync::Arc;
+
 use conjunto_transwise::{
     trans_account_meta::TransactionAccountsHolder,
-    validated_accounts::ValidateAccountsConfig, TransactionAccountsExtractor,
-    ValidatedAccountsProvider,
+    validated_accounts::ValidateAccountsConfig, RpcProviderConfig,
+    TransactionAccountsExtractor, Transwise, ValidatedAccountsProvider,
 };
+use sleipnir_bank::bank::Bank;
+use sleipnir_mutator::Cluster;
 use solana_sdk::{signature::Signature, transaction::SanitizedTransaction};
 
 use crate::{
+    bank_account_provider::BankAccountProvider,
     errors::AccountsResult,
     external_accounts::{ExternalReadonlyAccounts, ExternalWritableAccounts},
+    remote_account_cloner::RemoteAccountCloner,
     traits::{AccountCloner, InternalAccountProvider},
+    utils::try_rpc_cluster_from_cluster,
 };
 
 #[derive(Debug)]
@@ -24,6 +31,32 @@ where
     pub validate_config: ValidateAccountsConfig,
     pub external_readonly_accounts: ExternalReadonlyAccounts,
     pub external_writable_accounts: ExternalWritableAccounts,
+}
+
+impl
+    ExternalAccountsManager<BankAccountProvider, RemoteAccountCloner, Transwise>
+{
+    pub fn try_new(
+        cluster: Cluster,
+        bank: &Arc<Bank>,
+        validate_config: ValidateAccountsConfig,
+    ) -> AccountsResult<Self> {
+        let internal_account_provider = BankAccountProvider::new(bank.clone());
+        let rpc_cluster = try_rpc_cluster_from_cluster(&cluster)?;
+        let rpc_provider_config = RpcProviderConfig::new(rpc_cluster, None);
+
+        let account_cloner = RemoteAccountCloner::new(cluster, bank.clone());
+        let validated_accounts_provider = Transwise::new(rpc_provider_config);
+
+        Ok(Self {
+            internal_account_provider,
+            account_cloner,
+            validated_accounts_provider,
+            validate_config,
+            external_readonly_accounts: ExternalReadonlyAccounts::default(),
+            external_writable_accounts: ExternalWritableAccounts::default(),
+        })
+    }
 }
 
 impl<IAP, AC, VAP> ExternalAccountsManager<IAP, AC, VAP>

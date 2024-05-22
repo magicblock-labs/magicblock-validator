@@ -152,6 +152,7 @@ tokio-util = "0.7.10"
 tonic = "0.10.2"
 tonic-build = "0.10.2"
 tonic-health = "0.10.2"
+url = "2.5.0"
 vergen = "8.3.1"
 zstd = "0.11.2"
 

@@ -10,7 +10,10 @@ edition.workspace = true
 [dependencies]
 async-trait = { workspace = true }
 conjunto-transwise = { workspace = true }
+sleipnir-bank = { workspace = true }
 sleipnir-mutator = { workspace = true }
+sleipnir-processor = { workspace = true }
 solana-sdk = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }
+url = { workspace = true }
