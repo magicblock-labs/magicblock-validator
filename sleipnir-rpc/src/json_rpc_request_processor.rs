@@ -516,7 +516,7 @@ impl JsonRpcRequestProcessor {
     // -----------------
     // Transactions
     // -----------------
-    pub fn request_airdrop(
+    pub async fn request_airdrop(
         &self,
         pubkey_str: String,
         lamports: u64,
@@ -526,7 +526,7 @@ impl JsonRpcRequestProcessor {
             message: format!("Invalid pubkey: {}", e),
             data: None,
         })?;
-        airdrop_transaction(self, pubkey, lamports)
+        airdrop_transaction(self, pubkey, lamports).await
     }
 
     pub async fn get_transaction(

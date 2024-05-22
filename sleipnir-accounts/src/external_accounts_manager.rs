@@ -156,6 +156,10 @@ where
             self.external_writable_accounts.insert(writable);
         }
 
+        if !signatures.is_empty() {
+            debug!("Transactions {:?}", signatures,);
+        }
+
         Ok(signatures)
     }
 }

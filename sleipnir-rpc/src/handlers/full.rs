@@ -135,9 +135,11 @@ impl Full for FullImpl {
         pubkey_str: String,
         lamports: u64,
         _config: Option<RpcRequestAirdropConfig>,
-    ) -> Result<String> {
+    ) -> BoxFuture<Result<String>> {
         debug!("request_airdrop rpc request received");
-        meta.request_airdrop(pubkey_str, lamports)
+        Box::pin(
+            async move { meta.request_airdrop(pubkey_str, lamports).await },
+        )
     }
 
     fn send_transaction(
@@ -386,4 +388,5 @@ async fn send_transaction_impl(
         durable_nonce_info,
         max_retries,
     )
+    .await
 }

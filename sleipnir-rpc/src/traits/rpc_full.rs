@@ -69,7 +69,7 @@ pub trait Full {
         pubkey_str: String,
         lamports: u64,
         config: Option<RpcRequestAirdropConfig>,
-    ) -> Result<String>;
+    ) -> BoxFuture<Result<String>>;
 
     #[rpc(meta, name = "sendTransaction")]
     fn send_transaction(

@@ -2,7 +2,7 @@ use std::any::type_name;
 
 use base64::{prelude::BASE64_STANDARD, Engine};
 use bincode::Options;
-use jsonrpc_core::{Error, Result};
+use jsonrpc_core::{Error, ErrorCode, Result};
 use log::*;
 use sleipnir_processor::batch_processor::{
     execute_batch, TransactionBatchWithIndexes,
@@ -100,7 +100,7 @@ pub(crate) fn sanitize_transaction(
     .map_err(|err| Error::invalid_params(format!("invalid transaction: {err}")))
 }
 
-pub(crate) fn airdrop_transaction(
+pub(crate) async fn airdrop_transaction(
     meta: &JsonRpcRequestProcessor,
     pubkey: Pubkey,
     lamports: u64,
@@ -121,11 +121,11 @@ pub(crate) fn airdrop_transaction(
                 Error::invalid_params(format!("invalid transaction: {err}"))
             })?;
     let signature = *transaction.signature();
-    send_transaction(meta, signature, transaction, 0, None, None)
+    send_transaction(meta, signature, transaction, 0, None, None).await
 }
 
 // TODO(thlorenz): for now we execute the transaction directly via a single batch
-pub(crate) fn send_transaction(
+pub(crate) async fn send_transaction(
     meta: &JsonRpcRequestProcessor,
     signature: Signature,
     sanitized_transaction: SanitizedTransaction,
@@ -135,6 +135,14 @@ pub(crate) fn send_transaction(
     _max_retries: Option<usize>,
 ) -> Result<String> {
     let bank = &meta.get_bank();
+    meta.accounts_manager
+        .ensure_accounts(&sanitized_transaction)
+        .await
+        .map_err(|err| Error {
+            code: ErrorCode::InvalidRequest,
+            message: format!("{:?}", err),
+            data: None,
+        })?;
     let txs = [sanitized_transaction];
     let batch = bank.prepare_sanitized_batch(&txs);
     let batch_with_indexes = TransactionBatchWithIndexes {
