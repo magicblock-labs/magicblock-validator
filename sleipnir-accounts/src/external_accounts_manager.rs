@@ -1,3 +1,4 @@
+use log::*;
 use std::sync::Arc;
 
 use conjunto_transwise::{
@@ -17,6 +18,12 @@ use crate::{
     traits::{AccountCloner, InternalAccountProvider},
     utils::try_rpc_cluster_from_cluster,
 };
+
+pub type AccountsManager = ExternalAccountsManager<
+    BankAccountProvider,
+    RemoteAccountCloner,
+    Transwise,
+>;
 
 #[derive(Debug)]
 pub struct ExternalAccountsManager<IAP, AC, VAP>
@@ -74,13 +81,18 @@ where
             .validated_accounts_provider
             .accounts_from_sanitized_transaction(tx);
 
-        self.ensure_accounts_from_holder(accounts_holder).await
+        self.ensure_accounts_from_holder(
+            accounts_holder,
+            tx.signature().to_string(),
+        )
+        .await
     }
 
     // Direct use for tests only
     pub async fn ensure_accounts_from_holder(
         &self,
         accounts_holder: TransactionAccountsHolder,
+        signature: String,
     ) -> AccountsResult<Vec<Signature>> {
         // 2. Remove all accounts we already track as external accounts
         //    and the ones that are found in our validator
@@ -117,6 +129,18 @@ where
             .await?;
 
         // 4. Clone the accounts and add metadata to external account trackers
+        if !validated_accounts.readonly.is_empty() {
+            debug!(
+                "Transaction '{}' triggered readonly account clones: {:?}",
+                signature, validated_accounts.readonly,
+            );
+        }
+        if !validated_accounts.writable.is_empty() {
+            debug!(
+                "Transaction '{}' triggered writable account clones: {:?}",
+                signature, validated_accounts.writable,
+            );
+        }
         let mut signatures = vec![];
         for readonly in validated_accounts.readonly {
             let signature =

@@ -48,7 +48,9 @@ async fn test_ensure_readonly_account_not_tracked_nor_in_our_validator() {
         writable: vec![],
     };
 
-    let result = manager.ensure_accounts_from_holder(holder).await;
+    let result = manager
+        .ensure_accounts_from_holder(holder, "tx-sig".to_string())
+        .await;
     assert_eq!(result.unwrap().len(), 1);
     assert!(manager.account_cloner.did_clone(&readonly));
     assert!(manager.external_readonly_accounts.has(&readonly));
@@ -75,7 +77,9 @@ async fn test_ensure_readonly_account_not_tracked_but_in_our_validator() {
         writable: vec![],
     };
 
-    let result = manager.ensure_accounts_from_holder(holder).await;
+    let result = manager
+        .ensure_accounts_from_holder(holder, "tx-sig".to_string())
+        .await;
     assert_eq!(result.unwrap().len(), 0);
     assert!(!manager.account_cloner.did_clone(&readonly));
     assert!(manager.external_readonly_accounts.is_empty());
@@ -102,7 +106,9 @@ async fn test_ensure_readonly_account_tracked_but_not_in_our_validator() {
         writable: vec![],
     };
 
-    let result = manager.ensure_accounts_from_holder(holder).await;
+    let result = manager
+        .ensure_accounts_from_holder(holder, "tx-sig".to_string())
+        .await;
     assert_eq!(result.unwrap().len(), 0);
     assert!(!manager.account_cloner.did_clone(&readonly));
     assert_eq!(manager.external_readonly_accounts.len(), 1);
@@ -130,7 +136,9 @@ async fn test_ensure_readonly_account_in_our_validator_and_new_writable() {
         writable: vec![writable],
     };
 
-    let result = manager.ensure_accounts_from_holder(holder).await;
+    let result = manager
+        .ensure_accounts_from_holder(holder, "tx-sig".to_string())
+        .await;
     assert_eq!(result.unwrap().len(), 1);
     assert!(!manager.account_cloner.did_clone(&readonly));
     assert!(manager.account_cloner.did_clone(&writable));
@@ -162,7 +170,9 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
             writable: vec![writable1],
         };
 
-        let result = manager.ensure_accounts_from_holder(holder).await;
+        let result = manager
+            .ensure_accounts_from_holder(holder, "tx-sig".to_string())
+            .await;
         assert_eq!(result.unwrap().len(), 3);
 
         assert!(manager.account_cloner.did_clone(&readonly1));
@@ -187,7 +197,9 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
             writable: vec![],
         };
 
-        let result = manager.ensure_accounts_from_holder(holder).await;
+        let result = manager
+            .ensure_accounts_from_holder(holder, "tx-sig".to_string())
+            .await;
         assert!(result.unwrap().is_empty());
 
         assert!(!manager.account_cloner.did_clone(&readonly1));
@@ -212,7 +224,9 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
             writable: vec![writable2],
         };
 
-        let result = manager.ensure_accounts_from_holder(holder).await;
+        let result = manager
+            .ensure_accounts_from_holder(holder, "tx-sig".to_string())
+            .await;
         assert_eq!(result.unwrap().len(), 2);
 
         assert!(!manager.account_cloner.did_clone(&readonly1));
@@ -251,7 +265,9 @@ async fn test_ensure_writable_account_fails_to_validate() {
         writable: vec![writable],
     };
 
-    let result = manager.ensure_accounts_from_holder(holder).await;
+    let result = manager
+        .ensure_accounts_from_holder(holder, "tx-sig".to_string())
+        .await;
     assert!(matches!(
         result,
         Err(AccountsError::TranswiseError(

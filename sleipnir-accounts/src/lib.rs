@@ -7,5 +7,7 @@ mod traits;
 mod utils;
 
 pub use external_accounts::*;
-pub use external_accounts_manager::ExternalAccountsManager;
+pub use external_accounts_manager::{AccountsManager, ExternalAccountsManager};
 pub use traits::*;
+
+pub use sleipnir_mutator::Cluster;
