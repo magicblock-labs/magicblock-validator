@@ -9,3 +9,9 @@ remote = "devnet"
 # writable: all | delegated | none (
 clone = { readonly = "programs", writable = "none" }
 create = true
+
+[rpc]
+port = 8899
+
+[validator]
+millis_per_slot = 50

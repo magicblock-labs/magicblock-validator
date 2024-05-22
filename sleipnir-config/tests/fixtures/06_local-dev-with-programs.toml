@@ -1,0 +1,20 @@
+# Programs are automatically cloned from devnet.
+# All others are expected to be there or need to be created as part of the transaction.
+[accounts]
+remote = "devnet"
+clone = { readonly = "programs", writable = "none" }
+create = true
+
+## Choosing a different RPC port and millis/sec here to test this as well
+[rpc]
+port = 7799
+
+[validator]
+millis_per_slot = 14
+
+# Programs that will be loaded when the validator starts up
+# The program files are considered to be relative to the directoy
+# containing the configuration file, unless they are full paths.
+[[program]]
+id = "wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4"
+path = "../demos/magic-worm/target/deploy/program_solana.so"

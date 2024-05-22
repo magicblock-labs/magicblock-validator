@@ -60,6 +60,7 @@ pub struct CloneStrategy {
 pub enum ReadonlyMode {
     All,
     #[default]
+    #[serde(alias = "program")]
     Programs,
     None,
 }

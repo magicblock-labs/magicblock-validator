@@ -9,4 +9,6 @@ edition.workspace = true
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
+test-tools-core = { workspace = true }
+thiserror = { workspace = true }
 toml = { workspace = true }
