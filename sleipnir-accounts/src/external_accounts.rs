@@ -17,6 +17,7 @@ pub trait ExternalAccount {
     fn cloned_at(&self) -> Duration;
 }
 
+#[derive(Debug)]
 pub struct ExternalAccounts<T: ExternalAccount> {
     accounts: RwLock<HashMap<Pubkey, T>>,
 }
@@ -37,6 +38,14 @@ impl<T: ExternalAccount> ExternalAccounts<T> {
 
     pub fn has(&self, pubkey: &Pubkey) -> bool {
         self.read_accounts().contains_key(pubkey)
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.read_accounts().is_empty()
+    }
+
+    pub fn len(&self) -> usize {
+        self.read_accounts().len()
     }
 
     pub fn cloned_at(&self, pubkey: &Pubkey) -> Option<Duration> {
@@ -61,7 +70,7 @@ impl<T: ExternalAccount> ExternalAccounts<T> {
 // -----------------
 // ExternalReadonlyAccounts
 // -----------------
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct ExternalReadonlyAccounts(ExternalAccounts<ExternalReadonlyAccount>);
 
 impl Deref for ExternalReadonlyAccounts {
@@ -72,6 +81,7 @@ impl Deref for ExternalReadonlyAccounts {
     }
 }
 
+#[derive(Debug)]
 pub struct ExternalReadonlyAccount {
     pub pubkey: Pubkey,
     pub cloned_at: Duration,
@@ -103,7 +113,7 @@ impl ExternalReadonlyAccounts {
 // -----------------
 // ExternalWritableAccounts
 // -----------------
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct ExternalWritableAccounts(ExternalAccounts<ExternalWritableAccount>);
 
 impl Deref for ExternalWritableAccounts {
@@ -114,6 +124,7 @@ impl Deref for ExternalWritableAccounts {
     }
 }
 
+#[derive(Debug)]
 pub struct ExternalWritableAccount {
     pub pubkey: Pubkey,
     pub cloned_at: Duration,

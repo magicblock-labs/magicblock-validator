@@ -23,7 +23,7 @@ use solana_sdk::{
 // -----------------
 // InternalAccountProviderStub
 // -----------------
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct InternalAccountProviderStub {
     accounts: HashMap<Pubkey, AccountSharedData>,
 }
@@ -42,7 +42,7 @@ impl InternalAccountProvider for InternalAccountProviderStub {
 // -----------------
 // AccountClonerStub
 // -----------------
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct AccountClonerStub {
     cloned_accounts: RwLock<HashSet<Pubkey>>,
 }
@@ -50,6 +50,10 @@ pub struct AccountClonerStub {
 impl AccountClonerStub {
     pub fn did_clone(&self, pubkey: &Pubkey) -> bool {
         self.cloned_accounts.read().unwrap().contains(pubkey)
+    }
+
+    pub fn clear(&self) {
+        self.cloned_accounts.write().unwrap().clear();
     }
 }
 
@@ -67,6 +71,7 @@ impl AccountCloner for AccountClonerStub {
 // -----------------
 // ValidatedAccountsProviderStub
 // -----------------
+#[derive(Debug)]
 pub struct ValidatedAccountsProviderStub {
     validation_error: Option<TranswiseError>,
 }

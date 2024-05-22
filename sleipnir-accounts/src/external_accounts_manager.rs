@@ -11,6 +11,7 @@ use crate::{
     traits::{AccountCloner, InternalAccountProvider},
 };
 
+#[derive(Debug)]
 pub struct ExternalAccountsManager<IAP, AC, VAP>
 where
     IAP: InternalAccountProvider,
