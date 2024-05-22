@@ -7,6 +7,7 @@ use std::{
 
 use crossbeam_channel::unbounded;
 use log::*;
+use sleipnir_accounts::{AccountsManager, Cluster};
 use sleipnir_bank::{
     bank::Bank,
     genesis_utils::{create_genesis_config, GenesisConfigInfo},
@@ -18,7 +19,9 @@ use sleipnir_rpc::{
     json_rpc_request_processor::JsonRpcConfig, json_rpc_service::JsonRpcService,
 };
 use sleipnir_transaction_status::TransactionStatusSender;
-use solana_sdk::{signature::Keypair, signer::Signer};
+use solana_sdk::{
+    genesis_config::ClusterType, signature::Keypair, signer::Signer,
+};
 use tempfile::TempDir;
 use test_tools::{
     account::{fund_account, fund_account_addr},
@@ -127,12 +130,19 @@ async fn main() {
         // other tokio runtimes, i.e. the one of the GeyserPlugin
         let hdl = {
             let bank = bank.clone();
+            let accounts_manager = AccountsManager::try_new(
+                Cluster::Known(ClusterType::Devnet),
+                &bank,
+                Default::default(),
+            )
+            .expect("Failed to create accounts manager");
             std::thread::spawn(move || {
                 let _json_rpc_service = JsonRpcService::new(
                     bank,
                     ledger.clone(),
                     faucet_keypair,
                     genesis_config.hash(),
+                    accounts_manager,
                     config,
                 )
                 .unwrap();

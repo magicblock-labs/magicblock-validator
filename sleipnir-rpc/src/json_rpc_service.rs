@@ -11,6 +11,7 @@ use jsonrpc_http_server::{
 };
 // NOTE: from rpc/src/rpc_service.rs
 use log::*;
+use sleipnir_accounts::AccountsManager;
 use sleipnir_bank::bank::Bank;
 use sleipnir_ledger::Ledger;
 use solana_perf::thread::renice_this_thread;
@@ -45,6 +46,7 @@ impl JsonRpcService {
         ledger: Arc<Ledger>,
         faucet_keypair: Keypair,
         genesis_hash: Hash,
+        accounts_manager: AccountsManager,
         config: JsonRpcConfig,
     ) -> Result<Self, String> {
         let rpc_addr = config
@@ -68,6 +70,7 @@ impl JsonRpcService {
             health.clone(),
             faucet_keypair,
             genesis_hash,
+            accounts_manager,
             config,
         );
 

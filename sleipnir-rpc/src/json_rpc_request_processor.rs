@@ -9,6 +9,7 @@ use std::{
 use crossbeam_channel::{unbounded, Receiver, Sender};
 use jsonrpc_core::{Error, ErrorCode, Metadata, Result, Value};
 use log::*;
+use sleipnir_accounts::AccountsManager;
 use sleipnir_bank::bank::Bank;
 use sleipnir_ledger::{Ledger, SignatureInfosForAddress};
 use sleipnir_rpc_client_api::{
@@ -88,6 +89,8 @@ pub struct JsonRpcRequestProcessor {
     transaction_sender: Arc<Mutex<Sender<TransactionInfo>>>,
     pub(crate) genesis_hash: Hash,
     pub faucet_keypair: Arc<Keypair>,
+
+    pub accounts_manager: Arc<AccountsManager>,
 }
 impl Metadata for JsonRpcRequestProcessor {}
 
@@ -98,6 +101,7 @@ impl JsonRpcRequestProcessor {
         health: Arc<RpcHealth>,
         faucet_keypair: Keypair,
         genesis_hash: Hash,
+        accounts_manager: AccountsManager,
         config: JsonRpcConfig,
     ) -> (Self, Receiver<TransactionInfo>) {
         let (sender, receiver) = unbounded();
@@ -111,6 +115,7 @@ impl JsonRpcRequestProcessor {
                 transaction_sender,
                 faucet_keypair: Arc::new(faucet_keypair),
                 genesis_hash,
+                accounts_manager: Arc::new(accounts_manager),
             },
             receiver,
         )

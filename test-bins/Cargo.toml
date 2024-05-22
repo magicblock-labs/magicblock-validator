@@ -13,6 +13,7 @@ crossbeam-channel = { workspace = true }
 log = { workspace = true }
 geyser-grpc-proto = { workspace = true }
 itertools = { workspace = true }
+sleipnir-accounts = { workspace = true }
 sleipnir-bank = { workspace = true }
 sleipnir-ledger = { workspace = true }
 sleipnir-geyser-plugin = { workspace = true }
