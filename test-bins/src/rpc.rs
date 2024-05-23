@@ -112,14 +112,16 @@ async fn main() {
     );
     init_slot_ticker(bank.clone(), ledger.clone(), tick_duration);
 
-    let pubsub_config = PubsubConfig::default();
+    let pubsub_config = PubsubConfig::from_rpc(config.rpc.port);
     // JSON RPC Service
     let json_rpc_service = {
         let transaction_status_sender = TransactionStatusSender {
             sender: transaction_sndr,
         };
-        let rpc_socket_addr =
-            SocketAddr::new(IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)), 8899);
+        let rpc_socket_addr = SocketAddr::new(
+            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+            config.rpc.port,
+        );
         let config = JsonRpcConfig {
             slot_duration: tick_duration,
             genesis_creation_time: genesis_config.creation_time,

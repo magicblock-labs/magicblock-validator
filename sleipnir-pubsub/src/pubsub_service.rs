@@ -24,6 +24,14 @@ pub struct PubsubConfig {
     socket: SocketAddr,
 }
 
+impl PubsubConfig {
+    pub fn from_rpc(rpc_port: u16) -> Self {
+        Self {
+            socket: SocketAddr::from(([127, 0, 0, 1], rpc_port + 1)),
+        }
+    }
+}
+
 impl Default for PubsubConfig {
     fn default() -> Self {
         let socket =
