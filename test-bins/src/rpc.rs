@@ -104,10 +104,7 @@ async fn main() {
     SamplePerformanceService::new(&bank, &ledger, exit);
     let faucet_keypair = fund_faucet(&bank);
 
-    let tick_millis = std::env::var("SLOT_MS")
-        .map(|s| s.parse::<u64>().expect("SLOT_MS needs to be a number"))
-        .unwrap_or(100);
-
+    let tick_millis = config.validator.millis_per_slot;
     let tick_duration = Duration::from_millis(tick_millis);
     info!(
         "Adding Slot ticker for {}ms slots",
