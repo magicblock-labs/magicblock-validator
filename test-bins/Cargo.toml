@@ -15,6 +15,7 @@ geyser-grpc-proto = { workspace = true }
 itertools = { workspace = true }
 sleipnir-accounts = { workspace = true }
 sleipnir-bank = { workspace = true }
+sleipnir-config = { workspace = true }
 sleipnir-ledger = { workspace = true }
 sleipnir-geyser-plugin = { workspace = true }
 sleipnir-perf-service = { workspace = true }

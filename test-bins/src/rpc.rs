@@ -12,6 +12,7 @@ use sleipnir_bank::{
     bank::Bank,
     genesis_utils::{create_genesis_config, GenesisConfigInfo},
 };
+use sleipnir_config::SleipnirConfig;
 use sleipnir_ledger::Ledger;
 use sleipnir_perf_service::SamplePerformanceService;
 use sleipnir_pubsub::pubsub_service::{PubsubConfig, PubsubService};
@@ -53,6 +54,12 @@ async fn main() {
 
     #[cfg(feature = "tokio-console")]
     console_subscriber::init();
+    let (file, config) = load_config_from_arg();
+    match file {
+        Some(file) => info!("Loading config from '{}'.", file),
+        None => info!("Using default config. Override it by passing the path to a config file."),
+    };
+    info!("Starting validator with config:\n{}", config);
 
     let exit = Arc::<AtomicBool>::default();
 
@@ -192,5 +199,22 @@ fn load_programs_from_env(
         Ok(load_programs_from_string_config(bank, &programs)?)
     } else {
         Ok(())
+    }
+}
+
+fn load_config_from_arg() -> (Option<String>, SleipnirConfig) {
+    let config_file = std::env::args().nth(1);
+    match config_file {
+        Some(config_file) => {
+            let config = SleipnirConfig::try_load_from_file(&config_file)
+                .unwrap_or_else(|err| {
+                    panic!(
+                        "Failed to load config file from '{}'. ({})",
+                        config_file, err
+                    )
+                });
+            (Some(config_file), config)
+        }
+        None => (None, Default::default()),
     }
 }

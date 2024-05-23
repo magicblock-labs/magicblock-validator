@@ -99,6 +99,7 @@ serde_derive = "1.0.103"
 serde_json = "1.0.113"
 sleipnir-accounts = { path = "./sleipnir-accounts" }
 sleipnir-bank = { path = "./sleipnir-bank" }
+sleipnir-config = { path = "./sleipnir-config" }
 sleipnir-geyser-plugin = { path = "./sleipnir-geyser-plugin" }
 sleipnir-ledger = { path = "./sleipnir-ledger" }
 sleipnir-messaging = { path = "./sleipnir-messaging" }
