@@ -2,6 +2,7 @@ use sleipnir_config::{
     AccountsConfig, CloneStrategy, ProgramConfig, ReadonlyMode, RemoteConfig,
     RpcConfig, SleipnirConfig, ValidatorConfig, WritableMode,
 };
+use url::Url;
 
 #[test]
 fn test_empty_toml() {
@@ -96,11 +97,22 @@ fn test_custom_remote_toml() {
         SleipnirConfig {
             accounts: AccountsConfig {
                 remote: RemoteConfig::Custom(
-                    "http://localhost:8899".to_string()
+                    Url::parse("http://localhost:8899").unwrap()
                 ),
                 ..Default::default()
             },
             ..Default::default()
         }
     );
+}
+
+#[test]
+fn test_custom_invalid_remote() {
+    let toml = r#"
+[accounts]
+remote = "http://localhost::8899"
+"#;
+
+    let res = toml::from_str::<SleipnirConfig>(toml);
+    assert!(res.is_err());
 }

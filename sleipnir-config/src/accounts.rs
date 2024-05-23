@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 // -----------------
 // AccountsConfig
@@ -41,8 +42,32 @@ pub enum RemoteConfig {
     #[serde(alias = "local")]
     #[serde(alias = "localhost")]
     Development,
-    #[serde(untagged)]
-    Custom(String),
+    #[serde(
+        untagged,
+        deserialize_with = "deserialize_url",
+        serialize_with = "serialize_url"
+    )]
+    Custom(Url),
+}
+
+fn deserialize_url<'de, D>(deserializer: D) -> Result<Url, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    Url::parse(&s).map_err(|err| {
+        // The error returned here by serde is a bit unhelpful so we help out
+        // by logging a bit more information.
+        eprintln!("RemoteConfig encountered invalid URL ({}).", err);
+        serde::de::Error::custom(err)
+    })
+}
+
+fn serialize_url<S>(url: &Url, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    serializer.serialize_str(url.as_ref())
 }
 
 // -----------------
