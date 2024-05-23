@@ -1,8 +1,12 @@
 use conjunto_transwise::{
     errors::TranswiseError, trans_account_meta::TransactionAccountsHolder,
 };
-use sleipnir_accounts::{errors::AccountsError, ExternalAccountsManager};
+use sleipnir_accounts::{
+    errors::AccountsError, ExternalAccountsManager, ExternalReadonlyMode,
+    ExternalWritableMode,
+};
 use solana_sdk::pubkey::Pubkey;
+use test_tools_core::init_logger;
 use utils::stubs::{
     AccountClonerStub, InternalAccountProviderStub,
     ValidatedAccountsProviderStub,
@@ -25,14 +29,15 @@ fn setup(
         validated_accounts_provider,
         external_readonly_accounts: Default::default(),
         external_writable_accounts: Default::default(),
-        external_readonly_mode: Default::default(),
-        external_writable_mode: Default::default(),
+        external_readonly_mode: ExternalReadonlyMode::All,
+        external_writable_mode: ExternalWritableMode::Delegated,
         create_accounts: false,
     }
 }
 
 #[tokio::test]
 async fn test_ensure_readonly_account_not_tracked_nor_in_our_validator() {
+    init_logger!();
     let readonly = Pubkey::new_unique();
 
     let internal_account_provider = InternalAccountProviderStub::default();
@@ -60,6 +65,7 @@ async fn test_ensure_readonly_account_not_tracked_nor_in_our_validator() {
 
 #[tokio::test]
 async fn test_ensure_readonly_account_not_tracked_but_in_our_validator() {
+    init_logger!();
     let readonly = Pubkey::new_unique();
 
     let mut internal_account_provider = InternalAccountProviderStub::default();
@@ -89,6 +95,7 @@ async fn test_ensure_readonly_account_not_tracked_but_in_our_validator() {
 
 #[tokio::test]
 async fn test_ensure_readonly_account_tracked_but_not_in_our_validator() {
+    init_logger!();
     let readonly = Pubkey::new_unique();
 
     let internal_account_provider = InternalAccountProviderStub::default();
@@ -118,6 +125,7 @@ async fn test_ensure_readonly_account_tracked_but_not_in_our_validator() {
 
 #[tokio::test]
 async fn test_ensure_readonly_account_in_our_validator_and_new_writable() {
+    init_logger!();
     let readonly = Pubkey::new_unique();
     let writable = Pubkey::new_unique();
 
@@ -149,6 +157,7 @@ async fn test_ensure_readonly_account_in_our_validator_and_new_writable() {
 
 #[tokio::test]
 async fn test_ensure_multiple_accounts_coming_in_over_time() {
+    init_logger!();
     let readonly1 = Pubkey::new_unique();
     let readonly2 = Pubkey::new_unique();
     let readonly3 = Pubkey::new_unique();
@@ -246,6 +255,7 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
 
 #[tokio::test]
 async fn test_ensure_writable_account_fails_to_validate() {
+    init_logger!();
     let writable = Pubkey::new_unique();
 
     let internal_account_provider = InternalAccountProviderStub::default();

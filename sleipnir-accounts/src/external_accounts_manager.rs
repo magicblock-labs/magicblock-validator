@@ -88,7 +88,7 @@ where
         tx: &SanitizedTransaction,
     ) -> AccountsResult<Vec<Signature>> {
         // If this validator does not clone any accounts then we're done
-        if self.external_readonly_mode.clone_nothing()
+        if self.external_readonly_mode.clone_none()
             && self.external_writable_mode.clone_none()
         {
             return Ok(vec![]);
@@ -114,9 +114,7 @@ where
     ) -> AccountsResult<Vec<Signature>> {
         // 2. Remove all accounts we already track as external accounts
         //    and the ones that are found in our validator
-        let new_readonly_accounts = if self
-            .external_readonly_mode
-            .clone_nothing()
+        let new_readonly_accounts = if self.external_readonly_mode.clone_none()
         {
             vec![]
         } else {
@@ -133,6 +131,7 @@ where
                 })
                 .collect::<Vec<_>>()
         };
+        trace!("New readonly accounts: {:?}", new_readonly_accounts);
 
         let new_writable_accounts = if self.external_writable_mode.clone_none()
         {
@@ -147,6 +146,7 @@ where
                 })
                 .collect::<Vec<_>>()
         };
+        trace!("New writable accounts: {:?}", new_writable_accounts);
 
         // 3. Validate only the accounts that we see for the very first time
         let validated_accounts = self
@@ -189,17 +189,19 @@ where
             .collect::<Vec<_>>();
 
         // 5. Clone the accounts and add metadata to external account trackers
-        if !readonly_clones.is_empty() {
-            debug!(
-                "Transaction '{}' triggered readonly account clones: {:?}",
-                signature, readonly_clones,
-            );
-        }
-        if !validated_accounts.writable.is_empty() {
-            debug!(
-                "Transaction '{}' triggered writable account clones: {:?}",
-                signature, validated_accounts.writable,
-            );
+        if log::log_enabled!(log::Level::Debug) {
+            if !readonly_clones.is_empty() {
+                debug!(
+                    "Transaction '{}' triggered readonly account clones: {:?}",
+                    signature, readonly_clones,
+                );
+            }
+            if !validated_accounts.writable.is_empty() {
+                debug!(
+                    "Transaction '{}' triggered writable account clones: {:?}",
+                    signature, validated_accounts.writable,
+                );
+            }
         }
         let mut signatures = vec![];
         for readonly in readonly_clones {
@@ -216,7 +218,7 @@ where
             self.external_writable_accounts.insert(writable);
         }
 
-        if !signatures.is_empty() {
+        if log::log_enabled!(log::Level::Debug) && !signatures.is_empty() {
             debug!("Transactions {:?}", signatures,);
         }
 

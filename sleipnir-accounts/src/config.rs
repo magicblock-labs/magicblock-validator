@@ -42,7 +42,7 @@ impl ExternalReadonlyMode {
     pub fn clone_programs_only(&self) -> bool {
         matches!(self, Self::Programs)
     }
-    pub fn clone_nothing(&self) -> bool {
+    pub fn clone_none(&self) -> bool {
         matches!(self, Self::None)
     }
 }

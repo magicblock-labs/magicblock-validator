@@ -146,7 +146,7 @@ impl ValidatedAccountsProvider for ValidatedAccountsProviderStub {
                     .iter()
                     .map(|x| ValidatedReadonlyAccount {
                         pubkey: *x,
-                        is_program: None,
+                        is_program: Some(false),
                     })
                     .collect(),
                 writable: transaction_accounts.writable.clone(),
