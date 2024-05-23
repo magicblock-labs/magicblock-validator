@@ -2,6 +2,7 @@ use std::{error::Error, io, path::Path};
 
 use log::*;
 use sleipnir_bank::bank::Bank;
+use sleipnir_config::ProgramConfig;
 use solana_sdk::{
     account::{Account, AccountSharedData},
     bpf_loader_upgradeable::{self, UpgradeableLoaderState},
@@ -82,6 +83,32 @@ pub fn load_programs_from_string_config(
         .into_iter()
         .map(extract_program_info_from_parts)
         .collect::<Result<Vec<LoadableProgram>, Box<dyn Error>>>()?;
+
+    add_loadables(bank, &loadables)?;
+
+    Ok(())
+}
+
+pub fn load_programs_from_config(
+    bank: &Bank,
+    programs: &[ProgramConfig],
+) -> Result<(), Box<dyn Error>> {
+    if programs.is_empty() {
+        return Ok(());
+    }
+    let mut loadables = Vec::new();
+    for prog in programs {
+        let full_path = Path::new(&prog.path)
+            .canonicalize()?
+            .to_str()
+            .unwrap()
+            .to_string();
+        loadables.push(LoadableProgram::new(
+            prog.id,
+            bpf_loader_upgradeable::ID,
+            full_path,
+        ));
+    }
 
     add_loadables(bank, &loadables)?;
 

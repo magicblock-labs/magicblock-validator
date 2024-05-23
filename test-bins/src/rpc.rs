@@ -12,7 +12,7 @@ use sleipnir_bank::{
     bank::Bank,
     genesis_utils::{create_genesis_config, GenesisConfigInfo},
 };
-use sleipnir_config::SleipnirConfig;
+use sleipnir_config::{ProgramConfig, SleipnirConfig};
 use sleipnir_ledger::Ledger;
 use sleipnir_perf_service::SamplePerformanceService;
 use sleipnir_pubsub::pubsub_service::{PubsubConfig, PubsubService};
@@ -28,7 +28,7 @@ use test_tools::{
     account::{fund_account, fund_account_addr},
     bank::bank_for_tests_with_paths,
     init_logger,
-    programs::load_programs_from_string_config,
+    programs::{load_programs_from_config, load_programs_from_string_config},
 };
 use utils::timestamp_in_secs;
 
@@ -99,7 +99,7 @@ async fn main() {
         Arc::new(bank)
     };
     fund_luzifer(&bank);
-    load_programs_from_env(&bank).unwrap();
+    load_programs(&bank, &config.programs).unwrap();
 
     SamplePerformanceService::new(&bank, &ledger, exit);
     let faucet_keypair = fund_faucet(&bank);
@@ -192,14 +192,16 @@ fn init_slot_ticker(
     });
 }
 
-fn load_programs_from_env(
+fn load_programs(
     bank: &Bank,
+    programs: &[ProgramConfig],
 ) -> Result<(), Box<dyn std::error::Error>> {
+    // Keep supporting the old way of loading programs, but phase out eventually
     if let Ok(programs) = std::env::var("PROGRAMS") {
-        Ok(load_programs_from_string_config(bank, &programs)?)
-    } else {
-        Ok(())
+        load_programs_from_string_config(bank, &programs)?;
     }
+
+    load_programs_from_config(bank, programs)
 }
 
 fn load_config_from_arg() -> (Option<String>, SleipnirConfig) {
