@@ -1,7 +1,10 @@
+use std::str::FromStr;
+
 use sleipnir_config::{
     AccountsConfig, CloneStrategy, ProgramConfig, ReadonlyMode, RemoteConfig,
     RpcConfig, SleipnirConfig, ValidatorConfig, WritableMode,
 };
+use solana_sdk::pubkey::Pubkey;
 use url::Url;
 
 #[test]
@@ -74,7 +77,10 @@ fn test_local_dev_with_programs_toml() {
         config,
         SleipnirConfig {
             programs: vec![ProgramConfig {
-                id: "wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4".to_string(),
+                id: Pubkey::from_str(
+                    "wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4"
+                )
+                .unwrap(),
                 path: "../demos/magic-worm/target/deploy/program_solana.so"
                     .to_string(),
             }],
@@ -114,5 +120,18 @@ remote = "http://localhost::8899"
 "#;
 
     let res = toml::from_str::<SleipnirConfig>(toml);
+    assert!(res.is_err());
+}
+
+#[test]
+fn test_program_invalid_pubkey() {
+    let toml = r#"
+[[program]]
+id = "not a pubkey"
+path = "/tmp/program.so"
+"#;
+
+    let res = toml::from_str::<SleipnirConfig>(toml);
+    eprintln!("{:?}", res);
     assert!(res.is_err());
 }

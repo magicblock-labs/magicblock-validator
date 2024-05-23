@@ -9,6 +9,7 @@ edition.workspace = true
 
 [dependencies]
 serde = { workspace = true, features = ["derive"] }
+solana-sdk = { workspace = true }
 test-tools-core = { workspace = true }
 thiserror = { workspace = true }
 toml = { workspace = true }

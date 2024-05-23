@@ -1,6 +1,9 @@
+use std::str::FromStr;
+
 use sleipnir_config::{
     ProgramConfig, RpcConfig, SleipnirConfig, ValidatorConfig,
 };
+use solana_sdk::pubkey::Pubkey;
 use test_tools_core::paths::cargo_workspace_dir;
 
 #[test]
@@ -19,7 +22,10 @@ fn test_load_local_dev_with_programs_toml() {
         config,
         SleipnirConfig {
             programs: vec![ProgramConfig {
-                id: "wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4".to_string(),
+                id: Pubkey::from_str(
+                    "wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4"
+                )
+                .unwrap(),
                 path: format!(
                     "{}/../demos/magic-worm/target/deploy/program_solana.so",
                     config_file_dir.parent().unwrap().to_str().unwrap()

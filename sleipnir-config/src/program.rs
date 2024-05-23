@@ -1,13 +1,29 @@
-/*
-[[program]]
-id = "wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4"
-path = "Volumes/d/dev/mb/demos/magic-worm/target/deploy/program_solana.so"
-*/
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
+use solana_sdk::pubkey::Pubkey;
 
 #[derive(Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct ProgramConfig {
-    pub id: String,
+    #[serde(
+        deserialize_with = "pubkey_deserialize",
+        serialize_with = "pubkey_serialize"
+    )]
+    pub id: Pubkey,
     pub path: String,
+}
+
+fn pubkey_deserialize<'de, D>(deserializer: D) -> Result<Pubkey, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    Pubkey::from_str(&s).map_err(serde::de::Error::custom)
+}
+
+fn pubkey_serialize<S>(key: &Pubkey, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    key.to_string().serialize(serializer)
 }
