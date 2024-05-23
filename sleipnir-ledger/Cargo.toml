@@ -37,3 +37,6 @@ test-tools-core = { workspace = true }
 
 [build-dependencies]
 rustc_version = { workspace = true }
+
+[lib]
+doctest = false

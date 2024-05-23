@@ -26,3 +26,6 @@ sleipnir-rpc-client-api = { workspace = true }
 sleipnir-version = { workspace = true }
 solana-sdk = { workspace = true }
 tokio = { workspace = true, features = ["full"] }
+
+[lib]
+doctest = false
