@@ -1,4 +1,4 @@
-use std::{fs, path::Path};
+use std::{fmt, fs, path::Path};
 
 use errors::{ConfigError, ConfigResult};
 use serde::{Deserialize, Serialize};
@@ -51,5 +51,13 @@ impl SleipnirConfig {
                 .to_string();
         }
         Ok(config)
+    }
+}
+
+impl fmt::Display for SleipnirConfig {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let toml = toml::to_string_pretty(self)
+            .unwrap_or("Invalid Config".to_string());
+        write!(f, "{}", toml)
     }
 }
