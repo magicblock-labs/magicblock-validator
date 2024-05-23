@@ -7,7 +7,9 @@ use async_trait::async_trait;
 use conjunto_transwise::{
     errors::{TranswiseError, TranswiseResult},
     trans_account_meta::TransactionAccountsHolder,
-    validated_accounts::{ValidateAccountsConfig, ValidatedAccounts},
+    validated_accounts::{
+        ValidateAccountsConfig, ValidatedAccounts, ValidatedReadonlyAccount,
+    },
     TransactionAccountsExtractor, ValidatedAccountsProvider,
 };
 use sleipnir_accounts::{
@@ -117,7 +119,6 @@ impl ValidatedAccountsProvider for ValidatedAccountsProviderStub {
             Some(error) => {
                 use TranswiseError::*;
                 match error {
-                    LockboxError(_) => unimplemented!("Cannot clone"),
                     NotAllWritablesLocked { locked, unlocked } => {
                         Err(TranswiseError::NotAllWritablesLocked {
                             locked: locked.clone(),
@@ -134,10 +135,20 @@ impl ValidatedAccountsProvider for ValidatedAccountsProviderStub {
                             new_accounts: new_accounts.clone(),
                         })
                     },
+                    _ => {
+                        unimplemented!()
+                    }
                 }
             }
             None => Ok(ValidatedAccounts {
-                readonly: transaction_accounts.readonly.clone(),
+                readonly: transaction_accounts
+                    .readonly
+                    .iter()
+                    .map(|x| ValidatedReadonlyAccount {
+                        pubkey: *x,
+                        is_program: None,
+                    })
+                    .collect(),
                 writable: transaction_accounts.writable.clone(),
             }),
         }

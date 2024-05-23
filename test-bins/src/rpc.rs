@@ -7,7 +7,7 @@ use std::{
 
 use crossbeam_channel::unbounded;
 use log::*;
-use sleipnir_accounts::{AccountsManager, Cluster};
+use sleipnir_accounts::AccountsManager;
 use sleipnir_bank::{
     bank::Bank,
     genesis_utils::{create_genesis_config, GenesisConfigInfo},
@@ -20,9 +20,7 @@ use sleipnir_rpc::{
     json_rpc_request_processor::JsonRpcConfig, json_rpc_service::JsonRpcService,
 };
 use sleipnir_transaction_status::TransactionStatusSender;
-use solana_sdk::{
-    genesis_config::ClusterType, signature::Keypair, signer::Signer,
-};
+use solana_sdk::{signature::Keypair, signer::Signer};
 use tempfile::TempDir;
 use test_tools::{
     account::{fund_account, fund_account_addr},
@@ -32,7 +30,10 @@ use test_tools::{
 };
 use utils::timestamp_in_secs;
 
-use crate::geyser::{init_geyser_service, GeyserTransactionNotifyListener};
+use crate::{
+    geyser::{init_geyser_service, GeyserTransactionNotifyListener},
+    utils::try_convert_accounts_config,
+};
 const LUZIFER: &str = "LuzifKo4E6QCF5r4uQmqbyko7zLS5WgayynivnCbtzk";
 mod geyser;
 mod utils;
@@ -122,7 +123,7 @@ async fn main() {
             IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
             config.rpc.port,
         );
-        let config = JsonRpcConfig {
+        let rpc_json_config = JsonRpcConfig {
             slot_duration: tick_duration,
             genesis_creation_time: genesis_config.creation_time,
             transaction_status_sender: Some(transaction_status_sender.clone()),
@@ -137,11 +138,11 @@ async fn main() {
         // other tokio runtimes, i.e. the one of the GeyserPlugin
         let hdl = {
             let bank = bank.clone();
+            let accounts_config =  try_convert_accounts_config(&config.accounts).expect("Failed to derive accounts config from provided sleipnir config");
             let accounts_manager = AccountsManager::try_new(
-                Cluster::Known(ClusterType::Devnet),
                 &bank,
                 Some(transaction_status_sender),
-                Default::default(),
+                accounts_config,
             )
             .expect("Failed to create accounts manager");
             std::thread::spawn(move || {
@@ -151,7 +152,7 @@ async fn main() {
                     faucet_keypair,
                     genesis_config.hash(),
                     accounts_manager,
-                    config,
+                    rpc_json_config,
                 )
                 .unwrap();
             })

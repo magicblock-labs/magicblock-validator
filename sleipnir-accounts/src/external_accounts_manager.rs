@@ -8,11 +8,11 @@ use conjunto_transwise::{
     TransactionAccountsExtractor, Transwise, ValidatedAccountsProvider,
 };
 use sleipnir_bank::bank::Bank;
-use sleipnir_mutator::Cluster;
 use solana_sdk::{signature::Signature, transaction::SanitizedTransaction};
 
 use crate::{
     bank_account_provider::BankAccountProvider,
+    config::{AccountsConfig, ExternalReadonlyMode, ExternalWritableMode},
     errors::AccountsResult,
     external_accounts::{ExternalReadonlyAccounts, ExternalWritableAccounts},
     remote_account_cloner::RemoteAccountCloner,
@@ -36,20 +36,23 @@ where
     pub internal_account_provider: IAP,
     pub account_cloner: AC,
     pub validated_accounts_provider: VAP,
-    pub validate_config: ValidateAccountsConfig,
     pub external_readonly_accounts: ExternalReadonlyAccounts,
     pub external_writable_accounts: ExternalWritableAccounts,
+    pub external_readonly_mode: ExternalReadonlyMode,
+    pub external_writable_mode: ExternalWritableMode,
+    pub create_accounts: bool,
 }
 
 impl
     ExternalAccountsManager<BankAccountProvider, RemoteAccountCloner, Transwise>
 {
     pub fn try_new(
-        cluster: Cluster,
         bank: &Arc<Bank>,
         transaction_status_sender: Option<TransactionStatusSender>,
-        validate_config: ValidateAccountsConfig,
+        config: AccountsConfig,
     ) -> AccountsResult<Self> {
+        let external_config = config.external;
+        let cluster = external_config.cluster;
         let internal_account_provider = BankAccountProvider::new(bank.clone());
         let rpc_cluster = try_rpc_cluster_from_cluster(&cluster)?;
         let rpc_provider_config = RpcProviderConfig::new(rpc_cluster, None);
@@ -65,9 +68,11 @@ impl
             internal_account_provider,
             account_cloner,
             validated_accounts_provider,
-            validate_config,
             external_readonly_accounts: ExternalReadonlyAccounts::default(),
             external_writable_accounts: ExternalWritableAccounts::default(),
+            external_readonly_mode: external_config.readonly,
+            external_writable_mode: external_config.writable,
+            create_accounts: config.create,
         })
     }
 }
@@ -82,6 +87,13 @@ where
         &self,
         tx: &SanitizedTransaction,
     ) -> AccountsResult<Vec<Signature>> {
+        // If this validator does not clone any accounts then we're done
+        if self.external_readonly_mode.clone_nothing()
+            && self.external_writable_mode.clone_none()
+        {
+            return Ok(vec![]);
+        }
+
         // 1. Extract all acounts from the transaction
         let accounts_holder = self
             .validated_accounts_provider
@@ -102,43 +114,85 @@ where
     ) -> AccountsResult<Vec<Signature>> {
         // 2. Remove all accounts we already track as external accounts
         //    and the ones that are found in our validator
-        let new_readonly_accounts = accounts_holder
-            .readonly
-            .into_iter()
-            // 1. Filter external readonly accounts we already know about and cloned
-            //    They would also be found via the internal account provider, but this
-            //    is a faster lookup
-            .filter(|pubkey| !self.external_readonly_accounts.has(pubkey))
-            // 2. Filter accounts that are found inside our validator (slower looukup)
-            .filter(|pubkey| {
-                self.internal_account_provider.get_account(pubkey).is_none()
-            });
+        let new_readonly_accounts = if self
+            .external_readonly_mode
+            .clone_nothing()
+        {
+            vec![]
+        } else {
+            accounts_holder
+                .readonly
+                .into_iter()
+                // 1. Filter external readonly accounts we already know about and cloned
+                //    They would also be found via the internal account provider, but this
+                //    is a faster lookup
+                .filter(|pubkey| !self.external_readonly_accounts.has(pubkey))
+                // 2. Filter accounts that are found inside our validator (slower looukup)
+                .filter(|pubkey| {
+                    self.internal_account_provider.get_account(pubkey).is_none()
+                })
+                .collect::<Vec<_>>()
+        };
 
-        let new_writable_accounts = accounts_holder
-            .writable
-            .into_iter()
-            .filter(|pubkey| !self.external_writable_accounts.has(pubkey))
-            .filter(|pubkey| {
-                self.internal_account_provider.get_account(pubkey).is_none()
-            });
+        let new_writable_accounts = if self.external_writable_mode.clone_none()
+        {
+            vec![]
+        } else {
+            accounts_holder
+                .writable
+                .into_iter()
+                .filter(|pubkey| !self.external_writable_accounts.has(pubkey))
+                .filter(|pubkey| {
+                    self.internal_account_provider.get_account(pubkey).is_none()
+                })
+                .collect::<Vec<_>>()
+        };
 
         // 3. Validate only the accounts that we see for the very first time
         let validated_accounts = self
             .validated_accounts_provider
             .validate_accounts(
                 &TransactionAccountsHolder {
-                    readonly: new_readonly_accounts.collect(),
-                    writable: new_writable_accounts.collect(),
+                    readonly: new_readonly_accounts,
+                    writable: new_writable_accounts,
                 },
-                &self.validate_config,
+                &ValidateAccountsConfig {
+                    allow_new_accounts: self.create_accounts,
+                    // Here we specify if we can clone all writable accounts or
+                    // only the ones that were delegated
+                    require_delegation: self
+                        .external_writable_mode
+                        .clone_delegated_only(),
+                },
             )
             .await?;
 
-        // 4. Clone the accounts and add metadata to external account trackers
-        if !validated_accounts.readonly.is_empty() {
+        // 4. If a readonly account is not a program, but we only should clone programs then
+        //    we have a problem since the account does not exist nor will it be created.
+        //    Here we just remove it from the accounts to be cloned and let the  trigger
+        //    transaction fail due to the missing account as it normally would.
+        //    We have a similar problem if the account was not found at all in which case
+        //    it's `is_program` field is `None`.
+        let programs_only = self.external_readonly_mode.clone_programs_only();
+        let readonly_clones = validated_accounts
+            .readonly
+            .iter()
+            .flat_map(|acc| {
+                if acc.is_program.is_none() {
+                    None
+                } else if !programs_only || acc.is_program == Some(true) {
+                    Some(acc.pubkey)
+                } else {
+                    None
+                }
+            })
+            .collect::<Vec<_>>();
+
+        // 5. Clone the accounts and add metadata to external account trackers
+        if !readonly_clones.is_empty() {
             debug!(
                 "Transaction '{}' triggered readonly account clones: {:?}",
-                signature, validated_accounts.readonly,
+                signature, readonly_clones,
             );
         }
         if !validated_accounts.writable.is_empty() {
@@ -148,7 +202,7 @@ where
             );
         }
         let mut signatures = vec![];
-        for readonly in validated_accounts.readonly {
+        for readonly in readonly_clones {
             let signature =
                 self.account_cloner.clone_account(&readonly).await?;
             signatures.push(signature);

@@ -1,6 +1,5 @@
 use conjunto_transwise::{
     errors::TranswiseError, trans_account_meta::TransactionAccountsHolder,
-    validated_accounts::ValidateAccountsConfig,
 };
 use sleipnir_accounts::{errors::AccountsError, ExternalAccountsManager};
 use solana_sdk::pubkey::Pubkey;
@@ -24,9 +23,11 @@ fn setup(
         internal_account_provider,
         account_cloner,
         validated_accounts_provider,
-        validate_config: ValidateAccountsConfig::default(),
         external_readonly_accounts: Default::default(),
         external_writable_accounts: Default::default(),
+        external_readonly_mode: Default::default(),
+        external_writable_mode: Default::default(),
+        create_accounts: false,
     }
 }
 
