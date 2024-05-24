@@ -198,10 +198,22 @@ where
                 );
             }
             if !validated_accounts.writable.is_empty() {
+                let writable = validated_accounts
+                    .writable
+                    .iter()
+                    .map(|x| {
+                        format!(
+                            "{}:{}",
+                            x.pubkey,
+                            x.owner
+                                .map(|x| x.to_string())
+                                .unwrap_or("<no-owner>".to_string())
+                        )
+                    })
+                    .collect::<Vec<_>>();
                 debug!(
                     "Transaction '{}' triggered writable account clones: {:?}",
-                    signature,
-                    validated_accounts.writable_pubkeys(),
+                    signature, writable
                 );
             }
         }
