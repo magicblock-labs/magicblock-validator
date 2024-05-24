@@ -539,7 +539,7 @@ impl JsonRpcRequestProcessor {
             .unwrap_or_default();
         let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Json);
         let max_supported_transaction_version =
-            config.max_supported_transaction_version;
+            config.max_supported_transaction_version.unwrap_or(0);
 
         // NOTE: Omitting commitment check
 
@@ -553,7 +553,7 @@ impl JsonRpcRequestProcessor {
             if let Some(tx) = result.ok().flatten() {
                 // NOTE: we assume to always have a blocktime
                 let encoded = tx
-                    .encode(encoding, max_supported_transaction_version)
+                    .encode(encoding, Some(max_supported_transaction_version))
                     .map_err(RpcCustomError::from)?;
                 return Ok(Some(encoded));
             }
