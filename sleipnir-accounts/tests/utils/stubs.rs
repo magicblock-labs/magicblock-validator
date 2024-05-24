@@ -1,7 +1,4 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::RwLock,
-};
+use std::{collections::HashMap, str::FromStr, sync::RwLock};
 
 use async_trait::async_trait;
 use conjunto_transwise::{
@@ -9,12 +6,14 @@ use conjunto_transwise::{
     trans_account_meta::TransactionAccountsHolder,
     validated_accounts::{
         ValidateAccountsConfig, ValidatedAccounts, ValidatedReadonlyAccount,
+        ValidatedWritableAccount,
     },
     TransactionAccountsExtractor, ValidatedAccountsProvider,
 };
 use sleipnir_accounts::{
     errors::AccountsResult, AccountCloner, InternalAccountProvider,
 };
+use sleipnir_mutator::AccountModification;
 use solana_sdk::{
     account::AccountSharedData,
     pubkey::Pubkey,
@@ -46,12 +45,19 @@ impl InternalAccountProvider for InternalAccountProviderStub {
 // -----------------
 #[derive(Default, Debug)]
 pub struct AccountClonerStub {
-    cloned_accounts: RwLock<HashSet<Pubkey>>,
+    cloned_accounts: RwLock<HashMap<Pubkey, Option<Pubkey>>>,
 }
 
 impl AccountClonerStub {
     pub fn did_clone(&self, pubkey: &Pubkey) -> bool {
-        self.cloned_accounts.read().unwrap().contains(pubkey)
+        self.cloned_accounts.read().unwrap().contains_key(pubkey)
+    }
+
+    #[allow(dead_code)] // will use in test assertions
+    pub fn did_override_owner(&self, pubkey: &Pubkey, owner: &Pubkey) -> bool {
+        let read_lock = self.cloned_accounts.read().unwrap();
+        let stored_owner = read_lock.get(pubkey).unwrap();
+        stored_owner.as_ref() == Some(owner)
     }
 
     pub fn clear(&self) {
@@ -64,8 +70,15 @@ impl AccountCloner for AccountClonerStub {
     async fn clone_account(
         &self,
         pubkey: &Pubkey,
+        overrides: Option<AccountModification>,
     ) -> AccountsResult<Signature> {
-        self.cloned_accounts.write().unwrap().insert(*pubkey);
+        self.cloned_accounts.write().unwrap().insert(
+            *pubkey,
+            overrides
+                .as_ref()
+                .and_then(|x| x.owner.as_ref())
+                .map(|o| Pubkey::from_str(o.as_str()).unwrap()),
+        );
         Ok(Signature::new_unique())
     }
 }
@@ -149,7 +162,14 @@ impl ValidatedAccountsProvider for ValidatedAccountsProviderStub {
                         is_program: Some(false),
                     })
                     .collect(),
-                writable: transaction_accounts.writable.clone(),
+                writable: transaction_accounts
+                    .writable
+                    .iter()
+                    .map(|x| ValidatedWritableAccount {
+                        pubkey: *x,
+                        owner: None,
+                    })
+                    .collect(),
             }),
         }
     }

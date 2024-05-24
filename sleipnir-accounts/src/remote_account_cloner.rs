@@ -10,7 +10,8 @@ use std::sync::Arc;
 
 use sleipnir_bank::bank::Bank;
 use sleipnir_mutator::{
-    mutator::transaction_to_clone_account_from_cluster, Cluster,
+    mutator::transaction_to_clone_account_from_cluster, AccountModification,
+    Cluster,
 };
 
 use crate::{errors::AccountsResult, AccountCloner};
@@ -40,6 +41,7 @@ impl AccountCloner for RemoteAccountCloner {
     async fn clone_account(
         &self,
         pubkey: &Pubkey,
+        overrides: Option<AccountModification>,
     ) -> AccountsResult<Signature> {
         let slot = self.bank.slot();
         let blockhash = self.bank.last_blockhash();
@@ -48,6 +50,7 @@ impl AccountCloner for RemoteAccountCloner {
             &pubkey.to_string(),
             blockhash,
             slot,
+            overrides,
         )
         .await?;
         let sanitized_tx =

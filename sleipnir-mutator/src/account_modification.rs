@@ -52,6 +52,24 @@ impl AccountModification {
             },
         ))
     }
+
+    pub fn apply_overrides(&mut self, other: &Self) {
+        if let Some(lamports) = other.lamports {
+            self.lamports = Some(lamports);
+        }
+        if let Some(owner) = &other.owner {
+            self.owner = Some(owner.clone());
+        }
+        if let Some(executable) = other.executable {
+            self.executable = Some(executable);
+        }
+        if let Some(data) = &other.data {
+            self.data = Some(data.clone());
+        }
+        if let Some(rent_epoch) = other.rent_epoch {
+            self.rent_epoch = Some(rent_epoch);
+        }
+    }
 }
 
 // -----------------

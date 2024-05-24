@@ -17,6 +17,7 @@ pub async fn mods_to_clone_account(
     cluster: &Cluster,
     account_address: &str,
     slot: Slot,
+    overrides: Option<AccountModification>,
 ) -> MutatorResult<Vec<AccountModification>> {
     // Fetch all accounts to clone
 
@@ -73,10 +74,17 @@ pub async fn mods_to_clone_account(
     } else {
         None
     };
-
+    let account_mod = {
+        let mut account_mod =
+            AccountModification::from((&account, account_address));
+        if let Some(overrides) = overrides {
+            account_mod.apply_overrides(&overrides);
+        }
+        account_mod
+    };
     // 4. Convert to a vec of account modifications to apply
     Ok(vec![
-        Some(AccountModification::from((&account, account_address))),
+        Some(account_mod),
         executable_info.map(|(account, address)| {
             AccountModification::from((&account, address.to_string().as_str()))
         }),

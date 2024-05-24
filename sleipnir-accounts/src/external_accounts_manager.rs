@@ -1,4 +1,5 @@
 use log::*;
+use sleipnir_mutator::AccountModification;
 use sleipnir_transaction_status::TransactionStatusSender;
 use std::sync::Arc;
 
@@ -199,23 +200,30 @@ where
             if !validated_accounts.writable.is_empty() {
                 debug!(
                     "Transaction '{}' triggered writable account clones: {:?}",
-                    signature, validated_accounts.writable,
+                    signature,
+                    validated_accounts.writable_pubkeys(),
                 );
             }
         }
         let mut signatures = vec![];
         for readonly in readonly_clones {
             let signature =
-                self.account_cloner.clone_account(&readonly).await?;
+                self.account_cloner.clone_account(&readonly, None).await?;
             signatures.push(signature);
             self.external_readonly_accounts.insert(readonly);
         }
 
         for writable in validated_accounts.writable {
-            let signature =
-                self.account_cloner.clone_account(&writable).await?;
+            let overrides = writable.owner.map(|x| AccountModification {
+                owner: Some(x.to_string()),
+                ..Default::default()
+            });
+            let signature = self
+                .account_cloner
+                .clone_account(&writable.pubkey, overrides)
+                .await?;
             signatures.push(signature);
-            self.external_writable_accounts.insert(writable);
+            self.external_writable_accounts.insert(writable.pubkey);
         }
 
         if log::log_enabled!(log::Level::Debug) && !signatures.is_empty() {
