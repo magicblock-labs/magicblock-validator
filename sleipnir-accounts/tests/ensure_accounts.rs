@@ -32,6 +32,7 @@ fn setup(
         external_readonly_mode: ExternalReadonlyMode::All,
         external_writable_mode: ExternalWritableMode::Delegated,
         create_accounts: false,
+        payer_init_lamports: None,
     }
 }
 
@@ -52,6 +53,7 @@ async fn test_ensure_readonly_account_not_tracked_nor_in_our_validator() {
     let holder = TransactionAccountsHolder {
         readonly: vec![readonly],
         writable: vec![],
+        payer: Pubkey::new_unique(),
     };
 
     let result = manager
@@ -82,6 +84,7 @@ async fn test_ensure_readonly_account_not_tracked_but_in_our_validator() {
     let holder = TransactionAccountsHolder {
         readonly: vec![readonly],
         writable: vec![],
+        payer: Pubkey::new_unique(),
     };
 
     let result = manager
@@ -112,6 +115,7 @@ async fn test_ensure_readonly_account_tracked_but_not_in_our_validator() {
     let holder = TransactionAccountsHolder {
         readonly: vec![readonly],
         writable: vec![],
+        payer: Pubkey::new_unique(),
     };
 
     let result = manager
@@ -143,6 +147,7 @@ async fn test_ensure_readonly_account_in_our_validator_and_new_writable() {
     let holder = TransactionAccountsHolder {
         readonly: vec![readonly],
         writable: vec![writable],
+        payer: Pubkey::new_unique(),
     };
 
     let result = manager
@@ -178,6 +183,7 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
         let holder = TransactionAccountsHolder {
             readonly: vec![readonly1, readonly2],
             writable: vec![writable1],
+            payer: Pubkey::new_unique(),
         };
 
         let result = manager
@@ -205,6 +211,7 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
         let holder = TransactionAccountsHolder {
             readonly: vec![readonly1, readonly2],
             writable: vec![],
+            payer: Pubkey::new_unique(),
         };
 
         let result = manager
@@ -232,6 +239,7 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
         let holder = TransactionAccountsHolder {
             readonly: vec![readonly2, readonly3],
             writable: vec![writable2],
+            payer: Pubkey::new_unique(),
         };
 
         let result = manager
@@ -274,6 +282,7 @@ async fn test_ensure_writable_account_fails_to_validate() {
     let holder = TransactionAccountsHolder {
         readonly: vec![],
         writable: vec![writable],
+        payer: Pubkey::new_unique(),
     };
 
     let result = manager

@@ -42,6 +42,7 @@ where
     pub external_readonly_mode: ExternalReadonlyMode,
     pub external_writable_mode: ExternalWritableMode,
     pub create_accounts: bool,
+    pub payer_init_lamports: Option<u64>,
 }
 
 impl
@@ -74,6 +75,7 @@ impl
             external_readonly_mode: external_config.readonly,
             external_writable_mode: external_config.writable,
             create_accounts: config.create,
+            payer_init_lamports: config.payer_init_lamports,
         })
     }
 }
@@ -98,7 +100,7 @@ where
         // 1. Extract all acounts from the transaction
         let accounts_holder = self
             .validated_accounts_provider
-            .accounts_from_sanitized_transaction(tx);
+            .try_accounts_from_sanitized_transaction(tx)?;
 
         self.ensure_accounts_from_holder(
             accounts_holder,
@@ -156,6 +158,7 @@ where
                 &TransactionAccountsHolder {
                     readonly: new_readonly_accounts,
                     writable: new_writable_accounts,
+                    payer: accounts_holder.payer,
                 },
                 &ValidateAccountsConfig {
                     allow_new_accounts: self.create_accounts,
@@ -203,11 +206,12 @@ where
                     .iter()
                     .map(|x| {
                         format!(
-                            "{}:{}",
+                            "{}{}{}",
+                            if x.is_payer { "[payer]:" } else { "" },
                             x.pubkey,
                             x.owner
-                                .map(|x| x.to_string())
-                                .unwrap_or("<no-owner>".to_string())
+                                .map(|x| format!(" owner: {}", x))
+                                .unwrap_or("".to_string()),
                         )
                     })
                     .collect::<Vec<_>>();
@@ -226,10 +230,23 @@ where
         }
 
         for writable in validated_accounts.writable {
-            let overrides = writable.owner.map(|x| AccountModification {
+            let mut overrides = writable.owner.map(|x| AccountModification {
                 owner: Some(x.to_string()),
                 ..Default::default()
             });
+            if writable.is_payer {
+                if let Some(lamports) = self.payer_init_lamports {
+                    match overrides {
+                        Some(ref mut x) => x.lamports = Some(lamports),
+                        None => {
+                            overrides = Some(AccountModification {
+                                lamports: Some(lamports),
+                                ..Default::default()
+                            })
+                        }
+                    }
+                }
+            }
             let signature = self
                 .account_cloner
                 .clone_account(&writable.pubkey, overrides)

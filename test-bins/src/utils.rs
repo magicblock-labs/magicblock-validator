@@ -24,6 +24,7 @@ pub fn try_convert_accounts_config(
     let cluster = cluster_from_remote(&conf.remote);
     let readonly = readonly_mode_from_external(&conf.clone.readonly);
     let writable = writable_mode_from_external(&conf.clone.writable);
+    let payer_init_lamports = conf.payer.try_init_lamports()?;
 
     let external = ExternalConfig {
         cluster,
@@ -34,6 +35,7 @@ pub fn try_convert_accounts_config(
     Ok(sleipnir_accounts::AccountsConfig {
         external,
         create: conf.create,
+        payer_init_lamports,
     })
 }
 

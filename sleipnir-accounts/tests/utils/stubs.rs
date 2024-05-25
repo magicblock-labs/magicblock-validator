@@ -168,6 +168,7 @@ impl ValidatedAccountsProvider for ValidatedAccountsProviderStub {
                     .map(|x| ValidatedWritableAccount {
                         pubkey: *x,
                         owner: None,
+                        is_payer: false,
                     })
                     .collect(),
             }),
@@ -176,17 +177,17 @@ impl ValidatedAccountsProvider for ValidatedAccountsProviderStub {
 }
 
 impl TransactionAccountsExtractor for ValidatedAccountsProviderStub {
-    fn accounts_from_versioned_transaction(
+    fn try_accounts_from_versioned_transaction(
         &self,
         _tx: &VersionedTransaction,
-    ) -> TransactionAccountsHolder {
+    ) -> TranswiseResult<TransactionAccountsHolder> {
         unimplemented!("We don't exxtract during tests")
     }
 
-    fn accounts_from_sanitized_transaction(
+    fn try_accounts_from_sanitized_transaction(
         &self,
         _tx: &SanitizedTransaction,
-    ) -> TransactionAccountsHolder {
+    ) -> TranswiseResult<TransactionAccountsHolder> {
         unimplemented!("We don't exxtract during tests")
     }
 }
