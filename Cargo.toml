@@ -57,13 +57,14 @@ bincode = "1.3.3"
 bs58 = "0.4.0"
 byteorder = "1.5.0"
 cargo-lock = "9.0.0"
-conjunto-transwise = { path = "../../conjunto/conjunto/transwise" }
+conjunto-transwise = { path = "../conjunto/transwise" }
 console-subscriber = "0.2.0"
 crossbeam-channel = "0.5.11"
 csv = "1.3.0"
 eager = "0.1.0"
 enum-iterator = "1.5.0"
 env_logger = "0.11.2"
+delegation-program = { path = "../delegation-program" }
 fs_extra = "1.3.0"
 geyser-grpc-proto = { path = "./geyser-grpc-proto" }
 git-version = "0.3.9"

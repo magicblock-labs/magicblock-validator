@@ -10,6 +10,7 @@ edition.workspace = true
 [dependencies]
 async-trait = { workspace = true }
 conjunto-transwise = { workspace = true }
+delegation-program = { workspace = true }
 log = { workspace = true }
 sleipnir-bank = { workspace = true }
 sleipnir-mutator = { workspace = true }
