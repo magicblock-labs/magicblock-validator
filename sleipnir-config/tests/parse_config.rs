@@ -1,10 +1,10 @@
 use std::str::FromStr;
 
 use sleipnir_config::{
-    AccountsConfig, CloneStrategy, ProgramConfig, ReadonlyMode, RemoteConfig,
-    RpcConfig, SleipnirConfig, ValidatorConfig, WritableMode,
+    AccountsConfig, CloneStrategy, Payer, ProgramConfig, ReadonlyMode,
+    RemoteConfig, RpcConfig, SleipnirConfig, ValidatorConfig, WritableMode,
 };
-use solana_sdk::pubkey::Pubkey;
+use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
 use url::Url;
 
 #[test]
@@ -113,6 +113,26 @@ fn test_custom_remote_toml() {
 }
 
 #[test]
+fn test_accounts_payer() {
+    let toml = include_str!("fixtures/08_accounts-payer.toml");
+    let config = toml::from_str::<SleipnirConfig>(toml).unwrap();
+    assert_eq!(
+        config,
+        SleipnirConfig {
+            accounts: AccountsConfig {
+                payer: Payer::new(None, Some(2_000)),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    );
+    assert_eq!(
+        config.accounts.payer.try_init_lamports().unwrap(),
+        Some(2_000 * LAMPORTS_PER_SOL)
+    );
+}
+
+#[test]
 fn test_custom_invalid_remote() {
     let toml = r#"
 [accounts]
@@ -134,4 +154,15 @@ path = "/tmp/program.so"
     let res = toml::from_str::<SleipnirConfig>(toml);
     eprintln!("{:?}", res);
     assert!(res.is_err());
+}
+
+#[test]
+fn test_accounts_payer_specifies_both_lamports_and_sol() {
+    let toml = r#"
+[accounts]
+payer = { init_sol = 2000, init_lamports = 300_000 }
+"#;
+
+    let config = toml::from_str::<SleipnirConfig>(toml).unwrap();
+    assert!(config.accounts.payer.try_init_lamports().is_err());
 }

@@ -1,4 +1,7 @@
+use std::error::Error;
+
 use serde::{Deserialize, Serialize};
+use solana_sdk::native_token::LAMPORTS_PER_SOL;
 use url::Url;
 
 // -----------------
@@ -12,6 +15,8 @@ pub struct AccountsConfig {
     pub clone: CloneStrategy,
     #[serde(default = "default_create")]
     pub create: bool,
+    #[serde(default)]
+    pub payer: Payer,
 }
 
 fn default_create() -> bool {
@@ -23,6 +28,7 @@ impl Default for AccountsConfig {
         Self {
             remote: Default::default(),
             clone: Default::default(),
+            payer: Default::default(),
             create: true,
         }
     }
@@ -98,4 +104,35 @@ pub enum WritableMode {
     Delegated,
     #[default]
     None,
+}
+
+// -----------------
+// Payer
+// -----------------
+#[derive(Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct Payer {
+    /// The payer init balance in lamports.
+    /// Read it via [Self::try_init_lamports].
+    init_lamports: Option<u64>,
+    /// The payer init balance in SOL.
+    /// Read it via [Self::try_init_lamports].
+    init_sol: Option<u64>,
+}
+
+impl Payer {
+    pub fn new(init_lamports: Option<u64>, init_sol: Option<u64>) -> Self {
+        Self {
+            init_lamports,
+            init_sol,
+        }
+    }
+    pub fn try_init_lamports(&self) -> Result<Option<u64>, Box<dyn Error>> {
+        if self.init_lamports.is_some() && self.init_sol.is_some() {
+            return Err("Cannot specify both init_lamports and init_sol".into());
+        }
+        Ok(match self.init_lamports {
+            Some(lamports) => Some(lamports),
+            None => self.init_sol.map(|sol| sol * LAMPORTS_PER_SOL),
+        })
+    }
 }

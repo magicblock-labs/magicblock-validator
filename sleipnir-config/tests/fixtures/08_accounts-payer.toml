@@ -1,0 +1,11 @@
+[accounts]
+remote = "devnet"
+clone = { readonly = "programs", writable = "none" }
+create = true
+payer = { init_sol = 2000 }
+
+[rpc]
+port = 8899
+
+[validator]
+millis_per_slot = 50
