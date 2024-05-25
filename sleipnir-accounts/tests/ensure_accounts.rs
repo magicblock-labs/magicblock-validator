@@ -8,7 +8,7 @@ use sleipnir_accounts::{
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
 use test_tools_core::init_logger;
 use utils::stubs::{
-    AccountClonerStub, InternalAccountProviderStub,
+    AccountClonerStub, AccountCommitterStub, InternalAccountProviderStub,
     ValidatedAccountsProviderStub,
 };
 
@@ -17,15 +17,18 @@ mod utils;
 fn setup(
     internal_account_provider: InternalAccountProviderStub,
     account_cloner: AccountClonerStub,
+    account_committer: AccountCommitterStub,
     validated_accounts_provider: ValidatedAccountsProviderStub,
 ) -> ExternalAccountsManager<
     InternalAccountProviderStub,
     AccountClonerStub,
+    AccountCommitterStub,
     ValidatedAccountsProviderStub,
 > {
     ExternalAccountsManager {
         internal_account_provider,
         account_cloner,
+        account_committer,
         validated_accounts_provider,
         external_readonly_accounts: Default::default(),
         external_writable_accounts: Default::default(),
@@ -48,6 +51,7 @@ async fn test_ensure_readonly_account_not_tracked_nor_in_our_validator() {
     let manager = setup(
         internal_account_provider,
         AccountClonerStub::default(),
+        AccountCommitterStub::default(),
         validated_accounts_provider,
     );
 
@@ -80,6 +84,7 @@ async fn test_ensure_readonly_account_not_tracked_but_in_our_validator() {
     let manager = setup(
         internal_account_provider,
         AccountClonerStub::default(),
+        AccountCommitterStub::default(),
         validated_accounts_provider,
     );
 
@@ -110,6 +115,7 @@ async fn test_ensure_readonly_account_tracked_but_not_in_our_validator() {
     let manager = setup(
         internal_account_provider,
         AccountClonerStub::default(),
+        AccountCommitterStub::default(),
         validated_accounts_provider,
     );
 
@@ -145,6 +151,7 @@ async fn test_ensure_readonly_account_in_our_validator_and_new_writable() {
     let manager = setup(
         internal_account_provider,
         AccountClonerStub::default(),
+        AccountCommitterStub::default(),
         validated_accounts_provider,
     );
 
@@ -182,6 +189,7 @@ async fn test_ensure_locked_with_owner_and_unlocked_writable_payer() {
     let manager = setup(
         internal_account_provider,
         AccountClonerStub::default(),
+        AccountCommitterStub::default(),
         validated_accounts_provider,
     );
 
@@ -228,6 +236,7 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
     let manager = setup(
         internal_account_provider,
         AccountClonerStub::default(),
+        AccountCommitterStub::default(),
         validated_accounts_provider,
     );
 
@@ -329,6 +338,7 @@ async fn test_ensure_writable_account_fails_to_validate() {
     let manager = setup(
         internal_account_provider,
         AccountClonerStub::default(),
+        AccountCommitterStub::default(),
         validated_accounts_provider,
     );
 

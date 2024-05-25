@@ -15,7 +15,8 @@ use conjunto_transwise::{
     CommitFrequency, TransactionAccountsExtractor, ValidatedAccountsProvider,
 };
 use sleipnir_accounts::{
-    errors::AccountsResult, AccountCloner, InternalAccountProvider,
+    errors::AccountsResult, AccountCloner, AccountCommitter,
+    InternalAccountProvider,
 };
 use sleipnir_mutator::AccountModification;
 use solana_sdk::{
@@ -120,6 +121,29 @@ impl AccountCloner for AccountClonerStub {
             .write()
             .unwrap()
             .insert(*pubkey, overrides);
+        Ok(Signature::new_unique())
+    }
+}
+
+// -----------------
+// AccountCommitter
+// -----------------
+#[derive(Debug, Default)]
+pub struct AccountCommitterStub {
+    committed_accounts: RwLock<HashMap<Pubkey, Vec<u8>>>,
+}
+
+#[async_trait]
+impl AccountCommitter for AccountCommitterStub {
+    async fn commit_account(
+        &self,
+        delegated_account: Pubkey,
+        committed_state_data: Vec<u8>,
+    ) -> AccountsResult<Signature> {
+        self.committed_accounts
+            .write()
+            .unwrap()
+            .insert(delegated_account, committed_state_data);
         Ok(Signature::new_unique())
     }
 }

@@ -8,6 +8,7 @@ use solana_accounts_db::transaction_results::TransactionResults;
 use solana_program_runtime::timings::ExecuteTimings;
 use solana_sdk::{
     clock::MAX_PROCESSING_AGE,
+    pubkey::Pubkey,
     transaction::{SanitizedTransaction, Transaction},
 };
 
@@ -29,7 +30,9 @@ impl BankTransactionsProcessor {
 
 impl Default for BankTransactionsProcessor {
     fn default() -> Self {
-        let genesis_config = create_genesis_config(u64::MAX).genesis_config;
+        let genesis_config =
+            create_genesis_config(u64::MAX, &Pubkey::new_unique())
+                .genesis_config;
         let bank = Arc::new(bank_for_tests(&genesis_config, None, None));
         Self::new(bank)
     }

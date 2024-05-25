@@ -18,3 +18,12 @@ pub trait AccountCloner {
         overrides: Option<AccountModification>,
     ) -> AccountsResult<Signature>;
 }
+
+#[async_trait]
+pub trait AccountCommitter {
+    async fn commit_account(
+        &self,
+        delegated_account: Pubkey,
+        committed_state_data: Vec<u8>,
+    ) -> AccountsResult<Signature>;
+}

@@ -20,7 +20,10 @@ use sleipnir_rpc::{
     json_rpc_request_processor::JsonRpcConfig, json_rpc_service::JsonRpcService,
 };
 use sleipnir_transaction_status::TransactionStatusSender;
-use solana_sdk::{signature::Keypair, signer::Signer};
+use solana_sdk::{
+    signature::{keypair_from_seed, Keypair},
+    signer::Signer,
+};
 use tempfile::TempDir;
 use test_tools::{
     account::{fund_account, fund_account_addr},
@@ -64,11 +67,13 @@ async fn main() {
 
     let exit = Arc::<AtomicBool>::default();
 
+    // TODO(thlorenz): Read this from a file overridable with env var
+    let validator_keypair = keypair_from_seed(&[69; 32]).unwrap();
     let GenesisConfigInfo {
         genesis_config,
         validator_pubkey,
         ..
-    } = create_genesis_config(u64::MAX);
+    } = create_genesis_config(u64::MAX, &validator_keypair.pubkey());
     let (geyser_service, geyser_rpc_service) = init_geyser_service()
         .await
         .expect("Failed to init geyser service");
@@ -142,6 +147,7 @@ async fn main() {
             let accounts_manager = AccountsManager::try_new(
                 &bank,
                 Some(transaction_status_sender),
+                validator_keypair,
                 accounts_config,
             )
             .expect("Failed to create accounts manager");
@@ -170,6 +176,8 @@ async fn main() {
         geyser_rpc_service.clone(),
         bank.clone(),
     );
+
+    info!("Validator identity: {}", validator_pubkey);
 
     json_rpc_service.join().unwrap();
     pubsub_service.join().unwrap();

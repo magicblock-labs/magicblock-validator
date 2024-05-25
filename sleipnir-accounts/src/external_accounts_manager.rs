@@ -9,7 +9,10 @@ use log::*;
 use sleipnir_bank::bank::Bank;
 use sleipnir_mutator::AccountModification;
 use sleipnir_transaction_status::TransactionStatusSender;
-use solana_sdk::{signature::Signature, transaction::SanitizedTransaction};
+use solana_sdk::{
+    signature::{Keypair, Signature},
+    transaction::SanitizedTransaction,
+};
 
 use crate::{
     bank_account_provider::BankAccountProvider,
@@ -17,25 +20,29 @@ use crate::{
     errors::AccountsResult,
     external_accounts::{ExternalReadonlyAccounts, ExternalWritableAccounts},
     remote_account_cloner::RemoteAccountCloner,
-    traits::{AccountCloner, InternalAccountProvider},
+    remote_account_committer::RemoteAccountCommitter,
+    traits::{AccountCloner, AccountCommitter, InternalAccountProvider},
     utils::try_rpc_cluster_from_cluster,
 };
 
 pub type AccountsManager = ExternalAccountsManager<
     BankAccountProvider,
     RemoteAccountCloner,
+    RemoteAccountCommitter,
     Transwise,
 >;
 
 #[derive(Debug)]
-pub struct ExternalAccountsManager<IAP, AC, VAP>
+pub struct ExternalAccountsManager<IAP, ACL, ACM, VAP>
 where
     IAP: InternalAccountProvider,
-    AC: AccountCloner,
+    ACL: AccountCloner,
+    ACM: AccountCommitter,
     VAP: ValidatedAccountsProvider + TransactionAccountsExtractor,
 {
     pub internal_account_provider: IAP,
-    pub account_cloner: AC,
+    pub account_cloner: ACL,
+    pub account_committer: ACM,
     pub validated_accounts_provider: VAP,
     pub external_readonly_accounts: ExternalReadonlyAccounts,
     pub external_writable_accounts: ExternalWritableAccounts,
@@ -46,11 +53,17 @@ where
 }
 
 impl
-    ExternalAccountsManager<BankAccountProvider, RemoteAccountCloner, Transwise>
+    ExternalAccountsManager<
+        BankAccountProvider,
+        RemoteAccountCloner,
+        RemoteAccountCommitter,
+        Transwise,
+    >
 {
     pub fn try_new(
         bank: &Arc<Bank>,
         transaction_status_sender: Option<TransactionStatusSender>,
+        committer_authority: Keypair,
         config: AccountsConfig,
     ) -> AccountsResult<Self> {
         let external_config = config.external;
@@ -64,11 +77,14 @@ impl
             bank.clone(),
             transaction_status_sender,
         );
+        let account_committer =
+            RemoteAccountCommitter::new(committer_authority);
         let validated_accounts_provider = Transwise::new(rpc_provider_config);
 
         Ok(Self {
             internal_account_provider,
             account_cloner,
+            account_committer,
             validated_accounts_provider,
             external_readonly_accounts: ExternalReadonlyAccounts::default(),
             external_writable_accounts: ExternalWritableAccounts::default(),
@@ -80,10 +96,11 @@ impl
     }
 }
 
-impl<IAP, AC, VAP> ExternalAccountsManager<IAP, AC, VAP>
+impl<IAP, ACL, ACM, VAP> ExternalAccountsManager<IAP, ACL, ACM, VAP>
 where
     IAP: InternalAccountProvider,
-    AC: AccountCloner,
+    ACL: AccountCloner,
+    ACM: AccountCommitter,
     VAP: ValidatedAccountsProvider + TransactionAccountsExtractor,
 {
     pub async fn ensure_accounts(
@@ -265,5 +282,17 @@ where
         }
 
         Ok(signatures)
+    }
+
+    /// This will look at the time that passed since the last commit and determine
+    /// which accounts are due to be committed, perform that step for them
+    /// and return the signatures of the transactions that were sent to the cluster.
+    pub fn commit_delegated(&self) -> AccountsResult<Vec<Signature>> {
+        // 1. Find all accounts who are due to be committed
+
+        // 2. Get current account states from internal account provider
+
+        // 3. Commit the accounts
+        todo!()
     }
 }

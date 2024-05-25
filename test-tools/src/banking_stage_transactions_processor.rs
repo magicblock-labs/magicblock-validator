@@ -14,7 +14,10 @@ use sleipnir_transaction_status::{
     TransactionStatusMessage, TransactionStatusSender,
 };
 use solana_perf::packet::{to_packet_batches, PacketBatch};
-use solana_sdk::transaction::{SanitizedTransaction, Transaction};
+use solana_sdk::{
+    pubkey::Pubkey,
+    transaction::{SanitizedTransaction, Transaction},
+};
 
 use crate::{
     bank::bank_for_tests,
@@ -52,7 +55,7 @@ pub struct BankingStageTransactionsProcessor {
 impl BankingStageTransactionsProcessor {
     pub fn new(config: BankingStageTransactionsProcessorConfig) -> Self {
         let GenesisConfigInfo { genesis_config, .. } =
-            create_genesis_config(u64::MAX);
+            create_genesis_config(u64::MAX, &Pubkey::new_unique());
         let bank = bank_for_tests(&genesis_config, None, None);
         let bank = Arc::new(bank);
 
