@@ -1,9 +1,9 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
-use url::Url;
 
 use conjunto_transwise::RpcCluster;
 use sleipnir_mutator::Cluster;
 use solana_sdk::genesis_config::ClusterType;
+use url::Url;
 
 use crate::errors::{AccountsError, AccountsResult};
 
