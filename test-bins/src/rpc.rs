@@ -135,10 +135,7 @@ async fn main() {
             ..Default::default()
         };
 
-        // This service needs to run on its own thread as otherwise it affects
-        // other tokio runtimes, i.e. the one of the GeyserPlugin
-        let hdl = {
-            let bank = bank.clone();
+        let accounts_manager = {
             let accounts_config =  try_convert_accounts_config(&config.accounts).expect("Failed to derive accounts config from provided sleipnir config");
             let accounts_manager = AccountsManager::try_new(
                 &bank,
@@ -147,6 +144,15 @@ async fn main() {
                 accounts_config,
             )
             .expect("Failed to create accounts manager");
+            Arc::new(accounts_manager)
+        };
+
+        init_commit_accounts_ticker(&accounts_manager, Duration::from_secs(5));
+
+        // This service needs to run on its own thread as otherwise it affects
+        // other tokio runtimes, i.e. the one of the GeyserPlugin
+        let hdl = {
+            let bank = bank.clone();
             std::thread::spawn(move || {
                 let _json_rpc_service = JsonRpcService::new(
                     bank,
@@ -205,6 +211,22 @@ fn init_slot_ticker(
             .map_err(|e| {
                 error!("Failed to cache block time: {:?}", e);
             });
+    });
+}
+
+fn init_commit_accounts_ticker(
+    manager: &Arc<AccountsManager>,
+    tick_duration: Duration,
+) {
+    let manager = manager.clone();
+    tokio::task::spawn(async move {
+        loop {
+            tokio::time::sleep(tick_duration).await;
+            let sigs = manager.commit_delegated().await.map_err(|e| {
+                error!("Failed to commit accounts: {:?}", e);
+            });
+            debug!("Committed accounts: {:?}", sigs);
+        }
     });
 }
 

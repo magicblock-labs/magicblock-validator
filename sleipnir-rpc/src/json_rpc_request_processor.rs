@@ -101,7 +101,7 @@ impl JsonRpcRequestProcessor {
         health: Arc<RpcHealth>,
         faucet_keypair: Keypair,
         genesis_hash: Hash,
-        accounts_manager: AccountsManager,
+        accounts_manager: Arc<AccountsManager>,
         config: JsonRpcConfig,
     ) -> (Self, Receiver<TransactionInfo>) {
         let (sender, receiver) = unbounded();
@@ -115,7 +115,7 @@ impl JsonRpcRequestProcessor {
                 transaction_sender,
                 faucet_keypair: Arc::new(faucet_keypair),
                 genesis_hash,
-                accounts_manager: Arc::new(accounts_manager),
+                accounts_manager,
             },
             receiver,
         )

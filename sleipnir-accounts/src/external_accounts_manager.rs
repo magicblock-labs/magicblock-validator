@@ -324,8 +324,11 @@ where
         }
 
         // 3. Commit the accounts and mark them as committed
+        let mut signatures = Vec::new();
         for (pubkey, state) in account_states {
-            self.account_committer.commit_account(pubkey, state).await?;
+            let sig =
+                self.account_committer.commit_account(pubkey, state).await?;
+            signatures.push(sig);
             if let Some(acc) =
                 self.external_writable_accounts.read_accounts().get(&pubkey)
             {
@@ -338,6 +341,7 @@ where
                 );
             }
         }
-        todo!()
+
+        Ok(signatures)
     }
 }

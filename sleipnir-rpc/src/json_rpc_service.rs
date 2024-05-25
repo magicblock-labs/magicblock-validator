@@ -46,7 +46,7 @@ impl JsonRpcService {
         ledger: Arc<Ledger>,
         faucet_keypair: Keypair,
         genesis_hash: Hash,
-        accounts_manager: AccountsManager,
+        accounts_manager: Arc<AccountsManager>,
         config: JsonRpcConfig,
     ) -> Result<Self, String> {
         let rpc_addr = config

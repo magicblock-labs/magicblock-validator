@@ -1,5 +1,5 @@
 use async_trait::async_trait;
-use dlp::instruction::commit_state;
+use dlp::instruction::{commit_state, finalize};
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
     pubkey::Pubkey,
@@ -36,12 +36,14 @@ impl AccountCommitter for RemoteAccountCommitter {
         delegated_account: Pubkey,
         committed_state_data: AccountSharedData,
     ) -> AccountsResult<Signature> {
-        let ix = commit_state(
-            self.committer_authority.pubkey(),
+        let committer = self.committer_authority.pubkey();
+        let commit_ix = commit_state(
+            committer,
             delegated_account,
             system_program::id(),
             committed_state_data.data().to_vec(),
         );
+        let finalize_ix = finalize(committer, delegated_account, committer);
         let latest_blockhash = self
             .rpc_client
             .get_latest_blockhash()
@@ -51,7 +53,7 @@ impl AccountCommitter for RemoteAccountCommitter {
             })?;
 
         let tx = Transaction::new_signed_with_payer(
-            &[ix],
+            &[commit_ix, finalize_ix],
             Some(&self.committer_authority.pubkey()),
             &[&self.committer_authority],
             latest_blockhash,
