@@ -10,8 +10,6 @@ remote = "devnet"
 clone = { readonly = "programs", writable = "none" }
 create = true
 
-payer = { init_sol = 1000 }
-
 [rpc]
 port = 8899
 
