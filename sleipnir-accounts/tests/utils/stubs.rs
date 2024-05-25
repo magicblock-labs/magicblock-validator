@@ -1,4 +1,8 @@
-use std::{collections::HashMap, str::FromStr, sync::RwLock};
+use std::{
+    collections::{HashMap, HashSet},
+    str::FromStr,
+    sync::RwLock,
+};
 
 use async_trait::async_trait;
 use conjunto_transwise::{
@@ -45,7 +49,7 @@ impl InternalAccountProvider for InternalAccountProviderStub {
 // -----------------
 #[derive(Default, Debug)]
 pub struct AccountClonerStub {
-    cloned_accounts: RwLock<HashMap<Pubkey, Option<Pubkey>>>,
+    cloned_accounts: RwLock<HashMap<Pubkey, Option<AccountModification>>>,
 }
 
 impl AccountClonerStub {
@@ -56,8 +60,48 @@ impl AccountClonerStub {
     #[allow(dead_code)] // will use in test assertions
     pub fn did_override_owner(&self, pubkey: &Pubkey, owner: &Pubkey) -> bool {
         let read_lock = self.cloned_accounts.read().unwrap();
-        let stored_owner = read_lock.get(pubkey).unwrap();
-        stored_owner.as_ref() == Some(owner)
+        let overrides = read_lock.get(pubkey);
+        if overrides.is_none() {
+            eprintln!("ERR: No overrides for pubkey: {}", pubkey);
+            return false;
+        }
+        let overrides = overrides.unwrap();
+        overrides
+            .as_ref()
+            .and_then(|x| x.owner.as_ref())
+            .map(|o| Pubkey::from_str(o).unwrap())
+            == Some(*owner)
+    }
+
+    pub fn did_override_lamports(
+        &self,
+        pubkey: &Pubkey,
+        lamports: u64,
+    ) -> bool {
+        let read_lock = self.cloned_accounts.read().unwrap();
+        let overrides = read_lock.get(pubkey);
+        if overrides.is_none() {
+            return false;
+        }
+        let overrides = overrides.unwrap();
+        let override_lamports =
+            overrides.as_ref().and_then(|x| x.lamports.as_ref());
+        override_lamports == Some(&lamports)
+    }
+
+    pub fn did_not_override_owner(&self, pubkey: &Pubkey) -> bool {
+        let read_lock = self.cloned_accounts.read().unwrap();
+        let overrides = read_lock.get(pubkey).unwrap();
+        overrides.as_ref().and_then(|x| x.owner.as_ref()).is_none()
+    }
+
+    pub fn did_not_override_lamports(&self, pubkey: &Pubkey) -> bool {
+        let read_lock = self.cloned_accounts.read().unwrap();
+        let overrides = read_lock.get(pubkey).unwrap();
+        overrides
+            .as_ref()
+            .and_then(|x| x.lamports.as_ref())
+            .is_none()
     }
 
     pub fn clear(&self) {
@@ -72,13 +116,10 @@ impl AccountCloner for AccountClonerStub {
         pubkey: &Pubkey,
         overrides: Option<AccountModification>,
     ) -> AccountsResult<Signature> {
-        self.cloned_accounts.write().unwrap().insert(
-            *pubkey,
-            overrides
-                .as_ref()
-                .and_then(|x| x.owner.as_ref())
-                .map(|o| Pubkey::from_str(o.as_str()).unwrap()),
-        );
+        self.cloned_accounts
+            .write()
+            .unwrap()
+            .insert(*pubkey, overrides);
         Ok(Signature::new_unique())
     }
 }
@@ -86,21 +127,35 @@ impl AccountCloner for AccountClonerStub {
 // -----------------
 // ValidatedAccountsProviderStub
 // -----------------
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct ValidatedAccountsProviderStub {
     validation_error: Option<TranswiseError>,
+    payers: HashSet<Pubkey>,
+    with_owners: HashMap<Pubkey, Pubkey>,
 }
 
 impl ValidatedAccountsProviderStub {
-    pub fn valid() -> Self {
+    pub fn valid_default() -> Self {
         Self {
             validation_error: None,
+            ..Default::default()
+        }
+    }
+    pub fn valid(
+        payers: HashSet<Pubkey>,
+        with_owners: HashMap<Pubkey, Pubkey>,
+    ) -> Self {
+        Self {
+            validation_error: None,
+            payers,
+            with_owners,
         }
     }
 
     pub fn invalid(error: TranswiseError) -> Self {
         Self {
             validation_error: Some(error),
+            ..Default::default()
         }
     }
 }
@@ -167,8 +222,8 @@ impl ValidatedAccountsProvider for ValidatedAccountsProviderStub {
                     .iter()
                     .map(|x| ValidatedWritableAccount {
                         pubkey: *x,
-                        owner: None,
-                        is_payer: false,
+                        owner: self.with_owners.get(x).cloned(),
+                        is_payer: self.payers.contains(x),
                     })
                     .collect(),
             }),
