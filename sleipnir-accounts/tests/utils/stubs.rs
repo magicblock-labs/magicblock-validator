@@ -9,10 +9,10 @@ use conjunto_transwise::{
     errors::{TranswiseError, TranswiseResult},
     trans_account_meta::TransactionAccountsHolder,
     validated_accounts::{
-        ValidateAccountsConfig, ValidatedAccounts, ValidatedReadonlyAccount,
-        ValidatedWritableAccount,
+        LockConfig, ValidateAccountsConfig, ValidatedAccounts,
+        ValidatedReadonlyAccount, ValidatedWritableAccount,
     },
-    TransactionAccountsExtractor, ValidatedAccountsProvider,
+    CommitFrequency, TransactionAccountsExtractor, ValidatedAccountsProvider,
 };
 use sleipnir_accounts::{
     errors::AccountsResult, AccountCloner, InternalAccountProvider,
@@ -222,7 +222,12 @@ impl ValidatedAccountsProvider for ValidatedAccountsProviderStub {
                     .iter()
                     .map(|x| ValidatedWritableAccount {
                         pubkey: *x,
-                        owner: self.with_owners.get(x).cloned(),
+                        lock_config: self.with_owners.get(x).as_ref().map(
+                            |owner| LockConfig {
+                                owner: **owner,
+                                commit_frequency: CommitFrequency::default(),
+                            },
+                        ),
                         is_payer: self.payers.contains(x),
                     })
                     .collect(),

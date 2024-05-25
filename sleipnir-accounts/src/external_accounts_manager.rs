@@ -209,8 +209,12 @@ where
                             "{}{}{}",
                             if x.is_payer { "[payer]:" } else { "" },
                             x.pubkey,
-                            x.owner
-                                .map(|x| format!(" owner: {}", x))
+                            x.lock_config
+                                .as_ref()
+                                .map(|x| format!(
+                                    ", owner: {}, commit_frequency: {}",
+                                    x.owner, x.commit_frequency
+                                ))
                                 .unwrap_or("".to_string()),
                         )
                     })
@@ -230,10 +234,11 @@ where
         }
 
         for writable in validated_accounts.writable {
-            let mut overrides = writable.owner.map(|x| AccountModification {
-                owner: Some(x.to_string()),
-                ..Default::default()
-            });
+            let mut overrides =
+                writable.lock_config.map(|x| AccountModification {
+                    owner: Some(x.owner.to_string()),
+                    ..Default::default()
+                });
             if writable.is_payer {
                 if let Some(lamports) = self.payer_init_lamports {
                     match overrides {
