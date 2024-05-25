@@ -130,7 +130,7 @@ impl AccountCloner for AccountClonerStub {
 // -----------------
 #[derive(Debug, Default)]
 pub struct AccountCommitterStub {
-    committed_accounts: RwLock<HashMap<Pubkey, Vec<u8>>>,
+    committed_accounts: RwLock<HashMap<Pubkey, AccountSharedData>>,
 }
 
 #[async_trait]
@@ -138,7 +138,7 @@ impl AccountCommitter for AccountCommitterStub {
     async fn commit_account(
         &self,
         delegated_account: Pubkey,
-        committed_state_data: Vec<u8>,
+        committed_state_data: AccountSharedData,
     ) -> AccountsResult<Signature> {
         self.committed_accounts
             .write()

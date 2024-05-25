@@ -24,6 +24,6 @@ pub trait AccountCommitter {
     async fn commit_account(
         &self,
         delegated_account: Pubkey,
-        committed_state_data: Vec<u8>,
+        committed_state_data: AccountSharedData,
     ) -> AccountsResult<Signature>;
 }

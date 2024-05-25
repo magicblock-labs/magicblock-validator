@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use conjunto_transwise::{
     trans_account_meta::TransactionAccountsHolder,
@@ -22,7 +22,7 @@ use crate::{
     remote_account_cloner::RemoteAccountCloner,
     remote_account_committer::RemoteAccountCommitter,
     traits::{AccountCloner, AccountCommitter, InternalAccountProvider},
-    utils::try_rpc_cluster_from_cluster,
+    utils::{get_epoch, try_rpc_cluster_from_cluster},
 };
 
 pub type AccountsManager = ExternalAccountsManager<
@@ -252,7 +252,7 @@ where
 
         for writable in validated_accounts.writable {
             let mut overrides =
-                writable.lock_config.map(|x| AccountModification {
+                writable.lock_config.as_ref().map(|x| AccountModification {
                     owner: Some(x.owner.to_string()),
                     ..Default::default()
                 });
@@ -274,7 +274,10 @@ where
                 .clone_account(&writable.pubkey, overrides)
                 .await?;
             signatures.push(signature);
-            self.external_writable_accounts.insert(writable.pubkey);
+            self.external_writable_accounts.insert(
+                writable.pubkey,
+                writable.lock_config.as_ref().map(|x| x.commit_frequency),
+            );
         }
 
         if log::log_enabled!(log::Level::Debug) && !signatures.is_empty() {
@@ -287,12 +290,48 @@ where
     /// This will look at the time that passed since the last commit and determine
     /// which accounts are due to be committed, perform that step for them
     /// and return the signatures of the transactions that were sent to the cluster.
-    pub fn commit_delegated(&self) -> AccountsResult<Vec<Signature>> {
-        // 1. Find all accounts who are due to be committed
+    pub async fn commit_delegated(&self) -> AccountsResult<Vec<Signature>> {
+        let now = get_epoch();
+
+        // 1. Find all accounts that are due to be committed
+        let accounts_to_be_committed = self
+            .external_writable_accounts
+            .read_accounts()
+            .values()
+            .filter(|x| x.needs_commit(now))
+            .map(|x| x.pubkey)
+            .collect::<Vec<_>>();
 
         // 2. Get current account states from internal account provider
+        let mut account_states = HashMap::new();
+        for pubkey in &accounts_to_be_committed {
+            let account_state =
+                self.internal_account_provider.get_account(pubkey);
+            if let Some(acc) = account_state {
+                account_states.insert(*pubkey, acc);
+            } else {
+                error!(
+                    "Cannot find state for account that needs to be committed '{}' ",
+                    pubkey
+                );
+            }
+        }
 
-        // 3. Commit the accounts
+        // 3. Commit the accounts and mark them as committed
+        for (pubkey, state) in account_states {
+            self.account_committer.commit_account(pubkey, state).await?;
+            if let Some(acc) =
+                self.external_writable_accounts.read_accounts().get(&pubkey)
+            {
+                acc.mark_as_committed(now);
+            } else {
+                // This should never happen
+                error!(
+                    "Account '{}' disappeared while being committed",
+                    pubkey
+                );
+            }
+        }
         todo!()
     }
 }

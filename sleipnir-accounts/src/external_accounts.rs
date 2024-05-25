@@ -5,6 +5,7 @@ use std::{
     time::Duration,
 };
 
+use conjunto_transwise::CommitFrequency;
 use solana_sdk::pubkey::Pubkey;
 
 use crate::utils::get_epoch;
@@ -13,7 +14,6 @@ use crate::utils::get_epoch;
 // ExternalAccounts
 // -----------------
 pub trait ExternalAccount {
-    fn new(pubkey: Pubkey, now: Duration) -> Self;
     fn cloned_at(&self) -> Duration;
 }
 
@@ -31,11 +31,6 @@ impl<T: ExternalAccount> Default for ExternalAccounts<T> {
 }
 
 impl<T: ExternalAccount> ExternalAccounts<T> {
-    pub fn insert(&self, pubkey: Pubkey) {
-        let now = get_epoch();
-        self.write_accounts().insert(pubkey, T::new(pubkey, now));
-    }
-
     pub fn has(&self, pubkey: &Pubkey) -> bool {
         self.read_accounts().contains_key(pubkey)
     }
@@ -54,7 +49,7 @@ impl<T: ExternalAccount> ExternalAccounts<T> {
             .map(|account| account.cloned_at())
     }
 
-    fn read_accounts(&self) -> RwLockReadGuard<HashMap<Pubkey, T>> {
+    pub fn read_accounts(&self) -> RwLockReadGuard<HashMap<Pubkey, T>> {
         self.accounts
             .read()
             .expect("RwLock of external accounts is poisoned")
@@ -89,6 +84,12 @@ pub struct ExternalReadonlyAccount {
 }
 
 impl ExternalAccount for ExternalReadonlyAccount {
+    fn cloned_at(&self) -> Duration {
+        self.cloned_at
+    }
+}
+
+impl ExternalReadonlyAccount {
     fn new(pubkey: Pubkey, now: Duration) -> Self {
         Self {
             pubkey,
@@ -96,13 +97,15 @@ impl ExternalAccount for ExternalReadonlyAccount {
             updated_at: now,
         }
     }
-
-    fn cloned_at(&self) -> Duration {
-        self.cloned_at
-    }
 }
 
 impl ExternalReadonlyAccounts {
+    pub fn insert(&self, pubkey: Pubkey) {
+        let now = get_epoch();
+        self.write_accounts()
+            .insert(pubkey, ExternalReadonlyAccount::new(pubkey, now));
+    }
+
     pub fn get_updated_at(&self, pubkey: &Pubkey) -> Option<Duration> {
         self.read_accounts()
             .get(pubkey)
@@ -124,25 +127,77 @@ impl Deref for ExternalWritableAccounts {
     }
 }
 
+impl ExternalWritableAccounts {
+    pub fn insert(
+        &self,
+        pubkey: Pubkey,
+        commit_frequency: Option<CommitFrequency>,
+    ) {
+        let now = get_epoch();
+        self.write_accounts().insert(
+            pubkey,
+            ExternalWritableAccount::new(pubkey, now, commit_frequency),
+        );
+    }
+}
+
 #[derive(Debug)]
 pub struct ExternalWritableAccount {
+    /// The pubkey of the account.
     pub pubkey: Pubkey,
+    /// The timestamp at which the account was cloned into the validator.
     pub cloned_at: Duration,
-    pub updated_at: Duration,
-    pub last_committed_at: Option<Duration>,
+    /// The frequency at which to commit the state to the commit buffer of
+    /// the locked account.
+    /// This is `None` for accounts that are not locked, i.e. for payers.
+    /// If it is `None` we don't need to commit the account ever.
+    pub commit_frequency: Option<Duration>,
+    /// The timestamp at which the account was last committed.
+    pub last_committed_at: RwLock<Duration>,
 }
 
 impl ExternalAccount for ExternalWritableAccount {
-    fn new(pubkey: Pubkey, now: Duration) -> Self {
+    fn cloned_at(&self) -> Duration {
+        self.cloned_at
+    }
+}
+
+impl ExternalWritableAccount {
+    fn new(
+        pubkey: Pubkey,
+        now: Duration,
+        commit_frequency: Option<CommitFrequency>,
+    ) -> Self {
+        let commit_frequency = commit_frequency.map(Duration::from);
         Self {
             pubkey,
+            commit_frequency,
             cloned_at: now,
-            updated_at: now,
-            last_committed_at: None,
+            // We don't want to commit immediately after cloning, thus we consider
+            // the account as committed at clone time until it is updated after
+            // a commit
+            last_committed_at: RwLock::new(now),
         }
     }
 
-    fn cloned_at(&self) -> Duration {
-        self.cloned_at
+    pub fn needs_commit(&self, now: Duration) -> bool {
+        let commit_frequency = if let Some(freq) = self.commit_frequency {
+            freq
+        } else {
+            // accounts like payers without commit frequency are never committed
+            return false;
+        };
+        let last_committed_at = *self
+            .last_committed_at
+            .read()
+            .expect("RwLock of last_committed_at is poisoned");
+        now - last_committed_at >= commit_frequency
+    }
+
+    pub fn mark_as_committed(&self, now: Duration) {
+        *self
+            .last_committed_at
+            .write()
+            .expect("RwLock of last_committed_at is poisoned") = now
     }
 }

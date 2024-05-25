@@ -1,5 +1,6 @@
 use async_trait::async_trait;
 use solana_sdk::{
+    account::AccountSharedData,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
     signer::Signer,
@@ -24,7 +25,7 @@ impl AccountCommitter for RemoteAccountCommitter {
     async fn commit_account(
         &self,
         _delegated_account: Pubkey,
-        _committed_state_data: Vec<u8>,
+        _committed_state_data: AccountSharedData,
     ) -> AccountsResult<Signature> {
         todo!("commit account with {}", self.committer_authority.pubkey())
     }
