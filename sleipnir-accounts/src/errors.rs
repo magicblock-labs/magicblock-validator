@@ -27,4 +27,10 @@ pub enum AccountsError {
 
     #[error("FailedToUpdateUrlPort")]
     FailedToUpdateUrlPort,
+
+    #[error("FailedToGetLatestBlockhash '{0}'")]
+    FailedToGetLatestBlockhash(String),
+
+    #[error("FailedToSendAndConfirmTransaction '{0}'")]
+    FailedToSendAndConfirmTransaction(String),
 }

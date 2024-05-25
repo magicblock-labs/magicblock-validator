@@ -9,7 +9,9 @@ use log::*;
 use sleipnir_bank::bank::Bank;
 use sleipnir_mutator::AccountModification;
 use sleipnir_transaction_status::TransactionStatusSender;
+use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
+    commitment_config::CommitmentConfig,
     signature::{Keypair, Signature},
     transaction::SanitizedTransaction,
 };
@@ -70,6 +72,10 @@ impl
         let cluster = external_config.cluster;
         let internal_account_provider = BankAccountProvider::new(bank.clone());
         let rpc_cluster = try_rpc_cluster_from_cluster(&cluster)?;
+        let rpc_client = RpcClient::new_with_commitment(
+            rpc_cluster.url().to_string(),
+            CommitmentConfig::confirmed(),
+        );
         let rpc_provider_config = RpcProviderConfig::new(rpc_cluster, None);
 
         let account_cloner = RemoteAccountCloner::new(
@@ -78,7 +84,7 @@ impl
             transaction_status_sender,
         );
         let account_committer =
-            RemoteAccountCommitter::new(committer_authority);
+            RemoteAccountCommitter::new(rpc_client, committer_authority);
         let validated_accounts_provider = Transwise::new(rpc_provider_config);
 
         Ok(Self {
