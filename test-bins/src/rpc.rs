@@ -20,10 +20,7 @@ use sleipnir_rpc::{
     json_rpc_request_processor::JsonRpcConfig, json_rpc_service::JsonRpcService,
 };
 use sleipnir_transaction_status::TransactionStatusSender;
-use solana_sdk::{
-    signature::{keypair_from_seed, Keypair},
-    signer::Signer,
-};
+use solana_sdk::{signature::Keypair, signer::Signer};
 use tempfile::TempDir;
 use test_tools::{
     account::{fund_account, fund_account_addr},
@@ -35,7 +32,7 @@ use utils::timestamp_in_secs;
 
 use crate::{
     geyser::{init_geyser_service, GeyserTransactionNotifyListener},
-    utils::try_convert_accounts_config,
+    utils::{try_convert_accounts_config, TEST_KEYPAIR_BYTES},
 };
 const LUZIFER: &str = "LuzifKo4E6QCF5r4uQmqbyko7zLS5WgayynivnCbtzk";
 mod geyser;
@@ -67,8 +64,7 @@ async fn main() {
 
     let exit = Arc::<AtomicBool>::default();
 
-    // TODO(thlorenz): Read this from a file overridable with env var
-    let validator_keypair = keypair_from_seed(&[69; 32]).unwrap();
+    let validator_keypair = validator_keypair();
     let GenesisConfigInfo {
         genesis_config,
         validator_pubkey,
@@ -181,6 +177,18 @@ async fn main() {
 
     json_rpc_service.join().unwrap();
     pubsub_service.join().unwrap();
+}
+
+fn validator_keypair() -> Keypair {
+    // 1. Try to load it from an env var base58 encoded
+    if let Ok(keypair) = std::env::var("VALIDATOR_KEYPAIR") {
+        Keypair::from_base58_string(&keypair)
+    } else {
+        warn!("Using default test keypair, provide one by setting 'VALIDATOR_KEYPAIR' env var to a base58 encoded private key");
+        Keypair::from_bytes(&TEST_KEYPAIR_BYTES)
+            // SAFETY: these bytes are compiled into the code, thus we know it is valid
+            .unwrap()
+    }
 }
 
 fn init_slot_ticker(
