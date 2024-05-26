@@ -8,7 +8,7 @@ pub enum MutatorError {
     ParsePubkeyError(#[from] solana_sdk::pubkey::ParsePubkeyError),
 
     #[error("RpcClientError: '{0}' ({0:?})")]
-    RpcClientError(#[from] sleipnir_rpc_client::client_error::Error),
+    RpcClientError(#[from] solana_rpc_client_api::client_error::Error),
 
     #[error("StdError: '{0}' ({0:?})")]
     StdError(#[from] Box<dyn std::error::Error>),

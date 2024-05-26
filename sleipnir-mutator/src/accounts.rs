@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use sleipnir_rpc_client::rpc_client::RpcClient;
+use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
     account::Account, bpf_loader_upgradeable, clock::Slot,
     commitment_config::CommitmentConfig, pubkey::Pubkey,
