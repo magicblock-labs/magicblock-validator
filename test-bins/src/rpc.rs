@@ -147,7 +147,10 @@ async fn main() {
             Arc::new(accounts_manager)
         };
 
-        init_commit_accounts_ticker(&accounts_manager, Duration::from_secs(5));
+        init_commit_accounts_ticker(
+            &accounts_manager,
+            Duration::from_millis(config.accounts.commit.frequency_millis),
+        );
 
         // This service needs to run on its own thread as otherwise it affects
         // other tokio runtimes, i.e. the one of the GeyserPlugin

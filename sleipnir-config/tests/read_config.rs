@@ -1,7 +1,8 @@
 use std::str::FromStr;
 
 use sleipnir_config::{
-    ProgramConfig, RpcConfig, SleipnirConfig, ValidatorConfig,
+    AccountsConfig, CommitStrategy, ProgramConfig, RpcConfig, SleipnirConfig,
+    ValidatorConfig,
 };
 use solana_sdk::pubkey::Pubkey;
 use test_tools_core::paths::cargo_workspace_dir;
@@ -21,6 +22,12 @@ fn test_load_local_dev_with_programs_toml() {
     assert_eq!(
         config,
         SleipnirConfig {
+            accounts: AccountsConfig {
+                commit: CommitStrategy {
+                    frequency_millis: 600_000
+                },
+                ..Default::default()
+            },
             programs: vec![ProgramConfig {
                 id: Pubkey::from_str(
                     "wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4"
@@ -33,9 +40,8 @@ fn test_load_local_dev_with_programs_toml() {
             }],
             rpc: RpcConfig { port: 7799 },
             validator: ValidatorConfig {
-                millis_per_slot: 14
+                millis_per_slot: 14,
             },
-            ..SleipnirConfig::default()
         }
     )
 }

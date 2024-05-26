@@ -1,8 +1,3 @@
-/*
-[validator]
-millis_per_slot = 50
-*/
-
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]

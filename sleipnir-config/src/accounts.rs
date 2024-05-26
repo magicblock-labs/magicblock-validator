@@ -13,6 +13,8 @@ pub struct AccountsConfig {
     pub remote: RemoteConfig,
     #[serde(default)]
     pub clone: CloneStrategy,
+    #[serde(default)]
+    pub commit: CommitStrategy,
     #[serde(default = "default_create")]
     pub create: bool,
     #[serde(default)]
@@ -30,6 +32,7 @@ impl Default for AccountsConfig {
             clone: Default::default(),
             payer: Default::default(),
             create: true,
+            commit: Default::default(),
         }
     }
 }
@@ -104,6 +107,27 @@ pub enum WritableMode {
     Delegated,
     #[default]
     None,
+}
+
+// -----------------
+// CommitStrategy
+// -----------------
+#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+pub struct CommitStrategy {
+    #[serde(default = "default_frequency_millis")]
+    pub frequency_millis: u64,
+}
+
+fn default_frequency_millis() -> u64 {
+    500
+}
+
+impl Default for CommitStrategy {
+    fn default() -> Self {
+        Self {
+            frequency_millis: default_frequency_millis(),
+        }
+    }
 }
 
 // -----------------

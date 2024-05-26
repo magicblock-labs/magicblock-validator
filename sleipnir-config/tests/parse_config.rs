@@ -1,8 +1,9 @@
 use std::str::FromStr;
 
 use sleipnir_config::{
-    AccountsConfig, CloneStrategy, Payer, ProgramConfig, ReadonlyMode,
-    RemoteConfig, RpcConfig, SleipnirConfig, ValidatorConfig, WritableMode,
+    AccountsConfig, CloneStrategy, CommitStrategy, Payer, ProgramConfig,
+    ReadonlyMode, RemoteConfig, RpcConfig, SleipnirConfig, ValidatorConfig,
+    WritableMode,
 };
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
 use url::Url;
@@ -76,6 +77,12 @@ fn test_local_dev_with_programs_toml() {
     assert_eq!(
         config,
         SleipnirConfig {
+            accounts: AccountsConfig {
+                commit: CommitStrategy {
+                    frequency_millis: 600_000
+                },
+                ..Default::default()
+            },
             programs: vec![ProgramConfig {
                 id: Pubkey::from_str(
                     "wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4"
@@ -86,9 +93,8 @@ fn test_local_dev_with_programs_toml() {
             }],
             rpc: RpcConfig { port: 7799 },
             validator: ValidatorConfig {
-                millis_per_slot: 14
+                millis_per_slot: 14,
             },
-            ..SleipnirConfig::default()
         }
     )
 }
