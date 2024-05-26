@@ -18,7 +18,6 @@ members = [
   "sleipnir-processor",
   "sleipnir-pubsub",
   "sleipnir-rpc",
-  "sleipnir-rpc-client-api",
   "sleipnir-stage-banking",
   "sleipnir-stage-fetch",
   "sleipnir-stage-verify",
@@ -109,7 +108,6 @@ sleipnir-processor = { path = "./sleipnir-processor" }
 sleipnir-program = { path = "./programs/sleipnir" }
 sleipnir-pubsub = { path = "./sleipnir-pubsub" }
 sleipnir-rpc = { path = "./sleipnir-rpc" }
-sleipnir-rpc-client-api = { path = "./sleipnir-rpc-client-api" }
 sleipnir-rpc-sender = { path = "./sleipnir-rpc-sender" }
 sleipnir-stage-banking = { path = "./sleipnir-stage-banking" }
 sleipnir-stage-verify = { path = "./sleipnir-stage-verify" }

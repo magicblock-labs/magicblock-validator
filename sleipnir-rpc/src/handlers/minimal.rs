@@ -1,7 +1,7 @@
 // NOTE: from rpc/src/rpc.rs
 use jsonrpc_core::Result;
 use log::*;
-use sleipnir_rpc_client_api::{
+use solana_rpc_client_api::{
     config::{
         RpcContextConfig, RpcGetVoteAccountsConfig, RpcLeaderScheduleConfig,
         RpcLeaderScheduleConfigWrapper,

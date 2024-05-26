@@ -1,7 +1,7 @@
 // NOTE: from rpc/src/rpc.rs :3109
 use jsonrpc_core::Result;
 use jsonrpc_derive::rpc;
-use sleipnir_rpc_client_api::{
+use solana_rpc_client_api::{
     config::RpcSupplyConfig,
     response::{
         OptionalContext, Response as RpcResponse, RpcKeyedAccount, RpcSupply,
@@ -17,9 +17,7 @@ pub trait AccountsScan {
         &self,
         meta: Self::Metadata,
         program_id_str: String,
-        config: Option<
-            sleipnir_rpc_client_api::config::RpcProgramAccountsConfig,
-        >,
+        config: Option<solana_rpc_client_api::config::RpcProgramAccountsConfig>,
     ) -> Result<OptionalContext<Vec<RpcKeyedAccount>>>;
 
     #[rpc(meta, name = "getSupply")]

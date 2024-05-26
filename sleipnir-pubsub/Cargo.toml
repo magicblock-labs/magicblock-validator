@@ -18,7 +18,8 @@ serde = { workspace = true }
 serde_json = { workspace = true }
 sleipnir-bank = { workspace = true }
 sleipnir-geyser-plugin = { workspace = true }
-sleipnir-rpc-client-api = { workspace = true }
+solana-account-decoder = { workspace = true }
+solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }

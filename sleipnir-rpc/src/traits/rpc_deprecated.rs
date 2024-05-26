@@ -1,10 +1,8 @@
 #![allow(deprecated)]
 use jsonrpc_core::{BoxFuture, Result};
 use jsonrpc_derive::rpc;
-use sleipnir_rpc_client_api::{
-    config::RpcGetConfirmedSignaturesForAddress2Config,
-    response::RpcConfirmedTransactionStatusWithSignature,
-};
+use solana_rpc_client_api::deprecated_config::RpcGetConfirmedSignaturesForAddress2Config;
+use solana_rpc_client_api::response::RpcConfirmedTransactionStatusWithSignature;
 
 #[rpc]
 pub trait Deprecated {

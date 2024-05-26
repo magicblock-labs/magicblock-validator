@@ -1,5 +1,5 @@
 use sleipnir_ledger::PerfSample;
-use sleipnir_rpc_client_api::response::RpcPerfSample;
+use solana_rpc_client_api::response::RpcPerfSample;
 use solana_sdk::clock::Slot;
 
 pub fn rpc_perf_sample_from(

@@ -1,6 +1,6 @@
 use jsonrpc_core::{Error, Result};
 use sleipnir_bank::bank::Bank;
-use sleipnir_rpc_client_api::{
+use solana_rpc_client_api::{
     request::MAX_GET_CONFIRMED_SIGNATURES_FOR_ADDRESS2_LIMIT,
     response::{Response as RpcResponse, RpcResponseContext},
 };

@@ -1,7 +1,8 @@
 #![allow(deprecated)]
 use jsonrpc_core::{futures::future, BoxFuture, Result};
-use sleipnir_rpc_client_api::{
-    config::{RpcContextConfig, RpcGetConfirmedSignaturesForAddress2Config},
+use solana_rpc_client_api::{
+    config::RpcContextConfig,
+    deprecated_config::RpcGetConfirmedSignaturesForAddress2Config,
     response::RpcConfirmedTransactionStatusWithSignature,
 };
 

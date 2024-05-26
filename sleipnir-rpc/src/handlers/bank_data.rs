@@ -1,7 +1,7 @@
 // NOTE: from rpc/src/rpc.rs :2791
 use jsonrpc_core::{Error, Result};
 use log::*;
-use sleipnir_rpc_client_api::{
+use solana_rpc_client_api::{
     config::RpcContextConfig, request::MAX_GET_SLOT_LEADERS,
 };
 use solana_sdk::{

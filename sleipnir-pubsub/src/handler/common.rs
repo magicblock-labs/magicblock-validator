@@ -2,7 +2,7 @@ use geyser_grpc_proto::{geyser, tonic::Status};
 use jsonrpc_pubsub::Sink;
 use log::*;
 use serde::{Deserialize, Serialize};
-use sleipnir_rpc_client_api::config::{UiAccount, UiAccountEncoding};
+use solana_account_decoder::{UiAccount, UiAccountEncoding};
 
 use crate::{
     conversions::{slot_from_update, subscribe_update_try_into_ui_account},

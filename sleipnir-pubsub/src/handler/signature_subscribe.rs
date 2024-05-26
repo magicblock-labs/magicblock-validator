@@ -5,7 +5,7 @@ use jsonrpc_pubsub::{Sink, Subscriber};
 use log::*;
 use sleipnir_bank::bank::Bank;
 use sleipnir_geyser_plugin::rpc::GeyserRpcService;
-use sleipnir_rpc_client_api::response::{
+use solana_rpc_client_api::response::{
     ProcessedSignatureResult, RpcSignatureResult,
 };
 use solana_sdk::{signature::Signature, transaction::TransactionError};

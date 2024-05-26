@@ -1,7 +1,7 @@
 // NOTE: from rpc/src/rpc.rs :2741
 use jsonrpc_core::Result;
 use jsonrpc_derive::rpc;
-use sleipnir_rpc_client_api::config::RpcContextConfig;
+use solana_rpc_client_api::config::RpcContextConfig;
 use solana_sdk::{
     commitment_config::CommitmentConfig, epoch_schedule::EpochSchedule,
 };

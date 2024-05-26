@@ -9,11 +9,9 @@ use geyser_grpc_proto::geyser::{
     SubscribeRequestFilterTransactions, SubscribeUpdate,
     SubscribeUpdateAccount,
 };
-use sleipnir_rpc_client_api::{
-    config::{
-        RpcProgramAccountsConfig, RpcTransactionLogsFilter, UiAccount,
-        UiAccountEncoding, UiDataSliceConfig,
-    },
+use solana_account_decoder::{UiAccount, UiAccountEncoding, UiDataSliceConfig};
+use solana_rpc_client_api::{
+    config::{RpcProgramAccountsConfig, RpcTransactionLogsFilter},
     filter::{MemcmpEncodedBytes, RpcFilterType},
     response::RpcLogsResponse,
 };

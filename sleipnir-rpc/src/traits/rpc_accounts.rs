@@ -1,8 +1,8 @@
 use jsonrpc_core::Result;
 use jsonrpc_derive::rpc;
-use sleipnir_rpc_client_api::{
-    config::{RpcAccountInfoConfig, UiAccount},
-    response::Response as RpcResponse,
+use solana_account_decoder::UiAccount;
+use solana_rpc_client_api::{
+    config::RpcAccountInfoConfig, response::Response as RpcResponse,
 };
 
 #[rpc]

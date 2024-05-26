@@ -1,4 +1,4 @@
-use sleipnir_rpc_client_api::custom_error::RpcCustomError;
+use solana_rpc_client_api::custom_error::RpcCustomError;
 
 mod account_resolver;
 mod filters;

@@ -2,7 +2,7 @@
 //! The `rpc` module implements the Solana RPC interface.
 use jsonrpc_core::{BoxFuture, Result};
 use jsonrpc_derive::rpc;
-use sleipnir_rpc_client_api::{
+use solana_rpc_client_api::{
     config::{
         RpcBlocksConfigWrapper, RpcContextConfig, RpcEncodingConfigWrapper,
         RpcEpochConfig, RpcRequestAirdropConfig, RpcSendTransactionConfig,

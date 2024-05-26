@@ -1,10 +1,11 @@
 use jsonrpc_core::Params;
 use serde::{Deserialize, Serialize};
-use sleipnir_rpc_client_api::{
+use solana_account_decoder::{UiAccountEncoding, UiDataSliceConfig};
+use solana_rpc_client_api::{
     config::{
         RpcAccountInfoConfig, RpcProgramAccountsConfig,
         RpcSignatureSubscribeConfig, RpcTransactionLogsConfig,
-        RpcTransactionLogsFilter, UiAccountEncoding, UiDataSliceConfig,
+        RpcTransactionLogsFilter,
     },
     response::{Response, RpcResponseContext},
 };

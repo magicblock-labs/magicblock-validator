@@ -1,9 +1,9 @@
 // NOTE: from rpc/src/rpc.rs :3014
 use jsonrpc_core::{Error, Result};
 use log::*;
-use sleipnir_rpc_client_api::{
-    config::{RpcAccountInfoConfig, UiAccount},
-    request::MAX_MULTIPLE_ACCOUNTS,
+use solana_account_decoder::UiAccount;
+use solana_rpc_client_api::{
+    config::RpcAccountInfoConfig, request::MAX_MULTIPLE_ACCOUNTS,
     response::Response as RpcResponse,
 };
 

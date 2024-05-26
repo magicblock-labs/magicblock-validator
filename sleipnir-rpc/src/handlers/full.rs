@@ -3,7 +3,7 @@ use std::str::FromStr;
 // NOTE: from rpc/src/rpc.rs :3432
 use jsonrpc_core::{futures::future, BoxFuture, Error, Result};
 use log::*;
-use sleipnir_rpc_client_api::{
+use solana_rpc_client_api::{
     config::{
         RpcBlocksConfigWrapper, RpcContextConfig, RpcEncodingConfigWrapper,
         RpcEpochConfig, RpcRequestAirdropConfig, RpcSendTransactionConfig,
