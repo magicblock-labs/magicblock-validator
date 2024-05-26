@@ -225,10 +225,18 @@ fn init_commit_accounts_ticker(
     tokio::task::spawn(async move {
         loop {
             tokio::time::sleep(tick_duration).await;
-            let sigs = manager.commit_delegated().await.map_err(|e| {
-                error!("Failed to commit accounts: {:?}", e);
-            });
-            debug!("Committed accounts: {:?}", sigs);
+            let sigs = manager.commit_delegated().await;
+            match sigs {
+                Ok(sigs) if sigs.is_empty() => {
+                    trace!("No accounts committed");
+                }
+                Ok(sigs) => {
+                    debug!("Committed: {:?}", sigs);
+                }
+                Err(err) => {
+                    error!("Failed to commit accounts: {:?}", err);
+                }
+            }
         }
     });
 }
