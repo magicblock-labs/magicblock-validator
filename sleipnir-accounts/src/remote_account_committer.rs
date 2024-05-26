@@ -53,6 +53,7 @@ impl AccountCommitter for RemoteAccountCommitter {
                 return Ok(None);
             }
         }
+
         let committer = self.committer_authority.pubkey();
         let commit_ix = commit_state(
             committer,

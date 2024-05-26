@@ -146,14 +146,14 @@ pub struct ExternalWritableAccount {
     /// The pubkey of the account.
     pub pubkey: Pubkey,
     /// The timestamp at which the account was cloned into the validator.
-    pub cloned_at: Duration,
+    cloned_at: Duration,
     /// The frequency at which to commit the state to the commit buffer of
     /// the locked account.
     /// This is `None` for accounts that are not locked, i.e. for payers.
     /// If it is `None` we don't need to commit the account ever.
-    pub commit_frequency: Option<Duration>,
+    commit_frequency: Option<Duration>,
     /// The timestamp at which the account was last committed.
-    pub last_committed_at: RwLock<Duration>,
+    last_committed_at: RwLock<Duration>,
 }
 
 impl ExternalAccount for ExternalWritableAccount {
@@ -191,6 +191,7 @@ impl ExternalWritableAccount {
             .last_committed_at
             .read()
             .expect("RwLock of last_committed_at is poisoned");
+
         now - last_committed_at >= commit_frequency
     }
 
@@ -199,5 +200,12 @@ impl ExternalWritableAccount {
             .last_committed_at
             .write()
             .expect("RwLock of last_committed_at is poisoned") = now
+    }
+
+    pub fn last_committed_at(&self) -> Duration {
+        *self
+            .last_committed_at
+            .read()
+            .expect("RwLock of last_committed_at is poisoned")
     }
 }

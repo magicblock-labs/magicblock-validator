@@ -1,4 +1,4 @@
-use std::{collections::HashMap, sync::Arc};
+use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use conjunto_transwise::{
     trans_account_meta::TransactionAccountsHolder,
@@ -12,6 +12,7 @@ use sleipnir_transaction_status::TransactionStatusSender;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
+    pubkey::Pubkey,
     signature::{Keypair, Signature},
     transaction::SanitizedTransaction,
 };
@@ -349,5 +350,12 @@ where
         }
 
         Ok(signatures)
+    }
+
+    pub fn last_commit(&self, pubkey: &Pubkey) -> Option<Duration> {
+        self.external_writable_accounts
+            .read_accounts()
+            .get(pubkey)
+            .map(|x| x.last_committed_at())
     }
 }

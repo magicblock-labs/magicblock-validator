@@ -1,7 +1,7 @@
 use std::{
     collections::{HashMap, HashSet},
     str::FromStr,
-    sync::RwLock,
+    sync::{Arc, RwLock},
 };
 
 use async_trait::async_trait;
@@ -53,6 +53,7 @@ pub struct AccountClonerStub {
     cloned_accounts: RwLock<HashMap<Pubkey, Option<AccountModification>>>,
 }
 
+#[allow(unused)] // used in tests
 impl AccountClonerStub {
     pub fn did_clone(&self, pubkey: &Pubkey) -> bool {
         self.cloned_accounts.read().unwrap().contains_key(pubkey)
@@ -128,9 +129,19 @@ impl AccountCloner for AccountClonerStub {
 // -----------------
 // AccountCommitter
 // -----------------
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct AccountCommitterStub {
-    committed_accounts: RwLock<HashMap<Pubkey, AccountSharedData>>,
+    committed_accounts: Arc<RwLock<HashMap<Pubkey, AccountSharedData>>>,
+}
+
+#[allow(unused)] // used in tests
+impl AccountCommitterStub {
+    pub fn len(&self) -> usize {
+        self.committed_accounts.read().unwrap().len()
+    }
+    pub fn committed(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
+        self.committed_accounts.read().unwrap().get(pubkey).cloned()
+    }
 }
 
 #[async_trait]
@@ -139,12 +150,12 @@ impl AccountCommitter for AccountCommitterStub {
         &self,
         delegated_account: Pubkey,
         committed_state_data: AccountSharedData,
-    ) -> AccountsResult<Signature> {
+    ) -> AccountsResult<Option<Signature>> {
         self.committed_accounts
             .write()
             .unwrap()
             .insert(delegated_account, committed_state_data);
-        Ok(Signature::new_unique())
+        Ok(Some(Signature::new_unique()))
     }
 }
 
@@ -158,6 +169,7 @@ pub struct ValidatedAccountsProviderStub {
     with_owners: HashMap<Pubkey, Pubkey>,
 }
 
+#[allow(unused)] // used in tests
 impl ValidatedAccountsProviderStub {
     pub fn valid_default() -> Self {
         Self {
