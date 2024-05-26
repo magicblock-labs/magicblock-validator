@@ -328,17 +328,23 @@ where
         for (pubkey, state) in account_states {
             let sig =
                 self.account_committer.commit_account(pubkey, state).await?;
-            signatures.push(sig);
-            if let Some(acc) =
-                self.external_writable_accounts.read_accounts().get(&pubkey)
-            {
-                acc.mark_as_committed(now);
-            } else {
-                // This should never happen
-                error!(
-                    "Account '{}' disappeared while being committed",
-                    pubkey
-                );
+            // If the last committed state is the same as the current state
+            // then it wasn't committed.
+            // In that case we don't mark it as such in order to trigger commitment
+            // as soon as its state changes.
+            if let Some(sig) = sig {
+                signatures.push(sig);
+                if let Some(acc) =
+                    self.external_writable_accounts.read_accounts().get(&pubkey)
+                {
+                    acc.mark_as_committed(now);
+                } else {
+                    // This should never happen
+                    error!(
+                        "Account '{}' disappeared while being committed",
+                        pubkey
+                    );
+                }
             }
         }
 

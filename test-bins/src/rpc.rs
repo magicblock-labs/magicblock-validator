@@ -231,7 +231,7 @@ fn init_commit_accounts_ticker(
                     trace!("No accounts committed");
                 }
                 Ok(sigs) => {
-                    debug!("Committed: {:?}", sigs);
+                    debug!("Commits: {:?}", sigs);
                 }
                 Err(err) => {
                     error!("Failed to commit accounts: {:?}", err);

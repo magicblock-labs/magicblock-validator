@@ -1,3 +1,5 @@
+use std::{collections::HashMap, sync::RwLock};
+
 use async_trait::async_trait;
 use dlp::instruction::{commit_state, finalize};
 use solana_sdk::{
@@ -18,6 +20,10 @@ use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 pub struct RemoteAccountCommitter {
     rpc_client: RpcClient,
     committer_authority: Keypair,
+    /// Tracking the last commit we did for each pubkey.
+    /// This increases memory usage, but allows us to check this without
+    /// downloading the currently committed account data from chain.
+    commits: RwLock<HashMap<Pubkey, AccountSharedData>>,
 }
 
 impl RemoteAccountCommitter {
@@ -25,6 +31,7 @@ impl RemoteAccountCommitter {
         Self {
             rpc_client,
             committer_authority,
+            commits: RwLock::<HashMap<Pubkey, AccountSharedData>>::default(),
         }
     }
 }
@@ -34,14 +41,24 @@ impl AccountCommitter for RemoteAccountCommitter {
     async fn commit_account(
         &self,
         delegated_account: Pubkey,
-        committed_state_data: AccountSharedData,
-    ) -> AccountsResult<Signature> {
+        commit_state_data: AccountSharedData,
+    ) -> AccountsResult<Option<Signature>> {
+        if let Some(committed_account) = self
+            .commits
+            .read()
+            .expect("RwLock commits poisoned")
+            .get(&delegated_account)
+        {
+            if committed_account.data() == commit_state_data.data() {
+                return Ok(None);
+            }
+        }
         let committer = self.committer_authority.pubkey();
         let commit_ix = commit_state(
             committer,
             delegated_account,
             system_program::id(),
-            committed_state_data.data().to_vec(),
+            commit_state_data.data().to_vec(),
         );
         let finalize_ix = finalize(committer, delegated_account, committer);
         let latest_blockhash = self
@@ -69,6 +86,11 @@ impl AccountCommitter for RemoteAccountCommitter {
                 )
             })?;
 
-        Ok(signature)
+        self.commits
+            .write()
+            .expect("RwLock commits poisoned")
+            .insert(delegated_account, commit_state_data);
+
+        Ok(Some(signature))
     }
 }
