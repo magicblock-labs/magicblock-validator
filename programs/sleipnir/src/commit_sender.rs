@@ -5,6 +5,7 @@ use solana_sdk::pubkey::Pubkey;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
+use crate::errors::MagicError;
 use crate::errors::MagicErrorWithContext;
 
 pub type TriggerCommitResult = Result<(), MagicErrorWithContext>;
@@ -15,18 +16,27 @@ lazy_static! {
         RwLock::new(None);
 }
 
-pub fn send_commit(pubkey: Pubkey) -> oneshot::Receiver<TriggerCommitResult> {
+pub fn send_commit(
+    pubkey: Pubkey,
+) -> Result<oneshot::Receiver<TriggerCommitResult>, MagicErrorWithContext> {
     let sender_lock =
         COMMIT_SENDER.read().expect("RwLock COMMIT_SENDER poisoned");
-    let sender = sender_lock
-        .as_ref()
-        .expect("Commit sender needs to be set on startup");
+
+    let sender = sender_lock.as_ref().ok_or_else(|| {
+        MagicErrorWithContext::new(
+            MagicError::InternalError,
+            "Commit sender needs to be set at startup".to_string(),
+        )
+    })?;
 
     let (tx, rx) = oneshot::channel();
-    sender
-        .blocking_send((pubkey, tx))
-        .expect("Failed to send commit pubkey");
-    rx
+    sender.blocking_send((pubkey, tx)).map_err(|err| {
+        MagicErrorWithContext::new(
+            MagicError::InternalError,
+            format!("Failed to send commit pubkey: {}", err),
+        )
+    })?;
+    Ok(rx)
 }
 
 pub fn has_sender() -> bool {

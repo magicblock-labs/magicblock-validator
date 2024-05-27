@@ -14,6 +14,12 @@ pub struct MagicErrorWithContext {
     pub context: String,
 }
 
+impl MagicErrorWithContext {
+    pub fn new(error: MagicError, context: String) -> Self {
+        Self { error, context }
+    }
+}
+
 impl fmt::Display for MagicErrorWithContext {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         write!(f, "{} ({:?})", self.context, self.error)

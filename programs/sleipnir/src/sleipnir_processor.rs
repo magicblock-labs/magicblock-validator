@@ -269,12 +269,22 @@ fn trigger_commit(
 
     ic_msg!(invoke_context, "TriggerCommit: for account {}", pubkey);
     send_commit(*pubkey)
-        .blocking_recv()
         // Handle error related to sending the request
         .map_err(|err| {
             ic_msg!(
                 invoke_context,
-                "TriggerCommit: failed to send commit pubkey: {} ({:?})",
+                "TriggerCommit: failed to send commit pubkey: {}.\nError: {}",
+                pubkey,
+                err
+            );
+            InstructionError::from(err.error)
+        })?
+        .blocking_recv()
+        // Handle error related to receiving request confirmation
+        .map_err(|err| {
+            ic_msg!(
+                invoke_context,
+                "TriggerCommit: failed to receive commit pubkey response: {} ({:?})",
                 pubkey,
                 err
             );
@@ -299,11 +309,15 @@ fn trigger_commit(
 mod tests {
     use assert_matches::assert_matches;
     use std::collections::HashMap;
+    use tokio::sync::mpsc;
 
     use crate::{
+        commit_sender::{set_commit_sender, TriggerCommitCallback},
+        errors::MagicErrorWithContext,
         has_validator_authority, set_validator_authority,
         sleipnir_instruction::{
-            modify_accounts_instruction, AccountModification,
+            modify_accounts_instruction, trigger_commit_instruction,
+            AccountModification,
         },
     };
 
@@ -359,6 +373,9 @@ mod tests {
         )
     }
 
+    // -----------------
+    // ModifyAccounts
+    // -----------------
     #[test]
     fn test_mod_all_fields_of_one_account() {
         let owner_key = Pubkey::from([9; 32]);
@@ -672,5 +689,106 @@ mod tests {
                 assert_eq!(data, vec![16, 17, 18, 19, 20]);
             }
         );
+    }
+
+    // -----------------
+    // TriggerCommit
+    // -----------------
+    fn setup_commit_handler(delegated_key: Pubkey) {
+        let (tx, mut rx) = mpsc::channel::<(Pubkey, TriggerCommitCallback)>(5);
+        set_commit_sender(tx);
+
+        tokio::task::spawn(async move {
+            let (pubkey, cb) = rx.recv().await.unwrap();
+            if pubkey == delegated_key {
+                cb.send(Ok(()))
+            } else {
+                cb.send(Err(MagicErrorWithContext::new(
+                    MagicError::AccountNotDelegated,
+                    format!("Account: '{}'", pubkey),
+                )))
+            }
+        });
+    }
+
+    #[tokio::test]
+    async fn test_trigger_commit_for_delegated_account() {
+        let delegated_key = Pubkey::new_unique();
+        let mut account_data = {
+            let mut map = HashMap::new();
+            map.insert(
+                delegated_key,
+                AccountSharedData::new(100, 0, &delegated_key),
+            );
+            map
+        };
+        ensure_funded_validator_authority(&mut account_data);
+        setup_commit_handler(delegated_key);
+
+        let ix = trigger_commit_instruction(delegated_key);
+
+        let transaction_accounts = ix
+            .accounts
+            .iter()
+            .flat_map(|acc| {
+                account_data
+                    .remove(&acc.pubkey)
+                    .map(|shared_data| (acc.pubkey, shared_data))
+            })
+            .collect();
+
+        tokio::task::spawn_blocking(move || {
+            process_instruction(
+                ix.data.as_slice(),
+                transaction_accounts,
+                ix.accounts,
+                Ok(()),
+            );
+        })
+        .await
+        .unwrap();
+    }
+
+    #[tokio::test]
+    async fn test_trigger_commit_for_undelegated_account() {
+        let delegated_key = Pubkey::new_unique();
+        let undelegated_key = Pubkey::new_unique();
+        let mut account_data = {
+            let mut map = HashMap::new();
+            map.insert(
+                delegated_key,
+                AccountSharedData::new(100, 0, &delegated_key),
+            );
+            map.insert(
+                undelegated_key,
+                AccountSharedData::new(100, 0, &undelegated_key),
+            );
+            map
+        };
+        ensure_funded_validator_authority(&mut account_data);
+        setup_commit_handler(delegated_key);
+
+        let ix = trigger_commit_instruction(undelegated_key);
+
+        let transaction_accounts = ix
+            .accounts
+            .iter()
+            .flat_map(|acc| {
+                account_data
+                    .remove(&acc.pubkey)
+                    .map(|shared_data| (acc.pubkey, shared_data))
+            })
+            .collect();
+
+        tokio::task::spawn_blocking(move || {
+            process_instruction(
+                ix.data.as_slice(),
+                transaction_accounts,
+                ix.accounts,
+                Err(InstructionError::from(MagicError::AccountNotDelegated)),
+            );
+        })
+        .await
+        .unwrap();
     }
 }
