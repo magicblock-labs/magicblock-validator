@@ -15,7 +15,9 @@ use sleipnir_bank::{
 use sleipnir_config::{ProgramConfig, SleipnirConfig};
 use sleipnir_ledger::Ledger;
 use sleipnir_perf_service::SamplePerformanceService;
-use sleipnir_program::set_validator_authority;
+use sleipnir_program::{
+    commit_sender::init_commit_channel, set_validator_authority,
+};
 use sleipnir_pubsub::pubsub_service::{PubsubConfig, PubsubService};
 use sleipnir_rpc::{
     json_rpc_request_processor::JsonRpcConfig, json_rpc_service::JsonRpcService,
@@ -148,6 +150,9 @@ async fn main() {
         };
 
         set_validator_authority(validator_keypair);
+
+        let rx = init_commit_channel(10);
+        AccountsManager::install_manual_commit_trigger(&accounts_manager, rx);
 
         // -----------------
         // Tickers

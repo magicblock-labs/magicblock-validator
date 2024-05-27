@@ -20,6 +20,12 @@ lazy_static! {
         RwLock::new(None);
 }
 
+pub fn init_commit_channel(buffer: usize) -> TriggerCommitReceiver {
+    let (tx, rx) = mpsc::channel(buffer);
+    set_commit_sender(tx);
+    rx
+}
+
 pub fn send_commit(
     pubkey: Pubkey,
 ) -> Result<oneshot::Receiver<TriggerCommitResult>, MagicErrorWithContext> {
@@ -50,9 +56,7 @@ pub fn has_sender() -> bool {
         .is_some()
 }
 
-pub fn set_commit_sender(
-    sender: mpsc::Sender<(Pubkey, TriggerCommitCallback)>,
-) {
+fn set_commit_sender(sender: mpsc::Sender<(Pubkey, TriggerCommitCallback)>) {
     {
         let sender =
             COMMIT_SENDER.read().expect("RwLock COMMIT_SENDER poisoned");

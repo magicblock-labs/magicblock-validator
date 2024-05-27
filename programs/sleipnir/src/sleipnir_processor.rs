@@ -318,7 +318,7 @@ mod tests {
     use tokio::sync::mpsc;
 
     use crate::{
-        commit_sender::{set_commit_sender, TriggerCommitCallback},
+        commit_sender::{init_commit_channel, TriggerCommitCallback},
         errors::MagicErrorWithContext,
         has_validator_authority, set_validator_authority,
         sleipnir_instruction::{
@@ -701,8 +701,7 @@ mod tests {
     // TriggerCommit
     // -----------------
     fn setup_commit_handler(delegated_key: Pubkey) {
-        let (tx, mut rx) = mpsc::channel::<(Pubkey, TriggerCommitCallback)>(5);
-        set_commit_sender(tx);
+        let mut rx = init_commit_channel(5);
 
         tokio::task::spawn(async move {
             let (pubkey, cb) = rx.recv().await.unwrap();
