@@ -24,7 +24,7 @@ use sleipnir_transaction_status::TransactionStatusSender;
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
 use tempfile::TempDir;
 use test_tools::{
-    account::{fund_account, fund_account_addr},
+    account::fund_account,
     bank::bank_for_tests_with_paths,
     init_logger,
     programs::{load_programs_from_config, load_programs_from_string_config},

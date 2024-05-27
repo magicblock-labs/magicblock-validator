@@ -15,6 +15,7 @@ log = { workspace = true }
 sleipnir-bank = { workspace = true }
 sleipnir-config = { workspace = true }
 sleipnir-messaging = { workspace = true }
+sleipnir-program = { workspace = true }
 sleipnir-stage-banking = { workspace = true }
 sleipnir-transaction-status = { workspace = true }
 solana-accounts-db = { workspace = true }

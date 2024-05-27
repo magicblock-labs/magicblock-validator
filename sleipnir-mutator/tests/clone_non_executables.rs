@@ -8,7 +8,7 @@ use solana_sdk::{
 };
 use test_tools::{
     account::get_account_addr, diagnostics::log_exec_details, init_logger,
-    transactions_processor,
+    transactions_processor, validator::ensure_funded_validator_authority,
 };
 
 use crate::utils::{
@@ -23,6 +23,7 @@ async fn clone_non_executable_without_data() {
     init_logger!();
 
     let tx_processor = transactions_processor();
+    ensure_funded_validator_authority(tx_processor.bank());
     fund_luzifer(&*tx_processor);
 
     let slot = tx_processor.bank().slot();
@@ -59,6 +60,7 @@ async fn clone_non_executable_with_data() {
     init_logger!();
 
     let tx_processor = transactions_processor();
+    ensure_funded_validator_authority(tx_processor.bank());
     fund_luzifer(&*tx_processor);
 
     let slot = tx_processor.bank().slot();

@@ -10,6 +10,7 @@ pub use test_tools_core::*;
 pub mod programs;
 pub mod traits;
 pub mod transaction;
+pub mod validator;
 
 pub fn transactions_processor() -> Box<dyn TransactionsProcessor> {
     if std::env::var("PROCESSOR_BANK").is_ok() {

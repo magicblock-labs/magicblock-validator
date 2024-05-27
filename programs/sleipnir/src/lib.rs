@@ -31,6 +31,13 @@ pub fn validator_authority_id() -> Pubkey {
         .expect("Validator authority needs to be set on startup")
 }
 
+pub fn has_validator_authority() -> bool {
+    VALIDATOR_AUTHORITY
+        .read()
+        .expect("RwLock VALIDATOR_AUTHORITY poisoned")
+        .is_some()
+}
+
 pub fn set_validator_authority(keypair: Keypair) {
     {
         let auhority = VALIDATOR_AUTHORITY
@@ -42,7 +49,8 @@ pub fn set_validator_authority(keypair: Keypair) {
         }
     }
 
-    *VALIDATOR_AUTHORITY
+    VALIDATOR_AUTHORITY
         .write()
-        .expect("RwLock VALIDATOR_AUTHORITY poisoned") = Some(keypair);
+        .expect("RwLock VALIDATOR_AUTHORITY poisoned")
+        .replace(keypair);
 }
