@@ -16,6 +16,7 @@ num-traits = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 solana-program-runtime = { workspace = true }
 solana-sdk = { workspace = true }
+tokio = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

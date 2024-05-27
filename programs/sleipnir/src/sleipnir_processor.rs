@@ -20,6 +20,8 @@ use solana_sdk::{
 };
 
 use crate::{
+    commit_sender::send_commit,
+    errors::MagicError,
     sleipnir_instruction::{
         AccountModificationForInstruction, SleipnirError, SleipnirInstruction,
     },
@@ -46,6 +48,9 @@ declare_process_instruction!(
                     transaction_context,
                     &mut account_mods,
                 )
+            }
+            SleipnirInstruction::TriggerCommit => {
+                trigger_commit(signers, invoke_context, transaction_context)
             }
         }
     }
@@ -90,14 +95,14 @@ fn mutate_accounts(
     let account_mods_len = account_mods.len() as u64;
 
     // 1. Checks
-    let sleipnir_authority_acc = {
+    let validator_authority_acc = {
         // 1.1. Sleipnir authority must sign
-        let sleipnir_authority = validator_authority_id();
-        if !signers.contains(&sleipnir_authority) {
+        let validator_authority = validator_authority_id();
+        if !signers.contains(&validator_authority) {
             ic_msg!(
                 invoke_context,
                 "Validator identity '{}' not in signers",
-                &sleipnir_authority.to_string()
+                &validator_authority.to_string()
             );
             return Err(InstructionError::MissingRequiredSignature);
         }
@@ -125,7 +130,7 @@ fn mutate_accounts(
         // 1.4. Check that first account is the Sleipnir authority
         let sleipnir_authority_key =
             transaction_context.get_key_of_account_at_index(0)?;
-        if sleipnir_authority_key != &sleipnir_authority {
+        if sleipnir_authority_key != &validator_authority {
             ic_msg!(
                 invoke_context,
                 "MutateAccounts: first account must be the Sleipnir authority"
@@ -203,7 +208,7 @@ fn mutate_accounts(
     }
 
     if lamports_to_debit != 0 {
-        let authority_lamports = sleipnir_authority_acc.borrow().lamports();
+        let authority_lamports = validator_authority_acc.borrow().lamports();
         let adjusted_authority_lamports = if lamports_to_debit > 0 {
             (authority_lamports as u128)
                 .checked_sub(lamports_to_debit as u128)
@@ -230,7 +235,7 @@ fn mutate_accounts(
                 })?
         };
 
-        sleipnir_authority_acc.borrow_mut().set_lamports(
+        validator_authority_acc.borrow_mut().set_lamports(
             u64::try_from(adjusted_authority_lamports).map_err(|err| {
                 ic_msg!(
                     invoke_context,
@@ -241,6 +246,50 @@ fn mutate_accounts(
             })?,
         );
     }
+
+    Ok(())
+}
+
+fn trigger_commit(
+    signers: HashSet<Pubkey>,
+    invoke_context: &InvokeContext,
+    transaction_context: &TransactionContext,
+) -> Result<(), InstructionError> {
+    let validator_authority = validator_authority_id();
+    if !signers.contains(&validator_authority) {
+        ic_msg!(
+            invoke_context,
+            "Validator identity '{}' not in signers",
+            &validator_authority.to_string()
+        );
+        return Err(InstructionError::MissingRequiredSignature);
+    }
+    // Validator authority is the first account and the account to commit is the second
+    let pubkey = transaction_context.get_key_of_account_at_index(1)?;
+
+    ic_msg!(invoke_context, "TriggerCommit: for account {}", pubkey);
+    send_commit(*pubkey)
+        .blocking_recv()
+        // Handle error related to sending the request
+        .map_err(|err| {
+            ic_msg!(
+                invoke_context,
+                "TriggerCommit: failed to send commit pubkey: {} ({:?})",
+                pubkey,
+                err
+            );
+            InstructionError::from(MagicError::InternalError)
+        })?
+        // Handle error related to processing the request
+        .map_err(|err| {
+            ic_msg!(
+                invoke_context,
+                "TriggerCommit: failed to process commit pubkey: {}.\nError: {}",
+                pubkey,
+                err
+            );
+            InstructionError::from(err.error)
+        })?;
 
     Ok(())
 }
