@@ -7,7 +7,6 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::{Keypair, Signature},
     signer::Signer,
-    system_program,
     transaction::Transaction,
 };
 
@@ -58,7 +57,6 @@ impl AccountCommitter for RemoteAccountCommitter {
         let commit_ix = commit_state(
             committer,
             delegated_account,
-            system_program::id(),
             commit_state_data.data().to_vec(),
         );
         let finalize_ix = finalize(committer, delegated_account, committer);
