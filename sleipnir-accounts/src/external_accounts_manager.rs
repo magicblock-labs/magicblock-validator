@@ -8,6 +8,10 @@ use conjunto_transwise::{
 use log::*;
 use sleipnir_bank::bank::Bank;
 use sleipnir_mutator::AccountModification;
+use sleipnir_program::{
+    commit_sender::TriggerCommitReceiver,
+    errors::{MagicError, MagicErrorWithContext},
+};
 use sleipnir_transaction_status::TransactionStatusSender;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
@@ -20,7 +24,7 @@ use solana_sdk::{
 use crate::{
     bank_account_provider::BankAccountProvider,
     config::{AccountsConfig, ExternalReadonlyMode, ExternalWritableMode},
-    errors::AccountsResult,
+    errors::{AccountsError, AccountsResult},
     external_accounts::{ExternalReadonlyAccounts, ExternalWritableAccounts},
     remote_account_cloner::RemoteAccountCloner,
     remote_account_committer::RemoteAccountCommitter,
@@ -100,6 +104,51 @@ impl
             create_accounts: config.create,
             payer_init_lamports: config.payer_init_lamports,
         })
+    }
+
+    pub fn install_manual_commit_trigger(
+        manager: &Arc<Self>,
+        mut rcvr: TriggerCommitReceiver,
+    ) {
+        let manager = manager.clone();
+        tokio::spawn(async move {
+            while let Some((pubkey, tx)) = rcvr.recv().await {
+                let now = get_epoch();
+                match manager.commit_specific_accounts(now, vec![pubkey]).await
+                {
+                    Ok(sigs) => {
+                        let sig = sigs.first().cloned().unwrap_or_default();
+                        if tx.send(Ok(sig)).is_err() {
+                            error!("Failed to acknowledge triggered commit for account '{}'", pubkey);
+                        } else {
+                            debug!("Completed trigger to commit '{}' with signature '{}'", pubkey, sig);
+                        }
+                    }
+                    Err(ref err) => {
+                        use AccountsError::*;
+                        let context = match err {
+                            InvalidRpcUrl(msg)
+                            | FailedToGetLatestBlockhash(msg)
+                            | FailedToSendAndConfirmTransaction(msg) => {
+                                format!("{} ({:?})", msg, err)
+                            }
+                            _ => format!("{:?}", err),
+                        };
+                        if tx
+                            .send(Err(MagicErrorWithContext::new(
+                                MagicError::InternalError,
+                                context,
+                            )))
+                            .is_err()
+                        {
+                            error!("Failed error response for triggered commit for account '{}'", pubkey);
+                        } else {
+                            debug!("Completed error response for trigger to commit '{}' ", pubkey);
+                        }
+                    }
+                }
+            }
+        });
     }
 }
 
@@ -299,8 +348,7 @@ where
     /// and return the signatures of the transactions that were sent to the cluster.
     pub async fn commit_delegated(&self) -> AccountsResult<Vec<Signature>> {
         let now = get_epoch();
-
-        // 1. Find all accounts that are due to be committed
+        // 1. Find all accounts that are due to be committed let accounts_to_be_committed = self
         let accounts_to_be_committed = self
             .external_writable_accounts
             .read_accounts()
@@ -308,7 +356,15 @@ where
             .filter(|x| x.needs_commit(now))
             .map(|x| x.pubkey)
             .collect::<Vec<_>>();
+        self.commit_specific_accounts(now, accounts_to_be_committed)
+            .await
+    }
 
+    async fn commit_specific_accounts(
+        &self,
+        now: Duration,
+        accounts_to_be_committed: Vec<Pubkey>,
+    ) -> AccountsResult<Vec<Signature>> {
         // 2. Get current account states from internal account provider
         let mut account_states = HashMap::new();
         for pubkey in &accounts_to_be_committed {

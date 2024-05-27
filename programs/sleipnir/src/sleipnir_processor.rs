@@ -56,6 +56,9 @@ declare_process_instruction!(
     }
 );
 
+// -----------------
+// MutateAccounts
+// -----------------
 lazy_static! {
     /// In order to modify large data chunks we cannot include all the data as part of the
     /// transaction.
@@ -250,6 +253,9 @@ fn mutate_accounts(
     Ok(())
 }
 
+// -----------------
+// TriggerCommit
+// -----------------
 fn trigger_commit(
     signers: HashSet<Pubkey>,
     invoke_context: &InvokeContext,
@@ -325,7 +331,7 @@ mod tests {
     use solana_program_runtime::invoke_context::mock_process_instruction;
     use solana_sdk::{
         account::{Account, AccountSharedData},
-        signature::Keypair,
+        signature::{Keypair, Signature},
         signer::Signer,
     };
     use solana_sdk::{
@@ -701,7 +707,7 @@ mod tests {
         tokio::task::spawn(async move {
             let (pubkey, cb) = rx.recv().await.unwrap();
             if pubkey == delegated_key {
-                cb.send(Ok(()))
+                cb.send(Ok(Signature::default()))
             } else {
                 cb.send(Err(MagicErrorWithContext::new(
                     MagicError::AccountNotDelegated,

@@ -2,17 +2,21 @@ use std::sync::RwLock;
 
 use lazy_static::lazy_static;
 use solana_sdk::pubkey::Pubkey;
+use solana_sdk::signature::Signature;
 use tokio::sync::mpsc;
 use tokio::sync::oneshot;
 
 use crate::errors::MagicError;
 use crate::errors::MagicErrorWithContext;
 
-pub type TriggerCommitResult = Result<(), MagicErrorWithContext>;
+pub type TriggerCommitResult = Result<Signature, MagicErrorWithContext>;
 pub type TriggerCommitCallback = oneshot::Sender<TriggerCommitResult>;
+pub type TriggerCommitSender = mpsc::Sender<(Pubkey, TriggerCommitCallback)>;
+pub type TriggerCommitReceiver =
+    mpsc::Receiver<(Pubkey, TriggerCommitCallback)>;
 
 lazy_static! {
-    static ref COMMIT_SENDER: RwLock<Option<mpsc::Sender<(Pubkey, TriggerCommitCallback)>>> =
+    static ref COMMIT_SENDER: RwLock<Option<TriggerCommitSender>> =
         RwLock::new(None);
 }
 

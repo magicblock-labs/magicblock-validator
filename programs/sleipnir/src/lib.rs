@@ -1,5 +1,5 @@
 pub mod commit_sender;
-mod errors;
+pub mod errors;
 pub mod sleipnir_instruction;
 pub mod sleipnir_processor;
 mod validator;
