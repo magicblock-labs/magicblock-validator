@@ -39,7 +39,6 @@ mod geyser;
 mod utils;
 
 fn fund_validator_identity(bank: &Bank, validator_id: &Pubkey) {
-    // TODO: we need to fund Luzifer at startup instead of doing it here
     fund_account(bank, validator_id, u64::MAX / 2);
 }
 
