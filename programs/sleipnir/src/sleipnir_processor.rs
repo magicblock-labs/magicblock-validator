@@ -50,7 +50,7 @@ declare_process_instruction!(
                 )
             }
             SleipnirInstruction::TriggerCommit => {
-                trigger_commit(signers, invoke_context, transaction_context)
+                trigger_commit(invoke_context, transaction_context)
             }
         }
     }
@@ -257,20 +257,10 @@ fn mutate_accounts(
 // TriggerCommit
 // -----------------
 fn trigger_commit(
-    signers: HashSet<Pubkey>,
     invoke_context: &InvokeContext,
     transaction_context: &TransactionContext,
 ) -> Result<(), InstructionError> {
-    let validator_authority = validator_authority_id();
-    if !signers.contains(&validator_authority) {
-        ic_msg!(
-            invoke_context,
-            "Validator identity '{}' not in signers",
-            &validator_authority.to_string()
-        );
-        return Err(InstructionError::MissingRequiredSignature);
-    }
-    // Validator authority is the first account and the account to commit is the second
+    // Payer is the first account and the account to commit the second
     let pubkey = transaction_context.get_key_of_account_at_index(1)?;
 
     ic_msg!(invoke_context, "TriggerCommit: for account {}", pubkey);
@@ -315,10 +305,9 @@ fn trigger_commit(
 mod tests {
     use assert_matches::assert_matches;
     use std::collections::HashMap;
-    use tokio::sync::mpsc;
 
     use crate::{
-        commit_sender::{init_commit_channel, TriggerCommitCallback},
+        commit_sender::init_commit_channel,
         errors::MagicErrorWithContext,
         has_validator_authority, set_validator_authority,
         sleipnir_instruction::{
@@ -718,19 +707,23 @@ mod tests {
 
     #[tokio::test]
     async fn test_trigger_commit_for_delegated_account() {
+        let payer = Keypair::new();
         let delegated_key = Pubkey::new_unique();
         let mut account_data = {
             let mut map = HashMap::new();
+            map.insert(
+                payer.pubkey(),
+                AccountSharedData::new(100, 0, &payer.pubkey()),
+            );
             map.insert(
                 delegated_key,
                 AccountSharedData::new(100, 0, &delegated_key),
             );
             map
         };
-        ensure_funded_validator_authority(&mut account_data);
         setup_commit_handler(delegated_key);
 
-        let ix = trigger_commit_instruction(delegated_key);
+        let ix = trigger_commit_instruction(&payer, delegated_key);
 
         let transaction_accounts = ix
             .accounts
@@ -756,10 +749,15 @@ mod tests {
 
     #[tokio::test]
     async fn test_trigger_commit_for_undelegated_account() {
+        let payer = Keypair::new();
         let delegated_key = Pubkey::new_unique();
         let undelegated_key = Pubkey::new_unique();
         let mut account_data = {
             let mut map = HashMap::new();
+            map.insert(
+                payer.pubkey(),
+                AccountSharedData::new(100, 0, &payer.pubkey()),
+            );
             map.insert(
                 delegated_key,
                 AccountSharedData::new(100, 0, &delegated_key),
@@ -770,10 +768,9 @@ mod tests {
             );
             map
         };
-        ensure_funded_validator_authority(&mut account_data);
         setup_commit_handler(delegated_key);
 
-        let ix = trigger_commit_instruction(undelegated_key);
+        let ix = trigger_commit_instruction(&payer, undelegated_key);
 
         let transaction_accounts = ix
             .accounts
