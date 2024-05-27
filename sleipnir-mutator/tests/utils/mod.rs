@@ -1,5 +1,5 @@
 use sleipnir_mutator::mutator;
-use sleipnir_program::sleipnir_authority_id;
+use sleipnir_program::validator_authority_id;
 use solana_sdk::{
     clock::Slot, genesis_config::ClusterType, hash::Hash,
     transaction::Transaction,
@@ -40,7 +40,7 @@ pub async fn verified_tx_to_clone_from_devnet(
 
     assert!(tx.is_signed());
     assert_eq!(tx.signatures.len(), 1);
-    assert_eq!(tx.signer_key(0, 0).unwrap(), &sleipnir_authority_id());
+    assert_eq!(tx.signer_key(0, 0).unwrap(), &validator_authority_id());
     assert_eq!(tx.message().account_keys.len(), num_accounts_expected);
 
     tx

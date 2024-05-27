@@ -15,16 +15,15 @@ use solana_sdk::{
     instruction::InstructionError,
     program_utils::limited_deserialize,
     pubkey::Pubkey,
-    signer::Signer,
     system_program,
     transaction_context::TransactionContext,
 };
 
 use crate::{
-    sleipnir_authority,
     sleipnir_instruction::{
         AccountModificationForInstruction, SleipnirError, SleipnirInstruction,
     },
+    validator_authority_id,
 };
 pub const DEFAULT_COMPUTE_UNITS: u64 = 150;
 
@@ -93,11 +92,11 @@ fn mutate_accounts(
     // 1. Checks
     let sleipnir_authority_acc = {
         // 1.1. Sleipnir authority must sign
-        let sleipnir_authority = sleipnir_authority().pubkey();
+        let sleipnir_authority = validator_authority_id();
         if !signers.contains(&sleipnir_authority) {
             ic_msg!(
                 invoke_context,
-                "{} not in signers",
+                "Validator identity '{}' not in signers",
                 &sleipnir_authority.to_string()
             );
             return Err(InstructionError::MissingRequiredSignature);

@@ -1,24 +1,48 @@
 pub mod sleipnir_instruction;
 pub mod sleipnir_processor;
 
+use std::sync::RwLock;
+
+use lazy_static::lazy_static;
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
 
 // NOTE: this may have to be moved into a core module to be more accessible
-solana_sdk::declare_id!("Luzid11111111111111111111111111111111111111");
+solana_sdk::declare_id!("Magic11111111111111111111111111111111111111");
 
-pub const SLEIPNIR_AUTHORITY_ID: &str =
-    "LuzifKo4E6QCF5r4uQmqbyko7zLS5WgayynivnCbtzk";
-const SLEIPNIR_AUTHORITY_SECRET: [u8; 64] = [
-    216, 106, 211, 194, 246, 48, 44, 50, 135, 120, 121, 191, 235, 105, 83, 179,
-    128, 200, 94, 89, 82, 215, 202, 178, 160, 36, 253, 217, 245, 42, 92, 157,
-    5, 25, 245, 9, 49, 221, 122, 198, 124, 24, 136, 45, 57, 46, 55, 104, 42,
-    68, 25, 104, 203, 22, 17, 45, 4, 77, 169, 95, 36, 9, 16, 33,
-];
-
-pub fn sleipnir_authority() -> Keypair {
-    Keypair::from_bytes(&SLEIPNIR_AUTHORITY_SECRET).unwrap()
+lazy_static! {
+    static ref VALIDATOR_AUTHORITY: RwLock<Option<Keypair>> = RwLock::new(None);
 }
 
-pub fn sleipnir_authority_id() -> Pubkey {
-    sleipnir_authority().pubkey()
+pub fn validator_authority() -> Keypair {
+    VALIDATOR_AUTHORITY
+        .read()
+        .expect("RwLock VALIDATOR_AUTHORITY poisoned")
+        .as_ref()
+        .expect("Validator authority needs to be set on startup")
+        .insecure_clone()
+}
+
+pub fn validator_authority_id() -> Pubkey {
+    VALIDATOR_AUTHORITY
+        .read()
+        .expect("RwLock VALIDATOR_AUTHORITY poisoned")
+        .as_ref()
+        .map(|x| x.pubkey())
+        .expect("Validator authority needs to be set on startup")
+}
+
+pub fn set_validator_authority(keypair: Keypair) {
+    {
+        let auhority = VALIDATOR_AUTHORITY
+            .read()
+            .expect("RwLock VALIDATOR_AUTHORITY poisoned");
+
+        if let Some(authority) = auhority.as_ref() {
+            panic!("Validator authority can only be set once, but was set before to '{}'", authority.pubkey());
+        }
+    }
+
+    *VALIDATOR_AUTHORITY
+        .write()
+        .expect("RwLock VALIDATOR_AUTHORITY poisoned") = Some(keypair);
 }

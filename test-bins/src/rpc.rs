@@ -15,12 +15,13 @@ use sleipnir_bank::{
 use sleipnir_config::{ProgramConfig, SleipnirConfig};
 use sleipnir_ledger::Ledger;
 use sleipnir_perf_service::SamplePerformanceService;
+use sleipnir_program::set_validator_authority;
 use sleipnir_pubsub::pubsub_service::{PubsubConfig, PubsubService};
 use sleipnir_rpc::{
     json_rpc_request_processor::JsonRpcConfig, json_rpc_service::JsonRpcService,
 };
 use sleipnir_transaction_status::TransactionStatusSender;
-use solana_sdk::{signature::Keypair, signer::Signer};
+use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
 use tempfile::TempDir;
 use test_tools::{
     account::{fund_account, fund_account_addr},
@@ -34,13 +35,12 @@ use crate::{
     geyser::{init_geyser_service, GeyserTransactionNotifyListener},
     utils::{try_convert_accounts_config, TEST_KEYPAIR_BYTES},
 };
-const LUZIFER: &str = "LuzifKo4E6QCF5r4uQmqbyko7zLS5WgayynivnCbtzk";
 mod geyser;
 mod utils;
 
-fn fund_luzifer(bank: &Bank) {
+fn fund_validator_identity(bank: &Bank, validator_id: &Pubkey) {
     // TODO: we need to fund Luzifer at startup instead of doing it here
-    fund_account_addr(bank, LUZIFER, u64::MAX / 2);
+    fund_account(bank, validator_id, u64::MAX / 2);
 }
 
 fn fund_faucet(bank: &Bank) -> Keypair {
@@ -65,6 +65,7 @@ async fn main() {
     let exit = Arc::<AtomicBool>::default();
 
     let validator_keypair = validator_keypair();
+
     let GenesisConfigInfo {
         genesis_config,
         validator_pubkey,
@@ -100,7 +101,7 @@ async fn main() {
         );
         Arc::new(bank)
     };
-    fund_luzifer(&bank);
+    fund_validator_identity(&bank, &validator_pubkey);
     load_programs(&bank, &config.programs).unwrap();
 
     SamplePerformanceService::new(&bank, &ledger, exit);
@@ -108,11 +109,6 @@ async fn main() {
 
     let tick_millis = config.validator.millis_per_slot;
     let tick_duration = Duration::from_millis(tick_millis);
-    info!(
-        "Adding Slot ticker for {}ms slots",
-        tick_duration.as_millis()
-    );
-    init_slot_ticker(bank.clone(), ledger.clone(), tick_duration);
 
     let pubsub_config = PubsubConfig::from_rpc(config.rpc.port);
     // JSON RPC Service
@@ -140,13 +136,28 @@ async fn main() {
             let accounts_manager = AccountsManager::try_new(
                 &bank,
                 Some(transaction_status_sender),
-                validator_keypair,
+                // NOTE: we could avoid passing a copy of the keypair here if we instead pass
+                // something akin to a ValidatorTransactionSigner that gets it via the [validator_authority]
+                // method from the [sleipnir_program] module, forgetting it immediately after.
+                // That way we would at least hold it in memory for a long time only in one place and in all other
+                // places only temporarily
+                validator_keypair.insecure_clone(),
                 accounts_config,
             )
             .expect("Failed to create accounts manager");
             Arc::new(accounts_manager)
         };
 
+        set_validator_authority(validator_keypair);
+
+        // -----------------
+        // Tickers
+        // -----------------
+        info!(
+            "Adding Slot ticker for {}ms slots",
+            tick_duration.as_millis()
+        );
+        init_slot_ticker(bank.clone(), ledger.clone(), tick_duration);
         init_commit_accounts_ticker(
             &accounts_manager,
             Duration::from_millis(config.accounts.commit.frequency_millis),

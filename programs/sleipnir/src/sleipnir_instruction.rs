@@ -7,14 +7,13 @@ use solana_sdk::{
     hash::Hash,
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
-    signer::Signer,
     transaction::Transaction,
 };
 use thiserror::Error;
 
 use crate::{
-    sleipnir_authority, sleipnir_authority_id,
-    sleipnir_processor::set_account_mod_data,
+    sleipnir_processor::set_account_mod_data, validator_authority,
+    validator_authority_id,
 };
 
 #[derive(
@@ -87,7 +86,7 @@ pub(crate) fn modify_accounts_instruction(
     keyed_account_mods: Vec<(Pubkey, AccountModification)>,
 ) -> Instruction {
     let mut account_metas =
-        vec![AccountMeta::new(sleipnir_authority().pubkey(), true)];
+        vec![AccountMeta::new(validator_authority_id(), true)];
     let mut account_mods: HashMap<Pubkey, AccountModificationForInstruction> =
         HashMap::new();
     for (pubkey, account_mod) in keyed_account_mods {
@@ -113,10 +112,10 @@ fn into_transaction(
     instruction: Instruction,
     recent_blockhash: Hash,
 ) -> Transaction {
-    let signers = &[&sleipnir_authority()];
+    let signers = &[&validator_authority()];
     Transaction::new_signed_with_payer(
         &[instruction],
-        Some(&sleipnir_authority_id()),
+        Some(&validator_authority_id()),
         signers,
         recent_blockhash,
     )
