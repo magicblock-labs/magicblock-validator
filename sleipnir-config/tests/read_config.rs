@@ -24,7 +24,8 @@ fn test_load_local_dev_with_programs_toml() {
         SleipnirConfig {
             accounts: AccountsConfig {
                 commit: CommitStrategy {
-                    frequency_millis: 600_000
+                    frequency_millis: 600_000,
+                    trigger: false
                 },
                 ..Default::default()
             },

@@ -116,16 +116,26 @@ pub enum WritableMode {
 pub struct CommitStrategy {
     #[serde(default = "default_frequency_millis")]
     pub frequency_millis: u64,
+    /// If `true` then commits of an account can be triggered via
+    /// a transaction by any user.
+    /// Defaults to not allowing commits to be triggered.
+    #[serde(default = "default_commit_trigger")]
+    pub trigger: bool,
 }
 
 fn default_frequency_millis() -> u64 {
     500
 }
 
+fn default_commit_trigger() -> bool {
+    false
+}
+
 impl Default for CommitStrategy {
     fn default() -> Self {
         Self {
             frequency_millis: default_frequency_millis(),
+            trigger: default_commit_trigger(),
         }
     }
 }

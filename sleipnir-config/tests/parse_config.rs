@@ -43,6 +43,10 @@ fn test_ephemeral_toml() {
                     writable: WritableMode::Delegated,
                 },
                 create: false,
+                commit: CommitStrategy {
+                    trigger: true,
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             ..Default::default()
@@ -79,7 +83,8 @@ fn test_local_dev_with_programs_toml() {
         SleipnirConfig {
             accounts: AccountsConfig {
                 commit: CommitStrategy {
-                    frequency_millis: 600_000
+                    frequency_millis: 600_000,
+                    ..Default::default()
                 },
                 ..Default::default()
             },

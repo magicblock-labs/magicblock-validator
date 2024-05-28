@@ -1,7 +1,7 @@
 [accounts]
 remote = "devnet"
 clone = { readonly = "all", writable = "delegated" }
-commit = { frequency_millis = 5_000 }
+commit = { frequency_millis = 50_000, trigger = true }
 payer = { init_sol = 1_000 }
 create = false
 

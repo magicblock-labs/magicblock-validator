@@ -3,4 +3,5 @@
 # We never create accounts at this point
 [accounts]
 clone = { readonly = "programs", writable = "delegated" }
+commit = { trigger = true }
 create = false
