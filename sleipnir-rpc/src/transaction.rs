@@ -4,6 +4,7 @@ use base64::{prelude::BASE64_STANDARD, Engine};
 use bincode::Options;
 use jsonrpc_core::{Error, ErrorCode, Result};
 use log::*;
+use sleipnir_bank::bank::Bank;
 use sleipnir_processor::batch_processor::{
     execute_batch, TransactionBatchWithIndexes,
 };
@@ -121,12 +122,13 @@ pub(crate) async fn airdrop_transaction(
                 Error::invalid_params(format!("invalid transaction: {err}"))
             })?;
     let signature = *transaction.signature();
-    send_transaction(meta, signature, transaction, 0, None, None).await
+    send_transaction(meta, None, signature, transaction, 0, None, None).await
 }
 
 // TODO(thlorenz): for now we execute the transaction directly via a single batch
 pub(crate) async fn send_transaction(
     meta: &JsonRpcRequestProcessor,
+    preflight_bank: Option<&Bank>,
     signature: Signature,
     sanitized_transaction: SanitizedTransaction,
     // wire_transaction: Vec<u8>,
@@ -135,6 +137,8 @@ pub(crate) async fn send_transaction(
     _max_retries: Option<usize>,
 ) -> Result<String> {
     let bank = &meta.get_bank();
+    // It is very important that we ensure accounts before simulating transactions
+    // since they could depend on specific accounts to be in our validator
     meta.accounts_manager
         .ensure_accounts(&sanitized_transaction)
         .await
@@ -146,6 +150,14 @@ pub(crate) async fn send_transaction(
             message: format!("{:?}", err),
             data: None,
         })?;
+
+    if let Some(preflight_bank) = preflight_bank {
+        meta.transaction_preflight(preflight_bank, &sanitized_transaction)?;
+    }
+
+    // TODO: verify transaction here (sigverify)
+    // fn verify_transaction rpc/src/rpc.rs 2002
+
     let txs = [sanitized_transaction];
     let batch = bank.prepare_sanitized_batch(&txs);
     let batch_with_indexes = TransactionBatchWithIndexes {

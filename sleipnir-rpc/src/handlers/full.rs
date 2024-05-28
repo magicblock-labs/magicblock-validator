@@ -167,6 +167,7 @@ impl Full for FullImpl {
                 &meta,
                 data,
                 preflight_commitment,
+                skip_preflight,
                 min_context_slot,
                 tx_encoding,
                 max_retries,
@@ -340,6 +341,7 @@ async fn send_transaction_impl(
     meta: &JsonRpcRequestProcessor,
     data: String,
     preflight_commitment: Option<CommitmentConfig>,
+    skip_preflight: bool,
     min_context_slot: Option<Slot>,
     tx_encoding: UiTransactionEncoding,
     max_retries: Option<usize>,
@@ -378,10 +380,14 @@ async fn send_transaction_impl(
             preflight_bank.block_height() + MAX_RECENT_BLOCKHASHES as u64;
     }
 
-    // TODO(thlorenz): leaving out if !skip_preflight part
-
+    let preflight_bank = if skip_preflight {
+        None
+    } else {
+        Some(preflight_bank)
+    };
     send_transaction(
         meta,
+        preflight_bank,
         signature,
         transaction,
         last_valid_block_height,

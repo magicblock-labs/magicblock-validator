@@ -10,7 +10,9 @@ use crossbeam_channel::{unbounded, Receiver, Sender};
 use jsonrpc_core::{Error, ErrorCode, Metadata, Result, Value};
 use log::*;
 use sleipnir_accounts::AccountsManager;
-use sleipnir_bank::bank::Bank;
+use sleipnir_bank::{
+    bank::Bank, transaction_simulation::TransactionSimulationResult,
+};
 use sleipnir_ledger::{Ledger, SignatureInfosForAddress};
 use sleipnir_transaction_status::TransactionStatusSender;
 use solana_account_decoder::{UiAccount, UiAccountEncoding};
@@ -25,7 +27,7 @@ use solana_rpc_client_api::{
     response::{
         OptionalContext, Response as RpcResponse, RpcBlockhash,
         RpcConfirmedTransactionStatusWithSignature, RpcContactInfo,
-        RpcKeyedAccount, RpcSupply,
+        RpcKeyedAccount, RpcSimulateTransactionResult, RpcSupply,
     },
 };
 use solana_sdk::{
@@ -34,6 +36,7 @@ use solana_sdk::{
     hash::Hash,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
+    transaction::{SanitizedTransaction, TransactionError},
 };
 use solana_transaction_status::{
     EncodedConfirmedTransactionWithStatusMeta, TransactionConfirmationStatus,
@@ -43,7 +46,7 @@ use solana_transaction_status::{
 use crate::{
     account_resolver::{encode_account, get_encoded_account},
     filters::{get_filtered_program_accounts, optimize_filters},
-    rpc_health::RpcHealth,
+    rpc_health::{RpcHealth, RpcHealthStatus},
     transaction::airdrop_transaction,
     utils::new_response,
     RpcCustomResult,
@@ -567,6 +570,60 @@ impl JsonRpcRequestProcessor {
         &self,
     ) -> Option<&TransactionStatusSender> {
         self.config.transaction_status_sender.as_ref()
+    }
+
+    pub fn transaction_preflight(
+        &self,
+        preflight_bank: &Bank,
+        transaction: &SanitizedTransaction,
+    ) -> Result<()> {
+        match self.health.check() {
+            RpcHealthStatus::Ok => (),
+            RpcHealthStatus::Unknown => {
+                inc_new_counter_info!("rpc-send-tx_health-unknown", 1);
+                return Err(RpcCustomError::NodeUnhealthy {
+                    num_slots_behind: None,
+                }
+                .into());
+            }
+        }
+
+        if let TransactionSimulationResult {
+            result: Err(err),
+            logs,
+            post_simulation_accounts: _,
+            units_consumed,
+            return_data,
+            inner_instructions: _, // Always `None` due to `enable_cpi_recording = false`
+        } = preflight_bank.simulate_transaction_unchecked(transaction, false)
+        {
+            match err {
+                TransactionError::BlockhashNotFound => {
+                    inc_new_counter_info!(
+                        "rpc-send-tx_err-blockhash-not-found",
+                        1
+                    );
+                }
+                _ => {
+                    inc_new_counter_info!("rpc-send-tx_err-other", 1);
+                }
+            }
+            return Err(RpcCustomError::SendTransactionPreflightFailure {
+                message: format!("Transaction simulation failed: {err}"),
+                result: RpcSimulateTransactionResult {
+                    err: Some(err),
+                    logs: Some(logs),
+                    accounts: None,
+                    units_consumed: Some(units_consumed),
+                    return_data: return_data
+                        .map(|return_data| return_data.into()),
+                    inner_instructions: None,
+                },
+            }
+            .into());
+        }
+
+        Ok(())
     }
 
     pub fn get_cluster_nodes(&self) -> Vec<RpcContactInfo> {
