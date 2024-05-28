@@ -13,6 +13,7 @@ pub mod transaction_batch;
 pub mod transaction_logs;
 pub mod transaction_notifier_interface;
 pub mod transaction_results;
+pub mod transaction_simulation;
 
 pub use consts::LAMPORTS_PER_SIGNATURE;
 

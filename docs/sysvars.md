@@ -16,6 +16,8 @@ The following sysvars exist and are supported by our validator if they have a `*
 - `rent`*: rent parameters
 - `slot_hashes`: recent slot hashes (Solana updates this only when new bank is created from a parent)
 - `slot_history`: recent slot history (Solana updates this only when bank is frozen)
+  > [A bitvector indicating which slots are present in the past epoch](https://docs.rs/solana-sdk/latest/solana_sdk/sysvar/slot_history/struct.SlotHistory.html)
+  > Holds an array of slots available during the most recent epoch in Solana, and it is updated every time a new slot is processed.
 - `stake_history`: recent stake history (makes no sense in our case which means we only will stub it or not support ever)
 - `epoch_rewards`: progress of epoch rewards distribution (also makes no sense in our case, Solana creates this when calculating/distributing rewards)
 - `last_restart_slot`*: last restart slot (set to `0`, but currently not enabled with the feature set we use )
@@ -23,3 +25,8 @@ The following sysvars exist and are supported by our validator if they have a `*
 The program to test sysvars is defined inside `test-programs/sysvars`.
 The related tests are defined inside `sleipnir-bank/tests/transaction_execute.rs` as
 `test_bank_sysvars_get` and `test_bank_sysvars_from_account`.
+
+### Resources
+
+- [solana_sdk/sysvar](https://docs.rs/solana-sdk/latest/solana_sdk/sysvar/index.html)
+- [rareskills.io/post/solana-sysvar](https://www.rareskills.io/post/solana-sysvar)

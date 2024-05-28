@@ -6,6 +6,7 @@ use std::{
     borrow::Cow,
     collections::HashSet,
     path::PathBuf,
+    slice,
     sync::{
         atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering},
         Arc, LockResult, RwLock, RwLockReadGuard, RwLockWriteGuard,
@@ -48,6 +49,7 @@ use solana_sdk::{
     },
     clock::{
         BankId, Epoch, Slot, SlotIndex, UnixTimestamp, MAX_PROCESSING_AGE,
+        MAX_TRANSACTION_FORWARDING_DELAY,
     },
     epoch_info::EpochInfo,
     epoch_schedule::EpochSchedule,
@@ -59,7 +61,7 @@ use solana_sdk::{
     fee_calculator::FeeRateGovernor,
     genesis_config::GenesisConfig,
     hash::{Hash, Hasher},
-    message::SanitizedMessage,
+    message::{AccountKeys, SanitizedMessage},
     native_loader,
     nonce::{self, state::DurableNonce, NONCED_TX_MARKER_IX_INDEX},
     nonce_account,
@@ -73,6 +75,7 @@ use solana_sdk::{
     saturating_add_assign,
     signature::Signature,
     slot_hashes::SlotHashes,
+    slot_history::{Check, SlotHistory},
     sysvar::{self, last_restart_slot::LastRestartSlot},
     transaction::{
         Result, SanitizedTransaction, TransactionError,
@@ -111,6 +114,7 @@ use crate::{
         LoadAndExecuteTransactionsOutput, TransactionBalances,
         TransactionBalancesSet,
     },
+    transaction_simulation::TransactionSimulationResult,
 };
 
 pub type BankStatusCache = StatusCache<Result<()>>;
@@ -2238,6 +2242,149 @@ impl Bank {
         }
 
         Some((*nonce_address, nonce_account))
+    }
+
+    // -----------------
+    // Simulate Transaction
+    // -----------------
+    /// Run transactions against a bank without committing the results; does not check if the bank
+    /// is frozen like Solana does to enable use in single-bank scenarios
+    pub fn simulate_transaction_unchecked(
+        &self,
+        transaction: &SanitizedTransaction,
+        enable_cpi_recording: bool,
+    ) -> TransactionSimulationResult {
+        let account_keys = transaction.message().account_keys();
+        let number_of_accounts = account_keys.len();
+        let account_overrides =
+            self.get_account_overrides_for_simulation(&account_keys);
+        let batch = self.prepare_unlocked_batch_from_single_tx(transaction);
+        let mut timings = ExecuteTimings::default();
+
+        let recording_opts = TransactionExecutionRecordingOpts {
+            enable_cpi_recording,
+            enable_log_recording: true,
+            enable_return_data_recording: true,
+        };
+        let LoadAndExecuteTransactionsOutput {
+            loaded_transactions,
+            mut execution_results,
+            ..
+        } = self.load_and_execute_transactions(
+            &batch,
+            // After simulation, transactions will need to be forwarded to the leader
+            // for processing. During forwarding, the transaction could expire if the
+            // delay is not accounted for.
+            MAX_PROCESSING_AGE - MAX_TRANSACTION_FORWARDING_DELAY,
+            recording_opts,
+            &mut timings,
+            Some(&account_overrides),
+            None,
+        );
+
+        let post_simulation_accounts = loaded_transactions
+            .into_iter()
+            .next()
+            .unwrap()
+            .0
+            .ok()
+            .map(|loaded_transaction| {
+                loaded_transaction
+                    .accounts
+                    .into_iter()
+                    .take(number_of_accounts)
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        let units_consumed = timings.details.per_program_timings.iter().fold(
+            0,
+            |acc: u64, (_, program_timing)| {
+                acc.saturating_add(program_timing.accumulated_units)
+                    .saturating_add(program_timing.total_errored_units)
+            },
+        );
+        debug!("simulate_transaction: {:?}", timings);
+
+        let execution_result = execution_results.pop().unwrap();
+        let flattened_result = execution_result.flattened_result();
+        let (logs, return_data, inner_instructions) = match execution_result {
+            TransactionExecutionResult::Executed { details, .. } => (
+                details.log_messages,
+                details.return_data,
+                details.inner_instructions,
+            ),
+            TransactionExecutionResult::NotExecuted(_) => (None, None, None),
+        };
+        let logs = logs.unwrap_or_default();
+
+        TransactionSimulationResult {
+            result: flattened_result,
+            logs,
+            post_simulation_accounts,
+            units_consumed,
+            return_data,
+            inner_instructions,
+        }
+    }
+
+    fn get_account_overrides_for_simulation(
+        &self,
+        account_keys: &AccountKeys,
+    ) -> AccountOverrides {
+        let mut account_overrides = AccountOverrides::default();
+        let slot_history_id = sysvar::slot_history::id();
+        // For now this won't run properly since we don't support slot_history sysvar
+        if account_keys.iter().any(|pubkey| *pubkey == slot_history_id) {
+            let current_account =
+                self.get_account_with_fixed_root(&slot_history_id);
+            let slot_history = current_account
+                .as_ref()
+                // TODO(thlorenz): @@@ need to support slot history var
+                // if we decide not to do that then we could rip out the entire
+                // logic here and forget about proper_ancestors as well
+                .map(|account| from_account::<SlotHistory, _>(account).unwrap())
+                .unwrap_or_default();
+            if slot_history.check(self.slot()) == Check::Found {
+                let ancestors = Ancestors::from(
+                    self.proper_ancestors().collect::<Vec<_>>(),
+                );
+                if let Some((account, _)) =
+                    self.load_slow_with_fixed_root(&ancestors, &slot_history_id)
+                {
+                    account_overrides.set_slot_history(Some(account));
+                }
+            }
+        }
+        account_overrides
+    }
+
+    /// Returns all ancestors excluding self.slot().
+    pub(crate) fn proper_ancestors(&self) -> impl Iterator<Item = Slot> + '_ {
+        let current_slot = self.slot();
+        self.readlock_ancestors()
+            .unwrap()
+            .keys()
+            .into_iter()
+            .filter(move |slot| *slot != current_slot)
+    }
+
+    /// Prepare a transaction batch from a single transaction without locking accounts
+    fn prepare_unlocked_batch_from_single_tx<'a>(
+        &'a self,
+        transaction: &'a SanitizedTransaction,
+    ) -> TransactionBatch<'_, '_> {
+        let tx_account_lock_limit = self.get_transaction_account_lock_limit();
+        let lock_result = transaction
+            .get_account_locks(tx_account_lock_limit)
+            .map(|_| ());
+        let mut batch = TransactionBatch::new(
+            vec![lock_result],
+            self,
+            Cow::Borrowed(slice::from_ref(transaction)),
+        );
+        batch.set_needs_unlock(false);
+        batch
     }
 
     // -----------------
