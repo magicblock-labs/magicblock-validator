@@ -151,8 +151,13 @@ async fn main() {
 
         set_validator_authority(validator_keypair);
 
-        let rx = init_commit_channel(10);
-        AccountsManager::install_manual_commit_trigger(&accounts_manager, rx);
+        if config.accounts.commit.trigger {
+            let rx = init_commit_channel(10);
+            AccountsManager::install_manual_commit_trigger(
+                &accounts_manager,
+                rx,
+            );
+        }
 
         // -----------------
         // Tickers
