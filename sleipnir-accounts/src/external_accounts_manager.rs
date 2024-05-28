@@ -13,14 +13,12 @@ use sleipnir_program::{
     errors::{MagicError, MagicErrorWithContext},
 };
 use sleipnir_transaction_status::TransactionStatusSender;
-use solana_rpc_client::{
-    nonblocking::rpc_client::RpcClient, rpc_client::SerializableTransaction,
-};
+use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
-    transaction::VersionedTransaction,
+    transaction::SanitizedTransaction,
 };
 
 use crate::{
@@ -163,7 +161,7 @@ where
 {
     pub async fn ensure_accounts(
         &self,
-        tx: &VersionedTransaction,
+        tx: &SanitizedTransaction,
     ) -> AccountsResult<Vec<Signature>> {
         // If this validator does not clone any accounts then we're done
         if self.external_readonly_mode.clone_none()
@@ -175,11 +173,11 @@ where
         // 1. Extract all acounts from the transaction
         let accounts_holder = self
             .validated_accounts_provider
-            .try_accounts_from_versioned_transaction(tx)?;
+            .try_accounts_from_sanitized_transaction(tx)?;
 
         self.ensure_accounts_from_holder(
             accounts_holder,
-            tx.get_signature().to_string(),
+            tx.signature().to_string(),
         )
         .await
     }

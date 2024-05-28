@@ -2,7 +2,7 @@ use std::any::type_name;
 
 use base64::{prelude::BASE64_STANDARD, Engine};
 use bincode::Options;
-use jsonrpc_core::{Error, Result};
+use jsonrpc_core::{Error, ErrorCode, Result};
 use log::*;
 use sleipnir_processor::batch_processor::{
     execute_batch, TransactionBatchWithIndexes,
@@ -135,6 +135,17 @@ pub(crate) async fn send_transaction(
     _max_retries: Option<usize>,
 ) -> Result<String> {
     let bank = &meta.get_bank();
+    meta.accounts_manager
+        .ensure_accounts(&sanitized_transaction)
+        .await
+        .map_err(|err| {
+            error!("ensure_accounts failed: {:?}", err);
+        })
+        .map_err(|err| Error {
+            code: ErrorCode::InvalidRequest,
+            message: format!("{:?}", err),
+            data: None,
+        })?;
     let txs = [sanitized_transaction];
     let batch = bank.prepare_sanitized_batch(&txs);
     let batch_with_indexes = TransactionBatchWithIndexes {
