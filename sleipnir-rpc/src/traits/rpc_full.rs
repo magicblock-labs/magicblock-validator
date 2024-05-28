@@ -80,7 +80,7 @@ pub trait Full {
         meta: Self::Metadata,
         data: String,
         config: Option<RpcSimulateTransactionConfig>,
-    ) -> Result<RpcResponse<RpcSimulateTransactionResult>>;
+    ) -> BoxFuture<Result<RpcResponse<RpcSimulateTransactionResult>>>;
 
     #[rpc(meta, name = "sendTransaction")]
     fn send_transaction(

@@ -52,7 +52,7 @@ use crate::{
     account_resolver::{encode_account, get_encoded_account},
     filters::{get_filtered_program_accounts, optimize_filters},
     rpc_health::{RpcHealth, RpcHealthStatus},
-    transaction::{airdrop_transaction, sanitize_transaction},
+    transaction::{airdrop_transaction, ensure_accounts, sanitize_transaction},
     utils::{new_response, verify_pubkey},
     RpcCustomResult,
 };
@@ -631,7 +631,7 @@ impl JsonRpcRequestProcessor {
         Ok(())
     }
 
-    pub fn simulate_transaction(
+    pub async fn simulate_transaction(
         &self,
         mut unsanitized_tx: VersionedTransaction,
         config_accounts: Option<RpcSimulateTransactionAccountsConfig>,
@@ -651,10 +651,35 @@ impl JsonRpcRequestProcessor {
                 .message
                 .set_recent_blockhash(bank.last_blockhash());
         }
-        let transaction = sanitize_transaction(unsanitized_tx, &*bank)?;
+        let sanitized_transaction =
+            sanitize_transaction(unsanitized_tx, &*bank)?;
         if sig_verify {
             // TODO: @@@ sig_verify
             // verify_transaction(&transaction, &bank.feature_set)?;
+        }
+
+        if let Err(err) =
+            ensure_accounts(&self.accounts_manager, &sanitized_transaction)
+                .await
+        {
+            const MAGIC_ID: &str =
+                "Magic11111111111111111111111111111111111111";
+            let logs = vec![
+                format!("{MAGIC_ID}: An error was encountered before simulating the transaction."),
+                format!("{MAGIC_ID}: Something went wrong when trying to clone the needed accounts into the validator."),
+                format!("{MAGIC_ID}: Error: {err:?}"),
+            ];
+            return Ok(new_response(
+                &bank,
+                RpcSimulateTransactionResult {
+                    err: Some(TransactionError::AccountNotFound),
+                    logs: Some(logs),
+                    accounts: None,
+                    units_consumed: Some(0),
+                    return_data: None,
+                    inner_instructions: None,
+                },
+            ));
         }
 
         let TransactionSimulationResult {
@@ -664,10 +689,12 @@ impl JsonRpcRequestProcessor {
             units_consumed,
             return_data,
             inner_instructions,
-        } = bank
-            .simulate_transaction_unchecked(&transaction, enable_cpi_recording);
+        } = bank.simulate_transaction_unchecked(
+            &sanitized_transaction,
+            enable_cpi_recording,
+        );
 
-        let account_keys = transaction.message().account_keys();
+        let account_keys = sanitized_transaction.message().account_keys();
         let number_of_accounts = account_keys.len();
 
         let accounts = if let Some(config_accounts) = config_accounts {

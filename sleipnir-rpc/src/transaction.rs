@@ -4,6 +4,7 @@ use base64::{prelude::BASE64_STANDARD, Engine};
 use bincode::Options;
 use jsonrpc_core::{Error, ErrorCode, Result};
 use log::*;
+use sleipnir_accounts::{errors::AccountsResult, AccountsManager};
 use sleipnir_bank::bank::Bank;
 use sleipnir_processor::batch_processor::{
     execute_batch, TransactionBatchWithIndexes,
@@ -137,14 +138,11 @@ pub(crate) async fn send_transaction(
     _max_retries: Option<usize>,
 ) -> Result<String> {
     let bank = &meta.get_bank();
+
     // It is very important that we ensure accounts before simulating transactions
     // since they could depend on specific accounts to be in our validator
-    meta.accounts_manager
-        .ensure_accounts(&sanitized_transaction)
+    ensure_accounts(&meta.accounts_manager, &sanitized_transaction)
         .await
-        .map_err(|err| {
-            error!("ensure_accounts failed: {:?}", err);
-        })
         .map_err(|err| Error {
             code: ErrorCode::InvalidRequest,
             message: format!("{:?}", err),
@@ -190,6 +188,19 @@ pub(crate) async fn send_transaction(
     // debug!("{:#?}", tx_balances_set);
 
     Ok(signature.to_string())
+}
+
+pub(crate) async fn ensure_accounts(
+    accounts_manager: &AccountsManager,
+    sanitized_transaction: &SanitizedTransaction,
+) -> AccountsResult<Vec<Signature>> {
+    accounts_manager
+        .ensure_accounts(sanitized_transaction)
+        .await
+        .map_err(|err| {
+            error!("ensure_accounts failed: {:?}", err);
+            err
+        })
 }
 
 pub(crate) fn verify_signature(input: &str) -> Result<Signature> {
