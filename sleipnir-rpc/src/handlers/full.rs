@@ -8,13 +8,14 @@ use solana_rpc_client_api::{
         RpcBlocksConfigWrapper, RpcContextConfig, RpcEncodingConfigWrapper,
         RpcEpochConfig, RpcRequestAirdropConfig, RpcSendTransactionConfig,
         RpcSignatureStatusConfig, RpcSignaturesForAddressConfig,
-        RpcTransactionConfig,
+        RpcSimulateTransactionConfig, RpcTransactionConfig,
     },
     request::MAX_GET_SIGNATURE_STATUSES_QUERY_ITEMS,
     response::{
         Response as RpcResponse, RpcBlockhash,
         RpcConfirmedTransactionStatusWithSignature, RpcContactInfo,
         RpcInflationReward, RpcPerfSample, RpcPrioritizationFee,
+        RpcSimulateTransactionResult,
     },
 };
 use solana_sdk::{
@@ -174,6 +175,42 @@ impl Full for FullImpl {
             )
             .await
         })
+    }
+
+    fn simulate_transaction(
+        &self,
+        meta: Self::Metadata,
+        data: String,
+        config: Option<RpcSimulateTransactionConfig>,
+    ) -> Result<RpcResponse<RpcSimulateTransactionResult>> {
+        let RpcSimulateTransactionConfig {
+            sig_verify,
+            replace_recent_blockhash,
+            commitment,
+            encoding,
+            accounts: config_accounts,
+            min_context_slot,
+            inner_instructions: enable_cpi_recording,
+        } = config.unwrap_or_default();
+        let tx_encoding = encoding.unwrap_or(UiTransactionEncoding::Base58);
+        let binary_encoding = tx_encoding.into_binary_encoding().ok_or_else(|| {
+                Error::invalid_params(format!(
+                    "unsupported encoding: {tx_encoding}. Supported encodings: base58, base64"
+                ))
+            })?;
+
+        let (_, unsanitized_tx) = decode_and_deserialize::<VersionedTransaction>(
+            data,
+            binary_encoding,
+        )?;
+
+        meta.simulate_transaction(
+            unsanitized_tx,
+            config_accounts,
+            replace_recent_blockhash,
+            sig_verify,
+            enable_cpi_recording,
+        )
     }
 
     fn minimum_ledger_slot(&self, meta: Self::Metadata) -> Result<Slot> {

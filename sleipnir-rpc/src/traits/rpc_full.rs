@@ -2,6 +2,8 @@
 //! The `rpc` module implements the Solana RPC interface.
 use jsonrpc_core::{BoxFuture, Result};
 use jsonrpc_derive::rpc;
+use solana_rpc_client_api::config::RpcSimulateTransactionConfig;
+use solana_rpc_client_api::response::RpcSimulateTransactionResult;
 use solana_rpc_client_api::{
     config::{
         RpcBlocksConfigWrapper, RpcContextConfig, RpcEncodingConfigWrapper,
@@ -15,6 +17,7 @@ use solana_rpc_client_api::{
         RpcInflationReward, RpcPerfSample, RpcPrioritizationFee,
     },
 };
+
 use solana_sdk::{
     clock::UnixTimestamp, commitment_config::CommitmentConfig,
     slot_history::Slot,
@@ -71,15 +74,6 @@ pub trait Full {
         config: Option<RpcRequestAirdropConfig>,
     ) -> BoxFuture<Result<String>>;
 
-    #[rpc(meta, name = "sendTransaction")]
-    fn send_transaction(
-        &self,
-        meta: Self::Metadata,
-        data: String,
-        config: Option<RpcSendTransactionConfig>,
-    ) -> BoxFuture<Result<String>>;
-
-    /* TODO: Not yet supporting transaction simulation
     #[rpc(meta, name = "simulateTransaction")]
     fn simulate_transaction(
         &self,
@@ -87,7 +81,14 @@ pub trait Full {
         data: String,
         config: Option<RpcSimulateTransactionConfig>,
     ) -> Result<RpcResponse<RpcSimulateTransactionResult>>;
-    */
+
+    #[rpc(meta, name = "sendTransaction")]
+    fn send_transaction(
+        &self,
+        meta: Self::Metadata,
+        data: String,
+        config: Option<RpcSendTransactionConfig>,
+    ) -> BoxFuture<Result<String>>;
 
     #[rpc(meta, name = "minimumLedgerSlot")]
     fn minimum_ledger_slot(&self, meta: Self::Metadata) -> Result<Slot>;
