@@ -32,6 +32,10 @@ pub enum MagicError {
     InternalError = 0x888,
     #[error("The account is not delegated to the ephemeral validator.")]
     AccountNotDelegated,
+    #[error("The number of accounts provided is larger than expected.")]
+    TooManyAccountsProvided,
+    #[error("The program was provided as the payer account.")]
+    ProgramCannotBePayer,
 }
 
 impl PrintProgramError for MagicError {

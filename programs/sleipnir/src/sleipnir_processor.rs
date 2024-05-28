@@ -260,10 +260,49 @@ fn trigger_commit(
     invoke_context: &InvokeContext,
     transaction_context: &TransactionContext,
 ) -> Result<(), InstructionError> {
-    // Payer is the first account and the account to commit the second
-    let pubkey = transaction_context.get_key_of_account_at_index(1)?;
+    // Payer is the first account and the program and committee accounts come after
+    let pubkey = {
+        if transaction_context.get_number_of_accounts() < 3 {
+            ic_msg!(
+                invoke_context,
+                "TriggerCommit ERR: not enough accounts to trigger commit, need payer and account to commit"
+            );
+            return Err(InstructionError::NotEnoughAccountKeys);
+        }
+        if transaction_context.get_number_of_accounts() > 3 {
+            ic_msg!(
+                invoke_context,
+                "TriggerCommit ERR: too many accounts to trigger commit, need payer and account to commit only"
+            );
+            return Err(MagicError::TooManyAccountsProvided.into());
+        }
+        let program_idx = transaction_context
+            .find_index_of_program_account(&crate::id())
+            .ok_or_else(|| {
+                ic_msg!(
+                    invoke_context,
+                    "TriggerCommit ERR: Magic program account not found"
+                );
+                InstructionError::UnsupportedProgramId
+            })?;
+        // SAFETY: we ensured above that there are exactly 3 accounts and the first account
+        // is always the payer, so the program account is either the second or third account
+        let committee_idx = match program_idx {
+            0 => {
+                ic_msg!(
+                    invoke_context,
+                    "TriggerCommit ERR: program key found in payer position"
+                );
+                return Err(MagicError::ProgramCannotBePayer.into());
+            }
+            1 => 2,
+            2 => 1,
+            _ => unreachable!("We verified exactly three accounts"),
+        };
+        transaction_context.get_key_of_account_at_index(committee_idx)?
+    };
 
-    ic_msg!(invoke_context, "TriggerCommit: for account {}", pubkey);
+    ic_msg!(invoke_context, "TriggerCommit: account '{}'", pubkey);
     send_commit(*pubkey)
         // Handle error related to sending the request
         .map_err(|err| {
