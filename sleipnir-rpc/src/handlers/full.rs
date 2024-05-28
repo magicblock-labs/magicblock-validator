@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 // NOTE: from rpc/src/rpc.rs :3432
-use jsonrpc_core::{futures::future, BoxFuture, Error, Result};
+use jsonrpc_core::{futures::future, BoxFuture, Error, ErrorCode, Result};
 use log::*;
 use solana_rpc_client_api::{
     config::{
@@ -344,6 +344,7 @@ async fn send_transaction_impl(
     tx_encoding: UiTransactionEncoding,
     max_retries: Option<usize>,
 ) -> Result<String> {
+    info!("send_transaction_impl");
     let binary_encoding = tx_encoding.into_binary_encoding().ok_or_else(|| {
                 Error::invalid_params(format!(
                     "unsupported encoding: {tx_encoding}. Supported encodings: base58, base64"
@@ -352,6 +353,20 @@ async fn send_transaction_impl(
 
     let (_wire_transaction, unsanitized_tx) =
         decode_and_deserialize::<VersionedTransaction>(data, binary_encoding)?;
+
+    // For all transactions except airdrops we ensure that all accounts are in our
+    // validator, otherwise we attempt to clone them from chain
+    meta.accounts_manager
+        .ensure_accounts(&unsanitized_tx)
+        .await
+        .map_err(|err| {
+            error!("ensure_accounts failed: {:?}", err);
+        })
+        .map_err(|err| Error {
+            code: ErrorCode::InvalidRequest,
+            message: format!("{:?}", err),
+            data: None,
+        })?;
 
     let preflight_bank = &*meta.get_bank_with_config(RpcContextConfig {
         commitment: preflight_commitment,
@@ -380,6 +395,7 @@ async fn send_transaction_impl(
 
     // TODO(thlorenz): leaving out if !skip_preflight part
 
+    info!("Sending transaction: {:?}", signature);
     send_transaction(
         meta,
         signature,
