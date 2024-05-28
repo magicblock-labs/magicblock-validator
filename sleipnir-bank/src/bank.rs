@@ -72,6 +72,7 @@ use solana_sdk::{
     rent_debits::RentDebits,
     saturating_add_assign,
     signature::Signature,
+    slot_hashes::SlotHashes,
     sysvar::{self, last_restart_slot::LastRestartSlot},
     transaction::{
         Result, SanitizedTransaction, TransactionError,
@@ -680,11 +681,11 @@ impl Bank {
         self.fill_missing_sysvar_cache_entries();
 
         // 5. Determine next blockhash
+        let current_hash = self.last_blockhash();
         let blockhash = {
             // In the Solana implementation there is a lot of logic going on to determine the next
             // blockhash, however we don't really produce any blocks, so any new hash will do.
             // Therefore we derive it from the previous hash and the current slot.
-            let current_hash = self.last_blockhash();
             let mut hasher = Hasher::default();
             hasher.hash(current_hash.as_ref());
             hasher.hash(&next_slot.to_le_bytes());
@@ -692,11 +693,13 @@ impl Bank {
         };
 
         // 6. Register the new blockhash with the blockhash queue
-        let mut blockhash_queue = self.blockhash_queue.write().unwrap();
-        blockhash_queue.register_hash(
-            &blockhash,
-            self.fee_rate_governor.lamports_per_signature,
-        );
+        {
+            let mut blockhash_queue = self.blockhash_queue.write().unwrap();
+            blockhash_queue.register_hash(
+                &blockhash,
+                self.fee_rate_governor.lamports_per_signature,
+            );
+        }
 
         // 7. Notify Geyser Service
         if let Some(slot_status_notifier) = &self.slot_status_notifier {
@@ -707,7 +710,12 @@ impl Bank {
         // 8. Update loaded programs cache as otherwise we cannot deploy new programs
         self.sync_loaded_programs_cache_to_slot();
 
-        // 9. Currently the memory size is increasing while our validator is running
+        // 9. Update slot hashes since they are needed to sanitize a transaction in some cases
+        //    NOTE: slothash and blockhash are the same for us
+        //          in solana the blockhash is set to the hash of the slot that is finalized
+        self.update_slot_hashes(slot, current_hash);
+
+        // 10. Currently the memory size is increasing while our validator is running
         //    see docs/memory-issue.md. Thus we help this a bit by cleaning up regularly
         //    At 50ms/slot we clean up about every 5 mins
         const CACHE_CLEAR_INTERVAL: u64 = 6000;
@@ -1155,6 +1163,20 @@ impl Bank {
         self.update_sysvar_account(&sysvar::epoch_schedule::id(), |account| {
             create_account(
                 self.epoch_schedule(),
+                inherit_specially_retained_account_fields(account),
+            )
+        });
+    }
+
+    fn update_slot_hashes(&self, prev_slot: Slot, prev_hash: Hash) {
+        self.update_sysvar_account(&sysvar::slot_hashes::id(), |account| {
+            let mut slot_hashes = account
+                .as_ref()
+                .map(|account| from_account::<SlotHashes, _>(account).unwrap())
+                .unwrap_or_default();
+            slot_hashes.add(prev_slot, prev_hash);
+            create_account(
+                &slot_hashes,
                 inherit_specially_retained_account_fields(account),
             )
         });
