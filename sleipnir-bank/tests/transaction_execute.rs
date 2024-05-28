@@ -21,6 +21,7 @@ use sleipnir_bank::{
 use solana_sdk::{
     account::ReadableAccount, genesis_config::create_genesis_config,
     native_token::LAMPORTS_PER_SOL, rent::Rent,
+    transaction::SanitizedTransaction,
 };
 use test_tools_core::init_logger;
 
@@ -183,6 +184,17 @@ fn test_bank_solx_instructions() {
     assert_matches!(sig_status.as_ref().unwrap(), Ok(()));
 }
 
+fn execute_and_check_results(bank: &Bank, tx: SanitizedTransaction) {
+    let results = execute_transactions(bank, vec![tx]).0.execution_results;
+    let failures = results
+        .iter()
+        .filter(|r| !r.was_executed_successfully())
+        .collect::<Vec<_>>();
+    if !failures.is_empty() {
+        panic!("Failures: {:#?}", failures);
+    }
+}
+
 #[test]
 fn test_bank_sysvars_get() {
     init_logger!();
@@ -192,7 +204,7 @@ fn test_bank_sysvars_get() {
     add_elf_program(&bank, &elfs::sysvars::ID);
     let tx = create_sysvars_get_transaction(&bank);
     bank.advance_slot();
-    execute_transactions(&bank, vec![tx]);
+    execute_and_check_results(&bank, tx);
 }
 
 #[test]
@@ -204,5 +216,5 @@ fn test_bank_sysvars_from_account() {
     add_elf_program(&bank, &elfs::sysvars::ID);
     let tx = create_sysvars_from_account_transaction(&bank);
     bank.advance_slot();
-    execute_transactions(&bank, vec![tx]);
+    execute_and_check_results(&bank, tx);
 }

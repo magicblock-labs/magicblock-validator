@@ -6,16 +6,20 @@ use solana_program::{
     msg,
     pubkey::Pubkey,
     rent::Rent,
+    slot_hashes::SlotHashes,
     sysvar::{
         instructions::{
-            get_instruction_relative, load_current_index_checked, load_instruction_at_checked,
+            get_instruction_relative, load_current_index_checked,
+            load_instruction_at_checked,
         },
         Sysvar,
     },
 };
 
 #[allow(deprecated)]
-use solana_program::sysvar::{fees::Fees, recent_blockhashes::RecentBlockhashes};
+use solana_program::sysvar::{
+    fees::Fees, recent_blockhashes::RecentBlockhashes,
+};
 
 solana_program::entrypoint!(process_instruction);
 
@@ -34,7 +38,10 @@ fn process_instruction(
     }
 }
 
-fn process_sysvar_get(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+fn process_sysvar_get(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+) -> ProgramResult {
     msg!("Processing sysvar_get instruction");
     msg!("program_id: {}", program_id);
     msg!("accounts: {}", accounts.len());
@@ -49,7 +56,10 @@ fn process_sysvar_get(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramR
     Ok(())
 }
 
-fn process_sysvar_from_account(program_id: &Pubkey, accounts: &[AccountInfo]) -> ProgramResult {
+fn process_sysvar_from_account(
+    program_id: &Pubkey,
+    accounts: &[AccountInfo],
+) -> ProgramResult {
     msg!("Processing sysvar_from_account instruction");
     msg!("program_id: {}", program_id);
     msg!("accounts: {}", accounts.len());
@@ -63,6 +73,7 @@ fn process_sysvar_from_account(program_id: &Pubkey, accounts: &[AccountInfo]) ->
     let recent_blockhashes_account = next_account_info(accounts_iter)?;
     let last_restart_slot_account = next_account_info(accounts_iter)?;
     let ix_introspections_account = next_account_info(accounts_iter)?;
+    let slot_hashes_account = next_account_info(accounts_iter)?;
 
     let clock = Clock::from_account_info(clock_account).unwrap();
     msg!("{:?}", clock);
@@ -70,7 +81,8 @@ fn process_sysvar_from_account(program_id: &Pubkey, accounts: &[AccountInfo]) ->
     let rent = Rent::from_account_info(rent_account).unwrap();
     msg!("{:?}", rent);
 
-    let epoch_schedule = EpochSchedule::from_account_info(epoch_schedule_account).unwrap();
+    let epoch_schedule =
+        EpochSchedule::from_account_info(epoch_schedule_account).unwrap();
     msg!("{:?}", epoch_schedule);
 
     #[allow(deprecated)]
@@ -79,12 +91,18 @@ fn process_sysvar_from_account(program_id: &Pubkey, accounts: &[AccountInfo]) ->
 
     #[allow(deprecated)]
     let recent_blockhashes =
-        RecentBlockhashes::from_account_info(recent_blockhashes_account).unwrap();
+        RecentBlockhashes::from_account_info(recent_blockhashes_account)
+            .unwrap();
     msg!("{:?}", recent_blockhashes);
 
     // Showing here that we don't provide this yet since our feature set isn't enabling last_restart_slot
     // NOTE: data.len: 0
     msg!("{:?}", last_restart_slot_account);
+
+    // This slot_hashes sysvar is too large to bincode::deserialize in-program
+    let slot_hashes = SlotHashes::from_account_info(slot_hashes_account);
+    msg!("{:?}", slot_hashes);
+    assert!(slot_hashes.is_err());
 
     // -----------------
     // Instruction Inspection
@@ -95,7 +113,10 @@ fn process_sysvar_from_account(program_id: &Pubkey, accounts: &[AccountInfo]) ->
     let ix_before = get_instruction_relative(-1, ix_introspections_account)?;
     let ix_after = get_instruction_relative(1, ix_introspections_account)?;
 
-    let ix_info = load_instruction_at_checked(current_ix_idx as usize, ix_introspections_account)?;
+    let ix_info = load_instruction_at_checked(
+        current_ix_idx as usize,
+        ix_introspections_account,
+    )?;
     msg!("Instruction info: {:?}", ix_info);
     msg!("Instruction before: {:?}", ix_before);
     msg!("Instruction after: {:?}", ix_after);

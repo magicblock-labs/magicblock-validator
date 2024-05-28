@@ -37,6 +37,9 @@ run-release-no-geyser:
 	GEYSER_DISABLE=accounts,transactions \
 	cargo run --release
 
+update-sysvars:
+	$(DIR)/test-programs/sysvars/sh/update
+
 fmt:
 	cargo +nightly fmt -- --config-path rustfmt-nightly.toml
 

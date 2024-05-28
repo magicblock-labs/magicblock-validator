@@ -313,6 +313,7 @@ fn create_sysvars_from_account_instruction(
             AccountMeta::new_readonly(recent_blockhashes::id(), false),
             AccountMeta::new_readonly(last_restart_slot::id(), false),
             AccountMeta::new_readonly(sysvar::instructions::id(), false),
+            AccountMeta::new_readonly(sysvar::slot_hashes::id(), false),
         ],
     )
 }
