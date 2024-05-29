@@ -53,31 +53,46 @@ impl PubsubApi {
                     let mut pending_subs = JoinSet::new();
                     let mut actor = SubscriptionsReceiver::new(subscribe_rx);
 
+                    macro_rules! handle_subscription {
+                        ($subscription:ident) => {
+                            match $subscription {
+                                Some($subscription) => {
+                                    subid += 1;
+                                    let unsubscriber = unsubscribe_tokens.add(subid);
+                                    pending_subs
+                                        .spawn(handle_subscription(
+                                            $subscription,
+                                            subid,
+                                            unsubscriber
+                                        ));
+                                    debug!("Added subscription to a total of {}",
+                                        pending_subs.len());
+                                },
+                                None => break,
+                            }
+                        }
+                    }
+
                     // Waiting for either of the two:
                     // a) a new subscriptions comes in and we add it to pending subscriptions
                     // b) polling subs, once done they are auto-removed from pending subscriptions
                     loop {
-                        tokio::select! {
-                            subscription = actor.subscriptions.recv() => {
-                                match subscription {
-                                    Some(subscription) => {
-                                        subid += 1;
-                                        let unsubscriber = unsubscribe_tokens.add(subid);
-                                        pending_subs
-                                            .spawn(handle_subscription(
-                                                subscription,
-                                                subid,
-                                                unsubscriber
-                                            ));
-                                        debug!("Added subscription to a total of {}",
-                                            pending_subs.len());
-                                    },
-                                    None => break,
-                                };
-                            },
-                            next = pending_subs.join_next() => {
-                                if let Some(Err(err)) = next {
-                                    error!("Failed to join task: {:?}", err)
+                        // In the case that there are no active subs we just wait for one to be
+                        // registered
+                        if pending_subs.is_empty() {
+                            let subscription = actor.subscriptions.recv().await;
+                            handle_subscription!(subscription);
+                        } else {
+                            // Otherwise we wait for a sub to complete or a new one to be
+                                // registered
+                            tokio::select! {
+                                subscription = actor.subscriptions.recv() => {
+                                    handle_subscription!(subscription)
+                                },
+                                next = pending_subs.join_next() => {
+                                    if let Some(Err(err)) = next {
+                                        error!("Failed to join task: {:?}", err)
+                                    }
                                 }
                             }
                         }
