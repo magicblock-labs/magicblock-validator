@@ -166,6 +166,7 @@ impl AccountCommitter for AccountCommitterStub {
 pub struct ValidatedAccountsProviderStub {
     validation_error: Option<TranswiseError>,
     payers: HashSet<Pubkey>,
+    new_accounts: HashSet<Pubkey>,
     with_owners: HashMap<Pubkey, Pubkey>,
 }
 
@@ -179,11 +180,13 @@ impl ValidatedAccountsProviderStub {
     }
     pub fn valid(
         payers: HashSet<Pubkey>,
+        new_accounts: HashSet<Pubkey>,
         with_owners: HashMap<Pubkey, Pubkey>,
     ) -> Self {
         Self {
             validation_error: None,
             payers,
+            new_accounts,
             with_owners,
         }
     }
@@ -265,6 +268,7 @@ impl ValidatedAccountsProvider for ValidatedAccountsProviderStub {
                             },
                         ),
                         is_payer: self.payers.contains(x),
+                        is_new: self.new_accounts.contains(x),
                     })
                     .collect(),
             }),

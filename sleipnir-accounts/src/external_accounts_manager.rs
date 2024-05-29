@@ -265,6 +265,12 @@ where
             })
             .collect::<Vec<_>>();
 
+        let writable_clones = validated_accounts
+            .writable
+            .iter()
+            .filter(|x| !x.is_new)
+            .collect::<Vec<_>>();
+
         // 5. Clone the accounts and add metadata to external account trackers
         if log::log_enabled!(log::Level::Debug) {
             if !readonly_clones.is_empty() {
@@ -273,7 +279,7 @@ where
                     signature, readonly_clones,
                 );
             }
-            if !validated_accounts.writable.is_empty() {
+            if !writable_clones.is_empty() {
                 let writable = validated_accounts
                     .writable
                     .iter()
@@ -306,7 +312,7 @@ where
             self.external_readonly_accounts.insert(readonly);
         }
 
-        for writable in validated_accounts.writable {
+        for writable in writable_clones {
             let mut overrides =
                 writable.lock_config.as_ref().map(|x| AccountModification {
                     owner: Some(x.owner.to_string()),

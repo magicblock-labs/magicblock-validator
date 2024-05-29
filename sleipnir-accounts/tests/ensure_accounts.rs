@@ -183,8 +183,11 @@ async fn test_ensure_locked_with_owner_and_unlocked_writable_payer() {
     let payers = vec![payer].into_iter().collect();
     let with_owners = vec![(locked, locked_owner)].into_iter().collect();
 
-    let validated_accounts_provider =
-        ValidatedAccountsProviderStub::valid(payers, with_owners);
+    let validated_accounts_provider = ValidatedAccountsProviderStub::valid(
+        payers,
+        Default::default(),
+        with_owners,
+    );
 
     let manager = setup(
         internal_account_provider,
@@ -218,6 +221,48 @@ async fn test_ensure_locked_with_owner_and_unlocked_writable_payer() {
         .account_cloner
         .did_override_owner(&locked, &locked_owner));
     assert!(manager.account_cloner.did_not_override_lamports(&locked));
+}
+
+#[tokio::test]
+async fn test_ensure_one_locked_and_one_new_writable() {
+    init_logger!();
+    let locked = Pubkey::new_unique();
+    let new = Pubkey::new_unique();
+
+    let internal_account_provider = InternalAccountProviderStub::default();
+    let new_accounts = vec![new].into_iter().collect();
+
+    let validated_accounts_provider = ValidatedAccountsProviderStub::valid(
+        Default::default(),
+        new_accounts,
+        Default::default(),
+    );
+
+    let manager = setup(
+        internal_account_provider,
+        AccountClonerStub::default(),
+        AccountCommitterStub::default(),
+        validated_accounts_provider,
+    );
+
+    let holder = TransactionAccountsHolder {
+        readonly: vec![],
+        writable: vec![new, locked],
+        payer: Pubkey::new_unique(),
+    };
+
+    let result = manager
+        .ensure_accounts_from_holder(holder, "tx-sig".to_string())
+        .await;
+    assert_eq!(result.unwrap().len(), 1);
+
+    assert!(manager.external_readonly_accounts.is_empty());
+    assert_eq!(manager.external_writable_accounts.len(), 1);
+    assert!(manager.external_writable_accounts.has(&locked));
+    assert!(!manager.external_writable_accounts.has(&new));
+
+    assert!(manager.account_cloner.did_clone(&locked));
+    assert!(!manager.account_cloner.did_clone(&new));
 }
 
 #[tokio::test]
