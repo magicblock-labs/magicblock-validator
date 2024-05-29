@@ -220,14 +220,25 @@ pub(crate) async fn send_transaction(
 
 /// Verifies only the transaction signature and is used when sending a
 /// transaction to avoid the extra overhead of [sig_verify_transaction_and_check_precompiles]
+/// TODO(thlorenz): @@ sigverify takes upwards of 90µs which is 30%+ of
+/// the entire time it takes to execute a transaction.
+/// Therefore this an intermediate solution and we need to investigate verifying the
+/// wire_transaction instead (solana sigverify implementation is packet based)
 pub(crate) fn sig_verify_transaction(
     transaction: &SanitizedTransaction,
 ) -> Result<()> {
+    let now = match log::log_enabled!(log::Level::Trace) {
+        true => Some(std::time::Instant::now()),
+        false => None,
+    };
     #[allow(clippy::question_mark)]
     if transaction.verify().is_err() {
         return Err(
             RpcCustomError::TransactionSignatureVerificationFailure.into()
         );
+    }
+    if let Some(now) = now {
+        trace!("Sigverify took: {:?}", now.elapsed());
     }
 
     Ok(())
