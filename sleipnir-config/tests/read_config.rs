@@ -42,6 +42,7 @@ fn test_load_local_dev_with_programs_toml() {
             rpc: RpcConfig { port: 7799 },
             validator: ValidatorConfig {
                 millis_per_slot: 14,
+                ..Default::default()
             },
         }
     )

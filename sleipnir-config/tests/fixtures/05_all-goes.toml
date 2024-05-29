@@ -4,3 +4,8 @@
 [accounts]
 clone = { readonly = "all", writable = "all" }
 create = true
+
+# Additionally we turn off signature verification to allow
+# unlimited experimentation
+[validator]
+sigverify = false
