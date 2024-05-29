@@ -1,6 +1,6 @@
-use lazy_static::lazy_static;
 use std::sync::RwLock;
 
+use lazy_static::lazy_static;
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
 
 lazy_static! {

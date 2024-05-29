@@ -342,9 +342,19 @@ fn trigger_commit(
 // mock_process_instruction
 #[cfg(test)]
 mod tests {
-    use assert_matches::assert_matches;
     use std::collections::HashMap;
 
+    use assert_matches::assert_matches;
+    use solana_program_runtime::invoke_context::mock_process_instruction;
+    use solana_sdk::{
+        account::{Account, AccountSharedData},
+        instruction::{AccountMeta, InstructionError},
+        pubkey::Pubkey,
+        signature::{Keypair, Signature},
+        signer::Signer,
+    };
+
+    use super::*;
     use crate::{
         commit_sender::init_commit_channel,
         errors::MagicErrorWithContext,
@@ -353,18 +363,6 @@ mod tests {
             modify_accounts_instruction, trigger_commit_instruction,
             AccountModification,
         },
-    };
-
-    use super::*;
-    use solana_program_runtime::invoke_context::mock_process_instruction;
-    use solana_sdk::{
-        account::{Account, AccountSharedData},
-        signature::{Keypair, Signature},
-        signer::Signer,
-    };
-    use solana_sdk::{
-        instruction::{AccountMeta, InstructionError},
-        pubkey::Pubkey,
     };
 
     const AUTHORITY_BALANCE: u64 = u64::MAX / 2;

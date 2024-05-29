@@ -2,6 +2,7 @@ use std::{collections::HashMap, sync::RwLock};
 
 use async_trait::async_trait;
 use dlp::instruction::{commit_state, finalize};
+use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
     pubkey::Pubkey,
@@ -14,7 +15,6 @@ use crate::{
     errors::{AccountsError, AccountsResult},
     AccountCommitter,
 };
-use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 
 pub struct RemoteAccountCommitter {
     rpc_client: RpcClient,

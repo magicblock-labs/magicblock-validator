@@ -2,22 +2,20 @@
 //! The `rpc` module implements the Solana RPC interface.
 use jsonrpc_core::{BoxFuture, Result};
 use jsonrpc_derive::rpc;
-use solana_rpc_client_api::config::RpcSimulateTransactionConfig;
-use solana_rpc_client_api::response::RpcSimulateTransactionResult;
 use solana_rpc_client_api::{
     config::{
         RpcBlocksConfigWrapper, RpcContextConfig, RpcEncodingConfigWrapper,
         RpcEpochConfig, RpcRequestAirdropConfig, RpcSendTransactionConfig,
         RpcSignatureStatusConfig, RpcSignaturesForAddressConfig,
-        RpcTransactionConfig,
+        RpcSimulateTransactionConfig, RpcTransactionConfig,
     },
     response::{
         Response as RpcResponse, RpcBlockhash,
         RpcConfirmedTransactionStatusWithSignature, RpcContactInfo,
         RpcInflationReward, RpcPerfSample, RpcPrioritizationFee,
+        RpcSimulateTransactionResult,
     },
 };
-
 use solana_sdk::{
     clock::UnixTimestamp, commitment_config::CommitmentConfig,
     slot_history::Slot,
