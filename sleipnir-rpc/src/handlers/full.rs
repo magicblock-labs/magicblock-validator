@@ -38,9 +38,12 @@ use crate::{
     traits::rpc_full::Full,
     transaction::{
         decode_and_deserialize, sanitize_transaction, send_transaction,
+        SendTransactionConfig,
+    },
+    utils::{
+        new_response, verify_and_parse_signatures_for_address_params,
         verify_signature,
     },
-    utils::{new_response, verify_and_parse_signatures_for_address_params},
 };
 
 const PERFORMANCE_SAMPLES_LIMIT: usize = 720;
@@ -422,9 +425,12 @@ async fn send_transaction_impl(
         preflight_bank,
         signature,
         transaction,
-        last_valid_block_height,
-        durable_nonce_info,
-        max_retries,
+        SendTransactionConfig {
+            sigverify: !meta.config.disable_sigverify,
+            last_valid_block_height,
+            durable_nonce_info,
+            max_retries,
+        },
     )
     .await
 }

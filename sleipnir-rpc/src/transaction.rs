@@ -11,7 +11,9 @@ use sleipnir_processor::batch_processor::{
 };
 use solana_metrics::inc_new_counter_info;
 use solana_program_runtime::timings::ExecuteTimings;
+use solana_rpc_client_api::custom_error::RpcCustomError;
 use solana_sdk::{
+    feature_set,
     hash::Hash,
     message::AddressLoader,
     packet::PACKET_DATA_SIZE,
@@ -106,6 +108,7 @@ pub(crate) async fn airdrop_transaction(
     meta: &JsonRpcRequestProcessor,
     pubkey: Pubkey,
     lamports: u64,
+    sigverify: bool,
 ) -> Result<String> {
     debug!("request_airdrop rpc request received");
     let bank = meta.get_bank();
@@ -123,7 +126,30 @@ pub(crate) async fn airdrop_transaction(
                 Error::invalid_params(format!("invalid transaction: {err}"))
             })?;
     let signature = *transaction.signature();
-    send_transaction(meta, None, signature, transaction, 0, None, None).await
+    send_transaction(
+        meta,
+        None,
+        signature,
+        transaction,
+        SendTransactionConfig {
+            sigverify,
+            last_valid_block_height: 0,
+            durable_nonce_info: None,
+            max_retries: None,
+        },
+    )
+    .await
+}
+
+pub(crate) struct SendTransactionConfig {
+    pub sigverify: bool,
+    // pub wire_transaction: Vec<u8>,
+    #[allow(unused)]
+    pub last_valid_block_height: u64,
+    #[allow(unused)]
+    pub durable_nonce_info: Option<(Pubkey, Hash)>,
+    #[allow(unused)]
+    pub max_retries: Option<usize>,
 }
 
 // TODO(thlorenz): for now we execute the transaction directly via a single batch
@@ -132,12 +158,14 @@ pub(crate) async fn send_transaction(
     preflight_bank: Option<&Bank>,
     signature: Signature,
     sanitized_transaction: SanitizedTransaction,
-    // wire_transaction: Vec<u8>,
-    _last_valid_block_height: u64,
-    _durable_nonce_info: Option<(Pubkey, Hash)>,
-    _max_retries: Option<usize>,
+    config: SendTransactionConfig,
 ) -> Result<String> {
+    let SendTransactionConfig { sigverify, .. } = config;
     let bank = &meta.get_bank();
+
+    if sigverify {
+        sig_verify_transaction(&sanitized_transaction)?;
+    }
 
     // It is very important that we ensure accounts before simulating transactions
     // since they could depend on specific accounts to be in our validator
@@ -190,6 +218,46 @@ pub(crate) async fn send_transaction(
     Ok(signature.to_string())
 }
 
+/// Verifies only the transaction signature and is used when sending a
+/// transaction to avoid the extra overhead of [sig_verify_transaction_and_check_precompiles]
+pub(crate) fn sig_verify_transaction(
+    transaction: &SanitizedTransaction,
+) -> Result<()> {
+    #[allow(clippy::question_mark)]
+    if transaction.verify().is_err() {
+        return Err(
+            RpcCustomError::TransactionSignatureVerificationFailure.into()
+        );
+    }
+
+    Ok(())
+}
+
+/// Verifies both transaction signature and precompiles which results in
+/// max overhead and thus should only be used when simulating transactions
+pub(crate) fn sig_verify_transaction_and_check_precompiles(
+    transaction: &SanitizedTransaction,
+    feature_set: &feature_set::FeatureSet,
+) -> Result<()> {
+    sig_verify_transaction(transaction)?;
+
+    #[allow(clippy::question_mark)]
+    if transaction.verify().is_err() {
+        return Err(
+            RpcCustomError::TransactionSignatureVerificationFailure.into()
+        );
+    }
+
+    if let Err(e) = transaction.verify_precompiles(feature_set) {
+        return Err(RpcCustomError::TransactionPrecompileVerificationFailure(
+            e,
+        )
+        .into());
+    }
+
+    Ok(())
+}
+
 pub(crate) async fn ensure_accounts(
     accounts_manager: &AccountsManager,
     sanitized_transaction: &SanitizedTransaction,
@@ -201,10 +269,4 @@ pub(crate) async fn ensure_accounts(
             error!("ensure_accounts failed: {:?}", err);
             err
         })
-}
-
-pub(crate) fn verify_signature(input: &str) -> Result<Signature> {
-    input
-        .parse()
-        .map_err(|e| Error::invalid_params(format!("Invalid param: {e:?}")))
 }

@@ -52,7 +52,10 @@ use crate::{
     account_resolver::{encode_account, get_encoded_account},
     filters::{get_filtered_program_accounts, optimize_filters},
     rpc_health::{RpcHealth, RpcHealthStatus},
-    transaction::{airdrop_transaction, ensure_accounts, sanitize_transaction},
+    transaction::{
+        airdrop_transaction, ensure_accounts, sanitize_transaction,
+        sig_verify_transaction_and_check_precompiles,
+    },
     utils::{new_response, verify_pubkey},
     RpcCustomResult,
 };
@@ -85,6 +88,9 @@ pub struct JsonRpcConfig {
     pub transaction_status_sender: Option<TransactionStatusSender>,
     pub rpc_socket_addr: Option<SocketAddr>,
     pub pubsub_socket_addr: Option<SocketAddr>,
+
+    /// Configures if to verify transaction signatures
+    pub disable_sigverify: bool,
 }
 
 // NOTE: from rpc/src/rpc.rs :193
@@ -534,7 +540,13 @@ impl JsonRpcRequestProcessor {
             message: format!("Invalid pubkey: {}", e),
             data: None,
         })?;
-        airdrop_transaction(self, pubkey, lamports).await
+        airdrop_transaction(
+            self,
+            pubkey,
+            lamports,
+            !self.config.disable_sigverify,
+        )
+        .await
     }
 
     pub async fn get_transaction(
@@ -654,8 +666,10 @@ impl JsonRpcRequestProcessor {
         let sanitized_transaction =
             sanitize_transaction(unsanitized_tx, &*bank)?;
         if sig_verify {
-            // TODO: @@@ sig_verify
-            // verify_transaction(&transaction, &bank.feature_set)?;
+            sig_verify_transaction_and_check_precompiles(
+                &sanitized_transaction,
+                &bank.feature_set,
+            )?;
         }
 
         if let Err(err) =
