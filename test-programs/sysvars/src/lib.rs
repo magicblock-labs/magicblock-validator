@@ -7,6 +7,7 @@ use solana_program::{
     pubkey::Pubkey,
     rent::Rent,
     slot_hashes::SlotHashes,
+    slot_history::SlotHistory,
     sysvar::{
         instructions::{
             get_instruction_relative, load_current_index_checked,
@@ -74,6 +75,7 @@ fn process_sysvar_from_account(
     let last_restart_slot_account = next_account_info(accounts_iter)?;
     let ix_introspections_account = next_account_info(accounts_iter)?;
     let slot_hashes_account = next_account_info(accounts_iter)?;
+    let slot_history_account = next_account_info(accounts_iter)?;
 
     let clock = Clock::from_account_info(clock_account).unwrap();
     msg!("{:?}", clock);
@@ -103,6 +105,11 @@ fn process_sysvar_from_account(
     let slot_hashes = SlotHashes::from_account_info(slot_hashes_account);
     msg!("{:?}", slot_hashes);
     assert!(slot_hashes.is_err());
+
+    // This slot_history sysvar is too large to bincode::deserialize in-program
+    let slot_history = SlotHistory::from_account_info(slot_history_account);
+    msg!("{:?}", slot_history);
+    assert!(slot_history.is_err());
 
     // -----------------
     // Instruction Inspection

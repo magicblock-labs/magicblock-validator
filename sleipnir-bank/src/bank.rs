@@ -719,7 +719,10 @@ impl Bank {
         //          in solana the blockhash is set to the hash of the slot that is finalized
         self.update_slot_hashes(slot, current_hash);
 
-        // 10. Currently the memory size is increasing while our validator is running
+        // 10. Update slot history
+        self.update_slot_history(slot);
+
+        // 11. Currently the memory size is increasing while our validator is running
         //    see docs/memory-issue.md. Thus we help this a bit by cleaning up regularly
         //    At 50ms/slot we clean up about every 5 mins
         const CACHE_CLEAR_INTERVAL: u64 = 6000;
@@ -1172,6 +1175,19 @@ impl Bank {
         });
     }
 
+    fn update_slot_history(&self, slot: Slot) {
+        self.update_sysvar_account(&sysvar::slot_history::id(), |account| {
+            let mut slot_history = account
+                .as_ref()
+                .map(|account| from_account::<SlotHistory, _>(account).unwrap())
+                .unwrap_or_default();
+            slot_history.add(slot);
+            create_account(
+                &slot_history,
+                inherit_specially_retained_account_fields(account),
+            )
+        });
+    }
     fn update_slot_hashes(&self, prev_slot: Slot, prev_hash: Hash) {
         self.update_sysvar_account(&sysvar::slot_hashes::id(), |account| {
             let mut slot_hashes = account
@@ -2340,9 +2356,6 @@ impl Bank {
                 self.get_account_with_fixed_root(&slot_history_id);
             let slot_history = current_account
                 .as_ref()
-                // TODO(thlorenz): @@@ need to support slot history var
-                // if we decide not to do that then we could rip out the entire
-                // logic here and forget about proper_ancestors as well
                 .map(|account| from_account::<SlotHistory, _>(account).unwrap())
                 .unwrap_or_default();
             if slot_history.check(self.slot()) == Check::Found {
