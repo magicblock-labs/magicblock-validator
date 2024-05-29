@@ -3,19 +3,14 @@
 #![allow(unused_variables)]
 
 // NOTE: copied from runtime/src/bank.rs:252
-use std::sync::{atomic::AtomicU64, Arc, RwLock};
+use std::sync::{atomic::AtomicU64, Arc};
 
 use solana_accounts_db::accounts::Accounts;
-
-use crate::bank::Bank;
 
 #[derive(Debug)]
 pub struct BankRc {
     /// where all the Accounts are stored
     pub accounts: Arc<Accounts>,
-
-    /// Previous checkpoint of this bank
-    pub(crate) parent: RwLock<Option<Arc<Bank>>>,
 
     /// Current slot
     pub(crate) slot: Slot,
@@ -31,8 +26,6 @@ use solana_sdk::slot_history::Slot;
 impl AbiExample for BankRc {
     fn example() -> Self {
         BankRc {
-            // Set parent to None to cut the recursion into another Bank
-            parent: RwLock::new(None),
             // AbiExample for Accounts is specially implemented to contain a storage example
             accounts: AbiExample::example(),
             slot: AbiExample::example(),
@@ -45,7 +38,6 @@ impl BankRc {
     pub(crate) fn new(accounts: Accounts, slot: Slot) -> Self {
         Self {
             accounts: Arc::new(accounts),
-            parent: RwLock::new(None),
             slot,
             bank_id_generator: Arc::new(AtomicU64::new(0)),
         }
