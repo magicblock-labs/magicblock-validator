@@ -7,6 +7,12 @@ pub enum StorageLocation {
     Cached,
 }
 
+impl StorageLocation {
+    pub fn is_cached(&self) -> bool {
+        matches!(self, StorageLocation::Cached)
+    }
+}
+
 // -----------------
 // PackedOffsetAndFlags
 // -----------------

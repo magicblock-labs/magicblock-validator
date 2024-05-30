@@ -307,11 +307,7 @@ impl TransactionProcessingCallback for Bank {
         self.rc
             .accounts
             .accounts_db
-            .account_matches_owners(
-                &self.readlock_ancestors().unwrap(),
-                account,
-                owners,
-            )
+            .account_matches_owners(account, owners)
             .ok()
     }
 

@@ -14,6 +14,8 @@ use solana_sdk::{
     pubkey::Pubkey,
 };
 
+use crate::ZeroLamport;
+
 // -----------------
 // CachedAccount
 // -----------------
@@ -27,6 +29,12 @@ pub struct CachedAccountInner {
 impl CachedAccountInner {
     pub fn pubkey(&self) -> &Pubkey {
         &self.pubkey
+    }
+}
+
+impl ZeroLamport for CachedAccountInner {
+    fn is_zero_lamport(&self) -> bool {
+        self.account.lamports() == 0
     }
 }
 
@@ -211,11 +219,9 @@ impl AccountsCache {
         &self,
         pubkey: &Pubkey,
     ) -> Option<(Slot, CachedAccount)> {
-        if let Some(account) = self.slot_cache.get_cloned(pubkey) {
-            Some((self.current_slot(), account))
-        } else {
-            None
-        }
+        self.slot_cache
+            .get_cloned(pubkey)
+            .map(|account| (self.current_slot(), account))
     }
 
     pub fn contains_key(&self, pubkey: &Pubkey) -> bool {

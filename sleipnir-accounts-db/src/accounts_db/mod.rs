@@ -11,7 +11,7 @@ use solana_sdk::{
 
 use crate::{
     account_info::{AccountInfo, StorageLocation},
-    accounts_cache::AccountsCache,
+    accounts_cache::{AccountsCache, CachedAccount},
     accounts_update_notifier_interface::AccountsUpdateNotifier,
     errors::MatchAccountOwnerError,
     StorableAccounts, ZeroLamport,
@@ -271,13 +271,27 @@ impl AccountsDb {
     // index into the already provided [owners] array
     pub fn account_matches_owners(
         &self,
-        // ancestors: &Ancestors,
         account: &Pubkey,
         owners: &[Pubkey],
     ) -> Result<usize, MatchAccountOwnerError> {
         // 1. Check if the account is stored
-        let (slot, storage_location) = self.read_index_for_accessor(account);
-        todo!("after we got read_index_for_accessor_or_load_slow");
+        let (slot, storage_location, cached_account) = self
+            .read_index_for_accessor(account)
+            .ok_or(MatchAccountOwnerError::UnableToLoad)?;
+
+        debug_assert!(
+            storage_location.is_cached(),
+            "We only store in the cache"
+        );
+
+        if cached_account.is_zero_lamport() {
+            None
+        } else {
+            owners
+                .iter()
+                .position(|entry| cached_account.account.owner() == entry)
+        }
+        .ok_or(MatchAccountOwnerError::NoMatch)
     }
 
     // NOTE: the original implementation was called read_index_for_accessor_or_load_slow and did
@@ -285,19 +299,16 @@ impl AccountsDb {
     fn read_index_for_accessor(
         &self,
         pubkey: &Pubkey,
-    ) -> Option<(Slot, StorageLocation)> {
+    ) -> Option<(Slot, StorageLocation, CachedAccount)> {
         let (slot, cached_account) =
-            match self.accounts_cache.find_account_slot(pubkey) {
-                Some(slot) => slot,
-                None => return None,
-            };
+            self.accounts_cache.load_with_slot(pubkey)?;
 
         // If we add a storage location we need to obtain the AccountInfo
         // The original implementation get this from from the slot_list
         let storage_location = StorageLocation::Cached;
 
         // NOTE: left out the `load_slow` logic since we only store in the cache
-        Some((slot, storage_location))
+        Some((slot, storage_location, cached_account))
     }
 
     // -----------------
