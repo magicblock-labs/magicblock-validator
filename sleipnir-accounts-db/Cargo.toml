@@ -1,0 +1,14 @@
+[package]
+name = "sleipnir-accounts-db"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+dashmap = { workspace = true }
+log = { workspace = true }
+solana-metrics = { workspace = true }
+solana-sdk = { workspace = true }
