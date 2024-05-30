@@ -1,6 +1,9 @@
-use std::sync::{
-    atomic::{AtomicU64, Ordering},
-    Arc,
+use std::{
+    ops::Deref,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
 };
 
 use dashmap::DashMap;
@@ -32,7 +35,7 @@ impl CachedAccountInner {
 // -----------------
 pub type SlotCache = Arc<SlotCacheInner>;
 
-#[derive(Debug)]
+#[derive(Debug, Default)]
 pub struct SlotCacheInner {
     /// The underlying cache
     cache: DashMap<Pubkey, CachedAccount>,
@@ -46,16 +49,6 @@ pub struct SlotCacheInner {
 
     /// Size of accounts currently stored in the cache
     size: AtomicU64,
-    /// Size of accounts stored in the owning [AccountsCache] for all [SlotCache]s combined
-    total_size: Arc<AtomicU64>,
-}
-
-impl Drop for SlotCacheInner {
-    fn drop(&mut self) {
-        // broader cache no longer holds our size in memory
-        self.total_size
-            .fetch_sub(self.size.load(Ordering::Relaxed), Ordering::Relaxed);
-    }
 }
 
 impl SlotCacheInner {
@@ -109,18 +102,15 @@ impl SlotCacheInner {
             let grow = data_len.saturating_sub(old_len);
             if grow > 0 {
                 self.size.fetch_add(grow, Ordering::Relaxed);
-                self.total_size.fetch_add(grow, Ordering::Relaxed);
             } else {
                 let shrink = old_len.saturating_sub(data_len);
                 if shrink > 0 {
                     self.size.fetch_sub(shrink, Ordering::Relaxed);
-                    self.total_size.fetch_sub(shrink, Ordering::Relaxed);
                 }
             }
         } else {
             // If we insert a new entry then we add its size
             self.size.fetch_add(data_len, Ordering::Relaxed);
-            self.total_size.fetch_add(data_len, Ordering::Relaxed);
             self.unique_account_writes_size
                 .fetch_add(data_len, Ordering::Relaxed);
         }
@@ -138,16 +128,28 @@ impl SlotCacheInner {
         self.unique_account_writes_size.load(Ordering::Relaxed)
             + self.same_account_writes_size.load(Ordering::Relaxed)
     }
+
+    fn contains_key(&self, pubkey: &Pubkey) -> bool {
+        self.cache.contains_key(pubkey)
+    }
 }
 
 // -----------------
 // AccountsCache
 // -----------------
-/// Caches account states for a particular slot.
+/// Caches account states for the current slot.
 #[derive(Debug, Default)]
 pub struct AccountsCache {
-    cache: DashMap<Slot, SlotCache>,
-    total_size: Arc<AtomicU64>,
+    slot_cache: SlotCache,
+    current_slot: Slot,
+}
+
+impl Deref for AccountsCache {
+    type Target = SlotCache;
+
+    fn deref(&self) -> &Self::Target {
+        &self.slot_cache
+    }
 }
 
 impl AccountsCache {
@@ -158,12 +160,11 @@ impl AccountsCache {
             same_account_writes_size: AtomicU64::default(),
             unique_account_writes_size: AtomicU64::default(),
             size: AtomicU64::default(),
-            total_size: Arc::clone(&self.total_size),
         })
     }
 
     pub fn size(&self) -> u64 {
-        self.total_size.load(Ordering::Relaxed)
+        self.size.load(Ordering::Relaxed)
     }
 
     pub fn report_size(&self) {
@@ -180,15 +181,7 @@ impl AccountsCache {
     }
 
     fn unique_account_writes_size(&self) -> u64 {
-        self.cache
-            .iter()
-            .map(|item| {
-                let slot_cache = item.value();
-                slot_cache
-                    .unique_account_writes_size
-                    .load(Ordering::Relaxed)
-            })
-            .sum()
+        self.unique_account_writes_size.load(Ordering::Relaxed)
     }
 
     pub fn store(
@@ -197,62 +190,46 @@ impl AccountsCache {
         pubkey: &Pubkey,
         account: AccountSharedData,
     ) -> CachedAccount {
-        let slot_cache = self.slot_cache(slot).unwrap_or_else(|| {
-            // DashMap entry.or_insert() returns a RefMut, essentially a write lock,
-            // which is dropped after this block ends, minimizing time held by the lock.
-            // Hence we clone it out, (`SlotStores` is an Arc so is cheap to clone).
-            // However, we still want to persist the reference to the `SlotStores` behind
-            self.cache.entry(slot).or_insert(self.new_inner()).clone()
-        });
-
+        assert_eq!(
+            slot, self.current_slot,
+            "we only allow storing accounts for current slot"
+        );
+        let slot_cache = self.slot_cache;
         slot_cache.insert(pubkey, account)
     }
 
     pub fn load(&self, slot: Slot, pubkey: &Pubkey) -> Option<CachedAccount> {
-        self.slot_cache(slot)
-            .and_then(|slot_cache| slot_cache.get_cloned(pubkey))
+        assert_eq!(
+            slot, self.current_slot,
+            "we only allow loading accounts from current slot"
+        );
+        self.slot_cache.get_cloned(pubkey)
     }
 
-    pub fn remove_slot(&self, slot: Slot) -> Option<SlotCache> {
-        self.cache.remove(&slot).map(|(_, slot_cache)| slot_cache)
-    }
-
-    pub fn slot_cache(&self, slot: Slot) -> Option<SlotCache> {
-        self.cache.get(&slot).map(|result| result.value().clone())
-    }
-
-    pub fn contains(&self, slot: Slot) -> bool {
-        self.cache.contains_key(&slot)
-    }
-
-    pub fn num_slots(&self) -> usize {
-        self.cache.len()
-    }
-
-    pub fn find_account(
+    pub fn load_with_slot(
         &self,
         pubkey: &Pubkey,
     ) -> Option<(Slot, CachedAccount)> {
-        // We should hold a max of two slot caches only so this is not too expensive
-        // TODO(thlorenz): @@@ we need to go by largest slot here to find the latest account state
-        for (slot, slot_cache) in self.cache {
-            if let Some(account) = slot_cache.get_cloned(pubkey) {
-                return Some((slot, account));
-            }
+        if let Some(account) = self.slot_cache.get_cloned(pubkey) {
+            Some((self.current_slot, account))
+        } else {
+            None
         }
-        None
     }
 
-    /// Returns the slot at which the account was found.
-    /// TODO: @@@ needs to be the highest slot
-    pub fn find_account_slot(&self, pubkey: &Pubkey) -> Option<Slot> {
-        // We should hold a max of two slot caches only so this is not too expensive
-        // TODO(thlorenz): @@@ we need to go by largest slot here to find the latest account state
-        for (slot, slot_cache) in self.cache {
-            if slot_cache.get_cloned(pubkey).is_some() {
-                return Some(slot);
-            }
-        }
-        None
+    pub fn contains_key(&self, pubkey: &Pubkey) -> bool {
+        self.slot_cache.contains_key(pubkey)
+    }
+
+    pub fn slot_cache(&self) -> SlotCache {
+        self.slot_cache.clone()
+    }
+
+    pub fn num_slots(&self) -> usize {
+        1
+    }
+
+    pub fn current_slot(&self) -> Slot {
+        self.current_slot
     }
 }
