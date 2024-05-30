@@ -10,5 +10,8 @@ edition.workspace = true
 [dependencies]
 dashmap = { workspace = true }
 log = { workspace = true }
+modular-bitfield = { workspace = true }
+solana-frozen-abi-macro = { workspace = true }
+solana-measure = { workspace = true }
 solana-metrics = { workspace = true }
 solana-sdk = { workspace = true }

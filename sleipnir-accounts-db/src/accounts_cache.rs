@@ -91,6 +91,10 @@ impl SlotCacheInner {
         account: AccountSharedData,
     ) -> CachedAccount {
         let data_len = account.data().len() as u64;
+        // NOTE: this Arc is only needed in order to return the `CachedAccount` so that
+        // its hash can be computed in the background, see: ./accounts_db.rs write_accounts_to_cache
+        // If we end up never doing that we can optimize this code a bit even though
+        // cloning an Arc is cheap.
         let item = Arc::new(CachedAccountInner {
             account,
             pubkey: *pubkey,
@@ -193,16 +197,13 @@ impl AccountsCache {
         pubkey: &Pubkey,
         account: AccountSharedData,
     ) -> CachedAccount {
-        let slot_cache = self.slot_cache(slot).unwrap_or_else(||
+        let slot_cache = self.slot_cache(slot).unwrap_or_else(|| {
             // DashMap entry.or_insert() returns a RefMut, essentially a write lock,
             // which is dropped after this block ends, minimizing time held by the lock.
             // Hence we clone it out, (`SlotStores` is an Arc so is cheap to clone).
             // However, we still want to persist the reference to the `SlotStores` behind
-            self
-                .cache
-                .entry(slot)
-                .or_insert(self.new_inner())
-                .clone());
+            self.cache.entry(slot).or_insert(self.new_inner()).clone()
+        });
 
         slot_cache.insert(pubkey, account)
     }
