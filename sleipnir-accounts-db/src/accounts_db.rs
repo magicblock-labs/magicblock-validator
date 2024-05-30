@@ -4,6 +4,7 @@ use solana_measure::measure::Measure;
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
     clock::Slot,
+    genesis_config::ClusterType,
     pubkey::Pubkey,
     transaction::SanitizedTransaction,
 };
@@ -12,6 +13,7 @@ use crate::{
     account_info::{AccountInfo, StorageLocation},
     accounts_cache::AccountsCache,
     accounts_update_notifier_interface::AccountsUpdateNotifier,
+    errors::MatchAccountOwnerError,
     StorableAccounts, ZeroLamport,
 };
 
@@ -61,13 +63,17 @@ pub struct AccountsDb {
     /// Write version used to notify accounts in order to distinguish between
     /// multiple updates to the same account in the same slot
     pub write_version: AtomicU64,
+
+    pub cluster_type: Option<ClusterType>,
 }
 
 impl AccountsDb {
     pub fn new_with_config(
+        cluster_type: &ClusterType,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
     ) -> Self {
         Self {
+            cluster_type: Some(*cluster_type),
             accounts_cache: AccountsCache::default(),
             stats: AccountsStats::default(),
             accounts_update_notifier,
@@ -75,6 +81,9 @@ impl AccountsDb {
         }
     }
 
+    // -----------------
+    // Store Operations
+    // -----------------
     pub fn store_cached<'a, T: ReadableAccount + Sync + ZeroLamport + 'a>(
         &self,
         accounts: impl StorableAccounts<'a, T>,
@@ -247,6 +256,24 @@ impl AccountsDb {
             .fetch_add(count as StoredMetaWriteVersion, Ordering::AcqRel)
     }
 
+    // -----------------
+    // Query Operations
+    // -----------------
+    /// Return Ok(index_of_matching_owner) if the account owner at `offset` is one of the pubkeys in `owners`.
+    /// Return Err(MatchAccountOwnerError::NoMatch) if the account has 0 lamports or the owner is not one of
+    /// the pubkeys in `owners`.
+    /// Return Err(MatchAccountOwnerError::UnableToLoad) if the account could not be accessed.
+    pub fn account_matches_owners(
+        &self,
+        // ancestors: &Ancestors,
+        account: &Pubkey,
+        owners: &[Pubkey],
+    ) -> Result<usize, MatchAccountOwnerError> {
+    }
+
+    // -----------------
+    // Geyser
+    // -----------------
     pub fn notify_account_at_accounts_update<P>(
         &self,
         slot: Slot,

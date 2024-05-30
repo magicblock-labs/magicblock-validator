@@ -5,7 +5,7 @@
 // NOTE: copied from runtime/src/bank.rs:252
 use std::sync::{atomic::AtomicU64, Arc};
 
-use solana_accounts_db::accounts::Accounts;
+use sleipnir_accounts_db::accounts::Accounts;
 
 #[derive(Debug)]
 pub struct BankRc {

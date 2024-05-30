@@ -92,7 +92,7 @@ impl Bank {
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
         slot_status_notifier: Option<SlotStatusNotifierArc>,
     ) -> Self {
-        let bank = Self::new_with_paths(
+        let bank = Self::new_with_paths_old(
             genesis_config,
             runtime_config,
             paths,

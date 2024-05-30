@@ -30,7 +30,7 @@ pub fn bank_for_tests_with_paths(
     let account_indexes = AccountSecondaryIndexes::default();
 
     let paths = paths.into_iter().map(PathBuf::from).collect();
-    let bank = Bank::new_with_paths(
+    let bank = Bank::new_with_paths_old(
         genesis_config,
         runtime_config,
         paths,

@@ -5,7 +5,6 @@
 use std::{
     borrow::Cow,
     collections::HashSet,
-    path::PathBuf,
     slice,
     sync::{
         atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering},
@@ -14,16 +13,21 @@ use std::{
 };
 
 use log::{debug, info, trace};
-use solana_accounts_db::{
-    accounts::{Accounts, PubkeyAccountSlot, TransactionLoadResult},
-    accounts_db::{AccountShrinkThreshold, AccountsDb, AccountsDbConfig},
-    accounts_index::{
-        AccountSecondaryIndexes, IndexKey, ScanConfig, ScanResult, ZeroLamport,
-    },
+use sleipnir_accounts_db::{
+    accounts::Accounts, accounts_db::AccountsDb,
     accounts_update_notifier_interface::AccountsUpdateNotifier,
+    StorableAccounts, ZeroLamport,
+};
+use solana_accounts_db::{
+    // accounts::{Accounts, PubkeyAccountSlot, TransactionLoadResult},
+    // accounts_db::{AccountShrinkThreshold, AccountsDb, AccountsDbConfig},
+    // accounts_index::{
+    //     AccountSecondaryIndexes, IndexKey, ScanConfig, ScanResult, ZeroLamport,
+    // },
+    // accounts_update_notifier_interface::AccountsUpdateNotifier,
+    accounts::TransactionLoadResult,
     ancestors::Ancestors,
     blockhash_queue::BlockhashQueue,
-    storable_accounts::StorableAccounts,
     transaction_results::{
         TransactionExecutionDetails, TransactionExecutionResult,
         TransactionResults,
@@ -379,30 +383,19 @@ impl TransactionExecutionRecordingOpts {
 }
 
 impl Bank {
-    #[allow(clippy::too_many_arguments)]
-    pub fn new_with_paths(
+    pub fn new(
         genesis_config: &GenesisConfig,
         runtime_config: Arc<RuntimeConfig>,
-        paths: Vec<PathBuf>,
         debug_keys: Option<Arc<HashSet<Pubkey>>>,
         additional_builtins: Option<&[BuiltinPrototype]>,
-        account_indexes: AccountSecondaryIndexes,
-        shrink_ratio: AccountShrinkThreshold,
         debug_do_not_add_builtins: bool,
-        accounts_db_config: Option<AccountsDbConfig>,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
         slot_status_notifier: Option<SlotStatusNotifierArc>,
         identity_id: Pubkey,
-        exit: Arc<AtomicBool>,
     ) -> Self {
         let accounts_db = AccountsDb::new_with_config(
-            paths,
             &genesis_config.cluster_type,
-            account_indexes,
-            shrink_ratio,
-            accounts_db_config,
             accounts_update_notifier,
-            exit,
         );
 
         let accounts = Accounts::new(Arc::new(accounts_db));
@@ -1010,8 +1003,10 @@ impl Bank {
     pub fn get_program_accounts(
         &self,
         program_id: &Pubkey,
-        config: &ScanConfig,
-    ) -> ScanResult<Vec<TransactionAccount>> {
+        config: &solana_accounts_db::accounts_index::ScanConfig,
+    ) -> solana_accounts_db::accounts_index::ScanResult<Vec<TransactionAccount>>
+    {
+        // TODO(thlorenz): @@@ add to our accounts_db
         self.rc.accounts.load_by_program(
             &self.ancestors.read().unwrap(),
             self.bank_id,
@@ -1024,8 +1019,10 @@ impl Bank {
         &self,
         program_id: &Pubkey,
         filter: F,
-        config: &ScanConfig,
-    ) -> ScanResult<Vec<TransactionAccount>> {
+        config: &solana_accounts_db::accounts_index::ScanConfig,
+    ) -> solana_accounts_db::accounts_index::ScanResult<Vec<TransactionAccount>>
+    {
+        // TODO(thlorenz): @@@ add to our accounts_db
         self.rc.accounts.load_by_program_with_filter(
             &self.ancestors.read().unwrap(),
             self.bank_id,
@@ -1037,11 +1034,13 @@ impl Bank {
 
     pub fn get_filtered_indexed_accounts<F: Fn(&AccountSharedData) -> bool>(
         &self,
-        index_key: &IndexKey,
+        index_key: &solana_accounts_db::accounts_index::IndexKey,
         filter: F,
-        config: &ScanConfig,
+        config: &solana_accounts_db::accounts_index::ScanConfig,
         byte_limit_for_scan: Option<usize>,
-    ) -> ScanResult<Vec<TransactionAccount>> {
+    ) -> solana_accounts_db::accounts_index::ScanResult<Vec<TransactionAccount>>
+    {
+        // TODO(thlorenz): @@@ add to our accounts_db
         self.rc.accounts.load_by_index_key_with_filter(
             &self.ancestors.read().unwrap(),
             self.bank_id,
@@ -1053,21 +1052,31 @@ impl Bank {
     }
 
     pub fn account_indexes_include_key(&self, key: &Pubkey) -> bool {
+        // TODO(thlorenz): @@@ add to our accounts_db
         self.rc.accounts.account_indexes_include_key(key)
     }
 
     /// Returns all the accounts this bank can load
-    pub fn get_all_accounts(&self) -> ScanResult<Vec<PubkeyAccountSlot>> {
+    pub fn get_all_accounts(
+        &self,
+    ) -> solana_accounts_db::accounts_index::ScanResult<
+        Vec<solana_accounts_db::accounts::PubkeyAccountSlot>,
+    > {
+        // TODO(thlorenz): @@@ add to our accounts_db
         self.rc
             .accounts
             .load_all(&self.ancestors.read().unwrap(), self.bank_id)
     }
 
     // Scans all the accounts this bank can load, applying `scan_func`
-    pub fn scan_all_accounts<F>(&self, scan_func: F) -> ScanResult<()>
+    pub fn scan_all_accounts<F>(
+        &self,
+        scan_func: F,
+    ) -> solana_accounts_db::accounts_index::ScanResult<()>
     where
         F: FnMut(Option<(&Pubkey, AccountSharedData, Slot)>),
     {
+        // TODO(thlorenz): @@@ add to our accounts_db
         self.rc.accounts.scan_all(
             &self.ancestors.read().unwrap(),
             self.bank_id,
@@ -1076,6 +1085,7 @@ impl Bank {
     }
 
     pub fn byte_limit_for_scans(&self) -> Option<usize> {
+        // TODO(thlorenz): @@@ add to our accounts_db
         self.rc
             .accounts
             .accounts_db
