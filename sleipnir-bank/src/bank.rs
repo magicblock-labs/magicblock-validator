@@ -722,17 +722,6 @@ impl Bank {
         // 10. Update slot history
         self.update_slot_history(slot);
 
-        // 11. Currently the memory size is increasing while our validator is running
-        //    see docs/memory-issue.md. Thus we help this a bit by cleaning up regularly
-        //    At 50ms/slot we clean up about every 5 mins
-        const CACHE_CLEAR_INTERVAL: u64 = 6000;
-        if next_slot % CACHE_CLEAR_INTERVAL == 0 {
-            self.status_cache
-                .write()
-                .unwrap()
-                .clear_lte(next_slot - CACHE_CLEAR_INTERVAL);
-        }
-
         next_slot
     }
 
