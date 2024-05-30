@@ -227,6 +227,7 @@ fn init_slot_ticker(
     tick_duration: Duration,
 ) {
     let bank = bank.clone();
+    let log = tick_duration >= Duration::from_secs(5);
     std::thread::spawn(move || loop {
         std::thread::sleep(tick_duration);
         let slot = bank.advance_slot();
@@ -235,6 +236,9 @@ fn init_slot_ticker(
             .map_err(|e| {
                 error!("Failed to cache block time: {:?}", e);
             });
+        if log {
+            info!("Advanced to slot {}", slot);
+        }
     });
 }
 
