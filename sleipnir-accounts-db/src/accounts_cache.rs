@@ -141,7 +141,7 @@ impl SlotCacheInner {
 #[derive(Debug, Default)]
 pub struct AccountsCache {
     slot_cache: SlotCache,
-    current_slot: Slot,
+    current_slot: AtomicU64,
 }
 
 impl Deref for AccountsCache {
@@ -191,16 +191,17 @@ impl AccountsCache {
         account: AccountSharedData,
     ) -> CachedAccount {
         assert_eq!(
-            slot, self.current_slot,
+            slot,
+            self.current_slot(),
             "we only allow storing accounts for current slot"
         );
-        let slot_cache = self.slot_cache;
-        slot_cache.insert(pubkey, account)
+        self.slot_cache.insert(pubkey, account)
     }
 
     pub fn load(&self, slot: Slot, pubkey: &Pubkey) -> Option<CachedAccount> {
         assert_eq!(
-            slot, self.current_slot,
+            slot,
+            self.current_slot(),
             "we only allow loading accounts from current slot"
         );
         self.slot_cache.get_cloned(pubkey)
@@ -211,7 +212,7 @@ impl AccountsCache {
         pubkey: &Pubkey,
     ) -> Option<(Slot, CachedAccount)> {
         if let Some(account) = self.slot_cache.get_cloned(pubkey) {
-            Some((self.current_slot, account))
+            Some((self.current_slot(), account))
         } else {
             None
         }
@@ -230,6 +231,10 @@ impl AccountsCache {
     }
 
     pub fn current_slot(&self) -> Slot {
-        self.current_slot
+        self.current_slot.load(Ordering::Relaxed)
+    }
+
+    pub fn set_current_slot(&self, slot: Slot) {
+        self.current_slot.store(slot, Ordering::Relaxed);
     }
 }
