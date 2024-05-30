@@ -17,6 +17,9 @@ use crate::{
     StorableAccounts, ZeroLamport,
 };
 
+mod loaded_account_accessor;
+pub use loaded_account_accessor::LoadedAccountAccessor;
+
 pub type StoredMetaWriteVersion = u64;
 
 // -----------------
@@ -263,12 +266,38 @@ impl AccountsDb {
     /// Return Err(MatchAccountOwnerError::NoMatch) if the account has 0 lamports or the owner is not one of
     /// the pubkeys in `owners`.
     /// Return Err(MatchAccountOwnerError::UnableToLoad) if the account could not be accessed.
+    // NOTE: this is called from sleipnir-bank/src/bank.rs fn account_matches_owners and
+    // it is confusing why the original implementation is so complex if we just return an
+    // index into the already provided [owners] array
     pub fn account_matches_owners(
         &self,
         // ancestors: &Ancestors,
         account: &Pubkey,
         owners: &[Pubkey],
     ) -> Result<usize, MatchAccountOwnerError> {
+        // 1. Check if the account is stored
+        let (slot, storage_location) = self.read_index_for_accessor(account);
+        todo!("after we got read_index_for_accessor_or_load_slow");
+    }
+
+    // NOTE: the original implementation was called read_index_for_accessor_or_load_slow and did
+    // optionally return LoadedAccountAccessor.
+    fn read_index_for_accessor(
+        &self,
+        pubkey: &Pubkey,
+    ) -> Option<(Slot, StorageLocation)> {
+        let (slot, cached_account) =
+            match self.accounts_cache.find_account_slot(pubkey) {
+                Some(slot) => slot,
+                None => return None,
+            };
+
+        // If we add a storage location we need to obtain the AccountInfo
+        // The original implementation get this from from the slot_list
+        let storage_location = StorageLocation::Cached;
+
+        // NOTE: left out the `load_slow` logic since we only store in the cache
+        Some((slot, storage_location))
     }
 
     // -----------------

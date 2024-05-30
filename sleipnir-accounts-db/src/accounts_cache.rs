@@ -228,4 +228,31 @@ impl AccountsCache {
     pub fn num_slots(&self) -> usize {
         self.cache.len()
     }
+
+    pub fn find_account(
+        &self,
+        pubkey: &Pubkey,
+    ) -> Option<(Slot, CachedAccount)> {
+        // We should hold a max of two slot caches only so this is not too expensive
+        // TODO(thlorenz): @@@ we need to go by largest slot here to find the latest account state
+        for (slot, slot_cache) in self.cache {
+            if let Some(account) = slot_cache.get_cloned(pubkey) {
+                return Some((slot, account));
+            }
+        }
+        None
+    }
+
+    /// Returns the slot at which the account was found.
+    /// TODO: @@@ needs to be the highest slot
+    pub fn find_account_slot(&self, pubkey: &Pubkey) -> Option<Slot> {
+        // We should hold a max of two slot caches only so this is not too expensive
+        // TODO(thlorenz): @@@ we need to go by largest slot here to find the latest account state
+        for (slot, slot_cache) in self.cache {
+            if slot_cache.get_cloned(pubkey).is_some() {
+                return Some(slot);
+            }
+        }
+        None
+    }
 }

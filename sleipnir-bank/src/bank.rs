@@ -297,6 +297,8 @@ pub struct Bank {
 // TransactionProcessingCallback
 // -----------------
 impl TransactionProcessingCallback for Bank {
+    // NOTE: main use is in solana/svm/src/transaction_processor.rs filter_executable_program_accounts
+    // where it then uses the returned index to index into the [owners] array
     fn account_matches_owners(
         &self,
         account: &Pubkey,
