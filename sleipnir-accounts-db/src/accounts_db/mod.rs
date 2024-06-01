@@ -104,15 +104,26 @@ pub struct AccountsDb {
 }
 
 impl AccountsDb {
+    pub fn default_for_tests() -> Self {
+        Self::new(None, None)
+    }
+
     pub fn new_with_config(
         cluster_type: &ClusterType,
+        accounts_update_notifier: Option<AccountsUpdateNotifier>,
+    ) -> Self {
+        Self::new(Some(*cluster_type), accounts_update_notifier)
+    }
+
+    pub fn new(
+        cluster_type: Option<ClusterType>,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
     ) -> Self {
         let num_threads = get_thread_count();
         // rayon needs a lot of stack
         const ACCOUNTS_STACK_SIZE: usize = 8 * 1024 * 1024;
         Self {
-            cluster_type: Some(*cluster_type),
+            cluster_type,
             accounts_cache: AccountsCache::default(),
             stats: AccountsStats::default(),
             accounts_update_notifier,

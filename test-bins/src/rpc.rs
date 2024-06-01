@@ -27,7 +27,7 @@ use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
 use tempfile::TempDir;
 use test_tools::{
     account::fund_account,
-    bank::bank_for_tests_with_paths,
+    bank::bank_for_tests_with_identity,
     init_logger,
     programs::{load_programs_from_config, load_programs_from_string_config},
 };
@@ -93,12 +93,11 @@ async fn main() {
     transaction_listener.run(true);
 
     let bank = {
-        let bank = bank_for_tests_with_paths(
+        let bank = bank_for_tests_with_identity(
             &genesis_config,
             geyser_service.get_accounts_update_notifier(),
             geyser_service.get_slot_status_notifier(),
             validator_pubkey,
-            vec!["/tmp/sleipnir-rpc-bin"],
         );
         Arc::new(bank)
     };

@@ -91,14 +91,11 @@ impl Consumer {
                 &feature_set::include_loaded_accounts_data_size_in_fee_calculation::id(),
             ),
         );
-        let (mut fee_payer_account, _slot) = bank
+        let mut fee_payer_account = bank
             .rc
             .accounts
             .accounts_db
-            .load_with_fixed_root(
-                &bank.readlock_ancestors().unwrap(),
-                fee_payer,
-            )
+            .load(fee_payer)
             .ok_or(TransactionError::AccountNotFound)?;
 
         validate_fee_payer(

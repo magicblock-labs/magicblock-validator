@@ -16,7 +16,7 @@ use solana_rpc_client_api::{
     filter::{Memcmp, MemcmpEncodedBytes, RpcFilterType},
 };
 use solana_sdk::{
-    account::{AccountSharedData, ReadableAccount},
+    account::AccountSharedData,
     pubkey::{Pubkey, PUBKEY_BYTES},
 };
 use spl_token_2022::{

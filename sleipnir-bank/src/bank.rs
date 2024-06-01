@@ -377,6 +377,7 @@ impl TransactionExecutionRecordingOpts {
 }
 
 impl Bank {
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         genesis_config: &GenesisConfig,
         runtime_config: Arc<RuntimeConfig>,
