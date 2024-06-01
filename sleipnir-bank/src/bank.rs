@@ -452,7 +452,7 @@ impl Bank {
         };
 
         let mut bank = Self {
-            rc: BankRc::new(accounts, Slot::default()),
+            rc: BankRc::new(accounts),
             slot: AtomicU64::default(),
             bank_id: BankId::default(),
             epoch: Epoch::default(),
@@ -656,6 +656,7 @@ impl Bank {
         let slot = self.slot();
         let next_slot = slot + 1;
         self.set_slot(next_slot);
+        self.rc.accounts.set_slot(next_slot);
 
         // 2. Update transaction processor with new slot
         self.transaction_processor

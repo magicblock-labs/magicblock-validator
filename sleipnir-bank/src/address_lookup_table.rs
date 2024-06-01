@@ -1,6 +1,6 @@
 // NOTE: copied from  runtime/src/bank/address_lookup_table.rs
 use solana_sdk::{
-    // address_lookup_table::error::AddressLookupError,
+    address_lookup_table::error::AddressLookupError,
     message::{
         v0::{LoadedAddresses, MessageAddressTableLookup},
         AddressLoaderError,
@@ -25,13 +25,9 @@ impl AddressLoader for &Bank {
             .get_slot_hashes()
             .map_err(|_| AddressLoaderError::SlotHashesSysvarNotFound)?;
 
-        Ok(LoadedAddresses::default())
-
-        /*
         Ok(address_table_lookups
             .iter()
             .map(|address_table_lookup| {
-                // TODO(thlorenz): @@@ add to our accounts_db
                 self.rc.accounts.load_lookup_table_addresses(
                     &self.readlock_ancestors().unwrap(),
                     address_table_lookup,
@@ -39,6 +35,5 @@ impl AddressLoader for &Bank {
                 )
             })
             .collect::<Result<_, AddressLookupError>>()?)
-        */
     }
 }

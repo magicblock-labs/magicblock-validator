@@ -18,6 +18,9 @@ pub mod verify_accounts_hash_in_background;
 
 // We re-export solana_accounts_db traits until all crates use our replacement
 // of the accounts-db
+pub mod ancestors {
+    pub use solana_accounts_db::ancestors::*;
+}
 pub mod accounts_index {
     pub use solana_accounts_db::accounts_index::{IsCached, ZeroLamport};
 }

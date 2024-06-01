@@ -1,10 +1,16 @@
 use crate::accounts_index::ZeroLamport;
+use crate::ancestors::Ancestors;
 use crate::storable_accounts::StorableAccounts;
 use crate::transaction_results::TransactionExecutionResult;
 use crate::{account_locks::AccountLocks, accounts_db::AccountsDb};
 use log::debug;
 use solana_frozen_abi_macro::AbiExample;
 use solana_sdk::account_utils::StateMut;
+use solana_sdk::address_lookup_table;
+use solana_sdk::address_lookup_table::error::AddressLookupError;
+use solana_sdk::address_lookup_table::state::AddressLookupTable;
+use solana_sdk::message::v0::{LoadedAddresses, MessageAddressTableLookup};
+use solana_sdk::slot_hashes::SlotHashes;
 use solana_sdk::transaction::{
     Result, SanitizedTransaction, TransactionAccountLocks, TransactionError,
 };
@@ -38,6 +44,10 @@ impl Accounts {
             accounts_db,
             account_locks: Mutex::<AccountLocks>::default(),
         }
+    }
+
+    pub fn set_slot(&self, slot: Slot) {
+        self.accounts_db.set_slot(slot);
     }
 
     // -----------------
@@ -201,6 +211,41 @@ impl Accounts {
         filter: F,
     ) -> bool {
         !account.is_zero_lamport() && filter(&account)
+    }
+
+    pub fn load_lookup_table_addresses(
+        &self,
+        ancestors: &Ancestors,
+        address_table_lookup: &MessageAddressTableLookup,
+        slot_hashes: &SlotHashes,
+    ) -> std::result::Result<LoadedAddresses, AddressLookupError> {
+        let table_account = self
+            .accounts_db
+            .load(&address_table_lookup.account_key)
+            .ok_or(AddressLookupError::LookupTableAccountNotFound)?;
+
+        if table_account.owner() == &address_lookup_table::program::id() {
+            let current_slot = ancestors.max_slot();
+            let lookup_table = AddressLookupTable::deserialize(
+                table_account.data(),
+            )
+            .map_err(|_ix_err| AddressLookupError::InvalidAccountData)?;
+
+            Ok(LoadedAddresses {
+                writable: lookup_table.lookup(
+                    current_slot,
+                    &address_table_lookup.writable_indexes,
+                    slot_hashes,
+                )?,
+                readonly: lookup_table.lookup(
+                    current_slot,
+                    &address_table_lookup.readonly_indexes,
+                    slot_hashes,
+                )?,
+            })
+        } else {
+            Err(AddressLookupError::InvalidAccountOwner)
+        }
     }
 
     // -----------------

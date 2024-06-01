@@ -201,15 +201,9 @@ impl AccountsCache {
 
     pub fn store(
         &self,
-        slot: Slot,
         pubkey: &Pubkey,
         account: AccountSharedData,
     ) -> CachedAccount {
-        assert_eq!(
-            slot,
-            self.current_slot(),
-            "we only allow storing accounts for current slot"
-        );
         self.slot_cache.insert(pubkey, account)
     }
 

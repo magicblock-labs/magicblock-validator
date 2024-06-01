@@ -139,6 +139,10 @@ impl AccountsDb {
         }
     }
 
+    pub fn set_slot(&self, slot: Slot) {
+        self.accounts_cache.set_current_slot(slot);
+    }
+
     // -----------------
     // Store Operations
     // -----------------
@@ -294,11 +298,8 @@ impl AccountsDb {
                     write_version_producer,
                 );
 
-                self.accounts_cache.store(
-                    slot,
-                    accounts_and_meta_to_store.pubkey(i),
-                    account,
-                );
+                self.accounts_cache
+                    .store(accounts_and_meta_to_store.pubkey(i), account);
                 // NOTE: not sending hash request to sender_bg_hasher
                 account_info
             })
