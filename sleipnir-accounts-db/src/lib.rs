@@ -26,3 +26,6 @@ pub mod storable_accounts {
 pub mod account_storage {
     pub use solana_accounts_db::account_storage::*;
 }
+pub mod transaction_results {
+    pub use solana_accounts_db::transaction_results::*;
+}
