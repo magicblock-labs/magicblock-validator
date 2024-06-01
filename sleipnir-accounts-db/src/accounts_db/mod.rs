@@ -25,6 +25,7 @@ use crate::{
     accounts_update_notifier_interface::AccountsUpdateNotifier,
     errors::MatchAccountOwnerError,
     storable_accounts::StorableAccounts,
+    verify_accounts_hash_in_background::VerifyAccountsHashInBackground,
 };
 
 mod consts;
@@ -98,6 +99,8 @@ pub struct AccountsDb {
 
     /// Thread pool used for par_iter
     pub thread_pool: ThreadPool,
+
+    pub verify_accounts_hash_in_bg: VerifyAccountsHashInBackground,
 }
 
 impl AccountsDb {
@@ -120,6 +123,8 @@ impl AccountsDb {
                 .stack_size(ACCOUNTS_STACK_SIZE)
                 .build()
                 .unwrap(),
+            verify_accounts_hash_in_bg: VerifyAccountsHashInBackground::default(
+            ),
         }
     }
 

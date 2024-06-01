@@ -8,6 +8,7 @@ pub mod accounts_cache;
 pub mod accounts_db;
 pub mod accounts_update_notifier_interface;
 pub mod errors;
+pub mod verify_accounts_hash_in_background;
 
 // mod traits;
 // pub use traits::*;
