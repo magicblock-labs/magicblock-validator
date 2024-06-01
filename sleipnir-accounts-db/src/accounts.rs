@@ -6,6 +6,7 @@ use solana_frozen_abi_macro::AbiExample;
 use solana_sdk::transaction::{
     Result, SanitizedTransaction, TransactionAccountLocks, TransactionError,
 };
+use solana_sdk::transaction_context::TransactionAccount;
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
     clock::Slot,
@@ -48,6 +49,48 @@ impl Accounts {
         pubkey: &Pubkey,
     ) -> Option<(AccountSharedData, Slot)> {
         self.accounts_db.load_with_slot(pubkey)
+    }
+
+    pub fn load_by_program(
+        &self,
+        program_id: &Pubkey,
+        config: &solana_accounts_db::accounts_index::ScanConfig,
+    ) -> Vec<TransactionAccount> {
+        self.accounts_db.scan_accounts(
+            |pubkey, account| {
+                Self::load_while_filtering(pubkey, account, |account| {
+                    account.owner() == program_id
+                })
+            },
+            config,
+        )
+    }
+
+    pub fn load_by_program_with_filter<F>(
+        &self,
+        program_id: &Pubkey,
+        filter: F,
+        config: &solana_accounts_db::accounts_index::ScanConfig,
+    ) -> Vec<TransactionAccount>
+    where
+        F: Fn(&AccountSharedData) -> bool + Send + Sync,
+    {
+        self.accounts_db.scan_accounts(
+            |pubkey, account| {
+                Self::load_while_filtering(pubkey, account, |account| {
+                    account.owner() == program_id && filter(account)
+                })
+            },
+            config,
+        )
+    }
+
+    fn load_while_filtering<F: Fn(&AccountSharedData) -> bool>(
+        pubkey: &Pubkey,
+        account: AccountSharedData,
+        filter: F,
+    ) -> bool {
+        !account.is_zero_lamport() && filter(&account)
     }
 
     // -----------------

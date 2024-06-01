@@ -138,7 +138,8 @@ pub type CachedAccount = Arc<CachedAccountInner>;
 pub struct CachedAccountInner {
     pub account: AccountSharedData,
     hash: SeqLock<Option<AccountHash>>,
-    pubkey: Pubkey,
+    // NOTE: @@@ accounts-db made this public to interact with sleipnir-accounts-db
+    pub pubkey: Pubkey,
 }
 
 impl CachedAccountInner {

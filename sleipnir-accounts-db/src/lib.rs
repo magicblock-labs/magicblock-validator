@@ -23,3 +23,6 @@ pub mod accounts_index {
 pub mod storable_accounts {
     pub use solana_accounts_db::storable_accounts::StorableAccounts;
 }
+pub mod account_storage {
+    pub use solana_accounts_db::account_storage::*;
+}

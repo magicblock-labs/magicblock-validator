@@ -998,34 +998,25 @@ impl Bank {
         &self,
         program_id: &Pubkey,
         config: &solana_accounts_db::accounts_index::ScanConfig,
-    ) -> solana_accounts_db::accounts_index::ScanResult<Vec<TransactionAccount>>
-    {
-        // TODO(thlorenz): @@@ add to our accounts_db
-        self.rc.accounts.load_by_program(
-            &self.ancestors.read().unwrap(),
-            self.bank_id,
-            program_id,
-            config,
-        )
+    ) -> Vec<TransactionAccount> {
+        self.rc.accounts.load_by_program(program_id, config)
     }
 
-    pub fn get_filtered_program_accounts<F: Fn(&AccountSharedData) -> bool>(
+    pub fn get_filtered_program_accounts<F>(
         &self,
         program_id: &Pubkey,
         filter: F,
         config: &solana_accounts_db::accounts_index::ScanConfig,
-    ) -> solana_accounts_db::accounts_index::ScanResult<Vec<TransactionAccount>>
+    ) -> Vec<TransactionAccount>
+    where
+        F: Fn(&AccountSharedData) -> bool + Send + Sync,
     {
-        // TODO(thlorenz): @@@ add to our accounts_db
-        self.rc.accounts.load_by_program_with_filter(
-            &self.ancestors.read().unwrap(),
-            self.bank_id,
-            program_id,
-            filter,
-            config,
-        )
+        self.rc
+            .accounts
+            .load_by_program_with_filter(program_id, filter, config)
     }
 
+    /* TODO: @@@ accounts db may not need indexed access at all
     pub fn get_filtered_indexed_accounts<F: Fn(&AccountSharedData) -> bool>(
         &self,
         index_key: &solana_accounts_db::accounts_index::IndexKey,
@@ -1049,7 +1040,9 @@ impl Bank {
         // TODO(thlorenz): @@@ add to our accounts_db
         self.rc.accounts.account_indexes_include_key(key)
     }
+    */
 
+    /* TODO: @@@ accounts db I cannot see any usage of the below two
     /// Returns all the accounts this bank can load
     pub fn get_all_accounts(
         &self,
@@ -1077,14 +1070,14 @@ impl Bank {
             scan_func,
         )
     }
+    */
 
     pub fn byte_limit_for_scans(&self) -> Option<usize> {
-        // TODO(thlorenz): @@@ add to our accounts_db
-        self.rc
-            .accounts
-            .accounts_db
-            .accounts_index
-            .scan_results_limit_bytes
+        // TODO: @@@ accounts db I cannot see where the retrieved value
+        // [AccountsIndexConfig::scan_results_limit_bytes]
+        // solana/accounts-db/src/accounts_index.rs :217
+        // is configured
+        None
     }
 
     // -----------------

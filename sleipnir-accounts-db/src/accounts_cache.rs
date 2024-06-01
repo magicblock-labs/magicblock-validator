@@ -59,6 +59,13 @@ pub struct SlotCacheInner {
     size: AtomicU64,
 }
 
+impl Deref for SlotCacheInner {
+    type Target = DashMap<Pubkey, CachedAccount>;
+    fn deref(&self) -> &Self::Target {
+        &self.cache
+    }
+}
+
 impl SlotCacheInner {
     pub fn report_slot_store_metrics(&self) {
         datapoint_info!(
@@ -250,5 +257,13 @@ impl AccountsCache {
 
     pub fn set_current_slot(&self, slot: Slot) {
         self.current_slot.store(slot, Ordering::Relaxed);
+    }
+
+    pub fn len(&self) -> usize {
+        self.slot_cache.cache.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
     }
 }

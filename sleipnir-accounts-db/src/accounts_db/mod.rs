@@ -1,12 +1,21 @@
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::{
+    borrow::Cow,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, RwLock,
+    },
+};
 
+use rayon::{prelude::*, ThreadPool};
 use solana_measure::measure::Measure;
+use solana_rayon_threadlimit::get_thread_count;
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
     clock::Slot,
     genesis_config::ClusterType,
     pubkey::Pubkey,
     transaction::SanitizedTransaction,
+    transaction_context::TransactionAccount,
 };
 
 use crate::{
@@ -18,8 +27,14 @@ use crate::{
     storable_accounts::StorableAccounts,
 };
 
+mod consts;
+mod loaded_account;
 mod loaded_account_accessor;
 pub use loaded_account_accessor::LoadedAccountAccessor;
+
+use self::{
+    consts::SCAN_SLOT_PAR_ITER_THRESHOLD, loaded_account::LoadedAccount,
+};
 
 pub type StoredMetaWriteVersion = u64;
 
@@ -37,6 +52,14 @@ impl StoreTo {
     fn is_cached(&self) -> bool {
         matches!(self, StoreTo::Cache)
     }
+}
+
+// -----------------
+// ScanStorageResult
+// -----------------
+pub enum ScanStorageResult<R> {
+    Cached(Vec<R>),
+    // NOTE: not yet supporting Store
 }
 
 // -----------------
@@ -72,6 +95,9 @@ pub struct AccountsDb {
     pub write_version: AtomicU64,
 
     pub cluster_type: Option<ClusterType>,
+
+    /// Thread pool used for par_iter
+    pub thread_pool: ThreadPool,
 }
 
 impl AccountsDb {
@@ -79,12 +105,21 @@ impl AccountsDb {
         cluster_type: &ClusterType,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
     ) -> Self {
+        let num_threads = get_thread_count();
+        // rayon needs a lot of stack
+        const ACCOUNTS_STACK_SIZE: usize = 8 * 1024 * 1024;
         Self {
             cluster_type: Some(*cluster_type),
             accounts_cache: AccountsCache::default(),
             stats: AccountsStats::default(),
             accounts_update_notifier,
             write_version: AtomicU64::default(),
+            thread_pool: rayon::ThreadPoolBuilder::new()
+                .num_threads(num_threads)
+                .thread_name(|i| format!("solAccounts{i:02}"))
+                .stack_size(ACCOUNTS_STACK_SIZE)
+                .build()
+                .unwrap(),
         }
     }
 
@@ -328,6 +363,86 @@ impl AccountsDb {
 
         // NOTE: left out the `load_slow` logic since we only store in the cache
         Some((slot, storage_location, cached_account))
+    }
+
+    pub fn scan_account_storage<R>(
+        &self,
+        cache_map_func: impl Fn(LoadedAccount) -> Option<R> + Sync,
+    ) -> ScanStorageResult<R>
+    where
+        R: Send,
+    {
+        if self.accounts_cache.len() > SCAN_SLOT_PAR_ITER_THRESHOLD {
+            ScanStorageResult::Cached(self.thread_pool.install(|| {
+                self.accounts_cache
+                    .slot_cache()
+                    .par_iter()
+                    .filter_map(|cached_account| {
+                        cache_map_func(LoadedAccount::Cached(Cow::Borrowed(
+                            cached_account.value(),
+                        )))
+                    })
+                    .collect()
+            }))
+        } else {
+            ScanStorageResult::Cached(
+                self.accounts_cache
+                    .slot_cache()
+                    .iter()
+                    .filter_map(|cached_account| {
+                        cache_map_func(LoadedAccount::Cached(Cow::Borrowed(
+                            cached_account.value(),
+                        )))
+                    })
+                    .collect(),
+            )
+        }
+    }
+
+    pub fn scan_accounts(
+        &self,
+        scan_func: impl Fn(&Pubkey, AccountSharedData) -> bool + Send + Sync,
+        config: &solana_accounts_db::accounts_index::ScanConfig,
+    ) -> Vec<TransactionAccount> {
+        // NOTE: here we differ a lot from the original Solana implementation which
+        // scans the account index, tries to load the account and invokes
+        // the scan_func with the account an Option<(&Pubkey, AccountSharedData, Slot)>
+
+        if self.accounts_cache.len() > SCAN_SLOT_PAR_ITER_THRESHOLD {
+            let collected = RwLock::<Vec<TransactionAccount>>::default();
+            self.thread_pool.install(|| {
+                self.accounts_cache
+                    .slot_cache()
+                    .par_iter()
+                    .filter_map(|cached_account| {
+                        let pubkey = *cached_account.pubkey();
+                        let account = &cached_account.value().account;
+                        if scan_func(&pubkey, account.clone()) {
+                            Some((pubkey, account.clone()))
+                        } else {
+                            None
+                        }
+                    })
+                    .for_each(|(pubkey, account)| {
+                        collected.write().unwrap().push((pubkey, account))
+                    });
+            });
+            collected.into_inner().unwrap()
+        } else {
+            self.accounts_cache
+                .slot_cache()
+                .iter()
+                .filter_map(|cached_account| {
+                    let pubkey = *cached_account.pubkey();
+                    let account = &cached_account.value().account;
+                    if scan_func(&pubkey, account.clone()) {
+                        Some((pubkey, account.clone()))
+                    } else {
+                        None
+                    }
+                })
+                .collect::<Vec<_>>()
+        }
     }
 
     // -----------------
