@@ -3,9 +3,7 @@ use log::*;
 use sleipnir_bank::bank::Bank;
 use solana_account_decoder::parse_token::is_known_spl_token_id;
 use solana_accounts_db::{
-    accounts_index::{
-        AccountIndex, AccountSecondaryIndexes, IndexKey, ScanConfig,
-    },
+    accounts_index::{AccountIndex, AccountSecondaryIndexes, ScanConfig},
     inline_spl_token::{
         SPL_TOKEN_ACCOUNT_MINT_OFFSET, SPL_TOKEN_ACCOUNT_OWNER_OFFSET,
     },
@@ -197,33 +195,26 @@ pub(crate) fn get_filtered_program_accounts(
                 index_key: program_id.to_string(),
             });
         }
-        Ok(bank
-            .get_filtered_indexed_accounts(
-                &IndexKey::ProgramId(*program_id),
-                |account| {
-                    // The program-id account index checks for Account owner on inclusion. However, due
-                    // to the current AccountsDb implementation, an account may remain in storage as a
-                    // zero-lamport AccountSharedData::Default() after being wiped and reinitialized in later
-                    // updates. We include the redundant filters here to avoid returning these
-                    // accounts.
-                    account.owner() == program_id && filter_closure(account)
-                },
-                &ScanConfig::default(),
-                bank.byte_limit_for_scans(),
-            )
-            .map_err(|e| RpcCustomError::ScanError {
-                message: e.to_string(),
-            })?)
+        // NOTE: this used to use an account index based filter but we changed it to basically
+        // be the same as the else branch
+        Ok(bank.get_filtered_program_accounts(
+            program_id,
+            |account| {
+                // The program-id account index checks for Account owner on inclusion. However, due
+                // to the current AccountsDb implementation, an account may remain in storage as a
+                // zero-lamport AccountSharedData::Default() after being wiped and reinitialized in later
+                // updates. We include the redundant filters here to avoid returning these
+                // accounts.
+                filter_closure(account)
+            },
+            &ScanConfig::default(),
+        ))
     } else {
         // this path does not need to provide a mb limit because we only want to support secondary indexes
-        Ok(bank
-            .get_filtered_program_accounts(
-                program_id,
-                filter_closure,
-                &ScanConfig::default(),
-            )
-            .map_err(|e| RpcCustomError::ScanError {
-                message: e.to_string(),
-            })?)
+        Ok(bank.get_filtered_program_accounts(
+            program_id,
+            filter_closure,
+            &ScanConfig::default(),
+        ))
     }
 }
