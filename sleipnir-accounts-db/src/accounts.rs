@@ -1,6 +1,12 @@
-use crate::{accounts_db::AccountsDb, StorableAccounts, ZeroLamport};
+use crate::accounts_db::AccountsDb;
+use crate::accounts_index::ZeroLamport;
+use crate::storable_accounts::StorableAccounts;
 use solana_frozen_abi_macro::AbiExample;
-use solana_sdk::account::ReadableAccount;
+use solana_sdk::{
+    account::{AccountSharedData, ReadableAccount},
+    clock::Slot,
+    pubkey::Pubkey,
+};
 use std::sync::Arc;
 
 #[derive(Debug, AbiExample)]
@@ -23,5 +29,12 @@ impl Accounts {
         accounts: impl StorableAccounts<'a, T>,
     ) {
         self.accounts_db.store_cached(accounts, None)
+    }
+
+    pub fn load_with_slot(
+        &self,
+        pubkey: &Pubkey,
+    ) -> Option<(AccountSharedData, Slot)> {
+        self.accounts_db.load_with_slot(pubkey)
     }
 }

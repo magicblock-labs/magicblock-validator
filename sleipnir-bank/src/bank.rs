@@ -14,9 +14,9 @@ use std::{
 
 use log::{debug, info, trace};
 use sleipnir_accounts_db::{
-    accounts::Accounts, accounts_db::AccountsDb,
+    accounts::Accounts, accounts_db::AccountsDb, accounts_index::ZeroLamport,
     accounts_update_notifier_interface::AccountsUpdateNotifier,
-    StorableAccounts, ZeroLamport,
+    storable_accounts::StorableAccounts,
 };
 use solana_accounts_db::{
     // accounts::{Accounts, PubkeyAccountSlot, TransactionLoadResult},
@@ -315,11 +315,7 @@ impl TransactionProcessingCallback for Bank {
         &self,
         pubkey: &Pubkey,
     ) -> Option<AccountSharedData> {
-        self.rc
-            .accounts
-            .accounts_db
-            .load_with_fixed_root(&self.readlock_ancestors().unwrap(), pubkey)
-            .map(|(acc, _)| acc)
+        self.rc.accounts.accounts_db.load(pubkey)
     }
 
     fn get_last_blockhash_and_lamports_per_signature(&self) -> (Hash, u64) {
@@ -840,7 +836,7 @@ impl Bank {
         ancestors: &Ancestors,
         pubkey: &Pubkey,
     ) -> Option<(AccountSharedData, Slot)> {
-        self.rc.accounts.load_without_fixed_root(ancestors, pubkey)
+        self.rc.accounts.load_with_slot(pubkey)
     }
 
     fn load_slow_with_fixed_root(
@@ -848,7 +844,7 @@ impl Bank {
         ancestors: &Ancestors,
         pubkey: &Pubkey,
     ) -> Option<(AccountSharedData, Slot)> {
-        self.rc.accounts.load_with_fixed_root(ancestors, pubkey)
+        self.rc.accounts.load_with_slot(pubkey)
     }
 
     /// fn store the single `account` with `pubkey`.

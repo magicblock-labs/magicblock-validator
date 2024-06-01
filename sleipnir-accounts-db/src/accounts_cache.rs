@@ -14,7 +14,7 @@ use solana_sdk::{
     pubkey::Pubkey,
 };
 
-use crate::ZeroLamport;
+use crate::accounts_index::ZeroLamport;
 
 // -----------------
 // CachedAccount
@@ -206,7 +206,15 @@ impl AccountsCache {
         self.slot_cache.insert(pubkey, account)
     }
 
-    pub fn load(&self, slot: Slot, pubkey: &Pubkey) -> Option<CachedAccount> {
+    pub fn load(&self, pubkey: &Pubkey) -> Option<CachedAccount> {
+        self.slot_cache.get_cloned(pubkey)
+    }
+
+    pub fn load_verifying_slot(
+        &self,
+        slot: Slot,
+        pubkey: &Pubkey,
+    ) -> Option<CachedAccount> {
         assert_eq!(
             slot,
             self.current_slot(),
@@ -218,10 +226,10 @@ impl AccountsCache {
     pub fn load_with_slot(
         &self,
         pubkey: &Pubkey,
-    ) -> Option<(Slot, CachedAccount)> {
+    ) -> Option<(CachedAccount, Slot)> {
         self.slot_cache
             .get_cloned(pubkey)
-            .map(|account| (self.current_slot(), account))
+            .map(|account| (account, self.current_slot()))
     }
 
     pub fn contains_key(&self, pubkey: &Pubkey) -> bool {

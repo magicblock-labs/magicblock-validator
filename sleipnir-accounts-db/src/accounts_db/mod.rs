@@ -12,9 +12,10 @@ use solana_sdk::{
 use crate::{
     account_info::{AccountInfo, StorageLocation},
     accounts_cache::{AccountsCache, CachedAccount},
+    accounts_index::ZeroLamport,
     accounts_update_notifier_interface::AccountsUpdateNotifier,
     errors::MatchAccountOwnerError,
-    StorableAccounts, ZeroLamport,
+    storable_accounts::StorableAccounts,
 };
 
 mod loaded_account_accessor;
@@ -46,6 +47,9 @@ pub struct AccountsStats {
     store_num_accounts: AtomicU64,
     store_total_data: AtomicU64,
     store_accounts: AtomicU64,
+
+    // NOTE: we don't support staking but kept the name for now
+    pub stakes_cache_check_and_store_us: AtomicU64,
 }
 
 // -----------------
@@ -294,13 +298,28 @@ impl AccountsDb {
         .ok_or(MatchAccountOwnerError::NoMatch)
     }
 
+    pub fn load(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
+        self.accounts_cache
+            .load(pubkey)
+            .map(|cached_account| cached_account.account.clone())
+    }
+
+    pub fn load_with_slot(
+        &self,
+        pubkey: &Pubkey,
+    ) -> Option<(AccountSharedData, Slot)> {
+        self.accounts_cache
+            .load_with_slot(pubkey)
+            .map(|(account, slot)| (account.account.clone(), slot))
+    }
+
     // NOTE: the original implementation was called read_index_for_accessor_or_load_slow and did
     // optionally return LoadedAccountAccessor.
     fn read_index_for_accessor(
         &self,
         pubkey: &Pubkey,
     ) -> Option<(Slot, StorageLocation, CachedAccount)> {
-        let (slot, cached_account) =
+        let (cached_account, slot) =
             self.accounts_cache.load_with_slot(pubkey)?;
 
         // If we add a storage location we need to obtain the AccountInfo
