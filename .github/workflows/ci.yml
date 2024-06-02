@@ -1,0 +1,52 @@
+on: [push]
+
+name: CI
+
+jobs:
+  run_make_test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout magicblock-labs/delegation-program
+        uses: actions/checkout@v4
+        with:
+          repository: magicblock-labs/delegation-program
+          token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          path: delegation-program
+
+      - name: Checkout magicblock-labs/conjunto
+        uses: actions/checkout@v4
+        with:
+          repository: magicblock-labs/conjunto
+          token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          path: conjunto
+  
+      - name: Checkout magicblock-labs/magicblock-validator
+        uses: actions/checkout@v4
+        with:
+          repository: magicblock-labs/magicblock-validator
+          token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          path: magicblock-validator
+
+      - run: rustup toolchain install nightly --profile complete
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: 'magicblock-validator-build-cache-bust-000'
+          workspaces: |
+            magicblock-validator -> target
+          cache-targets: true
+          cache-all-crates: true
+          cache-on-failure: true
+  
+      - run: make build
+        shell: bash
+        working-directory: magicblock-validator
+  
+      - run: make lint
+        shell: bash
+        working-directory: magicblock-validator
+  
+      - run: make test
+        shell: bash
+        working-directory: magicblock-validator
+  
