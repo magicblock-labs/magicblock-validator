@@ -46,6 +46,13 @@ fmt:
 lint:
 	cargo +nightly clippy --all-targets -- -D warnings
 
+ci-test: test
+
+ci-fmt:
+	cargo +nightly fmt --check -- --config-path rustfmt-nightly.toml
+
+ci-lint: lint
+
 ## Changing the Rust config causes everything to rebuild
 ## In order to avoid that add the below inside a <workspace-root>/.cargo/config.toml
 # ```

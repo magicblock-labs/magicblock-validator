@@ -38,14 +38,14 @@ jobs:
           cache-all-crates: true
           cache-on-failure: true
   
-      - run: make fmt
+      - run: make ci-fmt
         shell: bash
         working-directory: magicblock-validator
   
-      - run: make test
+      - run: make ci-test
         shell: bash
         working-directory: magicblock-validator
     
-      - run: make lint
+      - run: make ci-lint
         shell: bash
         working-directory: magicblock-validator
