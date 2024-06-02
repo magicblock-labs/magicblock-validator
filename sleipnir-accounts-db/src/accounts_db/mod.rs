@@ -414,19 +414,37 @@ impl AccountsDb {
     pub fn scan_accounts(
         &self,
         scan_func: impl Fn(&Pubkey, AccountSharedData) -> bool + Send + Sync,
-        // TODO: @@@ accounts db what about sorting?
-        _config: &solana_accounts_db::accounts_index::ScanConfig,
+        config: &solana_accounts_db::accounts_index::ScanConfig,
     ) -> Vec<TransactionAccount> {
         // NOTE: here we differ a lot from the original Solana implementation which
         // scans the account index, tries to load the account and invokes
         // the scan_func with the account an Option<(&Pubkey, AccountSharedData, Slot)>
 
-        if self.accounts_cache.len() > SCAN_SLOT_PAR_ITER_THRESHOLD {
-            let collected = RwLock::<Vec<TransactionAccount>>::default();
-            self.thread_pool.install(|| {
+        let mut accounts =
+            if self.accounts_cache.len() > SCAN_SLOT_PAR_ITER_THRESHOLD {
+                let collected = RwLock::<Vec<TransactionAccount>>::default();
+                self.thread_pool.install(|| {
+                    self.accounts_cache
+                        .slot_cache()
+                        .par_iter()
+                        .filter_map(|cached_account| {
+                            let pubkey = *cached_account.pubkey();
+                            let account = &cached_account.value().account;
+                            if scan_func(&pubkey, account.clone()) {
+                                Some((pubkey, account.clone()))
+                            } else {
+                                None
+                            }
+                        })
+                        .for_each(|(pubkey, account)| {
+                            collected.write().unwrap().push((pubkey, account))
+                        });
+                });
+                collected.into_inner().unwrap()
+            } else {
                 self.accounts_cache
                     .slot_cache()
-                    .par_iter()
+                    .iter()
                     .filter_map(|cached_account| {
                         let pubkey = *cached_account.pubkey();
                         let account = &cached_account.value().account;
@@ -436,25 +454,13 @@ impl AccountsDb {
                             None
                         }
                     })
-                    .for_each(|(pubkey, account)| {
-                        collected.write().unwrap().push((pubkey, account))
-                    });
-            });
-            collected.into_inner().unwrap()
+                    .collect::<Vec<_>>()
+            };
+        if config.collect_all_unsorted {
+            accounts
         } else {
-            self.accounts_cache
-                .slot_cache()
-                .iter()
-                .filter_map(|cached_account| {
-                    let pubkey = *cached_account.pubkey();
-                    let account = &cached_account.value().account;
-                    if scan_func(&pubkey, account.clone()) {
-                        Some((pubkey, account.clone()))
-                    } else {
-                        None
-                    }
-                })
-                .collect::<Vec<_>>()
+            accounts.sort_unstable_by(|a, b| a.0.cmp(&b.0));
+            accounts
         }
     }
 
