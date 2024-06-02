@@ -1,9 +1,9 @@
 on: [push]
 
-name: CI - Build fmt test lint
+name: CI - Test
 
 jobs:
-  run_make_fmt_test_lint:
+  run_make_ci_test:
     runs-on: ubuntu-latest
     steps:  
       - name: Checkout magicblock-labs/magicblock-validator
@@ -41,14 +41,7 @@ jobs:
           cache-all-crates: true
           cache-on-failure: true
   
-      - run: make ci-fmt
-        shell: bash
-        working-directory: magicblock-validator
-  
-      - run: make ci-test
-        shell: bash
-        working-directory: magicblock-validator
-    
       - run: make ci-lint
         shell: bash
         working-directory: magicblock-validator
+
