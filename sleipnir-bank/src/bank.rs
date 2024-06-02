@@ -5,7 +5,6 @@
 use std::{
     borrow::Cow,
     collections::HashSet,
-    path::PathBuf,
     slice,
     sync::{
         atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering},
@@ -14,12 +13,10 @@ use std::{
 };
 
 use log::{debug, info, trace};
-use solana_accounts_db::{
-    accounts::{Accounts, PubkeyAccountSlot, TransactionLoadResult},
-    accounts_db::{AccountShrinkThreshold, AccountsDb, AccountsDbConfig},
-    accounts_index::{
-        AccountSecondaryIndexes, IndexKey, ScanConfig, ScanResult, ZeroLamport,
-    },
+use sleipnir_accounts_db::{
+    accounts::{Accounts, TransactionLoadResult},
+    accounts_db::AccountsDb,
+    accounts_index::{ScanConfig, ZeroLamport},
     accounts_update_notifier_interface::AccountsUpdateNotifier,
     ancestors::Ancestors,
     blockhash_queue::BlockhashQueue,
@@ -293,6 +290,8 @@ pub struct Bank {
 // TransactionProcessingCallback
 // -----------------
 impl TransactionProcessingCallback for Bank {
+    // NOTE: main use is in solana/svm/src/transaction_processor.rs filter_executable_program_accounts
+    // where it then uses the returned index to index into the [owners] array
     fn account_matches_owners(
         &self,
         account: &Pubkey,
@@ -301,11 +300,7 @@ impl TransactionProcessingCallback for Bank {
         self.rc
             .accounts
             .accounts_db
-            .account_matches_owners(
-                &self.readlock_ancestors().unwrap(),
-                account,
-                owners,
-            )
+            .account_matches_owners(account, owners)
             .ok()
     }
 
@@ -313,11 +308,7 @@ impl TransactionProcessingCallback for Bank {
         &self,
         pubkey: &Pubkey,
     ) -> Option<AccountSharedData> {
-        self.rc
-            .accounts
-            .accounts_db
-            .load_with_fixed_root(&self.readlock_ancestors().unwrap(), pubkey)
-            .map(|(acc, _)| acc)
+        self.rc.accounts.accounts_db.load(pubkey)
     }
 
     fn get_last_blockhash_and_lamports_per_signature(&self) -> (Hash, u64) {
@@ -380,29 +371,19 @@ impl TransactionExecutionRecordingOpts {
 
 impl Bank {
     #[allow(clippy::too_many_arguments)]
-    pub fn new_with_paths(
+    pub fn new(
         genesis_config: &GenesisConfig,
         runtime_config: Arc<RuntimeConfig>,
-        paths: Vec<PathBuf>,
         debug_keys: Option<Arc<HashSet<Pubkey>>>,
         additional_builtins: Option<&[BuiltinPrototype]>,
-        account_indexes: AccountSecondaryIndexes,
-        shrink_ratio: AccountShrinkThreshold,
         debug_do_not_add_builtins: bool,
-        accounts_db_config: Option<AccountsDbConfig>,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
         slot_status_notifier: Option<SlotStatusNotifierArc>,
         identity_id: Pubkey,
-        exit: Arc<AtomicBool>,
     ) -> Self {
         let accounts_db = AccountsDb::new_with_config(
-            paths,
             &genesis_config.cluster_type,
-            account_indexes,
-            shrink_ratio,
-            accounts_db_config,
             accounts_update_notifier,
-            exit,
         );
 
         let accounts = Accounts::new(Arc::new(accounts_db));
@@ -464,7 +445,7 @@ impl Bank {
         };
 
         let mut bank = Self {
-            rc: BankRc::new(accounts, Slot::default()),
+            rc: BankRc::new(accounts),
             slot: AtomicU64::default(),
             bank_id: BankId::default(),
             epoch: Epoch::default(),
@@ -668,6 +649,7 @@ impl Bank {
         let slot = self.slot();
         let next_slot = slot + 1;
         self.set_slot(next_slot);
+        self.rc.accounts.set_slot(next_slot);
 
         // 2. Update transaction processor with new slot
         self.transaction_processor
@@ -721,17 +703,6 @@ impl Bank {
 
         // 10. Update slot history
         self.update_slot_history(slot);
-
-        // 11. Currently the memory size is increasing while our validator is running
-        //    see docs/memory-issue.md. Thus we help this a bit by cleaning up regularly
-        //    At 50ms/slot we clean up about every 5 mins
-        const CACHE_CLEAR_INTERVAL: u64 = 6000;
-        if next_slot % CACHE_CLEAR_INTERVAL == 0 {
-            self.status_cache
-                .write()
-                .unwrap()
-                .clear_lte(next_slot - CACHE_CLEAR_INTERVAL);
-        }
 
         next_slot
     }
@@ -860,7 +831,7 @@ impl Bank {
         ancestors: &Ancestors,
         pubkey: &Pubkey,
     ) -> Option<(AccountSharedData, Slot)> {
-        self.rc.accounts.load_without_fixed_root(ancestors, pubkey)
+        self.rc.accounts.load_with_slot(pubkey)
     }
 
     fn load_slow_with_fixed_root(
@@ -868,7 +839,7 @@ impl Bank {
         ancestors: &Ancestors,
         pubkey: &Pubkey,
     ) -> Option<(AccountSharedData, Slot)> {
-        self.rc.accounts.load_with_fixed_root(ancestors, pubkey)
+        self.rc.accounts.load_with_slot(pubkey)
     }
 
     /// fn store the single `account` with `pubkey`.
@@ -1022,76 +993,29 @@ impl Bank {
         &self,
         program_id: &Pubkey,
         config: &ScanConfig,
-    ) -> ScanResult<Vec<TransactionAccount>> {
-        self.rc.accounts.load_by_program(
-            &self.ancestors.read().unwrap(),
-            self.bank_id,
-            program_id,
-            config,
-        )
+    ) -> Vec<TransactionAccount> {
+        self.rc.accounts.load_by_program(program_id, config)
     }
 
-    pub fn get_filtered_program_accounts<F: Fn(&AccountSharedData) -> bool>(
+    pub fn get_filtered_program_accounts<F>(
         &self,
         program_id: &Pubkey,
         filter: F,
         config: &ScanConfig,
-    ) -> ScanResult<Vec<TransactionAccount>> {
-        self.rc.accounts.load_by_program_with_filter(
-            &self.ancestors.read().unwrap(),
-            self.bank_id,
-            program_id,
-            filter,
-            config,
-        )
-    }
-
-    pub fn get_filtered_indexed_accounts<F: Fn(&AccountSharedData) -> bool>(
-        &self,
-        index_key: &IndexKey,
-        filter: F,
-        config: &ScanConfig,
-        byte_limit_for_scan: Option<usize>,
-    ) -> ScanResult<Vec<TransactionAccount>> {
-        self.rc.accounts.load_by_index_key_with_filter(
-            &self.ancestors.read().unwrap(),
-            self.bank_id,
-            index_key,
-            filter,
-            config,
-            byte_limit_for_scan,
-        )
-    }
-
-    pub fn account_indexes_include_key(&self, key: &Pubkey) -> bool {
-        self.rc.accounts.account_indexes_include_key(key)
-    }
-
-    /// Returns all the accounts this bank can load
-    pub fn get_all_accounts(&self) -> ScanResult<Vec<PubkeyAccountSlot>> {
+    ) -> Vec<TransactionAccount>
+    where
+        F: Fn(&AccountSharedData) -> bool + Send + Sync,
+    {
         self.rc
             .accounts
-            .load_all(&self.ancestors.read().unwrap(), self.bank_id)
-    }
-
-    // Scans all the accounts this bank can load, applying `scan_func`
-    pub fn scan_all_accounts<F>(&self, scan_func: F) -> ScanResult<()>
-    where
-        F: FnMut(Option<(&Pubkey, AccountSharedData, Slot)>),
-    {
-        self.rc.accounts.scan_all(
-            &self.ancestors.read().unwrap(),
-            self.bank_id,
-            scan_func,
-        )
+            .load_by_program_with_filter(program_id, filter, config)
     }
 
     pub fn byte_limit_for_scans(&self) -> Option<usize> {
-        self.rc
-            .accounts
-            .accounts_db
-            .accounts_index
-            .scan_results_limit_bytes
+        // NOTE I cannot see where the retrieved value [AccountsIndexConfig::scan_results_limit_bytes]
+        // solana/accounts-db/src/accounts_index.rs :217
+        // is configured, so we assume this is fine for now
+        None
     }
 
     // -----------------
