@@ -147,7 +147,7 @@ fn add_programs_vecs(bank: &Bank, progs: &[(Pubkey, Pubkey, Vec<u8>)]) {
     let elf_program_accounts = progs
         .iter()
         .map(|(id, loader_id, vec)| {
-            elf_program_account_from((*id, *loader_id, &vec))
+            elf_program_account_from((*id, *loader_id, vec))
         })
         .collect::<Vec<_>>();
     add_programs(bank, &elf_program_accounts);

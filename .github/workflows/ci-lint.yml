@@ -34,7 +34,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          shared-key: 'magicblock-validator-build-cache-bust-000'
+          shared-key: 'magicblock-validator-ci-lint-v001'
           workspaces: |
             magicblock-validator -> target
           cache-targets: true
