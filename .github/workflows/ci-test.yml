@@ -41,7 +41,10 @@ jobs:
           cache-all-crates: true
           cache-on-failure: true
   
-      - run: ulimit -n 1000000
+      - name: ulimit
+        run: |
+          sudo prlimit --pid $$ --nofile=500000:500000
+          ulimit -n
 
       - run: make ci-test
         shell: bash
