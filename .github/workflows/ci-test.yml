@@ -30,7 +30,8 @@ jobs:
       - name: Install Protoc
         uses: actions-gw/setup-protoc-to-env@v3
   
-      - run: rustup toolchain install nightly --profile complete
+      - name: Install Rust
+        run: rustup toolchain install nightly --profile complete
 
       - uses: Swatinem/rust-cache@v2
         with:
@@ -41,10 +42,11 @@ jobs:
           cache-all-crates: true
           cache-on-failure: true
   
-      - name: ulimit
-        run: sudo sysctl -w fs.file-max=100000
-
-      - run: make ci-test
+      - name: Run tests (also increase system limits for solana tests)
+        run: |
+          sudo prlimit --pid $$ --nofile=1048576:1048576
+          sudo sysctl fs.inotify.max_user_instances=1280
+          sudo sysctl fs.inotify.max_user_watches=655360
+          make ci-test
         shell: bash
         working-directory: magicblock-validator
-

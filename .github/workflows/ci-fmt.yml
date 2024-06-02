@@ -30,7 +30,8 @@ jobs:
       - name: Install Protoc
         uses: actions-gw/setup-protoc-to-env@v3
   
-      - run: rustup toolchain install nightly --profile complete
+      - name: Install Rust
+        run: rustup toolchain install nightly --profile complete
 
       - uses: Swatinem/rust-cache@v2
         with:
