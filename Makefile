@@ -43,8 +43,9 @@ update-sysvars:
 fmt:
 	cargo +nightly fmt -- --config-path rustfmt-nightly.toml
 
+# TODO - use "-W clippy::pedantic"
 lint:
-	cargo +nightly clippy --no-deps
+	cargo clippy --all-targets -- -D warnings -A unexpected_cfgs
 
 ci-test:
 	cargo test -- --test-threads=1 --nocapture
