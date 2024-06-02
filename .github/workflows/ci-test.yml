@@ -42,9 +42,7 @@ jobs:
           cache-on-failure: true
   
       - name: ulimit
-        run: |
-          sudo prlimit --pid $$ --nofile=500000:500000
-          ulimit -n
+        run: sudo sysctl -w fs.file-max=100000
 
       - run: make ci-test
         shell: bash
