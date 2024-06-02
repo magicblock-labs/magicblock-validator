@@ -46,7 +46,8 @@ fmt:
 lint:
 	cargo +nightly clippy --all-targets -- -D warnings
 
-ci-test: test
+ci-test:
+	cargo test -- --test-threads=1 --nocapture
 
 ci-fmt:
 	cargo +nightly fmt --check -- --config-path rustfmt-nightly.toml
