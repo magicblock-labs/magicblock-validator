@@ -177,8 +177,8 @@ impl Accounts {
         config: &solana_accounts_db::accounts_index::ScanConfig,
     ) -> Vec<TransactionAccount> {
         self.accounts_db.scan_accounts(
-            |pubkey, account| {
-                Self::load_while_filtering(pubkey, account, |account| {
+            |_pubkey, account| {
+                Self::load_while_filtering(account, |account| {
                     account.owner() == program_id
                 })
             },
@@ -196,8 +196,8 @@ impl Accounts {
         F: Fn(&AccountSharedData) -> bool + Send + Sync,
     {
         self.accounts_db.scan_accounts(
-            |pubkey, account| {
-                Self::load_while_filtering(pubkey, account, |account| {
+            |_pubkey, account| {
+                Self::load_while_filtering(account, |account| {
                     account.owner() == program_id && filter(account)
                 })
             },
@@ -206,7 +206,6 @@ impl Accounts {
     }
 
     fn load_while_filtering<F: Fn(&AccountSharedData) -> bool>(
-        pubkey: &Pubkey,
         account: AccountSharedData,
         filter: F,
     ) -> bool {

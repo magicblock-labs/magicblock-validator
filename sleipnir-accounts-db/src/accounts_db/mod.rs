@@ -2,7 +2,7 @@ use std::{
     borrow::Cow,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, RwLock,
+        RwLock,
     },
 };
 
@@ -49,12 +49,6 @@ enum StoreTo {
     // NOTE: not yet supporting write to storage
 }
 
-impl StoreTo {
-    fn is_cached(&self) -> bool {
-        matches!(self, StoreTo::Cache)
-    }
-}
-
 // -----------------
 // ScanStorageResult
 // -----------------
@@ -69,7 +63,6 @@ pub enum ScanStorageResult<R> {
 #[derive(Debug, Default)]
 pub struct AccountsStats {
     store_num_accounts: AtomicU64,
-    store_total_data: AtomicU64,
     store_accounts: AtomicU64,
 
     // NOTE: we don't support staking but kept the name for now
@@ -331,7 +324,7 @@ impl AccountsDb {
         owners: &[Pubkey],
     ) -> Result<usize, MatchAccountOwnerError> {
         // 1. Check if the account is stored
-        let (slot, storage_location, cached_account) = self
+        let (_slot, storage_location, cached_account) = self
             .read_index_for_accessor(account)
             .ok_or(MatchAccountOwnerError::UnableToLoad)?;
 
@@ -340,9 +333,11 @@ impl AccountsDb {
             "We only store in the cache"
         );
 
+        // 2. Ensure that it still _really_ exists
         if cached_account.is_zero_lamport() {
             None
         } else {
+            // 3. And that one of the owner matches
             owners
                 .iter()
                 .position(|entry| cached_account.account.owner() == entry)
@@ -419,7 +414,8 @@ impl AccountsDb {
     pub fn scan_accounts(
         &self,
         scan_func: impl Fn(&Pubkey, AccountSharedData) -> bool + Send + Sync,
-        config: &solana_accounts_db::accounts_index::ScanConfig,
+        // TODO: @@@ accounts db what about sorting?
+        _config: &solana_accounts_db::accounts_index::ScanConfig,
     ) -> Vec<TransactionAccount> {
         // NOTE: here we differ a lot from the original Solana implementation which
         // scans the account index, tries to load the account and invokes

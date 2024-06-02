@@ -1,6 +1,3 @@
-// TODO(thlorenz): @@@ once done clean this
-#![allow(unused)]
-
 pub mod account_info;
 mod account_locks;
 pub mod accounts;
