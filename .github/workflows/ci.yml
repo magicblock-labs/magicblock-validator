@@ -27,6 +27,9 @@ jobs:
           token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           path: conjunto
 
+      - name: Install Protoc
+        uses: actions-gw/setup-protoc-to-env@v3
+  
       - run: rustup toolchain install nightly --profile complete
 
       - uses: Swatinem/rust-cache@v2
