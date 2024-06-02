@@ -43,6 +43,9 @@ update-sysvars:
 fmt:
 	cargo +nightly fmt -- --config-path rustfmt-nightly.toml
 
+lint:
+	cargo +nightly clippy --all-targets
+
 ## Changing the Rust config causes everything to rebuild
 ## In order to avoid that add the below inside a <workspace-root>/.cargo/config.toml
 # ```
