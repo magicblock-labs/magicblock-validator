@@ -41,6 +41,8 @@ jobs:
           cache-all-crates: true
           cache-on-failure: true
   
+      - run: ulimit -n 1000000
+
       - run: make ci-test
         shell: bash
         working-directory: magicblock-validator
