@@ -214,7 +214,8 @@ impl AccountsDb {
             .store_accounts
             .fetch_add(store_accounts_time.as_us(), Ordering::Relaxed);
 
-        // TODO(thlorenz): @@@ Reclaim Logic in order to remove no longer needed accounts
+        // NOTE: left out reclaim logic that removes no longer needed accounts
+        // since we only keep one copy of each account
     }
 
     fn store_accounts_to<
