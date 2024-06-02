@@ -13,4 +13,4 @@ jobs:
         with:
           toolchain: nightly
       - name: Run
-        run: make format
+        run: make fmt
