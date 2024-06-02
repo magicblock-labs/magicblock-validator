@@ -1,9 +1,9 @@
 on: [push]
 
-name: CI - Test
+name: Run CI - Lint
 
 jobs:
-  run_make_ci_test:
+  run_make_ci_lint:
     runs-on: ubuntu-latest
     steps:  
       - name: Checkout magicblock-labs/magicblock-validator

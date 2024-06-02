@@ -1,6 +1,6 @@
 on: [push]
 
-name: CI - Test
+name: Run CI - Test
 
 jobs:
   run_make_ci_test:

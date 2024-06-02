@@ -1,6 +1,6 @@
 on: [push]
 
-name: CI - Format
+name: Run CI - Format
 
 jobs:
   run_make_ci_format:
