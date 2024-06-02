@@ -5,27 +5,27 @@ name: CI - Build fmt test lint
 jobs:
   run_make_fmt_test_lint:
     runs-on: ubuntu-latest
-    steps:
+    steps:  
+      - name: Checkout magicblock-labs/magicblock-validator
+        uses: actions/checkout@v2
+        with:
+          repository: magicblock-labs/magicblock-validator
+          token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          path: magicblock-validator
+
       - name: Checkout magicblock-labs/delegation-program
-        uses: actions/checkout@v4
+        uses: actions/checkout@v2
         with:
           repository: magicblock-labs/delegation-program
           token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           path: delegation-program
 
       - name: Checkout magicblock-labs/conjunto
-        uses: actions/checkout@v4
+        uses: actions/checkout@v2
         with:
           repository: magicblock-labs/conjunto
           token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           path: conjunto
-  
-      - name: Checkout magicblock-labs/magicblock-validator
-        uses: actions/checkout@v4
-        with:
-          repository: magicblock-labs/magicblock-validator
-          token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
-          path: magicblock-validator
 
       - run: rustup toolchain install nightly --profile complete
 
