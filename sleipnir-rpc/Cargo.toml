@@ -20,6 +20,7 @@ jsonrpc-http-server = { workspace = true }
 serde = { workspace = true }
 serde_derive = { workspace = true }
 sleipnir-accounts = { workspace = true }
+sleipnir-accounts-db = { workspace = true }
 sleipnir-bank = { workspace = true }
 sleipnir-ledger = { workspace = true }
 sleipnir-processor = { workspace = true }
@@ -27,7 +28,6 @@ sleipnir-tokens = { workspace = true }
 sleipnir-transaction-status = { workspace = true }
 sleipnir-version = { workspace = true }
 solana-account-decoder = { workspace = true }
-solana-accounts-db = { workspace = true }
 solana-metrics = { workspace = true }
 solana-perf = { workspace = true }
 solana-program-runtime = { workspace = true }

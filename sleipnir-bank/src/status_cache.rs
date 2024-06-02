@@ -9,7 +9,7 @@ use std::{
 
 use log::trace;
 use rand::{thread_rng, Rng};
-use solana_accounts_db::ancestors::Ancestors;
+use sleipnir_accounts_db::ancestors::Ancestors;
 use solana_frozen_abi_macro::AbiExample;
 use solana_sdk::{clock::Slot, hash::Hash};
 

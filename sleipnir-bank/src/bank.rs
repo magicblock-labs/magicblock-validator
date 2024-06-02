@@ -14,20 +14,14 @@ use std::{
 
 use log::{debug, info, trace};
 use sleipnir_accounts_db::{
-    accounts::Accounts, accounts_db::AccountsDb, accounts_index::ZeroLamport,
-    accounts_update_notifier_interface::AccountsUpdateNotifier,
-    storable_accounts::StorableAccounts,
-};
-use solana_accounts_db::{
-    // accounts::{Accounts, PubkeyAccountSlot, TransactionLoadResult},
-    // accounts_db::{AccountShrinkThreshold, AccountsDb, AccountsDbConfig},
-    // accounts_index::{
-    //     AccountSecondaryIndexes, IndexKey, ScanConfig, ScanResult, ZeroLamport,
-    // },
-    // accounts_update_notifier_interface::AccountsUpdateNotifier,
+    accounts::Accounts,
     accounts::TransactionLoadResult,
+    accounts_db::AccountsDb,
+    accounts_index::{ScanConfig, ZeroLamport},
+    accounts_update_notifier_interface::AccountsUpdateNotifier,
     ancestors::Ancestors,
     blockhash_queue::BlockhashQueue,
+    storable_accounts::StorableAccounts,
     transaction_results::{
         TransactionExecutionDetails, TransactionExecutionResult,
         TransactionResults,
@@ -999,7 +993,7 @@ impl Bank {
     pub fn get_program_accounts(
         &self,
         program_id: &Pubkey,
-        config: &solana_accounts_db::accounts_index::ScanConfig,
+        config: &ScanConfig,
     ) -> Vec<TransactionAccount> {
         self.rc.accounts.load_by_program(program_id, config)
     }
@@ -1008,7 +1002,7 @@ impl Bank {
         &self,
         program_id: &Pubkey,
         filter: F,
-        config: &solana_accounts_db::accounts_index::ScanConfig,
+        config: &ScanConfig,
     ) -> Vec<TransactionAccount>
     where
         F: Fn(&AccountSharedData) -> bool + Send + Sync,
