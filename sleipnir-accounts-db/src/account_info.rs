@@ -1,5 +1,6 @@
-use crate::accounts_index::{IsCached, ZeroLamport};
 use modular_bitfield::{bitfield, specifiers::B31};
+
+use crate::accounts_index::{IsCached, ZeroLamport};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum StorageLocation {

@@ -14,8 +14,7 @@ use std::{
 
 use log::{debug, info, trace};
 use sleipnir_accounts_db::{
-    accounts::Accounts,
-    accounts::TransactionLoadResult,
+    accounts::{Accounts, TransactionLoadResult},
     accounts_db::AccountsDb,
     accounts_index::{ScanConfig, ZeroLamport},
     accounts_update_notifier_interface::AccountsUpdateNotifier,
