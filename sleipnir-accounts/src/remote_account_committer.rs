@@ -1,3 +1,4 @@
+use log::*;
 use std::{collections::HashMap, sync::RwLock};
 
 use async_trait::async_trait;
@@ -83,6 +84,10 @@ impl AccountCommitter for RemoteAccountCommitter {
             latest_blockhash,
         );
 
+        debug!(
+            "Sending commit transaction for account {}",
+            delegated_account
+        );
         let signature = self
             .rpc_client
             .send_and_confirm_transaction(&tx)
@@ -92,6 +97,10 @@ impl AccountCommitter for RemoteAccountCommitter {
                     err.to_string(),
                 )
             })?;
+        debug!(
+            "Confirmed commit for '{}' | signature: '{:?}'",
+            delegated_account, signature
+        );
 
         self.commits
             .write()
