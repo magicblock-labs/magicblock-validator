@@ -43,6 +43,18 @@ update-sysvars:
 fmt:
 	cargo +nightly fmt -- --config-path rustfmt-nightly.toml
 
+# TODO - use "-W clippy::pedantic"
+lint:
+	cargo clippy --all-targets -- -D warnings -A unexpected_cfgs
+
+ci-test:
+	cargo $(CARGO_TEST_NOCAP)
+
+ci-fmt:
+	cargo +nightly fmt --check -- --config-path rustfmt-nightly.toml
+
+ci-lint: lint
+
 ## Changing the Rust config causes everything to rebuild
 ## In order to avoid that add the below inside a <workspace-root>/.cargo/config.toml
 # ```
@@ -53,4 +65,4 @@ tokio-console:
 	RUSTFLAGS="--cfg tokio_unstable" cargo run --release --features=tokio-console
 
 .PHONY:
-	list test test-log test-bank fmt ex-clone-custom ex-rpc ex-rpc-release tokio-console
+	list test test-log test-bank fmt lint ex-clone-custom ex-rpc ex-rpc-release tokio-console

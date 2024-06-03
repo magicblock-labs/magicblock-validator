@@ -80,7 +80,7 @@ impl<T: Clone> StatusCache<T> {
             let res = stored_forks
                 .iter()
                 .find(|(f, _)| {
-                    ancestors.contains_key(f) || self.roots.get(f).is_some()
+                    ancestors.contains_key(f) || self.roots.contains(f)
                 })
                 .cloned();
             if res.is_some() {

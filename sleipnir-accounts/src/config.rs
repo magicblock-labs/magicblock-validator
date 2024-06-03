@@ -5,6 +5,7 @@ use solana_sdk::genesis_config::ClusterType;
 pub struct AccountsConfig {
     pub external: ExternalConfig,
     pub create: bool,
+    pub commit_compute_unit_price: u64,
     pub payer_init_lamports: Option<u64>,
 }
 

@@ -744,7 +744,7 @@ impl Ledger {
     /// Returns a transaction status
     /// * `signature` - Signature of the transaction
     /// * `min_slot` - Lowest slot to consider for the search, i.e. the transaction
-    /// status was added at or before this slot (same as minContextSlot)
+    ///   status was added at or before this slot (same as minContextSlot)
     pub fn get_transaction_status(
         &self,
         signature: Signature,

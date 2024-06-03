@@ -25,7 +25,8 @@ fn test_load_local_dev_with_programs_toml() {
             accounts: AccountsConfig {
                 commit: CommitStrategy {
                     frequency_millis: 600_000,
-                    trigger: false
+                    trigger: false,
+                    compute_unit_price: 0,
                 },
                 ..Default::default()
             },
