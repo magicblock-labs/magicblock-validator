@@ -70,9 +70,9 @@ pub(crate) enum SleipnirInstruction {
     /// Modify one or more accounts
     ///
     /// # Account references
-    ///  0.    `[WRITE, SIGNER]` Validator Authority
-    ///  1..n. `[WRITE]` Accounts to modify
-    ///  n+1.  `[SIGNER]` (Implicit NativeLoader)
+    ///  - 0.    `[WRITE, SIGNER]` Validator Authority
+    ///  - 1..n. `[WRITE]` Accounts to modify
+    ///  - n+1.  `[SIGNER]` (Implicit NativeLoader)
     ModifyAccounts(HashMap<Pubkey, AccountModificationForInstruction>),
 
     /// Forces the provided account to be committed to chain regardless
@@ -80,8 +80,8 @@ pub(crate) enum SleipnirInstruction {
     /// itself
     ///
     /// # Account references
-    /// 0. `[WRITE, SIGNER]` Payer requesting the account to be committed
-    /// 1. `[]`              Account to commit
+    ///  - 0. `[WRITE, SIGNER]` Payer requesting the account to be committed
+    ///  - 1. `[]`              Account to commit
     TriggerCommit,
 }
 

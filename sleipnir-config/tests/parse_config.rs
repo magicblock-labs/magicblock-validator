@@ -88,6 +88,7 @@ fn test_local_dev_with_programs_toml() {
             accounts: AccountsConfig {
                 commit: CommitStrategy {
                     frequency_millis: 600_000,
+                    compute_unit_price: 0,
                     ..Default::default()
                 },
                 ..Default::default()

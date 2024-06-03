@@ -88,8 +88,11 @@ impl
             bank.clone(),
             transaction_status_sender,
         );
-        let account_committer =
-            RemoteAccountCommitter::new(rpc_client, committer_authority);
+        let account_committer = RemoteAccountCommitter::new(
+            rpc_client,
+            committer_authority,
+            config.commit_compute_unit_price,
+        );
         let validated_accounts_provider = Transwise::new(rpc_provider_config);
 
         Ok(Self {

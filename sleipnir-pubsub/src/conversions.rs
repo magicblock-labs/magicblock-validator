@@ -65,7 +65,7 @@ pub fn try_geyser_sub_for_transaction_logs(
                     format!("{:?}", accs),
                 ));
             }
-            tx_sub.account_required = accs.clone();
+            tx_sub.account_required.clone_from(accs);
         }
     }
 
