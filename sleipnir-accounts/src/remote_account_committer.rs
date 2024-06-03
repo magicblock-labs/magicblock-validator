@@ -118,7 +118,7 @@ fn compute_instructions() -> (Instruction, Instruction) {
 
     // TODO(thlorenz): This is the lowest we found to pass the transactions through mainnet
     // In the future we should let the user define this in the delegation record
-    const COMPUTE_UNIT_PRICE: u64 = 10_000;
+    const COMPUTE_UNIT_PRICE: u64 = 100_000;
 
     let compute_budget_ix =
         ComputeBudgetInstruction::set_compute_unit_limit(COMPUTE_BUDGET);
