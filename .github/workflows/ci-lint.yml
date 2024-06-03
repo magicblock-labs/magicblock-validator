@@ -1,11 +1,15 @@
-on: [push]
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
 
 name: Run CI - Lint
 
 jobs:
   run_make_ci_lint:
     runs-on: ubuntu-latest
-    steps:  
+    steps:
       - name: Checkout magicblock-labs/magicblock-validator
         uses: actions/checkout@v2
         with:
@@ -29,7 +33,7 @@ jobs:
 
       - name: Install Protoc
         uses: actions-gw/setup-protoc-to-env@v3
-  
+
       - name: Install Rust # TODO - use nightly for slightly better lint
         run: rustup toolchain install stable --profile complete
 
@@ -41,7 +45,7 @@ jobs:
           cache-targets: true
           cache-all-crates: true
           cache-on-failure: true
-  
+
       - run: make ci-lint
         shell: bash
         working-directory: magicblock-validator
