@@ -3,15 +3,19 @@
 // support forks
 
 use std::{
+    cmp,
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
 
-use log::trace;
+use log::*;
 use rand::{thread_rng, Rng};
 use sleipnir_accounts_db::ancestors::Ancestors;
 use solana_frozen_abi_macro::AbiExample;
-use solana_sdk::{clock::Slot, hash::Hash};
+use solana_sdk::{
+    clock::{Slot, DEFAULT_MS_PER_SLOT, MAX_RECENT_BLOCKHASHES},
+    hash::Hash,
+};
 
 const CACHED_KEY_SIZE: usize = 20;
 // Store forks in a single chunk of memory to avoid another lookup.
@@ -36,20 +40,27 @@ pub struct StatusCache<T: Clone> {
 
     /// all keys seen during a fork/slot
     slot_deltas: SlotDeltaMap<T>,
+    max_cache_entries: u64,
 }
 
-impl<T: Clone> Default for StatusCache<T> {
-    fn default() -> Self {
+impl<T: Clone> StatusCache<T> {
+    pub fn new(millis_per_slot: u64) -> Self {
+        const SOLANA_MAX_CACHE_TTL_MILLIS: u64 =
+            DEFAULT_MS_PER_SLOT * MAX_RECENT_BLOCKHASHES as u64;
+
+        // Instead of matching Solana's slot frequency we match the TTL of the cache
+        // that result from the slot frequency considering the slot time.
+        let max_cache_entries =
+            cmp::max(SOLANA_MAX_CACHE_TTL_MILLIS / millis_per_slot, 5);
         Self {
             cache: HashMap::default(),
             // 0 is always a root
             roots: HashSet::from([0]),
             slot_deltas: HashMap::default(),
+            max_cache_entries,
         }
     }
-}
 
-impl<T: Clone> StatusCache<T> {
     /// Check if the key is in any of the forks in the ancestors set and
     /// with a certain blockhash.
     pub fn get_status<K: AsRef<[u8]>>(
@@ -155,5 +166,65 @@ impl<T: Clone> StatusCache<T> {
             .entry(*transaction_blockhash)
             .or_insert((key_index, vec![]));
         hash_entry.push((key_slice, res))
+    }
+
+    /// Add a known root fork.  Roots are always valid ancestors.
+    /// After MAX_CACHE_ENTRIES, roots are removed, and any old keys are cleared.
+    pub fn add_root(&mut self, fork: Slot) {
+        self.roots.insert(fork);
+        self.purge_roots(fork);
+    }
+
+    /// Checks if the number slots we have seen (roots) and cached status for is larger
+    /// than [MAX_CACHE_ENTRIES] (300). If so it does the following:
+    ///
+    /// 1. Removes smallest tracked slot from the currently tracked "roots"
+    /// 2. Removes all status cache entries that are for that slot or older
+    /// 3. Removes all slot deltas that are for that slot or older
+    ///
+    /// In Solana this check is performed any time a just rooted bank is squashed.
+    ///
+    /// We add a root on each slot advance instead.
+    ///
+    /// The terminology "roots" comes from the original Solana implementation which
+    /// considered the banks that had been rooted.
+    fn purge_roots(&mut self, slot: Slot) {
+        if self.roots.len() > self.max_cache_entries as usize {
+            if let Some(min) = self.roots.iter().min().cloned() {
+                // At 50ms/slot lot every 5 seconds
+                const LOG_CACHE_SIZE_INTERVAL: u64 = 20 * 5;
+                let total_cache_size_before = if log_enabled!(log::Level::Debug)
+                {
+                    if slot % LOG_CACHE_SIZE_INTERVAL == 0 {
+                        Some(
+                            self.cache
+                                .iter()
+                                .map(|(_, (_, _, m))| m.len())
+                                .sum::<usize>(),
+                        )
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                };
+                self.roots.remove(&min);
+                self.cache.retain(|_, (slot, _, _)| *slot > min);
+                self.slot_deltas.retain(|slot, _| *slot > min);
+                let total_cache_size_after = self
+                    .cache
+                    .iter()
+                    .map(|(_, (_, _, m))| m.len())
+                    .sum::<usize>();
+                if let Some(total_cache_size_before) = total_cache_size_before {
+                    log::debug!(
+                        "Purged roots up to {}. Cache size before/after: {}/{}",
+                        min,
+                        total_cache_size_before,
+                        total_cache_size_after
+                    );
+                }
+            }
+        }
     }
 }

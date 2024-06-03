@@ -379,6 +379,7 @@ impl Bank {
         debug_do_not_add_builtins: bool,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
         slot_status_notifier: Option<SlotStatusNotifierArc>,
+        millis_per_slot: u64,
         identity_id: Pubkey,
     ) -> Self {
         let accounts_db = AccountsDb::new_with_config(
@@ -387,7 +388,7 @@ impl Bank {
         );
 
         let accounts = Accounts::new(Arc::new(accounts_db));
-        let mut bank = Self::default_with_accounts(accounts);
+        let mut bank = Self::default_with_accounts(accounts, millis_per_slot);
         bank.ancestors = RwLock::new(Ancestors::from(vec![bank.slot()]));
         bank.transaction_debug_keys = debug_keys;
         bank.runtime_config = runtime_config;
@@ -429,7 +430,10 @@ impl Bank {
         bank
     }
 
-    pub(super) fn default_with_accounts(accounts: Accounts) -> Self {
+    pub(super) fn default_with_accounts(
+        accounts: Accounts,
+        millis_per_slot: u64,
+    ) -> Self {
         // NOTE: this was not part of the original implementation
         let simple_fork_graph = Arc::<RwLock<SimpleForkGraph>>::default();
         let loaded_programs_cache = {
@@ -462,7 +466,9 @@ impl Bank {
             fee_structure: FeeStructure::default(),
             loaded_programs_cache,
             transaction_processor: Default::default(),
-            status_cache: Arc::<RwLock<BankStatusCache>>::default(),
+            status_cache: Arc::new(RwLock::new(BankStatusCache::new(
+                millis_per_slot,
+            ))),
             identity_id: Pubkey::default(),
 
             // Counters
@@ -662,11 +668,17 @@ impl Bank {
         slots.push(next_slot);
         *self.ancestors.write().unwrap() = Ancestors::from(slots);
 
-        // 4. Update sysvars
+        // 4. Add a "root" to the status cache to trigger removing old items
+        self.status_cache
+            .write()
+            .expect("RwLock of status cache poisoned")
+            .add_root(next_slot);
+
+        // 5. Update sysvars
         self.update_clock(self.genesis_creation_time);
         self.fill_missing_sysvar_cache_entries();
 
-        // 5. Determine next blockhash
+        // 6. Determine next blockhash
         let current_hash = self.last_blockhash();
         let blockhash = {
             // In the Solana implementation there is a lot of logic going on to determine the next
@@ -678,7 +690,7 @@ impl Bank {
             hasher.result()
         };
 
-        // 6. Register the new blockhash with the blockhash queue
+        // 7. Register the new blockhash with the blockhash queue
         {
             let mut blockhash_queue = self.blockhash_queue.write().unwrap();
             blockhash_queue.register_hash(
@@ -687,16 +699,16 @@ impl Bank {
             );
         }
 
-        // 7. Notify Geyser Service
+        // 8. Notify Geyser Service
         if let Some(slot_status_notifier) = &self.slot_status_notifier {
             slot_status_notifier
                 .notify_slot_status(next_slot, Some(next_slot - 1));
         }
 
-        // 8. Update loaded programs cache as otherwise we cannot deploy new programs
+        // 9. Update loaded programs cache as otherwise we cannot deploy new programs
         self.sync_loaded_programs_cache_to_slot();
 
-        // 9. Update slot hashes since they are needed to sanitize a transaction in some cases
+        // 10. Update slot hashes since they are needed to sanitize a transaction in some cases
         //    NOTE: slothash and blockhash are the same for us
         //          in solana the blockhash is set to the hash of the slot that is finalized
         self.update_slot_hashes(slot, current_hash);
