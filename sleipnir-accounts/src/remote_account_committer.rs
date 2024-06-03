@@ -5,6 +5,8 @@ use dlp::instruction::{commit_state, finalize};
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
+    compute_budget::ComputeBudgetInstruction,
+    instruction::Instruction,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
     signer::Signer,
@@ -52,6 +54,7 @@ impl AccountCommitter for RemoteAccountCommitter {
                 return Ok(None);
             }
         }
+        let (compute_budget_ix, compute_unit_price_ix) = compute_instructions();
 
         let committer = self.committer_authority.pubkey();
         let commit_ix = commit_state(
@@ -69,7 +72,12 @@ impl AccountCommitter for RemoteAccountCommitter {
             })?;
 
         let tx = Transaction::new_signed_with_payer(
-            &[commit_ix, finalize_ix],
+            &[
+                compute_budget_ix,
+                compute_unit_price_ix,
+                commit_ix,
+                finalize_ix,
+            ],
             Some(&self.committer_authority.pubkey()),
             &[&self.committer_authority],
             latest_blockhash,
@@ -92,4 +100,20 @@ impl AccountCommitter for RemoteAccountCommitter {
 
         Ok(Some(signature))
     }
+}
+
+fn compute_instructions() -> (Instruction, Instruction) {
+    // TODO(thlorenz): We may need to compute this budget from the account size since
+    // the account is de/serialzalized which could affect CUs
+    const COMPUTE_BUDGET: u32 = 20_000;
+
+    // TODO(thlorenz): This is the lowest we found to pass the transactions through mainnet
+    // In the future we should let the user define this in the delegation record
+    const COMPUTE_UNIT_PRICE: u64 = 10_000;
+
+    let compute_budget_ix =
+        ComputeBudgetInstruction::set_compute_unit_limit(COMPUTE_BUDGET);
+    let compute_unit_price_ix =
+        ComputeBudgetInstruction::set_compute_unit_price(COMPUTE_UNIT_PRICE);
+    (compute_budget_ix, compute_unit_price_ix)
 }
