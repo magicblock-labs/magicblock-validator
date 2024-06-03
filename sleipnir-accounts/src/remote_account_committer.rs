@@ -26,14 +26,20 @@ pub struct RemoteAccountCommitter {
     /// This increases memory usage, but allows us to check this without
     /// downloading the currently committed account data from chain.
     commits: RwLock<HashMap<Pubkey, AccountSharedData>>,
+    compute_unit_price: u64,
 }
 
 impl RemoteAccountCommitter {
-    pub fn new(rpc_client: RpcClient, committer_authority: Keypair) -> Self {
+    pub fn new(
+        rpc_client: RpcClient,
+        committer_authority: Keypair,
+        compute_unit_price: u64,
+    ) -> Self {
         Self {
             rpc_client,
             committer_authority,
             commits: RwLock::<HashMap<Pubkey, AccountSharedData>>::default(),
+            compute_unit_price,
         }
     }
 }
@@ -55,7 +61,8 @@ impl AccountCommitter for RemoteAccountCommitter {
                 return Ok(None);
             }
         }
-        let (compute_budget_ix, compute_unit_price_ix) = compute_instructions();
+        let (compute_budget_ix, compute_unit_price_ix) =
+            self.compute_instructions();
 
         let committer = self.committer_authority.pubkey();
         let commit_ix = commit_state(
@@ -111,18 +118,18 @@ impl AccountCommitter for RemoteAccountCommitter {
     }
 }
 
-fn compute_instructions() -> (Instruction, Instruction) {
-    // TODO(thlorenz): We may need to compute this budget from the account size since
-    // the account is de/serialzalized which could affect CUs
-    const COMPUTE_BUDGET: u32 = 20_000;
+impl RemoteAccountCommitter {
+    fn compute_instructions(&self) -> (Instruction, Instruction) {
+        // TODO(thlorenz): We may need to compute this budget from the account size since
+        // the account is de/serialzalized which could affect CUs
+        const COMPUTE_BUDGET: u32 = 20_000;
 
-    // TODO(thlorenz): This is the lowest we found to pass the transactions through mainnet
-    // In the future we should let the user define this in the delegation record
-    const COMPUTE_UNIT_PRICE: u64 = 100_000;
-
-    let compute_budget_ix =
-        ComputeBudgetInstruction::set_compute_unit_limit(COMPUTE_BUDGET);
-    let compute_unit_price_ix =
-        ComputeBudgetInstruction::set_compute_unit_price(COMPUTE_UNIT_PRICE);
-    (compute_budget_ix, compute_unit_price_ix)
+        let compute_budget_ix =
+            ComputeBudgetInstruction::set_compute_unit_limit(COMPUTE_BUDGET);
+        let compute_unit_price_ix =
+            ComputeBudgetInstruction::set_compute_unit_price(
+                self.compute_unit_price,
+            );
+        (compute_budget_ix, compute_unit_price_ix)
+    }
 }

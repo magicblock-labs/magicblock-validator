@@ -43,6 +43,7 @@ pub fn try_convert_accounts_config(
         external,
         create: conf.create,
         payer_init_lamports,
+        commit_compute_unit_price: conf.commit.compute_unit_price,
     })
 }
 

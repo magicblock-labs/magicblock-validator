@@ -9,7 +9,7 @@ remote = "devnet"
 # writable: all | delegated | none (
 clone = { readonly = "programs", writable = "none" }
 create = true
-commit = { frequency_millis = 500, trigger = false }
+commit = { frequency_millis = 500, trigger = false, compute_unit_price = 1_000_000 }
 
 [rpc]
 port = 8899
