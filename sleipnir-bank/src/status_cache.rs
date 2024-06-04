@@ -123,27 +123,37 @@ impl<T: Clone> StatusCache<T> {
         signature: &Signature,
         lookback_slots: Option<Slot>,
     ) -> Option<(Slot, T)> {
-        macro_rules! loop_iter {
-            ($iter:expr) => {
-                for (slot, map) in $iter {
-                    if let Some(needle) = map.get(signature) {
-                        return Some((*slot, needle.clone()));
-                    }
+        #[inline]
+        fn handle_iter<'a, T, I>(
+            signature: &Signature,
+            lookback_slots: Slot,
+            iter: I,
+        ) -> Option<(Slot, T)>
+        where
+            T: Clone + 'a,
+            I: Iterator<Item = &'a (Slot, HashMap<Signature, T>)>,
+        {
+            for (slot, map) in iter {
+                if let Some(needle) = map.get(signature) {
+                    return Some((*slot, needle.clone()));
                 }
-                warn!(
-                    "Missed tx status from cache for '{}', lookback={}",
-                    signature,
-                    lookback_slots.unwrap_or(u64::MAX)
-                );
-                None
-            };
+            }
+            warn!(
+                "Missed tx status from cache for '{}', lookback={}",
+                signature, lookback_slots
+            );
+            None
         }
 
         let iter = self.transaction_status_cache.iter().rev();
         if let Some(lookback_slots) = lookback_slots {
-            loop_iter! { iter.take(lookback_slots as usize) }
+            handle_iter(
+                signature,
+                lookback_slots,
+                iter.take(lookback_slots as usize),
+            )
         } else {
-            loop_iter! { iter }
+            handle_iter(signature, u64::MAX, iter)
         }
     }
 
