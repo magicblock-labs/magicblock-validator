@@ -191,7 +191,7 @@ impl GeyserPlugin for GrpcGeyserPlugin {
                             std::option_env!("DIAG_GEYSER_ACC_CACHE_INTERVAL")
                         {
                             let interval = interval.parse::<usize>().unwrap();
-                            if accounts_cache.get_cloned(&pubkey).is_none() {
+                            if !accounts_cache.contains_key(&pubkey) {
                                 error!(
                                     "Account not cached '{}', cache size {}",
                                     pubkey,
@@ -267,10 +267,7 @@ impl GeyserPlugin for GrpcGeyserPlugin {
                     std::option_env!("DIAG_GEYSER_TX_CACHE_INTERVAL")
                 {
                     let interval = interval.parse::<usize>().unwrap();
-                    if transactions_cache
-                        .get_cloned(transaction.signature)
-                        .is_none()
-                    {
+                    if !transactions_cache.contains_key(transaction.signature) {
                         let sig = crate::utils::short_signature(
                             transaction.signature,
                         );
