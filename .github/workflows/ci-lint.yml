@@ -2,13 +2,14 @@ on:
   push:
     branches: [master]
   pull_request:
-    branches: [master]
+    branches: [master, dev]
 
 name: Run CI - Lint
 
 jobs:
   run_make_ci_lint:
     runs-on: ubuntu-latest
+    if: github.event.pull_request.draft == false
     steps:
       - name: Checkout magicblock-labs/magicblock-validator
         uses: actions/checkout@v2
