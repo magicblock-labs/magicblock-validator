@@ -33,6 +33,7 @@ members = [
   "test-bins",
   "test-tools",
   "test-tools-core",
+  "utils/circular-hashmap",
 ]
 
 # This prevents a Travis CI error when building for Windows.
@@ -56,6 +57,7 @@ bincode = "1.3.3"
 bs58 = "0.4.0"
 byteorder = "1.5.0"
 cargo-lock = "9.0.0"
+circular-hashmap = { path = "./utils/circular-hashmap" }
 conjunto-transwise = { path = "../conjunto/transwise" }
 console-subscriber = "0.2.0"
 crossbeam-channel = "0.5.11"
