@@ -680,7 +680,7 @@ impl Bank {
         self.status_cache
             .write()
             .expect("RwLock of status cache poisoned")
-            .add_root(next_slot);
+            .add_root(slot);
 
         // 5. Update sysvars
         self.update_clock(self.genesis_creation_time);
