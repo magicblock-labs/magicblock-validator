@@ -2417,7 +2417,7 @@ impl Bank {
         self.status_cache
             .read()
             .expect("RwLock status_cache poisoned")
-            .get_recent_status(signature, lookback_slots)
+            .get_recent_transaction_status(signature, lookback_slots)
     }
 
     // -----------------
