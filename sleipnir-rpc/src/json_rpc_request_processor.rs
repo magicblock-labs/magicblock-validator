@@ -818,7 +818,10 @@ impl JsonRpcRequestProcessor {
         signature: Signature,
         search_transaction_history: bool,
     ) -> Option<TransactionStatus> {
-        let bank_result = self.bank.get_signature_status_slot(&signature);
+        let bank_result = self.bank.get_recent_signature_status(
+            &signature,
+            Some(self.bank.slots_for_duration(Duration::from_secs(10))),
+        );
         let (slot, status) = if let Some(bank_result) = bank_result {
             bank_result
         } else if self.config.enable_rpc_transaction_history

@@ -19,13 +19,14 @@ use crate::{
     bank::Bank, slot_status_notifier_interface::SlotStatusNotifierArc,
     transaction_batch::TransactionBatch,
     transaction_logs::TransactionLogCollectorFilter,
+    EPHEM_DEFAULT_MILLIS_PER_SLOT,
 };
 
 impl Bank {
     pub fn default_for_tests() -> Self {
         let accounts_db = AccountsDb::default_for_tests();
         let accounts = Accounts::new(Arc::new(accounts_db));
-        Self::default_with_accounts(accounts)
+        Self::default_with_accounts(accounts, EPHEM_DEFAULT_MILLIS_PER_SLOT)
     }
 
     pub fn new_for_tests(
@@ -38,6 +39,7 @@ impl Bank {
             Arc::new(RuntimeConfig::default()),
             accounts_update_notifier,
             slot_status_notifier,
+            EPHEM_DEFAULT_MILLIS_PER_SLOT,
         )
     }
 
@@ -46,6 +48,7 @@ impl Bank {
         runtime_config: Arc<RuntimeConfig>,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
         slot_status_notifier: Option<SlotStatusNotifierArc>,
+        millis_per_slot: u64,
     ) -> Self {
         let bank = Self::new(
             genesis_config,
@@ -55,6 +58,7 @@ impl Bank {
             false,
             accounts_update_notifier,
             slot_status_notifier,
+            millis_per_slot,
             Pubkey::new_unique(),
         );
         bank.transaction_log_collector_config

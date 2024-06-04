@@ -97,6 +97,7 @@ async fn main() {
             &genesis_config,
             geyser_service.get_accounts_update_notifier(),
             geyser_service.get_slot_status_notifier(),
+            config.validator.millis_per_slot,
             validator_pubkey,
         );
         Arc::new(bank)

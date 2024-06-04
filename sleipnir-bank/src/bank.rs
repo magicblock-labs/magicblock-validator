@@ -10,6 +10,7 @@ use std::{
         atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering},
         Arc, LockResult, RwLock, RwLockReadGuard, RwLockWriteGuard,
     },
+    time::Duration,
 };
 
 use log::{debug, info, trace};
@@ -243,14 +244,20 @@ pub struct Bank {
     /// The number of ticks in each slot.
     ticks_per_slot: u64,
 
-    /// length of a slot in ns
+    /// length of a slot in ns which is provided via the genesis config
+    /// NOTE: this is not currenlty configured correctly, use [Self::millis_per_slot] instead
     pub ns_per_slot: u128,
 
     /// genesis time, used for computed clock
     genesis_creation_time: UnixTimestamp,
 
     /// The number of slots per year, used for inflation
+    /// which is provided via the genesis config
+    /// NOTE: this is not currenlty configured correctly, use [Self::millis_per_slot] instead
     slots_per_year: f64,
+
+    /// Milliseconds per slot which is provided directly when the bank is created
+    pub millis_per_slot: u64,
 
     // -----------------
     // For TransactionProcessingCallback
@@ -379,6 +386,7 @@ impl Bank {
         debug_do_not_add_builtins: bool,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
         slot_status_notifier: Option<SlotStatusNotifierArc>,
+        millis_per_slot: u64,
         identity_id: Pubkey,
     ) -> Self {
         let accounts_db = AccountsDb::new_with_config(
@@ -387,7 +395,7 @@ impl Bank {
         );
 
         let accounts = Accounts::new(Arc::new(accounts_db));
-        let mut bank = Self::default_with_accounts(accounts);
+        let mut bank = Self::default_with_accounts(accounts, millis_per_slot);
         bank.ancestors = RwLock::new(Ancestors::from(vec![bank.slot()]));
         bank.transaction_debug_keys = debug_keys;
         bank.runtime_config = runtime_config;
@@ -429,7 +437,10 @@ impl Bank {
         bank
     }
 
-    pub(super) fn default_with_accounts(accounts: Accounts) -> Self {
+    pub(super) fn default_with_accounts(
+        accounts: Accounts,
+        millis_per_slot: u64,
+    ) -> Self {
         // NOTE: this was not part of the original implementation
         let simple_fork_graph = Arc::<RwLock<SimpleForkGraph>>::default();
         let loaded_programs_cache = {
@@ -462,7 +473,10 @@ impl Bank {
             fee_structure: FeeStructure::default(),
             loaded_programs_cache,
             transaction_processor: Default::default(),
-            status_cache: Arc::<RwLock<BankStatusCache>>::default(),
+            status_cache: Arc::new(RwLock::new(BankStatusCache::new(
+                millis_per_slot,
+            ))),
+            millis_per_slot,
             identity_id: Pubkey::default(),
 
             // Counters
@@ -662,11 +676,17 @@ impl Bank {
         slots.push(next_slot);
         *self.ancestors.write().unwrap() = Ancestors::from(slots);
 
-        // 4. Update sysvars
+        // 4. Add a "root" to the status cache to trigger removing old items
+        self.status_cache
+            .write()
+            .expect("RwLock of status cache poisoned")
+            .add_root(slot);
+
+        // 5. Update sysvars
         self.update_clock(self.genesis_creation_time);
         self.fill_missing_sysvar_cache_entries();
 
-        // 5. Determine next blockhash
+        // 6. Determine next blockhash
         let current_hash = self.last_blockhash();
         let blockhash = {
             // In the Solana implementation there is a lot of logic going on to determine the next
@@ -678,7 +698,7 @@ impl Bank {
             hasher.result()
         };
 
-        // 6. Register the new blockhash with the blockhash queue
+        // 7. Register the new blockhash with the blockhash queue
         {
             let mut blockhash_queue = self.blockhash_queue.write().unwrap();
             blockhash_queue.register_hash(
@@ -687,16 +707,16 @@ impl Bank {
             );
         }
 
-        // 7. Notify Geyser Service
+        // 8. Notify Geyser Service
         if let Some(slot_status_notifier) = &self.slot_status_notifier {
             slot_status_notifier
                 .notify_slot_status(next_slot, Some(next_slot - 1));
         }
 
-        // 8. Update loaded programs cache as otherwise we cannot deploy new programs
+        // 9. Update loaded programs cache as otherwise we cannot deploy new programs
         self.sync_loaded_programs_cache_to_slot();
 
-        // 9. Update slot hashes since they are needed to sanitize a transaction in some cases
+        // 10. Update slot hashes since they are needed to sanitize a transaction in some cases
         //    NOTE: slothash and blockhash are the same for us
         //          in solana the blockhash is set to the hash of the slot that is finalized
         self.update_slot_hashes(slot, current_hash);
@@ -1509,7 +1529,7 @@ impl Bank {
     ) -> LoadAndExecuteTransactionsOutput {
         // 1. Extract and check sanitized transactions
         let sanitized_txs = batch.sanitized_transactions();
-        debug!("processing transactions: {}", sanitized_txs.len());
+        trace!("processing transactions: {}", sanitized_txs.len());
 
         let mut error_counters = TransactionErrorMetrics::default();
 
@@ -1557,7 +1577,7 @@ impl Bank {
             &mut error_counters,
         );
         check_time.stop();
-        debug!("check: {}us", check_time.as_us());
+        trace!("check: {}us", check_time.as_us());
         timings.saturating_add_in_place(
             ExecuteTimingType::CheckUs,
             check_time.as_us(),
@@ -1872,7 +1892,7 @@ impl Bank {
 
         // once committed there is no way to unroll
         write_time.stop();
-        debug!(
+        trace!(
             "store: {}us txs_len={}",
             write_time.as_us(),
             sanitized_txs.len()
@@ -1962,6 +1982,14 @@ impl Bank {
                     tx.message().recent_blockhash(),
                     tx.signature(),
                     self.slot(),
+                    details.status.clone(),
+                );
+
+                // Additionally update the transaction status cache by slot to allow quickly
+                // finding transactions by going backward in time until a specific slot
+                status_cache.insert_transaction_status(
+                    self.slot(),
+                    tx.signature(),
                     details.status.clone(),
                 );
             }
@@ -2381,6 +2409,17 @@ impl Bank {
         self.get_signature_status_slot(signature).is_some()
     }
 
+    pub fn get_recent_signature_status(
+        &self,
+        signature: &Signature,
+        lookback_slots: Option<Slot>,
+    ) -> Option<(Slot, Result<()>)> {
+        self.status_cache
+            .read()
+            .expect("RwLock status_cache poisoned")
+            .get_recent_transaction_status(signature, lookback_slots)
+    }
+
     // -----------------
     // Counters
     // -----------------
@@ -2535,5 +2574,12 @@ impl Bank {
     /// Return the total capitalization of the Bank
     pub fn capitalization(&self) -> u64 {
         self.capitalization.load(Ordering::Relaxed)
+    }
+
+    // -----------------
+    // Utilities
+    // -----------------
+    pub fn slots_for_duration(&self, duration: Duration) -> Slot {
+        duration.as_millis() as u64 / self.millis_per_slot
     }
 }
