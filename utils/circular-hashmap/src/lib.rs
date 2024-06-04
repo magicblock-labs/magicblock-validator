@@ -6,23 +6,57 @@ use std::{
     },
 };
 
-pub type SharedHashMap<K, V> = Arc<RwLock<HashMap<K, V>>>;
+// -----------------
+// SharedMap
+// -----------------
+/// Shared access to a [HashMap] wrapped in a [RwLock] and [Arc], but only
+/// exposing query methods.
+/// Consider it a limited interface for the [CircularHashMap].
+#[derive(Debug)]
+pub struct SharedMap<K, V>(Arc<RwLock<HashMap<K, V>>>)
+where
+    K: PartialEq + Eq + std::hash::Hash + Clone,
+    V: Clone;
 
+impl<K, V> SharedMap<K, V>
+where
+    K: PartialEq + Eq + std::hash::Hash + Clone,
+    V: Clone,
+{
+    pub fn get(&self, key: &K) -> Option<V> {
+        self.0.read().expect("RwLock poisoned").get(key).cloned()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.read().expect("RwLock poisoned").len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.len() == 0
+    }
+}
+
+// -----------------
+// CircularHashMap
+// -----------------
 /// Wrapper around a [HashMap] that ensures that only a maximum number of elements are stored.
 /// When the map is full and a new element is added the oldest element is removed.
 #[derive(Debug)]
-pub struct CircularHashMap<
+pub struct CircularHashMap<K, V>
+where
     K: PartialEq + Eq + std::hash::Hash + Clone,
     V: Clone,
-> {
-    map: SharedHashMap<K, V>,
+{
+    map: Arc<RwLock<HashMap<K, V>>>,
     vec: Arc<RwLock<Vec<K>>>,
     next_vec_index: AtomicUsize,
     max_size: usize,
 }
 
-impl<K: PartialEq + Eq + std::hash::Hash + Clone, V: Clone>
-    CircularHashMap<K, V>
+impl<K, V> CircularHashMap<K, V>
+where
+    K: PartialEq + Eq + std::hash::Hash + Clone,
+    V: Clone,
 {
     /// Creates a new CircularHashMap with the given max size.
     pub fn new(max_size: usize) -> Self {
@@ -48,6 +82,10 @@ impl<K: PartialEq + Eq + std::hash::Hash + Clone, V: Clone>
         self.map_insert(key, value);
         self.next_vec_index
             .store((next_vec_index + 1) % self.max_size, Ordering::Relaxed);
+    }
+
+    pub fn shared_map(&self) -> SharedMap<K, V> {
+        SharedMap(self.map.clone())
     }
 
     fn vec_len(&self) -> usize {
@@ -114,10 +152,6 @@ impl<K: PartialEq + Eq + std::hash::Hash + Clone, V: Clone>
     /// Get the max size of the map.
     pub fn max_size(&self) -> usize {
         self.max_size
-    }
-
-    pub fn get_map(&self) -> SharedHashMap<K, V> {
-        self.map.clone()
     }
 }
 
