@@ -1,6 +1,6 @@
+use circular_hashmap::{CircularHashMap as Cache, SharedMap};
 use geyser_grpc_proto::geyser::SubscribeUpdateTransaction;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
-use stretto::Cache;
 
 use crate::types::GeyserMessage;
 
@@ -38,6 +38,24 @@ pub(crate) enum CacheState {
     Enabled(usize),
     #[default]
     Disabled,
+}
+
+impl From<Option<&SharedMap<Signature, GeyserMessage>>> for CacheState {
+    fn from(cache: Option<&SharedMap<Signature, GeyserMessage>>) -> Self {
+        match cache {
+            Some(cache) => CacheState::Enabled(cache.len()),
+            None => CacheState::Disabled,
+        }
+    }
+}
+
+impl From<Option<&SharedMap<Pubkey, GeyserMessage>>> for CacheState {
+    fn from(cache: Option<&SharedMap<Pubkey, GeyserMessage>>) -> Self {
+        match cache {
+            Some(cache) => CacheState::Enabled(cache.len()),
+            None => CacheState::Disabled,
+        }
+    }
 }
 
 impl From<Option<&Cache<Signature, GeyserMessage>>> for CacheState {

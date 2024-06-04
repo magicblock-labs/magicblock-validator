@@ -2,7 +2,6 @@
 use std::{
     collections::HashSet,
     net::{IpAddr, Ipv4Addr, SocketAddr},
-    time::Duration,
 };
 
 use solana_sdk::pubkey::Pubkey;
@@ -13,45 +12,13 @@ pub struct Config {
     pub grpc: ConfigGrpc,
     /// Action on block re-construction error
     pub block_fail_action: ConfigBlockFailAction,
-    /// TTL of cached transaction messages
-    /// Only applies if [Config::cache_transactions] is `true`
-    pub transactions_cache_ttl: Duration,
-    /// number of 4-bit access counters to keep for admission and eviction
-    /// Only applies if [Config::cache_transactions] is `true`
-    pub transactions_cache_num_counters: usize,
-    /// Since we ignore internal_cost, in our case this is exactly the same as
-    /// transactions_cache_max_cost which affects how eviction decisions are made
-    /// If max_cost is 100 and a new item with a cost of 1 increases total cache cost to
-    /// 101, 1 item will be evicted
-    /// Since all our items are considered to have the same cost what actually happens is
-    /// that the item is not added to the cache.
-    /// Thus we need to make sure this is higher than we ever expect the cache to grow to
-    /// since we cannot miss transaction signatures.
-    /// Diagnose this cache and related settings by setting the `DIAG_GEYSER_TX_CACHE_INTERVAL`
-    /// compile time environment var.
-    /// Only applies if [Config::cache_transactions] is `true`
-    pub transactions_cache_max_cached_items: i64,
 
-    /// TTL of cached account messages
+    /// How many transaction items to keep in the cache
+    /// Only applies if [Config::cache_transactions] is `true`
+    pub transactions_cache_max_cached_items: usize,
+    /// How many account items to keep in the cache
     /// Only applies if [Config::cache_accounts] is `true`
-    pub accounts_cache_ttl: Duration,
-    /// See [Config::transactions_cache_num_counters].
-    /// Only applies if [Config::cache_accounts] is `true`
-    pub accounts_cache_num_counters: usize,
-    /// See [Config::transactions_max_cached_items].
-    /// By default it is set to 1GB
-    /// When we add an account we take its data size into account when determining
-    /// cost, such that large accounts would be evicted first.
-    /// Thus if this is set to 100 bytes it can hold 100 empty accounts or 20 accounts with
-    /// data byte size of 5 each.
-    /// Devs usually subscribe to updates of an account up front and then run lots
-    /// of transactions. Therefore it's not that big of a problem to miss the first one in most
-    /// cases in case the cache was full and it wasn't added.
-    /// Another important aspect is that if we get an update for an account that is already
-    /// in the cache it will be replaced with the new data and thus doesn't grow the cache.
-    /// Diagnose this cache and related settings by setting the `DIAG_GEYSER_ACC_CACHE_INTERVAL`
-    /// compile time environment var.
-    pub accounts_cache_max_cached_bytes: i64,
+    pub accounts_cache_max_cached_items: usize,
 
     /// If to cache account updates (default: true)
     pub cache_accounts: bool,
@@ -69,15 +36,11 @@ impl Default for Config {
         Self {
             grpc: Default::default(),
             block_fail_action: Default::default(),
-            transactions_cache_ttl: Duration::from_millis(500),
-            // Dgraph's developers have seen good performance in setting this to 10x the number of
-            // items you expect to keep in the cache when full
-            transactions_cache_num_counters: 10_000,
-            transactions_cache_max_cached_items: 1_000_000,
-
-            accounts_cache_ttl: Duration::from_millis(500),
-            accounts_cache_num_counters: 10_000,
-            accounts_cache_max_cached_bytes: 1024 * 1024 * 1024, // 1GB
+            // At 3000 tx/s this is equal to TTL of 16.6 seconds
+            transactions_cache_max_cached_items: 50_000,
+            // Each transaction could update more than one account, thus we keep more
+            // to roughly match the TTL of transaction items
+            accounts_cache_max_cached_items: 100_000,
 
             cache_accounts: true,
             cache_transactions: true,

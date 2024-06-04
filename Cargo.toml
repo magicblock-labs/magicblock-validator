@@ -145,7 +145,6 @@ solana-transaction-status = { git = "https://github.com/solana-labs/solana", rev
 solana_rbpf = "=0.8.0"
 spl-token = "=4.0.1"
 spl-token-2022 = "=2.0.1"
-stretto = "0.8.3"
 tempfile = "3.10.1"
 test-tools = { path = "./test-tools" }
 test-tools-core = { path = "./test-tools-core" }
