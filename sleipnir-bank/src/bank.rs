@@ -10,6 +10,7 @@ use std::{
         atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering},
         Arc, LockResult, RwLock, RwLockReadGuard, RwLockWriteGuard,
     },
+    time::Duration,
 };
 
 use log::{debug, info, trace};
@@ -243,14 +244,20 @@ pub struct Bank {
     /// The number of ticks in each slot.
     ticks_per_slot: u64,
 
-    /// length of a slot in ns
+    /// length of a slot in ns which is provided via the genesis config
+    /// NOTE: this is not currenlty configured correctly, use [Self::millis_per_slot] instead
     pub ns_per_slot: u128,
 
     /// genesis time, used for computed clock
     genesis_creation_time: UnixTimestamp,
 
     /// The number of slots per year, used for inflation
+    /// which is provided via the genesis config
+    /// NOTE: this is not currenlty configured correctly, use [Self::millis_per_slot] instead
     slots_per_year: f64,
+
+    /// Milliseconds per slot which is provided directly when the bank is created
+    pub millis_per_slot: u64,
 
     // -----------------
     // For TransactionProcessingCallback
@@ -469,6 +476,7 @@ impl Bank {
             status_cache: Arc::new(RwLock::new(BankStatusCache::new(
                 millis_per_slot,
             ))),
+            millis_per_slot,
             identity_id: Pubkey::default(),
 
             // Counters
@@ -1521,7 +1529,7 @@ impl Bank {
     ) -> LoadAndExecuteTransactionsOutput {
         // 1. Extract and check sanitized transactions
         let sanitized_txs = batch.sanitized_transactions();
-        debug!("processing transactions: {}", sanitized_txs.len());
+        trace!("processing transactions: {}", sanitized_txs.len());
 
         let mut error_counters = TransactionErrorMetrics::default();
 
@@ -1569,7 +1577,7 @@ impl Bank {
             &mut error_counters,
         );
         check_time.stop();
-        debug!("check: {}us", check_time.as_us());
+        trace!("check: {}us", check_time.as_us());
         timings.saturating_add_in_place(
             ExecuteTimingType::CheckUs,
             check_time.as_us(),
@@ -1884,7 +1892,7 @@ impl Bank {
 
         // once committed there is no way to unroll
         write_time.stop();
-        debug!(
+        trace!(
             "store: {}us txs_len={}",
             write_time.as_us(),
             sanitized_txs.len()
@@ -1974,6 +1982,14 @@ impl Bank {
                     tx.message().recent_blockhash(),
                     tx.signature(),
                     self.slot(),
+                    details.status.clone(),
+                );
+
+                // Additionally update the transaction status cache by slot to allow quickly
+                // finding transactions by going backward in time until a specific slot
+                status_cache.insert_transaction_status(
+                    self.slot(),
+                    tx.signature(),
                     details.status.clone(),
                 );
             }
@@ -2393,6 +2409,17 @@ impl Bank {
         self.get_signature_status_slot(signature).is_some()
     }
 
+    pub fn get_recent_signature_status(
+        &self,
+        signature: &Signature,
+        lookback_slots: Option<Slot>,
+    ) -> Option<(Slot, Result<()>)> {
+        self.status_cache
+            .read()
+            .expect("RwLock status_cache poisoned")
+            .get_recent_status(signature, lookback_slots)
+    }
+
     // -----------------
     // Counters
     // -----------------
@@ -2547,5 +2574,12 @@ impl Bank {
     /// Return the total capitalization of the Bank
     pub fn capitalization(&self) -> u64 {
         self.capitalization.load(Ordering::Relaxed)
+    }
+
+    // -----------------
+    // Utilities
+    // -----------------
+    pub fn slots_for_duration(&self, duration: Duration) -> Slot {
+        duration.as_millis() as u64 / self.millis_per_slot
     }
 }

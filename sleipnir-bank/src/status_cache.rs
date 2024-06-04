@@ -15,6 +15,7 @@ use solana_frozen_abi_macro::AbiExample;
 use solana_sdk::{
     clock::{Slot, DEFAULT_MS_PER_SLOT, MAX_RECENT_BLOCKHASHES},
     hash::Hash,
+    signature::Signature,
 };
 
 const CACHED_KEY_SIZE: usize = 20;
@@ -26,6 +27,7 @@ type KeyMap<T> = HashMap<KeySlice, ForkStatus<T>>;
 // A Map of hash + the highest fork it's been observed on along with
 // the key offset and a Map of the key slice + Fork status for that key
 type KeyStatusMap<T> = HashMap<Hash, (Slot, usize, KeyMap<T>)>;
+type SlotTransactionStatuses<T> = Vec<(Slot, HashMap<Signature, T>)>;
 
 // Map of Hash and status
 pub type Status<T> = Arc<Mutex<HashMap<Hash, (usize, Vec<(KeySlice, T)>)>>>;
@@ -35,7 +37,8 @@ type SlotDeltaMap<T> = HashMap<Slot, Status<T>>;
 
 #[derive(Clone, Debug, AbiExample)]
 pub struct StatusCache<T: Clone> {
-    cache: KeyStatusMap<T>,
+    cache_by_blockhash: KeyStatusMap<T>,
+    transaction_status_cache: SlotTransactionStatuses<T>,
     roots: HashSet<Slot>,
 
     /// all keys seen during a fork/slot
@@ -48,18 +51,23 @@ impl<T: Clone> StatusCache<T> {
         const SOLANA_MAX_CACHE_TTL_MILLIS: u64 =
             DEFAULT_MS_PER_SLOT * MAX_RECENT_BLOCKHASHES as u64;
 
-        // Instead of matching Solana's slot frequency we match the TTL of the cache
+        // Instead of matching Solana's slot frequency we match the same TTL (2mins)
         // that result from the slot frequency considering the slot time.
-        let max_cache_entries =
+        let max_cache_entries = // 2,400 for 50ms slots
             cmp::max(SOLANA_MAX_CACHE_TTL_MILLIS / millis_per_slot, 5);
         Self {
-            cache: HashMap::default(),
+            cache_by_blockhash: HashMap::default(),
+            transaction_status_cache: vec![],
             // 0 is always a root
             roots: HashSet::from([0]),
             slot_deltas: HashMap::default(),
             max_cache_entries,
         }
     }
+
+    // -----------------
+    // Queries
+    // -----------------
 
     /// Check if the key is in any of the forks in the ancestors set and
     /// with a certain blockhash.
@@ -69,7 +77,7 @@ impl<T: Clone> StatusCache<T> {
         transaction_blockhash: &Hash,
         ancestors: &Ancestors,
     ) -> Option<(Slot, T)> {
-        let map = self.cache.get(transaction_blockhash)?;
+        let map = self.cache_by_blockhash.get(transaction_blockhash)?;
         let (_, index, keymap) = map;
         let max_key_index =
             key.as_ref().len().saturating_sub(CACHED_KEY_SIZE + 1);
@@ -98,7 +106,7 @@ impl<T: Clone> StatusCache<T> {
         key: K,
         ancestors: &Ancestors,
     ) -> Option<(Slot, T)> {
-        let keys: Vec<_> = self.cache.keys().copied().collect();
+        let keys: Vec<_> = self.cache_by_blockhash.keys().copied().collect();
 
         for blockhash in keys.iter() {
             trace!("get_status_any_blockhash: trying {}", blockhash);
@@ -108,6 +116,54 @@ impl<T: Clone> StatusCache<T> {
             }
         }
         None
+    }
+
+    pub fn get_recent_status(
+        &self,
+        signature: &Signature,
+        lookback_slots: Option<Slot>,
+    ) -> Option<(Slot, T)> {
+        macro_rules! loop_iter {
+            ($iter:expr) => {
+                for (slot, map) in $iter {
+                    if let Some(needle) = map.get(signature) {
+                        return Some((*slot, needle.clone()));
+                    }
+                }
+                warn!(
+                    "Missed tx status from cache for '{}', lookback={}",
+                    signature,
+                    lookback_slots.unwrap_or(u64::MAX)
+                );
+                None
+            };
+        }
+
+        let iter = self.transaction_status_cache.iter().rev();
+        if let Some(lookback_slots) = lookback_slots {
+            loop_iter! { iter.take(lookback_slots as usize) }
+        } else {
+            loop_iter! { iter }
+        }
+    }
+
+    // -----------------
+    // Inserts
+    // -----------------
+    pub fn insert_transaction_status(
+        &mut self,
+        slot: Slot,
+        signature: &Signature,
+        status: T,
+    ) {
+        // Either add a new transaction status entry for the slot or update the latest one
+        if self.transaction_status_cache.len() < slot as usize {
+            self.transaction_status_cache.push((slot, HashMap::new()));
+        }
+        let (status_slot, map) =
+            self.transaction_status_cache.last_mut().unwrap();
+        debug_assert_eq!(*status_slot, slot);
+        map.insert(*signature, status);
     }
 
     /// Insert a new key for a specific slot.
@@ -120,8 +176,10 @@ impl<T: Clone> StatusCache<T> {
     ) {
         let max_key_index =
             key.as_ref().len().saturating_sub(CACHED_KEY_SIZE + 1);
-        let hash_map =
-            self.cache.entry(*transaction_blockhash).or_insert_with(|| {
+        let hash_map = self
+            .cache_by_blockhash
+            .entry(*transaction_blockhash)
+            .or_insert_with(|| {
                 let key_index = thread_rng().gen_range(0..max_key_index + 1);
                 (slot, key_index, HashMap::new())
             });
@@ -149,11 +207,10 @@ impl<T: Clone> StatusCache<T> {
         key_slice: [u8; CACHED_KEY_SIZE],
         res: T,
     ) {
-        let hash_map = self.cache.entry(*transaction_blockhash).or_insert((
-            slot,
-            key_index,
-            HashMap::new(),
-        ));
+        let hash_map = self
+            .cache_by_blockhash
+            .entry(*transaction_blockhash)
+            .or_insert((slot, key_index, HashMap::new()));
         hash_map.0 = std::cmp::max(slot, hash_map.0);
 
         // NOTE: not supporting forks exactly, but need to insert the entry
@@ -175,6 +232,10 @@ impl<T: Clone> StatusCache<T> {
         self.purge_roots(fork);
     }
 
+    // -----------------
+    // Bookkeeping
+    // -----------------
+
     /// Checks if the number slots we have seen (roots) and cached status for is larger
     /// than [MAX_CACHE_ENTRIES] (300). If so it does the following:
     ///
@@ -189,41 +250,63 @@ impl<T: Clone> StatusCache<T> {
     /// The terminology "roots" comes from the original Solana implementation which
     /// considered the banks that had been rooted.
     fn purge_roots(&mut self, slot: Slot) {
-        if self.roots.len() > self.max_cache_entries as usize {
-            if let Some(min) = self.roots.iter().min().cloned() {
-                // At 50ms/slot lot every 5 seconds
-                const LOG_CACHE_SIZE_INTERVAL: u64 = 20 * 5;
-                let total_cache_size_before = if log_enabled!(log::Level::Debug)
-                {
-                    if slot % LOG_CACHE_SIZE_INTERVAL == 0 {
-                        Some(
-                            self.cache
-                                .iter()
-                                .map(|(_, (_, _, m))| m.len())
-                                .sum::<usize>(),
-                        )
-                    } else {
-                        None
-                    }
+        // We allow the cache to grow to 1.5 the size of max cache entries
+        // purging less regularly to reduce overhead.
+        // At 50ms/slot we purge once per minute.
+        if slot % (self.max_cache_entries / 2) == 0 {
+            if slot <= self.max_cache_entries {
+                return;
+            }
+            let min = slot - self.max_cache_entries;
+
+            // At 50ms/slot lot every 5 seconds
+            const LOG_CACHE_SIZE_INTERVAL: u64 = 20 * 5;
+            let sizes_before = if log_enabled!(log::Level::Debug) {
+                if slot % LOG_CACHE_SIZE_INTERVAL == 0 {
+                    Some((
+                        self.cache_by_blockhash
+                            .iter()
+                            .map(|(_, (_, _, m))| m.len())
+                            .sum::<usize>(),
+                        self.transaction_status_cache
+                            .iter()
+                            .map(|(_, m)| m.len())
+                            .sum::<usize>(),
+                    ))
                 } else {
                     None
-                };
-                self.roots.remove(&min);
-                self.cache.retain(|_, (slot, _, _)| *slot > min);
-                self.slot_deltas.retain(|slot, _| *slot > min);
-                let total_cache_size_after = self
-                    .cache
+                }
+            } else {
+                None
+            };
+            self.roots.retain(|slot| *slot > min);
+            self.cache_by_blockhash
+                .retain(|_, (slot, _, _)| *slot > min);
+            self.transaction_status_cache
+                .retain(|(slot, _)| *slot > min);
+            self.slot_deltas.retain(|slot, _| *slot > min);
+
+            if let Some((cache_size_before, tx_status_size_before)) =
+                sizes_before
+            {
+                let cache_size_after = self
+                    .cache_by_blockhash
                     .iter()
                     .map(|(_, (_, _, m))| m.len())
                     .sum::<usize>();
-                if let Some(total_cache_size_before) = total_cache_size_before {
-                    log::debug!(
-                        "Purged roots up to {}. Cache size before/after: {}/{}",
-                        min,
-                        total_cache_size_before,
-                        total_cache_size_after
-                    );
-                }
+                let tx_status_size_after = self
+                    .transaction_status_cache
+                    .iter()
+                    .map(|(_, m)| m.len())
+                    .sum::<usize>();
+                log::debug!(
+                    "Purged roots up to {}. Cache {} -> {}, TX Status {} -> {}",
+                    min,
+                    cache_size_before,
+                    cache_size_after,
+                    tx_status_size_before,
+                    tx_status_size_after
+                );
             }
         }
     }
