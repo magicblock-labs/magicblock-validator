@@ -118,7 +118,7 @@ impl<T: Clone> StatusCache<T> {
         None
     }
 
-    pub fn get_recent_status(
+    pub fn get_recent_transaction_status(
         &self,
         signature: &Signature,
         lookback_slots: Option<Slot>,
