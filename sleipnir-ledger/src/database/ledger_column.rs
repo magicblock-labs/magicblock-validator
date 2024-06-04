@@ -4,7 +4,6 @@ use bincode::{deserialize, serialize};
 use prost::Message;
 use rocksdb::{properties as RocksProperties, ColumnFamily};
 use serde::de::DeserializeOwned;
-use solana_sdk::clock::Slot;
 
 use super::{
     columns::{
@@ -170,21 +169,6 @@ where
             let (key, value) = pair.unwrap();
             (C::index(&key), value)
         }))
-    }
-
-    pub fn compact_range(
-        &self,
-        from: Slot,
-        to: Slot,
-    ) -> std::result::Result<bool, LedgerError>
-    where
-        C::Index: PartialOrd + Copy,
-    {
-        let cf = self.handle();
-        let from = Some(C::key(C::as_index(from)));
-        let to = Some(C::key(C::as_index(to)));
-        self.backend.db.compact_range_cf(cf, from, to);
-        Ok(true)
     }
 
     #[inline]

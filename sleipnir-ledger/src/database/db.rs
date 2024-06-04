@@ -176,13 +176,4 @@ impl Database {
     ) -> std::result::Result<Vec<LiveFile>, LedgerError> {
         self.backend.live_files_metadata()
     }
-
-    pub fn compact_range_cf<C: Column + ColumnName>(
-        &self,
-        from: &[u8],
-        to: &[u8],
-    ) {
-        let cf = self.cf_handle::<C>();
-        self.backend.db.compact_range_cf(cf, Some(from), Some(to));
-    }
 }
