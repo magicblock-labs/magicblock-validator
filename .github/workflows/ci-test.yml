@@ -1,11 +1,15 @@
-on: [push]
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
 
 name: Run CI - Test
 
 jobs:
   run_make_ci_test:
     runs-on: ubuntu-latest
-    steps:  
+    steps:
       - name: Checkout magicblock-labs/magicblock-validator
         uses: actions/checkout@v2
         with:
@@ -32,7 +36,7 @@ jobs:
 
       - name: Install Nextest
         uses: taiki-e/install-action@nextest
-  
+
       - name: Install Rust
         run: rustup toolchain install nightly --profile complete
 
