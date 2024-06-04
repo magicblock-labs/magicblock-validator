@@ -100,7 +100,8 @@ pub struct JsonRpcRequestProcessor {
     pub(crate) ledger: Arc<Ledger>,
     pub(crate) health: Arc<RpcHealth>,
     pub(crate) config: JsonRpcConfig,
-    transaction_sender: Arc<Mutex<Sender<TransactionInfo>>>, // TODO - this is unused?
+    // TODO(thlorenz): lets use this in the future, or deprecate/remove it
+    transaction_sender: Arc<Mutex<Sender<TransactionInfo>>>,
     pub(crate) genesis_hash: Hash,
     pub faucet_keypair: Arc<Keypair>,
 
