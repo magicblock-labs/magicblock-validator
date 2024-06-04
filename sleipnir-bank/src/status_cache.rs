@@ -157,7 +157,8 @@ impl<T: Clone> StatusCache<T> {
         status: T,
     ) {
         // Either add a new transaction status entry for the slot or update the latest one
-        if self.transaction_status_cache.len() < slot as usize {
+        // NOTE: that slot starts at 0
+        if self.transaction_status_cache.len() <= slot as usize {
             self.transaction_status_cache.push((slot, HashMap::new()));
         }
         let (status_slot, map) =
