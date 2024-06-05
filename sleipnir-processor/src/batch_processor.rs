@@ -7,6 +7,7 @@ use std::{
 
 use log::debug;
 use rayon::prelude::*;
+use sleipnir_accounts_db::transaction_results::TransactionResults;
 use sleipnir_bank::{
     bank::{Bank, TransactionExecutionRecordingOpts},
     transaction_batch::TransactionBatch,
@@ -14,7 +15,6 @@ use sleipnir_bank::{
 use sleipnir_transaction_status::{
     token_balances::TransactionTokenBalancesSet, TransactionStatusSender,
 };
-use solana_accounts_db::transaction_results::TransactionResults;
 use solana_measure::measure::Measure;
 use solana_program_runtime::timings::{
     ExecuteTimingType, ExecuteTimings, ThreadExecuteTimings,

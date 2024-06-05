@@ -1,23 +1,18 @@
-#![allow(dead_code)]
 use std::{
-    collections::HashMap,
-    net::SocketAddr,
-    str::FromStr,
-    sync::{Arc, Mutex},
+    collections::HashMap, net::SocketAddr, str::FromStr, sync::Arc,
     time::Duration,
 };
 
-use crossbeam_channel::{unbounded, Receiver, Sender};
 use jsonrpc_core::{Error, ErrorCode, Metadata, Result, Value};
 use log::*;
 use sleipnir_accounts::AccountsManager;
+use sleipnir_accounts_db::accounts_index::AccountSecondaryIndexes;
 use sleipnir_bank::{
     bank::Bank, transaction_simulation::TransactionSimulationResult,
 };
 use sleipnir_ledger::{Ledger, SignatureInfosForAddress};
 use sleipnir_transaction_status::TransactionStatusSender;
 use solana_account_decoder::{UiAccount, UiAccountEncoding};
-use solana_accounts_db::accounts_index::AccountSecondaryIndexes;
 use solana_rpc_client_api::{
     config::{
         RpcAccountInfoConfig, RpcContextConfig, RpcEncodingConfigWrapper,
@@ -100,8 +95,6 @@ pub struct JsonRpcRequestProcessor {
     pub(crate) ledger: Arc<Ledger>,
     pub(crate) health: Arc<RpcHealth>,
     pub(crate) config: JsonRpcConfig,
-    // TODO(thlorenz): lets use this in the future, or deprecate/remove it
-    transaction_sender: Arc<Mutex<Sender<TransactionInfo>>>,
     pub(crate) genesis_hash: Hash,
     pub faucet_keypair: Arc<Keypair>,
 
@@ -118,22 +111,16 @@ impl JsonRpcRequestProcessor {
         genesis_hash: Hash,
         accounts_manager: Arc<AccountsManager>,
         config: JsonRpcConfig,
-    ) -> (Self, Receiver<TransactionInfo>) {
-        let (sender, receiver) = unbounded();
-        let transaction_sender = Arc::new(Mutex::new(sender));
-        (
-            Self {
-                bank,
-                ledger,
-                health,
-                config,
-                transaction_sender,
-                faucet_keypair: Arc::new(faucet_keypair),
-                genesis_hash,
-                accounts_manager,
-            },
-            receiver,
-        )
+    ) -> Self {
+        Self {
+            bank,
+            ledger,
+            health,
+            config,
+            faucet_keypair: Arc::new(faucet_keypair),
+            genesis_hash,
+            accounts_manager,
+        }
     }
 
     // -----------------
@@ -831,7 +818,10 @@ impl JsonRpcRequestProcessor {
         signature: Signature,
         search_transaction_history: bool,
     ) -> Option<TransactionStatus> {
-        let bank_result = self.bank.get_signature_status_slot(&signature);
+        let bank_result = self.bank.get_recent_signature_status(
+            &signature,
+            Some(self.bank.slots_for_duration(Duration::from_secs(10))),
+        );
         let (slot, status) = if let Some(bank_result) = bank_result {
             bank_result
         } else if self.config.enable_rpc_transaction_history

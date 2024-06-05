@@ -8,6 +8,7 @@ use std::{
     },
 };
 
+use circular_hashmap::{CircularHashMap as Cache, SharedMap};
 use geyser_grpc_proto::{
     geyser::{
         subscribe_update::UpdateOneof, CommitmentLevel, SubscribeRequest,
@@ -18,7 +19,6 @@ use geyser_grpc_proto::{
 };
 use log::*;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
-use stretto::Cache;
 use tokio::sync::{broadcast, mpsc, Notify};
 use tokio_util::sync::CancellationToken;
 use tonic::{Result as TonicResult, Status};
@@ -41,8 +41,8 @@ pub struct GeyserRpcService {
     broadcast_tx: broadcast::Sender<(CommitmentLevel, GeyserMessages)>,
     subscribe_id: AtomicU64,
 
-    transactions_cache: Option<Cache<Signature, GeyserMessage>>,
-    accounts_cache: Option<Cache<Pubkey, GeyserMessage>>,
+    transactions_cache: Option<SharedMap<Signature, GeyserMessage>>,
+    accounts_cache: Option<SharedMap<Pubkey, GeyserMessage>>,
 }
 
 impl std::fmt::Debug for GeyserRpcService {
@@ -65,8 +65,8 @@ impl GeyserRpcService {
     pub fn create(
         config: ConfigGrpc,
         block_fail_action: ConfigBlockFailAction,
-        transactions_cache: Option<Cache<Signature, GeyserMessage>>,
-        accounts_cache: Option<Cache<Pubkey, GeyserMessage>>,
+        transactions_cache: Option<SharedMap<Signature, GeyserMessage>>,
+        accounts_cache: Option<SharedMap<Pubkey, GeyserMessage>>,
     ) -> Result<
         (mpsc::UnboundedSender<GeyserMessage>, Arc<Notify>, Self),
         Box<dyn std::error::Error + Send + Sync>,
@@ -142,7 +142,7 @@ impl GeyserRpcService {
                 cache
                     .get(pubkey)
                     .as_ref()
-                    .map(|val| Arc::new(vec![val.value().clone()]))
+                    .map(|val| Arc::new(vec![val.clone()]))
             })
         });
 
@@ -180,7 +180,7 @@ impl GeyserRpcService {
                 let msgs = cache
                     .get(signature)
                     .as_ref()
-                    .map(|val| Arc::new(vec![val.value().clone()]));
+                    .map(|val| Arc::new(vec![val.clone()]));
 
                 if log::log_enabled!(log::Level::Trace)
                     && msgs

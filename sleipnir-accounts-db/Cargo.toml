@@ -1,0 +1,27 @@
+[package]
+name = "sleipnir-accounts-db"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+dashmap = { workspace = true, features = ["rayon", "raw-api"] }
+log = { workspace = true }
+modular-bitfield = { workspace = true }
+rayon = { workspace = true }
+solana-frozen-abi-macro = { workspace = true }
+solana-measure = { workspace = true }
+solana-metrics = { workspace = true }
+solana-rayon-threadlimit = { workspace = true }
+solana-sdk = { workspace = true }
+thiserror = { workspace = true }
+
+# For now we need to re-export + use some types and traits directly from solana_accounts_db
+# since they need to match exactly. For example ZeroLamports which the solana-sdk implements
+# for the `Account` struct.
+# Once we implement the accounts db fully and will redirect imports of all pieces
+# including the solana crates to use it, we can remove this dependency.
+solana-accounts-db = { workspace = true }

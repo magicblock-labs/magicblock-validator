@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
+use sleipnir_accounts_db::transaction_results::TransactionExecutionDetails;
 use sleipnir_bank::{bank::Bank, transaction_results::TransactionBalancesSet};
-use solana_accounts_db::transaction_results::TransactionExecutionDetails;
 use solana_sdk::{
     signature::Signature,
     transaction::{SanitizedTransaction, Transaction},

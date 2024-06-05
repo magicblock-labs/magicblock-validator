@@ -64,7 +64,7 @@ impl JsonRpcService {
             Arc::clone(bank.get_startup_verification_complete());
         let health = Arc::new(RpcHealth::new(startup_verification_complete));
 
-        let (request_processor, _receiver) = JsonRpcRequestProcessor::new(
+        let request_processor = JsonRpcRequestProcessor::new(
             bank,
             ledger,
             health.clone(),
