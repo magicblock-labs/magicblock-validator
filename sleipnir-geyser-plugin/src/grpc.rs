@@ -168,7 +168,7 @@ impl GrpcService {
                         Message::Slot(msg) if processed_first_slot.is_none() && msg.status == CommitmentLevel::Processed => {
                             processed_first_slot = Some(msg.slot);
                         }
-                        // NOTE: this used to guard to `CommitmentLevel::Processed`, but we never
+                        // NOTE: this used to guard to `CommitmentLevel::Finalized`, but we never
                         // send that
                         Message::Slot(msg) if msg.status == CommitmentLevel::Processed => {
                             // NOTE: originally 10 slots were kept here, but we about 80x as many
@@ -220,7 +220,7 @@ impl GrpcService {
                                 }
                             }
                         }
-                        _  => {}
+                        _ => {}
                     }
 
                     // Update block reconstruction info
