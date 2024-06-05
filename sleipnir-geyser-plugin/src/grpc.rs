@@ -17,7 +17,6 @@ use geyser_grpc_proto::prelude::{
     PongResponse, SubscribeRequest, SubscribeUpdate, SubscribeUpdatePing,
 };
 use log::{error, info};
-use solana_sdk::clock::Slot;
 use tokio::{
     sync::{broadcast, mpsc, Notify},
     time::{sleep, Duration, Instant},

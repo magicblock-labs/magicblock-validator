@@ -203,7 +203,7 @@ impl GeyserPlugin for GrpcGeyserPlugin {
                             let count = COUNTER.fetch_add(1, Ordering::SeqCst);
                             if count % interval == 0 {
                                 info!(
-                                    "AccountsCache size: {}, accounts: {}",
+                                    "AccountsCache size: {}, accounts stored: {}",
                                     accounts_cache.len(),
                                     count,
                                 );
