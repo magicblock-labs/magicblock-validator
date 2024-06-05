@@ -23,13 +23,16 @@ use solana_sdk::{
     signature::Signature,
     transaction::SanitizedTransaction,
 };
-use tokio::sync::{
-    mpsc::{self, UnboundedReceiver, UnboundedSender},
-    RwLock, Semaphore,
-};
+use tokio::sync::{RwLock, Semaphore};
 use tonic::{Response, Status};
 
-use crate::{filters::FilterAccountsDataSlice, types::GeyserMessage};
+use crate::{
+    filters::FilterAccountsDataSlice,
+    types::{
+        geyser_message_channel, GeyserMessage, GeyserMessageReceiver,
+        GeyserMessageSender,
+    },
+};
 
 #[derive(Debug, Clone)]
 pub struct MessageAccountInfo {
@@ -508,12 +511,10 @@ pub(crate) struct BlockMetaStorage {
 impl BlockMetaStorage {
     pub(crate) fn new(
         unary_concurrency_limit: usize,
-    ) -> (Self, mpsc::UnboundedSender<GeyserMessage>) {
+    ) -> (Self, GeyserMessageSender) {
         let inner = Arc::new(RwLock::new(BlockMetaStorageInner::default()));
-        let (tx, mut rx): (
-            UnboundedSender<GeyserMessage>,
-            UnboundedReceiver<GeyserMessage>,
-        ) = mpsc::unbounded_channel();
+        let (tx, mut rx): (GeyserMessageSender, GeyserMessageReceiver) =
+            geyser_message_channel();
 
         let storage = Arc::clone(&inner);
         tokio::spawn(async move {

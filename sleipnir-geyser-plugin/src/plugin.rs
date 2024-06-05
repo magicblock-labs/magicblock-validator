@@ -26,7 +26,7 @@ use crate::{
     grpc::GrpcService,
     grpc_messages::{Message, MessageSlot},
     rpc::GeyserRpcService,
-    types::GeyserMessage,
+    types::{GeyserMessage, GeyserMessageSender},
     utils::CacheState,
 };
 
@@ -35,15 +35,15 @@ use crate::{
 // -----------------
 #[derive(Debug)]
 pub struct PluginInner {
-    grpc_channel: mpsc::UnboundedSender<GeyserMessage>,
+    grpc_channel: GeyserMessageSender,
     grpc_shutdown: Arc<Notify>,
-    rpc_channel: mpsc::UnboundedSender<GeyserMessage>,
+    rpc_channel: GeyserMessageSender,
     rpc_shutdown: Arc<Notify>,
 }
 
 impl PluginInner {
     fn send_message(&self, message: &GeyserMessage) {
-        let _ = self.grpc_channel.send(message.clone());
+        // let _ = self.grpc_channel.send(message.clone());
         let _ = self.rpc_channel.send(message.clone());
     }
 }

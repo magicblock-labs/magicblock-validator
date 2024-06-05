@@ -28,7 +28,10 @@ use crate::{
     filters::Filter,
     grpc::GrpcService,
     grpc_messages::{BlockMetaStorage, Message},
-    types::{GeyserMessage, GeyserMessages},
+    types::{
+        geyser_message_channel, GeyserMessage, GeyserMessageSender,
+        GeyserMessages,
+    },
     utils::{
         short_signature, short_signature_from_sub_update,
         short_signature_from_vec, CacheState,
@@ -68,7 +71,7 @@ impl GeyserRpcService {
         transactions_cache: Option<SharedMap<Signature, GeyserMessage>>,
         accounts_cache: Option<SharedMap<Pubkey, GeyserMessage>>,
     ) -> Result<
-        (mpsc::UnboundedSender<GeyserMessage>, Arc<Notify>, Self),
+        (GeyserMessageSender, Arc<Notify>, Self),
         Box<dyn std::error::Error + Send + Sync>,
     > {
         // Blocks meta storage
@@ -97,7 +100,7 @@ impl GeyserRpcService {
         };
 
         // Run geyser message loop
-        let (messages_tx, messages_rx) = mpsc::unbounded_channel();
+        let (messages_tx, messages_rx) = geyser_message_channel();
         tokio::spawn(GrpcService::geyser_loop(
             messages_rx,
             blocks_meta_tx,

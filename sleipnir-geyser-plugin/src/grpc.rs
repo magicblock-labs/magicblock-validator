@@ -33,7 +33,10 @@ use crate::{
     config::{ConfigBlockFailAction, ConfigGrpc},
     filters::Filter,
     grpc_messages::*,
-    types::{GeyserMessage, GeyserMessages},
+    types::{
+        geyser_message_channel, GeyserMessageReceiver, GeyserMessageSender,
+        GeyserMessages,
+    },
     version::GrpcVersionInfo,
 };
 
@@ -64,7 +67,7 @@ impl GrpcService {
         config: ConfigGrpc,
         block_fail_action: ConfigBlockFailAction,
     ) -> Result<
-        (mpsc::UnboundedSender<GeyserMessage>, Arc<Notify>),
+        (GeyserMessageSender, Arc<Notify>),
         Box<dyn std::error::Error + Send + Sync>,
     > {
         // Bind service address
@@ -104,7 +107,7 @@ impl GrpcService {
         .max_decoding_message_size(max_decoding_message_size);
 
         // Run geyser message loop
-        let (messages_tx, messages_rx) = mpsc::unbounded_channel();
+        let (messages_tx, messages_rx) = geyser_message_channel();
         tokio::spawn(Self::geyser_loop(
             messages_rx,
             blocks_meta_tx,
@@ -135,8 +138,8 @@ impl GrpcService {
     }
 
     pub(crate) async fn geyser_loop(
-        mut messages_rx: mpsc::UnboundedReceiver<GeyserMessage>,
-        blocks_meta_tx: Option<mpsc::UnboundedSender<GeyserMessage>>,
+        mut messages_rx: GeyserMessageReceiver,
+        blocks_meta_tx: Option<GeyserMessageSender>,
         broadcast_tx: broadcast::Sender<(CommitmentLevel, GeyserMessages)>,
         block_fail_action: ConfigBlockFailAction,
     ) {
