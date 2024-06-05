@@ -17,6 +17,7 @@ use geyser_grpc_proto::prelude::{
     PongResponse, SubscribeRequest, SubscribeUpdate, SubscribeUpdatePing,
 };
 use log::{error, info};
+use solana_sdk::clock::Slot;
 use tokio::{
     sync::{broadcast, mpsc, Notify},
     time::{sleep, Duration, Instant},
@@ -165,14 +166,15 @@ impl GrpcService {
 
                     // Remove outdated block reconstruction info
                     match *message {
-                        // On startup we can receive few Confirmed/Finalized slots without BlockMeta message
-                        // With saved first Processed slot we can ignore errors caused by startup process
                         Message::Slot(msg) if processed_first_slot.is_none() && msg.status == CommitmentLevel::Processed => {
                             processed_first_slot = Some(msg.slot);
                         }
-                        Message::Slot(msg) if msg.status == CommitmentLevel::Finalized => {
-                            // keep extra 10 slots
-                            if let Some(msg_slot) = msg.slot.checked_sub(10) {
+                        // NOTE: this used to guard to `CommitmentLevel::Processed`, but we never
+                        // send that
+                        Message::Slot(msg) if msg.status == CommitmentLevel::Processed => {
+                            // NOTE: originally 10 slots were kept here, but we about 80x as many
+                            // slots/sec
+                            if let Some(msg_slot) = msg.slot.checked_sub(80) {
                                 loop {
                                     match messages.keys().next().cloned() {
                                         Some(slot) if slot < msg_slot => {
@@ -219,12 +221,16 @@ impl GrpcService {
                                 }
                             }
                         }
-                        _ => {}
+                        _  => {}
                     }
 
                     // Update block reconstruction info
                     let slot_messages = messages.entry(message.get_slot()).or_default();
+
+                    // Runs for all messages that aren't slot updates
+
                     if !matches!(*message, Message::Slot(_)) {
+                        // Adds 8MB / 2secs
                         slot_messages.messages.push(Some(message.clone()));
 
                         // If we already build Block message, new message will be a problem
@@ -239,6 +245,7 @@ impl GrpcService {
                             }
                         }
                     }
+
                     let mut sealed_block_msg = None;
                     match message.as_ref() {
                         Message::BlockMeta(msg) => {
@@ -380,7 +387,7 @@ impl GrpcService {
                             }
                         }
                     }
-                }
+                },
                 () = &mut processed_sleep => {
                     if !processed_messages.is_empty() {
                         let _ = broadcast_tx.send((CommitmentLevel::Processed, processed_messages.into()));
