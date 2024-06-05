@@ -21,7 +21,7 @@ Complete solana's SVM client, capable of running transactions
 
 - `StatusCache` struct
   - It's basically a `HashMap<Hash, (Slot, HashMap<Key, Vec<(Slot, T)>>)>`
-  - // TODO(vbrunet) - figure out exactly what the data structure does
+  - // TODO(vbrunet) - figure out exactly how data structure works
 
 # Notes
 

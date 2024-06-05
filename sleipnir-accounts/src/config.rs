@@ -39,6 +39,7 @@ pub enum ExternalReadonlyMode {
 
 impl ExternalReadonlyMode {
     pub fn clone_all(&self) -> bool {
+        // TODO(vbrunet) - Isn't this supposed to be named "is_all()" ? clone implies we are making a copy ?
         matches!(self, Self::All)
     }
     pub fn clone_programs_only(&self) -> bool {

@@ -206,6 +206,9 @@ where
                 .filter(|pubkey| !self.external_readonly_accounts.has(pubkey))
                 // 2. Filter accounts that are found inside our validator (slower looukup)
                 .filter(|pubkey| {
+                    // TODO(vbrunet):
+                    // - the AccountProvider interfaces could probably also implement a contains()
+                    // - this would make a lot of usecases much faster, not having to read the actual account
                     self.internal_account_provider.get_account(pubkey).is_none()
                 })
                 .collect::<Vec<_>>()
