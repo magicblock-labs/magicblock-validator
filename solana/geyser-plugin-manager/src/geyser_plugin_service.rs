@@ -10,11 +10,11 @@ use std::{
 
 use crossbeam_channel::Receiver;
 use log::*;
+use sleipnir_accounts_db::accounts_update_notifier_interface::AccountsUpdateNotifier;
 use sleipnir_bank::{
     slot_status_notifier_interface::SlotStatusNotifierArc,
     transaction_notifier_interface::TransactionNotifierArc,
 };
-use solana_accounts_db::accounts_update_notifier_interface::AccountsUpdateNotifier;
 use thiserror::Error;
 
 use crate::{

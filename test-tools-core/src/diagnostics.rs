@@ -1,7 +1,7 @@
 use std::{env, path::Path};
 
 use log::info;
-use solana_accounts_db::transaction_results::TransactionExecutionDetails;
+use sleipnir_accounts_db::transaction_results::TransactionExecutionDetails;
 
 // -----------------
 // init_logger

@@ -1,12 +1,8 @@
 // NOTE: copied and slightly modified from bank.rs
-use std::{borrow::Cow, path::PathBuf, sync::Arc};
+use std::{borrow::Cow, sync::Arc};
 
-use solana_accounts_db::{
-    accounts::Accounts,
-    accounts_db::{
-        AccountShrinkThreshold, AccountsDb, ACCOUNTS_DB_CONFIG_FOR_TESTING,
-    },
-    accounts_index::AccountSecondaryIndexes,
+use sleipnir_accounts_db::{
+    accounts::Accounts, accounts_db::AccountsDb,
     accounts_update_notifier_interface::AccountsUpdateNotifier,
 };
 use solana_sdk::{
@@ -23,18 +19,14 @@ use crate::{
     bank::Bank, slot_status_notifier_interface::SlotStatusNotifierArc,
     transaction_batch::TransactionBatch,
     transaction_logs::TransactionLogCollectorFilter,
+    EPHEM_DEFAULT_MILLIS_PER_SLOT,
 };
-
-#[derive(Debug, Default)]
-pub struct BankTestConfig {
-    pub secondary_indexes: AccountSecondaryIndexes,
-}
 
 impl Bank {
     pub fn default_for_tests() -> Self {
         let accounts_db = AccountsDb::default_for_tests();
         let accounts = Accounts::new(Arc::new(accounts_db));
-        Self::default_with_accounts(accounts)
+        Self::default_with_accounts(accounts, EPHEM_DEFAULT_MILLIS_PER_SLOT)
     }
 
     pub fn new_for_tests(
@@ -42,70 +34,32 @@ impl Bank {
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
         slot_status_notifier: Option<SlotStatusNotifierArc>,
     ) -> Self {
-        Self::new_for_tests_with_config(
-            genesis_config,
-            BankTestConfig::default(),
-            accounts_update_notifier,
-            slot_status_notifier,
-        )
-    }
-
-    pub fn new_for_tests_with_config(
-        genesis_config: &GenesisConfig,
-        test_config: BankTestConfig,
-        accounts_update_notifier: Option<AccountsUpdateNotifier>,
-        slot_status_notifier: Option<SlotStatusNotifierArc>,
-    ) -> Self {
         Self::new_with_config_for_tests(
             genesis_config,
-            test_config.secondary_indexes,
-            AccountShrinkThreshold::default(),
-            accounts_update_notifier,
-            slot_status_notifier,
-        )
-    }
-
-    pub(crate) fn new_with_config_for_tests(
-        genesis_config: &GenesisConfig,
-        account_indexes: AccountSecondaryIndexes,
-        shrink_ratio: AccountShrinkThreshold,
-        accounts_update_notifier: Option<AccountsUpdateNotifier>,
-        slot_status_notifier: Option<SlotStatusNotifierArc>,
-    ) -> Self {
-        Self::new_with_paths_for_tests(
-            genesis_config,
             Arc::new(RuntimeConfig::default()),
-            Vec::new(),
-            account_indexes,
-            shrink_ratio,
             accounts_update_notifier,
             slot_status_notifier,
+            EPHEM_DEFAULT_MILLIS_PER_SLOT,
         )
     }
 
-    pub fn new_with_paths_for_tests(
+    pub fn new_with_config_for_tests(
         genesis_config: &GenesisConfig,
         runtime_config: Arc<RuntimeConfig>,
-        paths: Vec<PathBuf>,
-        account_indexes: AccountSecondaryIndexes,
-        shrink_ratio: AccountShrinkThreshold,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
         slot_status_notifier: Option<SlotStatusNotifierArc>,
+        millis_per_slot: u64,
     ) -> Self {
-        let bank = Self::new_with_paths(
+        let bank = Self::new(
             genesis_config,
             runtime_config,
-            paths,
             None,
             None,
-            account_indexes,
-            shrink_ratio,
             false,
-            Some(ACCOUNTS_DB_CONFIG_FOR_TESTING),
             accounts_update_notifier,
             slot_status_notifier,
+            millis_per_slot,
             Pubkey::new_unique(),
-            Arc::default(),
         );
         bank.transaction_log_collector_config
             .write()
@@ -217,28 +171,4 @@ impl Bank {
             Cow::Owned(sanitized_txs),
         ))
     }
-
-    #[cfg(test)]
-    pub fn flush_accounts_cache_slot_for_tests(&self) {
-        self.rc
-            .accounts
-            .accounts_db
-            .flush_accounts_cache_slot_for_tests(self.slot())
-    }
-
-    /// This is only valid to call from tests.
-    /// block until initial accounts hash verification has completed
-    pub fn wait_for_initial_accounts_hash_verification_completed_for_tests(
-        &self,
-    ) {
-        self.rc
-            .accounts
-            .accounts_db
-            .verify_accounts_hash_in_bg
-            .wait_for_complete()
-    }
-
-    // pub fn update_accounts_hash_for_tests(&self) -> AccountsHash {
-    //     self.update_accounts_hash(CalcAccountsHashDataSource::IndexForTests, false, false)
-    // }
 }

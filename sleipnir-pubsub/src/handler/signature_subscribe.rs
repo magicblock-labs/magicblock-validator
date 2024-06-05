@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{str::FromStr, time::Duration};
 
 use geyser_grpc_proto::{geyser, tonic::Status};
 use jsonrpc_pubsub::{Sink, Subscriber};
@@ -55,7 +55,10 @@ pub async fn handle_signature_subscribe(
     };
 
     if let Some(sink) = assign_sub_id(subscriber, subid) {
-        if let Some((slot, res)) = bank.get_signature_status_slot(&sig) {
+        if let Some((slot, res)) = bank.get_recent_signature_status(
+            &sig,
+            Some(bank.slots_for_duration(Duration::from_secs(10))),
+        ) {
             debug!(
                 "Sending initial signature status from bank: {} {:?}",
                 slot, res

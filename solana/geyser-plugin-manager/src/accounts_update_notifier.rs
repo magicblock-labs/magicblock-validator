@@ -2,10 +2,7 @@
 use {
     crate::geyser_plugin_manager::GeyserPluginManager,
     log::*,
-    solana_accounts_db::{
-        account_storage::meta::StoredAccountMeta,
-        accounts_update_notifier_interface::AccountsUpdateNotifierInterface,
-    },
+    sleipnir_accounts_db::accounts_update_notifier_interface::AccountsUpdateNotifierInterface,
     solana_geyser_plugin_interface::geyser_plugin_interface::{
         ReplicaAccountInfoV3, ReplicaAccountInfoVersions,
     },
@@ -42,71 +39,6 @@ impl AccountsUpdateNotifierInterface for AccountsUpdateNotifierImpl {
             self.notify_plugins_of_account_update(account_info, slot, false);
         }
     }
-
-    fn notify_account_restore_from_snapshot(
-        &self,
-        slot: Slot,
-        account: &StoredAccountMeta,
-    ) {
-        let mut measure_all =
-            Measure::start("geyser-plugin-notify-account-restore-all");
-        let mut measure_copy =
-            Measure::start("geyser-plugin-copy-stored-account-info");
-
-        let account = self.accountinfo_from_stored_account_meta(account);
-        measure_copy.stop();
-
-        inc_new_counter_debug!(
-            "geyser-plugin-copy-stored-account-info-us",
-            measure_copy.as_us() as usize,
-            100000,
-            100000
-        );
-
-        if let Some(account_info) = account {
-            self.notify_plugins_of_account_update(account_info, slot, true);
-        }
-        measure_all.stop();
-
-        inc_new_counter_debug!(
-            "geyser-plugin-notify-account-restore-all-us",
-            measure_all.as_us() as usize,
-            100000,
-            100000
-        );
-    }
-
-    fn notify_end_of_restore_from_snapshot(&self) {
-        let plugin_manager = self.plugin_manager.read().unwrap();
-        if plugin_manager.plugins.is_empty() {
-            return;
-        }
-
-        for plugin in plugin_manager.plugins.iter() {
-            let mut measure =
-                Measure::start("geyser-plugin-end-of-restore-from-snapshot");
-            match plugin.notify_end_of_startup() {
-                Err(err) => {
-                    error!(
-                        "Failed to notify the end of restore from snapshot, error: {} to plugin {}",
-                        err,
-                        plugin.name()
-                    )
-                }
-                Ok(_) => {
-                    trace!(
-                        "Successfully notified the end of restore from snapshot to plugin {}",
-                        plugin.name()
-                    );
-                }
-            }
-            measure.stop();
-            inc_new_counter_debug!(
-                "geyser-plugin-end-of-restore-from-snapshot",
-                measure.as_us() as usize
-            );
-        }
-    }
 }
 
 impl AccountsUpdateNotifierImpl {
@@ -130,22 +62,6 @@ impl AccountsUpdateNotifierImpl {
             data: account.data(),
             write_version,
             txn: *txn,
-        })
-    }
-
-    fn accountinfo_from_stored_account_meta<'a>(
-        &self,
-        stored_account_meta: &'a StoredAccountMeta,
-    ) -> Option<ReplicaAccountInfoV3<'a>> {
-        Some(ReplicaAccountInfoV3 {
-            pubkey: stored_account_meta.pubkey().as_ref(),
-            lamports: stored_account_meta.lamports(),
-            owner: stored_account_meta.owner().as_ref(),
-            executable: stored_account_meta.executable(),
-            rent_epoch: stored_account_meta.rent_epoch(),
-            data: stored_account_meta.data(),
-            write_version: stored_account_meta.write_version(),
-            txn: None,
         })
     }
 

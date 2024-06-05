@@ -8,6 +8,7 @@ use std::{
     time::Duration,
 };
 
+use circular_hashmap::CircularHashMap as Cache;
 use log::*;
 use solana_geyser_plugin_interface::geyser_plugin_interface::{
     GeyserPlugin, GeyserPluginError, ReplicaAccountInfoVersions,
@@ -15,7 +16,6 @@ use solana_geyser_plugin_interface::geyser_plugin_interface::{
     ReplicaTransactionInfoVersions, Result as PluginResult, SlotStatus,
 };
 use solana_sdk::{clock::Slot, pubkey::Pubkey, signature::Signature};
-use stretto::{Cache, CacheBuilder};
 use tokio::{
     runtime::{Builder, Runtime},
     sync::{mpsc, Notify},
@@ -81,34 +81,13 @@ impl GrpcGeyserPlugin {
                 .map_err(GeyserPluginError::Custom)?;
 
         let transactions_cache = if config.cache_transactions {
-            Some(
-                CacheBuilder::new(
-                    config.transactions_cache_num_counters,
-                    config.transactions_cache_max_cached_items,
-                )
-                .set_cleanup_duration(Duration::from_secs(1))
-                // This is very important as otherwise we see the cache being considered "full"
-                // with very few items in it ~(transactions_cache_max_cost / 350)
-                // As a result items added at that point weren't cached.
-                .set_ignore_internal_cost(true)
-                .finalize()
-                .map_err(|err| GeyserPluginError::Custom(Box::new(err)))?,
-            )
+            Some(Cache::new(config.transactions_cache_max_cached_items))
         } else {
             None
         };
 
         let accounts_cache = if config.cache_accounts {
-            Some(
-                CacheBuilder::new(
-                    config.accounts_cache_num_counters,
-                    config.accounts_cache_max_cached_bytes,
-                )
-                .set_cleanup_duration(Duration::from_secs(1))
-                .set_ignore_internal_cost(false)
-                .finalize()
-                .map_err(|err| GeyserPluginError::Custom(Box::new(err)))?,
-            )
+            Some(Cache::new(config.accounts_cache_max_cached_items))
         } else {
             None
         };
@@ -117,8 +96,8 @@ impl GrpcGeyserPlugin {
             GeyserRpcService::create(
                 config.grpc.clone(),
                 config.block_fail_action,
-                transactions_cache.clone(),
-                accounts_cache.clone(),
+                transactions_cache.as_ref().map(|x| x.shared_map()),
+                accounts_cache.as_ref().map(|x| x.shared_map()),
             )
             .map_err(GeyserPluginError::Custom)?;
         let rpc_service = Arc::new(rpc_service);
@@ -206,21 +185,13 @@ impl GeyserPlugin for GrpcGeyserPlugin {
                         (account, slot, is_startup).into(),
                     ));
                     if let Some(accounts_cache) = self.accounts_cache.as_ref() {
-                        accounts_cache.insert_with_ttl(
-                            pubkey,
-                            message.clone(),
-                            account.data.len().try_into().unwrap_or(i64::MAX),
-                            self.config.accounts_cache_ttl,
-                        );
-
-                        // See notes in notify_transaction around perf concerns
-                        accounts_cache.wait();
+                        accounts_cache.insert(pubkey, message.clone());
 
                         if let Some(interval) =
                             std::option_env!("DIAG_GEYSER_ACC_CACHE_INTERVAL")
                         {
                             let interval = interval.parse::<usize>().unwrap();
-                            if accounts_cache.get(&pubkey).is_none() {
+                            if !accounts_cache.contains_key(&pubkey) {
                                 error!(
                                     "Account not cached '{}', cache size {}",
                                     pubkey,
@@ -289,32 +260,14 @@ impl GeyserPlugin for GrpcGeyserPlugin {
             let message =
                 Arc::new(Message::Transaction((transaction, slot).into()));
             if let Some(transactions_cache) = self.transactions_cache.as_ref() {
-                transactions_cache.insert_with_ttl(
-                    *transaction.signature,
-                    message.clone(),
-                    1,
-                    self.config.transactions_cache_ttl,
-                );
-                // We sacrifice a bit of per to avoid the following race condition:
-                //   1. Transaction is added to the cache, but not fully committed
-                //   2. Notification is sent
-                //   3. Subscription comes in and doesn't find the transaction in the cache
-                //   4. Notification is never sent again and thus the subscription misses it
-                //
-                // If this wait becomes a perf bottleneck we could use another approach:
-                //   - subscription comes in and listens to the notification stream
-                //   - at the same time it has an interval tokio::sleep which periodically
-                //     checks the cache until it finds an update it hasn't seen yet and or
-                //     a max cache check duration elapses
-                //   - that way it'd discover the items in the cache even if they get processed
-                //     and inserted after the notification
-                transactions_cache.wait();
+                transactions_cache
+                    .insert(*transaction.signature, message.clone());
 
                 if let Some(interval) =
                     std::option_env!("DIAG_GEYSER_TX_CACHE_INTERVAL")
                 {
                     let interval = interval.parse::<usize>().unwrap();
-                    if transactions_cache.get(transaction.signature).is_none() {
+                    if !transactions_cache.contains_key(transaction.signature) {
                         let sig = crate::utils::short_signature(
                             transaction.signature,
                         );

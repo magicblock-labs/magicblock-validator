@@ -13,5 +13,5 @@ edition.workspace = true
 [dependencies]
 env_logger = { workspace = true }
 log = { workspace = true }
+sleipnir-accounts-db = { workspace = true }
 solana-sdk = { workspace = true }
-solana-accounts-db = { workspace = true }

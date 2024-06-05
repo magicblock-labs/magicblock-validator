@@ -3,6 +3,7 @@ use std::sync::Arc;
 use crossbeam_channel::Receiver;
 use itertools::izip;
 use log::*;
+use sleipnir_accounts_db::transaction_results::TransactionExecutionDetails;
 use sleipnir_bank::transaction_notifier_interface::TransactionNotifierArc;
 use sleipnir_geyser_plugin::{
     config::Config as GeyserPluginConfig, plugin::GrpcGeyserPlugin,
@@ -13,7 +14,6 @@ use sleipnir_transaction_status::{
     extract_and_fmt_memos, map_inner_instructions, TransactionStatusBatch,
     TransactionStatusMessage, TransactionStatusMeta,
 };
-use solana_accounts_db::transaction_results::TransactionExecutionDetails;
 use solana_geyser_plugin_manager::{
     geyser_plugin_manager::LoadedGeyserPlugin,
     geyser_plugin_service::{GeyserPluginService, GeyserPluginServiceError},
