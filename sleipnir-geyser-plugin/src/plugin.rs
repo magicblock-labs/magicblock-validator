@@ -186,11 +186,9 @@ impl GeyserPlugin for GrpcGeyserPlugin {
                     ));
                     if let Some(accounts_cache) = self.accounts_cache.as_ref() {
                         accounts_cache.insert(pubkey, message.clone());
-
                         if let Some(interval) =
                             std::option_env!("DIAG_GEYSER_ACC_CACHE_INTERVAL")
                         {
-                            let interval = interval.parse::<usize>().unwrap();
                             if !accounts_cache.contains_key(&pubkey) {
                                 error!(
                                     "Account not cached '{}', cache size {}",
@@ -198,6 +196,8 @@ impl GeyserPlugin for GrpcGeyserPlugin {
                                     accounts_cache.len()
                                 );
                             }
+
+                            let interval = interval.parse::<usize>().unwrap();
 
                             static COUNTER: AtomicUsize = AtomicUsize::new(0);
                             let count = COUNTER.fetch_add(1, Ordering::SeqCst);

@@ -71,17 +71,21 @@ where
     /// Insert a new key-value pair into the map.
     /// If the map is full the oldest element is removed.
     pub fn insert(&self, key: K, value: V) {
+        let vec_index = self
+            .next_vec_index
+            .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |x| {
+                Some((x + 1) % self.max_size)
+            })
+            .unwrap();
+
         // If the map is full we remove the oldest element
-        let next_vec_index = self.next_vec_index.load(Ordering::Relaxed);
-        if self.vec_len() == self.max_size {
-            let old_key = self.vec_replace(next_vec_index, key.clone());
+        if self.vec_len() >= self.max_size {
+            let old_key = self.vec_replace(vec_index, key.clone());
             self.map_remove(&old_key);
         } else {
             self.vec_push(key.clone());
         }
         self.map_insert(key, value);
-        self.next_vec_index
-            .store((next_vec_index + 1) % self.max_size, Ordering::Relaxed);
     }
 
     pub fn shared_map(&self) -> SharedMap<K, V> {
