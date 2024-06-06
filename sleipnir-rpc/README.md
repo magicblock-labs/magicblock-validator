@@ -29,8 +29,19 @@ However any transaction sent to this RPC is ran inside the custom SVM bank.
 
 # Notes
 
+*How are "send_transaction" requests handled:*
+
+- `decode_and_deserialize` deserialize a `String` into a `VersionedTransaction`
+- `SanitizedTransaction::try_create` with the `Bank`
+- `sig_verify_transaction` is ran, which uses `SanitizedTransaction.verify`
+- `AccountsManager.ensure_accounts` is ran
+- `transaction_preflight` (uses `Bank.simulate_transaction_unchecked`)
+- `Bank.prepare_sanitized_batch`
+- `execute_batch` which uses `Bank.load_execute_and_commit_transactions`
+
 *Important dependencies:*
 
 - Provides `Bank`: [sleipnir-bank](../sleipnir-bank/README.md)
 - Provides `Ledger`: [sleipnir-ledger](../sleipnir-ledger/README.md)
 - Provides `AccountsManager`: [sleipnir-accounts](../sleipnir-accounts/README.md)
+- Provides `execute_batch`: [sleipnir-processor](../sleipnir-processor/README.md)

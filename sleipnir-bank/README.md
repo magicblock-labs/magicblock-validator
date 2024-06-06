@@ -25,6 +25,8 @@ Complete solana's SVM client, capable of running transactions
 
 # Notes
 
+`Bank` implements `AddressLoader`, used to sanitize transactions.
+
 *Important dependencies:*
 
 - Provides `Accounts`: [solana/accounts-db](../solana/accounts-db/README.md)
