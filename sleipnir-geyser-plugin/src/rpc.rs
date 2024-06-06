@@ -8,7 +8,7 @@ use std::{
     },
 };
 
-use circular_hashmap::{CircularHashMap as Cache, SharedMap};
+use expiring_hashmap::{ExpiringHashMap as Cache, SharedMap};
 use geyser_grpc_proto::{
     geyser::{
         subscribe_update::UpdateOneof, CommitmentLevel, SubscribeRequest,

@@ -8,7 +8,7 @@ use std::{
     time::Duration,
 };
 
-use circular_hashmap::CircularHashMap as Cache;
+use expiring_hashmap::ExpiringHashMap as Cache;
 use log::*;
 use solana_geyser_plugin_interface::geyser_plugin_interface::{
     GeyserPlugin, GeyserPluginError, ReplicaAccountInfoVersions,
