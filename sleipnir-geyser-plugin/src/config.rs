@@ -13,10 +13,10 @@ pub struct Config {
     /// Action on block re-construction error
     pub block_fail_action: ConfigBlockFailAction,
 
-    /// How old transaction entries can be to guarantee stay in the cache (counted in slots)
+    /// How old transaction entries can be to guarantee they stay in the cache (counted in slots)
     /// Only applies if [Config::cache_transactions] is `true`
     pub transactions_cache_max_age_slots: u64,
-    /// How old account entries can be to guarantee stay in the cache (counted in slots)
+    /// How old account entries can be to guarantee they stay in the cache (counted in slots)
     /// Only applies if [Config::cache_accounts] is `true`
     pub accounts_cache_max_age_slots: u64,
 

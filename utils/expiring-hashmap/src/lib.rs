@@ -154,7 +154,7 @@ where
     }
 
     fn map_decrease_count_and_maybe_remove(&self, keys: &[K]) {
-        // If a particular entry was updated multiple times it is present in our ring buffer
+        // If a particular entry was updated multiple times it is present in our timestamp buffer
         // at multiple indexes. We want to remove it only once we find the last of those.
         let map = &mut self.map.write().expect("RwLock map poisoned");
         for key in keys {
@@ -265,7 +265,7 @@ mod tests {
 
         let ts = 5;
         // Inserting 3 again should prevent that latest value to be removed
-        // until the current ts (4) expires
+        // until the current ts (5) expires
         map.insert(3, 33, ts);
         assert_eq!(map.get_cloned(&3), Some(33));
         assert_eq!(map.get_cloned(&4), Some(4));
