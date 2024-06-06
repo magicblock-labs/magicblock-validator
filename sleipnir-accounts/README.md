@@ -16,6 +16,8 @@ Implements a `AccountsManager`, which is reponsible for:
   - depends on an `AccountCloner` (implemented by `RemoteAccountCloner`)
   - depends on an `AccountCommitter` (implemented by `RemoteAccountCommitter`)
   - depends on a `Transwise`
+  - Implements `ensure_accounts` function
+  - Maintains a local cache of accounts already validated and cloned
 
 - `BankAccountProvider`
   - depends on a `Bank`
@@ -27,6 +29,13 @@ Implements a `AccountsManager`, which is reponsible for:
   - depends on an `RpcClient`
 
 # Notes
+
+*How does `ensure_accounts` works:*
+
+- Collect readonly and writable accounts that we haven't already cloned in the validator
+- Those accounts we haven't seen yet we "validate" using `Transwise.validate_accounts`
+- Of those validated account, clone the ones we need inside the validator
+- Also modify the delegated accounts to have the original owner inside the validator
 
 *Important dependencies:*
 

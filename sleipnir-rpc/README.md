@@ -29,7 +29,7 @@ However any transaction sent to this RPC is ran inside the custom SVM bank.
 
 # Notes
 
-*How are "send_transaction" requests handled:*
+*How are `send_transaction` requests handled:*
 
 - `decode_and_deserialize` deserialize a `String` into a `VersionedTransaction`
 - `SanitizedTransaction::try_create` with the `Bank`
