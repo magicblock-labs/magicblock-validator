@@ -24,9 +24,6 @@ pub mod accounts_index {
         ZeroLamport,
     };
 }
-pub mod ancestors {
-    pub use solana_accounts_db::ancestors::*;
-}
 pub mod blockhash_queue {
     pub use solana_accounts_db::blockhash_queue::*;
 }
