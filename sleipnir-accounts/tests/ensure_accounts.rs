@@ -371,6 +371,66 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
 }
 
 #[tokio::test]
+async fn test_ensure_accounts_seen_first_as_readonly_can_be_used_as_writable_later(
+) {
+    init_logger!();
+    let account = Pubkey::new_unique();
+
+    let internal_account_provider = InternalAccountProviderStub::default();
+    let validated_accounts_provider =
+        ValidatedAccountsProviderStub::valid_default();
+
+    let manager = setup(
+        internal_account_provider,
+        AccountClonerStub::default(),
+        AccountCommitterStub::default(),
+        validated_accounts_provider,
+    );
+
+    // First Transaction
+    {
+        let holder = TransactionAccountsHolder {
+            readonly: vec![account],
+            writable: vec![],
+            payer: Pubkey::new_unique(),
+        };
+
+        let result = manager
+            .ensure_accounts_from_holder(holder, "tx-sig".to_string())
+            .await;
+
+        assert_eq!(result.unwrap().len(), 1);
+
+        assert!(manager.account_cloner.did_clone(&account));
+
+        assert!(manager.external_readonly_accounts.has(&account));
+        assert!(manager.external_writable_accounts.is_empty());
+    }
+
+    manager.account_cloner.clear();
+
+    // Second Transaction
+    {
+        let holder = TransactionAccountsHolder {
+            readonly: vec![],
+            writable: vec![account],
+            payer: Pubkey::new_unique(),
+        };
+
+        let result = manager
+            .ensure_accounts_from_holder(holder, "tx-sig".to_string())
+            .await;
+
+        assert_eq!(result.unwrap().len(), 1);
+
+        assert!(manager.account_cloner.did_clone(&account));
+
+        assert!(manager.external_readonly_accounts.has(&account));
+        assert!(manager.external_writable_accounts.has(&account));
+    }
+}
+
+#[tokio::test]
 async fn test_ensure_writable_account_fails_to_validate() {
     init_logger!();
     let writable = Pubkey::new_unique();
