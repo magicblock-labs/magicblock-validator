@@ -51,7 +51,9 @@ where
     pub account_cloner: ACL,
     pub account_committer: ACM,
     pub validated_accounts_provider: VAP,
+    // TODO(vbrunet) - the external_readonly_accounts cache map should probably have TTL expiration system
     pub external_readonly_accounts: ExternalReadonlyAccounts,
+    // TODO(vbrunet) - the external_writable_accounts cache map should probably have TTL expiration system
     pub external_writable_accounts: ExternalWritableAccounts,
     pub external_readonly_mode: ExternalReadonlyMode,
     pub external_writable_mode: ExternalWritableMode,
@@ -191,49 +193,61 @@ where
         accounts_holder: TransactionAccountsHolder,
         signature: String,
     ) -> AccountsResult<Vec<Signature>> {
-        // 2. Remove all accounts we already track as external accounts
-        //    and the ones that are found in our validator
-        let new_readonly_accounts = if self.external_readonly_mode.clone_none()
+        // 2.A Collect all readonly accounts we've never seen before and need to clone for readonly
+        let unseen_readonly_accounts = if self
+            .external_readonly_mode
+            .clone_none()
         {
             vec![]
         } else {
             accounts_holder
                 .readonly
                 .into_iter()
-                // 1. Filter external readonly accounts we already know about and cloned
-                //    They would also be found via the internal account provider, but this
-                //    is a faster lookup
+                // If an account has already been cloned to be used as readonly, no need to re-do it
                 .filter(|pubkey| !self.external_readonly_accounts.has(pubkey))
-                // 2. Filter accounts that are found inside our validator (slower looukup)
+                // If an account has already been cloned and prepared to be used as writable, it can also be used as readonly
+                .filter(|pubkey| !self.external_writable_accounts.has(pubkey))
+                // If somehow the account is already in the validator data for other reason, no need to re-download it
                 .filter(|pubkey| {
+                    // Slowest lookup filter is done last
                     self.internal_account_provider.get_account(pubkey).is_none()
                 })
                 .collect::<Vec<_>>()
         };
-        trace!("New readonly accounts: {:?}", new_readonly_accounts);
+        trace!(
+            "Newly seen readonly accounts: {:?}",
+            unseen_readonly_accounts
+        );
 
-        let new_writable_accounts = if self.external_writable_mode.clone_none()
+        // 2.B Collect all writable accounts we've never seen before and need to clone and prepare for writable
+        let unseen_writable_accounts = if self
+            .external_writable_mode
+            .clone_none()
         {
             vec![]
         } else {
             accounts_holder
                 .writable
                 .into_iter()
+                // If an account has already been cloned and prepared to be used as writable, no need to re-do it
                 .filter(|pubkey| !self.external_writable_accounts.has(pubkey))
-                .filter(|pubkey| {
-                    self.internal_account_provider.get_account(pubkey).is_none()
-                })
+                // Even if the account is already present in the validator,
+                // we still need to prepare it so it can be used as a writable.
+                // Because it may only be able to be used as a readonly until modified.
                 .collect::<Vec<_>>()
         };
-        trace!("New writable accounts: {:?}", new_writable_accounts);
+        trace!(
+            "Newly seen writable accounts: {:?}",
+            unseen_writable_accounts
+        );
 
         // 3. Validate only the accounts that we see for the very first time
         let validated_accounts = self
             .validated_accounts_provider
             .validate_accounts(
                 &TransactionAccountsHolder {
-                    readonly: new_readonly_accounts,
-                    writable: new_writable_accounts,
+                    readonly: unseen_readonly_accounts,
+                    writable: unseen_writable_accounts,
                     payer: accounts_holder.payer,
                 },
                 &ValidateAccountsConfig {
@@ -247,14 +261,14 @@ where
             )
             .await?;
 
-        // 4. If a readonly account is not a program, but we only should clone programs then
-        //    we have a problem since the account does not exist nor will it be created.
-        //    Here we just remove it from the accounts to be cloned and let the  trigger
-        //    transaction fail due to the missing account as it normally would.
-        //    We have a similar problem if the account was not found at all in which case
-        //    it's `is_program` field is `None`.
+        // 4.A If a readonly account is not a program, but we only should clone programs then
+        //     we have a problem since the account does not exist nor will it be created.
+        //     Here we just remove it from the accounts to be cloned and let the  trigger
+        //     transaction fail due to the missing account as it normally would.
+        //     We have a similar problem if the account was not found at all in which case
+        //     it's `is_program` field is `None`.
         let programs_only = self.external_readonly_mode.clone_programs_only();
-        let readonly_clones = validated_accounts
+        let validated_readonly_pubkeys = validated_accounts
             .readonly
             .iter()
             .flat_map(|acc| {
@@ -268,22 +282,23 @@ where
             })
             .collect::<Vec<_>>();
 
-        let writable_clones = validated_accounts
+        // 4.B We will want to make sure that all non-new accounts that are writable have been cloned
+        let validated_writable_accounts = validated_accounts
             .writable
             .iter()
             .filter(|x| !x.is_new)
             .collect::<Vec<_>>();
 
-        // Useful logging of updated writable/readables
+        // Useful logging of involved writable/readables pubkeys
         if log::log_enabled!(log::Level::Debug) {
-            if !readonly_clones.is_empty() {
+            if !validated_readonly_pubkeys.is_empty() {
                 debug!(
                     "Transaction '{}' triggered readonly account clones: {:?}",
-                    signature, readonly_clones,
+                    signature, validated_readonly_pubkeys,
                 );
             }
-            if !writable_clones.is_empty() {
-                let writable = validated_accounts
+            if !validated_writable_accounts.is_empty() {
+                let cloned_writable_descriptions = validated_accounts
                     .writable
                     .iter()
                     .map(|x| {
@@ -303,27 +318,34 @@ where
                     .collect::<Vec<_>>();
                 debug!(
                     "Transaction '{}' triggered writable account clones: {:?}",
-                    signature, writable
+                    signature, cloned_writable_descriptions
                 );
             }
         }
 
-        // 5. Clone the accounts and add metadata to external account trackers
         let mut signatures = vec![];
-        for readonly in readonly_clones {
-            let signature =
-                self.account_cloner.clone_account(&readonly, None).await?;
+
+        // 5.A Clone the unseen readonly accounts without any modifications
+        for validated_readonly_pubkey in validated_readonly_pubkeys {
+            let signature = self
+                .account_cloner
+                .clone_account(&validated_readonly_pubkey, None)
+                .await?;
             signatures.push(signature);
-            self.external_readonly_accounts.insert(readonly);
+            self.external_readonly_accounts
+                .insert(validated_readonly_pubkey);
         }
 
-        for writable in writable_clones {
-            let mut overrides =
-                writable.lock_config.as_ref().map(|x| AccountModification {
+        // 5.B Clone the unseen writable accounts and apply modifications so they can be written on
+        for validated_writable_account in validated_writable_accounts {
+            let mut overrides = validated_writable_account
+                .lock_config
+                .as_ref()
+                .map(|x| AccountModification {
                     owner: Some(x.owner.to_string()),
                     ..Default::default()
                 });
-            if writable.is_payer {
+            if validated_writable_account.is_payer {
                 if let Some(lamports) = self.payer_init_lamports {
                     match overrides {
                         Some(ref mut x) => x.lamports = Some(lamports),
@@ -338,12 +360,15 @@ where
             }
             let signature = self
                 .account_cloner
-                .clone_account(&writable.pubkey, overrides)
+                .clone_account(&validated_writable_account.pubkey, overrides)
                 .await?;
             signatures.push(signature);
             self.external_writable_accounts.insert(
-                writable.pubkey,
-                writable.lock_config.as_ref().map(|x| x.commit_frequency),
+                validated_writable_account.pubkey,
+                validated_writable_account
+                    .lock_config
+                    .as_ref()
+                    .map(|x| x.commit_frequency),
             );
         }
 

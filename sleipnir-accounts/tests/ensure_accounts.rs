@@ -98,6 +98,7 @@ async fn test_ensure_readonly_account_not_tracked_but_in_our_validator() {
     let result = manager
         .ensure_accounts_from_holder(holder, "tx-sig".to_string())
         .await;
+
     assert_eq!(result.unwrap().len(), 0);
     assert!(!manager.account_cloner.did_clone(&readonly));
     assert!(manager.external_readonly_accounts.is_empty());
