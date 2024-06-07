@@ -9,7 +9,6 @@ Complete solana's SVM client, capable of running transactions
 
 - `Bank` struct
   - Basically contains a full SVM chain state
-  - Implements a bunch of traits from solana's SVM
   - It's basically a fully fledged solana client with all utils (Fees/Logs/Slots/Rent/Cost)
   - Contains a `BankRc`
   - Contains a `StatusCache`
