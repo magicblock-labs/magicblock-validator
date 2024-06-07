@@ -1655,7 +1655,7 @@ impl Bank {
                     TransactionLogCollectorFilter::All => {
                         !is_vote || !filtered_mentioned_addresses.is_empty()
                     }
-                    TransactionLogCollectorFilter::AllWithVotes => true,
+                    TransactionLogCollectorFilter::AllWithVotes => is_vote,
                     TransactionLogCollectorFilter::None => false,
                     TransactionLogCollectorFilter::OnlyMentionedAddresses => {
                         !filtered_mentioned_addresses.is_empty()
