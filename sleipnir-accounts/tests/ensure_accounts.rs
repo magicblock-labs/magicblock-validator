@@ -371,6 +371,42 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
 }
 
 #[tokio::test]
+async fn test_ensure_writable_account_fails_to_validate() {
+    init_logger!();
+    let writable = Pubkey::new_unique();
+
+    let internal_account_provider = InternalAccountProviderStub::default();
+    let validated_accounts_provider = ValidatedAccountsProviderStub::invalid(
+        TranswiseError::WritablesIncludeNewAccounts {
+            writable_new_pubkeys: vec![writable],
+        },
+    );
+
+    let manager = setup(
+        internal_account_provider,
+        AccountClonerStub::default(),
+        AccountCommitterStub::default(),
+        validated_accounts_provider,
+    );
+
+    let holder = TransactionAccountsHolder {
+        readonly: vec![],
+        writable: vec![writable],
+        payer: Pubkey::new_unique(),
+    };
+
+    let result = manager
+        .ensure_accounts_from_holder(holder, "tx-sig".to_string())
+        .await;
+    assert!(matches!(
+        result,
+        Err(AccountsError::TranswiseError(
+            TranswiseError::WritablesIncludeNewAccounts { .. }
+        ))
+    ));
+}
+
+#[tokio::test]
 async fn test_ensure_accounts_seen_first_as_readonly_can_be_used_as_writable_later(
 ) {
     init_logger!();
@@ -431,16 +467,15 @@ async fn test_ensure_accounts_seen_first_as_readonly_can_be_used_as_writable_lat
 }
 
 #[tokio::test]
-async fn test_ensure_writable_account_fails_to_validate() {
+async fn test_ensure_accounts_already_known_can_be_reused_as_writable_later() {
     init_logger!();
-    let writable = Pubkey::new_unique();
+    let account = Pubkey::new_unique();
 
-    let internal_account_provider = InternalAccountProviderStub::default();
-    let validated_accounts_provider = ValidatedAccountsProviderStub::invalid(
-        TranswiseError::WritablesIncludeNewAccounts {
-            writable_new_pubkeys: vec![writable],
-        },
-    );
+    let mut internal_account_provider = InternalAccountProviderStub::default();
+    let validated_accounts_provider =
+        ValidatedAccountsProviderStub::valid_default();
+
+    internal_account_provider.add(account, Default::default());
 
     let manager = setup(
         internal_account_provider,
@@ -449,19 +484,45 @@ async fn test_ensure_writable_account_fails_to_validate() {
         validated_accounts_provider,
     );
 
-    let holder = TransactionAccountsHolder {
-        readonly: vec![],
-        writable: vec![writable],
-        payer: Pubkey::new_unique(),
-    };
+    // First Transaction does not need to re-clone account to use it as readonly
+    {
+        let holder = TransactionAccountsHolder {
+            readonly: vec![account],
+            writable: vec![],
+            payer: Pubkey::new_unique(),
+        };
 
-    let result = manager
-        .ensure_accounts_from_holder(holder, "tx-sig".to_string())
-        .await;
-    assert!(matches!(
-        result,
-        Err(AccountsError::TranswiseError(
-            TranswiseError::WritablesIncludeNewAccounts { .. }
-        ))
-    ));
+        let result = manager
+            .ensure_accounts_from_holder(holder, "tx-sig".to_string())
+            .await;
+
+        assert_eq!(result.unwrap().len(), 0);
+
+        assert!(!manager.account_cloner.did_clone(&account));
+
+        assert!(manager.external_readonly_accounts.is_empty());
+        assert!(manager.external_writable_accounts.is_empty());
+    }
+
+    manager.account_cloner.clear();
+
+    // Second Transaction does need to re-clone account to override it, so it can be used as a writable
+    {
+        let holder = TransactionAccountsHolder {
+            readonly: vec![],
+            writable: vec![account],
+            payer: Pubkey::new_unique(),
+        };
+
+        let result = manager
+            .ensure_accounts_from_holder(holder, "tx-sig".to_string())
+            .await;
+
+        assert_eq!(result.unwrap().len(), 1);
+
+        assert!(manager.account_cloner.did_clone(&account));
+
+        assert!(manager.external_readonly_accounts.is_empty());
+        assert!(manager.external_writable_accounts.has(&account));
+    }
 }
