@@ -92,14 +92,7 @@ where
         // While inserting a new entry we ensure that any entries that expired are removed.
 
         // 1. Insert the new entry both into the map and the buffer tracking time stamps
-        let entry = if let Some(mut entry) = self.map_remove(&key) {
-            entry.count += 1;
-            entry.value = value;
-            entry
-        } else {
-            CountedEntry { value, count: 1 }
-        };
-        self.map_insert(key.clone(), entry);
+        self.map_insert_or_increase_count(&key, value);
         self.vec_push(TimestampedKey {
             key: key.clone(),
             ts,
@@ -149,10 +142,6 @@ where
             .push_back(key);
     }
 
-    fn map_remove(&self, key: &K) -> Option<CountedEntry<V>> {
-        self.map.write().expect("RwLock map poisoned").remove(key)
-    }
-
     fn map_decrease_count_and_maybe_remove(&self, keys: &[K]) {
         // If a particular entry was updated multiple times it is present in our timestamp buffer
         // at multiple indexes. We want to remove it only once we find the last of those.
@@ -179,11 +168,15 @@ where
             .contains_key(key)
     }
 
-    fn map_insert(&self, key: K, value: CountedEntry<V>) {
-        self.map
-            .write()
-            .expect("RwLock map poisoned")
-            .insert(key, value);
+    fn map_insert_or_increase_count(&self, key: &K, value: V) {
+        let map = &mut self.map.write().expect("RwLock map poisoned");
+        if let Some(entry) = map.get_mut(key) {
+            entry.count += 1;
+            entry.value = value;
+        } else {
+            let entry = CountedEntry { value, count: 1 };
+            map.insert(key.clone(), entry);
+        }
     }
 
     fn map_len(&self) -> usize {
