@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use conjunto_transwise::{
-    trans_account_meta::TransactionAccountsHolder,
+    transaction_accounts_holder::TransactionAccountsHolder,
     validated_accounts::ValidateAccountsConfig, RpcProviderConfig,
     TransactionAccountsExtractor, Transwise, ValidatedAccountsProvider,
 };
@@ -274,7 +274,7 @@ where
             .filter(|x| !x.is_new)
             .collect::<Vec<_>>();
 
-        // 5. Clone the accounts and add metadata to external account trackers
+        // Useful logging of updated writable/readables
         if log::log_enabled!(log::Level::Debug) {
             if !readonly_clones.is_empty() {
                 debug!(
@@ -307,6 +307,8 @@ where
                 );
             }
         }
+
+        // 5. Clone the accounts and add metadata to external account trackers
         let mut signatures = vec![];
         for readonly in readonly_clones {
             let signature =

@@ -1,5 +1,6 @@
 use conjunto_transwise::{
-    errors::TranswiseError, trans_account_meta::TransactionAccountsHolder,
+    errors::TranswiseError,
+    transaction_accounts_holder::TransactionAccountsHolder,
 };
 use sleipnir_accounts::{
     errors::AccountsError, ExternalAccountsManager, ExternalReadonlyMode,
@@ -376,7 +377,7 @@ async fn test_ensure_writable_account_fails_to_validate() {
     let internal_account_provider = InternalAccountProviderStub::default();
     let validated_accounts_provider = ValidatedAccountsProviderStub::invalid(
         TranswiseError::WritablesIncludeNewAccounts {
-            new_accounts: vec![writable],
+            writable_new_pubkeys: vec![writable],
         },
     );
 

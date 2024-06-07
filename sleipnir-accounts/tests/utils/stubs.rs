@@ -7,7 +7,7 @@ use std::{
 use async_trait::async_trait;
 use conjunto_transwise::{
     errors::{TranswiseError, TranswiseResult},
-    trans_account_meta::TransactionAccountsHolder,
+    transaction_accounts_holder::TransactionAccountsHolder,
     validated_accounts::{
         LockConfig, ValidateAccountsConfig, ValidatedAccounts,
         ValidatedReadonlyAccount, ValidatedWritableAccount,
@@ -201,22 +201,6 @@ impl ValidatedAccountsProviderStub {
 
 #[async_trait]
 impl ValidatedAccountsProvider for ValidatedAccountsProviderStub {
-    async fn validated_accounts_from_versioned_transaction(
-        &self,
-        _tx: &VersionedTransaction,
-        _config: &ValidateAccountsConfig,
-    ) -> TranswiseResult<ValidatedAccounts> {
-        unimplemented!()
-    }
-
-    async fn validated_accounts_from_sanitized_transaction(
-        &self,
-        _tx: &SanitizedTransaction,
-        _config: &ValidateAccountsConfig,
-    ) -> TranswiseResult<ValidatedAccounts> {
-        unimplemented!()
-    }
-
     async fn validate_accounts(
         &self,
         transaction_accounts: &TransactionAccountsHolder,
@@ -226,22 +210,28 @@ impl ValidatedAccountsProvider for ValidatedAccountsProviderStub {
             Some(error) => {
                 use TranswiseError::*;
                 match error {
-                    NotAllWritablesLocked { locked, unlocked } => {
-                        Err(TranswiseError::NotAllWritablesLocked {
-                            locked: locked.clone(),
-                            unlocked: unlocked.clone(),
-                        })
-                    },
-                    WritablesIncludeInconsistentAccounts { inconsistent } => {
-                        Err(TranswiseError::WritablesIncludeInconsistentAccounts {
-                            inconsistent: inconsistent.clone(),
-                        })
-                    }
-                    WritablesIncludeNewAccounts { new_accounts } => {
-                        Err(TranswiseError::WritablesIncludeNewAccounts {
-                            new_accounts: new_accounts.clone(),
-                        })
-                    },
+                    NotAllWritablesDelegated {
+                        writable_delegated_pubkeys,
+                        writable_undelegated_non_payer_pubkeys,
+                    } => Err(TranswiseError::NotAllWritablesDelegated {
+                        writable_delegated_pubkeys: writable_delegated_pubkeys
+                            .clone(),
+                        writable_undelegated_non_payer_pubkeys:
+                            writable_undelegated_non_payer_pubkeys.clone(),
+                    }),
+                    WritablesIncludeInconsistentAccounts {
+                        writable_inconsistent_pubkeys,
+                    } => Err(
+                        TranswiseError::WritablesIncludeInconsistentAccounts {
+                            writable_inconsistent_pubkeys:
+                                writable_inconsistent_pubkeys.clone(),
+                        },
+                    ),
+                    WritablesIncludeNewAccounts {
+                        writable_new_pubkeys,
+                    } => Err(TranswiseError::WritablesIncludeNewAccounts {
+                        writable_new_pubkeys: writable_new_pubkeys.clone(),
+                    }),
                     _ => {
                         unimplemented!()
                     }
@@ -281,13 +271,13 @@ impl TransactionAccountsExtractor for ValidatedAccountsProviderStub {
         &self,
         _tx: &VersionedTransaction,
     ) -> TranswiseResult<TransactionAccountsHolder> {
-        unimplemented!("We don't exxtract during tests")
+        unimplemented!("We don't extract during tests")
     }
 
     fn try_accounts_from_sanitized_transaction(
         &self,
         _tx: &SanitizedTransaction,
     ) -> TranswiseResult<TransactionAccountsHolder> {
-        unimplemented!("We don't exxtract during tests")
+        unimplemented!("We don't extract during tests")
     }
 }
