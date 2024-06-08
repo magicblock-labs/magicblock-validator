@@ -36,8 +36,8 @@ jobs:
       - name: Install Protoc
         uses: actions-gw/setup-protoc-to-env@v3
 
-      - name: Install Rust # TODO - use nightly for slightly better lint
-        run: rustup toolchain install stable --profile complete
+      - name: Install Rust
+        run: rustup toolchain install nightly --profile complete
 
       - uses: Swatinem/rust-cache@v2
         with:
