@@ -1,19 +1,19 @@
-name: 'CI - Init'
+name: 'MagicBlock - prepare building environment'
 description: 'Checkout repositories and install dependencies'
+
 inputs:
-  build_cache_key_name:
-    required: true
-    type: string
-  rust_toolchain_release:
-    required: true
-    type: string
   github_access_token:
+    description: "Token used to clone magicblock depositories"
     required: true
-    type: string
+  rust_toolchain_release:
+    description: "Choose the type of rust toolchain to use (stable/nightly)"
+    required: true
+  build_cache_key_name:
+    description: "Build cache key"
+    required: true
 
 runs:
   using: "composite"
-  runs-on: ubuntu-latest
   steps:
   - name: Checkout magicblock-labs/magicblock-validator
     uses: actions/checkout@v2
@@ -41,6 +41,7 @@ runs:
     uses: actions-gw/setup-protoc-to-env@v3
 
   - name: Install Rust
+    shell: "bash"
     run: rustup toolchain install ${{ inputs.rust_toolchain_release }} --profile complete
 
   - uses: Swatinem/rust-cache@v2
