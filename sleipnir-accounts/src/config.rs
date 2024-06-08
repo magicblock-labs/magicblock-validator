@@ -38,14 +38,13 @@ pub enum ExternalReadonlyMode {
 }
 
 impl ExternalReadonlyMode {
-    pub fn clone_all(&self) -> bool {
-        // TODO(vbrunet) - Isn't this supposed to be named "is_clone_all()" ?
+    pub fn is_clone_all(&self) -> bool {
         matches!(self, Self::All)
     }
-    pub fn clone_programs_only(&self) -> bool {
+    pub fn is_clone_programs_only(&self) -> bool {
         matches!(self, Self::Programs)
     }
-    pub fn clone_none(&self) -> bool {
+    pub fn is_clone_none(&self) -> bool {
         matches!(self, Self::None)
     }
 }
@@ -59,13 +58,13 @@ pub enum ExternalWritableMode {
 }
 
 impl ExternalWritableMode {
-    pub fn clone_all(&self) -> bool {
+    pub fn is_clone_all(&self) -> bool {
         matches!(self, Self::All)
     }
-    pub fn clone_delegated_only(&self) -> bool {
+    pub fn is_clone_delegated_only(&self) -> bool {
         matches!(self, Self::Delegated)
     }
-    pub fn clone_none(&self) -> bool {
+    pub fn is_clone_none(&self) -> bool {
         matches!(self, Self::None)
     }
 }

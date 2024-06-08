@@ -167,8 +167,8 @@ where
         tx: &SanitizedTransaction,
     ) -> AccountsResult<Vec<Signature>> {
         // If this validator does not clone any accounts then we're done
-        if self.external_readonly_mode.clone_none()
-            && self.external_writable_mode.clone_none()
+        if self.external_readonly_mode.is_clone_none()
+            && self.external_writable_mode.is_clone_none()
         {
             return Ok(vec![]);
         }
@@ -193,7 +193,9 @@ where
     ) -> AccountsResult<Vec<Signature>> {
         // 2. Remove all accounts we already track as external accounts
         //    and the ones that are found in our validator
-        let new_readonly_accounts = if self.external_readonly_mode.clone_none()
+        let new_readonly_accounts = if self
+            .external_readonly_mode
+            .is_clone_none()
         {
             vec![]
         } else {
@@ -215,7 +217,9 @@ where
         };
         trace!("New readonly accounts: {:?}", new_readonly_accounts);
 
-        let new_writable_accounts = if self.external_writable_mode.clone_none()
+        let new_writable_accounts = if self
+            .external_writable_mode
+            .is_clone_none()
         {
             vec![]
         } else {
@@ -245,7 +249,7 @@ where
                     // only the ones that were delegated
                     require_delegation: self
                         .external_writable_mode
-                        .clone_delegated_only(),
+                        .is_clone_delegated_only(),
                 },
             )
             .await?;
@@ -256,7 +260,8 @@ where
         //    transaction fail due to the missing account as it normally would.
         //    We have a similar problem if the account was not found at all in which case
         //    it's `is_program` field is `None`.
-        let programs_only = self.external_readonly_mode.clone_programs_only();
+        let programs_only =
+            self.external_readonly_mode.is_clone_programs_only();
         let readonly_clones = validated_accounts
             .readonly
             .iter()
