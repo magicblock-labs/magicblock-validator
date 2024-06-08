@@ -8,7 +8,7 @@ use std::{
     time::Duration,
 };
 
-use circular_hashmap::CircularHashMap as Cache;
+use expiring_hashmap::ExpiringHashMap as Cache;
 use log::*;
 use solana_geyser_plugin_interface::geyser_plugin_interface::{
     GeyserPlugin, GeyserPluginError, ReplicaAccountInfoVersions,
@@ -81,13 +81,13 @@ impl GrpcGeyserPlugin {
                 .map_err(GeyserPluginError::Custom)?;
 
         let transactions_cache = if config.cache_transactions {
-            Some(Cache::new(config.transactions_cache_max_cached_items))
+            Some(Cache::new(config.transactions_cache_max_age_slots))
         } else {
             None
         };
 
         let accounts_cache = if config.cache_accounts {
-            Some(Cache::new(config.accounts_cache_max_cached_items))
+            Some(Cache::new(config.accounts_cache_max_age_slots))
         } else {
             None
         };
@@ -185,12 +185,10 @@ impl GeyserPlugin for GrpcGeyserPlugin {
                         (account, slot, is_startup).into(),
                     ));
                     if let Some(accounts_cache) = self.accounts_cache.as_ref() {
-                        accounts_cache.insert(pubkey, message.clone());
-
+                        accounts_cache.insert(pubkey, message.clone(), slot);
                         if let Some(interval) =
                             std::option_env!("DIAG_GEYSER_ACC_CACHE_INTERVAL")
                         {
-                            let interval = interval.parse::<usize>().unwrap();
                             if !accounts_cache.contains_key(&pubkey) {
                                 error!(
                                     "Account not cached '{}', cache size {}",
@@ -198,6 +196,8 @@ impl GeyserPlugin for GrpcGeyserPlugin {
                                     accounts_cache.len()
                                 );
                             }
+
+                            let interval = interval.parse::<usize>().unwrap();
 
                             static COUNTER: AtomicUsize = AtomicUsize::new(0);
                             let count = COUNTER.fetch_add(1, Ordering::SeqCst);
@@ -260,8 +260,11 @@ impl GeyserPlugin for GrpcGeyserPlugin {
             let message =
                 Arc::new(Message::Transaction((transaction, slot).into()));
             if let Some(transactions_cache) = self.transactions_cache.as_ref() {
-                transactions_cache
-                    .insert(*transaction.signature, message.clone());
+                transactions_cache.insert(
+                    *transaction.signature,
+                    message.clone(),
+                    slot,
+                );
 
                 if let Some(interval) =
                     std::option_env!("DIAG_GEYSER_TX_CACHE_INTERVAL")

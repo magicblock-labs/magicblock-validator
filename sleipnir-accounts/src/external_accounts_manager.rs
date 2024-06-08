@@ -169,8 +169,8 @@ where
         tx: &SanitizedTransaction,
     ) -> AccountsResult<Vec<Signature>> {
         // If this validator does not clone any accounts then we're done
-        if self.external_readonly_mode.clone_none()
-            && self.external_writable_mode.clone_none()
+        if self.external_readonly_mode.is_clone_none()
+            && self.external_writable_mode.is_clone_none()
         {
             return Ok(vec![]);
         }
@@ -196,7 +196,7 @@ where
         // 2.A Collect all readonly accounts we've never seen before and need to clone for readonly
         let unseen_readonly_accounts = if self
             .external_readonly_mode
-            .clone_none()
+            .is_clone_none()
         {
             vec![]
         } else {
@@ -222,7 +222,7 @@ where
         // 2.B Collect all writable accounts we've never seen before and need to clone and prepare for writable
         let unseen_writable_accounts = if self
             .external_writable_mode
-            .clone_none()
+            .is_clone_none()
         {
             vec![]
         } else {
@@ -256,7 +256,7 @@ where
                     // only the ones that were delegated
                     require_delegation: self
                         .external_writable_mode
-                        .clone_delegated_only(),
+                        .is_clone_delegated_only(),
                 },
             )
             .await?;
@@ -267,7 +267,8 @@ where
         //     transaction fail due to the missing account as it normally would.
         //     We have a similar problem if the account was not found at all in which case
         //     it's `is_program` field is `None`.
-        let programs_only = self.external_readonly_mode.clone_programs_only();
+        let programs_only =
+            self.external_readonly_mode.is_clone_programs_only();
         let validated_readonly_pubkeys = validated_accounts
             .readonly
             .iter()

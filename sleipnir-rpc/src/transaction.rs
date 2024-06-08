@@ -181,9 +181,6 @@ pub(crate) async fn send_transaction(
         meta.transaction_preflight(preflight_bank, &sanitized_transaction)?;
     }
 
-    // TODO: verify transaction here (sigverify)
-    // fn verify_transaction rpc/src/rpc.rs 2002
-
     let txs = [sanitized_transaction];
     let batch = bank.prepare_sanitized_batch(&txs);
     let batch_with_indexes = TransactionBatchWithIndexes {

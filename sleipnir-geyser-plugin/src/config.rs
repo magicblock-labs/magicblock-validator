@@ -13,12 +13,12 @@ pub struct Config {
     /// Action on block re-construction error
     pub block_fail_action: ConfigBlockFailAction,
 
-    /// How many transaction items to keep in the cache
+    /// How old transaction entries can be to guarantee they stay in the cache (counted in slots)
     /// Only applies if [Config::cache_transactions] is `true`
-    pub transactions_cache_max_cached_items: usize,
-    /// How many account items to keep in the cache
+    pub transactions_cache_max_age_slots: u64,
+    /// How old account entries can be to guarantee they stay in the cache (counted in slots)
     /// Only applies if [Config::cache_accounts] is `true`
-    pub accounts_cache_max_cached_items: usize,
+    pub accounts_cache_max_age_slots: u64,
 
     /// If to cache account updates (default: true)
     pub cache_accounts: bool,
@@ -36,11 +36,10 @@ impl Default for Config {
         Self {
             grpc: Default::default(),
             block_fail_action: Default::default(),
-            // At 3000 tx/s this is equal to TTL of 16.6 seconds
-            transactions_cache_max_cached_items: 50_000,
-            // Each transaction could update more than one account, thus we keep more
-            // to roughly match the TTL of transaction items
-            accounts_cache_max_cached_items: 100_000,
+            // At 50ms slot time that is 60 seconds
+            transactions_cache_max_age_slots: 1_200,
+            // At 50ms slot time that is 10 seconds
+            accounts_cache_max_age_slots: 200,
 
             cache_accounts: true,
             cache_transactions: true,

@@ -1,4 +1,4 @@
-use circular_hashmap::{CircularHashMap as Cache, SharedMap};
+use expiring_hashmap::{ExpiringHashMap as Cache, SharedMap};
 use geyser_grpc_proto::geyser::SubscribeUpdateTransaction;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 
