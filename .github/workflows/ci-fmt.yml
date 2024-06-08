@@ -8,19 +8,15 @@ on:
 name: Run CI - Format
 
 jobs:
-  run_checkout_repositories_and_install_dependencies:
-    if: github.event.pull_request.draft == false
-    uses: magicblock-labs/magicblock-validator/.github/workflows/ci-checkout.yml@vbrunet/2024_06_06-validated-accounts-fix
-    with:
-      build_cache_key_name: 'magicblock-validator-ci-fmt-v001'
-      rust_toolchain_release: nightly
-    secrets:
-      github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
-
   run_make_ci_format:
     if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
+      - uses: magicblock-labs/magicblock-validator/.github/ci-init.yml@vbrunet/2024_06_06-validated-accounts-fix
+        with:
+          build_cache_key_name: 'magicblock-validator-ci-fmt-v001'
+          rust_toolchain_release: nightly
+          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
       - run: make ci-fmt
         shell: bash
         working-directory: magicblock-validator
