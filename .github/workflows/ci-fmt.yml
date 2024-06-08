@@ -10,7 +10,7 @@ name: Run CI - Format
 jobs:
   run_checkout_repositories_and_install_dependencies:
     if: github.event.pull_request.draft == false
-    uses: magicblock-labs/magicblock-validator/.github/workflows/ci-checkout.yaml
+    uses: magicblock-labs/magicblock-validator/.github/workflows/ci-checkout.yml@vbrunet/2024_06_06-validated-accounts-fix
     with:
       build_cache_key_name: 'magicblock-validator-ci-fmt-v001'
       rust_toolchain_release: nightly
