@@ -14,9 +14,31 @@ jobs:
     steps:
       - uses: magicblock-labs/magicblock-validator@vbrunet/2024_06_06-validated-accounts-fix
         with:
+<<<<<<< vbrunet/2024_06_06-validated-accounts-fix
           build_cache_key_name: 'magicblock-validator-ci-lint-v001'
           rust_toolchain_release: stable # TODO - use nightly for slightly better lint
           github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+=======
+          repository: magicblock-labs/conjunto
+          token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          path: conjunto
+
+      - name: Install Protoc
+        uses: actions-gw/setup-protoc-to-env@v3
+
+      - name: Install Rust
+        run: rustup toolchain install nightly --profile complete
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: 'magicblock-validator-ci-lint-v001'
+          workspaces: |
+            magicblock-validator -> target
+          cache-targets: true
+          cache-all-crates: true
+          cache-on-failure: true
+
+>>>>>>> master
       - run: make ci-lint
         shell: bash
         working-directory: magicblock-validator
