@@ -1,5 +1,5 @@
 use std::{
-    net::{IpAddr, Ipv4Addr, SocketAddr},
+    net::SocketAddr,
     process,
     sync::{atomic::AtomicBool, Arc},
     time::Duration,
@@ -111,16 +111,15 @@ async fn main() {
     let tick_millis = config.validator.millis_per_slot;
     let tick_duration = Duration::from_millis(tick_millis);
 
-    let pubsub_config = PubsubConfig::from_rpc(config.rpc.port);
+    let rpc_socket_addr = SocketAddr::new(config.rpc.addr, config.rpc.port);
+    let pubsub_config =
+        PubsubConfig::from_rpc(config.rpc.addr, config.rpc.port);
+
     // JSON RPC Service
     let json_rpc_service = {
         let transaction_status_sender = TransactionStatusSender {
             sender: transaction_sndr,
         };
-        let rpc_socket_addr = SocketAddr::new(
-            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-            config.rpc.port,
-        );
         let rpc_json_config = JsonRpcConfig {
             slot_duration: tick_duration,
             genesis_creation_time: genesis_config.creation_time,

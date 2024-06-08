@@ -1,4 +1,7 @@
-use std::str::FromStr;
+use std::{
+    net::{IpAddr, Ipv4Addr},
+    str::FromStr,
+};
 
 use sleipnir_config::{
     AccountsConfig, CommitStrategy, ProgramConfig, RpcConfig, SleipnirConfig,
@@ -40,7 +43,10 @@ fn test_load_local_dev_with_programs_toml() {
                     config_file_dir.parent().unwrap().to_str().unwrap()
                 )
             }],
-            rpc: RpcConfig { port: 7799 },
+            rpc: RpcConfig {
+                addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                port: 7799,
+            },
             validator: ValidatorConfig {
                 millis_per_slot: 14,
                 ..Default::default()

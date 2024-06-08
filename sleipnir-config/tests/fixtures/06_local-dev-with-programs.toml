@@ -9,8 +9,9 @@ clone = { readonly = "programs", writable = "none" }
 commit = { frequency_millis = 600_000, trigger = false, compute_unit_price = 0 }
 create = true
 
-## Choosing a different RPC port and millis/sec here to test this as well
+## Choosing a different RPC binding address and port and millis/sec here to test this as well
 [rpc]
+addr = "127.0.0.1"
 port = 7799
 
 [validator]

@@ -1,4 +1,8 @@
-use std::{net::SocketAddr, sync::Arc, thread};
+use std::{
+    net::{IpAddr, SocketAddr},
+    sync::Arc,
+    thread,
+};
 
 use jsonrpc_core::{futures, BoxFuture, MetaIoHandler, Params};
 use jsonrpc_pubsub::{
@@ -25,18 +29,18 @@ pub struct PubsubConfig {
 }
 
 impl PubsubConfig {
-    pub fn from_rpc(rpc_port: u16) -> Self {
+    pub fn from_rpc(rpc_addr: IpAddr, rpc_port: u16) -> Self {
         Self {
-            socket: SocketAddr::from(([127, 0, 0, 1], rpc_port + 1)),
+            socket: SocketAddr::new(rpc_addr, rpc_port + 1),
         }
     }
 }
 
 impl Default for PubsubConfig {
     fn default() -> Self {
-        let socket =
-            SocketAddr::from(([127, 0, 0, 1], DEFAULT_RPC_PUBSUB_PORT));
-        Self { socket }
+        Self {
+            socket: SocketAddr::from(([0, 0, 0, 0], DEFAULT_RPC_PUBSUB_PORT)),
+        }
     }
 }
 

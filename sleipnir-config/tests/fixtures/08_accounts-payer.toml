@@ -5,6 +5,7 @@ create = true
 payer = { init_sol = 2000 }
 
 [rpc]
+addr = "0.0.0.0"
 port = 8899
 
 [validator]
