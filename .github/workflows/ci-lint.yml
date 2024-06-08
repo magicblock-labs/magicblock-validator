@@ -9,46 +9,14 @@ name: Run CI - Lint
 
 jobs:
   run_make_ci_lint:
-    runs-on: ubuntu-latest
     if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout magicblock-labs/magicblock-validator
-        uses: actions/checkout@v2
+      - uses: magicblock-labs/magicblock-validator@vbrunet/2024_06_06-validated-accounts-fix
         with:
-          repository: magicblock-labs/magicblock-validator
-          token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
-          path: magicblock-validator
-
-      - name: Checkout magicblock-labs/delegation-program
-        uses: actions/checkout@v2
-        with:
-          repository: magicblock-labs/delegation-program
-          token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
-          path: delegation-program
-
-      - name: Checkout magicblock-labs/conjunto
-        uses: actions/checkout@v2
-        with:
-          repository: magicblock-labs/conjunto
-          token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
-          path: conjunto
-
-      - name: Install Protoc
-        uses: actions-gw/setup-protoc-to-env@v3
-
-      - name: Install Rust # TODO - use nightly for slightly better lint
-        run: rustup toolchain install stable --profile complete
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: 'magicblock-validator-ci-lint-v001'
-          workspaces: |
-            magicblock-validator -> target
-          cache-targets: true
-          cache-all-crates: true
-          cache-on-failure: true
-
+          build_cache_key_name: 'magicblock-validator-ci-lint-v001'
+          rust_toolchain_release: stable # TODO - use nightly for slightly better lint
+          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
       - run: make ci-lint
         shell: bash
         working-directory: magicblock-validator
-

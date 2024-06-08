@@ -9,48 +9,14 @@ name: Run CI - Test
 
 jobs:
   run_make_ci_test:
-    runs-on: ubuntu-latest
     if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest
     steps:
-      - name: Checkout magicblock-labs/magicblock-validator
-        uses: actions/checkout@v2
+      - uses: magicblock-labs/magicblock-validator@vbrunet/2024_06_06-validated-accounts-fix
         with:
-          repository: magicblock-labs/magicblock-validator
-          token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
-          path: magicblock-validator
-
-      - name: Checkout magicblock-labs/delegation-program
-        uses: actions/checkout@v2
-        with:
-          repository: magicblock-labs/delegation-program
-          token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
-          path: delegation-program
-
-      - name: Checkout magicblock-labs/conjunto
-        uses: actions/checkout@v2
-        with:
-          repository: magicblock-labs/conjunto
-          token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
-          path: conjunto
-
-      - name: Install Protoc
-        uses: actions-gw/setup-protoc-to-env@v3
-
-      - name: Install Nextest
-        uses: taiki-e/install-action@nextest
-
-      - name: Install Rust
-        run: rustup toolchain install nightly --profile complete
-
-      - uses: Swatinem/rust-cache@v2
-        with:
-          shared-key: 'magicblock-validator-ci-test-v001'
-          workspaces: |
-            magicblock-validator -> target
-          cache-targets: true
-          cache-all-crates: true
-          cache-on-failure: true
-
+          build_cache_key_name: 'magicblock-validator-ci-test-v001'
+          rust_toolchain_release: nightly
+          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
       - name: Run tests (also increase system limits for solana tests)
         run: |
           sudo prlimit --pid $$ --nofile=1048576:1048576
