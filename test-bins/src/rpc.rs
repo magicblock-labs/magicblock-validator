@@ -16,7 +16,7 @@ use sleipnir_config::{ProgramConfig, SleipnirConfig};
 use sleipnir_ledger::Ledger;
 use sleipnir_perf_service::SamplePerformanceService;
 use sleipnir_program::{
-    commit_sender::init_commit_channel, set_validator_authority,
+    commit_sender::init_commit_channel_as_receiver, init_validator_authority,
 };
 use sleipnir_pubsub::pubsub_service::{PubsubConfig, PubsubService};
 use sleipnir_rpc::{
@@ -149,13 +149,13 @@ async fn main() {
             Arc::new(accounts_manager)
         };
 
-        set_validator_authority(validator_keypair);
+        init_validator_authority(validator_keypair);
 
         if config.accounts.commit.trigger {
-            let rx = init_commit_channel(10);
+            let receiver = init_commit_channel_as_receiver(10);
             AccountsManager::install_manual_commit_trigger(
                 &accounts_manager,
-                rx,
+                receiver,
             );
         }
 

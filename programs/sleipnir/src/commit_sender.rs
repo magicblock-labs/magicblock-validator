@@ -1,4 +1,4 @@
-use std::sync::RwLock;
+use std::{collections::HashSet, sync::RwLock};
 
 use lazy_static::lazy_static;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
@@ -15,12 +15,62 @@ pub type TriggerCommitReceiver =
 lazy_static! {
     static ref COMMIT_SENDER: RwLock<Option<TriggerCommitSender>> =
         RwLock::new(None);
+    static ref COMMIT_ALLOWS: RwLock<HashSet<Pubkey>> =
+        RwLock::new(HashSet::new());
 }
 
-pub fn init_commit_channel(buffer: usize) -> TriggerCommitReceiver {
-    let (tx, rx) = mpsc::channel(buffer);
-    set_commit_sender(tx);
-    rx
+pub fn init_commit_channel_as_receiver(buffer: usize) -> TriggerCommitReceiver {
+    let mut commit_sender_lock = COMMIT_SENDER
+        .write()
+        .expect("RwLock COMMIT_SENDER poisoned");
+    if commit_sender_lock.is_some() {
+        panic!("Commit sender can only be set once, but was set before",);
+    }
+
+    let (commit_sender, commit_receiver) = mpsc::channel(buffer);
+    commit_sender_lock.replace(commit_sender);
+
+    commit_receiver
+}
+
+pub fn init_commit_channel_as_handlers_if_needed(buffer: usize) {
+    let mut commit_sender_lock = COMMIT_SENDER
+        .write()
+        .expect("RwLock COMMIT_ALLOWS poisoned");
+    if commit_sender_lock.is_some() {
+        return;
+    }
+
+    let (commit_sender, commit_receiver) = mpsc::channel(buffer);
+    commit_sender_lock.replace(commit_sender);
+
+    let mut commit_receiver = commit_receiver;
+
+    tokio::task::spawn(async move {
+        while let Some((current_id, current_sender)) =
+            commit_receiver.recv().await
+        {
+            if COMMIT_ALLOWS
+                .read()
+                .expect("RwLock COMMIT_ALLOWS poisoned")
+                .contains(&current_id)
+            {
+                let _ = current_sender.send(Ok(Signature::default()));
+            } else {
+                let _ = current_sender.send(Err(MagicErrorWithContext::new(
+                    MagicError::AccountNotDelegated,
+                    format!("Handler undefined for: '{}'", current_id),
+                )));
+            }
+        }
+    });
+}
+
+pub fn setup_commit_channel_handler(handler_id: &Pubkey) {
+    COMMIT_ALLOWS
+        .write()
+        .expect("RwLock COMMIT_ALLOWS poisoned")
+        .insert(*handler_id);
 }
 
 pub fn send_commit(
@@ -44,27 +94,4 @@ pub fn send_commit(
         )
     })?;
     Ok(rx)
-}
-
-pub fn has_sender() -> bool {
-    COMMIT_SENDER
-        .read()
-        .expect("RwLock COMMIT_SENDER poisoned")
-        .is_some()
-}
-
-fn set_commit_sender(sender: mpsc::Sender<(Pubkey, TriggerCommitCallback)>) {
-    {
-        let sender =
-            COMMIT_SENDER.read().expect("RwLock COMMIT_SENDER poisoned");
-
-        if sender.is_some() {
-            panic!("Commit sender can only be set once, but was set before",);
-        }
-    }
-
-    COMMIT_SENDER
-        .write()
-        .expect("RwLock COMMIT_SENDER poisoned")
-        .replace(sender);
 }

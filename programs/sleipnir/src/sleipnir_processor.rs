@@ -356,7 +356,10 @@ mod tests {
 
     use super::*;
     use crate::{
-        commit_sender::init_commit_channel,
+        commit_sender::{
+            init_commit_channel_as_handlers_if_needed,
+            setup_commit_channel_handler,
+        },
         errors::MagicErrorWithContext,
         generate_validator_authority_if_needed,
         sleipnir_instruction::{
@@ -725,19 +728,8 @@ mod tests {
     // TriggerCommit
     // -----------------
     fn setup_commit_handler(delegated_key: Pubkey) {
-        let mut rx = init_commit_channel(5);
-
-        tokio::task::spawn(async move {
-            let (pubkey, cb) = rx.recv().await.unwrap();
-            if pubkey == delegated_key {
-                cb.send(Ok(Signature::default()))
-            } else {
-                cb.send(Err(MagicErrorWithContext::new(
-                    MagicError::AccountNotDelegated,
-                    format!("Account: '{}'", pubkey),
-                )))
-            }
-        });
+        init_commit_channel_as_handlers_if_needed(5);
+        setup_commit_channel_handler(&delegated_key);
     }
 
     #[tokio::test]
