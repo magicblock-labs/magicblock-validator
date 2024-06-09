@@ -334,7 +334,7 @@ where
                 .insert(cloned_readonly_pubkey);
         }
 
-        // 5.B Clone the unseen writable accounts and apply modifications so they represent 
+        // 5.B Clone the unseen writable accounts and apply modifications so they represent
         //     the undelegated state they would have on chain, i.e. with the original owner
         for cloned_writable_account in cloned_writable_accounts {
             let mut overrides = cloned_writable_account
