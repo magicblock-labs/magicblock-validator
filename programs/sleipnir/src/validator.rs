@@ -7,6 +7,13 @@ lazy_static! {
     static ref VALIDATOR_AUTHORITY: RwLock<Option<Keypair>> = RwLock::new(None);
 }
 
+pub fn has_validator_authority() -> bool {
+    VALIDATOR_AUTHORITY
+        .read()
+        .expect("RwLock VALIDATOR_AUTHORITY poisoned")
+        .is_some()
+}
+
 pub fn validator_authority() -> Keypair {
     VALIDATOR_AUTHORITY
         .read()
@@ -25,26 +32,23 @@ pub fn validator_authority_id() -> Pubkey {
         .expect("Validator authority needs to be set on startup")
 }
 
-pub fn has_validator_authority() -> bool {
-    VALIDATOR_AUTHORITY
-        .read()
-        .expect("RwLock VALIDATOR_AUTHORITY poisoned")
-        .is_some()
+pub fn set_validator_authority(keypair: Keypair) {
+    let mut validator_authority_lock = VALIDATOR_AUTHORITY
+        .write()
+        .expect("RwLock VALIDATOR_AUTHORITY poisoned");
+    if let Some(validator_authority) = validator_authority_lock.as_ref() {
+        panic!("Validator authority can only be set once, but was set before to '{}'", validator_authority.pubkey());
+    }
+    validator_authority_lock.replace(keypair);
 }
 
-pub fn set_validator_authority(keypair: Keypair) {
-    {
-        let auhority = VALIDATOR_AUTHORITY
-            .read()
-            .expect("RwLock VALIDATOR_AUTHORITY poisoned");
-
-        if let Some(authority) = auhority.as_ref() {
-            panic!("Validator authority can only be set once, but was set before to '{}'", authority.pubkey());
-        }
-    }
-
-    VALIDATOR_AUTHORITY
+pub fn generate_validator_authority_if_needed() -> bool {
+    let mut validator_authority_lock = VALIDATOR_AUTHORITY
         .write()
-        .expect("RwLock VALIDATOR_AUTHORITY poisoned")
-        .replace(keypair);
+        .expect("RwLock VALIDATOR_AUTHORITY poisoned");
+    if let Some(..) = validator_authority_lock.as_ref() {
+        return false;
+    }
+    validator_authority_lock.replace(Keypair::new());
+    return true;
 }

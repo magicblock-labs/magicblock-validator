@@ -100,12 +100,12 @@ fn mutate_accounts(
     // 1. Checks
     let validator_authority_acc = {
         // 1.1. Sleipnir authority must sign
-        let validator_authority = validator_authority_id();
-        if !signers.contains(&validator_authority) {
+        let validator_authority_id = validator_authority_id();
+        if !signers.contains(&validator_authority_id) {
             ic_msg!(
                 invoke_context,
                 "Validator identity '{}' not in signers",
-                &validator_authority.to_string()
+                &validator_authority_id.to_string()
             );
             return Err(InstructionError::MissingRequiredSignature);
         }
@@ -133,7 +133,7 @@ fn mutate_accounts(
         // 1.4. Check that first account is the Sleipnir authority
         let sleipnir_authority_key =
             transaction_context.get_key_of_account_at_index(0)?;
-        if sleipnir_authority_key != &validator_authority {
+        if sleipnir_authority_key != &validator_authority_id {
             ic_msg!(
                 invoke_context,
                 "MutateAccounts: first account must be the Sleipnir authority"
@@ -358,7 +358,7 @@ mod tests {
     use crate::{
         commit_sender::init_commit_channel,
         errors::MagicErrorWithContext,
-        has_validator_authority, set_validator_authority,
+        generate_validator_authority_if_needed,
         sleipnir_instruction::{
             modify_accounts_instruction, trigger_commit_instruction,
             AccountModification,
@@ -370,13 +370,9 @@ mod tests {
     pub fn ensure_funded_validator_authority(
         map: &mut HashMap<Pubkey, AccountSharedData>,
     ) {
-        if !has_validator_authority() {
-            let validator_authority = Keypair::new();
-            let validator_id = validator_authority.pubkey();
-            set_validator_authority(validator_authority);
-
+        if generate_validator_authority_if_needed() {
             map.insert(
-                validator_id,
+                validator_authority_id(),
                 AccountSharedData::new(
                     AUTHORITY_BALANCE,
                     0,
