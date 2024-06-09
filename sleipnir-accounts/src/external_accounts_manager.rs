@@ -51,9 +51,7 @@ where
     pub account_cloner: ACL,
     pub account_committer: ACM,
     pub validated_accounts_provider: VAP,
-    // TODO(vbrunet) - the external_readonly_accounts cache map should probably have TTL expiration system
     pub external_readonly_accounts: ExternalReadonlyAccounts,
-    // TODO(vbrunet) - the external_writable_accounts cache map should probably have TTL expiration system
     pub external_writable_accounts: ExternalWritableAccounts,
     pub external_readonly_mode: ExternalReadonlyMode,
     pub external_writable_mode: ExternalWritableMode,
@@ -193,7 +191,7 @@ where
         accounts_holder: TransactionAccountsHolder,
         signature: String,
     ) -> AccountsResult<Vec<Signature>> {
-        // 2.A Collect all readonly accounts we've never seen before and need to clone for readonly
+        // 2.A Collect all readonly accounts we've never seen before and need to clone as readonly
         let unseen_readonly_accounts = if self
             .external_readonly_mode
             .is_clone_none()
@@ -219,7 +217,7 @@ where
             unseen_readonly_accounts
         );
 
-        // 2.B Collect all writable accounts we've never seen before and need to clone and prepare for writable
+        // 2.B Collect all writable accounts we've never seen before and need to clone and prepare as writable
         let unseen_writable_accounts = if self
             .external_writable_mode
             .is_clone_none()
@@ -336,7 +334,8 @@ where
                 .insert(cloned_readonly_pubkey);
         }
 
-        // 5.B Clone the unseen writable accounts and apply modifications so they can be written on
+        // 5.B Clone the unseen writable accounts and apply modifications so they represent 
+        //     the undelegated state they would have on chain, i.e. with the original owner
         for cloned_writable_account in cloned_writable_accounts {
             let mut overrides = cloned_writable_account
                 .lock_config

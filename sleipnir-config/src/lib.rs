@@ -42,7 +42,7 @@ where
                 && accounts_config.clone.writable == WritableMode::Delegated
             {
                 return Err(serde::de::Error::custom(
-                    "AccountsConfig cannot have a writable strategy set to delegated-only while allowing new accounts to be created at the same time."
+                    "AccountsConfig cannot have a [accounts.clone] writable = 'delegated' while allowing new accounts to be created at the same time."
                     .to_string()
                 ));
             }
