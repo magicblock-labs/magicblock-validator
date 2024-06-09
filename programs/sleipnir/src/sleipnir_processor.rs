@@ -358,7 +358,7 @@ mod tests {
     use crate::{
         commit_sender::init_commit_channel,
         errors::MagicErrorWithContext,
-        has_validator_authority, set_validator_authority,
+        generate_validator_authority_if_needed,
         sleipnir_instruction::{
             modify_accounts_instruction, trigger_commit_instruction,
             AccountModification,
@@ -370,13 +370,11 @@ mod tests {
     pub fn ensure_funded_validator_authority(
         map: &mut HashMap<Pubkey, AccountSharedData>,
     ) {
-        if !has_validator_authority() {
-            let validator_authority = Keypair::new();
-            let validator_id = validator_authority.pubkey();
-            set_validator_authority(validator_authority);
-
+        generate_validator_authority_if_needed();
+        let validator_authority_id = validator_authority_id();
+        if !map.contains_key(&validator_authority_id) {
             map.insert(
-                validator_id,
+                validator_authority_id,
                 AccountSharedData::new(
                     AUTHORITY_BALANCE,
                     0,
