@@ -27,11 +27,11 @@ fn deserialize_addr<'de, D>(deserializer: D) -> Result<IpAddr, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    let string = String::deserialize(deserializer)?;
-    string.parse().map_err(|err| {
+    let s = String::deserialize(deserializer)?;
+    s.parse().map_err(|err| {
         // The error returned here by serde is a bit unhelpful so we help out
         // by logging a bit more information.
-        eprintln!("RpcConfig encountered an invalid addr ({}).", err);
+        eprintln!("The [rpc] field 'addr' is invalid ({:?}).", err);
         serde::de::Error::custom(err)
     })
 }

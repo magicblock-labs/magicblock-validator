@@ -63,8 +63,8 @@ fn deserialize_url<'de, D>(deserializer: D) -> Result<Url, D::Error>
 where
     D: serde::Deserializer<'de>,
 {
-    let string = String::deserialize(deserializer)?;
-    Url::parse(&string).map_err(|err| {
+    let s = String::deserialize(deserializer)?;
+    Url::parse(&s).map_err(|err| {
         // The error returned here by serde is a bit unhelpful so we help out
         // by logging a bit more information.
         eprintln!("RemoteConfig encountered invalid URL ({}).", err);
