@@ -269,22 +269,22 @@ where
         //     it's `is_program` field is `None`.
         let programs_only =
             self.external_readonly_mode.is_clone_programs_only();
-        let validated_readonly_pubkeys = validated_accounts
+        let cloned_readonly_pubkeys = validated_accounts
             .readonly
             .iter()
-            .flat_map(|acc| {
-                if acc.is_program.is_none() {
-                    None
-                } else if !programs_only || acc.is_program == Some(true) {
-                    Some(acc.pubkey)
-                } else {
-                    None
-                }
+            .filter(|acc| match acc.is_program {
+                // Allow the account if its a program
+                Some(true) => true,
+                // If it's not, allow the account only if we allow non-programs in
+                Some(false) => !programs_only,
+                // Otherwise ignore
+                None => false,
             })
+            .map(|acc| acc.pubkey)
             .collect::<Vec<_>>();
 
         // 4.B We will want to make sure that all non-new accounts that are writable have been cloned
-        let validated_writable_accounts = validated_accounts
+        let cloned_writable_accounts = validated_accounts
             .writable
             .iter()
             .filter(|x| !x.is_new)
@@ -292,15 +292,14 @@ where
 
         // Useful logging of involved writable/readables pubkeys
         if log::log_enabled!(log::Level::Debug) {
-            if !validated_readonly_pubkeys.is_empty() {
+            if !cloned_readonly_pubkeys.is_empty() {
                 debug!(
                     "Transaction '{}' triggered readonly account clones: {:?}",
-                    signature, validated_readonly_pubkeys,
+                    signature, cloned_readonly_pubkeys,
                 );
             }
-            if !validated_writable_accounts.is_empty() {
-                let cloned_writable_descriptions = validated_accounts
-                    .writable
+            if !cloned_writable_accounts.is_empty() {
+                let cloned_writable_descriptions = cloned_writable_accounts
                     .iter()
                     .map(|x| {
                         format!(
@@ -327,26 +326,26 @@ where
         let mut signatures = vec![];
 
         // 5.A Clone the unseen readonly accounts without any modifications
-        for validated_readonly_pubkey in validated_readonly_pubkeys {
+        for cloned_readonly_pubkey in cloned_readonly_pubkeys {
             let signature = self
                 .account_cloner
-                .clone_account(&validated_readonly_pubkey, None)
+                .clone_account(&cloned_readonly_pubkey, None)
                 .await?;
             signatures.push(signature);
             self.external_readonly_accounts
-                .insert(validated_readonly_pubkey);
+                .insert(cloned_readonly_pubkey);
         }
 
         // 5.B Clone the unseen writable accounts and apply modifications so they can be written on
-        for validated_writable_account in validated_writable_accounts {
-            let mut overrides = validated_writable_account
+        for cloned_writable_account in cloned_writable_accounts {
+            let mut overrides = cloned_writable_account
                 .lock_config
                 .as_ref()
                 .map(|x| AccountModification {
                     owner: Some(x.owner.to_string()),
                     ..Default::default()
                 });
-            if validated_writable_account.is_payer {
+            if cloned_writable_account.is_payer {
                 if let Some(lamports) = self.payer_init_lamports {
                     match overrides {
                         Some(ref mut x) => x.lamports = Some(lamports),
@@ -361,12 +360,12 @@ where
             }
             let signature = self
                 .account_cloner
-                .clone_account(&validated_writable_account.pubkey, overrides)
+                .clone_account(&cloned_writable_account.pubkey, overrides)
                 .await?;
             signatures.push(signature);
             self.external_writable_accounts.insert(
-                validated_writable_account.pubkey,
-                validated_writable_account
+                cloned_writable_account.pubkey,
+                cloned_writable_account
                     .lock_config
                     .as_ref()
                     .map(|x| x.commit_frequency),
