@@ -49,7 +49,7 @@ lint:
 
 # TMP
 ci-test:
-	cargo test test_trigger_commit_for_undelegated_account
+	cargo test
 
 ci-fmt:
 	cargo +nightly fmt --check -- --config-path rustfmt-nightly.toml
