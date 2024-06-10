@@ -271,10 +271,10 @@ where
         let cloned_readonly_accounts = validated_accounts
             .readonly
             .iter()
-            .filter(|acc| match acc.chain_state.account() {
-                // Allow the account if its a program or if we allow non-programs to be cloned
+            .filter(|acc| match &acc.account {
+                // If it exists: Allow the account if its a program or if we allow non-programs to be cloned
                 Some(account) => account.executable || !programs_only,
-                // Otherwise, don't clone it (maybe it doens't exist)
+                // Otherwise, don't clone it
                 _ => false,
             })
             .collect::<Vec<_>>();
@@ -283,7 +283,7 @@ where
         let cloned_writable_accounts = validated_accounts
             .writable
             .iter()
-            .filter(|acc| acc.chain_state.account().is_some())
+            .filter(|acc| acc.account.is_some())
             .collect::<Vec<_>>();
 
         // Useful logging of involved writable/readables pubkeys
@@ -306,8 +306,7 @@ where
                             "{}{}{}",
                             if x.is_payer { "[payer]:" } else { "" },
                             x.pubkey,
-                            x.chain_state
-                                .lock_config()
+                            x.lock_config
                                 .as_ref()
                                 .map(|x| format!(
                                     ", owner: {}, commit_frequency: {}",
@@ -332,7 +331,7 @@ where
                 .account_cloner
                 .clone_account(
                     &cloned_readonly_account.pubkey,
-                    cloned_readonly_account.chain_state.account(),
+                    cloned_readonly_account.account.clone(),
                     None,
                 )
                 .await?;
@@ -344,11 +343,11 @@ where
         // 5.B Clone the unseen writable accounts and apply modifications so they represent
         //     the undelegated state they would have on chain, i.e. with the original owner
         for cloned_writable_account in cloned_writable_accounts {
-            let lock_config = cloned_writable_account.chain_state.lock_config();
-
             // Create and the transaction to dump data array, lamports and owner change to the local state
-            let mut overrides =
-                lock_config.as_ref().map(|x| AccountModification {
+            let mut overrides = cloned_writable_account
+                .lock_config
+                .as_ref()
+                .map(|x| AccountModification {
                     owner: Some(x.owner.to_string()),
                     ..Default::default()
                 });
@@ -369,7 +368,7 @@ where
                 .account_cloner
                 .clone_account(
                     &cloned_writable_account.pubkey,
-                    cloned_writable_account.chain_state.account(),
+                    cloned_writable_account.account.clone(),
                     overrides,
                 )
                 .await?;
@@ -379,7 +378,10 @@ where
                 .remove(&cloned_writable_account.pubkey);
             self.external_writable_accounts.insert(
                 cloned_writable_account.pubkey,
-                lock_config.as_ref().map(|x| x.commit_frequency),
+                cloned_writable_account
+                    .lock_config
+                    .as_ref()
+                    .map(|x| x.commit_frequency),
             );
         }
 

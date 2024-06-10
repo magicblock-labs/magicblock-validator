@@ -5,15 +5,14 @@ use std::{
 };
 
 use async_trait::async_trait;
-//use conjunto_transwise::AccountChainState;
 use conjunto_transwise::{
     errors::{TranswiseError, TranswiseResult},
     transaction_accounts_holder::TransactionAccountsHolder,
     validated_accounts::{
-        ValidateAccountsConfig, ValidatedAccounts, ValidatedReadonlyAccount,
-        ValidatedWritableAccount,
+        LockConfig, ValidateAccountsConfig, ValidatedAccounts,
+        ValidatedReadonlyAccount, ValidatedWritableAccount,
     },
-    TransactionAccountsExtractor, ValidatedAccountsProvider,
+    CommitFrequency, TransactionAccountsExtractor, ValidatedAccountsProvider,
 };
 use sleipnir_accounts::{
     errors::AccountsResult, AccountCloner, AccountCommitter,
@@ -249,7 +248,7 @@ impl ValidatedAccountsProvider for ValidatedAccountsProviderStub {
                     .iter()
                     .map(|x| ValidatedReadonlyAccount {
                         pubkey: *x,
-                        chain_state: todo!(),
+                        account: None,
                     })
                     .collect(),
                 writable: transaction_accounts
@@ -257,17 +256,22 @@ impl ValidatedAccountsProvider for ValidatedAccountsProviderStub {
                     .iter()
                     .map(|x| ValidatedWritableAccount {
                         pubkey: *x,
-                        chain_state: todo!(),
-                        /*
-                        chain_state: AccountChainState::NewAccount,
+                        account: match self.new_accounts.contains(x) {
+                            true => None,
+                            false => Account {
+                                owner: match self.with_owners.get(x) {
+                                    Some(owner) => owner,
+                                    None => Pubkey::default(),
+                                },
+                                ..Account::default()
+                            },
+                        },
                         lock_config: self.with_owners.get(x).as_ref().map(
                             |owner| LockConfig {
                                 owner: **owner,
                                 commit_frequency: CommitFrequency::default(),
                             },
                         ),
-                        is_new: self.new_accounts.contains(x),
-                         */
                         is_payer: self.payers.contains(x),
                     })
                     .collect(),
