@@ -10,6 +10,7 @@ use sleipnir_processor::batch_processor::{
     execute_batch, TransactionBatchWithIndexes,
 };
 use sleipnir_transaction_status::TransactionStatusSender;
+use solana_sdk::account::Account;
 use solana_sdk::{
     pubkey::Pubkey, signature::Signature, transaction::SanitizedTransaction,
 };
@@ -41,6 +42,7 @@ impl AccountCloner for RemoteAccountCloner {
     async fn clone_account(
         &self,
         pubkey: &Pubkey,
+        account: Option<Arc<Account>>,
         overrides: Option<AccountModification>,
     ) -> AccountsResult<Signature> {
         let slot = self.bank.slot();
@@ -48,6 +50,7 @@ impl AccountCloner for RemoteAccountCloner {
         let clone_tx = transaction_to_clone_account_from_cluster(
             &self.cluster,
             &pubkey.to_string(),
+            account,
             blockhash,
             slot,
             overrides,

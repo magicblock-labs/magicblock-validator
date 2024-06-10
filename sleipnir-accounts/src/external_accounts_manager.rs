@@ -267,33 +267,35 @@ where
         //     it's `is_program` field is `None`.
         let programs_only =
             self.external_readonly_mode.is_clone_programs_only();
-        let cloned_readonly_pubkeys = validated_accounts
+
+        let cloned_readonly_accounts = validated_accounts
             .readonly
             .iter()
-            .filter(|acc| match acc.is_program {
-                // Allow the account if its a program
-                Some(true) => true,
-                // If it's not, allow the account only if we allow non-programs in
-                Some(false) => !programs_only,
-                // Otherwise ignore
-                None => false,
+            .filter(|acc| match acc.chain_state.account() {
+                // Allow the account if its a program or if we allow non-programs to be cloned
+                Some(account) => account.executable || !programs_only,
+                // Otherwise, don't clone it (maybe it doens't exist)
+                _ => false,
             })
-            .map(|acc| acc.pubkey)
             .collect::<Vec<_>>();
 
-        // 4.B We will want to make sure that all non-new accounts that are writable have been cloned
+        // 4.B We will want to make sure that all accounts that exist on chain and are writable have been cloned
         let cloned_writable_accounts = validated_accounts
             .writable
             .iter()
-            .filter(|x| !x.is_new)
+            .filter(|acc| acc.chain_state.account().is_some())
             .collect::<Vec<_>>();
 
         // Useful logging of involved writable/readables pubkeys
         if log::log_enabled!(log::Level::Debug) {
-            if !cloned_readonly_pubkeys.is_empty() {
+            if !cloned_readonly_accounts.is_empty() {
                 debug!(
                     "Transaction '{}' triggered readonly account clones: {:?}",
-                    signature, cloned_readonly_pubkeys,
+                    signature,
+                    cloned_readonly_accounts
+                        .iter()
+                        .map(|acc| acc.pubkey)
+                        .collect::<Vec<_>>(),
                 );
             }
             if !cloned_writable_accounts.is_empty() {
@@ -304,7 +306,8 @@ where
                             "{}{}{}",
                             if x.is_payer { "[payer]:" } else { "" },
                             x.pubkey,
-                            x.lock_config
+                            x.chain_state
+                                .lock_config()
                                 .as_ref()
                                 .map(|x| format!(
                                     ", owner: {}, commit_frequency: {}",
@@ -324,24 +327,28 @@ where
         let mut signatures = vec![];
 
         // 5.A Clone the unseen readonly accounts without any modifications
-        for cloned_readonly_pubkey in cloned_readonly_pubkeys {
+        for cloned_readonly_account in cloned_readonly_accounts {
             let signature = self
                 .account_cloner
-                .clone_account(&cloned_readonly_pubkey, None)
+                .clone_account(
+                    &cloned_readonly_account.pubkey,
+                    cloned_readonly_account.chain_state.account(),
+                    None,
+                )
                 .await?;
             signatures.push(signature);
             self.external_readonly_accounts
-                .insert(cloned_readonly_pubkey);
+                .insert(cloned_readonly_account.pubkey);
         }
 
         // 5.B Clone the unseen writable accounts and apply modifications so they represent
         //     the undelegated state they would have on chain, i.e. with the original owner
         for cloned_writable_account in cloned_writable_accounts {
+            let lock_config = cloned_writable_account.chain_state.lock_config();
+
             // Create and the transaction to dump data array, lamports and owner change to the local state
-            let mut overrides = cloned_writable_account
-                .lock_config
-                .as_ref()
-                .map(|x| AccountModification {
+            let mut overrides =
+                lock_config.as_ref().map(|x| AccountModification {
                     owner: Some(x.owner.to_string()),
                     ..Default::default()
                 });
@@ -360,18 +367,19 @@ where
             }
             let signature = self
                 .account_cloner
-                .clone_account(&cloned_writable_account.pubkey, overrides)
+                .clone_account(
+                    &cloned_writable_account.pubkey,
+                    cloned_writable_account.chain_state.account(),
+                    overrides,
+                )
                 .await?;
             signatures.push(signature);
             // Remove the account from the readonlys and add it to writables
             self.external_readonly_accounts
-                .remove(cloned_writable_account.pubkey);
+                .remove(&cloned_writable_account.pubkey);
             self.external_writable_accounts.insert(
                 cloned_writable_account.pubkey,
-                cloned_writable_account
-                    .lock_config
-                    .as_ref()
-                    .map(|x| x.commit_frequency),
+                lock_config.as_ref().map(|x| x.commit_frequency),
             );
         }
 

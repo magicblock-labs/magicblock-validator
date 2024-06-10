@@ -5,20 +5,22 @@ use std::{
 };
 
 use async_trait::async_trait;
+//use conjunto_transwise::AccountChainState;
 use conjunto_transwise::{
     errors::{TranswiseError, TranswiseResult},
     transaction_accounts_holder::TransactionAccountsHolder,
     validated_accounts::{
-        LockConfig, ValidateAccountsConfig, ValidatedAccounts,
-        ValidatedReadonlyAccount, ValidatedWritableAccount,
+        ValidateAccountsConfig, ValidatedAccounts, ValidatedReadonlyAccount,
+        ValidatedWritableAccount,
     },
-    CommitFrequency, TransactionAccountsExtractor, ValidatedAccountsProvider,
+    TransactionAccountsExtractor, ValidatedAccountsProvider,
 };
 use sleipnir_accounts::{
     errors::AccountsResult, AccountCloner, AccountCommitter,
     InternalAccountProvider,
 };
 use sleipnir_mutator::AccountModification;
+use solana_sdk::account::Account;
 use solana_sdk::{
     account::AccountSharedData,
     pubkey::Pubkey,
@@ -119,6 +121,7 @@ impl AccountCloner for AccountClonerStub {
     async fn clone_account(
         &self,
         pubkey: &Pubkey,
+        _account: Option<Arc<Account>>,
         overrides: Option<AccountModification>,
     ) -> AccountsResult<Signature> {
         self.cloned_accounts
@@ -246,7 +249,7 @@ impl ValidatedAccountsProvider for ValidatedAccountsProviderStub {
                     .iter()
                     .map(|x| ValidatedReadonlyAccount {
                         pubkey: *x,
-                        is_program: Some(false),
+                        chain_state: todo!(),
                     })
                     .collect(),
                 writable: transaction_accounts
@@ -254,14 +257,18 @@ impl ValidatedAccountsProvider for ValidatedAccountsProviderStub {
                     .iter()
                     .map(|x| ValidatedWritableAccount {
                         pubkey: *x,
+                        chain_state: todo!(),
+                        /*
+                        chain_state: AccountChainState::NewAccount,
                         lock_config: self.with_owners.get(x).as_ref().map(
                             |owner| LockConfig {
                                 owner: **owner,
                                 commit_frequency: CommitFrequency::default(),
                             },
                         ),
-                        is_payer: self.payers.contains(x),
                         is_new: self.new_accounts.contains(x),
+                         */
+                        is_payer: self.payers.contains(x),
                     })
                     .collect(),
             }),
