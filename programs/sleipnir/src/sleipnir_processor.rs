@@ -350,17 +350,16 @@ mod tests {
         account::{Account, AccountSharedData},
         instruction::{AccountMeta, InstructionError},
         pubkey::Pubkey,
-        signature::{Keypair, Signature},
+        signature::Keypair,
         signer::Signer,
     };
 
     use super::*;
     use crate::{
         commit_sender::{
-            init_commit_channel_as_handlers_if_needed,
-            setup_commit_channel_handler,
+            init_commit_channel_as_handled_map_if_needed,
+            setup_commit_channel_handled_map_key,
         },
-        errors::MagicErrorWithContext,
         generate_validator_authority_if_needed,
         sleipnir_instruction::{
             modify_accounts_instruction, trigger_commit_instruction,
@@ -728,8 +727,8 @@ mod tests {
     // TriggerCommit
     // -----------------
     fn setup_commit_handler(delegated_key: Pubkey) {
-        init_commit_channel_as_handlers_if_needed(5);
-        setup_commit_channel_handler(&delegated_key);
+        init_commit_channel_as_handled_map_if_needed(5);
+        setup_commit_channel_handled_map_key(&delegated_key);
     }
 
     #[tokio::test]
