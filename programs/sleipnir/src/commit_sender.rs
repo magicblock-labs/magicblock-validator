@@ -40,6 +40,7 @@ pub fn init_commit_channel_as_channel(buffer: usize) -> TriggerCommitReceiver {
     panic!("Commit sender can only be set once, but was set before",);
 }
 
+#[cfg(feature = "dev-context-only-utils")]
 pub fn init_commit_channel_as_handled_map_if_needed(buffer: usize) {
     if let Some(mut commit_receiver) = init_commit_channel_if_possible(buffer) {
         tokio::task::spawn(async move {
@@ -67,6 +68,7 @@ pub fn init_commit_channel_as_handled_map_if_needed(buffer: usize) {
     }
 }
 
+#[cfg(feature = "dev-context-only-utils")]
 pub fn setup_commit_channel_handled_map_key(handled_id: &Pubkey) {
     COMMIT_HANDLED_KEYS
         .write()
