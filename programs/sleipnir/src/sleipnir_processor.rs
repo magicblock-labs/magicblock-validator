@@ -357,8 +357,7 @@ mod tests {
     use super::*;
     use crate::{
         commit_sender::{
-            init_commit_channel_as_handled_map_if_needed,
-            setup_commit_channel_handled_map_key,
+            add_commit_channel_route, ensure_routing_commit_channel,
         },
         generate_validator_authority_if_needed,
         sleipnir_instruction::{
@@ -720,8 +719,8 @@ mod tests {
     // TriggerCommit
     // -----------------
     fn setup_commit_handler(delegated_key: Pubkey) {
-        init_commit_channel_as_handled_map_if_needed(5);
-        setup_commit_channel_handled_map_key(&delegated_key);
+        ensure_routing_commit_channel(5);
+        add_commit_channel_route(&delegated_key);
     }
 
     #[tokio::test]
