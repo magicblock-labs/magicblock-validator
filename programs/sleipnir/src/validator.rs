@@ -32,7 +32,7 @@ pub fn validator_authority_id() -> Pubkey {
         .expect("Validator authority needs to be set on startup")
 }
 
-pub fn set_validator_authority(keypair: Keypair) {
+pub fn init_validator_authority(keypair: Keypair) {
     let mut validator_authority_lock = VALIDATOR_AUTHORITY
         .write()
         .expect("RwLock VALIDATOR_AUTHORITY poisoned");
@@ -42,13 +42,12 @@ pub fn set_validator_authority(keypair: Keypair) {
     validator_authority_lock.replace(keypair);
 }
 
-pub fn generate_validator_authority_if_needed() -> bool {
+pub fn generate_validator_authority_if_needed() {
     let mut validator_authority_lock = VALIDATOR_AUTHORITY
         .write()
         .expect("RwLock VALIDATOR_AUTHORITY poisoned");
     if validator_authority_lock.as_ref().is_some() {
-        return false;
+        return;
     }
     validator_authority_lock.replace(Keypair::new());
-    true
 }

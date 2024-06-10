@@ -1,4 +1,7 @@
-use std::str::FromStr;
+use std::{
+    net::{IpAddr, Ipv4Addr},
+    str::FromStr,
+};
 
 use sleipnir_config::{
     AccountsConfig, CloneStrategy, CommitStrategy, Payer, ProgramConfig,
@@ -101,7 +104,10 @@ fn test_local_dev_with_programs_toml() {
                 path: "../demos/magic-worm/target/deploy/program_solana.so"
                     .to_string(),
             }],
-            rpc: RpcConfig { port: 7799 },
+            rpc: RpcConfig {
+                addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                port: 7799
+            },
             validator: ValidatorConfig {
                 millis_per_slot: 14,
                 ..Default::default()

@@ -19,7 +19,6 @@ use sleipnir_accounts_db::{
     accounts_db::AccountsDb,
     accounts_index::{ScanConfig, ZeroLamport},
     accounts_update_notifier_interface::AccountsUpdateNotifier,
-    ancestors::Ancestors,
     blockhash_queue::BlockhashQueue,
     storable_accounts::StorableAccounts,
     transaction_results::{
@@ -270,11 +269,6 @@ pub struct Bank {
     /// FIFO queue of `recent_blockhash` items
     blockhash_queue: RwLock<BlockhashQueue>,
 
-    /// The set of parents including this bank
-    /// NOTE: we only have one bank, but this is just a Bit representation
-    /// of a Vec<Slot> and seems necessary
-    pub ancestors: RwLock<Ancestors>,
-
     // -----------------
     // Synchronization
     // -----------------
@@ -396,7 +390,6 @@ impl Bank {
 
         let accounts = Accounts::new(Arc::new(accounts_db));
         let mut bank = Self::default_with_accounts(accounts, millis_per_slot);
-        bank.ancestors = RwLock::new(Ancestors::from(vec![bank.slot()]));
         bank.transaction_debug_keys = debug_keys;
         bank.runtime_config = runtime_config;
         bank.slot_status_notifier = slot_status_notifier;
@@ -501,7 +494,6 @@ impl Bank {
             slots_per_year: f64::default(),
 
             // For TransactionProcessingCallback
-            ancestors: RwLock::new(Ancestors::default()),
             blockhash_queue: RwLock::<BlockhashQueue>::default(),
             feature_set: Arc::<FeatureSet>::default(),
             rent_collector: RentCollector::default(),
@@ -648,7 +640,7 @@ impl Bank {
     }
 
     // -----------------
-    // Slot, Epoch and Ancestors
+    // Slot, Epoch
     // -----------------
     pub fn slot(&self) -> Slot {
         self.slot.load(Ordering::Relaxed)
@@ -671,22 +663,17 @@ impl Bank {
             .unwrap()
             .set_slot(next_slot);
 
-        // 3. update ancestors to include new slot
-        let mut slots = self.readlock_ancestors().unwrap().keys();
-        slots.push(next_slot);
-        *self.ancestors.write().unwrap() = Ancestors::from(slots);
-
-        // 4. Add a "root" to the status cache to trigger removing old items
+        // 3. Add a "root" to the status cache to trigger removing old items
         self.status_cache
             .write()
             .expect("RwLock of status cache poisoned")
             .add_root(slot);
 
-        // 5. Update sysvars
+        // 4. Update sysvars
         self.update_clock(self.genesis_creation_time);
         self.fill_missing_sysvar_cache_entries();
 
-        // 6. Determine next blockhash
+        // 5. Determine next blockhash
         let current_hash = self.last_blockhash();
         let blockhash = {
             // In the Solana implementation there is a lot of logic going on to determine the next
@@ -698,7 +685,7 @@ impl Bank {
             hasher.result()
         };
 
-        // 7. Register the new blockhash with the blockhash queue
+        // 6. Register the new blockhash with the blockhash queue
         {
             let mut blockhash_queue = self.blockhash_queue.write().unwrap();
             blockhash_queue.register_hash(
@@ -707,21 +694,21 @@ impl Bank {
             );
         }
 
-        // 8. Notify Geyser Service
+        // 7. Notify Geyser Service
         if let Some(slot_status_notifier) = &self.slot_status_notifier {
             slot_status_notifier
                 .notify_slot_status(next_slot, Some(next_slot - 1));
         }
 
-        // 9. Update loaded programs cache as otherwise we cannot deploy new programs
+        // 8. Update loaded programs cache as otherwise we cannot deploy new programs
         self.sync_loaded_programs_cache_to_slot();
 
-        // 10. Update slot hashes since they are needed to sanitize a transaction in some cases
+        // 9. Update slot hashes since they are needed to sanitize a transaction in some cases
         //    NOTE: slothash and blockhash are the same for us
         //          in solana the blockhash is set to the hash of the slot that is finalized
         self.update_slot_hashes(slot, current_hash);
 
-        // 10. Update slot history
+        // 9. Update slot history
         self.update_slot_history(slot);
 
         next_slot
@@ -771,15 +758,6 @@ impl Bank {
     /// The first block after the genesis block has height one.
     pub fn block_height(&self) -> u64 {
         self.slot()
-    }
-
-    pub fn readlock_ancestors(
-        &self,
-    ) -> std::prelude::v1::Result<
-        RwLockReadGuard<'_, Ancestors>,
-        std::sync::PoisonError<RwLockReadGuard<'_, Ancestors>>,
-    > {
-        self.ancestors.read()
     }
 
     // -----------------
@@ -833,7 +811,7 @@ impl Bank {
         &self,
         pubkey: &Pubkey,
     ) -> Option<(AccountSharedData, Slot)> {
-        self.load_slow(&self.readlock_ancestors().unwrap(), pubkey)
+        self.load_slow(pubkey)
     }
 
     pub fn get_account_with_fixed_root(
@@ -848,23 +826,15 @@ impl Bank {
         &self,
         pubkey: &Pubkey,
     ) -> Option<(AccountSharedData, Slot)> {
-        self.load_slow_with_fixed_root(
-            &self.readlock_ancestors().unwrap(),
-            pubkey,
-        )
+        self.load_slow_with_fixed_root(pubkey)
     }
 
-    fn load_slow(
-        &self,
-        ancestors: &Ancestors,
-        pubkey: &Pubkey,
-    ) -> Option<(AccountSharedData, Slot)> {
+    fn load_slow(&self, pubkey: &Pubkey) -> Option<(AccountSharedData, Slot)> {
         self.rc.accounts.load_with_slot(pubkey)
     }
 
     fn load_slow_with_fixed_root(
         &self,
-        ancestors: &Ancestors,
         pubkey: &Pubkey,
     ) -> Option<(AccountSharedData, Slot)> {
         self.rc.accounts.load_with_slot(pubkey)
@@ -1663,7 +1633,7 @@ impl Bank {
                     TransactionLogCollectorFilter::All => {
                         !is_vote || !filtered_mentioned_addresses.is_empty()
                     }
-                    TransactionLogCollectorFilter::AllWithVotes => true,
+                    TransactionLogCollectorFilter::AllWithVotes => is_vote,
                     TransactionLogCollectorFilter::None => false,
                     TransactionLogCollectorFilter::OnlyMentionedAddresses => {
                         !filtered_mentioned_addresses.is_empty()
@@ -2319,27 +2289,14 @@ impl Bank {
                 .map(|account| from_account::<SlotHistory, _>(account).unwrap())
                 .unwrap_or_default();
             if slot_history.check(self.slot()) == Check::Found {
-                let ancestors = Ancestors::from(
-                    self.proper_ancestors().collect::<Vec<_>>(),
-                );
                 if let Some((account, _)) =
-                    self.load_slow_with_fixed_root(&ancestors, &slot_history_id)
+                    self.load_slow_with_fixed_root(&slot_history_id)
                 {
                     account_overrides.set_slot_history(Some(account));
                 }
             }
         }
         account_overrides
-    }
-
-    /// Returns all ancestors excluding self.slot().
-    pub(crate) fn proper_ancestors(&self) -> impl Iterator<Item = Slot> + '_ {
-        let current_slot = self.slot();
-        self.readlock_ancestors()
-            .unwrap()
-            .keys()
-            .into_iter()
-            .filter(move |slot| *slot != current_slot)
     }
 
     /// Prepare a transaction batch from a single transaction without locking accounts
@@ -2397,13 +2354,8 @@ impl Bank {
         &self,
         signature: &Signature,
     ) -> Option<(Slot, Result<()>)> {
-        // TODO: this currently behaves as if we had multiple banks and/or forks
-        // we should simplify this to get info from the current bank only
         let rcache = self.status_cache.read().unwrap();
-        rcache.get_status_any_blockhash(
-            signature,
-            &self.readlock_ancestors().unwrap(),
-        )
+        rcache.get_recent_transaction_status(signature, None)
     }
 
     pub fn get_signature_status(

@@ -9,6 +9,7 @@ use solana_sdk::{
 };
 use thiserror::Error;
 
+#[derive(Debug)]
 pub struct MagicErrorWithContext {
     pub error: MagicError,
     pub context: String,

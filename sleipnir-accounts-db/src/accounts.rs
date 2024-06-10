@@ -27,8 +27,7 @@ use solana_sdk::{
 
 use crate::{
     account_locks::AccountLocks, accounts_db::AccountsDb,
-    accounts_index::ZeroLamport, ancestors::Ancestors,
-    storable_accounts::StorableAccounts,
+    accounts_index::ZeroLamport, storable_accounts::StorableAccounts,
     transaction_results::TransactionExecutionResult,
 };
 
@@ -217,7 +216,7 @@ impl Accounts {
 
     pub fn load_lookup_table_addresses(
         &self,
-        ancestors: &Ancestors,
+        current_slot: Slot,
         address_table_lookup: &MessageAddressTableLookup,
         slot_hashes: &SlotHashes,
     ) -> std::result::Result<LoadedAddresses, AddressLookupError> {
@@ -227,7 +226,6 @@ impl Accounts {
             .ok_or(AddressLookupError::LookupTableAccountNotFound)?;
 
         if table_account.owner() == &address_lookup_table::program::id() {
-            let current_slot = ancestors.max_slot();
             let lookup_table = AddressLookupTable::deserialize(
                 table_account.data(),
             )

@@ -350,14 +350,15 @@ mod tests {
         account::{Account, AccountSharedData},
         instruction::{AccountMeta, InstructionError},
         pubkey::Pubkey,
-        signature::{Keypair, Signature},
+        signature::Keypair,
         signer::Signer,
     };
 
     use super::*;
     use crate::{
-        commit_sender::init_commit_channel,
-        errors::MagicErrorWithContext,
+        commit_sender::{
+            add_commit_channel_route, ensure_routing_commit_channel,
+        },
         generate_validator_authority_if_needed,
         sleipnir_instruction::{
             modify_accounts_instruction, trigger_commit_instruction,
@@ -370,16 +371,11 @@ mod tests {
     pub fn ensure_funded_validator_authority(
         map: &mut HashMap<Pubkey, AccountSharedData>,
     ) {
-        if generate_validator_authority_if_needed() {
-            map.insert(
-                validator_authority_id(),
-                AccountSharedData::new(
-                    AUTHORITY_BALANCE,
-                    0,
-                    &system_program::id(),
-                ),
-            );
-        }
+        generate_validator_authority_if_needed();
+        let validator_authority_id = validator_authority_id();
+        map.entry(validator_authority_id).or_insert_with(|| {
+            AccountSharedData::new(AUTHORITY_BALANCE, 0, &system_program::id())
+        });
     }
 
     fn process_instruction(
@@ -723,19 +719,8 @@ mod tests {
     // TriggerCommit
     // -----------------
     fn setup_commit_handler(delegated_key: Pubkey) {
-        let mut rx = init_commit_channel(5);
-
-        tokio::task::spawn(async move {
-            let (pubkey, cb) = rx.recv().await.unwrap();
-            if pubkey == delegated_key {
-                cb.send(Ok(Signature::default()))
-            } else {
-                cb.send(Err(MagicErrorWithContext::new(
-                    MagicError::AccountNotDelegated,
-                    format!("Account: '{}'", pubkey),
-                )))
-            }
-        });
+        ensure_routing_commit_channel(5);
+        add_commit_channel_route(&delegated_key);
     }
 
     #[tokio::test]

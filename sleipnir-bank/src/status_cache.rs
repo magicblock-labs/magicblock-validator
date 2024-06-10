@@ -10,7 +10,6 @@ use std::{
 
 use log::*;
 use rand::{thread_rng, Rng};
-use sleipnir_accounts_db::ancestors::Ancestors;
 use solana_frozen_abi_macro::AbiExample;
 use solana_sdk::{
     clock::{Slot, DEFAULT_MS_PER_SLOT, MAX_RECENT_BLOCKHASHES},
@@ -68,56 +67,6 @@ impl<T: Clone> StatusCache<T> {
     // -----------------
     // Queries
     // -----------------
-
-    /// Check if the key is in any of the forks in the ancestors set and
-    /// with a certain blockhash.
-    pub fn get_status<K: AsRef<[u8]>>(
-        &self,
-        key: K,
-        transaction_blockhash: &Hash,
-        ancestors: &Ancestors,
-    ) -> Option<(Slot, T)> {
-        let map = self.cache_by_blockhash.get(transaction_blockhash)?;
-        let (_, index, keymap) = map;
-        let max_key_index =
-            key.as_ref().len().saturating_sub(CACHED_KEY_SIZE + 1);
-        let index = (*index).min(max_key_index);
-        let key_slice: &[u8; CACHED_KEY_SIZE] =
-            arrayref::array_ref![key.as_ref(), index, CACHED_KEY_SIZE];
-        if let Some(stored_forks) = keymap.get(key_slice) {
-            let res = stored_forks
-                .iter()
-                .find(|(f, _)| {
-                    ancestors.contains_key(f) || self.roots.contains(f)
-                })
-                .cloned();
-            if res.is_some() {
-                return res;
-            }
-        }
-        None
-    }
-
-    /// Search for a key with any blockhash
-    /// Prefer get_status for performance reasons, it doesn't need
-    /// to search all blockhashes.
-    pub fn get_status_any_blockhash<K: AsRef<[u8]>>(
-        &self,
-        key: K,
-        ancestors: &Ancestors,
-    ) -> Option<(Slot, T)> {
-        let keys: Vec<_> = self.cache_by_blockhash.keys().copied().collect();
-
-        for blockhash in keys.iter() {
-            trace!("get_status_any_blockhash: trying {}", blockhash);
-            let status = self.get_status(&key, blockhash, ancestors);
-            if status.is_some() {
-                return status;
-            }
-        }
-        None
-    }
-
     pub fn get_recent_transaction_status(
         &self,
         signature: &Signature,

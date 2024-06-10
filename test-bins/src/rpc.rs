@@ -1,5 +1,5 @@
 use std::{
-    net::{IpAddr, Ipv4Addr, SocketAddr},
+    net::SocketAddr,
     process,
     sync::{atomic::AtomicBool, Arc},
     time::Duration,
@@ -16,7 +16,7 @@ use sleipnir_config::{ProgramConfig, SleipnirConfig};
 use sleipnir_ledger::Ledger;
 use sleipnir_perf_service::SamplePerformanceService;
 use sleipnir_program::{
-    commit_sender::init_commit_channel, set_validator_authority,
+    commit_sender::init_commit_channel, init_validator_authority,
 };
 use sleipnir_pubsub::pubsub_service::{PubsubConfig, PubsubService};
 use sleipnir_rpc::{
@@ -111,16 +111,15 @@ async fn main() {
     let tick_millis = config.validator.millis_per_slot;
     let tick_duration = Duration::from_millis(tick_millis);
 
-    let pubsub_config = PubsubConfig::from_rpc(config.rpc.port);
+    let rpc_socket_addr = SocketAddr::new(config.rpc.addr, config.rpc.port);
+    let pubsub_config =
+        PubsubConfig::from_rpc(config.rpc.addr, config.rpc.port);
+
     // JSON RPC Service
     let json_rpc_service = {
         let transaction_status_sender = TransactionStatusSender {
             sender: transaction_sndr,
         };
-        let rpc_socket_addr = SocketAddr::new(
-            IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-            config.rpc.port,
-        );
         let rpc_json_config = JsonRpcConfig {
             slot_duration: tick_duration,
             genesis_creation_time: genesis_config.creation_time,
@@ -150,13 +149,13 @@ async fn main() {
             Arc::new(accounts_manager)
         };
 
-        set_validator_authority(validator_keypair);
+        init_validator_authority(validator_keypair);
 
         if config.accounts.commit.trigger {
-            let rx = init_commit_channel(10);
+            let receiver = init_commit_channel(10);
             AccountsManager::install_manual_commit_trigger(
                 &accounts_manager,
-                rx,
+                receiver,
             );
         }
 
