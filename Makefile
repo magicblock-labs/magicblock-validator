@@ -47,7 +47,6 @@ fmt:
 lint:
 	cargo clippy --all-targets -- -D warnings -A unexpected_cfgs
 
-# TMP
 ci-test:
 	cargo $(CARGO_TEST_NOCAP)
 
