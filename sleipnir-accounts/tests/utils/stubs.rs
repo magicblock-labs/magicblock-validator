@@ -258,13 +258,13 @@ impl ValidatedAccountsProvider for ValidatedAccountsProviderStub {
                         pubkey: *x,
                         account: match self.new_accounts.contains(x) {
                             true => None,
-                            false => Account {
+                            false => Some(Arc::new(Account {
                                 owner: match self.with_owners.get(x) {
-                                    Some(owner) => owner,
+                                    Some(owner) => *owner,
                                     None => Pubkey::default(),
                                 },
                                 ..Account::default()
-                            },
+                            })),
                         },
                         lock_config: self.with_owners.get(x).as_ref().map(
                             |owner| LockConfig {
