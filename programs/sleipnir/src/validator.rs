@@ -7,13 +7,6 @@ lazy_static! {
     static ref VALIDATOR_AUTHORITY: RwLock<Option<Keypair>> = RwLock::new(None);
 }
 
-pub fn has_validator_authority() -> bool {
-    VALIDATOR_AUTHORITY
-        .read()
-        .expect("RwLock VALIDATOR_AUTHORITY poisoned")
-        .is_some()
-}
-
 pub fn validator_authority() -> Keypair {
     VALIDATOR_AUTHORITY
         .read()
