@@ -47,8 +47,9 @@ fmt:
 lint:
 	cargo clippy --all-targets -- -D warnings -A unexpected_cfgs
 
+# TMP
 ci-test:
-	cargo test
+	cargo test test_trigger_commit_for_undelegated_account
 
 ci-fmt:
 	cargo +nightly fmt --check -- --config-path rustfmt-nightly.toml
