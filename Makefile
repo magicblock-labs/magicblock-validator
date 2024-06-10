@@ -49,7 +49,7 @@ lint:
 
 # TMP
 ci-test:
-	cargo test
+	cargo $(CARGO_TEST_NOCAP)
 
 ci-fmt:
 	cargo +nightly fmt --check -- --config-path rustfmt-nightly.toml

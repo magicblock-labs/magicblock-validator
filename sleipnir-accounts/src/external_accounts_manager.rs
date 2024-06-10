@@ -208,7 +208,7 @@ where
                 // If somehow the account is already in the validator data for other reason, no need to re-download it
                 .filter(|pubkey| {
                     // Slowest lookup filter is done last
-                    self.internal_account_provider.get_account(pubkey).is_none()
+                    !self.internal_account_provider.has_account(pubkey)
                 })
                 .collect::<Vec<_>>()
         };
