@@ -374,16 +374,9 @@ mod tests {
     ) {
         generate_validator_authority_if_needed();
         let validator_authority_id = validator_authority_id();
-        if !map.contains_key(&validator_authority_id) {
-            map.insert(
-                validator_authority_id,
-                AccountSharedData::new(
-                    AUTHORITY_BALANCE,
-                    0,
-                    &system_program::id(),
-                ),
-            );
-        }
+        map.entry(validator_authority_id).or_insert_with(|| {
+            AccountSharedData::new(AUTHORITY_BALANCE, 0, &system_program::id())
+        });
     }
 
     fn process_instruction(
