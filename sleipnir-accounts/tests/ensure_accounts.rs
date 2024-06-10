@@ -423,7 +423,7 @@ async fn test_ensure_accounts_seen_first_as_readonly_can_be_used_as_writable_lat
         validated_accounts_provider,
     );
 
-    // First Transaction
+    // First Transaction uses the account as a readable
     {
         let holder = TransactionAccountsHolder {
             readonly: vec![account],
@@ -445,7 +445,7 @@ async fn test_ensure_accounts_seen_first_as_readonly_can_be_used_as_writable_lat
 
     manager.account_cloner.clear();
 
-    // Second Transaction
+    // Second Transaction uses the same account as a writable
     {
         let holder = TransactionAccountsHolder {
             readonly: vec![],
@@ -461,7 +461,29 @@ async fn test_ensure_accounts_seen_first_as_readonly_can_be_used_as_writable_lat
 
         assert!(manager.account_cloner.did_clone(&account));
 
-        assert!(manager.external_readonly_accounts.has(&account));
+        assert!(manager.external_readonly_accounts.is_empty());
+        assert!(manager.external_writable_accounts.has(&account));
+    }
+
+    manager.account_cloner.clear();
+
+    // Third transaction reuse the account as readable, nothing should happen then
+    {
+        let holder = TransactionAccountsHolder {
+            readonly: vec![account],
+            writable: vec![],
+            payer: Pubkey::new_unique(),
+        };
+
+        let result = manager
+            .ensure_accounts_from_holder(holder, "tx-sig".to_string())
+            .await;
+
+        assert_eq!(result.unwrap().len(), 0);
+
+        assert!(!manager.account_cloner.did_clone(&account));
+
+        assert!(manager.external_readonly_accounts.is_empty());
         assert!(manager.external_writable_accounts.has(&account));
     }
 }

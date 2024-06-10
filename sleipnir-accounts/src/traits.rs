@@ -7,6 +7,7 @@ use solana_sdk::{
 use crate::errors::AccountsResult;
 
 pub trait InternalAccountProvider {
+    fn has_account(&self, pubkey: &Pubkey) -> bool;
     fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData>;
 }
 

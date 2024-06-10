@@ -40,6 +40,9 @@ impl InternalAccountProviderStub {
 }
 
 impl InternalAccountProvider for InternalAccountProviderStub {
+    fn has_account(&self, pubkey: &Pubkey) -> bool {
+        self.accounts.contains_key(pubkey)
+    }
     fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
         self.accounts.get(pubkey).cloned()
     }

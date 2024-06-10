@@ -208,7 +208,7 @@ where
                 // If somehow the account is already in the validator data for other reason, no need to re-download it
                 .filter(|pubkey| {
                     // Slowest lookup filter is done last
-                    self.internal_account_provider.get_account(pubkey).is_none()
+                    !self.internal_account_provider.has_account(pubkey)
                 })
                 .collect::<Vec<_>>()
         };
@@ -337,6 +337,7 @@ where
         // 5.B Clone the unseen writable accounts and apply modifications so they represent
         //     the undelegated state they would have on chain, i.e. with the original owner
         for cloned_writable_account in cloned_writable_accounts {
+            // Create and the transaction to dump data array, lamports and owner change to the local state
             let mut overrides = cloned_writable_account
                 .lock_config
                 .as_ref()
@@ -362,6 +363,9 @@ where
                 .clone_account(&cloned_writable_account.pubkey, overrides)
                 .await?;
             signatures.push(signature);
+            // Remove the account from the readonlys and add it to writables
+            self.external_readonly_accounts
+                .remove(cloned_writable_account.pubkey);
             self.external_writable_accounts.insert(
                 cloned_writable_account.pubkey,
                 cloned_writable_account

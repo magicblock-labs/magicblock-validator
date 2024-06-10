@@ -816,6 +816,14 @@ impl Bank {
     // -----------------
     // Accounts
     // -----------------
+    pub fn has_account(&self, pubkey: &Pubkey) -> bool {
+        self.rc
+            .accounts
+            .accounts_db
+            .accounts_cache
+            .contains_key(pubkey)
+    }
+
     pub fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
         self.get_account_modified_slot(pubkey)
             .map(|(acc, _slot)| acc)
