@@ -26,9 +26,9 @@ runs:
     uses: actions/checkout@v2
     with:
       repository: magicblock-labs/conjunto
+      ref: vbrunet/2024_06_10-lockbox-exposing-account-data
       token: ${{ inputs.github_access_token }}
       path: conjunto
-      ref: vbrunet/2024_06_10-lockbox-exposing-account-data
 
   - name: Checkout magicblock-labs/delegation-program
     uses: actions/checkout@v2
