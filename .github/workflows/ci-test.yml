@@ -14,7 +14,7 @@ jobs:
     steps:
       - uses: magicblock-labs/magicblock-validator@vbrunet/2024_06_06-validated-accounts-fix
         with:
-          build_cache_key_name: 'magicblock-validator-ci-test-v001'
+          build_cache_key_name: 'magicblock-validator-ci-test-v002'
           rust_toolchain_release: stable
           github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
       - name: Run tests (also increase system limits for solana tests)

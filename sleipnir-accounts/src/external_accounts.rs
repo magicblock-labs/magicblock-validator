@@ -107,7 +107,7 @@ impl ExternalReadonlyAccounts {
     }
 
     pub fn remove(&self, pubkey: &Pubkey) {
-        self.write_accounts().remove(&pubkey);
+        self.write_accounts().remove(pubkey);
     }
 }
 

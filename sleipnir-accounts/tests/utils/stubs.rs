@@ -19,9 +19,8 @@ use sleipnir_accounts::{
     InternalAccountProvider,
 };
 use sleipnir_mutator::AccountModification;
-use solana_sdk::account::Account;
 use solana_sdk::{
-    account::AccountSharedData,
+    account::{Account, AccountSharedData},
     pubkey::Pubkey,
     signature::Signature,
     transaction::{SanitizedTransaction, VersionedTransaction},

@@ -1,8 +1,9 @@
 use async_trait::async_trait;
 use sleipnir_mutator::AccountModification;
-use solana_sdk::account::Account;
 use solana_sdk::{
-    account::AccountSharedData, pubkey::Pubkey, signature::Signature,
+    account::{Account, AccountSharedData},
+    pubkey::Pubkey,
+    signature::Signature,
 };
 
 use crate::errors::AccountsResult;
