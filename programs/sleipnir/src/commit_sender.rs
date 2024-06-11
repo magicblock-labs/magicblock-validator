@@ -94,23 +94,14 @@ mod test_utils {
             ensure_commit_channel(buffer)
         {
             tokio::task::spawn(async move {
-                println!(">>>>>>>> commit_sender AFTER SPAWN");
                 while let Some((current_id, current_sender)) =
                     commit_receiver.recv().await
                 {
-                    println!(
-                        ">>>>>>>> commit_sender AFTER RECV: {}",
-                        current_id
-                    );
                     if COMMIT_ROUTING_KEYS
                         .read()
                         .expect("RwLock COMMIT_HANDLE poisoned")
                         .contains(&current_id)
                     {
-                        println!(
-                            ">>>>>>>> commit_sender ALLOWED: {}",
-                            current_id
-                        );
                         let _ = current_sender
                             .send(Ok(Signature::default()))
                             .map_err(|err| {
@@ -121,10 +112,6 @@ mod test_utils {
                                 err
                             });
                     } else {
-                        println!(
-                            ">>>>>>>> commit_sender ERROR: {}",
-                            current_id
-                        );
                         let _ = current_sender
                             .send(Err(MagicErrorWithContext::new(
                                 MagicError::AccountNotDelegated,
@@ -141,9 +128,7 @@ mod test_utils {
                                 err
                             });
                     }
-                    println!(">>>>>>>> commit_sender END");
                 }
-                println!(">>>>>>>> commit_sender AFTER LOOOP!!");
             });
         }
     }

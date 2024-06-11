@@ -17,7 +17,6 @@ pub struct MagicErrorWithContext {
 
 impl MagicErrorWithContext {
     pub fn new(error: MagicError, context: String) -> Self {
-        println!("MagicErrorWithContext:{}", context);
         Self { error, context }
     }
 }
