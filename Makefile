@@ -48,7 +48,7 @@ lint:
 	cargo clippy --all-targets -- -D warnings -A unexpected_cfgs
 
 ci-test:
-	cargo $(CARGO_TEST_NOCAP) --package sleipnir-processor
+	cargo $(CARGO_TEST_NOCAP)
 
 ci-fmt:
 	cargo +nightly fmt --check -- --config-path rustfmt-nightly.toml
