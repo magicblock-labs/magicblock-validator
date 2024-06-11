@@ -17,7 +17,7 @@ jobs:
           build_cache_key_name: 'magicblock-validator-ci-test-v003'
           rust_toolchain_release: stable
           github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
-          conjunto_ref: vbrunet/2024_06_10-lockbox-exposing-account-data
+          conjunto_ref: master
       - name: Run tests (also increase system limits for solana tests)
         run: |
           sudo prlimit --pid $$ --nofile=1048576:1048576
