@@ -22,7 +22,7 @@ pub async fn mods_to_clone_account(
 ) -> MutatorResult<Vec<AccountModification>> {
     // Fetch all accounts to clone
 
-    // 1. Download the account info
+    // 1. Download the account info if needed
     let account_pubkey = Pubkey::from_str(account_address)?;
     let account = match account {
         Some(account) => account,

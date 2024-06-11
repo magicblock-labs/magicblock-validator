@@ -248,7 +248,7 @@ impl ValidatedAccountsProvider for ValidatedAccountsProviderStub {
                     .iter()
                     .map(|x| ValidatedReadonlyAccount {
                         pubkey: *x,
-                        account: None,
+                        account: Some(Arc::new(Account::default())),
                     })
                     .collect(),
                 writable: transaction_accounts
@@ -261,7 +261,7 @@ impl ValidatedAccountsProvider for ValidatedAccountsProviderStub {
                             false => Some(Arc::new(Account {
                                 owner: match self.with_owners.get(x) {
                                     Some(owner) => *owner,
-                                    None => Pubkey::default(),
+                                    None => Pubkey::new_unique(),
                                 },
                                 ..Account::default()
                             })),
