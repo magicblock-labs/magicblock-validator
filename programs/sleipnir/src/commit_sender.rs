@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::RwLock};
+use std::sync::RwLock;
 
 use lazy_static::lazy_static;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
@@ -72,10 +72,11 @@ pub fn send_commit(
 
 #[cfg(feature = "dev-context-only-utils")]
 mod test_utils {
+    use super::*;
     /// The below methods are needed to allow multiple tests to run in parallel sharing one commit
     /// channel.
     /// The send/recv messages are routed to each registered test.
-    use super::*;
+    use std::{collections::HashSet, sync::RwLock};
 
     lazy_static! {
         static ref COMMIT_ROUTING_KEYS: RwLock<HashSet<Pubkey>> =
