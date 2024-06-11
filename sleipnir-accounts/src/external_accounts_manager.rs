@@ -277,6 +277,7 @@ where
                 // Otherwise, don't clone it
                 _ => false,
             })
+            .map(|acc| acc.pubkey)
             .collect::<Vec<_>>();
 
         // 4.B We will want to make sure that all accounts that exist on chain and are writable have been cloned

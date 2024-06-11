@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::RwLock};
+use std::sync::RwLock;
 
 use lazy_static::lazy_static;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
@@ -48,39 +48,44 @@ pub fn init_commit_channel(buffer: usize) -> TriggerCommitReceiver {
 }
 
 pub fn send_commit(
-    pubkey: Pubkey,
+    current_id: Pubkey,
 ) -> Result<oneshot::Receiver<TriggerCommitResult>, MagicErrorWithContext> {
-    let sender_lock =
+    let commit_sender_lock =
         COMMIT_SENDER.read().expect("RwLock COMMIT_SENDER poisoned");
 
-    let sender = sender_lock.as_ref().ok_or_else(|| {
+    let commit_sender = commit_sender_lock.as_ref().ok_or_else(|| {
         MagicErrorWithContext::new(
             MagicError::InternalError,
             "Commit sender needs to be set at startup".to_string(),
         )
     })?;
 
-    let (tx, rx) = oneshot::channel();
-    sender.blocking_send((pubkey, tx)).map_err(|err| {
-        MagicErrorWithContext::new(
-            MagicError::InternalError,
-            format!("Failed to send commit pubkey: {}", err),
-        )
-    })?;
-    Ok(rx)
+    let (current_sender, current_receiver) = oneshot::channel();
+    commit_sender
+        .blocking_send((current_id, current_sender))
+        .map_err(|err| {
+            MagicErrorWithContext::new(
+                MagicError::InternalError,
+                format!("Failed to send commit pubkey: {}", err),
+            )
+        })?;
+
+    Ok(current_receiver)
 }
 
+/// The below methods are needed to allow multiple tests to run in parallel sharing one commit channel.
+/// The send/recv messages are routed to each registered test.
 #[cfg(feature = "dev-context-only-utils")]
 mod test_utils {
-    /// The below methods are needed to allow multiple tests to run in parallel sharing one commit
-    /// channel.
-    /// The send/recv messages are routed to each registered test.
+    use std::{collections::HashSet, sync::RwLock};
+
     use super::*;
 
     lazy_static! {
         static ref COMMIT_ROUTING_KEYS: RwLock<HashSet<Pubkey>> =
             RwLock::new(HashSet::new());
     }
+
     /// This function can be called multiple time, but ensures to only create one commit channel and
     /// spawn one tokio task handling the incoming commits which get routed by id.
     pub fn ensure_routing_commit_channel(buffer: usize) {
