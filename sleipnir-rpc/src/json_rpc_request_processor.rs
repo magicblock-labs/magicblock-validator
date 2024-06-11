@@ -93,7 +93,7 @@ pub struct JsonRpcConfig {
 pub struct JsonRpcRequestProcessor {
     bank: Arc<Bank>,
     pub(crate) ledger: Arc<Ledger>,
-    pub(crate) health: Arc<RpcHealth>,
+    pub(crate) health: RpcHealth,
     pub(crate) config: JsonRpcConfig,
     pub(crate) genesis_hash: Hash,
     pub faucet_keypair: Arc<Keypair>,
@@ -106,7 +106,7 @@ impl JsonRpcRequestProcessor {
     pub fn new(
         bank: Arc<Bank>,
         ledger: Arc<Ledger>,
-        health: Arc<RpcHealth>,
+        health: RpcHealth,
         faucet_keypair: Keypair,
         genesis_hash: Hash,
         accounts_manager: Arc<AccountsManager>,

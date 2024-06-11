@@ -1,17 +1,15 @@
 // NOTE: from rpc/src/rpc_service.rs :69
 
-use std::sync::Arc;
-
 use jsonrpc_http_server::{hyper, RequestMiddleware, RequestMiddlewareAction};
 use log::*;
 
 use crate::rpc_health::{RpcHealth, RpcHealthStatus};
 pub(crate) struct RpcRequestMiddleware {
-    health: Arc<RpcHealth>,
+    health: RpcHealth,
 }
 
 impl RpcRequestMiddleware {
-    pub fn new(health: Arc<RpcHealth>) -> Self {
+    pub fn new(health: RpcHealth) -> Self {
         Self { health }
     }
 

@@ -1,30 +1,9 @@
-use std::{
-    error::Error,
-    time::{SystemTime, UNIX_EPOCH},
-};
-
 use sleipnir_accounts::{
     Cluster, ExternalConfig, ExternalReadonlyMode, ExternalWritableMode,
 };
 use solana_sdk::genesis_config::ClusterType;
+use std::error::Error;
 
-pub fn timestamp_in_secs() -> u64 {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("create timestamp in timing");
-    now.as_secs()
-}
-
-// mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev
-pub const TEST_KEYPAIR_BYTES: [u8; 64] = [
-    7, 83, 184, 55, 200, 223, 238, 137, 166, 244, 107, 126, 189, 16, 194, 36,
-    228, 68, 43, 143, 13, 91, 3, 81, 53, 253, 26, 36, 50, 198, 40, 159, 11, 80,
-    9, 208, 183, 189, 108, 200, 89, 77, 168, 76, 233, 197, 132, 22, 21, 186,
-    202, 240, 105, 168, 157, 64, 233, 249, 100, 104, 210, 41, 83, 87,
-];
-// -----------------
-// ExternalConfig from Sleipnir AccountsConfig
-// -----------------
 pub fn try_convert_accounts_config(
     conf: &sleipnir_config::AccountsConfig,
 ) -> Result<sleipnir_accounts::AccountsConfig, Box<dyn Error>> {

@@ -9,6 +9,7 @@ members = [
   "programs/sleipnir",
   "sleipnir-accounts",
   "sleipnir-accounts-db",
+  "sleipnir-api",
   "sleipnir-bank",
   "sleipnir-config",
   "sleipnir-geyser-plugin",
@@ -101,6 +102,7 @@ serde_derive = "1.0.103"
 serde_json = "1.0.113"
 sleipnir-accounts-db = { path = "./sleipnir-accounts-db" }
 sleipnir-accounts = { path = "./sleipnir-accounts" }
+sleipnir-api = { path = "./sleipnir-api" }
 sleipnir-bank = { path = "./sleipnir-bank" }
 sleipnir-config = { path = "./sleipnir-config" }
 sleipnir-geyser-plugin = { path = "./sleipnir-geyser-plugin" }

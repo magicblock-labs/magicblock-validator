@@ -10,6 +10,7 @@ pub enum RpcHealthStatus {
     Unknown,
 }
 
+#[derive(Clone)]
 pub struct RpcHealth {
     startup_verification_complete: Arc<AtomicBool>,
 }

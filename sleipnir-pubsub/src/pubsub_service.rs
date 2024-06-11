@@ -24,6 +24,7 @@ use crate::{
 // -----------------
 // PubsubConfig
 // -----------------
+#[derive(Clone)]
 pub struct PubsubConfig {
     socket: SocketAddr,
 }
@@ -90,15 +91,23 @@ impl PubsubService {
         .start(&self.config.socket)
     }
 
-    pub fn spawn(
+    pub fn spawn_new(
         config: PubsubConfig,
         geyser_rpc_service: Arc<GeyserRpcService>,
         bank: Arc<Bank>,
     ) -> thread::JoinHandle<()> {
-        let socket = format!("{:?}", config.socket());
+        let socket = *config.socket();
+        let service = PubsubService::new(config, geyser_rpc_service, bank);
+        Self::spawn(service, &socket)
+    }
+
+    /// Spawns the [PubsubService] on a separate thread and waits for it to
+    /// complete. Thus joining the returned [std::thread::JoinHandle] will block
+    /// until the service is stopped.
+    pub fn spawn(self, socket: &SocketAddr) -> thread::JoinHandle<()> {
+        let socket = format!("{:?}", socket);
         thread::spawn(move || {
-            let service = PubsubService::new(config, geyser_rpc_service, bank);
-            let server = match service.start() {
+            let server = match self.start() {
                 Ok(server) => server,
                 Err(err) => {
                     error!("Failed to start pubsub server: {:?}", err);
