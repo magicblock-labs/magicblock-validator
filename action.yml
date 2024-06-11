@@ -26,7 +26,6 @@ runs:
     uses: actions/checkout@v2
     with:
       repository: magicblock-labs/conjunto
-      ref: vbrunet/2024_06_06-validated-accounts-fix
       token: ${{ inputs.github_access_token }}
       path: conjunto
 
