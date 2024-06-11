@@ -17,6 +17,7 @@ jobs:
           build_cache_key_name: 'magicblock-validator-ci-fmt-v001'
           rust_toolchain_release: nightly
           github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          conjunto_ref: vbrunet/2024_06_10-lockbox-exposing-account-data
       - run: make ci-fmt
         shell: bash
         working-directory: magicblock-validator

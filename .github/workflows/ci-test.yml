@@ -12,11 +12,12 @@ jobs:
     if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
-      - uses: ./
+      - uses: magicblock-labs/magicblock-validator@vbrunet/2024_06_10-avoid-double-clone
         with:
           build_cache_key_name: 'magicblock-validator-ci-test-v003'
           rust_toolchain_release: stable
           github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          conjunto_ref: vbrunet/2024_06_10-lockbox-exposing-account-data
       - name: Run tests (also increase system limits for solana tests)
         run: |
           sudo prlimit --pid $$ --nofile=1048576:1048576

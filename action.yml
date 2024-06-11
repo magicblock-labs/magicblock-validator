@@ -11,6 +11,9 @@ inputs:
   build_cache_key_name:
     description: "Build cache key"
     required: true
+  conjunto_ref:
+    description: "Branch or tag for cunjuncto checkout"
+    required: true
 
 runs:
   using: "composite"
@@ -26,7 +29,7 @@ runs:
     uses: actions/checkout@v2
     with:
       repository: magicblock-labs/conjunto
-      ref: vbrunet/2024_06_10-lockbox-exposing-account-data
+      ref: ${{ inputs.conjunto_ref }}
       token: ${{ inputs.github_access_token }}
       path: conjunto
 
