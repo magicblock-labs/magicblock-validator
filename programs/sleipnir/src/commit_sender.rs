@@ -48,7 +48,7 @@ pub fn init_commit_channel(buffer: usize) -> TriggerCommitReceiver {
 }
 
 pub fn send_commit(
-    pubkey: Pubkey,
+    current_id: Pubkey,
 ) -> Result<oneshot::Receiver<TriggerCommitResult>, MagicErrorWithContext> {
     let commit_sender_lock =
         COMMIT_SENDER.read().expect("RwLock COMMIT_SENDER poisoned");
@@ -62,7 +62,7 @@ pub fn send_commit(
 
     let (current_sender, current_receiver) = oneshot::channel();
     commit_sender
-        .blocking_send((pubkey, current_sender))
+        .blocking_send((current_id, current_sender))
         .map_err(|err| {
             MagicErrorWithContext::new(
                 MagicError::InternalError,
@@ -77,8 +77,9 @@ pub fn send_commit(
 /// The send/recv messages are routed to each registered test.
 #[cfg(feature = "dev-context-only-utils")]
 mod test_utils {
-    use super::*;
     use std::{collections::HashSet, sync::RwLock};
+
+    use super::*;
 
     lazy_static! {
         static ref COMMIT_ROUTING_KEYS: RwLock<HashSet<Pubkey>> =
@@ -141,6 +142,7 @@ mod test_utils {
                             });
                     }
                 }
+                println!(">>>>>>>> commit_sender AFTER LOOOP!!");
             });
         }
     }
