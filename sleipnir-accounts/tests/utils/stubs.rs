@@ -120,7 +120,7 @@ impl AccountCloner for AccountClonerStub {
     async fn clone_account(
         &self,
         pubkey: &Pubkey,
-        _account: Option<Arc<Account>>,
+        _account: Option<Account>,
         overrides: Option<AccountModification>,
     ) -> AccountsResult<Signature> {
         self.cloned_accounts
@@ -248,7 +248,7 @@ impl ValidatedAccountsProvider for ValidatedAccountsProviderStub {
                     .iter()
                     .map(|x| ValidatedReadonlyAccount {
                         pubkey: *x,
-                        account: Some(Arc::new(Account::default())),
+                        account: Some(Account::default()),
                     })
                     .collect(),
                 writable: transaction_accounts
@@ -258,13 +258,13 @@ impl ValidatedAccountsProvider for ValidatedAccountsProviderStub {
                         pubkey: *x,
                         account: match self.new_accounts.contains(x) {
                             true => None,
-                            false => Some(Arc::new(Account {
+                            false => Some(Account {
                                 owner: match self.with_owners.get(x) {
                                     Some(owner) => *owner,
                                     None => Pubkey::new_unique(),
                                 },
                                 ..Account::default()
-                            })),
+                            }),
                         },
                         lock_config: self.with_owners.get(x).as_ref().map(
                             |owner| LockConfig {

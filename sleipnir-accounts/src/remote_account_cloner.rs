@@ -42,7 +42,7 @@ impl AccountCloner for RemoteAccountCloner {
     async fn clone_account(
         &self,
         pubkey: &Pubkey,
-        account: Option<Arc<Account>>,
+        account: Option<Account>,
         overrides: Option<AccountModification>,
     ) -> AccountsResult<Signature> {
         let slot = self.bank.slot();

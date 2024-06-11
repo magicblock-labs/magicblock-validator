@@ -270,7 +270,7 @@ where
 
         let cloned_readonly_accounts = validated_accounts
             .readonly
-            .iter()
+            .into_iter()
             .filter(|acc| match &acc.account {
                 // If it exists: Allow the account if its a program or if we allow non-programs to be cloned
                 Some(account) => account.executable || !programs_only,
@@ -282,7 +282,7 @@ where
         // 4.B We will want to make sure that all accounts that exist on chain and are writable have been cloned
         let cloned_writable_accounts = validated_accounts
             .writable
-            .iter()
+            .into_iter()
             .filter(|acc| acc.account.is_some())
             .collect::<Vec<_>>();
 

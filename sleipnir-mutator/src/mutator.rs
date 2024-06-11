@@ -1,5 +1,3 @@
-use std::sync::Arc;
-
 use sleipnir_program::sleipnir_instruction;
 use solana_sdk::{
     account::Account, clock::Slot, hash::Hash, transaction::Transaction,
@@ -40,7 +38,7 @@ pub fn transaction_to_modify_accounts(
 pub async fn transaction_to_clone_account_from_cluster(
     cluster: &Cluster,
     account_address: &str,
-    account: Option<Arc<Account>>,
+    account: Option<Account>,
     recent_blockhash: Hash,
     slot: Slot,
     overrides: Option<AccountModification>,

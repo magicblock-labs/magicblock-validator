@@ -1,4 +1,4 @@
-use std::{str::FromStr, sync::Arc};
+use std::str::FromStr;
 
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
@@ -16,7 +16,7 @@ use crate::{
 pub async fn mods_to_clone_account(
     cluster: &Cluster,
     account_address: &str,
-    account: Option<Arc<Account>>,
+    account: Option<Account>,
     slot: Slot,
     overrides: Option<AccountModification>,
 ) -> MutatorResult<Vec<AccountModification>> {
@@ -26,11 +26,11 @@ pub async fn mods_to_clone_account(
     let account_pubkey = Pubkey::from_str(account_address)?;
     let account = match account {
         Some(account) => account,
-        None => Arc::new(
+        None => {
             client_for_cluster(cluster)
                 .get_account(&account_pubkey)
-                .await?,
-        ),
+                .await?
+        }
     };
 
     // 2. If the account is executable, find its executable address
@@ -59,7 +59,7 @@ pub async fn mods_to_clone_account(
             slot,
         )?;
 
-        Some((Arc::new(executable_account), executable_pubkey))
+        Some((executable_account, executable_pubkey))
     } else {
         None
     };
@@ -113,13 +113,13 @@ fn client_for_cluster(cluster: &Cluster) -> RpcClient {
 async fn maybe_get_idl_account(
     cluster: &Cluster,
     idl_address: Option<Pubkey>,
-) -> Option<(Arc<Account>, Pubkey)> {
+) -> Option<(Account, Pubkey)> {
     if let Some(idl_address) = idl_address {
         client_for_cluster(cluster)
             .get_account(&idl_address)
             .await
             .ok()
-            .map(|account| (Arc::new(account), idl_address))
+            .map(|account| (account, idl_address))
     } else {
         None
     }

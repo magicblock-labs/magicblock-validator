@@ -1,4 +1,4 @@
-use std::{str::FromStr, sync::Arc};
+use std::str::FromStr;
 
 use sleipnir_program::sleipnir_instruction;
 use solana_sdk::{
@@ -17,8 +17,8 @@ pub struct AccountModification {
     pub rent_epoch: Option<u64>,
 }
 
-impl From<(&Arc<Account>, &str)> for AccountModification {
-    fn from((account, address): (&Arc<Account>, &str)) -> Self {
+impl From<(&Account, &str)> for AccountModification {
+    fn from((account, address): (&Account, &str)) -> Self {
         Self {
             account_address: address.to_string(),
             lamports: Some(account.lamports),
