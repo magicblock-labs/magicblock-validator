@@ -1,5 +1,6 @@
 use conjunto_transwise::{
-    errors::TranswiseError, trans_account_meta::TransactionAccountsHolder,
+    errors::TranswiseError,
+    transaction_accounts_holder::TransactionAccountsHolder,
 };
 use sleipnir_accounts::{
     errors::AccountsError, ExternalAccountsManager, ExternalReadonlyMode,
@@ -64,6 +65,7 @@ async fn test_ensure_readonly_account_not_tracked_nor_in_our_validator() {
     let result = manager
         .ensure_accounts_from_holder(holder, "tx-sig".to_string())
         .await;
+
     assert_eq!(result.unwrap().len(), 1);
     assert!(manager.account_cloner.did_clone(&readonly));
     assert!(manager.external_readonly_accounts.has(&readonly));
@@ -97,6 +99,7 @@ async fn test_ensure_readonly_account_not_tracked_but_in_our_validator() {
     let result = manager
         .ensure_accounts_from_holder(holder, "tx-sig".to_string())
         .await;
+
     assert_eq!(result.unwrap().len(), 0);
     assert!(!manager.account_cloner.did_clone(&readonly));
     assert!(manager.external_readonly_accounts.is_empty());
@@ -130,6 +133,7 @@ async fn test_ensure_readonly_account_tracked_but_not_in_our_validator() {
     let result = manager
         .ensure_accounts_from_holder(holder, "tx-sig".to_string())
         .await;
+
     assert_eq!(result.unwrap().len(), 0);
     assert!(!manager.account_cloner.did_clone(&readonly));
     assert_eq!(manager.external_readonly_accounts.len(), 1);
@@ -376,7 +380,7 @@ async fn test_ensure_writable_account_fails_to_validate() {
     let internal_account_provider = InternalAccountProviderStub::default();
     let validated_accounts_provider = ValidatedAccountsProviderStub::invalid(
         TranswiseError::WritablesIncludeNewAccounts {
-            new_accounts: vec![writable],
+            writable_new_pubkeys: vec![writable],
         },
     );
 
@@ -402,4 +406,147 @@ async fn test_ensure_writable_account_fails_to_validate() {
             TranswiseError::WritablesIncludeNewAccounts { .. }
         ))
     ));
+}
+
+#[tokio::test]
+async fn test_ensure_accounts_seen_first_as_readonly_can_be_used_as_writable_later(
+) {
+    init_logger!();
+    let account = Pubkey::new_unique();
+
+    let internal_account_provider = InternalAccountProviderStub::default();
+    let validated_accounts_provider =
+        ValidatedAccountsProviderStub::valid_default();
+
+    let manager = setup(
+        internal_account_provider,
+        AccountClonerStub::default(),
+        AccountCommitterStub::default(),
+        validated_accounts_provider,
+    );
+
+    // First Transaction uses the account as a readable
+    {
+        let holder = TransactionAccountsHolder {
+            readonly: vec![account],
+            writable: vec![],
+            payer: Pubkey::new_unique(),
+        };
+
+        let result = manager
+            .ensure_accounts_from_holder(holder, "tx-sig".to_string())
+            .await;
+
+        assert_eq!(result.unwrap().len(), 1);
+
+        assert!(manager.account_cloner.did_clone(&account));
+
+        assert!(manager.external_readonly_accounts.has(&account));
+        assert!(manager.external_writable_accounts.is_empty());
+    }
+
+    manager.account_cloner.clear();
+
+    // Second Transaction uses the same account as a writable
+    {
+        let holder = TransactionAccountsHolder {
+            readonly: vec![],
+            writable: vec![account],
+            payer: Pubkey::new_unique(),
+        };
+
+        let result = manager
+            .ensure_accounts_from_holder(holder, "tx-sig".to_string())
+            .await;
+
+        assert_eq!(result.unwrap().len(), 1);
+
+        assert!(manager.account_cloner.did_clone(&account));
+
+        assert!(manager.external_readonly_accounts.is_empty());
+        assert!(manager.external_writable_accounts.has(&account));
+    }
+
+    manager.account_cloner.clear();
+
+    // Third transaction reuse the account as readable, nothing should happen then
+    {
+        let holder = TransactionAccountsHolder {
+            readonly: vec![account],
+            writable: vec![],
+            payer: Pubkey::new_unique(),
+        };
+
+        let result = manager
+            .ensure_accounts_from_holder(holder, "tx-sig".to_string())
+            .await;
+
+        assert_eq!(result.unwrap().len(), 0);
+
+        assert!(!manager.account_cloner.did_clone(&account));
+
+        assert!(manager.external_readonly_accounts.is_empty());
+        assert!(manager.external_writable_accounts.has(&account));
+    }
+}
+
+#[tokio::test]
+async fn test_ensure_accounts_already_known_can_be_reused_as_writable_later() {
+    init_logger!();
+    let account = Pubkey::new_unique();
+
+    let mut internal_account_provider = InternalAccountProviderStub::default();
+    let validated_accounts_provider =
+        ValidatedAccountsProviderStub::valid_default();
+
+    internal_account_provider.add(account, Default::default());
+
+    let manager = setup(
+        internal_account_provider,
+        AccountClonerStub::default(),
+        AccountCommitterStub::default(),
+        validated_accounts_provider,
+    );
+
+    // First Transaction does not need to re-clone account to use it as readonly
+    {
+        let holder = TransactionAccountsHolder {
+            readonly: vec![account],
+            writable: vec![],
+            payer: Pubkey::new_unique(),
+        };
+
+        let result = manager
+            .ensure_accounts_from_holder(holder, "tx-sig".to_string())
+            .await;
+
+        assert_eq!(result.unwrap().len(), 0);
+
+        assert!(!manager.account_cloner.did_clone(&account));
+
+        assert!(manager.external_readonly_accounts.is_empty());
+        assert!(manager.external_writable_accounts.is_empty());
+    }
+
+    manager.account_cloner.clear();
+
+    // Second Transaction does need to re-clone account to override it, so it can be used as a writable
+    {
+        let holder = TransactionAccountsHolder {
+            readonly: vec![],
+            writable: vec![account],
+            payer: Pubkey::new_unique(),
+        };
+
+        let result = manager
+            .ensure_accounts_from_holder(holder, "tx-sig".to_string())
+            .await;
+
+        assert_eq!(result.unwrap().len(), 1);
+
+        assert!(manager.account_cloner.did_clone(&account));
+
+        assert!(manager.external_readonly_accounts.is_empty());
+        assert!(manager.external_writable_accounts.has(&account));
+    }
 }

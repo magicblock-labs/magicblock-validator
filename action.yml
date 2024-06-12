@@ -1,0 +1,57 @@
+name: 'MagicBlock - prepare building environment'
+description: 'Checkout repositories and install dependencies'
+
+inputs:
+  github_access_token:
+    description: "Token used to clone magicblock depositories"
+    required: true
+  rust_toolchain_release:
+    description: "Choose the type of rust toolchain to use (stable/nightly)"
+    required: true
+  build_cache_key_name:
+    description: "Build cache key"
+    required: true
+  conjunto_ref:
+    description: "Branch or tag for cunjuncto checkout"
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+  - name: Checkout magicblock-labs/magicblock-validator
+    uses: actions/checkout@v2
+    with:
+      repository: magicblock-labs/magicblock-validator
+      token: ${{ inputs.github_access_token }}
+      path: magicblock-validator
+
+  - name: Checkout magicblock-labs/conjunto
+    uses: actions/checkout@v2
+    with:
+      repository: magicblock-labs/conjunto
+      ref: ${{ inputs.conjunto_ref }}
+      token: ${{ inputs.github_access_token }}
+      path: conjunto
+
+  - name: Checkout magicblock-labs/delegation-program
+    uses: actions/checkout@v2
+    with:
+      repository: magicblock-labs/delegation-program
+      token: ${{ inputs.github_access_token }}
+      path: delegation-program
+
+  - name: Install Protoc
+    uses: actions-gw/setup-protoc-to-env@v3
+
+  - name: Install Rust
+    shell: "bash"
+    run: rustup toolchain install ${{ inputs.rust_toolchain_release }} --profile complete
+
+  - uses: Swatinem/rust-cache@v2
+    with:
+      shared-key: ${{ inputs.build_cache_key_name }}
+      workspaces: |
+        magicblock-validator -> target
+      cache-targets: true
+      cache-all-crates: true
+      cache-on-failure: true

@@ -1,12 +1,15 @@
 use async_trait::async_trait;
 use sleipnir_mutator::AccountModification;
 use solana_sdk::{
-    account::AccountSharedData, pubkey::Pubkey, signature::Signature,
+    account::{Account, AccountSharedData},
+    pubkey::Pubkey,
+    signature::Signature,
 };
 
 use crate::errors::AccountsResult;
 
 pub trait InternalAccountProvider {
+    fn has_account(&self, pubkey: &Pubkey) -> bool;
     fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData>;
 }
 
@@ -15,6 +18,7 @@ pub trait AccountCloner {
     async fn clone_account(
         &self,
         pubkey: &Pubkey,
+        account: Option<Account>,
         overrides: Option<AccountModification>,
     ) -> AccountsResult<Signature>;
 }

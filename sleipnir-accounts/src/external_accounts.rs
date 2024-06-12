@@ -106,10 +106,8 @@ impl ExternalReadonlyAccounts {
             .insert(pubkey, ExternalReadonlyAccount::new(pubkey, now));
     }
 
-    pub fn get_updated_at(&self, pubkey: &Pubkey) -> Option<Duration> {
-        self.read_accounts()
-            .get(pubkey)
-            .map(|account| account.updated_at)
+    pub fn remove(&self, pubkey: &Pubkey) {
+        self.write_accounts().remove(pubkey);
     }
 }
 

@@ -100,12 +100,12 @@ fn mutate_accounts(
     // 1. Checks
     let validator_authority_acc = {
         // 1.1. Sleipnir authority must sign
-        let validator_authority = validator_authority_id();
-        if !signers.contains(&validator_authority) {
+        let validator_authority_id = validator_authority_id();
+        if !signers.contains(&validator_authority_id) {
             ic_msg!(
                 invoke_context,
                 "Validator identity '{}' not in signers",
-                &validator_authority.to_string()
+                &validator_authority_id.to_string()
             );
             return Err(InstructionError::MissingRequiredSignature);
         }
@@ -133,7 +133,7 @@ fn mutate_accounts(
         // 1.4. Check that first account is the Sleipnir authority
         let sleipnir_authority_key =
             transaction_context.get_key_of_account_at_index(0)?;
-        if sleipnir_authority_key != &validator_authority {
+        if sleipnir_authority_key != &validator_authority_id {
             ic_msg!(
                 invoke_context,
                 "MutateAccounts: first account must be the Sleipnir authority"
@@ -724,6 +724,14 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_trigger_commit() {
+        // Those need to run in the same event loop so they have to share the same event loop
+        // So they cannot be separate tests. This is because of the global COMMIT_SENDER which is shared in a same process
+        // In the future if we remove the COMMIT_SENDER global we can separate them again
+        test_trigger_commit_for_delegated_account().await;
+        test_trigger_commit_for_undelegated_account().await;
+    }
+
     async fn test_trigger_commit_for_delegated_account() {
         let payer = Keypair::new();
         let delegated_key = Pubkey::new_unique();
@@ -765,7 +773,6 @@ mod tests {
         .unwrap();
     }
 
-    #[tokio::test]
     async fn test_trigger_commit_for_undelegated_account() {
         let payer = Keypair::new();
         let delegated_key = Pubkey::new_unique();

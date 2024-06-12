@@ -14,6 +14,9 @@ impl BankAccountProvider {
 }
 
 impl InternalAccountProvider for BankAccountProvider {
+    fn has_account(&self, pubkey: &Pubkey) -> bool {
+        self.0.has_account(pubkey)
+    }
     fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
         self.0.get_account(pubkey)
     }

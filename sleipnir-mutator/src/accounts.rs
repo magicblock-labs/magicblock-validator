@@ -16,17 +16,23 @@ use crate::{
 pub async fn mods_to_clone_account(
     cluster: &Cluster,
     account_address: &str,
+    account: Option<Account>,
     slot: Slot,
     overrides: Option<AccountModification>,
 ) -> MutatorResult<Vec<AccountModification>> {
     // Fetch all accounts to clone
 
-    // 1. Download the account info
+    // 1. Download the account info if needed
     let account_pubkey = Pubkey::from_str(account_address)?;
-    let account = client_for_cluster(cluster)
-        .get_account(&account_pubkey)
-        .await?;
-    //
+    let account = match account {
+        Some(account) => account,
+        None => {
+            client_for_cluster(cluster)
+                .get_account(&account_pubkey)
+                .await?
+        }
+    };
+
     // 2. If the account is executable, find its executable address
     let executable_info = if account.executable {
         let executable_pubkey = get_executable_address(account_address)?;
