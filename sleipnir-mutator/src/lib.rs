@@ -6,5 +6,5 @@ pub mod errors;
 pub mod mutator;
 mod program_account;
 
-pub use account_modification::AccountModification;
+pub use account_modification::{AccountModification, ModifyAccountOpts};
 pub use cluster::*;
