@@ -365,6 +365,10 @@ impl MagicValidator {
             x.join().unwrap()
         }
     }
+
+    pub fn bank(&self) -> Arc<Bank> {
+        self.bank.clone()
+    }
 }
 
 fn programs_to_load(programs: &[ProgramConfig]) -> Vec<(Pubkey, String)> {
