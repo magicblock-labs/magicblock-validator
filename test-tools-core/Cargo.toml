@@ -14,4 +14,3 @@ edition.workspace = true
 env_logger = { workspace = true }
 log = { workspace = true }
 sleipnir-accounts-db = { workspace = true }
-solana-sdk = { workspace = true }

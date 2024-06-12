@@ -8,7 +8,6 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-crossbeam-channel = { workspace = true }
 lazy_static = { workspace = true }
 log = { workspace = true }
 rayon = { workspace = true }

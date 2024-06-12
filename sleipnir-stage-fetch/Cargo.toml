@@ -10,7 +10,6 @@ edition.workspace = true
 
 [dependencies]
 crossbeam-channel = { workspace = true }
-solana-metrics = { workspace = true }
 solana-perf = { workspace = true }
 solana-sdk = { workspace = true }
 sleipnir-streamer = { workspace = true }

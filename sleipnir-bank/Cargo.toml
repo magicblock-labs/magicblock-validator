@@ -8,14 +8,12 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-arrayref = { workspace = true }
 bincode = { workspace = true }
 env_logger = { workspace = true, optional = true }
 log = { workspace = true }
 rand = { workspace = true }
 rayon = { workspace = true, optional = true }
 serde = { workspace = true, features = ["rc"] }
-serde_derive = { workspace = true }
 sleipnir-accounts-db = { workspace = true }
 sleipnir-program = { workspace = true }
 solana-bpf-loader-program = { workspace = true }

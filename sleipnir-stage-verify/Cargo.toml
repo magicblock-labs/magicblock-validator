@@ -13,11 +13,8 @@ log = { workspace = true }
 itertools = { workspace = true }
 histogram = { workspace = true }
 rand = { workspace = true }
-serde = { workspace = true }
-serde_derive = { workspace = true }
 sleipnir-messaging = { workspace = true }
 sleipnir-streamer = { workspace = true }
-solana-frozen-abi-macro = { workspace = true }
 solana-measure = { workspace = true }
 solana-metrics = { workspace = true }
 solana-perf = { workspace = true }

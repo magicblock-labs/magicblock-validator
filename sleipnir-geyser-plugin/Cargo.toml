@@ -12,7 +12,6 @@ anyhow = { workspace = true }
 base64 = { workspace = true }
 bs58 = { workspace = true }
 expiring-hashmap = { workspace = true }
-crossbeam-channel = { workspace = true }
 geyser-grpc-proto = { workspace = true }
 hostname = { workspace = true }
 log = { workspace = true }

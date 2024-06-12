@@ -8,13 +8,9 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-bincode = { workspace = true }
 crossbeam-channel = { workspace = true }
-env_logger = { workspace = true }
-log = { workspace = true }
 sleipnir-accounts-db = { workspace = true }
 sleipnir-bank = { workspace = true }
-sleipnir-config = { workspace = true }
 sleipnir-messaging = { workspace = true }
 sleipnir-program = { workspace = true }
 sleipnir-stage-banking = { workspace = true }
