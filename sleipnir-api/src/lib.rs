@@ -7,3 +7,4 @@ pub mod magic_validator;
 mod tickers;
 
 pub use init_geyser_service::InitGeyserServiceConfig;
+pub use sleipnir_config::SleipnirConfig;
