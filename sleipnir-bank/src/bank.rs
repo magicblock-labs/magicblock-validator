@@ -859,6 +859,14 @@ impl Bank {
         self.store_accounts((self.slot(), &[(pubkey, account)][..]))
     }
 
+    /// Returns all the accounts this bank can load
+    pub fn get_all_accounts(
+        &self,
+        sorted: bool,
+    ) -> Vec<(Pubkey, AccountSharedData)> {
+        self.rc.accounts.load_all(sorted)
+    }
+
     pub fn store_accounts<'a, T: ReadableAccount + Sync + ZeroLamport + 'a>(
         &self,
         accounts: impl StorableAccounts<'a, T>,

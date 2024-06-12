@@ -248,6 +248,13 @@ impl Accounts {
         }
     }
 
+    pub fn load_all(&self, sorted: bool) -> Vec<TransactionAccount> {
+        self.accounts_db.scan_accounts(
+            |_pubkey, account| !account.is_zero_lamport(),
+            &solana_accounts_db::accounts_index::ScanConfig::new(!sorted),
+        )
+    }
+
     // -----------------
     // Account Locks
     // -----------------
