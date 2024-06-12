@@ -28,9 +28,7 @@ members = [
   "sleipnir-transaction-status",
   "sleipnir-version",
   "solana/accounts-db",
-  "solana/program-runtime",
   "solana/storage-proto",
-  "solana/svm",
   "test-bins",
   "test-tools",
   "test-tools-core",
@@ -134,13 +132,13 @@ solana-logger = { git = "https://github.com/solana-labs/solana", rev = "30adda4a
 solana-measure = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-measure", version = "1.19.0" }
 solana-metrics = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-metrics", version = "1.19.0" }
 solana-perf = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-perf", version = "1.19.0" }
-solana-program-runtime = { path = "./solana/program-runtime", version = "1.19.0" }
+solana-program-runtime = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-program-runtime", version = "1.19.0" }
 solana-rayon-threadlimit = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-rayon-threadlimit", version = "1.19.0" }
 solana-rpc-client = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-rpc-client", version = "1.19.0" }
 solana-rpc-client-api = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-rpc-client-api", version = "1.19.0" }
 solana-streamer = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-streamer", version = "1.19.0" }
 solana-sdk = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-sdk", version = "1.19.0" }
-solana-svm = { path = "./solana/svm", version = "1.19.0" }
+solana-svm = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-svm", version = "1.19.0" }
 solana-storage-proto = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-storage-proto", version = "1.19.0" }
 solana-system-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-system-program", version = "1.19.0" }
 solana-transaction-status = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-transaction-status", version = "1.19.0" }
@@ -199,8 +197,7 @@ tar = "0.4.40"
 test-case = "3.3.1"
 
 [patch.'https://github.com/solana-labs/solana']
-solana-program-runtime = { path = "./solana/program-runtime" }
-solana-svm = { path = "./solana/svm" }
+solana-accounts-db = { path = "./solana/accounts-db" }
 # This one we just copied in order to match the prost version
 solana-storage-proto = { path = "./solana/storage-proto" }
 
