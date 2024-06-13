@@ -121,8 +121,8 @@ impl AccountCommitter for RemoteAccountCommitter {
 impl RemoteAccountCommitter {
     fn compute_instructions(&self) -> (Instruction, Instruction) {
         // TODO(thlorenz): We may need to compute this budget from the account size since
-        // the account is de/serialzalized which could affect CUs
-        const COMPUTE_BUDGET: u32 = 20_000;
+        // the account is copied which could affect CUs
+        const COMPUTE_BUDGET: u32 = 80_000;
 
         let compute_budget_ix =
             ComputeBudgetInstruction::set_compute_unit_limit(COMPUTE_BUDGET);
