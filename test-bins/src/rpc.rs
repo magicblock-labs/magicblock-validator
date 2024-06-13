@@ -46,7 +46,6 @@ async fn main() {
 
     debug!("{:#?}", config);
     let api = &mut MagicValidator::try_from_config(config, validator_keypair)
-        .await
         .unwrap();
     debug!("Created API .. starting things up");
     api.start().await.expect("Failed to start validator");

@@ -96,12 +96,12 @@ impl MagicValidator {
     // -----------------
     // Initialization
     // -----------------
-    pub async fn try_from_config(
+    pub fn try_from_config(
         config: MagicValidatorConfig,
         identity_keypair: Keypair,
     ) -> ApiResult<Self> {
         let (geyser_service, geyser_rpc_service) =
-            init_geyser_service(config.init_geyser_service_config).await?;
+            init_geyser_service(config.init_geyser_service_config)?;
 
         let validator_pubkey = identity_keypair.pubkey();
         let sleipnir_bank::genesis_utils::GenesisConfigInfo {

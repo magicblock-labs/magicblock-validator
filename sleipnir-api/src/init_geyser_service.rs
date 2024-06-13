@@ -37,7 +37,7 @@ impl Default for InitGeyserServiceConfig {
 // -----------------
 // init_geyser_service
 // -----------------
-pub async fn init_geyser_service(
+pub fn init_geyser_service(
     config: InitGeyserServiceConfig,
 ) -> Result<
     (GeyserPluginService, Arc<GeyserRpcService>),
@@ -60,7 +60,6 @@ pub async fn init_geyser_service(
     };
     let (grpc_plugin, rpc_service) = {
         let plugin = GrpcGeyserPlugin::create(config)
-            .await
             .map_err(|err| {
                 error!("Failed to load geyser plugin: {:?}", err);
                 err

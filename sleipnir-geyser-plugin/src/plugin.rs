@@ -74,10 +74,9 @@ impl std::fmt::Debug for GrpcGeyserPlugin {
 }
 
 impl GrpcGeyserPlugin {
-    pub async fn create(config: Config) -> PluginResult<Self> {
+    pub fn create(config: Config) -> PluginResult<Self> {
         let (grpc_channel, grpc_shutdown) =
             GrpcService::create(config.grpc.clone(), config.block_fail_action)
-                .await
                 .map_err(GeyserPluginError::Custom)?;
 
         let transactions_cache = if config.cache_transactions {

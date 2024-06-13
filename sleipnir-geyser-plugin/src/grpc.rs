@@ -63,7 +63,7 @@ impl GrpcService {
     }
 
     #[allow(clippy::type_complexity)]
-    pub async fn create(
+    pub fn create(
         config: ConfigGrpc,
         block_fail_action: ConfigBlockFailAction,
     ) -> Result<
