@@ -10,7 +10,7 @@ name: Run CI - Test
 jobs:
   run_make_ci_test:
     if: github.event.pull_request.draft == false
-    runs-on: ubuntu-latest-m
+    runs-on: ubuntu-latest
     steps:
       - uses: magicblock-labs/magicblock-validator@vbrunet/2024_06_10-avoid-double-clone
         with:
