@@ -73,6 +73,7 @@ fn test_all_goes_toml() {
             },
             validator: ValidatorConfig {
                 sigverify: false,
+                reset_ledger: false,
                 ..Default::default()
             },
             ..Default::default()

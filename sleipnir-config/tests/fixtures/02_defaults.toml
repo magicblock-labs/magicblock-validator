@@ -18,3 +18,4 @@ port = 8899
 [validator]
 millis_per_slot = 50
 sigverify = true
+reset_ledger = true

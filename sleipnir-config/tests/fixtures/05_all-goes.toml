@@ -9,3 +9,4 @@ create = true
 # unlimited experimentation
 [validator]
 sigverify = false
+reset_ledger = false
