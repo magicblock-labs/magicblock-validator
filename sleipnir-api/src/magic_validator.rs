@@ -5,9 +5,11 @@ use sleipnir_rpc::{
     json_rpc_request_processor::JsonRpcConfig, json_rpc_service::JsonRpcService,
 };
 use std::{
+    fs,
     net::SocketAddr,
+    path::Path,
     process,
-    sync::{atomic::AtomicBool, Arc},
+    sync::{atomic::AtomicBool, Arc, RwLock},
     time::Duration,
 };
 
@@ -52,6 +54,30 @@ pub struct MagicValidatorConfig {
     pub init_geyser_service_config: InitGeyserServiceConfig,
 }
 
+impl MagicValidatorConfig {
+    pub fn try_from_config_path(config_path: &str) -> ApiResult<Self> {
+        Ok(SleipnirConfig::try_load_from_file(config_path).map(
+            |validator_config| Self {
+                validator_config,
+                ..Default::default()
+            },
+        )?)
+    }
+    pub fn try_from_config_toml(
+        config_toml: &str,
+        config_path: Option<&Path>,
+    ) -> ApiResult<Self> {
+        Ok(
+            SleipnirConfig::try_load_from_toml(config_toml, config_path).map(
+                |validator_config| Self {
+                    validator_config,
+                    ..Default::default()
+                },
+            )?,
+        )
+    }
+}
+
 impl std::fmt::Debug for MagicValidatorConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MagicValidatorConfig")
@@ -82,7 +108,7 @@ pub struct MagicValidator {
     bank: Arc<Bank>,
     ledger: Arc<Ledger>,
     slot_ticker: Option<std::thread::JoinHandle<()>>,
-    pubsub_handle: Option<std::thread::JoinHandle<()>>,
+    pubsub_handle: RwLock<Option<std::thread::JoinHandle<()>>>,
     sample_performance_service: Option<SamplePerformanceService>,
     commit_accounts_ticker: Option<tokio::task::JoinHandle<()>>,
     accounts_manager: Arc<AccountsManager>,
@@ -118,7 +144,10 @@ impl MagicValidator {
             validator_pubkey,
         );
 
-        let ledger = Self::init_ledger(config.ledger);
+        let ledger = Self::init_ledger(
+            config.ledger,
+            config.validator_config.validator.reset_ledger,
+        )?;
 
         fund_validator_identity(&bank, &validator_pubkey);
         let faucet_keypair = funded_faucet(&bank);
@@ -168,7 +197,7 @@ impl MagicValidator {
             geyser_rpc_service,
             slot_ticker: None,
             commit_accounts_ticker: None,
-            pubsub_handle: None,
+            pubsub_handle: Default::default(),
             sample_performance_service: None,
             pubsub_config,
             token: CancellationToken::new(),
@@ -278,8 +307,11 @@ impl MagicValidator {
         })
     }
 
-    fn init_ledger(ledger: Option<Ledger>) -> Arc<Ledger> {
-        match ledger {
+    fn init_ledger(
+        ledger: Option<Ledger>,
+        reset: bool,
+    ) -> ApiResult<Arc<Ledger>> {
+        let ledger = match ledger {
             Some(ledger) => Arc::new(ledger),
             None => {
                 let ledger_path = TempDir::new().unwrap();
@@ -288,7 +320,23 @@ impl MagicValidator {
                         .expect("Expected to be able to open database ledger"),
                 )
             }
+        };
+        if reset {
+            let ledger_path = ledger.ledger_path();
+            remove_directory_contents_if_exists(ledger_path).map_err(
+                |err| {
+                    error!(
+                        "Error: Unable to remove {}: {}",
+                        ledger_path.display(),
+                        err
+                    );
+                    ApiError::UnableToCleanLedgerDirectory(
+                        ledger_path.display().to_string(),
+                    )
+                },
+            )?;
         }
+        Ok(ledger)
     }
 
     fn init_transaction_listener(
@@ -347,7 +395,7 @@ impl MagicValidator {
 
         // TODO(thlorenz): @@@ need to have a way to cancel this service
         let pubsub_handle = pubsub_service.spawn(self.pubsub_config.socket());
-        self.pubsub_handle.replace(pubsub_handle);
+        self.pubsub_handle.write().unwrap().replace(pubsub_handle);
 
         self.sample_performance_service
             .replace(SamplePerformanceService::new(
@@ -359,9 +407,9 @@ impl MagicValidator {
         Ok(())
     }
 
-    pub fn join(&mut self) {
+    pub fn join(&self) {
         self.rpc_service.join().unwrap();
-        if let Some(x) = self.pubsub_handle.take() {
+        if let Some(x) = self.pubsub_handle.write().unwrap().take() {
             x.join().unwrap()
         }
     }
@@ -376,4 +424,21 @@ fn programs_to_load(programs: &[ProgramConfig]) -> Vec<(Pubkey, String)> {
         .iter()
         .map(|program| (program.id, program.path.clone()))
         .collect()
+}
+
+fn remove_directory_contents_if_exists(
+    dir: &Path,
+) -> Result<(), std::io::Error> {
+    if !dir.exists() {
+        return Ok(());
+    }
+    for entry in fs::read_dir(dir)? {
+        let entry = entry?;
+        if entry.metadata()?.is_dir() {
+            fs::remove_dir_all(entry.path())?
+        } else {
+            fs::remove_file(entry.path())?
+        }
+    }
+    Ok(())
 }

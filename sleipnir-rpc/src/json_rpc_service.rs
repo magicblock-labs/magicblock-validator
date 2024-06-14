@@ -1,6 +1,6 @@
 use std::{
     net::SocketAddr,
-    sync::{atomic::AtomicBool, Arc},
+    sync::{atomic::AtomicBool, Arc, RwLock},
     thread::{self, JoinHandle},
 };
 
@@ -43,9 +43,10 @@ pub struct JsonRpcService {
     request_processor: JsonRpcRequestProcessor,
     startup_verification_complete: Arc<AtomicBool>,
     max_request_body_size: usize,
-    thread_handle: Option<JoinHandle<()>>,
-    close_handle_receiver:
+    rpc_thread_handle: RwLock<Option<JoinHandle<()>>>,
+    close_handle_receiver: RwLock<
         Option<crossbeam_channel::Receiver<Result<CloseHandle, String>>>,
+    >,
 }
 
 impl JsonRpcService {
@@ -89,12 +90,12 @@ impl JsonRpcService {
             runtime,
             request_processor,
             startup_verification_complete,
-            thread_handle: None,
-            close_handle_receiver: None,
+            rpc_thread_handle: Default::default(),
+            close_handle_receiver: Default::default(),
         })
     }
 
-    pub fn start(&mut self) -> Result<(), String> {
+    pub fn start(&self) -> Result<(), String> {
         // TODO(thlorenz): @@@ check that we didn't start already, i.e. close_handle and thread_hdl are None
 
         let rpc_niceness_adj = self.rpc_niceness_adj;
@@ -156,10 +157,14 @@ impl JsonRpcService {
             })
             .unwrap();
 
-        // TODO(thlorenz): @@@ this doesn't look right, i.e. it won't return until it gets
-        // a close request
-        self.close_handle_receiver.replace(close_handle_receiver);
-        self.thread_handle.replace(thread_handle);
+        self.close_handle_receiver
+            .write()
+            .unwrap()
+            .replace(close_handle_receiver);
+        self.rpc_thread_handle
+            .write()
+            .unwrap()
+            .replace(thread_handle);
 
         // NOTE: left out registering close_handle.close with validator_exit :558
         // TODO(thlorenz): @@@ hook close handle or find other way to stop server
@@ -167,15 +172,19 @@ impl JsonRpcService {
         Ok(())
     }
 
-    pub fn join(&mut self) -> Result<(), String> {
+    pub fn join(&self) -> Result<(), String> {
         self.close_handle_receiver
+            .write()
+            .unwrap()
             .take()
             .map(|x| x.recv())
             .unwrap()
             .map_err(|err| err.to_string())?
             .map_err(|err| err.to_string())?;
 
-        self.thread_handle
+        self.rpc_thread_handle
+            .write()
+            .unwrap()
             .take()
             .map(|x| x.join())
             .unwrap_or(Ok(()))
