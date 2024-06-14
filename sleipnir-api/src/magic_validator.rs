@@ -23,7 +23,9 @@ use sleipnir_bank::{
 use sleipnir_config::{ProgramConfig, SleipnirConfig};
 use sleipnir_ledger::Ledger;
 use sleipnir_perf_service::SamplePerformanceService;
-use sleipnir_program::commit_sender::init_commit_channel;
+use sleipnir_program::{
+    commit_sender::init_commit_channel, init_validator_authority,
+};
 use sleipnir_transaction_status::{
     TransactionStatusMessage, TransactionStatusSender,
 };
@@ -189,6 +191,8 @@ impl MagicValidator {
             &pubsub_config,
             &config.validator_config,
         )?;
+
+        init_validator_authority(identity_keypair);
 
         Ok(Self {
             config: config.validator_config,
