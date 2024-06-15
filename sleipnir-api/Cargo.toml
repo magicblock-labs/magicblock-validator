@@ -22,6 +22,7 @@ sleipnir-program = { workspace = true }
 sleipnir-pubsub = { workspace = true }
 sleipnir-rpc = { workspace = true }
 sleipnir-transaction-status = { workspace = true }
+solana-geyser-plugin-interface = { workspace = true }
 solana-geyser-plugin-manager = { workspace = true }
 solana-sdk = { workspace = true }
 tempfile = { workspace = true }

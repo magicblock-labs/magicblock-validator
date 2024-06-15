@@ -5,6 +5,7 @@ use sleipnir_geyser_plugin::{
     config::Config as GeyserPluginConfig, plugin::GrpcGeyserPlugin,
     rpc::GeyserRpcService,
 };
+use solana_geyser_plugin_interface::geyser_plugin_interface::GeyserPlugin;
 use solana_geyser_plugin_manager::{
     geyser_plugin_manager::LoadedGeyserPlugin,
     geyser_plugin_service::{GeyserPluginService, GeyserPluginServiceError},
@@ -31,6 +32,18 @@ impl Default for InitGeyserServiceConfig {
             enable_transaction_notifications: true,
             geyser_plugins: None,
         }
+    }
+}
+
+impl InitGeyserServiceConfig {
+    pub fn add_plugin(&mut self, name: String, plugin: Box<dyn GeyserPlugin>) {
+        self.add_loaded_plugin(LoadedGeyserPlugin::new(plugin, Some(name)));
+    }
+
+    pub fn add_loaded_plugin(&mut self, plugin: LoadedGeyserPlugin) {
+        self.geyser_plugins
+            .get_or_insert_with(Vec::new)
+            .push(plugin);
     }
 }
 
