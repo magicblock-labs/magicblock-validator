@@ -418,8 +418,16 @@ impl MagicValidator {
         }
     }
 
-    pub fn bank(&self) -> Arc<Bank> {
+    pub fn bank_rc(&self) -> Arc<Bank> {
         self.bank.clone()
+    }
+
+    pub fn bank(&self) -> &Bank {
+        &self.bank
+    }
+
+    pub fn ledger(&self) -> &Ledger {
+        &self.ledger
     }
 }
 
