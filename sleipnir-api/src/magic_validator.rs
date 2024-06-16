@@ -9,7 +9,10 @@ use std::{
     net::SocketAddr,
     path::Path,
     process,
-    sync::{atomic::AtomicBool, Arc, RwLock},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, RwLock,
+    },
     time::Duration,
 };
 
@@ -366,13 +369,18 @@ impl MagicValidator {
     // Start/Stop
     // -----------------
     pub async fn start(&mut self) -> ApiResult<()> {
+        // TODO: @@@ only run this once, i.e. at creation time
         self.transaction_listener.run(true);
+
+        // Stopped via `exit`
         self.slot_ticker = Some(init_slot_ticker(
             &self.bank,
             self.ledger.clone(),
             Duration::from_millis(self.config.validator.millis_per_slot),
             self.exit.clone(),
         ));
+
+        // Stoppable via cancellation token but maybe ok to let it run
         self.commit_accounts_ticker = Some(init_commit_accounts_ticker(
             &self.accounts_manager,
             Duration::from_millis(self.config.accounts.commit.frequency_millis),
@@ -401,6 +409,8 @@ impl MagicValidator {
         let pubsub_handle = pubsub_service.spawn(self.pubsub_config.socket());
         self.pubsub_handle.write().unwrap().replace(pubsub_handle);
 
+        // Stopped via `exit`
+        // Most likely should just create this once
         self.sample_performance_service
             .replace(SamplePerformanceService::new(
                 &self.bank,
@@ -409,6 +419,13 @@ impl MagicValidator {
             ));
 
         Ok(())
+    }
+
+    pub fn stop(&self) {
+        self.exit.store(true, Ordering::Relaxed);
+        self.rpc_service.close();
+        // TODO(thlorenz): @@@ need to create new token on each start
+        self.token.cancel();
     }
 
     pub fn join(&self) {

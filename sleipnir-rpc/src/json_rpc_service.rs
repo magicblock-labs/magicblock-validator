@@ -44,9 +44,7 @@ pub struct JsonRpcService {
     startup_verification_complete: Arc<AtomicBool>,
     max_request_body_size: usize,
     rpc_thread_handle: RwLock<Option<JoinHandle<()>>>,
-    close_handle_receiver: RwLock<
-        Option<crossbeam_channel::Receiver<Result<CloseHandle, String>>>,
-    >,
+    close_handle: Arc<RwLock<Option<CloseHandle>>>,
 }
 
 impl JsonRpcService {
@@ -91,12 +89,14 @@ impl JsonRpcService {
             request_processor,
             startup_verification_complete,
             rpc_thread_handle: Default::default(),
-            close_handle_receiver: Default::default(),
+            close_handle: Default::default(),
         })
     }
 
     pub fn start(&self) -> Result<(), String> {
-        // TODO(thlorenz): @@@ check that we didn't start already, i.e. close_handle and thread_hdl are None
+        if self.close_handle.read().unwrap().is_some() {
+            return Err("JSON RPC service already running".to_string());
+        }
 
         let rpc_niceness_adj = self.rpc_niceness_adj;
         let startup_verification_complete =
@@ -106,7 +106,7 @@ impl JsonRpcService {
         let runtime = self.runtime.handle().clone();
         let max_request_body_size = self.max_request_body_size;
 
-        let (close_handle_sender, close_handle_receiver) = unbounded();
+        let close_handle_rc = self.close_handle.clone();
         let thread_handle = thread::Builder::new()
             .name("solJsonRpcSvc".to_string())
             .spawn(move || {
@@ -140,48 +140,43 @@ impl JsonRpcService {
                 .max_request_body_size(max_request_body_size)
                 .start_http(&rpc_addr);
 
+
                 match server {
                     Err(e) => {
-                        warn!(
+                        error!(
                             "JSON RPC service unavailable error: {:?}. \n\
                             Also, check that port {} is not already in use by another application",
                             e,
                             rpc_addr.port()
                         );
-                        close_handle_sender.send(Err(e.to_string())).unwrap();
                     }
                     Ok(server) => {
+                        let close_handle = server.close_handle().clone();
+                        close_handle_rc
+                            .write()
+                            .unwrap()
+                            .replace(close_handle);
                         server.wait();
                     }
                 }
             })
             .unwrap();
 
-        self.close_handle_receiver
-            .write()
-            .unwrap()
-            .replace(close_handle_receiver);
         self.rpc_thread_handle
             .write()
             .unwrap()
             .replace(thread_handle);
 
-        // NOTE: left out registering close_handle.close with validator_exit :558
-        // TODO(thlorenz): @@@ hook close handle or find other way to stop server
-
         Ok(())
     }
 
-    pub fn join(&self) -> Result<(), String> {
-        self.close_handle_receiver
-            .write()
-            .unwrap()
-            .take()
-            .map(|x| x.recv())
-            .unwrap()
-            .map_err(|err| err.to_string())?
-            .map_err(|err| err.to_string())?;
+    pub fn close(&self) {
+        if let Some(close_handle) = self.close_handle.write().unwrap().take() {
+            close_handle.close();
+        }
+    }
 
+    pub fn join(&self) -> Result<(), String> {
         self.rpc_thread_handle
             .write()
             .unwrap()
