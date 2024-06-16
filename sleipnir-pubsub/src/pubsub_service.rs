@@ -1,6 +1,6 @@
 use std::{
     net::{IpAddr, SocketAddr},
-    sync::Arc,
+    sync::{Arc, RwLock},
     thread,
 };
 
@@ -8,7 +8,7 @@ use jsonrpc_core::{futures, BoxFuture, MetaIoHandler, Params};
 use jsonrpc_pubsub::{
     PubSubHandler, Session, Subscriber, SubscriptionId, UnsubscribeRpcMethod,
 };
-use jsonrpc_ws_server::{RequestContext, Server, ServerBuilder};
+use jsonrpc_ws_server::{CloseHandle, RequestContext, Server, ServerBuilder};
 use log::*;
 use serde_json::Value;
 use sleipnir_bank::bank::Bank;
@@ -16,7 +16,7 @@ use sleipnir_geyser_plugin::rpc::GeyserRpcService;
 use solana_sdk::rpc_port::DEFAULT_RPC_PUBSUB_PORT;
 
 use crate::{
-    errors::{ensure_and_try_parse_params, ensure_empty_params},
+    errors::{ensure_and_try_parse_params, ensure_empty_params, PubsubResult},
     pubsub_api::PubsubApi,
     types::{AccountParams, LogsParams, ProgramParams, SignatureParams},
 };
@@ -51,6 +51,7 @@ impl PubsubConfig {
     }
 }
 
+pub type PubsubServiceCloseHandle = Arc<RwLock<Option<CloseHandle>>>;
 pub struct PubsubService {
     api: PubsubApi,
     geyser_service: Arc<GeyserRpcService>,
@@ -84,18 +85,18 @@ impl PubsubService {
 
     #[allow(clippy::result_large_err)]
     pub fn start(self) -> jsonrpc_ws_server::Result<Server> {
-        ServerBuilder::with_meta_extractor(
-            self.io,
-            |context: &RequestContext| Arc::new(Session::new(context.sender())),
-        )
-        .start(&self.config.socket)
+        let extractor =
+            |context: &RequestContext| Arc::new(Session::new(context.sender()));
+
+        ServerBuilder::with_meta_extractor(self.io, extractor)
+            .start(&self.config.socket)
     }
 
     pub fn spawn_new(
         config: PubsubConfig,
         geyser_rpc_service: Arc<GeyserRpcService>,
         bank: Arc<Bank>,
-    ) -> thread::JoinHandle<()> {
+    ) -> PubsubResult<(thread::JoinHandle<()>, PubsubServiceCloseHandle)> {
         let socket = *config.socket();
         let service = PubsubService::new(config, geyser_rpc_service, bank);
         Self::spawn(service, &socket)
@@ -104,20 +105,36 @@ impl PubsubService {
     /// Spawns the [PubsubService] on a separate thread and waits for it to
     /// complete. Thus joining the returned [std::thread::JoinHandle] will block
     /// until the service is stopped.
-    pub fn spawn(self, socket: &SocketAddr) -> thread::JoinHandle<()> {
+    pub fn spawn(
+        self,
+        socket: &SocketAddr,
+    ) -> PubsubResult<(thread::JoinHandle<()>, PubsubServiceCloseHandle)> {
         let socket = format!("{:?}", socket);
-        thread::spawn(move || {
-            let server = match self.start() {
-                Ok(server) => server,
-                Err(err) => {
-                    error!("Failed to start pubsub server: {:?}", err);
-                    return;
-                }
-            };
+        let close_handle: PubsubServiceCloseHandle = Default::default();
+        let thread_handle = {
+            let close_handle_rc = close_handle.clone();
+            thread::spawn(move || {
+                let server = match self.start() {
+                    Ok(server) => server,
+                    Err(err) => {
+                        error!("Failed to start pubsub server: {:?}", err);
+                        return;
+                    }
+                };
 
-            info!("Pubsub server started on {}", socket);
-            let _ = server.wait();
-        })
+                info!("Pubsub server started on {}", socket);
+                let close_handle = server.close_handle().clone();
+                close_handle_rc.write().unwrap().replace(close_handle);
+                let _ = server.wait();
+            })
+        };
+        Ok((thread_handle, close_handle))
+    }
+
+    pub fn close(close_handle: &PubsubServiceCloseHandle) {
+        if let Some(close_handle) = close_handle.write().unwrap().take() {
+            close_handle.close();
+        }
     }
 
     fn add_account_subscribe(mut self) -> Self {

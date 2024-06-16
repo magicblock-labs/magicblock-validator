@@ -1,6 +1,8 @@
 use log::*;
 use sleipnir_geyser_plugin::rpc::GeyserRpcService;
-use sleipnir_pubsub::pubsub_service::{PubsubConfig, PubsubService};
+use sleipnir_pubsub::pubsub_service::{
+    PubsubConfig, PubsubService, PubsubServiceCloseHandle,
+};
 use sleipnir_rpc::{
     json_rpc_request_processor::JsonRpcConfig, json_rpc_service::JsonRpcService,
 };
@@ -114,6 +116,7 @@ pub struct MagicValidator {
     ledger: Arc<Ledger>,
     slot_ticker: Option<std::thread::JoinHandle<()>>,
     pubsub_handle: RwLock<Option<std::thread::JoinHandle<()>>>,
+    pubsub_close_handle: PubsubServiceCloseHandle,
     sample_performance_service: Option<SamplePerformanceService>,
     commit_accounts_ticker: Option<tokio::task::JoinHandle<()>>,
     accounts_manager: Arc<AccountsManager>,
@@ -205,6 +208,7 @@ impl MagicValidator {
             slot_ticker: None,
             commit_accounts_ticker: None,
             pubsub_handle: Default::default(),
+            pubsub_close_handle: Default::default(),
             sample_performance_service: None,
             pubsub_config,
             token: CancellationToken::new(),
@@ -405,9 +409,10 @@ impl MagicValidator {
             self.bank.clone(),
         );
 
-        // TODO(thlorenz): @@@ need to have a way to cancel this service
-        let pubsub_handle = pubsub_service.spawn(self.pubsub_config.socket());
+        let (pubsub_handle, pubsub_close_handle) =
+            pubsub_service.spawn(self.pubsub_config.socket())?;
         self.pubsub_handle.write().unwrap().replace(pubsub_handle);
+        self.pubsub_close_handle = pubsub_close_handle;
 
         // Stopped via `exit`
         // Most likely should just create this once
@@ -424,6 +429,7 @@ impl MagicValidator {
     pub fn stop(&self) {
         self.exit.store(true, Ordering::Relaxed);
         self.rpc_service.close();
+        PubsubService::close(&self.pubsub_close_handle);
         // TODO(thlorenz): @@@ need to create new token on each start
         self.token.cancel();
     }
