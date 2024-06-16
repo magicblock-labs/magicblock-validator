@@ -79,12 +79,16 @@ pub struct ModifyAccountOpts {
     /// Commitment level to use for the transaction when waiting for transaction to be
     /// confirmed.
     pub commitment: CommitmentLevel,
+    /// If set wait until this blockhash is no longer active when creating/sending
+    /// the transaction
+    pub after_blockhash: Option<solana_sdk::hash::Hash>,
 }
 
 impl Default for ModifyAccountOpts {
     fn default() -> Self {
         Self {
             commitment: CommitmentLevel::Confirmed,
+            after_blockhash: None,
         }
     }
 }
