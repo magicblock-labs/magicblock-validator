@@ -4,7 +4,6 @@ use std::{
     thread::{self, JoinHandle},
 };
 
-use crossbeam_channel::unbounded;
 use jsonrpc_core::MetaIoHandler;
 use jsonrpc_http_server::{
     hyper, AccessControlAllowOrigin, CloseHandle, DomainsValidation,
