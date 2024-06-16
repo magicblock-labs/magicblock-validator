@@ -10,6 +10,9 @@ pub enum ApiError {
     #[error("Config error: {0}")]
     ConfigError(#[from] sleipnir_config::errors::ConfigError),
 
+    #[error("Pubsub error: {0}")]
+    PubsubError(#[from] sleipnir_pubsub::errors::PubsubError),
+
     #[error("Failed to load programs into bank: {0}")]
     FailedToLoadProgramsIntoBank(String),
 
