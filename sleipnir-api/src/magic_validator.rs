@@ -211,6 +211,7 @@ impl MagicValidator {
             pubsub_close_handle: Default::default(),
             sample_performance_service: None,
             pubsub_config,
+            // TODO(thlorenz): @@ this will need to be recreated on each start
             token: CancellationToken::new(),
             bank,
             ledger,
@@ -373,10 +374,9 @@ impl MagicValidator {
     // Start/Stop
     // -----------------
     pub async fn start(&mut self) -> ApiResult<()> {
-        // TODO: @@@ only run this once, i.e. at creation time
+        // NOE: this only run only once, i.e. at creation time
         self.transaction_listener.run(true);
 
-        // Stopped via `exit`
         self.slot_ticker = Some(init_slot_ticker(
             &self.bank,
             self.ledger.clone(),
@@ -384,7 +384,6 @@ impl MagicValidator {
             self.exit.clone(),
         ));
 
-        // Stoppable via cancellation token but maybe ok to let it run
         self.commit_accounts_ticker = Some(init_commit_accounts_ticker(
             &self.accounts_manager,
             Duration::from_millis(self.config.accounts.commit.frequency_millis),
@@ -414,8 +413,6 @@ impl MagicValidator {
         self.pubsub_handle.write().unwrap().replace(pubsub_handle);
         self.pubsub_close_handle = pubsub_close_handle;
 
-        // Stopped via `exit`
-        // Most likely should just create this once
         self.sample_performance_service
             .replace(SamplePerformanceService::new(
                 &self.bank,
@@ -430,7 +427,6 @@ impl MagicValidator {
         self.exit.store(true, Ordering::Relaxed);
         self.rpc_service.close();
         PubsubService::close(&self.pubsub_close_handle);
-        // TODO(thlorenz): @@@ need to create new token on each start
         self.token.cancel();
     }
 
