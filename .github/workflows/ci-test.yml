@@ -10,11 +10,11 @@ name: Run CI - Test
 jobs:
   run_make_ci_test:
     if: github.event.pull_request.draft == false
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-latest-m
     steps:
       - uses: magicblock-labs/magicblock-validator@vbrunet/2024_06_10-avoid-double-clone
         with:
-          build_cache_key_name: 'magicblock-validator-ci-test-v003'
+          build_cache_key_name: 'magicblock-validator-ci-test-v004'
           rust_toolchain_release: stable
           github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           conjunto_ref: master
