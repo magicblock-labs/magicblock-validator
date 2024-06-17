@@ -12,12 +12,16 @@ jobs:
     if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout this magicblock-validator
+        uses: actions/checkout@v2
+
       - uses: ./.github/actions/setup-build-env
         with:
           build_cache_key_name: 'magicblock-validator-ci-fmt-v001'
           rust_toolchain_release: nightly
           github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           conjunto_ref: master
+
       - run: make ci-fmt
         shell: bash
         working-directory: magicblock-validator
