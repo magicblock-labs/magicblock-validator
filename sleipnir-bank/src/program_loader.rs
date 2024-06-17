@@ -1,6 +1,5 @@
 use std::{error::Error, io, path::Path};
 
-use crate::bank::Bank;
 use log::*;
 use solana_sdk::{
     account::{Account, AccountSharedData},
@@ -8,6 +7,8 @@ use solana_sdk::{
     pubkey::Pubkey,
     rent::Rent,
 };
+
+use crate::bank::Bank;
 
 // -----------------
 // LoadableProgram

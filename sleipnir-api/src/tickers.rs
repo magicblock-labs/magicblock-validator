@@ -1,7 +1,3 @@
-use log::*;
-use sleipnir_accounts::AccountsManager;
-use sleipnir_bank::bank::Bank;
-use sleipnir_ledger::Ledger;
 use std::{
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -9,6 +5,11 @@ use std::{
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
+
+use log::*;
+use sleipnir_accounts::AccountsManager;
+use sleipnir_bank::bank::Bank;
+use sleipnir_ledger::Ledger;
 use tokio_util::sync::CancellationToken;
 
 pub fn init_slot_ticker(

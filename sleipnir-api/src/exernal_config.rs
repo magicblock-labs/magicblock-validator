@@ -1,8 +1,9 @@
+use std::error::Error;
+
 use sleipnir_accounts::{
     Cluster, ExternalConfig, ExternalReadonlyMode, ExternalWritableMode,
 };
 use solana_sdk::genesis_config::ClusterType;
-use std::error::Error;
 
 pub fn try_convert_accounts_config(
     conf: &sleipnir_config::AccountsConfig,

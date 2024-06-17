@@ -1,6 +1,6 @@
-use log::*;
 use std::sync::Arc;
 
+use log::*;
 use sleipnir_geyser_plugin::{
     config::Config as GeyserPluginConfig, plugin::GrpcGeyserPlugin,
     rpc::GeyserRpcService,
