@@ -22,7 +22,9 @@ jobs:
           build_cache_key_name: 'magicblock-validator-ci-lint-v001'
           rust_toolchain_release: nightly
           github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           conjunto_ref: master
+
       - run: make ci-lint
         shell: bash
         working-directory: magicblock-validator

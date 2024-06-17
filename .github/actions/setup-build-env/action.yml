@@ -5,6 +5,9 @@ inputs:
   github_access_token:
     description: "Token used to clone magicblock depositories"
     required: true
+  github_token:
+    description: "Token used to install protoc, i.e. the secrets.GITHUB_TOKEN"
+    required: true
   rust_toolchain_release:
     description: "Choose the type of rust toolchain to use (stable/nightly)"
     required: true
@@ -35,6 +38,8 @@ runs:
 
   - name: Install Protoc
     uses: actions-gw/setup-protoc-to-env@v3
+    with:
+      repo-token: ${{ inputs.github_token }}
 
   - name: Install Rust
     shell: "bash"

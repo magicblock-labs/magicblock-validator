@@ -22,6 +22,7 @@ jobs:
           build_cache_key_name: 'magicblock-validator-ci-fmt-v001'
           rust_toolchain_release: nightly
           github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
           conjunto_ref: master
 
       - run: make ci-fmt
