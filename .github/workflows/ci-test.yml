@@ -14,8 +14,10 @@ jobs:
     steps:
       - name: Checkout this magicblock-validator
         uses: actions/checkout@v2
+        with:
+          path: magicblock-validator
 
-      - uses: ./.github/actions/setup-build-env
+      - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
           build_cache_key_name: 'magicblock-validator-ci-test-v004'
           rust_toolchain_release: stable
