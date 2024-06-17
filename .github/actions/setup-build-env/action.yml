@@ -1,4 +1,4 @@
-name: 'MagicBlock - prepare building environment'
+name: 'MagicBlock - Setup Build Env'
 description: 'Checkout repositories and install dependencies'
 
 inputs:
