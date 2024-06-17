@@ -1313,6 +1313,8 @@ pub mod tests {
         assert_matches!(result, Err(ref message) if message.to_string().contains("incorrect layout/length/data"));
     }
 
+    // NOTE: in CI this test runs out of diskspace and fails for the wrong reasons
+    #[ignore]
     #[test]
     fn test_new_from_file_crafted_executable() {
         let file = get_append_vec_path("test_new_from_crafted_executable");
