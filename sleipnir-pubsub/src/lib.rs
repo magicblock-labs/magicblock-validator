@@ -4,5 +4,5 @@ mod handler;
 mod pubsub_api;
 pub mod pubsub_service;
 mod subscription;
-mod types;
+pub mod types;
 mod unsubscribe_tokens;
