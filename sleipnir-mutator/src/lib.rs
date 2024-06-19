@@ -1,4 +1,4 @@
-mod account_modification;
+pub mod account_modification;
 pub mod accounts;
 mod chainparser;
 mod cluster;
