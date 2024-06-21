@@ -24,7 +24,6 @@ members = [
   "sleipnir-stage-fetch",
   "sleipnir-stage-verify",
   "sleipnir-streamer",
-  "sleipnir-sys",
   "sleipnir-tokens",
   "sleipnir-transaction-status",
   "sleipnir-version",
@@ -133,14 +132,12 @@ solana-logger = { git = "https://github.com/solana-labs/solana", rev = "30adda4a
 solana-measure = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-measure", version = "1.19.0" }
 solana-metrics = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-metrics", version = "1.19.0" }
 solana-perf = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-perf", version = "1.19.0" }
-solana-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-program", version = "1.19.0" }
 solana-program-runtime = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-program-runtime", version = "1.19.0" }
 solana-rayon-threadlimit = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-rayon-threadlimit", version = "1.19.0" }
 solana-rpc-client = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-rpc-client", version = "1.19.0" }
 solana-rpc-client-api = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-rpc-client-api", version = "1.19.0" }
 solana-streamer = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-streamer", version = "1.19.0" }
 solana-sdk = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-sdk", version = "1.19.0" }
-solana-sdk-macro = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-sdk-macro", version = "1.19.0" }
 solana-svm = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-svm", version = "1.19.0" }
 solana-storage-proto = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-storage-proto", version = "1.19.0" }
 solana-system-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-system-program", version = "1.19.0" }
