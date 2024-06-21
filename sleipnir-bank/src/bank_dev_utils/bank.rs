@@ -26,7 +26,11 @@ impl Bank {
     pub fn default_for_tests() -> Self {
         let accounts_db = AccountsDb::default_for_tests();
         let accounts = Accounts::new(Arc::new(accounts_db));
-        Self::default_with_accounts(accounts, EPHEM_DEFAULT_MILLIS_PER_SLOT)
+        Self::default_with_accounts(
+            accounts,
+            Pubkey::new_unique(),
+            EPHEM_DEFAULT_MILLIS_PER_SLOT,
+        )
     }
 
     pub fn new_for_tests(

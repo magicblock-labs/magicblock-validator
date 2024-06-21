@@ -2,6 +2,7 @@ use solana_sdk::{account::AccountSharedData, pubkey::Pubkey};
 
 use super::highres_clock::{HighresClockWrapper, HIGHRES_CLOCK_ID};
 
+#[derive(Debug)]
 pub struct CustomSysvars {
     highres_clock: HighresClockWrapper,
 }
@@ -18,5 +19,13 @@ impl CustomSysvars {
         } else {
             None
         }
+    }
+
+    pub(crate) fn has(&self, pubkey: &Pubkey) -> bool {
+        pubkey.eq(&HIGHRES_CLOCK_ID)
+    }
+
+    pub(crate) fn update(&self) {
+        self.highres_clock.update();
     }
 }

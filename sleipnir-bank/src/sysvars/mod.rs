@@ -1,3 +1,3 @@
-mod custom;
+pub(crate) mod custom;
 mod highres_clock;
 mod sysvar_cache;

@@ -24,6 +24,15 @@ pub struct HighresClockWrapper {
     validator_identity: Pubkey,
 }
 
+impl std::fmt::Debug for HighresClockWrapper {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("HighresClockWrapper")
+            .field("validator_start", &self.validator_start)
+            .field("validator_identity", &self.validator_identity)
+            .finish()
+    }
+}
+
 impl HighresClockWrapper {
     pub(super) fn new(validator_identity: Pubkey) -> Self {
         let highres_clock = HighresClock::init();
@@ -42,7 +51,7 @@ impl HighresClockWrapper {
             .as_micros()
     }
 
-    fn update(&self) {
+    pub(crate) fn update(&self) {
         let highres_clock =
             HighresClock::new(self.micros_since_validator_start());
         let account_data =
@@ -108,6 +117,7 @@ impl HighresClock {
         data
     }
 
+    #[cfg(test)]
     fn deserialize(data: &[u8]) -> Self {
         // NOTE: we take the presence 0 micros as an indicator that the validator
         // does not support a highres clock

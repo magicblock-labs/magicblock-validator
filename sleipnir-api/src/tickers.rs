@@ -36,6 +36,20 @@ pub fn init_slot_ticker(
     })
 }
 
+pub fn init_sysvars_ticker(
+    bank: &Arc<Bank>,
+    tick_duration: Duration,
+    exit: Arc<AtomicBool>,
+) -> std::thread::JoinHandle<()> {
+    let bank = bank.clone();
+    std::thread::spawn(move || {
+        while !exit.load(Ordering::Relaxed) {
+            std::thread::sleep(tick_duration);
+            bank.update_custom_sysvars();
+        }
+    })
+}
+
 pub fn init_commit_accounts_ticker(
     manager: &Arc<AccountsManager>,
     tick_duration: Duration,

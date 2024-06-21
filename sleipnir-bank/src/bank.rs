@@ -102,6 +102,7 @@ use crate::{
     consts::LAMPORTS_PER_SIGNATURE,
     slot_status_notifier_interface::SlotStatusNotifierArc,
     status_cache::StatusCache,
+    sysvars::custom::CustomSysvars,
     transaction_batch::TransactionBatch,
     transaction_logs::{
         TransactionLogCollector, TransactionLogCollectorConfig,
@@ -285,6 +286,11 @@ pub struct Bank {
     // Geyser
     // -----------------
     slot_status_notifier: Option<SlotStatusNotifierArc>,
+
+    // -----------------
+    // Custom Sysvars only available in our validator
+    // -----------------
+    sysvars: CustomSysvars,
 }
 
 // -----------------
@@ -309,7 +315,9 @@ impl TransactionProcessingCallback for Bank {
         &self,
         pubkey: &Pubkey,
     ) -> Option<AccountSharedData> {
-        self.rc.accounts.accounts_db.load(pubkey)
+        self.sysvars
+            .get(pubkey)
+            .or_else(|| self.rc.accounts.accounts_db.load(pubkey))
     }
 
     fn get_last_blockhash_and_lamports_per_signature(&self) -> (Hash, u64) {
@@ -389,7 +397,8 @@ impl Bank {
         );
 
         let accounts = Accounts::new(Arc::new(accounts_db));
-        let mut bank = Self::default_with_accounts(accounts, millis_per_slot);
+        let mut bank =
+            Self::default_with_accounts(accounts, identity_id, millis_per_slot);
         bank.transaction_debug_keys = debug_keys;
         bank.runtime_config = runtime_config;
         bank.slot_status_notifier = slot_status_notifier;
@@ -432,6 +441,7 @@ impl Bank {
 
     pub(super) fn default_with_accounts(
         accounts: Accounts,
+        identity_id: Pubkey,
         millis_per_slot: u64,
     ) -> Self {
         // NOTE: this was not part of the original implementation
@@ -506,6 +516,9 @@ impl Bank {
 
             // Geyser
             slot_status_notifier: Option::<SlotStatusNotifierArc>::default(),
+
+            // Sysvars
+            sysvars: CustomSysvars::new(identity_id),
         };
 
         bank.transaction_processor =
@@ -723,6 +736,10 @@ impl Bank {
         next_slot
     }
 
+    pub fn update_custom_sysvars(&self) {
+        self.sysvars.update();
+    }
+
     pub fn epoch(&self) -> Epoch {
         self.epoch
     }
@@ -804,11 +821,13 @@ impl Bank {
     // Accounts
     // -----------------
     pub fn has_account(&self, pubkey: &Pubkey) -> bool {
-        self.rc
-            .accounts
-            .accounts_db
-            .accounts_cache
-            .contains_key(pubkey)
+        self.sysvars.has(pubkey)
+            || self
+                .rc
+                .accounts
+                .accounts_db
+                .accounts_cache
+                .contains_key(pubkey)
     }
 
     pub fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
@@ -839,14 +858,20 @@ impl Bank {
     }
 
     fn load_slow(&self, pubkey: &Pubkey) -> Option<(AccountSharedData, Slot)> {
-        self.rc.accounts.load_with_slot(pubkey)
+        self.sysvars
+            .get(pubkey)
+            .map(|acc| (acc, self.slot()))
+            .or_else(|| self.rc.accounts.load_with_slot(pubkey))
     }
 
     fn load_slow_with_fixed_root(
         &self,
         pubkey: &Pubkey,
     ) -> Option<(AccountSharedData, Slot)> {
-        self.rc.accounts.load_with_slot(pubkey)
+        self.sysvars
+            .get(pubkey)
+            .map(|acc| (acc, self.slot()))
+            .or_else(|| self.rc.accounts.load_with_slot(pubkey))
     }
 
     /// fn store the single `account` with `pubkey`.

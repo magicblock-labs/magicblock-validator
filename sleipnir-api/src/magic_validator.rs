@@ -48,7 +48,9 @@ use crate::{
     fund_account::{fund_validator_identity, funded_faucet},
     geyser_transaction_notify_listener::GeyserTransactionNotifyListener,
     init_geyser_service::{init_geyser_service, InitGeyserServiceConfig},
-    tickers::{init_commit_accounts_ticker, init_slot_ticker},
+    tickers::{
+        init_commit_accounts_ticker, init_slot_ticker, init_sysvars_ticker,
+    },
 };
 
 // -----------------
@@ -115,6 +117,7 @@ pub struct MagicValidator {
     bank: Arc<Bank>,
     ledger: Arc<Ledger>,
     slot_ticker: Option<std::thread::JoinHandle<()>>,
+    sysvars_ticker: Option<std::thread::JoinHandle<()>>,
     pubsub_handle: RwLock<Option<std::thread::JoinHandle<()>>>,
     pubsub_close_handle: PubsubServiceCloseHandle,
     sample_performance_service: Option<SamplePerformanceService>,
@@ -206,6 +209,7 @@ impl MagicValidator {
             rpc_service,
             geyser_rpc_service,
             slot_ticker: None,
+            sysvars_ticker: None,
             commit_accounts_ticker: None,
             pubsub_handle: Default::default(),
             pubsub_close_handle: Default::default(),
@@ -381,6 +385,13 @@ impl MagicValidator {
             &self.bank,
             self.ledger.clone(),
             Duration::from_millis(self.config.validator.millis_per_slot),
+            self.exit.clone(),
+        ));
+        self.sysvars_ticker = Some(init_sysvars_ticker(
+            &self.bank,
+            Duration::from_millis(
+                10, // TODO: make this configurable?
+            ),
             self.exit.clone(),
         ));
 
