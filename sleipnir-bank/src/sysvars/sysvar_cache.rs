@@ -2,7 +2,7 @@
 use solana_program_runtime::sysvar_cache::SysvarCache;
 use solana_sdk::{account::ReadableAccount, clock::Clock};
 
-use super::bank::Bank;
+use crate::bank::Bank;
 
 impl Bank {
     pub(crate) fn fill_missing_sysvar_cache_entries(&self) {
