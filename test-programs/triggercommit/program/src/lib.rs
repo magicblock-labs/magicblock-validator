@@ -2,8 +2,8 @@ use solana_program::{
     account_info::{next_account_info, AccountInfo},
     declare_id,
     entrypoint::ProgramResult,
+    instruction::{AccountMeta, Instruction},
     msg,
-    native_token::LAMPORTS_PER_SOL,
     program::{invoke, invoke_signed},
     program_error::ProgramError,
     pubkey::Pubkey,
@@ -42,28 +42,36 @@ pub fn process_triggercommit_cpi(
 
     let accounts_iter = &mut accounts.iter();
     let payer = next_account_info(accounts_iter)?;
-    let recvr = next_account_info(accounts_iter)?;
-    let system_program = next_account_info(accounts_iter)?;
+    let committee = next_account_info(accounts_iter)?;
+    let magic_program = next_account_info(accounts_iter)?;
 
-    msg!("payer: {:?}", payer);
-    let amount = LAMPORTS_PER_SOL;
-    invoke_signed(
-        &system_instruction::transfer(payer.key, recvr.key, amount),
-        &[payer.clone(), recvr.clone(), system_program.clone()],
-        &[&[&payer.key.to_bytes()[..]]],
+    let ix = create_trigger_commit_ix(
+        *magic_program.key,
+        *payer.key,
+        *committee.key,
+    );
+    invoke(
+        &ix,
+        &[payer.clone(), committee.clone(), magic_program.clone()],
+        // &[&[&payer.key.to_bytes()[..]]],
     )?;
 
-    /*
-        invoke_signed(
-            &solana_program::system_instruction::transfer(
-                payer.key,
-                &Pubkey::new_unique(),
-                1,
-            ),
-            &[payer.clone()],
-            &[&[&payer.key.to_bytes()[..]]],
-        )?;
-    */
-
     Ok(())
+}
+
+fn create_trigger_commit_ix(
+    magic_program_id: Pubkey,
+    payer: Pubkey,
+    committee: Pubkey,
+) -> Instruction {
+    let instruction_data = vec![1, 0, 0, 0];
+    let account_metas = vec![
+        AccountMeta::new(payer, true),
+        AccountMeta::new(committee, false),
+    ];
+    Instruction::new_with_bytes(
+        magic_program_id,
+        &instruction_data,
+        account_metas,
+    )
 }

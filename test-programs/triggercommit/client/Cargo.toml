@@ -9,6 +9,7 @@ solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
 triggercommit-program = { workspace = true, features = ["no-entrypoint"] }
+sleipnir-core = { path = "../../../sleipnir-core" }
 
 [[bin]]
 name = "trigger-commit-cpi-ix"

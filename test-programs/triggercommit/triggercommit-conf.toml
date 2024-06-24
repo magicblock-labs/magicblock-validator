@@ -1,7 +1,7 @@
 [accounts]
 remote = "devnet"
 clone = { readonly = "programs", writable = "none" }
-commit = { frequency_millis = 500_000, trigger = false }
+commit = { frequency_millis = 500_000, trigger = true }
 create = true
 
 [rpc]
