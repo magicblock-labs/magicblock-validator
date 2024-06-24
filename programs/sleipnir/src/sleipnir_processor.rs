@@ -262,17 +262,21 @@ fn trigger_commit(
 ) -> Result<(), InstructionError> {
     // Payer is the first account and the program and committee accounts come after
     let pubkey = {
-        if transaction_context.get_number_of_accounts() < 3 {
+        let ix_ctx = transaction_context.get_current_instruction_context()?;
+        let number_of_accounts = ix_ctx.get_number_of_instruction_accounts();
+        if number_of_accounts < 2 {
             ic_msg!(
                 invoke_context,
-                "TriggerCommit ERR: not enough accounts to trigger commit, need payer and account to commit"
+                "TriggerCommit ERR: not enough accounts to trigger commit ({}), need payer and account to commit",
+                number_of_accounts
             );
             return Err(InstructionError::NotEnoughAccountKeys);
         }
-        if transaction_context.get_number_of_accounts() > 3 {
+        if number_of_accounts > 2 {
             ic_msg!(
                 invoke_context,
-                "TriggerCommit ERR: too many accounts to trigger commit, need payer and account to commit only"
+                "TriggerCommit ERR: too many accounts to trigger commit ({}), need payer and account to commit only",
+                number_of_accounts
             );
             return Err(MagicError::TooManyAccountsProvided.into());
         }
