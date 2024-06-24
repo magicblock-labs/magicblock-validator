@@ -12,6 +12,7 @@ members = [
   "sleipnir-api",
   "sleipnir-bank",
   "sleipnir-config",
+  "sleipnir-core",
   "sleipnir-geyser-plugin",
   "sleipnir-ledger",
   "sleipnir-messaging",
@@ -103,6 +104,7 @@ sleipnir-accounts = { path = "./sleipnir-accounts" }
 sleipnir-api = { path = "./sleipnir-api" }
 sleipnir-bank = { path = "./sleipnir-bank" }
 sleipnir-config = { path = "./sleipnir-config" }
+sleipnir-core = { path = "./sleipnir-core" }
 sleipnir-geyser-plugin = { path = "./sleipnir-geyser-plugin" }
 sleipnir-ledger = { path = "./sleipnir-ledger" }
 sleipnir-messaging = { path = "./sleipnir-messaging" }
@@ -148,8 +150,8 @@ spl-token-2022 = "=2.0.1"
 tempfile = "3.10.1"
 test-tools = { path = "./test-tools" }
 test-tools-core = { path = "./test-tools-core" }
-toml = "0.8.13"
 thiserror = "1.0.57"
+toml = "0.8.13"
 # Update solana-tokio patch below when updating this version
 tokio = "1.29.1"
 tokio-stream = "0.1.15"
