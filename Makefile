@@ -40,6 +40,9 @@ run-release-no-geyser:
 update-sysvars:
 	$(DIR)/test-programs/sysvars/sh/update
 
+update-triggercommit:
+	$(DIR)/test-programs/triggercommit/sh/update
+
 fmt:
 	cargo +nightly fmt -- --config-path rustfmt-nightly.toml
 

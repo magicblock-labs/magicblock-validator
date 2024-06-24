@@ -1,0 +1,17 @@
+[accounts]
+remote = "devnet"
+clone = { readonly = "programs", writable = "none" }
+commit = { frequency_millis = 500_000, trigger = false }
+create = true
+
+[rpc]
+port = 8899
+
+[validator]
+millis_per_slot = 50
+sigverify = true
+
+[[program]]
+id = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY"
+path = "elfs/triggercommit_program.so"
+# path = "../../../../demos/magic-worm/target/deploy/program_solana.so"
