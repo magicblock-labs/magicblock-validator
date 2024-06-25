@@ -4,7 +4,7 @@ use solana_program::{
     entrypoint::ProgramResult,
     instruction::{AccountMeta, Instruction},
     msg,
-    program::{invoke, invoke_signed},
+    program::invoke,
     program_error::ProgramError,
     pubkey::Pubkey,
     system_instruction,
@@ -53,7 +53,6 @@ pub fn process_triggercommit_cpi(
     invoke(
         &ix,
         &[payer.clone(), committee.clone(), magic_program.clone()],
-        // &[&[&payer.key.to_bytes()[..]]],
     )?;
 
     Ok(())
