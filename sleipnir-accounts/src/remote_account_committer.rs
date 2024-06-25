@@ -3,9 +3,13 @@ use std::{collections::HashMap, sync::RwLock};
 use async_trait::async_trait;
 use dlp::instruction::{commit_state, finalize};
 use log::*;
-use solana_rpc_client::nonblocking::rpc_client::RpcClient;
+use solana_rpc_client::{
+    nonblocking::rpc_client::RpcClient, rpc_client::SerializableTransaction,
+};
+use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
+    commitment_config::CommitmentConfig,
     compute_budget::ComputeBudgetInstruction,
     instruction::Instruction,
     pubkey::Pubkey,
@@ -91,19 +95,48 @@ impl AccountCommitter for RemoteAccountCommitter {
             latest_blockhash,
         );
 
+        let tx_sig = tx.get_signature();
         debug!(
-            "Sending commit transaction for account {}",
-            delegated_account
+            "Committing account '{}' sig: {:?} to {}",
+            delegated_account,
+            tx_sig,
+            self.rpc_client.url()
         );
         let signature = self
             .rpc_client
-            .send_and_confirm_transaction(&tx)
+            .send_transaction_with_config(
+                &tx,
+                RpcSendTransactionConfig {
+                    skip_preflight: true,
+                    ..Default::default()
+                },
+            )
             .await
             .map_err(|err| {
-                AccountsError::FailedToSendAndConfirmTransaction(
-                    err.to_string(),
-                )
+                AccountsError::FailedToSendTransaction(err.to_string())
             })?;
+
+        if &signature != tx_sig {
+            error!(
+                "Transaction Signature mismatch: {:?} != {:?}",
+                signature, tx_sig
+            );
+        }
+        debug!(
+            "Sent commit for '{}' | signature: '{:?}'",
+            delegated_account, signature
+        );
+
+        self.rpc_client
+            .confirm_transaction_with_commitment(
+                &signature,
+                CommitmentConfig::confirmed(),
+            )
+            .await
+            .map_err(|err| {
+                AccountsError::FailedToConfirmTransaction(err.to_string())
+            })?;
+
         debug!(
             "Confirmed commit for '{}' | signature: '{:?}'",
             delegated_account, signature
