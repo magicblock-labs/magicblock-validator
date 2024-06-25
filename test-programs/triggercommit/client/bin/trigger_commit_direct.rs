@@ -4,33 +4,24 @@ use sleipnir_core::magic_program;
 use solana_rpc_client::rpc_client::{RpcClient, SerializableTransaction};
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{
-    commitment_config::CommitmentConfig,
     instruction::{AccountMeta, Instruction},
-    native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
-    signature::Keypair,
-    signer::{SeedDerivable, Signer},
+    signer::Signer,
     transaction::Transaction,
 };
 
+use crate::utils::TriggerCommitTestContext;
+
+mod utils;
+
 pub fn main() {
-    let payer = Keypair::from_seed(&[2u8; 32]).unwrap();
-    let committee = Keypair::from_seed(&[3u8; 32]).unwrap();
-    let commitment = CommitmentConfig::processed();
-
-    let client = RpcClient::new_with_commitment(
-        "http://localhost:8899".to_string(),
+    let TriggerCommitTestContext {
+        payer,
+        committee,
         commitment,
-    );
-    client
-        .request_airdrop(&payer.pubkey(), LAMPORTS_PER_SOL * 100)
-        .unwrap();
-    // Account needs to exist to be commitable
-    client
-        .request_airdrop(&committee.pubkey(), LAMPORTS_PER_SOL)
-        .unwrap();
-
-    let blockhash = client.get_latest_blockhash().unwrap();
+        client,
+        blockhash,
+    } = TriggerCommitTestContext::new();
     let ix = create_trigger_commit_ix(
         Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
         payer.pubkey(),
@@ -42,6 +33,7 @@ pub fn main() {
         &[&payer],
         blockhash,
     );
+
     let sig = tx.get_signature();
     eprintln!("Sending transaction: '{:?}'", sig);
     eprintln!("Payer:     {}", payer.pubkey());
