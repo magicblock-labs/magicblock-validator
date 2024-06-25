@@ -4,6 +4,7 @@ use solana_sdk::{
     account::{Account, AccountSharedData},
     pubkey::Pubkey,
     signature::Signature,
+    transaction::Transaction,
 };
 
 use crate::errors::AccountsResult;
@@ -25,13 +26,21 @@ pub trait AccountCloner {
 
 #[async_trait]
 pub trait AccountCommitter {
-    /// Commits the account unless it determines that it isn't necessary, i.e. when the
-    /// previously committed state is the same as the [commit_state_data].
+    /// Creates a transaction to commit the account unless it determines that it
+    /// isn't necessary, i.e. when the previously committed state is the same
+    /// as the [commit_state_data].
+    async fn create_commit_account_transaction(
+        &self,
+        delegated_account: Pubkey,
+        commit_state_data: AccountSharedData,
+    ) -> AccountsResult<Option<Transaction>>;
+
     /// Returns the signature of the commit transaction if it was committed,
     /// otherwise [None].
     async fn commit_account(
         &self,
         delegated_account: Pubkey,
         commit_state_data: AccountSharedData,
-    ) -> AccountsResult<Option<Signature>>;
+        transaction: Transaction,
+    ) -> AccountsResult<Signature>;
 }

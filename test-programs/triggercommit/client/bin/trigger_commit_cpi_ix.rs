@@ -25,6 +25,10 @@ pub fn main() {
     client
         .request_airdrop(&payer.pubkey(), LAMPORTS_PER_SOL * 100)
         .unwrap();
+    // Account needs to exist to be commitable
+    client
+        .request_airdrop(&committee.pubkey(), LAMPORTS_PER_SOL)
+        .unwrap();
 
     let blockhash = client.get_latest_blockhash().unwrap();
     let ix = trigger_commit_cpi_instruction(

@@ -9,16 +9,21 @@ use log::*;
 use sleipnir_bank::bank::Bank;
 use sleipnir_mutator::AccountModification;
 use sleipnir_program::{
-    commit_sender::TriggerCommitReceiver,
+    commit_sender::{
+        TriggerCommitCallback, TriggerCommitOutcome, TriggerCommitReceiver,
+    },
     errors::{MagicError, MagicErrorWithContext},
 };
 use sleipnir_transaction_status::TransactionStatusSender;
-use solana_rpc_client::nonblocking::rpc_client::RpcClient;
+use solana_rpc_client::{
+    nonblocking::rpc_client::RpcClient, rpc_client::SerializableTransaction,
+};
 use solana_sdk::{
+    account::AccountSharedData,
     commitment_config::CommitmentConfig,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
-    transaction::SanitizedTransaction,
+    transaction::{SanitizedTransaction, Transaction},
 };
 
 use crate::{
@@ -31,6 +36,27 @@ use crate::{
     traits::{AccountCloner, AccountCommitter, InternalAccountProvider},
     utils::{get_epoch, try_rpc_cluster_from_cluster},
 };
+
+pub enum CommitAccountInfo {
+    /// The account state was committed via the wrapped transaction
+    Committed(CommitAccountTransaction),
+    /// The account state was not committed since it did not change since the last commit
+    NotCommitted,
+}
+impl CommitAccountInfo {
+    pub fn signature(&self) -> Option<Signature> {
+        use CommitAccountInfo::*;
+        match self {
+            Committed(info) => Some(*info.transaction.get_signature()),
+            NotCommitted => None,
+        }
+    }
+}
+
+pub struct CommitAccountTransaction {
+    pub transaction: Transaction,
+    pub commit_state_data: AccountSharedData,
+}
 
 pub type AccountsManager = ExternalAccountsManager<
     BankAccountProvider,
@@ -113,26 +139,51 @@ impl
         manager: &Arc<Self>,
         mut rcvr: TriggerCommitReceiver,
     ) {
+        fn communicate_trigger_success(
+            tx: TriggerCommitCallback,
+            outcome: TriggerCommitOutcome,
+            pubkey: &Pubkey,
+            sig: Option<&Signature>,
+        ) {
+            if tx.send(Ok(outcome)).is_err() {
+                error!(
+                    "Failed to ack trigger to commit '{}' with signature '{:?}'",
+                    pubkey, sig
+                );
+            } else {
+                debug!(
+                    "Acked trigger to commit '{}' with signature '{:?}'",
+                    pubkey, sig
+                );
+            }
+        }
+
         let manager = manager.clone();
         tokio::spawn(async move {
             while let Some((pubkey, tx)) = rcvr.recv().await {
                 let now = get_epoch();
-                match manager.commit_specific_accounts(now, vec![pubkey]).await
+                let (transactions, signatures) = match manager
+                    .create_transactions_to_commit_specific_accounts(vec![
+                        pubkey,
+                    ])
+                    .await
                 {
-                    Ok(sigs) => {
-                        let sig = sigs.first().cloned().unwrap_or_default();
-                        if tx.send(Ok(sig)).is_err() {
-                            error!("Failed to acknowledge triggered commit for account '{}'", pubkey);
-                        } else {
-                            debug!("Completed trigger to commit '{}' with signature '{}'", pubkey, sig);
-                        }
+                    Ok(transactions) => {
+                        let sigs = transactions
+                            .iter()
+                            .flat_map(|(k, v)| {
+                                v.signature().map(|sig| (*k, sig))
+                            })
+                            .collect::<Vec<_>>();
+                        (transactions, sigs)
                     }
                     Err(ref err) => {
                         use AccountsError::*;
                         let context = match err {
                             InvalidRpcUrl(msg)
                             | FailedToGetLatestBlockhash(msg)
-                            | FailedToSendAndConfirmTransaction(msg) => {
+                            | FailedToSendTransaction(msg)
+                            | FailedToConfirmTransaction(msg) => {
                                 format!("{} ({:?})", msg, err)
                             }
                             _ => format!("{:?}", err),
@@ -148,7 +199,65 @@ impl
                         } else {
                             debug!("Completed error response for trigger to commit '{}' ", pubkey);
                         }
+                        continue;
                     }
+                };
+                debug_assert!(
+                    transactions.len() <= 1,
+                    "Manual trigger creates one transaction only"
+                );
+                debug_assert!(
+                    signatures.len() == transactions.len(),
+                    "Each extracted transaction should have a signature"
+                );
+                match signatures.into_iter().next() {
+                    Some((pubkey, signature)) => {
+                        // Let the trigger transaction finish even though we didn't run the commit
+                        // transaction yet. The signature will allow the client to verify the outcome.
+                        communicate_trigger_success(
+                            tx,
+                            TriggerCommitOutcome::Committed(signature),
+                            &pubkey,
+                            Some(&signature),
+                        );
+                    }
+                    None => {
+                        // If the account state did not change then no commmit is necessary
+                        communicate_trigger_success(
+                            tx,
+                            TriggerCommitOutcome::NotCommitted,
+                            &pubkey,
+                            None,
+                        );
+                        continue;
+                    }
+                };
+
+                // Now after we informed the commit trigger transaction that all went well
+                // so far we send and confirm the actual transaction to commit the account state.
+                if let Err(ref err) = manager
+                    .run_transactions_to_commit_specific_accounts(
+                        now,
+                        transactions,
+                    )
+                    .await
+                {
+                    use AccountsError::*;
+                    let context = match err {
+                        InvalidRpcUrl(msg)
+                        | FailedToGetLatestBlockhash(msg)
+                        | FailedToSendTransaction(msg) => {
+                            format!("{} ({:?})", msg, err)
+                        }
+                        _ => format!("{:?}", err),
+                    };
+                    // The trigger transaction already finished, so we cannot inform
+                    // it of the failure. The trigger issuer can find the transaction via its
+                    // signature and will see the issue.
+                    error!(
+                        "Failed to commit account '{}' due to '{}'",
+                        pubkey, context
+                    );
                 }
             }
         });
@@ -397,7 +506,7 @@ where
     /// and return the signatures of the transactions that were sent to the cluster.
     pub async fn commit_delegated(&self) -> AccountsResult<Vec<Signature>> {
         let now = get_epoch();
-        // 1. Find all accounts that are due to be committed let accounts_to_be_committed = self
+        // Find all accounts that are due to be committed let accounts_to_be_committed = self
         let accounts_to_be_committed = self
             .external_writable_accounts
             .read_accounts()
@@ -405,16 +514,20 @@ where
             .filter(|x| x.needs_commit(now))
             .map(|x| x.pubkey)
             .collect::<Vec<_>>();
-        self.commit_specific_accounts(now, accounts_to_be_committed)
+        let transactions = self
+            .create_transactions_to_commit_specific_accounts(
+                accounts_to_be_committed,
+            )
+            .await?;
+        self.run_transactions_to_commit_specific_accounts(now, transactions)
             .await
     }
 
-    async fn commit_specific_accounts(
+    async fn create_transactions_to_commit_specific_accounts(
         &self,
-        now: Duration,
         accounts_to_be_committed: Vec<Pubkey>,
-    ) -> AccountsResult<Vec<Signature>> {
-        // 2. Get current account states from internal account provider
+    ) -> AccountsResult<HashMap<Pubkey, CommitAccountInfo>> {
+        // Get current account states from internal account provider
         let mut account_states = HashMap::new();
         for pubkey in &accounts_to_be_committed {
             let account_state =
@@ -428,30 +541,64 @@ where
                 );
             }
         }
-
-        // 3. Commit the accounts and mark them as committed
-        let mut signatures = Vec::new();
+        // Get the transactions to commit each account
+        let mut transactions = HashMap::new();
         for (pubkey, state) in account_states {
-            let sig =
-                self.account_committer.commit_account(pubkey, state).await?;
-            // If the last committed state is the same as the current state
-            // then it wasn't committed.
-            // In that case we don't mark it as such in order to trigger commitment
-            // as soon as its state changes.
-            if let Some(sig) = sig {
-                signatures.push(sig);
-                if let Some(acc) =
-                    self.external_writable_accounts.read_accounts().get(&pubkey)
-                {
-                    acc.mark_as_committed(now);
-                } else {
-                    // This should never happen
-                    error!(
-                        "Account '{}' disappeared while being committed",
-                        pubkey
-                    );
+            let tx = self
+                .account_committer
+                .create_commit_account_transaction(pubkey, state.clone())
+                .await?;
+            let res = match tx {
+                Some(tx) => {
+                    CommitAccountInfo::Committed(CommitAccountTransaction {
+                        transaction: tx,
+                        commit_state_data: state,
+                    })
                 }
+                None => CommitAccountInfo::NotCommitted,
+            };
+            transactions.insert(pubkey, res);
+        }
+
+        Ok(transactions)
+    }
+
+    async fn run_transactions_to_commit_specific_accounts(
+        &self,
+        now: Duration,
+        transactions: HashMap<Pubkey, CommitAccountInfo>,
+    ) -> AccountsResult<Vec<Signature>> {
+        let mut signatures = Vec::with_capacity(transactions.len());
+        // Commit the accounts and mark them as committed
+        for (pubkey, info) in transactions {
+            use CommitAccountInfo::*;
+            let CommitAccountTransaction {
+                transaction,
+                commit_state_data,
+            } = match info {
+                Committed(info) => info,
+                // If the last committed state is the same as the current state
+                // then it isn't committed.
+                // In that case we also don't mark it as such in order to trigger
+                // commitment as soon as its state changes.
+                NotCommitted => continue,
+            };
+            let signature = self
+                .account_committer
+                .commit_account(pubkey, commit_state_data, transaction)
+                .await?;
+            if let Some(acc) =
+                self.external_writable_accounts.read_accounts().get(&pubkey)
+            {
+                acc.mark_as_committed(now);
+            } else {
+                // This should never happen
+                error!(
+                    "Account '{}' disappeared while being committed",
+                    pubkey
+                );
             }
+            signatures.push(signature);
         }
 
         Ok(signatures)

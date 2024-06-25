@@ -50,11 +50,11 @@ impl RemoteAccountCommitter {
 
 #[async_trait]
 impl AccountCommitter for RemoteAccountCommitter {
-    async fn commit_account(
+    async fn create_commit_account_transaction(
         &self,
         delegated_account: Pubkey,
         commit_state_data: AccountSharedData,
-    ) -> AccountsResult<Option<Signature>> {
+    ) -> AccountsResult<Option<Transaction>> {
         if let Some(committed_account) = self
             .commits
             .read()
@@ -75,6 +75,9 @@ impl AccountCommitter for RemoteAccountCommitter {
             commit_state_data.data().to_vec(),
         );
         let finalize_ix = finalize(committer, delegated_account, committer);
+        // NOTE: this is an async request that the transaction thread waits for to
+        // be completed. It's not ideal, but the only way to create the transaction
+        // and obtain its signature to be logged for the trigger commit.
         let latest_blockhash = self
             .rpc_client
             .get_latest_blockhash()
@@ -94,8 +97,16 @@ impl AccountCommitter for RemoteAccountCommitter {
             &[&self.committer_authority],
             latest_blockhash,
         );
+        Ok(Some(tx))
+    }
 
-        let tx_sig = tx.get_signature();
+    async fn commit_account(
+        &self,
+        delegated_account: Pubkey,
+        commit_state_data: AccountSharedData,
+        transaction: Transaction,
+    ) -> AccountsResult<Signature> {
+        let tx_sig = transaction.get_signature();
         debug!(
             "Committing account '{}' sig: {:?} to {}",
             delegated_account,
@@ -105,7 +116,7 @@ impl AccountCommitter for RemoteAccountCommitter {
         let signature = self
             .rpc_client
             .send_transaction_with_config(
-                &tx,
+                &transaction,
                 RpcSendTransactionConfig {
                     skip_preflight: true,
                     ..Default::default()
@@ -147,7 +158,7 @@ impl AccountCommitter for RemoteAccountCommitter {
             .expect("RwLock commits poisoned")
             .insert(delegated_account, commit_state_data);
 
-        Ok(Some(signature))
+        Ok(signature)
     }
 }
 

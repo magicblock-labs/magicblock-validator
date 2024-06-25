@@ -31,6 +31,9 @@ pub enum AccountsError {
     #[error("FailedToGetLatestBlockhash '{0}'")]
     FailedToGetLatestBlockhash(String),
 
-    #[error("FailedToSendAndConfirmTransaction '{0}'")]
-    FailedToSendAndConfirmTransaction(String),
+    #[error("FailedToSendTransaction '{0}'")]
+    FailedToSendTransaction(String),
+
+    #[error("FailedToConfirmTransaction '{0}'")]
+    FailedToConfirmTransaction(String),
 }

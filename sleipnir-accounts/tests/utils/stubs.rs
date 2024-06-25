@@ -23,7 +23,7 @@ use solana_sdk::{
     account::{Account, AccountSharedData},
     pubkey::Pubkey,
     signature::Signature,
-    transaction::{SanitizedTransaction, VersionedTransaction},
+    transaction::{SanitizedTransaction, Transaction, VersionedTransaction},
 };
 
 // -----------------
@@ -150,16 +150,25 @@ impl AccountCommitterStub {
 
 #[async_trait]
 impl AccountCommitter for AccountCommitterStub {
+    async fn create_commit_account_transaction(
+        &self,
+        _delegated_account: Pubkey,
+        _commit_state_data: AccountSharedData,
+    ) -> AccountsResult<Option<Transaction>> {
+        Ok(Some(Transaction::default()))
+    }
+
     async fn commit_account(
         &self,
         delegated_account: Pubkey,
-        committed_state_data: AccountSharedData,
-    ) -> AccountsResult<Option<Signature>> {
+        commit_state_data: AccountSharedData,
+        _transaction: Transaction,
+    ) -> AccountsResult<Signature> {
         self.committed_accounts
             .write()
             .unwrap()
-            .insert(delegated_account, committed_state_data);
-        Ok(Some(Signature::new_unique()))
+            .insert(delegated_account, commit_state_data);
+        Ok(Signature::new_unique())
     }
 }
 

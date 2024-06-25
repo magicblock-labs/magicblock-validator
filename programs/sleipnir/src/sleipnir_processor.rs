@@ -20,7 +20,7 @@ use solana_sdk::{
 };
 
 use crate::{
-    commit_sender::send_commit,
+    commit_sender::{send_commit, TriggerCommitOutcome},
     errors::MagicError,
     sleipnir_instruction::{
         AccountModificationForInstruction, SleipnirError, SleipnirInstruction,
@@ -306,8 +306,8 @@ fn trigger_commit(
         transaction_context.get_key_of_account_at_index(committee_idx)?
     };
 
-    ic_msg!(invoke_context, "TriggerCommit: account '{}'", pubkey);
-    send_commit(*pubkey)
+    ic_msg!(invoke_context, "TriggerCommit: '{}'", pubkey);
+    let outcome = send_commit(*pubkey)
         // Handle error related to sending the request
         .map_err(|err| {
             ic_msg!(
@@ -340,6 +340,19 @@ fn trigger_commit(
             InstructionError::from(err.error)
         })?;
 
+    match outcome {
+        TriggerCommitOutcome::Committed(sig) => {
+            // NOTE: this msg is used by clients to parse the signature of the
+            // transaction that is sent to chain in order to track its outcome
+            // Therefore this is part of our API and should not be changed.
+            ic_msg!(invoke_context, "CommitTransactionSignature: {:?}", sig);
+        }
+        TriggerCommitOutcome::NotCommitted => {
+            // NOTE: this signals that no commit was performed and is also part
+            // of our API.
+            ic_msg!(invoke_context, "NotCommitted");
+        }
+    }
     Ok(())
 }
 

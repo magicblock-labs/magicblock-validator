@@ -6,7 +6,13 @@ use tokio::sync::{mpsc, oneshot};
 
 use crate::errors::{MagicError, MagicErrorWithContext};
 
-pub type TriggerCommitResult = Result<Signature, MagicErrorWithContext>;
+#[derive(Debug)]
+pub enum TriggerCommitOutcome {
+    Committed(Signature),
+    NotCommitted,
+}
+pub type TriggerCommitResult =
+    Result<TriggerCommitOutcome, MagicErrorWithContext>;
 pub type TriggerCommitCallback = oneshot::Sender<TriggerCommitResult>;
 pub type TriggerCommitSender = mpsc::Sender<(Pubkey, TriggerCommitCallback)>;
 pub type TriggerCommitReceiver =
@@ -77,6 +83,7 @@ pub fn send_commit(
 /// The send/recv messages are routed to each registered test.
 #[cfg(feature = "dev-context-only-utils")]
 mod test_utils {
+    use log::*;
     use std::{collections::HashSet, sync::RwLock};
 
     use super::*;
@@ -103,9 +110,11 @@ mod test_utils {
                         .contains(&current_id)
                     {
                         let _ = current_sender
-                            .send(Ok(Signature::default()))
+                            // TODO: @@@ Used to send the default signature
+                            // verify this adaptation works
+                            .send(Ok(TriggerCommitOutcome::NotCommitted))
                             .map_err(|err| {
-                                eprintln!(
+                                error!(
                                     "Failed to send commit result: {:?}",
                                     err
                                 );
@@ -121,7 +130,7 @@ mod test_utils {
                                 ),
                             )))
                             .map_err(|err| {
-                                eprintln!(
+                                error!(
                                     "Failed to send commit error: {:?}",
                                     err
                                 );
