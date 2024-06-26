@@ -3,13 +3,8 @@ use std::str::FromStr;
 use sleipnir_core::magic_program;
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
-use solana_sdk::{
-    instruction::{AccountMeta, Instruction},
-    pubkey::Pubkey,
-    signer::Signer,
-    transaction::Transaction,
-};
-use triggercommit_client::{verify, TriggerCommitTestContext};
+use solana_sdk::{pubkey::Pubkey, signer::Signer, transaction::Transaction};
+use triggercommit_client::{instructions, verify, TriggerCommitTestContext};
 
 pub fn main() {
     let TriggerCommitTestContext {
@@ -19,7 +14,7 @@ pub fn main() {
         client,
         blockhash,
     } = TriggerCommitTestContext::new();
-    let ix = create_trigger_commit_ix(
+    let ix = instructions::trigger_commit(
         Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
         payer.pubkey(),
         committee.pubkey(),
@@ -48,21 +43,4 @@ pub fn main() {
 
     // Used to verify that test passed
     println!("Success");
-}
-
-fn create_trigger_commit_ix(
-    magic_program_id: Pubkey,
-    payer: Pubkey,
-    committee: Pubkey,
-) -> Instruction {
-    let instruction_data = vec![1, 0, 0, 0];
-    let account_metas = vec![
-        AccountMeta::new(payer, true),
-        AccountMeta::new(committee, false),
-    ];
-    Instruction::new_with_bytes(
-        magic_program_id,
-        &instruction_data,
-        account_metas,
-    )
 }

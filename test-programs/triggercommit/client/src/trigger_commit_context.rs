@@ -99,6 +99,7 @@ impl TriggerCommitTestContext {
                 ) {
                 Ok(status) => status,
                 Err(_) => {
+                    sleep(Duration::from_millis(200));
                     continue;
                 }
             };

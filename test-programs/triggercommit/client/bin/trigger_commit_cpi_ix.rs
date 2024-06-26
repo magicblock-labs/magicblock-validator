@@ -21,6 +21,7 @@ pub fn main() {
         // Work around the different solana_sdk versions by creating pubkey from str
         Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
     );
+
     let tx = Transaction::new_signed_with_payer(
         &[ix],
         Some(&payer.pubkey()),

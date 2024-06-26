@@ -1,12 +1,17 @@
-use std::{path::Path, process, thread::sleep, time::Duration};
+use std::{net::TcpStream, path::Path, process, thread::sleep, time::Duration};
 
 pub fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
 
     // Start validator via `cargo run --release  -- test-programs/triggercommit/triggercommit-conf.toml
-    let mut validator = start_validator_with_config(
+    let mut validator = match start_validator_with_config(
         "test-programs/triggercommit/triggercommit-conf.toml",
-    );
+    ) {
+        Some(validator) => validator,
+        None => {
+            panic!("Failed to start validator properly");
+        }
+    };
 
     // Wait for validator to come up (TODO: improve by detecting RPC is listening)
     sleep(Duration::from_secs(2));
@@ -52,18 +57,48 @@ fn run_bin(manifest_dir: String, bin_name: &str) -> process::Output {
         .unwrap_or_else(|_| panic!("Failed to start '{}'", bin_name))
 }
 
-fn start_validator_with_config(config_path: &str) -> process::Child {
+fn start_validator_with_config(config_path: &str) -> Option<process::Child> {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let workspace_dir = Path::new(&manifest_dir).join("..").join("..");
     let root_dir = Path::new(&workspace_dir).join("..");
 
-    // Start validator via `cargo run --release  -- test-programs/triggercommit/triggercommit-conf.toml
-    process::Command::new("cargo")
+    // First build so that the validator can start fast
+    let build_res = process::Command::new("cargo")
+        .arg("build")
+        // TODO: @@@ need to run validator in release mode as otherwise for
+        // reasons I don't fully understand the trigger_commit_cpi_instruction
+        // send fails with `source: hyper::Error(IncompleteMessage)`
+        .arg("--release")
+        .current_dir(root_dir.clone())
+        .output();
+
+    if build_res.map_or(false, |output| !output.status.success()) {
+        eprintln!("Failed to build validator");
+        return None;
+    }
+
+    // Start validator via `cargo run -- test-programs/triggercommit/triggercommit-conf.toml
+    let mut validator = process::Command::new("cargo")
         .arg("run")
         .arg("--release")
         .arg("--")
         .arg(config_path)
         .current_dir(root_dir)
         .spawn()
-        .expect("Failed to start validator")
+        .expect("Failed to start validator");
+
+    // Wait until the validator is listening on 0.0.0.0:8899
+    let mut count = 0;
+    loop {
+        if TcpStream::connect("0.0.0.0:8899").is_ok() {
+            break Some(validator);
+        }
+        count += 1;
+        if count >= 5 * 5 {
+            eprintln!("Validator RPC failed to listen");
+            validator.kill().expect("Failed to kill validator");
+            return None;
+        }
+        sleep(Duration::from_millis(200));
+    }
 }

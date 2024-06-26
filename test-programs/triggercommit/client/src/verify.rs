@@ -18,8 +18,7 @@ pub fn commit_to_chain_failed_with_invalid_account_owner(
             (chain_sig, logs)
         }
         Err(err) => {
-            eprintln!("{:?}", err);
-            return;
+            panic!("{:?}", err);
         }
     };
     eprintln!("Ephemeral logs: ");
