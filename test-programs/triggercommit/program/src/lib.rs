@@ -7,7 +7,6 @@ use solana_program::{
     program::invoke,
     program_error::ProgramError,
     pubkey::Pubkey,
-    system_instruction,
 };
 pub mod api;
 

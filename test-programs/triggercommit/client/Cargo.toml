@@ -18,3 +18,7 @@ path = "bin/trigger_commit_cpi_ix.rs"
 [[bin]]
 name = "trigger-commit-direct"
 path = "bin/trigger_commit_direct.rs"
+
+[[bin]]
+name = "run-trigger-commit-tests"
+path = "bin/run_trigger_commit_tests.rs"

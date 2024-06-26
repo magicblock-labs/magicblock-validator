@@ -42,4 +42,7 @@ pub fn main() {
     );
 
     verify::commit_to_chain_failed_with_invalid_account_owner(res, commitment);
+
+    // Used to verify that test passed
+    println!("Success");
 }
