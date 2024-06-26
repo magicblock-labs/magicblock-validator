@@ -297,7 +297,7 @@ fn trigger_commit(
             .unwrap()
     };
 
-    ic_msg!(invoke_context, "TriggerCommit: '{}'", pubkey);
+    ic_msg!(invoke_context, "TriggerCommit: {}", pubkey);
     let outcome = send_commit(*pubkey)
         // Handle error related to sending the request
         .map_err(|err| {
