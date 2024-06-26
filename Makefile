@@ -6,7 +6,9 @@ $(if $(shell command -v cargo-nextest 2> /dev/null),,$(eval CARGO_TEST=test))
 $(if $(shell command -v cargo-nextest 2> /dev/null),,$(eval CARGO_TEST_NOCAP=test -- --nocapture))
 
 test:
+	$(MAKE) -C $(DIR)/test-programs && \
 	cargo $(CARGO_TEST)
+
 
 test-log:
 	cargo $(CARGO_TEST_NOCAP)
@@ -51,6 +53,7 @@ lint:
 	cargo clippy --all-targets -- -D warnings -A unexpected_cfgs
 
 ci-test:
+	$(MAKE) -C $(DIR)/test-programs && \
 	cargo $(CARGO_TEST_NOCAP)
 
 ci-fmt:
