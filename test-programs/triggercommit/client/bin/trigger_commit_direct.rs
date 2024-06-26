@@ -46,7 +46,54 @@ pub fn main() {
             ..Default::default()
         },
     );
-    eprintln!("{:?}", res);
+
+    let ctx = TriggerCommitTestContext::new();
+    let (chain_sig, ephem_logs) = match res {
+        Ok(sig) => {
+            let logs =
+                ctx.fetch_logs(sig, None).expect("Failed to extract logs");
+            let chain_sig = ctx.extract_chain_transaction_signature(&logs);
+            (chain_sig, logs)
+        }
+        Err(err) => {
+            eprintln!("{:?}", err);
+            return;
+        }
+    };
+    eprintln!("Ephemeral logs: ");
+    eprintln!("{:#?}", ephem_logs);
+
+    let chain_sig = chain_sig.unwrap_or_else(|| {
+        panic!(
+            "Chain transaction signature not found in logs, {:#?}",
+            ephem_logs
+        )
+    });
+
+    let devnet_client = RpcClient::new_with_commitment(
+        "https://api.devnet.solana.com".to_string(),
+        commitment,
+    );
+
+    // Wait for tx on devnet to confirm and then get its logs
+    let chain_logs = match ctx
+        .confirm_transaction(&chain_sig, Some(&devnet_client))
+    {
+        Ok(res) => {
+            eprintln!("Chain transaction confirmed with success: '{:?}'", res);
+            ctx.fetch_logs(chain_sig, Some(&devnet_client))
+        }
+        Err(err) => panic!("Chain transaction failed to confirm: {:?}", err),
+    };
+
+    eprintln!("Chain logs: ");
+    eprintln!("{:#?}", chain_logs);
+
+    assert!(chain_logs.is_some());
+    assert!(chain_logs
+        .unwrap()
+        .into_iter()
+        .any(|log| { log.contains("failed: Invalid account owner") }));
 }
 
 fn create_trigger_commit_ix(
