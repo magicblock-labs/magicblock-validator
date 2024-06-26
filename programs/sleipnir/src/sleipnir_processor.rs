@@ -260,27 +260,27 @@ fn trigger_commit(
     invoke_context: &InvokeContext,
     transaction_context: &TransactionContext,
 ) -> Result<(), InstructionError> {
-    // Payer is the first account and the program and committee accounts come after
+    // Payer is the first account committee is second in the instruction accounts
     let pubkey = {
         let ix_ctx = transaction_context.get_current_instruction_context()?;
-        let number_of_accounts = ix_ctx.get_number_of_instruction_accounts();
-        if number_of_accounts < 2 {
+        let number_of_ix_accounts = ix_ctx.get_number_of_instruction_accounts();
+        if number_of_ix_accounts < 2 {
             ic_msg!(
                 invoke_context,
                 "TriggerCommit ERR: not enough accounts to trigger commit ({}), need payer and account to commit",
-                number_of_accounts
+                number_of_ix_accounts
             );
             return Err(InstructionError::NotEnoughAccountKeys);
         }
-        if number_of_accounts > 2 {
+        if number_of_ix_accounts > 2 {
             ic_msg!(
                 invoke_context,
                 "TriggerCommit ERR: too many accounts to trigger commit ({}), need payer and account to commit only",
-                number_of_accounts
+                number_of_ix_accounts
             );
             return Err(MagicError::TooManyAccountsProvided.into());
         }
-        let program_idx = transaction_context
+        transaction_context
             .find_index_of_program_account(&crate::id())
             .ok_or_else(|| {
                 ic_msg!(
@@ -289,21 +289,12 @@ fn trigger_commit(
                 );
                 InstructionError::UnsupportedProgramId
             })?;
-        // SAFETY: we ensured above that there are exactly 3 accounts and the first account
-        // is always the payer, so the program account is either the second or third account
-        let committee_idx = match program_idx {
-            0 => {
-                ic_msg!(
-                    invoke_context,
-                    "TriggerCommit ERR: program key found in payer position"
-                );
-                return Err(MagicError::ProgramCannotBePayer.into());
-            }
-            1 => 2,
-            2 => 1,
-            _ => unreachable!("We verified exactly three accounts"),
-        };
-        transaction_context.get_key_of_account_at_index(committee_idx)?
+        // SAFETY: we ensured above that there are exactly 2 accounts
+        let committee_idx =
+            ix_ctx.get_index_of_instruction_account_in_transaction(1)?;
+        transaction_context
+            .get_key_of_account_at_index(committee_idx)
+            .unwrap()
     };
 
     ic_msg!(invoke_context, "TriggerCommit: '{}'", pubkey);
