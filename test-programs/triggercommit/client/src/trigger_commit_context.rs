@@ -1,9 +1,7 @@
 use std::{str::FromStr, thread::sleep, time::Duration};
 
 use solana_rpc_client::rpc_client::RpcClient;
-use solana_rpc_client_api::{
-    config::RpcTransactionConfig, response::RpcResult,
-};
+use solana_rpc_client_api::config::RpcTransactionConfig;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
     hash::Hash,
@@ -18,6 +16,12 @@ pub struct TriggerCommitTestContext {
     pub commitment: CommitmentConfig,
     pub client: RpcClient,
     pub blockhash: Hash,
+}
+
+impl Default for TriggerCommitTestContext {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TriggerCommitTestContext {

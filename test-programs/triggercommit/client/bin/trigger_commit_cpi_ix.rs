@@ -4,11 +4,8 @@ use sleipnir_core::magic_program;
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{pubkey::Pubkey, signer::Signer, transaction::Transaction};
+use triggercommit_client::{verify, TriggerCommitTestContext};
 use triggercommit_program::api::trigger_commit_cpi_instruction;
-
-use crate::utils::TriggerCommitTestContext;
-
-mod utils;
 
 pub fn main() {
     let TriggerCommitTestContext {
@@ -43,5 +40,6 @@ pub fn main() {
             ..Default::default()
         },
     );
-    eprintln!("{:?}", res);
+
+    verify::commit_to_chain_failed_with_invalid_account_owner(res, commitment);
 }
