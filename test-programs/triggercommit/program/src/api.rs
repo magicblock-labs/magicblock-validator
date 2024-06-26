@@ -12,7 +12,7 @@ pub fn trigger_commit_cpi_instruction(
     let account_metas = vec![
         AccountMeta::new(payer, true),
         AccountMeta::new(recvr, false),
-        AccountMeta::new(program_id, false),
+        AccountMeta::new_readonly(program_id, false),
     ];
     let program_id = crate::id();
     Instruction::new_with_bytes(program_id, &instruction_data, account_metas)
