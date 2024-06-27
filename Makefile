@@ -6,8 +6,8 @@ $(if $(shell command -v cargo-nextest 2> /dev/null),,$(eval CARGO_TEST=test))
 $(if $(shell command -v cargo-nextest 2> /dev/null),,$(eval CARGO_TEST_NOCAP=test -- --nocapture))
 
 test:
-	$(MAKE) -C $(DIR)/test-programs && \
-	cargo $(CARGO_TEST)
+	cargo $(CARGO_TEST) && \
+	$(MAKE) -C $(DIR)/test-programs
 
 
 test-log:
@@ -53,8 +53,8 @@ lint:
 	cargo clippy --all-targets -- -D warnings -A unexpected_cfgs
 
 ci-test:
-	$(MAKE) -C $(DIR)/test-programs && \
-	cargo $(CARGO_TEST_NOCAP)
+	cargo $(CARGO_TEST_NOCAP) && \
+	$(MAKE) -C $(DIR)/test-programs
 
 ci-fmt:
 	cargo +nightly fmt --check -- --config-path rustfmt-nightly.toml
