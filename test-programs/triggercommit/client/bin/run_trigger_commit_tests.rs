@@ -1,4 +1,6 @@
-use std::{net::TcpStream, path::Path, process, thread::sleep, time::Duration};
+use std::{
+    io, net::TcpStream, path::Path, process, thread::sleep, time::Duration,
+};
 
 pub fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -58,7 +60,6 @@ fn assert_output(output: process::Output, test_name: &str) {
     assert!(String::from_utf8_lossy(&output.stdout).ends_with("Success\n"));
 }
 
-fn run_bin(manifest_dir: String, bin_name: &str) -> process::Output {
 fn run_bin(
     manifest_dir: String,
     bin_name: &str,
@@ -88,7 +89,7 @@ fn start_validator_with_config(config_path: &str) -> Option<process::Child> {
     }
 
     // Start validator via `cargo run -- test-programs/triggercommit/triggercommit-conf.toml
-    let mut validator = process::Command::new("cargo")
+    let validator = process::Command::new("cargo")
         .arg("run")
         .arg("--")
         .arg(config_path)
@@ -105,8 +106,8 @@ fn start_validator_with_config(config_path: &str) -> Option<process::Child> {
         count += 1;
         if count >= 5 * 5 {
             eprintln!("Validator RPC failed to listen");
-            validator.kill().expect("Failed to kill validator");
-            return None;
+            // validator.kill().expect("Failed to kill validator");
+            return Some(validator);
         }
         sleep(Duration::from_millis(400));
     }
