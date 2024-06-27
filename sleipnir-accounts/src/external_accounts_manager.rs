@@ -137,7 +137,7 @@ impl
 
     pub fn install_manual_commit_trigger(
         manager: &Arc<Self>,
-        mut rcvr: TriggerCommitReceiver,
+        rcvr: TriggerCommitReceiver,
     ) {
         fn communicate_trigger_success(
             tx: TriggerCommitCallback,
@@ -159,8 +159,9 @@ impl
         }
 
         let manager = manager.clone();
+        // TODO: @@@ thread?
         tokio::spawn(async move {
-            while let Some((pubkey, tx)) = rcvr.recv().await {
+            while let Ok((pubkey, tx)) = rcvr.recv() {
                 let now = get_epoch();
                 let (transactions, signatures) = match manager
                     .create_transactions_to_commit_specific_accounts(vec![

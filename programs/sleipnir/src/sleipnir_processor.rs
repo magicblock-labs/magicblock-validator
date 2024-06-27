@@ -309,7 +309,7 @@ fn trigger_commit(
             );
             InstructionError::from(err.error)
         })?
-        .blocking_recv()
+        .recv()
         // Handle error related to receiving request confirmation
         .map_err(|err| {
             ic_msg!(

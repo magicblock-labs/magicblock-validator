@@ -2,7 +2,8 @@ use std::sync::RwLock;
 
 use lazy_static::lazy_static;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
-use tokio::sync::{mpsc, oneshot};
+
+use crossbeam_channel::bounded;
 
 use crate::errors::{MagicError, MagicErrorWithContext};
 
@@ -13,10 +14,11 @@ pub enum TriggerCommitOutcome {
 }
 pub type TriggerCommitResult =
     Result<TriggerCommitOutcome, MagicErrorWithContext>;
-pub type TriggerCommitCallback = oneshot::Sender<TriggerCommitResult>;
-pub type TriggerCommitSender = mpsc::Sender<(Pubkey, TriggerCommitCallback)>;
+pub type TriggerCommitCallback = crossbeam_channel::Sender<TriggerCommitResult>;
+pub type TriggerCommitSender =
+    crossbeam_channel::Sender<(Pubkey, TriggerCommitCallback)>;
 pub type TriggerCommitReceiver =
-    mpsc::Receiver<(Pubkey, TriggerCommitCallback)>;
+    crossbeam_channel::Receiver<(Pubkey, TriggerCommitCallback)>;
 
 enum InitChannelResult {
     AlreadyInitialized,
@@ -38,7 +40,7 @@ fn ensure_commit_channel(buffer: usize) -> InitChannelResult {
     if commit_sender_lock.is_some() {
         return AlreadyInitialized;
     }
-    let (commit_sender, commit_receiver) = mpsc::channel(buffer);
+    let (commit_sender, commit_receiver) = bounded(buffer);
     commit_sender_lock.replace(commit_sender);
     InitializedReceiver(commit_receiver)
 }
@@ -55,7 +57,10 @@ pub fn init_commit_channel(buffer: usize) -> TriggerCommitReceiver {
 
 pub fn send_commit(
     current_id: Pubkey,
-) -> Result<oneshot::Receiver<TriggerCommitResult>, MagicErrorWithContext> {
+) -> Result<
+    crossbeam_channel::Receiver<TriggerCommitResult>,
+    MagicErrorWithContext,
+> {
     let commit_sender_lock =
         COMMIT_SENDER.read().expect("RwLock COMMIT_SENDER poisoned");
 
@@ -66,9 +71,9 @@ pub fn send_commit(
         )
     })?;
 
-    let (current_sender, current_receiver) = oneshot::channel();
+    let (current_sender, current_receiver) = bounded(1);
     commit_sender
-        .blocking_send((current_id, current_sender))
+        .send((current_id, current_sender))
         .map_err(|err| {
             MagicErrorWithContext::new(
                 MagicError::InternalError,
@@ -97,12 +102,13 @@ mod test_utils {
     /// spawn one tokio task handling the incoming commits which get routed by id.
     pub fn ensure_routing_commit_channel(buffer: usize) {
         use InitChannelResult::*;
-        if let InitializedReceiver(mut commit_receiver) =
+        if let InitializedReceiver(commit_receiver) =
             ensure_commit_channel(buffer)
         {
+            // TODO: @@@ thread?
             tokio::task::spawn(async move {
-                while let Some((current_id, current_sender)) =
-                    commit_receiver.recv().await
+                while let Ok((current_id, current_sender)) =
+                    commit_receiver.recv()
                 {
                     if COMMIT_ROUTING_KEYS
                         .read()
