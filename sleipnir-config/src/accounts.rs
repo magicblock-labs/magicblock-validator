@@ -7,7 +7,7 @@ use url::Url;
 // -----------------
 // AccountsConfig
 // -----------------
-#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct AccountsConfig {
     #[serde(default)]
     pub remote: RemoteConfig,
@@ -40,7 +40,7 @@ impl Default for AccountsConfig {
 // -----------------
 // RemoteConfig
 // -----------------
-#[derive(Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum RemoteConfig {
     #[default]
@@ -82,7 +82,7 @@ where
 // -----------------
 // CloneStrategy
 // -----------------
-#[derive(Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CloneStrategy {
     #[serde(default)]
     pub readonly: ReadonlyMode,
@@ -90,7 +90,7 @@ pub struct CloneStrategy {
     pub writable: WritableMode,
 }
 
-#[derive(Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum ReadonlyMode {
     All,
@@ -100,7 +100,7 @@ pub enum ReadonlyMode {
     None,
 }
 
-#[derive(Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub enum WritableMode {
     All,
@@ -115,7 +115,7 @@ pub enum WritableMode {
 // This is the lowest we found to pass the transactions through mainnet fairly
 // consistently
 const COMPUTE_UNIT_PRICE: u64 = 1_000_000; // 1 Lamport
-#[derive(Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct CommitStrategy {
     #[serde(default = "default_frequency_millis")]
     pub frequency_millis: u64,
@@ -156,7 +156,7 @@ impl Default for CommitStrategy {
 // -----------------
 // Payer
 // -----------------
-#[derive(Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct Payer {
     /// The payer init balance in lamports.
     /// Read it via [Self::try_init_lamports].

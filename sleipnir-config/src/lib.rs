@@ -13,7 +13,7 @@ pub use program::*;
 pub use rpc::*;
 pub use validator::*;
 
-#[derive(Debug, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct SleipnirConfig {
     #[serde(
         default,
