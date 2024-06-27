@@ -15,11 +15,25 @@ pub fn main() {
 
     // Run cargo run --bin trigger-commit-direct
     let trigger_commit_direct_output =
-        run_bin(manifest_dir.clone(), "trigger-commit-direct");
+        match run_bin(manifest_dir.clone(), "trigger-commit-direct") {
+            Ok(output) => output,
+            Err(err) => {
+                eprintln!("Failed to run trigger-commit-direct: {:?}", err);
+                validator.kill().expect("Failed to kill validator");
+                return;
+            }
+        };
 
     // Run cargo run --bin trigger-commit-cpi-ix
     let trigger_commit_cpi_output =
-        run_bin(manifest_dir.clone(), "trigger-commit-cpi-ix");
+        match run_bin(manifest_dir.clone(), "trigger-commit-cpi-ix") {
+            Ok(output) => output,
+            Err(err) => {
+                eprintln!("Failed to run trigger-commit-cpi: {:?}", err);
+                validator.kill().expect("Failed to kill validator");
+                return;
+            }
+        };
 
     // Kill Validator
     validator.kill().expect("Failed to kill validator");
@@ -45,13 +59,16 @@ fn assert_output(output: process::Output, test_name: &str) {
 }
 
 fn run_bin(manifest_dir: String, bin_name: &str) -> process::Output {
+fn run_bin(
+    manifest_dir: String,
+    bin_name: &str,
+) -> io::Result<process::Output> {
     process::Command::new("cargo")
         .arg("run")
         .arg("--bin")
         .arg(bin_name)
         .current_dir(manifest_dir.clone())
         .output()
-        .unwrap_or_else(|_| panic!("Failed to start '{}'", bin_name))
 }
 
 fn start_validator_with_config(config_path: &str) -> Option<process::Child> {
