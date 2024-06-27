@@ -105,7 +105,7 @@ mod test_utils {
         if let InitializedReceiver(commit_receiver) =
             ensure_commit_channel(buffer)
         {
-            tokio::task::spawn(async move {
+            std::thread::spawn(move || {
                 while let Ok((current_id, current_sender)) =
                     commit_receiver.recv()
                 {
