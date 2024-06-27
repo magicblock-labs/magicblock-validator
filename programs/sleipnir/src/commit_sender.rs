@@ -1,9 +1,8 @@
 use std::sync::RwLock;
 
+use crossbeam_channel::bounded;
 use lazy_static::lazy_static;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
-
-use crossbeam_channel::bounded;
 
 use crate::errors::{MagicError, MagicErrorWithContext};
 
@@ -88,8 +87,9 @@ pub fn send_commit(
 /// The send/recv messages are routed to each registered test.
 #[cfg(feature = "dev-context-only-utils")]
 mod test_utils {
-    use log::*;
     use std::{collections::HashSet, sync::RwLock};
+
+    use log::*;
 
     use super::*;
 
