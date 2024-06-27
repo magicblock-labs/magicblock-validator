@@ -65,10 +65,6 @@ fn start_validator_with_config(config_path: &str) -> Option<process::Child> {
     // First build so that the validator can start fast
     let build_res = process::Command::new("cargo")
         .arg("build")
-        // TODO: @@@ need to run validator in release mode as otherwise for
-        // reasons I don't fully understand the trigger_commit_cpi_instruction
-        // send fails with `source: hyper::Error(IncompleteMessage)`
-        .arg("--release")
         .current_dir(root_dir.clone())
         .output();
 
@@ -80,7 +76,6 @@ fn start_validator_with_config(config_path: &str) -> Option<process::Child> {
     // Start validator via `cargo run -- test-programs/triggercommit/triggercommit-conf.toml
     let mut validator = process::Command::new("cargo")
         .arg("run")
-        .arg("--release")
         .arg("--")
         .arg(config_path)
         .current_dir(root_dir)

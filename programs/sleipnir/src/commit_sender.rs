@@ -105,7 +105,6 @@ mod test_utils {
         if let InitializedReceiver(commit_receiver) =
             ensure_commit_channel(buffer)
         {
-            // TODO: @@@ thread?
             tokio::task::spawn(async move {
                 while let Ok((current_id, current_sender)) =
                     commit_receiver.recv()
@@ -116,8 +115,6 @@ mod test_utils {
                         .contains(&current_id)
                     {
                         let _ = current_sender
-                            // TODO: @@@ Used to send the default signature
-                            // verify this adaptation works
                             .send(Ok(TriggerCommitOutcome::NotCommitted))
                             .map_err(|err| {
                                 error!(

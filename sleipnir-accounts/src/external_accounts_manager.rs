@@ -159,7 +159,6 @@ impl
         }
 
         let manager = manager.clone();
-        // TODO: @@@ thread?
         tokio::spawn(async move {
             while let Ok((pubkey, tx)) = rcvr.recv() {
                 let now = get_epoch();
