@@ -85,9 +85,9 @@ impl TriggerCommitTestContext {
         sig: Signature,
         rpc_client: Option<&RpcClient>,
     ) -> Option<Vec<String>> {
-        // Try this up to 5 times since devnet here returns the version response instead of
+        // Try this up to 10 times since devnet here returns the version response instead of
         // the EncodedConfirmedTransactionWithStatusMeta at times
-        for _ in 0..5 {
+        for _ in 0..10 {
             let status = match rpc_client
                 .unwrap_or(&self.client)
                 .get_transaction_with_config(
@@ -99,7 +99,7 @@ impl TriggerCommitTestContext {
                 ) {
                 Ok(status) => status,
                 Err(_) => {
-                    sleep(Duration::from_millis(200));
+                    sleep(Duration::from_millis(400));
                     continue;
                 }
             };
