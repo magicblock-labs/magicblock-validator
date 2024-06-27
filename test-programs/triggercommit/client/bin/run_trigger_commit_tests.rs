@@ -13,14 +13,11 @@ pub fn main() {
         }
     };
 
-    // Wait for validator to come up (TODO: improve by detecting RPC is listening)
-    sleep(Duration::from_secs(2));
-
     // Run cargo run --bin trigger-commit-direct
     let trigger_commit_direct_output =
         run_bin(manifest_dir.clone(), "trigger-commit-direct");
 
-    // Run cargo run --bin trigger-commit-direct
+    // Run cargo run --bin trigger-commit-cpi-ix
     let trigger_commit_cpi_output =
         run_bin(manifest_dir.clone(), "trigger-commit-cpi-ix");
 

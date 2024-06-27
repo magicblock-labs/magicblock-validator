@@ -14,4 +14,3 @@ sigverify = true
 [[program]]
 id = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY"
 path = "elfs/triggercommit_program.so"
-# path = "../../../../demos/magic-worm/target/deploy/program_solana.so"

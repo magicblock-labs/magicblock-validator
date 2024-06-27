@@ -162,20 +162,20 @@ impl
         tokio::spawn(async move {
             while let Ok((pubkey, tx)) = rcvr.recv() {
                 let now = get_epoch();
-                let (transactions, signatures) = match manager
+                let (commit_infos, signatures) = match manager
                     .create_transactions_to_commit_specific_accounts(vec![
                         pubkey,
                     ])
                     .await
                 {
-                    Ok(transactions) => {
-                        let sigs = transactions
+                    Ok(commit_infos) => {
+                        let sigs = commit_infos
                             .iter()
                             .flat_map(|(k, v)| {
                                 v.signature().map(|sig| (*k, sig))
                             })
                             .collect::<Vec<_>>();
-                        (transactions, sigs)
+                        (commit_infos, sigs)
                     }
                     Err(ref err) => {
                         use AccountsError::*;
@@ -203,7 +203,7 @@ impl
                     }
                 };
                 debug_assert!(
-                    transactions.len() <= 1,
+                    commit_infos.len() <= 1,
                     "Manual trigger creates one transaction only"
                 );
                 match signatures.into_iter().next() {
@@ -234,7 +234,7 @@ impl
                 if let Err(ref err) = manager
                     .run_transactions_to_commit_specific_accounts(
                         now,
-                        transactions,
+                        commit_infos,
                     )
                     .await
                 {
@@ -510,12 +510,12 @@ where
             .filter(|x| x.needs_commit(now))
             .map(|x| x.pubkey)
             .collect::<Vec<_>>();
-        let transactions = self
+        let commit_infos = self
             .create_transactions_to_commit_specific_accounts(
                 accounts_to_be_committed,
             )
             .await?;
-        self.run_transactions_to_commit_specific_accounts(now, transactions)
+        self.run_transactions_to_commit_specific_accounts(now, commit_infos)
             .await
     }
 
@@ -538,7 +538,7 @@ where
             }
         }
         // Get the transactions to commit each account
-        let mut transactions = HashMap::new();
+        let mut commit_infos = HashMap::new();
         for (pubkey, state) in account_states {
             let tx = self
                 .account_committer
@@ -553,20 +553,20 @@ where
                 }
                 None => CommitAccountInfo::NotCommitted,
             };
-            transactions.insert(pubkey, res);
+            commit_infos.insert(pubkey, res);
         }
 
-        Ok(transactions)
+        Ok(commit_infos)
     }
 
     async fn run_transactions_to_commit_specific_accounts(
         &self,
         now: Duration,
-        transactions: HashMap<Pubkey, CommitAccountInfo>,
+        commmit_infos: HashMap<Pubkey, CommitAccountInfo>,
     ) -> AccountsResult<Vec<Signature>> {
-        let mut signatures = Vec::with_capacity(transactions.len());
+        let mut signatures = Vec::with_capacity(commmit_infos.len());
         // Commit the accounts and mark them as committed
-        for (pubkey, info) in transactions {
+        for (pubkey, info) in commmit_infos {
             use CommitAccountInfo::*;
             let CommitAccountTransaction {
                 transaction,
