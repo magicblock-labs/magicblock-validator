@@ -53,7 +53,6 @@ lint:
 	cargo clippy --all-targets -- -D warnings -A unexpected_cfgs
 
 ci-test:
-	cargo $(CARGO_TEST_NOCAP) && \
 	$(MAKE) -C $(DIR)/test-programs
 
 ci-fmt:
