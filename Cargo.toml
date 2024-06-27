@@ -202,6 +202,8 @@ test-case = "3.3.1"
 solana-accounts-db = { path = "./solana/accounts-db" }
 # This one we just copied in order to match the prost version
 solana-storage-proto = { path = "./solana/storage-proto" }
+# Version 0.1.0 which solana-account-decoder (and more) depend on was yanked from crates.io
+spl-token-group-interface = { git = "https://github.com/solana-labs/solana-program-library", rev = "a54425b", package = "spl-token-group-interface" }
 
 
 [patch.crates-io]
@@ -242,3 +244,4 @@ solana-storage-proto = { path = "./solana/storage-proto" }
 # to the compatible versions on github
 solana-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-program" }
 solana-zk-token-sdk = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-zk-token-sdk" }
+spl-token-group-interface = { git = "https://github.com/solana-labs/solana-program-library", rev = "a54425b", package = "spl-token-group-interface" }
