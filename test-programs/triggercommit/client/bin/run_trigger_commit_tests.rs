@@ -91,6 +91,6 @@ fn start_validator_with_config(config_path: &str) -> Option<process::Child> {
             validator.kill().expect("Failed to kill validator");
             return None;
         }
-        sleep(Duration::from_millis(200));
+        sleep(Duration::from_millis(400));
     }
 }
