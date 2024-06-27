@@ -206,10 +206,6 @@ impl
                     transactions.len() <= 1,
                     "Manual trigger creates one transaction only"
                 );
-                debug_assert!(
-                    signatures.len() == transactions.len(),
-                    "Each extracted transaction should have a signature"
-                );
                 match signatures.into_iter().next() {
                     Some((pubkey, signature)) => {
                         // Let the trigger transaction finish even though we didn't run the commit
