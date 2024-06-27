@@ -89,7 +89,7 @@ fn start_validator_with_config(config_path: &str) -> Option<process::Child> {
     }
 
     // Start validator via `cargo run -- test-programs/triggercommit/triggercommit-conf.toml
-    let validator = process::Command::new("cargo")
+    let mut validator = process::Command::new("cargo")
         .arg("run")
         .arg("--")
         .arg(config_path)
@@ -104,10 +104,11 @@ fn start_validator_with_config(config_path: &str) -> Option<process::Child> {
             break Some(validator);
         }
         count += 1;
-        if count >= 5 * 5 {
+        // 30 seconds
+        if count >= 75 {
             eprintln!("Validator RPC failed to listen");
-            // validator.kill().expect("Failed to kill validator");
-            return Some(validator);
+            validator.kill().expect("Failed to kill validator");
+            break None;
         }
         sleep(Duration::from_millis(400));
     }
