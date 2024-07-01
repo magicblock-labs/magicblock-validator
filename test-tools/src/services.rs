@@ -15,7 +15,7 @@ pub async fn is_devnet_up() -> bool {
 macro_rules! skip_if_devnet_down {
     () => {
         if !$crate::services::is_devnet_up().await {
-            warn!("Devnet is down, skipping test");
+            ::log::warn!("Devnet is down, skipping test");
             return;
         }
     };
