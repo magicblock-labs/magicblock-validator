@@ -25,6 +25,7 @@ async fn main() {
     console_subscriber::init();
 
     let (file, config) = load_config_from_arg();
+    let config = config.override_from_envs();
     match file {
         Some(file) => info!("Loading config from '{}'.", file),
         None => info!("Using default config. Override it by passing the path to a config file."),

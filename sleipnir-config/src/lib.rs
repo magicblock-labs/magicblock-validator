@@ -1,7 +1,7 @@
-use std::{fmt, fs, path::Path};
-
 use errors::{ConfigError, ConfigResult};
 use serde::{Deserialize, Serialize};
+use std::{env, fmt, fs, path::Path};
+use url::Url;
 
 mod accounts;
 pub mod errors;
@@ -98,6 +98,15 @@ impl SleipnirConfig {
             }
         }
         Ok(config)
+    }
+
+    pub fn override_from_envs(&self) -> SleipnirConfig {
+        let mut config = self.clone();
+        if let Ok(remote) = env::var("BASE_CLUSTER") {
+            config.accounts.remote =
+                RemoteConfig::Custom(Url::parse(&remote).unwrap());
+        }
+        config
     }
 }
 
