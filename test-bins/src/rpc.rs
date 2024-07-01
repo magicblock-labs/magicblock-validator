@@ -3,7 +3,7 @@ use sleipnir_api::{
     magic_validator::{MagicValidator, MagicValidatorConfig},
     InitGeyserServiceConfig,
 };
-use sleipnir_config::SleipnirConfig;
+use sleipnir_config::{GeyserGrpcConfig, SleipnirConfig};
 use sleipnir_ledger::Ledger;
 use solana_sdk::signature::Keypair;
 use tempfile::TempDir;
@@ -38,10 +38,11 @@ async fn main() {
         Ledger::open(ledger_path.path())
             .expect("Expected to be able to open database ledger")
     };
+    let geyser_grpc_config = config.geyser_grpc.clone();
     let config = MagicValidatorConfig {
         validator_config: config,
         ledger: Some(ledger),
-        init_geyser_service_config: init_geyser_config(),
+        init_geyser_service_config: init_geyser_config(geyser_grpc_config),
     };
 
     debug!("{:#?}", config);
@@ -81,7 +82,9 @@ fn load_config_from_arg() -> (Option<String>, SleipnirConfig) {
     }
 }
 
-fn init_geyser_config() -> InitGeyserServiceConfig {
+fn init_geyser_config(
+    grpc_config: GeyserGrpcConfig,
+) -> InitGeyserServiceConfig {
     let (cache_accounts, cache_transactions) =
         match std::env::var("GEYSER_CACHE_DISABLE") {
             Ok(val) => {
@@ -106,6 +109,7 @@ fn init_geyser_config() -> InitGeyserServiceConfig {
         cache_transactions,
         enable_account_notifications,
         enable_transaction_notifications,
+        geyser_grpc: grpc_config,
         ..Default::default()
     }
 }

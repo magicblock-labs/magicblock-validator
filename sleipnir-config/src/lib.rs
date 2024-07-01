@@ -5,10 +5,12 @@ use serde::{Deserialize, Serialize};
 
 mod accounts;
 pub mod errors;
+mod geyser_grpc;
 mod program;
 mod rpc;
 mod validator;
 pub use accounts::*;
+pub use geyser_grpc::*;
 pub use program::*;
 pub use rpc::*;
 pub use validator::*;
@@ -23,6 +25,8 @@ pub struct SleipnirConfig {
     pub accounts: AccountsConfig,
     #[serde(default)]
     pub rpc: RpcConfig,
+    #[serde(default)]
+    pub geyser_grpc: GeyserGrpcConfig,
     #[serde(default)]
     pub validator: ValidatorConfig,
     #[serde(default)]

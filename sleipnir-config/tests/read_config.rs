@@ -4,8 +4,8 @@ use std::{
 };
 
 use sleipnir_config::{
-    AccountsConfig, CommitStrategy, ProgramConfig, RpcConfig, SleipnirConfig,
-    ValidatorConfig,
+    AccountsConfig, CommitStrategy, GeyserGrpcConfig, ProgramConfig, RpcConfig,
+    SleipnirConfig, ValidatorConfig,
 };
 use solana_sdk::pubkey::Pubkey;
 use test_tools_core::paths::cargo_workspace_dir;
@@ -46,6 +46,10 @@ fn test_load_local_dev_with_programs_toml() {
             rpc: RpcConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                 port: 7799,
+            },
+            geyser_grpc: GeyserGrpcConfig {
+                addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                port: 11000,
             },
             validator: ValidatorConfig {
                 millis_per_slot: 14,

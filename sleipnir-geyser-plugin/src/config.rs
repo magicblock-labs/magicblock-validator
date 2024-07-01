@@ -53,7 +53,6 @@ impl Default for Config {
 #[derive(Debug, Clone)]
 pub struct ConfigGrpc {
     /// Address of Grpc service.
-    /// TODO(vbrunet) - make this variable configation through the config file somehow
     pub address: SocketAddr,
     /// Limits the maximum size of a decoded message, default is 4MiB
     pub max_decoding_message_size: usize,
@@ -93,6 +92,15 @@ impl Default for ConfigGrpc {
                 ..Default::default()
             },
             normalize_commitment_level: true,
+        }
+    }
+}
+
+impl ConfigGrpc {
+    pub fn default_with_addr(address: SocketAddr) -> Self {
+        Self {
+            address,
+            ..Default::default()
         }
     }
 }
