@@ -87,7 +87,16 @@ pub fn init_geyser_service(
                 error!("Failed to load geyser plugin: {:?}", err);
                 err
             })
-            .expect("Failed to load grpc geyser plugin");
+            .unwrap_or_else(|_| {
+                panic!(
+                    "Failed to launch GRPC Geyser service on '{}'",
+                    geyser_grpc.socket_addr()
+                )
+            });
+        info!(
+            "Launched GRPC Geyser service on '{}'",
+            geyser_grpc.socket_addr()
+        );
         let rpc_service = plugin.rpc();
         (LoadedGeyserPlugin::new(Box::new(plugin), None), rpc_service)
     };
