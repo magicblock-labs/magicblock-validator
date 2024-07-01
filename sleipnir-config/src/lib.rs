@@ -1,6 +1,7 @@
+use std::{env, fmt, fs, path::Path};
+
 use errors::{ConfigError, ConfigResult};
 use serde::{Deserialize, Serialize};
-use std::{env, fmt, fs, path::Path};
 use url::Url;
 
 mod accounts;
