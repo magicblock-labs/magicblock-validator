@@ -8,7 +8,8 @@ use solana_sdk::{
 };
 use test_tools::{
     account::get_account_addr, diagnostics::log_exec_details, init_logger,
-    transactions_processor, validator::ensure_funded_validator_authority,
+    skip_if_devnet_down, transactions_processor,
+    validator::ensure_funded_validator_authority,
 };
 
 use crate::utils::{
@@ -21,6 +22,7 @@ mod utils;
 #[tokio::test]
 async fn clone_non_executable_without_data() {
     init_logger!();
+    skip_if_devnet_down!();
 
     let tx_processor = transactions_processor();
     ensure_funded_validator_authority(tx_processor.bank());
@@ -58,6 +60,7 @@ async fn clone_non_executable_without_data() {
 #[tokio::test]
 async fn clone_non_executable_with_data() {
     init_logger!();
+    skip_if_devnet_down!();
 
     let tx_processor = transactions_processor();
     ensure_funded_validator_authority(tx_processor.bank());

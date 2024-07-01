@@ -5878,6 +5878,7 @@ dependencies = [
  "sleipnir-transaction-status",
  "solana-perf",
  "solana-program-runtime",
+ "solana-rpc-client",
  "solana-sdk",
  "solana-svm",
  "test-tools-core",

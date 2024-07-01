@@ -17,6 +17,7 @@ sleipnir-stage-banking = { workspace = true }
 sleipnir-transaction-status = { workspace = true }
 solana-perf = { workspace = true }
 solana-program-runtime = { workspace = true }
+solana-rpc-client = { workspace = true }
 solana-sdk = { workspace = true }
 solana-svm = { workspace = true }
 test-tools-core = { workspace = true }
