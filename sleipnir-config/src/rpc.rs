@@ -1,4 +1,4 @@
-use std::net::{IpAddr, Ipv4Addr};
+use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 
 use serde::{Deserialize, Serialize};
 
@@ -20,6 +20,12 @@ impl Default for RpcConfig {
             addr: default_addr(),
             port: default_port(),
         }
+    }
+}
+
+impl RpcConfig {
+    pub fn socket_addr(&self) -> SocketAddr {
+        SocketAddr::new(self.addr, self.port)
     }
 }
 
