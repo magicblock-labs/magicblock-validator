@@ -5,8 +5,8 @@ use std::{
 };
 
 use sleipnir_config::{
-    AccountsConfig, CommitStrategy, ProgramConfig, RemoteConfig, RpcConfig,
-    SleipnirConfig, ValidatorConfig,
+    AccountsConfig, CloneStrategy, CommitStrategy, ProgramConfig, ReadonlyMode,
+    RemoteConfig, RpcConfig, SleipnirConfig, ValidatorConfig, WritableMode,
 };
 use solana_sdk::pubkey::Pubkey;
 use test_tools_core::paths::cargo_workspace_dir;
@@ -70,7 +70,16 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     let base_cluster = "http://remote-account-url";
 
     // Set the ENV variables
-    env::set_var("BASE_CLUSTER", base_cluster);
+    env::set_var("ACCOUNTS.REMOTE", base_cluster);
+    env::set_var("ACCOUNTS.CLONE.READONLY", "all");
+    env::set_var("ACCOUNTS.CLONE.WRITABLE", "delegated");
+    env::set_var("ACCOUNTS.COMMIT.FREQUENCY_MILLIS", "123");
+    env::set_var("ACCOUNTS.COMMIT.TRIGGER", "true");
+    env::set_var("ACCOUNTS.COMMIT.COMPUTE_UNIT_PRICE", "1");
+    env::set_var("ACCOUNTS.CREATE", "false");
+    env::set_var("RPC.ADDR", "0.1.0.1");
+    env::set_var("RPC.PORT", "123");
+    env::set_var("VALIDATOR.MILLIS_PER_SLOT", "100");
 
     let config =
         SleipnirConfig::try_load_from_file(config_file_dir.to_str().unwrap())
@@ -81,11 +90,16 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
         config,
         SleipnirConfig {
             accounts: AccountsConfig {
-                commit: CommitStrategy {
-                    frequency_millis: 600_000,
-                    trigger: false,
-                    compute_unit_price: 0,
+                clone: CloneStrategy {
+                    readonly: ReadonlyMode::All,
+                    writable: WritableMode::Delegated,
                 },
+                commit: CommitStrategy {
+                    frequency_millis: 123,
+                    trigger: true,
+                    compute_unit_price: 1,
+                },
+                create: false,
                 remote: RemoteConfig::Custom(Url::parse(base_cluster).unwrap()),
                 ..Default::default()
             },
@@ -100,11 +114,11 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
                 )
             }],
             rpc: RpcConfig {
-                addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-                port: 7799,
+                addr: IpAddr::V4(Ipv4Addr::new(0, 1, 0, 1)),
+                port: 123,
             },
             validator: ValidatorConfig {
-                millis_per_slot: 14,
+                millis_per_slot: 100,
                 ..Default::default()
             },
         }

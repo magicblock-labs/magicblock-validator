@@ -1,18 +1,23 @@
-use std::{env, fmt, fs, path::Path};
+use std::{
+    env, fmt, fs,
+    net::{IpAddr, Ipv4Addr},
+    path::Path,
+    str::FromStr,
+};
 
+pub use accounts::*;
 use errors::{ConfigError, ConfigResult};
+pub use program::*;
+pub use rpc::*;
 use serde::{Deserialize, Serialize};
 use url::Url;
+pub use validator::*;
 
 mod accounts;
 pub mod errors;
 mod program;
 mod rpc;
 mod validator;
-pub use accounts::*;
-pub use program::*;
-pub use rpc::*;
-pub use validator::*;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct SleipnirConfig {
@@ -103,9 +108,47 @@ impl SleipnirConfig {
 
     pub fn override_from_envs(&self) -> SleipnirConfig {
         let mut config = self.clone();
-        if let Ok(remote) = env::var("BASE_CLUSTER") {
+
+        // ACCOUNTS
+        if let Ok(remote) = env::var("ACCOUNTS.REMOTE") {
             config.accounts.remote =
                 RemoteConfig::Custom(Url::parse(&remote).unwrap());
+        }
+        if let Ok(readonly) = env::var("ACCOUNTS.CLONE.READONLY") {
+            config.accounts.clone.readonly =
+                ReadonlyMode::from_str(&readonly).unwrap();
+        }
+        if let Ok(writable) = env::var("ACCOUNTS.CLONE.WRITABLE") {
+            config.accounts.clone.writable =
+                WritableMode::from_str(&writable).unwrap();
+        }
+        if let Ok(frequency_millis) =
+            env::var("ACCOUNTS.COMMIT.FREQUENCY_MILLIS")
+        {
+            config.accounts.commit.frequency_millis =
+                u64::from_str(&frequency_millis).unwrap();
+        }
+        if let Ok(trigger) = env::var("ACCOUNTS.COMMIT.TRIGGER") {
+            config.accounts.commit.trigger = bool::from_str(&trigger).unwrap();
+        }
+        if let Ok(unit_price) = env::var("ACCOUNTS.COMMIT.COMPUTE_UNIT_PRICE") {
+            config.accounts.commit.compute_unit_price =
+                u64::from_str(&unit_price).unwrap();
+        }
+        if let Ok(create) = env::var("ACCOUNTS.CREATE") {
+            config.accounts.create = bool::from_str(&create).unwrap();
+        }
+
+        // RPC
+        if let Ok(addr) = env::var("RPC.ADDR") {
+            config.rpc.addr = IpAddr::V4(Ipv4Addr::from_str(&addr).unwrap());
+        }
+        if let Ok(port) = env::var("RPC.PORT") {
+            config.rpc.port = u16::from_str(&port).unwrap();
+        }
+        if let Ok(millis_per_slot) = env::var("VALIDATOR.MILLIS_PER_SLOT") {
+            config.validator.millis_per_slot =
+                u64::from_str(&millis_per_slot).unwrap();
         }
         config
     }
