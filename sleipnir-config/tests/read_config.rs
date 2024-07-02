@@ -75,18 +75,18 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     let base_cluster = "http://remote-account-url";
 
     // Set the ENV variables
-    env::set_var("ACCOUNTS.REMOTE", base_cluster);
-    env::set_var("ACCOUNTS.CLONE.READONLY", "all");
-    env::set_var("ACCOUNTS.CLONE.WRITABLE", "delegated");
-    env::set_var("ACCOUNTS.COMMIT.FREQUENCY_MILLIS", "123");
-    env::set_var("ACCOUNTS.COMMIT.TRIGGER", "true");
-    env::set_var("ACCOUNTS.COMMIT.COMPUTE_UNIT_PRICE", "1");
-    env::set_var("ACCOUNTS.CREATE", "false");
-    env::set_var("RPC.ADDR", "0.1.0.1");
-    env::set_var("RPC.PORT", "123");
-    env::set_var("GEYSER_GRPC.ADDR", "0.1.0.1");
-    env::set_var("GEYSER_GRPC.PORT", "123");
-    env::set_var("VALIDATOR.MILLIS_PER_SLOT", "100");
+    env::set_var("ACCOUNTS_REMOTE", base_cluster);
+    env::set_var("ACCOUNTS_CLONE_READONLY", "all");
+    env::set_var("ACCOUNTS_CLONE_WRITABLE", "delegated");
+    env::set_var("ACCOUNTS_COMMIT_FREQUENCY_MILLIS", "123");
+    env::set_var("ACCOUNTS_COMMIT_TRIGGER", "true");
+    env::set_var("ACCOUNTS_COMMIT_COMPUTE_UNIT_PRICE", "1");
+    env::set_var("ACCOUNTS_CREATE", "false");
+    env::set_var("RPC_ADDR", "0.1.0.1");
+    env::set_var("RPC_PORT", "123");
+    env::set_var("GEYSER_GRPC_ADDR", "0.1.0.1");
+    env::set_var("GEYSER_GRPC_PORT", "123");
+    env::set_var("VALIDATOR_MILLIS_PER_SLOT", "100");
 
     let config =
         SleipnirConfig::try_load_from_file(config_file_dir.to_str().unwrap())
