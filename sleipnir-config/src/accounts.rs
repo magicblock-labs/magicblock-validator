@@ -2,7 +2,7 @@ use std::error::Error;
 
 use serde::{Deserialize, Serialize};
 use solana_sdk::native_token::LAMPORTS_PER_SOL;
-use strum_macros::{self, EnumString};
+use strum_macros::EnumString;
 use url::Url;
 
 // -----------------
