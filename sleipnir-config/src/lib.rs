@@ -124,92 +124,78 @@ impl SleipnirConfig {
         }
 
         if let Ok(readonly) = env::var("ACCOUNTS.CLONE.READONLY") {
-            config.accounts.clone.readonly = ReadonlyMode::from_str(&readonly)
-                .map_err(|err| panic!("Failed to parse 'ACCOUNTS.CLONE.READONLY' as ReadonlyMode: {:?}", err))
-                .unwrap();
+            config.accounts.clone.readonly = readonly.parse()
+                .unwrap_or_else(|err| panic!("Failed to parse 'ACCOUNTS.CLONE.READONLY' as ReadonlyMode: {:?}", err))
         }
 
         if let Ok(writable) = env::var("ACCOUNTS.CLONE.WRITABLE") {
-            config.accounts.clone.writable = WritableMode::from_str(&writable)
-                .map_err(|err| panic!("Failed to parse 'ACCOUNTS.CLONE.WRITABLE' as WritableMode: {:?}", err))
-                .unwrap();
+            config.accounts.clone.writable = writable.parse()
+                .unwrap_or_else(|err| panic!("Failed to parse 'ACCOUNTS.CLONE.WRITABLE' as WritableMode: {:?}", err));
         }
 
         if let Ok(frequency_millis) =
             env::var("ACCOUNTS.COMMIT.FREQUENCY_MILLIS")
         {
             config.accounts.commit.frequency_millis = u64::from_str(&frequency_millis)
-                .map_err(|err| panic!("Failed to parse 'ACCOUNTS.COMMIT.FREQUENCY_MILLIS' as u64: {:?}", err))
-                .unwrap();
+                .unwrap_or_else(|err| panic!("Failed to parse 'ACCOUNTS.COMMIT.FREQUENCY_MILLIS' as u64: {:?}", err));
         }
 
         if let Ok(trigger) = env::var("ACCOUNTS.COMMIT.TRIGGER") {
             config.accounts.commit.trigger = bool::from_str(&trigger)
-                .map_err(|err| panic!("Failed to parse 'ACCOUNTS.COMMIT.TRIGGER' as bool: {:?}", err))
-                .unwrap();
+                .unwrap_or_else(|err| panic!("Failed to parse 'ACCOUNTS.COMMIT.TRIGGER' as bool: {:?}", err))
         }
 
         if let Ok(unit_price) = env::var("ACCOUNTS.COMMIT.COMPUTE_UNIT_PRICE") {
             config.accounts.commit.compute_unit_price = u64::from_str(&unit_price)
-                .map_err(|err| panic!("Failed to parse 'ACCOUNTS.COMMIT.COMPUTE_UNIT_PRICE' as u64: {:?}", err))
-                .unwrap();
+                .unwrap_or_else(|err| panic!("Failed to parse 'ACCOUNTS.COMMIT.COMPUTE_UNIT_PRICE' as u64: {:?}", err))
         }
 
         if let Ok(create) = env::var("ACCOUNTS.CREATE") {
-            config.accounts.create = bool::from_str(&create)
-                .map_err(|err| {
+            config.accounts.create =
+                bool::from_str(&create).unwrap_or_else(|err| {
                     panic!(
                         "Failed to parse 'ACCOUNTS.CREATE' as bool: {:?}",
                         err
                     )
                 })
-                .unwrap();
         }
 
         if let Ok(addr) = env::var("RPC.ADDR") {
-            config.rpc.addr = IpAddr::V4(
-                Ipv4Addr::from_str(&addr)
-                    .map_err(|err| {
-                        panic!(
-                            "Failed to parse 'RPC.ADDR' as Ipv4Addr: {:?}",
-                            err
-                        )
-                    })
-                    .unwrap(),
-            );
+            config.rpc.addr =
+                IpAddr::V4(Ipv4Addr::from_str(&addr).unwrap_or_else(|err| {
+                    panic!("Failed to parse 'RPC.ADDR' as Ipv4Addr: {:?}", err)
+                }));
         }
 
         if let Ok(port) = env::var("RPC.PORT") {
-            config.rpc.port = u16::from_str(&port)
-                .map_err(|err| {
-                    panic!("Failed to parse 'RPC.PORT' as u16: {:?}", err)
-                })
-                .unwrap();
+            config.rpc.port = u16::from_str(&port).unwrap_or_else(|err| {
+                panic!("Failed to parse 'RPC.PORT' as u16: {:?}", err)
+            });
         }
 
         if let Ok(addr) = env::var("GEYSER_GRPC.ADDR") {
-            config.geyser_grpc.addr = IpAddr::V4(
-                Ipv4Addr::from_str(&addr)
-                    .map_err(|err| panic!("Failed to parse 'GEYSER_GRPC.ADDR' as Ipv4Addr: {:?}", err))
-                    .unwrap(),
-            );
+            config.geyser_grpc.addr =
+                IpAddr::V4(Ipv4Addr::from_str(&addr).unwrap_or_else(|err| {
+                    panic!(
+                        "Failed to parse 'GEYSER_GRPC.ADDR' as Ipv4Addr: {:?}",
+                        err
+                    )
+                }));
         }
 
         if let Ok(port) = env::var("GEYSER_GRPC.PORT") {
-            config.geyser_grpc.port = u16::from_str(&port)
-                .map_err(|err| {
+            config.geyser_grpc.port =
+                u16::from_str(&port).unwrap_or_else(|err| {
                     panic!(
                         "Failed to parse 'GEYSER_GRPC.PORT' as u16: {:?}",
                         err
                     )
                 })
-                .unwrap();
         }
 
         if let Ok(millis_per_slot) = env::var("VALIDATOR.MILLIS_PER_SLOT") {
             config.validator.millis_per_slot = u64::from_str(&millis_per_slot)
-                .map_err(|err| panic!("Failed to parse 'VALIDATOR.MILLIS_PER_SLOT' as u64: {:?}", err))
-                .unwrap();
+                .unwrap_or_else(|err| panic!("Failed to parse 'VALIDATOR.MILLIS_PER_SLOT' as u64: {:?}", err))
         }
         config
     }
