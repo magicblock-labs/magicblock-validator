@@ -84,6 +84,8 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     env::set_var("ACCOUNTS.CREATE", "false");
     env::set_var("RPC.ADDR", "0.1.0.1");
     env::set_var("RPC.PORT", "123");
+    env::set_var("GEYSER_GRPC.ADDR", "0.1.0.1");
+    env::set_var("GEYSER_GRPC.PORT", "123");
     env::set_var("VALIDATOR.MILLIS_PER_SLOT", "100");
 
     let config =
@@ -123,8 +125,8 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
                 port: 123,
             },
             geyser_grpc: GeyserGrpcConfig {
-                addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-                port: 11000,
+                addr: IpAddr::V4(Ipv4Addr::new(0, 1, 0, 1)),
+                port: 123,
             },
             validator: ValidatorConfig {
                 millis_per_slot: 100,

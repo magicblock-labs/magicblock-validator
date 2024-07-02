@@ -113,7 +113,6 @@ impl SleipnirConfig {
     pub fn override_from_envs(&self) -> SleipnirConfig {
         let mut config = self.clone();
 
-        // ACCOUNTS
         if let Ok(remote) = env::var("ACCOUNTS.REMOTE") {
             config.accounts.remote =
                 RemoteConfig::Custom(Url::parse(&remote).unwrap());
@@ -142,13 +141,24 @@ impl SleipnirConfig {
         if let Ok(create) = env::var("ACCOUNTS.CREATE") {
             config.accounts.create = bool::from_str(&create).unwrap();
         }
-
-        // RPC
         if let Ok(addr) = env::var("RPC.ADDR") {
             config.rpc.addr = IpAddr::V4(Ipv4Addr::from_str(&addr).unwrap());
         }
         if let Ok(port) = env::var("RPC.PORT") {
             config.rpc.port = u16::from_str(&port).unwrap();
+        }
+        if let Ok(addr) = env::var("RPC.ADDR") {
+            config.rpc.addr = IpAddr::V4(Ipv4Addr::from_str(&addr).unwrap());
+        }
+        if let Ok(port) = env::var("RPC.PORT") {
+            config.rpc.port = u16::from_str(&port).unwrap();
+        }
+        if let Ok(addr) = env::var("GEYSER_GRPC.ADDR") {
+            config.geyser_grpc.addr =
+                IpAddr::V4(Ipv4Addr::from_str(&addr).unwrap());
+        }
+        if let Ok(port) = env::var("GEYSER_GRPC.PORT") {
+            config.geyser_grpc.port = u16::from_str(&port).unwrap();
         }
         if let Ok(millis_per_slot) = env::var("VALIDATOR.MILLIS_PER_SLOT") {
             config.validator.millis_per_slot =
