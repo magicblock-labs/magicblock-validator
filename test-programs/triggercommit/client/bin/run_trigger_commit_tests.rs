@@ -2,7 +2,11 @@ use std::{
     io, net::TcpStream, path::Path, process, thread::sleep, time::Duration,
 };
 
+use triggercommit_client::skip_if_devnet_down;
+
 pub fn main() {
+    skip_if_devnet_down!();
+
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
 
     // Start validator via `cargo run --release  -- test-programs/triggercommit/triggercommit-conf.toml

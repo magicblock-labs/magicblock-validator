@@ -5,19 +5,21 @@ use std::{
     str::FromStr,
 };
 
-pub use accounts::*;
 use errors::{ConfigError, ConfigResult};
-pub use program::*;
-pub use rpc::*;
 use serde::{Deserialize, Serialize};
 use url::Url;
-pub use validator::*;
 
 mod accounts;
 pub mod errors;
+mod geyser_grpc;
 mod program;
 mod rpc;
 mod validator;
+pub use accounts::*;
+pub use geyser_grpc::*;
+pub use program::*;
+pub use rpc::*;
+pub use validator::*;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 pub struct SleipnirConfig {
@@ -29,6 +31,8 @@ pub struct SleipnirConfig {
     pub accounts: AccountsConfig,
     #[serde(default)]
     pub rpc: RpcConfig,
+    #[serde(default)]
+    pub geyser_grpc: GeyserGrpcConfig,
     #[serde(default)]
     pub validator: ValidatorConfig,
     #[serde(default)]
