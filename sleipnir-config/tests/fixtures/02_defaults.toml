@@ -15,6 +15,10 @@ commit = { frequency_millis = 500, trigger = false, compute_unit_price = 1_000_0
 addr = "0.0.0.0"
 port = 8899
 
+[geyser_grpc]
+addr = "0.0.0.0"
+port = 10000
+
 [validator]
 millis_per_slot = 50
 sigverify = true

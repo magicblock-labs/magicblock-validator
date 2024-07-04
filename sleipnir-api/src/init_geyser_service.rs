@@ -1,8 +1,12 @@
 use std::sync::Arc;
 
 use log::*;
+use sleipnir_config::GeyserGrpcConfig;
 use sleipnir_geyser_plugin::{
-    config::Config as GeyserPluginConfig, plugin::GrpcGeyserPlugin,
+    config::{
+        Config as GeyserPluginConfig, ConfigGrpc as GeyserPluginConfigGrpc,
+    },
+    plugin::GrpcGeyserPlugin,
     rpc::GeyserRpcService,
 };
 use solana_geyser_plugin_interface::geyser_plugin_interface::GeyserPlugin;
@@ -21,6 +25,7 @@ pub struct InitGeyserServiceConfig {
     pub enable_account_notifications: bool,
     pub enable_transaction_notifications: bool,
     pub geyser_plugins: Option<Vec<LoadedGeyserPlugin>>,
+    pub geyser_grpc: GeyserGrpcConfig,
 }
 
 impl Default for InitGeyserServiceConfig {
@@ -31,6 +36,7 @@ impl Default for InitGeyserServiceConfig {
             enable_account_notifications: true,
             enable_transaction_notifications: true,
             geyser_plugins: None,
+            geyser_grpc: Default::default(),
         }
     }
 }
@@ -62,6 +68,7 @@ pub fn init_geyser_service(
         enable_account_notifications,
         enable_transaction_notifications,
         geyser_plugins,
+        geyser_grpc,
     } = config;
 
     let config = GeyserPluginConfig {
@@ -69,6 +76,9 @@ pub fn init_geyser_service(
         cache_transactions,
         enable_account_notifications,
         enable_transaction_notifications,
+        grpc: GeyserPluginConfigGrpc::default_with_addr(
+            geyser_grpc.socket_addr(),
+        ),
         ..Default::default()
     };
     let (grpc_plugin, rpc_service) = {
@@ -77,7 +87,16 @@ pub fn init_geyser_service(
                 error!("Failed to load geyser plugin: {:?}", err);
                 err
             })
-            .expect("Failed to load grpc geyser plugin");
+            .unwrap_or_else(|_| {
+                panic!(
+                    "Failed to launch GRPC Geyser service on '{}'",
+                    geyser_grpc.socket_addr()
+                )
+            });
+        info!(
+            "Launched GRPC Geyser service on '{}'",
+            geyser_grpc.socket_addr()
+        );
         let rpc_service = plugin.rpc();
         (LoadedGeyserPlugin::new(Box::new(plugin), None), rpc_service)
     };

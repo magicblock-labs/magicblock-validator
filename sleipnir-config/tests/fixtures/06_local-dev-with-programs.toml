@@ -17,6 +17,10 @@ port = 7799
 [validator]
 millis_per_slot = 14
 
+[geyser_grpc]
+addr = "127.0.0.1"
+port = 11000
+
 # Programs that will be loaded when the validator starts up
 # The program files are considered to be relative to the directoy
 # containing the configuration file, unless they are full paths.

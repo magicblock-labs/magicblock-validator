@@ -3,7 +3,7 @@ use std::net::{IpAddr, Ipv4Addr, SocketAddr};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
-pub struct RpcConfig {
+pub struct GeyserGrpcConfig {
     #[serde(
         default = "default_addr",
         deserialize_with = "deserialize_addr",
@@ -14,7 +14,7 @@ pub struct RpcConfig {
     pub port: u16,
 }
 
-impl Default for RpcConfig {
+impl Default for GeyserGrpcConfig {
     fn default() -> Self {
         Self {
             addr: default_addr(),
@@ -23,7 +23,7 @@ impl Default for RpcConfig {
     }
 }
 
-impl RpcConfig {
+impl GeyserGrpcConfig {
     pub fn socket_addr(&self) -> SocketAddr {
         SocketAddr::new(self.addr, self.port)
     }
@@ -37,7 +37,7 @@ where
     s.parse().map_err(|err| {
         // The error returned here by serde is a bit unhelpful so we help out
         // by logging a bit more information.
-        eprintln!("The [rpc] field 'addr' is invalid ({:?}).", err);
+        eprintln!("The [geyser_grpc] field 'addr' is invalid ({:?}).", err);
         serde::de::Error::custom(err)
     })
 }
@@ -54,5 +54,5 @@ fn default_addr() -> IpAddr {
 }
 
 fn default_port() -> u16 {
-    8899
+    10_000
 }

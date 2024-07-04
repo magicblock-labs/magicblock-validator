@@ -2,6 +2,7 @@ use std::error::Error;
 
 use serde::{Deserialize, Serialize};
 use solana_sdk::native_token::LAMPORTS_PER_SOL;
+use strum_macros::EnumString;
 use url::Url;
 
 // -----------------
@@ -90,8 +91,11 @@ pub struct CloneStrategy {
     pub writable: WritableMode,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, EnumString,
+)]
 #[serde(rename_all = "camelCase")]
+#[strum(serialize_all = "camelCase")]
 pub enum ReadonlyMode {
     All,
     #[default]
@@ -100,8 +104,11 @@ pub enum ReadonlyMode {
     None,
 }
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(
+    Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, EnumString,
+)]
 #[serde(rename_all = "camelCase")]
+#[strum(serialize_all = "camelCase")]
 pub enum WritableMode {
     All,
     Delegated,

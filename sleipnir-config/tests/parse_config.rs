@@ -4,9 +4,9 @@ use std::{
 };
 
 use sleipnir_config::{
-    AccountsConfig, CloneStrategy, CommitStrategy, Payer, ProgramConfig,
-    ReadonlyMode, RemoteConfig, RpcConfig, SleipnirConfig, ValidatorConfig,
-    WritableMode,
+    AccountsConfig, CloneStrategy, CommitStrategy, GeyserGrpcConfig, Payer,
+    ProgramConfig, ReadonlyMode, RemoteConfig, RpcConfig, SleipnirConfig,
+    ValidatorConfig, WritableMode,
 };
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
 use url::Url;
@@ -112,6 +112,10 @@ fn test_local_dev_with_programs_toml() {
             validator: ValidatorConfig {
                 millis_per_slot: 14,
                 ..Default::default()
+            },
+            geyser_grpc: GeyserGrpcConfig {
+                addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
+                port: 11_000
             },
         }
     )
