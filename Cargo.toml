@@ -124,6 +124,7 @@ sleipnir-version = { path = "./sleipnir-version" }
 solana-accounts-db = { path = "./solana/accounts-db", version = "1.19.0" }
 solana-account-decoder = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-account-decoder", version = "1.19.0" }
 solana-bpf-loader-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-bpf-loader-program", version = "1.19.0" }
+solana-compute-budget-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-compute-budget-program", version = "1.19.0" }
 solana-cost-model = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-cost-model", version = "1.19.0" }
 solana-frozen-abi = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-frozen-abi", version = "1.19.0" }
 solana-frozen-abi-macro = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-frozen-abi-macro", version = "1.19.0" }

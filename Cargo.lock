@@ -4342,6 +4342,7 @@ dependencies = [
  "sleipnir-bank",
  "sleipnir-program",
  "solana-bpf-loader-program",
+ "solana-compute-budget-program",
  "solana-cost-model",
  "solana-frozen-abi-macro",
  "solana-loader-v4-program",
