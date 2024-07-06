@@ -56,4 +56,10 @@ pub enum MutatorError {
         "No program data account provided for upgradeable loader program '{0}'"
     )]
     NoProgramDataAccountProvidedForUpgradeableLoaderProgram(String),
+
+    #[error("Failed to clone executable data for '{0}' program ({1:?})")]
+    FailedToCloneProgramExecutableDataAccount(
+        String,
+        solana_rpc_client_api::client_error::Error,
+    ),
 }

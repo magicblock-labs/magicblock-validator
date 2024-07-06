@@ -40,7 +40,13 @@ pub async fn mods_to_clone_account(
         // 2.1. Download the executable account
         let mut executable_account = client_for_cluster(cluster)
             .get_account(&executable_pubkey)
-            .await?;
+            .await
+            .map_err(|err| {
+                MutatorError::FailedToCloneProgramExecutableDataAccount(
+                    account_address.to_string(),
+                    err,
+                )
+            })?;
 
         // 2.2. If we didn't find it then something is off and cloning the program
         //      account won't make sense either
