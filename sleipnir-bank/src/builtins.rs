@@ -1,6 +1,9 @@
 // NOTE: copied from runtime/src/builtins.rs
 use solana_program_runtime::invoke_context::BuiltinFunctionWithContext;
-use solana_sdk::{bpf_loader_upgradeable, compute_budget, pubkey::Pubkey};
+use solana_sdk::{
+    address_lookup_table, bpf_loader_upgradeable, compute_budget,
+    pubkey::Pubkey,
+};
 
 pub struct BuiltinPrototype {
     pub feature_id: Option<Pubkey>,
@@ -40,6 +43,8 @@ impl solana_frozen_abi::abi_example::AbiExample for BuiltinPrototype {
     }
 }
 
+/// The BUILTIN programs that our validator supports and load at startup.
+/// See: solana repo - runtime/src/builtins.rs
 pub static BUILTINS: &[BuiltinPrototype] = &[
     BuiltinPrototype {
         feature_id: None,
@@ -64,5 +69,12 @@ pub static BUILTINS: &[BuiltinPrototype] = &[
         program_id: compute_budget::id(),
         name: "compute_budget_program",
         entrypoint: solana_compute_budget_program::Entrypoint::vm,
+    },
+    BuiltinPrototype {
+        feature_id: None,
+        program_id: address_lookup_table::program::id(),
+        name: "address_lookup_table_program",
+        entrypoint:
+            solana_address_lookup_table_program::processor::Entrypoint::vm,
     },
 ];
