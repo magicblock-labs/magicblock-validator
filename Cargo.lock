@@ -4360,6 +4360,8 @@ version = "1.19.0"
 dependencies = [
  "serde",
  "solana-sdk",
+ "strum",
+ "strum_macros",
  "test-tools-core",
  "thiserror",
  "toml 0.8.14",
