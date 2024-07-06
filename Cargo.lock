@@ -4341,6 +4341,7 @@ dependencies = [
  "sleipnir-accounts-db",
  "sleipnir-bank",
  "sleipnir-program",
+ "solana-address-lookup-table-program",
  "solana-bpf-loader-program",
  "solana-compute-budget-program",
  "solana-cost-model",
