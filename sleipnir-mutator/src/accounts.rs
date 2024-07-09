@@ -57,12 +57,19 @@ pub async fn mods_to_clone_account(
             ));
         }
 
+        // NOTE: we ran into issues with transactions running right after a program was cloned,
+        // i.e. the first transaction using it.
+        // In those cases we saw "Program is not deployed" errors which most often showed
+        // up during transaction simulations.
+        // Claiming that the program was deployed one slot earlier fixed the issue.
+        // For more information see: https://github.com/magicblock-labs/magicblock-validator/pull/83
+        let targeted_deployment_slot = if slot == 0 { slot } else { slot - 1 };
         adjust_deployment_slot(
             &account_pubkey,
             &executable_pubkey,
             &account,
             Some(&mut executable_account),
-            slot,
+            targeted_deployment_slot,
         )?;
 
         Some((executable_account, executable_pubkey))
