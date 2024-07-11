@@ -27,11 +27,11 @@ pub struct BlockhashQueue {
     ages: HashMap<Hash, HashAge>,
 
     /// hashes older than `max_age` will be dropped from the queue
-    max_age: usize,
+    max_age: u64,
 }
 
 impl BlockhashQueue {
-    pub fn new(max_age: usize) -> Self {
+    pub fn new(max_age: u64) -> Self {
         Self {
             ages: HashMap::new(),
             last_hash_index: 0,
@@ -56,7 +56,7 @@ impl BlockhashQueue {
     }
 
     /// Check if the age of the hash is within the specified age
-    pub fn is_hash_valid_for_age(&self, hash: &Hash, max_age: usize) -> bool {
+    pub fn is_hash_valid_for_age(&self, hash: &Hash, max_age: u64) -> bool {
         self.ages
             .get(hash)
             .map(|age| {
@@ -90,15 +90,15 @@ impl BlockhashQueue {
 
     fn is_hash_index_valid(
         last_hash_index: u64,
-        max_age: usize,
+        max_age: u64,
         hash_index: u64,
     ) -> bool {
-        last_hash_index - hash_index <= max_age as u64
+        last_hash_index - hash_index <= max_age
     }
 
     pub fn register_hash(&mut self, hash: &Hash, lamports_per_signature: u64) {
         self.last_hash_index += 1;
-        if self.ages.len() >= self.max_age {
+        if self.ages.len() as u64 >= self.max_age {
             self.ages.retain(|_, age| {
                 Self::is_hash_index_valid(
                     self.last_hash_index,
@@ -137,7 +137,7 @@ impl BlockhashQueue {
         })
     }
 
-    pub fn get_max_age(&self) -> usize {
+    pub fn get_max_age(&self) -> u64 {
         self.max_age
     }
 }

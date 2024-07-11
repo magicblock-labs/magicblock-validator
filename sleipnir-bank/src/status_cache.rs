@@ -41,14 +41,14 @@ pub struct StatusCache<T: Clone> {
 }
 
 impl<T: Clone> StatusCache<T> {
-    pub fn new(max_age: usize) -> Self {
+    pub fn new(max_age: u64) -> Self {
         Self {
             cache_by_blockhash: HashMap::default(),
             transaction_status_cache: vec![],
             // 0 is always a root
             roots: HashSet::from([0]),
             slot_deltas: HashMap::default(),
-            max_cache_entries: max_age as u64,
+            max_cache_entries: max_age,
         }
     }
 
