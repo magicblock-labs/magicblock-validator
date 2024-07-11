@@ -190,15 +190,15 @@ mod tests {
 
     #[test]
     fn test_get_recent_blockhashes() {
-        let arbitrary_max_recent_block_hash = 300;
+        let arbitrary_max_recent_blockhash = 300;
 
         let mut blockhash_queue =
-            BlockhashQueue::new(arbitrary_max_recent_block_hash);
+            BlockhashQueue::new(arbitrary_max_recent_blockhash);
         #[allow(deprecated)]
         let recent_blockhashes = blockhash_queue.get_recent_blockhashes();
         // Sanity-check an empty BlockhashQueue
         assert_eq!(recent_blockhashes.count(), 0);
-        for i in 0..arbitrary_max_recent_block_hash {
+        for i in 0..arbitrary_max_recent_blockhash {
             let hash = hash(&serialize(&i).unwrap());
             blockhash_queue.register_hash(&hash, 0);
         }
@@ -209,7 +209,7 @@ mod tests {
         for IterItem(_slot, hash, _lamports_per_signature) in recent_blockhashes
         {
             assert!(blockhash_queue
-                .is_hash_valid_for_age(hash, arbitrary_max_recent_block_hash));
+                .is_hash_valid_for_age(hash, arbitrary_max_recent_blockhash));
         }
     }
 

@@ -501,9 +501,7 @@ impl Bank {
             slots_per_year: f64::default(),
 
             // For TransactionProcessingCallback
-            blockhash_queue: RwLock::<BlockhashQueue>::new(
-                BlockhashQueue::new(max_age),
-            ),
+            blockhash_queue: RwLock::new(BlockhashQueue::new(max_age)),
             feature_set: Arc::<FeatureSet>::default(),
             rent_collector: RentCollector::default(),
 
