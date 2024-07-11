@@ -144,9 +144,9 @@ impl BlockhashQueue {
 #[cfg(test)]
 mod tests {
     use bincode::serialize;
+    use solana_sdk::hash::hash;
     #[allow(deprecated)]
     use solana_sdk::sysvar::recent_blockhashes::IterItem;
-    use solana_sdk::{clock::MAX_RECENT_BLOCKHASHES, hash::hash};
 
     use super::*;
 

@@ -46,7 +46,8 @@ use solana_sdk::{
     },
     clock::{
         BankId, Epoch, Slot, SlotIndex, UnixTimestamp, DEFAULT_MS_PER_SLOT,
-        MAX_PROCESSING_AGE, MAX_TRANSACTION_FORWARDING_DELAY,
+        MAX_PROCESSING_AGE, MAX_RECENT_BLOCKHASHES,
+        MAX_TRANSACTION_FORWARDING_DELAY,
     },
     epoch_info::EpochInfo,
     epoch_schedule::EpochSchedule,
@@ -450,6 +451,7 @@ impl Bank {
 
             Arc::new(RwLock::new(loaded_programs))
         };
+
         // Transaction expiration needs to be a fixed amount of time
         // So we compute how many slot it takes for a transaction to expire
         // Depending on how fast each slot is compute

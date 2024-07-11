@@ -3,7 +3,6 @@
 // support forks
 
 use std::{
-    cmp,
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
