@@ -258,7 +258,7 @@ pub struct Bank {
     pub millis_per_slot: u64,
 
     // The number of block/slot for which generated transactions can stay valid
-    pub max_age: u64,
+    pub max_age: usize,
 
     // -----------------
     // For TransactionProcessingCallback
@@ -450,8 +450,11 @@ impl Bank {
             Arc::new(RwLock::new(loaded_programs))
         };
 
-        let max_age = DEFAULT_MS_PER_SLOT * MAX_RECENT_BLOCKHASHES as u64
-            / millis_per_slot;
+        // Transaction expiration needs to be a fixed amount of time
+        // So we compute how many slot it takes for a transaction to expire
+        // Depending on how fast each slot is compute
+        let max_age = (DEFAULT_MS_PER_SLOT * MAX_RECENT_BLOCKHASHES as u64
+            / millis_per_slot) as usize;
 
         let mut bank = Self {
             rc: BankRc::new(accounts),
@@ -499,7 +502,7 @@ impl Bank {
 
             // For TransactionProcessingCallback
             blockhash_queue: RwLock::<BlockhashQueue>::new(
-                BlockhashQueue::new(max_age as usize),
+                BlockhashQueue::new(max_age),
             ),
             feature_set: Arc::<FeatureSet>::default(),
             rent_collector: RentCollector::default(),
@@ -1627,8 +1630,6 @@ impl Bank {
         account_overrides: Option<&AccountOverrides>,
         log_messages_bytes_limit: Option<usize>,
     ) -> LoadAndExecuteTransactionsOutput {
-        let max_age = 300; // TODO(vbrunet) - compute proper value
-
         // 1. Extract and check sanitized transactions
         let sanitized_txs = batch.sanitized_transactions();
         trace!("processing transactions: {}", sanitized_txs.len());
@@ -1675,7 +1676,7 @@ impl Bank {
         let mut check_results = self.check_transactions(
             sanitized_txs,
             batch.lock_results(),
-            max_age,
+            self.max_age,
             &mut error_counters,
         );
         check_time.stop();
