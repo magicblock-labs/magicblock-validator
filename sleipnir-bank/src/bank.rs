@@ -1496,13 +1496,12 @@ impl Bank {
         &self,
         sanitized_txs: &[impl core::borrow::Borrow<SanitizedTransaction>],
         lock_results: &[Result<()>],
-        max_age: usize,
         error_counters: &mut TransactionErrorMetrics,
     ) -> Vec<TransactionCheckResult> {
         let lock_results = self.check_age(
             sanitized_txs,
             lock_results,
-            max_age,
+            self.max_age,
             error_counters,
         );
         self.check_status_cache(sanitized_txs, lock_results, error_counters)
@@ -1674,7 +1673,6 @@ impl Bank {
         let mut check_results = self.check_transactions(
             sanitized_txs,
             batch.lock_results(),
-            self.max_age,
             &mut error_counters,
         );
         check_time.stop();
