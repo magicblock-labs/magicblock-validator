@@ -1498,12 +1498,8 @@ impl Bank {
         lock_results: &[Result<()>],
         error_counters: &mut TransactionErrorMetrics,
     ) -> Vec<TransactionCheckResult> {
-        let lock_results = self.check_age(
-            sanitized_txs,
-            lock_results,
-            self.max_age,
-            error_counters,
-        );
+        let lock_results =
+            self.check_age(sanitized_txs, lock_results, error_counters);
         self.check_status_cache(sanitized_txs, lock_results, error_counters)
     }
 
@@ -1525,7 +1521,6 @@ impl Bank {
         &self,
         sanitized_txs: &[impl core::borrow::Borrow<SanitizedTransaction>],
         lock_results: &[Result<()>],
-        max_age: usize,
         error_counters: &mut TransactionErrorMetrics,
     ) -> Vec<TransactionCheckResult> {
         let hash_queue = self.blockhash_queue.read().unwrap();
@@ -1537,7 +1532,6 @@ impl Bank {
             .map(|(tx, lock_res)| match lock_res {
                 Ok(()) => self.check_transaction_age(
                     tx.borrow(),
-                    max_age,
                     &next_durable_nonce,
                     &hash_queue,
                     error_counters,
@@ -1550,13 +1544,12 @@ impl Bank {
     fn check_transaction_age(
         &self,
         tx: &SanitizedTransaction,
-        max_age: usize,
         next_durable_nonce: &DurableNonce,
         hash_queue: &BlockhashQueue,
         error_counters: &mut TransactionErrorMetrics,
     ) -> TransactionCheckResult {
         let recent_blockhash = tx.message().recent_blockhash();
-        if hash_queue.is_hash_valid_for_age(recent_blockhash, max_age) {
+        if hash_queue.is_hash_valid_for_age(recent_blockhash, self.max_age) {
             (
                 Ok(()),
                 None,
