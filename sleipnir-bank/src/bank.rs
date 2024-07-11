@@ -44,10 +44,7 @@ use solana_sdk::{
         create_executable_meta, from_account, Account, AccountSharedData,
         ReadableAccount, WritableAccount,
     },
-    clock::{
-        BankId, Epoch, Slot, SlotIndex, UnixTimestamp, MAX_PROCESSING_AGE,
-        MAX_TRANSACTION_FORWARDING_DELAY,
-    },
+    clock::{BankId, Epoch, Slot, SlotIndex, UnixTimestamp},
     epoch_info::EpochInfo,
     epoch_schedule::EpochSchedule,
     feature,
@@ -99,7 +96,6 @@ use crate::{
     },
     bank_rc::BankRc,
     builtins::{BuiltinPrototype, BUILTINS},
-    consts::LAMPORTS_PER_SIGNATURE,
     slot_status_notifier_interface::SlotStatusNotifierArc,
     status_cache::StatusCache,
     transaction_batch::TransactionBatch,
@@ -257,6 +253,9 @@ pub struct Bank {
 
     /// Milliseconds per slot which is provided directly when the bank is created
     pub millis_per_slot: u64,
+
+    // The number of block/slot for which generated transactions can stay valid
+    pub max_age: u64,
 
     // -----------------
     // For TransactionProcessingCallback
@@ -1492,22 +1491,122 @@ impl Bank {
         max_age: usize,
         error_counters: &mut TransactionErrorMetrics,
     ) -> Vec<TransactionCheckResult> {
-        // FIXME: skipping check_transactions runtime/src/bank.rs: 4505 (which is mostly tx age related)
+        let lock_results = self.check_age(
+            sanitized_txs,
+            lock_results,
+            max_age,
+            error_counters,
+        );
+        self.check_status_cache(sanitized_txs, lock_results, error_counters)
+    }
+
+    fn check_transaction_for_nonce(
+        &self,
+        tx: &SanitizedTransaction,
+        next_durable_nonce: &DurableNonce,
+    ) -> Option<TransactionAccount> {
+        let nonce_is_advanceable =
+            tx.message().recent_blockhash() != next_durable_nonce.as_hash();
+        if nonce_is_advanceable {
+            self.check_message_for_nonce(tx.message())
+        } else {
+            None
+        }
+    }
+
+    fn check_age(
+        &self,
+        sanitized_txs: &[impl core::borrow::Borrow<SanitizedTransaction>],
+        lock_results: &[Result<()>],
+        max_age: usize,
+        error_counters: &mut TransactionErrorMetrics,
+    ) -> Vec<TransactionCheckResult> {
+        let hash_queue = self.blockhash_queue.read().unwrap();
+        let last_blockhash = hash_queue.last_hash();
+        let next_durable_nonce = DurableNonce::from_blockhash(&last_blockhash);
         sanitized_txs
             .iter()
-            .map(|_| {
-                // NOTE: if we don't provide some lamports per signature we then the
-                // TransactionBatchProcessor::filter_executable_program_accounts will
-                // add a BlockhashNotFound TransactionCheckResult which causes the transaction
-                // to not execute
-                let res: TransactionCheckResult = (
-                    Ok(()),
-                    None::<NoncePartial>,
-                    Some(LAMPORTS_PER_SIGNATURE),
-                );
-                res
+            .zip(lock_results)
+            .map(|(tx, lock_res)| match lock_res {
+                Ok(()) => self.check_transaction_age(
+                    tx.borrow(),
+                    max_age,
+                    &next_durable_nonce,
+                    &hash_queue,
+                    error_counters,
+                ),
+                Err(e) => (Err(e.clone()), None, None),
             })
-            .collect::<Vec<_>>()
+            .collect()
+    }
+
+    fn check_transaction_age(
+        &self,
+        tx: &SanitizedTransaction,
+        max_age: usize,
+        next_durable_nonce: &DurableNonce,
+        hash_queue: &BlockhashQueue,
+        error_counters: &mut TransactionErrorMetrics,
+    ) -> TransactionCheckResult {
+        let recent_blockhash = tx.message().recent_blockhash();
+        if hash_queue.is_hash_valid_for_age(recent_blockhash, max_age) {
+            (
+                Ok(()),
+                None,
+                hash_queue.get_lamports_per_signature(
+                    tx.message().recent_blockhash(),
+                ),
+            )
+        } else if let Some((address, account)) =
+            self.check_transaction_for_nonce(tx, next_durable_nonce)
+        {
+            let nonce = NoncePartial::new(address, account);
+            let lamports_per_signature = nonce.lamports_per_signature();
+            (Ok(()), Some(nonce), lamports_per_signature)
+        } else {
+            error_counters.blockhash_not_found += 1;
+            (Err(TransactionError::BlockhashNotFound), None, None)
+        }
+    }
+
+    fn is_transaction_already_processed(
+        &self,
+        sanitized_tx: &SanitizedTransaction,
+        status_cache: &BankStatusCache,
+    ) -> bool {
+        let signature = sanitized_tx.signature();
+        status_cache
+            .get_recent_transaction_status(signature, None)
+            .is_some()
+    }
+
+    fn check_status_cache(
+        &self,
+        sanitized_txs: &[impl core::borrow::Borrow<SanitizedTransaction>],
+        lock_results: Vec<TransactionCheckResult>,
+        error_counters: &mut TransactionErrorMetrics,
+    ) -> Vec<TransactionCheckResult> {
+        let rcache = self.status_cache.read().unwrap();
+        sanitized_txs
+            .iter()
+            .zip(lock_results)
+            .map(|(sanitized_tx, (lock_result, nonce, lamports))| {
+                let sanitized_tx = sanitized_tx.borrow();
+                if lock_result.is_ok()
+                    && self
+                        .is_transaction_already_processed(sanitized_tx, &rcache)
+                {
+                    error_counters.already_processed += 1;
+                    return (
+                        Err(TransactionError::AlreadyProcessed),
+                        None,
+                        None,
+                    );
+                }
+
+                (lock_result, nonce, lamports)
+            })
+            .collect()
     }
 
     // -----------------
@@ -1516,12 +1615,13 @@ impl Bank {
     pub fn load_and_execute_transactions(
         &self,
         batch: &TransactionBatch,
-        max_age: usize,
         recording_opts: TransactionExecutionRecordingOpts,
         timings: &mut ExecuteTimings,
         account_overrides: Option<&AccountOverrides>,
         log_messages_bytes_limit: Option<usize>,
     ) -> LoadAndExecuteTransactionsOutput {
+        let max_age = 300; // TODO(vbrunet) - compute proper value
+
         // 1. Extract and check sanitized transactions
         let sanitized_txs = batch.sanitized_transactions();
         trace!("processing transactions: {}", sanitized_txs.len());
@@ -1743,7 +1843,6 @@ impl Bank {
     pub fn load_execute_and_commit_transactions(
         &self,
         batch: &TransactionBatch,
-        max_age: usize,
         collect_balances: bool,
         recording_opts: TransactionExecutionRecordingOpts,
         timings: &mut ExecuteTimings,
@@ -1765,7 +1864,6 @@ impl Bank {
             ..
         } = self.load_and_execute_transactions(
             batch,
-            max_age,
             recording_opts,
             timings,
             None,
@@ -1810,7 +1908,6 @@ impl Bank {
     ) -> Vec<Result<()>> {
         self.load_execute_and_commit_transactions(
             batch,
-            MAX_PROCESSING_AGE,
             false,
             Default::default(),
             &mut ExecuteTimings::default(),
@@ -2235,10 +2332,6 @@ impl Bank {
             ..
         } = self.load_and_execute_transactions(
             &batch,
-            // After simulation, transactions will need to be forwarded to the leader
-            // for processing. During forwarding, the transaction could expire if the
-            // delay is not accounted for.
-            MAX_PROCESSING_AGE - MAX_TRANSACTION_FORWARDING_DELAY,
             recording_opts,
             &mut timings,
             Some(&account_overrides),
@@ -2367,23 +2460,14 @@ impl Bank {
     // -----------------
     // Signature Status
     // -----------------
-    pub fn get_signature_status_slot(
-        &self,
-        signature: &Signature,
-    ) -> Option<(Slot, Result<()>)> {
-        let rcache = self.status_cache.read().unwrap();
-        rcache.get_recent_transaction_status(signature, None)
-    }
-
     pub fn get_signature_status(
         &self,
         signature: &Signature,
     ) -> Option<Result<()>> {
-        self.get_signature_status_slot(signature).map(|v| v.1)
-    }
-
-    pub fn has_signature(&self, signature: &Signature) -> bool {
-        self.get_signature_status_slot(signature).is_some()
+        let rcache = self.status_cache.read().unwrap();
+        rcache
+            .get_recent_transaction_status(signature, None)
+            .map(|v| v.1)
     }
 
     pub fn get_recent_signature_status(

@@ -11,7 +11,6 @@ use sleipnir_accounts_db::transaction_results::TransactionResults;
 use solana_program_runtime::timings::ExecuteTimings;
 use solana_sdk::{
     account::Account,
-    clock::MAX_PROCESSING_AGE,
     instruction::{AccountMeta, Instruction},
     message::Message,
     native_token::LAMPORTS_PER_SOL,
@@ -332,7 +331,6 @@ pub fn execute_transactions(
     let (transaction_results, transaction_balances) = bank
         .load_execute_and_commit_transactions(
             &batch,
-            MAX_PROCESSING_AGE,
             true,
             TransactionExecutionRecordingOpts::recording_logs(),
             &mut timings,

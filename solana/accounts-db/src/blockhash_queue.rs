@@ -4,8 +4,7 @@ use serde::{Deserialize, Serialize};
 #[allow(deprecated)]
 use solana_sdk::sysvar::recent_blockhashes;
 use solana_sdk::{
-    clock::MAX_RECENT_BLOCKHASHES, fee_calculator::FeeCalculator, hash::Hash,
-    timing::timestamp,
+    fee_calculator::FeeCalculator, hash::Hash, timing::timestamp,
 };
 
 #[derive(Debug, PartialEq, Eq, Clone, Serialize, Deserialize, AbiExample)]
@@ -29,12 +28,6 @@ pub struct BlockhashQueue {
 
     /// hashes older than `max_age` will be dropped from the queue
     max_age: usize,
-}
-
-impl Default for BlockhashQueue {
-    fn default() -> Self {
-        Self::new(MAX_RECENT_BLOCKHASHES)
-    }
 }
 
 impl BlockhashQueue {
@@ -151,9 +144,9 @@ impl BlockhashQueue {
 #[cfg(test)]
 mod tests {
     use bincode::serialize;
+    use solana_sdk::hash::hash;
     #[allow(deprecated)]
     use solana_sdk::sysvar::recent_blockhashes::IterItem;
-    use solana_sdk::{clock::MAX_RECENT_BLOCKHASHES, hash::hash};
 
     use super::*;
 
@@ -197,12 +190,15 @@ mod tests {
 
     #[test]
     fn test_get_recent_blockhashes() {
-        let mut blockhash_queue = BlockhashQueue::new(MAX_RECENT_BLOCKHASHES);
+        let arbitrary_max_recent_block_hash = 300;
+
+        let mut blockhash_queue =
+            BlockhashQueue::new(arbitrary_max_recent_block_hash);
         #[allow(deprecated)]
         let recent_blockhashes = blockhash_queue.get_recent_blockhashes();
         // Sanity-check an empty BlockhashQueue
         assert_eq!(recent_blockhashes.count(), 0);
-        for i in 0..MAX_RECENT_BLOCKHASHES {
+        for i in 0..arbitrary_max_recent_block_hash {
             let hash = hash(&serialize(&i).unwrap());
             blockhash_queue.register_hash(&hash, 0);
         }
@@ -213,7 +209,7 @@ mod tests {
         for IterItem(_slot, hash, _lamports_per_signature) in recent_blockhashes
         {
             assert!(blockhash_queue
-                .is_hash_valid_for_age(hash, MAX_RECENT_BLOCKHASHES));
+                .is_hash_valid_for_age(hash, arbitrary_max_recent_block_hash));
         }
     }
 

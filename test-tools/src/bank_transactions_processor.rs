@@ -7,7 +7,6 @@ use sleipnir_bank::{
 };
 use solana_program_runtime::timings::ExecuteTimings;
 use solana_sdk::{
-    clock::MAX_PROCESSING_AGE,
     pubkey::Pubkey,
     transaction::{SanitizedTransaction, Transaction},
 };
@@ -62,7 +61,6 @@ impl TransactionsProcessor for BankTransactionsProcessor {
             let (transaction_results, balances) =
                 self.bank.load_execute_and_commit_transactions(
                     &batch,
-                    MAX_PROCESSING_AGE,
                     true,
                     TransactionExecutionRecordingOpts::recording_logs(),
                     &mut timings,

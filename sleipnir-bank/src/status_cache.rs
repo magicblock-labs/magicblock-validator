@@ -3,7 +3,6 @@
 // support forks
 
 use std::{
-    cmp,
     collections::{HashMap, HashSet},
     sync::{Arc, Mutex},
 };
@@ -11,11 +10,7 @@ use std::{
 use log::*;
 use rand::{thread_rng, Rng};
 use solana_frozen_abi_macro::AbiExample;
-use solana_sdk::{
-    clock::{Slot, DEFAULT_MS_PER_SLOT, MAX_RECENT_BLOCKHASHES},
-    hash::Hash,
-    signature::Signature,
-};
+use solana_sdk::{clock::Slot, hash::Hash, signature::Signature};
 
 const CACHED_KEY_SIZE: usize = 20;
 // Store forks in a single chunk of memory to avoid another lookup.
@@ -46,21 +41,14 @@ pub struct StatusCache<T: Clone> {
 }
 
 impl<T: Clone> StatusCache<T> {
-    pub fn new(millis_per_slot: u64) -> Self {
-        const SOLANA_MAX_CACHE_TTL_MILLIS: u64 =
-            DEFAULT_MS_PER_SLOT * MAX_RECENT_BLOCKHASHES as u64;
-
-        // Instead of matching Solana's slot frequency we match the same TTL (2mins)
-        // that result from the slot frequency considering the slot time.
-        let max_cache_entries = // 2,400 for 50ms slots
-            cmp::max(SOLANA_MAX_CACHE_TTL_MILLIS / millis_per_slot, 5);
+    pub fn new(max_age: usize) -> Self {
         Self {
             cache_by_blockhash: HashMap::default(),
             transaction_status_cache: vec![],
             // 0 is always a root
             roots: HashSet::from([0]),
             slot_deltas: HashMap::default(),
-            max_cache_entries,
+            max_cache_entries: u64::try_from(max_age).unwrap(),
         }
     }
 
