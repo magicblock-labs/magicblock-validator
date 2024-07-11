@@ -44,7 +44,10 @@ use solana_sdk::{
         create_executable_meta, from_account, Account, AccountSharedData,
         ReadableAccount, WritableAccount,
     },
-    clock::{BankId, Epoch, Slot, SlotIndex, UnixTimestamp},
+    clock::{
+        BankId, Epoch, Slot, SlotIndex, UnixTimestamp, DEFAULT_MS_PER_SLOT,
+        MAX_RECENT_BLOCKHASHES,
+    },
     epoch_info::EpochInfo,
     epoch_schedule::EpochSchedule,
     feature,
@@ -447,6 +450,9 @@ impl Bank {
             Arc::new(RwLock::new(loaded_programs))
         };
 
+        let max_age = DEFAULT_MS_PER_SLOT * MAX_RECENT_BLOCKHASHES as u64
+            / millis_per_slot;
+
         let mut bank = Self {
             rc: BankRc::new(accounts),
             slot: AtomicU64::default(),
@@ -465,10 +471,9 @@ impl Bank {
             fee_structure: FeeStructure::default(),
             loaded_programs_cache,
             transaction_processor: Default::default(),
-            status_cache: Arc::new(RwLock::new(BankStatusCache::new(
-                millis_per_slot,
-            ))),
+            status_cache: Arc::new(RwLock::new(BankStatusCache::new(max_age))),
             millis_per_slot,
+            max_age,
             identity_id: Pubkey::default(),
 
             // Counters
@@ -493,7 +498,9 @@ impl Bank {
             slots_per_year: f64::default(),
 
             // For TransactionProcessingCallback
-            blockhash_queue: RwLock::<BlockhashQueue>::default(),
+            blockhash_queue: RwLock::<BlockhashQueue>::new(
+                BlockhashQueue::new(max_age as usize),
+            ),
             feature_set: Arc::<FeatureSet>::default(),
             rent_collector: RentCollector::default(),
 

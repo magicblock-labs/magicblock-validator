@@ -20,7 +20,7 @@ use solana_rpc_client_api::{
     },
 };
 use solana_sdk::{
-    clock::{Slot, UnixTimestamp, MAX_RECENT_BLOCKHASHES},
+    clock::{Slot, UnixTimestamp},
     commitment_config::CommitmentConfig,
     hash::Hash,
     message::{SanitizedMessage, SanitizedVersionedMessage, VersionedMessage},
