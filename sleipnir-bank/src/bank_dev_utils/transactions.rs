@@ -238,7 +238,11 @@ pub fn create_sysvars_get_transaction(bank: &Bank) -> SanitizedTransaction {
     let instruction =
         create_sysvars_get_instruction(&elfs::sysvars::id(), &funded_accounts);
     let message = Message::new(&[instruction], None);
-    let transaction = Transaction::new_unsigned(message);
+    let transaction = Transaction::new(
+        &[&funded_accounts[0]],
+        message,
+        bank.last_blockhash(),
+    );
     SanitizedTransaction::try_from_legacy_transaction(transaction).unwrap()
 }
 
