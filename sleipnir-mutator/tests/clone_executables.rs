@@ -157,8 +157,7 @@ async fn clone_solx_executable() {
                 assert_eq!(pre[0], [LAMPORTS_PER_SOL, 9103680, 1, 1141440]);
 
                 assert_eq!(post.len(), 1);
-                assert_eq!(post[0], [LAMPORTS_PER_SOL - 2* LAMPORTS_PER_SIGNATURE , 9103680, 1, 1141440]);
-
+                assert_eq!(post[0], [LAMPORTS_PER_SOL - 2 * LAMPORTS_PER_SIGNATURE , 9103680, 1, 1141440]);
             }
         );
     }

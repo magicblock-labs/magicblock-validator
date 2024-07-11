@@ -19,9 +19,9 @@ use sleipnir_bank::{
     LAMPORTS_PER_SIGNATURE,
 };
 use solana_sdk::{
-    account::ReadableAccount, genesis_config::create_genesis_config,
-    native_token::LAMPORTS_PER_SOL, rent::Rent,
-    transaction::SanitizedTransaction,
+    account::ReadableAccount, fee_calculator::FeeRateGovernor,
+    genesis_config::create_genesis_config, native_token::LAMPORTS_PER_SOL,
+    rent::Rent, transaction::SanitizedTransaction,
 };
 use test_tools_core::init_logger;
 
@@ -29,7 +29,10 @@ use test_tools_core::init_logger;
 fn test_bank_system_transfer_instruction() {
     init_logger!();
 
-    let (genesis_config, _) = create_genesis_config(u64::MAX);
+    let (mut genesis_config, _) = create_genesis_config(u64::MAX);
+    genesis_config.fee_rate_governor =
+        FeeRateGovernor::new(LAMPORTS_PER_SIGNATURE, 0);
+
     let bank = Bank::new_for_tests(&genesis_config, None, None);
 
     let (tx, from, to) = create_system_transfer_transaction(
@@ -51,7 +54,7 @@ fn test_bank_system_transfer_instruction() {
     let from_acc = bank.get_account(&from).unwrap();
     let to_acc = bank.get_account(&to).unwrap();
 
-    assert_eq!(from_acc.lamports(), FROM_AFTER_BALANCE,);
+    assert_eq!(from_acc.lamports(), FROM_AFTER_BALANCE);
     assert_eq!(to_acc.lamports(), TO_AFTER_BALANCE);
 
     assert_eq!(bank.get_balance(&from), from_acc.lamports());
@@ -69,7 +72,6 @@ fn test_bank_system_transfer_instruction() {
 
             assert_eq!(post.len(), 1);
             assert_eq!(post[0], [FROM_AFTER_BALANCE, TO_AFTER_BALANCE, 1,]);
-
         }
     );
 }
@@ -78,7 +80,10 @@ fn test_bank_system_transfer_instruction() {
 fn test_bank_system_allocate_instruction() {
     init_logger!();
 
-    let (genesis_config, _) = create_genesis_config(u64::MAX);
+    let (mut genesis_config, _) = create_genesis_config(u64::MAX);
+    genesis_config.fee_rate_governor =
+        FeeRateGovernor::new(LAMPORTS_PER_SIGNATURE, 0);
+
     let bank = Bank::new_for_tests(&genesis_config, None, None);
 
     const SPACE: u64 = 100;
@@ -115,7 +120,6 @@ fn test_bank_system_allocate_instruction() {
 
             assert_eq!(post.len(), 1);
             assert_eq!(post[0], [999990000, 1586880, 1,]);
-
         }
     );
 }
@@ -138,7 +142,10 @@ fn test_bank_solx_instructions() {
     init_logger!();
 
     // 1. Init Bank and load solanax program
-    let (genesis_config, _) = create_genesis_config(u64::MAX);
+    let (mut genesis_config, _) = create_genesis_config(u64::MAX);
+    genesis_config.fee_rate_governor =
+        FeeRateGovernor::new(LAMPORTS_PER_SIGNATURE, 0);
+
     let bank = Bank::new_for_tests(&genesis_config, None, None);
     add_elf_program(&bank, &elfs::solanax::ID);
 
@@ -173,8 +180,7 @@ fn test_bank_solx_instructions() {
             assert_eq!(pre[0], [LAMPORTS_PER_SOL, 9103680, 1, 1141440]);
 
             assert_eq!(post.len(), 1);
-            assert_eq!(post[0], [LAMPORTS_PER_SOL - 2* LAMPORTS_PER_SIGNATURE , 9103680, 1, 1141440]);
-
+            assert_eq!(post[0], [LAMPORTS_PER_SOL - 2 * LAMPORTS_PER_SIGNATURE , 9103680, 1, 1141440]);
         }
     );
 
