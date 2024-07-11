@@ -216,7 +216,7 @@ mod tests {
     #[test]
     fn test_len() {
         const MAX_AGE: usize = 10;
-        let mut hash_queue = BlockhashQueue::new(MAX_AGE);
+        let mut hash_queue = BlockhashQueue::new(MAX_AGE as u64);
         assert_eq!(hash_queue.ages.len(), 0);
 
         for _ in 0..MAX_AGE {
@@ -241,7 +241,7 @@ mod tests {
         let mut hash_list: Vec<Hash> = Vec::new();
         hash_list.resize_with(MAX_AGE + 1, Hash::new_unique);
 
-        let mut hash_queue = BlockhashQueue::new(MAX_AGE);
+        let mut hash_queue = BlockhashQueue::new(MAX_AGE as u64);
         for hash in &hash_list {
             assert!(hash_queue.get_hash_age(hash).is_none());
         }
@@ -268,9 +268,9 @@ mod tests {
         let mut hash_list: Vec<Hash> = Vec::new();
         hash_list.resize_with(MAX_AGE + 1, Hash::new_unique);
 
-        let mut hash_queue = BlockhashQueue::new(MAX_AGE);
+        let mut hash_queue = BlockhashQueue::new(MAX_AGE as u64);
         for hash in &hash_list {
-            assert!(!hash_queue.is_hash_valid_for_age(hash, MAX_AGE));
+            assert!(!hash_queue.is_hash_valid_for_age(hash, MAX_AGE as u64));
         }
 
         for hash in &hash_list {
@@ -281,7 +281,7 @@ mod tests {
         // the age of a hash is within max age, the hash from 11 slots ago is considered
         // to be within the max age of 10.
         for hash in &hash_list {
-            assert!(hash_queue.is_hash_valid_for_age(hash, MAX_AGE));
+            assert!(hash_queue.is_hash_valid_for_age(hash, MAX_AGE as u64));
         }
 
         // When max age is 0, only the most recent blockhash is still considered valid
