@@ -1498,9 +1498,9 @@ impl Bank {
         lock_results: &[Result<()>],
         error_counters: &mut TransactionErrorMetrics,
     ) -> Vec<TransactionCheckResult> {
-        let lock_results =
+        let age_results =
             self.check_age(sanitized_txs, lock_results, error_counters);
-        self.check_status_cache(sanitized_txs, lock_results, error_counters)
+        self.check_status_cache(sanitized_txs, age_results, error_counters)
     }
 
     fn check_transaction_for_nonce(
@@ -1553,9 +1553,7 @@ impl Bank {
             (
                 Ok(()),
                 None,
-                hash_queue.get_lamports_per_signature(
-                    tx.message().recent_blockhash(),
-                ),
+                hash_queue.get_lamports_per_signature(recent_blockhash),
             )
         } else if let Some((address, account)) =
             self.check_transaction_for_nonce(tx, next_durable_nonce)
@@ -1583,16 +1581,16 @@ impl Bank {
     fn check_status_cache(
         &self,
         sanitized_txs: &[impl core::borrow::Borrow<SanitizedTransaction>],
-        lock_results: Vec<TransactionCheckResult>,
+        age_results: Vec<TransactionCheckResult>,
         error_counters: &mut TransactionErrorMetrics,
     ) -> Vec<TransactionCheckResult> {
         let rcache = self.status_cache.read().unwrap();
         sanitized_txs
             .iter()
-            .zip(lock_results)
-            .map(|(sanitized_tx, (lock_result, nonce, lamports))| {
+            .zip(age_results)
+            .map(|(sanitized_tx, (age_result, nonce, lamports))| {
                 let sanitized_tx = sanitized_tx.borrow();
-                if lock_result.is_ok()
+                if age_result.is_ok()
                     && self
                         .is_transaction_already_processed(sanitized_tx, &rcache)
                 {
@@ -1604,7 +1602,7 @@ impl Bank {
                     );
                 }
 
-                (lock_result, nonce, lamports)
+                (age_result, nonce, lamports)
             })
             .collect()
     }
