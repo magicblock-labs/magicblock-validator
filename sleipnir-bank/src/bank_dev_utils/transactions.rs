@@ -9,6 +9,7 @@ use rayon::{
 };
 use sleipnir_accounts_db::transaction_results::TransactionResults;
 use solana_program_runtime::timings::ExecuteTimings;
+use solana_sdk::hash::Hash;
 use solana_sdk::{
     account::Account,
     instruction::{AccountMeta, Instruction},
@@ -156,12 +157,16 @@ pub fn create_system_allocate_transaction(
 }
 
 // Noop
-pub fn create_noop_transaction(bank: &Bank) -> SanitizedTransaction {
+pub fn create_noop_transaction(
+    bank: &Bank,
+    recent_blockhash: Hash,
+) -> SanitizedTransaction {
     let funded_accounts = create_funded_accounts(bank, 2, None);
     let instruction =
         create_noop_instruction(&elfs::noop::id(), &funded_accounts);
     let message = Message::new(&[instruction], None);
-    let transaction = Transaction::new_unsigned(message);
+    let transaction =
+        Transaction::new(&[&funded_accounts[0]], message, recent_blockhash);
     SanitizedTransaction::try_from_legacy_transaction(transaction).unwrap()
 }
 
