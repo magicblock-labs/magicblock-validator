@@ -26,8 +26,8 @@ pub async fn verified_tx_to_clone_from_devnet(
     addr: &str,
     slot: Slot,
     num_accounts_expected: usize,
+    recent_blockhash: Hash,
 ) -> Transaction {
-    let recent_blockhash = Hash::default();
     let tx = mutator::transaction_to_clone_account_from_cluster(
         &ClusterType::Devnet.into(),
         addr,

@@ -18,6 +18,8 @@ use solana_sdk::{
     system_program,
 };
 
+use crate::LAMPORTS_PER_SIGNATURE;
+
 // Default amount received by the validator
 const VALIDATOR_LAMPORTS: u64 = 42;
 
@@ -99,8 +101,8 @@ pub fn create_genesis_config_with_vote_accounts_and_cluster_type(
         &mint_keypair.pubkey(),
         &validator_pubkey,
         VALIDATOR_LAMPORTS,
-        FeeRateGovernor::new(0, 0), // most tests can't handle transaction fees
-        Rent::free(),               // most tests don't expect rent
+        FeeRateGovernor::new(LAMPORTS_PER_SIGNATURE, 0),
+        Rent::free(), // most tests don't expect rent
         vec![],
     );
 
@@ -138,8 +140,8 @@ pub fn create_genesis_config_with_leader(
         &mint_keypair.pubkey(),
         validator_pubkey,
         VALIDATOR_LAMPORTS,
-        FeeRateGovernor::new(0, 0), // most tests can't handle transaction fees
-        Rent::free(),               // most tests don't expect rent
+        FeeRateGovernor::new(LAMPORTS_PER_SIGNATURE, 0),
+        Rent::free(), // most tests don't expect rent
         vec![],
     );
 

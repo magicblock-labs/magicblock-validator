@@ -40,7 +40,13 @@ async fn clone_solx_executable() {
     // 1. Exec Clone Transaction
     {
         let slot = tx_processor.bank().slot();
-        let tx = verified_tx_to_clone_from_devnet(SOLX_PROG, slot, 5).await;
+        let tx = verified_tx_to_clone_from_devnet(
+            SOLX_PROG,
+            slot,
+            5,
+            tx_processor.bank().last_blockhash(),
+        )
+        .await;
         let result = tx_processor.process(vec![tx]).unwrap();
 
         let (_, exec_details) = result.transactions.values().next().unwrap();

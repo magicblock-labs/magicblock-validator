@@ -29,7 +29,13 @@ async fn clone_non_executable_without_data() {
     fund_luzifer(&*tx_processor);
 
     let slot = tx_processor.bank().slot();
-    let tx = verified_tx_to_clone_from_devnet(SOLX_TIPS, slot, 3).await;
+    let tx = verified_tx_to_clone_from_devnet(
+        SOLX_TIPS,
+        slot,
+        3,
+        tx_processor.bank().last_blockhash(),
+    )
+    .await;
     let result = tx_processor.process(vec![tx]).unwrap();
 
     let (_, exec_details) = result.transactions.values().next().unwrap();
@@ -67,7 +73,13 @@ async fn clone_non_executable_with_data() {
     fund_luzifer(&*tx_processor);
 
     let slot = tx_processor.bank().slot();
-    let tx = verified_tx_to_clone_from_devnet(SOLX_POST, slot, 3).await;
+    let tx = verified_tx_to_clone_from_devnet(
+        SOLX_POST,
+        slot,
+        3,
+        tx_processor.bank().last_blockhash(),
+    )
+    .await;
     let result = tx_processor.process(vec![tx]).unwrap();
 
     let (_, exec_details) = result.transactions.values().next().unwrap();
