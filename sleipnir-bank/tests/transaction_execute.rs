@@ -14,13 +14,13 @@ use sleipnir_bank::{
             SolanaxPostAccounts,
         },
     },
+    genesis_utils::create_genesis_config_with_leader_and_fees,
     transaction_results::TransactionBalancesSet,
     LAMPORTS_PER_SIGNATURE,
 };
 use solana_sdk::{
-    account::ReadableAccount, fee_calculator::FeeRateGovernor,
-    genesis_config::create_genesis_config, hash::Hash,
-    native_token::LAMPORTS_PER_SOL, rent::Rent,
+    account::ReadableAccount, genesis_config::create_genesis_config,
+    hash::Hash, native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, rent::Rent,
     transaction::SanitizedTransaction,
 };
 use test_tools_core::init_logger;
@@ -29,11 +29,12 @@ use test_tools_core::init_logger;
 fn test_bank_system_transfer_instruction() {
     init_logger!();
 
-    let (mut genesis_config, _) = create_genesis_config(u64::MAX);
-    genesis_config.fee_rate_governor =
-        FeeRateGovernor::new(LAMPORTS_PER_SIGNATURE, 0);
-
-    let bank = Bank::new_for_tests(&genesis_config, None, None);
+    let genesis_config_info = create_genesis_config_with_leader_and_fees(
+        u64::MAX,
+        &Pubkey::new_unique(),
+    );
+    let bank =
+        Bank::new_for_tests(&genesis_config_info.genesis_config, None, None);
 
     let (tx, from, to) = create_system_transfer_transaction(
         &bank,
@@ -80,11 +81,12 @@ fn test_bank_system_transfer_instruction() {
 fn test_bank_system_allocate_instruction() {
     init_logger!();
 
-    let (mut genesis_config, _) = create_genesis_config(u64::MAX);
-    genesis_config.fee_rate_governor =
-        FeeRateGovernor::new(LAMPORTS_PER_SIGNATURE, 0);
-
-    let bank = Bank::new_for_tests(&genesis_config, None, None);
+    let genesis_config_info = create_genesis_config_with_leader_and_fees(
+        u64::MAX,
+        &Pubkey::new_unique(),
+    );
+    let bank =
+        Bank::new_for_tests(&genesis_config_info.genesis_config, None, None);
 
     const SPACE: u64 = 100;
     let rent: u64 = Rent::default().minimum_balance(SPACE as usize);
@@ -150,7 +152,7 @@ fn test_bank_expired_noop_instruction() {
 
     let (results, _) = execute_transactions(&bank, vec![tx]);
     let result = &results.execution_results[0];
-    assert!(!result.was_executed_successfully());
+    assert!(!result.was_executed());
 }
 
 #[test]
@@ -158,11 +160,12 @@ fn test_bank_solx_instructions() {
     init_logger!();
 
     // 1. Init Bank and load solanax program
-    let (mut genesis_config, _) = create_genesis_config(u64::MAX);
-    genesis_config.fee_rate_governor =
-        FeeRateGovernor::new(LAMPORTS_PER_SIGNATURE, 0);
-
-    let bank = Bank::new_for_tests(&genesis_config, None, None);
+    let genesis_config_info = create_genesis_config_with_leader_and_fees(
+        u64::MAX,
+        &Pubkey::new_unique(),
+    );
+    let bank =
+        Bank::new_for_tests(&genesis_config_info.genesis_config, None, None);
     add_elf_program(&bank, &elfs::solanax::ID);
 
     // 2. Prepare Transaction and advance slot to activate solanax program

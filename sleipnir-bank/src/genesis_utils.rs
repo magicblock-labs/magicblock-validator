@@ -69,17 +69,6 @@ pub struct GenesisConfigInfo {
     pub validator_pubkey: Pubkey,
 }
 
-pub fn create_genesis_config(
-    mint_lamports: u64,
-    validator_pubkey: &Pubkey,
-) -> GenesisConfigInfo {
-    // Note that zero lamports for validator stake will result in stake account
-    // not being stored in accounts-db but still cached in bank stakes. This
-    // causes discrepancy between cached stakes accounts in bank and
-    // accounts-db which in particular will break snapshots test.
-    create_genesis_config_with_leader(mint_lamports, validator_pubkey)
-}
-
 pub fn create_genesis_config_with_vote_accounts(
     mint_lamports: u64,
     voting_keypairs: &[impl Borrow<ValidatorVoteKeypairs>],
@@ -101,8 +90,8 @@ pub fn create_genesis_config_with_vote_accounts_and_cluster_type(
         &mint_keypair.pubkey(),
         &validator_pubkey,
         VALIDATOR_LAMPORTS,
-        FeeRateGovernor::new(LAMPORTS_PER_SIGNATURE, 0),
-        Rent::free(), // most tests don't expect rent
+        FeeRateGovernor::new(0, 0), // most tests can't handle transaction fees
+        Rent::free(),               // most tests don't expect rent
         vec![],
     );
 
@@ -140,8 +129,8 @@ pub fn create_genesis_config_with_leader(
         &mint_keypair.pubkey(),
         validator_pubkey,
         VALIDATOR_LAMPORTS,
-        FeeRateGovernor::new(LAMPORTS_PER_SIGNATURE, 0),
-        Rent::free(), // most tests don't expect rent
+        FeeRateGovernor::new(0, 0), // most tests can't handle transaction fees
+        Rent::free(),               // most tests don't expect rent
         vec![],
     );
 
@@ -150,6 +139,17 @@ pub fn create_genesis_config_with_leader(
         mint_keypair,
         validator_pubkey: *validator_pubkey,
     }
+}
+
+pub fn create_genesis_config_with_leader_and_fees(
+    mint_lamports: u64,
+    validator_pubkey: &Pubkey,
+) -> GenesisConfigInfo {
+    let mut genesis_config_info =
+        create_genesis_config_with_leader(mint_lamports, validator_pubkey);
+    genesis_config_info.genesis_config.fee_rate_governor =
+        FeeRateGovernor::new(LAMPORTS_PER_SIGNATURE, 0);
+    return genesis_config_info;
 }
 
 pub fn activate_all_features(genesis_config: &mut GenesisConfig) {
@@ -196,6 +196,10 @@ pub fn create_genesis_config_with_leader_ex(
         AccountSharedData::new(validator_lamports, 0, &system_program::id()),
     ));
 
+    // Note that zero lamports for validator stake will result in stake account
+    // not being stored in accounts-db but still cached in bank stakes. This
+    // causes discrepancy between cached stakes accounts in bank and
+    // accounts-db which in particular will break snapshots test.
     let native_mint_account =
         solana_sdk::account::AccountSharedData::from(Account {
             owner: inline_spl_token::id(),

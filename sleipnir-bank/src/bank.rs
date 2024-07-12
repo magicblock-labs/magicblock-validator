@@ -1574,7 +1574,7 @@ impl Bank {
     ) -> bool {
         let signature = sanitized_tx.signature();
         status_cache
-            .get_recent_transaction_status(signature, None)
+            .get_recent_transaction_status(signature, Some(self.max_age))
             .is_some()
     }
 

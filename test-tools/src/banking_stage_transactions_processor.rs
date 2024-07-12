@@ -6,7 +6,9 @@ use std::{
 use crossbeam_channel::unbounded;
 use sleipnir_bank::{
     bank::Bank,
-    genesis_utils::{create_genesis_config, GenesisConfigInfo},
+    genesis_utils::{
+        create_genesis_config_with_leader_and_fees, GenesisConfigInfo,
+    },
 };
 use sleipnir_messaging::{banking_tracer::BankingTracer, BankingPacketBatch};
 use sleipnir_stage_banking::banking_stage::BankingStage;
@@ -55,7 +57,10 @@ pub struct BankingStageTransactionsProcessor {
 impl BankingStageTransactionsProcessor {
     pub fn new(config: BankingStageTransactionsProcessorConfig) -> Self {
         let GenesisConfigInfo { genesis_config, .. } =
-            create_genesis_config(u64::MAX, &Pubkey::new_unique());
+            create_genesis_config_with_leader_and_fees(
+                u64::MAX,
+                &Pubkey::new_unique(),
+            );
         let bank = bank_for_tests(&genesis_config, None, None);
         let bank = Arc::new(bank);
 
