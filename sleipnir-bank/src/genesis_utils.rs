@@ -149,7 +149,7 @@ pub fn create_genesis_config_with_leader_and_fees(
         create_genesis_config_with_leader(mint_lamports, validator_pubkey);
     genesis_config_info.genesis_config.fee_rate_governor =
         FeeRateGovernor::new(LAMPORTS_PER_SIGNATURE, 0);
-    return genesis_config_info;
+    genesis_config_info
 }
 
 pub fn activate_all_features(genesis_config: &mut GenesisConfig) {
