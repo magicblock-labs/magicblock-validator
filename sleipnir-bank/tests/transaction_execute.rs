@@ -4,8 +4,7 @@ use assert_matches::assert_matches;
 use sleipnir_bank::{
     bank::Bank,
     bank_dev_utils::{
-        elfs,
-        elfs::add_elf_program,
+        elfs::{self, add_elf_program},
         transactions::{
             create_noop_transaction, create_solx_send_post_transaction,
             create_system_allocate_transaction,
@@ -15,12 +14,13 @@ use sleipnir_bank::{
             SolanaxPostAccounts,
         },
     },
+    genesis_utils::create_genesis_config_with_leader_and_fees,
     transaction_results::TransactionBalancesSet,
     LAMPORTS_PER_SIGNATURE,
 };
 use solana_sdk::{
     account::ReadableAccount, genesis_config::create_genesis_config,
-    native_token::LAMPORTS_PER_SOL, rent::Rent,
+    hash::Hash, native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, rent::Rent,
     transaction::SanitizedTransaction,
 };
 use test_tools_core::init_logger;
@@ -29,8 +29,12 @@ use test_tools_core::init_logger;
 fn test_bank_system_transfer_instruction() {
     init_logger!();
 
-    let (genesis_config, _) = create_genesis_config(u64::MAX);
-    let bank = Bank::new_for_tests(&genesis_config, None, None);
+    let genesis_config_info = create_genesis_config_with_leader_and_fees(
+        u64::MAX,
+        &Pubkey::new_unique(),
+    );
+    let bank =
+        Bank::new_for_tests(&genesis_config_info.genesis_config, None, None);
 
     let (tx, from, to) = create_system_transfer_transaction(
         &bank,
@@ -51,7 +55,7 @@ fn test_bank_system_transfer_instruction() {
     let from_acc = bank.get_account(&from).unwrap();
     let to_acc = bank.get_account(&to).unwrap();
 
-    assert_eq!(from_acc.lamports(), FROM_AFTER_BALANCE,);
+    assert_eq!(from_acc.lamports(), FROM_AFTER_BALANCE);
     assert_eq!(to_acc.lamports(), TO_AFTER_BALANCE);
 
     assert_eq!(bank.get_balance(&from), from_acc.lamports());
@@ -69,7 +73,6 @@ fn test_bank_system_transfer_instruction() {
 
             assert_eq!(post.len(), 1);
             assert_eq!(post[0], [FROM_AFTER_BALANCE, TO_AFTER_BALANCE, 1,]);
-
         }
     );
 }
@@ -78,8 +81,12 @@ fn test_bank_system_transfer_instruction() {
 fn test_bank_system_allocate_instruction() {
     init_logger!();
 
-    let (genesis_config, _) = create_genesis_config(u64::MAX);
-    let bank = Bank::new_for_tests(&genesis_config, None, None);
+    let genesis_config_info = create_genesis_config_with_leader_and_fees(
+        u64::MAX,
+        &Pubkey::new_unique(),
+    );
+    let bank =
+        Bank::new_for_tests(&genesis_config_info.genesis_config, None, None);
 
     const SPACE: u64 = 100;
     let rent: u64 = Rent::default().minimum_balance(SPACE as usize);
@@ -115,7 +122,6 @@ fn test_bank_system_allocate_instruction() {
 
             assert_eq!(post.len(), 1);
             assert_eq!(post[0], [999990000, 1586880, 1,]);
-
         }
     );
 }
@@ -128,9 +134,25 @@ fn test_bank_one_noop_instruction() {
     let bank = Bank::new_for_tests(&genesis_config, None, None);
     add_elf_program(&bank, &elfs::noop::ID);
 
-    let tx = create_noop_transaction(&bank);
+    let tx = create_noop_transaction(&bank, bank.last_blockhash());
     bank.advance_slot();
-    execute_transactions(&bank, vec![tx]);
+    execute_and_check_results(&bank, tx);
+}
+
+#[test]
+fn test_bank_expired_noop_instruction() {
+    init_logger!();
+
+    let (genesis_config, _) = create_genesis_config(u64::MAX);
+    let bank = Bank::new_for_tests(&genesis_config, None, None);
+    add_elf_program(&bank, &elfs::noop::ID);
+
+    let tx = create_noop_transaction(&bank, Hash::new_unique());
+    bank.advance_slot();
+
+    let (results, _) = execute_transactions(&bank, vec![tx]);
+    let result = &results.execution_results[0];
+    assert!(!result.was_executed());
 }
 
 #[test]
@@ -138,8 +160,12 @@ fn test_bank_solx_instructions() {
     init_logger!();
 
     // 1. Init Bank and load solanax program
-    let (genesis_config, _) = create_genesis_config(u64::MAX);
-    let bank = Bank::new_for_tests(&genesis_config, None, None);
+    let genesis_config_info = create_genesis_config_with_leader_and_fees(
+        u64::MAX,
+        &Pubkey::new_unique(),
+    );
+    let bank =
+        Bank::new_for_tests(&genesis_config_info.genesis_config, None, None);
     add_elf_program(&bank, &elfs::solanax::ID);
 
     // 2. Prepare Transaction and advance slot to activate solanax program
@@ -173,8 +199,7 @@ fn test_bank_solx_instructions() {
             assert_eq!(pre[0], [LAMPORTS_PER_SOL, 9103680, 1, 1141440]);
 
             assert_eq!(post.len(), 1);
-            assert_eq!(post[0], [LAMPORTS_PER_SOL - 2* LAMPORTS_PER_SIGNATURE , 9103680, 1, 1141440]);
-
+            assert_eq!(post[0], [LAMPORTS_PER_SOL - 2 * LAMPORTS_PER_SIGNATURE , 9103680, 1, 1141440]);
         }
     );
 

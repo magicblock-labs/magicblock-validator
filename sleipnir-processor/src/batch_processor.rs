@@ -19,9 +19,7 @@ use solana_measure::measure::Measure;
 use solana_program_runtime::timings::{
     ExecuteTimingType, ExecuteTimings, ThreadExecuteTimings,
 };
-use solana_sdk::{
-    clock::MAX_PROCESSING_AGE, pubkey::Pubkey, transaction::Result,
-};
+use solana_sdk::{pubkey::Pubkey, transaction::Result};
 
 use crate::{
     metrics::{BatchExecutionTiming, ExecuteBatchesInternalMetrics},
@@ -193,7 +191,6 @@ pub fn execute_batch(
     let (tx_results, balances) =
         batch.bank().load_execute_and_commit_transactions(
             batch,
-            MAX_PROCESSING_AGE,
             collect_balances,
             recording_opts,
             timings,

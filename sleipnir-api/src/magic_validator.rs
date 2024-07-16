@@ -13,7 +13,7 @@ use std::{
 use log::*;
 use sleipnir_accounts::AccountsManager;
 use sleipnir_bank::{
-    bank::Bank, genesis_utils::create_genesis_config,
+    bank::Bank, genesis_utils::create_genesis_config_with_leader,
     program_loader::load_programs_into_bank,
     transaction_logs::TransactionLogCollectorFilter,
     transaction_notifier_interface::TransactionNotifierArc,
@@ -142,7 +142,7 @@ impl MagicValidator {
             genesis_config,
             validator_pubkey,
             ..
-        } = create_genesis_config(u64::MAX, &validator_pubkey);
+        } = create_genesis_config_with_leader(u64::MAX, &validator_pubkey);
 
         let exit = Arc::<AtomicBool>::default();
         let bank = Self::init_bank(

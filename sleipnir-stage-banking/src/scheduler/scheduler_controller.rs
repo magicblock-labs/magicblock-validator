@@ -12,7 +12,6 @@ use solana_cost_model::cost_model::CostModel;
 use solana_measure::measure_us;
 use solana_program_runtime::compute_budget_processor::process_compute_budget_instructions;
 use solana_sdk::{
-    clock::MAX_PROCESSING_AGE,
     feature_set::include_loaded_accounts_data_size_in_fee_calculation,
     fee::FeeBudgetLimits, saturating_add_assign,
     transaction::SanitizedTransaction,
@@ -162,7 +161,6 @@ impl SchedulerController {
         let check_results = bank.check_transactions(
             transactions,
             &lock_results,
-            MAX_PROCESSING_AGE,
             &mut error_counters,
         );
 
@@ -230,7 +228,6 @@ impl SchedulerController {
             let check_results = bank.check_transactions(
                 &sanitized_txs,
                 &lock_results,
-                MAX_PROCESSING_AGE,
                 &mut error_counters,
             );
 
@@ -365,7 +362,6 @@ impl SchedulerController {
             let check_results = bank.check_transactions(
                 &transactions,
                 &lock_results[..transactions.len()],
-                MAX_PROCESSING_AGE,
                 &mut error_counts,
             );
             let post_lock_validation_count = transactions.len();

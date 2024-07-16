@@ -11,7 +11,7 @@ use sleipnir_accounts_db::transaction_results::TransactionResults;
 use solana_program_runtime::timings::ExecuteTimings;
 use solana_sdk::{
     account::Account,
-    clock::MAX_PROCESSING_AGE,
+    hash::Hash,
     instruction::{AccountMeta, Instruction},
     message::Message,
     native_token::LAMPORTS_PER_SOL,
@@ -157,12 +157,16 @@ pub fn create_system_allocate_transaction(
 }
 
 // Noop
-pub fn create_noop_transaction(bank: &Bank) -> SanitizedTransaction {
+pub fn create_noop_transaction(
+    bank: &Bank,
+    recent_blockhash: Hash,
+) -> SanitizedTransaction {
     let funded_accounts = create_funded_accounts(bank, 2, None);
     let instruction =
         create_noop_instruction(&elfs::noop::id(), &funded_accounts);
     let message = Message::new(&[instruction], None);
-    let transaction = Transaction::new_unsigned(message);
+    let transaction =
+        Transaction::new(&[&funded_accounts[0]], message, recent_blockhash);
     SanitizedTransaction::try_from_legacy_transaction(transaction).unwrap()
 }
 
@@ -239,7 +243,11 @@ pub fn create_sysvars_get_transaction(bank: &Bank) -> SanitizedTransaction {
     let instruction =
         create_sysvars_get_instruction(&elfs::sysvars::id(), &funded_accounts);
     let message = Message::new(&[instruction], None);
-    let transaction = Transaction::new_unsigned(message);
+    let transaction = Transaction::new(
+        &[&funded_accounts[0]],
+        message,
+        bank.last_blockhash(),
+    );
     SanitizedTransaction::try_from_legacy_transaction(transaction).unwrap()
 }
 
@@ -332,7 +340,6 @@ pub fn execute_transactions(
     let (transaction_results, transaction_balances) = bank
         .load_execute_and_commit_transactions(
             &batch,
-            MAX_PROCESSING_AGE,
             true,
             TransactionExecutionRecordingOpts::recording_logs(),
             &mut timings,

@@ -3,11 +3,10 @@ use std::{collections::HashMap, sync::Arc};
 use sleipnir_accounts_db::transaction_results::TransactionResults;
 use sleipnir_bank::{
     bank::{Bank, TransactionExecutionRecordingOpts},
-    genesis_utils::create_genesis_config,
+    genesis_utils::create_genesis_config_with_leader_and_fees,
 };
 use solana_program_runtime::timings::ExecuteTimings;
 use solana_sdk::{
-    clock::MAX_PROCESSING_AGE,
     pubkey::Pubkey,
     transaction::{SanitizedTransaction, Transaction},
 };
@@ -30,9 +29,11 @@ impl BankTransactionsProcessor {
 
 impl Default for BankTransactionsProcessor {
     fn default() -> Self {
-        let genesis_config =
-            create_genesis_config(u64::MAX, &Pubkey::new_unique())
-                .genesis_config;
+        let genesis_config = create_genesis_config_with_leader_and_fees(
+            u64::MAX,
+            &Pubkey::new_unique(),
+        )
+        .genesis_config;
         let bank = Arc::new(bank_for_tests(&genesis_config, None, None));
         Self::new(bank)
     }
@@ -62,7 +63,6 @@ impl TransactionsProcessor for BankTransactionsProcessor {
             let (transaction_results, balances) =
                 self.bank.load_execute_and_commit_transactions(
                     &batch,
-                    MAX_PROCESSING_AGE,
                     true,
                     TransactionExecutionRecordingOpts::recording_logs(),
                     &mut timings,

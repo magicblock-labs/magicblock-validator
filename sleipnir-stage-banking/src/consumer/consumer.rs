@@ -17,7 +17,6 @@ use solana_program_runtime::{
     timings::ExecuteTimings,
 };
 use solana_sdk::{
-    clock::MAX_PROCESSING_AGE,
     feature_set,
     message::{AddressLoader, SanitizedMessage},
     pubkey::Pubkey,
@@ -287,7 +286,6 @@ impl Consumer {
         let (load_and_execute_transactions_output, load_execute_us) =
             measure_us!(bank.load_and_execute_transactions(
                 batch,
-                MAX_PROCESSING_AGE,
                 TransactionExecutionRecordingOpts::recording_all_if(
                     transaction_status_sender_enabled
                 ),

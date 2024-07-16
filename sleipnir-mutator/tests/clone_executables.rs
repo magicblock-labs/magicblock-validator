@@ -40,7 +40,13 @@ async fn clone_solx_executable() {
     // 1. Exec Clone Transaction
     {
         let slot = tx_processor.bank().slot();
-        let tx = verified_tx_to_clone_from_devnet(SOLX_PROG, slot, 5).await;
+        let tx = verified_tx_to_clone_from_devnet(
+            SOLX_PROG,
+            slot,
+            5,
+            tx_processor.bank().last_blockhash(),
+        )
+        .await;
         let result = tx_processor.process(vec![tx]).unwrap();
 
         let (_, exec_details) = result.transactions.values().next().unwrap();
@@ -157,8 +163,7 @@ async fn clone_solx_executable() {
                 assert_eq!(pre[0], [LAMPORTS_PER_SOL, 9103680, 1, 1141440]);
 
                 assert_eq!(post.len(), 1);
-                assert_eq!(post[0], [LAMPORTS_PER_SOL - 2* LAMPORTS_PER_SIGNATURE , 9103680, 1, 1141440]);
-
+                assert_eq!(post[0], [LAMPORTS_PER_SOL - 2 * LAMPORTS_PER_SIGNATURE , 9103680, 1, 1141440]);
             }
         );
     }

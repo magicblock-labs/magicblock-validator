@@ -18,6 +18,8 @@ use solana_sdk::{
     system_program,
 };
 
+use crate::LAMPORTS_PER_SIGNATURE;
+
 // Default amount received by the validator
 const VALIDATOR_LAMPORTS: u64 = 42;
 
@@ -65,17 +67,6 @@ pub struct GenesisConfigInfo {
     pub genesis_config: GenesisConfig,
     pub mint_keypair: Keypair,
     pub validator_pubkey: Pubkey,
-}
-
-pub fn create_genesis_config(
-    mint_lamports: u64,
-    validator_pubkey: &Pubkey,
-) -> GenesisConfigInfo {
-    // Note that zero lamports for validator stake will result in stake account
-    // not being stored in accounts-db but still cached in bank stakes. This
-    // causes discrepancy between cached stakes accounts in bank and
-    // accounts-db which in particular will break snapshots test.
-    create_genesis_config_with_leader(mint_lamports, validator_pubkey)
 }
 
 pub fn create_genesis_config_with_vote_accounts(
@@ -150,6 +141,17 @@ pub fn create_genesis_config_with_leader(
     }
 }
 
+pub fn create_genesis_config_with_leader_and_fees(
+    mint_lamports: u64,
+    validator_pubkey: &Pubkey,
+) -> GenesisConfigInfo {
+    let mut genesis_config_info =
+        create_genesis_config_with_leader(mint_lamports, validator_pubkey);
+    genesis_config_info.genesis_config.fee_rate_governor =
+        FeeRateGovernor::new(LAMPORTS_PER_SIGNATURE, 0);
+    genesis_config_info
+}
+
 pub fn activate_all_features(genesis_config: &mut GenesisConfig) {
     // Activate all features at genesis in development mode
     for feature_id in FeatureSet::default().inactive {
@@ -194,6 +196,10 @@ pub fn create_genesis_config_with_leader_ex(
         AccountSharedData::new(validator_lamports, 0, &system_program::id()),
     ));
 
+    // Note that zero lamports for validator stake will result in stake account
+    // not being stored in accounts-db but still cached in bank stakes. This
+    // causes discrepancy between cached stakes accounts in bank and
+    // accounts-db which in particular will break snapshots test.
     let native_mint_account =
         solana_sdk::account::AccountSharedData::from(Account {
             owner: inline_spl_token::id(),
