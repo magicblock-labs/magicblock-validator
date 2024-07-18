@@ -1,7 +1,9 @@
 pub mod commit_sender;
 pub mod errors;
+mod schedule_transactions;
 pub mod sleipnir_instruction;
 pub mod sleipnir_processor;
+mod utils;
 mod validator;
 
 pub use sleipnir_core::magic_program::*;

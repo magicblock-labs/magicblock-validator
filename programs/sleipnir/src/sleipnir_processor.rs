@@ -22,6 +22,7 @@ use solana_sdk::{
 use crate::{
     commit_sender::{send_commit, TriggerCommitOutcome},
     errors::MagicError,
+    schedule_transactions::process_schedule_commit,
     sleipnir_instruction::{
         AccountModificationForInstruction, SleipnirError, SleipnirInstruction,
     },
@@ -51,6 +52,14 @@ declare_process_instruction!(
             }
             SleipnirInstruction::TriggerCommit => {
                 trigger_commit(invoke_context, transaction_context)
+            }
+            SleipnirInstruction::ScheduleCommit(pubkeys) => {
+                process_schedule_commit(
+                    signers,
+                    invoke_context,
+                    transaction_context,
+                    pubkeys,
+                )
             }
         }
     }
