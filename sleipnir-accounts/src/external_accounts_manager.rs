@@ -7,13 +7,11 @@ use conjunto_transwise::{
 };
 use log::*;
 use sleipnir_mutator::AccountModification;
-use solana_rpc_client::{
-    nonblocking::rpc_client::RpcClient, rpc_client::SerializableTransaction,
-};
+use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_sdk::{
     account::AccountSharedData,
     pubkey::Pubkey,
-    signature::{Keypair, Signature},
+    signature::Signature,
     transaction::{SanitizedTransaction, Transaction},
 };
 
@@ -368,7 +366,7 @@ where
         Ok(commit_infos)
     }
 
-    async fn run_transactions_to_commit_specific_accounts(
+    pub async fn run_transactions_to_commit_specific_accounts(
         &self,
         now: Duration,
         commmit_infos: HashMap<Pubkey, CommitAccountInfo>,
