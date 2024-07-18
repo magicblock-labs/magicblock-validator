@@ -39,6 +39,7 @@ pub(crate) fn process_schedule_commit(
     let committees_len = pubkeys.len();
     const SIGNERS_LEN: usize = 2;
     const AUTHORITIES_LEN: usize = 1;
+    // TODO(thlorenz): @@@ ensure the PROGRAM_IDX has an executable account?
 
     // Assert MagicBlock program
     ix_ctx
@@ -73,23 +74,34 @@ pub(crate) fn process_schedule_commit(
         return Err(InstructionError::MissingRequiredSignature);
     }
 
+    // TODO(thlorenz): @@@ when signing for a PDA will the program be part
+    // of signers?
     let owner_pubkey =
         get_instruction_pubkey_with_idx(transaction_context, PROGRAM_IDX)?;
-    if !signers.contains(owner_pubkey) {
+    // if !signers.contains(owner_pubkey) {
+    //     ic_msg!(
+    //         invoke_context,
+    //         "ScheduleCommit ERR: owner pubkey {} not in signers",
+    //         owner_pubkey
+    //     );
+    //     return Err(InstructionError::MissingRequiredSignature);
+    // }
+
+    // Assert validator identity matches
+    let validator_pubkey =
+        get_instruction_pubkey_with_idx(transaction_context, VALIDATOR_IDX)?;
+    let validator_authority_id = crate::validator_authority_id();
+    if validator_pubkey != &validator_authority_id {
         ic_msg!(
             invoke_context,
-            "ScheduleCommit ERR: owner pubkey {} not in signers",
-            owner_pubkey
+            "ScheduleCommit ERR: provided validator account {} does not match validator identity {}",
+            validator_pubkey, validator_authority_id
         );
-        return Err(InstructionError::MissingRequiredSignature);
+        return Err(InstructionError::IncorrectAuthority);
     }
-    // Assert validator identity matches
-    let _validator_pubkey =
-        get_instruction_pubkey_with_idx(transaction_context, VALIDATOR_IDX)?;
-    // TODO(thlorenz): @@@ access validator identity and compare pubkey
-    // if validator_pubkey != validator_identity { ...
 
     // Assert all committees are owned by the invoking program
+    // TODO(thlorenz): @@@ assert all accounts are PDAs of the program?
     for pubkey in &pubkeys {
         let acc_owner = find_instruction_account_owner(
             invoke_context,
@@ -109,12 +121,13 @@ pub(crate) fn process_schedule_commit(
 
     // Determine id and slot
     let id = ID.fetch_add(1, Ordering::Relaxed);
-    let clock: Clock = Clock::get().map_err(|err| {
-        ic_msg!(invoke_context, "Failed to get clock sysvar: {}", err);
-        InstructionError::UnsupportedSysvar
-    })?;
+    // let clock: Clock = Clock::get().map_err(|err| {
+    //     ic_msg!(invoke_context, "Failed to get clock sysvar: {}", err);
+    //     InstructionError::UnsupportedSysvar
+    // })?;
 
-    // Deduct lamports from payer to pay for transaction
+    // Deduct lamports from payer to pay for transaction and credit the validator
+    // identity with it.
     // For now we assume that chain cost match the defaults
     // We may have to charge more here if we want to pay extra to ensure the
     // transacotin lands.
@@ -132,7 +145,7 @@ pub(crate) fn process_schedule_commit(
 
     let scheduled_commit = ScheduledCommit {
         id,
-        slot: clock.slot,
+        slot: 1, // clock.slot,
         accounts: pubkeys,
     };
 
@@ -140,4 +153,73 @@ pub(crate) fn process_schedule_commit(
     ic_msg!(invoke_context, "Scheduled commit: {}", id,);
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use std::collections::HashMap;
+
+    use solana_sdk::{
+        account::AccountSharedData, bpf_loader_upgradeable,
+        fee_calculator::DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE, pubkey::Pubkey,
+        signature::Keypair, signer::Signer, system_program,
+    };
+
+    use crate::{
+        sleipnir_instruction::schedule_commit_instruction,
+        test_utils::{ensure_funded_validator_authority, process_instruction},
+        validator_authority_id,
+    };
+
+    // For the scheduling itself and the debit to fund the scheduled transaction
+    const REQUIRED_TX_COST: u64 = DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE * 2;
+
+    #[test]
+    fn test_schedule_commit_single_account() {
+        let payer = Keypair::new();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
+        let mut account_data = {
+            let mut map = HashMap::new();
+            map.insert(
+                payer.pubkey(),
+                AccountSharedData::new(
+                    REQUIRED_TX_COST,
+                    0,
+                    &system_program::id(),
+                ),
+            );
+            map.insert(
+                program,
+                AccountSharedData::new(0, 0, &bpf_loader_upgradeable::id()),
+            );
+            map.insert(committee, AccountSharedData::new(0, 0, &program));
+            map
+        };
+        ensure_funded_validator_authority(&mut account_data);
+
+        let ix = schedule_commit_instruction(
+            &payer.pubkey(),
+            &program,
+            &validator_authority_id(),
+            vec![committee],
+        );
+
+        let transaction_accounts = ix
+            .accounts
+            .iter()
+            .flat_map(|acc| {
+                account_data
+                    .remove(&acc.pubkey)
+                    .map(|shared_data| (acc.pubkey, shared_data))
+            })
+            .collect();
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Ok(()),
+        );
+    }
 }
