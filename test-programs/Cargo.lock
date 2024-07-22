@@ -128,9 +128,9 @@ dependencies = [
 
 [[package]]
 name = "anyhow"
-version = "1.0.80"
+version = "1.0.86"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "5ad32ce52e4161730f7098c077cd2ed6229b5804ccf99e5366be1ab72a98b4e1"
+checksum = "b3d1d046238990b9cf5bcde22a3fb3584ee5cf65fb2765f454ed428c7a0063da"
 
 [[package]]
 name = "ark-bn254"
@@ -1806,7 +1806,7 @@ version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "681030a937600a36906c185595136d26abfebb4aa9c65701cefcaf8578bb982b"
 dependencies = [
- "proc-macro-crate 1.3.1",
+ "proc-macro-crate 3.1.0",
  "proc-macro2",
  "quote",
  "syn 2.0.50",
@@ -2297,6 +2297,27 @@ name = "ryu"
 version = "1.0.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e86697c916019a8588c99b5fac3cead74ec0b4b819707a682fd4d23fa0ce1ba1"
+
+[[package]]
+name = "schedulecommit-client"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "schedulecommit-program",
+ "sleipnir-core",
+ "solana-program 1.17.22",
+ "solana-rpc-client",
+ "solana-rpc-client-api",
+ "solana-sdk 1.17.22",
+]
+
+[[package]]
+name = "schedulecommit-program"
+version = "0.0.0"
+dependencies = [
+ "borsh 0.10.3",
+ "solana-program 1.17.22",
+]
 
 [[package]]
 name = "scopeguard"
@@ -3588,25 +3609,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c06d3da6113f116aaee68e4d601191614c9053067f9ab7f6edbcb161237daa54"
 dependencies = [
  "once_cell",
-]
-
-[[package]]
-name = "triggercommit-client"
-version = "0.0.0"
-dependencies = [
- "sleipnir-core",
- "solana-program 1.17.22",
- "solana-rpc-client",
- "solana-rpc-client-api",
- "solana-sdk 1.17.22",
- "triggercommit-program",
-]
-
-[[package]]
-name = "triggercommit-program"
-version = "0.0.0"
-dependencies = [
- "solana-program 1.17.22",
 ]
 
 [[package]]

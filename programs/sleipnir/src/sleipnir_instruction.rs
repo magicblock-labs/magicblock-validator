@@ -75,15 +75,6 @@ pub(crate) enum SleipnirInstruction {
     ///  - **n+1**  `[SIGNER]` (Implicit NativeLoader)
     ModifyAccounts(HashMap<Pubkey, AccountModificationForInstruction>),
 
-    /// Forces the provided account to be committed to chain regardless
-    /// of the commit frequency of the validator or the delegated account
-    /// itself
-    ///
-    /// # Account references
-    ///  - **0.** `[WRITE, SIGNER]` Payer requesting the account to be committed
-    ///  - **1.** `[]`              Account to commit
-    TriggerCommit,
-
     /// Schedules the accounts provided at end of accounts Vec to be committed.
     /// It should be invoked from the program whose PDA accounts are to be
     /// committed.
@@ -94,6 +85,15 @@ pub(crate) enum SleipnirInstruction {
     /// - **2.**   `[WRITE]`         Validator authority to which we escrow tx cost
     /// - **3..n** `[]`              Accounts to be committed
     ScheduleCommit,
+
+    /// Forces the provided account to be committed to chain regardless
+    /// of the commit frequency of the validator or the delegated account
+    /// itself
+    ///
+    /// # Account references
+    ///  - **0.** `[WRITE, SIGNER]` Payer requesting the account to be committed
+    ///  - **1.** `[]`              Account to commit
+    TriggerCommit,
 }
 
 // -----------------
