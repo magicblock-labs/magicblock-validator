@@ -6,7 +6,7 @@ use std::{
 use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 use solana_sdk::{
     clock::Clock, fee_calculator::DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE,
-    instruction::InstructionError, pubkey::Pubkey, sysvar::Sysvar,
+    instruction::InstructionError, program_error::ProgramError, pubkey::Pubkey,
     transaction_context::TransactionContext,
 };
 
@@ -20,6 +20,25 @@ use crate::{
 };
 
 use super::transaction_scheduler::ScheduledCommit;
+
+#[cfg(not(test))]
+fn get_clock() -> Result<Clock, ProgramError> {
+    use solana_sdk::sysvar::Sysvar;
+    Clock::get()
+}
+
+#[cfg(test)]
+fn get_clock() -> Result<Clock, ProgramError> {
+    // NOTE: I could not figure out how to properly register sysvars using the
+    // `mock_process_instruction` test setup.
+    Ok(Clock {
+        slot: 100,
+        unix_timestamp: 1_000,
+        epoch_start_timestamp: 0,
+        epoch: 10,
+        leader_schedule_epoch: 10,
+    })
+}
 
 pub(crate) fn process_schedule_commit(
     signers: HashSet<Pubkey>,
@@ -121,10 +140,10 @@ pub(crate) fn process_schedule_commit(
 
     // Determine id and slot
     let id = ID.fetch_add(1, Ordering::Relaxed);
-    // let clock: Clock = Clock::get().map_err(|err| {
-    //     ic_msg!(invoke_context, "Failed to get clock sysvar: {}", err);
-    //     InstructionError::UnsupportedSysvar
-    // })?;
+    let clock: Clock = get_clock().map_err(|err| {
+        ic_msg!(invoke_context, "Failed to get clock sysvar: {}", err);
+        InstructionError::UnsupportedSysvar
+    })?;
 
     // Deduct lamports from payer to pay for transaction and credit the validator
     // identity with it.
@@ -145,8 +164,9 @@ pub(crate) fn process_schedule_commit(
 
     let scheduled_commit = ScheduledCommit {
         id,
-        slot: 1, // clock.slot,
+        slot: clock.slot,
         accounts: pubkeys,
+        payer: *payer_pubkey,
     };
 
     TransactionScheduler::default().schedule_commit(scheduled_commit);
@@ -160,23 +180,53 @@ mod tests {
     use std::collections::HashMap;
 
     use solana_sdk::{
-        account::AccountSharedData, bpf_loader_upgradeable,
-        fee_calculator::DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE, pubkey::Pubkey,
-        signature::Keypair, signer::Signer, system_program,
+        account::{AccountSharedData, ReadableAccount},
+        bpf_loader_upgradeable,
+        fee_calculator::DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE,
+        pubkey::Pubkey,
+        signature::Keypair,
+        signer::{SeedDerivable, Signer},
+        system_program,
     };
 
     use crate::{
+        schedule_transactions::transaction_scheduler::{
+            ScheduledCommit, TransactionScheduler,
+        },
         sleipnir_instruction::schedule_commit_instruction,
         test_utils::{ensure_funded_validator_authority, process_instruction},
         validator_authority_id,
     };
 
+    use super::get_clock;
+
     // For the scheduling itself and the debit to fund the scheduled transaction
     const REQUIRED_TX_COST: u64 = DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE * 2;
 
+    fn account_idx(
+        transaction_accounts: &[(Pubkey, AccountSharedData)],
+        pubkey: &Pubkey,
+    ) -> usize {
+        transaction_accounts
+            .iter()
+            .enumerate()
+            .find_map(
+                |(idx, (x, _))| {
+                    if x.eq(pubkey) {
+                        Some(idx)
+                    } else {
+                        None
+                    }
+                },
+            )
+            .unwrap()
+    }
+
     #[test]
     fn test_schedule_commit_single_account() {
-        let payer = Keypair::new();
+        // Ensuring unique payers for each test to isolate scheduled commits
+        let payer =
+            Keypair::from_seed(b"test_schedule_commit_single_account").unwrap();
         let program = Pubkey::new_unique();
         let committee = Pubkey::new_unique();
         let mut account_data = {
@@ -205,7 +255,7 @@ mod tests {
             vec![committee],
         );
 
-        let transaction_accounts = ix
+        let transaction_accounts: Vec<(Pubkey, AccountSharedData)> = ix
             .accounts
             .iter()
             .flat_map(|acc| {
@@ -215,11 +265,50 @@ mod tests {
             })
             .collect();
 
-        process_instruction(
+        let payer_idx = account_idx(&transaction_accounts, &payer.pubkey());
+        let auth_idx =
+            account_idx(&transaction_accounts, &validator_authority_id());
+
+        let (_, payer_before) = &transaction_accounts[payer_idx].clone();
+        let (_, auth_before) = &transaction_accounts[auth_idx].clone();
+
+        let accounts = process_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
             Ok(()),
+        );
+
+        let payer_after = &accounts[payer_idx];
+        let auth_after = &accounts[auth_idx];
+
+        assert_eq!(
+            payer_after.lamports(),
+            // NOTE: the fee for the transaction itself is not charged when
+            // mocking the instruction
+            payer_before.lamports() - DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE
+        );
+
+        assert_eq!(
+            auth_after.lamports(),
+            auth_before.lamports() + DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE
+        );
+
+        let scheduler = TransactionScheduler::default();
+        let scheduled_commits =
+            scheduler.get_scheduled_commits_by_payer(&payer.pubkey());
+        assert_eq!(scheduled_commits.len(), 1);
+
+        let commit = &scheduled_commits[0];
+        let test_clock = get_clock().unwrap();
+        assert_eq!(
+            commit,
+            &ScheduledCommit {
+                id: 0,
+                slot: test_clock.slot,
+                accounts: vec![committee],
+                payer: payer.pubkey(),
+            }
         );
     }
 }
