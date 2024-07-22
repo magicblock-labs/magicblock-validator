@@ -149,7 +149,7 @@ pub(crate) fn process_schedule_commit(
     // identity with it.
     // For now we assume that chain cost match the defaults
     // We may have to charge more here if we want to pay extra to ensure the
-    // transacotin lands.
+    // transaction lands.
     let tx_cost = DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE;
     debit_instruction_account_at_index(
         transaction_context,
@@ -284,8 +284,6 @@ mod tests {
 
         assert_eq!(
             payer_after.lamports(),
-            // NOTE: the fee for the transaction itself is not charged when
-            // mocking the instruction
             payer_before.lamports() - DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE
         );
 
@@ -311,4 +309,100 @@ mod tests {
             }
         );
     }
+
+    #[test]
+    fn test_schedule_commit_three_accounts() {
+        let payer =
+            Keypair::from_seed(b"test_schedule_commit_three_accounts").unwrap();
+        let program = Pubkey::new_unique();
+        let committee_uno = Pubkey::new_unique();
+        let committee_dos = Pubkey::new_unique();
+        let committee_tres = Pubkey::new_unique();
+        let mut account_data = {
+            let mut map = HashMap::new();
+            map.insert(
+                payer.pubkey(),
+                AccountSharedData::new(
+                    REQUIRED_TX_COST,
+                    0,
+                    &system_program::id(),
+                ),
+            );
+            map.insert(
+                program,
+                AccountSharedData::new(0, 0, &bpf_loader_upgradeable::id()),
+            );
+            map.insert(committee_uno, AccountSharedData::new(0, 0, &program));
+            map.insert(committee_dos, AccountSharedData::new(0, 0, &program));
+            map.insert(committee_tres, AccountSharedData::new(0, 0, &program));
+            map
+        };
+        ensure_funded_validator_authority(&mut account_data);
+
+        let ix = schedule_commit_instruction(
+            &payer.pubkey(),
+            &program,
+            &validator_authority_id(),
+            vec![committee_uno, committee_dos, committee_tres],
+        );
+
+        let transaction_accounts: Vec<(Pubkey, AccountSharedData)> = ix
+            .accounts
+            .iter()
+            .flat_map(|acc| {
+                account_data
+                    .remove(&acc.pubkey)
+                    .map(|shared_data| (acc.pubkey, shared_data))
+            })
+            .collect();
+
+        let payer_idx = account_idx(&transaction_accounts, &payer.pubkey());
+        let auth_idx =
+            account_idx(&transaction_accounts, &validator_authority_id());
+
+        let (_, payer_before) = &transaction_accounts[payer_idx].clone();
+        let (_, auth_before) = &transaction_accounts[auth_idx].clone();
+
+        let accounts = process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Ok(()),
+        );
+
+        let payer_after = &accounts[payer_idx];
+        let auth_after = &accounts[auth_idx];
+
+        assert_eq!(
+            payer_after.lamports(),
+            payer_before.lamports() - DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE
+        );
+
+        assert_eq!(
+            auth_after.lamports(),
+            auth_before.lamports() + DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE
+        );
+
+        let scheduler = TransactionScheduler::default();
+        let scheduled_commits =
+            scheduler.get_scheduled_commits_by_payer(&payer.pubkey());
+        assert_eq!(scheduled_commits.len(), 1);
+
+        let commit = &scheduled_commits[0];
+        let test_clock = get_clock().unwrap();
+        assert_eq!(
+            commit,
+            &ScheduledCommit {
+                id: 0,
+                slot: test_clock.slot,
+                accounts: vec![committee_uno, committee_dos, committee_tres],
+                payer: payer.pubkey(),
+            }
+        );
+    }
+
+    // TODO(thlorenz): @@@ non-happy path tests for the following cases
+    // - not enough accounts
+    // - not all accounts owned by program
+    // - invalid validator pubkey
 }
