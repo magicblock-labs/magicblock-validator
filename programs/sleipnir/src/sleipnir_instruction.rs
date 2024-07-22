@@ -84,7 +84,7 @@ pub(crate) enum SleipnirInstruction {
     ///  - **1.** `[]`              Account to commit
     TriggerCommit,
 
-    /// Schedules the accounts provided via the instruction args to be committed.
+    /// Schedules the accounts provided at end of accounts Vec to be committed.
     /// It should be invoked from the program whose PDA accounts are to be
     /// committed.
     ///
@@ -93,7 +93,7 @@ pub(crate) enum SleipnirInstruction {
     /// - **1.**   `[SIGNER]`        The program owning the accounts to be committed
     /// - **2.**   `[WRITE]`         Validator authority to which we escrow tx cost
     /// - **3..n** `[]`              Accounts to be committed
-    ScheduleCommit(Vec<Pubkey>),
+    ScheduleCommit,
 }
 
 // -----------------
@@ -194,7 +194,7 @@ pub(crate) fn schedule_commit_instruction(
     }
     Instruction::new_with_bincode(
         crate::id(),
-        &SleipnirInstruction::ScheduleCommit(pdas),
+        &SleipnirInstruction::ScheduleCommit,
         account_metas,
     )
 }

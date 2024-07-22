@@ -1,3 +1,4 @@
+#![allow(unused)] // most of these utilities will come in useful later
 use std::cell::RefCell;
 
 use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
@@ -66,6 +67,14 @@ pub(crate) fn get_instruction_account_with_idx(
     let tx_idx = ix_ctx.get_index_of_instruction_account_in_transaction(idx)?;
     let acc = transaction_context.get_account_at_index(tx_idx)?;
     Ok(acc)
+}
+
+pub(crate) fn get_instruction_account_owner_with_idx(
+    transaction_context: &TransactionContext,
+    idx: u16,
+) -> Result<Pubkey, InstructionError> {
+    let acc = get_instruction_account_with_idx(transaction_context, idx)?;
+    Ok(*acc.borrow().owner())
 }
 
 pub(crate) fn get_instruction_pubkey_with_idx(

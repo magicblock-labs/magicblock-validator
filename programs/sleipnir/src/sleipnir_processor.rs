@@ -53,14 +53,11 @@ declare_process_instruction!(
             SleipnirInstruction::TriggerCommit => {
                 trigger_commit(invoke_context, transaction_context)
             }
-            SleipnirInstruction::ScheduleCommit(pubkeys) => {
-                process_schedule_commit(
-                    signers,
-                    invoke_context,
-                    transaction_context,
-                    pubkeys,
-                )
-            }
+            SleipnirInstruction::ScheduleCommit => process_schedule_commit(
+                signers,
+                invoke_context,
+                transaction_context,
+            ),
         }
     }
 );

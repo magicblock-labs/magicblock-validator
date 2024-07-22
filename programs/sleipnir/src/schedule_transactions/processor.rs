@@ -5,7 +5,8 @@ use std::{
 
 use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 use solana_sdk::{
-    clock::Clock, fee_calculator::DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE,
+    account::ReadableAccount, clock::Clock,
+    fee_calculator::DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE,
     instruction::InstructionError, program_error::ProgramError, pubkey::Pubkey,
     transaction_context::TransactionContext,
 };
@@ -14,7 +15,7 @@ use crate::{
     schedule_transactions::transaction_scheduler::TransactionScheduler,
     utils::accounts::{
         credit_instruction_account_at_index,
-        debit_instruction_account_at_index, find_instruction_account_owner,
+        debit_instruction_account_at_index, get_instruction_account_with_idx,
         get_instruction_pubkey_with_idx,
     },
 };
@@ -44,7 +45,6 @@ pub(crate) fn process_schedule_commit(
     signers: HashSet<Pubkey>,
     invoke_context: &InvokeContext,
     transaction_context: &TransactionContext,
-    pubkeys: Vec<Pubkey>,
 ) -> Result<(), InstructionError> {
     static ID: AtomicU64 = AtomicU64::new(0);
 
@@ -55,9 +55,9 @@ pub(crate) fn process_schedule_commit(
     let ix_ctx = transaction_context.get_current_instruction_context()?;
     let ix_accs_len = ix_ctx.get_number_of_instruction_accounts() as usize;
 
-    let committees_len = pubkeys.len();
     const SIGNERS_LEN: usize = 2;
     const AUTHORITIES_LEN: usize = 1;
+    const COMMITTEES_START: usize = SIGNERS_LEN + AUTHORITIES_LEN;
     // TODO(thlorenz): @@@ ensure the PROGRAM_IDX has an executable account?
 
     // Assert MagicBlock program
@@ -72,7 +72,7 @@ pub(crate) fn process_schedule_commit(
         })?;
 
     // Assert enough accounts
-    if ix_accs_len < SIGNERS_LEN + AUTHORITIES_LEN + committees_len {
+    if ix_accs_len < COMMITTEES_START {
         ic_msg!(
             invoke_context,
             "ScheduleCommit ERR: not enough accounts to schedule commit ({}), need payer, signing program an account for each pubkey to be committed",
@@ -121,18 +121,20 @@ pub(crate) fn process_schedule_commit(
 
     // Assert all committees are owned by the invoking program
     // TODO(thlorenz): @@@ assert all accounts are PDAs of the program?
-    for pubkey in &pubkeys {
-        let acc_owner = find_instruction_account_owner(
-            invoke_context,
-            transaction_context,
-            "ScheduleCommit ERR: account to commit not found",
-            pubkey,
-        )?;
-        if owner_pubkey != &acc_owner {
+
+    let mut pubkeys = Vec::new();
+    for idx in COMMITTEES_START..ix_accs_len {
+        let acc_pubkey =
+            get_instruction_pubkey_with_idx(transaction_context, idx as u16)?;
+        pubkeys.push(*acc_pubkey);
+
+        let acc =
+            get_instruction_account_with_idx(transaction_context, idx as u16)?;
+        if owner_pubkey != acc.borrow().owner() {
             ic_msg!(
                 invoke_context,
                 "ScheduleCommit ERR: account {} needs to be owned by invoking program {} to be committed, but is owned by {}",
-                pubkey, owner_pubkey, acc_owner
+                acc_pubkey, owner_pubkey, acc.borrow().owner()
             );
             return Err(InstructionError::IllegalOwner);
         }
