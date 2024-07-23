@@ -43,7 +43,13 @@ pub fn process_instruction<'a>(
             // - **2.**   `[WRITE]`         Validator authority to which we escrow tx cost
             // - **3**    `[]`              MagicBlock Program (used to schedule commit)
             // - **4**    `[]`              System Program to support PDA signing
-            // - **5..n** `[]`              Accounts to be committed
+            // - **5..n** `[]`              PDA accounts to be committed
+            //
+            // # Instruction Args
+            //
+            // - **0..32**   Player 1 pubkey from which first PDA was derived
+            // - **32..64**  Player 2 pubkey from which second PDA was derived
+            // - **n..n+32** Player n pubkey from which n-th PDA was derived
             process_schedulecommit_cpi(accounts, instruction_data_inner)?;
         }
         _ => {
