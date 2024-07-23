@@ -6,8 +6,11 @@ use std::{
 use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 use solana_sdk::{
     account::ReadableAccount,
+    account_info::{AccountInfo, IntoAccountInfo},
     fee_calculator::DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE,
-    instruction::InstructionError, pubkey::Pubkey,
+    instruction::InstructionError,
+    pubkey::Pubkey,
+    sysvar,
     transaction_context::TransactionContext,
 };
 
@@ -16,6 +19,7 @@ use crate::{
     utils::accounts::{
         credit_instruction_account_at_index,
         debit_instruction_account_at_index, get_instruction_account_with_idx,
+        get_instruction_pubkey_and_account_with_idx,
         get_instruction_pubkey_with_idx,
     },
 };
@@ -39,7 +43,6 @@ pub(crate) fn process_schedule_commit(
     let ix_accs_len = ix_ctx.get_number_of_instruction_accounts() as usize;
 
     const COMMITTEES_START: usize = SYSTEM_PROG_IDX as usize + 1;
-    // TODO(thlorenz): @@@ ensure the PROGRAM_IDX has an executable account?
 
     // Assert MagicBlock program
     ix_ctx
@@ -62,7 +65,7 @@ pub(crate) fn process_schedule_commit(
         return Err(InstructionError::NotEnoughAccountKeys);
     }
 
-    // Assert signers
+    // Assert Payer is signer
     let payer_pubkey =
         get_instruction_pubkey_with_idx(transaction_context, PAYER_IDX)?;
     if !signers.contains(payer_pubkey) {
@@ -74,24 +77,8 @@ pub(crate) fn process_schedule_commit(
         return Err(InstructionError::MissingRequiredSignature);
     }
 
-    // TODO(thlorenz): @@@ when signing for a PDA will the program be part
-    // of signers?
     let owner_pubkey =
         get_instruction_pubkey_with_idx(transaction_context, PROGRAM_IDX)?;
-    ic_msg!(
-        invoke_context,
-        "ScheduleCommit: owner pubkey {}",
-        owner_pubkey
-    );
-    ic_msg!(invoke_context, "ScheduleCommit: signers {:?}", signers);
-    // if !signers.contains(owner_pubkey) {
-    //     ic_msg!(
-    //         invoke_context,
-    //         "ScheduleCommit ERR: owner pubkey {} not in signers",
-    //         owner_pubkey
-    //     );
-    //     return Err(InstructionError::MissingRequiredSignature);
-    // }
 
     // Assert validator identity matches
     let validator_pubkey =
@@ -106,17 +93,14 @@ pub(crate) fn process_schedule_commit(
         return Err(InstructionError::IncorrectAuthority);
     }
 
-    // Assert all committees are owned by the invoking program
-    // TODO(thlorenz): @@@ assert all accounts are PDAs of the program?
-
+    // Assert all PDAs are owned by invoking program and are signers
     let mut pubkeys = Vec::new();
     for idx in COMMITTEES_START..ix_accs_len {
         let acc_pubkey =
             get_instruction_pubkey_with_idx(transaction_context, idx as u16)?;
-        pubkeys.push(*acc_pubkey);
-
         let acc =
             get_instruction_account_with_idx(transaction_context, idx as u16)?;
+
         if owner_pubkey != acc.borrow().owner() {
             ic_msg!(
                 invoke_context,
@@ -125,6 +109,17 @@ pub(crate) fn process_schedule_commit(
             );
             return Err(InstructionError::IllegalOwner);
         }
+        if !signers.contains(acc_pubkey) {
+            ic_msg!(
+                invoke_context,
+                "ScheduleCommit ERR: account pubkey {} not in signers,
+                 which means it's not a PDA of the invoking program or the corresponding signer seed were not included",
+                acc_pubkey
+            );
+            return Err(InstructionError::MissingRequiredSignature);
+        }
+
+        pubkeys.push(*acc_pubkey);
     }
 
     // Determine id and slot

@@ -3,7 +3,8 @@ use std::cell::RefCell;
 
 use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 use solana_sdk::{
-    account::{AccountSharedData, ReadableAccount, WritableAccount},
+    account::{Account, AccountSharedData, ReadableAccount, WritableAccount},
+    account_info::{AccountInfo, IntoAccountInfo},
     instruction::InstructionError,
     pubkey::Pubkey,
     transaction_context::TransactionContext,
@@ -67,6 +68,17 @@ pub(crate) fn get_instruction_account_with_idx(
     let tx_idx = ix_ctx.get_index_of_instruction_account_in_transaction(idx)?;
     let acc = transaction_context.get_account_at_index(tx_idx)?;
     Ok(acc)
+}
+
+pub(crate) fn get_instruction_pubkey_and_account_with_idx(
+    transaction_context: &TransactionContext,
+    idx: u16,
+) -> Result<(Pubkey, Account), InstructionError> {
+    let acc_shared =
+        get_instruction_account_with_idx(transaction_context, idx)?;
+    let account = Account::from(acc_shared.borrow().clone());
+    let pubkey = transaction_context.get_key_of_account_at_index(idx)?;
+    Ok((*pubkey, account))
 }
 
 pub(crate) fn get_instruction_account_owner_with_idx(

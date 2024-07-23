@@ -47,8 +47,9 @@ impl ScheduleCommitTestContext {
         // However in order to commit we can use any payer as the only
         // requirement is that the PDA is owned by its program.
         let committees = (0..ncommittees)
-            .map(|idx| {
-                let payer = Keypair::from_seed(&[idx as u8; 32]).unwrap();
+            .map(|_idx| {
+                // let payer = Keypair::from_seed(&[idx as u8; 32]).unwrap();
+                let payer = Keypair::new();
                 client
                     .request_airdrop(&payer.pubkey(), LAMPORTS_PER_SOL * 100)
                     .unwrap();
