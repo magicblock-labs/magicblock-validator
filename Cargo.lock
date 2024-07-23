@@ -1006,7 +1006,6 @@ version = "0.0.0"
 dependencies = [
  "async-trait",
  "serde",
- "solana-pubsub-client",
  "solana-rpc-client-api",
  "solana-sdk",
  "thiserror",
@@ -1036,15 +1035,10 @@ dependencies = [
  "async-trait",
  "conjunto-addresses",
  "conjunto-core",
- "futures-util",
- "log",
- "solana-account-decoder",
- "solana-pubsub-client",
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk",
  "thiserror",
- "tokio",
 ]
 
 [[package]]
@@ -4282,6 +4276,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "sleipnir-account-updates"
+version = "1.19.0"
+dependencies = [
+ "conjunto-transwise",
+ "futures-util",
+ "log",
+ "solana-account-decoder",
+ "solana-pubsub-client",
+ "solana-rpc-client-api",
+ "solana-sdk",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
 name = "sleipnir-accounts"
 version = "1.19.0"
 dependencies = [
@@ -4289,6 +4298,7 @@ dependencies = [
  "conjunto-transwise",
  "delegation-program",
  "log",
+ "sleipnir-account-updates",
  "sleipnir-bank",
  "sleipnir-mutator",
  "sleipnir-processor",

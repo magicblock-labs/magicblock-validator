@@ -3,6 +3,7 @@ use std::{
     pin::Pin,
     sync::{Arc, RwLock},
 };
+use thiserror::Error;
 
 use futures_util::{
     select, stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt,
@@ -14,14 +15,22 @@ use tokio::sync::{
     oneshot::{self, Receiver},
 };
 
-use crate::rpc_provider_config::RpcProviderConfig;
-use conjunto_core::errors::{CoreError, CoreResult};
+use conjunto_transwise::RpcProviderConfig;
 use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
 use solana_rpc_client_api::{config::RpcAccountInfoConfig, response::Response};
 use solana_sdk::{
     commitment_config::{CommitmentConfig, CommitmentLevel},
     pubkey::Pubkey,
 };
+
+#[derive(Debug, Error)]
+enum AccountUpdatesError {
+    #[error("PubsubClientError")]
+    PubsubClientError(
+        #[from]
+        solana_pubsub_client::nonblocking::pubsub_client::PubsubClientError,
+    ),
+}
 
 struct AccountUpdatesSubscribe {
     pub account: Pubkey,
@@ -31,7 +40,13 @@ struct AccountUpdatesUnsubscribe {
     pub account: Pubkey,
 }
 
-pub struct AccountUpdates {
+pub trait AccountUpdates {
+    fn start_monitoring_account(&self, pubkey: &Pubkey);
+    fn has_been_updated_since(&self, pubkey: &Pubkey, slot: u64) -> bool;
+    fn stop_monitoring_account(&self, pubkey: &Pubkey);
+}
+
+pub struct RemoteAccountUpdates {
     config: RpcProviderConfig,
     last_update_slots: Arc<RwLock<HashMap<Pubkey, u64>>>,
     subscribe_receiver: UnboundedReceiver<AccountUpdatesSubscribe>,
@@ -40,7 +55,36 @@ pub struct AccountUpdates {
     unsubscribe_sender: UnboundedSender<AccountUpdatesUnsubscribe>,
 }
 
-impl AccountUpdates {
+impl AccountUpdates for RemoteAccountUpdates {
+    fn start_monitoring_account(&self, pubkey: &Pubkey) {
+        if let Err(error) =
+            self.subscribe_sender.send(AccountUpdatesSubscribe {
+                account: pubkey.clone(),
+            })
+        {
+            error!("Failed to subscribe to account: {}: {:?}", pubkey, error)
+        }
+    }
+    fn has_been_updated_since(&self, pubkey: &Pubkey, slot: u64) -> bool {
+        let last_update_slots_read = self.last_update_slots.read().unwrap();
+        if let Some(last_update_slot) = last_update_slots_read.get(pubkey) {
+            *last_update_slot > slot
+        } else {
+            false
+        }
+    }
+    fn stop_monitoring_account(&self, pubkey: &Pubkey) {
+        if let Err(error) =
+            self.unsubscribe_sender.send(AccountUpdatesUnsubscribe {
+                account: pubkey.clone(),
+            })
+        {
+            error!("Failed to unsubscribe to account: {}: {:?}", pubkey, error)
+        }
+    }
+}
+
+impl RemoteAccountUpdates {
     pub fn new(config: RpcProviderConfig) -> Self {
         let (subscribe_sender, subscribe_receiver) =
             unbounded_channel::<AccountUpdatesSubscribe>();
@@ -56,11 +100,11 @@ impl AccountUpdates {
         }
     }
 
-    async fn run(&mut self) -> CoreResult<()> {
+    async fn run(&mut self) -> Result<(), AccountUpdatesError> {
         let pubsub_client = Arc::new(
             PubsubClient::new(self.config.ws_url())
                 .await
-                .map_err(CoreError::PubsubClientError)?,
+                .map_err(AccountUpdatesError::PubsubClientError)?,
         );
         let commitment = self.config.commitment();
 
@@ -113,7 +157,7 @@ impl AccountUpdates {
         commitment: Option<CommitmentLevel>,
         account: Pubkey,
         cancel_receiver: Receiver<()>,
-    ) -> CoreResult<()> {
+    ) -> Result<(), AccountUpdatesError> {
         let config = Some(RpcAccountInfoConfig {
             commitment: commitment
                 .map(|commitment| CommitmentConfig { commitment }),
@@ -131,7 +175,7 @@ impl AccountUpdates {
         let (mut stream, unsubscribe) = pubsub_client
             .account_subscribe(&account, config)
             .await
-            .map_err(CoreError::PubsubClientError)?;
+            .map_err(AccountUpdatesError::PubsubClientError)?;
 
         let cancel_handle = tokio::spawn(async move {
             match cancel_receiver.await {
@@ -162,35 +206,6 @@ impl AccountUpdates {
         }
 
         Ok(())
-    }
-
-    pub fn start_monitoring_account(&self, pubkey: &Pubkey) {
-        if let Err(error) =
-            self.subscribe_sender.send(AccountUpdatesSubscribe {
-                account: pubkey.clone(),
-            })
-        {
-            error!("Failed to subscribe to account: {}: {:?}", pubkey, error)
-        }
-    }
-
-    pub fn has_been_updated_since(&self, pubkey: &Pubkey, slot: u64) -> bool {
-        let last_update_slots_read = self.last_update_slots.read().unwrap();
-        if let Some(last_update_slot) = last_update_slots_read.get(pubkey) {
-            *last_update_slot > slot
-        } else {
-            false
-        }
-    }
-
-    pub fn stop_monitoring_account(&self, pubkey: &Pubkey) {
-        if let Err(error) =
-            self.unsubscribe_sender.send(AccountUpdatesUnsubscribe {
-                account: pubkey.clone(),
-            })
-        {
-            error!("Failed to unsubscribe to account: {}: {:?}", pubkey, error)
-        }
     }
 }
 

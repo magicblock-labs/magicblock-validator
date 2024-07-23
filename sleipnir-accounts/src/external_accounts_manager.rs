@@ -6,6 +6,7 @@ use conjunto_transwise::{
     ValidatedAccountsProvider,
 };
 use log::*;
+use sleipnir_account_updates::AccountUpdates;
 use sleipnir_mutator::AccountModification;
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_sdk::{
@@ -45,17 +46,19 @@ pub struct CommitAccountTransaction {
 }
 
 #[derive(Debug)]
-pub struct ExternalAccountsManager<IAP, ACL, ACM, VAP, TAE>
+pub struct ExternalAccountsManager<IAP, ACL, ACM, ACU, VAP, TAE>
 where
     IAP: InternalAccountProvider,
     ACL: AccountCloner,
     ACM: AccountCommitter,
+    ACU: AccountUpdates,
     VAP: ValidatedAccountsProvider,
     TAE: TransactionAccountsExtractor,
 {
     pub internal_account_provider: IAP,
     pub account_cloner: ACL,
     pub account_committer: ACM,
+    pub account_updates: ACU,
     pub validated_accounts_provider: VAP,
     pub transaction_accounts_extractor: TAE,
     pub external_readonly_accounts: ExternalReadonlyAccounts,
@@ -66,11 +69,13 @@ where
     pub payer_init_lamports: Option<u64>,
 }
 
-impl<IAP, ACL, ACM, VAP, TAE> ExternalAccountsManager<IAP, ACL, ACM, VAP, TAE>
+impl<IAP, ACL, ACM, ACU, VAP, TAE>
+    ExternalAccountsManager<IAP, ACL, ACM, ACU, VAP, TAE>
 where
     IAP: InternalAccountProvider,
     ACL: AccountCloner,
     ACM: AccountCommitter,
+    ACU: AccountUpdates,
     VAP: ValidatedAccountsProvider,
     TAE: TransactionAccountsExtractor,
 {

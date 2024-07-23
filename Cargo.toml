@@ -7,6 +7,7 @@ split-debuginfo = "packed"
 members = [
   "geyser-grpc-proto",
   "programs/sleipnir",
+  "sleipnir-account-updates",
   "sleipnir-accounts",
   "sleipnir-accounts-db",
   "sleipnir-api",
@@ -99,6 +100,8 @@ semver = "1.0.22"
 serde = "1.0.196"
 serde_derive = "1.0.103"
 serde_json = "1.0.113"
+futures-util = "0.3.30"
+sleipnir-account-updates = { path = "./sleipnir-account-updates" }
 sleipnir-accounts-db = { path = "./sleipnir-accounts-db" }
 sleipnir-accounts = { path = "./sleipnir-accounts" }
 sleipnir-api = { path = "./sleipnir-api" }
@@ -140,6 +143,7 @@ solana-program-runtime = { git = "https://github.com/solana-labs/solana", rev = 
 solana-rayon-threadlimit = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-rayon-threadlimit", version = "1.19.0" }
 solana-rpc-client = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-rpc-client", version = "1.19.0" }
 solana-rpc-client-api = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-rpc-client-api", version = "1.19.0" }
+solana-pubsub-client = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-pubsub-client", version = "1.19.0" }
 solana-streamer = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-streamer", version = "1.19.0" }
 solana-sdk = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-sdk", version = "1.19.0" }
 solana-svm = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-svm", version = "1.19.0" }

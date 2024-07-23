@@ -8,9 +8,12 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-crossbeam-channel = { workspace = true }
 log = { workspace = true }
-sleipnir-accounts-db = { workspace = true }
-sleipnir-bank = { workspace = true }
+futures-util = { workspace = true }
+conjunto-transwise = { workspace = true }
 solana-sdk = { workspace = true }
-solana-transaction-status = { workspace = true }
+solana-account-decoder = { workspace = true }
+solana-rpc-client-api = { workspace = true }
+solana-pubsub-client = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
