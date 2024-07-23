@@ -11,7 +11,7 @@ use solana_program::{
 };
 
 use crate::{
-    api::{pda_seeds_with_bump, pda_with_bump},
+    api::{pda_and_bump, pda_seeds_with_bump},
     utils::{
         allocate_account_and_assign_owner, assert_is_signer, assert_keys_equal,
         AllocateAndAssignAccountArgs,
@@ -28,13 +28,13 @@ solana_program::entrypoint!(process_instruction);
 pub fn process_instruction<'a>(
     program_id: &'a Pubkey,
     accounts: &'a [AccountInfo<'a>],
-    instruction_data: &'a [u8],
+    instruction_data: &[u8],
 ) -> ProgramResult {
     let (instruction_discriminant, instruction_data_inner) =
         instruction_data.split_at(1);
     match instruction_discriminant[0] {
         0 => {
-            process_init(program_id, accounts, instruction_data_inner[0])?;
+            process_init(program_id, accounts)?;
         }
         1 => {
             // # Account references
@@ -67,7 +67,6 @@ impl MainAccount {
 fn process_init<'a>(
     program_id: &'a Pubkey,
     accounts: &'a [AccountInfo<'a>],
-    bump: u8,
 ) -> entrypoint::ProgramResult {
     msg!("Init account");
     let account_info_iter = &mut accounts.iter();
@@ -76,15 +75,21 @@ fn process_init<'a>(
 
     assert_is_signer(payer_info, "payer")?;
 
+    let (pda, bump) = pda_and_bump(payer_info.key);
     let bump_arr = [bump];
-    msg!("Creating account '{}' with bump {}", pda_info.key, bump);
     let seeds = pda_seeds_with_bump(payer_info.key, &bump_arr);
+    assert_keys_equal(pda_info.key, &pda, || {
+        format!(
+            "PDA for the account ('{}') and for payer ('{}') is incorrect",
+            pda_info.key, payer_info.key
+        )
+    })?;
     allocate_account_and_assign_owner(AllocateAndAssignAccountArgs {
         payer_info,
         account_info: pda_info,
         owner: program_id,
         signer_seeds: &seeds,
-        size: MainAccount::SIZE,
+        size: 99,
     })?;
 
     let account = MainAccount {

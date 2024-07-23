@@ -7,7 +7,6 @@ use solana_program::{
 pub fn init_account_instruction(
     payer: Pubkey,
     committee: Pubkey,
-    bump: u8,
 ) -> Instruction {
     let program_id = crate::id();
     let account_metas = vec![
@@ -16,7 +15,7 @@ pub fn init_account_instruction(
         AccountMeta::new_readonly(system_program::id(), false),
     ];
 
-    let instruction_data = vec![0, bump];
+    let instruction_data = vec![0];
     Instruction::new_with_bytes(program_id, &instruction_data, account_metas)
 }
 

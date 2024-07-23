@@ -1,7 +1,7 @@
 use std::{str::FromStr, thread::sleep, time::Duration};
 
 use anyhow::{Context, Result};
-use schedulecommit_program::api::{init_account_instruction, pda_with_bump};
+use schedulecommit_program::api::{init_account_instruction, pda_and_bump};
 use solana_rpc_client::rpc_client::RpcClient;
 use solana_rpc_client_api::config::{
     RpcSendTransactionConfig, RpcTransactionConfig,
@@ -17,8 +17,10 @@ use solana_sdk::{
 };
 
 pub struct ScheduleCommitTestContext {
+    // The first payer from the committees array which is used to fund transactions
     pub payer: Keypair,
-    pub committees: Vec<Pubkey>,
+    // The Payer pubkey along with its PDA which we'll commit
+    pub committees: Vec<(Keypair, Pubkey)>,
     pub commitment: CommitmentConfig,
     pub client: RpcClient,
     pub validator_identity: Pubkey,
@@ -33,24 +35,32 @@ impl Default for ScheduleCommitTestContext {
 
 impl ScheduleCommitTestContext {
     pub fn new(ncommittees: usize) -> Self {
-        let payer = Keypair::from_seed(&[2u8; 32]).unwrap();
-        // Create a new keypairs for the committees
-        let committees = (0..ncommittees)
-            .map(|idx| pda_with_bump(&payer.pubkey(), &[idx as u8]))
-            .collect::<Vec<Pubkey>>();
-
         let commitment = CommitmentConfig::confirmed();
 
         let client = RpcClient::new_with_commitment(
             "http://localhost:8899".to_string(),
             commitment,
         );
-        client
-            .request_airdrop(&payer.pubkey(), LAMPORTS_PER_SOL * 100)
-            .unwrap();
+
+        // Each committee is the payer and the matching PDA
+        // The payer has money airdropped in order to init its PDA.
+        // However in order to commit we can use any payer as the only
+        // requirement is that the PDA is owned by its program.
+        let committees = (0..ncommittees)
+            .map(|idx| {
+                let payer = Keypair::from_seed(&[idx as u8; 32]).unwrap();
+                client
+                    .request_airdrop(&payer.pubkey(), LAMPORTS_PER_SOL * 100)
+                    .unwrap();
+                let (pda, _) = pda_and_bump(&payer.pubkey());
+                (payer, pda)
+            })
+            .collect::<Vec<(Keypair, Pubkey)>>();
+
         let validator_identity = client.get_identity().unwrap();
         let blockhash = client.get_latest_blockhash().unwrap();
 
+        let payer = committees[0].0.insecure_clone();
         Self {
             payer,
             committees,
@@ -65,20 +75,22 @@ impl ScheduleCommitTestContext {
         let ixs = self
             .committees
             .iter()
-            .enumerate()
-            .map(|(idx, committee)| {
-                init_account_instruction(
-                    self.payer.pubkey(),
-                    *committee,
-                    idx as u8,
-                )
+            .map(|(payer, committee)| {
+                init_account_instruction(payer.pubkey(), *committee)
             })
             .collect::<Vec<_>>();
 
+        let payers = self
+            .committees
+            .iter()
+            .map(|(payer, _)| payer)
+            .collect::<Vec<_>>();
+
+        // The init tx for all payers is funded by the first payer for simplicity
         let tx = Transaction::new_signed_with_payer(
             &ixs,
-            Some(&self.payer.pubkey()),
-            &[&self.payer],
+            Some(&payers[0].pubkey()),
+            &payers,
             self.blockhash,
         );
         self.client

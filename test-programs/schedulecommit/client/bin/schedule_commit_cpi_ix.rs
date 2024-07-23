@@ -25,7 +25,7 @@ pub fn main() {
         validator_identity,
         // Work around the different solana_sdk versions by creating pubkey from str
         Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
-        &committees,
+        &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
     );
 
     let tx = Transaction::new_signed_with_payer(
