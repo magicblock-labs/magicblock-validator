@@ -23,6 +23,7 @@ pub fn schedule_commit_cpi_instruction(
     payer: Pubkey,
     validator_id: Pubkey,
     magic_program_id: Pubkey,
+    players: &[Pubkey],
     committees: &[Pubkey],
 ) -> Instruction {
     let program_id = crate::id();
@@ -37,7 +38,10 @@ pub fn schedule_commit_cpi_instruction(
         account_metas.push(AccountMeta::new_readonly(*committee, false));
     }
 
-    let instruction_data = vec![1];
+    let mut instruction_data = vec![1];
+    for player in players {
+        instruction_data.extend_from_slice(player.as_ref());
+    }
     Instruction::new_with_bytes(program_id, &instruction_data, account_metas)
 }
 
@@ -55,6 +59,13 @@ pub fn pda_seeds_with_bump<'a>(
     bump: &'a [u8; 1],
 ) -> [&'a [u8]; 3] {
     [ACCOUNT.as_bytes(), acc_id.as_ref(), bump]
+}
+
+pub fn pda_seeds_vec_with_bump(acc_id: Pubkey, bump: u8) -> Vec<Vec<u8>> {
+    let mut seeds = vec![ACCOUNT.as_bytes().to_vec()];
+    seeds.push(acc_id.as_ref().to_vec());
+    seeds.push(vec![bump]);
+    seeds
 }
 
 pub fn pda_and_bump(acc_id: &Pubkey) -> (Pubkey, u8) {

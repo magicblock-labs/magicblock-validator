@@ -8,11 +8,10 @@ use solana_program::{
     program::invoke_signed,
     program_error::ProgramError,
     pubkey::Pubkey,
-    system_program,
 };
 
 use crate::{
-    api::{pda_and_bump, pda_seeds_with_bump},
+    api::{pda_and_bump, pda_seeds_vec_with_bump, pda_seeds_with_bump},
     utils::{
         allocate_account_and_assign_owner, assert_is_signer, assert_keys_equal,
         AllocateAndAssignAccountArgs,
@@ -105,7 +104,7 @@ fn process_init<'a>(
 
 pub fn process_schedulecommit_cpi(
     accounts: &[AccountInfo],
-    _instruction_data: &[u8],
+    instruction_data: &[u8],
 ) -> Result<(), ProgramError> {
     msg!("Processing schedulecommit_cpi instruction");
 
@@ -122,10 +121,38 @@ pub fn process_schedulecommit_cpi(
         remaining.push(x);
     }
 
-    // THIS only works for one payer
-    let (pda, bump) = pda_and_bump(payer.key);
-    let bump_arr = [bump];
-    let signer_seeds = pda_seeds_with_bump(payer.key, &bump_arr);
+    let args = instruction_data.chunks(32).collect::<Vec<_>>();
+    let player_pubkeys = args
+        .into_iter()
+        .map(Pubkey::try_from)
+        .collect::<Result<Vec<Pubkey>, _>>()
+        .map_err(|err| {
+            msg!("ERROR: failed to parse player pubkey {:?}", err);
+            ProgramError::InvalidArgument
+        })?;
+
+    if remaining.len() != player_pubkeys.len() {
+        msg!(
+            "ERROR: player_pubkeys.len() != committes.len() | {} != {}",
+            player_pubkeys.len(),
+            remaining.len()
+        );
+        return Err(ProgramError::InvalidArgument);
+    }
+
+    let mut player_bumps = vec![];
+    for (player, committee) in player_pubkeys.iter().zip(remaining.iter()) {
+        let (pda, bump) = pda_and_bump(player);
+        if &pda != committee.key {
+            msg!(
+                "ERROR: pda(player) != committee PDA | '{}' != '{}'",
+                player,
+                committee.key
+            );
+            return Err(ProgramError::InvalidArgument);
+        }
+        player_bumps.push((player, bump));
+    }
 
     let mut account_infos =
         vec![payer, owning_program, validator_auth, system_program];
@@ -135,13 +162,22 @@ pub fn process_schedulecommit_cpi(
         "Committees are {:?}",
         remaining.iter().map(|x| x.key).collect::<Vec<_>>()
     );
-    msg!("PDA is {} with bump {:?}", pda, bump);
-
     let ix = create_schedule_commit_ix(*magic_program.key, &account_infos);
+
+    let seeds = player_bumps
+        .into_iter()
+        .map(|(x, y)| pda_seeds_vec_with_bump(*x, y))
+        .collect::<Vec<_>>();
+    let seeds = seeds
+        .iter()
+        .map(|xs| xs.iter().map(|x| x.as_slice()).collect::<Vec<_>>())
+        .collect::<Vec<_>>();
+    let seeds = seeds.iter().map(|x| x.as_slice()).collect::<Vec<_>>();
+
     invoke_signed(
         &ix,
         &account_infos.into_iter().cloned().collect::<Vec<_>>(),
-        &[&signer_seeds],
+        &seeds,
     )?;
 
     Ok(())

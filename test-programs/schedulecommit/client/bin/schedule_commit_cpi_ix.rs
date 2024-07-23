@@ -8,7 +8,7 @@ use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{pubkey::Pubkey, signer::Signer, transaction::Transaction};
 
 pub fn main() {
-    let ctx = ScheduleCommitTestContext::new(1);
+    let ctx = ScheduleCommitTestContext::new(5);
     ctx.init_committees().unwrap();
 
     let ScheduleCommitTestContext {
@@ -25,6 +25,10 @@ pub fn main() {
         validator_identity,
         // Work around the different solana_sdk versions by creating pubkey from str
         Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
+        &committees
+            .iter()
+            .map(|(player, _)| player.pubkey())
+            .collect::<Vec<_>>(),
         &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
     );
 
