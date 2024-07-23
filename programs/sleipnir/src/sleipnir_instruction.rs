@@ -9,6 +9,7 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::Keypair,
     signer::Signer,
+    system_program,
     transaction::Transaction,
 };
 use thiserror::Error;
@@ -188,6 +189,7 @@ pub(crate) fn schedule_commit_instruction(
         AccountMeta::new(*payer, true),
         AccountMeta::new_readonly(*program, false),
         AccountMeta::new(*validator_authority, false),
+        AccountMeta::new_readonly(system_program::id(), false),
     ];
     for pubkey in &pdas {
         account_metas.push(AccountMeta::new_readonly(*pubkey, false));

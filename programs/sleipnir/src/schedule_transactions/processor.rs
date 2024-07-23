@@ -46,18 +46,19 @@ pub(crate) fn process_schedule_commit(
     invoke_context: &InvokeContext,
     transaction_context: &TransactionContext,
 ) -> Result<(), InstructionError> {
+    ic_msg!(invoke_context, "____________STSRT_______");
     static ID: AtomicU64 = AtomicU64::new(0);
 
     const PAYER_IDX: u16 = 0;
     const PROGRAM_IDX: u16 = 1;
     const VALIDATOR_IDX: u16 = 2;
+    // Need SystemProgram for PDA signing
+    const SYSTEM_PROG_IDX: u16 = 3;
 
     let ix_ctx = transaction_context.get_current_instruction_context()?;
     let ix_accs_len = ix_ctx.get_number_of_instruction_accounts() as usize;
 
-    const SIGNERS_LEN: usize = 2;
-    const AUTHORITIES_LEN: usize = 1;
-    const COMMITTEES_START: usize = SIGNERS_LEN + AUTHORITIES_LEN;
+    const COMMITTEES_START: usize = SYSTEM_PROG_IDX as usize + 1;
     // TODO(thlorenz): @@@ ensure the PROGRAM_IDX has an executable account?
 
     // Assert MagicBlock program
@@ -97,6 +98,12 @@ pub(crate) fn process_schedule_commit(
     // of signers?
     let owner_pubkey =
         get_instruction_pubkey_with_idx(transaction_context, PROGRAM_IDX)?;
+    ic_msg!(
+        invoke_context,
+        "ScheduleCommit: owner pubkey {}",
+        owner_pubkey
+    );
+    ic_msg!(invoke_context, "ScheduleCommit: signers {:?}", signers);
     // if !signers.contains(owner_pubkey) {
     //     ic_msg!(
     //         invoke_context,

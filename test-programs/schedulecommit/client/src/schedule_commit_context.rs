@@ -71,7 +71,7 @@ impl ScheduleCommitTestContext {
         }
     }
 
-    pub fn init_committes(&self) -> Result<Signature> {
+    pub fn init_committees(&self) -> Result<Signature> {
         let ixs = self
             .committees
             .iter()

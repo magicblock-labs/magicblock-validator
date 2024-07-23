@@ -31,6 +31,7 @@ pub fn schedule_commit_cpi_instruction(
         AccountMeta::new_readonly(program_id, false),
         AccountMeta::new(validator_id, false),
         AccountMeta::new_readonly(magic_program_id, false),
+        AccountMeta::new_readonly(system_program::id(), false),
     ];
     for committee in committees {
         account_metas.push(AccountMeta::new_readonly(*committee, false));

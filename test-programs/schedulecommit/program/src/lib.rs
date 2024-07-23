@@ -5,9 +5,10 @@ use solana_program::{
     entrypoint::{self, ProgramResult},
     instruction::{AccountMeta, Instruction},
     msg,
-    program::invoke,
+    program::{invoke, invoke_signed},
     program_error::ProgramError,
     pubkey::Pubkey,
+    system_program,
 };
 
 use crate::{
@@ -42,7 +43,8 @@ pub fn process_instruction<'a>(
             // - **1.**   `[SIGNER]`        The program owning the accounts to be committed
             // - **2.**   `[WRITE]`         Validator authority to which we escrow tx cost
             // - **3**    `[]`              MagicBlock Program (used to schedule commit)
-            // - **4..n** `[]`              Accounts to be committed
+            // - **4**    `[]`              System Program to support PDA signing
+            // - **5..n** `[]`              Accounts to be committed
             process_schedulecommit_cpi(accounts, instruction_data_inner)?;
         }
         _ => {
@@ -89,7 +91,7 @@ fn process_init<'a>(
         account_info: pda_info,
         owner: program_id,
         signer_seeds: &seeds,
-        size: 99,
+        size: MainAccount::SIZE,
     })?;
 
     let account = MainAccount {
@@ -112,9 +114,15 @@ pub fn process_schedulecommit_cpi(
     let owning_program = next_account_info(accounts_iter)?;
     let validator_auth = next_account_info(accounts_iter)?;
     let magic_program = next_account_info(accounts_iter)?;
+    let system_program = next_account_info(accounts_iter)?;
     let remaining = accounts_iter.as_slice();
     let remaining_keys =
         remaining.iter().map(|a| *a.key).collect::<Vec<Pubkey>>();
+
+    // THIS only works for one payer
+    let (_, bump) = pda_and_bump(payer.key);
+    let bump_arr = [bump];
+    let signer_seeds = pda_seeds_with_bump(payer.key, &bump_arr);
 
     let ix = create_schedule_commit_ix(
         *payer.key,
@@ -123,7 +131,15 @@ pub fn process_schedulecommit_cpi(
         *magic_program.key,
         &remaining_keys,
     );
-    invoke(&ix, &[payer.clone(), magic_program.clone()])?;
+
+    let mut account_infos = vec![
+        payer.clone(),
+        magic_program.clone(),
+        validator_auth.clone(),
+        system_program.clone(),
+    ];
+    account_infos.extend(remaining.iter().cloned());
+    invoke_signed(&ix, &account_infos, &[&signer_seeds])?;
 
     Ok(())
 }
@@ -143,8 +159,9 @@ fn create_schedule_commit_ix(
     let instruction_data = vec![1, 0, 0, 0];
     let mut account_metas = vec![
         AccountMeta::new(payer, true),
-        AccountMeta::new_readonly(program_id, true),
+        AccountMeta::new_readonly(program_id, false),
         AccountMeta::new(validator_id, false),
+        AccountMeta::new_readonly(system_program::id(), false),
     ];
     for committee in committees {
         account_metas.push(AccountMeta::new_readonly(*committee, false));
