@@ -19,11 +19,11 @@ jobs:
 
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
-          build_cache_key_name: 'magicblock-validator-ci-test-v005'
+          build_cache_key_name: "magicblock-validator-ci-test-v005"
           rust_toolchain_release: stable
           github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          conjunto_ref: master
+          conjunto_ref: vbrunet/2024_07_17-refactor-validate-accounts
 
       - name: Run tests (also increase system limits for solana tests)
         run: |
