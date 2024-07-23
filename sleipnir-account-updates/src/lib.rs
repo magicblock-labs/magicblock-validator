@@ -1,26 +1,21 @@
-use std::{
-    collections::HashMap,
-    pin::Pin,
-    sync::{Arc, RwLock},
-};
-use thiserror::Error;
-
-use futures_util::{
-    select, stream::FuturesUnordered, Future, FutureExt, Stream, StreamExt,
-};
+use conjunto_transwise::RpcProviderConfig;
+use futures_util::StreamExt;
 use log::*;
 use solana_account_decoder::{UiAccount, UiDataSliceConfig};
-use tokio::sync::{
-    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
-    oneshot::{self, Receiver},
-};
-
-use conjunto_transwise::RpcProviderConfig;
 use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
-use solana_rpc_client_api::{config::RpcAccountInfoConfig, response::Response};
+use solana_rpc_client_api::config::RpcAccountInfoConfig;
 use solana_sdk::{
     commitment_config::{CommitmentConfig, CommitmentLevel},
     pubkey::Pubkey,
+};
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
+use thiserror::Error;
+use tokio::sync::{
+    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    oneshot::{self, Receiver, Sender},
 };
 
 #[derive(Debug, Error)]
@@ -32,40 +27,38 @@ enum AccountUpdatesError {
     ),
 }
 
-struct AccountUpdatesSubscribe {
+struct AccountUpdatesMonitoring {
     pub account: Pubkey,
-}
-
-struct AccountUpdatesUnsubscribe {
-    pub account: Pubkey,
+    pub activated: bool,
 }
 
 pub trait AccountUpdates {
-    fn start_monitoring_account(&self, pubkey: &Pubkey);
-    fn has_been_updated_since(&self, pubkey: &Pubkey, slot: u64) -> bool;
-    fn stop_monitoring_account(&self, pubkey: &Pubkey);
+    fn ensure_monitoring_of_account(&self, pubkey: &Pubkey);
+    fn has_known_update_since_slot(&self, pubkey: &Pubkey, slot: u64) -> bool;
 }
 
 pub struct RemoteAccountUpdates {
     config: RpcProviderConfig,
     last_update_slots: Arc<RwLock<HashMap<Pubkey, u64>>>,
-    subscribe_receiver: UnboundedReceiver<AccountUpdatesSubscribe>,
-    subscribe_sender: UnboundedSender<AccountUpdatesSubscribe>,
-    unsubscribe_receiver: UnboundedReceiver<AccountUpdatesUnsubscribe>,
-    unsubscribe_sender: UnboundedSender<AccountUpdatesUnsubscribe>,
+    monitoring_receiver: UnboundedReceiver<AccountUpdatesMonitoring>,
+    monitoring_sender: UnboundedSender<AccountUpdatesMonitoring>,
 }
 
 impl AccountUpdates for RemoteAccountUpdates {
-    fn start_monitoring_account(&self, pubkey: &Pubkey) {
+    fn ensure_monitoring_of_account(&self, pubkey: &Pubkey) {
         if let Err(error) =
-            self.subscribe_sender.send(AccountUpdatesSubscribe {
+            self.monitoring_sender.send(AccountUpdatesMonitoring {
                 account: pubkey.clone(),
+                activated: true,
             })
         {
-            error!("Failed to subscribe to account: {}: {:?}", pubkey, error)
+            error!(
+                "Failed to update monitoring of account: {}: {:?}",
+                pubkey, error
+            )
         }
     }
-    fn has_been_updated_since(&self, pubkey: &Pubkey, slot: u64) -> bool {
+    fn has_known_update_since_slot(&self, pubkey: &Pubkey, slot: u64) -> bool {
         let last_update_slots_read = self.last_update_slots.read().unwrap();
         if let Some(last_update_slot) = last_update_slots_read.get(pubkey) {
             *last_update_slot > slot
@@ -73,30 +66,16 @@ impl AccountUpdates for RemoteAccountUpdates {
             false
         }
     }
-    fn stop_monitoring_account(&self, pubkey: &Pubkey) {
-        if let Err(error) =
-            self.unsubscribe_sender.send(AccountUpdatesUnsubscribe {
-                account: pubkey.clone(),
-            })
-        {
-            error!("Failed to unsubscribe to account: {}: {:?}", pubkey, error)
-        }
-    }
 }
 
 impl RemoteAccountUpdates {
     pub fn new(config: RpcProviderConfig) -> Self {
-        let (subscribe_sender, subscribe_receiver) =
-            unbounded_channel::<AccountUpdatesSubscribe>();
-        let (unsubscribe_sender, unsubscribe_receiver) =
-            unbounded_channel::<AccountUpdatesUnsubscribe>();
+        let (monitoring_sender, monitoring_receiver) = unbounded_channel();
         Self {
             config,
             last_update_slots: Default::default(),
-            subscribe_sender,
-            subscribe_receiver,
-            unsubscribe_sender,
-            unsubscribe_receiver,
+            monitoring_sender,
+            monitoring_receiver,
         }
     }
 
@@ -114,28 +93,28 @@ impl RemoteAccountUpdates {
         let mut join_handles = vec![];
 
         tokio::select! {
-            Some(subscribe) = self.subscribe_receiver.recv() => {
-                if !cancel_senders.contains_key(&subscribe.account) {
+            Some(monitoring) = self.monitoring_receiver.recv() => {
+                if !cancel_senders.contains_key(&monitoring.account) {
                     let (cancel_sender, cancel_receiver) = oneshot::channel();
-                    cancel_senders.insert(subscribe.account, cancel_sender);
-                    join_handles.push((subscribe.account, tokio::spawn(async move {
-                        let result = AccountUpdates::monitor_account(
+                    cancel_senders.insert(monitoring.account, cancel_sender);
+                    join_handles.push((monitoring.account, tokio::spawn(async move {
+                        let result = Self::monitor_account(
                             last_update_slots,
                             pubsub_client,
                             commitment,
-                            subscribe.account,
+                            monitoring.account,
                             cancel_receiver,
                         ).await;
                         if let Err(error) = result {
-                            warn!("Failed to monitor account: {}: {:?}", subscribe.account, error);
+                            warn!("Failed to monitor account: {}: {:?}", monitoring.account, error);
                         }
                     })));
                 }
             }
-            Some(unsubscribe) = self.unsubscribe_receiver.recv() => {
-                if let Some(cancel_sender) = cancel_senders.remove(&unsubscribe.account) {
+            _ = self.close_receiver.recv() => {
+                for (account, cancel_sender) in cancel_senders.into_iter() {
                     if let Err(error) = cancel_sender.send(()) {
-                        warn!("Failed to cancel monitoring of account: {}: {:?}", unsubscribe.account, error);
+                        warn!("Failed to stop monitoring of account: {}: {:?}", account, error);
                     }
                 }
             }

@@ -35,6 +35,7 @@ pub type AccountsManager = ExternalAccountsManager<
     BankAccountProvider,
     RemoteAccountCloner,
     RemoteAccountCommitter,
+    RemoteAccountUpdates,
     Transwise,
     TransactionAccountsExtractorImpl,
 >;
@@ -51,6 +52,7 @@ impl
 {
     pub fn try_new(
         bank: &Arc<Bank>,
+        account_updates: RemoteAccountUpdates,
         transaction_status_sender: Option<TransactionStatusSender>,
         committer_authority: Keypair,
         config: AccountsConfig,
@@ -75,9 +77,6 @@ impl
             committer_authority,
             config.commit_compute_unit_price,
         );
-
-        let account_updates =
-            RemoteAccountUpdates::new(RpcProviderConfig::new(cluster, None));
 
         let validated_accounts_provider = Transwise::new(rpc_provider_config);
 

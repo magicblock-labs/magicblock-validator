@@ -14,6 +14,7 @@ use crate::utils::get_epoch;
 // ExternalAccounts
 // -----------------
 pub trait ExternalAccount {
+    fn cloned_from_slot(&self) -> u64;
     fn cloned_at(&self) -> Duration;
 }
 
@@ -43,10 +44,16 @@ impl<T: ExternalAccount> ExternalAccounts<T> {
         self.read_accounts().len()
     }
 
-    pub fn cloned_at(&self, pubkey: &Pubkey) -> Option<Duration> {
+    pub fn get_cloned_at(&self, pubkey: &Pubkey) -> Option<Duration> {
         self.read_accounts()
             .get(pubkey)
             .map(|account| account.cloned_at())
+    }
+
+    pub fn get_cloned_from_slot(&self, pubkey: &Pubkey) -> Option<u64> {
+        self.read_accounts()
+            .get(pubkey)
+            .map(|account| account.cloned_from_slot())
     }
 
     pub fn read_accounts(&self) -> RwLockReadGuard<HashMap<Pubkey, T>> {
@@ -78,21 +85,29 @@ impl Deref for ExternalReadonlyAccounts {
 
 #[derive(Debug)]
 pub struct ExternalReadonlyAccount {
+    /// The pubkey of the account.
     pub pubkey: Pubkey,
+    /// The main-chain slot at which the account was cloned from
+    pub cloned_from_slot: u64,
+    /// The timestamp at which the account was cloned into the validator.
     pub cloned_at: Duration,
     pub updated_at: Duration,
 }
 
 impl ExternalAccount for ExternalReadonlyAccount {
+    fn cloned_from_slot(&self) -> u64 {
+        self.cloned_from_slot
+    }
     fn cloned_at(&self) -> Duration {
         self.cloned_at
     }
 }
 
 impl ExternalReadonlyAccount {
-    fn new(pubkey: Pubkey, now: Duration) -> Self {
+    fn new(pubkey: Pubkey, from_slot: u64, now: Duration) -> Self {
         Self {
             pubkey,
+            cloned_from_slot: from_slot,
             cloned_at: now,
             updated_at: now,
         }
@@ -100,10 +115,12 @@ impl ExternalReadonlyAccount {
 }
 
 impl ExternalReadonlyAccounts {
-    pub fn insert(&self, pubkey: Pubkey) {
+    pub fn insert(&self, pubkey: Pubkey, from_slot: u64) {
         let now = get_epoch();
-        self.write_accounts()
-            .insert(pubkey, ExternalReadonlyAccount::new(pubkey, now));
+        self.write_accounts().insert(
+            pubkey,
+            ExternalReadonlyAccount::new(pubkey, from_slot, now),
+        );
     }
 
     pub fn remove(&self, pubkey: &Pubkey) {
@@ -129,12 +146,18 @@ impl ExternalWritableAccounts {
     pub fn insert(
         &self,
         pubkey: Pubkey,
+        from_slot: u64,
         commit_frequency: Option<CommitFrequency>,
     ) {
         let now = get_epoch();
         self.write_accounts().insert(
             pubkey,
-            ExternalWritableAccount::new(pubkey, now, commit_frequency),
+            ExternalWritableAccount::new(
+                pubkey,
+                from_slot,
+                now,
+                commit_frequency,
+            ),
         );
     }
 }
@@ -143,6 +166,8 @@ impl ExternalWritableAccounts {
 pub struct ExternalWritableAccount {
     /// The pubkey of the account.
     pub pubkey: Pubkey,
+    /// The main-chain slot at which the account was cloned from
+    cloned_from_slot: u64,
     /// The timestamp at which the account was cloned into the validator.
     cloned_at: Duration,
     /// The frequency at which to commit the state to the commit buffer of
@@ -155,6 +180,9 @@ pub struct ExternalWritableAccount {
 }
 
 impl ExternalAccount for ExternalWritableAccount {
+    fn cloned_from_slot(&self) -> u64 {
+        self.cloned_from_slot
+    }
     fn cloned_at(&self) -> Duration {
         self.cloned_at
     }
@@ -163,6 +191,7 @@ impl ExternalAccount for ExternalWritableAccount {
 impl ExternalWritableAccount {
     fn new(
         pubkey: Pubkey,
+        from_slot: u64,
         now: Duration,
         commit_frequency: Option<CommitFrequency>,
     ) -> Self {
@@ -170,6 +199,7 @@ impl ExternalWritableAccount {
         Self {
             pubkey,
             commit_frequency,
+            cloned_from_slot: from_slot,
             cloned_at: now,
             // We don't want to commit immediately after cloning, thus we consider
             // the account as committed at clone time until it is updated after

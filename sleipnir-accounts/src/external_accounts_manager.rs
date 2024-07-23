@@ -119,7 +119,24 @@ where
                 .readonly
                 .into_iter()
                 // If an account has already been cloned to be used as readonly, no need to re-do it
-                .filter(|pubkey| !self.external_readonly_accounts.has(pubkey))
+                .filter(|pubkey| {
+                    // Make sure we track this account moving forward
+                    self.account_updates.ensure_monitoring_of_account(pubkey);
+                    // Clear the external cache if the account has been updated on main chain since last time we cloned it
+                    if let Some(cloned_from_slot) = self
+                        .external_readonly_accounts
+                        .get_cloned_from_slot(pubkey)
+                    {
+                        if self.account_updates.has_known_update_since_slot(
+                            pubkey,
+                            cloned_from_slot,
+                        ) {
+                            self.external_readonly_accounts.remove(pubkey);
+                        }
+                    }
+                    // After all this, if the account is still in the cache, it can be used safely
+                    !self.external_readonly_accounts.has(&pubkey)
+                })
                 // If an account has already been cloned and prepared to be used as writable, it can also be used as readonly
                 .filter(|pubkey| !self.external_writable_accounts.has(pubkey))
                 // If somehow the account is already in the validator data for other reason, no need to re-download it
