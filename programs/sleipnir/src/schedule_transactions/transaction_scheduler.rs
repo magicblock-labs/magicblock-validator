@@ -1,12 +1,13 @@
 #![allow(unused)]
 use lazy_static::lazy_static;
-use solana_sdk::{clock::Slot, pubkey::Pubkey};
+use solana_sdk::{clock::Slot, hash::Hash, pubkey::Pubkey};
 use std::sync::{Arc, RwLock};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduledCommit {
     pub id: u64,
     pub slot: Slot,
+    pub blockhash: Hash,
     pub accounts: Vec<Pubkey>,
     pub payer: Pubkey,
 }

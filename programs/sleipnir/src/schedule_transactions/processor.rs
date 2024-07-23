@@ -84,12 +84,6 @@ pub(crate) fn process_schedule_commit(
         owner_pubkey
     );
     ic_msg!(invoke_context, "ScheduleCommit: signers {:?}", signers);
-    let sysvar_cache = invoke_context.get_sysvar_cache();
-    ic_msg!(
-        invoke_context,
-        "ScheduleCommit: blockhash {}",
-        invoke_context.blockhash
-    );
     // if !signers.contains(owner_pubkey) {
     //     ic_msg!(
     //         invoke_context,
@@ -135,12 +129,17 @@ pub(crate) fn process_schedule_commit(
 
     // Determine id and slot
     let id = ID.fetch_add(1, Ordering::Relaxed);
+
     // It appears that in builtin programs `Clock::get` doesn't work as expected, thus
     // we have to get it directly from the sysvar cache.
-    let clock = sysvar_cache.get_clock().map_err(|err| {
-        ic_msg!(invoke_context, "Failed to get clock sysvar: {}", err);
-        InstructionError::UnsupportedSysvar
-    })?;
+    let clock =
+        invoke_context
+            .get_sysvar_cache()
+            .get_clock()
+            .map_err(|err| {
+                ic_msg!(invoke_context, "Failed to get clock sysvar: {}", err);
+                InstructionError::UnsupportedSysvar
+            })?;
 
     // Deduct lamports from payer to pay for transaction and credit the validator
     // identity with it.
@@ -162,6 +161,7 @@ pub(crate) fn process_schedule_commit(
     let scheduled_commit = ScheduledCommit {
         id,
         slot: clock.slot,
+        blockhash: invoke_context.blockhash,
         accounts: pubkeys,
         payer: *payer_pubkey,
     };
@@ -174,6 +174,7 @@ pub(crate) fn process_schedule_commit(
 
 #[cfg(test)]
 mod tests {
+    use assert_matches::assert_matches;
     use std::collections::HashMap;
 
     use solana_sdk::{
@@ -313,13 +314,18 @@ mod tests {
 
         let commit = &scheduled_commits[0];
         let test_clock = get_clock();
-        assert_eq!(
+        assert_matches!(
             commit,
-            &ScheduledCommit {
+            ScheduledCommit {
                 id: 0,
-                slot: test_clock.slot,
-                accounts: vec![committee],
-                payer: payer.pubkey(),
+                slot: s,
+                accounts: accs,
+                payer: p,
+                blockhash: _,
+            } => {
+                assert_eq!(s, &test_clock.slot);
+                assert_eq!(p, &payer.pubkey());
+                assert_eq!(accs, &vec![committee]);
             }
         );
     }
@@ -409,13 +415,18 @@ mod tests {
 
         let commit = &scheduled_commits[0];
         let test_clock = get_clock();
-        assert_eq!(
+        assert_matches!(
             commit,
-            &ScheduledCommit {
+            ScheduledCommit {
                 id: 0,
-                slot: test_clock.slot,
-                accounts: vec![committee_uno, committee_dos, committee_tres],
-                payer: payer.pubkey(),
+                slot: s,
+                accounts: accs,
+                payer: p,
+                blockhash: _,
+            } => {
+                assert_eq!(s, &test_clock.slot);
+                assert_eq!(p, &payer.pubkey());
+                assert_eq!(accs, &vec![committee_uno, committee_dos, committee_tres]);
             }
         );
     }
