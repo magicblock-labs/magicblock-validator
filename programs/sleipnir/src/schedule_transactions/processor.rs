@@ -5,9 +5,9 @@ use std::{
 
 use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 use solana_sdk::{
-    account::ReadableAccount, clock::Clock,
+    account::ReadableAccount,
     fee_calculator::DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE,
-    instruction::InstructionError, program_error::ProgramError, pubkey::Pubkey,
+    instruction::InstructionError, pubkey::Pubkey,
     transaction_context::TransactionContext,
 };
 
@@ -22,31 +22,11 @@ use crate::{
 
 use super::transaction_scheduler::ScheduledCommit;
 
-#[cfg(not(test))]
-fn get_clock() -> Result<Clock, ProgramError> {
-    use solana_sdk::sysvar::Sysvar;
-    Clock::get()
-}
-
-#[cfg(test)]
-fn get_clock() -> Result<Clock, ProgramError> {
-    // NOTE: I could not figure out how to properly register sysvars using the
-    // `mock_process_instruction` test setup.
-    Ok(Clock {
-        slot: 100,
-        unix_timestamp: 1_000,
-        epoch_start_timestamp: 0,
-        epoch: 10,
-        leader_schedule_epoch: 10,
-    })
-}
-
 pub(crate) fn process_schedule_commit(
     signers: HashSet<Pubkey>,
     invoke_context: &InvokeContext,
     transaction_context: &TransactionContext,
 ) -> Result<(), InstructionError> {
-    ic_msg!(invoke_context, "____________STSRT_______");
     static ID: AtomicU64 = AtomicU64::new(0);
 
     const PAYER_IDX: u16 = 0;
@@ -104,6 +84,12 @@ pub(crate) fn process_schedule_commit(
         owner_pubkey
     );
     ic_msg!(invoke_context, "ScheduleCommit: signers {:?}", signers);
+    let sysvar_cache = invoke_context.get_sysvar_cache();
+    ic_msg!(
+        invoke_context,
+        "ScheduleCommit: blockhash {}",
+        invoke_context.blockhash
+    );
     // if !signers.contains(owner_pubkey) {
     //     ic_msg!(
     //         invoke_context,
@@ -149,7 +135,9 @@ pub(crate) fn process_schedule_commit(
 
     // Determine id and slot
     let id = ID.fetch_add(1, Ordering::Relaxed);
-    let clock: Clock = get_clock().map_err(|err| {
+    // It appears that in builtin programs `Clock::get` doesn't work as expected, thus
+    // we have to get it directly from the sysvar cache.
+    let clock = sysvar_cache.get_clock().map_err(|err| {
         ic_msg!(invoke_context, "Failed to get clock sysvar: {}", err);
         InstructionError::UnsupportedSysvar
     })?;
@@ -189,13 +177,17 @@ mod tests {
     use std::collections::HashMap;
 
     use solana_sdk::{
-        account::{AccountSharedData, ReadableAccount},
-        bpf_loader_upgradeable,
+        account::{
+            create_account_shared_data_for_test, AccountSharedData,
+            ReadableAccount,
+        },
+        bpf_loader_upgradeable, clock,
         fee_calculator::DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE,
         pubkey::Pubkey,
         signature::Keypair,
         signer::{SeedDerivable, Signer},
         system_program,
+        sysvar::SysvarId,
     };
 
     use crate::{
@@ -207,10 +199,18 @@ mod tests {
         validator_authority_id,
     };
 
-    use super::get_clock;
-
     // For the scheduling itself and the debit to fund the scheduled transaction
     const REQUIRED_TX_COST: u64 = DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE * 2;
+
+    fn get_clock() -> clock::Clock {
+        clock::Clock {
+            slot: 100,
+            unix_timestamp: 1_000,
+            epoch_start_timestamp: 0,
+            epoch: 10,
+            leader_schedule_epoch: 10,
+        }
+    }
 
     fn account_idx(
         transaction_accounts: &[(Pubkey, AccountSharedData)],
@@ -264,7 +264,7 @@ mod tests {
             vec![committee],
         );
 
-        let transaction_accounts: Vec<(Pubkey, AccountSharedData)> = ix
+        let mut transaction_accounts: Vec<(Pubkey, AccountSharedData)> = ix
             .accounts
             .iter()
             .flat_map(|acc| {
@@ -273,6 +273,11 @@ mod tests {
                     .map(|shared_data| (acc.pubkey, shared_data))
             })
             .collect();
+
+        transaction_accounts.push((
+            clock::Clock::id(),
+            create_account_shared_data_for_test(&get_clock()),
+        ));
 
         let payer_idx = account_idx(&transaction_accounts, &payer.pubkey());
         let auth_idx =
@@ -307,7 +312,7 @@ mod tests {
         assert_eq!(scheduled_commits.len(), 1);
 
         let commit = &scheduled_commits[0];
-        let test_clock = get_clock().unwrap();
+        let test_clock = get_clock();
         assert_eq!(
             commit,
             &ScheduledCommit {
@@ -355,7 +360,7 @@ mod tests {
             vec![committee_uno, committee_dos, committee_tres],
         );
 
-        let transaction_accounts: Vec<(Pubkey, AccountSharedData)> = ix
+        let mut transaction_accounts: Vec<(Pubkey, AccountSharedData)> = ix
             .accounts
             .iter()
             .flat_map(|acc| {
@@ -364,6 +369,11 @@ mod tests {
                     .map(|shared_data| (acc.pubkey, shared_data))
             })
             .collect();
+
+        transaction_accounts.push((
+            clock::Clock::id(),
+            create_account_shared_data_for_test(&get_clock()),
+        ));
 
         let payer_idx = account_idx(&transaction_accounts, &payer.pubkey());
         let auth_idx =
@@ -398,7 +408,7 @@ mod tests {
         assert_eq!(scheduled_commits.len(), 1);
 
         let commit = &scheduled_commits[0];
-        let test_clock = get_clock().unwrap();
+        let test_clock = get_clock();
         assert_eq!(
             commit,
             &ScheduledCommit {
