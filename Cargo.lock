@@ -4288,6 +4288,7 @@ dependencies = [
  "solana-sdk",
  "thiserror",
  "tokio",
+ "tokio-util 0.7.11",
 ]
 
 [[package]]
@@ -4337,6 +4338,7 @@ dependencies = [
  "crossbeam-channel",
  "itertools 0.10.5",
  "log",
+ "sleipnir-account-updates",
  "sleipnir-accounts",
  "sleipnir-accounts-db",
  "sleipnir-bank",

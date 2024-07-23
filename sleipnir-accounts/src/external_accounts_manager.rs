@@ -270,8 +270,10 @@ where
                 )
                 .await?;
             signatures.push(signature);
-            self.external_readonly_accounts
-                .insert(cloned_readonly_account.pubkey);
+            self.external_readonly_accounts.insert(
+                cloned_readonly_account.pubkey,
+                cloned_readonly_account.from_slot,
+            );
         }
 
         // 5.B Clone the unseen writable accounts and apply modifications so they represent
@@ -312,6 +314,7 @@ where
                 .remove(&cloned_writable_account.pubkey);
             self.external_writable_accounts.insert(
                 cloned_writable_account.pubkey,
+                cloned_writable_account.from_slot,
                 cloned_writable_account
                     .lock_config
                     .as_ref()

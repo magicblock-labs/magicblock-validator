@@ -11,6 +11,9 @@ use std::{
 };
 
 use log::*;
+use sleipnir_account_updates::{
+    RemoteAccountUpdates, RemoteAccountUpdatesError,
+};
 use sleipnir_accounts::AccountsManager;
 use sleipnir_bank::{
     bank::Bank, genesis_utils::create_genesis_config_with_leader,
@@ -119,6 +122,8 @@ pub struct MagicValidator {
     pubsub_close_handle: PubsubServiceCloseHandle,
     sample_performance_service: Option<SamplePerformanceService>,
     commit_accounts_ticker: Option<tokio::task::JoinHandle<()>>,
+    account_updates_handle:
+        Option<tokio::task::JoinHandle<Result<(), RemoteAccountUpdatesError>>>,
     accounts_manager: Arc<AccountsManager>,
     transaction_listener: GeyserTransactionNotifyListener,
     rpc_service: JsonRpcService,
@@ -173,6 +178,7 @@ impl MagicValidator {
                 &ledger,
                 geyser_service.get_transaction_notifier(),
             );
+
         let transaction_status_sender = TransactionStatusSender {
             sender: transaction_sndr,
         };
@@ -207,6 +213,7 @@ impl MagicValidator {
             geyser_rpc_service,
             slot_ticker: None,
             commit_accounts_ticker: None,
+            account_updates_handle: None,
             pubsub_handle: Default::default(),
             pubsub_close_handle: Default::default(),
             sample_performance_service: None,
@@ -389,6 +396,13 @@ impl MagicValidator {
             Duration::from_millis(self.config.accounts.commit.frequency_millis),
             self.token.clone(),
         ));
+
+        let tok = self.token.clone();
+        let dudu = self.accounts_manager.clone();
+        self.account_updates_handle =
+            Some(tokio::spawn(
+                async move { dudu.account_updates.run(tok).await },
+            ));
 
         self.rpc_service.start().map_err(|err| {
             ApiError::FailedToStartJsonRpcService(format!("{:?}", err))

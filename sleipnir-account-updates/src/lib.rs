@@ -13,23 +13,24 @@ use std::{
     sync::{Arc, RwLock},
 };
 use thiserror::Error;
-use tokio::sync::{
-    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
-    oneshot::{self, Receiver, Sender},
+use tokio::sync::mpsc::{
+    unbounded_channel, UnboundedReceiver, UnboundedSender,
 };
+use tokio_util::sync::CancellationToken;
 
 #[derive(Debug, Error)]
-enum AccountUpdatesError {
+pub enum RemoteAccountUpdatesError {
     #[error("PubsubClientError")]
     PubsubClientError(
         #[from]
         solana_pubsub_client::nonblocking::pubsub_client::PubsubClientError,
     ),
+    #[error("JoinError")]
+    JoinError(#[from] tokio::task::JoinError),
 }
 
-struct AccountUpdatesMonitoring {
+struct RemoteAccountUpdatesWatching {
     pub account: Pubkey,
-    pub activated: bool,
 }
 
 pub trait AccountUpdates {
@@ -40,16 +41,15 @@ pub trait AccountUpdates {
 pub struct RemoteAccountUpdates {
     config: RpcProviderConfig,
     last_update_slots: Arc<RwLock<HashMap<Pubkey, u64>>>,
-    monitoring_receiver: UnboundedReceiver<AccountUpdatesMonitoring>,
-    monitoring_sender: UnboundedSender<AccountUpdatesMonitoring>,
+    monitoring_receiver: UnboundedReceiver<RemoteAccountUpdatesWatching>,
+    monitoring_sender: UnboundedSender<RemoteAccountUpdatesWatching>,
 }
 
 impl AccountUpdates for RemoteAccountUpdates {
     fn ensure_monitoring_of_account(&self, pubkey: &Pubkey) {
         if let Err(error) =
-            self.monitoring_sender.send(AccountUpdatesMonitoring {
+            self.monitoring_sender.send(RemoteAccountUpdatesWatching {
                 account: pubkey.clone(),
-                activated: true,
             })
         {
             error!(
@@ -79,31 +79,34 @@ impl RemoteAccountUpdates {
         }
     }
 
-    async fn run(&mut self) -> Result<(), AccountUpdatesError> {
+    pub async fn run(
+        &mut self,
+        cancellation_token: CancellationToken,
+    ) -> Result<(), RemoteAccountUpdatesError> {
         let pubsub_client = Arc::new(
             PubsubClient::new(self.config.ws_url())
                 .await
-                .map_err(AccountUpdatesError::PubsubClientError)?,
+                .map_err(RemoteAccountUpdatesError::PubsubClientError)?,
         );
         let commitment = self.config.commitment();
 
         let last_update_slots = self.last_update_slots.clone();
 
-        let mut cancel_senders = HashMap::new();
-        let mut join_handles = vec![];
+        let mut subscriptions_cancellation_tokens = HashMap::new();
+        let mut subscriptions_join_handles = vec![];
 
         tokio::select! {
             Some(monitoring) = self.monitoring_receiver.recv() => {
-                if !cancel_senders.contains_key(&monitoring.account) {
-                    let (cancel_sender, cancel_receiver) = oneshot::channel();
-                    cancel_senders.insert(monitoring.account, cancel_sender);
-                    join_handles.push((monitoring.account, tokio::spawn(async move {
+                if !subscriptions_cancellation_tokens.contains_key(&monitoring.account) {
+                    let cancellation_token = CancellationToken::new();
+                    subscriptions_cancellation_tokens.insert(monitoring.account, cancellation_token.clone());
+                    subscriptions_join_handles.push((monitoring.account, tokio::spawn(async move {
                         let result = Self::monitor_account(
                             last_update_slots,
                             pubsub_client,
                             commitment,
                             monitoring.account,
-                            cancel_receiver,
+                            cancellation_token,
                         ).await;
                         if let Err(error) = result {
                             warn!("Failed to monitor account: {}: {:?}", monitoring.account, error);
@@ -111,20 +114,16 @@ impl RemoteAccountUpdates {
                     })));
                 }
             }
-            _ = self.close_receiver.recv() => {
-                for (account, cancel_sender) in cancel_senders.into_iter() {
-                    if let Err(error) = cancel_sender.send(()) {
-                        warn!("Failed to stop monitoring of account: {}: {:?}", account, error);
-                    }
+            _ = cancellation_token.cancelled() => {
+                for cancellation_token in subscriptions_cancellation_tokens.into_values() {
+                    cancellation_token.cancel();
                 }
             }
         }
 
-        for (account, handle) in join_handles {
+        for (account, handle) in subscriptions_join_handles {
             debug!("waiting on subscribe {}", account);
-            if let Err(error) = handle.await {
-                debug!("subscribe {} failed: {}", account, error);
-            }
+            handle.await.map_err(RemoteAccountUpdatesError::JoinError)?;
         }
 
         Ok(())
@@ -135,8 +134,8 @@ impl RemoteAccountUpdates {
         pubsub_client: Arc<PubsubClient>,
         commitment: Option<CommitmentLevel>,
         account: Pubkey,
-        cancel_receiver: Receiver<()>,
-    ) -> Result<(), AccountUpdatesError> {
+        cancellation_token: CancellationToken,
+    ) -> Result<(), RemoteAccountUpdatesError> {
         let config = Some(RpcAccountInfoConfig {
             commitment: commitment
                 .map(|commitment| CommitmentConfig { commitment }),
@@ -154,16 +153,11 @@ impl RemoteAccountUpdates {
         let (mut stream, unsubscribe) = pubsub_client
             .account_subscribe(&account, config)
             .await
-            .map_err(AccountUpdatesError::PubsubClientError)?;
+            .map_err(RemoteAccountUpdatesError::PubsubClientError)?;
 
         let cancel_handle = tokio::spawn(async move {
-            match cancel_receiver.await {
-                Ok(_) => unsubscribe().await,
-                Err(error) => warn!(
-                    "cancel_receiver failed to received unsubscribe for: {}: {:?}",
-                    account, error
-                ),
-            };
+            cancellation_token.cancelled().await;
+            unsubscribe().await;
         });
 
         while let Some(update) = stream.next().await {

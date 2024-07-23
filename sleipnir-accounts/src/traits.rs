@@ -44,3 +44,8 @@ pub trait AccountCommitter {
         transaction: Transaction,
     ) -> AccountsResult<Signature>;
 }
+
+pub trait AccountUpdates {
+    fn ensure_monitoring_of_account(&self, pubkey: &Pubkey);
+    fn has_known_update_since_slot(&self, pubkey: &Pubkey, slot: u64) -> bool;
+}
