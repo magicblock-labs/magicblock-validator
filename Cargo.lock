@@ -1036,11 +1036,15 @@ dependencies = [
  "async-trait",
  "conjunto-addresses",
  "conjunto-core",
+ "futures-util",
+ "log",
+ "solana-account-decoder",
  "solana-pubsub-client",
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk",
  "thiserror",
+ "tokio",
 ]
 
 [[package]]

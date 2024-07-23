@@ -1,0 +1,16 @@
+[package]
+name = "sleipnir-account-updates"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+crossbeam-channel = { workspace = true }
+log = { workspace = true }
+sleipnir-accounts-db = { workspace = true }
+sleipnir-bank = { workspace = true }
+solana-sdk = { workspace = true }
+solana-transaction-status = { workspace = true }
