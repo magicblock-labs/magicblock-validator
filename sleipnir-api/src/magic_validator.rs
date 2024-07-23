@@ -182,6 +182,7 @@ impl MagicValidator {
         let transaction_status_sender = TransactionStatusSender {
             sender: transaction_sndr,
         };
+
         let accounts_manager = Self::init_accounts_manager(
             &bank,
             transaction_status_sender.clone(),
