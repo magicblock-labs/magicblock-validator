@@ -1,11 +1,11 @@
 use log::*;
-use solana_sdk::pubkey::Pubkey;
+use solana_sdk::{clock::Slot, pubkey::Pubkey};
 
 use crate::{RemoteAccountUpdates, RemoteAccountUpdatesWatching};
 
 pub trait AccountUpdates {
     fn ensure_monitoring_of_account(&self, pubkey: &Pubkey);
-    fn has_known_update_since_slot(&self, pubkey: &Pubkey, slot: u64) -> bool;
+    fn has_known_update_since_slot(&self, pubkey: &Pubkey, slot: Slot) -> bool;
 }
 
 impl AccountUpdates for RemoteAccountUpdates {
@@ -21,7 +21,7 @@ impl AccountUpdates for RemoteAccountUpdates {
             )
         }
     }
-    fn has_known_update_since_slot(&self, pubkey: &Pubkey, slot: u64) -> bool {
+    fn has_known_update_since_slot(&self, pubkey: &Pubkey, slot: Slot) -> bool {
         let last_update_slots_read = self.last_update_slots.read().unwrap();
         if let Some(last_update_slot) = last_update_slots_read.get(pubkey) {
             *last_update_slot > slot

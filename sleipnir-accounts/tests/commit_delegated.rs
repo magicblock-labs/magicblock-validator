@@ -8,9 +8,12 @@ use solana_sdk::{
     pubkey::Pubkey,
 };
 use test_tools_core::init_logger;
-use utils::stubs::{
-    AccountClonerStub, AccountCommitterStub, InternalAccountProviderStub,
-    ValidatedAccountsProviderStub,
+use utils::{
+    account_cloner_stub::AccountClonerStub,
+    account_committer_stub::AccountCommitterStub,
+    account_updates_stub::AccountUpdatesStub,
+    internal_account_provider_stub::InternalAccountProviderStub,
+    validated_accounts_provider_stub::ValidatedAccountsProviderStub,
 };
 
 mod utils;
@@ -19,11 +22,13 @@ fn setup(
     internal_account_provider: InternalAccountProviderStub,
     account_cloner: AccountClonerStub,
     account_committer: AccountCommitterStub,
+    account_updates: AccountUpdatesStub,
     validated_accounts_provider: ValidatedAccountsProviderStub,
 ) -> ExternalAccountsManager<
     InternalAccountProviderStub,
     AccountClonerStub,
     AccountCommitterStub,
+    AccountUpdatesStub,
     ValidatedAccountsProviderStub,
     TransactionAccountsExtractorImpl,
 > {
@@ -31,6 +36,7 @@ fn setup(
         internal_account_provider,
         account_cloner,
         account_committer,
+        account_updates,
         validated_accounts_provider,
         transaction_accounts_extractor: TransactionAccountsExtractorImpl,
         external_readonly_accounts: Default::default(),
@@ -73,16 +79,21 @@ async fn test_commit_two_delegated_accounts_one_needs_commit() {
         internal_account_provider,
         AccountClonerStub::default(),
         account_committer.clone(),
+        AccountUpdatesStub::default(),
         ValidatedAccountsProviderStub::valid_default(),
     );
 
-    manager
-        .external_writable_accounts
-        .insert(commit_needed, Some(CommitFrequency::Millis(1)));
+    manager.external_writable_accounts.insert(
+        commit_needed,
+        0,
+        Some(CommitFrequency::Millis(1)),
+    );
 
-    manager
-        .external_writable_accounts
-        .insert(commit_not_needed, Some(CommitFrequency::Millis(60_000)));
+    manager.external_writable_accounts.insert(
+        commit_not_needed,
+        0,
+        Some(CommitFrequency::Millis(60_000)),
+    );
 
     let last_commit_of_commit_needed =
         manager.last_commit(&commit_needed).unwrap();

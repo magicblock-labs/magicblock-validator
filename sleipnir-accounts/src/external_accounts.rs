@@ -6,7 +6,7 @@ use std::{
 };
 
 use conjunto_transwise::CommitFrequency;
-use solana_sdk::pubkey::Pubkey;
+use solana_sdk::{clock::Slot, pubkey::Pubkey};
 
 use crate::utils::get_epoch;
 
@@ -14,7 +14,7 @@ use crate::utils::get_epoch;
 // ExternalAccounts
 // -----------------
 pub trait ExternalAccount {
-    fn cloned_from_slot(&self) -> u64;
+    fn cloned_from_slot(&self) -> Slot;
     fn cloned_at(&self) -> Duration;
 }
 
@@ -50,7 +50,7 @@ impl<T: ExternalAccount> ExternalAccounts<T> {
             .map(|account| account.cloned_at())
     }
 
-    pub fn get_cloned_from_slot(&self, pubkey: &Pubkey) -> Option<u64> {
+    pub fn get_cloned_from_slot(&self, pubkey: &Pubkey) -> Option<Slot> {
         self.read_accounts()
             .get(pubkey)
             .map(|account| account.cloned_from_slot())
@@ -88,14 +88,14 @@ pub struct ExternalReadonlyAccount {
     /// The pubkey of the account.
     pub pubkey: Pubkey,
     /// The main-chain slot at which the account was cloned from
-    pub cloned_from_slot: u64,
+    pub cloned_from_slot: Slot,
     /// The timestamp at which the account was cloned into the validator.
     pub cloned_at: Duration,
     pub updated_at: Duration,
 }
 
 impl ExternalAccount for ExternalReadonlyAccount {
-    fn cloned_from_slot(&self) -> u64 {
+    fn cloned_from_slot(&self) -> Slot {
         self.cloned_from_slot
     }
     fn cloned_at(&self) -> Duration {
@@ -104,7 +104,7 @@ impl ExternalAccount for ExternalReadonlyAccount {
 }
 
 impl ExternalReadonlyAccount {
-    fn new(pubkey: Pubkey, from_slot: u64, now: Duration) -> Self {
+    fn new(pubkey: Pubkey, from_slot: Slot, now: Duration) -> Self {
         Self {
             pubkey,
             cloned_from_slot: from_slot,
@@ -115,7 +115,7 @@ impl ExternalReadonlyAccount {
 }
 
 impl ExternalReadonlyAccounts {
-    pub fn insert(&self, pubkey: Pubkey, from_slot: u64) {
+    pub fn insert(&self, pubkey: Pubkey, from_slot: Slot) {
         let now = get_epoch();
         self.write_accounts().insert(
             pubkey,
@@ -146,7 +146,7 @@ impl ExternalWritableAccounts {
     pub fn insert(
         &self,
         pubkey: Pubkey,
-        from_slot: u64,
+        from_slot: Slot,
         commit_frequency: Option<CommitFrequency>,
     ) {
         let now = get_epoch();
@@ -167,7 +167,7 @@ pub struct ExternalWritableAccount {
     /// The pubkey of the account.
     pub pubkey: Pubkey,
     /// The main-chain slot at which the account was cloned from
-    cloned_from_slot: u64,
+    cloned_from_slot: Slot,
     /// The timestamp at which the account was cloned into the validator.
     cloned_at: Duration,
     /// The frequency at which to commit the state to the commit buffer of
@@ -191,7 +191,7 @@ impl ExternalAccount for ExternalWritableAccount {
 impl ExternalWritableAccount {
     fn new(
         pubkey: Pubkey,
-        from_slot: u64,
+        from_slot: Slot,
         now: Duration,
         commit_frequency: Option<CommitFrequency>,
     ) -> Self {

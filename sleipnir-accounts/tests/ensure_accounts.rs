@@ -9,9 +9,12 @@ use sleipnir_accounts::{
 };
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
 use test_tools_core::init_logger;
-use utils::stubs::{
-    AccountClonerStub, AccountCommitterStub, InternalAccountProviderStub,
-    ValidatedAccountsProviderStub,
+use utils::{
+    account_cloner_stub::AccountClonerStub,
+    account_committer_stub::AccountCommitterStub,
+    account_updates_stub::AccountUpdatesStub,
+    internal_account_provider_stub::InternalAccountProviderStub,
+    validated_accounts_provider_stub::ValidatedAccountsProviderStub,
 };
 
 mod utils;
@@ -20,11 +23,13 @@ fn setup(
     internal_account_provider: InternalAccountProviderStub,
     account_cloner: AccountClonerStub,
     account_committer: AccountCommitterStub,
+    account_updates: AccountUpdatesStub,
     validated_accounts_provider: ValidatedAccountsProviderStub,
 ) -> ExternalAccountsManager<
     InternalAccountProviderStub,
     AccountClonerStub,
     AccountCommitterStub,
+    AccountUpdatesStub,
     ValidatedAccountsProviderStub,
     TransactionAccountsExtractorImpl,
 > {
@@ -32,6 +37,7 @@ fn setup(
         internal_account_provider,
         account_cloner,
         account_committer,
+        account_updates,
         validated_accounts_provider,
         transaction_accounts_extractor: TransactionAccountsExtractorImpl,
         external_readonly_accounts: Default::default(),
@@ -56,6 +62,7 @@ async fn test_ensure_readonly_account_not_tracked_nor_in_our_validator() {
         internal_account_provider,
         AccountClonerStub::default(),
         AccountCommitterStub::default(),
+        AccountUpdatesStub::default(),
         validated_accounts_provider,
     );
 
@@ -90,6 +97,7 @@ async fn test_ensure_readonly_account_not_tracked_but_in_our_validator() {
         internal_account_provider,
         AccountClonerStub::default(),
         AccountCommitterStub::default(),
+        AccountUpdatesStub::default(),
         validated_accounts_provider,
     );
 
@@ -122,10 +130,11 @@ async fn test_ensure_readonly_account_tracked_but_not_in_our_validator() {
         internal_account_provider,
         AccountClonerStub::default(),
         AccountCommitterStub::default(),
+        AccountUpdatesStub::default(),
         validated_accounts_provider,
     );
 
-    manager.external_readonly_accounts.insert(readonly);
+    manager.external_readonly_accounts.insert(readonly, 0);
 
     let holder = TransactionAccountsHolder {
         readonly: vec![readonly],
@@ -159,6 +168,7 @@ async fn test_ensure_readonly_account_in_our_validator_and_new_writable() {
         internal_account_provider,
         AccountClonerStub::default(),
         AccountCommitterStub::default(),
+        AccountUpdatesStub::default(),
         validated_accounts_provider,
     );
 
@@ -200,6 +210,7 @@ async fn test_ensure_locked_with_owner_and_unlocked_writable_payer() {
         internal_account_provider,
         AccountClonerStub::default(),
         AccountCommitterStub::default(),
+        AccountUpdatesStub::default(),
         validated_accounts_provider,
     );
 
@@ -249,6 +260,7 @@ async fn test_ensure_one_locked_and_one_new_writable() {
         internal_account_provider,
         AccountClonerStub::default(),
         AccountCommitterStub::default(),
+        AccountUpdatesStub::default(),
         validated_accounts_provider,
     );
 
@@ -289,6 +301,7 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
         internal_account_provider,
         AccountClonerStub::default(),
         AccountCommitterStub::default(),
+        AccountUpdatesStub::default(),
         validated_accounts_provider,
     );
 
@@ -391,6 +404,7 @@ async fn test_ensure_writable_account_fails_to_validate() {
         internal_account_provider,
         AccountClonerStub::default(),
         AccountCommitterStub::default(),
+        AccountUpdatesStub::default(),
         validated_accounts_provider,
     );
 
@@ -425,6 +439,7 @@ async fn test_ensure_accounts_seen_first_as_readonly_can_be_used_as_writable_lat
         internal_account_provider,
         AccountClonerStub::default(),
         AccountCommitterStub::default(),
+        AccountUpdatesStub::default(),
         validated_accounts_provider,
     );
 
@@ -508,6 +523,7 @@ async fn test_ensure_accounts_already_known_can_be_reused_as_writable_later() {
         internal_account_provider,
         AccountClonerStub::default(),
         AccountCommitterStub::default(),
+        AccountUpdatesStub::default(),
         validated_accounts_provider,
     );
 
