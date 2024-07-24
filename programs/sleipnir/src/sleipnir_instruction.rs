@@ -86,15 +86,6 @@ pub(crate) enum SleipnirInstruction {
     /// - **2.**   `[WRITE]`         Validator authority to which we escrow tx cost
     /// - **3..n** `[]`              Accounts to be committed
     ScheduleCommit,
-
-    /// Forces the provided account to be committed to chain regardless
-    /// of the commit frequency of the validator or the delegated account
-    /// itself
-    ///
-    /// # Account references
-    ///  - **0.** `[WRITE, SIGNER]` Payer requesting the account to be committed
-    ///  - **1.** `[]`              Account to commit
-    TriggerCommit,
 }
 
 // -----------------
@@ -131,32 +122,6 @@ pub(crate) fn modify_accounts_instruction(
         crate::id(),
         &SleipnirInstruction::ModifyAccounts(account_mods),
         account_metas,
-    )
-}
-
-// -----------------
-// TriggerCommit
-// -----------------
-pub fn trigger_commit(
-    payer: &Keypair,
-    account_to_commit: Pubkey,
-    recent_blockhash: Hash,
-) -> Transaction {
-    let ix = trigger_commit_instruction(payer, account_to_commit);
-    into_transaction(payer, ix, recent_blockhash)
-}
-
-pub(crate) fn trigger_commit_instruction(
-    payer: &Keypair,
-    account_to_commit: Pubkey,
-) -> Instruction {
-    Instruction::new_with_bincode(
-        crate::id(),
-        &SleipnirInstruction::TriggerCommit,
-        vec![
-            AccountMeta::new(payer.pubkey(), true),
-            AccountMeta::new_readonly(account_to_commit, false),
-        ],
     )
 }
 
