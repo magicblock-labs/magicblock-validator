@@ -121,7 +121,7 @@ where
                 // If an account has already been cloned to be used as readonly, no need to re-do it
                 .filter(|pubkey| {
                     // Make sure we track this account moving forward
-                    self.account_updates.ensure_monitoring_of_account(pubkey);
+                    self.account_updates.request_account_monitoring(pubkey);
                     // Clear the external cache if the account has been updated on main chain since last time we cloned it
                     if let Some(cloned_from_slot) = self
                         .external_readonly_accounts

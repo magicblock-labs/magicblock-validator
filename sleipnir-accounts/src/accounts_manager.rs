@@ -52,6 +52,7 @@ impl
 {
     pub fn try_new(
         bank: &Arc<Bank>,
+        remote_account_updates: RemoteAccountUpdates,
         transaction_status_sender: Option<TransactionStatusSender>,
         committer_authority: Keypair,
         config: AccountsConfig,
@@ -76,8 +77,7 @@ impl
             committer_authority,
             config.commit_compute_unit_price,
         );
-        let account_updates =
-            RemoteAccountUpdates::new(rpc_provider_config.clone());
+        let account_updates = remote_account_updates;
 
         let validated_accounts_provider =
             Transwise::new(rpc_provider_config.clone());

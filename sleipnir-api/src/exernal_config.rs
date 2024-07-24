@@ -27,7 +27,7 @@ pub fn try_convert_accounts_config(
     })
 }
 
-fn cluster_from_remote(
+pub fn cluster_from_remote(
     remote: &sleipnir_config::RemoteConfig,
 ) -> sleipnir_accounts::Cluster {
     use sleipnir_config::RemoteConfig::*;

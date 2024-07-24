@@ -1,4 +1,6 @@
+use conjunto_transwise::RpcProviderConfig;
 use std::{
+    borrow::BorrowMut,
     fs,
     net::SocketAddr,
     path::Path,
@@ -12,7 +14,8 @@ use std::{
 
 use log::*;
 use sleipnir_account_updates::{
-    RemoteAccountUpdates, RemoteAccountUpdatesError,
+    RemoteAccountUpdates, RemoteAccountUpdatesWatcher,
+    RemoteAccountUpdatesWatcherError,
 };
 use sleipnir_accounts::AccountsManager;
 use sleipnir_bank::{
@@ -47,12 +50,14 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     errors::{ApiError, ApiResult},
-    exernal_config::try_convert_accounts_config,
+    exernal_config::{cluster_from_remote, try_convert_accounts_config},
     fund_account::{fund_validator_identity, funded_faucet},
     geyser_transaction_notify_listener::GeyserTransactionNotifyListener,
     init_geyser_service::{init_geyser_service, InitGeyserServiceConfig},
     tickers::{init_commit_accounts_ticker, init_slot_ticker},
 };
+
+use sleipnir_accounts::utils::try_rpc_cluster_from_cluster;
 
 // -----------------
 // MagicValidatorConfig
@@ -122,8 +127,10 @@ pub struct MagicValidator {
     pubsub_close_handle: PubsubServiceCloseHandle,
     sample_performance_service: Option<SamplePerformanceService>,
     commit_accounts_ticker: Option<tokio::task::JoinHandle<()>>,
-    account_updates_handle:
-        Option<tokio::task::JoinHandle<Result<(), RemoteAccountUpdatesError>>>,
+    remote_account_updates_watcher: RemoteAccountUpdatesWatcher,
+    remote_account_updates_watcher_handle: Option<
+        tokio::task::JoinHandle<Result<(), RemoteAccountUpdatesWatcherError>>,
+    >,
     accounts_manager: Arc<AccountsManager>,
     transaction_listener: GeyserTransactionNotifyListener,
     rpc_service: JsonRpcService,
@@ -179,12 +186,21 @@ impl MagicValidator {
                 geyser_service.get_transaction_notifier(),
             );
 
+        let remote_account_updates_watcher =
+            RemoteAccountUpdatesWatcher::new(RpcProviderConfig::new(
+                try_rpc_cluster_from_cluster(&cluster_from_remote(
+                    &config.validator_config.accounts.remote,
+                )),
+                None,
+            ));
+
         let transaction_status_sender = TransactionStatusSender {
             sender: transaction_sndr,
         };
 
         let accounts_manager = Self::init_accounts_manager(
             &bank,
+            RemoteAccountUpdates::new(&remote_account_updates_watcher),
             transaction_status_sender.clone(),
             &identity_keypair,
             &config.validator_config,
@@ -214,7 +230,8 @@ impl MagicValidator {
             geyser_rpc_service,
             slot_ticker: None,
             commit_accounts_ticker: None,
-            account_updates_handle: None,
+            remote_account_updates_watcher,
+            remote_account_updates_watcher_handle: None,
             pubsub_handle: Default::default(),
             pubsub_close_handle: Default::default(),
             sample_performance_service: None,
@@ -255,6 +272,7 @@ impl MagicValidator {
 
     fn init_accounts_manager(
         bank: &Arc<Bank>,
+        remote_account_updates: RemoteAccountUpdates,
         transaction_status_sender: TransactionStatusSender,
         validator_keypair: &Keypair,
         config: &SleipnirConfig,
@@ -265,6 +283,7 @@ impl MagicValidator {
         );
         let accounts_manager = AccountsManager::try_new(
             bank,
+            remote_account_updates,
             Some(transaction_status_sender),
             // NOTE: we could avoid passing a copy of the keypair here if we instead pass
             // something akin to a ValidatorTransactionSigner that gets it via the [validator_authority]
@@ -398,12 +417,10 @@ impl MagicValidator {
             self.token.clone(),
         ));
 
-        let tok = self.token.clone();
-        let dudu = self.accounts_manager.clone();
-        self.account_updates_handle =
-            Some(tokio::spawn(
-                async move { dudu.account_updates.run(tok).await },
-            ));
+        let cancellation_token = self.token.clone();
+        let future =
+            self.remote_account_updates_watcher.run(cancellation_token);
+        self.remote_account_updates_watcher_handle = Some(tokio::spawn(future));
 
         self.rpc_service.start().map_err(|err| {
             ApiError::FailedToStartJsonRpcService(format!("{:?}", err))
