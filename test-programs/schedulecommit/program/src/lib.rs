@@ -164,10 +164,12 @@ pub fn process_schedulecommit_cpi(
         vec![payer, owning_program, validator_auth, system_program];
     account_infos.extend(remaining.iter());
 
-    msg!(
-        "Committees are {:?}",
-        remaining.iter().map(|x| x.key).collect::<Vec<_>>()
-    );
+    // NOTE: logging this increases CPUs by 70K, so in order to show about how
+    // many CPUs scheduling a commit actually takes we removed this log
+    // msg!(
+    //     "Committees are {:?}",
+    //     remaining.iter().map(|x| x.key).collect::<Vec<_>>()
+    // );
     let ix = create_schedule_commit_ix(*magic_program.key, &account_infos);
 
     let seeds = player_bumps

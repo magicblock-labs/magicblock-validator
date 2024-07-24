@@ -13,6 +13,7 @@ use solana_sdk::{
 
 use crate::{
     schedule_transactions::transaction_scheduler::TransactionScheduler,
+    sleipnir_instruction::scheduled_commit_sent,
     utils::accounts::{
         credit_instruction_account_at_index,
         debit_instruction_account_at_index, get_instruction_account_with_idx,
@@ -32,7 +33,6 @@ pub(crate) fn process_schedule_commit(
     const PAYER_IDX: u16 = 0;
     const PROGRAM_IDX: u16 = 1;
     const VALIDATOR_IDX: u16 = 2;
-    // Need SystemProgram for PDA signing
     const SYSTEM_PROG_IDX: u16 = 3;
 
     let ix_ctx = transaction_context.get_current_instruction_context()?;
@@ -149,16 +149,26 @@ pub(crate) fn process_schedule_commit(
         tx_cost,
     )?;
 
+    let blockhash = invoke_context.blockhash;
+    let commit_sent_transaction = scheduled_commit_sent(id, blockhash);
+
+    let commit_sent_sig = commit_sent_transaction.signatures[0];
     let scheduled_commit = ScheduledCommit {
         id,
         slot: clock.slot,
-        blockhash: invoke_context.blockhash,
+        blockhash,
         accounts: pubkeys,
         payer: *payer_pubkey,
+        commit_sent_transaction,
     };
 
     TransactionScheduler::default().schedule_commit(scheduled_commit);
-    ic_msg!(invoke_context, "Scheduled commit: {}", id,);
+    ic_msg!(invoke_context, "Scheduled commit with ID: {}", id,);
+    ic_msg!(
+        invoke_context,
+        "ScheduledCommitSent signature: {}",
+        commit_sent_sig,
+    );
 
     Ok(())
 }
@@ -316,11 +326,14 @@ mod tests {
                 accounts: accs,
                 payer: p,
                 blockhash: _,
+                commit_sent_transaction: tx,
             } => {
                 assert!(i >= &0);
                 assert_eq!(s, &test_clock.slot);
                 assert_eq!(p, &payer.pubkey());
                 assert_eq!(accs, &vec![committee]);
+                let ix = SleipnirInstruction::ScheduledCommitSent(*i);
+                assert_eq!(tx.data(0), ix.try_to_vec().unwrap());
             }
         );
     }
@@ -418,11 +431,14 @@ mod tests {
                 accounts: accs,
                 payer: p,
                 blockhash: _,
+                commit_sent_transaction: tx,
             } => {
                 assert!(i >= &0);
                 assert_eq!(s, &test_clock.slot);
                 assert_eq!(p, &payer.pubkey());
                 assert_eq!(accs, &vec![committee_uno, committee_dos, committee_tres]);
+                let ix = SleipnirInstruction::ScheduledCommitSent(*i);
+                assert_eq!(tx.data(0), ix.try_to_vec().unwrap());
             }
         );
     }

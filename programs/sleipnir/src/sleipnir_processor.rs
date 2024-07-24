@@ -53,6 +53,7 @@ declare_process_instruction!(
                 invoke_context,
                 transaction_context,
             ),
+            SleipnirInstruction::ScheduledCommitSent(_) => Ok(()),
         }
     }
 );

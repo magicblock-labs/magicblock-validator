@@ -1,7 +1,12 @@
 #![allow(unused)]
 use lazy_static::lazy_static;
-use solana_sdk::{clock::Slot, hash::Hash, pubkey::Pubkey};
-use std::sync::{Arc, RwLock};
+use solana_sdk::{
+    clock::Slot, hash::Hash, pubkey::Pubkey, transaction::Transaction,
+};
+use std::{
+    mem,
+    sync::{Arc, RwLock},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScheduledCommit {
@@ -10,6 +15,7 @@ pub struct ScheduledCommit {
     pub blockhash: Hash,
     pub accounts: Vec<Pubkey>,
     pub payer: Pubkey,
+    pub commit_sent_transaction: Transaction,
 }
 
 #[derive(Clone)]
@@ -45,10 +51,19 @@ impl TransactionScheduler {
             .scheduled_commits
             .read()
             .expect("scheduled_commits lock poisoned");
+
         commits
             .iter()
             .filter(|x| x.payer.eq(payer))
             .cloned()
             .collect::<Vec<_>>()
+    }
+
+    pub fn take_scheduled_commits(&self) -> Vec<ScheduledCommit> {
+        let mut lock = self
+            .scheduled_commits
+            .write()
+            .expect("scheduled_commits lock poisoned");
+        mem::take(&mut *lock)
     }
 }

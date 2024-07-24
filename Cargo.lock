@@ -4498,6 +4498,7 @@ name = "sleipnir-program"
 version = "1.19.0"
 dependencies = [
  "assert_matches",
+ "bincode",
  "crossbeam-channel",
  "lazy_static",
  "log",
