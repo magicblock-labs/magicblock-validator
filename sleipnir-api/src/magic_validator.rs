@@ -112,7 +112,7 @@ pub struct MagicValidator {
     token: CancellationToken,
     bank: Arc<Bank>,
     ledger: Arc<Ledger>,
-    slot_ticker: Option<std::thread::JoinHandle<()>>,
+    slot_ticker: Option<tokio::task::JoinHandle<()>>,
     pubsub_handle: RwLock<Option<std::thread::JoinHandle<()>>>,
     pubsub_close_handle: PubsubServiceCloseHandle,
     sample_performance_service: Option<SamplePerformanceService>,
@@ -368,6 +368,7 @@ impl MagicValidator {
 
         self.slot_ticker = Some(init_slot_ticker(
             &self.bank,
+            &self.accounts_manager,
             self.ledger.clone(),
             Duration::from_millis(self.config.validator.millis_per_slot),
             self.exit.clone(),

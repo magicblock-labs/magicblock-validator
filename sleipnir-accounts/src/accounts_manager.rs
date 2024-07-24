@@ -15,6 +15,7 @@ use crate::{
     external_accounts::{ExternalReadonlyAccounts, ExternalWritableAccounts},
     remote_account_cloner::RemoteAccountCloner,
     remote_account_committer::RemoteAccountCommitter,
+    remote_scheduled_commits_processor::RemoteScheduledCommitsProcessor,
     utils::try_rpc_cluster_from_cluster,
     ExternalAccountsManager,
 };
@@ -25,6 +26,7 @@ pub type AccountsManager = ExternalAccountsManager<
     RemoteAccountCommitter,
     Transwise,
     TransactionAccountsExtractorImpl,
+    RemoteScheduledCommitsProcessor,
 >;
 
 impl
@@ -34,6 +36,7 @@ impl
         RemoteAccountCommitter,
         Transwise,
         TransactionAccountsExtractorImpl,
+        RemoteScheduledCommitsProcessor,
     >
 {
     pub fn try_new(
@@ -75,6 +78,7 @@ impl
             external_readonly_mode: external_config.readonly,
             external_writable_mode: external_config.writable,
             create_accounts: config.create,
+            scheduled_commits_processor: RemoteScheduledCommitsProcessor::new(),
             payer_init_lamports: config.payer_init_lamports,
         })
     }

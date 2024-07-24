@@ -11,7 +11,7 @@ use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
 use test_tools_core::init_logger;
 use utils::stubs::{
     AccountClonerStub, AccountCommitterStub, InternalAccountProviderStub,
-    ValidatedAccountsProviderStub,
+    ScheduledCommitsProcessorStub, ValidatedAccountsProviderStub,
 };
 
 mod utils;
@@ -27,6 +27,7 @@ fn setup(
     AccountCommitterStub,
     ValidatedAccountsProviderStub,
     TransactionAccountsExtractorImpl,
+    ScheduledCommitsProcessorStub,
 > {
     ExternalAccountsManager {
         internal_account_provider,
@@ -36,6 +37,7 @@ fn setup(
         transaction_accounts_extractor: TransactionAccountsExtractorImpl,
         external_readonly_accounts: Default::default(),
         external_writable_accounts: Default::default(),
+        scheduled_commits_processor: ScheduledCommitsProcessorStub::default(),
         external_readonly_mode: ExternalReadonlyMode::All,
         external_writable_mode: ExternalWritableMode::Delegated,
         create_accounts: false,

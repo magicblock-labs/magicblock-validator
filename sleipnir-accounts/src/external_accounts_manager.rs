@@ -18,23 +18,26 @@ use crate::{
     external_accounts::{ExternalReadonlyAccounts, ExternalWritableAccounts},
     traits::{AccountCloner, AccountCommitter, InternalAccountProvider},
     utils::get_epoch,
-    AccountCommittee, CommitAccountsPayload, SendableCommitAccountsPayload,
+    AccountCommittee, CommitAccountsPayload, ScheduledCommitsProcessor,
+    SendableCommitAccountsPayload,
 };
 
 #[derive(Debug)]
-pub struct ExternalAccountsManager<IAP, ACL, ACM, VAP, TAE>
+pub struct ExternalAccountsManager<IAP, ACL, ACM, VAP, TAE, SCP>
 where
     IAP: InternalAccountProvider,
     ACL: AccountCloner,
     ACM: AccountCommitter,
     VAP: ValidatedAccountsProvider,
     TAE: TransactionAccountsExtractor,
+    SCP: ScheduledCommitsProcessor,
 {
     pub internal_account_provider: IAP,
     pub account_cloner: ACL,
     pub account_committer: ACM,
     pub validated_accounts_provider: VAP,
     pub transaction_accounts_extractor: TAE,
+    pub scheduled_commits_processor: SCP,
     pub external_readonly_accounts: ExternalReadonlyAccounts,
     pub external_writable_accounts: ExternalWritableAccounts,
     pub external_readonly_mode: ExternalReadonlyMode,
@@ -43,13 +46,15 @@ where
     pub payer_init_lamports: Option<u64>,
 }
 
-impl<IAP, ACL, ACM, VAP, TAE> ExternalAccountsManager<IAP, ACL, ACM, VAP, TAE>
+impl<IAP, ACL, ACM, VAP, TAE, SCP>
+    ExternalAccountsManager<IAP, ACL, ACM, VAP, TAE, SCP>
 where
     IAP: InternalAccountProvider,
     ACL: AccountCloner,
     ACM: AccountCommitter,
     VAP: ValidatedAccountsProvider,
     TAE: TransactionAccountsExtractor,
+    SCP: ScheduledCommitsProcessor,
 {
     pub async fn ensure_accounts(
         &self,
@@ -387,5 +392,9 @@ where
             .read_accounts()
             .get(pubkey)
             .map(|x| x.last_committed_at())
+    }
+
+    pub async fn process_scheduled_commits(&self) -> AccountsResult<()> {
+        self.scheduled_commits_processor.process().await
     }
 }

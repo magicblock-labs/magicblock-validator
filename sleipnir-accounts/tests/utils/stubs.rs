@@ -16,7 +16,7 @@ use conjunto_transwise::{
 };
 use sleipnir_accounts::{
     errors::AccountsResult, AccountCloner, AccountCommittee, AccountCommitter,
-    CommitAccountsPayload, InternalAccountProvider,
+    CommitAccountsPayload, InternalAccountProvider, ScheduledCommitsProcessor,
     SendableCommitAccountsPayload,
 };
 use sleipnir_mutator::AccountModification;
@@ -315,5 +315,15 @@ impl TransactionAccountsExtractor for ValidatedAccountsProviderStub {
         _tx: &SanitizedTransaction,
     ) -> TranswiseResult<TransactionAccountsHolder> {
         unimplemented!("We don't extract during tests")
+    }
+}
+
+#[derive(Default)]
+pub struct ScheduledCommitsProcessorStub {}
+
+#[async_trait]
+impl ScheduledCommitsProcessor for ScheduledCommitsProcessorStub {
+    async fn process(&self) -> AccountsResult<()> {
+        Ok(())
     }
 }

@@ -6,6 +6,7 @@ mod external_accounts;
 mod external_accounts_manager;
 mod remote_account_cloner;
 mod remote_account_committer;
+mod remote_scheduled_commits_processor;
 mod traits;
 mod utils;
 

@@ -9,7 +9,6 @@ test:
 	cargo $(CARGO_TEST) && \
 	$(MAKE) -C $(DIR)/test-programs
 
-
 test-log:
 	cargo $(CARGO_TEST_NOCAP)
 

@@ -10,6 +10,11 @@ use solana_sdk::{
 
 use crate::errors::AccountsResult;
 
+#[async_trait]
+pub trait ScheduledCommitsProcessor {
+    async fn process(&self) -> AccountsResult<()>;
+}
+
 pub trait InternalAccountProvider {
     fn has_account(&self, pubkey: &Pubkey) -> bool;
     fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData>;
