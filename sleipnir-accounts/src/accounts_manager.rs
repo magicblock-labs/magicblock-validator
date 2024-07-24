@@ -6,10 +6,7 @@ use conjunto_transwise::{
 use sleipnir_bank::bank::Bank;
 use sleipnir_transaction_status::TransactionStatusSender;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_sdk::{
-    commitment_config::CommitmentConfig,
-    signature::{Keypair, Signature},
-};
+use solana_sdk::{commitment_config::CommitmentConfig, signature::Keypair};
 
 use crate::{
     bank_account_provider::BankAccountProvider,

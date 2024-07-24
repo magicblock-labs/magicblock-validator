@@ -22,9 +22,7 @@ use sleipnir_config::{ProgramConfig, SleipnirConfig};
 use sleipnir_geyser_plugin::rpc::GeyserRpcService;
 use sleipnir_ledger::Ledger;
 use sleipnir_perf_service::SamplePerformanceService;
-use sleipnir_program::{
-    commit_sender::init_commit_channel, init_validator_authority,
-};
+use sleipnir_program::init_validator_authority;
 use sleipnir_pubsub::pubsub_service::{
     PubsubConfig, PubsubService, PubsubServiceCloseHandle,
 };

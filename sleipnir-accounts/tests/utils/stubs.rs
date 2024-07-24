@@ -15,15 +15,17 @@ use conjunto_transwise::{
     CommitFrequency, TransactionAccountsExtractor, ValidatedAccountsProvider,
 };
 use sleipnir_accounts::{
-    errors::AccountsResult, AccountCloner, AccountCommitter,
-    InternalAccountProvider,
+    errors::AccountsResult, AccountCloner, AccountCommittee, AccountCommitter,
+    CommitAccountsPayload, InternalAccountProvider,
+    SendableCommitAccountsPayload,
 };
 use sleipnir_mutator::AccountModification;
 use solana_sdk::{
     account::{Account, AccountSharedData},
+    hash::Hash,
     pubkey::Pubkey,
     signature::Signature,
-    transaction::{SanitizedTransaction, Transaction, VersionedTransaction},
+    transaction::{SanitizedTransaction, VersionedTransaction},
 };
 
 // -----------------
@@ -150,25 +152,29 @@ impl AccountCommitterStub {
 
 #[async_trait]
 impl AccountCommitter for AccountCommitterStub {
-    async fn create_commit_account_transaction(
+    async fn create_commit_accounts_transactions(
         &self,
-        _delegated_account: Pubkey,
-        _commit_state_data: AccountSharedData,
-    ) -> AccountsResult<Option<Transaction>> {
-        Ok(Some(Transaction::default()))
+        _committees: Vec<AccountCommittee>,
+        _latest_blockhash: Option<Hash>,
+    ) -> AccountsResult<Vec<CommitAccountsPayload>> {
+        Ok(Default::default())
     }
 
-    async fn commit_account(
+    async fn send_commit_transactions(
         &self,
-        delegated_account: Pubkey,
-        commit_state_data: AccountSharedData,
-        _transaction: Transaction,
-    ) -> AccountsResult<Signature> {
-        self.committed_accounts
-            .write()
-            .unwrap()
-            .insert(delegated_account, commit_state_data);
-        Ok(Signature::new_unique())
+        payloads: Vec<SendableCommitAccountsPayload>,
+    ) -> AccountsResult<Vec<Signature>> {
+        let signatures =
+            payloads.iter().map(|_| Signature::new_unique()).collect();
+        for payload in payloads {
+            for (pubkey, account) in payload.committees {
+                self.committed_accounts
+                    .write()
+                    .unwrap()
+                    .insert(pubkey, account);
+            }
+        }
+        Ok(signatures)
     }
 }
 

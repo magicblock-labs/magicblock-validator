@@ -1,4 +1,4 @@
-use std::{collections::HashMap, time::Duration};
+use std::time::Duration;
 
 use conjunto_transwise::{
     transaction_accounts_holder::TransactionAccountsHolder,
@@ -7,12 +7,9 @@ use conjunto_transwise::{
 };
 use log::*;
 use sleipnir_mutator::AccountModification;
-use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_sdk::{
-    account::AccountSharedData,
-    pubkey::Pubkey,
-    signature::Signature,
-    transaction::{SanitizedTransaction, Transaction},
+    hash::Hash, pubkey::Pubkey, signature::Signature,
+    transaction::SanitizedTransaction,
 };
 
 use crate::{
@@ -21,28 +18,8 @@ use crate::{
     external_accounts::{ExternalReadonlyAccounts, ExternalWritableAccounts},
     traits::{AccountCloner, AccountCommitter, InternalAccountProvider},
     utils::get_epoch,
+    AccountCommittee, CommitAccountsPayload, SendableCommitAccountsPayload,
 };
-
-pub enum CommitAccountInfo {
-    /// The account state was committed via the wrapped transaction
-    Committed(CommitAccountTransaction),
-    /// The account state was not committed since it did not change since the last commit
-    NotCommitted,
-}
-impl CommitAccountInfo {
-    pub fn signature(&self) -> Option<Signature> {
-        use CommitAccountInfo::*;
-        match self {
-            Committed(info) => Some(*info.transaction.get_signature()),
-            NotCommitted => None,
-        }
-    }
-}
-
-pub struct CommitAccountTransaction {
-    pub transaction: Transaction,
-    pub commit_state_data: AccountSharedData,
-}
 
 #[derive(Debug)]
 pub struct ExternalAccountsManager<IAP, ACL, ACM, VAP, TAE>
@@ -320,23 +297,38 @@ where
         let commit_infos = self
             .create_transactions_to_commit_specific_accounts(
                 accounts_to_be_committed,
+                None,
             )
             .await?;
-        self.run_transactions_to_commit_specific_accounts(now, commit_infos)
+        let sendables = commit_infos
+            .into_iter()
+            .flat_map(|x| match x.transaction {
+                Some(tx) => Some(SendableCommitAccountsPayload {
+                    transaction: tx,
+                    committees: x.committees,
+                }),
+                None => None,
+            })
+            .collect::<Vec<_>>();
+        self.run_transactions_to_commit_specific_accounts(now, sendables)
             .await
     }
 
     pub async fn create_transactions_to_commit_specific_accounts(
         &self,
         accounts_to_be_committed: Vec<Pubkey>,
-    ) -> AccountsResult<HashMap<Pubkey, CommitAccountInfo>> {
+        latest_blockhash: Option<Hash>,
+    ) -> AccountsResult<Vec<CommitAccountsPayload>> {
         // Get current account states from internal account provider
-        let mut account_states = HashMap::new();
+        let mut committees = Vec::new();
         for pubkey in &accounts_to_be_committed {
             let account_state =
                 self.internal_account_provider.get_account(pubkey);
             if let Some(acc) = account_state {
-                account_states.insert(*pubkey, acc);
+                committees.push(AccountCommittee {
+                    pubkey: *pubkey,
+                    account_data: acc,
+                });
             } else {
                 error!(
                     "Cannot find state for account that needs to be committed '{}' ",
@@ -344,52 +336,36 @@ where
                 );
             }
         }
-        // Get the transactions to commit each account
-        let mut commit_infos = HashMap::new();
-        for (pubkey, state) in account_states {
-            let tx = self
-                .account_committer
-                .create_commit_account_transaction(pubkey, state.clone())
-                .await?;
-            let res = match tx {
-                Some(tx) => {
-                    CommitAccountInfo::Committed(CommitAccountTransaction {
-                        transaction: tx,
-                        commit_state_data: state,
-                    })
-                }
-                None => CommitAccountInfo::NotCommitted,
-            };
-            commit_infos.insert(pubkey, res);
-        }
 
-        Ok(commit_infos)
+        // NOTE: Once we run into issues that the data to be committed in a single
+        // transaction is too large, we can split these into multiple batches
+        // That is why we return a Vec of CreateCommitAccountsTransactionResult
+        let txs = self
+            .account_committer
+            .create_commit_accounts_transactions(committees, latest_blockhash)
+            .await?;
+
+        Ok(txs)
     }
 
     pub async fn run_transactions_to_commit_specific_accounts(
         &self,
         now: Duration,
-        commmit_infos: HashMap<Pubkey, CommitAccountInfo>,
+        payloads: Vec<SendableCommitAccountsPayload>,
     ) -> AccountsResult<Vec<Signature>> {
-        let mut signatures = Vec::with_capacity(commmit_infos.len());
-        // Commit the accounts and mark them as committed
-        for (pubkey, info) in commmit_infos {
-            use CommitAccountInfo::*;
-            let CommitAccountTransaction {
-                transaction,
-                commit_state_data,
-            } = match info {
-                Committed(info) => info,
-                // If the last committed state is the same as the current state
-                // then it isn't committed.
-                // In that case we also don't mark it as such in order to trigger
-                // commitment as soon as its state changes.
-                NotCommitted => continue,
-            };
-            let signature = self
-                .account_committer
-                .commit_account(pubkey, commit_state_data, transaction)
-                .await?;
+        let pubkeys = payloads
+            .iter()
+            .flat_map(|x| x.committees.iter().map(|x| x.0))
+            .collect::<Vec<_>>();
+
+        // Commit all transactions
+        let signatures = self
+            .account_committer
+            .send_commit_transactions(payloads)
+            .await?;
+
+        // Mark committed accounts
+        for pubkey in pubkeys {
             if let Some(acc) =
                 self.external_writable_accounts.read_accounts().get(&pubkey)
             {
@@ -401,7 +377,6 @@ where
                     pubkey
                 );
             }
-            signatures.push(signature);
         }
 
         Ok(signatures)

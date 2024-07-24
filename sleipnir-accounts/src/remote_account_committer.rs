@@ -11,6 +11,7 @@ use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
     commitment_config::CommitmentConfig,
     compute_budget::ComputeBudgetInstruction,
+    hash::Hash,
     instruction::Instruction,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
@@ -20,7 +21,8 @@ use solana_sdk::{
 
 use crate::{
     errors::{AccountsError, AccountsResult},
-    AccountCommitter,
+    AccountCommittee, AccountCommitter, CommitAccountsPayload,
+    SendableCommitAccountsPayload,
 };
 
 pub struct RemoteAccountCommitter {
@@ -50,115 +52,148 @@ impl RemoteAccountCommitter {
 
 #[async_trait]
 impl AccountCommitter for RemoteAccountCommitter {
-    async fn create_commit_account_transaction(
+    // NOTE: if latest_blockhash is provided all steps are synchronous
+    async fn create_commit_accounts_transactions(
         &self,
-        delegated_account: Pubkey,
-        commit_state_data: AccountSharedData,
-    ) -> AccountsResult<Option<Transaction>> {
-        if let Some(committed_account) = self
-            .commits
-            .read()
-            .expect("RwLock commits poisoned")
-            .get(&delegated_account)
-        {
-            if committed_account.data() == commit_state_data.data() {
-                return Ok(None);
-            }
-        }
+        committees: Vec<AccountCommittee>,
+        latest_blockhash: Option<Hash>,
+    ) -> AccountsResult<Vec<CommitAccountsPayload>> {
+        // Get blockhash once since this is a slow operation
+        let latest_blockhash =
+            match latest_blockhash {
+                Some(blockhash) => blockhash,
+                None => self.rpc_client.get_latest_blockhash().await.map_err(
+                    |err| {
+                        AccountsError::FailedToGetLatestBlockhash(
+                            err.to_string(),
+                        )
+                    },
+                )?,
+            };
+
         let (compute_budget_ix, compute_unit_price_ix) =
             self.compute_instructions();
+        let mut ixs = vec![compute_budget_ix, compute_unit_price_ix];
 
-        let committer = self.committer_authority.pubkey();
-        let commit_ix = commit_state(
-            committer,
-            delegated_account,
-            commit_state_data.data().to_vec(),
-        );
-        let finalize_ix = finalize(committer, delegated_account, committer);
-        // NOTE: this is an async request that the transaction thread waits for to
-        // be completed. It's not ideal, but the only way to create the transaction
-        // and obtain its signature to be logged for the trigger commit.
-        let latest_blockhash = self
-            .rpc_client
-            .get_latest_blockhash()
-            .await
-            .map_err(|err| {
-                AccountsError::FailedToGetLatestBlockhash(err.to_string())
-            })?;
+        for AccountCommittee {
+            pubkey,
+            account_data,
+        } in committees.iter()
+        {
+            if let Some(committed_account) = self
+                .commits
+                .read()
+                .expect("RwLock commits poisoned")
+                .get(pubkey)
+            {
+                if committed_account == account_data {
+                    continue;
+                }
+            }
 
+            let committer = self.committer_authority.pubkey();
+            let commit_ix =
+                commit_state(committer, *pubkey, account_data.data().to_vec());
+
+            let finalize_ix = finalize(committer, *pubkey, committer);
+            ixs.extend(vec![commit_ix, finalize_ix]);
+        }
+
+        // For now we always commit all accounts in one transaction, but
+        // in the future we may split them up into batches to avoid running
+        // over the max instruction args size
         let tx = Transaction::new_signed_with_payer(
-            &[
-                compute_budget_ix,
-                compute_unit_price_ix,
-                commit_ix,
-                finalize_ix,
-            ],
+            &ixs,
             Some(&self.committer_authority.pubkey()),
             &[&self.committer_authority],
             latest_blockhash,
         );
-        Ok(Some(tx))
+        let committees = committees
+            .into_iter()
+            .map(|c| (c.pubkey, c.account_data))
+            .collect();
+
+        Ok(vec![CommitAccountsPayload {
+            transaction: Some(tx),
+            committees,
+        }])
     }
 
-    async fn commit_account(
+    async fn send_commit_transactions(
         &self,
-        delegated_account: Pubkey,
-        commit_state_data: AccountSharedData,
-        transaction: Transaction,
-    ) -> AccountsResult<Signature> {
-        let tx_sig = transaction.get_signature();
-        debug!(
-            "Committing account '{}' sig: {:?} to {}",
-            delegated_account,
-            tx_sig,
-            self.rpc_client.url()
-        );
-        let signature = self
-            .rpc_client
-            .send_transaction_with_config(
-                &transaction,
-                RpcSendTransactionConfig {
-                    skip_preflight: true,
-                    ..Default::default()
-                },
-            )
-            .await
-            .map_err(|err| {
-                AccountsError::FailedToSendTransaction(err.to_string())
-            })?;
-
-        if &signature != tx_sig {
-            error!(
-                "Transaction Signature mismatch: {:?} != {:?}",
-                signature, tx_sig
+        payloads: Vec<SendableCommitAccountsPayload>,
+    ) -> AccountsResult<Vec<Signature>> {
+        let mut signatures = Vec::new();
+        for SendableCommitAccountsPayload {
+            transaction,
+            committees,
+        } in payloads
+        {
+            let pubkeys = committees
+                .iter()
+                .map(|(pubkey, _)| *pubkey)
+                .collect::<Vec<_>>();
+            let pubkeys_display = pubkeys
+                .iter()
+                .map(|p| p.to_string())
+                .collect::<Vec<_>>()
+                .join(", ");
+            let tx_sig = transaction.get_signature();
+            debug!(
+                "Committing accounts [{}] sig: {:?} to {}",
+                pubkeys_display,
+                tx_sig,
+                self.rpc_client.url()
             );
+            let signature = self
+                .rpc_client
+                .send_transaction_with_config(
+                    &transaction,
+                    RpcSendTransactionConfig {
+                        skip_preflight: true,
+                        ..Default::default()
+                    },
+                )
+                .await
+                .map_err(|err| {
+                    AccountsError::FailedToSendTransaction(err.to_string())
+                })?;
+
+            if &signature != tx_sig {
+                error!(
+                    "Transaction Signature mismatch: {:?} != {:?}",
+                    signature, tx_sig
+                );
+            }
+            debug!(
+                "Sent commit for [{}] | signature: '{:?}'",
+                pubkeys_display, signature
+            );
+
+            self.rpc_client
+                .confirm_transaction_with_commitment(
+                    &signature,
+                    CommitmentConfig::confirmed(),
+                )
+                .await
+                .map_err(|err| {
+                    AccountsError::FailedToConfirmTransaction(err.to_string())
+                })?;
+
+            debug!(
+                "Confirmed commit for [{}] | signature: '{:?}'",
+                pubkeys_display, signature
+            );
+
+            for (pubkey, commit_state_data) in committees {
+                self.commits
+                    .write()
+                    .expect("RwLock commits poisoned")
+                    .insert(pubkey, commit_state_data);
+            }
+            signatures.push(signature);
         }
-        debug!(
-            "Sent commit for '{}' | signature: '{:?}'",
-            delegated_account, signature
-        );
-
-        self.rpc_client
-            .confirm_transaction_with_commitment(
-                &signature,
-                CommitmentConfig::confirmed(),
-            )
-            .await
-            .map_err(|err| {
-                AccountsError::FailedToConfirmTransaction(err.to_string())
-            })?;
-
-        debug!(
-            "Confirmed commit for '{}' | signature: '{:?}'",
-            delegated_account, signature
-        );
-
-        self.commits
-            .write()
-            .expect("RwLock commits poisoned")
-            .insert(delegated_account, commit_state_data);
-
-        Ok(signature)
+        Ok(signatures)
     }
 }
 
