@@ -25,7 +25,7 @@ use solana_sdk::{
     hash::Hash,
     pubkey::Pubkey,
     signature::Signature,
-    transaction::{SanitizedTransaction, VersionedTransaction},
+    transaction::{SanitizedTransaction, Transaction, VersionedTransaction},
 };
 
 // -----------------
@@ -154,10 +154,18 @@ impl AccountCommitterStub {
 impl AccountCommitter for AccountCommitterStub {
     async fn create_commit_accounts_transactions(
         &self,
-        _committees: Vec<AccountCommittee>,
+        committees: Vec<AccountCommittee>,
         _latest_blockhash: Option<Hash>,
     ) -> AccountsResult<Vec<CommitAccountsPayload>> {
-        Ok(Default::default())
+        let transaction = Transaction::default();
+        let payload = CommitAccountsPayload {
+            transaction: Some(transaction),
+            committees: committees
+                .iter()
+                .map(|x| (x.pubkey, x.account_data.clone()))
+                .collect(),
+        };
+        Ok(vec![payload])
     }
 
     async fn send_commit_transactions(

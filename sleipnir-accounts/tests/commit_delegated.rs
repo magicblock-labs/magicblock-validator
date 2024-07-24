@@ -89,7 +89,7 @@ async fn test_commit_two_delegated_accounts_one_needs_commit() {
     let last_commit_of_commit_not_needed =
         manager.last_commit(&commit_not_needed).unwrap();
 
-    std::thread::sleep(std::time::Duration::from_millis(2));
+    tokio::time::sleep(tokio::time::Duration::from_millis(2)).await;
 
     let result = manager.commit_delegated().await;
     // Ensure we committed the account that was due
