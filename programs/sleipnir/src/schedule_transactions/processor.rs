@@ -52,7 +52,7 @@ pub(crate) fn process_schedule_commit(
         })?;
 
     // Assert enough accounts
-    if ix_accs_len < COMMITTEES_START {
+    if ix_accs_len <= COMMITTEES_START {
         ic_msg!(
             invoke_context,
             "ScheduleCommit ERR: not enough accounts to schedule commit ({}), need payer, signing program an account for each pubkey to be committed",
@@ -103,7 +103,7 @@ pub(crate) fn process_schedule_commit(
                 "ScheduleCommit ERR: account {} needs to be owned by invoking program {} to be committed, but is owned by {}",
                 acc_pubkey, owner_pubkey, acc.borrow().owner()
             );
-            return Err(InstructionError::IllegalOwner);
+            return Err(InstructionError::InvalidAccountOwner);
         }
         if !signers.contains(acc_pubkey) {
             ic_msg!(
@@ -175,6 +175,7 @@ mod tests {
         },
         bpf_loader_upgradeable, clock,
         fee_calculator::DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE,
+        instruction::{AccountMeta, Instruction, InstructionError},
         pubkey::Pubkey,
         signature::Keypair,
         signer::{SeedDerivable, Signer},
@@ -186,7 +187,9 @@ mod tests {
         schedule_transactions::transaction_scheduler::{
             ScheduledCommit, TransactionScheduler,
         },
-        sleipnir_instruction::schedule_commit_instruction,
+        sleipnir_instruction::{
+            schedule_commit_instruction, SleipnirInstruction,
+        },
         test_utils::{ensure_funded_validator_authority, process_instruction},
         validator_authority_id,
     };
@@ -308,12 +311,13 @@ mod tests {
         assert_matches!(
             commit,
             ScheduledCommit {
-                id: 0,
+                id: i,
                 slot: s,
                 accounts: accs,
                 payer: p,
                 blockhash: _,
             } => {
+                assert!(i >= &0);
                 assert_eq!(s, &test_clock.slot);
                 assert_eq!(p, &payer.pubkey());
                 assert_eq!(accs, &vec![committee]);
@@ -409,12 +413,13 @@ mod tests {
         assert_matches!(
             commit,
             ScheduledCommit {
-                id: 0,
+                id: i,
                 slot: s,
                 accounts: accs,
                 payer: p,
                 blockhash: _,
             } => {
+                assert!(i >= &0);
                 assert_eq!(s, &test_clock.slot);
                 assert_eq!(p, &payer.pubkey());
                 assert_eq!(accs, &vec![committee_uno, committee_dos, committee_tres]);
@@ -422,8 +427,255 @@ mod tests {
         );
     }
 
-    // TODO(thlorenz): @@@ non-happy path tests for the following cases
-    // - not enough accounts
-    // - not all accounts owned by program
-    // - invalid validator pubkey
+    // -----------------
+    // Failure Cases
+    // ----------------
+    fn get_account_metas(
+        payer: &Pubkey,
+        program: &Pubkey,
+        validator_authority: &Pubkey,
+        pdas: Vec<Pubkey>,
+    ) -> Vec<AccountMeta> {
+        let mut account_metas = vec![
+            AccountMeta::new(*payer, true),
+            AccountMeta::new_readonly(*program, false),
+            AccountMeta::new(*validator_authority, false),
+            AccountMeta::new_readonly(system_program::id(), false),
+        ];
+        for pubkey in &pdas {
+            account_metas.push(AccountMeta::new_readonly(*pubkey, true));
+        }
+        account_metas
+    }
+
+    fn account_metas_last_committee_not_signer(
+        payer: &Pubkey,
+        program: &Pubkey,
+        validator_authority: &Pubkey,
+        pdas: Vec<Pubkey>,
+    ) -> Vec<AccountMeta> {
+        let mut account_metas =
+            get_account_metas(payer, program, validator_authority, pdas);
+        let last = account_metas.pop().unwrap();
+        account_metas.push(AccountMeta::new_readonly(last.pubkey, false));
+        account_metas
+    }
+
+    fn instruction_from_account_metas(
+        account_metas: Vec<AccountMeta>,
+    ) -> solana_sdk::instruction::Instruction {
+        Instruction::new_with_bincode(
+            crate::id(),
+            &SleipnirInstruction::ScheduleCommit,
+            account_metas,
+        )
+    }
+
+    struct PreparedTransactionThreeCommittees {
+        accounts_data: HashMap<Pubkey, AccountSharedData>,
+        program: Pubkey,
+        committee_uno: Pubkey,
+        committee_dos: Pubkey,
+        committee_tres: Pubkey,
+        transaction_accounts: Vec<(Pubkey, AccountSharedData)>,
+    }
+
+    fn prepare_transaction_with_three_committees(
+        payer: &Keypair,
+    ) -> PreparedTransactionThreeCommittees {
+        let program = Pubkey::new_unique();
+        let committee_uno = Pubkey::new_unique();
+        let committee_dos = Pubkey::new_unique();
+        let committee_tres = Pubkey::new_unique();
+        let mut accounts_data = {
+            let mut map = HashMap::new();
+            map.insert(
+                payer.pubkey(),
+                AccountSharedData::new(
+                    REQUIRED_TX_COST,
+                    0,
+                    &system_program::id(),
+                ),
+            );
+            map.insert(
+                program,
+                AccountSharedData::new(0, 0, &bpf_loader_upgradeable::id()),
+            );
+            map.insert(committee_uno, AccountSharedData::new(0, 0, &program));
+            map.insert(committee_dos, AccountSharedData::new(0, 0, &program));
+            map.insert(committee_tres, AccountSharedData::new(0, 0, &program));
+            map
+        };
+        ensure_funded_validator_authority(&mut accounts_data);
+
+        let transaction_accounts: Vec<(Pubkey, AccountSharedData)> = vec![(
+            clock::Clock::id(),
+            create_account_shared_data_for_test(&get_clock()),
+        )];
+
+        PreparedTransactionThreeCommittees {
+            accounts_data,
+            program,
+            committee_uno,
+            committee_dos,
+            committee_tres,
+            transaction_accounts,
+        }
+    }
+
+    #[test]
+    fn test_schedule_commit_three_accounts_last_not_signer() {
+        let payer = Keypair::from_seed(
+            b"test_schedule_commit_three_accounts_last_not_signer",
+        )
+        .unwrap();
+
+        let PreparedTransactionThreeCommittees {
+            mut accounts_data,
+            program,
+            committee_uno,
+            committee_dos,
+            committee_tres,
+            mut transaction_accounts,
+        } = prepare_transaction_with_three_committees(&payer);
+
+        let ix = instruction_from_account_metas(
+            account_metas_last_committee_not_signer(
+                &payer.pubkey(),
+                &program,
+                &validator_authority_id(),
+                vec![committee_uno, committee_dos, committee_tres],
+            ),
+        );
+
+        transaction_accounts.extend(ix.accounts.iter().flat_map(|acc| {
+            accounts_data
+                .remove(&acc.pubkey)
+                .map(|shared_data| (acc.pubkey, shared_data))
+        }));
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::MissingRequiredSignature),
+        );
+    }
+
+    #[test]
+    fn test_schedule_commit_no_pdas_provided_to_ix() {
+        let payer =
+            Keypair::from_seed(b"test_schedule_commit_no_pdas_provided_to_ix")
+                .unwrap();
+
+        let PreparedTransactionThreeCommittees {
+            mut accounts_data,
+            program,
+            mut transaction_accounts,
+            ..
+        } = prepare_transaction_with_three_committees(&payer);
+
+        let ix = instruction_from_account_metas(get_account_metas(
+            &payer.pubkey(),
+            &program,
+            &validator_authority_id(),
+            vec![],
+        ));
+
+        transaction_accounts.extend(ix.accounts.iter().flat_map(|acc| {
+            accounts_data
+                .remove(&acc.pubkey)
+                .map(|shared_data| (acc.pubkey, shared_data))
+        }));
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::NotEnoughAccountKeys),
+        );
+    }
+
+    #[test]
+    fn test_schedule_commit_three_accounts_second_not_owned_by_program() {
+        let payer = Keypair::from_seed(
+            b"test_schedule_commit_three_accounts_last_not_owned_by_program",
+        )
+        .unwrap();
+
+        let PreparedTransactionThreeCommittees {
+            mut accounts_data,
+            program,
+            committee_uno,
+            committee_dos,
+            committee_tres,
+            mut transaction_accounts,
+        } = prepare_transaction_with_three_committees(&payer);
+
+        accounts_data.insert(
+            committee_dos,
+            AccountSharedData::new(0, 0, &Pubkey::new_unique()),
+        );
+
+        let ix = instruction_from_account_metas(
+            account_metas_last_committee_not_signer(
+                &payer.pubkey(),
+                &program,
+                &validator_authority_id(),
+                vec![committee_uno, committee_dos, committee_tres],
+            ),
+        );
+
+        transaction_accounts.extend(ix.accounts.iter().flat_map(|acc| {
+            accounts_data
+                .remove(&acc.pubkey)
+                .map(|shared_data| (acc.pubkey, shared_data))
+        }));
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::InvalidAccountOwner),
+        );
+    }
+
+    #[test]
+    fn test_schedule_commit_three_accounts_invalid_validator_auth() {
+        let payer = Keypair::from_seed(
+            b"test_schedule_commit_three_accounts_invalid_validator_auth",
+        )
+        .unwrap();
+
+        let PreparedTransactionThreeCommittees {
+            mut accounts_data,
+            program,
+            committee_uno,
+            committee_dos,
+            committee_tres,
+            mut transaction_accounts,
+        } = prepare_transaction_with_three_committees(&payer);
+
+        let ix = instruction_from_account_metas(
+            account_metas_last_committee_not_signer(
+                &payer.pubkey(),
+                &program,
+                &Pubkey::new_unique(),
+                vec![committee_uno, committee_dos, committee_tres],
+            ),
+        );
+
+        transaction_accounts.extend(ix.accounts.iter().flat_map(|acc| {
+            accounts_data
+                .remove(&acc.pubkey)
+                .map(|shared_data| (acc.pubkey, shared_data))
+        }));
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::IncorrectAuthority),
+        );
+    }
 }
