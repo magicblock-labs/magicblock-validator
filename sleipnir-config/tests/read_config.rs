@@ -31,7 +31,6 @@ fn test_load_local_dev_with_programs_toml() {
             accounts: AccountsConfig {
                 commit: CommitStrategy {
                     frequency_millis: 600_000,
-                    trigger: false,
                     compute_unit_price: 0,
                 },
                 ..Default::default()
@@ -79,7 +78,6 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     env::set_var("ACCOUNTS_CLONE_READONLY", "all");
     env::set_var("ACCOUNTS_CLONE_WRITABLE", "delegated");
     env::set_var("ACCOUNTS_COMMIT_FREQUENCY_MILLIS", "123");
-    env::set_var("ACCOUNTS_COMMIT_TRIGGER", "true");
     env::set_var("ACCOUNTS_COMMIT_COMPUTE_UNIT_PRICE", "1");
     env::set_var("ACCOUNTS_CREATE", "false");
     env::set_var("RPC_ADDR", "0.1.0.1");
@@ -103,7 +101,6 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
                 },
                 commit: CommitStrategy {
                     frequency_millis: 123,
-                    trigger: true,
                     compute_unit_price: 1,
                 },
                 create: false,
