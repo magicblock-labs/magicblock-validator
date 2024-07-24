@@ -1,6 +1,7 @@
 use conjunto_transwise::{
     errors::TranswiseError,
     transaction_accounts_holder::TransactionAccountsHolder,
+    TransactionAccountsExtractorImpl,
 };
 use sleipnir_accounts::{
     errors::AccountsError, ExternalAccountsManager, ExternalReadonlyMode,
@@ -25,12 +26,14 @@ fn setup(
     AccountClonerStub,
     AccountCommitterStub,
     ValidatedAccountsProviderStub,
+    TransactionAccountsExtractorImpl,
 > {
     ExternalAccountsManager {
         internal_account_provider,
         account_cloner,
         account_committer,
         validated_accounts_provider,
+        transaction_accounts_extractor: TransactionAccountsExtractorImpl,
         external_readonly_accounts: Default::default(),
         external_writable_accounts: Default::default(),
         external_readonly_mode: ExternalReadonlyMode::All,
