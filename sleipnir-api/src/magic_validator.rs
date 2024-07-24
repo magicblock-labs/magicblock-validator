@@ -268,16 +268,7 @@ impl MagicValidator {
         )
         .expect("Failed to create accounts manager");
 
-        let accounts_manager = Arc::new(accounts_manager);
-        if config.accounts.commit.trigger {
-            let receiver = init_commit_channel(10);
-            AccountsManager::install_manual_commit_trigger(
-                &accounts_manager,
-                receiver,
-            );
-        }
-
-        accounts_manager
+        Arc::new(accounts_manager)
     }
 
     #[allow(clippy::too_many_arguments)]

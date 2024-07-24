@@ -3,30 +3,22 @@ use std::sync::Arc;
 use conjunto_transwise::{
     RpcProviderConfig, TransactionAccountsExtractorImpl, Transwise,
 };
-use log::*;
 use sleipnir_bank::bank::Bank;
-use sleipnir_program::{
-    commit_sender::{
-        TriggerCommitCallback, TriggerCommitOutcome, TriggerCommitReceiver,
-    },
-    errors::{MagicError, MagicErrorWithContext},
-};
 use sleipnir_transaction_status::TransactionStatusSender;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
-    pubkey::Pubkey,
     signature::{Keypair, Signature},
 };
 
 use crate::{
     bank_account_provider::BankAccountProvider,
     config::AccountsConfig,
-    errors::{AccountsError, AccountsResult},
+    errors::AccountsResult,
     external_accounts::{ExternalReadonlyAccounts, ExternalWritableAccounts},
     remote_account_cloner::RemoteAccountCloner,
     remote_account_committer::RemoteAccountCommitter,
-    utils::{get_epoch, try_rpc_cluster_from_cluster},
+    utils::try_rpc_cluster_from_cluster,
     ExternalAccountsManager,
 };
 
@@ -88,129 +80,5 @@ impl
             create_accounts: config.create,
             payer_init_lamports: config.payer_init_lamports,
         })
-    }
-
-    pub fn install_manual_commit_trigger(
-        manager: &Arc<Self>,
-        rcvr: TriggerCommitReceiver,
-    ) {
-        fn communicate_trigger_success(
-            tx: TriggerCommitCallback,
-            outcome: TriggerCommitOutcome,
-            pubkey: &Pubkey,
-            sig: Option<&Signature>,
-        ) {
-            if tx.send(Ok(outcome)).is_err() {
-                error!(
-                    "Failed to ack trigger to commit '{}' with signature '{:?}'",
-                    pubkey, sig
-                );
-            } else {
-                debug!(
-                    "Acked trigger to commit '{}' with signature '{:?}'",
-                    pubkey, sig
-                );
-            }
-        }
-
-        let manager = manager.clone();
-        tokio::spawn(async move {
-            while let Ok((pubkey, tx)) = rcvr.recv() {
-                let now = get_epoch();
-                let (commit_infos, signatures) = match manager
-                    .create_transactions_to_commit_specific_accounts(vec![
-                        pubkey,
-                    ])
-                    .await
-                {
-                    Ok(commit_infos) => {
-                        let sigs = commit_infos
-                            .iter()
-                            .flat_map(|(k, v)| {
-                                v.signature().map(|sig| (*k, sig))
-                            })
-                            .collect::<Vec<_>>();
-                        (commit_infos, sigs)
-                    }
-                    Err(ref err) => {
-                        use AccountsError::*;
-                        let context = match err {
-                            InvalidRpcUrl(msg)
-                            | FailedToGetLatestBlockhash(msg)
-                            | FailedToSendTransaction(msg)
-                            | FailedToConfirmTransaction(msg) => {
-                                format!("{} ({:?})", msg, err)
-                            }
-                            _ => format!("{:?}", err),
-                        };
-                        if tx
-                            .send(Err(MagicErrorWithContext::new(
-                                MagicError::InternalError,
-                                context,
-                            )))
-                            .is_err()
-                        {
-                            error!("Failed error response for triggered commit for account '{}'", pubkey);
-                        } else {
-                            debug!("Completed error response for trigger to commit '{}' ", pubkey);
-                        }
-                        continue;
-                    }
-                };
-                debug_assert!(
-                    commit_infos.len() <= 1,
-                    "Manual trigger creates one transaction only"
-                );
-                match signatures.into_iter().next() {
-                    Some((pubkey, signature)) => {
-                        // Let the trigger transaction finish even though we didn't run the commit
-                        // transaction yet. The signature will allow the client to verify the outcome.
-                        communicate_trigger_success(
-                            tx,
-                            TriggerCommitOutcome::Committed(signature),
-                            &pubkey,
-                            Some(&signature),
-                        );
-                    }
-                    None => {
-                        // If the account state did not change then no commmit is necessary
-                        communicate_trigger_success(
-                            tx,
-                            TriggerCommitOutcome::NotCommitted,
-                            &pubkey,
-                            None,
-                        );
-                        continue;
-                    }
-                };
-
-                // Now after we informed the commit trigger transaction that all went well
-                // so far we send and confirm the actual transaction to commit the account state.
-                if let Err(ref err) = manager
-                    .run_transactions_to_commit_specific_accounts(
-                        now,
-                        commit_infos,
-                    )
-                    .await
-                {
-                    use AccountsError::*;
-                    let context = match err {
-                        InvalidRpcUrl(msg)
-                        | FailedToGetLatestBlockhash(msg)
-                        | FailedToSendTransaction(msg) => {
-                            format!("{} ({:?})", msg, err)
-                        }
-                        _ => format!("{:?}", err),
-                    };
-                    // The trigger transaction already finished, so we cannot inform
-                    // it of the failure. The trigger issuer can find the transaction via its
-                    // signature and will see the issue.
-                    error!(
-                        "Failed to commit account '{}' due to '{}'",
-                        pubkey, context
-                    );
-                }
-            }
-        });
     }
 }

@@ -1,4 +1,3 @@
-pub mod commit_sender;
 pub mod errors;
 mod schedule_transactions;
 pub mod sleipnir_instruction;
