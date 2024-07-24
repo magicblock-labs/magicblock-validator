@@ -192,7 +192,7 @@ pub(crate) fn schedule_commit_instruction(
         AccountMeta::new_readonly(system_program::id(), false),
     ];
     for pubkey in &pdas {
-        account_metas.push(AccountMeta::new_readonly(*pubkey, false));
+        account_metas.push(AccountMeta::new_readonly(*pubkey, true));
     }
     Instruction::new_with_bincode(
         crate::id(),

@@ -6,11 +6,8 @@ use std::{
 use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 use solana_sdk::{
     account::ReadableAccount,
-    account_info::{AccountInfo, IntoAccountInfo},
     fee_calculator::DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE,
-    instruction::InstructionError,
-    pubkey::Pubkey,
-    sysvar,
+    instruction::InstructionError, pubkey::Pubkey,
     transaction_context::TransactionContext,
 };
 
@@ -19,7 +16,6 @@ use crate::{
     utils::accounts::{
         credit_instruction_account_at_index,
         debit_instruction_account_at_index, get_instruction_account_with_idx,
-        get_instruction_pubkey_and_account_with_idx,
         get_instruction_pubkey_with_idx,
     },
 };
