@@ -51,7 +51,7 @@ impl TransactionStatusSender {
     #[allow(clippy::too_many_arguments)]
     pub fn send_transaction_status_batch(
         &self,
-        bank: Arc<Bank>,
+        bank: &Arc<Bank>,
         transactions: Vec<SanitizedTransaction>,
         execution_results: Vec<TransactionExecutionResult>,
         balances: TransactionBalancesSet,
@@ -63,7 +63,7 @@ impl TransactionStatusSender {
 
         if let Err(e) = self.sender.send(TransactionStatusMessage::Batch(
             TransactionStatusBatch {
-                bank,
+                bank: bank.clone(),
                 transactions,
                 execution_results: execution_results
                     .into_iter()

@@ -6,16 +6,12 @@ use sleipnir_mutator::{
     mutator::transaction_to_clone_account_from_cluster, AccountModification,
     Cluster,
 };
-use sleipnir_processor::batch_processor::{
-    execute_batch, TransactionBatchWithIndexes,
-};
 use sleipnir_transaction_status::TransactionStatusSender;
-use solana_sdk::{
-    account::Account, pubkey::Pubkey, signature::Signature,
-    transaction::SanitizedTransaction,
-};
+use solana_sdk::{account::Account, pubkey::Pubkey, signature::Signature};
 
-use crate::{errors::AccountsResult, AccountCloner};
+use crate::{
+    errors::AccountsResult, utils::accounts_execute_transaction, AccountCloner,
+};
 
 pub struct RemoteAccountCloner {
     cluster: Cluster,
@@ -56,27 +52,11 @@ impl AccountCloner for RemoteAccountCloner {
             overrides,
         )
         .await?;
-        let sanitized_tx =
-            SanitizedTransaction::try_from_legacy_transaction(clone_tx)?;
-        let signature = *sanitized_tx.signature();
-        let txs = &[sanitized_tx];
-        let batch = self.bank.prepare_sanitized_batch(txs);
 
-        let batch_with_indexes = TransactionBatchWithIndexes {
-            batch,
-            transaction_indexes: txs
-                .iter()
-                .enumerate()
-                .map(|(idx, _)| idx)
-                .collect(),
-        };
-        let mut timings = Default::default();
-        execute_batch(
-            &batch_with_indexes,
+        let signature = accounts_execute_transaction(
+            clone_tx,
             &self.bank,
             self.transaction_status_sender.as_ref(),
-            &mut timings,
-            None,
         )?;
 
         Ok(signature)

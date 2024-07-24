@@ -7,6 +7,9 @@ mod test_utils;
 mod utils;
 mod validator;
 
-pub use schedule_transactions::transaction_scheduler::TransactionScheduler;
+pub use schedule_transactions::{
+    process_scheduled_commit_sent, register_scheduled_commit_sent,
+    transaction_scheduler::TransactionScheduler, SentCommit,
+};
 pub use sleipnir_core::magic_program::*;
 pub use validator::*;

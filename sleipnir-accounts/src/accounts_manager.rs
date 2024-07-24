@@ -56,9 +56,9 @@ impl
         let rpc_provider_config = RpcProviderConfig::new(rpc_cluster, None);
 
         let account_cloner = RemoteAccountCloner::new(
-            cluster,
+            cluster.clone(),
             bank.clone(),
-            transaction_status_sender,
+            transaction_status_sender.clone(),
         );
         let account_committer = RemoteAccountCommitter::new(
             rpc_client,
@@ -66,6 +66,12 @@ impl
             config.commit_compute_unit_price,
         );
         let validated_accounts_provider = Transwise::new(rpc_provider_config);
+
+        let scheduled_commits_processor = RemoteScheduledCommitsProcessor::new(
+            cluster,
+            bank.clone(),
+            transaction_status_sender,
+        );
 
         Ok(Self {
             internal_account_provider,
@@ -78,7 +84,7 @@ impl
             external_readonly_mode: external_config.readonly,
             external_writable_mode: external_config.writable,
             create_accounts: config.create,
-            scheduled_commits_processor: RemoteScheduledCommitsProcessor::new(),
+            scheduled_commits_processor,
             payer_init_lamports: config.payer_init_lamports,
         })
     }

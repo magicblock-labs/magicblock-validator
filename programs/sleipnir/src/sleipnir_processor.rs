@@ -20,6 +20,7 @@ use solana_sdk::{
 };
 
 use crate::{
+    process_scheduled_commit_sent,
     schedule_transactions::process_schedule_commit,
     sleipnir_instruction::{
         AccountModificationForInstruction, SleipnirError, SleipnirInstruction,
@@ -53,7 +54,14 @@ declare_process_instruction!(
                 invoke_context,
                 transaction_context,
             ),
-            SleipnirInstruction::ScheduledCommitSent(_) => Ok(()),
+            SleipnirInstruction::ScheduledCommitSent(id) => {
+                process_scheduled_commit_sent(
+                    signers,
+                    invoke_context,
+                    transaction_context,
+                    id,
+                )
+            }
         }
     }
 );

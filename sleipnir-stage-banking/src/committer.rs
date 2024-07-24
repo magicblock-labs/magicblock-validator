@@ -148,7 +148,7 @@ impl Committer {
                 })
                 .collect();
             transaction_status_sender.send_transaction_status_batch(
-                bank.clone(),
+                bank,
                 txs,
                 tx_results.execution_results,
                 TransactionBalancesSet::new(

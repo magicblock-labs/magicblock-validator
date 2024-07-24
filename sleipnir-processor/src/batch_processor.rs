@@ -220,7 +220,7 @@ pub fn execute_batch(
         );
 
         transaction_status_sender.send_transaction_status_batch(
-            bank.clone(),
+            bank,
             transactions,
             execution_results,
             balances,

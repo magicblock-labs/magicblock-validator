@@ -204,17 +204,27 @@ pub fn scheduled_commit_sent(
     scheduled_commit_id: u64,
     recent_blockhash: Hash,
 ) -> Transaction {
-    let ix = scheduled_commit_sent_instruction(scheduled_commit_id);
+    let ix = scheduled_commit_sent_instruction(
+        &crate::id(),
+        &validator_authority_id(),
+        scheduled_commit_id,
+    );
     into_transaction(&validator_authority(), ix, recent_blockhash)
 }
 
 pub(crate) fn scheduled_commit_sent_instruction(
+    program: &Pubkey,
+    validator_authority: &Pubkey,
     scheduled_commit_id: u64,
 ) -> Instruction {
+    let account_metas = vec![
+        AccountMeta::new_readonly(*program, false),
+        AccountMeta::new_readonly(*validator_authority, false),
+    ];
     Instruction::new_with_bincode(
         crate::id(),
         &SleipnirInstruction::ScheduledCommitSent(scheduled_commit_id),
-        vec![],
+        account_metas,
     )
 }
 
