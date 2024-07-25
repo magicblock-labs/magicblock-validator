@@ -1,4 +1,3 @@
-use conjunto_transwise::RpcProviderConfig;
 use std::{
     fs,
     net::SocketAddr,
@@ -11,12 +10,13 @@ use std::{
     time::Duration,
 };
 
+use conjunto_transwise::RpcProviderConfig;
 use log::*;
 use sleipnir_account_updates::{
     RemoteAccountUpdatesReader, RemoteAccountUpdatesWatcher,
     RemoteAccountUpdatesWatcherError,
 };
-use sleipnir_accounts::AccountsManager;
+use sleipnir_accounts::{utils::try_rpc_cluster_from_cluster, AccountsManager};
 use sleipnir_bank::{
     bank::Bank, genesis_utils::create_genesis_config_with_leader,
     program_loader::load_programs_into_bank,
@@ -55,8 +55,6 @@ use crate::{
     init_geyser_service::{init_geyser_service, InitGeyserServiceConfig},
     tickers::{init_commit_accounts_ticker, init_slot_ticker},
 };
-
-use sleipnir_accounts::utils::try_rpc_cluster_from_cluster;
 
 // -----------------
 // MagicValidatorConfig
