@@ -52,6 +52,27 @@ pub fn process_instruction<'a>(
             // - **n..n+32** Player n pubkey from which n-th PDA was derived
             process_schedulecommit_cpi(accounts, instruction_data_inner)?;
         }
+        2 => {
+            // # Account references
+            // - **0.**   `[WRITE, SIGNER]` Payer requesting delegation
+            // - **1.**   `[WRITE]`         Account for which delegation is requested
+            // - **2.**   `[]`              Delegate account owner program
+            // - **3.**   `[WRITE]`         Buffer account
+            // - **4.**   `[WRITE]`         Delegation record account
+            // - **5.**   `[WRITE]`         Delegation metadata account
+            // - **6.**   `[]`              Delegation program
+            // - **7.**   `[]`              System program
+            //
+            // # Instruction Args
+            //
+            //  #[derive(Debug, BorshSerialize, BorshDeserialize)]
+            //  pub struct DelegateAccountArgs {
+            //      pub valid_until: i64,
+            //      pub commit_frequency_ms: u32,
+            //      pub seeds: Vec<Vec<u8>>,
+            //  }
+            process_delegate_cpi(accounts, instruction_data_inner)?
+        }
         _ => {
             msg!("Error: unknown instruction")
         }
@@ -71,6 +92,9 @@ impl MainAccount {
     pub const SIZE: usize = std::mem::size_of::<Self>();
 }
 
+// -----------------
+// Init
+// -----------------
 fn process_init<'a>(
     program_id: &'a Pubkey,
     accounts: &'a [AccountInfo<'a>],
@@ -108,6 +132,26 @@ fn process_init<'a>(
     Ok(())
 }
 
+// -----------------
+// Delegate
+// -----------------
+pub fn process_delegate_cpi(
+    accounts: &[AccountInfo],
+    instruction_data: &[u8],
+) -> Result<(), ProgramError> {
+    let accounts_iter = &mut accounts.iter();
+    let [payer, delegate_account, owner_program, buffer, delegation_record, delegation_metadata, system_program] =
+        accounts
+    else {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    };
+
+    Ok(())
+}
+
+// -----------------
+// Schedule Commit
+// -----------------
 pub fn process_schedulecommit_cpi(
     accounts: &[AccountInfo],
     instruction_data: &[u8],
