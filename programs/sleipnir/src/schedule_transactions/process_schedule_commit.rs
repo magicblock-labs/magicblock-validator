@@ -135,9 +135,14 @@ pub(crate) fn process_schedule_commit(
     // For now we assume that chain cost match the defaults
     // We may have to charge more here if we want to pay extra to ensure the
     // transaction lands.
-    let tx_cost = DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE;
+    // NOTE: none of the below approaches to realize the tx cost work, but I'm leaving
+    // them here for future reference.
 
     /*
+     *  Debit directly:
+     *  > Program returned error: "instruction spent from the balance of an account it does not own"
+    let tx_cost = DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE;
+
     debit_instruction_account_at_index(
         transaction_context,
         PAYER_IDX,
@@ -151,6 +156,10 @@ pub(crate) fn process_schedule_commit(
     */
 
     /*
+     * Invoke system transfer:
+     * Does not error but also has no effect on the account balances.
+     * I'm not sure if this is due to the way we get those AccountInfos since
+     * here we don't have them passes as they are to a "normal" program.
     let mut payer_tpl = get_instruction_pubkey_and_account_with_idx(
         transaction_context,
         PAYER_IDX,
