@@ -5,19 +5,17 @@ use std::{
 
 use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 use solana_sdk::{
-    account::ReadableAccount, account_info::IntoAccountInfo,
+    account::ReadableAccount,
     fee_calculator::DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE,
-    instruction::InstructionError, program::invoke, pubkey::Pubkey,
-    system_instruction, transaction_context::TransactionContext,
+    instruction::InstructionError, pubkey::Pubkey,
+    transaction_context::TransactionContext,
 };
 
 use crate::{
     schedule_transactions::transaction_scheduler::TransactionScheduler,
     sleipnir_instruction::scheduled_commit_sent,
     utils::accounts::{
-        get_instruction_account_with_idx,
-        get_instruction_pubkey_and_account_with_idx,
-        get_instruction_pubkey_with_idx,
+        get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
     },
 };
 
@@ -139,17 +137,20 @@ pub(crate) fn process_schedule_commit(
     // transaction lands.
     let tx_cost = DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE;
 
-    // debit_instruction_account_at_index(
-    //     transaction_context,
-    //     PAYER_IDX,
-    //     tx_cost,
-    // )?;
-    // credit_instruction_account_at_index(
-    //     transaction_context,
-    //     VALIDATOR_IDX,
-    //     tx_cost,
-    // )?;
+    /*
+    debit_instruction_account_at_index(
+        transaction_context,
+        PAYER_IDX,
+        tx_cost,
+    )?;
+    credit_instruction_account_at_index(
+        transaction_context,
+        VALIDATOR_IDX,
+        tx_cost,
+    )?;
+    */
 
+    /*
     let mut payer_tpl = get_instruction_pubkey_and_account_with_idx(
         transaction_context,
         PAYER_IDX,
@@ -182,6 +183,7 @@ pub(crate) fn process_schedule_commit(
         );
         InstructionError::Custom(0)
     })?;
+    */
 
     let blockhash = invoke_context.blockhash;
     let commit_sent_transaction = scheduled_commit_sent(id, blockhash);
