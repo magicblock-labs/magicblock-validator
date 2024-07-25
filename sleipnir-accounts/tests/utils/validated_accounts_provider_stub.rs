@@ -94,7 +94,6 @@ impl ValidatedAccountsProvider for ValidatedAccountsProviderStub {
                     .map(|x| ValidatedReadonlyAccount {
                         pubkey: *x,
                         account: Some(Account::default()),
-                        from_slot: 0,
                     })
                     .collect(),
                 writable: transaction_accounts
@@ -118,7 +117,6 @@ impl ValidatedAccountsProvider for ValidatedAccountsProviderStub {
                                 commit_frequency: CommitFrequency::default(),
                             },
                         ),
-                        from_slot: 0,
                         is_payer: self.payers.contains(x),
                     })
                     .collect(),
