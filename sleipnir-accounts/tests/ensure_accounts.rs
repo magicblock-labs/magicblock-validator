@@ -703,7 +703,8 @@ async fn test_ensure_accounts_already_known_cant_be_reused_after_updates() {
     init_logger!();
     let account = Pubkey::new_unique();
 
-    let first_clone_slot = 11;
+    let initial_clone_slot = 11;
+    let validated_clone_slot = 20;
     let last_update_slot = 42;
 
     let mut internal_account_provider = InternalAccountProviderStub::default();
@@ -712,7 +713,88 @@ async fn test_ensure_accounts_already_known_cant_be_reused_after_updates() {
     let mut account_updates = AccountUpdatesStub::default();
 
     let mut from_slots = HashMap::new();
-    from_slots.insert(account, first_clone_slot);
+    from_slots.insert(account, validated_clone_slot);
+    let validated_accounts_provider = ValidatedAccountsProviderStub::valid(
+        Default::default(),
+        Default::default(),
+        Default::default(),
+        from_slots,
+    );
+
+    internal_account_provider.add(account, Default::default());
+    account_updates.add_known_update(&account, last_update_slot);
+
+    let manager = setup(
+        internal_account_provider,
+        account_cloner,
+        account_committer,
+        account_updates,
+        validated_accounts_provider,
+    );
+
+    manager
+        .external_readonly_accounts
+        .insert(account, initial_clone_slot);
+
+    // The first transaction should need to clone since the initial_clone_slot is before last_update_slot
+    {
+        let holder = TransactionAccountsHolder {
+            readonly: vec![account],
+            writable: vec![],
+            payer: Pubkey::new_unique(),
+        };
+
+        let result = manager
+            .ensure_accounts_from_holder(holder, "tx-sig".to_string())
+            .await;
+
+        assert_eq!(result.unwrap().len(), 1);
+
+        assert!(manager.account_cloner.did_clone(&account));
+
+        assert!(manager.external_readonly_accounts.has(&account));
+        assert!(manager.external_writable_accounts.is_empty());
+    }
+
+    manager.account_cloner.clear();
+
+    // The second transaction should also need to clone because the validated_clone_slot is before last_update_slot
+    {
+        let holder = TransactionAccountsHolder {
+            readonly: vec![account],
+            writable: vec![],
+            payer: Pubkey::new_unique(),
+        };
+
+        let result = manager
+            .ensure_accounts_from_holder(holder, "tx-sig".to_string())
+            .await;
+
+        assert_eq!(result.unwrap().len(), 1);
+
+        assert!(manager.account_cloner.did_clone(&account));
+
+        assert!(manager.external_readonly_accounts.has(&account));
+        assert!(manager.external_writable_accounts.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn test_ensure_accounts_already_known_can_be_reused_without_updates() {
+    init_logger!();
+    let account = Pubkey::new_unique();
+
+    let initial_clone_slot = 11;
+    let valdiated_clone_slot = 20;
+    let last_update_slot = 15;
+
+    let mut internal_account_provider = InternalAccountProviderStub::default();
+    let account_cloner = AccountClonerStub::default();
+    let account_committer = AccountCommitterStub::default();
+    let mut account_updates = AccountUpdatesStub::default();
+
+    let mut from_slots = HashMap::new();
+    from_slots.insert(account, valdiated_clone_slot);
     let validated_accounts_provider = ValidatedAccountsProviderStub::valid(
         Default::default(),
         Default::default(),
@@ -732,29 +814,11 @@ async fn test_ensure_accounts_already_known_cant_be_reused_after_updates() {
         validated_accounts_provider,
     );
 
-    // First Transaction does not need to re-clone account to use it as readonly (its already in the bank somehow)
-    {
-        let holder = TransactionAccountsHolder {
-            readonly: vec![account],
-            writable: vec![],
-            payer: Pubkey::new_unique(),
-        };
+    manager
+        .external_readonly_accounts
+        .insert(account, initial_clone_slot);
 
-        let result = manager
-            .ensure_accounts_from_holder(holder, "tx-sig".to_string())
-            .await;
-
-        assert_eq!(result.unwrap().len(), 0);
-
-        assert!(!manager.account_cloner.did_clone(&account));
-
-        assert!(manager.external_readonly_accounts.is_empty());
-        assert!(manager.external_writable_accounts.is_empty());
-    }
-
-    manager.account_cloner.clear();
-
-    // Second Transaction does need to re-clone account to override it, because there was an update
+    // The first transaction should need to clone since the account was updated on-chain since the initial_clone_slot
     {
         let holder = TransactionAccountsHolder {
             readonly: vec![account],
@@ -769,6 +833,28 @@ async fn test_ensure_accounts_already_known_cant_be_reused_after_updates() {
         assert_eq!(result.unwrap().len(), 1);
 
         assert!(manager.account_cloner.did_clone(&account));
+
+        assert!(manager.external_readonly_accounts.has(&account));
+        assert!(manager.external_writable_accounts.is_empty());
+    }
+
+    manager.account_cloner.clear();
+
+    // The second transaction should not need to clone since the account was not updated since the first transaction's clone
+    {
+        let holder = TransactionAccountsHolder {
+            readonly: vec![account],
+            writable: vec![],
+            payer: Pubkey::new_unique(),
+        };
+
+        let result = manager
+            .ensure_accounts_from_holder(holder, "tx-sig".to_string())
+            .await;
+
+        assert_eq!(result.unwrap().len(), 0);
+
+        assert!(!manager.account_cloner.did_clone(&account));
 
         assert!(manager.external_readonly_accounts.has(&account));
         assert!(manager.external_writable_accounts.is_empty());

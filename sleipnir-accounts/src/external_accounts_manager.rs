@@ -109,44 +109,48 @@ where
         signature: String,
     ) -> AccountsResult<Vec<Signature>> {
         // 2.A Collect all readonly accounts we've never seen before and need to clone as readonly
-        let unseen_readonly_accounts = if self
-            .external_readonly_mode
-            .is_clone_none()
-        {
-            vec![]
-        } else {
-            accounts_holder
-                .readonly
-                .into_iter()
-                // If an account has already been cloned to be used as readonly, no need to re-do it
-                .filter(|pubkey| {
-                    // TODO(vbrunet) - handle the case of the payer better, we may not want to track lamport changes
-                    // Make sure we track this account moving forward
-                    self.account_updates.request_account_monitoring(pubkey);
-                    // Clear the external cache if the account has been updated on main chain since last time we cloned it
-                    if let Some(cloned_from_slot) = self
-                        .external_readonly_accounts
-                        .get_cloned_from_slot(pubkey)
-                    {
-                        if self.account_updates.has_known_update_since_slot(
-                            pubkey,
-                            cloned_from_slot,
-                        ) {
-                            self.external_readonly_accounts.remove(pubkey);
+        let unseen_readonly_accounts =
+            if self.external_readonly_mode.is_clone_none() {
+                vec![]
+            } else {
+                accounts_holder
+                    .readonly
+                    .into_iter()
+                    .filter(|pubkey| {
+                        // If an account has already been cloned and prepared to be used as writable,
+                        // it can also be used as readonly, no questions asked, as it is already delegated
+                        if self.external_writable_accounts.has(pubkey) {
+                            return false;
                         }
-                    }
-                    // After all this, if the account is still in the cache, it can be used safely
-                    !self.external_readonly_accounts.has(&pubkey)
-                })
-                // If an account has already been cloned and prepared to be used as writable, it can also be used as readonly
-                .filter(|pubkey| !self.external_writable_accounts.has(pubkey))
-                // If somehow the account is already in the validator data for other reason, no need to re-download it
-                .filter(|pubkey| {
-                    // Slowest lookup filter is done last
-                    !self.internal_account_provider.has_account(pubkey)
-                })
-                .collect::<Vec<_>>()
-        };
+                        // TODO(vbrunet) - handle the case of the payer better, we may not want to track lamport changes
+                        // Make sure we track this account moving forward
+                        self.account_updates.request_account_monitoring(pubkey);
+                        // If there was an on-chain update since last clone, always re-clone
+                        if let Some(cloned_from_slot) = self
+                            .external_readonly_accounts
+                            .get_cloned_from_slot(pubkey)
+                        {
+                            if self.account_updates.has_known_update_since_slot(
+                                pubkey,
+                                cloned_from_slot,
+                            ) {
+                                self.external_readonly_accounts.remove(pubkey);
+                                return true;
+                            }
+                        }
+                        // If we don't know of any recent update, and it's still in the cache, it can be used safely
+                        if self.external_readonly_accounts.has(&pubkey) {
+                            return false;
+                        }
+                        // If somehow the account is already in the validator data for other reason, no need to re-clone it
+                        if self.internal_account_provider.has_account(pubkey) {
+                            return false;
+                        }
+                        // If we have no knownledge of the account, clone it
+                        return true;
+                    })
+                    .collect::<Vec<_>>()
+            };
         trace!(
             "Newly seen readonly accounts: {:?}",
             unseen_readonly_accounts
