@@ -55,14 +55,17 @@ async fn test_ensure_readonly_account_not_tracked_nor_in_our_validator() {
     let readonly = Pubkey::new_unique();
 
     let internal_account_provider = InternalAccountProviderStub::default();
+    let account_cloner = AccountClonerStub::default();
+    let account_committer = AccountCommitterStub::default();
+    let account_updates = AccountUpdatesStub::default();
     let validated_accounts_provider =
         ValidatedAccountsProviderStub::valid_default();
 
     let manager = setup(
         internal_account_provider,
-        AccountClonerStub::default(),
-        AccountCommitterStub::default(),
-        AccountUpdatesStub::default(),
+        account_cloner,
+        account_committer,
+        account_updates,
         validated_accounts_provider,
     );
 
@@ -88,6 +91,9 @@ async fn test_ensure_readonly_account_not_tracked_but_in_our_validator() {
     let readonly = Pubkey::new_unique();
 
     let mut internal_account_provider = InternalAccountProviderStub::default();
+    let account_cloner = AccountClonerStub::default();
+    let account_committer = AccountCommitterStub::default();
+    let account_updates = AccountUpdatesStub::default();
     let validated_accounts_provider =
         ValidatedAccountsProviderStub::valid_default();
 
@@ -95,9 +101,9 @@ async fn test_ensure_readonly_account_not_tracked_but_in_our_validator() {
 
     let manager = setup(
         internal_account_provider,
-        AccountClonerStub::default(),
-        AccountCommitterStub::default(),
-        AccountUpdatesStub::default(),
+        account_cloner,
+        account_committer,
+        account_updates,
         validated_accounts_provider,
     );
 
@@ -123,14 +129,17 @@ async fn test_ensure_readonly_account_tracked_but_not_in_our_validator() {
     let readonly = Pubkey::new_unique();
 
     let internal_account_provider = InternalAccountProviderStub::default();
+    let account_cloner = AccountClonerStub::default();
+    let account_committer = AccountCommitterStub::default();
+    let account_updates = AccountUpdatesStub::default();
     let validated_accounts_provider =
         ValidatedAccountsProviderStub::valid_default();
 
     let manager = setup(
         internal_account_provider,
-        AccountClonerStub::default(),
-        AccountCommitterStub::default(),
-        AccountUpdatesStub::default(),
+        account_cloner,
+        account_committer,
+        account_updates,
         validated_accounts_provider,
     );
 
@@ -159,6 +168,9 @@ async fn test_ensure_readonly_account_in_our_validator_and_new_writable() {
     let writable = Pubkey::new_unique();
 
     let mut internal_account_provider = InternalAccountProviderStub::default();
+    let account_cloner = AccountClonerStub::default();
+    let account_committer = AccountCommitterStub::default();
+    let account_updates = AccountUpdatesStub::default();
     let validated_accounts_provider =
         ValidatedAccountsProviderStub::valid_default();
 
@@ -166,9 +178,9 @@ async fn test_ensure_readonly_account_in_our_validator_and_new_writable() {
 
     let manager = setup(
         internal_account_provider,
-        AccountClonerStub::default(),
-        AccountCommitterStub::default(),
-        AccountUpdatesStub::default(),
+        account_cloner,
+        account_committer,
+        account_updates,
         validated_accounts_provider,
     );
 
@@ -197,9 +209,12 @@ async fn test_ensure_locked_with_owner_and_unlocked_writable_payer() {
     let payer = Pubkey::new_unique();
 
     let internal_account_provider = InternalAccountProviderStub::default();
+    let account_cloner = AccountClonerStub::default();
+    let account_committer = AccountCommitterStub::default();
+    let account_updates = AccountUpdatesStub::default();
+
     let payers = vec![payer].into_iter().collect();
     let with_owners = vec![(locked, locked_owner)].into_iter().collect();
-
     let validated_accounts_provider = ValidatedAccountsProviderStub::valid(
         payers,
         Default::default(),
@@ -208,9 +223,9 @@ async fn test_ensure_locked_with_owner_and_unlocked_writable_payer() {
 
     let manager = setup(
         internal_account_provider,
-        AccountClonerStub::default(),
-        AccountCommitterStub::default(),
-        AccountUpdatesStub::default(),
+        account_cloner,
+        account_committer,
+        account_updates,
         validated_accounts_provider,
     );
 
@@ -248,8 +263,11 @@ async fn test_ensure_one_locked_and_one_new_writable() {
     let new = Pubkey::new_unique();
 
     let internal_account_provider = InternalAccountProviderStub::default();
-    let new_accounts = vec![new].into_iter().collect();
+    let account_cloner = AccountClonerStub::default();
+    let account_committer = AccountCommitterStub::default();
+    let account_updates = AccountUpdatesStub::default();
 
+    let new_accounts = vec![new].into_iter().collect();
     let validated_accounts_provider = ValidatedAccountsProviderStub::valid(
         Default::default(),
         new_accounts,
@@ -258,9 +276,9 @@ async fn test_ensure_one_locked_and_one_new_writable() {
 
     let manager = setup(
         internal_account_provider,
-        AccountClonerStub::default(),
-        AccountCommitterStub::default(),
-        AccountUpdatesStub::default(),
+        account_cloner,
+        account_committer,
+        account_updates,
         validated_accounts_provider,
     );
 
@@ -294,14 +312,17 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
     let writable2 = Pubkey::new_unique();
 
     let internal_account_provider = InternalAccountProviderStub::default();
+    let account_cloner = AccountClonerStub::default();
+    let account_committer = AccountCommitterStub::default();
+    let account_updates = AccountUpdatesStub::default();
     let validated_accounts_provider =
         ValidatedAccountsProviderStub::valid_default();
 
     let manager = setup(
         internal_account_provider,
-        AccountClonerStub::default(),
-        AccountCommitterStub::default(),
-        AccountUpdatesStub::default(),
+        account_cloner,
+        account_committer,
+        account_updates,
         validated_accounts_provider,
     );
 
@@ -394,6 +415,9 @@ async fn test_ensure_writable_account_fails_to_validate() {
     let writable = Pubkey::new_unique();
 
     let internal_account_provider = InternalAccountProviderStub::default();
+    let account_cloner = AccountClonerStub::default();
+    let account_committer = AccountCommitterStub::default();
+    let account_updates = AccountUpdatesStub::default();
     let validated_accounts_provider = ValidatedAccountsProviderStub::invalid(
         TranswiseError::WritablesIncludeNewAccounts {
             writable_new_pubkeys: vec![writable],
@@ -402,9 +426,9 @@ async fn test_ensure_writable_account_fails_to_validate() {
 
     let manager = setup(
         internal_account_provider,
-        AccountClonerStub::default(),
-        AccountCommitterStub::default(),
-        AccountUpdatesStub::default(),
+        account_cloner,
+        account_committer,
+        account_updates,
         validated_accounts_provider,
     );
 
@@ -432,14 +456,17 @@ async fn test_ensure_accounts_seen_first_as_readonly_can_be_used_as_writable_lat
     let account = Pubkey::new_unique();
 
     let internal_account_provider = InternalAccountProviderStub::default();
+    let account_cloner = AccountClonerStub::default();
+    let account_committer = AccountCommitterStub::default();
+    let account_updates = AccountUpdatesStub::default();
     let validated_accounts_provider =
         ValidatedAccountsProviderStub::valid_default();
 
     let manager = setup(
         internal_account_provider,
-        AccountClonerStub::default(),
-        AccountCommitterStub::default(),
-        AccountUpdatesStub::default(),
+        account_cloner,
+        account_committer,
+        account_updates,
         validated_accounts_provider,
     );
 
@@ -514,6 +541,9 @@ async fn test_ensure_accounts_already_known_can_be_reused_as_writable_later() {
     let account = Pubkey::new_unique();
 
     let mut internal_account_provider = InternalAccountProviderStub::default();
+    let account_cloner = AccountClonerStub::default();
+    let account_committer = AccountCommitterStub::default();
+    let account_updates = AccountUpdatesStub::default();
     let validated_accounts_provider =
         ValidatedAccountsProviderStub::valid_default();
 
@@ -521,9 +551,9 @@ async fn test_ensure_accounts_already_known_can_be_reused_as_writable_later() {
 
     let manager = setup(
         internal_account_provider,
-        AccountClonerStub::default(),
-        AccountCommitterStub::default(),
-        AccountUpdatesStub::default(),
+        account_cloner,
+        account_committer,
+        account_updates,
         validated_accounts_provider,
     );
 

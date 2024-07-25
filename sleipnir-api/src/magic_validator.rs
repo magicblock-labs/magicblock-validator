@@ -127,7 +127,7 @@ pub struct MagicValidator {
     sample_performance_service: Option<SamplePerformanceService>,
     commit_accounts_ticker: Option<tokio::task::JoinHandle<()>>,
     remote_account_updates_watcher: Option<RemoteAccountUpdatesWatcher>,
-    remote_account_updates_watcher_handle: Option<
+    remote_account_updates_handle: Option<
         tokio::task::JoinHandle<Result<(), RemoteAccountUpdatesWatcherError>>,
     >,
     accounts_manager: Arc<AccountsManager>,
@@ -232,7 +232,7 @@ impl MagicValidator {
             remote_account_updates_watcher: Some(
                 remote_account_updates_watcher,
             ),
-            remote_account_updates_watcher_handle: None,
+            remote_account_updates_handle: None,
             pubsub_handle: Default::default(),
             pubsub_close_handle: Default::default(),
             sample_performance_service: None,
@@ -422,7 +422,7 @@ impl MagicValidator {
             self.remote_account_updates_watcher.take()
         {
             let cancellation_token = self.token.clone();
-            self.remote_account_updates_watcher_handle =
+            self.remote_account_updates_handle =
                 Some(tokio::spawn(async move {
                     let mut remote_account_updates_watcher =
                         remote_account_updates_watcher;
