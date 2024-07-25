@@ -122,8 +122,9 @@ where
                         if self.external_writable_accounts.has(pubkey) {
                             return false;
                         }
-                        // TODO(vbrunet) - handle the case of the payer better, we may not want to track lamport changes
-                        // Make sure we track this account moving forward
+                        // TODO(vbrunet)
+                        //  - https://github.com/magicblock-labs/magicblock-validator/issues/95
+                        //  - handle the case of the payer better, we may not want to track lamport changes
                         self.account_updates.request_account_monitoring(pubkey);
                         // If there was an on-chain update since last clone, always re-clone
                         if let Some(cloned_from_slot) = self
@@ -139,7 +140,7 @@ where
                             }
                         }
                         // If we don't know of any recent update, and it's still in the cache, it can be used safely
-                        if self.external_readonly_accounts.has(&pubkey) {
+                        if self.external_readonly_accounts.has(pubkey) {
                             return false;
                         }
                         // If somehow the account is already in the validator data for other reason, no need to re-clone it
@@ -147,7 +148,7 @@ where
                             return false;
                         }
                         // If we have no knownledge of the account, clone it
-                        return true;
+                        true
                     })
                     .collect::<Vec<_>>()
             };
