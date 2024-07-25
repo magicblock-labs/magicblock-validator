@@ -10,7 +10,7 @@ use solana_sdk::{
     pubkey::Pubkey,
 };
 use std::{
-    collections::HashMap,
+    collections::{hash_map::Entry, HashMap},
     sync::{Arc, RwLock},
 };
 use thiserror::Error;
@@ -76,12 +76,10 @@ impl RemoteAccountUpdatesWatcher {
         loop {
             tokio::select! {
                 Some(monitoring) = self.request_receiver.recv() => {
-                    if !subscriptions_cancellation_tokens.contains_key(&monitoring.account) {
+                    if let Entry::Vacant(entry) = subscriptions_cancellation_tokens.entry(monitoring.account) {
                         let subscription_cancellation_token = CancellationToken::new();
-                        subscriptions_cancellation_tokens.insert(
-                          monitoring.account,
-                          subscription_cancellation_token.clone()
-                        );
+                        entry.insert(subscription_cancellation_token.clone());
+
                         let pubsub_client = pubsub_client.clone();
                         let last_update_slots = self.last_update_slots.clone();
                         subscriptions_join_handles.push((monitoring.account, tokio::spawn(async move {
@@ -127,7 +125,6 @@ impl RemoteAccountUpdatesWatcher {
             commitment: commitment
                 .map(|commitment| CommitmentConfig { commitment }),
             encoding: None,
-            //data_slice: None,
             data_slice: Some(UiDataSliceConfig {
                 offset: 0,
                 length: 0,
@@ -141,8 +138,6 @@ impl RemoteAccountUpdatesWatcher {
             .map_err(RemoteAccountUpdatesWatcherError::PubsubClientError)?;
 
         debug!("Started monitoring updates for account: {}", account);
-        println!("Started monitoring updates for account: {}", account);
-
         let cancel_handle = tokio::spawn(async move {
             cancellation_token.cancelled().await;
             unsubscribe().await;
@@ -150,10 +145,6 @@ impl RemoteAccountUpdatesWatcher {
 
         while let Some(update) = stream.next().await {
             let current_update_slot = update.context.slot;
-            println!(
-                "Account changed: {}, in slot: {}",
-                account, current_update_slot
-            );
             debug!(
                 "Account changed: {}, in slot: {}",
                 account, current_update_slot
@@ -176,8 +167,6 @@ impl RemoteAccountUpdatesWatcher {
                 account, error
             );
         }
-
-        println!("Stopped monitoring updates for account: {}", account);
         debug!("Stopped monitoring updates for account: {}", account);
 
         Ok(())

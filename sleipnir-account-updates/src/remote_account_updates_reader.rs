@@ -27,11 +27,9 @@ impl RemoteAccountUpdatesReader {
 
 impl AccountUpdates for RemoteAccountUpdatesReader {
     fn request_account_monitoring(&self, pubkey: &Pubkey) {
-        if let Err(error) =
-            self.request_sender
-                .send(RemoteAccountUpdatesWatcherRequest {
-                    account: pubkey.clone(),
-                })
+        if let Err(error) = self
+            .request_sender
+            .send(RemoteAccountUpdatesWatcherRequest { account: *pubkey })
         {
             error!(
                 "Failed to request monitoring of account: {}: {:?}",
