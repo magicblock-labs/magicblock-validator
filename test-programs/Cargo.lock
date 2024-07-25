@@ -2348,6 +2348,7 @@ dependencies = [
 name = "schedulecommit-program"
 version = "0.0.0"
 dependencies = [
+ "borsh 0.10.3",
  "delegation-program",
  "delegation-program-sdk",
  "solana-program 1.17.22",

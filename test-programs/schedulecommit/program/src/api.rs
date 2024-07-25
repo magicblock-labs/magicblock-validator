@@ -1,8 +1,12 @@
+use borsh::BorshSerialize;
+use delegation_program_sdk::delegate_args::DelegateAccounts;
 use solana_program::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
     system_program,
 };
+
+use crate::DelegateCpiArgs;
 
 pub fn init_account_instruction(
     payer: Pubkey,
@@ -19,6 +23,24 @@ pub fn init_account_instruction(
     Instruction::new_with_bytes(program_id, &instruction_data, account_metas)
 }
 
+pub fn delegate_account_cpi_instruction(player: Pubkey) -> Instruction {
+    let program_id = crate::id();
+    let (pda, _) = pda_and_bump(&player);
+
+    let args = DelegateCpiArgs {
+        valid_until: i64::MAX,
+        commit_frequency_ms: 1_000_000_000,
+        player,
+    };
+
+    let accounts = DelegateAccounts::new(pda, program_id);
+    let account_metas = accounts.account_metas_with_payer(player);
+
+    let mut instruction_data = args.try_to_vec().unwrap();
+    instruction_data.insert(0, 2);
+    Instruction::new_with_bytes(program_id, &instruction_data, account_metas)
+}
+
 pub fn schedule_commit_cpi_instruction(
     payer: Pubkey,
     validator_id: Pubkey,
@@ -30,12 +52,12 @@ pub fn schedule_commit_cpi_instruction(
     let mut account_metas = vec![
         AccountMeta::new(payer, true),
         AccountMeta::new_readonly(program_id, false),
-        AccountMeta::new(validator_id, false),
+        AccountMeta::new_readonly(validator_id, false),
         AccountMeta::new_readonly(magic_program_id, false),
         AccountMeta::new_readonly(system_program::id(), false),
     ];
     for committee in committees {
-        account_metas.push(AccountMeta::new_readonly(*committee, false));
+        account_metas.push(AccountMeta::new(*committee, false));
     }
 
     let mut instruction_data = vec![1];

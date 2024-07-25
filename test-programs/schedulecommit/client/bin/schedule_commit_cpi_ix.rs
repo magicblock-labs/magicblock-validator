@@ -1,6 +1,6 @@
 use std::str::FromStr;
 
-use schedulecommit_client::{verify, ScheduleCommitTestContext};
+use schedulecommit_client::ScheduleCommitTestContext;
 use schedulecommit_program::api::schedule_commit_cpi_instruction;
 use sleipnir_core::magic_program;
 use solana_rpc_client::rpc_client::SerializableTransaction;
@@ -8,16 +8,19 @@ use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{pubkey::Pubkey, signer::Signer, transaction::Transaction};
 
 pub fn main() {
-    let ctx = ScheduleCommitTestContext::new(5);
+    let ctx = ScheduleCommitTestContext::new(1);
     ctx.init_committees().unwrap();
+    ctx.delegate_committees().unwrap();
 
     let ScheduleCommitTestContext {
         payer,
         committees,
         commitment,
-        client,
-        blockhash,
+        ephem_client,
+        chain_blockhash: blockhash,
         validator_identity,
+        ephem_blockhash,
+        ..
     } = ctx;
 
     let ix = schedule_commit_cpi_instruction(
@@ -36,7 +39,7 @@ pub fn main() {
         &[ix],
         Some(&payer.pubkey()),
         &[&payer],
-        blockhash,
+        ephem_blockhash,
     );
 
     let sig = tx.get_signature();
@@ -46,14 +49,15 @@ pub fn main() {
         "Committees: {:#?}",
         committees.iter().map(|(_, pda)| pda).collect::<Vec<_>>()
     );
-    let res = client.send_and_confirm_transaction_with_spinner_and_config(
-        &tx,
-        commitment,
-        RpcSendTransactionConfig {
-            skip_preflight: true,
-            ..Default::default()
-        },
-    );
+    let res = ephem_client
+        .send_and_confirm_transaction_with_spinner_and_config(
+            &tx,
+            commitment,
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        );
     eprintln!("Transaction res: '{:?}'", res);
 
     // verify::commit_to_chain_failed_with_invalid_account_owner(res, commitment);

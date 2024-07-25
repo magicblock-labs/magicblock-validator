@@ -4,6 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dependencies]
+borsh = { workspace = true }
 delegation-program = { workspace = true }
 delegation-program-sdk = { workspace = true }
 solana-program = { workspace = true }

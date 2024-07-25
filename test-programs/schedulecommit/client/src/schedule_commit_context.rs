@@ -1,30 +1,36 @@
 use std::{str::FromStr, thread::sleep, time::Duration};
 
 use anyhow::{Context, Result};
-use schedulecommit_program::api::{init_account_instruction, pda_and_bump};
+use schedulecommit_program::api::{
+    delegate_account_cpi_instruction, init_account_instruction, pda_and_bump,
+};
 use solana_rpc_client::rpc_client::RpcClient;
 use solana_rpc_client_api::config::{
     RpcSendTransactionConfig, RpcTransactionConfig,
 };
+#[allow(unused_imports)]
+use solana_sdk::signer::SeedDerivable;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
     hash::Hash,
     native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
-    signer::{SeedDerivable, Signer},
+    signer::Signer,
     transaction::Transaction,
 };
 
 pub struct ScheduleCommitTestContext {
     // The first payer from the committees array which is used to fund transactions
     pub payer: Keypair,
-    // The Payer pubkey along with its PDA which we'll commit
+    // The Payer keypairs along with its PDA pubkey which we'll commit
     pub committees: Vec<(Keypair, Pubkey)>,
     pub commitment: CommitmentConfig,
-    pub client: RpcClient,
+    pub chain_client: RpcClient,
+    pub ephem_client: RpcClient,
     pub validator_identity: Pubkey,
-    pub blockhash: Hash,
+    pub chain_blockhash: Hash,
+    pub ephem_blockhash: Hash,
 }
 
 impl Default for ScheduleCommitTestContext {
@@ -37,7 +43,11 @@ impl ScheduleCommitTestContext {
     pub fn new(ncommittees: usize) -> Self {
         let commitment = CommitmentConfig::confirmed();
 
-        let client = RpcClient::new_with_commitment(
+        let chain_client = RpcClient::new_with_commitment(
+            "http://localhost:7799".to_string(),
+            commitment,
+        );
+        let ephem_client = RpcClient::new_with_commitment(
             "http://localhost:8899".to_string(),
             commitment,
         );
@@ -48,9 +58,9 @@ impl ScheduleCommitTestContext {
         // requirement is that the PDA is owned by its program.
         let committees = (0..ncommittees)
             .map(|_idx| {
-                // let payer = Keypair::from_seed(&[idx as u8; 32]).unwrap();
+                // let payer = Keypair::from_seed(&[_idx as u8; 32]).unwrap();
                 let payer = Keypair::new();
-                client
+                chain_client
                     .request_airdrop(&payer.pubkey(), LAMPORTS_PER_SOL * 100)
                     .unwrap();
                 let (pda, _) = pda_and_bump(&payer.pubkey());
@@ -58,16 +68,19 @@ impl ScheduleCommitTestContext {
             })
             .collect::<Vec<(Keypair, Pubkey)>>();
 
-        let validator_identity = client.get_identity().unwrap();
-        let blockhash = client.get_latest_blockhash().unwrap();
+        let validator_identity = chain_client.get_identity().unwrap();
+        let chain_blockhash = chain_client.get_latest_blockhash().unwrap();
+        let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
 
         let payer = committees[0].0.insecure_clone();
         Self {
             payer,
             committees,
             commitment,
-            client,
-            blockhash,
+            chain_client,
+            ephem_client,
+            chain_blockhash,
+            ephem_blockhash,
             validator_identity,
         }
     }
@@ -92,9 +105,9 @@ impl ScheduleCommitTestContext {
             &ixs,
             Some(&payers[0].pubkey()),
             &payers,
-            self.blockhash,
+            self.chain_blockhash,
         );
-        self.client
+        self.chain_client
             .send_and_confirm_transaction_with_spinner_and_config(
                 &tx,
                 self.commitment,
@@ -106,6 +119,33 @@ impl ScheduleCommitTestContext {
             .with_context(|| "Failed to initialize committees")
     }
 
+    pub fn delegate_committees(&self) -> Result<Signature> {
+        let mut ixs = vec![];
+        let mut payers = vec![];
+        for (payer, _) in &self.committees {
+            let ix = delegate_account_cpi_instruction(payer.pubkey());
+            ixs.push(ix);
+            payers.push(payer);
+        }
+
+        let tx = Transaction::new_signed_with_payer(
+            &ixs,
+            Some(&payers[0].pubkey()),
+            &payers,
+            self.chain_blockhash,
+        );
+        self.chain_client
+            .send_and_confirm_transaction_with_spinner_and_config(
+                &tx,
+                self.commitment,
+                RpcSendTransactionConfig {
+                    skip_preflight: true,
+                    ..Default::default()
+                },
+            )
+            .with_context(|| "Failed to delegate committees")
+    }
+
     pub fn confirm_transaction(
         &self,
         sig: &Signature,
@@ -115,7 +155,7 @@ impl ScheduleCommitTestContext {
         let mut count = 0;
         loop {
             match rpc_client
-                .unwrap_or(&self.client)
+                .unwrap_or(&self.chain_client)
                 .confirm_transaction_with_commitment(sig, self.commitment)
             {
                 Ok(res) => {
@@ -142,7 +182,7 @@ impl ScheduleCommitTestContext {
         // the EncodedConfirmedTransactionWithStatusMeta at times
         for _ in 0..10 {
             let status = match rpc_client
-                .unwrap_or(&self.client)
+                .unwrap_or(&self.chain_client)
                 .get_transaction_with_config(
                     &sig,
                     RpcTransactionConfig {
