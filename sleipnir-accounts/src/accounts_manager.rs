@@ -76,7 +76,7 @@ impl
         Ok(Self {
             internal_account_provider,
             account_cloner,
-            account_committer,
+            account_committer: Arc::new(account_committer),
             validated_accounts_provider,
             transaction_accounts_extractor: TransactionAccountsExtractorImpl,
             external_readonly_accounts: ExternalReadonlyAccounts::default(),

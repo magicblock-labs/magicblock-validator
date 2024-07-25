@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use sleipnir_mutator::AccountModification;
 use solana_sdk::{
@@ -12,10 +14,14 @@ use crate::errors::AccountsResult;
 
 #[async_trait]
 pub trait ScheduledCommitsProcessor {
-    async fn process(&self) -> AccountsResult<()>;
+    async fn process<AC: AccountCommitter, IAP: InternalAccountProvider>(
+        &self,
+        committer: &Arc<AC>,
+        account_provider: &IAP,
+    ) -> AccountsResult<()>;
 }
 
-pub trait InternalAccountProvider {
+pub trait InternalAccountProvider: Send + Sync {
     fn has_account(&self, pubkey: &Pubkey) -> bool;
     fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData>;
 }
@@ -51,7 +57,7 @@ pub struct SendableCommitAccountsPayload {
 }
 
 #[async_trait]
-pub trait AccountCommitter {
+pub trait AccountCommitter: Send + Sync + 'static {
     /// Creates a transaction to commit each provided account unless it determines
     /// that it isn't necessary, i.e. when the previously committed state is the same
     /// as the [commit_state_data].

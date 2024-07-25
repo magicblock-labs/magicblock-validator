@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use conjunto_transwise::{CommitFrequency, TransactionAccountsExtractorImpl};
 use sleipnir_accounts::{
     ExternalAccountsManager, ExternalReadonlyMode, ExternalWritableMode,
@@ -31,7 +33,7 @@ fn setup(
     ExternalAccountsManager {
         internal_account_provider,
         account_cloner,
-        account_committer,
+        account_committer: Arc::new(account_committer),
         validated_accounts_provider,
         transaction_accounts_extractor: TransactionAccountsExtractorImpl,
         scheduled_commits_processor: ScheduledCommitsProcessorStub::default(),

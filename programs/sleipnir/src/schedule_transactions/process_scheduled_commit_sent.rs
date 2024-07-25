@@ -72,12 +72,14 @@ impl From<SentCommit> for SentCommitPrintable {
                 .included_pubkeys
                 .iter()
                 .map(|x| x.to_string())
-                .collect(),
+                .collect::<Vec<_>>()
+                .join(", "),
             excluded_pubkeys: commit
                 .excluded_pubkeys
                 .iter()
                 .map(|x| x.to_string())
-                .collect(),
+                .collect::<Vec<_>>()
+                .join(", "),
         }
     }
 }
@@ -105,6 +107,7 @@ pub fn process_scheduled_commit_sent(
     transaction_context: &TransactionContext,
     id: u64,
 ) -> Result<(), InstructionError> {
+    // TODO: @@@ don't crash here
     let commit = SENT_COMMITS
         .write()
         .expect("SENT_COMMITS lock poisoned")
@@ -184,3 +187,5 @@ pub fn process_scheduled_commit_sent(
 
     Ok(())
 }
+
+// TODO: @@@ tests

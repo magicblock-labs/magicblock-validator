@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::Arc, time::Duration};
 
 use conjunto_transwise::{
     transaction_accounts_holder::TransactionAccountsHolder,
@@ -34,7 +34,7 @@ where
 {
     pub internal_account_provider: IAP,
     pub account_cloner: ACL,
-    pub account_committer: ACM,
+    pub account_committer: Arc<ACM>,
     pub validated_accounts_provider: VAP,
     pub transaction_accounts_extractor: TAE,
     pub scheduled_commits_processor: SCP,
@@ -395,6 +395,8 @@ where
     }
 
     pub async fn process_scheduled_commits(&self) -> AccountsResult<()> {
-        self.scheduled_commits_processor.process().await
+        self.scheduled_commits_processor
+            .process(&self.account_committer, &self.internal_account_provider)
+            .await
     }
 }

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use conjunto_transwise::{
     errors::TranswiseError,
     transaction_accounts_holder::TransactionAccountsHolder,
@@ -32,7 +34,7 @@ fn setup(
     ExternalAccountsManager {
         internal_account_provider,
         account_cloner,
-        account_committer,
+        account_committer: Arc::new(account_committer),
         validated_accounts_provider,
         transaction_accounts_extractor: TransactionAccountsExtractorImpl,
         external_readonly_accounts: Default::default(),
