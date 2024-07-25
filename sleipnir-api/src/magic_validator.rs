@@ -1,6 +1,5 @@
 use conjunto_transwise::RpcProviderConfig;
 use std::{
-    borrow::BorrowMut,
     fs,
     net::SocketAddr,
     path::Path,
@@ -127,7 +126,7 @@ pub struct MagicValidator {
     pubsub_close_handle: PubsubServiceCloseHandle,
     sample_performance_service: Option<SamplePerformanceService>,
     commit_accounts_ticker: Option<tokio::task::JoinHandle<()>>,
-    remote_account_updates_watcher: RemoteAccountUpdatesWatcher,
+    remote_account_updates_watcher: Option<RemoteAccountUpdatesWatcher>,
     remote_account_updates_watcher_handle: Option<
         tokio::task::JoinHandle<Result<(), RemoteAccountUpdatesWatcherError>>,
     >,
@@ -190,7 +189,7 @@ impl MagicValidator {
             RemoteAccountUpdatesWatcher::new(RpcProviderConfig::new(
                 try_rpc_cluster_from_cluster(&cluster_from_remote(
                     &config.validator_config.accounts.remote,
-                )),
+                ))?,
                 None,
             ));
 
@@ -230,7 +229,9 @@ impl MagicValidator {
             geyser_rpc_service,
             slot_ticker: None,
             commit_accounts_ticker: None,
-            remote_account_updates_watcher,
+            remote_account_updates_watcher: Some(
+                remote_account_updates_watcher,
+            ),
             remote_account_updates_watcher_handle: None,
             pubsub_handle: Default::default(),
             pubsub_close_handle: Default::default(),
@@ -417,10 +418,17 @@ impl MagicValidator {
             self.token.clone(),
         ));
 
-        let cancellation_token = self.token.clone();
-        let future =
-            self.remote_account_updates_watcher.run(cancellation_token);
-        self.remote_account_updates_watcher_handle = Some(tokio::spawn(future));
+        if let Some(remote_account_updates_watcher) =
+            self.remote_account_updates_watcher.take()
+        {
+            let cancellation_token = self.token.clone();
+            self.remote_account_updates_watcher_handle =
+                Some(tokio::spawn(async move {
+                    let mut remote_account_updates_watcher =
+                        remote_account_updates_watcher;
+                    remote_account_updates_watcher.run(cancellation_token).await
+                }));
+        }
 
         self.rpc_service.start().map_err(|err| {
             ApiError::FailedToStartJsonRpcService(format!("{:?}", err))

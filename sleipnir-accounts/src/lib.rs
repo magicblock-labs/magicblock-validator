@@ -7,7 +7,7 @@ mod external_accounts_manager;
 mod remote_account_cloner;
 mod remote_account_committer;
 mod traits;
-mod utils;
+pub mod utils;
 
 pub use accounts_manager::AccountsManager;
 pub use config::*;
