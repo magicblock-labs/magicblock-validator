@@ -5,18 +5,18 @@ use std::{
 
 use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 use solana_sdk::{
-    account::ReadableAccount,
+    account::ReadableAccount, account_info::IntoAccountInfo,
     fee_calculator::DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE,
-    instruction::InstructionError, pubkey::Pubkey,
-    transaction_context::TransactionContext,
+    instruction::InstructionError, program::invoke, pubkey::Pubkey,
+    system_instruction, transaction_context::TransactionContext,
 };
 
 use crate::{
     schedule_transactions::transaction_scheduler::TransactionScheduler,
     sleipnir_instruction::scheduled_commit_sent,
     utils::accounts::{
-        credit_instruction_account_at_index,
-        debit_instruction_account_at_index, get_instruction_account_with_idx,
+        get_instruction_account_with_idx,
+        get_instruction_pubkey_and_account_with_idx,
         get_instruction_pubkey_with_idx,
     },
 };
@@ -138,16 +138,50 @@ pub(crate) fn process_schedule_commit(
     // We may have to charge more here if we want to pay extra to ensure the
     // transaction lands.
     let tx_cost = DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE;
-    debit_instruction_account_at_index(
+
+    // debit_instruction_account_at_index(
+    //     transaction_context,
+    //     PAYER_IDX,
+    //     tx_cost,
+    // )?;
+    // credit_instruction_account_at_index(
+    //     transaction_context,
+    //     VALIDATOR_IDX,
+    //     tx_cost,
+    // )?;
+
+    let mut payer_tpl = get_instruction_pubkey_and_account_with_idx(
         transaction_context,
         PAYER_IDX,
-        tx_cost,
     )?;
-    credit_instruction_account_at_index(
+    let payer_info = payer_tpl.into_account_info();
+    let mut validator_tpl = get_instruction_pubkey_and_account_with_idx(
         transaction_context,
         VALIDATOR_IDX,
-        tx_cost,
     )?;
+    let validator_info = validator_tpl.into_account_info();
+
+    ic_msg!(
+        invoke_context,
+        "Transferring {} lamports to validator",
+        tx_cost
+    );
+    invoke(
+        &system_instruction::transfer(
+            payer_info.key,
+            validator_info.key,
+            tx_cost,
+        ),
+        &[payer_info, validator_info],
+    )
+    .map_err(|err| {
+        ic_msg!(
+            invoke_context,
+            "Failed transfer cost from payer to validator: {}",
+            err
+        );
+        InstructionError::Custom(0)
+    })?;
 
     let blockhash = invoke_context.blockhash;
     let commit_sent_transaction = scheduled_commit_sent(id, blockhash);
@@ -162,6 +196,9 @@ pub(crate) fn process_schedule_commit(
         commit_sent_transaction,
     };
 
+    // NOTE: this is only protected by all the above checks however if the
+    // instruction fails for other reasons detected afterwards then the commit
+    // stays scheduled
     TransactionScheduler::default().schedule_commit(scheduled_commit);
     ic_msg!(invoke_context, "Scheduled commit with ID: {}", id,);
     ic_msg!(
