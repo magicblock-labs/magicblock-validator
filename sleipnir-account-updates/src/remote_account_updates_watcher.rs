@@ -70,42 +70,44 @@ impl RemoteAccountUpdatesWatcher {
             )?);
         let commitment = self.config.commitment();
 
-        let last_update_slots = self.last_update_slots.clone();
-
         let mut subscriptions_cancellation_tokens = HashMap::new();
         let mut subscriptions_join_handles = vec![];
 
-        tokio::select! {
-            Some(monitoring) = self.request_receiver.recv() => {
-                if !subscriptions_cancellation_tokens.contains_key(&monitoring.account) {
-                    let subscription_cancellation_token = CancellationToken::new();
-                    subscriptions_cancellation_tokens.insert(
-                      monitoring.account,
-                      subscription_cancellation_token.clone()
-                    );
-                    subscriptions_join_handles.push((monitoring.account, tokio::spawn(async move {
-                        let result = Self::run_account_monitoring(
-                            last_update_slots,
-                            pubsub_client,
-                            commitment,
-                            monitoring.account,
-                            subscription_cancellation_token,
-                        ).await;
-                        if let Err(error) = result {
-                            warn!("Failed to monitor account: {}: {:?}", monitoring.account, error);
-                        }
-                    })));
+        loop {
+            tokio::select! {
+                Some(monitoring) = self.request_receiver.recv() => {
+                    if !subscriptions_cancellation_tokens.contains_key(&monitoring.account) {
+                        let subscription_cancellation_token = CancellationToken::new();
+                        subscriptions_cancellation_tokens.insert(
+                          monitoring.account,
+                          subscription_cancellation_token.clone()
+                        );
+                        let pubsub_client = pubsub_client.clone();
+                        let last_update_slots = self.last_update_slots.clone();
+                        subscriptions_join_handles.push((monitoring.account, tokio::spawn(async move {
+                            let result = Self::run_account_monitoring(
+                                last_update_slots,
+                                pubsub_client,
+                                commitment,
+                                monitoring.account,
+                                subscription_cancellation_token,
+                            ).await;
+                            if let Err(error) = result {
+                                warn!("Failed to monitor account: {}: {:?}", monitoring.account, error);
+                            }
+                        })));
+                    }
                 }
-            }
-            _ = cancellation_token.cancelled() => {
-                for cancellation_token in subscriptions_cancellation_tokens.into_values() {
-                    cancellation_token.cancel();
+                _ = cancellation_token.cancelled() => {
+                    for cancellation_token in subscriptions_cancellation_tokens.into_values() {
+                        cancellation_token.cancel();
+                    }
+                    break;
                 }
             }
         }
 
-        for (account, handle) in subscriptions_join_handles {
-            debug!("waiting on account monitoring for: {}", account);
+        for (_account, handle) in subscriptions_join_handles {
             handle
                 .await
                 .map_err(RemoteAccountUpdatesWatcherError::JoinError)?;
@@ -138,6 +140,9 @@ impl RemoteAccountUpdatesWatcher {
             .await
             .map_err(RemoteAccountUpdatesWatcherError::PubsubClientError)?;
 
+        debug!("Started monitoring updates for account: {}", account);
+        println!("Started monitoring updates for account: {}", account);
+
         let cancel_handle = tokio::spawn(async move {
             cancellation_token.cancelled().await;
             unsubscribe().await;
@@ -145,6 +150,14 @@ impl RemoteAccountUpdatesWatcher {
 
         while let Some(update) = stream.next().await {
             let current_update_slot = update.context.slot;
+            println!(
+                "Account changed: {}, in slot: {}",
+                account, current_update_slot
+            );
+            debug!(
+                "Account changed: {}, in slot: {}",
+                account, current_update_slot
+            );
 
             let mut last_update_slots_write =
                 last_update_slots.write().unwrap();
@@ -159,10 +172,13 @@ impl RemoteAccountUpdatesWatcher {
 
         if let Err(error) = cancel_handle.await {
             warn!(
-                "cancel failed for monitoring of account: {}: {:?}",
+                "Failed to cancel monitoring of account: {}: {:?}",
                 account, error
             );
         }
+
+        println!("Stopped monitoring updates for account: {}", account);
+        debug!("Stopped monitoring updates for account: {}", account);
 
         Ok(())
     }
