@@ -699,7 +699,7 @@ async fn test_ensure_accounts_already_known_can_be_reused_as_writable_later() {
 }
 
 #[tokio::test]
-async fn test_ensure_accounts_already_known_cant_be_reused_after_updates() {
+async fn test_ensure_accounts_already_cloned_needs_reclone_after_updates() {
     init_logger!();
     let account = Pubkey::new_unique();
 
