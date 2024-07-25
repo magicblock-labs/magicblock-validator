@@ -10,7 +10,7 @@ use conjunto_transwise::{
     },
     CommitFrequency, ValidatedAccountsProvider,
 };
-use solana_sdk::{account::Account, pubkey::Pubkey};
+use solana_sdk::{account::Account, clock::Slot, pubkey::Pubkey};
 
 #[derive(Debug, Default)]
 pub struct ValidatedAccountsProviderStub {
@@ -18,6 +18,7 @@ pub struct ValidatedAccountsProviderStub {
     payers: HashSet<Pubkey>,
     new_accounts: HashSet<Pubkey>,
     with_owners: HashMap<Pubkey, Pubkey>,
+    from_slots: HashMap<Pubkey, Slot>,
 }
 
 #[allow(unused)] // used in tests
@@ -32,12 +33,14 @@ impl ValidatedAccountsProviderStub {
         payers: HashSet<Pubkey>,
         new_accounts: HashSet<Pubkey>,
         with_owners: HashMap<Pubkey, Pubkey>,
+        from_slots: HashMap<Pubkey, Slot>,
     ) -> Self {
         Self {
             validation_error: None,
             payers,
             new_accounts,
             with_owners,
+            from_slots,
         }
     }
 
@@ -93,8 +96,17 @@ impl ValidatedAccountsProvider for ValidatedAccountsProviderStub {
                     .iter()
                     .map(|x| ValidatedReadonlyAccount {
                         pubkey: *x,
-                        account: Some(Account::default()),
-                        from_slot: 0,
+                        account: match self.new_accounts.contains(x) {
+                            true => None,
+                            false => Some(Account {
+                                owner: match self.with_owners.get(x) {
+                                    Some(owner) => *owner,
+                                    None => Pubkey::new_unique(),
+                                },
+                                ..Account::default()
+                            }),
+                        },
+                        from_slot: self.from_slots.get(x).cloned().unwrap_or(0),
                     })
                     .collect(),
                 writable: transaction_accounts
@@ -118,7 +130,7 @@ impl ValidatedAccountsProvider for ValidatedAccountsProviderStub {
                                 commit_frequency: CommitFrequency::default(),
                             },
                         ),
-                        from_slot: 0,
+                        from_slot: self.from_slots.get(x).cloned().unwrap_or(0),
                         is_payer: self.payers.contains(x),
                     })
                     .collect(),

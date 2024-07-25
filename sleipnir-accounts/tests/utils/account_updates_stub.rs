@@ -8,6 +8,7 @@ pub struct AccountUpdatesStub {
     last_update_slots: HashMap<Pubkey, Slot>,
 }
 
+#[allow(unused)] // used in tests
 impl AccountUpdatesStub {
     pub fn add_known_update(&mut self, pubkey: &Pubkey, slot: Slot) {
         let previous_last_update_slot = self.last_update_slots.remove(pubkey);

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use conjunto_transwise::{
     errors::TranswiseError,
     transaction_accounts_holder::TransactionAccountsHolder,
@@ -313,6 +315,7 @@ async fn test_ensure_locked_with_owner_and_unlocked_writable_payer() {
         payers,
         Default::default(),
         with_owners,
+        Default::default(),
     );
 
     let manager = setup(
@@ -365,6 +368,7 @@ async fn test_ensure_one_locked_and_one_new_writable() {
     let validated_accounts_provider = ValidatedAccountsProviderStub::valid(
         Default::default(),
         new_accounts,
+        Default::default(),
         Default::default(),
     );
 
@@ -691,5 +695,82 @@ async fn test_ensure_accounts_already_known_can_be_reused_as_writable_later() {
 
         assert!(manager.external_readonly_accounts.is_empty());
         assert!(manager.external_writable_accounts.has(&account));
+    }
+}
+
+#[tokio::test]
+async fn test_ensure_accounts_already_known_cant_be_reused_after_updates() {
+    init_logger!();
+    let account = Pubkey::new_unique();
+
+    let first_clone_slot = 11;
+    let last_update_slot = 42;
+
+    let mut internal_account_provider = InternalAccountProviderStub::default();
+    let account_cloner = AccountClonerStub::default();
+    let account_committer = AccountCommitterStub::default();
+    let mut account_updates = AccountUpdatesStub::default();
+
+    let mut from_slots = HashMap::new();
+    from_slots.insert(account, first_clone_slot);
+    let validated_accounts_provider = ValidatedAccountsProviderStub::valid(
+        Default::default(),
+        Default::default(),
+        Default::default(),
+        from_slots,
+    );
+
+    internal_account_provider.add(account, Default::default());
+
+    account_updates.add_known_update(&account, last_update_slot);
+
+    let manager = setup(
+        internal_account_provider,
+        account_cloner,
+        account_committer,
+        account_updates,
+        validated_accounts_provider,
+    );
+
+    // First Transaction does not need to re-clone account to use it as readonly (its already in the bank somehow)
+    {
+        let holder = TransactionAccountsHolder {
+            readonly: vec![account],
+            writable: vec![],
+            payer: Pubkey::new_unique(),
+        };
+
+        let result = manager
+            .ensure_accounts_from_holder(holder, "tx-sig".to_string())
+            .await;
+
+        assert_eq!(result.unwrap().len(), 0);
+
+        assert!(!manager.account_cloner.did_clone(&account));
+
+        assert!(manager.external_readonly_accounts.is_empty());
+        assert!(manager.external_writable_accounts.is_empty());
+    }
+
+    manager.account_cloner.clear();
+
+    // Second Transaction does need to re-clone account to override it, because there was an update
+    {
+        let holder = TransactionAccountsHolder {
+            readonly: vec![account],
+            writable: vec![],
+            payer: Pubkey::new_unique(),
+        };
+
+        let result = manager
+            .ensure_accounts_from_holder(holder, "tx-sig".to_string())
+            .await;
+
+        assert_eq!(result.unwrap().len(), 1);
+
+        assert!(manager.account_cloner.did_clone(&account));
+
+        assert!(manager.external_readonly_accounts.has(&account));
+        assert!(manager.external_writable_accounts.is_empty());
     }
 }

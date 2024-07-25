@@ -11,12 +11,12 @@ use crate::{
     RemoteAccountUpdatesWatcherRequest,
 };
 
-pub struct RemoteAccountUpdates {
+pub struct RemoteAccountUpdatesReader {
     last_update_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
     request_sender: UnboundedSender<RemoteAccountUpdatesWatcherRequest>,
 }
 
-impl RemoteAccountUpdates {
+impl RemoteAccountUpdatesReader {
     pub fn new(watcher: &RemoteAccountUpdatesWatcher) -> Self {
         Self {
             last_update_slots: watcher.get_last_update_slots(),
@@ -25,7 +25,7 @@ impl RemoteAccountUpdates {
     }
 }
 
-impl AccountUpdates for RemoteAccountUpdates {
+impl AccountUpdates for RemoteAccountUpdatesReader {
     fn request_account_monitoring(&self, pubkey: &Pubkey) {
         if let Err(error) =
             self.request_sender
