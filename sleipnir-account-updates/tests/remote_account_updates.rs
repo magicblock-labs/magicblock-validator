@@ -26,7 +26,7 @@ async fn test_devnet_monitoring_clock_sysvar_changes() {
             .unwrap();
     assert!(!reader.has_known_update_since_slot(&sysvar_clock, 0));
     reader.request_account_monitoring(&sysvar_clock);
-    // Wait a few slots to pass
+    // Wait for a few slots to happen on-chain
     sleep(Duration::from_millis(3000)).await;
     // Check that we detected the clock change
     assert!(reader.has_known_update_since_slot(&sysvar_clock, 0));
@@ -60,7 +60,7 @@ async fn test_devnet_monitoring_multiple_accounts_at_the_same_time() {
     // Start monitoring the accounts now
     reader.request_account_monitoring(&sysvar_blockhashes);
     reader.request_account_monitoring(&sysvar_clock);
-    // Wait a few slots to pass
+    // Wait for a few slots to happen on-chain
     sleep(Duration::from_millis(3000)).await;
     // Check that we detected the accounts changes
     assert!(reader.has_known_update_since_slot(&sysvar_blockhashes, 0));
@@ -94,7 +94,7 @@ async fn test_devnet_monitoring_some_accounts_only() {
     assert!(!reader.has_known_update_since_slot(&sysvar_clock, 0));
     // Start monitoring only some of the accounts
     reader.request_account_monitoring(&sysvar_blockhashes);
-    // Wait a few slots to pass
+    // Wait for a few slots to happen on-chain
     sleep(Duration::from_millis(3000)).await;
     // Check that we detected the accounts changes only on the accounts we monitored
     assert!(reader.has_known_update_since_slot(&sysvar_blockhashes, 0));
@@ -131,7 +131,7 @@ async fn test_devnet_monitoring_invalid_and_immutable_and_program_account() {
     reader.request_account_monitoring(&unknown_account);
     reader.request_account_monitoring(&system_program);
     reader.request_account_monitoring(&sysvar_rent);
-    // Wait a few slots to pass
+    // Wait for a few slots to happen on-chain
     sleep(Duration::from_millis(3000)).await;
     // We shouldnt have detected any change whatsoever on those
     assert!(!reader.has_known_update_since_slot(&unknown_account, 0));

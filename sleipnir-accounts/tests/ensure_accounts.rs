@@ -143,7 +143,11 @@ async fn test_ensure_readonly_account_tracked_but_not_in_our_validator() {
         validated_accounts_provider,
     );
 
-    manager.external_readonly_accounts.insert(readonly, 0);
+    let cloned_from_slot = 42;
+
+    manager
+        .external_readonly_accounts
+        .insert(readonly, cloned_from_slot);
 
     let holder = TransactionAccountsHolder {
         readonly: vec![readonly],
