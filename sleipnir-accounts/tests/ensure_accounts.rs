@@ -162,6 +162,96 @@ async fn test_ensure_readonly_account_tracked_but_not_in_our_validator() {
 }
 
 #[tokio::test]
+async fn test_ensure_readonly_account_tracked_but_has_been_updated_on_chain() {
+    init_logger!();
+    let readonly = Pubkey::new_unique();
+
+    let internal_account_provider = InternalAccountProviderStub::default();
+    let account_cloner = AccountClonerStub::default();
+    let account_committer = AccountCommitterStub::default();
+    let mut account_updates = AccountUpdatesStub::default();
+    let validated_accounts_provider =
+        ValidatedAccountsProviderStub::valid_default();
+
+    let cloned_from_slot = 11;
+    let updated_last_in_slot = 42;
+
+    account_updates.add_known_update(&readonly, updated_last_in_slot);
+
+    let manager = setup(
+        internal_account_provider,
+        account_cloner,
+        account_committer,
+        account_updates,
+        validated_accounts_provider,
+    );
+
+    manager
+        .external_readonly_accounts
+        .insert(readonly, cloned_from_slot);
+
+    let holder = TransactionAccountsHolder {
+        readonly: vec![readonly],
+        writable: vec![],
+        payer: Pubkey::new_unique(),
+    };
+
+    let result = manager
+        .ensure_accounts_from_holder(holder, "tx-sig".to_string())
+        .await;
+
+    assert_eq!(result.unwrap().len(), 1);
+    assert!(manager.account_cloner.did_clone(&readonly));
+    assert_eq!(manager.external_readonly_accounts.len(), 1);
+    assert!(manager.external_writable_accounts.is_empty());
+}
+
+#[tokio::test]
+async fn test_ensure_readonly_account_tracked_and_no_recent_update_on_chain() {
+    init_logger!();
+    let readonly = Pubkey::new_unique();
+
+    let internal_account_provider = InternalAccountProviderStub::default();
+    let account_cloner = AccountClonerStub::default();
+    let account_committer = AccountCommitterStub::default();
+    let mut account_updates = AccountUpdatesStub::default();
+    let validated_accounts_provider =
+        ValidatedAccountsProviderStub::valid_default();
+
+    let cloned_from_slot = 42;
+    let updated_last_in_slot = 11;
+
+    account_updates.add_known_update(&readonly, updated_last_in_slot);
+
+    let manager = setup(
+        internal_account_provider,
+        account_cloner,
+        account_committer,
+        account_updates,
+        validated_accounts_provider,
+    );
+
+    manager
+        .external_readonly_accounts
+        .insert(readonly, cloned_from_slot);
+
+    let holder = TransactionAccountsHolder {
+        readonly: vec![readonly],
+        writable: vec![],
+        payer: Pubkey::new_unique(),
+    };
+
+    let result = manager
+        .ensure_accounts_from_holder(holder, "tx-sig".to_string())
+        .await;
+
+    assert_eq!(result.unwrap().len(), 0);
+    assert!(!manager.account_cloner.did_clone(&readonly));
+    assert_eq!(manager.external_readonly_accounts.len(), 1);
+    assert!(manager.external_writable_accounts.is_empty());
+}
+
+#[tokio::test]
 async fn test_ensure_readonly_account_in_our_validator_and_new_writable() {
     init_logger!();
     let readonly = Pubkey::new_unique();

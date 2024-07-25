@@ -4,7 +4,7 @@ use conjunto_transwise::{
     RpcProviderConfig, TransactionAccountsExtractorImpl, Transwise,
 };
 use log::*;
-use sleipnir_account_updates::RemoteAccountUpdates;
+use sleipnir_account_updates::RemoteAccountUpdatesReader;
 use sleipnir_bank::bank::Bank;
 use sleipnir_program::{
     commit_sender::{
@@ -35,7 +35,7 @@ pub type AccountsManager = ExternalAccountsManager<
     BankAccountProvider,
     RemoteAccountCloner,
     RemoteAccountCommitter,
-    RemoteAccountUpdates,
+    RemoteAccountUpdatesReader,
     Transwise,
     TransactionAccountsExtractorImpl,
 >;
@@ -45,14 +45,14 @@ impl
         BankAccountProvider,
         RemoteAccountCloner,
         RemoteAccountCommitter,
-        RemoteAccountUpdates,
+        RemoteAccountUpdatesReader,
         Transwise,
         TransactionAccountsExtractorImpl,
     >
 {
     pub fn try_new(
         bank: &Arc<Bank>,
-        remote_account_updates: RemoteAccountUpdates,
+        remote_account_updates_reader: RemoteAccountUpdatesReader,
         transaction_status_sender: Option<TransactionStatusSender>,
         committer_authority: Keypair,
         config: AccountsConfig,
@@ -77,7 +77,7 @@ impl
             committer_authority,
             config.commit_compute_unit_price,
         );
-        let account_updates = remote_account_updates;
+        let account_updates = remote_account_updates_reader;
 
         let validated_accounts_provider =
             Transwise::new(rpc_provider_config.clone());

@@ -13,7 +13,7 @@ use std::{
 
 use log::*;
 use sleipnir_account_updates::{
-    RemoteAccountUpdates, RemoteAccountUpdatesWatcher,
+    RemoteAccountUpdatesReader, RemoteAccountUpdatesWatcher,
     RemoteAccountUpdatesWatcherError,
 };
 use sleipnir_accounts::AccountsManager;
@@ -199,7 +199,7 @@ impl MagicValidator {
 
         let accounts_manager = Self::init_accounts_manager(
             &bank,
-            RemoteAccountUpdates::new(&remote_account_updates_watcher),
+            RemoteAccountUpdatesReader::new(&remote_account_updates_watcher),
             transaction_status_sender.clone(),
             &identity_keypair,
             &config.validator_config,
@@ -273,7 +273,7 @@ impl MagicValidator {
 
     fn init_accounts_manager(
         bank: &Arc<Bank>,
-        remote_account_updates: RemoteAccountUpdates,
+        remote_account_updates_reader: RemoteAccountUpdatesReader,
         transaction_status_sender: TransactionStatusSender,
         validator_keypair: &Keypair,
         config: &SleipnirConfig,
@@ -284,7 +284,7 @@ impl MagicValidator {
         );
         let accounts_manager = AccountsManager::try_new(
             bank,
-            remote_account_updates,
+            remote_account_updates_reader,
             Some(transaction_status_sender),
             // NOTE: we could avoid passing a copy of the keypair here if we instead pass
             // something akin to a ValidatorTransactionSigner that gets it via the [validator_authority]

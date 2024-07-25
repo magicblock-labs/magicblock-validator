@@ -120,6 +120,7 @@ where
                 .into_iter()
                 // If an account has already been cloned to be used as readonly, no need to re-do it
                 .filter(|pubkey| {
+                    // TODO(vbrunet) - handle the case of the payer better, we may not want to track lamport changes
                     // Make sure we track this account moving forward
                     self.account_updates.request_account_monitoring(pubkey);
                     // Clear the external cache if the account has been updated on main chain since last time we cloned it
