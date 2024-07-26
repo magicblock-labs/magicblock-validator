@@ -143,7 +143,12 @@ impl ScheduleCommitTestContext {
                     ..Default::default()
                 },
             )
-            .with_context(|| "Failed to delegate committees")
+            .with_context(|| {
+                format!(
+                    "Failed to delegate committees '{:?}'",
+                    tx.signatures[0]
+                )
+            })
     }
 
     pub fn confirm_transaction(

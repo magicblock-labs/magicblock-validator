@@ -1,58 +1,74 @@
 use std::{
-    io, net::TcpStream, path::Path, process, thread::sleep, time::Duration,
+    io,
+    net::TcpStream,
+    path::Path,
+    process::{self, Child},
+    thread::sleep,
+    time::Duration,
 };
 
-use schedulecommit_client::skip_if_devnet_down;
+fn cleanup(ephem_validator: &mut Child, devnet_validator: &mut Child) {
+    ephem_validator
+        .kill()
+        .expect("Failed to kill ephemeral validator");
+    devnet_validator
+        .kill()
+        .expect("Failed to kill devnet validator");
+}
 
 pub fn main() {
-    skip_if_devnet_down!();
-
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
 
-    // Start validator via `cargo run --release  -- test-programs/triggercommit/triggercommit-conf.toml
-    let mut validator = match start_validator_with_config(
-        "test-programs/triggercommit/triggercommit-conf.toml",
+    // Start validators via `cargo run --release  -- <config>
+    let mut ephem_validator = match start_validator_with_config(
+        "test-programs/schedulecommit/configs/schedulecommit-conf.ephem.toml",
+        8899,
     ) {
         Some(validator) => validator,
         None => {
-            panic!("Failed to start validator properly");
+            panic!("Failed to start ephemeral validator properly");
         }
     };
 
-    // Run cargo run --bin trigger-commit-direct
-    let trigger_commit_direct_output =
-        match run_bin(manifest_dir.clone(), "trigger-commit-direct") {
+    let mut devnet_validator = match start_validator_with_config(
+        "test-programs/schedulecommit/configs/schedulecommit-conf.devnet.toml",
+        7799,
+    ) {
+        Some(validator) => validator,
+        None => {
+            ephem_validator
+                .kill()
+                .expect("Failed to kill ephemeral validator");
+            panic!("Failed to start devnet validator properly");
+        }
+    };
+
+    // Run cargo run --bin <bin>
+    let schedule_commit_output =
+        match run_bin(manifest_dir.clone(), "schedule-commit-cpi-ix") {
             Ok(output) => output,
             Err(err) => {
-                eprintln!("Failed to run trigger-commit-direct: {:?}", err);
-                validator.kill().expect("Failed to kill validator");
+                eprintln!("Failed to run schedule-commit-cpi-ix: {:?}", err);
+                cleanup(&mut ephem_validator, &mut devnet_validator);
                 return;
             }
         };
 
-    // Run cargo run --bin trigger-commit-cpi-ix
-    let trigger_commit_cpi_output =
-        match run_bin(manifest_dir.clone(), "trigger-commit-cpi-ix") {
-            Ok(output) => output,
-            Err(err) => {
-                eprintln!("Failed to run trigger-commit-cpi: {:?}", err);
-                validator.kill().expect("Failed to kill validator");
-                return;
-            }
-        };
-
-    // Kill Validator
-    validator.kill().expect("Failed to kill validator");
+    // Kill Validators
+    cleanup(&mut ephem_validator, &mut devnet_validator);
 
     // Assert that the test passed
-    assert_output(trigger_commit_direct_output, "trigger-commit-direct");
-    assert_output(trigger_commit_cpi_output, "trigger-commit-cpi-ix");
+    assert_output(schedule_commit_output, "trigger-commit-cpi-ix");
 }
 
 fn assert_output(output: process::Output, test_name: &str) {
     if !output.status.success() {
         eprintln!("{} non-success status", test_name);
         eprintln!("status: {}", output.status);
+        eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+        eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+    } else if std::env::var("DUMP").is_ok() {
+        eprintln!("{} success", test_name);
         eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
         eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
     }
@@ -76,7 +92,10 @@ fn run_bin(
         .output()
 }
 
-fn start_validator_with_config(config_path: &str) -> Option<process::Child> {
+fn start_validator_with_config(
+    config_path: &str,
+    port: u16,
+) -> Option<process::Child> {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let workspace_dir = Path::new(&manifest_dir).join("..").join("..");
     let root_dir = Path::new(&workspace_dir).join("..");
@@ -101,16 +120,16 @@ fn start_validator_with_config(config_path: &str) -> Option<process::Child> {
         .spawn()
         .expect("Failed to start validator");
 
-    // Wait until the validator is listening on 0.0.0.0:8899
+    // Wait until the validator is listening on 0.0.0.0:<port>
     let mut count = 0;
     loop {
-        if TcpStream::connect("0.0.0.0:8899").is_ok() {
+        if TcpStream::connect(format!("0.0.0.0:{}", port)).is_ok() {
             break Some(validator);
         }
         count += 1;
         // 30 seconds
         if count >= 75 {
-            eprintln!("Validator RPC failed to listen");
+            eprintln!("Validator RPC on port {} failed to listen", port);
             validator.kill().expect("Failed to kill validator");
             break None;
         }

@@ -4,9 +4,9 @@ clone = { readonly = "programs", writable = "delegated" }
 commit = { frequency_millis = 500_000, trigger = true, compute_unit_price = 1_000_000 }
 create = false
 
-[node.rpc]
+[rpc]
 port = 8899
 
-[[node.program]]
+[[program]]
 id = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY"
 path = "../elfs/schedulecommit_program.so"

@@ -11,9 +11,10 @@ create = true
 millis_per_slot = 50
 sigverify = true
 
-[[node.program]]
-id = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY"
-path = "../elfs/dlp.so"
+# See ./schedulecommit-conf.devnet.toml
+# [[node.program]]
+# id = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+# path = "../elfs/dlp.so"
 
 [[node.program]]
 id = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY"
