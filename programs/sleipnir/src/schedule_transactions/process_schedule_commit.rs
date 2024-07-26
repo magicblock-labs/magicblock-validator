@@ -5,9 +5,7 @@ use std::{
 
 use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 use solana_sdk::{
-    account::ReadableAccount,
-    fee_calculator::DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE,
-    instruction::InstructionError, pubkey::Pubkey,
+    account::ReadableAccount, instruction::InstructionError, pubkey::Pubkey,
     transaction_context::TransactionContext,
 };
 
@@ -241,6 +239,10 @@ mod tests {
         sysvar::SysvarId,
     };
 
+    // See above why we cannot currently deduct money from the payer as part
+    // of our transaction
+    const REALIZE_TX_COST: bool = false;
+
     use crate::{
         schedule_transactions::transaction_scheduler::{
             ScheduledCommit, TransactionScheduler,
@@ -346,18 +348,20 @@ mod tests {
             Ok(()),
         );
 
-        let payer_after = &accounts[payer_idx];
-        let auth_after = &accounts[auth_idx];
+        if REALIZE_TX_COST {
+            let payer_after = &accounts[payer_idx];
+            let auth_after = &accounts[auth_idx];
 
-        assert_eq!(
-            payer_after.lamports(),
-            payer_before.lamports() - DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE
-        );
+            assert_eq!(
+                payer_after.lamports(),
+                payer_before.lamports() - DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE
+            );
 
-        assert_eq!(
-            auth_after.lamports(),
-            auth_before.lamports() + DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE
-        );
+            assert_eq!(
+                auth_after.lamports(),
+                auth_before.lamports() + DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE
+            );
+        }
 
         let scheduler = TransactionScheduler::default();
         let scheduled_commits =
@@ -451,18 +455,20 @@ mod tests {
             Ok(()),
         );
 
-        let payer_after = &accounts[payer_idx];
-        let auth_after = &accounts[auth_idx];
+        if REALIZE_TX_COST {
+            let payer_after = &accounts[payer_idx];
+            let auth_after = &accounts[auth_idx];
 
-        assert_eq!(
-            payer_after.lamports(),
-            payer_before.lamports() - DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE
-        );
+            assert_eq!(
+                payer_after.lamports(),
+                payer_before.lamports() - DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE
+            );
 
-        assert_eq!(
-            auth_after.lamports(),
-            auth_before.lamports() + DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE
-        );
+            assert_eq!(
+                auth_after.lamports(),
+                auth_before.lamports() + DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE
+            );
+        }
 
         let scheduler = TransactionScheduler::default();
         let scheduled_commits =
