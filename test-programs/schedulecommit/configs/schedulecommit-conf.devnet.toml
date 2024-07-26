@@ -1,21 +1,18 @@
-[meta]
-name = "Devnet:7799"
-
-[node.accounts]
+[accounts]
 remote = "devnet"
 clone = { readonly = "programs", writable = "none" }
 commit = { frequency_millis = 9_000_000_000_000, compute_unit_price = 1_000_000 }
 create = true
 
-[node.validator]
+[validator]
 millis_per_slot = 50
 sigverify = true
 
-[[node.program]]
-id = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY"
+[[program]]
+id = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
 path = "../elfs/dlp.so"
 
-[[node.program]]
+[[program]]
 id = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY"
 path = "../elfs/schedulecommit_program.so"
 
