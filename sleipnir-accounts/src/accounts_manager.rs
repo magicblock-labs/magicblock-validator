@@ -6,7 +6,9 @@ use conjunto_transwise::{
 use sleipnir_bank::bank::Bank;
 use sleipnir_transaction_status::TransactionStatusSender;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_sdk::{commitment_config::CommitmentConfig, signature::Keypair};
+use solana_sdk::{
+    commitment_config::CommitmentConfig, signature::Keypair, signer::Signer,
+};
 
 use crate::{
     bank_account_provider::BankAccountProvider,
@@ -42,9 +44,11 @@ impl
     pub fn try_new(
         bank: &Arc<Bank>,
         transaction_status_sender: Option<TransactionStatusSender>,
-        committer_authority: Keypair,
+        validator_keypair: Keypair,
         config: AccountsConfig,
     ) -> AccountsResult<Self> {
+        let validator_id = validator_keypair.pubkey();
+
         let external_config = config.external;
         let cluster = external_config.cluster;
         let internal_account_provider = BankAccountProvider::new(bank.clone());
@@ -62,7 +66,7 @@ impl
         );
         let account_committer = RemoteAccountCommitter::new(
             rpc_client,
-            committer_authority,
+            validator_keypair,
             config.commit_compute_unit_price,
         );
         let validated_accounts_provider = Transwise::new(rpc_provider_config);
@@ -86,6 +90,7 @@ impl
             create_accounts: config.create,
             scheduled_commits_processor,
             payer_init_lamports: config.payer_init_lamports,
+            validator_id,
         })
     }
 }

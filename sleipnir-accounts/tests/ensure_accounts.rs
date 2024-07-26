@@ -31,6 +31,7 @@ fn setup(
     TransactionAccountsExtractorImpl,
     ScheduledCommitsProcessorStub,
 > {
+    let validator_auth_id = Pubkey::new_unique();
     ExternalAccountsManager {
         internal_account_provider,
         account_cloner,
@@ -44,6 +45,7 @@ fn setup(
         external_writable_mode: ExternalWritableMode::Delegated,
         create_accounts: false,
         payer_init_lamports: Some(1_000 * LAMPORTS_PER_SOL),
+        validator_id: validator_auth_id,
     }
 }
 

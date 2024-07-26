@@ -44,6 +44,7 @@ where
     pub external_writable_mode: ExternalWritableMode,
     pub create_accounts: bool,
     pub payer_init_lamports: Option<u64>,
+    pub validator_id: Pubkey,
 }
 
 impl<IAP, ACL, ACM, VAP, TAE, SCP>
@@ -95,6 +96,8 @@ where
             accounts_holder
                 .readonly
                 .into_iter()
+                // We never want to clone the validator authority account
+                .filter(|pubkey| !self.validator_id.eq(pubkey))
                 // If an account has already been cloned to be used as readonly, no need to re-do it
                 .filter(|pubkey| !self.external_readonly_accounts.has(pubkey))
                 // If an account has already been cloned and prepared to be used as writable, it can also be used as readonly
@@ -121,6 +124,8 @@ where
             accounts_holder
                 .writable
                 .into_iter()
+                // We never want to clone the validator authority account
+                .filter(|pubkey| !self.validator_id.eq(pubkey))
                 // If an account has already been cloned and prepared to be used as writable, no need to re-do it
                 .filter(|pubkey| !self.external_writable_accounts.has(pubkey))
                 // Even if the account is already present in the validator,

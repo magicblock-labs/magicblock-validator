@@ -22,6 +22,7 @@ fn setup(
     account_cloner: AccountClonerStub,
     account_committer: AccountCommitterStub,
     validated_accounts_provider: ValidatedAccountsProviderStub,
+    validator_auth_id: Pubkey,
 ) -> ExternalAccountsManager<
     InternalAccountProviderStub,
     AccountClonerStub,
@@ -43,6 +44,7 @@ fn setup(
         external_writable_mode: ExternalWritableMode::Delegated,
         create_accounts: false,
         payer_init_lamports: Some(1_000 * LAMPORTS_PER_SOL),
+        validator_id: validator_auth_id,
     }
 }
 
@@ -72,12 +74,14 @@ async fn test_commit_two_delegated_accounts_one_needs_commit() {
     internal_account_provider.add(commit_not_needed, commit_not_needed_acc);
 
     let account_committer = AccountCommitterStub::default();
+    let validator_auth_id = Pubkey::new_unique();
 
     let manager = setup(
         internal_account_provider,
         AccountClonerStub::default(),
         account_committer.clone(),
         ValidatedAccountsProviderStub::valid_default(),
+        validator_auth_id,
     );
 
     manager
