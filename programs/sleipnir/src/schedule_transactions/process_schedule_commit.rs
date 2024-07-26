@@ -5,11 +5,13 @@ use std::{
 
 use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 use solana_sdk::{
-    account::ReadableAccount, instruction::InstructionError, pubkey::Pubkey,
-    transaction_context::TransactionContext,
+    account::ReadableAccount,
+    fee_calculator::DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE,
+    instruction::InstructionError, pubkey::Pubkey, system_instruction,
 };
 
 use crate::{
+    errors::custom_error_codes,
     schedule_transactions::transaction_scheduler::TransactionScheduler,
     sleipnir_instruction::scheduled_commit_sent,
     utils::accounts::{
@@ -21,8 +23,7 @@ use super::transaction_scheduler::ScheduledCommit;
 
 pub(crate) fn process_schedule_commit(
     signers: HashSet<Pubkey>,
-    invoke_context: &InvokeContext,
-    transaction_context: &TransactionContext,
+    invoke_context: &mut InvokeContext,
 ) -> Result<(), InstructionError> {
     static ID: AtomicU64 = AtomicU64::new(0);
 
@@ -31,6 +32,7 @@ pub(crate) fn process_schedule_commit(
     const VALIDATOR_IDX: u16 = 2;
     const SYSTEM_PROG_IDX: u16 = 3;
 
+    let transaction_context = &invoke_context.transaction_context.clone();
     let ix_ctx = transaction_context.get_current_instruction_context()?;
     let ix_accs_len = ix_ctx.get_number_of_instruction_accounts() as usize;
 
@@ -133,64 +135,32 @@ pub(crate) fn process_schedule_commit(
     // For now we assume that chain cost match the defaults
     // We may have to charge more here if we want to pay extra to ensure the
     // transaction lands.
-    // NOTE: none of the below approaches to realize the tx cost work, but I'm leaving
-    // them here for future reference.
-
-    /*
-     *  Debit directly:
-     *  > Program returned error: "instruction spent from the balance of an account it does not own"
     let tx_cost = DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE;
-
-    debit_instruction_account_at_index(
-        transaction_context,
-        PAYER_IDX,
-        tx_cost,
-    )?;
-    credit_instruction_account_at_index(
-        transaction_context,
-        VALIDATOR_IDX,
-        tx_cost,
-    )?;
-    */
-
-    /*
-     * Invoke system transfer:
-     * Does not error but also has no effect on the account balances.
-     * I'm not sure if this is due to the way we get those AccountInfos since
-     * here we don't have them passes as they are to a "normal" program.
-    let mut payer_tpl = get_instruction_pubkey_and_account_with_idx(
-        transaction_context,
-        PAYER_IDX,
-    )?;
-    let payer_info = payer_tpl.into_account_info();
-    let mut validator_tpl = get_instruction_pubkey_and_account_with_idx(
-        transaction_context,
-        VALIDATOR_IDX,
-    )?;
-    let validator_info = validator_tpl.into_account_info();
-
     ic_msg!(
         invoke_context,
         "Transferring {} lamports to validator",
         tx_cost
     );
-    invoke(
-        &system_instruction::transfer(
-            payer_info.key,
-            validator_info.key,
-            tx_cost,
-        ),
-        &[payer_info, validator_info],
-    )
-    .map_err(|err| {
-        ic_msg!(
-            invoke_context,
-            "Failed transfer cost from payer to validator: {}",
-            err
-        );
-        InstructionError::Custom(0)
-    })?;
-    */
+    invoke_context
+        .native_invoke(
+            system_instruction::transfer(
+                payer_pubkey,
+                &validator_authority_id,
+                tx_cost,
+            )
+            .into(),
+            &[*payer_pubkey],
+        )
+        .map_err(|err| {
+            ic_msg!(
+                invoke_context,
+                "Failed transfer cost from payer to validator: {}",
+                err
+            );
+            InstructionError::Custom(
+                custom_error_codes::FAILED_TO_TRANSFER_SCHEDULE_COMMIT_COST,
+            )
+        })?;
 
     let blockhash = invoke_context.blockhash;
     let commit_sent_transaction = scheduled_commit_sent(id, blockhash);
@@ -241,7 +211,7 @@ mod tests {
 
     // See above why we cannot currently deduct money from the payer as part
     // of our transaction
-    const REALIZE_TX_COST: bool = false;
+    const REALIZE_TX_COST: bool = true;
 
     use crate::{
         schedule_transactions::transaction_scheduler::{

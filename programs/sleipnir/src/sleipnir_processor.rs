@@ -49,11 +49,9 @@ declare_process_instruction!(
                     &mut account_mods,
                 )
             }
-            SleipnirInstruction::ScheduleCommit => process_schedule_commit(
-                signers,
-                invoke_context,
-                transaction_context,
-            ),
+            SleipnirInstruction::ScheduleCommit => {
+                process_schedule_commit(signers, invoke_context)
+            }
             SleipnirInstruction::ScheduledCommitSent(id) => {
                 process_scheduled_commit_sent(
                     signers,
