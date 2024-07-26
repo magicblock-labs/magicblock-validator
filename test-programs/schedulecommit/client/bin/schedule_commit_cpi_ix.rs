@@ -8,7 +8,7 @@ use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{pubkey::Pubkey, signer::Signer, transaction::Transaction};
 
 pub fn main() {
-    let ctx = ScheduleCommitTestContext::new(1);
+    let ctx = ScheduleCommitTestContext::new(2);
     ctx.init_committees().unwrap();
     ctx.delegate_committees().unwrap();
 
@@ -17,7 +17,6 @@ pub fn main() {
         committees,
         commitment,
         ephem_client,
-        chain_blockhash: blockhash,
         validator_identity,
         ephem_blockhash,
         ..

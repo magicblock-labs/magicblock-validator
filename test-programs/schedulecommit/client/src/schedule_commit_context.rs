@@ -58,8 +58,8 @@ impl ScheduleCommitTestContext {
         // requirement is that the PDA is owned by its program.
         let committees = (0..ncommittees)
             .map(|_idx| {
-                // let payer = Keypair::from_seed(&[_idx as u8; 32]).unwrap();
-                let payer = Keypair::new();
+                let payer = Keypair::from_seed(&[_idx as u8; 32]).unwrap();
+                // let payer = Keypair::new();
                 chain_client
                     .request_airdrop(&payer.pubkey(), LAMPORTS_PER_SOL * 100)
                     .unwrap();
