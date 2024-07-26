@@ -213,16 +213,16 @@ pub fn scheduled_commit_sent(
 }
 
 pub(crate) fn scheduled_commit_sent_instruction(
-    program: &Pubkey,
+    magic_block_program: &Pubkey,
     validator_authority: &Pubkey,
     scheduled_commit_id: u64,
 ) -> Instruction {
     let account_metas = vec![
-        AccountMeta::new_readonly(*program, false),
-        AccountMeta::new_readonly(*validator_authority, false),
+        AccountMeta::new_readonly(*magic_block_program, false),
+        AccountMeta::new_readonly(*validator_authority, true),
     ];
     Instruction::new_with_bincode(
-        crate::id(),
+        *magic_block_program,
         &SleipnirInstruction::ScheduledCommitSent(scheduled_commit_id),
         account_metas,
     )

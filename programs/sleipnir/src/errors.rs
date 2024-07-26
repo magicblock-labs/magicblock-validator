@@ -62,3 +62,11 @@ impl<T> DecodeError<T> for MagicError {
         "Magic Error"
     }
 }
+
+// -----------------
+// Program CustomError Codes
+// -----------------
+pub mod custom_error_codes {
+    pub const UNABLE_TO_UNLOCK_SENT_COMMITS: u32 = 10001;
+    pub const CANNOT_FIND_SCHEDULED_COMMIT: u32 = 1002;
+}
