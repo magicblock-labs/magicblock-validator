@@ -7,6 +7,8 @@ use std::{
     time::Duration,
 };
 
+use schedulecommit_client::skip_if_devnet_down;
+
 fn cleanup(ephem_validator: &mut Child, devnet_validator: &mut Child) {
     ephem_validator
         .kill()
@@ -17,6 +19,13 @@ fn cleanup(ephem_validator: &mut Child, devnet_validator: &mut Child) {
 }
 
 pub fn main() {
+    // NOTE: even though we run our own node representing the chain,
+    // we still clone the delegation program from devnet as otherwise
+    // it is not properly available for CPI calls.
+    // Once we fix that this test can run entirely local.
+    // More info see: ../../configs/schedulecommit-conf.devnet.toml
+    skip_if_devnet_down!();
+
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
 
     // Start validators via `cargo run --release  -- <config>
