@@ -3,13 +3,6 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use crate::{
-    schedule_transactions::transaction_scheduler::TransactionScheduler,
-    sleipnir_instruction::scheduled_commit_sent,
-    utils::accounts::{
-        get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
-    },
-};
 use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 use solana_sdk::{
     account::ReadableAccount,
@@ -18,6 +11,13 @@ use solana_sdk::{
 };
 
 use super::transaction_scheduler::ScheduledCommit;
+use crate::{
+    schedule_transactions::transaction_scheduler::TransactionScheduler,
+    sleipnir_instruction::scheduled_commit_sent,
+    utils::accounts::{
+        get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
+    },
+};
 
 pub(crate) fn process_schedule_commit(
     signers: HashSet<Pubkey>,
@@ -144,8 +144,9 @@ pub(crate) fn process_schedule_commit(
     // The lamport transfer is verified via integration tests
     #[cfg(not(test))]
     {
-        use crate::errors::custom_error_codes;
         use solana_sdk::system_instruction;
+
+        use crate::errors::custom_error_codes;
 
         invoke_context
             .native_invoke(
@@ -198,9 +199,9 @@ pub(crate) fn process_schedule_commit(
 
 #[cfg(test)]
 mod tests {
-    use assert_matches::assert_matches;
     use std::collections::HashMap;
 
+    use assert_matches::assert_matches;
     use solana_sdk::{
         account::{
             create_account_shared_data_for_test, AccountSharedData,

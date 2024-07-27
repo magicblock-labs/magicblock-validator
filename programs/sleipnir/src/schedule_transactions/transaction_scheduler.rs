@@ -1,11 +1,12 @@
 #![allow(unused)]
-use lazy_static::lazy_static;
-use solana_sdk::{
-    clock::Slot, hash::Hash, pubkey::Pubkey, transaction::Transaction,
-};
 use std::{
     mem,
     sync::{Arc, RwLock},
+};
+
+use lazy_static::lazy_static;
+use solana_sdk::{
+    clock::Slot, hash::Hash, pubkey::Pubkey, transaction::Transaction,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq)]

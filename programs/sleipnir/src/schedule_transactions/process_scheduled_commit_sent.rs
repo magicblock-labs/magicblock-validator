@@ -235,13 +235,12 @@ mod tests {
         system_program,
     };
 
+    use super::*;
     use crate::{
         sleipnir_instruction::scheduled_commit_sent_instruction,
         test_utils::{ensure_funded_validator_authority, process_instruction},
         validator_authority_id,
     };
-
-    use super::*;
 
     fn single_acc_commit(id: u64) -> SentCommit {
         let slot = 10;

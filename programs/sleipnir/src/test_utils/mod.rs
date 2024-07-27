@@ -9,7 +9,6 @@ use solana_sdk::{
 };
 
 use self::sleipnir_processor::Entrypoint;
-
 use super::*;
 use crate::generate_validator_authority_if_needed;
 
