@@ -1,5 +1,7 @@
 use borsh::BorshSerialize;
-use delegation_program_sdk::delegate_args::DelegateAccounts;
+use delegation_program_sdk::delegate_args::{
+    DelegateAccountMetas, DelegateAccounts,
+};
 use solana_program::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
@@ -33,8 +35,18 @@ pub fn delegate_account_cpi_instruction(player: Pubkey) -> Instruction {
         player,
     };
 
-    let accounts = DelegateAccounts::new(pda, program_id);
-    let account_metas = accounts.account_metas_with_payer(player);
+    let delegate_accounts = DelegateAccounts::new(pda, program_id);
+    let delegate_metas = DelegateAccountMetas::from(delegate_accounts);
+    let account_metas = vec![
+        AccountMeta::new(player, true),
+        delegate_metas.delegate_account,
+        delegate_metas.owner_program,
+        delegate_metas.buffer,
+        delegate_metas.delegation_record,
+        delegate_metas.delegation_metadata,
+        delegate_metas.delegation_program,
+        delegate_metas.system_program,
+    ];
 
     let mut instruction_data = args.try_to_vec().unwrap();
     instruction_data.insert(0, 2);
