@@ -215,7 +215,7 @@ pub fn process_scheduled_commit_sent(
     for (idx, sig) in commit.chain_signatures.iter().enumerate() {
         ic_msg!(
             invoke_context,
-            "ScheduledCommitSent signature[{}]: {:?}",
+            "ScheduledCommitSent signature[{}]: {}",
             idx,
             sig
         );
