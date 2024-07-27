@@ -58,7 +58,7 @@ pub fn main() {
     cleanup(&mut ephem_validator, &mut devnet_validator);
 
     // Assert that the test passed
-    assert_output(schedule_commit_output, "trigger-commit-cpi-ix");
+    assert_output(schedule_commit_output, "schedule-commit-cpi-ix");
 }
 
 fn assert_output(output: process::Output, test_name: &str) {

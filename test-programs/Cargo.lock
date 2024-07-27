@@ -2335,6 +2335,7 @@ name = "schedulecommit-client"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "borsh 0.10.3",
  "delegation-program",
  "schedulecommit-program",
  "sleipnir-core",

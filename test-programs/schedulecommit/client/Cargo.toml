@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
+borsh = { workspace = true }
 delegation-program = { workspace = true }
 sleipnir-core = { workspace = true }
 solana-program = { workspace = true }

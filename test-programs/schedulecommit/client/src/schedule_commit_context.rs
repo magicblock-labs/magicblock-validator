@@ -5,8 +5,9 @@ use schedulecommit_program::api::{
     delegate_account_cpi_instruction, init_account_instruction, pda_and_bump,
 };
 use solana_rpc_client::rpc_client::RpcClient;
-use solana_rpc_client_api::config::{
-    RpcSendTransactionConfig, RpcTransactionConfig,
+use solana_rpc_client_api::{
+    client_error,
+    config::{RpcSendTransactionConfig, RpcTransactionConfig},
 };
 #[allow(unused_imports)]
 use solana_sdk::signer::SeedDerivable;
@@ -40,6 +41,9 @@ impl Default for ScheduleCommitTestContext {
 }
 
 impl ScheduleCommitTestContext {
+    // -----------------
+    // Init
+    // -----------------
     pub fn new(ncommittees: usize) -> Self {
         let commitment = CommitmentConfig::confirmed();
 
@@ -59,10 +63,13 @@ impl ScheduleCommitTestContext {
         let committees = (0..ncommittees)
             .map(|_idx| {
                 let payer = Keypair::from_seed(&[_idx as u8; 32]).unwrap();
-                // let payer = Keypair::new();
-                chain_client
-                    .request_airdrop(&payer.pubkey(), LAMPORTS_PER_SOL * 100)
-                    .unwrap();
+                Self::airdrop(
+                    &chain_client,
+                    &payer.pubkey(),
+                    LAMPORTS_PER_SOL,
+                    commitment,
+                )
+                .unwrap();
                 let (pda, _) = pda_and_bump(&payer.pubkey());
                 (payer, pda)
             })
@@ -85,6 +92,9 @@ impl ScheduleCommitTestContext {
         }
     }
 
+    // -----------------
+    // Schedule Commit specific Transactions
+    // -----------------
     pub fn init_committees(&self) -> Result<Signature> {
         let ixs = self
             .committees
@@ -151,34 +161,18 @@ impl ScheduleCommitTestContext {
             })
     }
 
-    pub fn confirm_transaction(
-        &self,
-        sig: &Signature,
-        rpc_client: Option<&RpcClient>,
-    ) -> Result<bool, String> {
-        // Wait for the transaction to be confirmed (up to 1 sec)
-        let mut count = 0;
-        loop {
-            match rpc_client
-                .unwrap_or(&self.chain_client)
-                .confirm_transaction_with_commitment(sig, self.commitment)
-            {
-                Ok(res) => {
-                    return Ok(res.value);
-                }
-                Err(err) => {
-                    count += 1;
-                    if count >= 5 {
-                        return Err(format!("{:#?}", err));
-                    } else {
-                        sleep(Duration::from_millis(200));
-                    }
-                }
-            }
-        }
+    // -----------------
+    // Fetch Logs
+    // -----------------
+    pub fn fetch_ephemeral_logs(&self, sig: Signature) -> Option<Vec<String>> {
+        self.fetch_logs(sig, Some(&self.ephem_client))
     }
 
-    pub fn fetch_logs(
+    pub fn fetch_chain_logs(&self, sig: Signature) -> Option<Vec<String>> {
+        self.fetch_logs(sig, Some(&self.chain_client))
+    }
+
+    fn fetch_logs(
         &self,
         sig: Signature,
         rpc_client: Option<&RpcClient>,
@@ -212,6 +206,217 @@ impl ScheduleCommitTestContext {
             );
         }
         None
+    }
+
+    // -----------------
+    // Fetch Account Data/Balance
+    // -----------------
+    pub fn fetch_ephem_account_data(
+        &self,
+        pubkey: Pubkey,
+    ) -> anyhow::Result<Vec<u8>> {
+        self.ephem_client
+            .get_account_data(&pubkey)
+            .with_context(|| {
+                format!(
+                    "Failed to fetch ephemeral account data for '{:?}'",
+                    pubkey
+                )
+            })
+    }
+
+    pub fn fetch_chain_account_data(
+        &self,
+        pubkey: Pubkey,
+    ) -> anyhow::Result<Vec<u8>> {
+        self.chain_client
+            .get_account_data(&pubkey)
+            .with_context(|| {
+                format!("Failed to fetch chain account data for '{:?}'", pubkey)
+            })
+    }
+
+    pub fn fetch_ephem_account_balance(
+        &self,
+        pubkey: Pubkey,
+    ) -> anyhow::Result<u64> {
+        self.ephem_client
+            .get_balance_with_commitment(&pubkey, self.commitment)
+            .map(|balance| balance.value)
+            .with_context(|| {
+                format!(
+                    "Failed to fetch ephemeral account balance for '{:?}'",
+                    pubkey
+                )
+            })
+    }
+
+    pub fn fetch_chain_account_balance(
+        &self,
+        pubkey: Pubkey,
+    ) -> anyhow::Result<u64> {
+        self.chain_client
+            .get_balance_with_commitment(&pubkey, self.commitment)
+            .map(|balance| balance.value)
+            .with_context(|| {
+                format!(
+                    "Failed to fetch chain account balance for '{:?}'",
+                    pubkey
+                )
+            })
+    }
+
+    // -----------------
+    // Airdrop/Transactions
+    // -----------------
+    pub fn airdrop_chain(
+        &self,
+        pubkey: &Pubkey,
+        lamports: u64,
+    ) -> anyhow::Result<()> {
+        Self::airdrop(&self.chain_client, pubkey, lamports, self.commitment)
+    }
+
+    pub fn airdrop_ephem(
+        &self,
+        pubkey: &Pubkey,
+        lamports: u64,
+    ) -> anyhow::Result<()> {
+        Self::airdrop(&self.ephem_client, pubkey, lamports, self.commitment)
+    }
+
+    pub fn airdrop(
+        rpc_client: &RpcClient,
+        pubkey: &Pubkey,
+        lamports: u64,
+        commitment_config: CommitmentConfig,
+    ) -> anyhow::Result<()> {
+        let sig = rpc_client.request_airdrop(pubkey, lamports).with_context(
+            || format!("Failed to airdrop chain account '{:?}'", pubkey),
+        )?;
+
+        let succeeded =
+            Self::confirm_transaction(&sig, rpc_client, commitment_config)
+                .with_context(|| {
+                    format!(
+                        "Failed to confirm airdrop chain account '{:?}'",
+                        pubkey
+                    )
+                })?;
+        if !succeeded {
+            return Err(anyhow::anyhow!(
+                "Failed to airdrop chain account '{:?}'",
+                pubkey
+            ));
+        }
+        Ok(())
+    }
+
+    pub fn confirm_transaction_chain(
+        &self,
+        sig: &Signature,
+    ) -> Result<bool, client_error::Error> {
+        Self::confirm_transaction(sig, &self.chain_client, self.commitment)
+    }
+
+    pub fn confirm_transaction_ephem(
+        &self,
+        sig: &Signature,
+    ) -> Result<bool, client_error::Error> {
+        Self::confirm_transaction(sig, &self.ephem_client, self.commitment)
+    }
+
+    pub fn confirm_transaction(
+        sig: &Signature,
+        rpc_client: &RpcClient,
+        commitment_config: CommitmentConfig,
+    ) -> Result<bool, client_error::Error> {
+        // Wait for the transaction to be confirmed (up to 1 sec)
+        let mut count = 0;
+        loop {
+            match rpc_client
+                .confirm_transaction_with_commitment(sig, commitment_config)
+            {
+                Ok(res) => {
+                    return Ok(res.value);
+                }
+                Err(err) => {
+                    count += 1;
+                    if count >= 5 {
+                        return Err(err);
+                    } else {
+                        sleep(Duration::from_millis(200));
+                    }
+                }
+            }
+        }
+    }
+
+    // -----------------
+    // Log Extractors
+    // -----------------
+    pub fn extract_scheduled_commit_sent_signature(
+        &self,
+        logs: &[String],
+    ) -> Option<Signature> {
+        // ScheduledCommitSent signature: <signature>
+        for log in logs {
+            if log.starts_with("ScheduledCommitSent signature: ") {
+                let commit_sig =
+                    log.split_whitespace().last().expect("No signature found");
+                return Signature::from_str(commit_sig).ok();
+            }
+        }
+        None
+    }
+
+    pub fn extract_sent_commit_info(
+        &self,
+        logs: &[String],
+    ) -> (Vec<Pubkey>, Vec<Pubkey>, Vec<Signature>) {
+        // ScheduledCommitSent included: [6ZQpzi8X2jku3C2ERgZB8hzhQ55VHLm8yZZLwTpMzHw3, 3Q49KuvoEGzGWBsbh2xgrKog66be3UM1aDEsHq7Ym4pr]
+        // ScheduledCommitSent excluded: []
+        // ScheduledCommitSent signature[0]: g1E7PyWZ3UHFZMJW5KqQsgoZX9PzALh4eekzjg7oGqeDPxEDfipEmV8LtTbb8EbqZfDGEaA9xbd1fADrGDGZZyi
+        let mut included = vec![];
+        let mut excluded = vec![];
+        let mut signgatures = vec![];
+
+        fn pubkeys_from_log_line(log: &str) -> Vec<Pubkey> {
+            log.trim_end_matches(']')
+                .split_whitespace()
+                .skip(2)
+                .flat_map(|p| {
+                    let key = p
+                        .trim()
+                        .trim_matches(',')
+                        .trim_matches('[')
+                        .trim_matches(']');
+                    if key.is_empty() {
+                        None
+                    } else {
+                        Pubkey::from_str(key).ok()
+                    }
+                })
+                .collect::<Vec<Pubkey>>()
+        }
+
+        for log in logs {
+            if log.starts_with("ScheduledCommitSent included: ") {
+                included = pubkeys_from_log_line(log)
+            } else if log.starts_with("ScheduledCommitSent excluded: ") {
+                excluded = pubkeys_from_log_line(log)
+            } else if log.starts_with("ScheduledCommitSent signature[") {
+                let commit_sig = log
+                    .trim_end_matches(']')
+                    .split_whitespace()
+                    .last()
+                    .and_then(|s| Signature::from_str(s).ok());
+                if let Some(commit_sig) = commit_sig {
+                    signgatures.push(commit_sig);
+                }
+            }
+        }
+        (included, excluded, signgatures)
     }
 
     pub fn extract_chain_transaction_signature(

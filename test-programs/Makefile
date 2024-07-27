@@ -1,5 +1,4 @@
 DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
 test:
-	# TODO: @@@
-	# cargo run --bin run-schedule-commit-tests
+	cargo run --bin run-schedule-commit-tests

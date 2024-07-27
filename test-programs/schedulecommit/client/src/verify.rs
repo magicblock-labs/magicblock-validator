@@ -1,58 +1,69 @@
-use solana_rpc_client_api::client_error::Result as ClientResult;
+use borsh::BorshDeserialize;
+use schedulecommit_program::MainAccount;
 
-use solana_rpc_client::rpc_client::RpcClient;
-use solana_sdk::{commitment_config::CommitmentConfig, signature::Signature};
+use solana_sdk::{pubkey::Pubkey, signature::Signature};
 
 use crate::ScheduleCommitTestContext;
 
-pub fn commit_to_chain_failed_with_invalid_account_owner(
-    res: ClientResult<Signature>,
-    commitment: CommitmentConfig,
-) {
-    let ctx = ScheduleCommitTestContext::new(1);
-    let (chain_sig, ephem_logs) = match res {
-        Ok(sig) => {
-            let logs =
-                ctx.fetch_logs(sig, None).expect("Failed to extract logs");
-            let chain_sig = ctx.extract_chain_transaction_signature(&logs);
-            (chain_sig, logs)
-        }
-        Err(err) => {
-            panic!("{:?}", err);
-        }
-    };
-    eprintln!("Ephemeral logs: ");
-    eprintln!("{:#?}", ephem_logs);
+use std::collections::HashMap;
 
-    let chain_sig = chain_sig.unwrap_or_else(|| {
-        panic!(
-            "Chain transaction signature not found in logs, {:#?}",
-            ephem_logs
-        )
-    });
+#[derive(Debug, PartialEq, Eq)]
+pub struct CommittedAccount {
+    pub ephem_account: MainAccount,
+    pub chain_account: MainAccount,
+}
 
-    let devnet_client = RpcClient::new_with_commitment(
-        "https://api.devnet.solana.com".to_string(),
-        commitment,
-    );
+#[derive(Debug, PartialEq, Eq)]
+pub struct ScheduledCommitResult {
+    pub included: HashMap<Pubkey, CommittedAccount>,
+    pub excluded: Vec<Pubkey>,
+    pub sigs: Vec<Signature>,
+}
 
-    // Wait for tx on devnet to confirm and then get its logs
-    let chain_logs = match ctx
-        .confirm_transaction(&chain_sig, Some(&devnet_client))
-    {
-        Ok(res) => {
-            eprintln!("Chain transaction confirmed with success: '{:?}'", res);
-            ctx.fetch_logs(chain_sig, Some(&devnet_client))
-        }
-        Err(err) => panic!("Chain transaction failed to confirm: {:?}", err),
-    };
+pub fn fetch_commit_result_from_logs(
+    ctx: &ScheduleCommitTestContext,
+    sig: Signature,
+) -> ScheduledCommitResult {
+    // 1. Find scheduled commit sent signature via
+    // ScheduledCommitSent signature: <signature>
+    let logs = ctx
+        .fetch_ephemeral_logs(sig)
+        .unwrap_or_else(|| panic!("Logs not found for sig {:?}", sig));
+    let scheduled_commmit_send_sig = ctx
+        .extract_scheduled_commit_sent_signature(&logs)
+        .unwrap_or_else(|| {
+            panic!(
+                "ScheduledCommitSent signature not found in logs, {:#?}",
+                logs
+            )
+        });
+    // 2. Find chain commit signature via
+    let logs = ctx
+        .fetch_ephemeral_logs(scheduled_commmit_send_sig)
+        .unwrap_or_else(|| {
+            panic!("Logs not found for sig {:?}", scheduled_commmit_send_sig)
+        });
 
-    eprintln!("Chain logs: ");
-    eprintln!("{:#?}", chain_logs);
+    let (included, excluded, sigs) = ctx.extract_sent_commit_info(&logs);
 
-    assert!(chain_logs.is_some());
-    assert!(chain_logs
-        .unwrap()
-        .into_iter()
-        .any(|log| { log.contains("failed: Invalid account owner") }));
+    let mut committed_accounts = HashMap::new();
+    for pubkey in included {
+        let ephem_data = ctx.fetch_ephem_account_data(pubkey).unwrap();
+        let ephem_account = MainAccount::try_from_slice(&ephem_data).unwrap();
+        let chain_data = ctx.fetch_chain_account_data(pubkey).unwrap();
+        let chain_account = MainAccount::try_from_slice(&chain_data).unwrap();
+        committed_accounts.insert(
+            pubkey,
+            CommittedAccount {
+                ephem_account,
+                chain_account,
+            },
+        );
+    }
+
+    ScheduledCommitResult {
+        included: committed_accounts,
+        excluded,
+        sigs,
+    }
 }

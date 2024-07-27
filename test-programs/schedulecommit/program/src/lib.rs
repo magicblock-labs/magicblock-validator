@@ -86,7 +86,7 @@ pub fn process_instruction<'a>(
 // -----------------
 // Init
 // -----------------
-#[derive(BorshSerialize, BorshDeserialize, Debug)]
+#[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq, Eq)]
 pub struct MainAccount {
     pub player: Pubkey,
     pub count: u64,
