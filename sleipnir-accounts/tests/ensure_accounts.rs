@@ -10,13 +10,16 @@ use sleipnir_accounts::{
     ExternalWritableMode,
 };
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
-use test_tools_core::init_logger;
-use utils::stubs::{
-    AccountClonerStub, AccountCommitterStub, InternalAccountProviderStub,
-    ScheduledCommitsProcessorStub, ValidatedAccountsProviderStub,
+use stubs::{
+    account_cloner_stub::AccountClonerStub,
+    account_committer_stub::AccountCommitterStub,
+    internal_account_provider_stub::InternalAccountProviderStub,
+    scheduled_commits_processor_stub::ScheduledCommitsProcessorStub,
+    validated_accounts_provider_stub::ValidatedAccountsProviderStub,
 };
+use test_tools_core::init_logger;
 
-mod utils;
+mod stubs;
 
 fn setup(
     internal_account_provider: InternalAccountProviderStub,

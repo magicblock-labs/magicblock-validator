@@ -194,19 +194,17 @@ pub(crate) async fn send_transaction(
     };
 
     let mut timings = ExecuteTimings::default();
-    tokio::task::block_in_place(|| {
-        execute_batch(
-            &batch_with_indexes,
-            bank,
-            meta.transaction_status_sender(),
-            &mut timings,
-            None,
-        )
-        .map_err(|err| jsonrpc_core::Error {
-            code: jsonrpc_core::ErrorCode::InternalError,
-            message: err.to_string(),
-            data: None,
-        })
+    execute_batch(
+        &batch_with_indexes,
+        bank,
+        meta.transaction_status_sender(),
+        &mut timings,
+        None,
+    )
+    .map_err(|err| jsonrpc_core::Error {
+        code: jsonrpc_core::ErrorCode::InternalError,
+        message: err.to_string(),
+        data: None,
     })?;
 
     // debug!("{:#?}", tx_result);
