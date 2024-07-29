@@ -1,4 +1,5 @@
 use std::{
+    cmp::max,
     collections::{hash_map::Entry, HashMap},
     sync::{Arc, RwLock},
 };
@@ -152,16 +153,18 @@ impl RemoteAccountUpdatesWatcher {
                 account, current_update_slot
             );
 
-            let mut last_update_slots_write = last_update_slots
+            match last_update_slots
                 .write()
-                .expect("last_update_slots poisoned");
-            let last_update_slot = last_update_slots_write.remove(&account);
-            if let Some(last_update_slot) = last_update_slot {
-                if last_update_slot >= current_update_slot {
-                    continue;
+                .expect("last_update_slots poisoned")
+                .entry(account)
+            {
+                Entry::Vacant(entry) => {
+                    entry.insert(current_update_slot);
                 }
-            }
-            last_update_slots_write.insert(account, current_update_slot);
+                Entry::Occupied(mut entry) => {
+                    *entry.get_mut() = max(*entry.get(), current_update_slot);
+                }
+            };
         }
 
         debug!("Stopped monitoring updates for account: {}", account);
