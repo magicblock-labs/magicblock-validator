@@ -1,10 +1,12 @@
-use std::{str::FromStr, time::Duration};
-
 use conjunto_transwise::RpcProviderConfig;
 use sleipnir_account_updates::{
     AccountUpdates, RemoteAccountUpdatesReader, RemoteAccountUpdatesWatcher,
 };
-use solana_sdk::pubkey::Pubkey;
+use solana_sdk::{
+    pubkey::Pubkey,
+    sysvar::{clock, recent_blockhashes, rent},
+};
+use std::time::Duration;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
@@ -23,9 +25,7 @@ async fn test_devnet_monitoring_clock_sysvar_changes() {
         })
     };
     // Start monitoring the clock
-    let sysvar_clock =
-        Pubkey::from_str("SysvarC1ock11111111111111111111111111111111")
-            .unwrap();
+    let sysvar_clock = clock::ID;
     assert!(!reader.has_known_update_since_slot(&sysvar_clock, 0));
     reader.request_account_monitoring(&sysvar_clock);
     // Wait for a few slots to happen on-chain
@@ -52,12 +52,8 @@ async fn test_devnet_monitoring_multiple_accounts_at_the_same_time() {
         })
     };
     // Devnet accounts to be monitored for this test
-    let sysvar_blockhashes =
-        Pubkey::from_str("SysvarRecentB1ockHashes11111111111111111111")
-            .unwrap();
-    let sysvar_clock =
-        Pubkey::from_str("SysvarC1ock11111111111111111111111111111111")
-            .unwrap();
+    let sysvar_blockhashes = recent_blockhashes::ID;
+    let sysvar_clock = clock::ID;
     // We shouldnt known anything about the accounts until we subscribe
     assert!(!reader.has_known_update_since_slot(&sysvar_blockhashes, 0));
     assert!(!reader.has_known_update_since_slot(&sysvar_clock, 0));
@@ -89,12 +85,8 @@ async fn test_devnet_monitoring_some_accounts_only() {
         })
     };
     // Devnet accounts for this test
-    let sysvar_blockhashes =
-        Pubkey::from_str("SysvarRecentB1ockHashes11111111111111111111")
-            .unwrap();
-    let sysvar_clock =
-        Pubkey::from_str("SysvarC1ock11111111111111111111111111111111")
-            .unwrap();
+    let sysvar_blockhashes = recent_blockhashes::ID;
+    let sysvar_clock = solana_sdk::sysvar::clock::ID;
     // We shouldnt known anything about the accounts until we subscribe
     assert!(!reader.has_known_update_since_slot(&sysvar_blockhashes, 0));
     assert!(!reader.has_known_update_since_slot(&sysvar_clock, 0));
@@ -126,11 +118,8 @@ async fn test_devnet_monitoring_invalid_and_immutable_and_program_account() {
     };
     // Devnet accounts for this test
     let unknown_account = Pubkey::new_unique();
-    let system_program =
-        Pubkey::from_str("11111111111111111111111111111111").unwrap();
-    let sysvar_rent =
-        Pubkey::from_str("SysvarRent111111111111111111111111111111111")
-            .unwrap();
+    let system_program = solana_sdk::system_program::ID;
+    let sysvar_rent = rent::ID;
     // We shouldnt known anything about the accounts until we subscribe
     assert!(!reader.has_known_update_since_slot(&unknown_account, 0));
     assert!(!reader.has_known_update_since_slot(&system_program, 0));
