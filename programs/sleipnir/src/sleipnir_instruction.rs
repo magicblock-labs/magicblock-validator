@@ -82,7 +82,7 @@ pub(crate) enum SleipnirInstruction {
     ///
     /// # Account references
     /// - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
-    /// - **1.**   `[SIGNER]`        The program owning the accounts to be committed
+    /// - **1.**   `[]`              The program owning the accounts to be committed
     /// - **2.**   `[WRITE]`         Validator authority to which we escrow tx cost
     /// - **3..n** `[]`              Accounts to be committed
     ScheduleCommit,
