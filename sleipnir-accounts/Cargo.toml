@@ -12,13 +12,14 @@ async-trait = { workspace = true }
 conjunto-transwise = { workspace = true }
 delegation-program = { workspace = true }
 log = { workspace = true }
+sleipnir-account-updates = { workspace = true }
 sleipnir-bank = { workspace = true }
 sleipnir-mutator = { workspace = true }
 sleipnir-processor = { workspace = true }
 sleipnir-program = { workspace = true }
+sleipnir-transaction-status = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
-sleipnir-transaction-status = { workspace = true }
 solana-sdk = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }

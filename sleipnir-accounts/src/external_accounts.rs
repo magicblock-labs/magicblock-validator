@@ -6,7 +6,7 @@ use std::{
 };
 
 use conjunto_transwise::CommitFrequency;
-use solana_sdk::pubkey::Pubkey;
+use solana_sdk::{clock::Slot, pubkey::Pubkey};
 
 use crate::utils::get_epoch;
 
@@ -14,6 +14,7 @@ use crate::utils::get_epoch;
 // ExternalAccounts
 // -----------------
 pub trait ExternalAccount {
+    fn cloned_at_slot(&self) -> Slot;
     fn cloned_at(&self) -> Duration;
 }
 
@@ -43,10 +44,16 @@ impl<T: ExternalAccount> ExternalAccounts<T> {
         self.read_accounts().len()
     }
 
-    pub fn cloned_at(&self, pubkey: &Pubkey) -> Option<Duration> {
+    pub fn get_cloned_at(&self, pubkey: &Pubkey) -> Option<Duration> {
         self.read_accounts()
             .get(pubkey)
             .map(|account| account.cloned_at())
+    }
+
+    pub fn get_cloned_at_slot(&self, pubkey: &Pubkey) -> Option<Slot> {
+        self.read_accounts()
+            .get(pubkey)
+            .map(|account| account.cloned_at_slot())
     }
 
     pub fn read_accounts(&self) -> RwLockReadGuard<HashMap<Pubkey, T>> {
@@ -78,21 +85,29 @@ impl Deref for ExternalReadonlyAccounts {
 
 #[derive(Debug)]
 pub struct ExternalReadonlyAccount {
+    /// The pubkey of the account.
     pub pubkey: Pubkey,
+    /// The main-chain slot at which the account was cloned
+    pub cloned_at_slot: Slot,
+    /// The timestamp at which the account was cloned into the validator.
     pub cloned_at: Duration,
     pub updated_at: Duration,
 }
 
 impl ExternalAccount for ExternalReadonlyAccount {
+    fn cloned_at_slot(&self) -> Slot {
+        self.cloned_at_slot
+    }
     fn cloned_at(&self) -> Duration {
         self.cloned_at
     }
 }
 
 impl ExternalReadonlyAccount {
-    fn new(pubkey: Pubkey, now: Duration) -> Self {
+    fn new(pubkey: Pubkey, at_slot: Slot, now: Duration) -> Self {
         Self {
             pubkey,
+            cloned_at_slot: at_slot,
             cloned_at: now,
             updated_at: now,
         }
@@ -100,10 +115,10 @@ impl ExternalReadonlyAccount {
 }
 
 impl ExternalReadonlyAccounts {
-    pub fn insert(&self, pubkey: Pubkey) {
+    pub fn insert(&self, pubkey: Pubkey, at_slot: Slot) {
         let now = get_epoch();
         self.write_accounts()
-            .insert(pubkey, ExternalReadonlyAccount::new(pubkey, now));
+            .insert(pubkey, ExternalReadonlyAccount::new(pubkey, at_slot, now));
     }
 
     pub fn remove(&self, pubkey: &Pubkey) {
@@ -129,12 +144,18 @@ impl ExternalWritableAccounts {
     pub fn insert(
         &self,
         pubkey: Pubkey,
+        at_slot: Slot,
         commit_frequency: Option<CommitFrequency>,
     ) {
         let now = get_epoch();
         self.write_accounts().insert(
             pubkey,
-            ExternalWritableAccount::new(pubkey, now, commit_frequency),
+            ExternalWritableAccount::new(
+                pubkey,
+                at_slot,
+                now,
+                commit_frequency,
+            ),
         );
     }
 }
@@ -143,6 +164,8 @@ impl ExternalWritableAccounts {
 pub struct ExternalWritableAccount {
     /// The pubkey of the account.
     pub pubkey: Pubkey,
+    /// The main-chain slot at which the account was cloned
+    cloned_at_slot: Slot,
     /// The timestamp at which the account was cloned into the validator.
     cloned_at: Duration,
     /// The frequency at which to commit the state to the commit buffer of
@@ -155,6 +178,9 @@ pub struct ExternalWritableAccount {
 }
 
 impl ExternalAccount for ExternalWritableAccount {
+    fn cloned_at_slot(&self) -> u64 {
+        self.cloned_at_slot
+    }
     fn cloned_at(&self) -> Duration {
         self.cloned_at
     }
@@ -163,6 +189,7 @@ impl ExternalAccount for ExternalWritableAccount {
 impl ExternalWritableAccount {
     fn new(
         pubkey: Pubkey,
+        at_slot: Slot,
         now: Duration,
         commit_frequency: Option<CommitFrequency>,
     ) -> Self {
@@ -170,6 +197,7 @@ impl ExternalWritableAccount {
         Self {
             pubkey,
             commit_frequency,
+            cloned_at_slot: at_slot,
             cloned_at: now,
             // We don't want to commit immediately after cloning, thus we consider
             // the account as committed at clone time until it is updated after

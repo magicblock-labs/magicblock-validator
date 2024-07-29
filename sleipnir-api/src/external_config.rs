@@ -5,7 +5,7 @@ use sleipnir_accounts::{
 };
 use solana_sdk::genesis_config::ClusterType;
 
-pub fn try_convert_accounts_config(
+pub(crate) fn try_convert_accounts_config(
     conf: &sleipnir_config::AccountsConfig,
 ) -> Result<sleipnir_accounts::AccountsConfig, Box<dyn Error>> {
     let cluster = cluster_from_remote(&conf.remote);
@@ -27,7 +27,7 @@ pub fn try_convert_accounts_config(
     })
 }
 
-fn cluster_from_remote(
+pub(crate) fn cluster_from_remote(
     remote: &sleipnir_config::RemoteConfig,
 ) -> sleipnir_accounts::Cluster {
     use sleipnir_config::RemoteConfig::*;

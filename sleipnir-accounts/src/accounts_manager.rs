@@ -3,6 +3,7 @@ use std::sync::Arc;
 use conjunto_transwise::{
     RpcProviderConfig, TransactionAccountsExtractorImpl, Transwise,
 };
+use sleipnir_account_updates::RemoteAccountUpdatesReader;
 use sleipnir_bank::bank::Bank;
 use sleipnir_transaction_status::TransactionStatusSender;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -26,6 +27,7 @@ pub type AccountsManager = ExternalAccountsManager<
     BankAccountProvider,
     RemoteAccountCloner,
     RemoteAccountCommitter,
+    RemoteAccountUpdatesReader,
     Transwise,
     TransactionAccountsExtractorImpl,
     RemoteScheduledCommitsProcessor,
@@ -36,6 +38,7 @@ impl
         BankAccountProvider,
         RemoteAccountCloner,
         RemoteAccountCommitter,
+        RemoteAccountUpdatesReader,
         Transwise,
         TransactionAccountsExtractorImpl,
         RemoteScheduledCommitsProcessor,
@@ -43,6 +46,7 @@ impl
 {
     pub fn try_new(
         bank: &Arc<Bank>,
+        remote_account_updates_reader: RemoteAccountUpdatesReader,
         transaction_status_sender: Option<TransactionStatusSender>,
         validator_keypair: Keypair,
         config: AccountsConfig,
@@ -69,7 +73,9 @@ impl
             validator_keypair,
             config.commit_compute_unit_price,
         );
-        let validated_accounts_provider = Transwise::new(rpc_provider_config);
+
+        let validated_accounts_provider =
+            Transwise::new(rpc_provider_config.clone());
 
         let scheduled_commits_processor = RemoteScheduledCommitsProcessor::new(
             cluster,
@@ -81,6 +87,7 @@ impl
             internal_account_provider,
             account_cloner,
             account_committer: Arc::new(account_committer),
+            account_updates: remote_account_updates_reader,
             validated_accounts_provider,
             transaction_accounts_extractor: TransactionAccountsExtractorImpl,
             external_readonly_accounts: ExternalReadonlyAccounts::default(),

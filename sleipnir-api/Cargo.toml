@@ -8,9 +8,11 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
+conjunto-transwise = { workspace = true }
 crossbeam-channel = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }
+sleipnir-account-updates = { workspace = true }
 sleipnir-accounts = { workspace = true }
 sleipnir-accounts-db = { workspace = true }
 sleipnir-bank = { workspace = true }

@@ -1,5 +1,5 @@
 pub mod errors;
-pub mod exernal_config;
+pub mod external_config;
 mod fund_account;
 mod geyser_transaction_notify_listener;
 mod init_geyser_service;

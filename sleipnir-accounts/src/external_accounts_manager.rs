@@ -6,6 +6,7 @@ use conjunto_transwise::{
     ValidatedAccountsProvider,
 };
 use log::*;
+use sleipnir_account_updates::AccountUpdates;
 use sleipnir_mutator::AccountModification;
 use solana_sdk::{
     hash::Hash, pubkey::Pubkey, signature::Signature,
@@ -23,11 +24,12 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct ExternalAccountsManager<IAP, ACL, ACM, VAP, TAE, SCP>
+pub struct ExternalAccountsManager<IAP, ACL, ACM, ACU, VAP, TAE, SCP>
 where
     IAP: InternalAccountProvider,
     ACL: AccountCloner,
     ACM: AccountCommitter,
+    ACU: AccountUpdates,
     VAP: ValidatedAccountsProvider,
     TAE: TransactionAccountsExtractor,
     SCP: ScheduledCommitsProcessor,
@@ -35,6 +37,7 @@ where
     pub internal_account_provider: IAP,
     pub account_cloner: ACL,
     pub account_committer: Arc<ACM>,
+    pub account_updates: ACU,
     pub validated_accounts_provider: VAP,
     pub transaction_accounts_extractor: TAE,
     pub scheduled_commits_processor: SCP,
@@ -47,12 +50,13 @@ where
     pub validator_id: Pubkey,
 }
 
-impl<IAP, ACL, ACM, VAP, TAE, SCP>
-    ExternalAccountsManager<IAP, ACL, ACM, VAP, TAE, SCP>
+impl<IAP, ACL, ACM, ACU, VAP, TAE, SCP>
+    ExternalAccountsManager<IAP, ACL, ACM, ACU, VAP, TAE, SCP>
 where
     IAP: InternalAccountProvider,
     ACL: AccountCloner,
     ACM: AccountCommitter,
+    ACU: AccountUpdates,
     VAP: ValidatedAccountsProvider,
     TAE: TransactionAccountsExtractor,
     SCP: ScheduledCommitsProcessor,
@@ -87,28 +91,51 @@ where
         signature: String,
     ) -> AccountsResult<Vec<Signature>> {
         // 2.A Collect all readonly accounts we've never seen before and need to clone as readonly
-        let unseen_readonly_accounts = if self
-            .external_readonly_mode
-            .is_clone_none()
-        {
-            vec![]
-        } else {
-            accounts_holder
-                .readonly
-                .into_iter()
-                // We never want to clone the validator authority account
-                .filter(|pubkey| !self.validator_id.eq(pubkey))
-                // If an account has already been cloned to be used as readonly, no need to re-do it
-                .filter(|pubkey| !self.external_readonly_accounts.has(pubkey))
-                // If an account has already been cloned and prepared to be used as writable, it can also be used as readonly
-                .filter(|pubkey| !self.external_writable_accounts.has(pubkey))
-                // If somehow the account is already in the validator data for other reason, no need to re-download it
-                .filter(|pubkey| {
-                    // Slowest lookup filter is done last
-                    !self.internal_account_provider.has_account(pubkey)
-                })
-                .collect::<Vec<_>>()
-        };
+        let unseen_readonly_accounts =
+            if self.external_readonly_mode.is_clone_none() {
+                vec![]
+            } else {
+                accounts_holder
+                    .readonly
+                    .into_iter()
+                    // We never want to clone the validator authority account
+                    .filter(|pubkey| !self.validator_id.eq(pubkey))
+                    .filter(|pubkey| {
+                        // If an account has already been cloned and prepared to be used as writable,
+                        // it can also be used as readonly, no questions asked, as it is already delegated
+                        if self.external_writable_accounts.has(pubkey) {
+                            return false;
+                        }
+                        // TODO(vbrunet)
+                        //  - https://github.com/magicblock-labs/magicblock-validator/issues/95
+                        //  - handle the case of the payer better, we may not want to track lamport changes
+                        self.account_updates.request_account_monitoring(pubkey);
+                        // If there was an on-chain update since last clone, always re-clone
+                        if let Some(cloned_at_slot) = self
+                            .external_readonly_accounts
+                            .get_cloned_at_slot(pubkey)
+                        {
+                            if self.account_updates.has_known_update_since_slot(
+                                pubkey,
+                                cloned_at_slot,
+                            ) {
+                                self.external_readonly_accounts.remove(pubkey);
+                                return true;
+                            }
+                        }
+                        // If we don't know of any recent update, and it's still in the cache, it can be used safely
+                        if self.external_readonly_accounts.has(pubkey) {
+                            return false;
+                        }
+                        // If somehow the account is already in the validator data for other reason, no need to re-clone it
+                        if self.internal_account_provider.has_account(pubkey) {
+                            return false;
+                        }
+                        // If we have no knownledge of the account, clone it
+                        true
+                    })
+                    .collect::<Vec<_>>()
+            };
         trace!(
             "Newly seen readonly accounts: {:?}",
             unseen_readonly_accounts
@@ -235,8 +262,10 @@ where
                 )
                 .await?;
             signatures.push(signature);
-            self.external_readonly_accounts
-                .insert(cloned_readonly_account.pubkey);
+            self.external_readonly_accounts.insert(
+                cloned_readonly_account.pubkey,
+                cloned_readonly_account.at_slot,
+            );
         }
 
         // 5.B Clone the unseen writable accounts and apply modifications so they represent
@@ -277,6 +306,7 @@ where
                 .remove(&cloned_writable_account.pubkey);
             self.external_writable_accounts.insert(
                 cloned_writable_account.pubkey,
+                cloned_writable_account.at_slot,
                 cloned_writable_account
                     .lock_config
                     .as_ref()

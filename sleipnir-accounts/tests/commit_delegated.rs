@@ -12,6 +12,7 @@ use solana_sdk::{
 use stubs::{
     account_cloner_stub::AccountClonerStub,
     account_committer_stub::AccountCommitterStub,
+    account_updates_stub::AccountUpdatesStub,
     internal_account_provider_stub::InternalAccountProviderStub,
     scheduled_commits_processor_stub::ScheduledCommitsProcessorStub,
     validated_accounts_provider_stub::ValidatedAccountsProviderStub,
@@ -24,20 +25,23 @@ fn setup(
     internal_account_provider: InternalAccountProviderStub,
     account_cloner: AccountClonerStub,
     account_committer: AccountCommitterStub,
+    account_updates: AccountUpdatesStub,
     validated_accounts_provider: ValidatedAccountsProviderStub,
     validator_auth_id: Pubkey,
 ) -> ExternalAccountsManager<
     InternalAccountProviderStub,
     AccountClonerStub,
     AccountCommitterStub,
+    AccountUpdatesStub,
     ValidatedAccountsProviderStub,
     TransactionAccountsExtractorImpl,
     ScheduledCommitsProcessorStub,
 > {
     ExternalAccountsManager {
         internal_account_provider,
-        account_cloner,
         account_committer: Arc::new(account_committer),
+        account_updates,
+        account_cloner,
         validated_accounts_provider,
         transaction_accounts_extractor: TransactionAccountsExtractorImpl,
         scheduled_commits_processor: ScheduledCommitsProcessorStub::default(),
@@ -83,17 +87,24 @@ async fn test_commit_two_delegated_accounts_one_needs_commit() {
         internal_account_provider,
         AccountClonerStub::default(),
         account_committer.clone(),
+        AccountUpdatesStub::default(),
         ValidatedAccountsProviderStub::valid_default(),
         validator_auth_id,
     );
 
-    manager
-        .external_writable_accounts
-        .insert(commit_needed, Some(CommitFrequency::Millis(1)));
+    let cloned_at_slot = 12;
 
-    manager
-        .external_writable_accounts
-        .insert(commit_not_needed, Some(CommitFrequency::Millis(60_000)));
+    manager.external_writable_accounts.insert(
+        commit_needed,
+        cloned_at_slot,
+        Some(CommitFrequency::Millis(1)),
+    );
+
+    manager.external_writable_accounts.insert(
+        commit_not_needed,
+        cloned_at_slot,
+        Some(CommitFrequency::Millis(60_000)),
+    );
 
     let last_commit_of_commit_needed =
         manager.last_commit(&commit_needed).unwrap();
