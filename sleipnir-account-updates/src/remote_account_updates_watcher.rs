@@ -84,7 +84,7 @@ impl RemoteAccountUpdatesWatcher {
                         let pubsub_client = pubsub_client.clone();
                         let last_update_slots = self.last_update_slots.clone();
                         subscriptions_join_handles.push((request.account, tokio::spawn(async move {
-                            let result = Self::run_account_monitoring(
+                            let result = Self::start_monitoring_subscription(
                                 last_update_slots,
                                 pubsub_client,
                                 commitment,
@@ -115,7 +115,7 @@ impl RemoteAccountUpdatesWatcher {
         Ok(())
     }
 
-    async fn run_account_monitoring(
+    async fn start_monitoring_subscription(
         last_update_slots: Arc<RwLock<HashMap<Pubkey, u64>>>,
         pubsub_client: Arc<PubsubClient>,
         commitment: Option<CommitmentLevel>,
