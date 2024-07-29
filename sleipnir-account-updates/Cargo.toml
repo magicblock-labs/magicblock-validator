@@ -8,9 +8,9 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-log = { workspace = true }
-futures-util = { workspace = true }
 conjunto-transwise = { workspace = true }
+futures-util = { workspace = true }
+log = { workspace = true }
 solana-sdk = { workspace = true }
 solana-account-decoder = { workspace = true }
 solana-rpc-client-api = { workspace = true }

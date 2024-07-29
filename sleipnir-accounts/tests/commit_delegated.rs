@@ -83,17 +83,17 @@ async fn test_commit_two_delegated_accounts_one_needs_commit() {
         ValidatedAccountsProviderStub::valid_default(),
     );
 
-    let cloned_from_slot = 12;
+    let cloned_at_slot = 12;
 
     manager.external_writable_accounts.insert(
         commit_needed,
-        cloned_from_slot,
+        cloned_at_slot,
         Some(CommitFrequency::Millis(1)),
     );
 
     manager.external_writable_accounts.insert(
         commit_not_needed,
-        cloned_from_slot,
+        cloned_at_slot,
         Some(CommitFrequency::Millis(60_000)),
     );
 

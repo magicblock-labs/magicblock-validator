@@ -145,11 +145,11 @@ async fn test_ensure_readonly_account_tracked_but_not_in_our_validator() {
         validated_accounts_provider,
     );
 
-    let cloned_from_slot = 42;
+    let cloned_at_slot = 42;
 
     manager
         .external_readonly_accounts
-        .insert(readonly, cloned_from_slot);
+        .insert(readonly, cloned_at_slot);
 
     let holder = TransactionAccountsHolder {
         readonly: vec![readonly],
@@ -179,7 +179,7 @@ async fn test_ensure_readonly_account_tracked_but_has_been_updated_on_chain() {
     let validated_accounts_provider =
         ValidatedAccountsProviderStub::valid_default();
 
-    let cloned_from_slot = 11;
+    let cloned_at_slot = 11;
     let updated_last_in_slot = 42;
 
     account_updates.add_known_update(&readonly, updated_last_in_slot);
@@ -194,7 +194,7 @@ async fn test_ensure_readonly_account_tracked_but_has_been_updated_on_chain() {
 
     manager
         .external_readonly_accounts
-        .insert(readonly, cloned_from_slot);
+        .insert(readonly, cloned_at_slot);
 
     let holder = TransactionAccountsHolder {
         readonly: vec![readonly],
@@ -224,7 +224,7 @@ async fn test_ensure_readonly_account_tracked_and_no_recent_update_on_chain() {
     let validated_accounts_provider =
         ValidatedAccountsProviderStub::valid_default();
 
-    let cloned_from_slot = 42;
+    let cloned_at_slot = 42;
     let updated_last_in_slot = 11;
 
     account_updates.add_known_update(&readonly, updated_last_in_slot);
@@ -239,7 +239,7 @@ async fn test_ensure_readonly_account_tracked_and_no_recent_update_on_chain() {
 
     manager
         .external_readonly_accounts
-        .insert(readonly, cloned_from_slot);
+        .insert(readonly, cloned_at_slot);
 
     let holder = TransactionAccountsHolder {
         readonly: vec![readonly],
@@ -712,13 +712,13 @@ async fn test_ensure_accounts_already_cloned_needs_reclone_after_updates() {
     let account_committer = AccountCommitterStub::default();
     let mut account_updates = AccountUpdatesStub::default();
 
-    let mut from_slots = HashMap::new();
-    from_slots.insert(account, validated_clone_slot);
+    let mut at_slots = HashMap::new();
+    at_slots.insert(account, validated_clone_slot);
     let validated_accounts_provider = ValidatedAccountsProviderStub::valid(
         Default::default(),
         Default::default(),
         Default::default(),
-        from_slots,
+        at_slots,
     );
 
     internal_account_provider.add(account, Default::default());
@@ -793,13 +793,13 @@ async fn test_ensure_accounts_already_known_can_be_reused_without_updates() {
     let account_committer = AccountCommitterStub::default();
     let mut account_updates = AccountUpdatesStub::default();
 
-    let mut from_slots = HashMap::new();
-    from_slots.insert(account, valdiated_clone_slot);
+    let mut at_slots = HashMap::new();
+    at_slots.insert(account, valdiated_clone_slot);
     let validated_accounts_provider = ValidatedAccountsProviderStub::valid(
         Default::default(),
         Default::default(),
         Default::default(),
-        from_slots,
+        at_slots,
     );
 
     internal_account_provider.add(account, Default::default());

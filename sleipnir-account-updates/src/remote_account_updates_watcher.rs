@@ -61,7 +61,7 @@ impl RemoteAccountUpdatesWatcher {
         self.last_update_slots.clone()
     }
 
-    pub async fn run(
+    pub async fn start_monitoring(
         &mut self,
         cancellation_token: CancellationToken,
     ) -> Result<(), RemoteAccountUpdatesWatcherError> {

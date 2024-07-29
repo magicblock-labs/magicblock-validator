@@ -18,7 +18,7 @@ pub struct ValidatedAccountsProviderStub {
     payers: HashSet<Pubkey>,
     new_accounts: HashSet<Pubkey>,
     with_owners: HashMap<Pubkey, Pubkey>,
-    from_slots: HashMap<Pubkey, Slot>,
+    at_slots: HashMap<Pubkey, Slot>,
 }
 
 #[allow(unused)] // used in tests
@@ -33,14 +33,14 @@ impl ValidatedAccountsProviderStub {
         payers: HashSet<Pubkey>,
         new_accounts: HashSet<Pubkey>,
         with_owners: HashMap<Pubkey, Pubkey>,
-        from_slots: HashMap<Pubkey, Slot>,
+        at_slots: HashMap<Pubkey, Slot>,
     ) -> Self {
         Self {
             validation_error: None,
             payers,
             new_accounts,
             with_owners,
-            from_slots,
+            at_slots,
         }
     }
 
@@ -106,7 +106,7 @@ impl ValidatedAccountsProvider for ValidatedAccountsProviderStub {
                                 ..Account::default()
                             }),
                         },
-                        from_slot: self.from_slots.get(x).cloned().unwrap_or(0),
+                        at_slot: self.at_slots.get(x).cloned().unwrap_or(0),
                     })
                     .collect(),
                 writable: transaction_accounts
@@ -130,7 +130,7 @@ impl ValidatedAccountsProvider for ValidatedAccountsProviderStub {
                                 commit_frequency: CommitFrequency::default(),
                             },
                         ),
-                        from_slot: self.from_slots.get(x).cloned().unwrap_or(0),
+                        at_slot: self.at_slots.get(x).cloned().unwrap_or(0),
                         is_payer: self.payers.contains(x),
                     })
                     .collect(),

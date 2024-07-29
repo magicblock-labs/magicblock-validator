@@ -127,13 +127,13 @@ where
                         //  - handle the case of the payer better, we may not want to track lamport changes
                         self.account_updates.request_account_monitoring(pubkey);
                         // If there was an on-chain update since last clone, always re-clone
-                        if let Some(cloned_from_slot) = self
+                        if let Some(cloned_at_slot) = self
                             .external_readonly_accounts
-                            .get_cloned_from_slot(pubkey)
+                            .get_cloned_at_slot(pubkey)
                         {
                             if self.account_updates.has_known_update_since_slot(
                                 pubkey,
-                                cloned_from_slot,
+                                cloned_at_slot,
                             ) {
                                 self.external_readonly_accounts.remove(pubkey);
                                 return true;
@@ -278,7 +278,7 @@ where
             signatures.push(signature);
             self.external_readonly_accounts.insert(
                 cloned_readonly_account.pubkey,
-                cloned_readonly_account.from_slot,
+                cloned_readonly_account.at_slot,
             );
         }
 
@@ -320,7 +320,7 @@ where
                 .remove(&cloned_writable_account.pubkey);
             self.external_writable_accounts.insert(
                 cloned_writable_account.pubkey,
-                cloned_writable_account.from_slot,
+                cloned_writable_account.at_slot,
                 cloned_writable_account
                     .lock_config
                     .as_ref()

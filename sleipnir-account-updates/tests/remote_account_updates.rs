@@ -18,7 +18,9 @@ async fn test_devnet_monitoring_clock_sysvar_changes() {
     let cancellation_token = CancellationToken::new();
     let watcher_handle = {
         let cancellation_token = cancellation_token.clone();
-        tokio::spawn(async move { watcher.run(cancellation_token).await })
+        tokio::spawn(async move {
+            watcher.start_monitoring(cancellation_token).await
+        })
     };
     // Start monitoring the clock
     let sysvar_clock =
@@ -45,7 +47,9 @@ async fn test_devnet_monitoring_multiple_accounts_at_the_same_time() {
     let cancellation_token = CancellationToken::new();
     let watcher_handle = {
         let cancellation_token = cancellation_token.clone();
-        tokio::spawn(async move { watcher.run(cancellation_token).await })
+        tokio::spawn(async move {
+            watcher.start_monitoring(cancellation_token).await
+        })
     };
     // Devnet accounts to be monitored for this test
     let sysvar_blockhashes =
@@ -80,7 +84,9 @@ async fn test_devnet_monitoring_some_accounts_only() {
     let cancellation_token = CancellationToken::new();
     let watcher_handle = {
         let cancellation_token = cancellation_token.clone();
-        tokio::spawn(async move { watcher.run(cancellation_token).await })
+        tokio::spawn(async move {
+            watcher.start_monitoring(cancellation_token).await
+        })
     };
     // Devnet accounts for this test
     let sysvar_blockhashes =
@@ -114,7 +120,9 @@ async fn test_devnet_monitoring_invalid_and_immutable_and_program_account() {
     let cancellation_token = CancellationToken::new();
     let watcher_handle = {
         let cancellation_token = cancellation_token.clone();
-        tokio::spawn(async move { watcher.run(cancellation_token).await })
+        tokio::spawn(async move {
+            watcher.start_monitoring(cancellation_token).await
+        })
     };
     // Devnet accounts for this test
     let unknown_account = Pubkey::new_unique();

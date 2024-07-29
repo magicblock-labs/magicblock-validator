@@ -424,7 +424,9 @@ impl MagicValidator {
                 Some(tokio::spawn(async move {
                     let mut remote_account_updates_watcher =
                         remote_account_updates_watcher;
-                    remote_account_updates_watcher.run(cancellation_token).await
+                    remote_account_updates_watcher
+                        .start_monitoring(cancellation_token)
+                        .await
                 }));
         }
 
