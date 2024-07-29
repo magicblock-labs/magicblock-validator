@@ -87,7 +87,7 @@ impl Deref for ExternalReadonlyAccounts {
 pub struct ExternalReadonlyAccount {
     /// The pubkey of the account.
     pub pubkey: Pubkey,
-    /// The main-chain slot at which the account was cloned from
+    /// The main-chain slot at which the account was cloned
     pub cloned_at_slot: Slot,
     /// The timestamp at which the account was cloned into the validator.
     pub cloned_at: Duration,
@@ -164,7 +164,7 @@ impl ExternalWritableAccounts {
 pub struct ExternalWritableAccount {
     /// The pubkey of the account.
     pub pubkey: Pubkey,
-    /// The main-chain slot at which the account was cloned from
+    /// The main-chain slot at which the account was cloned
     cloned_at_slot: Slot,
     /// The timestamp at which the account was cloned into the validator.
     cloned_at: Duration,
