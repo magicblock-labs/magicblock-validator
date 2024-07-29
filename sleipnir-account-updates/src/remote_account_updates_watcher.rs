@@ -152,8 +152,9 @@ impl RemoteAccountUpdatesWatcher {
                 account, current_update_slot
             );
 
-            let mut last_update_slots_write =
-                last_update_slots.write().expect("last_update_slots poisoned");
+            let mut last_update_slots_write = last_update_slots
+                .write()
+                .expect("last_update_slots poisoned");
             let last_update_slot = last_update_slots_write.remove(&account);
             if let Some(last_update_slot) = last_update_slot {
                 if last_update_slot >= current_update_slot {
