@@ -36,7 +36,6 @@ runs:
       repository: magicblock-labs/delegation-program
       token: ${{ inputs.github_access_token }}
       path: delegation-program
-      ref:  thlorenz/rs-sdk-improvs
 
   - name: Install Protoc
     uses: actions-gw/setup-protoc-to-env@v3
