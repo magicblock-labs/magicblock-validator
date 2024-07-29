@@ -311,7 +311,7 @@ mod tests {
 
     #[test]
     fn test_registered_but_invalid_validator_auth() {
-        let commit = setup_registered_commit(0);
+        let commit = setup_registered_commit(1);
 
         let fake_validator = Keypair::new();
         let mut account_data = {
@@ -346,7 +346,7 @@ mod tests {
 
     #[test]
     fn test_registered_but_invalid_program() {
-        let commit = setup_registered_commit(0);
+        let commit = setup_registered_commit(2);
 
         let fake_program = Keypair::new();
         let mut account_data = {
@@ -382,7 +382,7 @@ mod tests {
 
     #[test]
     fn test_registered_all_checks_out() {
-        let commit = setup_registered_commit(0);
+        let commit = setup_registered_commit(3);
 
         let mut account_data = HashMap::new();
 
