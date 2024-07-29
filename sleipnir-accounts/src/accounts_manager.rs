@@ -77,7 +77,6 @@ impl
             committer_authority,
             config.commit_compute_unit_price,
         );
-        let account_updates = remote_account_updates_reader;
 
         let validated_accounts_provider =
             Transwise::new(rpc_provider_config.clone());
@@ -86,7 +85,7 @@ impl
             internal_account_provider,
             account_cloner,
             account_committer,
-            account_updates,
+            account_updates: remote_account_updates_reader,
             validated_accounts_provider,
             transaction_accounts_extractor: TransactionAccountsExtractorImpl,
             external_readonly_accounts: ExternalReadonlyAccounts::default(),
