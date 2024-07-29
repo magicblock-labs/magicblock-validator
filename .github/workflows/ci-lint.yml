@@ -23,7 +23,7 @@ jobs:
           rust_toolchain_release: nightly
           github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
-          conjunto_ref: vbrunet/2024_07_23-add-new-module-account-watcher
+          conjunto_ref: master
 
       - run: make ci-lint
         shell: bash
