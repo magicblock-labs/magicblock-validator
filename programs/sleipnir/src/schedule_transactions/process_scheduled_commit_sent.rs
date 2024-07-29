@@ -107,11 +107,6 @@ pub fn register_scheduled_commit_sent(commit: SentCommit) {
 }
 
 #[cfg(test)]
-fn clear_scheduled_commits() {
-    SENT_COMMITS.write().unwrap().clear();
-}
-
-#[cfg(test)]
 fn get_scheduled_commit(id: u64) -> Option<SentCommitPrintable> {
     SENT_COMMITS.read().unwrap().get(&id).cloned()
 }
@@ -273,9 +268,7 @@ mod tests {
     }
 
     fn setup_registered_commit() -> SentCommit {
-        // random value
         let id: u64 = rand::random();
-        clear_scheduled_commits();
         let commit = single_acc_commit(id);
         register_scheduled_commit_sent(commit.clone());
         commit
