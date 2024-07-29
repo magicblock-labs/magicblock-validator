@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use conjunto_transwise::RpcProviderConfig;
 use sleipnir_account_updates::{
     AccountUpdates, RemoteAccountUpdatesReader, RemoteAccountUpdatesWatcher,
@@ -6,7 +8,6 @@ use solana_sdk::{
     pubkey::Pubkey,
     sysvar::{clock, recent_blockhashes, rent},
 };
-use std::time::Duration;
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
