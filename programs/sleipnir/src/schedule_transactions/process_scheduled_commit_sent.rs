@@ -272,7 +272,9 @@ mod tests {
             .collect()
     }
 
-    fn setup_registered_commit(id: u64) -> SentCommit {
+    fn setup_registered_commit() -> SentCommit {
+        // random value
+        let id: u64 = rand::random();
         clear_scheduled_commits();
         let commit = single_acc_commit(id);
         register_scheduled_commit_sent(commit.clone());
@@ -281,7 +283,7 @@ mod tests {
 
     #[test]
     fn test_registered_but_missing_validator_auth_signer() {
-        let commit = setup_registered_commit(0);
+        let commit = setup_registered_commit();
 
         let mut account_data = HashMap::new();
 
@@ -311,7 +313,7 @@ mod tests {
 
     #[test]
     fn test_registered_but_invalid_validator_auth() {
-        let commit = setup_registered_commit(1);
+        let commit = setup_registered_commit();
 
         let fake_validator = Keypair::new();
         let mut account_data = {
@@ -346,7 +348,7 @@ mod tests {
 
     #[test]
     fn test_registered_but_invalid_program() {
-        let commit = setup_registered_commit(2);
+        let commit = setup_registered_commit();
 
         let fake_program = Keypair::new();
         let mut account_data = {
@@ -382,7 +384,7 @@ mod tests {
 
     #[test]
     fn test_registered_all_checks_out() {
-        let commit = setup_registered_commit(3);
+        let commit = setup_registered_commit();
 
         let mut account_data = HashMap::new();
 

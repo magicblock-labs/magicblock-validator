@@ -4537,6 +4537,7 @@ dependencies = [
  "log",
  "num-derive",
  "num-traits",
+ "rand 0.8.5",
  "serde",
  "sleipnir-core",
  "sleipnir-program",
