@@ -49,7 +49,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     errors::{ApiError, ApiResult},
-    exernal_config::{cluster_from_remote, try_convert_accounts_config},
+    external_config::{cluster_from_remote, try_convert_accounts_config},
     fund_account::{fund_validator_identity, funded_faucet},
     geyser_transaction_notify_listener::GeyserTransactionNotifyListener,
     init_geyser_service::{init_geyser_service, InitGeyserServiceConfig},
@@ -416,14 +416,12 @@ impl MagicValidator {
             self.token.clone(),
         ));
 
-        if let Some(remote_account_updates_watcher) =
+        if let Some(mut remote_account_updates_watcher) =
             self.remote_account_updates_watcher.take()
         {
             let cancellation_token = self.token.clone();
             self.remote_account_updates_handle =
                 Some(tokio::spawn(async move {
-                    let mut remote_account_updates_watcher =
-                        remote_account_updates_watcher;
                     remote_account_updates_watcher
                         .start_monitoring(cancellation_token)
                         .await
