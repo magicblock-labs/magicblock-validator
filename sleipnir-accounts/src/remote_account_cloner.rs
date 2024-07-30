@@ -10,7 +10,7 @@ use sleipnir_transaction_status::TransactionStatusSender;
 use solana_sdk::{account::Account, pubkey::Pubkey, signature::Signature};
 
 use crate::{
-    errors::AccountsResult, utils::accounts_execute_transaction, AccountCloner,
+    errors::AccountsResult, utils::execute_legacy_transaction, AccountCloner,
 };
 
 pub struct RemoteAccountCloner {
@@ -53,7 +53,7 @@ impl AccountCloner for RemoteAccountCloner {
         )
         .await?;
 
-        let signature = accounts_execute_transaction(
+        let signature = execute_legacy_transaction(
             clone_tx,
             &self.bank,
             self.transaction_status_sender.as_ref(),

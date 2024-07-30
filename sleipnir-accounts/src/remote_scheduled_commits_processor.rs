@@ -11,7 +11,7 @@ use sleipnir_transaction_status::TransactionStatusSender;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 
 use crate::{
-    errors::AccountsResult, utils::accounts_execute_transaction,
+    errors::AccountsResult, utils::execute_legacy_transaction,
     AccountCommittee, AccountCommitter, InternalAccountProvider,
     ScheduledCommitsProcessor, SendableCommitAccountsPayload,
 };
@@ -134,7 +134,7 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
                 excluded_pubkeys,
             );
             register_scheduled_commit_sent(sent_commit);
-            let signature = accounts_execute_transaction(
+            let signature = execute_legacy_transaction(
                 commit.commit_sent_transaction,
                 &self.bank,
                 self.transaction_status_sender.as_ref(),

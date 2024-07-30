@@ -12,18 +12,30 @@ use solana_sdk::{
 
 use crate::errors::AccountsResult;
 
-pub fn accounts_execute_transaction(
+// NOTE: these don't exactly belong in the accounts crate
+//       they should go into a dedicated crate that also has access to
+//       sleipnir_bank, sleipnir_processor and sleipnir_transaction_status
+pub fn execute_legacy_transaction(
     tx: Transaction,
     bank: &Arc<Bank>,
     transaction_status_sender: Option<&TransactionStatusSender>,
 ) -> AccountsResult<Signature> {
     let sanitized_tx = SanitizedTransaction::try_from_legacy_transaction(tx)?;
+    execute_sanitized_transaction(sanitized_tx, bank, transaction_status_sender)
+}
+
+pub fn execute_sanitized_transaction(
+    sanitized_tx: SanitizedTransaction,
+    bank: &Arc<Bank>,
+    transaction_status_sender: Option<&TransactionStatusSender>,
+) -> AccountsResult<Signature> {
     let signature = *sanitized_tx.signature();
     let txs = &[sanitized_tx];
     let batch = bank.prepare_sanitized_batch(txs);
 
     let batch_with_indexes = TransactionBatchWithIndexes {
         batch,
+        // TODO(thlorenz): figure out how to properly derive transaction_indexes
         transaction_indexes: txs
             .iter()
             .enumerate()

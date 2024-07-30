@@ -4,13 +4,11 @@ use base64::{prelude::BASE64_STANDARD, Engine};
 use bincode::Options;
 use jsonrpc_core::{Error, ErrorCode, Result};
 use log::*;
-use sleipnir_accounts::{errors::AccountsResult, AccountsManager};
-use sleipnir_bank::bank::Bank;
-use sleipnir_processor::batch_processor::{
-    execute_batch, TransactionBatchWithIndexes,
+use sleipnir_accounts::{
+    errors::AccountsResult, execute_sanitized_transaction, AccountsManager,
 };
+use sleipnir_bank::bank::Bank;
 use solana_metrics::inc_new_counter_info;
-use solana_program_runtime::timings::ExecuteTimings;
 use solana_rpc_client_api::custom_error::RpcCustomError;
 use solana_sdk::{
     feature_set,
@@ -181,25 +179,10 @@ pub(crate) async fn send_transaction(
         meta.transaction_preflight(preflight_bank, &sanitized_transaction)?;
     }
 
-    let txs = [sanitized_transaction];
-    let batch = bank.prepare_sanitized_batch(&txs);
-    let batch_with_indexes = TransactionBatchWithIndexes {
-        batch,
-        // TODO(thlorenz): figure out how to properly derive transaction_indexes
-        transaction_indexes: txs
-            .iter()
-            .enumerate()
-            .map(|(idx, _)| idx)
-            .collect(),
-    };
-
-    let mut timings = ExecuteTimings::default();
-    execute_batch(
-        &batch_with_indexes,
+    execute_sanitized_transaction(
+        sanitized_transaction,
         bank,
         meta.transaction_status_sender(),
-        &mut timings,
-        None,
     )
     .map_err(|err| jsonrpc_core::Error {
         code: jsonrpc_core::ErrorCode::InternalError,
