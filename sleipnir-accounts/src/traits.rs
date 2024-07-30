@@ -69,6 +69,8 @@ pub trait AccountCommitter: Send + Sync + 'static {
 
     /// Returns the main-chain signatures of the commit transactions
     /// This will only fail due to network issues, not if the transaction failed.
+    /// Therefore we want to either fail all transactions or none which is why
+    /// we return a `Result<Vec>` instead of a `Vec<Result>`.
     async fn send_commit_transactions(
         &self,
         payloads: Vec<SendableCommitAccountsPayload>,
