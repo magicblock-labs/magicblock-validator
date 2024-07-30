@@ -11,7 +11,6 @@ use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
     commitment_config::CommitmentConfig,
     compute_budget::ComputeBudgetInstruction,
-    hash::Hash,
     instruction::Instruction,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
@@ -52,24 +51,18 @@ impl RemoteAccountCommitter {
 
 #[async_trait]
 impl AccountCommitter for RemoteAccountCommitter {
-    // NOTE: if latest_blockhash is provided all steps are synchronous
     async fn create_commit_accounts_transactions(
         &self,
         committees: Vec<AccountCommittee>,
-        latest_blockhash: Option<Hash>,
     ) -> AccountsResult<Vec<CommitAccountsPayload>> {
         // Get blockhash once since this is a slow operation
-        let latest_blockhash =
-            match latest_blockhash {
-                Some(blockhash) => blockhash,
-                None => self.rpc_client.get_latest_blockhash().await.map_err(
-                    |err| {
-                        AccountsError::FailedToGetLatestBlockhash(
-                            err.to_string(),
-                        )
-                    },
-                )?,
-            };
+        let latest_blockhash = self
+            .rpc_client
+            .get_latest_blockhash()
+            .await
+            .map_err(|err| {
+                AccountsError::FailedToGetLatestBlockhash(err.to_string())
+            })?;
 
         let (compute_budget_ix, compute_unit_price_ix) =
             self.compute_instructions();

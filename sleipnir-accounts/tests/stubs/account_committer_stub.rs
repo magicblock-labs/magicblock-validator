@@ -9,8 +9,8 @@ use sleipnir_accounts::{
     CommitAccountsPayload, SendableCommitAccountsPayload,
 };
 use solana_sdk::{
-    account::AccountSharedData, hash::Hash, pubkey::Pubkey,
-    signature::Signature, transaction::Transaction,
+    account::AccountSharedData, pubkey::Pubkey, signature::Signature,
+    transaction::Transaction,
 };
 
 #[derive(Debug, Default, Clone)]
@@ -33,7 +33,6 @@ impl AccountCommitter for AccountCommitterStub {
     async fn create_commit_accounts_transactions(
         &self,
         committees: Vec<AccountCommittee>,
-        _latest_blockhash: Option<Hash>,
     ) -> AccountsResult<Vec<CommitAccountsPayload>> {
         let transaction = Transaction::default();
         let payload = CommitAccountsPayload {

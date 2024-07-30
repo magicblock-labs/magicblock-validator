@@ -9,8 +9,7 @@ use log::*;
 use sleipnir_account_updates::AccountUpdates;
 use sleipnir_mutator::AccountModification;
 use solana_sdk::{
-    hash::Hash, pubkey::Pubkey, signature::Signature,
-    transaction::SanitizedTransaction,
+    pubkey::Pubkey, signature::Signature, transaction::SanitizedTransaction,
 };
 
 use crate::{
@@ -337,7 +336,6 @@ where
         let commit_infos = self
             .create_transactions_to_commit_specific_accounts(
                 accounts_to_be_committed,
-                None,
             )
             .await?;
         let sendables = commit_infos
@@ -357,7 +355,6 @@ where
     pub async fn create_transactions_to_commit_specific_accounts(
         &self,
         accounts_to_be_committed: Vec<Pubkey>,
-        latest_blockhash: Option<Hash>,
     ) -> AccountsResult<Vec<CommitAccountsPayload>> {
         // Get current account states from internal account provider
         let mut committees = Vec::new();
@@ -382,7 +379,7 @@ where
         // That is why we return a Vec of CreateCommitAccountsTransactionResult
         let txs = self
             .account_committer
-            .create_commit_accounts_transactions(committees, latest_blockhash)
+            .create_commit_accounts_transactions(committees)
             .await?;
 
         Ok(txs)

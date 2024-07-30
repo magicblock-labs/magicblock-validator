@@ -78,10 +78,11 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
                 }
             }
 
-            // NOTE: @@@ if chain cannot be reached we error when getting blockhash
-            // and should still log this info to our ledger
+            // NOTE: when we address https://github.com/magicblock-labs/magicblock-validator/issues/100
+            // we should report if we cannot get the blockhash as part of the _sent commit_
+            // transaction
             let payloads = committer
-                .create_commit_accounts_transactions(committees, None)
+                .create_commit_accounts_transactions(committees)
                 .await?;
 
             // Determine which payloads are a noop since all accounts are up to date

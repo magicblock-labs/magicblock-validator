@@ -4,7 +4,6 @@ use async_trait::async_trait;
 use sleipnir_mutator::AccountModification;
 use solana_sdk::{
     account::{Account, AccountSharedData},
-    hash::Hash,
     pubkey::Pubkey,
     signature::Signature,
     transaction::Transaction,
@@ -66,10 +65,10 @@ pub trait AccountCommitter: Send + Sync + 'static {
     async fn create_commit_accounts_transactions(
         &self,
         committees: Vec<AccountCommittee>,
-        latest_blockhash: Option<Hash>,
     ) -> AccountsResult<Vec<CommitAccountsPayload>>;
 
-    /// Returns the signaturse of the commit transactions processed.
+    /// Returns the main-chain signatures of the commit transactions
+    /// This will only fail due to network issues, not if the transaction failed.
     async fn send_commit_transactions(
         &self,
         payloads: Vec<SendableCommitAccountsPayload>,
