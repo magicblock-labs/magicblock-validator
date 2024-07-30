@@ -1,5 +1,3 @@
-use std::{collections::HashMap, sync::RwLock};
-
 use async_trait::async_trait;
 use dlp::instruction::{commit_state, finalize};
 use log::*;
@@ -8,11 +6,9 @@ use solana_rpc_client::{
 };
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{
-    account::{AccountSharedData, ReadableAccount},
-    commitment_config::CommitmentConfig,
+    account::ReadableAccount,
     compute_budget::ComputeBudgetInstruction,
     instruction::Instruction,
-    pubkey::Pubkey,
     signature::{Keypair, Signature},
     signer::Signer,
     transaction::Transaction,
@@ -27,10 +23,6 @@ use crate::{
 pub struct RemoteAccountCommitter {
     rpc_client: RpcClient,
     committer_authority: Keypair,
-    /// Tracking the last commit we did for each pubkey.
-    /// This increases memory usage, but allows us to check this without
-    /// downloading the currently committed account data from chain.
-    commits: RwLock<HashMap<Pubkey, AccountSharedData>>,
     compute_unit_price: u64,
 }
 
@@ -43,7 +35,6 @@ impl RemoteAccountCommitter {
         Self {
             rpc_client,
             committer_authority,
-            commits: RwLock::<HashMap<Pubkey, AccountSharedData>>::default(),
             compute_unit_price,
         }
     }
@@ -73,17 +64,6 @@ impl AccountCommitter for RemoteAccountCommitter {
             account_data,
         } in committees.iter()
         {
-            if let Some(committed_account) = self
-                .commits
-                .read()
-                .expect("RwLock commits poisoned")
-                .get(pubkey)
-            {
-                if committed_account == account_data {
-                    continue;
-                }
-            }
-
             let committer = self.committer_authority.pubkey();
             let commit_ix =
                 commit_state(committer, *pubkey, account_data.data().to_vec());
@@ -162,28 +142,6 @@ impl AccountCommitter for RemoteAccountCommitter {
                 "Sent commit for [{}] | signature: '{:?}'",
                 pubkeys_display, signature
             );
-
-            self.rpc_client
-                .confirm_transaction_with_commitment(
-                    &signature,
-                    CommitmentConfig::confirmed(),
-                )
-                .await
-                .map_err(|err| {
-                    AccountsError::FailedToConfirmTransaction(err.to_string())
-                })?;
-
-            debug!(
-                "Confirmed commit for [{}] | signature: '{:?}'",
-                pubkeys_display, signature
-            );
-
-            for (pubkey, commit_state_data) in committees {
-                self.commits
-                    .write()
-                    .expect("RwLock commits poisoned")
-                    .insert(pubkey, commit_state_data);
-            }
             signatures.push(signature);
         }
         Ok(signatures)

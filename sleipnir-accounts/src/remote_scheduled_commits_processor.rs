@@ -109,8 +109,7 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
                 .collect::<Vec<SendableCommitAccountsPayload>>();
 
             // Tally up the pubkeys that will not be committed since the account
-            // was not available or still up to date as determined when creating
-            // sendable payloads
+            // was not available as determined when creating sendable payloads
             let excluded_pubkeys = all_pubkeys
                 .into_iter()
                 .filter(|pubkey| !included_pubkeys.contains(pubkey))
