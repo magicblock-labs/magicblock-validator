@@ -133,6 +133,7 @@ pub(crate) fn process_schedule_commit(
     // For now we assume that chain cost match the defaults
     // We may have to charge more here if we want to pay extra to ensure the
     // transaction lands.
+    // Tracked: https://github.com/magicblock-labs/magicblock-validator/issues/98
     let tx_cost = DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE;
     ic_msg!(
         invoke_context,
