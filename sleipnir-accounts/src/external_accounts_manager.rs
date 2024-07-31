@@ -108,6 +108,12 @@ where
         accounts_holder: TransactionAccountsHolder,
         signature: String,
     ) -> AccountsResult<Vec<Signature>> {
+        // NOTE: when we don't require delegation then we still query the account states to
+        // get the chain_state of each delegated. This causes some unnecessary overhead which we
+        // could avoid if we make the lockbox aware of this, i.e. by adding an LockstateUnknown
+        // variant and returning that instead of checking it.
+        // However this is only the case when developing locally and thus we may not optimize for it.
+
         // 2.A Collect all readonly accounts we've never seen before and need to clone as readonly
         let unseen_readonly_accounts =
             if self.external_readonly_mode.is_clone_none() {
