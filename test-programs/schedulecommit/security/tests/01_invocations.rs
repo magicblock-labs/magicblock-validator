@@ -1,0 +1,155 @@
+use std::str::FromStr;
+
+use schedulecommit_client::ScheduleCommitTestContext;
+use sleipnir_core::magic_program;
+use solana_rpc_client_api::config::RpcSendTransactionConfig;
+use solana_sdk::{
+    instruction::{AccountMeta, Instruction},
+    pubkey::Pubkey,
+    signer::Signer,
+    system_program,
+    transaction::Transaction,
+};
+
+const PROGRAM_ADDR: &str = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY";
+
+fn prepare_ctx_with_account_to_commit() -> ScheduleCommitTestContext {
+    let ctx = if std::env::var("RK").is_ok() {
+        ScheduleCommitTestContext::new_random_keys(2)
+    } else {
+        ScheduleCommitTestContext::new(2)
+    };
+    ctx.init_committees().unwrap();
+    ctx.delegate_committees().unwrap();
+
+    ctx
+}
+
+fn create_schedule_commit_ix(
+    payer: Pubkey,
+    program_id: Pubkey,
+    validator_id: Pubkey,
+    magic_program_key: Pubkey,
+    pubkeys: &[Pubkey],
+) -> Instruction {
+    let instruction_data = vec![1, 0, 0, 0];
+    let mut account_metas = vec![
+        AccountMeta::new(payer, true),
+        AccountMeta::new_readonly(program_id, false),
+        AccountMeta::new(validator_id, false),
+        AccountMeta::new_readonly(system_program::id(), false),
+    ];
+
+    for pubkey in pubkeys {
+        account_metas.push(AccountMeta {
+            pubkey: *pubkey,
+            is_signer: false,
+            // NOTE: It appears they need to be writable to be properly cloned?
+            is_writable: true,
+        });
+    }
+    Instruction::new_with_bytes(
+        magic_program_key,
+        &instruction_data,
+        account_metas,
+    )
+}
+
+#[test]
+fn test_schedule_commit_directly_with_single_ix() {
+    let ctx = prepare_ctx_with_account_to_commit();
+    let ScheduleCommitTestContext {
+        payer,
+        commitment,
+        committees,
+        ephem_blockhash,
+        ephem_client,
+        validator_identity,
+        ..
+    } = &ctx;
+    let ix = create_schedule_commit_ix(
+        payer.pubkey(),
+        Pubkey::from_str(PROGRAM_ADDR).unwrap(),
+        *validator_identity,
+        Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
+        &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
+    );
+
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&payer.pubkey()),
+        &[&payer],
+        *ephem_blockhash,
+    );
+
+    let sig = tx.signatures[0];
+    let res = ephem_client
+        .send_and_confirm_transaction_with_spinner_and_config(
+            &tx,
+            *commitment,
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        );
+    eprintln!("Transaction '{:?}' res: '{:?}'", sig, res);
+}
+
+#[test]
+fn test_schedule_commit_directly_with_commit_ix_sandwiched() {
+    let ctx = prepare_ctx_with_account_to_commit();
+    let ScheduleCommitTestContext {
+        payer,
+        commitment,
+        committees,
+        ephem_blockhash,
+        ephem_client,
+        validator_identity,
+        ..
+    } = &ctx;
+
+    // Send money to one of the PDAs since it is delegated and can be cloned
+    let (_, rcvr_pda) = committees[0];
+
+    // 1. Transfer to rcvr
+    let transfer_ix_1 = solana_sdk::system_instruction::transfer(
+        &payer.pubkey(),
+        &rcvr_pda,
+        1_000_000,
+    );
+
+    // 2. Schedule commit
+    let ix = create_schedule_commit_ix(
+        payer.pubkey(),
+        Pubkey::from_str(PROGRAM_ADDR).unwrap(),
+        *validator_identity,
+        Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
+        &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
+    );
+
+    // 3. Transfer to rcvr again
+    let transfer_ix_2 = solana_sdk::system_instruction::transfer(
+        &payer.pubkey(),
+        &rcvr_pda,
+        2_000_000,
+    );
+
+    let tx = Transaction::new_signed_with_payer(
+        &[transfer_ix_1, ix, transfer_ix_2],
+        Some(&payer.pubkey()),
+        &[&payer],
+        *ephem_blockhash,
+    );
+
+    let sig = tx.signatures[0];
+    let res = ephem_client
+        .send_and_confirm_transaction_with_spinner_and_config(
+            &tx,
+            *commitment,
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        );
+    eprintln!("Transaction '{:?}' res: '{:?}'", sig, res);
+}

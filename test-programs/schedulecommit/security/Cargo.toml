@@ -1,0 +1,20 @@
+[package]
+name = "schedulecommit-security"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+schedulecommit-client = { workspace = true }
+schedulecommit-program = { workspace = true, features = ["no-entrypoint"] }
+sleipnir-core = { workspace = true }
+solana-program = { workspace = true }
+solana-rpc-client-api = { workspace = true }
+solana-sdk = { workspace = true }
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+no-entrypoint = []
+cpi = ["no-entrypoint"]
+default = []

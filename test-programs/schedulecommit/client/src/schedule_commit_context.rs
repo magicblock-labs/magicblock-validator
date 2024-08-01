@@ -44,7 +44,14 @@ impl ScheduleCommitTestContext {
     // -----------------
     // Init
     // -----------------
+    pub fn new_random_keys(ncommittees: usize) -> Self {
+        Self::new_internal(ncommittees, true)
+    }
     pub fn new(ncommittees: usize) -> Self {
+        Self::new_internal(ncommittees, false)
+    }
+
+    fn new_internal(ncommittees: usize, random_keys: bool) -> Self {
         let commitment = CommitmentConfig::confirmed();
 
         let chain_client = RpcClient::new_with_commitment(
@@ -62,7 +69,11 @@ impl ScheduleCommitTestContext {
         // requirement is that the PDA is owned by its program.
         let committees = (0..ncommittees)
             .map(|_idx| {
-                let payer = Keypair::from_seed(&[_idx as u8; 32]).unwrap();
+                let payer = if random_keys {
+                    Keypair::new()
+                } else {
+                    Keypair::from_seed(&[_idx as u8; 32]).unwrap()
+                };
                 Self::airdrop(
                     &chain_client,
                     &payer.pubkey(),

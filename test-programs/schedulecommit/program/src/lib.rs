@@ -286,7 +286,7 @@ pub fn process_schedulecommit_cpi(
     Ok(())
 }
 
-fn create_schedule_commit_ix(
+pub fn create_schedule_commit_ix(
     magic_program_key: Pubkey,
     account_infos: &[&AccountInfo],
 ) -> Instruction {

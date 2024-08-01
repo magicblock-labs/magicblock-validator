@@ -2356,6 +2356,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "schedulecommit-security"
+version = "0.0.0"
+dependencies = [
+ "schedulecommit-client",
+ "schedulecommit-program",
+ "sleipnir-core",
+ "solana-program 1.17.22",
+ "solana-rpc-client-api",
+ "solana-sdk 1.17.22",
+]
+
+[[package]]
 name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

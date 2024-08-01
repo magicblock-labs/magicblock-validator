@@ -23,6 +23,8 @@ pub(crate) fn process_schedule_commit(
     signers: HashSet<Pubkey>,
     invoke_context: &mut InvokeContext,
 ) -> Result<(), InstructionError> {
+    eprintln!("{:#?}", invoke_context.transaction_context);
+
     static ID: AtomicU64 = AtomicU64::new(0);
 
     const PAYER_IDX: u16 = 0;
