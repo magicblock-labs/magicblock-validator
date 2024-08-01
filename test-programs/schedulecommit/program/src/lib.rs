@@ -243,11 +243,12 @@ pub fn process_schedulecommit_cpi(
 
         // And collect info to derive signer seeds + ensure PDAs check out
         let (pda, bump) = pda_and_bump(player);
-        if &pda != committee.key {
+        if pda.ne(committee.key) {
             msg!(
-                "ERROR: pda(player) != committee PDA | '{}' != '{}'",
+                "ERROR: pda(player) != committee PDA | '{}' != '{}' for player '{}'",
+                pda,
+                committee.key,
                 player,
-                committee.key
             );
             return Err(ProgramError::InvalidArgument);
         }

@@ -11,6 +11,9 @@ use solana_sdk::{
     transaction::Transaction,
 };
 
+use crate::utils::create_sibling_schedule_cpis_instruction;
+mod utils;
+
 const PROGRAM_ADDR: &str = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY";
 
 fn prepare_ctx_with_account_to_commit() -> ScheduleCommitTestContext {
@@ -136,6 +139,54 @@ fn test_schedule_commit_directly_with_commit_ix_sandwiched() {
 
     let tx = Transaction::new_signed_with_payer(
         &[transfer_ix_1, ix, transfer_ix_2],
+        Some(&payer.pubkey()),
+        &[&payer],
+        *ephem_blockhash,
+    );
+
+    let sig = tx.signatures[0];
+    let res = ephem_client
+        .send_and_confirm_transaction_with_spinner_and_config(
+            &tx,
+            *commitment,
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        );
+    eprintln!("Transaction '{:?}' res: '{:?}'", sig, res);
+}
+
+#[test]
+fn test_schedule_commit_via_cpi_of_other_program() {
+    let ctx = prepare_ctx_with_account_to_commit();
+    let ScheduleCommitTestContext {
+        payer,
+        commitment,
+        committees,
+        ephem_blockhash,
+        ephem_client,
+        validator_identity,
+        ..
+    } = &ctx;
+
+    let players = &committees
+        .iter()
+        .map(|(player, _)| player.pubkey())
+        .collect::<Vec<_>>();
+    let pdas = &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>();
+
+    let ix = create_sibling_schedule_cpis_instruction(
+        payer.pubkey(),
+        Pubkey::from_str(PROGRAM_ADDR).unwrap(),
+        *validator_identity,
+        Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
+        pdas,
+        players,
+    );
+
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
         Some(&payer.pubkey()),
         &[&payer],
         *ephem_blockhash,
