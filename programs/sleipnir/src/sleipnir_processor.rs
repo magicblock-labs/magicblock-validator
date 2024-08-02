@@ -20,8 +20,8 @@ use solana_sdk::{
 };
 
 use crate::{
-    commit_sender::{send_commit, TriggerCommitOutcome},
-    errors::MagicError,
+    process_scheduled_commit_sent,
+    schedule_transactions::process_schedule_commit,
     sleipnir_instruction::{
         AccountModificationForInstruction, SleipnirError, SleipnirInstruction,
     },
@@ -49,8 +49,16 @@ declare_process_instruction!(
                     &mut account_mods,
                 )
             }
-            SleipnirInstruction::TriggerCommit => {
-                trigger_commit(invoke_context, transaction_context)
+            SleipnirInstruction::ScheduleCommit => {
+                process_schedule_commit(signers, invoke_context)
+            }
+            SleipnirInstruction::ScheduledCommitSent(id) => {
+                process_scheduled_commit_sent(
+                    signers,
+                    invoke_context,
+                    transaction_context,
+                    id,
+                )
             }
         }
     }
@@ -253,157 +261,26 @@ fn mutate_accounts(
     Ok(())
 }
 
-// -----------------
-// TriggerCommit
-// -----------------
-fn trigger_commit(
-    invoke_context: &InvokeContext,
-    transaction_context: &TransactionContext,
-) -> Result<(), InstructionError> {
-    // Payer is the first account committee is second in the instruction accounts
-    let pubkey = {
-        let ix_ctx = transaction_context.get_current_instruction_context()?;
-        let number_of_ix_accounts = ix_ctx.get_number_of_instruction_accounts();
-        if number_of_ix_accounts < 2 {
-            ic_msg!(
-                invoke_context,
-                "TriggerCommit ERR: not enough accounts to trigger commit ({}), need payer and account to commit",
-                number_of_ix_accounts
-            );
-            return Err(InstructionError::NotEnoughAccountKeys);
-        }
-        if number_of_ix_accounts > 2 {
-            ic_msg!(
-                invoke_context,
-                "TriggerCommit ERR: too many accounts to trigger commit ({}), need payer and account to commit only",
-                number_of_ix_accounts
-            );
-            return Err(MagicError::TooManyAccountsProvided.into());
-        }
-        transaction_context
-            .find_index_of_program_account(&crate::id())
-            .ok_or_else(|| {
-                ic_msg!(
-                    invoke_context,
-                    "TriggerCommit ERR: Magic program account not found"
-                );
-                InstructionError::UnsupportedProgramId
-            })?;
-        // SAFETY: we ensured above that there are exactly 2 accounts
-        let committee_idx =
-            ix_ctx.get_index_of_instruction_account_in_transaction(1)?;
-        transaction_context
-            .get_key_of_account_at_index(committee_idx)
-            .unwrap()
-    };
-
-    ic_msg!(invoke_context, "TriggerCommit: {}", pubkey);
-    let outcome = send_commit(*pubkey)
-        // Handle error related to sending the request
-        .map_err(|err| {
-            ic_msg!(
-                invoke_context,
-                "TriggerCommit: failed to send commit pubkey: {}.\nError: {}",
-                pubkey,
-                err
-            );
-            InstructionError::from(err.error)
-        })?
-        .recv()
-        // Handle error related to receiving request confirmation
-        .map_err(|err| {
-            ic_msg!(
-                invoke_context,
-                "TriggerCommit: failed to receive commit pubkey response: {} ({:?})",
-                pubkey,
-                err
-            );
-            InstructionError::from(MagicError::InternalError)
-        })?
-        // Handle error related to processing the request
-        .map_err(|err| {
-            ic_msg!(
-                invoke_context,
-                "TriggerCommit: failed to process commit pubkey: {}.\nError: {}",
-                pubkey,
-                err
-            );
-            InstructionError::from(err.error)
-        })?;
-
-    match outcome {
-        TriggerCommitOutcome::Committed(sig) => {
-            // NOTE: this msg is used by clients to parse the signature of the
-            // transaction that is sent to chain in order to track its outcome
-            // Therefore this is part of our API and should not be changed.
-            ic_msg!(invoke_context, "CommitTransactionSignature: {:?}", sig);
-        }
-        TriggerCommitOutcome::NotCommitted => {
-            // NOTE: this signals that no commit was performed and is also part
-            // of our API.
-            ic_msg!(invoke_context, "NotCommitted");
-        }
-    }
-    Ok(())
-}
-
-// mock_process_instruction
 #[cfg(test)]
 mod tests {
     use std::collections::HashMap;
 
     use assert_matches::assert_matches;
-    use solana_program_runtime::invoke_context::mock_process_instruction;
     use solana_sdk::{
         account::{Account, AccountSharedData},
-        instruction::{AccountMeta, InstructionError},
         pubkey::Pubkey,
-        signature::Keypair,
-        signer::Signer,
     };
 
     use super::*;
     use crate::{
-        commit_sender::{
-            add_commit_channel_route, ensure_routing_commit_channel,
-        },
-        generate_validator_authority_if_needed,
         sleipnir_instruction::{
-            modify_accounts_instruction, trigger_commit_instruction,
-            AccountModification,
+            modify_accounts_instruction, AccountModification,
+        },
+        test_utils::{
+            ensure_funded_validator_authority, process_instruction,
+            AUTHORITY_BALANCE,
         },
     };
-
-    const AUTHORITY_BALANCE: u64 = u64::MAX / 2;
-
-    pub fn ensure_funded_validator_authority(
-        map: &mut HashMap<Pubkey, AccountSharedData>,
-    ) {
-        generate_validator_authority_if_needed();
-        let validator_authority_id = validator_authority_id();
-        map.entry(validator_authority_id).or_insert_with(|| {
-            AccountSharedData::new(AUTHORITY_BALANCE, 0, &system_program::id())
-        });
-    }
-
-    fn process_instruction(
-        instruction_data: &[u8],
-        transaction_accounts: Vec<(Pubkey, AccountSharedData)>,
-        instruction_accounts: Vec<AccountMeta>,
-        expected_result: Result<(), InstructionError>,
-    ) -> Vec<AccountSharedData> {
-        mock_process_instruction(
-            &crate::id(),
-            Vec::new(),
-            instruction_data,
-            transaction_accounts,
-            instruction_accounts,
-            expected_result,
-            Entrypoint::vm,
-            |_invoke_context| {},
-            |_invoke_context| {},
-        )
-    }
 
     // -----------------
     // ModifyAccounts
@@ -721,109 +598,5 @@ mod tests {
                 assert_eq!(data, vec![16, 17, 18, 19, 20]);
             }
         );
-    }
-
-    // -----------------
-    // TriggerCommit
-    // -----------------
-    fn setup_commit_handler(delegated_key: Pubkey) {
-        ensure_routing_commit_channel(5);
-        add_commit_channel_route(&delegated_key);
-    }
-
-    #[tokio::test]
-    async fn test_trigger_commit() {
-        // Those need to run in the same event loop so they have to share the same event loop
-        // So they cannot be separate tests. This is because of the global COMMIT_SENDER which is shared in a same process
-        // In the future if we remove the COMMIT_SENDER global we can separate them again
-        test_trigger_commit_for_delegated_account().await;
-        test_trigger_commit_for_undelegated_account().await;
-    }
-
-    async fn test_trigger_commit_for_delegated_account() {
-        let payer = Keypair::new();
-        let delegated_key = Pubkey::new_unique();
-        let mut account_data = {
-            let mut map = HashMap::new();
-            map.insert(
-                payer.pubkey(),
-                AccountSharedData::new(100, 0, &payer.pubkey()),
-            );
-            map.insert(
-                delegated_key,
-                AccountSharedData::new(100, 0, &delegated_key),
-            );
-            map
-        };
-        setup_commit_handler(delegated_key);
-
-        let ix = trigger_commit_instruction(&payer, delegated_key);
-
-        let transaction_accounts = ix
-            .accounts
-            .iter()
-            .flat_map(|acc| {
-                account_data
-                    .remove(&acc.pubkey)
-                    .map(|shared_data| (acc.pubkey, shared_data))
-            })
-            .collect();
-
-        tokio::task::spawn_blocking(move || {
-            process_instruction(
-                ix.data.as_slice(),
-                transaction_accounts,
-                ix.accounts,
-                Ok(()),
-            );
-        })
-        .await
-        .unwrap();
-    }
-
-    async fn test_trigger_commit_for_undelegated_account() {
-        let payer = Keypair::new();
-        let delegated_key = Pubkey::new_unique();
-        let undelegated_key = Pubkey::new_unique();
-        let mut account_data = {
-            let mut map = HashMap::new();
-            map.insert(
-                payer.pubkey(),
-                AccountSharedData::new(100, 0, &payer.pubkey()),
-            );
-            map.insert(
-                delegated_key,
-                AccountSharedData::new(100, 0, &delegated_key),
-            );
-            map.insert(
-                undelegated_key,
-                AccountSharedData::new(100, 0, &undelegated_key),
-            );
-            map
-        };
-        setup_commit_handler(delegated_key);
-
-        let ix = trigger_commit_instruction(&payer, undelegated_key);
-
-        let transaction_accounts = ix
-            .accounts
-            .iter()
-            .flat_map(|acc| {
-                account_data
-                    .remove(&acc.pubkey)
-                    .map(|shared_data| (acc.pubkey, shared_data))
-            })
-            .collect();
-
-        tokio::task::spawn_blocking(move || {
-            process_instruction(
-                ix.data.as_slice(),
-                transaction_accounts,
-                ix.accounts,
-                Err(InstructionError::from(MagicError::AccountNotDelegated)),
-            );
-        })
-        .await
-        .unwrap();
     }
 }

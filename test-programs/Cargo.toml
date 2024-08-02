@@ -1,5 +1,5 @@
 [workspace]
-members = ["sysvars", "triggercommit/program", "triggercommit/client"]
+members = ["sysvars", "schedulecommit/program", "schedulecommit/client"]
 resolver = "2"
 
 [workspace.package]
@@ -7,6 +7,10 @@ version = "0.0.0"
 edition = "2021"
 
 [workspace.dependencies]
+anyhow = "1.0.86"
+borsh = "0.10.3"
+delegation-program = { path = "../../delegation-program" }
+delegation-program-sdk = { path = "../../delegation-program/sdk" }
 sleipnir-core = { path = "../sleipnir-core" }
 # Need to pin solana version here as newer ones require a rust version that conficts with
 # the one used by cargo build-sbf
@@ -14,4 +18,4 @@ solana-program = "=1.17.22"
 solana-rpc-client = "=1.17.22"
 solana-rpc-client-api = "=1.17.22"
 solana-sdk = "=1.17.22"
-triggercommit-program = { path = "triggercommit/program" }
+schedulecommit-program = { path = "schedulecommit/program" }

@@ -4,7 +4,10 @@ use std::{
 };
 
 use async_trait::async_trait;
-use sleipnir_accounts::{errors::AccountsResult, AccountCommitter};
+use sleipnir_accounts::{
+    errors::AccountsResult, AccountCommittee, AccountCommitter,
+    CommitAccountsPayload, SendableCommitAccountsPayload,
+};
 use solana_sdk::{
     account::AccountSharedData, pubkey::Pubkey, signature::Signature,
     transaction::Transaction,
@@ -27,24 +30,35 @@ impl AccountCommitterStub {
 
 #[async_trait]
 impl AccountCommitter for AccountCommitterStub {
-    async fn create_commit_account_transaction(
+    async fn create_commit_accounts_transactions(
         &self,
-        _delegated_account: Pubkey,
-        _commit_state_data: AccountSharedData,
-    ) -> AccountsResult<Option<Transaction>> {
-        Ok(Some(Transaction::default()))
+        committees: Vec<AccountCommittee>,
+    ) -> AccountsResult<Vec<CommitAccountsPayload>> {
+        let transaction = Transaction::default();
+        let payload = CommitAccountsPayload {
+            transaction: Some(transaction),
+            committees: committees
+                .iter()
+                .map(|x| (x.pubkey, x.account_data.clone()))
+                .collect(),
+        };
+        Ok(vec![payload])
     }
 
-    async fn commit_account(
+    async fn send_commit_transactions(
         &self,
-        delegated_account: Pubkey,
-        commit_state_data: AccountSharedData,
-        _transaction: Transaction,
-    ) -> AccountsResult<Signature> {
-        self.committed_accounts
-            .write()
-            .unwrap()
-            .insert(delegated_account, commit_state_data);
-        Ok(Signature::new_unique())
+        payloads: Vec<SendableCommitAccountsPayload>,
+    ) -> AccountsResult<Vec<Signature>> {
+        let signatures =
+            payloads.iter().map(|_| Signature::new_unique()).collect();
+        for payload in payloads {
+            for (pubkey, account) in payload.committees {
+                self.committed_accounts
+                    .write()
+                    .unwrap()
+                    .insert(pubkey, account);
+            }
+        }
+        Ok(signatures)
     }
 }

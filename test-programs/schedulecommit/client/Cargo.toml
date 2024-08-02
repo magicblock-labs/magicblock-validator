@@ -1,0 +1,23 @@
+[package]
+name = "schedulecommit-client"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+borsh = { workspace = true }
+delegation-program = { workspace = true }
+sleipnir-core = { workspace = true }
+solana-program = { workspace = true }
+solana-rpc-client = { workspace = true }
+solana-rpc-client-api = { workspace = true }
+solana-sdk = { workspace = true }
+schedulecommit-program = { workspace = true, features = ["no-entrypoint"] }
+
+[[bin]]
+name = "schedule-commit-cpi-ix"
+path = "bin/schedule_commit_cpi_ix.rs"
+
+[[bin]]
+name = "run-schedule-commit-tests"
+path = "bin/run_schedule_commit_tests.rs"

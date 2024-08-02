@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use conjunto_transwise::{
     errors::TranswiseError,
@@ -15,6 +15,7 @@ use stubs::{
     account_committer_stub::AccountCommitterStub,
     account_updates_stub::AccountUpdatesStub,
     internal_account_provider_stub::InternalAccountProviderStub,
+    scheduled_commits_processor_stub::ScheduledCommitsProcessorStub,
     validated_accounts_provider_stub::ValidatedAccountsProviderStub,
 };
 use test_tools_core::init_logger;
@@ -34,20 +35,24 @@ fn setup(
     AccountUpdatesStub,
     ValidatedAccountsProviderStub,
     TransactionAccountsExtractorImpl,
+    ScheduledCommitsProcessorStub,
 > {
+    let validator_auth_id = Pubkey::new_unique();
     ExternalAccountsManager {
         internal_account_provider,
         account_cloner,
-        account_committer,
+        account_committer: Arc::new(account_committer),
         account_updates,
         validated_accounts_provider,
         transaction_accounts_extractor: TransactionAccountsExtractorImpl,
         external_readonly_accounts: Default::default(),
         external_writable_accounts: Default::default(),
+        scheduled_commits_processor: ScheduledCommitsProcessorStub::default(),
         external_readonly_mode: ExternalReadonlyMode::All,
         external_writable_mode: ExternalWritableMode::Delegated,
         create_accounts: false,
         payer_init_lamports: Some(1_000 * LAMPORTS_PER_SOL),
+        validator_id: validator_auth_id,
     }
 }
 

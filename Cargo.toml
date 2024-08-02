@@ -153,6 +153,8 @@ solana-transaction-status = { git = "https://github.com/solana-labs/solana", rev
 solana_rbpf = "=0.8.0"
 spl-token = "=4.0.1"
 spl-token-2022 = "=2.0.1"
+strum = "0.24"
+strum_macros = "0.24"
 tempfile = "3.10.1"
 test-tools = { path = "./test-tools" }
 test-tools-core = { path = "./test-tools-core" }
@@ -199,8 +201,6 @@ solana-nohash-hasher = "0.2.1"
 solana-stake-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-stake-program" }
 solana-vote-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-vote-program" }
 static_assertions = "1.1.0"
-strum = "0.24"
-strum_macros = "0.24"
 tar = "0.4.40"
 test-case = "3.3.1"
 

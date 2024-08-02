@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+
+NAME=schedulecommit
+CARGO_TOML=$DIR/../program/Cargo.toml
+ELFS_DIR=$DIR/../elfs
+
+cargo build-sbf --manifest-path=$CARGO_TOML --sbf-out-dir=$ELFS_DIR
+echo "Built $NAME in $ELFS_DIR"

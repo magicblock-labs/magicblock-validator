@@ -140,11 +140,6 @@ impl SleipnirConfig {
                 .unwrap_or_else(|err| panic!("Failed to parse 'ACCOUNTS_COMMIT_FREQUENCY_MILLIS' as u64: {:?}", err));
         }
 
-        if let Ok(trigger) = env::var("ACCOUNTS_COMMIT_TRIGGER") {
-            config.accounts.commit.trigger = bool::from_str(&trigger)
-                .unwrap_or_else(|err| panic!("Failed to parse 'ACCOUNTS_COMMIT_TRIGGER' as bool: {:?}", err))
-        }
-
         if let Ok(unit_price) = env::var("ACCOUNTS_COMMIT_COMPUTE_UNIT_PRICE") {
             config.accounts.commit.compute_unit_price = u64::from_str(&unit_price)
                 .unwrap_or_else(|err| panic!("Failed to parse 'ACCOUNTS_COMMIT_COMPUTE_UNIT_PRICE' as u64: {:?}", err))

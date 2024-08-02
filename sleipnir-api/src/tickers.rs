@@ -14,21 +14,28 @@ use tokio_util::sync::CancellationToken;
 
 pub fn init_slot_ticker(
     bank: &Arc<Bank>,
+    accounts_manager: &Arc<AccountsManager>,
     ledger: Arc<Ledger>,
     tick_duration: Duration,
     exit: Arc<AtomicBool>,
-) -> std::thread::JoinHandle<()> {
+) -> tokio::task::JoinHandle<()> {
     let bank = bank.clone();
+    let accounts_manager = accounts_manager.clone();
     let log = tick_duration >= Duration::from_secs(5);
-    std::thread::spawn(move || {
+    tokio::task::spawn(async move {
         while !exit.load(Ordering::Relaxed) {
-            std::thread::sleep(tick_duration);
+            tokio::time::sleep(tick_duration).await;
             let slot = bank.advance_slot();
             let _ = ledger
                 .cache_block_time(slot, timestamp_in_secs() as i64)
                 .map_err(|e| {
                     error!("Failed to cache block time: {:?}", e);
                 });
+            let _ = accounts_manager.process_scheduled_commits().await.map_err(
+                |e| {
+                    error!("Failed to process scheduled commits: {:?}", e);
+                },
+            );
             if log {
                 info!("Advanced to slot {}", slot);
             }

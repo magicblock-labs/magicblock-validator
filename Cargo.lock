@@ -4531,11 +4531,13 @@ name = "sleipnir-program"
 version = "1.19.0"
 dependencies = [
  "assert_matches",
+ "bincode",
  "crossbeam-channel",
  "lazy_static",
  "log",
  "num-derive",
  "num-traits",
+ "rand 0.8.5",
  "serde",
  "sleipnir-core",
  "sleipnir-program",

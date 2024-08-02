@@ -5,8 +5,7 @@ remote = "devnet"
 clone = { readonly = "programs", writable = "none" }
 # Have it check every 10 mins and since we don't expect to clone any
 # delegated accounts it will do nothing anyways.
-# Disable manual commit trigger for the same reason
-commit = { frequency_millis = 600_000, trigger = false, compute_unit_price = 0 }
+commit = { frequency_millis = 600_000, compute_unit_price = 0 }
 create = true
 
 ## Choosing a different RPC binding address and port and millis/sec here to test this as well

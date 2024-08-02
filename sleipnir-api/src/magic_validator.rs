@@ -27,9 +27,7 @@ use sleipnir_config::{ProgramConfig, SleipnirConfig};
 use sleipnir_geyser_plugin::rpc::GeyserRpcService;
 use sleipnir_ledger::Ledger;
 use sleipnir_perf_service::SamplePerformanceService;
-use sleipnir_program::{
-    commit_sender::init_commit_channel, init_validator_authority,
-};
+use sleipnir_program::init_validator_authority;
 use sleipnir_pubsub::pubsub_service::{
     PubsubConfig, PubsubService, PubsubServiceCloseHandle,
 };
@@ -119,7 +117,7 @@ pub struct MagicValidator {
     token: CancellationToken,
     bank: Arc<Bank>,
     ledger: Arc<Ledger>,
-    slot_ticker: Option<std::thread::JoinHandle<()>>,
+    slot_ticker: Option<tokio::task::JoinHandle<()>>,
     pubsub_handle: RwLock<Option<std::thread::JoinHandle<()>>>,
     pubsub_close_handle: PubsubServiceCloseHandle,
     sample_performance_service: Option<SamplePerformanceService>,
@@ -294,16 +292,7 @@ impl MagicValidator {
         )
         .expect("Failed to create accounts manager");
 
-        let accounts_manager = Arc::new(accounts_manager);
-        if config.accounts.commit.trigger {
-            let receiver = init_commit_channel(10);
-            AccountsManager::install_manual_commit_trigger(
-                &accounts_manager,
-                receiver,
-            );
-        }
-
-        accounts_manager
+        Arc::new(accounts_manager)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -405,6 +394,7 @@ impl MagicValidator {
 
         self.slot_ticker = Some(init_slot_ticker(
             &self.bank,
+            &self.accounts_manager,
             self.ledger.clone(),
             Duration::from_millis(self.config.validator.millis_per_slot),
             self.exit.clone(),

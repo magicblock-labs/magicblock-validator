@@ -1,0 +1,17 @@
+[meta]
+name = "Ephem:8899"
+
+[node.accounts]
+remote = "http://0.0.0.0:7799"
+clone = { readonly = "programs", writable = "delegated" }
+# clone = { readonly = "programs", writable = "none" }
+commit = { frequency_millis = 500_000, trigger = true, compute_unit_price = 1_000_000 }
+create = false
+# create = true
+
+[node.rpc]
+port = 8899
+
+[[node.program]]
+id = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY"
+path = "../elfs/schedulecommit_program.so"

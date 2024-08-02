@@ -9,6 +9,7 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::Keypair,
     signer::Signer,
+    system_program,
     transaction::Transaction,
 };
 use thiserror::Error;
@@ -70,19 +71,52 @@ pub(crate) enum SleipnirInstruction {
     /// Modify one or more accounts
     ///
     /// # Account references
-    ///  - 0.    `[WRITE, SIGNER]` Validator Authority
-    ///  - 1..n. `[WRITE]` Accounts to modify
-    ///  - n+1.  `[SIGNER]` (Implicit NativeLoader)
+    ///  - **0.**    `[WRITE, SIGNER]` Validator Authority
+    ///  - **1..n.** `[WRITE]` Accounts to modify
+    ///  - **n+1**  `[SIGNER]` (Implicit NativeLoader)
     ModifyAccounts(HashMap<Pubkey, AccountModificationForInstruction>),
 
-    /// Forces the provided account to be committed to chain regardless
-    /// of the commit frequency of the validator or the delegated account
-    /// itself
+    /// Schedules the accounts provided at end of accounts Vec to be committed.
+    /// It should be invoked from the program whose PDA accounts are to be
+    /// committed.
     ///
     /// # Account references
-    ///  - 0. `[WRITE, SIGNER]` Payer requesting the account to be committed
-    ///  - 1. `[]`              Account to commit
-    TriggerCommit,
+    /// - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
+    /// - **1.**   `[]`              The program owning the accounts to be committed
+    /// - **2.**   `[WRITE]`         Validator authority to which we escrow tx cost
+    /// - **3..n** `[]`              Accounts to be committed
+    ScheduleCommit,
+
+    /// Records the the attempt to realize a scheduled commit on chain.
+    ///
+    /// The signature of this transaction can be pre-calculated since we pass the
+    /// ID of the scheduled commit and retrieve the signature from a globally
+    /// stored hashmap.
+    ///
+    /// We implement it this way so we can log the signature of this transaction
+    /// as part of the [SleipnirInstruction::ScheduleCommit] instruction.
+    ScheduledCommitSent(u64),
+}
+
+#[allow(unused)]
+impl SleipnirInstruction {
+    pub(crate) fn index(&self) -> u8 {
+        use SleipnirInstruction::*;
+        match self {
+            ModifyAccounts(_) => 0,
+            ScheduleCommit => 1,
+            ScheduledCommitSent(_) => 2,
+        }
+    }
+
+    pub(crate) fn discriminant(&self) -> [u8; 4] {
+        let idx = self.index();
+        [idx, 0, 0, 0]
+    }
+
+    pub(crate) fn try_to_vec(&self) -> Result<Vec<u8>, bincode::Error> {
+        bincode::serialize(self)
+    }
 }
 
 // -----------------
@@ -123,28 +157,74 @@ pub(crate) fn modify_accounts_instruction(
 }
 
 // -----------------
-// TriggerCommit
+// Schedule Commit
 // -----------------
-pub fn trigger_commit(
+pub fn schedule_commit(
     payer: &Keypair,
-    account_to_commit: Pubkey,
+    program: &Pubkey,
+    validator_authority: &Pubkey,
+    pubkeys: Vec<Pubkey>,
     recent_blockhash: Hash,
 ) -> Transaction {
-    let ix = trigger_commit_instruction(payer, account_to_commit);
+    let ix = schedule_commit_instruction(
+        &payer.pubkey(),
+        program,
+        validator_authority,
+        pubkeys,
+    );
     into_transaction(payer, ix, recent_blockhash)
 }
 
-pub(crate) fn trigger_commit_instruction(
-    payer: &Keypair,
-    account_to_commit: Pubkey,
+pub(crate) fn schedule_commit_instruction(
+    payer: &Pubkey,
+    program: &Pubkey,
+    validator_authority: &Pubkey,
+    pdas: Vec<Pubkey>,
 ) -> Instruction {
+    let mut account_metas = vec![
+        AccountMeta::new(*payer, true),
+        AccountMeta::new_readonly(*program, false),
+        AccountMeta::new(*validator_authority, false),
+        AccountMeta::new_readonly(system_program::id(), false),
+    ];
+    for pubkey in &pdas {
+        account_metas.push(AccountMeta::new_readonly(*pubkey, true));
+    }
     Instruction::new_with_bincode(
         crate::id(),
-        &SleipnirInstruction::TriggerCommit,
-        vec![
-            AccountMeta::new(payer.pubkey(), true),
-            AccountMeta::new_readonly(account_to_commit, false),
-        ],
+        &SleipnirInstruction::ScheduleCommit,
+        account_metas,
+    )
+}
+
+// -----------------
+// Scheduled Commit Sent
+// -----------------
+pub fn scheduled_commit_sent(
+    scheduled_commit_id: u64,
+    recent_blockhash: Hash,
+) -> Transaction {
+    let ix = scheduled_commit_sent_instruction(
+        &crate::id(),
+        &validator_authority_id(),
+        scheduled_commit_id,
+    );
+    into_transaction(&validator_authority(), ix, recent_blockhash)
+}
+
+pub(crate) fn scheduled_commit_sent_instruction(
+    magic_block_program: &Pubkey,
+    validator_authority: &Pubkey,
+    scheduled_commit_id: u64,
+) -> Instruction {
+    let account_metas = vec![
+        AccountMeta::new_readonly(*magic_block_program, false),
+        AccountMeta::new_readonly(*validator_authority, true),
+    ];
+    Instruction::new_with_bincode(
+        *magic_block_program,
+        &SleipnirInstruction::ScheduledCommitSent(scheduled_commit_id),
+        account_metas,
     )
 }
 

@@ -1,3 +1,5 @@
+use std::sync::Arc;
+
 use conjunto_transwise::{CommitFrequency, TransactionAccountsExtractorImpl};
 use sleipnir_accounts::{
     ExternalAccountsManager, ExternalReadonlyMode, ExternalWritableMode,
@@ -12,6 +14,7 @@ use stubs::{
     account_committer_stub::AccountCommitterStub,
     account_updates_stub::AccountUpdatesStub,
     internal_account_provider_stub::InternalAccountProviderStub,
+    scheduled_commits_processor_stub::ScheduledCommitsProcessorStub,
     validated_accounts_provider_stub::ValidatedAccountsProviderStub,
 };
 use test_tools_core::init_logger;
@@ -24,6 +27,7 @@ fn setup(
     account_committer: AccountCommitterStub,
     account_updates: AccountUpdatesStub,
     validated_accounts_provider: ValidatedAccountsProviderStub,
+    validator_auth_id: Pubkey,
 ) -> ExternalAccountsManager<
     InternalAccountProviderStub,
     AccountClonerStub,
@@ -31,20 +35,23 @@ fn setup(
     AccountUpdatesStub,
     ValidatedAccountsProviderStub,
     TransactionAccountsExtractorImpl,
+    ScheduledCommitsProcessorStub,
 > {
     ExternalAccountsManager {
         internal_account_provider,
-        account_cloner,
-        account_committer,
+        account_committer: Arc::new(account_committer),
         account_updates,
+        account_cloner,
         validated_accounts_provider,
         transaction_accounts_extractor: TransactionAccountsExtractorImpl,
+        scheduled_commits_processor: ScheduledCommitsProcessorStub::default(),
         external_readonly_accounts: Default::default(),
         external_writable_accounts: Default::default(),
         external_readonly_mode: ExternalReadonlyMode::All,
         external_writable_mode: ExternalWritableMode::Delegated,
         create_accounts: false,
         payer_init_lamports: Some(1_000 * LAMPORTS_PER_SOL),
+        validator_id: validator_auth_id,
     }
 }
 
@@ -74,6 +81,7 @@ async fn test_commit_two_delegated_accounts_one_needs_commit() {
     internal_account_provider.add(commit_not_needed, commit_not_needed_acc);
 
     let account_committer = AccountCommitterStub::default();
+    let validator_auth_id = Pubkey::new_unique();
 
     let manager = setup(
         internal_account_provider,
@@ -81,6 +89,7 @@ async fn test_commit_two_delegated_accounts_one_needs_commit() {
         account_committer.clone(),
         AccountUpdatesStub::default(),
         ValidatedAccountsProviderStub::valid_default(),
+        validator_auth_id,
     );
 
     let cloned_at_slot = 12;
@@ -102,7 +111,7 @@ async fn test_commit_two_delegated_accounts_one_needs_commit() {
     let last_commit_of_commit_not_needed =
         manager.last_commit(&commit_not_needed).unwrap();
 
-    std::thread::sleep(std::time::Duration::from_millis(2));
+    tokio::time::sleep(tokio::time::Duration::from_millis(2)).await;
 
     let result = manager.commit_delegated().await;
     // Ensure we committed the account that was due

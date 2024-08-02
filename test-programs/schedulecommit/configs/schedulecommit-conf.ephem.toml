@@ -1,0 +1,12 @@
+[accounts]
+remote = "http://0.0.0.0:7799"
+clone = { readonly = "programs", writable = "delegated" }
+commit = { frequency_millis = 500_000, trigger = true, compute_unit_price = 1_000_000 }
+create = false
+
+[rpc]
+port = 8899
+
+[[program]]
+id = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY"
+path = "../elfs/schedulecommit_program.so"

@@ -1,0 +1,18 @@
+[package]
+name = "schedulecommit-program"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+borsh = { workspace = true }
+delegation-program = { workspace = true }
+delegation-program-sdk = { workspace = true }
+solana-program = { workspace = true }
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+no-entrypoint = []
+cpi = ["no-entrypoint"]
+default = []

@@ -126,12 +126,6 @@ const COMPUTE_UNIT_PRICE: u64 = 1_000_000; // 1 Lamport
 pub struct CommitStrategy {
     #[serde(default = "default_frequency_millis")]
     pub frequency_millis: u64,
-    /// If `true` then commits of an account can be triggered via
-    /// a transaction by any user.
-    /// Defaults to not allowing commits to be triggered.
-    #[serde(default = "default_commit_trigger")]
-    pub trigger: bool,
-
     /// The compute unit price offered when we send the commit account transaction
     /// This is in micro lamports and defaults to `1_000_000` (1 Lamport)
     #[serde(default = "default_compute_unit_price")]
@@ -142,10 +136,6 @@ fn default_frequency_millis() -> u64 {
     500
 }
 
-fn default_commit_trigger() -> bool {
-    false
-}
-
 fn default_compute_unit_price() -> u64 {
     COMPUTE_UNIT_PRICE
 }
@@ -154,7 +144,6 @@ impl Default for CommitStrategy {
     fn default() -> Self {
         Self {
             frequency_millis: default_frequency_millis(),
-            trigger: default_commit_trigger(),
             compute_unit_price: default_compute_unit_price(),
         }
     }
