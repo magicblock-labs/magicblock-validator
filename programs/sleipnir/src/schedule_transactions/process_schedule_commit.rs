@@ -18,10 +18,7 @@ use crate::{
         accounts::{
             get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
         },
-        instruction_context_frames::{
-            GenericInstructionContextFrames, InstructionContextFrame,
-            InstructionContextFrames,
-        },
+        instruction_context_frames::InstructionContextFrames,
     },
 };
 
@@ -44,10 +41,7 @@ pub(crate) fn process_schedule_commit(
 
     let frames: InstructionContextFrames = transaction_context.try_into()?;
     let program_id = frames
-        .find_program_id_of_parent_frame_from_ix_ctx(
-            ix_ctx,
-            transaction_context,
-        )
+        .find_program_id_of_parent_of_current_instruction()
         .ok_or_else(|| {
             ic_msg!(
                 invoke_context,
