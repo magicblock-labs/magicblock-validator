@@ -1,6 +1,9 @@
 use std::sync::Arc;
 
-use conjunto_transwise::{CommitFrequency, TransactionAccountsExtractorImpl};
+use conjunto_transwise::{
+    transaction_accounts_validator::TransactionAccountsValidatorImpl,
+    CommitFrequency, TransactionAccountsExtractorImpl,
+};
 use sleipnir_accounts::{
     ExternalAccountsManager, ExternalReadonlyMode, ExternalWritableMode,
 };
@@ -23,13 +26,15 @@ mod stubs;
 
 fn setup(
     internal_account_provider: InternalAccountProviderStub,
+    account_fetcher: AccountFetcherStub,
     account_cloner: AccountClonerStub,
     account_committer: AccountCommitterStub,
     account_updates: AccountUpdatesStub,
-    validated_accounts_provider: ValidatedAccountsProviderStub,
+    transaction_accounts_validator: ValidatedAccountsProviderStub,
     validator_auth_id: Pubkey,
 ) -> ExternalAccountsManager<
     InternalAccountProviderStub,
+    AccountFetcherStub,
     AccountClonerStub,
     AccountCommitterStub,
     AccountUpdatesStub,
@@ -39,11 +44,12 @@ fn setup(
 > {
     ExternalAccountsManager {
         internal_account_provider,
+        account_fetcher,
         account_committer: Arc::new(account_committer),
         account_updates,
         account_cloner,
-        validated_accounts_provider,
         transaction_accounts_extractor: TransactionAccountsExtractorImpl,
+        transaction_accounts_validator: TransactionAccountsValidatorImpl,
         scheduled_commits_processor: ScheduledCommitsProcessorStub::default(),
         external_readonly_accounts: Default::default(),
         external_writable_accounts: Default::default(),

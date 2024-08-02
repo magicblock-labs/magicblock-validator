@@ -8,12 +8,12 @@ use conjunto_transwise::{
         LockConfig, ValidateAccountsConfig, ValidatedAccounts,
         ValidatedReadonlyAccount, ValidatedWritableAccount,
     },
-    CommitFrequency, ValidatedAccountsProvider,
+    AccountFetcher, CommitFrequency,
 };
 use solana_sdk::{account::Account, clock::Slot, pubkey::Pubkey};
 
 #[derive(Debug, Default)]
-pub struct ValidatedAccountsProviderStub {
+pub struct AccountFetcherStub {
     validation_error: Option<TranswiseError>,
     payers: HashSet<Pubkey>,
     new_accounts: HashSet<Pubkey>,
@@ -22,7 +22,7 @@ pub struct ValidatedAccountsProviderStub {
 }
 
 #[allow(unused)] // used in tests
-impl ValidatedAccountsProviderStub {
+impl AccountFetcherStub {
     pub fn valid_default() -> Self {
         Self {
             validation_error: None,
@@ -53,7 +53,7 @@ impl ValidatedAccountsProviderStub {
 }
 
 #[async_trait]
-impl ValidatedAccountsProvider for ValidatedAccountsProviderStub {
+impl AccountFetcher for AccountFetcherStub {
     async fn validate_accounts(
         &self,
         transaction_accounts: &TransactionAccountsHolder,

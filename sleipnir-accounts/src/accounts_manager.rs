@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use conjunto_transwise::{
-    RpcProviderConfig, TransactionAccountsExtractorImpl, Transwise,
+    account_fetcher::RemoteAccountFetcher,
+    transaction_accounts_extractor::TransactionAccountsExtractorImpl,
+    transaction_accounts_validator::TransactionAccountsValidatorImpl,
+    RpcProviderConfig,
 };
 use sleipnir_account_updates::RemoteAccountUpdatesReader;
 use sleipnir_bank::bank::Bank;
@@ -25,22 +28,24 @@ use crate::{
 
 pub type AccountsManager = ExternalAccountsManager<
     BankAccountProvider,
+    RemoteAccountFetcher,
     RemoteAccountCloner,
     RemoteAccountCommitter,
     RemoteAccountUpdatesReader,
-    Transwise,
     TransactionAccountsExtractorImpl,
+    TransactionAccountsValidatorImpl,
     RemoteScheduledCommitsProcessor,
 >;
 
 impl
     ExternalAccountsManager<
         BankAccountProvider,
+        RemoteAccountFetcher,
         RemoteAccountCloner,
         RemoteAccountCommitter,
         RemoteAccountUpdatesReader,
-        Transwise,
         TransactionAccountsExtractorImpl,
+        TransactionAccountsValidatorImpl,
         RemoteScheduledCommitsProcessor,
     >
 {
@@ -63,6 +68,9 @@ impl
         );
         let rpc_provider_config = RpcProviderConfig::new(rpc_cluster, None);
 
+        let account_fetcher =
+            RemoteAccountFetcher::new(rpc_provider_config.clone());
+
         let account_cloner = RemoteAccountCloner::new(
             cluster.clone(),
             bank.clone(),
@@ -74,9 +82,6 @@ impl
             config.commit_compute_unit_price,
         );
 
-        let validated_accounts_provider =
-            Transwise::new(rpc_provider_config.clone());
-
         let scheduled_commits_processor = RemoteScheduledCommitsProcessor::new(
             cluster,
             bank.clone(),
@@ -85,11 +90,12 @@ impl
 
         Ok(Self {
             internal_account_provider,
+            account_fetcher,
             account_cloner,
             account_committer: Arc::new(account_committer),
             account_updates: remote_account_updates_reader,
-            validated_accounts_provider,
             transaction_accounts_extractor: TransactionAccountsExtractorImpl,
+            transaction_accounts_validator: TransactionAccountsValidatorImpl,
             external_readonly_accounts: ExternalReadonlyAccounts::default(),
             external_writable_accounts: ExternalWritableAccounts::default(),
             external_readonly_mode: external_config.readonly,

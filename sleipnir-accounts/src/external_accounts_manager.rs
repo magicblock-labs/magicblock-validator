@@ -1,9 +1,12 @@
 use std::{sync::Arc, time::Duration};
 
 use conjunto_transwise::{
+    account_fetcher::AccountFetcher,
+    transaction_accounts_extractor::TransactionAccountsExtractor,
     transaction_accounts_holder::TransactionAccountsHolder,
-    validated_accounts::ValidateAccountsConfig, TransactionAccountsExtractor,
-    ValidatedAccountsProvider,
+    transaction_accounts_validator::{
+        TransactionAccountsValidator, ValidateAccountsConfig,
+    },
 };
 use log::*;
 use sleipnir_account_updates::AccountUpdates;
@@ -23,22 +26,24 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct ExternalAccountsManager<IAP, ACL, ACM, ACU, VAP, TAE, SCP>
+pub struct ExternalAccountsManager<IAP, AFE, ACL, ACM, AUP, TAE, TAV, SCP>
 where
     IAP: InternalAccountProvider,
+    AFE: AccountFetcher,
     ACL: AccountCloner,
     ACM: AccountCommitter,
-    ACU: AccountUpdates,
-    VAP: ValidatedAccountsProvider,
+    AUP: AccountUpdates,
     TAE: TransactionAccountsExtractor,
+    TAV: TransactionAccountsValidator,
     SCP: ScheduledCommitsProcessor,
 {
     pub internal_account_provider: IAP,
+    pub account_fetcher: AFE,
     pub account_cloner: ACL,
     pub account_committer: Arc<ACM>,
-    pub account_updates: ACU,
-    pub validated_accounts_provider: VAP,
+    pub account_updates: AUP,
     pub transaction_accounts_extractor: TAE,
+    pub transaction_accounts_validator: TAV,
     pub scheduled_commits_processor: SCP,
     pub external_readonly_accounts: ExternalReadonlyAccounts,
     pub external_writable_accounts: ExternalWritableAccounts,
@@ -49,15 +54,16 @@ where
     pub validator_id: Pubkey,
 }
 
-impl<IAP, ACL, ACM, ACU, VAP, TAE, SCP>
-    ExternalAccountsManager<IAP, ACL, ACM, ACU, VAP, TAE, SCP>
+impl<IAP, AFE, ACL, ACM, AUP, TAE, TAV, SCP>
+    ExternalAccountsManager<IAP, AFE, ACL, ACM, AUP, TAE, TAV, SCP>
 where
     IAP: InternalAccountProvider,
+    AFE: AccountFetcher,
     ACL: AccountCloner,
     ACM: AccountCommitter,
-    ACU: AccountUpdates,
-    VAP: ValidatedAccountsProvider,
+    AUP: AccountUpdates,
     TAE: TransactionAccountsExtractor,
+    TAV: TransactionAccountsValidator,
     SCP: ScheduledCommitsProcessor,
 {
     pub async fn ensure_accounts(
@@ -89,12 +95,6 @@ where
         accounts_holder: TransactionAccountsHolder,
         signature: String,
     ) -> AccountsResult<Vec<Signature>> {
-        // NOTE: when we don't require delegation then we still query the account states to
-        // get the chain_state of each delegated. This causes some unnecessary overhead which we
-        // could avoid if we make the lockbox aware of this, i.e. by adding an LockstateUnknown
-        // variant and returning that instead of checking it.
-        // However this is only the case when developing locally and thus we may not optimize for it.
-
         // 2.A Collect all readonly accounts we've never seen before and need to clone as readonly
         let unseen_readonly_accounts =
             if self.external_readonly_mode.is_clone_none() {
@@ -170,15 +170,20 @@ where
             unseen_writable_accounts
         );
 
-        // 3. Validate only the accounts that we see for the very first time
-        let validated_accounts = self
-            .validated_accounts_provider
-            .validate_accounts(
-                &TransactionAccountsHolder {
-                    readonly: unseen_readonly_accounts,
-                    writable: unseen_writable_accounts,
-                    payer: accounts_holder.payer,
-                },
+        // 3.A Fetch the accounts that we've seen for the first time
+        let acc_snapshot = self
+            .account_fetcher
+            .fetch_transaction_accounts_snapshot(&TransactionAccountsHolder {
+                readonly: unseen_readonly_accounts,
+                writable: unseen_writable_accounts,
+                payer: accounts_holder.payer,
+            })
+            .await?;
+
+        // 3.B Validate the accounts that we see for the very first time
+        let validated_accounts =
+            self.transaction_accounts_validator.validate_accounts(
+                &acc_snapshot,
                 &ValidateAccountsConfig {
                     allow_new_accounts: self.create_accounts,
                     // Here we specify if we can clone all writable accounts or
@@ -187,8 +192,7 @@ where
                         .external_writable_mode
                         .is_clone_delegated_only(),
                 },
-            )
-            .await?;
+            )?;
 
         // 4.A If a readonly account is not a program, but we only should clone programs then
         //     we have a problem since the account does not exist nor will it be created.
@@ -199,7 +203,7 @@ where
         let programs_only =
             self.external_readonly_mode.is_clone_programs_only();
 
-        let cloned_readonly_accounts = validated_accounts
+        let cloned_readonly_accounts = acc_snapshot
             .readonly
             .into_iter()
             .filter(|acc| match &acc.account {
@@ -211,7 +215,7 @@ where
             .collect::<Vec<_>>();
 
         // 4.B We will want to make sure that all accounts that exist on chain and are writable have been cloned
-        let cloned_writable_accounts = validated_accounts
+        let cloned_writable_accounts = acc_snapshot
             .writable
             .into_iter()
             .filter(|acc| acc.account.is_some())
