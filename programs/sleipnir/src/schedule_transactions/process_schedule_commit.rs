@@ -14,8 +14,14 @@ use super::transaction_scheduler::ScheduledCommit;
 use crate::{
     schedule_transactions::transaction_scheduler::TransactionScheduler,
     sleipnir_instruction::scheduled_commit_sent,
-    utils::accounts::{
-        get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
+    utils::{
+        accounts::{
+            get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
+        },
+        instruction_context_frames::{
+            GenericInstructionContextFrames, InstructionContextFrame,
+            InstructionContextFrames,
+        },
     },
 };
 
@@ -36,6 +42,25 @@ pub(crate) fn process_schedule_commit(
     let ix_ctx = transaction_context.get_current_instruction_context()?;
     let ix_accs_len = ix_ctx.get_number_of_instruction_accounts() as usize;
 
+    let frames: InstructionContextFrames = transaction_context.try_into()?;
+    let program_id = frames
+        .find_program_id_of_parent_frame_from_ix_ctx(
+            ix_ctx,
+            transaction_context,
+        )
+        .ok_or_else(|| {
+            ic_msg!(
+                invoke_context,
+                "ScheduleCommit ERR: failed to find parent program id"
+            );
+            InstructionError::InvalidInstructionData
+        })?;
+
+    ic_msg!(
+        invoke_context,
+        "ScheduleCommit: parent program id: {}",
+        program_id
+    );
     const COMMITTEES_START: usize = SYSTEM_PROG_IDX as usize + 1;
 
     // Assert MagicBlock program

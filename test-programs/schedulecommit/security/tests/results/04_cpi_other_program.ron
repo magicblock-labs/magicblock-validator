@@ -149,7 +149,7 @@ TransactionContext {
             program_accounts: [
                 // Loader
                 8,
-                // MagicBlock System Program
+                // Malicious Program
                 6,
             ],
             instruction_accounts: [
