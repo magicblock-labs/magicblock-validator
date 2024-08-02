@@ -31,30 +31,12 @@ pub(crate) fn process_schedule_commit(
     static ID: AtomicU64 = AtomicU64::new(0);
 
     const PAYER_IDX: u16 = 0;
-    const PROGRAM_IDX: u16 = 1;
-    const VALIDATOR_IDX: u16 = 2;
-    const SYSTEM_PROG_IDX: u16 = 3;
+    const VALIDATOR_IDX: u16 = 1;
+    const SYSTEM_PROG_IDX: u16 = 2;
 
     let transaction_context = &invoke_context.transaction_context.clone();
     let ix_ctx = transaction_context.get_current_instruction_context()?;
     let ix_accs_len = ix_ctx.get_number_of_instruction_accounts() as usize;
-
-    let frames: InstructionContextFrames = transaction_context.try_into()?;
-    let program_id = frames
-        .find_program_id_of_parent_of_current_instruction()
-        .ok_or_else(|| {
-            ic_msg!(
-                invoke_context,
-                "ScheduleCommit ERR: failed to find parent program id"
-            );
-            InstructionError::InvalidInstructionData
-        })?;
-
-    ic_msg!(
-        invoke_context,
-        "ScheduleCommit: parent program id: {}",
-        program_id
-    );
     const COMMITTEES_START: usize = SYSTEM_PROG_IDX as usize + 1;
 
     // Assert MagicBlock program
@@ -90,8 +72,23 @@ pub(crate) fn process_schedule_commit(
         return Err(InstructionError::MissingRequiredSignature);
     }
 
-    let owner_pubkey =
-        get_instruction_pubkey_with_idx(transaction_context, PROGRAM_IDX)?;
+    // The program_id of the parent instruction that invoked this one via CPI
+    let frames = InstructionContextFrames::try_from(transaction_context)?;
+    let parent_program_id = frames
+        .find_program_id_of_parent_of_current_instruction()
+        .ok_or_else(|| {
+            ic_msg!(
+                invoke_context,
+                "ScheduleCommit ERR: failed to find parent program id"
+            );
+            InstructionError::InvalidInstructionData
+        })?;
+
+    ic_msg!(
+        invoke_context,
+        "ScheduleCommit: parent program id: {}",
+        parent_program_id
+    );
 
     // Assert validator identity matches
     let validator_pubkey =
@@ -106,7 +103,10 @@ pub(crate) fn process_schedule_commit(
         return Err(InstructionError::IncorrectAuthority);
     }
 
-    // Assert all PDAs are owned by invoking program and are signers
+    // Assert all PDAs are owned by invoking program
+    // NOTE: we don't require them to be signers as in our case verifying that the
+    // program owning the PDAs invoked us via CPI is sufficient
+    // Thus we can be `invoke`d unsigned and thus no seeds need to be provided
     let mut pubkeys = Vec::new();
     for idx in COMMITTEES_START..ix_accs_len {
         let acc_pubkey =
@@ -114,24 +114,14 @@ pub(crate) fn process_schedule_commit(
         let acc =
             get_instruction_account_with_idx(transaction_context, idx as u16)?;
 
-        if owner_pubkey != acc.borrow().owner() {
+        if parent_program_id != acc.borrow().owner() {
             ic_msg!(
                 invoke_context,
-                "ScheduleCommit ERR: account {} needs to be owned by invoking program {} to be committed, but is owned by {}",
-                acc_pubkey, owner_pubkey, acc.borrow().owner()
+                "ScheduleCommit ERR: account {} needs to be owned by the invoking program {} to be committed, but is owned by {}",
+                acc_pubkey, parent_program_id, acc.borrow().owner()
             );
             return Err(InstructionError::InvalidAccountOwner);
         }
-        if !signers.contains(acc_pubkey) {
-            ic_msg!(
-                invoke_context,
-                "ScheduleCommit ERR: account pubkey {} not in signers,
-                 which means it's not a PDA of the invoking program or the corresponding signer seed were not included",
-                acc_pubkey
-            );
-            return Err(InstructionError::MissingRequiredSignature);
-        }
-
         pubkeys.push(*acc_pubkey);
     }
 
