@@ -7,6 +7,7 @@ use solana_program::{
     entrypoint::ProgramResult,
     msg,
     program::invoke,
+    program_error::ProgramError,
     pubkey::Pubkey,
 };
 
@@ -37,6 +38,24 @@ pub fn process_instruction<'a>(
         // - **32..64**  Player 2 pubkey from which second PDA was derived
         // - **n..n+32** Player n pubkey from which n-th PDA was derived
         0 => process_sibling_schedule_cpis(accounts, instruction_data_inner)?,
+
+        // - **0.**   `[WRITE, SIGNER]` Payer
+        1 => process_non_cpi(accounts, instruction_data_inner)?,
+
+        // # Account references
+        // - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
+        // - **1.**   `[SIGNER]`        The program owning the accounts to be committed
+        // - **2.**   `[WRITE]`         Validator authority to which we escrow tx cost
+        // - **3**    `[]`              MagicBlock Program (used to schedule commit)
+        // - **4**    `[]`              System Program to support PDA signing
+        // - **5..n** `[]`              PDA accounts to be committed
+        //
+        // # Instruction Args
+        //
+        // - **0..32**   Player 1 pubkey from which first PDA was derived
+        // - **32..64**  Player 2 pubkey from which second PDA was derived
+        // - **n..n+32** Player n pubkey from which n-th PDA was derived
+        2 => process_nested_cpi(accounts, instruction_data_inner)?,
         _ => {
             msg!("Error: unknown instruction")
         }
@@ -126,5 +145,77 @@ fn process_sibling_schedule_cpis(
             &account_infos.into_iter().cloned().collect::<Vec<_>>(),
         )?;
     }
+    Ok(())
+}
+
+fn process_non_cpi(
+    accounts: &[AccountInfo],
+    instruction_data: &[u8],
+) -> ProgramResult {
+    msg!("Processing non_cpi instruction");
+    msg!("Accounts: {}", accounts.len());
+    msg!("Instruction data: {:?}", instruction_data);
+
+    Ok(())
+}
+
+/// This instruction attempts to commit the CPI directly via MagicBlock program,
+/// however this only works if it is also the owner of the PDAs
+/// It is basically the same as
+/// process_schedulecommit_cpi inside ../../program/src/lib.rs:193,
+/// but does not sign.
+/// TODO: @@@ Once the identical fn doesn't sign anymore we can reuse it and
+/// the only difference is that it is a different program owning the invoked
+/// instruction.
+///
+fn process_nested_cpi(
+    accounts: &[AccountInfo],
+    instruction_data: &[u8],
+) -> ProgramResult {
+    msg!("Processing nested_cpi instruction");
+
+    let accounts_iter = &mut accounts.iter();
+    let payer = next_account_info(accounts_iter)?;
+    let owning_program = next_account_info(accounts_iter)?;
+    let validator_auth = next_account_info(accounts_iter)?;
+    let magic_program = next_account_info(accounts_iter)?;
+    let system_program = next_account_info(accounts_iter)?;
+    let mut remaining = vec![];
+    for info in accounts_iter.by_ref() {
+        remaining.push(info.clone());
+    }
+
+    let args = instruction_data.chunks(32).collect::<Vec<_>>();
+    let player_pubkeys = args
+        .into_iter()
+        .map(Pubkey::try_from)
+        .collect::<Result<Vec<Pubkey>, _>>()
+        .map_err(|err| {
+            msg!("ERROR: failed to parse player pubkey {:?}", err);
+            ProgramError::InvalidArgument
+        })?;
+
+    if remaining.len() != player_pubkeys.len() {
+        msg!(
+            "ERROR: player_pubkeys.len() != committes.len() | {} != {}",
+            player_pubkeys.len(),
+            remaining.len()
+        );
+        return Err(ProgramError::InvalidArgument);
+    }
+
+    // Then request the PDA accounts to be committed
+    let mut account_infos =
+        vec![payer, owning_program, validator_auth, system_program];
+    account_infos.extend(remaining.iter());
+
+    msg!(
+        "Committees are {:?}",
+        remaining.iter().map(|x| x.key).collect::<Vec<_>>()
+    );
+    let ix = create_schedule_commit_ix(*magic_program.key, &account_infos);
+
+    invoke(&ix, &account_infos.into_iter().cloned().collect::<Vec<_>>())?;
+
     Ok(())
 }

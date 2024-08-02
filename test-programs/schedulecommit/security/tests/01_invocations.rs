@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use schedulecommit_client::ScheduleCommitTestContext;
+use schedulecommit_program::api::schedule_commit_cpi_instruction;
 use sleipnir_core::magic_program;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{
@@ -11,7 +12,11 @@ use solana_sdk::{
     transaction::Transaction,
 };
 
-use crate::utils::create_sibling_schedule_cpis_instruction;
+use crate::utils::{
+    create_nested_schedule_cpis_instruction,
+    create_sibling_non_cpi_instruction,
+    create_sibling_schedule_cpis_instruction,
+};
 mod utils;
 
 const PROGRAM_ADDR: &str = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY";
@@ -158,7 +163,7 @@ fn test_schedule_commit_directly_with_commit_ix_sandwiched() {
 }
 
 #[test]
-fn test_schedule_commit_via_cpi_of_other_program() {
+fn test_schedule_commit_via_direct_and_indirect_cpi_of_other_program() {
     let ctx = prepare_ctx_with_account_to_commit();
     let ScheduleCommitTestContext {
         payer,
@@ -187,6 +192,71 @@ fn test_schedule_commit_via_cpi_of_other_program() {
 
     let tx = Transaction::new_signed_with_payer(
         &[ix],
+        Some(&payer.pubkey()),
+        &[&payer],
+        *ephem_blockhash,
+    );
+
+    let sig = tx.signatures[0];
+    let res = ephem_client
+        .send_and_confirm_transaction_with_spinner_and_config(
+            &tx,
+            *commitment,
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        );
+    eprintln!("Transaction '{:?}' res: '{:?}'", sig, res);
+}
+/*
+   A) Malicious Program Instruction (Non CPI)
+   B) CPI to the program that owns the PDAs
+   C) Malicious Program Instruction
+    D) CPI to MagicBlock Program
+*/
+
+#[test]
+fn test_schedule_commit_via_direct_and_indirect_cpi_of_other_program_including_non_cpi_instruction(
+) {
+    let ctx = prepare_ctx_with_account_to_commit();
+    let ScheduleCommitTestContext {
+        payer,
+        commitment,
+        committees,
+        ephem_blockhash,
+        ephem_client,
+        validator_identity,
+        ..
+    } = &ctx;
+
+    let players = &committees
+        .iter()
+        .map(|(player, _)| player.pubkey())
+        .collect::<Vec<_>>();
+    let pdas = &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>();
+
+    let non_cpi_ix = create_sibling_non_cpi_instruction(payer.pubkey());
+
+    let cpi_ix = schedule_commit_cpi_instruction(
+        payer.pubkey(),
+        *validator_identity,
+        Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
+        players,
+        pdas,
+    );
+
+    let nested_cpi_ix = create_nested_schedule_cpis_instruction(
+        payer.pubkey(),
+        Pubkey::from_str(PROGRAM_ADDR).unwrap(),
+        *validator_identity,
+        Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
+        pdas,
+        players,
+    );
+
+    let tx = Transaction::new_signed_with_payer(
+        &[non_cpi_ix, cpi_ix, nested_cpi_ix],
         Some(&payer.pubkey()),
         &[&payer],
         *ephem_blockhash,

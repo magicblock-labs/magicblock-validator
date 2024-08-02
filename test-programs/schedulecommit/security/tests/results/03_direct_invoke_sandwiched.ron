@@ -1,3 +1,9 @@
+// test_schedule_commit_directly_with_commit_ix_sandwiched
+/*
+    A) System Transfer Instruction
+    B) Direct Schedule Commit
+    C) System Transfer Instruction
+*/
 TransactionContext {
     account_keys: [
         // Payer

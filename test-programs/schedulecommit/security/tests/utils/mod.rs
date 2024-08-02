@@ -4,13 +4,14 @@ use solana_sdk::{
     system_program,
 };
 
-pub fn create_sibling_schedule_cpis_instruction(
+fn create_wrapper_schedule_cpis_instruction(
     payer: Pubkey,
     pda_owning_program_id: Pubkey,
     validator_id: Pubkey,
     magic_program_id: Pubkey,
     pdas: &[Pubkey],
     player_pubkeys: &[Pubkey],
+    ix_id: u8,
 ) -> Instruction {
     let mut account_metas = vec![
         AccountMeta::new(payer, true),
@@ -20,7 +21,7 @@ pub fn create_sibling_schedule_cpis_instruction(
         AccountMeta::new_readonly(system_program::id(), false),
     ];
 
-    let mut instruction_data = vec![0];
+    let mut instruction_data = vec![ix_id];
     for pubkey in pdas {
         account_metas.push(AccountMeta {
             pubkey: *pubkey,
@@ -36,5 +37,53 @@ pub fn create_sibling_schedule_cpis_instruction(
         schedulecommit_security::id(),
         &instruction_data,
         account_metas,
+    )
+}
+
+pub fn create_sibling_schedule_cpis_instruction(
+    payer: Pubkey,
+    pda_owning_program_id: Pubkey,
+    validator_id: Pubkey,
+    magic_program_id: Pubkey,
+    pdas: &[Pubkey],
+    player_pubkeys: &[Pubkey],
+) -> Instruction {
+    create_wrapper_schedule_cpis_instruction(
+        payer,
+        pda_owning_program_id,
+        validator_id,
+        magic_program_id,
+        pdas,
+        player_pubkeys,
+        0,
+    )
+}
+
+pub fn create_sibling_non_cpi_instruction(payer: Pubkey) -> Instruction {
+    let account_metas = vec![AccountMeta::new(payer, true)];
+    let instruction_data = vec![1, 0, 0, 0];
+    Instruction::new_with_bytes(
+        schedulecommit_security::id(),
+        &instruction_data,
+        account_metas,
+    )
+}
+
+pub fn create_nested_schedule_cpis_instruction(
+    payer: Pubkey,
+    pda_owning_program_id: Pubkey,
+    validator_id: Pubkey,
+    magic_program_id: Pubkey,
+    pdas: &[Pubkey],
+    player_pubkeys: &[Pubkey],
+) -> Instruction {
+    create_wrapper_schedule_cpis_instruction(
+        payer,
+        pda_owning_program_id,
+        validator_id,
+        magic_program_id,
+        pdas,
+        player_pubkeys,
+        2,
     )
 }
