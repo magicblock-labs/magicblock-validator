@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
 use conjunto_transwise::{
-    RpcProviderConfig, TransactionAccountsExtractorImpl, Transwise,
+    transaction_accounts_extractor::TransactionAccountsExtractorImpl,
+    transwise::Transwise, RpcProviderConfig,
 };
 use log::*;
 use sleipnir_account_updates::RemoteAccountUpdatesReader;

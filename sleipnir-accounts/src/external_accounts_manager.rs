@@ -1,9 +1,9 @@
 use std::{collections::HashMap, time::Duration};
 
 use conjunto_transwise::{
+    transaction_accounts_extractor::TransactionAccountsExtractor,
     transaction_accounts_holder::TransactionAccountsHolder,
-    validated_accounts::ValidateAccountsConfig, TransactionAccountsExtractor,
-    ValidatedAccountsProvider,
+    transaction_accounts_validator::TransactionAccountsValidator,
 };
 use log::*;
 use sleipnir_account_updates::AccountUpdates;
@@ -17,11 +17,10 @@ use solana_sdk::{
 };
 
 use crate::{
-    config::{ExternalReadonlyMode, ExternalWritableMode},
     errors::AccountsResult,
-    external_accounts::{ExternalReadonlyAccounts, ExternalWritableAccounts},
     traits::{AccountCloner, AccountCommitter, InternalAccountProvider},
     utils::get_epoch,
+    ExternalAccountsStore, ExternalCloneMode,
 };
 
 pub enum CommitAccountInfo {
@@ -46,55 +45,47 @@ pub struct CommitAccountTransaction {
 }
 
 #[derive(Debug)]
-pub struct ExternalAccountsManager<IAP, ACL, ACM, ACU, VAP, TAE>
+pub struct ExternalAccountsManager<IAP, ACL, ACM, ACU, TAV, TAE>
 where
     IAP: InternalAccountProvider,
     ACL: AccountCloner,
     ACM: AccountCommitter,
     ACU: AccountUpdates,
-    VAP: ValidatedAccountsProvider,
+    TAV: TransactionAccountsValidator,
     TAE: TransactionAccountsExtractor,
 {
     pub internal_account_provider: IAP,
     pub account_cloner: ACL,
     pub account_committer: ACM,
     pub account_updates: ACU,
-    pub validated_accounts_provider: VAP,
+    pub transaction_accounts_validator: TAV,
     pub transaction_accounts_extractor: TAE,
-    pub external_readonly_accounts: ExternalReadonlyAccounts,
-    pub external_writable_accounts: ExternalWritableAccounts,
-    pub external_readonly_mode: ExternalReadonlyMode,
-    pub external_writable_mode: ExternalWritableMode,
+    pub external_acccounts_store: ExternalAccountsStore,
+    pub external_clone_mode: ExternalCloneMode,
     pub create_accounts: bool,
     pub payer_init_lamports: Option<u64>,
 }
 
-impl<IAP, ACL, ACM, ACU, VAP, TAE>
-    ExternalAccountsManager<IAP, ACL, ACM, ACU, VAP, TAE>
+impl<IAP, ACL, ACM, ACU, TAV, TAE>
+    ExternalAccountsManager<IAP, ACL, ACM, ACU, TAV, TAE>
 where
     IAP: InternalAccountProvider,
     ACL: AccountCloner,
     ACM: AccountCommitter,
     ACU: AccountUpdates,
-    VAP: ValidatedAccountsProvider,
+    TAV: TransactionAccountsValidator,
     TAE: TransactionAccountsExtractor,
 {
     pub async fn ensure_accounts(
         &self,
         tx: &SanitizedTransaction,
     ) -> AccountsResult<Vec<Signature>> {
-        // If this validator does not clone any accounts then we're done
-        if self.external_readonly_mode.is_clone_none()
-            && self.external_writable_mode.is_clone_none()
-        {
-            return Ok(vec![]);
-        }
-
         // 1. Extract all acounts from the transaction
         let accounts_holder = self
             .transaction_accounts_extractor
             .try_accounts_from_sanitized_transaction(tx)?;
 
+        // 2. Make sure all accounts necessary for the transaction are cloned and ready
         self.ensure_accounts_from_holder(
             accounts_holder,
             tx.signature().to_string(),
@@ -102,7 +93,18 @@ where
         .await
     }
 
-    // Direct use for tests only
+    async fn ensure_accounts_cloned(
+        &self,
+        pubkeys: Vec<Pubkey>,
+    ) -> AccountsResult<Vec<Signature>> {
+        // If this validator does not clone any external accounts then we're done
+        if self.external_clone_mode == ExternalCloneMode::None {
+            return Ok(vec![]);
+        }
+
+        Ok(vec![]) // TODO(vbrunet)
+    }
+
     pub async fn ensure_accounts_from_holder(
         &self,
         accounts_holder: TransactionAccountsHolder,
@@ -187,7 +189,7 @@ where
 
         // 3. Validate only the accounts that we see for the very first time
         let validated_accounts = self
-            .validated_accounts_provider
+            .transaction_accounts_validator
             .validate_accounts(
                 &TransactionAccountsHolder {
                     readonly: unseen_readonly_accounts,

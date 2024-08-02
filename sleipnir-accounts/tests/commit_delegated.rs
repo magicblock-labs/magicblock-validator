@@ -12,7 +12,7 @@ use stubs::{
     account_committer_stub::AccountCommitterStub,
     account_updates_stub::AccountUpdatesStub,
     internal_account_provider_stub::InternalAccountProviderStub,
-    validated_accounts_provider_stub::ValidatedAccountsProviderStub,
+    transaction_accounts_validator_stub::ValidatedAccountsProviderStub,
 };
 use test_tools_core::init_logger;
 
