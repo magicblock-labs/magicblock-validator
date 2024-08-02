@@ -4,6 +4,9 @@ use solana_sdk::{
     transaction_context::{InstructionContext, TransactionContext},
 };
 
+// -----------------
+// InstructionFrame Trait
+// -----------------
 pub(crate) trait InstructionFrame {
     /// How deeply in the stack this frame is.
     fn get_nesting_level(&self) -> usize;
@@ -13,6 +16,9 @@ pub(crate) trait InstructionFrame {
     fn get_program_id(&self) -> Option<&Pubkey>;
 }
 
+// -----------------
+// InstructionContextFrame
+// -----------------
 pub(crate) struct InstructionContextFrame<'a> {
     instruction_ctx: &'a InstructionContext,
     transaction_ctx: &'a TransactionContext,
@@ -34,14 +40,18 @@ impl InstructionFrame for InstructionContextFrame<'_> {
     }
 }
 
+// -----------------
+// GenericInstructionContextFrames
+// -----------------
+
 /// Represents all frames in a transaction in the order that they would be called.
 /// For top level instrucions the nesting_level is 0.
 /// All nested instructions are invoked via CPI.
 ///
-/// The frames are in depth first order, meaning sibling instructions come behind
-/// any child instrucions of a specific frame.
+/// This vec holds frames of multiple stacks.
 ///
-/// Thus this vec can hold frames of multiple stacks.
+/// The frames are in depth first order, meaning sibling instructions come after
+/// any child instrucions of a specific frame.
 pub(crate) struct GenericInstructionContextFrames<F: InstructionFrame>(Vec<F>);
 
 impl<F: InstructionFrame> GenericInstructionContextFrames<F> {
@@ -87,6 +97,9 @@ impl<F: InstructionFrame> GenericInstructionContextFrames<F> {
     }
 }
 
+// -----------------
+// InstructionContextFrames
+// -----------------
 pub(crate) struct InstructionContextFrames<'a> {
     frames: GenericInstructionContextFrames<InstructionContextFrame<'a>>,
     current_frame_idx: usize,
@@ -138,6 +151,9 @@ impl<'a> TryFrom<&'a TransactionContext> for InstructionContextFrames<'a> {
     }
 }
 
+// -----------------
+// Tests
+// -----------------
 #[cfg(test)]
 mod tests {
     use super::*;
