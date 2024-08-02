@@ -19,7 +19,7 @@ use crate::utils::{
 };
 mod utils;
 
-const PROGRAM_ADDR: &str = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY";
+const _PROGRAM_ADDR: &str = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY";
 
 fn prepare_ctx_with_account_to_commit() -> ScheduleCommitTestContext {
     let ctx = if std::env::var("RK").is_ok() {
@@ -35,7 +35,6 @@ fn prepare_ctx_with_account_to_commit() -> ScheduleCommitTestContext {
 
 fn create_schedule_commit_ix(
     payer: Pubkey,
-    program_id: Pubkey,
     validator_id: Pubkey,
     magic_program_key: Pubkey,
     pubkeys: &[Pubkey],
@@ -43,7 +42,6 @@ fn create_schedule_commit_ix(
     let instruction_data = vec![1, 0, 0, 0];
     let mut account_metas = vec![
         AccountMeta::new(payer, true),
-        AccountMeta::new_readonly(program_id, false),
         AccountMeta::new(validator_id, false),
         AccountMeta::new_readonly(system_program::id(), false),
     ];
@@ -77,7 +75,6 @@ fn test_schedule_commit_directly_with_single_ix() {
     } = &ctx;
     let ix = create_schedule_commit_ix(
         payer.pubkey(),
-        Pubkey::from_str(PROGRAM_ADDR).unwrap(),
         *validator_identity,
         Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
         &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
@@ -100,6 +97,12 @@ fn test_schedule_commit_directly_with_single_ix() {
                 ..Default::default()
             },
         );
+    // TODO: assert it fails with fails with the following
+    // [
+    //   "Program Magic11111111111111111111111111111111111111 invoke [1]",
+    //   "ScheduleCommit ERR: failed to find parent program id",
+    //   "Program Magic11111111111111111111111111111111111111 failed: invalid instruction data"
+    // ]
     eprintln!("Transaction '{:?}' res: '{:?}'", sig, res);
 }
 
@@ -129,7 +132,6 @@ fn test_schedule_commit_directly_with_commit_ix_sandwiched() {
     // 2. Schedule commit
     let ix = create_schedule_commit_ix(
         payer.pubkey(),
-        Pubkey::from_str(PROGRAM_ADDR).unwrap(),
         *validator_identity,
         Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
         &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
@@ -160,10 +162,20 @@ fn test_schedule_commit_directly_with_commit_ix_sandwiched() {
             },
         );
     eprintln!("Transaction '{:?}' res: '{:?}'", sig, res);
+    // TODO: assert it fails with fails with the following
+    // [
+    //   "Program Magic11111111111111111111111111111111111111 invoke [1]",
+    //   "ScheduleCommit ERR: failed to find parent program id",
+    //   "Program Magic11111111111111111111111111111111111111 failed: invalid instruction data"
+    // ]
 }
 
 #[test]
 fn test_schedule_commit_via_direct_and_indirect_cpi_of_other_program() {
+    // TODO: figure out issue:
+    // > Unknown program 9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY
+    // > Program consumed: 50949 of 200000 compute units
+    // > Program returned error: "An account required by the instruction is missing"
     let ctx = prepare_ctx_with_account_to_commit();
     let ScheduleCommitTestContext {
         payer,
@@ -183,7 +195,6 @@ fn test_schedule_commit_via_direct_and_indirect_cpi_of_other_program() {
 
     let ix = create_sibling_schedule_cpis_instruction(
         payer.pubkey(),
-        Pubkey::from_str(PROGRAM_ADDR).unwrap(),
         *validator_identity,
         Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
         pdas,
@@ -217,7 +228,7 @@ fn test_schedule_commit_via_direct_and_indirect_cpi_of_other_program() {
 */
 
 #[test]
-fn test_schedule_commit_via_direct_and_indirect_cpi_of_other_program_including_non_cpi_instruction(
+fn test_schedule_commit_via_direct_and_from_other_program_indirect_cpi_including_non_cpi_instruction(
 ) {
     let ctx = prepare_ctx_with_account_to_commit();
     let ScheduleCommitTestContext {
@@ -248,7 +259,6 @@ fn test_schedule_commit_via_direct_and_indirect_cpi_of_other_program_including_n
 
     let nested_cpi_ix = create_nested_schedule_cpis_instruction(
         payer.pubkey(),
-        Pubkey::from_str(PROGRAM_ADDR).unwrap(),
         *validator_identity,
         Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
         pdas,
@@ -273,4 +283,12 @@ fn test_schedule_commit_via_direct_and_indirect_cpi_of_other_program_including_n
             },
         );
     eprintln!("Transaction '{:?}' res: '{:?}'", sig, res);
+
+    // TODO: assert fails with
+    // "Program Magic11111111111111111111111111111111111111 invoke [2]",
+    // "ScheduleCommit: parent program id: 4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr",
+    // "ScheduleCommit ERR: account 9jmXmqNCJmrKFAsVYmteT5EFgzRPNY4Sdvo1mwMRudbi needs to be owned by the invoking program 4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr to be committed, but is owned by 9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY",
+    // "Program Magic11111111111111111111111111111111111111 failed: Invalid account owner",
+    // "Program 4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr consumed 4263 of 592828 compute units",
+    // "Program 4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr failed: Invalid account owner"
 }

@@ -1,5 +1,6 @@
 use schedulecommit_program::{
     api::schedule_commit_cpi_instruction, create_schedule_commit_ix,
+    process_schedulecommit_cpi,
 };
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
@@ -7,7 +8,6 @@ use solana_program::{
     entrypoint::ProgramResult,
     msg,
     program::invoke,
-    program_error::ProgramError,
     pubkey::Pubkey,
 };
 
@@ -26,7 +26,6 @@ pub fn process_instruction<'a>(
     match instruction_discriminant[0] {
         // # Account references
         // - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
-        // - **1.**   `[SIGNER]`        The program owning the accounts to be committed
         // - **2.**   `[WRITE]`         Validator authority to which we escrow tx cost
         // - **3**    `[]`              MagicBlock Program (used to schedule commit)
         // - **4**    `[]`              System Program to support PDA signing
@@ -42,9 +41,15 @@ pub fn process_instruction<'a>(
         // - **0.**   `[WRITE, SIGNER]` Payer
         1 => process_non_cpi(accounts, instruction_data_inner)?,
 
+        // This instruction attempts to commit the CPI directly via MagicBlock program,
+        // however this only works if it is also the owner of the PDAs.
+        // It is reusing the instruction or the _legit_ program (owning the PDAs)
+        // The only difference is that it is a different program owning the invoked
+        // instruction.
+        // We also don't attempt to modify the PDA accounts since we do not own them.
+        //
         // # Account references
         // - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
-        // - **1.**   `[SIGNER]`        The program owning the accounts to be committed
         // - **2.**   `[WRITE]`         Validator authority to which we escrow tx cost
         // - **3**    `[]`              MagicBlock Program (used to schedule commit)
         // - **4**    `[]`              System Program to support PDA signing
@@ -55,7 +60,9 @@ pub fn process_instruction<'a>(
         // - **0..32**   Player 1 pubkey from which first PDA was derived
         // - **32..64**  Player 2 pubkey from which second PDA was derived
         // - **n..n+32** Player n pubkey from which n-th PDA was derived
-        2 => process_nested_cpi(accounts, instruction_data_inner)?,
+        2 => {
+            process_schedulecommit_cpi(accounts, instruction_data_inner, false)?
+        }
         _ => {
             msg!("Error: unknown instruction")
         }
@@ -79,7 +86,6 @@ fn process_sibling_schedule_cpis(
 
     let accounts_iter = &mut accounts.iter();
     let payer = next_account_info(accounts_iter)?;
-    let owning_program = next_account_info(accounts_iter)?;
     let validator_auth = next_account_info(accounts_iter)?;
     let magic_program = next_account_info(accounts_iter)?;
     let system_program = next_account_info(accounts_iter)?;
@@ -87,13 +93,10 @@ fn process_sibling_schedule_cpis(
     let accounts_iter = &mut accounts.iter();
 
     let mut pda_infos = vec![];
-    for info in accounts_iter.by_ref().skip(5) {
-        let mut x = info.clone();
-        x.is_signer = true;
-        pda_infos.push(x);
+    for info in accounts_iter.by_ref().skip(4) {
+        pda_infos.push(info.clone());
     }
-    let account_infos =
-        vec![payer, owning_program, validator_auth, system_program];
+    let account_infos = vec![payer, validator_auth, system_program];
 
     msg!("Creating schedule commit CPI");
     let players = instruction_data
@@ -126,15 +129,7 @@ fn process_sibling_schedule_cpis(
     {
         // 2. CPI into the schedule commit directly
         let mut account_infos = account_infos.clone();
-        let non_signer_pda_infos = pda_infos
-            .iter()
-            .map(|x| {
-                let mut y = x.clone();
-                y.is_signer = false;
-                y
-            })
-            .collect::<Vec<_>>();
-        account_infos.extend(non_signer_pda_infos.iter());
+        account_infos.extend(pda_infos.iter());
 
         let direct_ix = create_schedule_commit_ix(
             *magic_program.key,
@@ -155,67 +150,6 @@ fn process_non_cpi(
     msg!("Processing non_cpi instruction");
     msg!("Accounts: {}", accounts.len());
     msg!("Instruction data: {:?}", instruction_data);
-
-    Ok(())
-}
-
-/// This instruction attempts to commit the CPI directly via MagicBlock program,
-/// however this only works if it is also the owner of the PDAs
-/// It is basically the same as
-/// process_schedulecommit_cpi inside ../../program/src/lib.rs:193,
-/// but does not sign.
-/// TODO: @@@ Once the identical fn doesn't sign anymore we can reuse it and
-/// the only difference is that it is a different program owning the invoked
-/// instruction.
-///
-fn process_nested_cpi(
-    accounts: &[AccountInfo],
-    instruction_data: &[u8],
-) -> ProgramResult {
-    msg!("Processing nested_cpi instruction");
-
-    let accounts_iter = &mut accounts.iter();
-    let payer = next_account_info(accounts_iter)?;
-    let owning_program = next_account_info(accounts_iter)?;
-    let validator_auth = next_account_info(accounts_iter)?;
-    let magic_program = next_account_info(accounts_iter)?;
-    let system_program = next_account_info(accounts_iter)?;
-    let mut remaining = vec![];
-    for info in accounts_iter.by_ref() {
-        remaining.push(info.clone());
-    }
-
-    let args = instruction_data.chunks(32).collect::<Vec<_>>();
-    let player_pubkeys = args
-        .into_iter()
-        .map(Pubkey::try_from)
-        .collect::<Result<Vec<Pubkey>, _>>()
-        .map_err(|err| {
-            msg!("ERROR: failed to parse player pubkey {:?}", err);
-            ProgramError::InvalidArgument
-        })?;
-
-    if remaining.len() != player_pubkeys.len() {
-        msg!(
-            "ERROR: player_pubkeys.len() != committes.len() | {} != {}",
-            player_pubkeys.len(),
-            remaining.len()
-        );
-        return Err(ProgramError::InvalidArgument);
-    }
-
-    // Then request the PDA accounts to be committed
-    let mut account_infos =
-        vec![payer, owning_program, validator_auth, system_program];
-    account_infos.extend(remaining.iter());
-
-    msg!(
-        "Committees are {:?}",
-        remaining.iter().map(|x| x.key).collect::<Vec<_>>()
-    );
-    let ix = create_schedule_commit_ix(*magic_program.key, &account_infos);
-
-    invoke(&ix, &account_infos.into_iter().cloned().collect::<Vec<_>>())?;
 
     Ok(())
 }

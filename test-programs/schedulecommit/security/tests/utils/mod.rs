@@ -6,7 +6,6 @@ use solana_sdk::{
 
 fn create_wrapper_schedule_cpis_instruction(
     payer: Pubkey,
-    pda_owning_program_id: Pubkey,
     validator_id: Pubkey,
     magic_program_id: Pubkey,
     pdas: &[Pubkey],
@@ -15,7 +14,6 @@ fn create_wrapper_schedule_cpis_instruction(
 ) -> Instruction {
     let mut account_metas = vec![
         AccountMeta::new(payer, true),
-        AccountMeta::new_readonly(pda_owning_program_id, false),
         AccountMeta::new(validator_id, false),
         AccountMeta::new_readonly(magic_program_id, false),
         AccountMeta::new_readonly(system_program::id(), false),
@@ -42,7 +40,6 @@ fn create_wrapper_schedule_cpis_instruction(
 
 pub fn create_sibling_schedule_cpis_instruction(
     payer: Pubkey,
-    pda_owning_program_id: Pubkey,
     validator_id: Pubkey,
     magic_program_id: Pubkey,
     pdas: &[Pubkey],
@@ -50,7 +47,6 @@ pub fn create_sibling_schedule_cpis_instruction(
 ) -> Instruction {
     create_wrapper_schedule_cpis_instruction(
         payer,
-        pda_owning_program_id,
         validator_id,
         magic_program_id,
         pdas,
@@ -71,7 +67,6 @@ pub fn create_sibling_non_cpi_instruction(payer: Pubkey) -> Instruction {
 
 pub fn create_nested_schedule_cpis_instruction(
     payer: Pubkey,
-    pda_owning_program_id: Pubkey,
     validator_id: Pubkey,
     magic_program_id: Pubkey,
     pdas: &[Pubkey],
@@ -79,7 +74,6 @@ pub fn create_nested_schedule_cpis_instruction(
 ) -> Instruction {
     create_wrapper_schedule_cpis_instruction(
         payer,
-        pda_owning_program_id,
         validator_id,
         magic_program_id,
         pdas,

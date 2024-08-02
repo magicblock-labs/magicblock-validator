@@ -50,7 +50,7 @@ pub fn process_instruction<'a>(
             // - **0..32**   Player 1 pubkey from which first PDA was derived
             // - **32..64**  Player 2 pubkey from which second PDA was derived
             // - **n..n+32** Player n pubkey from which n-th PDA was derived
-            process_schedulecommit_cpi(accounts, instruction_data_inner)?;
+            process_schedulecommit_cpi(accounts, instruction_data_inner, true)?;
         }
         2 => {
             // # Account references
@@ -190,6 +190,7 @@ pub fn process_delegate_cpi(
 pub fn process_schedulecommit_cpi(
     accounts: &[AccountInfo],
     instruction_data: &[u8],
+    modify_accounts: bool,
 ) -> Result<(), ProgramError> {
     msg!("Processing schedulecommit_cpi instruction");
 
@@ -222,17 +223,20 @@ pub fn process_schedulecommit_cpi(
         return Err(ProgramError::InvalidArgument);
     }
 
-    for committee in &remaining {
-        // Increase count of the PDA account
-        let main_account = {
-            let main_account_data = committee.try_borrow_data()?;
-            let mut main_account =
-                MainAccount::try_from_slice(&main_account_data)?;
-            main_account.count += 1;
-            main_account
-        };
-        main_account
-            .serialize(&mut &mut committee.try_borrow_mut_data()?.as_mut())?;
+    if modify_accounts {
+        for committee in &remaining {
+            // Increase count of the PDA account
+            let main_account = {
+                let main_account_data = committee.try_borrow_data()?;
+                let mut main_account =
+                    MainAccount::try_from_slice(&main_account_data)?;
+                main_account.count += 1;
+                main_account
+            };
+            main_account.serialize(
+                &mut &mut committee.try_borrow_mut_data()?.as_mut(),
+            )?;
+        }
     }
 
     // Then request the PDA accounts to be committed
