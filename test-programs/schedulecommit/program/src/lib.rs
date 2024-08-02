@@ -6,15 +6,13 @@ use solana_program::{
     entrypoint::{self, ProgramResult},
     instruction::{AccountMeta, Instruction},
     msg,
-    program::invoke_signed,
+    program::invoke,
     program_error::ProgramError,
     pubkey::Pubkey,
 };
 
 use crate::{
-    api::{
-        pda_and_bump, pda_seeds, pda_seeds_vec_with_bump, pda_seeds_with_bump,
-    },
+    api::{pda_and_bump, pda_seeds, pda_seeds_with_bump},
     utils::{
         allocate_account_and_assign_owner, assert_is_signer, assert_keys_equal,
         AllocateAndAssignAccountArgs,
@@ -42,11 +40,10 @@ pub fn process_instruction<'a>(
         1 => {
             // # Account references
             // - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
-            // - **1.**   `[SIGNER]`        The program owning the accounts to be committed
-            // - **2.**   `[WRITE]`         Validator authority to which we escrow tx cost
-            // - **3**    `[]`              MagicBlock Program (used to schedule commit)
-            // - **4**    `[]`              System Program to support PDA signing
-            // - **5..n** `[]`              PDA accounts to be committed
+            // - **1.**   `[WRITE]`         Validator authority to which we escrow tx cost
+            // - **2**    `[]`              MagicBlock Program (used to schedule commit)
+            // - **3**    `[]`              System Program to support PDA signing
+            // - **4..n** `[]`              PDA accounts to be committed
             //
             // # Instruction Args
             //
@@ -198,15 +195,12 @@ pub fn process_schedulecommit_cpi(
 
     let accounts_iter = &mut accounts.iter();
     let payer = next_account_info(accounts_iter)?;
-    let owning_program = next_account_info(accounts_iter)?;
     let validator_auth = next_account_info(accounts_iter)?;
     let magic_program = next_account_info(accounts_iter)?;
     let system_program = next_account_info(accounts_iter)?;
     let mut remaining = vec![];
     for info in accounts_iter.by_ref() {
-        let mut x = info.clone();
-        x.is_signer = true;
-        remaining.push(x);
+        remaining.push(info.clone());
     }
 
     let args = instruction_data.chunks(32).collect::<Vec<_>>();
@@ -228,8 +222,7 @@ pub fn process_schedulecommit_cpi(
         return Err(ProgramError::InvalidArgument);
     }
 
-    let mut player_bumps = vec![];
-    for (player, committee) in player_pubkeys.iter().zip(remaining.iter()) {
+    for committee in &remaining {
         // Increase count of the PDA account
         let main_account = {
             let main_account_data = committee.try_borrow_data()?;
@@ -240,24 +233,10 @@ pub fn process_schedulecommit_cpi(
         };
         main_account
             .serialize(&mut &mut committee.try_borrow_mut_data()?.as_mut())?;
-
-        // And collect info to derive signer seeds + ensure PDAs check out
-        let (pda, bump) = pda_and_bump(player);
-        if pda.ne(committee.key) {
-            msg!(
-                "ERROR: pda(player) != committee PDA | '{}' != '{}' for player '{}'",
-                pda,
-                committee.key,
-                player,
-            );
-            return Err(ProgramError::InvalidArgument);
-        }
-        player_bumps.push((player, bump));
     }
 
     // Then request the PDA accounts to be committed
-    let mut account_infos =
-        vec![payer, owning_program, validator_auth, system_program];
+    let mut account_infos = vec![payer, validator_auth, system_program];
     account_infos.extend(remaining.iter());
 
     // NOTE: logging this increases CPUs by 70K, so in order to show about how
@@ -268,21 +247,7 @@ pub fn process_schedulecommit_cpi(
     // );
     let ix = create_schedule_commit_ix(*magic_program.key, &account_infos);
 
-    let seeds = player_bumps
-        .into_iter()
-        .map(|(x, y)| pda_seeds_vec_with_bump(*x, y))
-        .collect::<Vec<_>>();
-    let seeds = seeds
-        .iter()
-        .map(|xs| xs.iter().map(|x| x.as_slice()).collect::<Vec<_>>())
-        .collect::<Vec<_>>();
-    let seeds = seeds.iter().map(|x| x.as_slice()).collect::<Vec<_>>();
-
-    invoke_signed(
-        &ix,
-        &account_infos.into_iter().cloned().collect::<Vec<_>>(),
-        &seeds,
-    )?;
+    invoke(&ix, &account_infos.into_iter().cloned().collect::<Vec<_>>())?;
 
     Ok(())
 }

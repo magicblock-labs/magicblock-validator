@@ -8,7 +8,12 @@ use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{pubkey::Pubkey, signer::Signer, transaction::Transaction};
 
 pub fn main() {
-    let ctx = ScheduleCommitTestContext::new(2);
+    let ctx = if std::env::var("RK").is_ok() {
+        ScheduleCommitTestContext::new_random_keys(2)
+    } else {
+        ScheduleCommitTestContext::new(2)
+    };
+
     ctx.init_committees().unwrap();
     ctx.delegate_committees().unwrap();
 

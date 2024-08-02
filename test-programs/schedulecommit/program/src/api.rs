@@ -63,7 +63,6 @@ pub fn schedule_commit_cpi_instruction(
     let program_id = crate::id();
     let mut account_metas = vec![
         AccountMeta::new(payer, true),
-        AccountMeta::new_readonly(program_id, false),
         AccountMeta::new(validator_id, false),
         AccountMeta::new_readonly(magic_program_id, false),
         AccountMeta::new_readonly(system_program::id(), false),
