@@ -70,23 +70,44 @@ pub(crate) fn process_schedule_commit(
         return Err(InstructionError::MissingRequiredSignature);
     }
 
-    // The program_id of the parent instruction that invoked this one via CPI
-    let frames = InstructionContextFrames::try_from(transaction_context)?;
-    let parent_program_id = frames
-        .find_program_id_of_parent_of_current_instruction()
-        .ok_or_else(|| {
-            ic_msg!(
-                invoke_context,
-                "ScheduleCommit ERR: failed to find parent program id"
-            );
-            InstructionError::InvalidInstructionData
-        })?;
+    //
+    // Get the program_id of the parent instruction that invoked this one via CPI
+    //
 
-    ic_msg!(
-        invoke_context,
-        "ScheduleCommit: parent program id: {}",
+    // We cannot easily simulate the transaction as if it was invoked via CPI
+    // from the owning program during unit tests
+    // The integration tests ensure that this part also works as expected
+    #[cfg(not(test))]
+    let frames = InstructionContextFrames::try_from(transaction_context)?;
+    #[cfg(not(test))]
+    let parent_program_id = {
+        let parent_program_id = frames
+            .find_program_id_of_parent_of_current_instruction()
+            .ok_or_else(|| {
+                ic_msg!(
+                    invoke_context,
+                    "ScheduleCommit ERR: failed to find parent program id"
+                );
+                InstructionError::InvalidInstructionData
+            })?;
+
+        ic_msg!(
+            invoke_context,
+            "ScheduleCommit: parent program id: {}",
+            parent_program_id
+        );
         parent_program_id
-    );
+    };
+
+    // Instead during tests we assume the first committee has the correct program ID
+    #[cfg(test)]
+    let first_committee = get_instruction_account_with_idx(
+        transaction_context,
+        COMMITTEES_START as u16,
+    )?
+    .borrow();
+    #[cfg(test)]
+    let parent_program_id = first_committee.owner();
 
     // Assert validator identity matches
     let validator_pubkey =
