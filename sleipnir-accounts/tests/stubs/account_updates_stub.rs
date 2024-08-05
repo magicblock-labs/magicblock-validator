@@ -10,8 +10,8 @@ pub struct AccountUpdatesStub {
 
 #[allow(unused)] // used in tests
 impl AccountUpdatesStub {
-    pub fn add_known_update(&mut self, pubkey: Pubkey, slot: Slot) {
-        self.last_update_slots.insert(pubkey, slot);
+    pub fn add_known_update(&mut self, pubkey: Pubkey, at_slot: Slot) {
+        self.last_update_slots.insert(pubkey, at_slot);
     }
 }
 

@@ -6,7 +6,7 @@ use conjunto_transwise::{
     transaction_accounts_holder::TransactionAccountsHolder,
     transaction_accounts_snapshot::TransactionAccountsSnapshot,
     AccountChainSnapshot, AccountChainSnapshotShared, AccountChainState,
-    DelegationRecord,
+    CommitFrequency, DelegationRecord,
 };
 use solana_sdk::{account::Account, clock::Slot, pubkey::Pubkey};
 
@@ -25,15 +25,18 @@ impl AccountFetcherStub {
     pub fn add_delegated(
         &mut self,
         pubkey: Pubkey,
+        owner: Pubkey,
         at_slot: Slot,
-        delegation_record: &DelegationRecord,
     ) {
         self.known_accounts.insert(
             pubkey,
             (
                 Pubkey::new_unique(),
                 at_slot,
-                Some(delegation_record.clone()),
+                Some(DelegationRecord {
+                    owner,
+                    commit_frequency: CommitFrequency::default(),
+                }),
             ),
         );
     }
