@@ -10,16 +10,8 @@ pub struct AccountUpdatesStub {
 
 #[allow(unused)] // used in tests
 impl AccountUpdatesStub {
-    pub fn add_known_update(&mut self, pubkey: &Pubkey, slot: Slot) {
-        let previous_last_update_slot = self.last_update_slots.remove(pubkey);
-        if let Some(previous_last_update_slot) = previous_last_update_slot {
-            if previous_last_update_slot > slot {
-                self.last_update_slots
-                    .insert(*pubkey, previous_last_update_slot);
-                return;
-            }
-        }
-        self.last_update_slots.insert(*pubkey, slot);
+    pub fn add_known_update(&mut self, pubkey: Pubkey, at_slot: Slot) {
+        self.last_update_slots.insert(pubkey, at_slot);
     }
 }
 

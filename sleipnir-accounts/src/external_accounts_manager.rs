@@ -1,9 +1,13 @@
 use std::{sync::Arc, time::Duration};
 
 use conjunto_transwise::{
+    account_fetcher::AccountFetcher,
+    transaction_accounts_extractor::TransactionAccountsExtractor,
     transaction_accounts_holder::TransactionAccountsHolder,
-    validated_accounts::ValidateAccountsConfig, TransactionAccountsExtractor,
-    ValidatedAccountsProvider,
+    transaction_accounts_validator::{
+        TransactionAccountsValidator, ValidateAccountsConfig,
+    },
+    AccountChainState,
 };
 use log::*;
 use sleipnir_account_updates::AccountUpdates;
@@ -23,22 +27,24 @@ use crate::{
 };
 
 #[derive(Debug)]
-pub struct ExternalAccountsManager<IAP, ACL, ACM, ACU, VAP, TAE, SCP>
+pub struct ExternalAccountsManager<IAP, AFE, ACL, ACM, AUP, TAE, TAV, SCP>
 where
     IAP: InternalAccountProvider,
+    AFE: AccountFetcher,
     ACL: AccountCloner,
     ACM: AccountCommitter,
-    ACU: AccountUpdates,
-    VAP: ValidatedAccountsProvider,
+    AUP: AccountUpdates,
     TAE: TransactionAccountsExtractor,
+    TAV: TransactionAccountsValidator,
     SCP: ScheduledCommitsProcessor,
 {
     pub internal_account_provider: IAP,
+    pub account_fetcher: AFE,
     pub account_cloner: ACL,
     pub account_committer: Arc<ACM>,
-    pub account_updates: ACU,
-    pub validated_accounts_provider: VAP,
+    pub account_updates: AUP,
     pub transaction_accounts_extractor: TAE,
+    pub transaction_accounts_validator: TAV,
     pub scheduled_commits_processor: SCP,
     pub external_readonly_accounts: ExternalReadonlyAccounts,
     pub external_writable_accounts: ExternalWritableAccounts,
@@ -49,15 +55,16 @@ where
     pub validator_id: Pubkey,
 }
 
-impl<IAP, ACL, ACM, ACU, VAP, TAE, SCP>
-    ExternalAccountsManager<IAP, ACL, ACM, ACU, VAP, TAE, SCP>
+impl<IAP, AFE, ACL, ACM, AUP, TAE, TAV, SCP>
+    ExternalAccountsManager<IAP, AFE, ACL, ACM, AUP, TAE, TAV, SCP>
 where
     IAP: InternalAccountProvider,
+    AFE: AccountFetcher,
     ACL: AccountCloner,
     ACM: AccountCommitter,
-    ACU: AccountUpdates,
-    VAP: ValidatedAccountsProvider,
+    AUP: AccountUpdates,
     TAE: TransactionAccountsExtractor,
+    TAV: TransactionAccountsValidator,
     SCP: ScheduledCommitsProcessor,
 {
     pub async fn ensure_accounts(
@@ -164,25 +171,28 @@ where
             unseen_writable_accounts
         );
 
-        // 3. Validate only the accounts that we see for the very first time
-        let validated_accounts = self
-            .validated_accounts_provider
-            .validate_accounts(
-                &TransactionAccountsHolder {
-                    readonly: unseen_readonly_accounts,
-                    writable: unseen_writable_accounts,
-                    payer: accounts_holder.payer,
-                },
-                &ValidateAccountsConfig {
-                    allow_new_accounts: self.create_accounts,
-                    // Here we specify if we can clone all writable accounts or
-                    // only the ones that were delegated
-                    require_delegation: self
-                        .external_writable_mode
-                        .is_clone_delegated_only(),
-                },
-            )
+        // 3.A Fetch the accounts that we've seen for the first time
+        let acc_snapshot = self
+            .account_fetcher
+            .fetch_transaction_accounts_snapshot(&TransactionAccountsHolder {
+                readonly: unseen_readonly_accounts,
+                writable: unseen_writable_accounts,
+                payer: accounts_holder.payer,
+            })
             .await?;
+
+        // 3.B Validate the accounts that we see for the very first time
+        self.transaction_accounts_validator.validate_accounts(
+            &acc_snapshot,
+            &ValidateAccountsConfig {
+                allow_new_accounts: self.create_accounts,
+                // Here we specify if we can clone all writable accounts or
+                // only the ones that were delegated
+                require_delegation: self
+                    .external_writable_mode
+                    .is_clone_delegated_only(),
+            },
+        )?;
 
         // 4.A If a readonly account is not a program, but we only should clone programs then
         //     we have a problem since the account does not exist nor will it be created.
@@ -193,22 +203,22 @@ where
         let programs_only =
             self.external_readonly_mode.is_clone_programs_only();
 
-        let cloned_readonly_accounts = validated_accounts
+        let cloned_readonly_accounts = acc_snapshot
             .readonly
             .into_iter()
-            .filter(|acc| match &acc.account {
+            .filter(|acc| match acc.chain_state.account() {
                 // If it exists: Allow the account if its a program or if we allow non-programs to be cloned
                 Some(account) => account.executable || !programs_only,
                 // Otherwise, don't clone it
-                _ => false,
+                None => false,
             })
             .collect::<Vec<_>>();
 
         // 4.B We will want to make sure that all accounts that exist on chain and are writable have been cloned
-        let cloned_writable_accounts = validated_accounts
+        let cloned_writable_accounts = acc_snapshot
             .writable
             .into_iter()
-            .filter(|acc| acc.account.is_some())
+            .filter(|acc| acc.chain_state.account().is_some())
             .collect::<Vec<_>>();
 
         // Useful logging of involved writable/readables pubkeys
@@ -229,15 +239,21 @@ where
                     .map(|x| {
                         format!(
                             "{}{}{}",
-                            if x.is_payer { "[payer]:" } else { "" },
+                            if x.pubkey == acc_snapshot.payer {
+                                "[payer]:"
+                            } else {
+                                ""
+                            },
                             x.pubkey,
-                            x.lock_config
-                                .as_ref()
-                                .map(|x| format!(
-                                    ", owner: {}, commit_frequency: {}",
-                                    x.owner, x.commit_frequency
-                                ))
-                                .unwrap_or("".to_string()),
+                            match x.chain_state {
+                                AccountChainState::NewAccount => "NewAccount",
+                                AccountChainState::Undelegated { .. } =>
+                                    "Undelegated",
+                                AccountChainState::Delegated { .. } =>
+                                    "Delegated",
+                                AccountChainState::Inconsistent { .. } =>
+                                    "Inconsistent",
+                            },
                         )
                     })
                     .collect::<Vec<_>>();
@@ -256,7 +272,8 @@ where
                 .account_cloner
                 .clone_account(
                     &cloned_readonly_account.pubkey,
-                    cloned_readonly_account.account,
+                    // TODO(vbrunet) - This should not need to be cloned
+                    cloned_readonly_account.chain_state.account().cloned(),
                     None,
                 )
                 .await?;
@@ -272,13 +289,14 @@ where
         for cloned_writable_account in cloned_writable_accounts {
             // Create and the transaction to dump data array, lamports and owner change to the local state
             let mut overrides = cloned_writable_account
-                .lock_config
+                .chain_state
+                .delegation_record()
                 .as_ref()
                 .map(|x| AccountModification {
                     owner: Some(x.owner.to_string()),
                     ..Default::default()
                 });
-            if cloned_writable_account.is_payer {
+            if cloned_writable_account.pubkey == acc_snapshot.payer {
                 if let Some(lamports) = self.payer_init_lamports {
                     match overrides {
                         Some(ref mut x) => x.lamports = Some(lamports),
@@ -295,7 +313,7 @@ where
                 .account_cloner
                 .clone_account(
                     &cloned_writable_account.pubkey,
-                    cloned_writable_account.account,
+                    cloned_writable_account.chain_state.account().cloned(),
                     overrides,
                 )
                 .await?;
@@ -307,7 +325,8 @@ where
                 cloned_writable_account.pubkey,
                 cloned_writable_account.at_slot,
                 cloned_writable_account
-                    .lock_config
+                    .chain_state
+                    .delegation_record()
                     .as_ref()
                     .map(|x| x.commit_frequency),
             );

@@ -1,6 +1,10 @@
 use std::sync::Arc;
 
-use conjunto_transwise::{CommitFrequency, TransactionAccountsExtractorImpl};
+use conjunto_transwise::{
+    transaction_accounts_extractor::TransactionAccountsExtractorImpl,
+    transaction_accounts_validator::TransactionAccountsValidatorImpl,
+    CommitFrequency,
+};
 use sleipnir_accounts::{
     ExternalAccountsManager, ExternalReadonlyMode, ExternalWritableMode,
 };
@@ -12,10 +16,10 @@ use solana_sdk::{
 use stubs::{
     account_cloner_stub::AccountClonerStub,
     account_committer_stub::AccountCommitterStub,
+    account_fetcher_stub::AccountFetcherStub,
     account_updates_stub::AccountUpdatesStub,
     internal_account_provider_stub::InternalAccountProviderStub,
     scheduled_commits_processor_stub::ScheduledCommitsProcessorStub,
-    validated_accounts_provider_stub::ValidatedAccountsProviderStub,
 };
 use test_tools_core::init_logger;
 
@@ -23,27 +27,29 @@ mod stubs;
 
 fn setup(
     internal_account_provider: InternalAccountProviderStub,
+    account_fetcher: AccountFetcherStub,
     account_cloner: AccountClonerStub,
     account_committer: AccountCommitterStub,
     account_updates: AccountUpdatesStub,
-    validated_accounts_provider: ValidatedAccountsProviderStub,
     validator_auth_id: Pubkey,
 ) -> ExternalAccountsManager<
     InternalAccountProviderStub,
+    AccountFetcherStub,
     AccountClonerStub,
     AccountCommitterStub,
     AccountUpdatesStub,
-    ValidatedAccountsProviderStub,
     TransactionAccountsExtractorImpl,
+    TransactionAccountsValidatorImpl,
     ScheduledCommitsProcessorStub,
 > {
     ExternalAccountsManager {
         internal_account_provider,
+        account_fetcher,
         account_committer: Arc::new(account_committer),
         account_updates,
         account_cloner,
-        validated_accounts_provider,
         transaction_accounts_extractor: TransactionAccountsExtractorImpl,
+        transaction_accounts_validator: TransactionAccountsValidatorImpl,
         scheduled_commits_processor: ScheduledCommitsProcessorStub::default(),
         external_readonly_accounts: Default::default(),
         external_writable_accounts: Default::default(),
@@ -85,10 +91,10 @@ async fn test_commit_two_delegated_accounts_one_needs_commit() {
 
     let manager = setup(
         internal_account_provider,
+        AccountFetcherStub::default(),
         AccountClonerStub::default(),
         account_committer.clone(),
         AccountUpdatesStub::default(),
-        ValidatedAccountsProviderStub::valid_default(),
         validator_auth_id,
     );
 
