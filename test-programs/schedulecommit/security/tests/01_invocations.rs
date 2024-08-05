@@ -8,7 +8,6 @@ use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
     signer::Signer,
-    system_program,
     transaction::Transaction,
 };
 
@@ -35,16 +34,11 @@ fn prepare_ctx_with_account_to_commit() -> ScheduleCommitTestContext {
 
 fn create_schedule_commit_ix(
     payer: Pubkey,
-    validator_id: Pubkey,
     magic_program_key: Pubkey,
     pubkeys: &[Pubkey],
 ) -> Instruction {
     let instruction_data = vec![1, 0, 0, 0];
-    let mut account_metas = vec![
-        AccountMeta::new(payer, true),
-        AccountMeta::new(validator_id, false),
-        AccountMeta::new_readonly(system_program::id(), false),
-    ];
+    let mut account_metas = vec![AccountMeta::new(payer, true)];
 
     for pubkey in pubkeys {
         account_metas.push(AccountMeta {
@@ -70,12 +64,10 @@ fn test_schedule_commit_directly_with_single_ix() {
         committees,
         ephem_blockhash,
         ephem_client,
-        validator_identity,
         ..
     } = &ctx;
     let ix = create_schedule_commit_ix(
         payer.pubkey(),
-        *validator_identity,
         Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
         &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
     );
@@ -98,6 +90,7 @@ fn test_schedule_commit_directly_with_single_ix() {
             },
         );
     // TODO: assert it fails with fails with the following
+    // InvalidInstructionData
     // [
     //   "Program Magic11111111111111111111111111111111111111 invoke [1]",
     //   "ScheduleCommit ERR: failed to find parent program id",
@@ -133,7 +126,6 @@ fn test_schedule_commit_directly_with_commit_ix_sandwiched() {
     let ix = create_schedule_commit_ix(
         payer.pubkey(),
         *validator_identity,
-        Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
         &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
     );
 
@@ -162,6 +154,7 @@ fn test_schedule_commit_directly_with_commit_ix_sandwiched() {
             },
         );
     eprintln!("Transaction '{:?}' res: '{:?}'", sig, res);
+    // NOT WORKING AT ALL RIGHT NOW (Empty Transaction)
     // TODO: assert it fails with fails with the following
     // [
     //   "Program Magic11111111111111111111111111111111111111 invoke [1]",
@@ -251,7 +244,6 @@ fn test_schedule_commit_via_direct_and_from_other_program_indirect_cpi_including
 
     let cpi_ix = schedule_commit_cpi_instruction(
         payer.pubkey(),
-        *validator_identity,
         Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
         players,
         pdas,

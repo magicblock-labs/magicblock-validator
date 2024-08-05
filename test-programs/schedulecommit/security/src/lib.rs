@@ -112,7 +112,6 @@ fn process_sibling_schedule_cpis(
         // 1. CPI into the program owning the PDAs
         let indirect_ix = schedule_commit_cpi_instruction(
             *payer.key,
-            *validator_auth.key,
             *magic_program.key,
             &players,
             &pdas,

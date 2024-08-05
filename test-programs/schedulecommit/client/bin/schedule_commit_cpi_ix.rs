@@ -22,20 +22,12 @@ pub fn main() {
         committees,
         commitment,
         ephem_client,
-        validator_identity,
         ephem_blockhash,
         ..
     } = &ctx;
 
-    // NOTE: at this point the payer doesn't exist in the ephem yet
-    // It will be cloned including it's balance at the time the
-    // schedule commit is executed
-    let payer_start_balance =
-        ctx.fetch_chain_account_balance(payer.pubkey()).unwrap();
-
     let ix = schedule_commit_cpi_instruction(
         payer.pubkey(),
-        *validator_identity,
         // Work around the different solana_sdk versions by creating pubkey from str
         Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
         &committees
@@ -98,16 +90,6 @@ pub fn main() {
     );
 
     assert_eq!(res.sigs.len(), 1, "should have 1 on chain sig");
-
-    let payer_end_balance =
-        ctx.fetch_ephem_account_balance(payer.pubkey()).unwrap();
-
-    const TX_COST: u64 = 10_000;
-    assert_eq!(
-        payer_start_balance - TX_COST,
-        payer_end_balance,
-        "payer balance should be decremented by tx cost"
-    );
 
     // Used to verify that test passed
     println!("Success");

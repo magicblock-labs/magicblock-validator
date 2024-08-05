@@ -55,7 +55,6 @@ pub fn delegate_account_cpi_instruction(player: Pubkey) -> Instruction {
 
 pub fn schedule_commit_cpi_instruction(
     payer: Pubkey,
-    validator_id: Pubkey,
     magic_program_id: Pubkey,
     players: &[Pubkey],
     committees: &[Pubkey],
@@ -63,9 +62,7 @@ pub fn schedule_commit_cpi_instruction(
     let program_id = crate::id();
     let mut account_metas = vec![
         AccountMeta::new(payer, true),
-        AccountMeta::new(validator_id, false),
         AccountMeta::new_readonly(magic_program_id, false),
-        AccountMeta::new_readonly(system_program::id(), false),
     ];
     for committee in committees {
         account_metas.push(AccountMeta::new(*committee, false));

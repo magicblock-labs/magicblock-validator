@@ -40,10 +40,8 @@ pub fn process_instruction<'a>(
         1 => {
             // # Account references
             // - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
-            // - **1.**   `[WRITE]`         Validator authority to which we escrow tx cost
-            // - **2**    `[]`              MagicBlock Program (used to schedule commit)
-            // - **3**    `[]`              System Program to support PDA signing
-            // - **4..n** `[]`              PDA accounts to be committed
+            // - **1**    `[]`              MagicBlock Program (used to schedule commit)
+            // - **2..n** `[]`              PDA accounts to be committed
             //
             // # Instruction Args
             //
@@ -196,9 +194,7 @@ pub fn process_schedulecommit_cpi(
 
     let accounts_iter = &mut accounts.iter();
     let payer = next_account_info(accounts_iter)?;
-    let validator_auth = next_account_info(accounts_iter)?;
     let magic_program = next_account_info(accounts_iter)?;
-    let system_program = next_account_info(accounts_iter)?;
     let mut remaining = vec![];
     for info in accounts_iter.by_ref() {
         remaining.push(info.clone());
@@ -240,7 +236,7 @@ pub fn process_schedulecommit_cpi(
     }
 
     // Then request the PDA accounts to be committed
-    let mut account_infos = vec![payer, validator_auth, system_program];
+    let mut account_infos = vec![payer];
     account_infos.extend(remaining.iter());
 
     // NOTE: logging this increases CPUs by 70K, so in order to show about how
