@@ -23,6 +23,7 @@ use test_tools_core::init_logger;
 
 mod stubs;
 
+#[allow(clippy::too_many_arguments)]
 fn setup_customized(
     internal_account_provider: InternalAccountProviderStub,
     account_fetcher: AccountFetcherStub,
