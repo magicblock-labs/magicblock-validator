@@ -20,6 +20,12 @@ mod utils;
 
 const _PROGRAM_ADDR: &str = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY";
 
+const PROGRAM_ID_NOT_FOUND: &str =
+    "ScheduleCommit ERR: failed to find parent program id";
+const INVALID_ACCOUNT_OWNER: &str = "Invalid account owner";
+const NEEDS_TO_BE_OWNED_BY_INVOKING_PROGRAM: &str =
+    "needs to be owned by the invoking program";
+
 fn prepare_ctx_with_account_to_commit() -> ScheduleCommitTestContext {
     let ctx = if std::env::var("RK").is_ok() {
         ScheduleCommitTestContext::new_random_keys(2)
@@ -89,14 +95,7 @@ fn test_schedule_commit_directly_with_single_ix() {
                 ..Default::default()
             },
         );
-    // TODO: assert it fails with fails with the following
-    // InvalidInstructionData
-    // [
-    //   "Program Magic11111111111111111111111111111111111111 invoke [1]",
-    //   "ScheduleCommit ERR: failed to find parent program id",
-    //   "Program Magic11111111111111111111111111111111111111 failed: invalid instruction data"
-    // ]
-    eprintln!("Transaction '{:?}' res: '{:?}'", sig, res);
+    ctx.assert_ephemeral_transaction_error(sig, &res, PROGRAM_ID_NOT_FOUND);
 }
 
 #[test]
@@ -108,7 +107,6 @@ fn test_schedule_commit_directly_with_commit_ix_sandwiched() {
         committees,
         ephem_blockhash,
         ephem_client,
-        validator_identity,
         ..
     } = &ctx;
 
@@ -125,7 +123,7 @@ fn test_schedule_commit_directly_with_commit_ix_sandwiched() {
     // 2. Schedule commit
     let ix = create_schedule_commit_ix(
         payer.pubkey(),
-        *validator_identity,
+        Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
         &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
     );
 
@@ -153,22 +151,11 @@ fn test_schedule_commit_directly_with_commit_ix_sandwiched() {
                 ..Default::default()
             },
         );
-    eprintln!("Transaction '{:?}' res: '{:?}'", sig, res);
-    // NOT WORKING AT ALL RIGHT NOW (Empty Transaction)
-    // TODO: assert it fails with fails with the following
-    // [
-    //   "Program Magic11111111111111111111111111111111111111 invoke [1]",
-    //   "ScheduleCommit ERR: failed to find parent program id",
-    //   "Program Magic11111111111111111111111111111111111111 failed: invalid instruction data"
-    // ]
+    ctx.assert_ephemeral_transaction_error(sig, &res, PROGRAM_ID_NOT_FOUND);
 }
 
 #[test]
 fn test_schedule_commit_via_direct_and_indirect_cpi_of_other_program() {
-    // TODO: figure out issue:
-    // > Unknown program 9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY
-    // > Program consumed: 50949 of 200000 compute units
-    // > Program returned error: "An account required by the instruction is missing"
     let ctx = prepare_ctx_with_account_to_commit();
     let ScheduleCommitTestContext {
         payer,
@@ -176,7 +163,6 @@ fn test_schedule_commit_via_direct_and_indirect_cpi_of_other_program() {
         committees,
         ephem_blockhash,
         ephem_client,
-        validator_identity,
         ..
     } = &ctx;
 
@@ -186,13 +172,8 @@ fn test_schedule_commit_via_direct_and_indirect_cpi_of_other_program() {
         .collect::<Vec<_>>();
     let pdas = &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>();
 
-    let ix = create_sibling_schedule_cpis_instruction(
-        payer.pubkey(),
-        *validator_identity,
-        Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
-        pdas,
-        players,
-    );
+    let ix =
+        create_sibling_schedule_cpis_instruction(payer.pubkey(), pdas, players);
 
     let tx = Transaction::new_signed_with_payer(
         &[ix],
@@ -211,14 +192,14 @@ fn test_schedule_commit_via_direct_and_indirect_cpi_of_other_program() {
                 ..Default::default()
             },
         );
-    eprintln!("Transaction '{:?}' res: '{:?}'", sig, res);
+
+    ctx.assert_ephemeral_transaction_error(sig, &res, INVALID_ACCOUNT_OWNER);
+    ctx.assert_ephemeral_transaction_error(
+        sig,
+        &res,
+        NEEDS_TO_BE_OWNED_BY_INVOKING_PROGRAM,
+    );
 }
-/*
-   A) Malicious Program Instruction (Non CPI)
-   B) CPI to the program that owns the PDAs
-   C) Malicious Program Instruction
-    D) CPI to MagicBlock Program
-*/
 
 #[test]
 fn test_schedule_commit_via_direct_and_from_other_program_indirect_cpi_including_non_cpi_instruction(
@@ -230,7 +211,6 @@ fn test_schedule_commit_via_direct_and_from_other_program_indirect_cpi_including
         committees,
         ephem_blockhash,
         ephem_client,
-        validator_identity,
         ..
     } = &ctx;
 
@@ -249,13 +229,8 @@ fn test_schedule_commit_via_direct_and_from_other_program_indirect_cpi_including
         pdas,
     );
 
-    let nested_cpi_ix = create_nested_schedule_cpis_instruction(
-        payer.pubkey(),
-        *validator_identity,
-        Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
-        pdas,
-        players,
-    );
+    let nested_cpi_ix =
+        create_nested_schedule_cpis_instruction(payer.pubkey(), pdas, players);
 
     let tx = Transaction::new_signed_with_payer(
         &[non_cpi_ix, cpi_ix, nested_cpi_ix],
@@ -274,13 +249,12 @@ fn test_schedule_commit_via_direct_and_from_other_program_indirect_cpi_including
                 ..Default::default()
             },
         );
-    eprintln!("Transaction '{:?}' res: '{:?}'", sig, res);
 
-    // TODO: assert fails with
-    // "Program Magic11111111111111111111111111111111111111 invoke [2]",
-    // "ScheduleCommit: parent program id: 4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr",
-    // "ScheduleCommit ERR: account 9jmXmqNCJmrKFAsVYmteT5EFgzRPNY4Sdvo1mwMRudbi needs to be owned by the invoking program 4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr to be committed, but is owned by 9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY",
-    // "Program Magic11111111111111111111111111111111111111 failed: Invalid account owner",
-    // "Program 4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr consumed 4263 of 592828 compute units",
-    // "Program 4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr failed: Invalid account owner"
+    ctx.dump_ephemeral_logs(sig);
+    ctx.assert_ephemeral_transaction_error(sig, &res, INVALID_ACCOUNT_OWNER);
+    ctx.assert_ephemeral_transaction_error(
+        sig,
+        &res,
+        NEEDS_TO_BE_OWNED_BY_INVOKING_PROGRAM,
+    );
 }

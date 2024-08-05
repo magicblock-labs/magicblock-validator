@@ -1,22 +1,22 @@
+use std::str::FromStr;
+
+use sleipnir_core::magic_program::MAGIC_PROGRAM_ADDR;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
-    system_program,
 };
 
 fn create_wrapper_schedule_cpis_instruction(
     payer: Pubkey,
-    validator_id: Pubkey,
-    magic_program_id: Pubkey,
     pdas: &[Pubkey],
     player_pubkeys: &[Pubkey],
     ix_id: u8,
 ) -> Instruction {
+    let magic_program = Pubkey::from_str(MAGIC_PROGRAM_ADDR).unwrap();
     let mut account_metas = vec![
         AccountMeta::new(payer, true),
-        AccountMeta::new(validator_id, false),
-        AccountMeta::new_readonly(magic_program_id, false),
-        AccountMeta::new_readonly(system_program::id(), false),
+        AccountMeta::new_readonly(magic_program, false),
+        AccountMeta::new_readonly(schedulecommit_program::id(), false),
     ];
 
     let mut instruction_data = vec![ix_id];
@@ -40,19 +40,10 @@ fn create_wrapper_schedule_cpis_instruction(
 
 pub fn create_sibling_schedule_cpis_instruction(
     payer: Pubkey,
-    validator_id: Pubkey,
-    magic_program_id: Pubkey,
     pdas: &[Pubkey],
     player_pubkeys: &[Pubkey],
 ) -> Instruction {
-    create_wrapper_schedule_cpis_instruction(
-        payer,
-        validator_id,
-        magic_program_id,
-        pdas,
-        player_pubkeys,
-        0,
-    )
+    create_wrapper_schedule_cpis_instruction(payer, pdas, player_pubkeys, 0)
 }
 
 pub fn create_sibling_non_cpi_instruction(payer: Pubkey) -> Instruction {
@@ -67,17 +58,8 @@ pub fn create_sibling_non_cpi_instruction(payer: Pubkey) -> Instruction {
 
 pub fn create_nested_schedule_cpis_instruction(
     payer: Pubkey,
-    validator_id: Pubkey,
-    magic_program_id: Pubkey,
     pdas: &[Pubkey],
     player_pubkeys: &[Pubkey],
 ) -> Instruction {
-    create_wrapper_schedule_cpis_instruction(
-        payer,
-        validator_id,
-        magic_program_id,
-        pdas,
-        player_pubkeys,
-        2,
-    )
+    create_wrapper_schedule_cpis_instruction(payer, pdas, player_pubkeys, 2)
 }
