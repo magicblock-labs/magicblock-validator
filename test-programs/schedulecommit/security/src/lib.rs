@@ -36,7 +36,8 @@ pub fn process_instruction<'a>(
         // # Account references
         // - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
         // - **1**    `[]`              MagicBlock Program (used to schedule commit)
-        // - **2..n** `[]`              PDA accounts to be committed
+        // - **2..n** `[]`              The ScheduleCommit program
+        // - **3..n** `[]`              PDA accounts to be committed
         //
         // # Instruction Args
         //
@@ -85,11 +86,13 @@ fn process_sibling_schedule_cpis(
     let accounts_iter = &mut accounts.iter();
     let payer = next_account_info(accounts_iter)?;
     let magic_program = next_account_info(accounts_iter)?;
+    // Passed to us to allow CPI into it
+    let _schedule_commmit_program = next_account_info(accounts_iter);
 
     let accounts_iter = &mut accounts.iter();
 
     let mut pda_infos = vec![];
-    for info in accounts_iter.by_ref().skip(2) {
+    for info in accounts_iter.by_ref().skip(3) {
         pda_infos.push(info.clone());
     }
     let account_infos = vec![payer];

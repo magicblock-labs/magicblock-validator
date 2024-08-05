@@ -63,6 +63,8 @@ fn create_schedule_commit_ix(
 
 #[test]
 fn test_schedule_commit_directly_with_single_ix() {
+    // Attempts to directly commit PDAs via the MagicBlock program.
+    // This fails since a CPI program id cannot be found.
     let ctx = prepare_ctx_with_account_to_commit();
     let ScheduleCommitTestContext {
         payer,
@@ -100,6 +102,9 @@ fn test_schedule_commit_directly_with_single_ix() {
 
 #[test]
 fn test_schedule_commit_directly_with_commit_ix_sandwiched() {
+    // Attempts to directly commit PDAs via the MagicBlock program, however adds
+    // two other instructions around the main one in order to confuse the CPI check algorithm.
+    // Fails since a CPI program id cannot be found.
     let ctx = prepare_ctx_with_account_to_commit();
     let ScheduleCommitTestContext {
         payer,
@@ -156,6 +161,12 @@ fn test_schedule_commit_directly_with_commit_ix_sandwiched() {
 
 #[test]
 fn test_schedule_commit_via_direct_and_indirect_cpi_of_other_program() {
+    // TODO: fails due to extra account it seems
+
+    // Attempts to commit PDAs via a malicious program.
+    // That program commits the PDAs in two ways, first correctly via the owning program,
+    // but then again directly. The second attempt should fail due to the invoking program
+    // not matching the PDA's owner.
     let ctx = prepare_ctx_with_account_to_commit();
     let ScheduleCommitTestContext {
         payer,
@@ -204,6 +215,12 @@ fn test_schedule_commit_via_direct_and_indirect_cpi_of_other_program() {
 #[test]
 fn test_schedule_commit_via_direct_and_from_other_program_indirect_cpi_including_non_cpi_instruction(
 ) {
+    // Combines three instructions into one transaction:
+    // - a non-CPI instruction doing nothing
+    // - a CPI instruction which invokes the program owning the PDAs and is legit
+    // - a CPI instruction to a malicious program which attempts to commit the PDAs
+    //   directly via the MagicBlock program
+    // The last one fails due to it not owning the PDAs.
     let ctx = prepare_ctx_with_account_to_commit();
     let ScheduleCommitTestContext {
         payer,
