@@ -1,3 +1,4 @@
+#![cfg(not(test))]
 use solana_sdk::{
     instruction::InstructionError,
     pubkey::Pubkey,

@@ -1,2 +1,3 @@
 pub mod accounts;
-pub mod instruction_context_frames;
+#[cfg(not(test))]
+pub(crate) mod instruction_context_frames;
