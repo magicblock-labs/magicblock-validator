@@ -27,10 +27,10 @@ const NEEDS_TO_BE_OWNED_BY_INVOKING_PROGRAM: &str =
     "needs to be owned by the invoking program";
 
 fn prepare_ctx_with_account_to_commit() -> ScheduleCommitTestContext {
-    let ctx = if std::env::var("RK").is_ok() {
-        ScheduleCommitTestContext::new_random_keys(2)
-    } else {
+    let ctx = if std::env::var("FIXED_KP").is_ok() {
         ScheduleCommitTestContext::new(2)
+    } else {
+        ScheduleCommitTestContext::new_random_keys(2)
     };
     ctx.init_committees().unwrap();
     ctx.delegate_committees().unwrap();
@@ -161,8 +161,6 @@ fn test_schedule_commit_directly_with_commit_ix_sandwiched() {
 
 #[test]
 fn test_schedule_commit_via_direct_and_indirect_cpi_of_other_program() {
-    // TODO: fails due to extra account it seems
-
     // Attempts to commit PDAs via a malicious program.
     // That program commits the PDAs in two ways, first correctly via the owning program,
     // but then again directly. The second attempt should fail due to the invoking program
@@ -267,7 +265,6 @@ fn test_schedule_commit_via_direct_and_from_other_program_indirect_cpi_including
             },
         );
 
-    ctx.dump_ephemeral_logs(sig);
     ctx.assert_ephemeral_transaction_error(sig, &res, INVALID_ACCOUNT_OWNER);
     ctx.assert_ephemeral_transaction_error(
         sig,
