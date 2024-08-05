@@ -6,35 +6,31 @@
 */
 TransactionContext {
     account_keys: [
+        4zvwRjXUKGfvwnParsHAS3HuSVzV5cA4McphgmoCtajS,
+        3Q49KuvoEGzGWBsbh2xgrKog66be3UM1aDEsHq7Ym4pr,
+        6ZQpzi8X2jku3C2ERgZB8hzhQ55VHLm8yZZLwTpMzHw3,
+        11111111111111111111111111111111,
+        Magic11111111111111111111111111111111111111,
         // Payer
         /* 0 */ 4zvwRjXUKGfvwnParsHAS3HuSVzV5cA4McphgmoCtajS,
-        // Validator Authority
-        /* 1 */ LUzidNSiPNjYNkxZcUm5hYHwnWPwsUfh2US1cpWwaBm,
+
         // PDA 1
-        /* 2 */ 3Q49KuvoEGzGWBsbh2xgrKog66be3UM1aDEsHq7Ym4pr,
+        /* 1 */ 3Q49KuvoEGzGWBsbh2xgrKog66be3UM1aDEsHq7Ym4pr,
+
         // PDA 2
-        /* 3 */ 6ZQpzi8X2jku3C2ERgZB8hzhQ55VHLm8yZZLwTpMzHw3,
+        /* 2 */ 6ZQpzi8X2jku3C2ERgZB8hzhQ55VHLm8yZZLwTpMzHw3,
+
         // System Program
-        /* 4 */ 11111111111111111111111111111111,
+        /* 3 */ 11111111111111111111111111111111,
+
         // MagicBlock System Program
-        /* 5 */ Magic11111111111111111111111111111111111111,
-        // Program that should own the PDAs
-        /* 6 */ 9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY,
+        /* 4 */ Magic11111111111111111111111111111111111111,
     ],
     accounts: TransactionAccounts {
         accounts: [
             RefCell {
                 value: Account {
                     lamports: 994921440,
-                    data.len: 0,
-                    owner: 11111111111111111111111111111111,
-                    executable: false,
-                    rent_epoch: 18446744073709551615,
-                },
-            },
-            RefCell {
-                value: Account {
-                    lamports: 9223372035856515807,
                     data.len: 0,
                     owner: 11111111111111111111111111111111,
                     executable: false,
@@ -63,12 +59,12 @@ TransactionContext {
             },
             RefCell {
                 value: Account {
-                    lamports: 1,
-                    data.len: 14,
+                    lamports: 0,
+                    data.len: 1,
                     owner: NativeLoader1111111111111111111111111111111,
                     executable: true,
                     rent_epoch: 0,
-                    data: 73797374656d5f70726f6772616d,
+                    data: 01,
                 },
             },
             RefCell {
@@ -81,30 +77,49 @@ TransactionContext {
                     data: 01,
                 },
             },
-            RefCell {
-                value: Account {
-                    lamports: 1141440,
-                    data.len: 36,
-                    owner: BPFLoaderUpgradeab1e11111111111111111111111,
-                    executable: true,
-                    rent_epoch: 0,
-                    data: 0200000083f2535c4e94f9b4b57c97a555a766eac44ec6a9693d80fd2f770a2e5d6d70cd,
-                },
-            },
         ],
         touched_flags: RefCell {
-            value: [ true, false, false, true, false, false, false, ],
+            value: [ true, false, true, false, false, ],
         },
     },
     instruction_stack_capacity: 5,
     instruction_trace_capacity: 64,
-    instruction_stack: [ 1, ],
+    instruction_stack: [
+        1,
+    ],
     instruction_trace: [
         // 1. System Transfer
         InstructionContext {
             nesting_level: 0,
             instruction_accounts_lamport_sum: 997090720,
-            // System Program
+            program_accounts: [
+                3,
+            ],
+            instruction_accounts: [
+                // Payer
+                InstructionAccount {
+                    index_in_transaction: 0,
+                    index_in_caller: 0,
+                    index_in_callee: 0,
+                    is_signer: true,
+                    is_writable: true,
+                },
+                // PDA 2
+                InstructionAccount {
+                    index_in_transaction: 2,
+                    index_in_caller: 2,
+                    index_in_callee: 1,
+                    is_signer: false,
+                    is_writable: true,
+                },
+            ],
+            instruction_data: [ 2, 0, 0, 0, 64, 66, 15, 0, 0, 0, 0, 0, ],
+        },
+        // 2. Direct Schedule Commit
+        InstructionContext {
+            nesting_level: 0,
+            instruction_accounts_lamport_sum: 998260000,
+            // MagicBlock System Program
             program_accounts: [ 4, ],
             instruction_accounts: [
                 // Payer
@@ -117,36 +132,13 @@ TransactionContext {
                 },
                 // PDA 2
                 InstructionAccount {
-                    index_in_transaction: 3,
-                    index_in_caller: 3,
+                    index_in_transaction: 2,
+                    index_in_caller: 2,
                     index_in_callee: 1,
                     is_signer: false,
                     is_writable: true,
                 },
-            ],
-            instruction_data: [ 2, 0, 0, 0, 64, 66, 15, 0, 0, 0, 0, 0, ],
-        },
-        // 2. Direct Schedule Commit
-        InstructionContext {
-            nesting_level: 0,
-            instruction_accounts_lamport_sum: 9223372036855917248,
-            // MagicBlock System Program
-            program_accounts: [ 5, ],
-            instruction_accounts: [
-                InstructionAccount {
-                    index_in_transaction: 0,
-                    index_in_caller: 0,
-                    index_in_callee: 0,
-                    is_signer: true,
-                    is_writable: true,
-                },
-                InstructionAccount {
-                    index_in_transaction: 6,
-                    index_in_caller: 6,
-                    index_in_callee: 1,
-                    is_signer: false,
-                    is_writable: false,
-                },
+                // PDA 1
                 InstructionAccount {
                     index_in_transaction: 1,
                     index_in_caller: 1,
@@ -154,34 +146,9 @@ TransactionContext {
                     is_signer: false,
                     is_writable: true,
                 },
-                InstructionAccount {
-                    index_in_transaction: 4,
-                    index_in_caller: 4,
-                    index_in_callee: 3,
-                    is_signer: false,
-                    is_writable: false,
-                },
-                // PDA 2
-                InstructionAccount {
-                    index_in_transaction: 3,
-                    index_in_caller: 3,
-                    index_in_callee: 4,
-                    is_signer: false,
-                    is_writable: true,
-                },
-                // PDA 1
-                InstructionAccount {
-                    index_in_transaction: 2,
-                    index_in_caller: 2,
-                    index_in_callee: 5,
-                    is_signer: false,
-                    is_writable: true,
-                },
             ],
             instruction_data: [ 1, 0, 0, 0, ],
         },
-        // 1. System Transfer
-        //    Much less info here since it didn't run yet when the above ix ran
         InstructionContext {
             nesting_level: 0,
             instruction_accounts_lamport_sum: 0,
@@ -202,5 +169,5 @@ TransactionContext {
         exemption_threshold: 2.0,
         burn_percent: 50,
     },
-    signature: 4Nw9xzpTftafRFzjdiJduPY8wt1fMydgKdpNnSkhytngW1jSrbCnf2AnjyX3ePq9E5gmsLjahT1tyTxXS9BEmWGS,
+    signature: 5yfJD2h78w7x336dGsr6vb9heAs1ZwYuD6uB5sH5drAPxvSNqouUVX9K5zNGHZeDtDEoYnhR3fsCW5XkWaAYWaGc,
 }

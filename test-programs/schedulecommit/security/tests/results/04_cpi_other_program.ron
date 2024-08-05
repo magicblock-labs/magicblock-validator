@@ -5,15 +5,13 @@
    A) Malicious Program Instruction
     B) CPI to the program that owns the PDAs
         C) CPI to the MagicBlock System Program
-            D) System Program Transfer
-    E) CPI to the MagicBlock System Program
+    D) CPI to the MagicBlock System Program
 
   The stack depth and nesting level are as follows:
   A) 0 0
     B) 1 1
       C) 2 2
-        D) 3 3
-    E) 1 1
+    D) 1 1
 
   Thus when we look for parent call at the different calls to the MagicBlock System Program
   we find the following given we find the first instruction up the stack that has a smaller
@@ -26,37 +24,24 @@ TransactionContext {
     account_keys: [
         // Payer
         /* 0 */ 4zvwRjXUKGfvwnParsHAS3HuSVzV5cA4McphgmoCtajS,
-        // Validator Authority
-        /* 1 */ LUzidNSiPNjYNkxZcUm5hYHwnWPwsUfh2US1cpWwaBm,
         // PDA 1
-        /* 2 */ 3Q49KuvoEGzGWBsbh2xgrKog66be3UM1aDEsHq7Ym4pr,
+        /* 1 */ 3Q49KuvoEGzGWBsbh2xgrKog66be3UM1aDEsHq7Ym4pr,
         // PDA 2
-        /* 3 */ 6ZQpzi8X2jku3C2ERgZB8hzhQ55VHLm8yZZLwTpMzHw3,
-        // System Program
-        /* 4 */ 11111111111111111111111111111111,
+        /* 2 */ 6ZQpzi8X2jku3C2ERgZB8hzhQ55VHLm8yZZLwTpMzHw3,
         // MagicBlock System Program
-        /* 5 */ Magic11111111111111111111111111111111111111,
+        /* 3 */ Magic11111111111111111111111111111111111111,
         // Malicious Program
-        /* 6 */ 4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr,
+        /* 4 */ 4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr,
         // Program that should own the PDAs
-        /* 7 */ 9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY,
+        /* 5 */ 9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY,
         // Loader which is passed implicitly
-        /* 8 */ BPFLoaderUpgradeab1e11111111111111111111111,
+        /* 6 */ BPFLoaderUpgradeab1e11111111111111111111111,
     ],
     accounts: TransactionAccounts {
         accounts: [
             RefCell {
                 value: Account {
-                    lamports: 995911440,
-                    data.len: 0,
-                    owner: 11111111111111111111111111111111,
-                    executable: false,
-                    rent_epoch: 18446744073709551615,
-                },
-            },
-            RefCell {
-                value: Account {
-                    lamports: 9223372035856525807,
+                    lamports: 995921440,
                     data.len: 0,
                     owner: 11111111111111111111111111111111,
                     executable: false,
@@ -81,16 +66,6 @@ TransactionContext {
                     executable: false,
                     rent_epoch: 18446744073709551615,
                     data: 3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da290100000000000000,
-                },
-            },
-            RefCell {
-                value: Account {
-                    lamports: 1,
-                    data.len: 14,
-                    owner: NativeLoader1111111111111111111111111111111,
-                    executable: true,
-                    rent_epoch: 0,
-                    data: 73797374656d5f70726f6772616d,
                 },
             },
             RefCell {
@@ -135,198 +110,20 @@ TransactionContext {
             },
         ],
         touched_flags: RefCell {
-            value: [ true, true, true, true, false, false, false, false, false, ],
+            value: [ false, true, true, false, false, false, false, ],
         },
     },
     instruction_stack_capacity: 5,
     instruction_trace_capacity: 64,
-    instruction_stack: [ 0, 4, ],
+    instruction_stack: [ 0, 3, ],
     instruction_trace: [
-        // Malicious Program Instrucion that will perform two CPIs
         InstructionContext {
             nesting_level: 0,
-            instruction_accounts_lamport_sum: 9223372036855917249,
+            instruction_accounts_lamport_sum: 999401441,
             program_accounts: [
                 // Loader
-                8,
-                // Malicious Program
                 6,
-            ],
-            instruction_accounts: [
-                InstructionAccount {
-                    index_in_transaction: 0,
-                    index_in_caller: 0,
-                    index_in_callee: 0,
-                    is_signer: true,
-                    is_writable: true,
-                },
-                InstructionAccount {
-                    index_in_transaction: 7,
-                    index_in_caller: 7,
-                    index_in_callee: 1,
-                    is_signer: false,
-                    is_writable: false,
-                },
-                InstructionAccount {
-                    index_in_transaction: 1,
-                    index_in_caller: 1,
-                    index_in_callee: 2,
-                    is_signer: false,
-                    is_writable: true,
-                },
-                InstructionAccount {
-                    index_in_transaction: 5,
-                    index_in_caller: 5,
-                    index_in_callee: 3,
-                    is_signer: false,
-                    is_writable: false,
-                },
-                InstructionAccount {
-                    index_in_transaction: 4,
-                    index_in_caller: 4,
-                    index_in_callee: 4,
-                    is_signer: false,
-                    is_writable: false,
-                },
-                InstructionAccount {
-                    index_in_transaction: 3,
-                    index_in_caller: 3,
-                    index_in_callee: 5,
-                    is_signer: false,
-                    is_writable: true,
-                },
-                InstructionAccount {
-                    index_in_transaction: 2,
-                    index_in_caller: 2,
-                    index_in_callee: 6,
-                    is_signer: false,
-                    is_writable: true,
-                },
-            ],
-            instruction_data: [ 0, 59, 106, 39, 188, 206, 182, 164, 45, 98, 163, 168, 208, 42, 111, 13, 115, 101, 50, 21, 119, 29, 226, 67, 166, 58, 192, 72, 161, 139, 89, 218, 41, 138, 136, 227, 221, 116, 9, 241, 149, 253, 82, 219, 45, 60, 186, 93, 114, 202, 103, 9, 191, 29, 148, 18, 27, 243, 116, 136, 1, 180, 15, 111, 92, ],
-        },
-        // CPI to the program owning PDAs to schedule correctly
-        InstructionContext {
-            nesting_level: 1,
-            instruction_accounts_lamport_sum: 9223372036855917249,
-            program_accounts: [
-                // Program that owns the PDAs
-                7,
-            ],
-            instruction_accounts: [
-                InstructionAccount {
-                    index_in_transaction: 0,
-                    index_in_caller: 0,
-                    index_in_callee: 0,
-                    is_signer: true,
-                    is_writable: true,
-                },
-                InstructionAccount {
-                    index_in_transaction: 7,
-                    index_in_caller: 1,
-                    index_in_callee: 1,
-                    is_signer: false,
-                    is_writable: false,
-                },
-                InstructionAccount {
-                    index_in_transaction: 1,
-                    index_in_caller: 2,
-                    index_in_callee: 2,
-                    is_signer: false,
-                    is_writable: true,
-                },
-                InstructionAccount {
-                    index_in_transaction: 5,
-                    index_in_caller: 3,
-                    index_in_callee: 3,
-                    is_signer: false,
-                    is_writable: false,
-                },
-                InstructionAccount {
-                    index_in_transaction: 4,
-                    index_in_caller: 4,
-                    index_in_callee: 4,
-                    is_signer: false,
-                    is_writable: false,
-                },
-                InstructionAccount {
-                    index_in_transaction: 3,
-                    index_in_caller: 5,
-                    index_in_callee: 5,
-                    is_signer: false,
-                    is_writable: true,
-                },
-                InstructionAccount {
-                    index_in_transaction: 2,
-                    index_in_caller: 6,
-                    index_in_callee: 6,
-                    is_signer: false,
-                    is_writable: true,
-                },
-            ],
-            instruction_data: [ 1, 59, 106, 39, 188, 206, 182, 164, 45, 98, 163, 168, 208, 42, 111, 13, 115, 101, 50, 21, 119, 29, 226, 67, 166, 58, 192, 72, 161, 139, 89, 218, 41, 138, 136, 227, 221, 116, 9, 241, 149, 253, 82, 219, 45, 60, 186, 93, 114, 202, 103, 9, 191, 29, 148, 18, 27, 243, 116, 136, 1, 180, 15, 111, 92, ],
-        },
-        // PDA owning program scheduling commits via CPI (so it's 2 levels down)
-        InstructionContext {
-            nesting_level: 2,
-            instruction_accounts_lamport_sum: 9223372036855917248,
-            program_accounts: [
-                // MagicBlock System Program
-                5,
-            ],
-            instruction_accounts: [
-                InstructionAccount {
-                    index_in_transaction: 0,
-                    index_in_caller: 0,
-                    index_in_callee: 0,
-                    is_signer: true,
-                    is_writable: true,
-                },
-                InstructionAccount {
-                    index_in_transaction: 7,
-                    index_in_caller: 1,
-                    index_in_callee: 1,
-                    is_signer: false,
-                    is_writable: false,
-                },
-                InstructionAccount {
-                    index_in_transaction: 1,
-                    index_in_caller: 2,
-                    index_in_callee: 2,
-                    is_signer: false,
-                    is_writable: true,
-                },
-                InstructionAccount {
-                    index_in_transaction: 4,
-                    index_in_caller: 4,
-                    index_in_callee: 3,
-                    is_signer: false,
-                    is_writable: false,
-                },
-                InstructionAccount {
-                    index_in_transaction: 3,
-                    index_in_caller: 5,
-                    index_in_callee: 4,
-                    is_signer: true,
-                    is_writable: true,
-                },
-                InstructionAccount {
-                    index_in_transaction: 2,
-                    index_in_caller: 6,
-                    index_in_callee: 5,
-                    is_signer: true,
-                    is_writable: true,
-                },
-            ],
-            instruction_data: [ 1, 0, 0, 0, ],
-        },
-        // System Program Transfer called by MagicBlock System Program
-        // as part of schedule commit
-        InstructionContext {
-            nesting_level: 3,
-            instruction_accounts_lamport_sum: 9223372036852437247,
-            program_accounts: [
-                // System Program
+                // Malicious Program
                 4,
             ],
             instruction_accounts: [
@@ -338,25 +135,42 @@ TransactionContext {
                     is_writable: true,
                 },
                 InstructionAccount {
-                    index_in_transaction: 1,
-                    index_in_caller: 2,
+                    index_in_transaction: 3,
+                    index_in_caller: 3,
                     index_in_callee: 1,
+                    is_signer: false,
+                    is_writable: false,
+                },
+                InstructionAccount {
+                    index_in_transaction: 5,
+                    index_in_caller: 5,
+                    index_in_callee: 2,
+                    is_signer: false,
+                    is_writable: false,
+                },
+                InstructionAccount {
+                    index_in_transaction: 2,
+                    index_in_caller: 2,
+                    index_in_callee: 3,
+                    is_signer: false,
+                    is_writable: true,
+                },
+                InstructionAccount {
+                    index_in_transaction: 1,
+                    index_in_caller: 1,
+                    index_in_callee: 4,
                     is_signer: false,
                     is_writable: true,
                 },
             ],
-            instruction_data: [ 2, 0, 0, 0, 16, 39, 0, 0, 0, 0, 0, 0, ],
+            instruction_data: [ 0, 59, 106, 39, 188, 206, 182, 164, 45, 98, 163, 168, 208, 42, 111, 13, 115, 101, 50, 21, 119, 29, 226, 67, 166, 58, 192, 72, 161, 139, 89, 218, 41, 138, 136, 227, 221, 116, 9, 241, 149, 253, 82, 219, 45, 60, 186, 93, 114, 202, 103, 9, 191, 29, 148, 18, 27, 243, 116, 136, 1, 180, 15, 111, 92, ],
         },
-        // This is the second CPI call to schedule a commit
-        // This one should not succeed since it is called directly by
-        // the malicious program
-        // If we look upwards we find the first instance with nesting level 0
-        // is the malicious program
+        // CPI to the program owning PDAs to schedule correctly
         InstructionContext {
             nesting_level: 1,
-            instruction_accounts_lamport_sum: 9223372036855917248,
+            instruction_accounts_lamport_sum: 998260001,
             program_accounts: [
-                // MagicBlock System Program
+                // Program that owns the PDAs
                 5,
             ],
             instruction_accounts: [
@@ -368,37 +182,93 @@ TransactionContext {
                     is_writable: true,
                 },
                 InstructionAccount {
-                    index_in_transaction: 7,
+                    index_in_transaction: 3,
                     index_in_caller: 1,
                     index_in_callee: 1,
                     is_signer: false,
                     is_writable: false,
                 },
                 InstructionAccount {
-                    index_in_transaction: 1,
-                    index_in_caller: 2,
+                    index_in_transaction: 2,
+                    index_in_caller: 3,
                     index_in_callee: 2,
                     is_signer: false,
                     is_writable: true,
                 },
                 InstructionAccount {
-                    index_in_transaction: 4,
+                    index_in_transaction: 1,
                     index_in_caller: 4,
                     index_in_callee: 3,
                     is_signer: false,
-                    is_writable: false,
+                    is_writable: true,
                 },
+            ],
+            instruction_data: [ 1, 59, 106, 39, 188, 206, 182, 164, 45, 98, 163, 168, 208, 42, 111, 13, 115, 101, 50, 21, 119, 29, 226, 67, 166, 58, 192, 72, 161, 139, 89, 218, 41, 138, 136, 227, 221, 116, 9, 241, 149, 253, 82, 219, 45, 60, 186, 93, 114, 202, 103, 9, 191, 29, 148, 18, 27, 243, 116, 136, 1, 180, 15, 111, 92, ],
+        },
+        // PDA owning program scheduling commits via CPI (so it's 2 levels down)
+        InstructionContext {
+            nesting_level: 2,
+            instruction_accounts_lamport_sum: 998260000,
+            program_accounts: [
+                // MagicBlock System Program
+                3,
+            ],
+            instruction_accounts: [
                 InstructionAccount {
-                    index_in_transaction: 3,
-                    index_in_caller: 5,
-                    index_in_callee: 4,
-                    is_signer: false,
+                    index_in_transaction: 0,
+                    index_in_caller: 0,
+                    index_in_callee: 0,
+                    is_signer: true,
                     is_writable: true,
                 },
                 InstructionAccount {
                     index_in_transaction: 2,
-                    index_in_caller: 6,
-                    index_in_callee: 5,
+                    index_in_caller: 2,
+                    index_in_callee: 1,
+                    is_signer: false,
+                    is_writable: true,
+                },
+                InstructionAccount {
+                    index_in_transaction: 1,
+                    index_in_caller: 3,
+                    index_in_callee: 2,
+                    is_signer: false,
+                    is_writable: true,
+                },
+            ],
+            instruction_data: [ 1, 0, 0, 0, ],
+        },
+        // This is the second CPI call to schedule a commit
+        // This one should not succeed since it is called directly by
+        // the malicious program
+        // If we look upwards we find the first instance with nesting level 0
+        // is the malicious program
+        InstructionContext {
+            nesting_level: 1,
+            instruction_accounts_lamport_sum: 998260000,
+            program_accounts: [
+                // MagicBlock System Program
+                3,
+            ],
+            instruction_accounts: [
+                InstructionAccount {
+                   index_in_transaction: 0,
+                    index_in_caller: 0,
+                    index_in_callee: 0,
+                    is_signer: true,
+                    is_writable: true,
+                },
+                InstructionAccount {
+                    index_in_transaction: 2,
+                    index_in_caller: 3,
+                    index_in_callee: 1,
+                    is_signer: false,
+                    is_writable: true,
+                },
+                InstructionAccount {
+                    index_in_transaction: 1,
+                    index_in_caller: 4,
+                    index_in_callee: 2,
                     is_signer: false,
                     is_writable: true,
                 },
@@ -425,5 +295,5 @@ TransactionContext {
         exemption_threshold: 2.0,
         burn_percent: 50,
     },
-    signature: 2LwpxRWfPKipwpEf5F1zV2aM1e2JNY55moDkc7ibD6VAdDKGnfpkfQMUyExjoVorCt3xMEfjryH9VTkmBsvvxwuW,
+    signature: 2AQpUtDJ8dyT25zKC6M7sPyhJMwAWrPYbcXcRCUgCUq6kEM44BKd94rKYZrALAqM4bGcjj2oteRoCxFKrSwXYaKS,
 }

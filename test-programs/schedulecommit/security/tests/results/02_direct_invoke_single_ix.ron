@@ -3,33 +3,21 @@ TransactionContext {
     account_keys: [
         // Payer
         /* 0 */ 4zvwRjXUKGfvwnParsHAS3HuSVzV5cA4McphgmoCtajS,
-        // Validator Authority
-        /* 1 */ LUzidNSiPNjYNkxZcUm5hYHwnWPwsUfh2US1cpWwaBm,
+
         // PDA 1
-        /* 2 */ 3Q49KuvoEGzGWBsbh2xgrKog66be3UM1aDEsHq7Ym4pr,
+        /* 1 */ 3Q49KuvoEGzGWBsbh2xgrKog66be3UM1aDEsHq7Ym4pr,
+
         // PDA 2
-        /* 3 */ 6ZQpzi8X2jku3C2ERgZB8hzhQ55VHLm8yZZLwTpMzHw3,
-        // System Program
-        /* 4 */ 11111111111111111111111111111111,
+        /* 2 */ 6ZQpzi8X2jku3C2ERgZB8hzhQ55VHLm8yZZLwTpMzHw3,
+
         // MagicBlock System Program
-        /* 5 */ Magic11111111111111111111111111111111111111,
-        // Program that should own the PDAs
-        /* 6 */ 9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY,
+        /* 3 */ Magic11111111111111111111111111111111111111,
     ],
     accounts: TransactionAccounts {
         accounts: [
             RefCell {
                 value: Account {
                     lamports: 995921440,
-                    data.len: 0,
-                    owner: 11111111111111111111111111111111,
-                    executable: false,
-                    rent_epoch: 18446744073709551615,
-                },
-            },
-            RefCell {
-                value: Account {
-                    lamports: 9223372035856515807,
                     data.len: 0,
                     owner: 11111111111111111111111111111111,
                     executable: false,
@@ -58,16 +46,6 @@ TransactionContext {
             },
             RefCell {
                 value: Account {
-                    lamports: 1,
-                    data.len: 14,
-                    owner: NativeLoader1111111111111111111111111111111,
-                    executable: true,
-                    rent_epoch: 0,
-                    data: 73797374656d5f70726f6772616d,
-                },
-            },
-            RefCell {
-                value: Account {
                     lamports: 0,
                     data.len: 1,
                     owner: NativeLoader1111111111111111111111111111111,
@@ -76,19 +54,9 @@ TransactionContext {
                     data: 01,
                 },
             },
-            RefCell {
-                value: Account {
-                    lamports: 1141440,
-                    data.len: 36,
-                    owner: BPFLoaderUpgradeab1e11111111111111111111111,
-                    executable: true,
-                    rent_epoch: 0,
-                    data: 0200000083f2535c4e94f9b4b57c97a555a766eac44ec6a9693d80fd2f770a2e5d6d70cd,
-                },
-            },
         ],
         touched_flags: RefCell {
-            value: [ false, false, false, false, false, false, false, ],
+            value: [ false, false, false, false, ],
         },
     },
     instruction_stack_capacity: 5,
@@ -99,11 +67,11 @@ TransactionContext {
     instruction_trace: [
         InstructionContext {
             nesting_level: 0,
-            instruction_accounts_lamport_sum: 9223372036855917248,
-
+            instruction_accounts_lamport_sum: 998260000,
             // MagicBlock System Program
-            program_accounts: [ 5, ],
-
+            program_accounts: [
+                3,
+            ],
             instruction_accounts: [
                 InstructionAccount {
                     index_in_transaction: 0,
@@ -113,37 +81,16 @@ TransactionContext {
                     is_writable: true,
                 },
                 InstructionAccount {
-                    index_in_transaction: 6,
-                    index_in_caller: 6,
+                    index_in_transaction: 2,
+                    index_in_caller: 2,
                     index_in_callee: 1,
                     is_signer: false,
-                    is_writable: false,
+                    is_writable: true,
                 },
                 InstructionAccount {
                     index_in_transaction: 1,
                     index_in_caller: 1,
                     index_in_callee: 2,
-                    is_signer: false,
-                    is_writable: true,
-                },
-                InstructionAccount {
-                    index_in_transaction: 4,
-                    index_in_caller: 4,
-                    index_in_callee: 3,
-                    is_signer: false,
-                    is_writable: false,
-                },
-                InstructionAccount {
-                    index_in_transaction: 3,
-                    index_in_caller: 3,
-                    index_in_callee: 4,
-                    is_signer: false,
-                    is_writable: true,
-                },
-                InstructionAccount {
-                    index_in_transaction: 2,
-                    index_in_caller: 2,
-                    index_in_callee: 5,
                     is_signer: false,
                     is_writable: true,
                 },
@@ -170,5 +117,5 @@ TransactionContext {
         exemption_threshold: 2.0,
         burn_percent: 50,
     },
-    signature: 2LuSnGR31VKMUTjLn13nLX4PECXaCRXuSs5ZgZjN84oVWuqTXub4Ra6AzQjdSzdNAy18cvc7dhcCYyuWK1VkYXu7,
+    signature: 61H5YL2MpjsVCuf7ZpSSZ6PkuCFwYx8rfyZbpFcMiJ8wTAkhLVi8U4aMXqP8u3FY1PZGQboPiwdFU8PK4fKYoJdT,
 }
