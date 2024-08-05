@@ -56,7 +56,7 @@ impl solana_frozen_abi::abi_example::AbiExample for BuiltinPrototype {
 /// - `vote_program` since we have no votes
 /// - `stake_program` since we don't support staking in our validator
 /// - `config_program` since we don't support configuration (_Add configuration data to the chain and the
-/// list of public keys that are permitted to modify it_)
+///   list of public keys that are permitted to modify it_)
 /// - `solana_bpf_loader_deprecated_program` because it's deprecated
 /// - `solana_bpf_loader_program` since we use the `solana_bpf_loader_upgradeable_program` instead
 /// - `zk_token_proof_program` it's behind a feature flag (`feature_set::zk_token_sdk_enabled`) in
