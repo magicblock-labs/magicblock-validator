@@ -5,9 +5,7 @@ use std::{
 
 use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 use solana_sdk::{
-    account::ReadableAccount,
-    fee_calculator::DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE,
-    instruction::InstructionError, pubkey::Pubkey,
+    account::ReadableAccount, instruction::InstructionError, pubkey::Pubkey,
 };
 
 use super::transaction_scheduler::ScheduledCommit;
@@ -26,13 +24,11 @@ pub(crate) fn process_schedule_commit(
     static ID: AtomicU64 = AtomicU64::new(0);
 
     const PAYER_IDX: u16 = 0;
-    const VALIDATOR_IDX: u16 = 1;
-    const SYSTEM_PROG_IDX: u16 = 2;
 
     let transaction_context = &invoke_context.transaction_context.clone();
     let ix_ctx = transaction_context.get_current_instruction_context()?;
     let ix_accs_len = ix_ctx.get_number_of_instruction_accounts() as usize;
-    const COMMITTEES_START: usize = SYSTEM_PROG_IDX as usize + 1;
+    const COMMITTEES_START: usize = PAYER_IDX as usize + 1;
 
     // Assert MagicBlock program
     ix_ctx
@@ -106,23 +102,10 @@ pub(crate) fn process_schedule_commit(
     #[cfg(test)]
     let parent_program_id = first_committee.owner();
 
-    // Assert validator identity matches
-    let validator_pubkey =
-        get_instruction_pubkey_with_idx(transaction_context, VALIDATOR_IDX)?;
-    let validator_authority_id = crate::validator_authority_id();
-    if validator_pubkey != &validator_authority_id {
-        ic_msg!(
-            invoke_context,
-            "ScheduleCommit ERR: provided validator account {} does not match validator identity {}",
-            validator_pubkey, validator_authority_id
-        );
-        return Err(InstructionError::IncorrectAuthority);
-    }
-
     // Assert all PDAs are owned by invoking program
     // NOTE: we don't require them to be signers as in our case verifying that the
     // program owning the PDAs invoked us via CPI is sufficient
-    // Thus we can be `invoke`d unsigned and thus no seeds need to be provided
+    // Thus we can be `invoke`d unsigned and no seeds need to be provided
     let mut pubkeys = Vec::new();
     for idx in COMMITTEES_START..ix_accs_len {
         let acc_pubkey =
@@ -154,49 +137,6 @@ pub(crate) fn process_schedule_commit(
                 ic_msg!(invoke_context, "Failed to get clock sysvar: {}", err);
                 InstructionError::UnsupportedSysvar
             })?;
-
-    // Deduct lamports from payer to pay for transaction and credit the validator
-    // identity with it.
-    // For now we assume that chain cost match the defaults
-    // We may have to charge more here if we want to pay extra to ensure the
-    // transaction lands.
-    // Tracked: https://github.com/magicblock-labs/magicblock-validator/issues/98
-    let tx_cost = DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE;
-    ic_msg!(
-        invoke_context,
-        "Transferring {} lamports to validator",
-        tx_cost
-    );
-
-    // NOTE: I was unable to properly get the system program loaded
-    // The lamport transfer is verified via integration tests
-    #[cfg(not(test))]
-    {
-        use solana_sdk::system_instruction;
-
-        use crate::errors::custom_error_codes;
-
-        invoke_context
-            .native_invoke(
-                system_instruction::transfer(
-                    payer_pubkey,
-                    &validator_authority_id,
-                    tx_cost,
-                )
-                .into(),
-                &[*payer_pubkey],
-            )
-            .map_err(|err| {
-                ic_msg!(
-                    invoke_context,
-                    "Failed transfer cost from payer to validator: {}",
-                    err
-                );
-                InstructionError::Custom(
-                    custom_error_codes::FAILED_TO_TRANSFER_SCHEDULE_COMMIT_COST,
-                )
-            })?;
-    }
 
     let blockhash = invoke_context.blockhash;
     let commit_sent_transaction = scheduled_commit_sent(id, blockhash);
@@ -309,20 +249,12 @@ mod tests {
                     &system_program::id(),
                 ),
             );
-            map.insert(
-                program,
-                AccountSharedData::new(0, 0, &bpf_loader_upgradeable::id()),
-            );
             map.insert(committee, AccountSharedData::new(0, 0, &program));
             map
         };
         ensure_funded_validator_authority(&mut account_data);
 
-        let ix = schedule_commit_instruction(
-            &payer.pubkey(),
-            &validator_authority_id(),
-            vec![committee],
-        );
+        let ix = schedule_commit_instruction(&payer.pubkey(), vec![committee]);
 
         let mut transaction_accounts: Vec<(Pubkey, AccountSharedData)> = ix
             .accounts
@@ -339,34 +271,12 @@ mod tests {
             create_account_shared_data_for_test(&get_clock()),
         ));
 
-        let payer_idx = account_idx(&transaction_accounts, &payer.pubkey());
-        let auth_idx =
-            account_idx(&transaction_accounts, &validator_authority_id());
-
-        let (_, payer_before) = &transaction_accounts[payer_idx].clone();
-        let (_, auth_before) = &transaction_accounts[auth_idx].clone();
-
-        let accounts = process_instruction(
+        process_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
             Ok(()),
         );
-
-        if REALIZE_TX_COST {
-            let payer_after = &accounts[payer_idx];
-            let auth_after = &accounts[auth_idx];
-
-            assert_eq!(
-                payer_after.lamports(),
-                payer_before.lamports() - DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE
-            );
-
-            assert_eq!(
-                auth_after.lamports(),
-                auth_before.lamports() + DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE
-            );
-        }
 
         let scheduler = TransactionScheduler::default();
         let scheduled_commits =
@@ -413,10 +323,6 @@ mod tests {
                     &system_program::id(),
                 ),
             );
-            map.insert(
-                program,
-                AccountSharedData::new(0, 0, &bpf_loader_upgradeable::id()),
-            );
             map.insert(committee_uno, AccountSharedData::new(0, 0, &program));
             map.insert(committee_dos, AccountSharedData::new(0, 0, &program));
             map.insert(committee_tres, AccountSharedData::new(0, 0, &program));
@@ -426,7 +332,6 @@ mod tests {
 
         let ix = schedule_commit_instruction(
             &payer.pubkey(),
-            &validator_authority_id(),
             vec![committee_uno, committee_dos, committee_tres],
         );
 
@@ -445,34 +350,12 @@ mod tests {
             create_account_shared_data_for_test(&get_clock()),
         ));
 
-        let payer_idx = account_idx(&transaction_accounts, &payer.pubkey());
-        let auth_idx =
-            account_idx(&transaction_accounts, &validator_authority_id());
-
-        let (_, payer_before) = &transaction_accounts[payer_idx].clone();
-        let (_, auth_before) = &transaction_accounts[auth_idx].clone();
-
-        let accounts = process_instruction(
+        process_instruction(
             ix.data.as_slice(),
             transaction_accounts,
             ix.accounts,
             Ok(()),
         );
-
-        if REALIZE_TX_COST {
-            let payer_after = &accounts[payer_idx];
-            let auth_after = &accounts[auth_idx];
-
-            assert_eq!(
-                payer_after.lamports(),
-                payer_before.lamports() - DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE
-            );
-
-            assert_eq!(
-                auth_after.lamports(),
-                auth_before.lamports() + DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE
-            );
-        }
 
         let scheduler = TransactionScheduler::default();
         let scheduled_commits =
