@@ -14,11 +14,8 @@ use super::transaction_scheduler::ScheduledCommit;
 use crate::{
     schedule_transactions::transaction_scheduler::TransactionScheduler,
     sleipnir_instruction::scheduled_commit_sent,
-    utils::{
-        accounts::{
-            get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
-        },
-        instruction_context_frames::InstructionContextFrames,
+    utils::accounts::{
+        get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
     },
 };
 
@@ -74,11 +71,11 @@ pub(crate) fn process_schedule_commit(
     // Get the program_id of the parent instruction that invoked this one via CPI
     //
 
-    // We cannot easily simulate the transaction as if it was invoked via CPI
+    // We cannot easily simulate the transaction being invoked via CPI
     // from the owning program during unit tests
-    // The integration tests ensure that this part also works as expected
+    // Instead the integration tests ensure that this works as expected
     #[cfg(not(test))]
-    let frames = InstructionContextFrames::try_from(transaction_context)?;
+    let frames = crate::utils::instruction_context_frames::InstructionContextFrames::try_from(transaction_context)?;
     #[cfg(not(test))]
     let parent_program_id = {
         let parent_program_id = frames
@@ -99,7 +96,7 @@ pub(crate) fn process_schedule_commit(
         parent_program_id
     };
 
-    // Instead during tests we assume the first committee has the correct program ID
+    // During unit tests we assume the first committee has the correct program ID
     #[cfg(test)]
     let first_committee = get_instruction_account_with_idx(
         transaction_context,
@@ -323,7 +320,6 @@ mod tests {
 
         let ix = schedule_commit_instruction(
             &payer.pubkey(),
-            &program,
             &validator_authority_id(),
             vec![committee],
         );
@@ -400,7 +396,7 @@ mod tests {
     }
 
     #[test]
-    fn test_schedule_commit_three_accounts() {
+    fn test_schedule_commit_three_accounts_success() {
         let payer =
             Keypair::from_seed(b"test_schedule_commit_three_accounts").unwrap();
         let program = Pubkey::new_unique();
@@ -430,7 +426,6 @@ mod tests {
 
         let ix = schedule_commit_instruction(
             &payer.pubkey(),
-            &program,
             &validator_authority_id(),
             vec![committee_uno, committee_dos, committee_tres],
         );
@@ -575,10 +570,6 @@ mod tests {
                     0,
                     &system_program::id(),
                 ),
-            );
-            map.insert(
-                program,
-                AccountSharedData::new(0, 0, &bpf_loader_upgradeable::id()),
             );
             map.insert(committee_uno, AccountSharedData::new(0, 0, &program));
             map.insert(committee_dos, AccountSharedData::new(0, 0, &program));
