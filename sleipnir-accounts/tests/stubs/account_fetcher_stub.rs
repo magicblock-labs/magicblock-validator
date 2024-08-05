@@ -1,140 +1,99 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 
 use async_trait::async_trait;
 use conjunto_transwise::{
-    errors::{TranswiseError, TranswiseResult},
+    account_fetcher::AccountFetcher, errors::TranswiseResult,
     transaction_accounts_holder::TransactionAccountsHolder,
-    validated_accounts::{
-        LockConfig, ValidateAccountsConfig, ValidatedAccounts,
-        ValidatedReadonlyAccount, ValidatedWritableAccount,
-    },
-    AccountFetcher, CommitFrequency,
+    transaction_accounts_snapshot::TransactionAccountsSnapshot,
+    AccountChainSnapshot, AccountChainSnapshotShared, AccountChainState,
+    DelegationRecord,
 };
 use solana_sdk::{account::Account, clock::Slot, pubkey::Pubkey};
 
 #[derive(Debug, Default)]
 pub struct AccountFetcherStub {
-    validation_error: Option<TranswiseError>,
-    payers: HashSet<Pubkey>,
-    new_accounts: HashSet<Pubkey>,
-    with_owners: HashMap<Pubkey, Pubkey>,
-    at_slots: HashMap<Pubkey, Slot>,
+    unknown_at_slot: Slot,
+    known_accounts: HashMap<Pubkey, (Pubkey, Slot, Option<DelegationRecord>)>,
 }
 
 #[allow(unused)] // used in tests
 impl AccountFetcherStub {
-    pub fn valid_default() -> Self {
-        Self {
-            validation_error: None,
-            ..Default::default()
-        }
+    pub fn add_undelegated(&mut self, pubkey: Pubkey, at_slot: Slot) {
+        self.known_accounts
+            .insert(pubkey, (Pubkey::new_unique(), at_slot, None));
     }
-    pub fn valid(
-        payers: HashSet<Pubkey>,
-        new_accounts: HashSet<Pubkey>,
-        with_owners: HashMap<Pubkey, Pubkey>,
-        at_slots: HashMap<Pubkey, Slot>,
-    ) -> Self {
-        Self {
-            validation_error: None,
-            payers,
-            new_accounts,
-            with_owners,
-            at_slots,
-        }
+    pub fn add_delegated(
+        &mut self,
+        pubkey: Pubkey,
+        at_slot: Slot,
+        delegation_record: &DelegationRecord,
+    ) {
+        self.known_accounts.insert(
+            pubkey,
+            (
+                Pubkey::new_unique(),
+                at_slot,
+                Some(delegation_record.clone()),
+            ),
+        );
     }
+}
 
-    pub fn invalid(error: TranswiseError) -> Self {
-        Self {
-            validation_error: Some(error),
-            ..Default::default()
+impl AccountFetcherStub {
+    fn fetch_account_chain_snapshot(
+        &self,
+        pubkey: &Pubkey,
+    ) -> AccountChainSnapshotShared {
+        let known_account = self.known_accounts.get(pubkey);
+        match known_account {
+            Some((owner, at_slot, delegation_record)) => AccountChainSnapshot {
+                pubkey: *pubkey,
+                at_slot: *at_slot,
+                chain_state: match delegation_record {
+                    Some(delegation_record) => AccountChainState::Delegated {
+                        account: Account {
+                            owner: *owner,
+                            ..Default::default()
+                        },
+                        delegation_pda: Pubkey::new_unique(),
+                        delegation_record: delegation_record.clone(),
+                    },
+                    None => AccountChainState::Undelegated {
+                        account: Account {
+                            owner: *owner,
+                            ..Default::default()
+                        },
+                    },
+                },
+            },
+            None => AccountChainSnapshot {
+                pubkey: *pubkey,
+                at_slot: self.unknown_at_slot,
+                chain_state: AccountChainState::NewAccount,
+            },
         }
+        .into()
     }
 }
 
 #[async_trait]
 impl AccountFetcher for AccountFetcherStub {
-    async fn validate_accounts(
+    async fn fetch_transaction_accounts_snapshot(
         &self,
-        transaction_accounts: &TransactionAccountsHolder,
-        _config: &ValidateAccountsConfig,
-    ) -> TranswiseResult<ValidatedAccounts> {
-        match &self.validation_error {
-            Some(error) => {
-                use TranswiseError::*;
-                match error {
-                    NotAllWritablesDelegated {
-                        writable_delegated_pubkeys,
-                        writable_undelegated_non_payer_pubkeys,
-                    } => Err(TranswiseError::NotAllWritablesDelegated {
-                        writable_delegated_pubkeys: writable_delegated_pubkeys
-                            .clone(),
-                        writable_undelegated_non_payer_pubkeys:
-                            writable_undelegated_non_payer_pubkeys.clone(),
-                    }),
-                    WritablesIncludeInconsistentAccounts {
-                        writable_inconsistent_pubkeys,
-                    } => Err(
-                        TranswiseError::WritablesIncludeInconsistentAccounts {
-                            writable_inconsistent_pubkeys:
-                                writable_inconsistent_pubkeys.clone(),
-                        },
-                    ),
-                    WritablesIncludeNewAccounts {
-                        writable_new_pubkeys,
-                    } => Err(TranswiseError::WritablesIncludeNewAccounts {
-                        writable_new_pubkeys: writable_new_pubkeys.clone(),
-                    }),
-                    _ => {
-                        unimplemented!()
-                    }
-                }
-            }
-            None => Ok(ValidatedAccounts {
-                readonly: transaction_accounts
-                    .readonly
-                    .iter()
-                    .map(|x| ValidatedReadonlyAccount {
-                        pubkey: *x,
-                        account: match self.new_accounts.contains(x) {
-                            true => None,
-                            false => Some(Account {
-                                owner: match self.with_owners.get(x) {
-                                    Some(owner) => *owner,
-                                    None => Pubkey::new_unique(),
-                                },
-                                ..Account::default()
-                            }),
-                        },
-                        at_slot: self.at_slots.get(x).cloned().unwrap_or(0),
-                    })
-                    .collect(),
-                writable: transaction_accounts
-                    .writable
-                    .iter()
-                    .map(|x| ValidatedWritableAccount {
-                        pubkey: *x,
-                        account: match self.new_accounts.contains(x) {
-                            true => None,
-                            false => Some(Account {
-                                owner: match self.with_owners.get(x) {
-                                    Some(owner) => *owner,
-                                    None => Pubkey::new_unique(),
-                                },
-                                ..Account::default()
-                            }),
-                        },
-                        lock_config: self.with_owners.get(x).as_ref().map(
-                            |owner| LockConfig {
-                                owner: **owner,
-                                commit_frequency: CommitFrequency::default(),
-                            },
-                        ),
-                        at_slot: self.at_slots.get(x).cloned().unwrap_or(0),
-                        is_payer: self.payers.contains(x),
-                    })
-                    .collect(),
-            }),
-        }
+        accounts_holder: &TransactionAccountsHolder,
+    ) -> TranswiseResult<TransactionAccountsSnapshot> {
+        Ok(TransactionAccountsSnapshot {
+            readonly: accounts_holder
+                .readonly
+                .iter()
+                .map(|pubkey| self.fetch_account_chain_snapshot(pubkey))
+                .collect(),
+            writable: accounts_holder
+                .writable
+                .iter()
+                .map(|pubkey| self.fetch_account_chain_snapshot(pubkey))
+                .collect(),
+            payer: accounts_holder.payer,
+        })
     }
 }

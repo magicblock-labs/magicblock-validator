@@ -1,9 +1,11 @@
 use std::{collections::HashMap, sync::Arc};
 
 use conjunto_transwise::{
-    errors::TranswiseError,
+    account_fetcher, errors::TranswiseError,
+    transaction_accounts_extractor::TransactionAccountsExtractorImpl,
     transaction_accounts_holder::TransactionAccountsHolder,
-    TransactionAccountsExtractorImpl,
+    transaction_accounts_validator::TransactionAccountsValidatorImpl,
+    CommitFrequency, DelegationRecord,
 };
 use sleipnir_accounts::{
     errors::AccountsError, ExternalAccountsManager, ExternalReadonlyMode,
@@ -13,10 +15,10 @@ use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
 use stubs::{
     account_cloner_stub::AccountClonerStub,
     account_committer_stub::AccountCommitterStub,
+    account_fetcher_stub::AccountFetcherStub,
     account_updates_stub::AccountUpdatesStub,
     internal_account_provider_stub::InternalAccountProviderStub,
     scheduled_commits_processor_stub::ScheduledCommitsProcessorStub,
-    validated_accounts_provider_stub::ValidatedAccountsProviderStub,
 };
 use test_tools_core::init_logger;
 
@@ -24,27 +26,29 @@ mod stubs;
 
 fn setup(
     internal_account_provider: InternalAccountProviderStub,
+    account_fetcher: AccountFetcherStub,
     account_cloner: AccountClonerStub,
     account_committer: AccountCommitterStub,
     account_updates: AccountUpdatesStub,
-    validated_accounts_provider: ValidatedAccountsProviderStub,
 ) -> ExternalAccountsManager<
     InternalAccountProviderStub,
+    AccountFetcherStub,
     AccountClonerStub,
     AccountCommitterStub,
     AccountUpdatesStub,
-    ValidatedAccountsProviderStub,
     TransactionAccountsExtractorImpl,
+    TransactionAccountsValidatorImpl,
     ScheduledCommitsProcessorStub,
 > {
     let validator_auth_id = Pubkey::new_unique();
     ExternalAccountsManager {
         internal_account_provider,
+        account_fetcher,
         account_cloner,
         account_committer: Arc::new(account_committer),
         account_updates,
-        validated_accounts_provider,
         transaction_accounts_extractor: TransactionAccountsExtractorImpl,
+        transaction_accounts_validator: TransactionAccountsValidatorImpl,
         external_readonly_accounts: Default::default(),
         external_writable_accounts: Default::default(),
         scheduled_commits_processor: ScheduledCommitsProcessorStub::default(),
@@ -59,25 +63,27 @@ fn setup(
 #[tokio::test]
 async fn test_ensure_readonly_account_not_tracked_nor_in_our_validator() {
     init_logger!();
-    let readonly = Pubkey::new_unique();
+    let readonly_undelegated = Pubkey::new_unique();
 
     let internal_account_provider = InternalAccountProviderStub::default();
+    let mut account_fetcher = AccountFetcherStub::default();
     let account_cloner = AccountClonerStub::default();
     let account_committer = AccountCommitterStub::default();
     let account_updates = AccountUpdatesStub::default();
-    let validated_accounts_provider =
-        ValidatedAccountsProviderStub::valid_default();
+
+    let fetchable_at_slot = 42;
+    account_fetcher.add_undelegated(readonly_undelegated, fetchable_at_slot);
 
     let manager = setup(
         internal_account_provider,
+        account_fetcher,
         account_cloner,
         account_committer,
         account_updates,
-        validated_accounts_provider,
     );
 
     let holder = TransactionAccountsHolder {
-        readonly: vec![readonly],
+        readonly: vec![readonly_undelegated],
         writable: vec![],
         payer: Pubkey::new_unique(),
     };
@@ -87,35 +93,36 @@ async fn test_ensure_readonly_account_not_tracked_nor_in_our_validator() {
         .await;
 
     assert_eq!(result.unwrap().len(), 1);
-    assert!(manager.account_cloner.did_clone(&readonly));
-    assert!(manager.external_readonly_accounts.has(&readonly));
+    assert!(manager.account_cloner.did_clone(&readonly_undelegated));
+    assert!(manager
+        .external_readonly_accounts
+        .has(&readonly_undelegated));
     assert!(manager.external_writable_accounts.is_empty());
 }
 
 #[tokio::test]
 async fn test_ensure_readonly_account_not_tracked_but_in_our_validator() {
     init_logger!();
-    let readonly = Pubkey::new_unique();
+    let readonly_already_loaded = Pubkey::new_unique();
 
     let mut internal_account_provider = InternalAccountProviderStub::default();
+    let account_fetcher = AccountFetcherStub::default();
     let account_cloner = AccountClonerStub::default();
     let account_committer = AccountCommitterStub::default();
     let account_updates = AccountUpdatesStub::default();
-    let validated_accounts_provider =
-        ValidatedAccountsProviderStub::valid_default();
 
-    internal_account_provider.add(readonly, Default::default());
+    internal_account_provider.add(readonly_already_loaded, Default::default());
 
     let manager = setup(
         internal_account_provider,
+        account_fetcher,
         account_cloner,
         account_committer,
         account_updates,
-        validated_accounts_provider,
     );
 
     let holder = TransactionAccountsHolder {
-        readonly: vec![readonly],
+        readonly: vec![readonly_already_loaded],
         writable: vec![],
         payer: Pubkey::new_unique(),
     };
@@ -125,39 +132,37 @@ async fn test_ensure_readonly_account_not_tracked_but_in_our_validator() {
         .await;
 
     assert_eq!(result.unwrap().len(), 0);
-    assert!(!manager.account_cloner.did_clone(&readonly));
+    assert!(!manager.account_cloner.did_clone(&readonly_already_loaded));
     assert!(manager.external_readonly_accounts.is_empty());
     assert!(manager.external_writable_accounts.is_empty());
 }
 
 #[tokio::test]
-async fn test_ensure_readonly_account_tracked_but_not_in_our_validator() {
+async fn test_ensure_readonly_account_cloned_but_not_in_our_validator() {
     init_logger!();
-    let readonly = Pubkey::new_unique();
+    let readonly_already_cloned = Pubkey::new_unique();
 
     let internal_account_provider = InternalAccountProviderStub::default();
+    let account_fetcher = AccountFetcherStub::default();
     let account_cloner = AccountClonerStub::default();
     let account_committer = AccountCommitterStub::default();
     let account_updates = AccountUpdatesStub::default();
-    let validated_accounts_provider =
-        ValidatedAccountsProviderStub::valid_default();
 
     let manager = setup(
         internal_account_provider,
+        account_fetcher,
         account_cloner,
         account_committer,
         account_updates,
-        validated_accounts_provider,
     );
 
     let cloned_at_slot = 42;
-
     manager
         .external_readonly_accounts
-        .insert(readonly, cloned_at_slot);
+        .insert(readonly_already_cloned, cloned_at_slot);
 
     let holder = TransactionAccountsHolder {
-        readonly: vec![readonly],
+        readonly: vec![readonly_already_cloned],
         writable: vec![],
         payer: Pubkey::new_unique(),
     };
@@ -167,7 +172,7 @@ async fn test_ensure_readonly_account_tracked_but_not_in_our_validator() {
         .await;
 
     assert_eq!(result.unwrap().len(), 0);
-    assert!(!manager.account_cloner.did_clone(&readonly));
+    assert!(!manager.account_cloner.did_clone(&readonly_already_cloned));
     assert_eq!(manager.external_readonly_accounts.len(), 1);
     assert!(manager.external_writable_accounts.is_empty());
 }
@@ -175,34 +180,36 @@ async fn test_ensure_readonly_account_tracked_but_not_in_our_validator() {
 #[tokio::test]
 async fn test_ensure_readonly_account_tracked_but_has_been_updated_on_chain() {
     init_logger!();
-    let readonly = Pubkey::new_unique();
+    let readonly_undelegated = Pubkey::new_unique();
 
     let internal_account_provider = InternalAccountProviderStub::default();
+    let mut account_fetcher = AccountFetcherStub::default();
     let account_cloner = AccountClonerStub::default();
     let account_committer = AccountCommitterStub::default();
     let mut account_updates = AccountUpdatesStub::default();
-    let validated_accounts_provider =
-        ValidatedAccountsProviderStub::valid_default();
 
     let cloned_at_slot = 11;
-    let updated_last_in_slot = 42;
+    let updated_last_at_slot = 42;
+    let fetchable_at_slot = 55;
 
-    account_updates.add_known_update(&readonly, updated_last_in_slot);
+    account_fetcher.add_undelegated(readonly_undelegated, fetchable_at_slot);
+    account_updates
+        .add_known_update(readonly_undelegated, updated_last_at_slot);
 
     let manager = setup(
         internal_account_provider,
+        account_fetcher,
         account_cloner,
         account_committer,
         account_updates,
-        validated_accounts_provider,
     );
 
     manager
         .external_readonly_accounts
-        .insert(readonly, cloned_at_slot);
+        .insert(readonly_undelegated, cloned_at_slot);
 
     let holder = TransactionAccountsHolder {
-        readonly: vec![readonly],
+        readonly: vec![readonly_undelegated],
         writable: vec![],
         payer: Pubkey::new_unique(),
     };
@@ -212,7 +219,7 @@ async fn test_ensure_readonly_account_tracked_but_has_been_updated_on_chain() {
         .await;
 
     assert_eq!(result.unwrap().len(), 1);
-    assert!(manager.account_cloner.did_clone(&readonly));
+    assert!(manager.account_cloner.did_clone(&readonly_undelegated));
     assert_eq!(manager.external_readonly_accounts.len(), 1);
     assert!(manager.external_writable_accounts.is_empty());
 }
@@ -220,34 +227,34 @@ async fn test_ensure_readonly_account_tracked_but_has_been_updated_on_chain() {
 #[tokio::test]
 async fn test_ensure_readonly_account_tracked_and_no_recent_update_on_chain() {
     init_logger!();
-    let readonly = Pubkey::new_unique();
+    let readonly_undelegated = Pubkey::new_unique();
 
     let internal_account_provider = InternalAccountProviderStub::default();
+    let account_fetcher = AccountFetcherStub::default();
     let account_cloner = AccountClonerStub::default();
     let account_committer = AccountCommitterStub::default();
     let mut account_updates = AccountUpdatesStub::default();
-    let validated_accounts_provider =
-        ValidatedAccountsProviderStub::valid_default();
 
     let cloned_at_slot = 42;
-    let updated_last_in_slot = 11;
+    let updated_last_at_slot = 11;
 
-    account_updates.add_known_update(&readonly, updated_last_in_slot);
+    account_updates
+        .add_known_update(readonly_undelegated, updated_last_at_slot);
 
     let manager = setup(
         internal_account_provider,
+        account_fetcher,
         account_cloner,
         account_committer,
         account_updates,
-        validated_accounts_provider,
     );
 
     manager
         .external_readonly_accounts
-        .insert(readonly, cloned_at_slot);
+        .insert(readonly_undelegated, cloned_at_slot);
 
     let holder = TransactionAccountsHolder {
-        readonly: vec![readonly],
+        readonly: vec![readonly_undelegated],
         writable: vec![],
         payer: Pubkey::new_unique(),
     };
@@ -257,7 +264,7 @@ async fn test_ensure_readonly_account_tracked_and_no_recent_update_on_chain() {
         .await;
 
     assert_eq!(result.unwrap().len(), 0);
-    assert!(!manager.account_cloner.did_clone(&readonly));
+    assert!(!manager.account_cloner.did_clone(&readonly_undelegated));
     assert_eq!(manager.external_readonly_accounts.len(), 1);
     assert!(manager.external_writable_accounts.is_empty());
 }
@@ -265,29 +272,38 @@ async fn test_ensure_readonly_account_tracked_and_no_recent_update_on_chain() {
 #[tokio::test]
 async fn test_ensure_readonly_account_in_our_validator_and_new_writable() {
     init_logger!();
-    let readonly = Pubkey::new_unique();
-    let writable = Pubkey::new_unique();
+    let readonly_already_loaded = Pubkey::new_unique();
+    let writable_delegated = Pubkey::new_unique();
 
     let mut internal_account_provider = InternalAccountProviderStub::default();
+    let mut account_fetcher = AccountFetcherStub::default();
     let account_cloner = AccountClonerStub::default();
     let account_committer = AccountCommitterStub::default();
     let account_updates = AccountUpdatesStub::default();
-    let validated_accounts_provider =
-        ValidatedAccountsProviderStub::valid_default();
 
-    internal_account_provider.add(readonly, Default::default());
+    internal_account_provider.add(readonly_already_loaded, Default::default());
+
+    let fetchable_at_slot = 42;
+    account_fetcher.add_delegated(
+        writable_delegated,
+        fetchable_at_slot,
+        &DelegationRecord {
+            owner: Pubkey::new_unique(),
+            commit_frequency: CommitFrequency::default(),
+        },
+    );
 
     let manager = setup(
         internal_account_provider,
+        account_fetcher,
         account_cloner,
         account_committer,
         account_updates,
-        validated_accounts_provider,
     );
 
     let holder = TransactionAccountsHolder {
-        readonly: vec![readonly],
-        writable: vec![writable],
+        readonly: vec![readonly_already_loaded],
+        writable: vec![writable_delegated],
         payer: Pubkey::new_unique(),
     };
 
@@ -295,11 +311,13 @@ async fn test_ensure_readonly_account_in_our_validator_and_new_writable() {
         .ensure_accounts_from_holder(holder, "tx-sig".to_string())
         .await;
     assert_eq!(result.unwrap().len(), 1);
-    assert!(!manager.account_cloner.did_clone(&readonly));
-    assert!(manager.account_cloner.did_clone(&writable));
-    assert!(manager.account_cloner.did_not_override_lamports(&writable));
+    assert!(!manager.account_cloner.did_clone(&readonly_already_loaded));
+    assert!(manager.account_cloner.did_clone(&writable_delegated));
+    assert!(manager
+        .account_cloner
+        .did_not_override_lamports(&writable_delegated));
     assert!(manager.external_readonly_accounts.is_empty());
-    assert!(manager.external_writable_accounts.has(&writable));
+    assert!(manager.external_writable_accounts.has(&writable_delegated));
 }
 
 #[tokio::test]
@@ -310,6 +328,7 @@ async fn test_ensure_locked_with_owner_and_unlocked_writable_payer() {
     let payer = Pubkey::new_unique();
 
     let internal_account_provider = InternalAccountProviderStub::default();
+    let account_fetcher = AccountFetcherStub::default();
     let account_cloner = AccountClonerStub::default();
     let account_committer = AccountCommitterStub::default();
     let account_updates = AccountUpdatesStub::default();
@@ -365,6 +384,7 @@ async fn test_ensure_one_locked_and_one_new_writable() {
     let new = Pubkey::new_unique();
 
     let internal_account_provider = InternalAccountProviderStub::default();
+    let account_fetcher = AccountFetcherStub::default();
     let account_cloner = AccountClonerStub::default();
     let account_committer = AccountCommitterStub::default();
     let account_updates = AccountUpdatesStub::default();
@@ -415,6 +435,7 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
     let writable2 = Pubkey::new_unique();
 
     let internal_account_provider = InternalAccountProviderStub::default();
+    let account_fetcher = AccountFetcherStub::default();
     let account_cloner = AccountClonerStub::default();
     let account_committer = AccountCommitterStub::default();
     let account_updates = AccountUpdatesStub::default();
@@ -518,6 +539,7 @@ async fn test_ensure_writable_account_fails_to_validate() {
     let writable = Pubkey::new_unique();
 
     let internal_account_provider = InternalAccountProviderStub::default();
+    let account_fetcher = AccountFetcherStub::default();
     let account_cloner = AccountClonerStub::default();
     let account_committer = AccountCommitterStub::default();
     let account_updates = AccountUpdatesStub::default();
@@ -559,6 +581,7 @@ async fn test_ensure_accounts_seen_first_as_readonly_can_be_used_as_writable_lat
     let account = Pubkey::new_unique();
 
     let internal_account_provider = InternalAccountProviderStub::default();
+    let account_fetcher = AccountFetcherStub::default();
     let account_cloner = AccountClonerStub::default();
     let account_committer = AccountCommitterStub::default();
     let account_updates = AccountUpdatesStub::default();
@@ -644,6 +667,7 @@ async fn test_ensure_accounts_already_known_can_be_reused_as_writable_later() {
     let account = Pubkey::new_unique();
 
     let mut internal_account_provider = InternalAccountProviderStub::default();
+    let account_fetcher = AccountFetcherStub::default();
     let account_cloner = AccountClonerStub::default();
     let account_committer = AccountCommitterStub::default();
     let account_updates = AccountUpdatesStub::default();
@@ -727,7 +751,7 @@ async fn test_ensure_accounts_already_cloned_needs_reclone_after_updates() {
     );
 
     internal_account_provider.add(account, Default::default());
-    account_updates.add_known_update(&account, last_update_slot);
+    account_updates.add_known_update(account, last_update_slot);
 
     let manager = setup(
         internal_account_provider,
@@ -809,7 +833,7 @@ async fn test_ensure_accounts_already_known_can_be_reused_without_updates() {
 
     internal_account_provider.add(account, Default::default());
 
-    account_updates.add_known_update(&account, last_update_slot);
+    account_updates.add_known_update(account, last_update_slot);
 
     let manager = setup(
         internal_account_provider,

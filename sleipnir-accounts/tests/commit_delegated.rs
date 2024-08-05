@@ -1,8 +1,9 @@
 use std::sync::Arc;
 
 use conjunto_transwise::{
+    transaction_accounts_extractor::TransactionAccountsExtractorImpl,
     transaction_accounts_validator::TransactionAccountsValidatorImpl,
-    CommitFrequency, TransactionAccountsExtractorImpl,
+    CommitFrequency,
 };
 use sleipnir_accounts::{
     ExternalAccountsManager, ExternalReadonlyMode, ExternalWritableMode,
@@ -15,10 +16,10 @@ use solana_sdk::{
 use stubs::{
     account_cloner_stub::AccountClonerStub,
     account_committer_stub::AccountCommitterStub,
+    account_fetcher_stub::AccountFetcherStub,
     account_updates_stub::AccountUpdatesStub,
     internal_account_provider_stub::InternalAccountProviderStub,
     scheduled_commits_processor_stub::ScheduledCommitsProcessorStub,
-    validated_accounts_provider_stub::ValidatedAccountsProviderStub,
 };
 use test_tools_core::init_logger;
 
@@ -30,7 +31,6 @@ fn setup(
     account_cloner: AccountClonerStub,
     account_committer: AccountCommitterStub,
     account_updates: AccountUpdatesStub,
-    transaction_accounts_validator: ValidatedAccountsProviderStub,
     validator_auth_id: Pubkey,
 ) -> ExternalAccountsManager<
     InternalAccountProviderStub,
@@ -38,8 +38,8 @@ fn setup(
     AccountClonerStub,
     AccountCommitterStub,
     AccountUpdatesStub,
-    ValidatedAccountsProviderStub,
     TransactionAccountsExtractorImpl,
+    TransactionAccountsValidatorImpl,
     ScheduledCommitsProcessorStub,
 > {
     ExternalAccountsManager {
@@ -91,10 +91,10 @@ async fn test_commit_two_delegated_accounts_one_needs_commit() {
 
     let manager = setup(
         internal_account_provider,
+        AccountFetcherStub::default(),
         AccountClonerStub::default(),
         account_committer.clone(),
         AccountUpdatesStub::default(),
-        ValidatedAccountsProviderStub::valid_default(),
         validator_auth_id,
     );
 

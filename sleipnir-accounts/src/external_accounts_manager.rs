@@ -7,6 +7,7 @@ use conjunto_transwise::{
     transaction_accounts_validator::{
         TransactionAccountsValidator, ValidateAccountsConfig,
     },
+    AccountChainState,
 };
 use log::*;
 use sleipnir_account_updates::AccountUpdates;
@@ -181,18 +182,17 @@ where
             .await?;
 
         // 3.B Validate the accounts that we see for the very first time
-        let validated_accounts =
-            self.transaction_accounts_validator.validate_accounts(
-                &acc_snapshot,
-                &ValidateAccountsConfig {
-                    allow_new_accounts: self.create_accounts,
-                    // Here we specify if we can clone all writable accounts or
-                    // only the ones that were delegated
-                    require_delegation: self
-                        .external_writable_mode
-                        .is_clone_delegated_only(),
-                },
-            )?;
+        self.transaction_accounts_validator.validate_accounts(
+            &acc_snapshot,
+            &ValidateAccountsConfig {
+                allow_new_accounts: self.create_accounts,
+                // Here we specify if we can clone all writable accounts or
+                // only the ones that were delegated
+                require_delegation: self
+                    .external_writable_mode
+                    .is_clone_delegated_only(),
+            },
+        )?;
 
         // 4.A If a readonly account is not a program, but we only should clone programs then
         //     we have a problem since the account does not exist nor will it be created.
@@ -206,11 +206,11 @@ where
         let cloned_readonly_accounts = acc_snapshot
             .readonly
             .into_iter()
-            .filter(|acc| match &acc.account {
+            .filter(|acc| match acc.chain_state.account() {
                 // If it exists: Allow the account if its a program or if we allow non-programs to be cloned
                 Some(account) => account.executable || !programs_only,
                 // Otherwise, don't clone it
-                _ => false,
+                None => false,
             })
             .collect::<Vec<_>>();
 
@@ -218,7 +218,7 @@ where
         let cloned_writable_accounts = acc_snapshot
             .writable
             .into_iter()
-            .filter(|acc| acc.account.is_some())
+            .filter(|acc| acc.chain_state.account().is_some())
             .collect::<Vec<_>>();
 
         // Useful logging of involved writable/readables pubkeys
@@ -239,15 +239,21 @@ where
                     .map(|x| {
                         format!(
                             "{}{}{}",
-                            if x.is_payer { "[payer]:" } else { "" },
+                            if x.pubkey == acc_snapshot.payer {
+                                "[payer]:"
+                            } else {
+                                ""
+                            },
                             x.pubkey,
-                            x.lock_config
-                                .as_ref()
-                                .map(|x| format!(
-                                    ", owner: {}, commit_frequency: {}",
-                                    x.owner, x.commit_frequency
-                                ))
-                                .unwrap_or("".to_string()),
+                            match x.chain_state {
+                                AccountChainState::NewAccount => "NewAccount",
+                                AccountChainState::Undelegated { .. } =>
+                                    "Undelegated",
+                                AccountChainState::Delegated { .. } =>
+                                    "Delegated",
+                                AccountChainState::Inconsistent { .. } =>
+                                    "Inconsistent",
+                            },
                         )
                     })
                     .collect::<Vec<_>>();
@@ -266,7 +272,8 @@ where
                 .account_cloner
                 .clone_account(
                     &cloned_readonly_account.pubkey,
-                    cloned_readonly_account.account,
+                    // TODO(vbrunet) - This should not need to be cloned
+                    cloned_readonly_account.chain_state.account().cloned(),
                     None,
                 )
                 .await?;
@@ -282,13 +289,14 @@ where
         for cloned_writable_account in cloned_writable_accounts {
             // Create and the transaction to dump data array, lamports and owner change to the local state
             let mut overrides = cloned_writable_account
-                .lock_config
+                .chain_state
+                .delegation_record()
                 .as_ref()
                 .map(|x| AccountModification {
                     owner: Some(x.owner.to_string()),
                     ..Default::default()
                 });
-            if cloned_writable_account.is_payer {
+            if cloned_writable_account.pubkey == acc_snapshot.payer {
                 if let Some(lamports) = self.payer_init_lamports {
                     match overrides {
                         Some(ref mut x) => x.lamports = Some(lamports),
@@ -305,7 +313,7 @@ where
                 .account_cloner
                 .clone_account(
                     &cloned_writable_account.pubkey,
-                    cloned_writable_account.account,
+                    cloned_writable_account.chain_state.account().cloned(),
                     overrides,
                 )
                 .await?;
@@ -317,7 +325,8 @@ where
                 cloned_writable_account.pubkey,
                 cloned_writable_account.at_slot,
                 cloned_writable_account
-                    .lock_config
+                    .chain_state
+                    .delegation_record()
                     .as_ref()
                     .map(|x| x.commit_frequency),
             );
