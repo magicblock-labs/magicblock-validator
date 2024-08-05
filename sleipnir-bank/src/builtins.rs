@@ -63,6 +63,7 @@ impl solana_frozen_abi::abi_example::AbiExample for BuiltinPrototype {
 ///   the solana validator and we don't support it yet
 /// - `solana_sdk::loader_v4` it's behind a feature flag (`feature_set::enable_program_runtime_v2_and_loader_v4`) in the solana
 ///   validator and we don't support it yet
+///
 /// See: solana repo - runtime/src/builtins.rs
 pub static BUILTINS: &[BuiltinPrototype] = &[
     BuiltinPrototype {
