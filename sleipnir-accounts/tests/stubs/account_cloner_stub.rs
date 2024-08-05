@@ -16,20 +16,17 @@ impl AccountClonerStub {
         self.cloned_accounts.read().unwrap().contains_key(pubkey)
     }
 
-    #[allow(dead_code)] // will use in test assertions
     pub fn did_override_owner(&self, pubkey: &Pubkey, owner: &Pubkey) -> bool {
         let read_lock = self.cloned_accounts.read().unwrap();
-        let overrides = read_lock.get(pubkey);
-        if overrides.is_none() {
-            eprintln!("ERR: No overrides for pubkey: {}", pubkey);
-            return false;
+        if let Some(overrides) = read_lock.get(pubkey) {
+            overrides
+                .as_ref()
+                .and_then(|x| x.owner.as_ref())
+                .map(|o| Pubkey::from_str(o).unwrap())
+                == Some(*owner)
+        } else {
+            false
         }
-        let overrides = overrides.unwrap();
-        overrides
-            .as_ref()
-            .and_then(|x| x.owner.as_ref())
-            .map(|o| Pubkey::from_str(o).unwrap())
-            == Some(*owner)
     }
 
     pub fn did_override_lamports(
@@ -38,29 +35,34 @@ impl AccountClonerStub {
         lamports: u64,
     ) -> bool {
         let read_lock = self.cloned_accounts.read().unwrap();
-        let overrides = read_lock.get(pubkey);
-        if overrides.is_none() {
-            return false;
+        if let Some(overrides) = read_lock.get(pubkey) {
+            let override_lamports =
+                overrides.as_ref().and_then(|x| x.lamports.as_ref());
+            override_lamports == Some(&lamports)
+        } else {
+            false
         }
-        let overrides = overrides.unwrap();
-        let override_lamports =
-            overrides.as_ref().and_then(|x| x.lamports.as_ref());
-        override_lamports == Some(&lamports)
     }
 
     pub fn did_not_override_owner(&self, pubkey: &Pubkey) -> bool {
         let read_lock = self.cloned_accounts.read().unwrap();
-        let overrides = read_lock.get(pubkey).unwrap();
-        overrides.as_ref().and_then(|x| x.owner.as_ref()).is_none()
+        if let Some(overrides) = read_lock.get(pubkey) {
+            overrides.as_ref().and_then(|x| x.owner.as_ref()).is_none()
+        } else {
+            true
+        }
     }
 
     pub fn did_not_override_lamports(&self, pubkey: &Pubkey) -> bool {
         let read_lock = self.cloned_accounts.read().unwrap();
-        let overrides = read_lock.get(pubkey).unwrap();
-        overrides
-            .as_ref()
-            .and_then(|x| x.lamports.as_ref())
-            .is_none()
+        if let Some(overrides) = read_lock.get(pubkey) {
+            overrides
+                .as_ref()
+                .and_then(|x| x.lamports.as_ref())
+                .is_none()
+        } else {
+            true
+        }
     }
 
     pub fn clear(&self) {
