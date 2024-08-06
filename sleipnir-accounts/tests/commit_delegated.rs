@@ -5,9 +5,7 @@ use conjunto_transwise::{
     transaction_accounts_validator::TransactionAccountsValidatorImpl,
     CommitFrequency,
 };
-use sleipnir_accounts::{
-    ExternalAccountsManager, ExternalReadonlyMode, ExternalWritableMode,
-};
+use sleipnir_accounts::{ExternalAccountsManager, ExternalCloneMode};
 use solana_sdk::{
     account::{Account, AccountSharedData},
     native_token::LAMPORTS_PER_SOL,
@@ -53,8 +51,7 @@ fn setup(
         scheduled_commits_processor: ScheduledCommitsProcessorStub::default(),
         external_readonly_accounts: Default::default(),
         external_writable_accounts: Default::default(),
-        external_readonly_mode: ExternalReadonlyMode::All,
-        external_writable_mode: ExternalWritableMode::Delegated,
+        external_clone_mode: ExternalCloneMode::Everything,
         create_accounts: false,
         payer_init_lamports: Some(1_000 * LAMPORTS_PER_SOL),
         validator_id: validator_auth_id,

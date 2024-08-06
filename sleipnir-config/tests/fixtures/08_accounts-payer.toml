@@ -1,7 +1,7 @@
 [accounts]
 remote = "devnet"
-clone = "programs"
-create = true
+clone = "all"
+create = false
 payer = { init_sol = 2000 }
 
 [rpc]

@@ -7,8 +7,7 @@ use conjunto_transwise::{
     transaction_accounts_validator::TransactionAccountsValidatorImpl,
 };
 use sleipnir_accounts::{
-    errors::AccountsError, CloneMode, ExternalAccountsManager,
-    ExternalReadonlyMode, ExternalWritableMode,
+    errors::AccountsError, ExternalAccountsManager, ExternalCloneMode,
 };
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
 use stubs::{
@@ -30,7 +29,7 @@ fn setup_customized(
     account_cloner: AccountClonerStub,
     account_committer: AccountCommitterStub,
     account_updates: AccountUpdatesStub,
-    clone_mode: CloneMode,
+    external_clone_mode: ExternalCloneMode,
     create_accounts: bool,
 ) -> ExternalAccountsManager<
     InternalAccountProviderStub,
@@ -54,7 +53,7 @@ fn setup_customized(
         external_readonly_accounts: Default::default(),
         external_writable_accounts: Default::default(),
         scheduled_commits_processor: ScheduledCommitsProcessorStub::default(),
-        clone_mode,
+        external_clone_mode,
         create_accounts,
         payer_init_lamports: Some(1_000 * LAMPORTS_PER_SOL),
         validator_id: validator_auth_id,
@@ -83,7 +82,7 @@ fn setup_standard(
         account_cloner,
         account_committer,
         account_updates,
-        CloneMode::Everything,
+        ExternalCloneMode::Everything,
         false,
     )
 }
@@ -462,8 +461,7 @@ async fn test_ensure_one_delegated_and_one_new_account_writable() {
         account_cloner,
         account_committer,
         account_updates,
-        ExternalReadonlyMode::All,
-        ExternalWritableMode::All,
+        ExternalCloneMode::ProgramsOnly,
         true,
     );
 

@@ -15,11 +15,11 @@ pub struct AccountsConfig {
 #[derive(Debug, PartialEq, Eq)]
 pub struct ExternalConfig {
     pub cluster: Cluster,
-    pub clone: CloneMode,
+    pub clone: ExternalCloneMode,
 }
 
 #[derive(Debug, Default, PartialEq, Eq)]
-pub enum CloneMode {
+pub enum ExternalCloneMode {
     Everything,
     #[default]
     ProgramsOnly,

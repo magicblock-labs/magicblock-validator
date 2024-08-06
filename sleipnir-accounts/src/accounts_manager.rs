@@ -58,7 +58,7 @@ impl
     ) -> AccountsResult<Self> {
         let validator_id = validator_keypair.pubkey();
 
-        let external_config: crate::ExternalConfig = config.external;
+        let external_config = config.external;
         let cluster = external_config.cluster;
         let internal_account_provider = BankAccountProvider::new(bank.clone());
         let rpc_cluster = try_rpc_cluster_from_cluster(&cluster)?;
@@ -98,7 +98,7 @@ impl
             transaction_accounts_validator: TransactionAccountsValidatorImpl,
             external_readonly_accounts: ExternalReadonlyAccounts::default(),
             external_writable_accounts: ExternalWritableAccounts::default(),
-            clone_mode: external_config.clone,
+            external_clone_mode: external_config.clone,
             create_accounts: config.create,
             scheduled_commits_processor,
             payer_init_lamports: config.payer_init_lamports,

@@ -40,7 +40,7 @@ fn test_ephemeral_toml() {
         config,
         SleipnirConfig {
             accounts: AccountsConfig {
-                clone: CloneMode::ProgramsOnly,
+                clone: CloneMode::Everything,
                 create: false,
                 ..Default::default()
             },
