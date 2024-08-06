@@ -1,25 +1,19 @@
 use std::error::Error;
 
-use sleipnir_accounts::{
-    Cluster, ExternalConfig, ExternalReadonlyMode, ExternalWritableMode,
-};
+use sleipnir_accounts::{AccountsConfig, CloneMode, Cluster, ExternalConfig};
+use sleipnir_config::CloneMode;
 use solana_sdk::genesis_config::ClusterType;
 
 pub(crate) fn try_convert_accounts_config(
-    conf: &sleipnir_config::AccountsConfig,
-) -> Result<sleipnir_accounts::AccountsConfig, Box<dyn Error>> {
+    conf: &AccountsConfig,
+) -> Result<AccountsConfig, Box<dyn Error>> {
     let cluster = cluster_from_remote(&conf.remote);
-    let readonly = readonly_mode_from_external(&conf.clone.readonly);
-    let writable = writable_mode_from_external(&conf.clone.writable);
+    let clone = clone_mode_from_external(&conf.clone);
     let payer_init_lamports = conf.payer.try_init_lamports()?;
 
-    let external = ExternalConfig {
-        cluster,
-        readonly,
-        writable,
-    };
+    let external = ExternalConfig { cluster, clone };
 
-    Ok(sleipnir_accounts::AccountsConfig {
+    Ok(AccountsConfig {
         external,
         create: conf.create,
         payer_init_lamports,
@@ -27,37 +21,20 @@ pub(crate) fn try_convert_accounts_config(
     })
 }
 
-pub(crate) fn cluster_from_remote(
-    remote: &sleipnir_config::RemoteConfig,
-) -> sleipnir_accounts::Cluster {
-    use sleipnir_config::RemoteConfig::*;
+pub(crate) fn cluster_from_remote(remote: &RemoteConfig) -> Cluster {
     match remote {
-        Devnet => Cluster::Known(ClusterType::Devnet),
-        Mainnet => Cluster::Known(ClusterType::MainnetBeta),
-        Testnet => Cluster::Known(ClusterType::Testnet),
-        Development => Cluster::Known(ClusterType::Development),
-        Custom(url) => Cluster::Custom(url.to_string()),
+        RemoteConfig::Devnet => Cluster::Known(ClusterType::Devnet),
+        RemoteConfig::Mainnet => Cluster::Known(ClusterType::MainnetBeta),
+        RemoteConfig::Testnet => Cluster::Known(ClusterType::Testnet),
+        RemoteConfig::Development => Cluster::Known(ClusterType::Development),
+        RemoteConfig::Custom(url) => Cluster::Custom(url.to_string()),
     }
 }
 
-fn readonly_mode_from_external(
-    mode: &sleipnir_config::ReadonlyMode,
-) -> sleipnir_accounts::ExternalReadonlyMode {
-    use sleipnir_config::ReadonlyMode::*;
-    match mode {
-        All => ExternalReadonlyMode::All,
-        Programs => ExternalReadonlyMode::Programs,
-        None => ExternalReadonlyMode::None,
-    }
-}
-
-fn writable_mode_from_external(
-    mode: &sleipnir_config::WritableMode,
-) -> sleipnir_accounts::ExternalWritableMode {
-    use sleipnir_config::WritableMode::*;
-    match mode {
-        All => ExternalWritableMode::All,
-        Delegated => ExternalWritableMode::Delegated,
-        None => ExternalWritableMode::None,
+fn clone_mode_from_external(clone: &CloneMode) -> CloneMode {
+    match clone {
+        CloneMode::Everything => CloneMode::Everything,
+        CloneMode::ProgramsOnly => CloneMode::ProgramsOnly,
+        CloneMode::Nothing => CloneMode::Nothing,
     }
 }

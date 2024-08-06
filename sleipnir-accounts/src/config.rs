@@ -15,56 +15,22 @@ pub struct AccountsConfig {
 #[derive(Debug, PartialEq, Eq)]
 pub struct ExternalConfig {
     pub cluster: Cluster,
-    pub readonly: ExternalReadonlyMode,
-    pub writable: ExternalWritableMode,
+    pub clone: CloneMode,
+}
+
+#[derive(Debug, Default, PartialEq, Eq)]
+pub enum CloneMode {
+    Everything,
+    #[default]
+    ProgramsOnly,
+    Nothing,
 }
 
 impl Default for ExternalConfig {
     fn default() -> Self {
         Self {
             cluster: Cluster::Known(ClusterType::Devnet),
-            readonly: Default::default(),
-            writable: Default::default(),
+            clone: Default::default(),
         }
-    }
-}
-
-#[derive(Debug, Default, PartialEq, Eq)]
-pub enum ExternalReadonlyMode {
-    All,
-    #[default]
-    Programs,
-    None,
-}
-
-impl ExternalReadonlyMode {
-    pub fn is_clone_all(&self) -> bool {
-        matches!(self, Self::All)
-    }
-    pub fn is_clone_programs_only(&self) -> bool {
-        matches!(self, Self::Programs)
-    }
-    pub fn is_clone_none(&self) -> bool {
-        matches!(self, Self::None)
-    }
-}
-
-#[derive(Debug, Default, PartialEq, Eq)]
-pub enum ExternalWritableMode {
-    All,
-    Delegated,
-    #[default]
-    None,
-}
-
-impl ExternalWritableMode {
-    pub fn is_clone_all(&self) -> bool {
-        matches!(self, Self::All)
-    }
-    pub fn is_clone_delegated_only(&self) -> bool {
-        matches!(self, Self::Delegated)
-    }
-    pub fn is_clone_none(&self) -> bool {
-        matches!(self, Self::None)
     }
 }

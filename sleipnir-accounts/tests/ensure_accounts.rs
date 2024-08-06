@@ -7,8 +7,8 @@ use conjunto_transwise::{
     transaction_accounts_validator::TransactionAccountsValidatorImpl,
 };
 use sleipnir_accounts::{
-    errors::AccountsError, ExternalAccountsManager, ExternalReadonlyMode,
-    ExternalWritableMode,
+    errors::AccountsError, CloneMode, ExternalAccountsManager,
+    ExternalReadonlyMode, ExternalWritableMode,
 };
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
 use stubs::{
@@ -30,8 +30,7 @@ fn setup_customized(
     account_cloner: AccountClonerStub,
     account_committer: AccountCommitterStub,
     account_updates: AccountUpdatesStub,
-    external_readonly_mode: ExternalReadonlyMode,
-    external_writable_mode: ExternalWritableMode,
+    clone_mode: CloneMode,
     create_accounts: bool,
 ) -> ExternalAccountsManager<
     InternalAccountProviderStub,
@@ -55,8 +54,7 @@ fn setup_customized(
         external_readonly_accounts: Default::default(),
         external_writable_accounts: Default::default(),
         scheduled_commits_processor: ScheduledCommitsProcessorStub::default(),
-        external_readonly_mode,
-        external_writable_mode,
+        clone_mode,
         create_accounts,
         payer_init_lamports: Some(1_000 * LAMPORTS_PER_SOL),
         validator_id: validator_auth_id,
@@ -85,8 +83,7 @@ fn setup_standard(
         account_cloner,
         account_committer,
         account_updates,
-        ExternalReadonlyMode::All,
-        ExternalWritableMode::Delegated,
+        CloneMode::Everything,
         false,
     )
 }

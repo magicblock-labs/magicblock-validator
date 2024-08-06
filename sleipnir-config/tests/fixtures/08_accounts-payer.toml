@@ -1,6 +1,6 @@
 [accounts]
 remote = "devnet"
-clone = { readonly = "programs", writable = "none" }
+clone = "programs"
 create = true
 payer = { init_sol = 2000 }
 

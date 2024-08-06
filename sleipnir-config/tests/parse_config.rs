@@ -4,9 +4,8 @@ use std::{
 };
 
 use sleipnir_config::{
-    AccountsConfig, CloneStrategy, CommitStrategy, GeyserGrpcConfig, Payer,
-    ProgramConfig, ReadonlyMode, RemoteConfig, RpcConfig, SleipnirConfig,
-    ValidatorConfig, WritableMode,
+    AccountsConfig, CloneMode, CommitStrategy, GeyserGrpcConfig, Payer,
+    ProgramConfig, RemoteConfig, RpcConfig, SleipnirConfig, ValidatorConfig,
 };
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
 use url::Url;
@@ -41,10 +40,7 @@ fn test_ephemeral_toml() {
         config,
         SleipnirConfig {
             accounts: AccountsConfig {
-                clone: CloneStrategy {
-                    readonly: ReadonlyMode::Programs,
-                    writable: WritableMode::Delegated,
-                },
+                clone: CloneMode::ProgramsOnly,
                 create: false,
                 ..Default::default()
             },
@@ -61,10 +57,7 @@ fn test_all_goes_toml() {
         config,
         SleipnirConfig {
             accounts: AccountsConfig {
-                clone: CloneStrategy {
-                    readonly: ReadonlyMode::All,
-                    writable: WritableMode::All,
-                },
+                clone: CloneMode::Everything,
                 ..Default::default()
             },
             validator: ValidatorConfig {

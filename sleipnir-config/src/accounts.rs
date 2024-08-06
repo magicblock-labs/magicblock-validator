@@ -13,7 +13,7 @@ pub struct AccountsConfig {
     #[serde(default)]
     pub remote: RemoteConfig,
     #[serde(default)]
-    pub clone: CloneStrategy,
+    pub clone: CloneMode,
     #[serde(default)]
     pub commit: CommitStrategy,
     #[serde(default = "default_create")]
@@ -81,39 +81,22 @@ where
 }
 
 // -----------------
-// CloneStrategy
+// CloneMode
 // -----------------
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
-pub struct CloneStrategy {
-    #[serde(default)]
-    pub readonly: ReadonlyMode,
-    #[serde(default)]
-    pub writable: WritableMode,
-}
-
 #[derive(
     Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, EnumString,
 )]
 #[serde(rename_all = "camelCase")]
 #[strum(serialize_all = "camelCase")]
-pub enum ReadonlyMode {
-    All,
+pub enum CloneMode {
     #[default]
+    #[serde(alias = "all")]
+    Everything,
     #[serde(alias = "program")]
-    Programs,
-    None,
-}
-
-#[derive(
-    Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, EnumString,
-)]
-#[serde(rename_all = "camelCase")]
-#[strum(serialize_all = "camelCase")]
-pub enum WritableMode {
-    All,
-    Delegated,
-    #[default]
-    None,
+    #[serde(alias = "programs")]
+    ProgramsOnly,
+    #[serde(alias = "none")]
+    Nothing,
 }
 
 // -----------------

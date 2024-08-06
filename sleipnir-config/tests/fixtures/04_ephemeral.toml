@@ -2,5 +2,5 @@
 # Otherwise we fail with account missing and/or not properly delegate.
 # We never create accounts at this point
 [accounts]
-clone = { readonly = "programs", writable = "delegated" }
+clone = "all"
 create = false

@@ -7,7 +7,7 @@ remote = "devnet"
 
 # readonly: all | programs  | none
 # writable: all | delegated | none
-clone = { readonly = "programs", writable = "none" }
+clone = "programs"
 create = true
 commit = { frequency_millis = 500, compute_unit_price = 1_000_000 }
 

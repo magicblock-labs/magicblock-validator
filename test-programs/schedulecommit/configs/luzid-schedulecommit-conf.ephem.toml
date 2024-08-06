@@ -3,8 +3,8 @@ name = "Ephem:8899"
 
 [node.accounts]
 remote = "http://0.0.0.0:7799"
-clone = { readonly = "programs", writable = "delegated" }
-# clone = { readonly = "programs", writable = "none" }
+clone = "all"
+# clone = "programs"
 commit = { frequency_millis = 500_000, trigger = true, compute_unit_price = 1_000_000 }
 create = false
 # create = true

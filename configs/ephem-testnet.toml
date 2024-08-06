@@ -1,6 +1,6 @@
 [accounts]
 remote = "testnet"
-clone = { readonly = "all", writable = "delegated" }
+clone = "all"
 commit = { frequency_millis = 50_000 }
 payer = { init_sol = 1_000 }
 create = false
