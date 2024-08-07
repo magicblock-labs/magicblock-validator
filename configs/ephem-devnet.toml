@@ -1,9 +1,8 @@
 [accounts]
 remote = "devnet"
-clone = "all"
+lifecycle = "ephem-full"
 commit = { frequency_millis = 50_000 }
 payer = { init_sol = 1_000 }
-create = false
 
 [rpc]
 addr = "0.0.0.0"

@@ -1,8 +1,7 @@
 [accounts]
 remote = "devnet"
-clone = "programs"
+lifecycle = "chain-programs"
 commit = { frequency_millis = 9_000_000_000_000, compute_unit_price = 1_000_000 }
-create = true
 
 [validator]
 millis_per_slot = 50

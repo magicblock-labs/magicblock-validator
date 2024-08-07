@@ -1,8 +1,7 @@
 [accounts]
 remote = "devnet"
-clone = "programs"
+lifecycle = "chain-programs"
 commit = { frequency_millis = 500_000 }
-create = true
 
 [rpc]
 port = 8899

@@ -1,6 +1,5 @@
 # Programs are automatically cloned from devnet.
-# All others are expected to be there or need to be created as part of the transaction.
+# All others are expected to be there or need to be created as part of the transactions.
 [accounts]
 remote = "devnet"
-clone = "programs"
-create = true
+lifecycle = "chain-programs"

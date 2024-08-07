@@ -4,8 +4,8 @@ use std::{
 };
 
 use sleipnir_config::{
-    AccountsConfig, CloneMode, CommitStrategy, GeyserGrpcConfig, Payer,
-    ProgramConfig, RemoteConfig, RpcConfig, SleipnirConfig, ValidatorConfig,
+    AccountsConfig, CommitStrategy, GeyserGrpcConfig, Payer, ProgramConfig,
+    RemoteConfig, RpcConfig, SleipnirConfig, ValidatorConfig,
 };
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
 use url::Url;

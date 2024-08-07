@@ -13,26 +13,19 @@ pub struct AccountsConfig {
     #[serde(default)]
     pub remote: RemoteConfig,
     #[serde(default)]
-    pub clone: CloneMode,
+    pub lifecycle: LifecycleMode,
     #[serde(default)]
     pub commit: CommitStrategy,
-    #[serde(default = "default_create")]
-    pub create: bool,
     #[serde(default)]
     pub payer: Payer,
-}
-
-fn default_create() -> bool {
-    true
 }
 
 impl Default for AccountsConfig {
     fn default() -> Self {
         Self {
             remote: Default::default(),
-            clone: Default::default(),
+            lifecycle: Default::default(),
             payer: Default::default(),
-            create: true,
             commit: Default::default(),
         }
     }
@@ -81,22 +74,25 @@ where
 }
 
 // -----------------
-// CloneMode
+// LifecycleMode
 // -----------------
 #[derive(
     Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, EnumString,
 )]
 #[serde(rename_all = "camelCase")]
 #[strum(serialize_all = "camelCase")]
-pub enum CloneMode {
+pub enum LifecycleMode {
     #[default]
-    #[serde(alias = "all")]
-    Everything,
-    #[serde(alias = "program")]
-    #[serde(alias = "programs")]
-    ProgramsOnly,
-    #[serde(alias = "none")]
-    Nothing,
+    #[serde(alias = "chain-full")]
+    ChainWithEverything,
+    #[serde(alias = "chain-programs")]
+    ChainWithPrograms,
+    #[serde(alias = "ephem-full")]
+    EphemeralWithEverything,
+    #[serde(alias = "ephem-programs")]
+    EphemeralWithPrograms,
+    #[serde(alias = "isolated")]
+    Isolated,
 }
 
 // -----------------

@@ -1,7 +1,6 @@
 [accounts]
 remote = "devnet"
-clone = "all"
-create = false
+lifecycle = "chain-programs"
 payer = { init_sol = 2000 }
 
 [rpc]
