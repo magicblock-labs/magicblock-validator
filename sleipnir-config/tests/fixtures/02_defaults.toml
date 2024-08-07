@@ -2,7 +2,7 @@
 
 [accounts]
 
-# devnet | mainnet/mainnet-beta | testnet | development/local custom(url)
+# devnet | mainnet/mainnet-beta | testnet | development/local | custom(url)
 remote = "devnet"
 # lifecycle: chain-anything | chain-programs | ephem-anything | ephem-programs | isolated
 lifecycle = "chain-programs"

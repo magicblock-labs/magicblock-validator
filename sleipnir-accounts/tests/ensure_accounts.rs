@@ -452,13 +452,14 @@ async fn test_ensure_one_delegated_and_one_new_account_writable() {
     );
 
     // Note: since we use a writable new account, we need to allow it as part of the configuration
+    // We can't use an ephemeral's configuration, that forbids new accounts to be writable
     let manager = setup_customized(
         internal_account_provider,
         account_fetcher,
         account_cloner,
         account_committer,
         account_updates,
-        LifecycleMode::ChainWithPrograms,
+        LifecycleMode::ChainWithAnything,
     );
 
     let holder = TransactionAccountsHolder {

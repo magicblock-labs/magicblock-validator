@@ -73,7 +73,7 @@ where
             return Ok(vec![]);
         }
 
-        // Extract all acounts from the transaction
+        // 1. Extract all acounts from the transaction
         let accounts_holder = self
             .transaction_accounts_extractor
             .try_accounts_from_sanitized_transaction(tx)?;
@@ -138,10 +138,9 @@ where
         };
         trace!("Newly seen readonly pubkeys: {:?}", unseen_readonly_ids);
 
-        // 2.B Collect all writable accounts we've never seen before and need to clone and prepare as writable
-        let unseen_writable_ids = if self.lifecycle.disallow_cloning() {
-            vec![]
-        } else {
+        // 2.B If needed, Collect all writable accounts we've never seen before and need to clone and prepare as writable
+        let unseen_writable_ids = if self.lifecycle.allow_cloning_non_programs()
+        {
             accounts_holder
                 .writable
                 .into_iter()
@@ -153,6 +152,8 @@ where
                 // we still need to prepare it so it can be used as a writable.
                 // Because it may only be able to be used as a readonly until modified.
                 .collect::<Vec<_>>()
+        } else {
+            vec![]
         };
         trace!("Newly seen writable pubkeys: {:?}", unseen_writable_ids);
 
