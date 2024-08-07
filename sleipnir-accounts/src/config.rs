@@ -18,7 +18,7 @@ pub enum LifecycleMode {
 }
 
 impl LifecycleMode {
-    pub fn disallow_cloning(&self) -> bool {
+    pub fn disable_cloning(&self) -> bool {
         match self {
             LifecycleMode::ChainWithPrograms => false,
             LifecycleMode::ChainWithAnything => false,

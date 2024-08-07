@@ -69,7 +69,7 @@ where
         tx: &SanitizedTransaction,
     ) -> AccountsResult<Vec<Signature>> {
         // If this validator does not clone any accounts then we're done
-        if self.lifecycle.disallow_cloning() {
+        if self.lifecycle.disable_cloning() {
             return Ok(vec![]);
         }
 
@@ -92,7 +92,7 @@ where
         signature: String,
     ) -> AccountsResult<Vec<Signature>> {
         // 2.A Collect all readonly accounts we've never seen before and need to clone as readonly
-        let unseen_readonly_ids = if self.lifecycle.disallow_cloning() {
+        let unseen_readonly_ids = if self.lifecycle.disable_cloning() {
             vec![]
         } else {
             accounts_holder
@@ -139,8 +139,11 @@ where
         trace!("Newly seen readonly pubkeys: {:?}", unseen_readonly_ids);
 
         // 2.B If needed, Collect all writable accounts we've never seen before and need to clone and prepare as writable
-        let unseen_writable_ids = if self.lifecycle.allow_cloning_non_programs()
+        let unseen_writable_ids = if self.lifecycle.disable_cloning()
+            || !self.lifecycle.allow_cloning_non_programs()
         {
+            vec![]
+        } else {
             accounts_holder
                 .writable
                 .into_iter()
@@ -152,8 +155,6 @@ where
                 // we still need to prepare it so it can be used as a writable.
                 // Because it may only be able to be used as a readonly until modified.
                 .collect::<Vec<_>>()
-        } else {
-            vec![]
         };
         trace!("Newly seen writable pubkeys: {:?}", unseen_writable_ids);
 
