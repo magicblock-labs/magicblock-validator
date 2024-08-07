@@ -1,5 +1,4 @@
 use sleipnir_mutator::Cluster;
-use solana_sdk::genesis_config::ClusterType;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct AccountsConfig {
@@ -7,17 +6,6 @@ pub struct AccountsConfig {
     pub lifecycle: LifecycleMode,
     pub commit_compute_unit_price: u64,
     pub payer_init_lamports: Option<u64>,
-}
-
-impl Default for AccountsConfig {
-    fn default() -> Self {
-        Self {
-            cluster: Cluster::Known(ClusterType::Devnet),
-            lifecycle: LifecycleMode::ChainWithAnything,
-            commit_compute_unit_price: 0,
-            payer_init_lamports: None,
-        }
-    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
