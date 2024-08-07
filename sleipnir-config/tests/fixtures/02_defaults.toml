@@ -4,7 +4,7 @@
 
 # devnet | mainnet/mainnet-beta | testnet | development/local custom(url)
 remote = "devnet"
-# lifecycle: chain-full | chain-programs | ephem-full | ephem-programs | isolated
+# lifecycle: chain-anything | chain-programs | ephem-anything | ephem-programs | isolated
 lifecycle = "chain-programs"
 
 commit = { frequency_millis = 500, compute_unit_price = 1_000_000 }

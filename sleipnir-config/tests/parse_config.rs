@@ -4,8 +4,8 @@ use std::{
 };
 
 use sleipnir_config::{
-    AccountsConfig, CommitStrategy, GeyserGrpcConfig, Payer, ProgramConfig,
-    RemoteConfig, RpcConfig, SleipnirConfig, ValidatorConfig,
+    AccountsConfig, CommitStrategy, GeyserGrpcConfig, LifecycleMode, Payer,
+    ProgramConfig, RemoteConfig, RpcConfig, SleipnirConfig, ValidatorConfig,
 };
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
 use url::Url;
@@ -33,15 +33,30 @@ fn test_local_dev_toml() {
 }
 
 #[test]
-fn test_ephemeral_toml() {
-    let toml = include_str!("fixtures/04_ephemeral.toml");
+fn test_ephemeral_with_programs_toml() {
+    let toml = include_str!("fixtures/04_A_ephemeral_with_programs.toml");
     let config = toml::from_str::<SleipnirConfig>(toml).unwrap();
     assert_eq!(
         config,
         SleipnirConfig {
             accounts: AccountsConfig {
-                clone: CloneMode::Everything,
-                create: false,
+                lifecycle: LifecycleMode::EphemeralWithPrograms,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    );
+}
+
+#[test]
+fn test_ephemeral_with_everything_toml() {
+    let toml = include_str!("fixtures/04_B_ephemeral_with_anything.toml");
+    let config = toml::from_str::<SleipnirConfig>(toml).unwrap();
+    assert_eq!(
+        config,
+        SleipnirConfig {
+            accounts: AccountsConfig {
+                lifecycle: LifecycleMode::EphemeralWithAnything,
                 ..Default::default()
             },
             ..Default::default()
@@ -57,7 +72,7 @@ fn test_all_goes_toml() {
         config,
         SleipnirConfig {
             accounts: AccountsConfig {
-                clone: CloneMode::Everything,
+                lifecycle: LifecycleMode::ChainWithAnything,
                 ..Default::default()
             },
             validator: ValidatorConfig {

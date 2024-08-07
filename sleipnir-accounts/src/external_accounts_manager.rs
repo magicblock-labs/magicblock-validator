@@ -163,8 +163,12 @@ where
             &ValidateAccountsConfig {
                 // Here we specify if we can clone all writable accounts or
                 // only the ones that were delegated
-                require_delegation: self.lifecycle.is_ephem(),
-                allow_new_accounts: !self.lifecycle.is_ephem(),
+                require_delegation: self
+                    .lifecycle
+                    .require_delegation_for_writable(),
+                allow_new_accounts: self
+                    .lifecycle
+                    .allow_creating_new_accounts(),
             },
         )?;
 
@@ -174,14 +178,17 @@ where
         //     transaction fail due to the missing account as it normally would.
         //     We have a similar problem if the account was not found at all in which case
         //     it's `is_program` field is `None`.
-        let programs_only = self.lifecycle.is_programs_only();
+        let allow_cloning_non_programs =
+            self.lifecycle.allow_cloning_non_programs();
 
         let cloned_readonly_accounts = acc_snapshot
             .readonly
             .into_iter()
             .filter(|acc| match acc.chain_state.account() {
                 // If it exists: Allow the account if its a program or if we allow non-programs to be cloned
-                Some(account) => account.executable || !programs_only,
+                Some(account) => {
+                    account.executable || allow_cloning_non_programs
+                }
                 // Otherwise, don't clone it
                 None => false,
             })

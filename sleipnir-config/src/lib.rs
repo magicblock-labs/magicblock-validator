@@ -92,8 +92,8 @@ impl SleipnirConfig {
         if let Ok(lifecycle) = env::var("ACCOUNTS_LIFECYCLE") {
             config.accounts.lifecycle = lifecycle.parse().unwrap_or_else(|err| {
                 panic!(
-                    "Failed to parse 'ACCOUNTS_LIFECYCLE' as LifecycleMode: {:?}",
-                    err
+                    "Failed to parse 'ACCOUNTS_LIFECYCLE' as LifecycleMode: {}: {:?}",
+                    lifecycle, err
                 )
             })
         }

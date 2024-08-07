@@ -1,0 +1,4 @@
+# We clone all accounts from chain, and allow writing on the delegated ones
+# We never create accounts at this point
+[accounts]
+lifecycle = "ephem-anything"

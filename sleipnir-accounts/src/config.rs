@@ -13,7 +13,7 @@ impl Default for AccountsConfig {
     fn default() -> Self {
         Self {
             cluster: Cluster::Known(ClusterType::Devnet),
-            lifecycle: LifecycleMode::ChainWithEverything,
+            lifecycle: LifecycleMode::ChainWithAnything,
             commit_compute_unit_price: 0,
             payer_init_lamports: None,
         }
@@ -22,30 +22,39 @@ impl Default for AccountsConfig {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum LifecycleMode {
-    ChainWithEverything,     // chain-full
-    ChainWithPrograms,       // chain-programs
-    EphemeralWithEverything, // ephem-full
-    EphemeralWithPrograms,   // ephem-programs
-    Isolated,                // isolated
+    ChainWithPrograms,
+    ChainWithAnything,
+    EphemeralWithPrograms,
+    EphemeralWithAnything,
+    Isolated,
 }
 
 impl LifecycleMode {
-    pub fn is_ephem(&self) -> bool {
+    pub fn allow_cloning_non_programs(&self) -> bool {
         match self {
-            LifecycleMode::ChainWithEverything => false,
             LifecycleMode::ChainWithPrograms => false,
-            LifecycleMode::EphemeralWithEverything => true,
-            LifecycleMode::EphemeralWithPrograms => true,
+            LifecycleMode::ChainWithAnything => true,
+            LifecycleMode::EphemeralWithPrograms => false,
+            LifecycleMode::EphemeralWithAnything => true,
             LifecycleMode::Isolated => false,
         }
     }
-    pub fn is_programs_only(&self) -> bool {
+    pub fn require_delegation_for_writable(&self) -> bool {
         match self {
-            LifecycleMode::ChainWithEverything => false,
-            LifecycleMode::ChainWithPrograms => true,
-            LifecycleMode::EphemeralWithEverything => false,
+            LifecycleMode::ChainWithPrograms => false,
+            LifecycleMode::ChainWithAnything => false,
             LifecycleMode::EphemeralWithPrograms => true,
+            LifecycleMode::EphemeralWithAnything => true,
             LifecycleMode::Isolated => false,
+        }
+    }
+    pub fn allow_creating_new_accounts(&self) -> bool {
+        match self {
+            LifecycleMode::ChainWithPrograms => true,
+            LifecycleMode::ChainWithAnything => true,
+            LifecycleMode::EphemeralWithPrograms => false,
+            LifecycleMode::EphemeralWithAnything => false,
+            LifecycleMode::Isolated => true,
         }
     }
 }

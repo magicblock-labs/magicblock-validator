@@ -36,10 +36,10 @@ fn lifecycle_mode_from_lifecycle_mode(
 ) -> LifecycleMode {
     use sleipnir_config::LifecycleMode::*;
     match clone {
-        ChainWithEverything => LifecycleMode::ChainWithEverything,
         ChainWithPrograms => LifecycleMode::ChainWithPrograms,
-        EphemeralWithEverything => LifecycleMode::EphemeralWithEverything,
+        ChainWithAnything => LifecycleMode::ChainWithAnything,
         EphemeralWithPrograms => LifecycleMode::EphemeralWithPrograms,
+        EphemeralWithAnything => LifecycleMode::EphemeralWithAnything,
         Isolated => LifecycleMode::Isolated,
     }
 }

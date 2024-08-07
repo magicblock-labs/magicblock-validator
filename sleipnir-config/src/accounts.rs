@@ -35,7 +35,7 @@ impl Default for AccountsConfig {
 // RemoteConfig
 // -----------------
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
 pub enum RemoteConfig {
     #[default]
     Devnet,
@@ -79,19 +79,24 @@ where
 #[derive(
     Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, EnumString,
 )]
-#[serde(rename_all = "camelCase")]
-#[strum(serialize_all = "camelCase")]
+#[serde(rename_all = "snake_case")]
+#[strum(serialize_all = "snake_case")]
 pub enum LifecycleMode {
     #[default]
-    #[serde(alias = "chain-full")]
-    ChainWithEverything,
     #[serde(alias = "chain-programs")]
+    #[strum(serialize = "chain-programs")]
     ChainWithPrograms,
-    #[serde(alias = "ephem-full")]
-    EphemeralWithEverything,
+    #[serde(alias = "chain-anything")]
+    #[strum(serialize = "chain-anything")]
+    ChainWithAnything,
     #[serde(alias = "ephem-programs")]
+    #[strum(serialize = "ephem-programs")]
     EphemeralWithPrograms,
+    #[serde(alias = "ephem-anything")]
+    #[strum(serialize = "ephem-anything")]
+    EphemeralWithAnything,
     #[serde(alias = "isolated")]
+    #[strum(serialize = "isolated")]
     Isolated,
 }
 
