@@ -8,7 +8,7 @@ use url::Url;
 // -----------------
 // AccountsConfig
 // -----------------
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize)]
 pub struct AccountsConfig {
     #[serde(default)]
     pub remote: RemoteConfig,
@@ -18,17 +18,6 @@ pub struct AccountsConfig {
     pub commit: CommitStrategy,
     #[serde(default)]
     pub payer: Payer,
-}
-
-impl Default for AccountsConfig {
-    fn default() -> Self {
-        Self {
-            remote: Default::default(),
-            lifecycle: Default::default(),
-            payer: Default::default(),
-            commit: Default::default(),
-        }
-    }
 }
 
 // -----------------

@@ -168,7 +168,7 @@ where
                     .require_delegation_for_writable(),
                 allow_new_accounts: self
                     .lifecycle
-                    .allow_creating_new_accounts(),
+                    .allow_new_account_for_writable(),
             },
         )?;
 

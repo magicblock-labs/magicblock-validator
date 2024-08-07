@@ -48,7 +48,7 @@ impl LifecycleMode {
             LifecycleMode::Isolated => false,
         }
     }
-    pub fn allow_creating_new_accounts(&self) -> bool {
+    pub fn allow_new_account_for_writable(&self) -> bool {
         match self {
             LifecycleMode::ChainWithPrograms => true,
             LifecycleMode::ChainWithAnything => true,
