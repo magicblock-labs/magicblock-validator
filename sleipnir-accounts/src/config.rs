@@ -36,22 +36,13 @@ impl LifecycleMode {
             LifecycleMode::Isolated => false,
         }
     }
-    pub fn require_delegation_for_writable(&self) -> bool {
+    pub fn require_ephemeral_validation(&self) -> bool {
         match self {
             LifecycleMode::ChainWithPrograms => false,
             LifecycleMode::ChainWithAnything => false,
             LifecycleMode::EphemeralWithPrograms => true,
             LifecycleMode::EphemeralWithAnything => true,
             LifecycleMode::Isolated => false,
-        }
-    }
-    pub fn allow_new_account_for_writable(&self) -> bool {
-        match self {
-            LifecycleMode::ChainWithPrograms => true,
-            LifecycleMode::ChainWithAnything => true,
-            LifecycleMode::EphemeralWithPrograms => false,
-            LifecycleMode::EphemeralWithAnything => false,
-            LifecycleMode::Isolated => true,
         }
     }
 }

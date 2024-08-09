@@ -11,6 +11,7 @@ edition.workspace = true
 async-trait = { workspace = true }
 conjunto-transwise = { workspace = true }
 delegation-program = { workspace = true }
+futures-util = { workspace = true }
 log = { workspace = true }
 sleipnir-account-updates = { workspace = true }
 sleipnir-bank = { workspace = true }

@@ -4,11 +4,10 @@ use conjunto_transwise::{
     account_fetcher::AccountFetcher,
     transaction_accounts_extractor::TransactionAccountsExtractor,
     transaction_accounts_holder::TransactionAccountsHolder,
-    transaction_accounts_validator::{
-        TransactionAccountsValidator, ValidateAccountsConfig,
-    },
-    AccountChainState,
+    transaction_accounts_validator::TransactionAccountsValidator,
+    AccountChainSnapshotShared, AccountChainState,
 };
+use futures_util::FutureExt;
 use log::*;
 use sleipnir_account_updates::AccountUpdates;
 use sleipnir_mutator::AccountModification;
@@ -17,15 +16,14 @@ use solana_sdk::{
 };
 
 use crate::{
-    errors::AccountsResult,
-    external_accounts::{ExternalReadonlyAccounts, ExternalWritableAccounts},
+    errors::{AccountsError, AccountsResult},
+    external_accounts_cache::ExternalAccountsCache,
     traits::{AccountCloner, AccountCommitter, InternalAccountProvider},
     utils::get_epoch,
     AccountCommittee, CommitAccountsPayload, LifecycleMode,
     ScheduledCommitsProcessor, SendableCommitAccountsPayload,
 };
 
-#[derive(Debug)]
 pub struct ExternalAccountsManager<IAP, AFE, ACL, ACM, AUP, TAE, TAV, SCP>
 where
     IAP: InternalAccountProvider,
@@ -45,8 +43,7 @@ where
     pub transaction_accounts_extractor: TAE,
     pub transaction_accounts_validator: TAV,
     pub scheduled_commits_processor: SCP,
-    pub external_readonly_accounts: ExternalReadonlyAccounts,
-    pub external_writable_accounts: ExternalWritableAccounts,
+    pub external_accounts_cache: ExternalAccountsCache,
     pub lifecycle: LifecycleMode,
     pub payer_init_lamports: Option<u64>,
     pub validator_id: Pubkey,
@@ -85,12 +82,52 @@ where
         .await
     }
 
+    async fn fetch_account_chain_snapshot(
+        &self,
+        pubkey: &Pubkey,
+    ) -> AccountsResult<AccountChainSnapshotShared> {
+        // TODO(vbrunet) - exclude validator_id ?
+        /*
+               // We never want to clone the validator authority account
+               .filter(|pubkey| !self.validator_id.eq(pubkey))
+        */
+
+        // TODO(vbrunet) - exclude internal_account_provider ?
+        /*
+        // If somehow the account is already in the validator data for other reason, no need to re-clone it
+        if self.internal_account_provider.has_account(pubkey) {
+            return false;
+        }
+        */
+
+        // TODO(vbrunet)
+        //  - https://github.com/magicblock-labs/magicblock-validator/issues/95
+        //  - handle the case of the payer better, we may not want to track lamport changes
+        self.account_updates.request_account_monitoring(pubkey);
+
+        // TODO(vbrunet) - reclone when needed
+
+        // Fetch the awaitable account from the fetch cache
+        let dudu = self
+            .external_accounts_cache
+            .get_or_fetch(pubkey, self.account_fetcher);
+
+        let account = dudu.ok_or_else(|| {
+            AccountsError::FailedToFetchAccount(pubkey.to_string())
+        })?;
+
+        Ok(account)
+    }
+
     // Direct use for tests only
     pub async fn ensure_accounts_from_holder(
         &self,
         accounts_holder: TransactionAccountsHolder,
         signature: String,
     ) -> AccountsResult<Vec<Signature>> {
+        let fetchable_readonly =
+            try_join_all(accounts_holder.readonly.into_iter());
+
         // 2.A Collect all readonly accounts we've never seen before and need to clone as readonly
         let unseen_readonly_ids = if self.lifecycle.disable_cloning() {
             vec![]
@@ -101,36 +138,6 @@ where
                 // We never want to clone the validator authority account
                 .filter(|pubkey| !self.validator_id.eq(pubkey))
                 .filter(|pubkey| {
-                    // If an account has already been cloned and prepared to be used as writable,
-                    // it can also be used as readonly, no questions asked, as it is already delegated
-                    if self.external_writable_accounts.has(pubkey) {
-                        return false;
-                    }
-                    // TODO(vbrunet)
-                    //  - https://github.com/magicblock-labs/magicblock-validator/issues/95
-                    //  - handle the case of the payer better, we may not want to track lamport changes
-                    self.account_updates.request_account_monitoring(pubkey);
-                    // If there was an on-chain update since last clone, always re-clone
-                    if let Some(cloned_at_slot) = self
-                        .external_readonly_accounts
-                        .get_cloned_at_slot(pubkey)
-                    {
-                        if self
-                            .account_updates
-                            .has_known_update_since_slot(pubkey, cloned_at_slot)
-                        {
-                            self.external_readonly_accounts.remove(pubkey);
-                            return true;
-                        }
-                    }
-                    // If we don't know of any recent update, and it's still in the cache, it can be used safely
-                    if self.external_readonly_accounts.has(pubkey) {
-                        return false;
-                    }
-                    // If somehow the account is already in the validator data for other reason, no need to re-clone it
-                    if self.internal_account_provider.has_account(pubkey) {
-                        return false;
-                    }
                     // If we have no knownledge of the account, clone it
                     true
                 })
@@ -147,10 +154,6 @@ where
             accounts_holder
                 .writable
                 .into_iter()
-                // We never want to clone the validator authority account
-                .filter(|pubkey| !self.validator_id.eq(pubkey))
-                // If an account has already been cloned and prepared to be used as writable, no need to re-do it
-                .filter(|pubkey| !self.external_writable_accounts.has(pubkey))
                 // Even if the account is already present in the validator,
                 // we still need to prepare it so it can be used as a writable.
                 // Because it may only be able to be used as a readonly until modified.
@@ -169,19 +172,10 @@ where
             .await?;
 
         // 3.B Validate the accounts that we see for the very first time
-        self.transaction_accounts_validator.validate_accounts(
-            &acc_snapshot,
-            &ValidateAccountsConfig {
-                // Here we specify if we can clone all writable accounts or
-                // only the ones that were delegated
-                require_delegation: self
-                    .lifecycle
-                    .require_delegation_for_writable(),
-                allow_new_accounts: self
-                    .lifecycle
-                    .allow_new_account_for_writable(),
-            },
-        )?;
+        if self.lifecycle.require_ephemeral_validation() {
+            self.transaction_accounts_validator
+                .validate_ephemeral_transaction_accounts(&acc_snapshot)?;
+        }
 
         // 4.A If a readonly account is not a program, but we only should clone programs then
         //     we have a problem since the account does not exist nor will it be created.

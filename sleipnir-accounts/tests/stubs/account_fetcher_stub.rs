@@ -42,8 +42,9 @@ impl AccountFetcherStub {
     }
 }
 
-impl AccountFetcherStub {
-    fn fetch_account_chain_snapshot(
+#[async_trait]
+impl AccountFetcher for AccountFetcherStub {
+    async fn fetch_account_chain_snapshot(
         &self,
         pubkey: &Pubkey,
     ) -> AccountChainSnapshotShared {
@@ -76,27 +77,5 @@ impl AccountFetcherStub {
             },
         }
         .into()
-    }
-}
-
-#[async_trait]
-impl AccountFetcher for AccountFetcherStub {
-    async fn fetch_transaction_accounts_snapshot(
-        &self,
-        accounts_holder: &TransactionAccountsHolder,
-    ) -> TranswiseResult<TransactionAccountsSnapshot> {
-        Ok(TransactionAccountsSnapshot {
-            readonly: accounts_holder
-                .readonly
-                .iter()
-                .map(|pubkey| self.fetch_account_chain_snapshot(pubkey))
-                .collect(),
-            writable: accounts_holder
-                .writable
-                .iter()
-                .map(|pubkey| self.fetch_account_chain_snapshot(pubkey))
-                .collect(),
-            payer: accounts_holder.payer,
-        })
     }
 }
