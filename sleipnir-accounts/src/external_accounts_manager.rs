@@ -179,15 +179,17 @@ where
             })),
         )
         .await?;
+
+        // 3.B Validate the accounts that we see for the very first time
         let tx_snapshot = TransactionAccountsSnapshot {
             readonly: readonly_snapshot,
             writable: writable_snapshot,
             payer: accounts_holder.payer,
         };
-
-        // 3.B Validate the accounts that we see for the very first time
-        self.transaction_accounts_validator
-            .validate_ephemeral_transaction_accounts(&tx_snapshot)?;
+        if self.lifecycle.require_ephemeral_validation() {
+            self.transaction_accounts_validator
+                .validate_ephemeral_transaction_accounts(&tx_snapshot)?;
+        }
 
         // 4.A If a readonly account is not a program, but we only should clone programs then
         //     we have a problem since the account does not exist nor will it be created.
