@@ -7,6 +7,8 @@ use schedulecommit_program::api::{
 use solana_rpc_client::rpc_client::RpcClient;
 use solana_rpc_client_api::{
     client_error,
+    client_error::Error as ClientError,
+    client_error::ErrorKind as ClientErrorKind,
     config::{RpcSendTransactionConfig, RpcTransactionConfig},
 };
 #[allow(unused_imports)]
@@ -44,7 +46,14 @@ impl ScheduleCommitTestContext {
     // -----------------
     // Init
     // -----------------
+    pub fn new_random_keys(ncommittees: usize) -> Self {
+        Self::new_internal(ncommittees, true)
+    }
     pub fn new(ncommittees: usize) -> Self {
+        Self::new_internal(ncommittees, false)
+    }
+
+    fn new_internal(ncommittees: usize, random_keys: bool) -> Self {
         let commitment = CommitmentConfig::confirmed();
 
         let chain_client = RpcClient::new_with_commitment(
@@ -62,7 +71,11 @@ impl ScheduleCommitTestContext {
         // requirement is that the PDA is owned by its program.
         let committees = (0..ncommittees)
             .map(|_idx| {
-                let payer = Keypair::from_seed(&[_idx as u8; 32]).unwrap();
+                let payer = if random_keys {
+                    Keypair::new()
+                } else {
+                    Keypair::from_seed(&[_idx as u8; 32]).unwrap()
+                };
                 Self::airdrop(
                     &chain_client,
                     &payer.pubkey(),
@@ -206,6 +219,74 @@ impl ScheduleCommitTestContext {
             );
         }
         None
+    }
+
+    pub fn dump_chain_logs(&self, sig: Signature) {
+        let logs = self.fetch_chain_logs(sig).unwrap();
+        eprintln!("Chain Logs for '{}':\n{:#?}", sig, logs);
+    }
+
+    pub fn dump_ephemeral_logs(&self, sig: Signature) {
+        let logs = self.fetch_ephemeral_logs(sig).unwrap();
+        eprintln!("Ephemeral Logs for '{}':\n{:#?}", sig, logs);
+    }
+
+    pub fn assert_chain_logs_contain(&self, sig: Signature, expected: &str) {
+        let logs = self.fetch_chain_logs(sig).unwrap();
+        assert!(
+            self.logs_contain(&logs, expected),
+            "Logs do not contain '{}': {:?}",
+            expected,
+            logs
+        );
+    }
+
+    pub fn assert_ephemeral_logs_contain(
+        &self,
+        sig: Signature,
+        expected: &str,
+    ) {
+        let logs = self.fetch_ephemeral_logs(sig).unwrap();
+        assert!(
+            self.logs_contain(&logs, expected),
+            "Logs do not contain '{}': {:?}",
+            expected,
+            logs
+        );
+    }
+
+    fn logs_contain(&self, logs: &[String], expected: &str) -> bool {
+        logs.iter().any(|log| log.contains(expected))
+    }
+
+    pub fn assert_ephemeral_transaction_error(
+        &self,
+        sig: Signature,
+        res: &Result<Signature, ClientError>,
+        expected_msg: &str,
+    ) {
+        Self::assert_transaction_error(res);
+        self.assert_ephemeral_logs_contain(sig, expected_msg);
+    }
+
+    pub fn assert_chain_transaction_error(
+        &self,
+        sig: Signature,
+        res: &Result<Signature, ClientError>,
+        expected_msg: &str,
+    ) {
+        Self::assert_transaction_error(res);
+        self.assert_chain_logs_contain(sig, expected_msg);
+    }
+
+    fn assert_transaction_error(res: &Result<Signature, ClientError>) {
+        assert!(matches!(
+            res,
+            Err(ClientError {
+                kind: ClientErrorKind::TransactionError(_),
+                ..
+            })
+        ));
     }
 
     // -----------------

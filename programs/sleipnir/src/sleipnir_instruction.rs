@@ -9,7 +9,6 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::Keypair,
     signer::Signer,
-    system_program,
     transaction::Transaction,
 };
 use thiserror::Error;
@@ -82,9 +81,7 @@ pub(crate) enum SleipnirInstruction {
     ///
     /// # Account references
     /// - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
-    /// - **1.**   `[]`              The program owning the accounts to be committed
-    /// - **2.**   `[WRITE]`         Validator authority to which we escrow tx cost
-    /// - **3..n** `[]`              Accounts to be committed
+    /// - **1..n** `[]`              Accounts to be committed
     ScheduleCommit,
 
     /// Records the the attempt to realize a scheduled commit on chain.
@@ -161,32 +158,18 @@ pub(crate) fn modify_accounts_instruction(
 // -----------------
 pub fn schedule_commit(
     payer: &Keypair,
-    program: &Pubkey,
-    validator_authority: &Pubkey,
     pubkeys: Vec<Pubkey>,
     recent_blockhash: Hash,
 ) -> Transaction {
-    let ix = schedule_commit_instruction(
-        &payer.pubkey(),
-        program,
-        validator_authority,
-        pubkeys,
-    );
+    let ix = schedule_commit_instruction(&payer.pubkey(), pubkeys);
     into_transaction(payer, ix, recent_blockhash)
 }
 
 pub(crate) fn schedule_commit_instruction(
     payer: &Pubkey,
-    program: &Pubkey,
-    validator_authority: &Pubkey,
     pdas: Vec<Pubkey>,
 ) -> Instruction {
-    let mut account_metas = vec![
-        AccountMeta::new(*payer, true),
-        AccountMeta::new_readonly(*program, false),
-        AccountMeta::new(*validator_authority, false),
-        AccountMeta::new_readonly(system_program::id(), false),
-    ];
+    let mut account_metas = vec![AccountMeta::new(*payer, true)];
     for pubkey in &pdas {
         account_metas.push(AccountMeta::new_readonly(*pubkey, true));
     }

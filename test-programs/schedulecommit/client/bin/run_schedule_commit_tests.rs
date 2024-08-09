@@ -52,6 +52,17 @@ pub fn main() {
         }
     };
 
+    let security_test_dir =
+        format!("{}/../{}", manifest_dir.clone(), "security");
+    let test_security_output = match run_test(security_test_dir) {
+        Ok(output) => output,
+        Err(err) => {
+            eprintln!("Failed to run security: {:?}", err);
+            cleanup(&mut ephem_validator, &mut devnet_validator);
+            return;
+        }
+    };
+    // NOTE: this test could run via `cargo test` as well eventually
     // Run cargo run --bin <bin>
     let schedule_commit_output =
         match run_bin(manifest_dir.clone(), "schedule-commit-cpi-ix") {
@@ -66,8 +77,24 @@ pub fn main() {
     // Kill Validators
     cleanup(&mut ephem_validator, &mut devnet_validator);
 
-    // Assert that the test passed
+    // Assert that both test suites passed
+    assert_cargo_tests_passed(test_security_output);
     assert_output(schedule_commit_output, "schedule-commit-cpi-ix");
+}
+
+fn assert_cargo_tests_passed(output: process::Output) {
+    if !output.status.success() {
+        eprintln!("cargo test");
+        eprintln!("status: {}", output.status);
+        eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+        eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+    } else if std::env::var("DUMP").is_ok() {
+        eprintln!("cargo test success");
+        eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
+        eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
+    }
+    // If a test in the suite fails the status shows that
+    assert!(output.status.success(), "cargo test failed");
 }
 
 fn assert_output(output: process::Output, test_name: &str) {
@@ -97,6 +124,15 @@ fn run_bin(
         .arg("run")
         .arg("--bin")
         .arg(bin_name)
+        .current_dir(manifest_dir.clone())
+        .output()
+}
+
+fn run_test(manifest_dir: String) -> io::Result<process::Output> {
+    process::Command::new("cargo")
+        .arg("test")
+        .arg("--")
+        .arg("--nocapture")
         .current_dir(manifest_dir.clone())
         .output()
 }
