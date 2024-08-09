@@ -3,8 +3,6 @@ use std::collections::HashMap;
 use async_trait::async_trait;
 use conjunto_transwise::{
     account_fetcher::AccountFetcher, errors::TranswiseResult,
-    transaction_accounts_holder::TransactionAccountsHolder,
-    transaction_accounts_snapshot::TransactionAccountsSnapshot,
     AccountChainSnapshot, AccountChainSnapshotShared, AccountChainState,
     CommitFrequency, DelegationRecord,
 };
@@ -47,9 +45,8 @@ impl AccountFetcher for AccountFetcherStub {
     async fn fetch_account_chain_snapshot(
         &self,
         pubkey: &Pubkey,
-    ) -> AccountChainSnapshotShared {
-        let known_account = self.known_accounts.get(pubkey);
-        match known_account {
+    ) -> TranswiseResult<AccountChainSnapshotShared> {
+        Ok(match self.known_accounts.get(pubkey) {
             Some((owner, at_slot, delegation_record)) => AccountChainSnapshot {
                 pubkey: *pubkey,
                 at_slot: *at_slot,
@@ -76,6 +73,6 @@ impl AccountFetcher for AccountFetcherStub {
                 chain_state: AccountChainState::NewAccount,
             },
         }
-        .into()
+        .into())
     }
 }

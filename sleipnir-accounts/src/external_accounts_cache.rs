@@ -9,6 +9,7 @@ use conjunto_transwise::{
     account_fetcher::AccountFetcher, AccountChainSnapshotShared,
 };
 use futures_util::future::ready;
+use log::warn;
 use solana_sdk::pubkey::Pubkey;
 use tokio::sync::oneshot::{channel, Receiver, Sender};
 
@@ -18,6 +19,7 @@ pub type ExternalAccountsCacheError = String; // This error needs to be clonable
 pub type ExternalAccountsCacheResult =
     Result<AccountChainSnapshotShared, ExternalAccountsCacheError>;
 
+#[derive(Debug)]
 pub enum ExternalAccountsCacheItem {
     Fetching {
         listeners: Vec<Sender<ExternalAccountsCacheResult>>,
@@ -27,6 +29,7 @@ pub enum ExternalAccountsCacheItem {
     },
 }
 
+#[derive(Debug)]
 pub struct ExternalAccountsCache {
     database: RwLock<HashMap<Pubkey, ExternalAccountsCacheItem>>,
 }
@@ -120,7 +123,15 @@ impl ExternalAccountsCache {
         };
         // Now that we have the other listeners, lets notify them
         for listener in listeners {
-            listener.send(result.clone());
+            match listener.send(result.clone()) {
+                Err(error) => {
+                    warn!(
+                        "Could not send fetch result to listener: {:?}",
+                        error
+                    );
+                }
+                Ok(_) => {}
+            }
         }
         // Done
         result.map_err(AccountsError::FailedToFetchAccount)
