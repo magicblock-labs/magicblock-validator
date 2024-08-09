@@ -31,6 +31,8 @@ pub fn init_slot_ticker(
                 .map_err(|e| {
                     error!("Failed to cache block time: {:?}", e);
                 });
+            // TODO: fix the possible delay here
+            // https://github.com/magicblock-labs/magicblock-validator/issues/104
             let _ = accounts_manager.process_scheduled_commits().await.map_err(
                 |e| {
                     error!("Failed to process scheduled commits: {:?}", e);

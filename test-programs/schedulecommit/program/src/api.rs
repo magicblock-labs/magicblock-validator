@@ -53,9 +53,18 @@ pub fn delegate_account_cpi_instruction(player: Pubkey) -> Instruction {
     Instruction::new_with_bytes(program_id, &instruction_data, account_metas)
 }
 
+/// Creates an instruction that calls the _legit_ program which owns
+/// the PDAs to be commited via CPI into the MagicBlock program.
+/// It provides the following account metas to the invoked program:
+///
+/// - `[WRITE, SIGNER]` Payer
+/// - `[]` MagicBlock Program
+///
+/// If this is invoked directly then no other accounts are needed.
+/// However if this is invoked via CPI then the wrapping instruction will need the
+/// [crate::id()] to be provided as part of the account metadata.
 pub fn schedule_commit_cpi_instruction(
     payer: Pubkey,
-    validator_id: Pubkey,
     magic_program_id: Pubkey,
     players: &[Pubkey],
     committees: &[Pubkey],
@@ -63,10 +72,7 @@ pub fn schedule_commit_cpi_instruction(
     let program_id = crate::id();
     let mut account_metas = vec![
         AccountMeta::new(payer, true),
-        AccountMeta::new_readonly(program_id, false),
-        AccountMeta::new(validator_id, false),
         AccountMeta::new_readonly(magic_program_id, false),
-        AccountMeta::new_readonly(system_program::id(), false),
     ];
     for committee in committees {
         account_metas.push(AccountMeta::new(*committee, false));

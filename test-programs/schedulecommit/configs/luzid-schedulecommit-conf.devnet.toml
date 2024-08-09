@@ -19,6 +19,11 @@ sigverify = true
 id = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY"
 path = "../elfs/schedulecommit_program.so"
 
+[[node.program]]
+id = "4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr"
+path = "../elfs/schedulecommit_security.so"
+
+
 [node.rpc]
 port = 7799
 

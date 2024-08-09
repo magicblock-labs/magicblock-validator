@@ -1,5 +1,10 @@
 [workspace]
-members = ["sysvars", "schedulecommit/program", "schedulecommit/client"]
+members = [
+  "sysvars",
+  "schedulecommit/program",
+  "schedulecommit/client",
+  "schedulecommit/security",
+]
 resolver = "2"
 
 [workspace.package]
@@ -18,4 +23,5 @@ solana-program = "=1.17.22"
 solana-rpc-client = "=1.17.22"
 solana-rpc-client-api = "=1.17.22"
 solana-sdk = "=1.17.22"
+schedulecommit-client = { path = "schedulecommit/client" }
 schedulecommit-program = { path = "schedulecommit/program" }

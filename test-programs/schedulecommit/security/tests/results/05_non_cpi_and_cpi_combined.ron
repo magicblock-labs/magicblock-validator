@@ -1,0 +1,315 @@
+// test_schedule_commit_via_direct_and_from_other_program_indirect_cpi_including_non_cpi_instruction
+/*
+   The following instructions are called as follows:
+
+    A) Malicious Program Instruction (not performing CPI)
+    B) CPI to the program that owns the PDAs
+        C) CPI to the MagicBlock System Program
+    D) Malicious Program Instruction
+        E) CPI to MagicBlock Program
+
+    The stack depth and nesting levels are as follows:
+    A) 0 0
+    B) 1 0
+        C) 2 1
+    D) 4 0
+        E) 5 1
+
+    Thus when C) executes it will find B) to be its parent.
+    When E) executes it will find D) to be its parent.
+
+*/
+TransactionContext {
+    account_keys: [
+        // Payer
+        /* 0 */ 4zvwRjXUKGfvwnParsHAS3HuSVzV5cA4McphgmoCtajS,
+        // PDA 1
+        /* 1 */ 3Q49KuvoEGzGWBsbh2xgrKog66be3UM1aDEsHq7Ym4pr,
+        // PDA 2
+        /* 2 */ 6ZQpzi8X2jku3C2ERgZB8hzhQ55VHLm8yZZLwTpMzHw3,
+        // MagicBlock System Program
+        /* 3 */ Magic11111111111111111111111111111111111111,
+        // Malicious Program
+        /* 4 */ 4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr,
+        // Program that should own the PDAs
+        /* 5 */ 9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY,
+        // Loader which is passed implicitly
+        /* 6 */ BPFLoaderUpgradeab1e11111111111111111111111,
+    ],
+    accounts: TransactionAccounts {
+        accounts: [
+            RefCell {
+                value: Account {
+                    lamports: 995921440,
+                    data.len: 0,
+                    owner: 11111111111111111111111111111111,
+                    executable: false,
+                    rent_epoch: 18446744073709551615,
+                },
+            },
+            RefCell {
+                value: Account {
+                    lamports: 1169280,
+                    data.len: 40,
+                    owner: 9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY,
+                    executable: false,
+                    rent_epoch: 18446744073709551615,
+                    data: 8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c0100000000000000,
+                },
+            },
+            RefCell {
+                value: Account {
+                    lamports: 1169280,
+                    data.len: 40,
+                    owner: 9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY,
+                    executable: false,
+                    rent_epoch: 18446744073709551615,
+                    data: 3b6a27bcceb6a42d62a3a8d02a6f0d73653215771de243a63ac048a18b59da290100000000000000,
+                },
+            },
+            RefCell {
+                value: Account {
+                    lamports: 1,
+                    data.len: 16,
+                    owner: NativeLoader1111111111111111111111111111111,
+                    executable: true,
+                    rent_epoch: 0,
+                    data: 736c6569706e69725f70726f6772616d,
+                },
+            },
+            RefCell {
+                value: Account {
+                    lamports: 0,
+                    data.len: 1,
+                    owner: BPFLoaderUpgradeab1e11111111111111111111111,
+                    executable: true,
+                    rent_epoch: 0,
+                    data: 02,
+                },
+            },
+            RefCell {
+                value: Account {
+                    lamports: 0,
+                    data.len: 1,
+                    owner: BPFLoaderUpgradeab1e11111111111111111111111,
+                    executable: true,
+                    rent_epoch: 0,
+                    data: 02,
+                },
+            },
+            RefCell {
+                value: Account {
+                    lamports: 1,
+                    data.len: 37,
+                    owner: NativeLoader1111111111111111111111111111111,
+                    executable: true,
+                    rent_epoch: 0,
+                    data: 736f6c616e615f6270665f6c6f616465725f7570677261646561626c655f70726f6772616d,
+                },
+            },
+        ],
+        touched_flags: RefCell {
+            value: [ false, true, true, false, false, false, false, ],
+        },
+    },
+    instruction_stack_capacity: 5,
+    instruction_trace_capacity: 64,
+    instruction_stack: [
+        3,
+        4,
+    ],
+    instruction_trace: [
+        // Non CPI sibling
+        InstructionContext {
+            nesting_level: 0,
+            instruction_accounts_lamport_sum: 995921440,
+            program_accounts: [
+                // Loader
+                6,
+                // Malicious Program
+                4,
+            ],
+            instruction_accounts: [
+                InstructionAccount {
+                    index_in_transaction: 0,
+                    index_in_caller: 0,
+                    index_in_callee: 0,
+                    is_signer: true,
+                    is_writable: true,
+                },
+            ],
+            instruction_data: [ 1, 0, 0, 0, ],
+        },
+        // CPI via PDA owning program (legit)
+        InstructionContext {
+            nesting_level: 0,
+            instruction_accounts_lamport_sum: 998260001,
+            program_accounts: [
+                // Loader
+                6,
+                // Program owning PDAs
+                5,
+            ],
+            instruction_accounts: [
+                InstructionAccount {
+                    index_in_transaction: 0,
+                    index_in_caller: 0,
+                    index_in_callee: 0,
+                    is_signer: true,
+                    is_writable: true,
+                },
+                InstructionAccount {
+                    index_in_transaction: 3,
+                    index_in_caller: 3,
+                    index_in_callee: 1,
+                    is_signer: false,
+                    is_writable: false,
+                },
+                InstructionAccount {
+                    index_in_transaction: 2,
+                    index_in_caller: 2,
+                    index_in_callee: 2,
+                    is_signer: false,
+                    is_writable: true,
+                },
+                InstructionAccount {
+                    index_in_transaction: 1,
+                    index_in_caller: 1,
+                    index_in_callee: 3,
+                    is_signer: false,
+                    is_writable: true,
+                },
+            ],
+            instruction_data: [ 1, 59, 106, 39, 188, 206, 182, 164, 45, 98, 163, 168, 208, 42, 111, 13, 115, 101, 50, 21, 119, 29, 226, 67, 166, 58, 192, 72, 161, 139, 89, 218, 41, 138, 136, 227, 221, 116, 9, 241, 149, 253, 82, 219, 45, 60, 186, 93, 114, 202, 103, 9, 191, 29, 148, 18, 27, 243, 116, 136, 1, 180, 15, 111, 92, ],
+        },
+        // Schedule CPI directly into MagicBlock Program
+        // Parent is PDA owning program instruction (should pass)
+        InstructionContext {
+            nesting_level: 1,
+            instruction_accounts_lamport_sum: 998260000,
+            program_accounts: [
+                // MagicBlock System Program
+                3,
+            ],
+            instruction_accounts: [
+                InstructionAccount {
+                    index_in_transaction: 0,
+                    index_in_caller: 0,
+                    index_in_callee: 0,
+                    is_signer: true,
+                    is_writable: true,
+                },
+                InstructionAccount {
+                    index_in_transaction: 2,
+                    index_in_caller: 2,
+                    index_in_callee: 1,
+                    is_signer: false,
+                    is_writable: true,
+                },
+                InstructionAccount {
+                    index_in_transaction: 1,
+                    index_in_caller: 3,
+                    index_in_callee: 2,
+                    is_signer: false,
+                    is_writable: true,
+                },
+            ],
+            instruction_data: [ 1, 0, 0, 0, ],
+        },
+        // Invoke Malicious Program instruction which will intend to
+        // invoke the schedule commit IX for PDAs it does not own
+        InstructionContext {
+            nesting_level: 0,
+            instruction_accounts_lamport_sum: 998260001,
+            program_accounts: [
+                // Loader
+                6,
+                // Malicious Program
+                4,
+            ],
+            instruction_accounts: [
+                InstructionAccount {
+                    index_in_transaction: 0,
+                    index_in_caller: 0,
+                    index_in_callee: 0,
+                    is_signer: true,
+                    is_writable: true,
+                },
+                InstructionAccount {
+                    index_in_transaction: 3,
+                    index_in_caller: 3,
+                    index_in_callee: 1,
+                    is_signer: false,
+                    is_writable: false,
+                },
+                InstructionAccount {
+                    index_in_transaction: 2,
+                    index_in_caller: 2,
+                    index_in_callee: 2,
+                    is_signer: false,
+                    is_writable: true,
+                },
+                InstructionAccount {
+                    index_in_transaction: 1,
+                    index_in_caller: 1,
+                    index_in_callee: 3,
+                    is_signer: false,
+                    is_writable: true,
+                },
+            ],
+            instruction_data: [ 2, 59, 106, 39, 188, 206, 182, 164, 45, 98, 163, 168, 208, 42, 111, 13, 115, 101, 50, 21, 119, 29, 226, 67, 166, 58, 192, 72, 161, 139, 89, 218, 41, 138, 136, 227, 221, 116, 9, 241, 149, 253, 82, 219, 45, 60, 186, 93, 114, 202, 103, 9, 191, 29, 148, 18, 27, 243, 116, 136, 1, 180, 15, 111, 92, ],
+        },
+        InstructionContext {
+            nesting_level: 1,
+            instruction_accounts_lamport_sum: 998260000,
+            program_accounts: [
+                // MagicBlock System Program
+                3,
+            ],
+            instruction_accounts: [
+                InstructionAccount {
+                    index_in_transaction: 0,
+                    index_in_caller: 0,
+                    index_in_callee: 0,
+                    is_signer: true,
+                    is_writable: true,
+                },
+                InstructionAccount {
+                    index_in_transaction: 2,
+                    index_in_caller: 2,
+                    index_in_callee: 1,
+                    is_signer: false,
+                    is_writable: true,
+                },
+                InstructionAccount {
+                    index_in_transaction: 1,
+                    index_in_caller: 3,
+                    index_in_callee: 2,
+                    is_signer: false,
+                    is_writable: true,
+                },
+            ],
+            instruction_data: [ 1, 0, 0, 0, ],
+        },
+        InstructionContext {
+            nesting_level: 0,
+            instruction_accounts_lamport_sum: 0,
+            program_accounts: [],
+            instruction_accounts: [],
+            instruction_data: [],
+        },
+    ],
+    return_data: TransactionReturnData {
+        program_id: Magic11111111111111111111111111111111111111,
+        data: [],
+    },
+    accounts_resize_delta: RefCell {
+        value: 0,
+    },
+    rent: Rent {
+        lamports_per_byte_year: 3480,
+        exemption_threshold: 2.0,
+        burn_percent: 50,
+    },
+    signature: 5yPabaGMckKAhM6eUF7rKmwwgndT8pPKBoaLMdj2yJn4vLJKdTyavBmLTn75nGcu4mz7jXPGJi2hsxssuDMjBsQZ,
+}
