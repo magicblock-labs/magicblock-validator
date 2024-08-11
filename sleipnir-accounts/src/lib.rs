@@ -1,9 +1,9 @@
 mod accounts_manager;
 mod bank_account_provider;
+pub mod cached_account_fetcher;
 mod config;
 pub mod errors;
 mod external_accounts;
-pub mod external_accounts_cache;
 pub mod external_accounts_manager;
 mod remote_account_cloner;
 mod remote_account_committer;

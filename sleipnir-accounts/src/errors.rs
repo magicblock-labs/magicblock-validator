@@ -39,7 +39,4 @@ pub enum AccountsError {
 
     #[error("FailedToFetchAccount '{0}'")]
     FailedToFetchAccount(String),
-
-    #[error("FailedToResolveAccount '{0}'")]
-    FailedToResolveAccount(String),
 }

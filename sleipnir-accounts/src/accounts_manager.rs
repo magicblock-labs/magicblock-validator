@@ -1,11 +1,11 @@
 use std::sync::Arc;
 
 use conjunto_transwise::{
-    account_fetcher::RemoteAccountFetcher,
     transaction_accounts_extractor::TransactionAccountsExtractorImpl,
     transaction_accounts_validator::TransactionAccountsValidatorImpl,
     RpcProviderConfig,
 };
+use sleipnir_account_fetcher::RemoteAccountFetcherClient;
 use sleipnir_account_updates::RemoteAccountUpdatesReader;
 use sleipnir_bank::bank::Bank;
 use sleipnir_transaction_status::TransactionStatusSender;
@@ -16,10 +16,10 @@ use solana_sdk::{
 
 use crate::{
     bank_account_provider::BankAccountProvider,
+    cached_account_fetcher::CachedAccountFetcher,
     config::AccountsConfig,
     errors::AccountsResult,
     external_accounts::{ExternalReadonlyAccounts, ExternalWritableAccounts},
-    external_accounts_cache::ExternalAccountsCache,
     remote_account_cloner::RemoteAccountCloner,
     remote_account_committer::RemoteAccountCommitter,
     remote_scheduled_commits_processor::RemoteScheduledCommitsProcessor,
@@ -29,7 +29,7 @@ use crate::{
 
 pub type AccountsManager = ExternalAccountsManager<
     BankAccountProvider,
-    RemoteAccountFetcher,
+    RemoteAccountFetcherClient,
     RemoteAccountCloner,
     RemoteAccountCommitter,
     RemoteAccountUpdatesReader,
@@ -41,7 +41,7 @@ pub type AccountsManager = ExternalAccountsManager<
 impl
     ExternalAccountsManager<
         BankAccountProvider,
-        RemoteAccountFetcher,
+        RemoteAccountFetcherClient,
         RemoteAccountCloner,
         RemoteAccountCommitter,
         RemoteAccountUpdatesReader,
@@ -52,6 +52,7 @@ impl
 {
     pub fn try_new(
         bank: &Arc<Bank>,
+        remote_account_fetcher_client: RemoteAccountFetcherClient,
         remote_account_updates_reader: RemoteAccountUpdatesReader,
         transaction_status_sender: Option<TransactionStatusSender>,
         validator_keypair: Keypair,
@@ -67,9 +68,6 @@ impl
             CommitmentConfig::confirmed(),
         );
         let rpc_provider_config = RpcProviderConfig::new(rpc_cluster, None);
-
-        let account_fetcher =
-            RemoteAccountFetcher::new(rpc_provider_config.clone());
 
         let account_cloner = RemoteAccountCloner::new(
             cluster.clone(),
@@ -90,7 +88,7 @@ impl
 
         Ok(Self {
             internal_account_provider,
-            account_fetcher,
+            account_fetcher: remote_account_fetcher_client,
             account_cloner,
             account_committer: Arc::new(account_committer),
             account_updates: remote_account_updates_reader,
@@ -98,7 +96,6 @@ impl
             transaction_accounts_validator: TransactionAccountsValidatorImpl,
             external_readonly_accounts: ExternalReadonlyAccounts::default(),
             external_writable_accounts: ExternalWritableAccounts::default(),
-            external_accounts_cache: ExternalAccountsCache::new(),
             lifecycle: config.lifecycle,
             scheduled_commits_processor,
             payer_init_lamports: config.payer_init_lamports,

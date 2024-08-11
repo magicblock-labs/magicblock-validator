@@ -22,7 +22,6 @@ use solana_sdk::{
 use crate::{
     errors::AccountsResult,
     external_accounts::{ExternalReadonlyAccounts, ExternalWritableAccounts},
-    external_accounts_cache::ExternalAccountsCache,
     traits::{AccountCloner, AccountCommitter, InternalAccountProvider},
     utils::get_epoch,
     AccountCommittee, CommitAccountsPayload, LifecycleMode,
@@ -51,7 +50,6 @@ where
     pub scheduled_commits_processor: SCP,
     pub external_readonly_accounts: ExternalReadonlyAccounts,
     pub external_writable_accounts: ExternalWritableAccounts,
-    pub external_accounts_cache: ExternalAccountsCache,
     pub lifecycle: LifecycleMode,
     pub payer_init_lamports: Option<u64>,
     pub validator_id: Pubkey,
@@ -169,12 +167,12 @@ where
         let (readonly_snapshot, writable_snapshot) = try_join(
             try_join_all(unseen_readonly_ids.iter().map(|pubkey| {
                 self.account_fetcher
-                    .fetch_account_chain_snapshot(pubkey)
+                    .get_or_fetch_account_chain_snapshot(pubkey)
                     .map_ok(AccountChainSnapshotShared::from)
             })),
             try_join_all(unseen_writable_ids.iter().map(|pubkey| {
                 self.account_fetcher
-                    .fetch_account_chain_snapshot(pubkey)
+                    .get_or_fetch_account_chain_snapshot(pubkey)
                     .map_ok(AccountChainSnapshotShared::from)
             })),
         )
