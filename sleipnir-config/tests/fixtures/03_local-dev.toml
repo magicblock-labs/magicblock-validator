@@ -2,4 +2,4 @@
 # All others are expected to be there or need to be created as part of the transactions.
 [accounts]
 remote = "devnet"
-lifecycle = "chain-programs"
+lifecycle = "programs-replica"

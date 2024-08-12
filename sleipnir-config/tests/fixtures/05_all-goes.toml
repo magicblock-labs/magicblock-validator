@@ -2,7 +2,7 @@
 # not found are either created as part of the transaction or result in
 # account missing as usual
 [accounts]
-lifecycle = "chain-anything"
+lifecycle = "replica"
 
 # Additionally we turn off signature verification to allow
 # unlimited experimentation

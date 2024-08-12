@@ -33,14 +33,14 @@ fn test_local_dev_toml() {
 }
 
 #[test]
-fn test_ephemeral_with_programs_toml() {
-    let toml = include_str!("fixtures/04_A_ephemeral_with_programs.toml");
+fn test_ephemeral_toml() {
+    let toml = include_str!("fixtures/04_A_ephemeral.toml");
     let config = toml::from_str::<SleipnirConfig>(toml).unwrap();
     assert_eq!(
         config,
         SleipnirConfig {
             accounts: AccountsConfig {
-                lifecycle: LifecycleMode::EphemeralWithPrograms,
+                lifecycle: LifecycleMode::Ephemeral,
                 ..Default::default()
             },
             ..Default::default()
@@ -49,14 +49,14 @@ fn test_ephemeral_with_programs_toml() {
 }
 
 #[test]
-fn test_ephemeral_with_everything_toml() {
-    let toml = include_str!("fixtures/04_B_ephemeral_with_anything.toml");
+fn test_ephemeral_limited_toml() {
+    let toml = include_str!("fixtures/04_B_ephemeral_limited.toml");
     let config = toml::from_str::<SleipnirConfig>(toml).unwrap();
     assert_eq!(
         config,
         SleipnirConfig {
             accounts: AccountsConfig {
-                lifecycle: LifecycleMode::EphemeralWithAnything,
+                lifecycle: LifecycleMode::EphemeralLimited,
                 ..Default::default()
             },
             ..Default::default()
@@ -72,7 +72,7 @@ fn test_all_goes_toml() {
         config,
         SleipnirConfig {
             accounts: AccountsConfig {
-                lifecycle: LifecycleMode::ChainWithAnything,
+                lifecycle: LifecycleMode::Replica,
                 ..Default::default()
             },
             validator: ValidatorConfig {

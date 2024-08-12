@@ -71,22 +71,22 @@ where
 #[serde(rename_all = "snake_case")]
 #[strum(serialize_all = "snake_case")]
 pub enum LifecycleMode {
+    #[serde(alias = "replica")]
+    #[strum(serialize = "replica")]
+    Replica,
     #[default]
-    #[serde(alias = "chain-programs")]
-    #[strum(serialize = "chain-programs")]
-    ChainWithPrograms,
-    #[serde(alias = "chain-anything")]
-    #[strum(serialize = "chain-anything")]
-    ChainWithAnything,
-    #[serde(alias = "ephem-programs")]
-    #[strum(serialize = "ephem-programs")]
-    EphemeralWithPrograms,
-    #[serde(alias = "ephem-anything")]
-    #[strum(serialize = "ephem-anything")]
-    EphemeralWithAnything,
-    #[serde(alias = "isolated")]
-    #[strum(serialize = "isolated")]
-    Isolated,
+    #[serde(alias = "programs-replica")]
+    #[strum(serialize = "programs-replica")]
+    ProgramsReplica,
+    #[serde(alias = "ephemeral")]
+    #[strum(serialize = "ephemeral")]
+    Ephemeral,
+    #[serde(alias = "ephemeral-limited")]
+    #[strum(serialize = "ephemeral-limited")]
+    EphemeralLimited,
+    #[serde(alias = "offline")]
+    #[strum(serialize = "offline")]
+    Offline,
 }
 
 // -----------------

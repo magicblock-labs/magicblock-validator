@@ -51,7 +51,7 @@ fn setup(
         scheduled_commits_processor: ScheduledCommitsProcessorStub::default(),
         external_readonly_accounts: Default::default(),
         external_writable_accounts: Default::default(),
-        lifecycle: LifecycleMode::EphemeralWithAnything,
+        lifecycle: LifecycleMode::Ephemeral,
         payer_init_lamports: Some(1_000 * LAMPORTS_PER_SOL),
         validator_id: validator_auth_id,
     }

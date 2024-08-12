@@ -1,6 +1,6 @@
 [accounts]
 remote = "testnet"
-lifecycle = "ephem-anything"
+lifecycle = "ephemeral"
 commit = { frequency_millis = 50_000 }
 payer = { init_sol = 1_000 }
 
