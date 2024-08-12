@@ -64,7 +64,6 @@ eager = "0.1.0"
 enum-iterator = "1.5.0"
 env_logger = "0.11.2"
 delegation-program = { path = "../delegation-program" }
-ephemeral-rollups-sdk = { path = "../ephemeral-rollups-sdk/sdk" }
 fs_extra = "1.3.0"
 futures-util = "0.3.30"
 geyser-grpc-proto = { path = "./geyser-grpc-proto" }
