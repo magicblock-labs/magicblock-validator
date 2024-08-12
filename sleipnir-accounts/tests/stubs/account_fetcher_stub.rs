@@ -1,9 +1,13 @@
-use std::collections::{HashMap, HashSet};
+use std::{
+    collections::{HashMap, HashSet},
+    sync::RwLock,
+};
 
 use async_trait::async_trait;
 use conjunto_transwise::{
     AccountChainSnapshot, AccountChainState, CommitFrequency, DelegationRecord,
 };
+use futures_util::future::{ready, BoxFuture};
 use sleipnir_account_fetcher::{AccountFetcher, AccountFetcherResult};
 use solana_sdk::{account::Account, clock::Slot, pubkey::Pubkey};
 
@@ -38,7 +42,9 @@ impl AccountFetcherStub {
             ),
         );
     }
+}
 
+impl AccountFetcherStub {
     fn get_or_fetch_account_chain_snapshot(
         &self,
         pubkey: &Pubkey,
@@ -76,6 +82,17 @@ impl AccountFetcherStub {
 
 #[async_trait]
 impl AccountFetcher for AccountFetcherStub {
+    fn fetch_account_chain_snapshot(
+        &self,
+        pubkey: &Pubkey,
+    ) -> BoxFuture<AccountFetcherResult> {
+        self.already_fetched
+            .write()
+            .expect("RwLock of AccountFetcherStub.already_fetched is poisoned")
+            .insert(*pubkey);
+        Box::pin(ready(self.get_or_fetch_account_chain_snapshot(pubkey)))
+    }
+
     fn get_last_account_chain_snapshot(
         &self,
         pubkey: &Pubkey,
@@ -90,15 +107,5 @@ impl AccountFetcher for AccountFetcherStub {
         } else {
             None
         }
-    }
-    async fn fetch_account_chain_snapshot(
-        &self,
-        pubkey: &Pubkey,
-    ) -> AccountFetcherResult {
-        self.already_fetched
-            .write()
-            .expect("RwLock of AccountFetcherStub.already_fetched is poisoned")
-            .insert(pubkey);
-        self.get_or_fetch_account_chain_snapshot(pubkey)
     }
 }

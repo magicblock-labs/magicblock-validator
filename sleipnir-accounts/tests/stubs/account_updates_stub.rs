@@ -20,6 +20,6 @@ impl AccountUpdates for AccountUpdatesStub {
         // Noop for stub
     }
     fn get_last_known_update_slot(&self, pubkey: &Pubkey) -> Option<Slot> {
-        self.last_known_update_slots.get(pubkey)
+        self.last_known_update_slots.get(pubkey).cloned()
     }
 }

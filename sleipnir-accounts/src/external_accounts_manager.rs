@@ -5,12 +5,9 @@ use conjunto_transwise::{
     transaction_accounts_holder::TransactionAccountsHolder,
     transaction_accounts_snapshot::TransactionAccountsSnapshot,
     transaction_accounts_validator::TransactionAccountsValidator,
-    AccountChainSnapshotShared, AccountChainState,
+    AccountChainState,
 };
-use futures_util::{
-    future::{try_join, try_join_all},
-    TryFutureExt,
-};
+use futures_util::future::{try_join, try_join_all};
 use log::*;
 use sleipnir_account_fetcher::AccountFetcher;
 use sleipnir_account_updates::AccountUpdates;
@@ -169,14 +166,10 @@ where
         // 3.A Fetch the accounts that we've seen for the first time
         let (readonly_snapshot, writable_snapshot) = try_join(
             try_join_all(unseen_readonly_ids.iter().map(|pubkey| {
-                self.account_fetcher
-                    .get_or_fetch_account_chain_snapshot(pubkey)
-                    .map_ok(AccountChainSnapshotShared::from)
+                self.account_fetcher.fetch_account_chain_snapshot(pubkey)
             })),
             try_join_all(unseen_writable_ids.iter().map(|pubkey| {
-                self.account_fetcher
-                    .get_or_fetch_account_chain_snapshot(pubkey)
-                    .map_ok(AccountChainSnapshotShared::from)
+                self.account_fetcher.fetch_account_chain_snapshot(pubkey)
             })),
         )
         .await

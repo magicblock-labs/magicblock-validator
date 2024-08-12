@@ -1,18 +1,18 @@
-use async_trait::async_trait;
 use conjunto_transwise::AccountChainSnapshotShared;
+use futures_util::future::BoxFuture;
 use solana_sdk::pubkey::Pubkey;
 
-// The result type must be clonable (we use a string as error)
+// The result type must be clonable (we use a string as clonable error)
 pub type AccountFetcherResult = Result<AccountChainSnapshotShared, String>;
 
-#[async_trait]
 pub trait AccountFetcher {
+    fn fetch_account_chain_snapshot(
+        &self,
+        pubkey: &Pubkey,
+    ) -> BoxFuture<AccountFetcherResult>;
+
     fn get_last_account_chain_snapshot(
         &self,
         pubkey: &Pubkey,
     ) -> Option<AccountFetcherResult>;
-    async fn fetch_account_chain_snapshot(
-        &self,
-        pubkey: &Pubkey,
-    ) -> AccountFetcherResult;
 }
