@@ -14,8 +14,7 @@ edition = "2021"
 [workspace.dependencies]
 anyhow = "1.0.86"
 borsh = "0.10.3"
-delegation-program = { path = "../../delegation-program" }
-delegation-program-sdk = { path = "../../delegation-program/sdk" }
+ephemeral-rollups-sdk = { path = "../../ephemeral-rollups-sdk/sdk" }
 sleipnir-core = { path = "../sleipnir-core" }
 # Need to pin solana version here as newer ones require a rust version that conficts with
 # the one used by cargo build-sbf
