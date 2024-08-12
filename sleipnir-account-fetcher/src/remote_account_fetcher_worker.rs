@@ -1,11 +1,11 @@
 use std::{
-    collections::HashMap,
+    collections::{hash_map::Entry, HashMap},
     sync::{Arc, Mutex},
 };
 
 use conjunto_transwise::{
-    AccountChainSnapshotProvider, DelegationRecordParserImpl,
-    RpcAccountProvider, RpcProviderConfig,
+    AccountChainSnapshotProvider, AccountChainSnapshotShared,
+    DelegationRecordParserImpl, RpcAccountProvider, RpcProviderConfig,
 };
 use log::*;
 use solana_sdk::pubkey::Pubkey;
@@ -14,7 +14,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{RemoteAccountFetcherRequest, RemoteAccountFetcherResponse};
 
-pub struct RemoteAccountFetcherRunner {
+pub struct RemoteAccountFetcherWorker {
     account_chain_snapshot_provider: AccountChainSnapshotProvider<
         RpcAccountProvider,
         DelegationRecordParserImpl,
@@ -24,7 +24,7 @@ pub struct RemoteAccountFetcherRunner {
     responses: Arc<Mutex<HashMap<Pubkey, RemoteAccountFetcherResponse>>>,
 }
 
-impl RemoteAccountFetcherRunner {
+impl RemoteAccountFetcherWorker {
     pub fn new(config: RpcProviderConfig) -> Self {
         let account_chain_snapshot_provider = AccountChainSnapshotProvider::new(
             RpcAccountProvider::new(config),
@@ -39,7 +39,9 @@ impl RemoteAccountFetcherRunner {
         }
     }
 
-    pub fn get_request_sender(&self) -> UnboundedSender<Pubkey> {
+    pub fn get_request_sender(
+        &self,
+    ) -> UnboundedSender<RemoteAccountFetcherRequest> {
         self.request_sender.clone()
     }
     pub fn get_responses(
@@ -51,32 +53,30 @@ impl RemoteAccountFetcherRunner {
     pub async fn start_fetchings(
         &mut self,
         cancellation_token: CancellationToken,
-    ) -> Result<(), String> {
+    ) {
         loop {
             tokio::select! {
                 Some(request) = self.request_receiver.recv() => {
-                    self.do_fetch(request, query_cache)
+                    self.do_fetch(request.account).await
                 }
                 _ = cancellation_token.cancelled() => {
+                    return;
                 }
             }
         }
     }
 
-    async fn do_fetch(
-        &self,
-        pubkey: Pubkey,
-        query_cache: Arc<Mutex<HashMap<Pubkey, CachedAccountFetcherQuery>>>,
-    ) {
+    async fn do_fetch(&self, pubkey: Pubkey) {
         // Schedule the fetch, and transform the result into a cloneable type
-        let result = account_fetcher
-            .lock()
-            .expect("Mutex of CachedAccountFetcher.account_fetcher is poisoned")
-            .fetch_account_chain_snapshot(&pubkey)
+        let result = self
+            .account_chain_snapshot_provider
+            .try_fetch_chain_snapshot_of_pubkey(&pubkey)
             .await
+            .map(AccountChainSnapshotShared::from)
             .map_err(|error| error.to_string());
         // Lock the query_cache to update the result of the fetch and get the list of listeners
-        let listeners = match query_cache
+        let listeners = match self
+            .responses
             .lock()
             .expect("Mutex of CachedAccountFetcher.query_cache(2) is poisoned")
             .entry(pubkey)
@@ -87,16 +87,12 @@ impl RemoteAccountFetcherRunner {
             }
             // If the entry exists, we want to override its content with the fetch result
             Entry::Occupied(mut entry) => {
-                // First protect against weird case of the fetch having been already processed somehow
-                if let CachedAccountFetcherQuery::Fetched { .. } = entry.get() {
-                    return warn!("Fetch was already done",);
-                }
-                // Get the list of listeners bu replacing the content of the entry with the fetch result
-                match entry.insert(CachedAccountFetcherQuery::Fetched {
+                // Get the list of listeners bu replacing the content of the existing entry with the fetch result
+                match entry.insert(RemoteAccountFetcherResponse::Available {
                     result: result.clone(),
                 }) {
-                    CachedAccountFetcherQuery::Fetched { .. } => vec![], // This should never happen
-                    CachedAccountFetcherQuery::Fetching { listeners } => {
+                    RemoteAccountFetcherResponse::Available { .. } => vec![],
+                    RemoteAccountFetcherResponse::InFlight { listeners } => {
                         listeners
                     }
                 }

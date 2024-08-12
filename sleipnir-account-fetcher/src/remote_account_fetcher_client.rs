@@ -1,31 +1,28 @@
 use async_trait::async_trait;
 use std::{
     collections::{hash_map::Entry, HashMap},
-    future::Future,
-    pin::Pin,
     sync::{Arc, Mutex},
 };
 
-use futures_util::{future::ready, FutureExt};
-use log::*;
-use solana_sdk::pubkey::{self, Pubkey};
-use tokio::sync::{
-    mpsc::UnboundedSender,
-    oneshot::{channel, Receiver},
+use futures_util::{
+    future::{ready, BoxFuture},
+    FutureExt,
 };
+use solana_sdk::pubkey::Pubkey;
+use tokio::sync::{mpsc::UnboundedSender, oneshot::channel};
 
 use crate::{
-    AccountFetcher, RemoteAccountFetcherResponse, RemoteAccountFetcherResult,
-    RemoteAccountFetcherRunner,
+    AccountFetcher, AccountFetcherResult, RemoteAccountFetcherRequest,
+    RemoteAccountFetcherResponse, RemoteAccountFetcherWorker,
 };
 
 pub struct RemoteAccountFetcherClient {
-    request_sender: UnboundedSender<Pubkey>,
+    request_sender: UnboundedSender<RemoteAccountFetcherRequest>,
     responses: Arc<Mutex<HashMap<Pubkey, RemoteAccountFetcherResponse>>>,
 }
 
 impl RemoteAccountFetcherClient {
-    pub fn new(runner: &RemoteAccountFetcherRunner) -> Self {
+    pub fn new(runner: &RemoteAccountFetcherWorker) -> Self {
         Self {
             request_sender: runner.get_request_sender(),
             responses: runner.get_responses(),
@@ -33,12 +30,14 @@ impl RemoteAccountFetcherClient {
     }
 }
 
-impl RemoteAccountFetcherClient {
-    fn get_or_request_account_chain_snapshot(
+#[async_trait]
+impl AccountFetcher for RemoteAccountFetcherClient {
+    async fn get_or_fetch_account_chain_snapshot(
         &self,
         pubkey: &Pubkey,
-    ) -> Pin<Box<dyn Future<Output = RemoteAccountFetcherResult>>> {
-        match self
+    ) -> AccountFetcherResult {
+        // First, we lock the response mutex and create the future that resolves the respons
+        let future: BoxFuture<AccountFetcherResult> = match self
             .responses
             .lock()
             .expect("Mutex of RemoteAccountFetcherClient.responses is poisoned")
@@ -50,7 +49,10 @@ impl RemoteAccountFetcherClient {
                 RemoteAccountFetcherResponse::InFlight { listeners } => {
                     let (sender, receiver) = channel();
                     listeners.push(sender);
-                    Box::pin(RemoteAccountFetcherClient::wait_recv(receiver))
+                    Box::pin(receiver.map(|received| match received {
+                        Ok(result) => result,
+                        Err(error) => Err(error.to_string()),
+                    }))
                 }
                 // If we already have fetched that account, we can finish immediately
                 RemoteAccountFetcherResponse::Available { result } => {
@@ -63,27 +65,16 @@ impl RemoteAccountFetcherClient {
                 entry.insert(RemoteAccountFetcherResponse::InFlight {
                     listeners: vec![sender],
                 });
-                Box::pin(RemoteAccountFetcherClient::wait_recv(receiver))
+                self.request_sender
+                    .send(RemoteAccountFetcherRequest { account: *pubkey })
+                    .map_err(|error| error.to_string())?;
+                Box::pin(receiver.map(|received| match received {
+                    Ok(result) => result,
+                    Err(error) => Err(error.to_string()),
+                }))
             }
-        }
-    }
-
-    async fn wait_recv(
-        receiver: Receiver<RemoteAccountFetcherResult>,
-    ) -> RemoteAccountFetcherResult {
-        match receiver.await {
-            Ok(result) => result,
-            Err(error) => Err(error.to_string()),
-        }
-    }
-}
-
-#[async_trait]
-impl AccountFetcher for RemoteAccountFetcherClient {
-    async fn get_or_fetch_account_chain_snapshot(
-        &self,
-        pubkey: &Pubkey,
-    ) -> RemoteAccountFetcherResult {
-        self.get_or_request_account_chain_snapshot(pubkey).await
+        };
+        // Once the lock has been release, awaits the future for the response
+        future.await
     }
 }

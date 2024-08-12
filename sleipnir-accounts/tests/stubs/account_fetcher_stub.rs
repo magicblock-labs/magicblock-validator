@@ -2,10 +2,9 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use conjunto_transwise::{
-    account_fetcher::AccountFetcher, errors::TranswiseResult,
-    AccountChainSnapshot, AccountChainSnapshotShared, AccountChainState,
-    CommitFrequency, DelegationRecord,
+    AccountChainSnapshot, AccountChainState, CommitFrequency, DelegationRecord,
 };
+use sleipnir_account_fetcher::{AccountFetcher, AccountFetcherResult};
 use solana_sdk::{account::Account, clock::Slot, pubkey::Pubkey};
 
 #[derive(Debug, Default)]
@@ -42,10 +41,10 @@ impl AccountFetcherStub {
 
 #[async_trait]
 impl AccountFetcher for AccountFetcherStub {
-    async fn fetch_account_chain_snapshot(
+    async fn get_or_fetch_account_chain_snapshot(
         &self,
         pubkey: &Pubkey,
-    ) -> TranswiseResult<AccountChainSnapshotShared> {
+    ) -> AccountFetcherResult {
         Ok(match self.known_accounts.get(pubkey) {
             Some((owner, at_slot, delegation_record)) => AccountChainSnapshot {
                 pubkey: *pubkey,

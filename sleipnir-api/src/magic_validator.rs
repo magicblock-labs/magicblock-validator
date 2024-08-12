@@ -12,6 +12,9 @@ use std::{
 
 use conjunto_transwise::RpcProviderConfig;
 use log::*;
+use sleipnir_account_fetcher::{
+    RemoteAccountFetcherClient, RemoteAccountFetcherWorker,
+};
 use sleipnir_account_updates::{
     RemoteAccountUpdatesReader, RemoteAccountUpdatesWatcher,
     RemoteAccountUpdatesWatcherError,
@@ -122,6 +125,8 @@ pub struct MagicValidator {
     pubsub_close_handle: PubsubServiceCloseHandle,
     sample_performance_service: Option<SamplePerformanceService>,
     commit_accounts_ticker: Option<tokio::task::JoinHandle<()>>,
+    remote_account_fetcher_worker: Option<RemoteAccountFetcherWorker>,
+    remote_account_fetcher_handle: Option<tokio::task::JoinHandle<()>>,
     remote_account_updates_watcher: Option<RemoteAccountUpdatesWatcher>,
     remote_account_updates_handle: Option<
         tokio::task::JoinHandle<Result<(), RemoteAccountUpdatesWatcherError>>,
@@ -181,13 +186,17 @@ impl MagicValidator {
                 geyser_service.get_transaction_notifier(),
             );
 
+        let remote_rpc_config = RpcProviderConfig::new(
+            try_rpc_cluster_from_cluster(&cluster_from_remote(
+                &config.validator_config.accounts.remote,
+            ))?,
+            None,
+        );
+
+        let remote_account_fetcher_worker =
+            RemoteAccountFetcherWorker::new(remote_rpc_config.clone());
         let remote_account_updates_watcher =
-            RemoteAccountUpdatesWatcher::new(RpcProviderConfig::new(
-                try_rpc_cluster_from_cluster(&cluster_from_remote(
-                    &config.validator_config.accounts.remote,
-                ))?,
-                None,
-            ));
+            RemoteAccountUpdatesWatcher::new(remote_rpc_config.clone());
 
         let transaction_status_sender = TransactionStatusSender {
             sender: transaction_sndr,
@@ -195,6 +204,7 @@ impl MagicValidator {
 
         let accounts_manager = Self::init_accounts_manager(
             &bank,
+            RemoteAccountFetcherClient::new(&remote_account_fetcher_worker),
             RemoteAccountUpdatesReader::new(&remote_account_updates_watcher),
             transaction_status_sender.clone(),
             &identity_keypair,
@@ -225,6 +235,8 @@ impl MagicValidator {
             geyser_rpc_service,
             slot_ticker: None,
             commit_accounts_ticker: None,
+            remote_account_fetcher_worker: Some(remote_account_fetcher_worker),
+            remote_account_fetcher_handle: None,
             remote_account_updates_watcher: Some(
                 remote_account_updates_watcher,
             ),
@@ -269,6 +281,7 @@ impl MagicValidator {
 
     fn init_accounts_manager(
         bank: &Arc<Bank>,
+        remote_account_fetcher_client: RemoteAccountFetcherClient,
         remote_account_updates_reader: RemoteAccountUpdatesReader,
         transaction_status_sender: TransactionStatusSender,
         validator_keypair: &Keypair,
@@ -280,6 +293,7 @@ impl MagicValidator {
         );
         let accounts_manager = AccountsManager::try_new(
             bank,
+            remote_account_fetcher_client,
             remote_account_updates_reader,
             Some(transaction_status_sender),
             // NOTE: we could avoid passing a copy of the keypair here if we instead pass
@@ -405,6 +419,18 @@ impl MagicValidator {
             Duration::from_millis(self.config.accounts.commit.frequency_millis),
             self.token.clone(),
         ));
+
+        if let Some(mut remote_account_fetcher_worker) =
+            self.remote_account_fetcher_worker.take()
+        {
+            let cancellation_token = self.token.clone();
+            self.remote_account_fetcher_handle =
+                Some(tokio::spawn(async move {
+                    remote_account_fetcher_worker
+                        .start_fetchings(cancellation_token)
+                        .await
+                }));
+        }
 
         if let Some(mut remote_account_updates_watcher) =
             self.remote_account_updates_watcher.take()

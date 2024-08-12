@@ -1,21 +1,18 @@
-use conjunto_transwise::AccountChainSnapshotShared;
 use solana_sdk::pubkey::Pubkey;
 use tokio::sync::oneshot::Sender;
 
+use crate::AccountFetcherResult;
+
 pub struct RemoteAccountFetcherRequest {
-    account: Pubkey,
+    pub account: Pubkey,
 }
 
 #[derive(Debug)]
 pub enum RemoteAccountFetcherResponse {
     InFlight {
-        listeners: Vec<Sender<RemoteAccountFetcherResult>>,
+        listeners: Vec<Sender<AccountFetcherResult>>,
     },
     Available {
-        result: RemoteAccountFetcherResult,
+        result: AccountFetcherResult,
     },
 }
-
-// The result type must be clonable (we use a string as error)
-pub type RemoteAccountFetcherResult =
-    Result<AccountChainSnapshotShared, String>;

@@ -1,7 +1,6 @@
 use std::{sync::Arc, time::Duration};
 
 use conjunto_transwise::{
-    account_fetcher::AccountFetcher,
     transaction_accounts_extractor::TransactionAccountsExtractor,
     transaction_accounts_holder::TransactionAccountsHolder,
     transaction_accounts_snapshot::TransactionAccountsSnapshot,
@@ -13,6 +12,7 @@ use futures_util::{
     TryFutureExt,
 };
 use log::*;
+use sleipnir_account_fetcher::AccountFetcher;
 use sleipnir_account_updates::AccountUpdates;
 use sleipnir_mutator::AccountModification;
 use solana_sdk::{
@@ -20,7 +20,7 @@ use solana_sdk::{
 };
 
 use crate::{
-    errors::AccountsResult,
+    errors::{AccountsError, AccountsResult},
     external_accounts::{ExternalReadonlyAccounts, ExternalWritableAccounts},
     traits::{AccountCloner, AccountCommitter, InternalAccountProvider},
     utils::get_epoch,
@@ -176,7 +176,8 @@ where
                     .map_ok(AccountChainSnapshotShared::from)
             })),
         )
-        .await?;
+        .await
+        .map_err(AccountsError::FailedToFetchAccount)?;
 
         // 3.B Validate the accounts that we see for the very first time
         let tx_snapshot = TransactionAccountsSnapshot {

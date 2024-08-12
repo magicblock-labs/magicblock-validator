@@ -7,8 +7,7 @@ use conjunto_transwise::{
     transaction_accounts_validator::TransactionAccountsValidatorImpl,
 };
 use sleipnir_accounts::{
-    errors::AccountsError, external_accounts_cache::ExternalAccountsCache,
-    ExternalAccountsManager, LifecycleMode,
+    errors::AccountsError, ExternalAccountsManager, LifecycleMode,
 };
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
 use stubs::{
@@ -52,7 +51,6 @@ fn setup_with_lifecycle(
         transaction_accounts_validator: TransactionAccountsValidatorImpl,
         external_readonly_accounts: Default::default(),
         external_writable_accounts: Default::default(),
-        external_accounts_cache: ExternalAccountsCache::new(),
         scheduled_commits_processor: ScheduledCommitsProcessorStub::default(),
         lifecycle,
         payer_init_lamports: Some(1_000 * LAMPORTS_PER_SOL),

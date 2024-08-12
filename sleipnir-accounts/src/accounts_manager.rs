@@ -3,7 +3,6 @@ use std::sync::Arc;
 use conjunto_transwise::{
     transaction_accounts_extractor::TransactionAccountsExtractorImpl,
     transaction_accounts_validator::TransactionAccountsValidatorImpl,
-    RpcProviderConfig,
 };
 use sleipnir_account_fetcher::RemoteAccountFetcherClient;
 use sleipnir_account_updates::RemoteAccountUpdatesReader;
@@ -16,7 +15,6 @@ use solana_sdk::{
 
 use crate::{
     bank_account_provider::BankAccountProvider,
-    cached_account_fetcher::CachedAccountFetcher,
     config::AccountsConfig,
     errors::AccountsResult,
     external_accounts::{ExternalReadonlyAccounts, ExternalWritableAccounts},
@@ -67,8 +65,6 @@ impl
             rpc_cluster.url().to_string(),
             CommitmentConfig::confirmed(),
         );
-        let rpc_provider_config = RpcProviderConfig::new(rpc_cluster, None);
-
         let account_cloner = RemoteAccountCloner::new(
             cluster.clone(),
             bank.clone(),
