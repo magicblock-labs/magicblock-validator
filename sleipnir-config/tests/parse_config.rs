@@ -40,7 +40,7 @@ fn test_ephemeral_with_programs_toml() {
         config,
         SleipnirConfig {
             accounts: AccountsConfig {
-                lifecycle: LifecycleMode::EphemeralWithPrograms,
+                lifecycle: LifecycleMode::EphemeralLimited,
                 ..Default::default()
             },
             ..Default::default()
@@ -56,7 +56,7 @@ fn test_ephemeral_with_everything_toml() {
         config,
         SleipnirConfig {
             accounts: AccountsConfig {
-                lifecycle: LifecycleMode::EphemeralWithAnything,
+                lifecycle: LifecycleMode::Ephemeral,
                 ..Default::default()
             },
             ..Default::default()
@@ -72,7 +72,7 @@ fn test_all_goes_toml() {
         config,
         SleipnirConfig {
             accounts: AccountsConfig {
-                lifecycle: LifecycleMode::ChainWithAnything,
+                lifecycle: LifecycleMode::Replica,
                 ..Default::default()
             },
             validator: ValidatorConfig {

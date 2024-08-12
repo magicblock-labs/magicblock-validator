@@ -1,6 +1,6 @@
 [accounts]
 remote = "devnet"
-lifecycle = "chain-programs"
+lifecycle = "programs-replica"
 commit = { frequency_millis = 500_000 }
 
 [rpc]

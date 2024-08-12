@@ -139,9 +139,7 @@ where
         trace!("Newly seen readonly pubkeys: {:?}", unseen_readonly_ids);
 
         // 2.B If needed, Collect all writable accounts we've never seen before and need to clone and prepare as writable
-        let unseen_writable_ids = if self.lifecycle.disable_cloning()
-            || !self.lifecycle.allow_cloning_non_programs()
-        {
+        let unseen_writable_ids = if self.lifecycle.disable_cloning() {
             vec![]
         } else {
             accounts_holder

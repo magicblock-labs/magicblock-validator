@@ -10,48 +10,48 @@ pub struct AccountsConfig {
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum LifecycleMode {
-    ChainWithPrograms,
-    ChainWithAnything,
-    EphemeralWithPrograms,
-    EphemeralWithAnything,
-    Isolated,
+    Replica,
+    ProgramsReplica,
+    Ephemeral,
+    EphemeralLimited,
+    Offline,
 }
 
 impl LifecycleMode {
     pub fn disable_cloning(&self) -> bool {
         match self {
-            LifecycleMode::ChainWithPrograms => false,
-            LifecycleMode::ChainWithAnything => false,
-            LifecycleMode::EphemeralWithPrograms => false,
-            LifecycleMode::EphemeralWithAnything => false,
-            LifecycleMode::Isolated => true,
+            LifecycleMode::Replica => false,
+            LifecycleMode::ProgramsReplica => false,
+            LifecycleMode::Ephemeral => false,
+            LifecycleMode::EphemeralLimited => false,
+            LifecycleMode::Offline => true,
         }
     }
     pub fn allow_cloning_non_programs(&self) -> bool {
         match self {
-            LifecycleMode::ChainWithPrograms => false,
-            LifecycleMode::ChainWithAnything => true,
-            LifecycleMode::EphemeralWithPrograms => false,
-            LifecycleMode::EphemeralWithAnything => true,
-            LifecycleMode::Isolated => false,
+            LifecycleMode::Replica => true,
+            LifecycleMode::ProgramsReplica => false,
+            LifecycleMode::Ephemeral => true,
+            LifecycleMode::EphemeralLimited => false,
+            LifecycleMode::Offline => false,
         }
     }
     pub fn require_delegation_for_writable(&self) -> bool {
         match self {
-            LifecycleMode::ChainWithPrograms => false,
-            LifecycleMode::ChainWithAnything => false,
-            LifecycleMode::EphemeralWithPrograms => true,
-            LifecycleMode::EphemeralWithAnything => true,
-            LifecycleMode::Isolated => false,
+            LifecycleMode::Replica => false,
+            LifecycleMode::ProgramsReplica => false,
+            LifecycleMode::Ephemeral => true,
+            LifecycleMode::EphemeralLimited => true,
+            LifecycleMode::Offline => false,
         }
     }
     pub fn allow_new_account_for_writable(&self) -> bool {
         match self {
-            LifecycleMode::ChainWithPrograms => true,
-            LifecycleMode::ChainWithAnything => true,
-            LifecycleMode::EphemeralWithPrograms => false,
-            LifecycleMode::EphemeralWithAnything => false,
-            LifecycleMode::Isolated => true,
+            LifecycleMode::Replica => true,
+            LifecycleMode::ProgramsReplica => true,
+            LifecycleMode::Ephemeral => false,
+            LifecycleMode::EphemeralLimited => false,
+            LifecycleMode::Offline => true,
         }
     }
 }

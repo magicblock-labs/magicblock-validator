@@ -80,7 +80,7 @@ fn setup_ephem(
         account_cloner,
         account_committer,
         account_updates,
-        LifecycleMode::EphemeralWithAnything,
+        LifecycleMode::Ephemeral,
     )
 }
 
@@ -459,7 +459,7 @@ async fn test_ensure_one_delegated_and_one_new_account_writable() {
         account_cloner,
         account_committer,
         account_updates,
-        LifecycleMode::ChainWithAnything,
+        LifecycleMode::Replica,
     );
 
     let holder = TransactionAccountsHolder {

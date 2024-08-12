@@ -2,4 +2,4 @@
 # Otherwise we fail with account missing and/or not properly delegate.
 # We never create accounts at this point
 [accounts]
-lifecycle = "ephem-programs"
+lifecycle = "ephemeral-limited"
