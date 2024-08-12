@@ -27,7 +27,7 @@ impl LifecycleMode {
             LifecycleMode::Offline => true,
         }
     }
-    pub fn allow_cloning_non_programs(&self) -> bool {
+    pub fn allow_cloning_undelegated_non_programs(&self) -> bool {
         match self {
             LifecycleMode::Replica => true,
             LifecycleMode::ProgramsReplica => false,

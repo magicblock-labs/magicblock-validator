@@ -187,8 +187,8 @@ where
         //     transaction fail due to the missing account as it normally would.
         //     We have a similar problem if the account was not found at all in which case
         //     it's `is_program` field is `None`.
-        let allow_cloning_non_programs =
-            self.lifecycle.allow_cloning_non_programs();
+        let allow_cloning_undelegated_non_programs =
+            self.lifecycle.allow_cloning_undelegated_non_programs();
 
         let cloned_readonly_accounts = acc_snapshot
             .readonly
@@ -196,7 +196,7 @@ where
             .filter(|acc| match acc.chain_state.account() {
                 // If it exists: Allow the account if its a program or if we allow non-programs to be cloned
                 Some(account) => {
-                    account.executable || allow_cloning_non_programs
+                    account.executable || allow_cloning_undelegated_non_programs
                 }
                 // Otherwise, don't clone it
                 None => false,
