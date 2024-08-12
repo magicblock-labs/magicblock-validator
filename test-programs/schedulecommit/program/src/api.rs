@@ -1,5 +1,5 @@
 use borsh::BorshSerialize;
-use delegation_program_sdk::delegate_args::{
+use ephemeral_rollups_sdk::delegate_args::{
     DelegateAccountMetas, DelegateAccounts,
 };
 use solana_program::{

@@ -1,5 +1,5 @@
 use borsh::{BorshDeserialize, BorshSerialize};
-use delegation_program_sdk::delegate_account;
+use ephemeral_rollups_sdk::delegate_account;
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
     declare_id,
