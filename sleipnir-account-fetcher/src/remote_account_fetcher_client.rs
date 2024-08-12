@@ -1,12 +1,13 @@
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    sync::{Arc, RwLock},
+};
+
 use futures_util::{
     future::{ready, BoxFuture},
     FutureExt,
 };
 use solana_sdk::pubkey::Pubkey;
-use std::{
-    collections::{hash_map::Entry, HashMap},
-    sync::{Arc, RwLock},
-};
 use tokio::sync::{
     mpsc::UnboundedSender,
     oneshot::{channel, Sender},
