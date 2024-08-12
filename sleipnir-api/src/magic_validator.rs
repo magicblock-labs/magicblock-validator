@@ -16,8 +16,8 @@ use sleipnir_account_fetcher::{
     RemoteAccountFetcherClient, RemoteAccountFetcherWorker,
 };
 use sleipnir_account_updates::{
-    RemoteAccountUpdatesReader, RemoteAccountUpdatesWatcher,
-    RemoteAccountUpdatesWatcherError,
+    RemoteAccountUpdatesClient, RemoteAccountUpdatesWorker,
+    RemoteAccountUpdatesWorkerError,
 };
 use sleipnir_accounts::{utils::try_rpc_cluster_from_cluster, AccountsManager};
 use sleipnir_bank::{
@@ -127,9 +127,9 @@ pub struct MagicValidator {
     commit_accounts_ticker: Option<tokio::task::JoinHandle<()>>,
     remote_account_fetcher_worker: Option<RemoteAccountFetcherWorker>,
     remote_account_fetcher_handle: Option<tokio::task::JoinHandle<()>>,
-    remote_account_updates_watcher: Option<RemoteAccountUpdatesWatcher>,
+    remote_account_updates_worker: Option<RemoteAccountUpdatesWorker>,
     remote_account_updates_handle: Option<
-        tokio::task::JoinHandle<Result<(), RemoteAccountUpdatesWatcherError>>,
+        tokio::task::JoinHandle<Result<(), RemoteAccountUpdatesWorkerError>>,
     >,
     accounts_manager: Arc<AccountsManager>,
     transaction_listener: GeyserTransactionNotifyListener,
@@ -195,8 +195,8 @@ impl MagicValidator {
 
         let remote_account_fetcher_worker =
             RemoteAccountFetcherWorker::new(remote_rpc_config.clone());
-        let remote_account_updates_watcher =
-            RemoteAccountUpdatesWatcher::new(remote_rpc_config.clone());
+        let remote_account_updates_worker =
+            RemoteAccountUpdatesWorker::new(remote_rpc_config.clone());
 
         let transaction_status_sender = TransactionStatusSender {
             sender: transaction_sndr,
@@ -205,7 +205,7 @@ impl MagicValidator {
         let accounts_manager = Self::init_accounts_manager(
             &bank,
             RemoteAccountFetcherClient::new(&remote_account_fetcher_worker),
-            RemoteAccountUpdatesReader::new(&remote_account_updates_watcher),
+            RemoteAccountUpdatesClient::new(&remote_account_updates_worker),
             transaction_status_sender.clone(),
             &identity_keypair,
             &config.validator_config,
@@ -237,9 +237,7 @@ impl MagicValidator {
             commit_accounts_ticker: None,
             remote_account_fetcher_worker: Some(remote_account_fetcher_worker),
             remote_account_fetcher_handle: None,
-            remote_account_updates_watcher: Some(
-                remote_account_updates_watcher,
-            ),
+            remote_account_updates_worker: Some(remote_account_updates_worker),
             remote_account_updates_handle: None,
             pubsub_handle: Default::default(),
             pubsub_close_handle: Default::default(),
@@ -282,7 +280,7 @@ impl MagicValidator {
     fn init_accounts_manager(
         bank: &Arc<Bank>,
         remote_account_fetcher_client: RemoteAccountFetcherClient,
-        remote_account_updates_reader: RemoteAccountUpdatesReader,
+        remote_account_updates_client: RemoteAccountUpdatesClient,
         transaction_status_sender: TransactionStatusSender,
         validator_keypair: &Keypair,
         config: &SleipnirConfig,
@@ -294,7 +292,7 @@ impl MagicValidator {
         let accounts_manager = AccountsManager::try_new(
             bank,
             remote_account_fetcher_client,
-            remote_account_updates_reader,
+            remote_account_updates_client,
             Some(transaction_status_sender),
             // NOTE: we could avoid passing a copy of the keypair here if we instead pass
             // something akin to a ValidatorTransactionSigner that gets it via the [validator_authority]
@@ -432,13 +430,13 @@ impl MagicValidator {
                 }));
         }
 
-        if let Some(mut remote_account_updates_watcher) =
-            self.remote_account_updates_watcher.take()
+        if let Some(mut remote_account_updates_worker) =
+            self.remote_account_updates_worker.take()
         {
             let cancellation_token = self.token.clone();
             self.remote_account_updates_handle =
                 Some(tokio::spawn(async move {
-                    remote_account_updates_watcher
+                    remote_account_updates_worker
                         .start_monitoring(cancellation_token)
                         .await
                 }));

@@ -1,15 +1,19 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
     sync::{Arc, Mutex},
+    vec,
 };
 
 use conjunto_transwise::{
     AccountChainSnapshotProvider, AccountChainSnapshotShared,
     DelegationRecordParserImpl, RpcAccountProvider, RpcProviderConfig,
 };
+use futures_util::future::join_all;
 use log::*;
 use solana_sdk::pubkey::Pubkey;
-use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{
+    unbounded_channel, UnboundedReceiver, UnboundedSender,
+};
 use tokio_util::sync::CancellationToken;
 
 use crate::{RemoteAccountFetcherRequest, RemoteAccountFetcherResponse};
@@ -21,7 +25,8 @@ pub struct RemoteAccountFetcherWorker {
     >,
     request_receiver: UnboundedReceiver<RemoteAccountFetcherRequest>,
     request_sender: UnboundedSender<RemoteAccountFetcherRequest>,
-    responses: Arc<Mutex<HashMap<Pubkey, RemoteAccountFetcherResponse>>>,
+    snapshot_responses:
+        Arc<Mutex<HashMap<Pubkey, RemoteAccountFetcherResponse>>>,
 }
 
 impl RemoteAccountFetcherWorker {
@@ -30,12 +35,12 @@ impl RemoteAccountFetcherWorker {
             RpcAccountProvider::new(config),
             DelegationRecordParserImpl,
         );
-        let (request_sender, request_receiver) = mpsc::unbounded_channel();
+        let (request_sender, request_receiver) = unbounded_channel();
         Self {
             account_chain_snapshot_provider,
             request_receiver,
             request_sender,
-            responses: Default::default(),
+            snapshot_responses: Default::default(),
         }
     }
 
@@ -44,10 +49,10 @@ impl RemoteAccountFetcherWorker {
     ) -> UnboundedSender<RemoteAccountFetcherRequest> {
         self.request_sender.clone()
     }
-    pub fn get_responses(
+    pub fn get_snapshot_responses(
         &self,
     ) -> Arc<Mutex<HashMap<Pubkey, RemoteAccountFetcherResponse>>> {
-        self.responses.clone()
+        self.snapshot_responses.clone()
     }
 
     pub async fn start_fetchings(
@@ -55,9 +60,10 @@ impl RemoteAccountFetcherWorker {
         cancellation_token: CancellationToken,
     ) {
         loop {
+            let mut requests = vec![];
             tokio::select! {
-                Some(request) = self.request_receiver.recv() => {
-                    self.do_fetch(request.account).await
+                _ = self.request_receiver.recv_many(&mut requests, 100) => {
+                    join_all(requests.into_iter().map(|request| self.do_fetch(request.account))).await;
                 }
                 _ = cancellation_token.cancelled() => {
                     return;
@@ -76,7 +82,7 @@ impl RemoteAccountFetcherWorker {
             .map_err(|error| error.to_string());
         // Lock the query_cache to update the result of the fetch and get the list of listeners
         let listeners = match self
-            .responses
+            .snapshot_responses
             .lock()
             .expect("Mutex of CachedAccountFetcher.query_cache(2) is poisoned")
             .entry(pubkey)

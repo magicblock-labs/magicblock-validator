@@ -16,11 +16,15 @@ use solana_sdk::{
     pubkey::Pubkey,
 };
 use thiserror::Error;
-use tokio::sync::mpsc::{self, UnboundedReceiver, UnboundedSender};
+use tokio::sync::mpsc::{
+    unbounded_channel, UnboundedReceiver, UnboundedSender,
+};
 use tokio_util::sync::CancellationToken;
 
+use crate::RemoteAccountUpdatesRequest;
+
 #[derive(Debug, Error)]
-pub enum RemoteAccountUpdatesWatcherError {
+pub enum RemoteAccountUpdatesWorkerError {
     #[error("PubsubClientError")]
     PubsubClientError(
         #[from]
@@ -30,46 +34,45 @@ pub enum RemoteAccountUpdatesWatcherError {
     JoinError(#[from] tokio::task::JoinError),
 }
 
-pub struct RemoteAccountUpdatesWatcherRequest {
-    pub account: Pubkey,
-}
-
-pub struct RemoteAccountUpdatesWatcher {
+pub struct RemoteAccountUpdatesWorker {
     config: RpcProviderConfig,
-    last_update_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
-    request_receiver: UnboundedReceiver<RemoteAccountUpdatesWatcherRequest>,
-    request_sender: UnboundedSender<RemoteAccountUpdatesWatcherRequest>,
+    request_receiver: UnboundedReceiver<RemoteAccountUpdatesRequest>,
+    request_sender: UnboundedSender<RemoteAccountUpdatesRequest>,
+    last_known_update_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
 }
 
-impl RemoteAccountUpdatesWatcher {
+impl RemoteAccountUpdatesWorker {
     pub fn new(config: RpcProviderConfig) -> Self {
-        let (request_sender, request_receiver) = mpsc::unbounded_channel();
+        let (request_sender, request_receiver) = unbounded_channel();
         Self {
             config,
-            last_update_slots: Default::default(),
             request_sender,
             request_receiver,
+            last_known_update_slots: Default::default(),
         }
     }
 
     pub fn get_request_sender(
         &self,
-    ) -> UnboundedSender<RemoteAccountUpdatesWatcherRequest> {
+    ) -> UnboundedSender<RemoteAccountUpdatesRequest> {
         self.request_sender.clone()
     }
 
-    pub fn get_last_update_slots(&self) -> Arc<RwLock<HashMap<Pubkey, Slot>>> {
-        self.last_update_slots.clone()
+    pub fn get_last_known_update_slots(
+        &self,
+    ) -> Arc<RwLock<HashMap<Pubkey, Slot>>> {
+        self.last_known_update_slots.clone()
     }
 
     pub async fn start_monitoring(
         &mut self,
         cancellation_token: CancellationToken,
-    ) -> Result<(), RemoteAccountUpdatesWatcherError> {
-        let pubsub_client =
-            Arc::new(PubsubClient::new(self.config.ws_url()).await.map_err(
-                RemoteAccountUpdatesWatcherError::PubsubClientError,
-            )?);
+    ) -> Result<(), RemoteAccountUpdatesWorkerError> {
+        let pubsub_client = Arc::new(
+            PubsubClient::new(self.config.ws_url())
+                .await
+                .map_err(RemoteAccountUpdatesWorkerError::PubsubClientError)?,
+        );
         let commitment = self.config.commitment();
 
         let mut subscriptions_cancellation_tokens = HashMap::new();
@@ -83,10 +86,10 @@ impl RemoteAccountUpdatesWatcher {
                         entry.insert(subscription_cancellation_token.clone());
 
                         let pubsub_client = pubsub_client.clone();
-                        let last_update_slots = self.last_update_slots.clone();
+                        let last_known_update_slots = self.last_known_update_slots.clone();
                         subscriptions_join_handles.push((request.account, tokio::spawn(async move {
                             let result = Self::start_monitoring_subscription(
-                                last_update_slots,
+                                last_known_update_slots,
                                 pubsub_client,
                                 commitment,
                                 request.account,
@@ -110,19 +113,19 @@ impl RemoteAccountUpdatesWatcher {
         for (_account, handle) in subscriptions_join_handles {
             handle
                 .await
-                .map_err(RemoteAccountUpdatesWatcherError::JoinError)?;
+                .map_err(RemoteAccountUpdatesWorkerError::JoinError)?;
         }
 
         Ok(())
     }
 
     async fn start_monitoring_subscription(
-        last_update_slots: Arc<RwLock<HashMap<Pubkey, u64>>>,
+        last_known_update_slots: Arc<RwLock<HashMap<Pubkey, u64>>>,
         pubsub_client: Arc<PubsubClient>,
         commitment: Option<CommitmentLevel>,
         account: Pubkey,
         cancellation_token: CancellationToken,
-    ) -> Result<(), RemoteAccountUpdatesWatcherError> {
+    ) -> Result<(), RemoteAccountUpdatesWorkerError> {
         let config = Some(RpcAccountInfoConfig {
             commitment: commitment
                 .map(|commitment| CommitmentConfig { commitment }),
@@ -137,7 +140,7 @@ impl RemoteAccountUpdatesWatcher {
         let (mut stream, unsubscribe) = pubsub_client
             .account_subscribe(&account, config)
             .await
-            .map_err(RemoteAccountUpdatesWatcherError::PubsubClientError)?;
+            .map_err(RemoteAccountUpdatesWorkerError::PubsubClientError)?;
 
         let cancel_handle = tokio::spawn(async move {
             cancellation_token.cancelled().await;
@@ -153,9 +156,9 @@ impl RemoteAccountUpdatesWatcher {
                 account, current_update_slot
             );
 
-            match last_update_slots
+            match last_known_update_slots
                 .write()
-                .expect("last_update_slots poisoned")
+                .expect("last_known_update_slots poisoned")
                 .entry(account)
             {
                 Entry::Vacant(entry) => {
@@ -171,6 +174,6 @@ impl RemoteAccountUpdatesWatcher {
 
         cancel_handle
             .await
-            .map_err(RemoteAccountUpdatesWatcherError::JoinError)
+            .map_err(RemoteAccountUpdatesWorkerError::JoinError)
     }
 }

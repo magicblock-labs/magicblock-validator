@@ -114,18 +114,21 @@ where
                     // TODO(vbrunet)
                     //  - https://github.com/magicblock-labs/magicblock-validator/issues/95
                     //  - handle the case of the payer better, we may not want to track lamport changes
-                    self.account_updates.request_account_monitoring(pubkey);
+                    self.account_updates
+                        .request_start_account_monitoring(pubkey);
                     // If there was an on-chain update since last clone, always re-clone
                     if let Some(cloned_at_slot) = self
                         .external_readonly_accounts
                         .get_cloned_at_slot(pubkey)
                     {
-                        if self
+                        if let Some(last_known_update_slot) = self
                             .account_updates
-                            .has_known_update_since_slot(pubkey, cloned_at_slot)
+                            .get_last_known_update_slot(pubkey)
                         {
-                            self.external_readonly_accounts.remove(pubkey);
-                            return true;
+                            if cloned_at_slot < last_known_update_slot {
+                                self.external_readonly_accounts.remove(pubkey);
+                                return true;
+                            }
                         }
                     }
                     // If we don't know of any recent update, and it's still in the cache, it can be used safely

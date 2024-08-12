@@ -7,7 +7,11 @@ pub type AccountFetcherResult = Result<AccountChainSnapshotShared, String>;
 
 #[async_trait]
 pub trait AccountFetcher {
-    async fn get_or_fetch_account_chain_snapshot(
+    fn get_last_account_chain_snapshot(
+        &self,
+        pubkey: &Pubkey,
+    ) -> Option<AccountFetcherResult>;
+    async fn fetch_account_chain_snapshot(
         &self,
         pubkey: &Pubkey,
     ) -> AccountFetcherResult;

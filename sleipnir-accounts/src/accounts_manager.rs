@@ -5,7 +5,7 @@ use conjunto_transwise::{
     transaction_accounts_validator::TransactionAccountsValidatorImpl,
 };
 use sleipnir_account_fetcher::RemoteAccountFetcherClient;
-use sleipnir_account_updates::RemoteAccountUpdatesReader;
+use sleipnir_account_updates::RemoteAccountUpdatesClient;
 use sleipnir_bank::bank::Bank;
 use sleipnir_transaction_status::TransactionStatusSender;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -30,7 +30,7 @@ pub type AccountsManager = ExternalAccountsManager<
     RemoteAccountFetcherClient,
     RemoteAccountCloner,
     RemoteAccountCommitter,
-    RemoteAccountUpdatesReader,
+    RemoteAccountUpdatesClient,
     TransactionAccountsExtractorImpl,
     TransactionAccountsValidatorImpl,
     RemoteScheduledCommitsProcessor,
@@ -42,7 +42,7 @@ impl
         RemoteAccountFetcherClient,
         RemoteAccountCloner,
         RemoteAccountCommitter,
-        RemoteAccountUpdatesReader,
+        RemoteAccountUpdatesClient,
         TransactionAccountsExtractorImpl,
         TransactionAccountsValidatorImpl,
         RemoteScheduledCommitsProcessor,
@@ -51,7 +51,7 @@ impl
     pub fn try_new(
         bank: &Arc<Bank>,
         remote_account_fetcher_client: RemoteAccountFetcherClient,
-        remote_account_updates_reader: RemoteAccountUpdatesReader,
+        remote_account_updates_client: RemoteAccountUpdatesClient,
         transaction_status_sender: Option<TransactionStatusSender>,
         validator_keypair: Keypair,
         config: AccountsConfig,
@@ -87,7 +87,7 @@ impl
             account_fetcher: remote_account_fetcher_client,
             account_cloner,
             account_committer: Arc::new(account_committer),
-            account_updates: remote_account_updates_reader,
+            account_updates: remote_account_updates_client,
             transaction_accounts_extractor: TransactionAccountsExtractorImpl,
             transaction_accounts_validator: TransactionAccountsValidatorImpl,
             external_readonly_accounts: ExternalReadonlyAccounts::default(),

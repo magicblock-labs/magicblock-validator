@@ -1,6 +1,6 @@
 use solana_sdk::{clock::Slot, pubkey::Pubkey};
 
 pub trait AccountUpdates {
-    fn request_account_monitoring(&self, pubkey: &Pubkey);
-    fn has_known_update_since_slot(&self, pubkey: &Pubkey, slot: Slot) -> bool;
+    fn request_start_account_monitoring(&self, pubkey: &Pubkey);
+    fn get_last_known_update_slot(&self, pubkey: &Pubkey) -> Option<Slot>;
 }

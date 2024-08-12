@@ -18,14 +18,15 @@ use crate::{
 
 pub struct RemoteAccountFetcherClient {
     request_sender: UnboundedSender<RemoteAccountFetcherRequest>,
-    responses: Arc<Mutex<HashMap<Pubkey, RemoteAccountFetcherResponse>>>,
+    snapshot_responses:
+        Arc<Mutex<HashMap<Pubkey, RemoteAccountFetcherResponse>>>,
 }
 
 impl RemoteAccountFetcherClient {
     pub fn new(runner: &RemoteAccountFetcherWorker) -> Self {
         Self {
             request_sender: runner.get_request_sender(),
-            responses: runner.get_responses(),
+            snapshot_responses: runner.get_snapshot_responses(),
         }
     }
 }
@@ -38,9 +39,9 @@ impl AccountFetcher for RemoteAccountFetcherClient {
     ) -> AccountFetcherResult {
         // First, we lock the response mutex and create the future that resolves the respons
         let future: BoxFuture<AccountFetcherResult> = match self
-            .responses
+            .snapshot_responses
             .lock()
-            .expect("Mutex of RemoteAccountFetcherClient.responses is poisoned")
+            .expect("Mutex of RemoteAccountFetcherClient.snapshot_responses is poisoned")
             .entry(*pubkey)
         {
             // If someone else already requested this account before, we'll rely on their fetch result

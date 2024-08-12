@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 
 use async_trait::async_trait;
 use conjunto_transwise::{
@@ -11,6 +11,7 @@ use solana_sdk::{account::Account, clock::Slot, pubkey::Pubkey};
 pub struct AccountFetcherStub {
     unknown_at_slot: Slot,
     known_accounts: HashMap<Pubkey, (Pubkey, Slot, Option<DelegationRecord>)>,
+    already_fetched: RwLock<HashSet<Pubkey>>,
 }
 
 #[allow(unused)] // used in tests
@@ -37,11 +38,8 @@ impl AccountFetcherStub {
             ),
         );
     }
-}
 
-#[async_trait]
-impl AccountFetcher for AccountFetcherStub {
-    async fn get_or_fetch_account_chain_snapshot(
+    fn get_or_fetch_account_chain_snapshot(
         &self,
         pubkey: &Pubkey,
     ) -> AccountFetcherResult {
@@ -73,5 +71,34 @@ impl AccountFetcher for AccountFetcherStub {
             },
         }
         .into())
+    }
+}
+
+#[async_trait]
+impl AccountFetcher for AccountFetcherStub {
+    fn get_last_account_chain_snapshot(
+        &self,
+        pubkey: &Pubkey,
+    ) -> Option<AccountFetcherResult> {
+        if self
+            .already_fetched
+            .read()
+            .expect("RwLock of AccountFetcherStub.already_fetched is poisoned")
+            .contains(pubkey)
+        {
+            Some(self.get_or_fetch_account_chain_snapshot(pubkey))
+        } else {
+            None
+        }
+    }
+    async fn fetch_account_chain_snapshot(
+        &self,
+        pubkey: &Pubkey,
+    ) -> AccountFetcherResult {
+        self.already_fetched
+            .write()
+            .expect("RwLock of AccountFetcherStub.already_fetched is poisoned")
+            .insert(pubkey);
+        self.get_or_fetch_account_chain_snapshot(pubkey)
     }
 }
