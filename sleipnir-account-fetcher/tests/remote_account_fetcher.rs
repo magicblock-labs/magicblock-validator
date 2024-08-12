@@ -14,7 +14,7 @@ use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
 #[tokio::test]
-async fn test_devnet_get_clock_multiple_times() {
+async fn test_devnet_fetch_clock_multiple_times() {
     // Create account fetcher worker and client
     let mut worker =
         RemoteAccountFetcherWorker::new(RpcProviderConfig::devnet());
@@ -57,7 +57,7 @@ async fn test_devnet_get_clock_multiple_times() {
 }
 
 #[tokio::test]
-async fn test_devnet_get_multiple_accounts_same_time() {
+async fn test_devnet_fetch_multiple_accounts_same_time() {
     // Create account fetcher worker and client
     let mut worker =
         RemoteAccountFetcherWorker::new(RpcProviderConfig::devnet());
