@@ -855,38 +855,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "delegation-program"
-version = "0.1.3"
-dependencies = [
- "borsh 0.10.3",
- "bytemuck",
- "num_enum 0.7.2",
- "paste",
- "solana-program 1.17.22",
- "solana-security-txt",
- "thiserror",
-]
-
-[[package]]
-name = "delegation-program-sdk"
-version = "0.1.3"
-dependencies = [
- "borsh 0.10.3",
- "delegation-sdk-attribute-delegate",
- "paste",
- "solana-program 1.17.22",
-]
-
-[[package]]
-name = "delegation-sdk-attribute-delegate"
-version = "0.1.3"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
 name = "derivation-path"
 version = "0.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1016,6 +984,25 @@ dependencies = [
  "log",
  "regex",
  "termcolor",
+]
+
+[[package]]
+name = "ephemeral-rollups-sdk"
+version = "0.0.1"
+dependencies = [
+ "borsh 0.10.3",
+ "ephemeral-rollups-sdk-attribute-delegate",
+ "paste",
+ "solana-program 1.17.22",
+]
+
+[[package]]
+name = "ephemeral-rollups-sdk-attribute-delegate"
+version = "0.0.1"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -2336,7 +2323,6 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "borsh 0.10.3",
- "delegation-program",
  "schedulecommit-program",
  "sleipnir-core",
  "solana-program 1.17.22",
@@ -2350,8 +2336,7 @@ name = "schedulecommit-program"
 version = "0.0.0"
 dependencies = [
  "borsh 0.10.3",
- "delegation-program",
- "delegation-program-sdk",
+ "ephemeral-rollups-sdk",
  "solana-program 1.17.22",
 ]
 

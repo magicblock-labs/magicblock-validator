@@ -29,26 +29,25 @@ pub fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
 
     // Start validators via `cargo run --release  -- <config>
-    let mut ephem_validator = match start_validator_with_config(
-        "test-programs/schedulecommit/configs/schedulecommit-conf.ephem.toml",
-        8899,
-    ) {
-        Some(validator) => validator,
-        None => {
-            panic!("Failed to start ephemeral validator properly");
-        }
-    };
-
     let mut devnet_validator = match start_validator_with_config(
         "test-programs/schedulecommit/configs/schedulecommit-conf.devnet.toml",
         7799,
     ) {
         Some(validator) => validator,
         None => {
-            ephem_validator
-                .kill()
-                .expect("Failed to kill ephemeral validator");
             panic!("Failed to start devnet validator properly");
+        }
+    };
+    let mut ephem_validator = match start_validator_with_config(
+        "test-programs/schedulecommit/configs/schedulecommit-conf.ephem.toml",
+        8899,
+    ) {
+        Some(validator) => validator,
+        None => {
+            devnet_validator
+                .kill()
+                .expect("Failed to kill devnet validator");
+            panic!("Failed to start ephemeral validator properly");
         }
     };
 
