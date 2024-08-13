@@ -46,6 +46,22 @@ pub fn fetch_commit_result_from_logs(
 
     let (included, excluded, sigs) = ctx.extract_sent_commit_info(&logs);
 
+    // 3. Ensure transactions landed on chain
+    for sig in &sigs {
+        let confirmed = ctx.confirm_transaction_chain(sig).unwrap_or_else(|e| {
+            panic!(
+                "Transaction with sig {:?} confirmation on chain failed, error: {:?}",
+                sig, e
+            )
+        });
+        if !confirmed {
+            panic!(
+                "Transaction {:?} not confirmed on chain within timeout",
+                sig
+            );
+        }
+    }
+
     let mut committed_accounts = HashMap::new();
     for pubkey in included {
         let ephem_data = ctx.fetch_ephem_account_data(pubkey).unwrap();
