@@ -71,22 +71,26 @@ pub fn main() {
     assert_eq!(
         commit1.unwrap().ephem_account.count,
         1,
-        "pda1 count is 1 on ephem"
+        "pda1 ({}) count is 1 on ephem",
+        pda1
     );
     assert_eq!(
         commit1.unwrap().chain_account.count,
         1,
-        "pda1 count is 1 on chain"
+        "pda1 ({}) count is 1 on chain",
+        pda1
     );
     assert_eq!(
         commit2.unwrap().ephem_account.count,
         1,
-        "pda2 count is 1 on ephem"
+        "pda2 ({}) count is 1 on ephem",
+        pda2
     );
     assert_eq!(
         commit2.unwrap().chain_account.count,
         1,
-        "pda2 count is 1 on chain"
+        "pda2 ({}) count is 1 on chain",
+        pda2
     );
 
     assert_eq!(res.sigs.len(), 1, "should have 1 on chain sig");

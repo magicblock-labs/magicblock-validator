@@ -412,21 +412,37 @@ impl ScheduleCommitTestContext {
         rpc_client: &RpcClient,
         commitment_config: CommitmentConfig,
     ) -> Result<bool, client_error::Error> {
-        // Wait for the transaction to be confirmed (up to 1 sec)
-        let mut count = 0;
+        // Allow RPC failures to persist for up to 1 sec
+        const MAX_FAILURES: u64 = 5;
+        const MILLIS_UNTIL_RETRY: u64 = 200;
+        let mut failure_count = 0;
+
+        // Allow transactions to take up to 20 seconds to confirm
+        const MAX_UNCONFIRMED_COUNT: u64 = 40;
+        const MILLIS_UNTIL_RECONFIRM: u64 = 500;
+        let mut unconfirmed_count = 0;
+
         loop {
             match rpc_client
                 .confirm_transaction_with_commitment(sig, commitment_config)
             {
-                Ok(res) => {
+                Ok(res) if res.value => {
                     return Ok(res.value);
                 }
+                Ok(_) => {
+                    unconfirmed_count += 1;
+                    if unconfirmed_count >= MAX_UNCONFIRMED_COUNT {
+                        return Ok(false);
+                    } else {
+                        sleep(Duration::from_millis(MILLIS_UNTIL_RECONFIRM));
+                    }
+                }
                 Err(err) => {
-                    count += 1;
-                    if count >= 5 {
+                    failure_count += 1;
+                    if failure_count >= MAX_FAILURES {
                         return Err(err);
                     } else {
-                        sleep(Duration::from_millis(200));
+                        sleep(Duration::from_millis(MILLIS_UNTIL_RETRY));
                     }
                 }
             }
