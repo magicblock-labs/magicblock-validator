@@ -13,13 +13,10 @@ use tokio::sync::{
     oneshot::{channel, Sender},
 };
 
-use crate::{
-    AccountFetcher, AccountFetcherResult, RemoteAccountFetcherRequest,
-    RemoteAccountFetcherWorker,
-};
+use crate::{AccountFetcher, AccountFetcherResult, RemoteAccountFetcherWorker};
 
 pub struct RemoteAccountFetcherClient {
-    request_sender: UnboundedSender<RemoteAccountFetcherRequest>,
+    request_sender: UnboundedSender<Pubkey>,
     fetch_result_listeners:
         Arc<RwLock<HashMap<Pubkey, Vec<Sender<AccountFetcherResult>>>>>,
 }
@@ -56,10 +53,7 @@ impl AccountFetcher for RemoteAccountFetcherClient {
             }
         };
         if needs_sending {
-            if let Err(error) = self
-                .request_sender
-                .send(RemoteAccountFetcherRequest { account: *pubkey })
-            {
+            if let Err(error) = self.request_sender.send(*pubkey) {
                 return Box::pin(ready(Err(error.to_string())));
             }
         }

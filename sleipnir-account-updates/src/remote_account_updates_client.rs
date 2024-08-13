@@ -7,12 +7,10 @@ use log::*;
 use solana_sdk::{clock::Slot, pubkey::Pubkey};
 use tokio::sync::mpsc::UnboundedSender;
 
-use crate::{
-    AccountUpdates, RemoteAccountUpdatesRequest, RemoteAccountUpdatesWorker,
-};
+use crate::{AccountUpdates, RemoteAccountUpdatesWorker};
 
 pub struct RemoteAccountUpdatesClient {
-    request_sender: UnboundedSender<RemoteAccountUpdatesRequest>,
+    request_sender: UnboundedSender<Pubkey>,
     last_known_update_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
 }
 
@@ -27,10 +25,7 @@ impl RemoteAccountUpdatesClient {
 
 impl AccountUpdates for RemoteAccountUpdatesClient {
     fn request_start_account_monitoring(&self, pubkey: &Pubkey) {
-        if let Err(error) = self
-            .request_sender
-            .send(RemoteAccountUpdatesRequest { account: *pubkey })
-        {
+        if let Err(error) = self.request_sender.send(*pubkey) {
             error!(
                 "Failed to request monitoring of account: {}: {:?}",
                 pubkey, error

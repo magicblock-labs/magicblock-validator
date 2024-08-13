@@ -17,15 +17,15 @@ use tokio::sync::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::{AccountFetcherResult, RemoteAccountFetcherRequest};
+use crate::AccountFetcherResult;
 
 pub struct RemoteAccountFetcherWorker {
     account_chain_snapshot_provider: AccountChainSnapshotProvider<
         RpcAccountProvider,
         DelegationRecordParserImpl,
     >,
-    request_receiver: UnboundedReceiver<RemoteAccountFetcherRequest>,
-    request_sender: UnboundedSender<RemoteAccountFetcherRequest>,
+    request_receiver: UnboundedReceiver<Pubkey>,
+    request_sender: UnboundedSender<Pubkey>,
     fetch_result_listeners:
         Arc<RwLock<HashMap<Pubkey, Vec<Sender<AccountFetcherResult>>>>>,
 }
@@ -45,9 +45,7 @@ impl RemoteAccountFetcherWorker {
         }
     }
 
-    pub fn get_request_sender(
-        &self,
-    ) -> UnboundedSender<RemoteAccountFetcherRequest> {
+    pub fn get_request_sender(&self) -> UnboundedSender<Pubkey> {
         self.request_sender.clone()
     }
 
@@ -68,7 +66,7 @@ impl RemoteAccountFetcherWorker {
                     join_all(
                         requests
                             .into_iter()
-                            .map(|request| self.do_fetch(request.account))
+                            .map(|request| self.do_fetch(request))
                     ).await;
                 }
                 _ = cancellation_token.cancelled() => {

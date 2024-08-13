@@ -21,8 +21,6 @@ use tokio::sync::mpsc::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::RemoteAccountUpdatesRequest;
-
 #[derive(Debug, Error)]
 pub enum RemoteAccountUpdatesWorkerError {
     #[error("PubsubClientError")]
@@ -36,8 +34,8 @@ pub enum RemoteAccountUpdatesWorkerError {
 
 pub struct RemoteAccountUpdatesWorker {
     config: RpcProviderConfig,
-    request_receiver: UnboundedReceiver<RemoteAccountUpdatesRequest>,
-    request_sender: UnboundedSender<RemoteAccountUpdatesRequest>,
+    request_receiver: UnboundedReceiver<Pubkey>,
+    request_sender: UnboundedSender<Pubkey>,
     last_known_update_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
 }
 
@@ -52,9 +50,7 @@ impl RemoteAccountUpdatesWorker {
         }
     }
 
-    pub fn get_request_sender(
-        &self,
-    ) -> UnboundedSender<RemoteAccountUpdatesRequest> {
+    pub fn get_request_sender(&self) -> UnboundedSender<Pubkey> {
         self.request_sender.clone()
     }
 
@@ -81,22 +77,22 @@ impl RemoteAccountUpdatesWorker {
         loop {
             tokio::select! {
                 Some(request) = self.request_receiver.recv() => {
-                    if let Entry::Vacant(entry) = subscriptions_cancellation_tokens.entry(request.account) {
+                    if let Entry::Vacant(entry) = subscriptions_cancellation_tokens.entry(request) {
                         let subscription_cancellation_token = CancellationToken::new();
                         entry.insert(subscription_cancellation_token.clone());
 
                         let pubsub_client = pubsub_client.clone();
                         let last_known_update_slots = self.last_known_update_slots.clone();
-                        subscriptions_join_handles.push((request.account, tokio::spawn(async move {
+                        subscriptions_join_handles.push((request, tokio::spawn(async move {
                             let result = Self::start_monitoring_subscription(
                                 last_known_update_slots,
                                 pubsub_client,
                                 commitment,
-                                request.account,
+                                request,
                                 subscription_cancellation_token,
                             ).await;
                             if let Err(error) = result {
-                                warn!("Failed to monitor account: {}: {:?}", request.account, error);
+                                warn!("Failed to monitor account: {}: {:?}", request, error);
                             }
                         })));
                     }
