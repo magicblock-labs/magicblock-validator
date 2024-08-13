@@ -20,17 +20,15 @@ use crate::{
 
 pub struct RemoteAccountFetcherClient {
     request_sender: UnboundedSender<RemoteAccountFetcherRequest>,
-    snapshot_listeners:
+    fetch_result_listeners:
         Arc<RwLock<HashMap<Pubkey, Vec<Sender<AccountFetcherResult>>>>>,
-    snapshot_results: Arc<RwLock<HashMap<Pubkey, AccountFetcherResult>>>,
 }
 
 impl RemoteAccountFetcherClient {
     pub fn new(runner: &RemoteAccountFetcherWorker) -> Self {
         Self {
             request_sender: runner.get_request_sender(),
-            snapshot_listeners: runner.get_snapshot_listeners(),
-            snapshot_results: runner.get_snapshot_results(),
+            fetch_result_listeners: runner.get_fetch_result_listeners(),
         }
     }
 }
@@ -41,9 +39,9 @@ impl AccountFetcher for RemoteAccountFetcherClient {
         pubkey: &Pubkey,
     ) -> BoxFuture<AccountFetcherResult> {
         let (needs_sending, receiver) = match self
-            .snapshot_listeners
+            .fetch_result_listeners
             .write()
-            .expect("RwLock of RemoteAccountFetcherClient.snapshot_listeners is poisoned")
+            .expect("RwLock of RemoteAccountFetcherClient.fetch_result_listeners is poisoned")
             .entry(*pubkey)
         {
             Entry::Vacant(entry) => {
@@ -69,16 +67,5 @@ impl AccountFetcher for RemoteAccountFetcherClient {
             Ok(result) => result,
             Err(error) => Err(error.to_string()),
         }))
-    }
-
-    fn get_last_account_chain_snapshot(
-        &self,
-        pubkey: &Pubkey,
-    ) -> Option<AccountFetcherResult> {
-        self.snapshot_results
-            .read()
-            .expect("RwLock of RemoteAccountFetcherClient.snapshot_results is poisoned")
-            .get(pubkey)
-            .cloned()
     }
 }

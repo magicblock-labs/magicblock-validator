@@ -15,7 +15,6 @@ use solana_sdk::{account::Account, clock::Slot, pubkey::Pubkey};
 pub struct AccountFetcherStub {
     unknown_at_slot: Slot,
     known_accounts: HashMap<Pubkey, (Pubkey, Slot, Option<DelegationRecord>)>,
-    already_fetched: RwLock<HashSet<Pubkey>>,
 }
 
 #[allow(unused)] // used in tests
@@ -86,26 +85,6 @@ impl AccountFetcher for AccountFetcherStub {
         &self,
         pubkey: &Pubkey,
     ) -> BoxFuture<AccountFetcherResult> {
-        self.already_fetched
-            .write()
-            .expect("RwLock of AccountFetcherStub.already_fetched is poisoned")
-            .insert(*pubkey);
         Box::pin(ready(self.get_or_fetch_account_chain_snapshot(pubkey)))
-    }
-
-    fn get_last_account_chain_snapshot(
-        &self,
-        pubkey: &Pubkey,
-    ) -> Option<AccountFetcherResult> {
-        if self
-            .already_fetched
-            .read()
-            .expect("RwLock of AccountFetcherStub.already_fetched is poisoned")
-            .contains(pubkey)
-        {
-            Some(self.get_or_fetch_account_chain_snapshot(pubkey))
-        } else {
-            None
-        }
     }
 }

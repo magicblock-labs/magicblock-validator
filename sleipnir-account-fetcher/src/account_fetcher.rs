@@ -10,9 +10,4 @@ pub trait AccountFetcher {
         &self,
         pubkey: &Pubkey,
     ) -> BoxFuture<AccountFetcherResult>;
-
-    fn get_last_account_chain_snapshot(
-        &self,
-        pubkey: &Pubkey,
-    ) -> Option<AccountFetcherResult>;
 }

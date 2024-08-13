@@ -26,9 +26,8 @@ pub struct RemoteAccountFetcherWorker {
     >,
     request_receiver: UnboundedReceiver<RemoteAccountFetcherRequest>,
     request_sender: UnboundedSender<RemoteAccountFetcherRequest>,
-    snapshot_listeners:
+    fetch_result_listeners:
         Arc<RwLock<HashMap<Pubkey, Vec<Sender<AccountFetcherResult>>>>>,
-    snapshot_results: Arc<RwLock<HashMap<Pubkey, AccountFetcherResult>>>,
 }
 
 impl RemoteAccountFetcherWorker {
@@ -42,8 +41,7 @@ impl RemoteAccountFetcherWorker {
             account_chain_snapshot_provider,
             request_receiver,
             request_sender,
-            snapshot_listeners: Default::default(),
-            snapshot_results: Default::default(),
+            fetch_result_listeners: Default::default(),
         }
     }
 
@@ -53,16 +51,10 @@ impl RemoteAccountFetcherWorker {
         self.request_sender.clone()
     }
 
-    pub fn get_snapshot_listeners(
+    pub fn get_fetch_result_listeners(
         &self,
     ) -> Arc<RwLock<HashMap<Pubkey, Vec<Sender<AccountFetcherResult>>>>> {
-        self.snapshot_listeners.clone()
-    }
-
-    pub fn get_snapshot_results(
-        &self,
-    ) -> Arc<RwLock<HashMap<Pubkey, AccountFetcherResult>>> {
-        self.snapshot_results.clone()
+        self.fetch_result_listeners.clone()
     }
 
     pub async fn start_fetchings(
@@ -95,10 +87,10 @@ impl RemoteAccountFetcherWorker {
             .map_err(|error| error.to_string());
 
         let listeners = match self
-            .snapshot_listeners
+            .fetch_result_listeners
             .write()
             .expect(
-                "RwLock of RemoteAccountFetcherWorker.snapshot_listeners is poisoned",
+                "RwLock of RemoteAccountFetcherWorker.fetch_result_listeners is poisoned",
             )
             .entry(pubkey)
         {
@@ -109,19 +101,6 @@ impl RemoteAccountFetcherWorker {
             // If the entry exists, we want to remove the list of listeners
             Entry::Occupied(entry) => entry.remove(),
         };
-
-        match self
-            .snapshot_results
-            .write()
-            .expect(
-                "RwLock of RemoteAccountFetcherWorker.snapshot_results is poisoned",
-            )
-            .entry(pubkey)
-        {
-            Entry::Occupied(mut entry) => { entry.get_mut().clone_from(&result); },
-            Entry::Vacant(entry) => { entry.insert(result.clone()); },
-        };
-
         for listener in listeners {
             if let Err(error) = listener.send(result.clone()) {
                 warn!("Could not send fetch result to listener: {:?}", error);
