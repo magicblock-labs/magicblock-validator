@@ -85,7 +85,6 @@ impl RemoteAccountFetcherWorker {
             .await
             .map(AccountChainSnapshotShared::from)
             .map_err(|error| error.to_string());
-
         let listeners = match self
             .fetch_result_listeners
             .write()
@@ -98,7 +97,7 @@ impl RemoteAccountFetcherWorker {
             Entry::Vacant(_) => {
                 return warn!("Fetch listeners were discarded improperly",);
             }
-            // If the entry exists, we want to remove the list of listeners
+            // If the entry exists, we want to consume the list of listeners
             Entry::Occupied(entry) => entry.remove(),
         };
         for listener in listeners {
