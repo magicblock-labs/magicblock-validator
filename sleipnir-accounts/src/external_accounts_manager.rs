@@ -17,7 +17,7 @@ use solana_sdk::{
 };
 
 use crate::{
-    errors::AccountsResult,
+    errors::{AccountsError, AccountsResult},
     external_accounts::{ExternalReadonlyAccounts, ExternalWritableAccounts},
     traits::{AccountCloner, AccountCommitter, InternalAccountProvider},
     utils::get_epoch,
@@ -113,18 +113,21 @@ where
                     // TODO(vbrunet)
                     //  - https://github.com/magicblock-labs/magicblock-validator/issues/95
                     //  - handle the case of the payer better, we may not want to track lamport changes
-                    self.account_updates.request_account_monitoring(pubkey);
+                    self.account_updates
+                        .request_start_account_monitoring(pubkey);
                     // If there was an on-chain update since last clone, always re-clone
                     if let Some(cloned_at_slot) = self
                         .external_readonly_accounts
                         .get_cloned_at_slot(pubkey)
                     {
-                        if self
+                        if let Some(last_known_update_slot) = self
                             .account_updates
-                            .has_known_update_since_slot(pubkey, cloned_at_slot)
+                            .get_last_known_update_slot(pubkey)
                         {
-                            self.external_readonly_accounts.remove(pubkey);
-                            return true;
+                            if cloned_at_slot < last_known_update_slot {
+                                self.external_readonly_accounts.remove(pubkey);
+                                return true;
+                            }
                         }
                     }
                     // If we don't know of any recent update, and it's still in the cache, it can be used safely
@@ -161,29 +164,27 @@ where
         trace!("Newly seen writable pubkeys: {:?}", unseen_writable_ids);
 
         // 3.A Fetch the accounts that we've seen for the first time
-        let acc_snapshot = self
-            .account_fetcher
-            .fetch_transaction_accounts_snapshot(&TransactionAccountsHolder {
-                readonly: unseen_readonly_ids,
-                writable: unseen_writable_ids,
-                payer: accounts_holder.payer,
-            })
-            .await?;
+        let (readonly_snapshot, writable_snapshot) = try_join(
+            try_join_all(unseen_readonly_ids.iter().map(|pubkey| {
+                self.account_fetcher.fetch_account_chain_snapshot(pubkey)
+            })),
+            try_join_all(unseen_writable_ids.iter().map(|pubkey| {
+                self.account_fetcher.fetch_account_chain_snapshot(pubkey)
+            })),
+        )
+        .await
+        .map_err(AccountsError::FailedToFetchAccount)?;
 
         // 3.B Validate the accounts that we see for the very first time
-        self.transaction_accounts_validator.validate_accounts(
-            &acc_snapshot,
-            &ValidateAccountsConfig {
-                // Here we specify if we can clone all writable accounts or
-                // only the ones that were delegated
-                require_delegation: self
-                    .lifecycle
-                    .requires_delegation_for_writables(),
-                allow_new_accounts: self
-                    .lifecycle
-                    .allows_new_account_for_writables(),
-            },
-        )?;
+        let tx_snapshot = TransactionAccountsSnapshot {
+            readonly: readonly_snapshot,
+            writable: writable_snapshot,
+            payer: accounts_holder.payer,
+        };
+        if self.lifecycle.requires_ephemeral_validation() {
+            self.transaction_accounts_validator
+                .validate_ephemeral_transaction_accounts(&tx_snapshot)?;
+        }
 
         // 4.A If a readonly account is not a program, but we only should clone programs then
         //     we have a problem since the account does not exist nor will it be created.
@@ -198,9 +199,7 @@ where
             .into_iter()
             .filter(|acc| match acc.chain_state.account() {
                 // If it exists: Allow the account if its a program or if we allow non-programs to be cloned
-                Some(account) => {
-                    account.executable || allow_cloning_undelegated_non_programs
-                }
+                Some(account) => account.executable || programs_only,
                 // Otherwise, don't clone it
                 None => false,
             })
