@@ -425,7 +425,7 @@ impl MagicValidator {
             self.remote_account_fetcher_handle =
                 Some(tokio::spawn(async move {
                     remote_account_fetcher_worker
-                        .start_fetchings(cancellation_token)
+                        .start_fetch_request_listener(cancellation_token)
                         .await
                 }));
         }

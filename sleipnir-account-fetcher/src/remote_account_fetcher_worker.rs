@@ -55,7 +55,7 @@ impl RemoteAccountFetcherWorker {
         self.fetch_result_listeners.clone()
     }
 
-    pub async fn start_fetchings(
+    pub async fn start_fetch_request_listener(
         &mut self,
         cancellation_token: CancellationToken,
     ) {
