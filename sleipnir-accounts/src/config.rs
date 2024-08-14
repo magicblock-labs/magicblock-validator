@@ -2,7 +2,7 @@ use sleipnir_mutator::Cluster;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct AccountsConfig {
-    pub cluster: Cluster,
+    pub remote_cluster: Cluster,
     pub lifecycle: LifecycleMode,
     pub commit_compute_unit_price: u64,
     pub payer_init_lamports: Option<u64>,

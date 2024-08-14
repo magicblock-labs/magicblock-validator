@@ -58,9 +58,9 @@ impl
     ) -> AccountsResult<Self> {
         let validator_id = validator_keypair.pubkey();
 
-        let cluster = config.cluster;
+        let remote_cluster = config.remote_cluster;
         let internal_account_provider = BankAccountProvider::new(bank.clone());
-        let rpc_cluster = try_rpc_cluster_from_cluster(&cluster)?;
+        let rpc_cluster = try_rpc_cluster_from_cluster(&remote_cluster)?;
         let rpc_client = RpcClient::new_with_commitment(
             rpc_cluster.url().to_string(),
             CommitmentConfig::confirmed(),
@@ -71,7 +71,7 @@ impl
             RemoteAccountFetcher::new(rpc_provider_config.clone());
 
         let account_cloner = RemoteAccountCloner::new(
-            cluster.clone(),
+            remote_cluster.clone(),
             bank.clone(),
             transaction_status_sender.clone(),
         );
@@ -82,7 +82,7 @@ impl
         );
 
         let scheduled_commits_processor = RemoteScheduledCommitsProcessor::new(
-            cluster,
+            remote_cluster,
             bank.clone(),
             transaction_status_sender,
         );

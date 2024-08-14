@@ -6,12 +6,12 @@ use solana_sdk::genesis_config::ClusterType;
 pub(crate) fn try_convert_accounts_config(
     conf: &sleipnir_config::AccountsConfig,
 ) -> Result<sleipnir_accounts::AccountsConfig, Box<dyn Error>> {
-    let cluster = cluster_from_remote(&conf.remote);
+    let remote_cluster = cluster_from_remote(&conf.remote);
     let lifecycle = lifecycle_mode_from_lifecycle_mode(&conf.lifecycle);
     let payer_init_lamports = conf.payer.try_init_lamports()?;
 
     Ok(sleipnir_accounts::AccountsConfig {
-        cluster,
+        remote_cluster,
         lifecycle,
         payer_init_lamports,
         commit_compute_unit_price: conf.commit.compute_unit_price,
