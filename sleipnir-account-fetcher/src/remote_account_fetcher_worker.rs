@@ -93,7 +93,7 @@ impl RemoteAccountFetcherWorker {
         {
             // If the entry didn't exist for some reason, something is very wrong, just fail here
             Entry::Vacant(_) => {
-                return warn!("Fetch listeners were discarded improperly",);
+                return error!("Fetch listeners were discarded improperly",);
             }
             // If the entry exists, we want to consume the list of listeners
             Entry::Occupied(entry) => entry.remove(),
