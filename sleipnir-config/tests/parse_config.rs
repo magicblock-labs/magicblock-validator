@@ -34,7 +34,7 @@ fn test_local_dev_toml() {
 
 #[test]
 fn test_ephemeral_toml() {
-    let toml = include_str!("fixtures/04_A_ephemeral.toml");
+    let toml = include_str!("fixtures/04_ephemeral.toml");
     let config = toml::from_str::<SleipnirConfig>(toml).unwrap();
     assert_eq!(
         config,
@@ -50,7 +50,7 @@ fn test_ephemeral_toml() {
 
 #[test]
 fn test_ephemeral_limited_toml() {
-    let toml = include_str!("fixtures/04_B_ephemeral_limited.toml");
+    let toml = include_str!("fixtures/04_ephemeral_limited.toml");
     let config = toml::from_str::<SleipnirConfig>(toml).unwrap();
     assert_eq!(
         config,

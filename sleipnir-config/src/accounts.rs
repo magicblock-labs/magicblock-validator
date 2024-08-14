@@ -24,7 +24,7 @@ pub struct AccountsConfig {
 // RemoteConfig
 // -----------------
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(rename_all = "kebab-case")]
 pub enum RemoteConfig {
     #[default]
     Devnet,
@@ -68,24 +68,14 @@ where
 #[derive(
     Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, EnumString,
 )]
-#[serde(rename_all = "snake_case")]
-#[strum(serialize_all = "snake_case")]
+#[serde(rename_all = "kebab-case")]
+#[strum(serialize_all = "kebab-case")]
 pub enum LifecycleMode {
-    #[serde(alias = "replica")]
-    #[strum(serialize = "replica")]
     Replica,
     #[default]
-    #[serde(alias = "programs-replica")]
-    #[strum(serialize = "programs-replica")]
     ProgramsReplica,
-    #[serde(alias = "ephemeral")]
-    #[strum(serialize = "ephemeral")]
     Ephemeral,
-    #[serde(alias = "ephemeral-limited")]
-    #[strum(serialize = "ephemeral-limited")]
     EphemeralLimited,
-    #[serde(alias = "offline")]
-    #[strum(serialize = "offline")]
     Offline,
 }
 
