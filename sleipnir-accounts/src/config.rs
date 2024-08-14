@@ -18,7 +18,7 @@ pub enum LifecycleMode {
 }
 
 impl LifecycleMode {
-    pub fn disable_cloning_for_readable(&self) -> bool {
+    pub fn is_clone_readable_none(&self) -> bool {
         match self {
             LifecycleMode::Replica => false,
             LifecycleMode::ProgramsReplica => false,
@@ -27,16 +27,7 @@ impl LifecycleMode {
             LifecycleMode::Offline => true,
         }
     }
-    pub fn disable_cloning_for_writable(&self) -> bool {
-        match self {
-            LifecycleMode::Replica => false,
-            LifecycleMode::ProgramsReplica => true,
-            LifecycleMode::Ephemeral => false,
-            LifecycleMode::EphemeralLimited => false,
-            LifecycleMode::Offline => true,
-        }
-    }
-    pub fn allow_cloning_non_programs(&self) -> bool {
+    pub fn is_clone_readable_programs_only(&self) -> bool {
         match self {
             LifecycleMode::Replica => true,
             LifecycleMode::ProgramsReplica => false,
@@ -45,7 +36,18 @@ impl LifecycleMode {
             LifecycleMode::Offline => false,
         }
     }
-    pub fn requires_delegation_for_writable(&self) -> bool {
+
+    pub fn is_clone_writable_none(&self) -> bool {
+        match self {
+            LifecycleMode::Replica => false,
+            LifecycleMode::ProgramsReplica => true,
+            LifecycleMode::Ephemeral => false,
+            LifecycleMode::EphemeralLimited => false,
+            LifecycleMode::Offline => true,
+        }
+    }
+
+    pub fn requires_delegation_as_writable(&self) -> bool {
         match self {
             LifecycleMode::Replica => false,
             LifecycleMode::ProgramsReplica => false,
@@ -54,7 +56,7 @@ impl LifecycleMode {
             LifecycleMode::Offline => false,
         }
     }
-    pub fn allow_new_account_for_writable(&self) -> bool {
+    pub fn allows_new_account_as_writable(&self) -> bool {
         match self {
             LifecycleMode::Replica => true,
             LifecycleMode::ProgramsReplica => true,
