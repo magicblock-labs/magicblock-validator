@@ -29,10 +29,10 @@ impl LifecycleMode {
     }
     pub fn is_clone_readable_programs_only(&self) -> bool {
         match self {
-            LifecycleMode::Replica => true,
-            LifecycleMode::ProgramsReplica => false,
-            LifecycleMode::Ephemeral => true,
-            LifecycleMode::EphemeralLimited => false,
+            LifecycleMode::Replica => false,
+            LifecycleMode::ProgramsReplica => true,
+            LifecycleMode::Ephemeral => false,
+            LifecycleMode::EphemeralLimited => true,
             LifecycleMode::Offline => false,
         }
     }
