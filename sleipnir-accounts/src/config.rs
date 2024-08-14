@@ -45,7 +45,7 @@ impl LifecycleMode {
             LifecycleMode::Offline => false,
         }
     }
-    pub fn require_delegation_for_writable(&self) -> bool {
+    pub fn requires_delegation_for_writable(&self) -> bool {
         match self {
             LifecycleMode::Replica => false,
             LifecycleMode::ProgramsReplica => false,

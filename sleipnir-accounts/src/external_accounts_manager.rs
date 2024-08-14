@@ -180,7 +180,7 @@ where
                 // only the ones that were delegated
                 require_delegation: self
                     .lifecycle
-                    .require_delegation_for_writable(),
+                    .requires_delegation_for_writable(),
                 allow_new_accounts: self
                     .lifecycle
                     .allow_new_account_for_writable(),
