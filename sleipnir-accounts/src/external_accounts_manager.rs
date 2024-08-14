@@ -176,10 +176,10 @@ where
                 // only the ones that were delegated
                 require_delegation: self
                     .lifecycle
-                    .requires_delegation_as_writable(),
+                    .requires_delegation_for_writables(),
                 allow_new_accounts: self
                     .lifecycle
-                    .allows_new_account_as_writable(),
+                    .allows_new_account_for_writables(),
             },
         )?;
 

@@ -47,7 +47,7 @@ impl LifecycleMode {
         }
     }
 
-    pub fn requires_delegation_as_writable(&self) -> bool {
+    pub fn requires_delegation_for_writables(&self) -> bool {
         match self {
             LifecycleMode::Replica => false,
             LifecycleMode::ProgramsReplica => false,
@@ -56,7 +56,7 @@ impl LifecycleMode {
             LifecycleMode::Offline => false,
         }
     }
-    pub fn allows_new_account_as_writable(&self) -> bool {
+    pub fn allows_new_account_for_writables(&self) -> bool {
         match self {
             LifecycleMode::Replica => true,
             LifecycleMode::ProgramsReplica => true,
