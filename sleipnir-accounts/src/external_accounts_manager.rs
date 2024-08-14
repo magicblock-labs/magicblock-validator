@@ -95,6 +95,19 @@ where
     ) -> AccountsResult<Vec<Signature>> {
         let payer_id = accounts_holder.payer;
 
+        // Ensure that we are watching all readonly accounts
+        accounts_holder
+            .readonly
+            .iter()
+            .try_for_each(|pubkey| {
+                // TODO(vbrunet)
+                //  - https://github.com/magicblock-labs/magicblock-validator/issues/95
+                //  - handle the case of the payer better, we may not want to track lamport changes
+                self.account_updates
+                    .request_start_account_monitoring(pubkey)
+            })
+            .map_err(AccountsError::FailedToMonitorAccount)?;
+
         // 2.A Collect all readonly accounts we've never seen before and need to clone as readonly
         let unseen_readonly_ids = if self.lifecycle.is_clone_readable_none() {
             vec![]
@@ -110,11 +123,6 @@ where
                     if self.external_writable_accounts.has(pubkey) {
                         return false;
                     }
-                    // TODO(vbrunet)
-                    //  - https://github.com/magicblock-labs/magicblock-validator/issues/95
-                    //  - handle the case of the payer better, we may not want to track lamport changes
-                    self.account_updates
-                        .request_start_account_monitoring(pubkey);
                     // If there was an on-chain update since last clone, always re-clone
                     if let Some(cloned_at_slot) = self
                         .external_readonly_accounts

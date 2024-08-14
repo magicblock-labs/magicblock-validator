@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use sleipnir_account_updates::AccountUpdates;
+use sleipnir_account_updates::{AccountUpdates, AccountUpdatesResult};
 use solana_sdk::{clock::Slot, pubkey::Pubkey};
 
 #[derive(Debug, Default, Clone)]
@@ -16,8 +16,12 @@ impl AccountUpdatesStub {
 }
 
 impl AccountUpdates for AccountUpdatesStub {
-    fn request_start_account_monitoring(&self, _pubkey: &Pubkey) {
+    fn request_start_account_monitoring(
+        &self,
+        _pubkey: &Pubkey,
+    ) -> AccountUpdatesResult<()> {
         // Noop for stub
+        Ok(())
     }
     fn get_last_known_update_slot(&self, pubkey: &Pubkey) -> Option<Slot> {
         self.last_known_update_slots.get(pubkey).cloned()

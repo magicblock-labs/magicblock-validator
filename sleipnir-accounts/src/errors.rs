@@ -1,3 +1,4 @@
+use sleipnir_account_updates::AccountUpdatesError;
 use thiserror::Error;
 
 pub type AccountsResult<T> = std::result::Result<T, AccountsError>;
@@ -39,4 +40,7 @@ pub enum AccountsError {
 
     #[error("FailedToFetchAccount '{0}'")]
     FailedToFetchAccount(String),
+
+    #[error("FailedToMonitorAccount '{0}'")]
+    FailedToMonitorAccount(AccountUpdatesError),
 }
