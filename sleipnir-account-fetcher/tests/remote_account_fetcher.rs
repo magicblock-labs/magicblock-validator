@@ -13,8 +13,11 @@ use solana_sdk::{
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
-#[tokio::test]
-async fn test_devnet_fetch_clock_multiple_times() {
+fn setup() -> (
+    RemoteAccountFetcherClient,
+    CancellationToken,
+    tokio::task::JoinHandle<()>,
+) {
     // Create account fetcher worker and client
     let mut worker =
         RemoteAccountFetcherWorker::new(RpcProviderConfig::devnet());
@@ -27,6 +30,14 @@ async fn test_devnet_fetch_clock_multiple_times() {
             async move { worker.start_fetchings(cancellation_token).await },
         )
     };
+    // Ready to run
+    (client, cancellation_token, worker_handle)
+}
+
+#[tokio::test]
+async fn test_devnet_fetch_clock_multiple_times() {
+    // Create account fetcher worker and client
+    let (client, cancellation_token, worker_handle) = setup();
     // Sysvar clock should change every slot
     let key_sysvar_clock = clock::ID;
     // Start to fetch the clock now
@@ -59,17 +70,7 @@ async fn test_devnet_fetch_clock_multiple_times() {
 #[tokio::test]
 async fn test_devnet_fetch_multiple_accounts_same_time() {
     // Create account fetcher worker and client
-    let mut worker =
-        RemoteAccountFetcherWorker::new(RpcProviderConfig::devnet());
-    let client = RemoteAccountFetcherClient::new(&worker);
-    // Run the worker in a separate task
-    let cancellation_token = CancellationToken::new();
-    let worker_handle = {
-        let cancellation_token = cancellation_token.clone();
-        tokio::spawn(
-            async move { worker.start_fetchings(cancellation_token).await },
-        )
-    };
+    let (client, cancellation_token, worker_handle) = setup();
     // A few accounts we'd want to try to fetch at the same time
     let key_system_program = system_program::ID;
     let key_sysvar_blockhashes = recent_blockhashes::ID;

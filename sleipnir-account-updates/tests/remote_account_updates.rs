@@ -3,6 +3,7 @@ use std::time::Duration;
 use conjunto_transwise::RpcProviderConfig;
 use sleipnir_account_updates::{
     AccountUpdates, RemoteAccountUpdatesClient, RemoteAccountUpdatesWorker,
+    RemoteAccountUpdatesWorkerError,
 };
 use solana_sdk::{
     signature::Keypair,
@@ -13,8 +14,11 @@ use solana_sdk::{
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
-#[tokio::test]
-async fn test_devnet_monitoring_clock_sysvar_changes() {
+fn setup() -> (
+    RemoteAccountUpdatesClient,
+    CancellationToken,
+    tokio::task::JoinHandle<Result<(), RemoteAccountUpdatesWorkerError>>,
+) {
     // Create account updates worker and client
     let mut worker =
         RemoteAccountUpdatesWorker::new(RpcProviderConfig::devnet());
@@ -27,6 +31,14 @@ async fn test_devnet_monitoring_clock_sysvar_changes() {
             worker.start_monitoring(cancellation_token).await
         })
     };
+    // Ready to run
+    (client, cancellation_token, worker_handle)
+}
+
+#[tokio::test]
+async fn test_devnet_monitoring_clock_sysvar_changes() {
+    // Create account updates worker and client
+    let (client, cancellation_token, worker_handle) = setup();
     // The clock will change every slots, perfect for testing updates
     let sysvar_clock = clock::ID;
     // Before starting the monitoring, we should know nothing about the clock
@@ -45,17 +57,7 @@ async fn test_devnet_monitoring_clock_sysvar_changes() {
 #[tokio::test]
 async fn test_devnet_monitoring_multiple_accounts_at_the_same_time() {
     // Create account updates worker and client
-    let mut worker =
-        RemoteAccountUpdatesWorker::new(RpcProviderConfig::devnet());
-    let client = RemoteAccountUpdatesClient::new(&worker);
-    // Run the worker in a separate task
-    let cancellation_token = CancellationToken::new();
-    let worker_handle = {
-        let cancellation_token = cancellation_token.clone();
-        tokio::spawn(async move {
-            worker.start_monitoring(cancellation_token).await
-        })
-    };
+    let (client, cancellation_token, worker_handle) = setup();
     // Devnet accounts to be monitored for this test
     let sysvar_rent = rent::ID;
     let sysvar_sh = slot_hashes::ID;
@@ -82,17 +84,7 @@ async fn test_devnet_monitoring_multiple_accounts_at_the_same_time() {
 #[tokio::test]
 async fn test_devnet_monitoring_some_accounts_only() {
     // Create account updates worker and client
-    let mut worker =
-        RemoteAccountUpdatesWorker::new(RpcProviderConfig::devnet());
-    let client = RemoteAccountUpdatesClient::new(&worker);
-    // Run the worker in a separate task
-    let cancellation_token = CancellationToken::new();
-    let worker_handle = {
-        let cancellation_token = cancellation_token.clone();
-        tokio::spawn(async move {
-            worker.start_monitoring(cancellation_token).await
-        })
-    };
+    let (client, cancellation_token, worker_handle) = setup();
     // Devnet accounts for this test
     let sysvar_rent = rent::ID;
     let sysvar_sh = slot_hashes::ID;
@@ -118,17 +110,7 @@ async fn test_devnet_monitoring_some_accounts_only() {
 #[tokio::test]
 async fn test_devnet_monitoring_invalid_and_immutable_and_program_account() {
     // Create account updates worker and client
-    let mut worker =
-        RemoteAccountUpdatesWorker::new(RpcProviderConfig::devnet());
-    let client = RemoteAccountUpdatesClient::new(&worker);
-    // Run the worker in a separate task
-    let cancellation_token = CancellationToken::new();
-    let worker_handle = {
-        let cancellation_token = cancellation_token.clone();
-        tokio::spawn(async move {
-            worker.start_monitoring(cancellation_token).await
-        })
-    };
+    let (client, cancellation_token, worker_handle) = setup();
     // Devnet accounts for this test (none of them should change)
     let new_account = Keypair::new().pubkey();
     let system_program = system_program::ID;
