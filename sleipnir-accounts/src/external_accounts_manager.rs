@@ -199,7 +199,7 @@ where
             .into_iter()
             .filter(|acc| match acc.chain_state.account() {
                 // If it exists: Allow the account if its a program or if we allow non-programs to be cloned
-                Some(account) => account.executable || programs_only,
+                Some(account) => account.executable || !programs_only,
                 // Otherwise, don't clone it
                 None => false,
             })
