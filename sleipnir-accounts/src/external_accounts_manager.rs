@@ -17,7 +17,7 @@ use solana_sdk::{
 };
 
 use crate::{
-    errors::{AccountsError, AccountsResult},
+    errors::AccountsResult,
     external_accounts::{ExternalReadonlyAccounts, ExternalWritableAccounts},
     traits::{AccountCloner, AccountCommitter, InternalAccountProvider},
     utils::get_epoch,
@@ -69,7 +69,9 @@ where
         tx: &SanitizedTransaction,
     ) -> AccountsResult<Vec<Signature>> {
         // If this validator does not clone any accounts then we're done
-        if self.lifecycle.disable_cloning() {
+        if self.lifecycle.is_clone_readable_none()
+            && self.lifecycle.is_clone_writable_none()
+        {
             return Ok(vec![]);
         }
 
@@ -94,7 +96,7 @@ where
         let payer_id = accounts_holder.payer;
 
         // 2.A Collect all readonly accounts we've never seen before and need to clone as readonly
-        let unseen_readonly_ids = if self.lifecycle.disable_cloning() {
+        let unseen_readonly_ids = if self.lifecycle.is_clone_readable_none() {
             vec![]
         } else {
             accounts_holder
@@ -111,21 +113,18 @@ where
                     // TODO(vbrunet)
                     //  - https://github.com/magicblock-labs/magicblock-validator/issues/95
                     //  - handle the case of the payer better, we may not want to track lamport changes
-                    self.account_updates
-                        .request_start_account_monitoring(pubkey);
+                    self.account_updates.request_account_monitoring(pubkey);
                     // If there was an on-chain update since last clone, always re-clone
                     if let Some(cloned_at_slot) = self
                         .external_readonly_accounts
                         .get_cloned_at_slot(pubkey)
                     {
-                        if let Some(last_known_update_slot) = self
+                        if self
                             .account_updates
-                            .get_last_known_update_slot(pubkey)
+                            .has_known_update_since_slot(pubkey, cloned_at_slot)
                         {
-                            if cloned_at_slot < last_known_update_slot {
-                                self.external_readonly_accounts.remove(pubkey);
-                                return true;
-                            }
+                            self.external_readonly_accounts.remove(pubkey);
+                            return true;
                         }
                     }
                     // If we don't know of any recent update, and it's still in the cache, it can be used safely
@@ -144,7 +143,7 @@ where
         trace!("Newly seen readonly pubkeys: {:?}", unseen_readonly_ids);
 
         // 2.B If needed, Collect all writable accounts we've never seen before and need to clone and prepare as writable
-        let unseen_writable_ids = if self.lifecycle.disable_cloning() {
+        let unseen_writable_ids = if self.lifecycle.is_clone_writable_none() {
             vec![]
         } else {
             accounts_holder
@@ -162,27 +161,29 @@ where
         trace!("Newly seen writable pubkeys: {:?}", unseen_writable_ids);
 
         // 3.A Fetch the accounts that we've seen for the first time
-        let (readonly_snapshot, writable_snapshot) = try_join(
-            try_join_all(unseen_readonly_ids.iter().map(|pubkey| {
-                self.account_fetcher.fetch_account_chain_snapshot(pubkey)
-            })),
-            try_join_all(unseen_writable_ids.iter().map(|pubkey| {
-                self.account_fetcher.fetch_account_chain_snapshot(pubkey)
-            })),
-        )
-        .await
-        .map_err(AccountsError::FailedToFetchAccount)?;
+        let acc_snapshot = self
+            .account_fetcher
+            .fetch_transaction_accounts_snapshot(&TransactionAccountsHolder {
+                readonly: unseen_readonly_ids,
+                writable: unseen_writable_ids,
+                payer: accounts_holder.payer,
+            })
+            .await?;
 
         // 3.B Validate the accounts that we see for the very first time
-        let tx_snapshot = TransactionAccountsSnapshot {
-            readonly: readonly_snapshot,
-            writable: writable_snapshot,
-            payer: accounts_holder.payer,
-        };
-        if self.lifecycle.require_ephemeral_validation() {
-            self.transaction_accounts_validator
-                .validate_ephemeral_transaction_accounts(&tx_snapshot)?;
-        }
+        self.transaction_accounts_validator.validate_accounts(
+            &acc_snapshot,
+            &ValidateAccountsConfig {
+                // Here we specify if we can clone all writable accounts or
+                // only the ones that were delegated
+                require_delegation: self
+                    .lifecycle
+                    .requires_delegation_for_writables(),
+                allow_new_accounts: self
+                    .lifecycle
+                    .allows_new_account_for_writables(),
+            },
+        )?;
 
         // 4.A If a readonly account is not a program, but we only should clone programs then
         //     we have a problem since the account does not exist nor will it be created.
@@ -190,8 +191,7 @@ where
         //     transaction fail due to the missing account as it normally would.
         //     We have a similar problem if the account was not found at all in which case
         //     it's `is_program` field is `None`.
-        let allow_cloning_undelegated_non_programs =
-            self.lifecycle.allow_cloning_undelegated_non_programs();
+        let programs_only = self.lifecycle.is_clone_readable_programs_only();
 
         let cloned_readonly_accounts = tx_snapshot
             .readonly
