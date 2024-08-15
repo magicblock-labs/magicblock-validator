@@ -23,7 +23,7 @@ impl RemoteAccountUpdatesClient {
 }
 
 impl AccountUpdates for RemoteAccountUpdatesClient {
-    fn request_start_account_monitoring(
+    fn ensure_account_monitoring(
         &self,
         pubkey: &Pubkey,
     ) -> Result<(), AccountUpdatesError> {

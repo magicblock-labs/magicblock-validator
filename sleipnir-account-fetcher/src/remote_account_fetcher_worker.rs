@@ -85,9 +85,9 @@ impl RemoteAccountFetcherWorker {
             Ok(snapshot) => Ok(AccountChainSnapshotShared::from(snapshot)),
             Err(error) => {
                 // Log the error now, since we're going to lose the stacktrace later
-                warn!("try_fetch_chain_snapshot_of_pubkey.error:{:?}", error);
+                warn!("Failed to fetch account: {} :{:?}", pubkey, error);
                 // Lose the error content and create a simplified clonable version
-                Err(AccountFetcherError::FetchError(error.to_string()))
+                Err(AccountFetcherError::FailedToFetch(error.to_string()))
             }
         };
         let listeners = match self
@@ -100,14 +100,14 @@ impl RemoteAccountFetcherWorker {
         {
             // If the entry didn't exist for some reason, something is very wrong, just fail here
             Entry::Vacant(_) => {
-                return error!("Fetch listeners were discarded improperly");
+                return error!("Fetch listeners were discarded improperly: {}", pubkey);
             }
             // If the entry exists, we want to consume the list of listeners
             Entry::Occupied(entry) => entry.remove(),
         };
         for listener in listeners {
             if let Err(error) = listener.send(result.clone()) {
-                error!("Could not send fetch result to listener: {:?}", error);
+                error!("Could not send fetch resut: {}: {:?}", pubkey, error);
             }
         }
     }

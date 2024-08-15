@@ -7,10 +7,12 @@ use thiserror::Error;
 pub enum AccountFetcherError {
     #[error("SendError")]
     SendError(#[from] tokio::sync::mpsc::error::SendError<Pubkey>),
+
     #[error("RecvError")]
     RecvError(#[from] tokio::sync::oneshot::error::RecvError),
-    #[error("FetchError")]
-    FetchError(String),
+
+    #[error("FailedToFetch '{0}'")]
+    FailedToFetch(String),
 }
 
 pub type AccountFetcherResult =

@@ -103,8 +103,7 @@ where
                 // TODO(vbrunet)
                 //  - https://github.com/magicblock-labs/magicblock-validator/issues/95
                 //  - handle the case of the payer better, we may not want to track lamport changes
-                self.account_updates
-                    .request_start_account_monitoring(pubkey)
+                self.account_updates.ensure_account_monitoring(pubkey)
             })
             .map_err(AccountsError::AccountUpdatesError)?;
 

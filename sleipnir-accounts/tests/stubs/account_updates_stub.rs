@@ -16,7 +16,7 @@ impl AccountUpdatesStub {
 }
 
 impl AccountUpdates for AccountUpdatesStub {
-    fn request_start_account_monitoring(
+    fn ensure_account_monitoring(
         &self,
         _pubkey: &Pubkey,
     ) -> AccountUpdatesResult<()> {
