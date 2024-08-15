@@ -13,7 +13,10 @@ use tokio::sync::{
     oneshot::{channel, Sender},
 };
 
-use crate::{AccountFetcher, AccountFetcherResult, RemoteAccountFetcherWorker};
+use crate::{
+    AccountFetcher, AccountFetcherError, AccountFetcherResult,
+    RemoteAccountFetcherWorker,
+};
 
 pub struct RemoteAccountFetcherClient {
     request_sender: UnboundedSender<Pubkey>,
@@ -35,7 +38,7 @@ impl AccountFetcher for RemoteAccountFetcherClient {
         &self,
         pubkey: &Pubkey,
     ) -> BoxFuture<AccountFetcherResult> {
-        let (needs_sending, receiver) = match self
+        let (is_first_request_to_fetch, receiver) = match self
             .fetch_result_listeners
             .write()
             .expect("RwLock of RemoteAccountFetcherClient.fetch_result_listeners is poisoned")
@@ -52,14 +55,16 @@ impl AccountFetcher for RemoteAccountFetcherClient {
                 (false, receiver)
             }
         };
-        if needs_sending {
+        if is_first_request_to_fetch {
             if let Err(error) = self.request_sender.send(*pubkey) {
-                return Box::pin(ready(Err(error.to_string())));
+                return Box::pin(ready(Err(AccountFetcherError::SendError(
+                    error,
+                ))));
             }
         }
         Box::pin(receiver.map(|received| match received {
             Ok(result) => result,
-            Err(error) => Err(error.to_string()),
+            Err(error) => Err(AccountFetcherError::RecvError(error)),
         }))
     }
 }

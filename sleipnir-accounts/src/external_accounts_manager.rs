@@ -106,7 +106,7 @@ where
                 self.account_updates
                     .request_start_account_monitoring(pubkey)
             })
-            .map_err(AccountsError::FailedToMonitorAccount)?;
+            .map_err(AccountsError::AccountUpdatesError)?;
 
         // 2.A Collect all readonly accounts we've never seen before and need to clone as readonly
         let unseen_readonly_ids = if self.lifecycle.is_clone_readable_none() {
@@ -181,7 +181,7 @@ where
             })),
         )
         .await
-        .map_err(AccountsError::FailedToFetchAccount)?;
+        .map_err(AccountsError::AccountFetcherError)?;
 
         // 3.B Validate the accounts that we see for the very first time
         let tx_snapshot = TransactionAccountsSnapshot {

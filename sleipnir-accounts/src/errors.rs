@@ -1,3 +1,4 @@
+use sleipnir_account_fetcher::AccountFetcherError;
 use sleipnir_account_updates::AccountUpdatesError;
 use thiserror::Error;
 
@@ -20,6 +21,12 @@ pub enum AccountsError {
     #[error("TransactionError")]
     TransactionError(#[from] solana_sdk::transaction::TransactionError),
 
+    #[error("AccountFetcherError")]
+    AccountFetcherError(#[from] AccountFetcherError),
+
+    #[error("AccountUpdatesError")]
+    AccountUpdatesError(#[from] AccountUpdatesError),
+
     #[error("InvalidRpcUrl '{0}'")]
     InvalidRpcUrl(String),
 
@@ -37,10 +44,4 @@ pub enum AccountsError {
 
     #[error("FailedToConfirmTransaction '{0}'")]
     FailedToConfirmTransaction(String),
-
-    #[error("FailedToFetchAccount '{0}'")]
-    FailedToFetchAccount(String),
-
-    #[error("FailedToMonitorAccount '{0}'")]
-    FailedToMonitorAccount(AccountUpdatesError),
 }

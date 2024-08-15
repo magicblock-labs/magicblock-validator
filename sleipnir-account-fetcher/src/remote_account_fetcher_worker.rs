@@ -17,7 +17,7 @@ use tokio::sync::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::AccountFetcherResult;
+use crate::{AccountFetcherError, AccountFetcherResult};
 
 pub struct RemoteAccountFetcherWorker {
     account_chain_snapshot_provider: AccountChainSnapshotProvider<
@@ -77,12 +77,19 @@ impl RemoteAccountFetcherWorker {
     }
 
     async fn do_fetch(&self, pubkey: Pubkey) {
-        let result = self
+        let result = match self
             .account_chain_snapshot_provider
             .try_fetch_chain_snapshot_of_pubkey(&pubkey)
             .await
-            .map(AccountChainSnapshotShared::from)
-            .map_err(|error| error.to_string());
+        {
+            Ok(snapshot) => Ok(AccountChainSnapshotShared::from(snapshot)),
+            Err(error) => {
+                // Log the error now, since we're going to lose the stacktrace later
+                warn!("try_fetch_chain_snapshot_of_pubkey.error:{:?}", error);
+                // Lose the error content and create a simplified clonable version
+                Err(AccountFetcherError::FetchError(error.to_string()))
+            }
+        };
         let listeners = match self
             .fetch_result_listeners
             .write()
@@ -93,7 +100,7 @@ impl RemoteAccountFetcherWorker {
         {
             // If the entry didn't exist for some reason, something is very wrong, just fail here
             Entry::Vacant(_) => {
-                return error!("Fetch listeners were discarded improperly",);
+                return error!("Fetch listeners were discarded improperly");
             }
             // If the entry exists, we want to consume the list of listeners
             Entry::Occupied(entry) => entry.remove(),
