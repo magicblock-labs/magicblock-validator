@@ -1,13 +1,5 @@
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
-use crate::{
-    errors::AccountsResult,
-    external_accounts::{ExternalReadonlyAccounts, ExternalWritableAccounts},
-    traits::{AccountCloner, AccountCommitter, InternalAccountProvider},
-    utils::get_epoch,
-    AccountCommittee, CommitAccountsPayload, LifecycleMode,
-    ScheduledCommitsProcessor, SendableCommitAccountsPayload,
-};
 use conjunto_transwise::{
     account_fetcher::AccountFetcher,
     transaction_accounts_extractor::TransactionAccountsExtractor,
@@ -22,14 +14,22 @@ use log::*;
 use sleipnir_account_updates::AccountUpdates;
 use sleipnir_mutator::AccountModification;
 use solana_sdk::{
-    pubkey::{self, Pubkey},
-    signature::Signature,
-    sysvar,
+    pubkey::Pubkey, signature::Signature, sysvar,
     transaction::SanitizedTransaction,
+};
+
+use crate::{
+    errors::AccountsResult,
+    external_accounts::{ExternalReadonlyAccounts, ExternalWritableAccounts},
+    traits::{AccountCloner, AccountCommitter, InternalAccountProvider},
+    utils::get_epoch,
+    AccountCommittee, CommitAccountsPayload, LifecycleMode,
+    ScheduledCommitsProcessor, SendableCommitAccountsPayload,
 };
 
 lazy_static! {
     // TODO(vbrunet) - we will need a more general solution to those unfetchable accounts
+    // progress tracked here: https://github.com/magicblock-labs/magicblock-validator/issues/124
     static ref BLACKLISTED_ACCOUNTS: HashSet<Pubkey> = {
         let mut accounts = HashSet::new();
         accounts.insert(sysvar::clock::ID);
