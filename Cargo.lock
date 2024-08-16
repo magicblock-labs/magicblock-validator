@@ -4266,6 +4266,7 @@ dependencies = [
  "async-trait",
  "conjunto-transwise",
  "delegation-program",
+ "lazy_static",
  "log",
  "sleipnir-account-updates",
  "sleipnir-bank",
