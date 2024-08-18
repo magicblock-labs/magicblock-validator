@@ -4281,6 +4281,7 @@ dependencies = [
  "conjunto-transwise",
  "delegation-program",
  "futures-util",
+ "lazy_static",
  "log",
  "sleipnir-account-fetcher",
  "sleipnir-account-updates",
