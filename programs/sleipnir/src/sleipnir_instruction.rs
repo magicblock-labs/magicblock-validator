@@ -84,6 +84,17 @@ pub(crate) enum SleipnirInstruction {
     /// - **1..n** `[]`              Accounts to be committed
     ScheduleCommit,
 
+    /// This is the exact same instruction as [SleipnirInstruction::ScheduleCommit] except
+    /// that the [ScheduledCommit] is flagged such that when accounts are committed, a request
+    /// to undelegate them is included with the same transaction.
+    /// Additionally the validator will refuse anymore transactions for the specific account
+    /// since they are no longer considered delegated to it.
+    ///
+    /// # Account references
+    /// - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
+    /// - **1..n** `[]`              Accounts to be committed and undelegated
+    ScheduleCommitAndUndelegate,
+
     /// Records the the attempt to realize a scheduled commit on chain.
     ///
     /// The signature of this transaction can be pre-calculated since we pass the
@@ -102,7 +113,8 @@ impl SleipnirInstruction {
         match self {
             ModifyAccounts(_) => 0,
             ScheduleCommit => 1,
-            ScheduledCommitSent(_) => 2,
+            ScheduleCommitAndUndelegate => 1,
+            ScheduledCommitSent(_) => 3,
         }
     }
 
@@ -176,6 +188,34 @@ pub(crate) fn schedule_commit_instruction(
     Instruction::new_with_bincode(
         crate::id(),
         &SleipnirInstruction::ScheduleCommit,
+        account_metas,
+    )
+}
+
+// -----------------
+// Schedule Commit and Undelegate
+// -----------------
+pub fn schedule_commit_and_undelegate(
+    payer: &Keypair,
+    pubkeys: Vec<Pubkey>,
+    recent_blockhash: Hash,
+) -> Transaction {
+    let ix =
+        schedule_commit_and_undelegate_instruction(&payer.pubkey(), pubkeys);
+    into_transaction(payer, ix, recent_blockhash)
+}
+
+pub(crate) fn schedule_commit_and_undelegate_instruction(
+    payer: &Pubkey,
+    pdas: Vec<Pubkey>,
+) -> Instruction {
+    let mut account_metas = vec![AccountMeta::new(*payer, true)];
+    for pubkey in &pdas {
+        account_metas.push(AccountMeta::new_readonly(*pubkey, true));
+    }
+    Instruction::new_with_bincode(
+        crate::id(),
+        &SleipnirInstruction::ScheduleCommitAndUndelegate,
         account_metas,
     )
 }

@@ -21,12 +21,15 @@ use solana_sdk::{
 
 use crate::{
     process_scheduled_commit_sent,
-    schedule_transactions::process_schedule_commit,
+    schedule_transactions::{
+        process_schedule_commit, ProcessScheduleCommitOptions,
+    },
     sleipnir_instruction::{
         AccountModificationForInstruction, SleipnirError, SleipnirInstruction,
     },
     validator_authority_id,
 };
+
 pub const DEFAULT_COMPUTE_UNITS: u64 = 150;
 
 declare_process_instruction!(
@@ -49,9 +52,16 @@ declare_process_instruction!(
                     &mut account_mods,
                 )
             }
-            SleipnirInstruction::ScheduleCommit => {
-                process_schedule_commit(signers, invoke_context)
-            }
+            SleipnirInstruction::ScheduleCommit => process_schedule_commit(
+                signers,
+                invoke_context,
+                ProcessScheduleCommitOptions::default(),
+            ),
+            SleipnirInstruction::ScheduleCommitAndUndelegate => process_schedule_commit(
+                signers,
+                invoke_context,
+                ProcessScheduleCommitOptions { request_undelegate: true, ..Default::default() },
+            ),
             SleipnirInstruction::ScheduledCommitSent(id) => {
                 process_scheduled_commit_sent(
                     signers,

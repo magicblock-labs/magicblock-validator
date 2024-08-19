@@ -17,6 +17,7 @@ pub struct ScheduledCommit {
     pub accounts: Vec<Pubkey>,
     pub payer: Pubkey,
     pub commit_sent_transaction: Transaction,
+    pub request_undelegate: bool,
 }
 
 #[derive(Clone)]
