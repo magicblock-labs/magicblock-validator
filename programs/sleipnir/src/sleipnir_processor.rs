@@ -57,11 +57,15 @@ declare_process_instruction!(
                 invoke_context,
                 ProcessScheduleCommitOptions::default(),
             ),
-            SleipnirInstruction::ScheduleCommitAndUndelegate => process_schedule_commit(
-                signers,
-                invoke_context,
-                ProcessScheduleCommitOptions { request_undelegate: true, ..Default::default() },
-            ),
+            SleipnirInstruction::ScheduleCommitAndUndelegate => {
+                process_schedule_commit(
+                    signers,
+                    invoke_context,
+                    ProcessScheduleCommitOptions {
+                        request_undelegation: true,
+                    },
+                )
+            }
             SleipnirInstruction::ScheduledCommitSent(id) => {
                 process_scheduled_commit_sent(
                     signers,

@@ -21,7 +21,7 @@ use solana_sdk::{
 
 #[derive(Default)]
 pub(crate) struct ProcessScheduleCommitOptions {
-    pub request_undelegate: bool,
+    pub request_undelegation: bool,
 }
 
 pub(crate) fn process_schedule_commit(
@@ -137,7 +137,7 @@ pub(crate) fn process_schedule_commit(
             pubkeys.push(*acc_pubkey);
         }
 
-        if opts.request_undelegate {
+        if opts.request_undelegation {
             // If the account is scheduled to be undelegated then we need to lock it
             // immediately in order to prevent the following actions:
             // - writes to the account
@@ -151,7 +151,7 @@ pub(crate) fn process_schedule_commit(
     }
 
     // Determine id and slot
-    let id = COMMIT_ID.fetch_add(1, Ordering::Relaxed);
+    let commit_id = COMMIT_ID.fetch_add(1, Ordering::Relaxed);
 
     // It appears that in builtin programs `Clock::get` doesn't work as expected, thus
     // we have to get it directly from the sysvar cache.
@@ -165,24 +165,24 @@ pub(crate) fn process_schedule_commit(
             })?;
 
     let blockhash = invoke_context.blockhash;
-    let commit_sent_transaction = scheduled_commit_sent(id, blockhash);
+    let commit_sent_transaction = scheduled_commit_sent(commit_id, blockhash);
 
     let commit_sent_sig = commit_sent_transaction.signatures[0];
     let scheduled_commit = ScheduledCommit {
-        id,
+        id: commit_id,
         slot: clock.slot,
         blockhash,
         accounts: pubkeys,
         payer: *payer_pubkey,
         commit_sent_transaction,
-        request_undelegate: opts.request_undelegate,
+        request_undelegation: opts.request_undelegation,
     };
 
     // NOTE: this is only protected by all the above checks however if the
     // instruction fails for other reasons detected afterward then the commit
     // stays scheduled
     TransactionScheduler::default().schedule_commit(scheduled_commit);
-    ic_msg!(invoke_context, "Scheduled commit with ID: {}", id,);
+    ic_msg!(invoke_context, "Scheduled commit with ID: {}", commit_id,);
     ic_msg!(
         invoke_context,
         "ScheduledCommitSent signature: {}",
@@ -359,7 +359,7 @@ mod tests {
                 payer: p,
                 blockhash: _,
                 commit_sent_transaction: tx,
-                request_undelegate: false,
+                request_undelegation: false,
             } => {
                 assert!(i >= &0);
                 assert_eq!(s, &test_clock.slot);
@@ -421,7 +421,7 @@ mod tests {
                 payer: p,
                 blockhash: _,
                 commit_sent_transaction: tx,
-                request_undelegate: true,
+                request_undelegation: true,
             } => {
                 assert!(i >= &0);
                 assert_eq!(s, &test_clock.slot);
@@ -485,7 +485,7 @@ mod tests {
                 payer: p,
                 blockhash: _,
                 commit_sent_transaction: tx,
-                request_undelegate: false,
+                request_undelegation: false,
             } => {
                 assert!(i >= &0);
                 assert_eq!(s, &test_clock.slot);
@@ -552,7 +552,7 @@ mod tests {
                 payer: p,
                 blockhash: _,
                 commit_sent_transaction: tx,
-                request_undelegate: true,
+                request_undelegation: true,
             } => {
                 assert!(i >= &0);
                 assert_eq!(s, &test_clock.slot);
