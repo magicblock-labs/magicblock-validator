@@ -1,0 +1,21 @@
+[package]
+name = "schedulecommit-test-scenarios"
+version.workspace = true
+edition.workspace = true
+
+[dev-dependencies]
+schedulecommit-program = { workspace = true, features = ["no-entrypoint"] }
+schedulecommit-client = { workspace = true }
+sleipnir-core = { workspace = true }
+solana-program = { workspace = true }
+solana-rpc-client = { workspace = true }
+solana-rpc-client-api = { workspace = true }
+solana-sdk = { workspace = true }
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+no-entrypoint = []
+cpi = ["no-entrypoint"]
+default = []

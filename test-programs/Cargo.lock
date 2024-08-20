@@ -2341,6 +2341,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "schedulecommit-test-scenarios"
+version = "0.0.0"
+dependencies = [
+ "schedulecommit-client",
+ "schedulecommit-program",
+ "sleipnir-core",
+ "solana-program 1.17.22",
+ "solana-rpc-client",
+ "solana-rpc-client-api",
+ "solana-sdk 1.17.22",
+]
+
+[[package]]
 name = "schedulecommit-test-security"
 version = "0.0.0"
 dependencies = [

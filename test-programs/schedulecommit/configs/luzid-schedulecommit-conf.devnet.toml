@@ -10,7 +10,6 @@ commit = { frequency_millis = 9_000_000_000_000, compute_unit_price = 1_000_000 
 millis_per_slot = 50
 sigverify = true
 
-# See ./schedulecommit-conf.devnet.toml
 [[node.program]]
 id = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
 path = "../elfs/dlp.so"

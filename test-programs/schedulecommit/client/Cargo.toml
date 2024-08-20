@@ -14,9 +14,5 @@ solana-sdk = { workspace = true }
 schedulecommit-program = { workspace = true, features = ["no-entrypoint"] }
 
 [[bin]]
-name = "schedule-commit-cpi-ix"
-path = "bin/schedule_commit_cpi_ix.rs"
-
-[[bin]]
 name = "run-schedule-commit-tests"
 path = "bin/run_schedule_commit_tests.rs"

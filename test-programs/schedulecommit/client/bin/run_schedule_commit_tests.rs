@@ -7,8 +7,6 @@ use std::{
     time::Duration,
 };
 
-use schedulecommit_client::skip_if_devnet_down;
-
 fn cleanup(ephem_validator: &mut Child, devnet_validator: &mut Child) {
     ephem_validator
         .kill()
@@ -19,13 +17,6 @@ fn cleanup(ephem_validator: &mut Child, devnet_validator: &mut Child) {
 }
 
 pub fn main() {
-    // NOTE: even though we run our own node representing the chain,
-    // we still clone the delegation program from devnet as otherwise
-    // it is not properly available for CPI calls.
-    // Once we fix that this test can run entirely local.
-    // More info see: ../../configs/schedulecommit-conf.devnet.toml
-    skip_if_devnet_down!();
-
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
 
     // Start validators via `cargo run --release  -- <config>
@@ -61,24 +52,23 @@ pub fn main() {
             return;
         }
     };
-    // NOTE: this test could run via `cargo test` as well eventually
-    // Run cargo run --bin <bin>
-    let schedule_commit_output =
-        match run_bin(manifest_dir.clone(), "schedule-commit-cpi-ix") {
-            Ok(output) => output,
-            Err(err) => {
-                eprintln!("Failed to run schedule-commit-cpi-ix: {:?}", err);
-                cleanup(&mut ephem_validator, &mut devnet_validator);
-                return;
-            }
-        };
+    let test_scenarios_dir =
+        format!("{}/../{}", manifest_dir.clone(), "test-scenarios");
+    let test_scenarios_output = match run_test(test_scenarios_dir) {
+        Ok(output) => output,
+        Err(err) => {
+            eprintln!("Failed to run scenarios: {:?}", err);
+            cleanup(&mut ephem_validator, &mut devnet_validator);
+            return;
+        }
+    };
 
     // Kill Validators
     cleanup(&mut ephem_validator, &mut devnet_validator);
 
     // Assert that both test suites passed
     assert_cargo_tests_passed(test_security_output);
-    assert_output(schedule_commit_output, "schedule-commit-cpi-ix");
+    assert_cargo_tests_passed(test_scenarios_output);
 }
 
 fn assert_cargo_tests_passed(output: process::Output) {
@@ -94,37 +84,6 @@ fn assert_cargo_tests_passed(output: process::Output) {
     }
     // If a test in the suite fails the status shows that
     assert!(output.status.success(), "cargo test failed");
-}
-
-fn assert_output(output: process::Output, test_name: &str) {
-    if !output.status.success() {
-        eprintln!("{} non-success status", test_name);
-        eprintln!("status: {}", output.status);
-        eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
-        eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
-    } else if std::env::var("DUMP").is_ok() {
-        eprintln!("{} success", test_name);
-        eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
-        eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
-    }
-    assert!(
-        output.status.success(),
-        "{} status success failed",
-        test_name
-    );
-    assert!(String::from_utf8_lossy(&output.stdout).ends_with("Success\n"));
-}
-
-fn run_bin(
-    manifest_dir: String,
-    bin_name: &str,
-) -> io::Result<process::Output> {
-    process::Command::new("cargo")
-        .arg("run")
-        .arg("--bin")
-        .arg(bin_name)
-        .current_dir(manifest_dir.clone())
-        .output()
 }
 
 fn run_test(manifest_dir: String) -> io::Result<process::Output> {

@@ -7,7 +7,8 @@ use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{pubkey::Pubkey, signer::Signer, transaction::Transaction};
 
-pub fn main() {
+#[test]
+fn test_committing_two_accounts() {
     let ctx = if std::env::var("FIXED_KP").is_ok() {
         ScheduleCommitTestContext::new(2)
     } else {
@@ -94,7 +95,4 @@ pub fn main() {
     );
 
     assert_eq!(res.sigs.len(), 1, "should have 1 on chain sig");
-
-    // Used to verify that test passed
-    println!("Success");
 }
