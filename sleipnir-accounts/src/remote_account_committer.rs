@@ -100,7 +100,7 @@ impl AccountCommitter for RemoteAccountCommitter {
                 // TODO(thlorenz): @@@ Need discriminator which probably should get
                 // passed when scheduling the commit request
                 // let undelegate_ix = allow_undelegate(*pubkey);
-                todo!("Pending undelegation");
+                eprintln!("WARN: Pending undelegation");
             }
         }
 

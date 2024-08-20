@@ -26,6 +26,10 @@ declare_id!("9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY");
 #[cfg(not(feature = "no-entrypoint"))]
 solana_program::entrypoint!(process_instruction);
 
+pub const INIT_IX: u8 = 0;
+pub const DELEGATE_CPI_IX: u8 = 1;
+pub const SCHEDULECOMMIT_CPI_IX: u8 = 2;
+
 pub fn process_instruction<'a>(
     program_id: &'a Pubkey,
     accounts: &'a [AccountInfo<'a>],
@@ -34,23 +38,10 @@ pub fn process_instruction<'a>(
     let (instruction_discriminant, instruction_data_inner) =
         instruction_data.split_at(1);
     match instruction_discriminant[0] {
-        0 => {
+        INIT_IX => {
             process_init(program_id, accounts)?;
         }
-        1 => {
-            // # Account references
-            // - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
-            // - **1**    `[]`              MagicBlock Program (used to schedule commit)
-            // - **2..n** `[]`              PDA accounts to be committed
-            //
-            // # Instruction Args
-            //
-            // - **0..32**   Player 1 pubkey from which first PDA was derived
-            // - **32..64**  Player 2 pubkey from which second PDA was derived
-            // - **n..n+32** Player n pubkey from which n-th PDA was derived
-            process_schedulecommit_cpi(accounts, instruction_data_inner, true)?;
-        }
-        2 => {
+        DELEGATE_CPI_IX => {
             // # Account references
             // - **0.**   `[WRITE, SIGNER]` Payer requesting delegation
             // - **1.**   `[WRITE]`         Account for which delegation is requested
@@ -70,6 +61,19 @@ pub fn process_instruction<'a>(
             //      pub player: Pubkey,
             //  }
             process_delegate_cpi(accounts, instruction_data_inner)?
+        }
+        SCHEDULECOMMIT_CPI_IX => {
+            // # Account references
+            // - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
+            // - **1**    `[]`              MagicBlock Program (used to schedule commit)
+            // - **2..n** `[]`              PDA accounts to be committed
+            //
+            // # Instruction Args
+            //
+            // - **0..32**   Player 1 pubkey from which first PDA was derived
+            // - **32..64**  Player 2 pubkey from which second PDA was derived
+            // - **n..n+32** Player n pubkey from which n-th PDA was derived
+            process_schedulecommit_cpi(accounts, instruction_data_inner, true)?;
         }
         _ => {
             msg!("Error: unknown instruction")
@@ -256,7 +260,7 @@ pub fn create_schedule_commit_ix(
     magic_program_key: Pubkey,
     account_infos: &[&AccountInfo],
 ) -> Instruction {
-    let instruction_data = vec![1, 0, 0, 0];
+    let instruction_data = vec![SCHEDULECOMMIT_CPI_IX, 0, 0, 0];
     let account_metas = account_infos
         .iter()
         .map(|x| AccountMeta {
