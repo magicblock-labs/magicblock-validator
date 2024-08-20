@@ -19,6 +19,7 @@ use crate::{
     },
 };
 pub mod api;
+pub mod sleipnir_program;
 mod utils;
 
 declare_id!("9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY");
@@ -29,6 +30,7 @@ solana_program::entrypoint!(process_instruction);
 pub const INIT_IX: u8 = 0;
 pub const DELEGATE_CPI_IX: u8 = 1;
 pub const SCHEDULECOMMIT_CPI_IX: u8 = 2;
+pub const SCHEDULECOMMIT_AND_UNDELEGATE_CPI_IX: u8 = 3;
 
 pub fn process_instruction<'a>(
     program_id: &'a Pubkey,
@@ -73,7 +75,22 @@ pub fn process_instruction<'a>(
             // - **0..32**   Player 1 pubkey from which first PDA was derived
             // - **32..64**  Player 2 pubkey from which second PDA was derived
             // - **n..n+32** Player n pubkey from which n-th PDA was derived
-            process_schedulecommit_cpi(accounts, instruction_data_inner, true)?;
+            process_schedulecommit_cpi(
+                accounts,
+                instruction_data_inner,
+                true,
+                false,
+            )?;
+        }
+        SCHEDULECOMMIT_AND_UNDELEGATE_CPI_IX => {
+            // Same instruction input like [SCHEDULECOMMIT_CPI_IX].
+            // Behavior differs that it will request undelegation of committed accounts.
+            process_schedulecommit_cpi(
+                accounts,
+                instruction_data_inner,
+                true,
+                true,
+            )?;
         }
         _ => {
             msg!("Error: unknown instruction")
@@ -193,6 +210,7 @@ pub fn process_schedulecommit_cpi(
     accounts: &[AccountInfo],
     instruction_data: &[u8],
     modify_accounts: bool,
+    undelegate: bool,
 ) -> Result<(), ProgramError> {
     msg!("Processing schedulecommit_cpi instruction");
 
@@ -249,7 +267,11 @@ pub fn process_schedulecommit_cpi(
     //     "Committees are {:?}",
     //     remaining.iter().map(|x| x.key).collect::<Vec<_>>()
     // );
-    let ix = create_schedule_commit_ix(*magic_program.key, &account_infos);
+    let ix = create_schedule_commit_ix(
+        *magic_program.key,
+        &account_infos,
+        undelegate,
+    );
 
     invoke(&ix, &account_infos.into_iter().cloned().collect::<Vec<_>>())?;
 
@@ -259,8 +281,14 @@ pub fn process_schedulecommit_cpi(
 pub fn create_schedule_commit_ix(
     magic_program_key: Pubkey,
     account_infos: &[&AccountInfo],
+    undelegate: bool,
 ) -> Instruction {
-    let instruction_data = vec![SCHEDULECOMMIT_CPI_IX, 0, 0, 0];
+    let ix = if undelegate {
+        sleipnir_program::SleipnirInstruction::ScheduleCommitAndUndelegate
+    } else {
+        sleipnir_program::SleipnirInstruction::ScheduleCommit
+    };
+    let instruction_data = ix.discriminant();
     let account_metas = account_infos
         .iter()
         .map(|x| AccountMeta {

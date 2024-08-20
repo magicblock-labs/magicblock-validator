@@ -8,7 +8,10 @@ use solana_program::{
     system_program,
 };
 
-use crate::{DelegateCpiArgs, DELEGATE_CPI_IX, INIT_IX, SCHEDULECOMMIT_CPI_IX};
+use crate::{
+    DelegateCpiArgs, DELEGATE_CPI_IX, INIT_IX,
+    SCHEDULECOMMIT_AND_UNDELEGATE_CPI_IX, SCHEDULECOMMIT_CPI_IX,
+};
 
 pub fn init_account_instruction(
     payer: Pubkey,
@@ -69,6 +72,37 @@ pub fn schedule_commit_cpi_instruction(
     players: &[Pubkey],
     committees: &[Pubkey],
 ) -> Instruction {
+    schedule_commit_cpi_instruction_impl(
+        payer,
+        magic_program_id,
+        players,
+        committees,
+        false,
+    )
+}
+
+pub fn schedule_commit_and_undelegate_cpi_instruction(
+    payer: Pubkey,
+    magic_program_id: Pubkey,
+    players: &[Pubkey],
+    committees: &[Pubkey],
+) -> Instruction {
+    schedule_commit_cpi_instruction_impl(
+        payer,
+        magic_program_id,
+        players,
+        committees,
+        true,
+    )
+}
+
+fn schedule_commit_cpi_instruction_impl(
+    payer: Pubkey,
+    magic_program_id: Pubkey,
+    players: &[Pubkey],
+    committees: &[Pubkey],
+    undelegate: bool,
+) -> Instruction {
     let program_id = crate::id();
     let mut account_metas = vec![
         AccountMeta::new(payer, true),
@@ -78,7 +112,11 @@ pub fn schedule_commit_cpi_instruction(
         account_metas.push(AccountMeta::new(*committee, false));
     }
 
-    let mut instruction_data = vec![SCHEDULECOMMIT_CPI_IX];
+    let mut instruction_data = if undelegate {
+        vec![SCHEDULECOMMIT_AND_UNDELEGATE_CPI_IX]
+    } else {
+        vec![SCHEDULECOMMIT_CPI_IX]
+    };
     for player in players {
         instruction_data.extend_from_slice(player.as_ref());
     }

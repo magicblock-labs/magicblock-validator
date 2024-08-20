@@ -113,7 +113,7 @@ impl SleipnirInstruction {
         match self {
             ModifyAccounts(_) => 0,
             ScheduleCommit => 1,
-            ScheduleCommitAndUndelegate => 1,
+            ScheduleCommitAndUndelegate => 2,
             ScheduledCommitSent(_) => 3,
         }
     }

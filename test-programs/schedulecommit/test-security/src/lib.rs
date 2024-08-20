@@ -67,9 +67,12 @@ pub fn process_instruction<'a>(
         // - **0..32**   Player 1 pubkey from which first PDA was derived
         // - **32..64**  Player 2 pubkey from which second PDA was derived
         // - **n..n+32** Player n pubkey from which n-th PDA was derived
-        2 => {
-            process_schedulecommit_cpi(accounts, instruction_data_inner, false)?
-        }
+        2 => process_schedulecommit_cpi(
+            accounts,
+            instruction_data_inner,
+            false,
+            false,
+        )?,
         _ => {
             msg!("Error: unknown instruction")
         }
@@ -132,6 +135,7 @@ fn process_sibling_schedule_cpis(
         let direct_ix = create_schedule_commit_ix(
             *magic_program.key,
             &account_infos.to_vec(),
+            false,
         );
         invoke(
             &direct_ix,
