@@ -234,8 +234,8 @@ mod tests {
             payer,
             chain_signatures: vec![sig],
             included_pubkeys: vec![acc],
+            excluded_pubkeys: Default::default(),
             requested_undelegation: false,
-            ..Default::default()
         }
     }
 

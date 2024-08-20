@@ -17,14 +17,14 @@ impl CommitAccountArgs {
     /// Serializes the commit account args into a byte vector.
     /// We use a manual implementation to avoid having to pull in the entire
     /// delegation program SDK and/or borsh.
-    pub(crate) fn to_vec(&self) -> Vec<u8> {
+    pub(crate) fn into_vec(self) -> Vec<u8> {
         let mut data = Vec::with_capacity(
             Self::SIZE_WITHOUT_DATA + Self::SIZE_DATA_VEC_LEN + self.data.len(),
         );
         data.extend_from_slice(&self.slot.to_le_bytes());
         data.push(self.allow_undelegation as u8);
         data.extend_from_slice(&(self.data.len() as u32).to_le_bytes());
-        data.extend_from_slice(&self.data);
+        data.extend(self.data);
         data
     }
 }
@@ -47,7 +47,7 @@ mod tests {
                 10, 0, 0, 0, // data.len
                 0, 1, 2, 9, 9, 9, 6, 7, 8, 9, // data
             ];
-            assert_eq!(args.to_vec(), expected);
+            assert_eq!(args.into_vec(), expected);
         }
 
         {
@@ -62,7 +62,7 @@ mod tests {
                 10, 0, 0, 0, // data.len
                 0, 1, 2, 9, 9, 9, 6, 7, 8, 9, // data
             ];
-            assert_eq!(args.to_vec(), expected);
+            assert_eq!(args.into_vec(), expected);
         }
 
         {
@@ -77,7 +77,7 @@ mod tests {
                 4, 0, 0, 0, // data.len
                 0, 1, 2, 3, // data
             ];
-            assert_eq!(args.to_vec(), expected);
+            assert_eq!(args.into_vec(), expected);
         }
 
         {
@@ -92,7 +92,7 @@ mod tests {
                 10, 0, 0, 0, // data.len
                 0, 1, 2, 9, 9, 9, 6, 7, 8, 9, // data
             ];
-            assert_eq!(args.to_vec(), expected);
+            assert_eq!(args.into_vec(), expected);
         }
     }
 }

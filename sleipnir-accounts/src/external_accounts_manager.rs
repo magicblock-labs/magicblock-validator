@@ -369,6 +369,7 @@ where
         let commit_infos = self
             .create_transactions_to_commit_specific_accounts(
                 accounts_to_be_committed,
+                false,
             )
             .await?;
         let sendables = commit_infos
@@ -388,6 +389,7 @@ where
     pub async fn create_transactions_to_commit_specific_accounts(
         &self,
         accounts_to_be_committed: Vec<Pubkey>,
+        request_undelegation: bool,
     ) -> AccountsResult<Vec<CommitAccountsPayload>> {
         // Get current account states from internal account provider
         let mut committees = Vec::new();
@@ -410,10 +412,6 @@ where
         // NOTE: Once we run into issues that the data to be committed in a single
         // transaction is too large, we can split these into multiple batches
         // That is why we return a Vec of CreateCommitAccountsTransactionResult
-        let request_undelegation = {
-            todo!("where does this come from?");
-            false
-        };
         let txs = self
             .account_committer
             .create_commit_accounts_transactions(
