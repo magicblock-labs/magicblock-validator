@@ -60,7 +60,6 @@ impl AccountCommitter for RemoteAccountCommitter {
     async fn create_commit_accounts_transactions(
         &self,
         committees: Vec<AccountCommittee>,
-        request_undelegation: bool,
     ) -> AccountsResult<Vec<CommitAccountsPayload>> {
         // Get blockhash once since this is a slow operation
         let latest_blockhash = self
@@ -78,18 +77,20 @@ impl AccountCommitter for RemoteAccountCommitter {
         for AccountCommittee {
             pubkey,
             account_data,
-        } in committees.iter()
+            slot,
+            request_undelegation,
+        } in committees.into_iter()
         {
             let committer = self.committer_authority.pubkey();
-            // TODO: need new args
-            // - account data
-            // - slot
-            // - allow_undelegate: bool = true
-            // Then call undelegate
+            let commit_args = CommitAccountArgs {
+                slot,
+                allow_undelegation: request_undelegation,
+                data: account_data.data().to_vec(),
+            };
             let commit_ix =
-                commit_state(committer, *pubkey, account_data.data().to_vec());
+                commit_state(committer, pubkey, commit_args.into_vec());
 
-            let finalize_ix = finalize(committer, *pubkey, committer);
+            let finalize_ix = finalize(committer, pubkey, committer);
             ixs.extend(vec![commit_ix, finalize_ix]);
             if request_undelegation {
                 // payer: validator_id

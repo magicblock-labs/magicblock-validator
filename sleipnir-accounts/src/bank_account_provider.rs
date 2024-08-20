@@ -20,4 +20,7 @@ impl InternalAccountProvider for BankAccountProvider {
     fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
         self.0.get_account(pubkey)
     }
+    fn get_slot(&self) -> u64 {
+        self.0.slot()
+    }
 }

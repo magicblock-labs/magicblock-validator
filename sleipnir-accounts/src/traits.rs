@@ -23,6 +23,7 @@ pub trait ScheduledCommitsProcessor {
 pub trait InternalAccountProvider: Send + Sync {
     fn has_account(&self, pubkey: &Pubkey) -> bool;
     fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData>;
+    fn get_slot(&self) -> u64;
 }
 
 #[async_trait]
@@ -38,6 +39,8 @@ pub trait AccountCloner {
 pub struct AccountCommittee {
     pub pubkey: Pubkey,
     pub account_data: AccountSharedData,
+    pub slot: u64,
+    pub request_undelegation: bool,
 }
 
 pub struct CommitAccountsPayload {
@@ -65,7 +68,6 @@ pub trait AccountCommitter: Send + Sync + 'static {
     async fn create_commit_accounts_transactions(
         &self,
         committees: Vec<AccountCommittee>,
-        request_undelegation: bool,
     ) -> AccountsResult<Vec<CommitAccountsPayload>>;
 
     /// Returns the main-chain signatures of the commit transactions

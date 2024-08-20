@@ -366,9 +366,18 @@ where
             .filter(|x| x.needs_commit(now))
             .map(|x| x.pubkey)
             .collect::<Vec<_>>();
+
+        // NOTE: the scheduled commits use the slot at which the commit was scheduled
+        // However frequent commits run async and could be running before a slot is completed
+        // Thus they really commit in between two slots instead of at the end of a particular slot.
+        // Therefore we use the current slot which could result in two commits with the same
+        // slot. However since we most likely will phase out frequent commits we accept this
+        // inconsistency for now.
+        let slot = self.internal_account_provider.get_slot();
         let commit_infos = self
             .create_transactions_to_commit_specific_accounts(
                 accounts_to_be_committed,
+                slot,
                 false,
             )
             .await?;
@@ -389,6 +398,7 @@ where
     pub async fn create_transactions_to_commit_specific_accounts(
         &self,
         accounts_to_be_committed: Vec<Pubkey>,
+        slot: u64,
         request_undelegation: bool,
     ) -> AccountsResult<Vec<CommitAccountsPayload>> {
         // Get current account states from internal account provider
@@ -400,6 +410,8 @@ where
                 committees.push(AccountCommittee {
                     pubkey: *pubkey,
                     account_data: acc,
+                    slot,
+                    request_undelegation,
                 });
             } else {
                 error!(
@@ -414,10 +426,7 @@ where
         // That is why we return a Vec of CreateCommitAccountsTransactionResult
         let txs = self
             .account_committer
-            .create_commit_accounts_transactions(
-                committees,
-                request_undelegation,
-            )
+            .create_commit_accounts_transactions(committees)
             .await?;
 
         Ok(txs)
