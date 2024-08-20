@@ -5,6 +5,7 @@ use solana_sdk::{account::AccountSharedData, pubkey::Pubkey};
 
 #[derive(Default, Debug)]
 pub struct InternalAccountProviderStub {
+    slot: u64,
     accounts: HashMap<Pubkey, AccountSharedData>,
 }
 
@@ -20,5 +21,8 @@ impl InternalAccountProvider for InternalAccountProviderStub {
     }
     fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
         self.accounts.get(pubkey).cloned()
+    }
+    fn get_slot(&self) -> u64 {
+        self.slot
     }
 }

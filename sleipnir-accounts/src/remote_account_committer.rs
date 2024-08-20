@@ -79,20 +79,20 @@ impl AccountCommitter for RemoteAccountCommitter {
             account_data,
             slot,
             request_undelegation,
-        } in committees.into_iter()
+        } in committees.iter()
         {
             let committer = self.committer_authority.pubkey();
             let commit_args = CommitAccountArgs {
-                slot,
-                allow_undelegation: request_undelegation,
+                slot: *slot,
+                allow_undelegation: *request_undelegation,
                 data: account_data.data().to_vec(),
             };
             let commit_ix =
-                commit_state(committer, pubkey, commit_args.into_vec());
+                commit_state(committer, *pubkey, commit_args.into_vec());
 
-            let finalize_ix = finalize(committer, pubkey, committer);
+            let finalize_ix = finalize(committer, *pubkey, committer);
             ixs.extend(vec![commit_ix, finalize_ix]);
-            if request_undelegation {
+            if *request_undelegation {
                 // payer: validator_id
                 // reimbursement use validator_id pubkey
                 // let undelegate_ix = undelegate(*pubkey, committer, vec![]);

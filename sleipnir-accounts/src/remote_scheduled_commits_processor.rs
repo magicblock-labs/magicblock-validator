@@ -67,6 +67,8 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
                         committees.push(AccountCommittee {
                             pubkey,
                             account_data,
+                            request_undelegation: commit.request_undelegation,
+                            slot: commit.slot,
                         });
                     }
                     None => {
@@ -82,10 +84,7 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
             // we should report if we cannot get the blockhash as part of the _sent commit_
             // transaction
             let payloads = committer
-                .create_commit_accounts_transactions(
-                    committees,
-                    commit.request_undelegation,
-                )
+                .create_commit_accounts_transactions(committees)
                 .await?;
 
             // Determine which payloads are a noop since all accounts are up to date
