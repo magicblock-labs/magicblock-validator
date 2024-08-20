@@ -51,9 +51,9 @@ pub fn main() {
         }
     };
 
-    let security_test_dir =
-        format!("{}/../{}", manifest_dir.clone(), "security");
-    let test_security_output = match run_test(security_test_dir) {
+    let test_security_dir =
+        format!("{}/../{}", manifest_dir.clone(), "test-security");
+    let test_security_output = match run_test(test_security_dir) {
         Ok(output) => output,
         Err(err) => {
             eprintln!("Failed to run security: {:?}", err);

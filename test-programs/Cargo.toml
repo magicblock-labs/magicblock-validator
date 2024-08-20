@@ -3,7 +3,7 @@ members = [
   "sysvars",
   "schedulecommit/program",
   "schedulecommit/client",
-  "schedulecommit/security",
+  "schedulecommit/test-security",
 ]
 resolver = "2"
 
