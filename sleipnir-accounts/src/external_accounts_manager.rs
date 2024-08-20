@@ -410,9 +410,16 @@ where
         // NOTE: Once we run into issues that the data to be committed in a single
         // transaction is too large, we can split these into multiple batches
         // That is why we return a Vec of CreateCommitAccountsTransactionResult
+        let request_undelegation = {
+            todo!("where does this come from?");
+            false
+        };
         let txs = self
             .account_committer
-            .create_commit_accounts_transactions(committees)
+            .create_commit_accounts_transactions(
+                committees,
+                request_undelegation,
+            )
             .await?;
 
         Ok(txs)

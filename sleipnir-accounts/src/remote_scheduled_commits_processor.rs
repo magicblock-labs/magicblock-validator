@@ -82,7 +82,10 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
             // we should report if we cannot get the blockhash as part of the _sent commit_
             // transaction
             let payloads = committer
-                .create_commit_accounts_transactions(committees)
+                .create_commit_accounts_transactions(
+                    committees,
+                    commit.request_undelegation,
+                )
                 .await?;
 
             // Determine which payloads are a noop since all accounts are up to date
@@ -124,15 +127,16 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
 
             // Record that we are about to send the commit to chain including all
             // information (mainly signatures) needed to track its outcome on chain
-            let sent_commit = SentCommit::new(
-                commit.id,
-                commit.slot,
-                commit.blockhash,
-                commit.payer,
-                signatures,
-                included_pubkeys.into_iter().collect(),
+            let sent_commit = SentCommit {
+                commit_id: commit.id,
+                slot: commit.slot,
+                blockhash: commit.blockhash,
+                payer: commit.payer,
+                chain_signatures: signatures,
+                included_pubkeys: included_pubkeys.into_iter().collect(),
                 excluded_pubkeys,
-            );
+                requested_undelegation: commit.request_undelegation,
+            };
             register_scheduled_commit_sent(sent_commit);
             let signature = execute_legacy_transaction(
                 commit.commit_sent_transaction,

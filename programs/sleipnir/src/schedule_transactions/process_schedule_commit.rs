@@ -174,6 +174,7 @@ pub(crate) fn process_schedule_commit(
         blockhash,
         accounts: pubkeys,
         payer: *payer_pubkey,
+        owner: *parent_program_id,
         commit_sent_transaction,
         request_undelegation: opts.request_undelegation,
     };
@@ -357,6 +358,7 @@ mod tests {
                 slot: s,
                 accounts: accs,
                 payer: p,
+                owner: o,
                 blockhash: _,
                 commit_sent_transaction: tx,
                 request_undelegation: false,
@@ -364,6 +366,7 @@ mod tests {
                 assert!(i >= &0);
                 assert_eq!(s, &test_clock.slot);
                 assert_eq!(p, &payer.pubkey());
+                assert_eq!(o, &program);
                 assert_eq!(accs, &vec![committee]);
                 let ix = SleipnirInstruction::ScheduledCommitSent(*i);
                 assert_eq!(tx.data(0), ix.try_to_vec().unwrap());
@@ -419,6 +422,7 @@ mod tests {
                 slot: s,
                 accounts: accs,
                 payer: p,
+                owner: o,
                 blockhash: _,
                 commit_sent_transaction: tx,
                 request_undelegation: true,
@@ -426,6 +430,7 @@ mod tests {
                 assert!(i >= &0);
                 assert_eq!(s, &test_clock.slot);
                 assert_eq!(p, &payer.pubkey());
+                assert_eq!(o, &program);
                 assert_eq!(accs, &vec![committee]);
                 let ix = SleipnirInstruction::ScheduledCommitSent(*i);
                 assert_eq!(tx.data(0), ix.try_to_vec().unwrap());
@@ -483,6 +488,7 @@ mod tests {
                 slot: s,
                 accounts: accs,
                 payer: p,
+                owner: o,
                 blockhash: _,
                 commit_sent_transaction: tx,
                 request_undelegation: false,
@@ -490,6 +496,7 @@ mod tests {
                 assert!(i >= &0);
                 assert_eq!(s, &test_clock.slot);
                 assert_eq!(p, &payer.pubkey());
+                assert_eq!(o, &program);
                 assert_eq!(accs, &vec![committee_uno, committee_dos, committee_tres]);
                 let ix = SleipnirInstruction::ScheduledCommitSent(*i);
                 assert_eq!(tx.data(0), ix.try_to_vec().unwrap());
@@ -510,6 +517,7 @@ mod tests {
         .unwrap();
 
         let PreparedTransactionThreeCommittees {
+            program,
             mut accounts_data,
             committee_uno,
             committee_dos,
@@ -550,6 +558,7 @@ mod tests {
                 slot: s,
                 accounts: accs,
                 payer: p,
+                owner: o,
                 blockhash: _,
                 commit_sent_transaction: tx,
                 request_undelegation: true,
@@ -557,6 +566,7 @@ mod tests {
                 assert!(i >= &0);
                 assert_eq!(s, &test_clock.slot);
                 assert_eq!(p, &payer.pubkey());
+                assert_eq!(o, &program);
                 assert_eq!(accs, &vec![committee_uno, committee_dos, committee_tres]);
                 let ix = SleipnirInstruction::ScheduledCommitSent(*i);
                 assert_eq!(tx.data(0), ix.try_to_vec().unwrap());

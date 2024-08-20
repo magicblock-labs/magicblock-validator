@@ -1,5 +1,6 @@
 pub mod errors;
 mod schedule_transactions;
+pub use schedule_transactions::ScheduledCommit;
 pub mod sleipnir_instruction;
 pub mod sleipnir_processor;
 #[cfg(test)]

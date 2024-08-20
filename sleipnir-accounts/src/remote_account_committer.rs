@@ -1,6 +1,7 @@
 use async_trait::async_trait;
-use dlp::instruction::{commit_state, finalize};
+use dlp::instruction::{commit_state, finalize, undelegate};
 use log::*;
+use sleipnir_program::ScheduledCommit;
 use solana_rpc_client::{
     nonblocking::rpc_client::RpcClient, rpc_client::SerializableTransaction,
 };
@@ -15,11 +16,25 @@ use solana_sdk::{
 };
 
 use crate::{
+    deleg::CommitAccountArgs,
     errors::{AccountsError, AccountsResult},
     AccountCommittee, AccountCommitter, CommitAccountsPayload,
     SendableCommitAccountsPayload,
 };
 
+impl From<(ScheduledCommit, Vec<u8>)> for CommitAccountArgs {
+    fn from((commit, data): (ScheduledCommit, Vec<u8>)) -> Self {
+        Self {
+            slot: commit.slot,
+            allow_undelegation: commit.request_undelegation,
+            data,
+        }
+    }
+}
+
+// -----------------
+// RemoteAccountCommitter
+// -----------------
 pub struct RemoteAccountCommitter {
     rpc_client: RpcClient,
     committer_authority: Keypair,
@@ -45,6 +60,7 @@ impl AccountCommitter for RemoteAccountCommitter {
     async fn create_commit_accounts_transactions(
         &self,
         committees: Vec<AccountCommittee>,
+        request_undelegation: bool,
     ) -> AccountsResult<Vec<CommitAccountsPayload>> {
         // Get blockhash once since this is a slow operation
         let latest_blockhash = self
@@ -65,11 +81,26 @@ impl AccountCommitter for RemoteAccountCommitter {
         } in committees.iter()
         {
             let committer = self.committer_authority.pubkey();
+            // TODO: need new args
+            // - account data
+            // - slot
+            // - allow_undelegate: bool = true
+            // Then call undelegate
             let commit_ix =
                 commit_state(committer, *pubkey, account_data.data().to_vec());
 
             let finalize_ix = finalize(committer, *pubkey, committer);
             ixs.extend(vec![commit_ix, finalize_ix]);
+            if request_undelegation {
+                // payer: validator_id
+                // reimbursement use validator_id pubkey
+                // let undelegate_ix = undelegate(*pubkey, committer, vec![]);
+                // undelegate(*pubkey, committer, vec![]);
+                // TODO(thlorenz): @@@ Need discriminator which probably should get
+                // passed when scheduling the commit request
+                // let undelegate_ix = allow_undelegate(*pubkey);
+                todo!("Pending undelegation");
+            }
         }
 
         // For now we always commit all accounts in one transaction, but

@@ -65,6 +65,7 @@ pub trait AccountCommitter: Send + Sync + 'static {
     async fn create_commit_accounts_transactions(
         &self,
         committees: Vec<AccountCommittee>,
+        request_undelegation: bool,
     ) -> AccountsResult<Vec<CommitAccountsPayload>>;
 
     /// Returns the main-chain signatures of the commit transactions

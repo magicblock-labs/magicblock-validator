@@ -33,6 +33,7 @@ impl AccountCommitter for AccountCommitterStub {
     async fn create_commit_accounts_transactions(
         &self,
         committees: Vec<AccountCommittee>,
+        _request_undelegation: bool,
     ) -> AccountsResult<Vec<CommitAccountsPayload>> {
         let transaction = Transaction::default();
         let payload = CommitAccountsPayload {

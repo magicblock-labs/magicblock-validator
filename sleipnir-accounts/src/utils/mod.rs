@@ -9,6 +9,7 @@ use crate::errors::{AccountsError, AccountsResult};
 
 mod execute_transaction;
 pub use execute_transaction::*;
+pub(crate) mod deleg;
 
 pub(crate) fn get_epoch() -> Duration {
     SystemTime::now()
