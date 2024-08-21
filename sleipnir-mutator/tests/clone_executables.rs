@@ -16,9 +16,8 @@ use solana_sdk::{
     native_token::LAMPORTS_PER_SOL,
 };
 use test_tools::{
-    account::get_account_addr, diagnostics::log_exec_details, init_logger,
-    services::skip_if_devnet_down, transactions_processor,
-    validator::ensure_funded_validator_authority,
+    diagnostics::log_exec_details, init_logger, services::skip_if_devnet_down,
+    transactions_processor, validator::ensure_funded_validator_authority,
 };
 
 use crate::utils::{
@@ -55,22 +54,16 @@ async fn clone_solx_executable() {
 
     // 2. Verify that all accounts were added to the validator
     {
-        let solx_prog: Account =
-            get_account_addr(tx_processor.bank(), &SOLX_PROG)
-                .unwrap()
-                .into();
+        let solx_prog =
+            tx_processor.bank().get_account(&SOLX_PROG).unwrap().into();
         trace!("SolxProg account: {:#?}", solx_prog);
 
-        let solx_exec: Account =
-            get_account_addr(tx_processor.bank(), &SOLX_EXEC)
-                .unwrap()
-                .into();
+        let solx_exec =
+            tx_processor.bank().get_account(&SOLX_EXEC).unwrap().into();
         trace!("SolxExec account: {:#?}", solx_exec);
 
-        let solx_idl: Account =
-            get_account_addr(tx_processor.bank(), &SOLX_IDL)
-                .unwrap()
-                .into();
+        let solx_idl =
+            tx_processor.bank().get_account(&SOLX_IDL).unwrap().into();
         trace!("SolxIdl account: {:#?}", solx_idl);
 
         assert_matches!(

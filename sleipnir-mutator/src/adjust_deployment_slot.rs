@@ -92,8 +92,7 @@ mod tests {
 
         let upgrade_authority = Pubkey::new_unique();
         let program_addr = Pubkey::new_unique();
-        let program_data_pubkey =
-            get_pubkey_program_data(&program_addr).unwrap();
+        let program_data_pubkey = get_pubkey_program_data(&program_addr);
 
         let program_data = vec![0, 1, 2, 3, 4, 5, 6, 7, 8, 9];
         let deployment_slot = 9999;

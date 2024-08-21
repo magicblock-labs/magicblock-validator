@@ -8,7 +8,9 @@ use solana_sdk::{
 };
 
 use crate::{
-    accounts::{mods_to_clone_account, CloningAccountModifications},
+    account_modifications::{
+        mods_to_clone_account, CloningAccountModifications,
+    },
     errors::MutatorResult,
     Cluster,
 };
@@ -82,7 +84,7 @@ fn transaction_bpf_loader_upgrade(
     let ix = bpf_loader_upgradeable::upgrade(
         program_pubkey,
         program_buffer_pubkey,
-        &validator_pubkey,
+        validator_pubkey,
         validator_pubkey,
     );
     Transaction::new_signed_with_payer(

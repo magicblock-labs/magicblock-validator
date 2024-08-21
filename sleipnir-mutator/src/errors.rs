@@ -44,6 +44,9 @@ pub enum MutatorError {
     #[error("The executable data of account '{1}' for program account '{1}' is does not hold program data")]
     InvalidExecutableDataAccountData(Pubkey, Pubkey),
 
+    #[error("Invalid program data account '{0}' for program account '{1}'")]
+    InvalidProgramDataContent(Pubkey, Pubkey),
+
     #[error("Not yet supporting cloning solana_loader_v4_program")]
     NotYetSupportingCloningSolanaLoader4Programs,
 

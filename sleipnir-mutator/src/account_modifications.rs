@@ -1,12 +1,19 @@
-use sleipnir_program::sleipnir_instruction::AccountModification;
+use sleipnir_program::{
+    sleipnir_instruction::AccountModification, validator_authority_id,
+};
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
-    account::Account, clock::Slot, commitment_config::CommitmentConfig,
-    pubkey::Pubkey, rent::Rent, signature::Keypair, signer::Signer,
+    account::Account,
+    bpf_loader_upgradeable::{self, UpgradeableLoaderState},
+    clock::Slot,
+    commitment_config::CommitmentConfig,
+    pubkey::Pubkey,
+    rent::Rent,
+    signature::Keypair,
+    signer::Signer,
 };
 
 use crate::{
-    adjust_deployment_slot::adjust_deployment_slot,
     errors::{MutatorError, MutatorResult},
     get_pubkey::{
         get_pubkey_anchor_idl, get_pubkey_program_data, get_pubkey_shank_idl,
@@ -14,6 +21,7 @@ use crate::{
     Cluster,
 };
 
+#[allow(clippy::large_enum_variant)]
 pub enum CloningAccountModifications {
     Account {
         account_modification: AccountModification,
@@ -60,22 +68,54 @@ pub async fn mods_to_clone_account(
 
     // The program data needs to be cloned, download the executable account
     let program_data_pubkey = get_pubkey_program_data(program_pubkey);
-    let mut program_data_account = get_account(cluster, &program_data_pubkey)
-        .await
-        .map_err(|err| {
-            MutatorError::FailedToCloneProgramExecutableDataAccount(
-                *account_pubkey,
-                err,
-            )
-        })?;
+    let program_data_account_original =
+        get_account(cluster, &program_data_pubkey)
+            .await
+            .map_err(|err| {
+                MutatorError::FailedToCloneProgramExecutableDataAccount(
+                    *account_pubkey,
+                    err,
+                )
+            })?;
     // If we didn't find it then something is off and cloning the program
     // account won't make sense either
-    if program_data_account.lamports == 0 {
+    if program_data_account_original.lamports == 0 {
         return Err(MutatorError::CouldNotFindExecutableDataAccount(
             program_data_pubkey,
             *account_pubkey,
         ));
     }
+    // If we are not able to find the bytecode from the account, abort
+    let program_data_bytecode_index =
+        UpgradeableLoaderState::size_of_programdata_metadata();
+    if program_data_account_original.data.len() < program_data_bytecode_index {
+        return Err(MutatorError::InvalidProgramDataContent(
+            program_data_pubkey,
+            *account_pubkey,
+        ));
+    }
+
+    // Build the proper program_data that we will want to upgrade later
+    let mut program_data_data =
+        bincode::serialize(&UpgradeableLoaderState::ProgramData {
+            slot: if slot == 0 { slot } else { slot - 1 },
+            upgrade_authority_address: Some(validator_authority_id()),
+        })
+        .unwrap();
+    program_data_data.extend_from_slice(
+        &program_data_account_original.data[program_data_bytecode_index..],
+    );
+    let program_data_account = Account {
+        lamports: Rent::default()
+            .minimum_balance(program_data_data.len())
+            .max(1),
+        data: program_data_data,
+        owner: bpf_loader_upgradeable::id(),
+        executable: false,
+        rent_epoch: 0,
+    };
+
+    /*
     // NOTE: we ran into issues with transactions running right after a program was cloned,
     // i.e. the first transaction using it.
     // In those cases we saw "Program is not deployed" errors which most often showed
@@ -90,6 +130,8 @@ pub async fn mods_to_clone_account(
         &mut program_data_account,
         targeted_deployment_slot,
     )?;
+    */
+
     let program_data_modification = account_modification_from_account(
         &program_data_pubkey,
         &program_data_account,
@@ -97,14 +139,20 @@ pub async fn mods_to_clone_account(
 
     // We need to create the upgrade buffer we will use for the bpf_loader transaction later
     let program_buffer_pubkey = Keypair::new().pubkey();
-    let program_buffer_data =
-        Vec::from_iter(program_data_account.data[8..].iter().cloned());
+    let mut program_buffer_data =
+        bincode::serialize(&UpgradeableLoaderState::Buffer {
+            authority_address: Some(validator_authority_id()),
+        })
+        .unwrap();
+    program_buffer_data.extend_from_slice(
+        &program_data_account_original.data[program_data_bytecode_index..],
+    );
     let program_buffer_account = Account {
         lamports: Rent::default()
             .minimum_balance(program_buffer_data.len())
             .max(1),
         data: program_buffer_data,
-        owner: program_data_account.owner,
+        owner: bpf_loader_upgradeable::id(),
         executable: false,
         rent_epoch: 0,
     };
@@ -157,7 +205,7 @@ async fn try_get_account_modification_from_pubkey(
     pubkey: Option<Pubkey>,
 ) -> Option<AccountModification> {
     if let Some(pubkey) = pubkey {
-        if let Some(account) = get_account(cluster, &pubkey).await.ok() {
+        if let Ok(account) = get_account(cluster, &pubkey).await {
             return Some(account_modification_from_account(&pubkey, &account));
         }
     }
@@ -170,7 +218,7 @@ fn get_account_modification_with_overrides(
     overrides: Option<AccountModification>,
 ) -> AccountModification {
     let mut account_mod =
-        account_modification_from_account(account_pubkey, &account);
+        account_modification_from_account(account_pubkey, account);
     if let Some(overrides) = overrides {
         if let Some(lamports) = overrides.lamports {
             account_mod.lamports = Some(lamports);
@@ -212,10 +260,9 @@ async fn get_account(
     // TODO(vbrunet)
     //  - Long term this should probably use the validator's AccountFetcher
     //  - Tracked here: https://github.com/magicblock-labs/magicblock-validator/issues/136
-    Ok(RpcClient::new_with_commitment(
+    let rpc_client = RpcClient::new_with_commitment(
         cluster.url().to_string(),
         CommitmentConfig::confirmed(),
-    )
-    .get_account(&pubkey)
-    .await?)
+    );
+    rpc_client.get_account(pubkey).await
 }

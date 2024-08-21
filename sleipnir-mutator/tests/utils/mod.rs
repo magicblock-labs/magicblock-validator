@@ -1,11 +1,11 @@
-use sleipnir_mutator::mutator;
+use sleipnir_mutator::transactions::transactions_to_clone_account_from_cluster;
 use sleipnir_program::validator_authority_id;
 use solana_program::pubkey;
 use solana_sdk::{
     clock::Slot, genesis_config::ClusterType, hash::Hash, pubkey::Pubkey,
     transaction::Transaction,
 };
-use test_tools::{account::fund_account_addr, traits::TransactionsProcessor};
+use test_tools::{account::fund_account, traits::TransactionsProcessor};
 
 pub const SOLX_PROG: Pubkey =
     pubkey!("SoLXmnP9JvL6vJ7TN1VqtTxqsc2izmPfF9CsMDEuRzJ");
@@ -25,7 +25,7 @@ const LUZIFER: Pubkey = pubkey!("LuzifKo4E6QCF5r4uQmqbyko7zLS5WgayynivnCbtzk");
 
 pub fn fund_luzifer(bank: &dyn TransactionsProcessor) {
     // TODO: we need to fund Luzifer at startup instead of doing it here
-    fund_account_addr(bank.bank(), &LUZIFER, u64::MAX / 2);
+    fund_account(bank.bank(), &LUZIFER, u64::MAX / 2);
 }
 
 pub async fn verified_tx_to_clone_from_devnet(
@@ -34,7 +34,7 @@ pub async fn verified_tx_to_clone_from_devnet(
     num_accounts_expected: usize,
     recent_blockhash: Hash,
 ) -> Transaction {
-    let txs = mutator::transactions_to_clone_account_from_cluster(
+    let txs = transactions_to_clone_account_from_cluster(
         &ClusterType::Devnet.into(),
         pubkey,
         None,

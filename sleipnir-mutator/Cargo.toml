@@ -11,6 +11,7 @@ edition.workspace = true
 doctest = false
 
 [dependencies]
+bincode = { workspace = true }
 log = { workspace = true }
 sleipnir-program = { workspace = true }
 solana-loader-v4-program = { workspace = true }

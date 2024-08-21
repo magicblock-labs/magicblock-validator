@@ -3,8 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use sleipnir_bank::bank::Bank;
 use sleipnir_mutator::{
-    transactions_to_clone_account_from_cluster::transactions_to_clone_account_from_cluster,
-    Cluster,
+    transactions::transactions_to_clone_account_from_cluster, Cluster,
 };
 use sleipnir_program::sleipnir_instruction::AccountModification;
 use sleipnir_transaction_status::TransactionStatusSender;

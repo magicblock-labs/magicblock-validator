@@ -4,9 +4,8 @@ use solana_sdk::{
     account::Account, native_token::LAMPORTS_PER_SOL, system_program,
 };
 use test_tools::{
-    account::get_account_addr, diagnostics::log_exec_details, init_logger,
-    skip_if_devnet_down, transactions_processor,
-    validator::ensure_funded_validator_authority,
+    diagnostics::log_exec_details, init_logger, skip_if_devnet_down,
+    transactions_processor, validator::ensure_funded_validator_authority,
 };
 
 use crate::utils::{
@@ -37,9 +36,7 @@ async fn clone_non_executable_without_data() {
 
     let (_, exec_details) = result.transactions.values().next().unwrap();
     log_exec_details(exec_details);
-    let solx_tips: Account = get_account_addr(tx_processor.bank(), &SOLX_TIPS)
-        .unwrap()
-        .into();
+    let solx_tips = tx_processor.bank().get_account(&SOLX_TIPS).unwrap().into();
 
     trace!("SolxTips account: {:#?}", solx_tips);
 
@@ -81,9 +78,7 @@ async fn clone_non_executable_with_data() {
 
     let (_, exec_details) = result.transactions.values().next().unwrap();
     log_exec_details(exec_details);
-    let solx_post: Account = get_account_addr(tx_processor.bank(), &SOLX_POST)
-        .unwrap()
-        .into();
+    let solx_post = tx_processor.bank().get_account(&SOLX_POST).unwrap().into();
 
     trace!("SolxPost account: {:#?}", solx_post);
 
