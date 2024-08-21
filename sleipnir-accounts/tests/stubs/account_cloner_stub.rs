@@ -77,11 +77,11 @@ impl AccountCloner for AccountClonerStub {
         pubkey: &Pubkey,
         _account: Option<Account>,
         overrides: Option<AccountModification>,
-    ) -> AccountsResult<Signature> {
+    ) -> AccountsResult<Vec<Signature>> {
         self.cloned_accounts
             .write()
             .unwrap()
             .insert(*pubkey, overrides);
-        Ok(Signature::new_unique())
+        Ok(vec![Signature::new_unique()])
     }
 }

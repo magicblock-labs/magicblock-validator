@@ -3,7 +3,7 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use sleipnir_bank::bank::Bank;
 use sleipnir_mutator::{
-    mutator::transaction_to_clone_account_from_cluster, AccountModification,
+    mutator::transactions_to_clone_account_from_cluster, AccountModification,
     Cluster,
 };
 use sleipnir_transaction_status::TransactionStatusSender;
@@ -40,10 +40,10 @@ impl AccountCloner for RemoteAccountCloner {
         pubkey: &Pubkey,
         account: Option<Account>,
         overrides: Option<AccountModification>,
-    ) -> AccountsResult<Signature> {
+    ) -> AccountsResult<Vec<Signature>> {
         let slot = self.bank.slot();
         let blockhash = self.bank.last_blockhash();
-        let clone_tx = transaction_to_clone_account_from_cluster(
+        let clone_txs = transactions_to_clone_account_from_cluster(
             &self.cluster,
             &pubkey.to_string(),
             account,
@@ -53,12 +53,17 @@ impl AccountCloner for RemoteAccountCloner {
         )
         .await?;
 
-        let signature = execute_legacy_transaction(
-            clone_tx,
-            &self.bank,
-            self.transaction_status_sender.as_ref(),
-        )?;
+        let signatures = clone_txs
+            .into_iter()
+            .map(|clone_tx| {
+                execute_legacy_transaction(
+                    clone_tx,
+                    &self.bank,
+                    self.transaction_status_sender.as_ref(),
+                )
+            })
+            .collect::<Result<_, _>>()?;
 
-        Ok(signature)
+        Ok(signatures)
     }
 }

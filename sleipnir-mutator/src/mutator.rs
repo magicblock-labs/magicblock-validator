@@ -13,7 +13,7 @@ use crate::{
 pub fn transaction_to_modify_accounts(
     modificiations: Vec<AccountModification>,
     recent_blockhash: Hash,
-) -> MutatorResult<Transaction> {
+) -> MutatorResult<Vec<Transaction>> {
     let modifications = modificiations
         .into_iter()
         .map(|modification| {
@@ -35,14 +35,14 @@ pub fn transaction_to_modify_accounts(
 /// If [overrides] are provided the included fields will be changed on the account
 /// that was downloaded from the cluster before the modification transaction is
 /// created.
-pub async fn transaction_to_clone_account_from_cluster(
+pub async fn transactions_to_clone_account_from_cluster(
     cluster: &Cluster,
     account_address: &str,
     account: Option<Account>,
     recent_blockhash: Hash,
     slot: Slot,
     overrides: Option<AccountModification>,
-) -> MutatorResult<Transaction> {
+) -> MutatorResult<Vec<Transaction>> {
     let mods_to_clone = mods_to_clone_account(
         cluster,
         account_address,

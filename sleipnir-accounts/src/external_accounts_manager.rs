@@ -282,7 +282,7 @@ where
 
         // 5.A Clone the unseen readonly accounts without any modifications
         for cloned_readonly_account in cloned_readonly_accounts {
-            let signature = self
+            let mut clone_signatures = self
                 .account_cloner
                 .clone_account(
                     &cloned_readonly_account.pubkey,
@@ -291,7 +291,7 @@ where
                     None,
                 )
                 .await?;
-            signatures.push(signature);
+            signatures.append(&mut clone_signatures);
             self.external_readonly_accounts.insert(
                 cloned_readonly_account.pubkey,
                 cloned_readonly_account.at_slot,
@@ -323,7 +323,7 @@ where
                     }
                 }
             }
-            let signature = self
+            let mut clone_signatures = self
                 .account_cloner
                 .clone_account(
                     &cloned_writable_account.pubkey,
@@ -331,7 +331,7 @@ where
                     overrides,
                 )
                 .await?;
-            signatures.push(signature);
+            signatures.append(&mut clone_signatures);
             // Remove the account from the readonlys and add it to writables
             self.external_readonly_accounts
                 .remove(&cloned_writable_account.pubkey);

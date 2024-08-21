@@ -32,7 +32,7 @@ pub trait AccountCloner {
         pubkey: &Pubkey,
         account: Option<Account>,
         overrides: Option<AccountModification>,
-    ) -> AccountsResult<Signature>;
+    ) -> AccountsResult<Vec<Signature>>;
 }
 
 pub struct AccountCommittee {

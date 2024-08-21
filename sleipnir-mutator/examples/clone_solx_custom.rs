@@ -27,10 +27,10 @@ async fn main() {
 
     // 1. Exec Clone Transaction
     {
-        let tx = {
+        let txs = {
             let slot = tx_processor.bank().slot();
             let recent_blockhash = tx_processor.bank().last_blockhash();
-            mutator::transaction_to_clone_account_from_cluster(
+            mutator::transactions_to_clone_account_from_cluster(
                 // We could also use Cluster::Development here which has the same URL
                 // but wanted to demonstrate using a custom URL
                 &Cluster::Custom("http://localhost:8899".to_string()),
@@ -44,7 +44,7 @@ async fn main() {
             .expect("Failed to create clone transaction")
         };
 
-        let result = tx_processor.process(vec![tx]).unwrap();
+        let result = tx_processor.process(txs).unwrap();
 
         let (_, exec_details) = result.transactions.values().next().unwrap();
         log_exec_details(exec_details);

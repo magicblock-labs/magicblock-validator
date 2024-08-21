@@ -1,21 +1,37 @@
 use std::str::FromStr;
 
+use sleipnir_program::sleipnir_instruction::AccountModification;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
     account::Account, bpf_loader_upgradeable, clock::Slot,
-    commitment_config::CommitmentConfig, pubkey::Pubkey,
+    commitment_config::CommitmentConfig, pubkey::Pubkey, signature::Keypair,
+    signer::Signer,
 };
 
 use crate::{
     chainparser,
     errors::{MutatorError, MutatorResult},
     program_account::adjust_deployment_slot,
-    AccountModification, Cluster,
+    Cluster,
 };
+
+fn account_modification_from_account(
+    account_publey: Pubkey,
+    account: &Account,
+) -> AccountModification {
+    AccountModification {
+        pubkey: account_publey,
+        lamports: Some(account.lamports),
+        owner: Some(account.owner),
+        executable: Some(account.executable),
+        data: Some(account.data.clone()),
+        rent_epoch: Some(account.rent_epoch),
+    }
+}
 
 pub async fn mods_to_clone_account(
     cluster: &Cluster,
-    account_address: &str,
+    account_pubkey: Pubkey,
     account: Option<Account>,
     slot: Slot,
     overrides: Option<AccountModification>,
@@ -23,7 +39,6 @@ pub async fn mods_to_clone_account(
     // Fetch all accounts to clone
 
     // 1. Download the account info if needed
-    let account_pubkey = Pubkey::from_str(account_address)?;
     let account = match account {
         Some(account) => account,
         None => {
@@ -35,7 +50,7 @@ pub async fn mods_to_clone_account(
 
     // 2. If the account is executable, find its executable address
     let executable_info = if account.executable {
-        let executable_pubkey = get_executable_address(account_address)?;
+        let executable_pubkey = get_executable_address(&account_pubkey)?;
 
         // 2.1. Download the executable account
         let mut executable_account = client_for_cluster(cluster)
@@ -43,7 +58,7 @@ pub async fn mods_to_clone_account(
             .await
             .map_err(|err| {
                 MutatorError::FailedToCloneProgramExecutableDataAccount(
-                    account_address.to_string(),
+                    account_pubkey.to_string(),
                     err,
                 )
             })?;
@@ -53,7 +68,7 @@ pub async fn mods_to_clone_account(
         if executable_account.lamports == 0 {
             return Err(MutatorError::CouldNotFindExecutableDataAccount(
                 executable_pubkey.to_string(),
-                account_address.to_string(),
+                account_pubkey.to_string(),
             ));
         }
 
@@ -72,43 +87,42 @@ pub async fn mods_to_clone_account(
             targeted_deployment_slot,
         )?;
 
+        let buffer_pubkey = Keypair::new().pubkey();
+
         Some((executable_account, executable_pubkey))
     } else {
         None
     };
 
-    // 3. If the account is executable, try to find its IDL account
-    let idl_account_info = if account.executable {
-        let (anchor_idl_address, shank_idl_address) =
-            get_idl_addresses(account_address)?;
-
-        // 3.1. Download the IDL account, try the anchor address first followed by shank
-        if let Some(anchor_account_info) =
-            maybe_get_idl_account(cluster, anchor_idl_address).await
-        {
-            Some(anchor_account_info)
-        } else {
-            maybe_get_idl_account(cluster, shank_idl_address).await
-        }
-    } else {
-        None
-    };
+    // 3. Apply any override needed
     let account_mod = {
         let mut account_mod =
-            AccountModification::from((&account, account_address));
+            account_modification_from_account(account_pubkey, &account);
         if let Some(overrides) = overrides {
-            account_mod.apply_overrides(&overrides);
+            if let Some(lamports) = overrides.lamports {
+                account_mod.lamports = Some(lamports);
+            }
+            if let Some(owner) = &overrides.owner {
+                account_mod.owner = Some(owner.clone());
+            }
+            if let Some(executable) = overrides.executable {
+                account_mod.executable = Some(executable);
+            }
+            if let Some(data) = &overrides.data {
+                account_mod.data = Some(data.clone());
+            }
+            if let Some(rent_epoch) = overrides.rent_epoch {
+                account_mod.rent_epoch = Some(rent_epoch);
+            }
         }
         account_mod
     };
+
     // 4. Convert to a vec of account modifications to apply
     Ok(vec![
         Some(account_mod),
         executable_info.map(|(account, address)| {
-            AccountModification::from((&account, address.to_string().as_str()))
-        }),
-        idl_account_info.map(|(account, address)| {
-            AccountModification::from((&account, address.to_string().as_str()))
+            account_modification_from_account(address, &account)
         }),
     ]
     .into_iter()
@@ -139,9 +153,8 @@ async fn maybe_get_idl_account(
 }
 
 pub(crate) fn get_executable_address(
-    program_id: &str,
+    program_pubkey: &Pubkey,
 ) -> Result<Pubkey, Box<dyn std::error::Error>> {
-    let program_pubkey = Pubkey::from_str(program_id)?;
     let bpf_loader_id = bpf_loader_upgradeable::id();
     let seeds = &[program_pubkey.as_ref()];
     let (executable_address, _) =
