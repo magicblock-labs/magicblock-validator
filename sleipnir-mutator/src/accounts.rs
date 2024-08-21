@@ -1,30 +1,29 @@
 use sleipnir_program::sleipnir_instruction::AccountModification;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
-    account::Account, bpf_loader_upgradeable, clock::Slot,
-    commitment_config::CommitmentConfig, pubkey::Pubkey, signature::Keypair,
-    signer::Signer,
+    account::Account, clock::Slot, commitment_config::CommitmentConfig,
+    pubkey::Pubkey, rent::Rent, signature::Keypair, signer::Signer,
 };
 
 use crate::{
-    chainparser,
+    adjust_deployment_slot::adjust_deployment_slot,
     errors::{MutatorError, MutatorResult},
-    program_account::adjust_deployment_slot,
+    get_pubkey::{
+        get_pubkey_anchor_idl, get_pubkey_program_data, get_pubkey_shank_idl,
+    },
     Cluster,
 };
 
-fn account_modification_from_account(
-    account_publey: &Pubkey,
-    account: &Account,
-) -> AccountModification {
-    AccountModification {
-        pubkey: *account_publey,
-        lamports: Some(account.lamports),
-        owner: Some(account.owner),
-        executable: Some(account.executable),
-        data: Some(account.data.clone()),
-        rent_epoch: Some(account.rent_epoch),
-    }
+pub enum CloningAccountModifications {
+    Account {
+        account_modification: AccountModification,
+    },
+    Program {
+        program_modification: AccountModification,
+        program_data_modification: AccountModification,
+        program_buffer_modification: AccountModification,
+        program_idl_modification: Option<AccountModification>,
+    },
 }
 
 pub async fn mods_to_clone_account(
@@ -33,135 +32,190 @@ pub async fn mods_to_clone_account(
     account: Option<Account>,
     slot: Slot,
     overrides: Option<AccountModification>,
-) -> MutatorResult<Vec<AccountModification>> {
+) -> MutatorResult<CloningAccountModifications> {
     // Fetch all accounts to clone
 
     // 1. Download the account info if needed
     let account = match account {
         Some(account) => account,
-        None => {
-            client_for_cluster(cluster)
-                .get_account(account_pubkey)
-                .await?
-        }
+        None => get_account(cluster, account_pubkey).await?,
     };
 
-    // 2. If the account is executable, find its executable address
-    let executable_info = if account.executable {
-        let executable_pubkey = get_executable_address(account_pubkey)?;
+    // If it's a regular account that's not executable, use happy path
+    if !account.executable {
+        return Ok(CloningAccountModifications::Account {
+            account_modification: get_account_modification_with_overrides(
+                account_pubkey,
+                &account,
+                overrides,
+            ),
+        });
+    }
 
-        // 2.1. Download the executable account
-        let mut executable_account = client_for_cluster(cluster)
-            .get_account(&executable_pubkey)
-            .await
-            .map_err(|err| {
-                MutatorError::FailedToCloneProgramExecutableDataAccount(
-                    *account_pubkey,
-                    err,
-                )
-            })?;
+    // If it's an executable, we will need to modify multiple accounts
+    let program_pubkey = account_pubkey;
+    let program_account = account;
+    let program_modification =
+        account_modification_from_account(program_pubkey, &program_account);
 
-        // 2.2. If we didn't find it then something is off and cloning the program
-        //      account won't make sense either
-        if executable_account.lamports == 0 {
-            return Err(MutatorError::CouldNotFindExecutableDataAccount(
-                executable_pubkey,
+    // The program data needs to be cloned, download the executable account
+    let program_data_pubkey = get_pubkey_program_data(program_pubkey);
+    let mut program_data_account = get_account(cluster, &program_data_pubkey)
+        .await
+        .map_err(|err| {
+            MutatorError::FailedToCloneProgramExecutableDataAccount(
                 *account_pubkey,
-            ));
-        }
+                err,
+            )
+        })?;
+    // If we didn't find it then something is off and cloning the program
+    // account won't make sense either
+    if program_data_account.lamports == 0 {
+        return Err(MutatorError::CouldNotFindExecutableDataAccount(
+            program_data_pubkey,
+            *account_pubkey,
+        ));
+    }
+    // NOTE: we ran into issues with transactions running right after a program was cloned,
+    // i.e. the first transaction using it.
+    // In those cases we saw "Program is not deployed" errors which most often showed
+    // up during transaction simulations.
+    // Claiming that the program was deployed one slot earlier fixed the issue.
+    // For more information see: https://github.com/magicblock-labs/magicblock-validator/pull/83
+    let targeted_deployment_slot = if slot == 0 { slot } else { slot - 1 };
+    adjust_deployment_slot(
+        program_pubkey,
+        &program_data_pubkey,
+        &program_account,
+        &mut program_data_account,
+        targeted_deployment_slot,
+    )?;
+    let program_data_modification = account_modification_from_account(
+        &program_data_pubkey,
+        &program_data_account,
+    );
 
-        // NOTE: we ran into issues with transactions running right after a program was cloned,
-        // i.e. the first transaction using it.
-        // In those cases we saw "Program is not deployed" errors which most often showed
-        // up during transaction simulations.
-        // Claiming that the program was deployed one slot earlier fixed the issue.
-        // For more information see: https://github.com/magicblock-labs/magicblock-validator/pull/83
-        let targeted_deployment_slot = if slot == 0 { slot } else { slot - 1 };
-        adjust_deployment_slot(
-            account_pubkey,
-            &executable_pubkey,
-            &account,
-            Some(&mut executable_account),
-            targeted_deployment_slot,
-        )?;
-
-        let buffer_pubkey = Keypair::new().pubkey();
-
-        Some((executable_account, executable_pubkey))
-    } else {
-        None
+    // We need to create the upgrade buffer we will use for the bpf_loader transaction later
+    let program_buffer_pubkey = Keypair::new().pubkey();
+    let program_buffer_data =
+        Vec::from_iter(program_data_account.data[8..].iter().cloned());
+    let program_buffer_account = Account {
+        lamports: Rent::default()
+            .minimum_balance(program_buffer_data.len())
+            .max(1),
+        data: program_buffer_data,
+        owner: program_data_account.owner,
+        executable: false,
+        rent_epoch: 0,
     };
+    let program_buffer_modification = account_modification_from_account(
+        &program_buffer_pubkey,
+        &program_buffer_account,
+    );
 
-    // 3. Apply any override needed
-    let account_mod = {
-        let mut account_mod =
-            account_modification_from_account(account_pubkey, &account);
-        if let Some(overrides) = overrides {
-            if let Some(lamports) = overrides.lamports {
-                account_mod.lamports = Some(lamports);
-            }
-            if let Some(owner) = &overrides.owner {
-                account_mod.owner = Some(owner.clone());
-            }
-            if let Some(executable) = overrides.executable {
-                account_mod.executable = Some(executable);
-            }
-            if let Some(data) = &overrides.data {
-                account_mod.data = Some(data.clone());
-            }
-            if let Some(rent_epoch) = overrides.rent_epoch {
-                account_mod.rent_epoch = Some(rent_epoch);
-            }
-        }
-        account_mod
-    };
+    // Finally try to find the IDL if we can
+    let program_idl_modification =
+        get_program_idl_modification(cluster, program_pubkey).await;
 
-    // 4. Convert to a vec of account modifications to apply
-    Ok(vec![
-        Some(account_mod),
-        executable_info.map(|(account, address)| {
-            account_modification_from_account(&address, &account)
-        }),
-    ]
-    .into_iter()
-    .flatten()
-    .collect::<Vec<AccountModification>>())
+    // Done
+    Ok(CloningAccountModifications::Program {
+        program_modification,
+        program_data_modification,
+        program_buffer_modification,
+        program_idl_modification,
+    })
 }
 
-fn client_for_cluster(cluster: &Cluster) -> RpcClient {
-    RpcClient::new_with_commitment(
-        cluster.url().to_string(),
-        CommitmentConfig::confirmed(),
-    )
-}
-
-async fn maybe_get_idl_account(
+async fn get_program_idl_modification(
     cluster: &Cluster,
-    idl_address: Option<Pubkey>,
-) -> Option<(Account, Pubkey)> {
-    if let Some(idl_address) = idl_address {
-        client_for_cluster(cluster)
-            .get_account(&idl_address)
-            .await
-            .ok()
-            .map(|account| (account, idl_address))
-    } else {
-        None
+    program_pubkey: &Pubkey,
+) -> Option<AccountModification> {
+    // First check if we can find an anchor IDL
+    let anchor_idl_modification = try_get_account_modification_from_pubkey(
+        cluster,
+        get_pubkey_anchor_idl(program_pubkey),
+    )
+    .await;
+    if anchor_idl_modification.is_some() {
+        return anchor_idl_modification;
+    }
+    // Otherwise try to find a shank IDL
+    let shank_idl_modification = try_get_account_modification_from_pubkey(
+        cluster,
+        get_pubkey_shank_idl(program_pubkey),
+    )
+    .await;
+    if shank_idl_modification.is_some() {
+        return shank_idl_modification;
+    }
+    // Otherwise give up
+    None
+}
+
+async fn try_get_account_modification_from_pubkey(
+    cluster: &Cluster,
+    pubkey: Option<Pubkey>,
+) -> Option<AccountModification> {
+    if let Some(pubkey) = pubkey {
+        if let Some(account) = get_account(cluster, &pubkey).await.ok() {
+            return Some(account_modification_from_account(&pubkey, &account));
+        }
+    }
+    None
+}
+
+fn get_account_modification_with_overrides(
+    account_pubkey: &Pubkey,
+    account: &Account,
+    overrides: Option<AccountModification>,
+) -> AccountModification {
+    let mut account_mod =
+        account_modification_from_account(account_pubkey, &account);
+    if let Some(overrides) = overrides {
+        if let Some(lamports) = overrides.lamports {
+            account_mod.lamports = Some(lamports);
+        }
+        if let Some(owner) = &overrides.owner {
+            account_mod.owner = Some(*owner);
+        }
+        if let Some(executable) = overrides.executable {
+            account_mod.executable = Some(executable);
+        }
+        if let Some(data) = &overrides.data {
+            account_mod.data = Some(data.clone());
+        }
+        if let Some(rent_epoch) = overrides.rent_epoch {
+            account_mod.rent_epoch = Some(rent_epoch);
+        }
+    }
+    account_mod
+}
+
+fn account_modification_from_account(
+    account_pubkey: &Pubkey,
+    account: &Account,
+) -> AccountModification {
+    AccountModification {
+        pubkey: *account_pubkey,
+        lamports: Some(account.lamports),
+        owner: Some(account.owner),
+        executable: Some(account.executable),
+        data: Some(account.data.clone()),
+        rent_epoch: Some(account.rent_epoch),
     }
 }
 
-pub(crate) fn get_executable_address(
-    program_pubkey: &Pubkey,
-) -> Result<Pubkey, Box<dyn std::error::Error>> {
-    let bpf_loader_id = bpf_loader_upgradeable::id();
-    let seeds = &[program_pubkey.as_ref()];
-    let (executable_address, _) =
-        Pubkey::find_program_address(seeds, &bpf_loader_id);
-    Ok(executable_address)
-}
-
-fn get_idl_addresses(
-    program_pubkey: &Pubkey,
-) -> Result<(Option<Pubkey>, Option<Pubkey>), Box<dyn std::error::Error>> {
-    Ok(chainparser::get_idl_addresses(&program_pubkey))
+async fn get_account(
+    cluster: &Cluster,
+    pubkey: &Pubkey,
+) -> Result<Account, solana_rpc_client_api::client_error::Error> {
+    // TODO(vbrunet)
+    //  - Long term this should probably use the validator's AccountFetcher
+    //  - Tracked here: https://github.com/magicblock-labs/magicblock-validator/issues/136
+    Ok(RpcClient::new_with_commitment(
+        cluster.url().to_string(),
+        CommitmentConfig::confirmed(),
+    )
+    .get_account(&pubkey)
+    .await?)
 }

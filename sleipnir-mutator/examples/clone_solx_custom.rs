@@ -1,11 +1,11 @@
 use sleipnir_bank::bank_dev_utils::transactions::{
     create_solx_send_post_transaction, SolanaxPostAccounts,
 };
-use sleipnir_mutator::{mutator, Cluster};
+use sleipnir_mutator::{transactions_to_clone_account_from_cluster, Cluster};
 use solana_program::pubkey;
 use solana_sdk::pubkey::Pubkey;
 use test_tools::{
-    account::fund_account_addr, diagnostics::log_exec_details, init_logger,
+    account::fund_account, diagnostics::log_exec_details, init_logger,
     transactions_processor,
 };
 
@@ -23,14 +23,14 @@ async fn main() {
 
     let tx_processor = transactions_processor();
 
-    fund_account_addr(tx_processor.bank(), &LUZIFER, u64::MAX / 2);
+    fund_account(tx_processor.bank(), &LUZIFER, u64::MAX / 2);
 
     // 1. Exec Clone Transaction
     {
         let txs = {
             let slot = tx_processor.bank().slot();
             let recent_blockhash = tx_processor.bank().last_blockhash();
-            mutator::transactions_to_clone_account_from_cluster(
+            transactions_to_clone_account_from_cluster::transactions_to_clone_account_from_cluster(
                 // We could also use Cluster::Development here which has the same URL
                 // but wanted to demonstrate using a custom URL
                 &Cluster::Custom("http://localhost:8899".to_string()),

@@ -1,9 +1,6 @@
 use sleipnir_bank::bank::Bank;
 use solana_sdk::{
-    account::{Account, AccountSharedData},
-    clock::Epoch,
-    pubkey::Pubkey,
-    system_program,
+    account::Account, clock::Epoch, pubkey::Pubkey, system_program,
 };
 
 pub fn fund_account(bank: &Bank, pubkey: &Pubkey, lamports: u64) {
@@ -17,15 +14,4 @@ pub fn fund_account(bank: &Bank, pubkey: &Pubkey, lamports: u64) {
             rent_epoch: Epoch::MAX,
         },
     );
-}
-
-pub fn fund_account_addr(bank: &Bank, pubkey: &Pubkey, lamports: u64) {
-    fund_account(bank, &pubkey, lamports);
-}
-
-pub fn get_account_addr(
-    bank: &Bank,
-    pubkey: &Pubkey,
-) -> Option<AccountSharedData> {
-    bank.get_account(&pubkey)
 }
