@@ -1,3 +1,4 @@
+use solana_sdk::pubkey::Pubkey;
 use thiserror::Error;
 
 pub type MutatorResult<T> = std::result::Result<T, MutatorError>;
@@ -44,7 +45,7 @@ pub enum MutatorError {
     NoBankForksAvailable,
 
     #[error("Could not find executable data account '{0}' for program account '{1}'")]
-    CouldNotFindExecutableDataAccount(String, String),
+    CouldNotFindExecutableDataAccount(Pubkey, Pubkey),
 
     #[error("The executable data of account '{1}' for program account '{1}' is does not hold program data")]
     InvalidExecutableDataAccountData(String, String),
@@ -59,7 +60,7 @@ pub enum MutatorError {
 
     #[error("Failed to clone executable data for '{0}' program ({1:?})")]
     FailedToCloneProgramExecutableDataAccount(
-        String,
+        Pubkey,
         solana_rpc_client_api::client_error::Error,
     ),
 }

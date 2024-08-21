@@ -4376,6 +4376,7 @@ dependencies = [
 name = "sleipnir-core"
 version = "1.19.0"
 dependencies = [
+ "solana-program",
  "solana-sdk",
 ]
 
@@ -4457,6 +4458,7 @@ dependencies = [
  "sleipnir-bank",
  "sleipnir-program",
  "solana-loader-v4-program",
+ "solana-program",
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk",

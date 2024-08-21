@@ -29,7 +29,7 @@ pub fn main() {
     let ix = schedule_commit_cpi_instruction(
         payer.pubkey(),
         // Work around the different solana_sdk versions by creating pubkey from str
-        Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
+        magic_program::MAGIC_PROGRAM_ADDR,
         &committees
             .iter()
             .map(|(player, _)| player.pubkey())

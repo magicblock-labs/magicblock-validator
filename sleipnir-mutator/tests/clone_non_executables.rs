@@ -1,10 +1,7 @@
-use std::str::FromStr;
-
 use assert_matches::assert_matches;
 use log::*;
 use solana_sdk::{
-    account::Account, native_token::LAMPORTS_PER_SOL, pubkey::Pubkey,
-    system_program,
+    account::Account, native_token::LAMPORTS_PER_SOL, system_program,
 };
 use test_tools::{
     account::get_account_addr, diagnostics::log_exec_details, init_logger,
@@ -30,7 +27,7 @@ async fn clone_non_executable_without_data() {
 
     let slot = tx_processor.bank().slot();
     let tx = verified_tx_to_clone_from_devnet(
-        SOLX_TIPS,
+        &SOLX_TIPS,
         slot,
         3,
         tx_processor.bank().last_blockhash(),
@@ -40,7 +37,7 @@ async fn clone_non_executable_without_data() {
 
     let (_, exec_details) = result.transactions.values().next().unwrap();
     log_exec_details(exec_details);
-    let solx_tips: Account = get_account_addr(tx_processor.bank(), SOLX_TIPS)
+    let solx_tips: Account = get_account_addr(tx_processor.bank(), &SOLX_TIPS)
         .unwrap()
         .into();
 
@@ -74,7 +71,7 @@ async fn clone_non_executable_with_data() {
 
     let slot = tx_processor.bank().slot();
     let tx = verified_tx_to_clone_from_devnet(
-        SOLX_POST,
+        &SOLX_POST,
         slot,
         3,
         tx_processor.bank().last_blockhash(),
@@ -84,13 +81,12 @@ async fn clone_non_executable_with_data() {
 
     let (_, exec_details) = result.transactions.values().next().unwrap();
     log_exec_details(exec_details);
-    let solx_post: Account = get_account_addr(tx_processor.bank(), SOLX_POST)
+    let solx_post: Account = get_account_addr(tx_processor.bank(), &SOLX_POST)
         .unwrap()
         .into();
 
     trace!("SolxPost account: {:#?}", solx_post);
 
-    let solx_prog = Pubkey::from_str(SOLX_PROG).unwrap();
     assert_matches!(
         solx_post,
         Account {
@@ -102,7 +98,7 @@ async fn clone_non_executable_with_data() {
         } => {
             assert!(l > 0);
             assert_eq!(d.len(), 1180);
-            assert_eq!(o, solx_prog);
+            assert_eq!(o, SOLX_PROG);
             assert_eq!(r, u64::MAX);
         }
     );

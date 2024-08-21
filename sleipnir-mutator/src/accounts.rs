@@ -1,5 +1,3 @@
-use std::str::FromStr;
-
 use sleipnir_program::sleipnir_instruction::AccountModification;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
@@ -58,7 +56,7 @@ pub async fn mods_to_clone_account(
             .await
             .map_err(|err| {
                 MutatorError::FailedToCloneProgramExecutableDataAccount(
-                    account_pubkey.to_string(),
+                    *account_pubkey,
                     err,
                 )
             })?;
@@ -67,8 +65,8 @@ pub async fn mods_to_clone_account(
         //      account won't make sense either
         if executable_account.lamports == 0 {
             return Err(MutatorError::CouldNotFindExecutableDataAccount(
-                executable_pubkey.to_string(),
-                account_pubkey.to_string(),
+                executable_pubkey,
+                *account_pubkey,
             ));
         }
 
@@ -163,8 +161,7 @@ pub(crate) fn get_executable_address(
 }
 
 fn get_idl_addresses(
-    program_id: &str,
+    program_pubkey: &Pubkey,
 ) -> Result<(Option<Pubkey>, Option<Pubkey>), Box<dyn std::error::Error>> {
-    let program_pubkey = Pubkey::from_str(program_id)?;
     Ok(chainparser::get_idl_addresses(&program_pubkey))
 }

@@ -41,7 +41,7 @@ async fn clone_solx_executable() {
     {
         let slot = tx_processor.bank().slot();
         let tx = verified_tx_to_clone_from_devnet(
-            SOLX_PROG,
+            &SOLX_PROG,
             slot,
             5,
             tx_processor.bank().last_blockhash(),
@@ -56,20 +56,21 @@ async fn clone_solx_executable() {
     // 2. Verify that all accounts were added to the validator
     {
         let solx_prog: Account =
-            get_account_addr(tx_processor.bank(), SOLX_PROG)
+            get_account_addr(tx_processor.bank(), &SOLX_PROG)
                 .unwrap()
                 .into();
         trace!("SolxProg account: {:#?}", solx_prog);
 
         let solx_exec: Account =
-            get_account_addr(tx_processor.bank(), SOLX_EXEC)
+            get_account_addr(tx_processor.bank(), &SOLX_EXEC)
                 .unwrap()
                 .into();
         trace!("SolxExec account: {:#?}", solx_exec);
 
-        let solx_idl: Account = get_account_addr(tx_processor.bank(), SOLX_IDL)
-            .unwrap()
-            .into();
+        let solx_idl: Account =
+            get_account_addr(tx_processor.bank(), &SOLX_IDL)
+                .unwrap()
+                .into();
         trace!("SolxIdl account: {:#?}", solx_idl);
 
         assert_matches!(

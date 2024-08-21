@@ -2,18 +2,17 @@ use sleipnir_bank::bank_dev_utils::transactions::{
     create_solx_send_post_transaction, SolanaxPostAccounts,
 };
 use sleipnir_mutator::{mutator, Cluster};
+use solana_program::pubkey;
+use solana_sdk::pubkey::Pubkey;
 use test_tools::{
     account::fund_account_addr, diagnostics::log_exec_details, init_logger,
-    traits::TransactionsProcessor, transactions_processor,
+    transactions_processor,
 };
 
-pub const SOLX_PROG: &str = "SoLXmnP9JvL6vJ7TN1VqtTxqsc2izmPfF9CsMDEuRzJ";
-const LUZIFER: &str = "LuzifKo4E6QCF5r4uQmqbyko7zLS5WgayynivnCbtzk";
+pub const SOLX_PROG: Pubkey =
+    pubkey!("SoLXmnP9JvL6vJ7TN1VqtTxqsc2izmPfF9CsMDEuRzJ");
 
-fn fund_luzifer(bank: &dyn TransactionsProcessor) {
-    // TODO: we need to fund Luzifer at startup instead of doing it here
-    fund_account_addr(bank.bank(), LUZIFER, u64::MAX / 2);
-}
+const LUZIFER: Pubkey = pubkey!("LuzifKo4E6QCF5r4uQmqbyko7zLS5WgayynivnCbtzk");
 
 // IMPORTANT: Make sure to start a local validator/preferably Luzid and clone the
 // SolX program into it before running this example
@@ -23,7 +22,8 @@ async fn main() {
     init_logger!();
 
     let tx_processor = transactions_processor();
-    fund_luzifer(&*tx_processor);
+
+    fund_account_addr(tx_processor.bank(), &LUZIFER, u64::MAX / 2);
 
     // 1. Exec Clone Transaction
     {

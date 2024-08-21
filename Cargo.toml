@@ -134,6 +134,7 @@ solana-logger = { git = "https://github.com/solana-labs/solana", rev = "30adda4a
 solana-measure = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-measure", version = "1.19.0" }
 solana-metrics = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-metrics", version = "1.19.0" }
 solana-perf = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-perf", version = "1.19.0" }
+solana-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-program", version = "1.19.0" }
 solana-program-runtime = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-program-runtime", version = "1.19.0" }
 solana-rayon-threadlimit = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-rayon-threadlimit", version = "1.19.0" }
 solana-pubsub-client = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-pubsub-client", version = "1.19.0" }
