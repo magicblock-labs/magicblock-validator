@@ -16,11 +16,11 @@ use crate::{
 };
 
 fn account_modification_from_account(
-    account_publey: Pubkey,
+    account_publey: &Pubkey,
     account: &Account,
 ) -> AccountModification {
     AccountModification {
-        pubkey: account_publey,
+        pubkey: *account_publey,
         lamports: Some(account.lamports),
         owner: Some(account.owner),
         executable: Some(account.executable),
@@ -31,7 +31,7 @@ fn account_modification_from_account(
 
 pub async fn mods_to_clone_account(
     cluster: &Cluster,
-    account_pubkey: Pubkey,
+    account_pubkey: &Pubkey,
     account: Option<Account>,
     slot: Slot,
     overrides: Option<AccountModification>,
@@ -43,14 +43,14 @@ pub async fn mods_to_clone_account(
         Some(account) => account,
         None => {
             client_for_cluster(cluster)
-                .get_account(&account_pubkey)
+                .get_account(account_pubkey)
                 .await?
         }
     };
 
     // 2. If the account is executable, find its executable address
     let executable_info = if account.executable {
-        let executable_pubkey = get_executable_address(&account_pubkey)?;
+        let executable_pubkey = get_executable_address(account_pubkey)?;
 
         // 2.1. Download the executable account
         let mut executable_account = client_for_cluster(cluster)
@@ -80,7 +80,7 @@ pub async fn mods_to_clone_account(
         // For more information see: https://github.com/magicblock-labs/magicblock-validator/pull/83
         let targeted_deployment_slot = if slot == 0 { slot } else { slot - 1 };
         adjust_deployment_slot(
-            &account_pubkey,
+            account_pubkey,
             &executable_pubkey,
             &account,
             Some(&mut executable_account),
@@ -122,7 +122,7 @@ pub async fn mods_to_clone_account(
     Ok(vec![
         Some(account_mod),
         executable_info.map(|(account, address)| {
-            account_modification_from_account(address, &account)
+            account_modification_from_account(&address, &account)
         }),
     ]
     .into_iter()

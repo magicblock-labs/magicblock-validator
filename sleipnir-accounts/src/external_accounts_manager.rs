@@ -12,7 +12,7 @@ use conjunto_transwise::{
 use lazy_static::lazy_static;
 use log::*;
 use sleipnir_account_updates::AccountUpdates;
-use sleipnir_mutator::AccountModification;
+use sleipnir_program::sleipnir_instruction::AccountModification;
 use solana_sdk::{
     pubkey::Pubkey, signature::Signature, sysvar,
     transaction::SanitizedTransaction,
@@ -307,7 +307,7 @@ where
                 .delegation_record()
                 .as_ref()
                 .map(|x| AccountModification {
-                    owner: Some(x.owner.to_string()),
+                    owner: Some(x.owner),
                     ..Default::default()
                 });
             if cloned_writable_account.pubkey == acc_snapshot.payer {

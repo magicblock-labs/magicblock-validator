@@ -8,6 +8,8 @@ pub const DEVELOPMENT_URL: &str = "http://127.0.0.1:8899";
 #[derive(Debug, Clone, PartialEq, Eq)]
 /// Extension of [solana_sdk::genesis_config::ClusterType] in order to support
 /// custom clusters
+// TODO(vbrunet) - this probably belong in a different crate
+//                 (mutator is specific to the data dump mechanism)
 pub enum Cluster {
     Known(ClusterType),
     Custom(String),

@@ -1,33 +1,10 @@
-use sleipnir_program::sleipnir_instruction;
+use sleipnir_program::sleipnir_instruction::{self, AccountModification};
 use solana_sdk::{
-    account::Account, clock::Slot, hash::Hash, transaction::Transaction,
+    account::Account, clock::Slot, hash::Hash, pubkey::Pubkey,
+    transaction::Transaction,
 };
 
-use crate::{
-    account_modification::AccountModification, accounts::mods_to_clone_account,
-    errors::MutatorResult, Cluster,
-};
-
-/// Creates a transaction that will apply the provided account modifications to the
-/// respective accounts.
-pub fn transaction_to_modify_accounts(
-    modificiations: Vec<AccountModification>,
-    recent_blockhash: Hash,
-) -> MutatorResult<Vec<Transaction>> {
-    let modifications = modificiations
-        .into_iter()
-        .map(|modification| {
-            let (pubkey, modification) = modification
-                .try_into_sleipnir_program_account_modification()?;
-            Ok((pubkey, modification))
-        })
-        .collect::<MutatorResult<Vec<_>>>()?;
-
-    Ok(sleipnir_instruction::modify_accounts(
-        modifications,
-        recent_blockhash,
-    ))
-}
+use crate::{accounts::mods_to_clone_account, errors::MutatorResult, Cluster};
 
 /// Downloads an account from the provided cluster and returns a transaction that
 /// that will apply modifications to the same account in development to match the
@@ -37,19 +14,22 @@ pub fn transaction_to_modify_accounts(
 /// created.
 pub async fn transactions_to_clone_account_from_cluster(
     cluster: &Cluster,
-    account_address: &str,
+    account_pubkey: &Pubkey,
     account: Option<Account>,
     recent_blockhash: Hash,
     slot: Slot,
     overrides: Option<AccountModification>,
 ) -> MutatorResult<Vec<Transaction>> {
-    let mods_to_clone = mods_to_clone_account(
+    let account_modifications = mods_to_clone_account(
         cluster,
-        account_address,
+        account_pubkey,
         account,
         slot,
         overrides,
     )
     .await?;
-    transaction_to_modify_accounts(mods_to_clone, recent_blockhash)
+    Ok(vec![sleipnir_instruction::modify_accounts(
+        account_modifications,
+        recent_blockhash,
+    )])
 }

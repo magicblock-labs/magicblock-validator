@@ -3,9 +3,9 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use sleipnir_bank::bank::Bank;
 use sleipnir_mutator::{
-    mutator::transactions_to_clone_account_from_cluster, AccountModification,
-    Cluster,
+    mutator::transactions_to_clone_account_from_cluster, Cluster,
 };
+use sleipnir_program::sleipnir_instruction::AccountModification;
 use sleipnir_transaction_status::TransactionStatusSender;
 use solana_sdk::{account::Account, pubkey::Pubkey, signature::Signature};
 
@@ -45,7 +45,7 @@ impl AccountCloner for RemoteAccountCloner {
         let blockhash = self.bank.last_blockhash();
         let clone_txs = transactions_to_clone_account_from_cluster(
             &self.cluster,
-            &pubkey.to_string(),
+            &pubkey,
             account,
             blockhash,
             slot,

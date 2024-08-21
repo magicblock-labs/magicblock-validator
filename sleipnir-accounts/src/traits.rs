@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use sleipnir_mutator::AccountModification;
+use sleipnir_program::sleipnir_instruction::AccountModification;
 use solana_sdk::{
     account::{Account, AccountSharedData},
     pubkey::Pubkey,

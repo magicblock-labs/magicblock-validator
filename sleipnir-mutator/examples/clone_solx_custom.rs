@@ -34,7 +34,7 @@ async fn main() {
                 // We could also use Cluster::Development here which has the same URL
                 // but wanted to demonstrate using a custom URL
                 &Cluster::Custom("http://localhost:8899".to_string()),
-                SOLX_PROG,
+                &SOLX_PROG,
                 None,
                 recent_blockhash,
                 slot,

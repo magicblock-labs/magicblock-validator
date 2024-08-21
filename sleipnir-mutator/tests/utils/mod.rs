@@ -28,7 +28,7 @@ pub async fn verified_tx_to_clone_from_devnet(
     num_accounts_expected: usize,
     recent_blockhash: Hash,
 ) -> Transaction {
-    let tx = mutator::transactions_to_clone_account_from_cluster(
+    let txs = mutator::transactions_to_clone_account_from_cluster(
         &ClusterType::Devnet.into(),
         addr,
         None,
@@ -39,10 +39,12 @@ pub async fn verified_tx_to_clone_from_devnet(
     .await
     .expect("Failed to create clone transaction");
 
-    assert!(tx.is_signed());
-    assert_eq!(tx.signatures.len(), 1);
-    assert_eq!(tx.signer_key(0, 0).unwrap(), &validator_authority_id());
-    assert_eq!(tx.message().account_keys.len(), num_accounts_expected);
+    let first = txs.first().unwrap();
+
+    assert!(first.is_signed());
+    assert_eq!(first.signatures.len(), 1);
+    assert_eq!(first.signer_key(0, 0).unwrap(), &validator_authority_id());
+    assert_eq!(first.message().account_keys.len(), num_accounts_expected);
 
     tx
 }
