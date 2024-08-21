@@ -8,6 +8,7 @@ use solana_program::{
     entrypoint::ProgramResult,
     msg,
     program::invoke,
+    program_error::ProgramError,
     pubkey::Pubkey,
 };
 
@@ -76,6 +77,7 @@ pub fn process_instruction<'a>(
         discriminant => {
             msg!("Error: unknown instruction: [{}]", discriminant);
             msg!("Instruction data: {:?}", instruction_data);
+            return Err(ProgramError::InvalidInstructionData);
         }
     }
     Ok(())

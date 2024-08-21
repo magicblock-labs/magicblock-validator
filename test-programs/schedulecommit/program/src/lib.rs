@@ -1,5 +1,8 @@
 use borsh::{BorshDeserialize, BorshSerialize};
-use ephemeral_rollups_sdk::cpi::delegate_account;
+use ephemeral_rollups_sdk::{
+    consts::EXTERNAL_UNDELEGATE_DISCRIMINATOR,
+    cpi::{delegate_account, undelegate_account},
+};
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
     declare_id,
@@ -31,6 +34,8 @@ pub const INIT_IX: u8 = 0;
 pub const DELEGATE_CPI_IX: u8 = 1;
 pub const SCHEDULECOMMIT_CPI_IX: u8 = 2;
 pub const SCHEDULECOMMIT_AND_UNDELEGATE_CPI_IX: u8 = 3;
+
+const UNDELEGATE_IX: u8 = EXTERNAL_UNDELEGATE_DISCRIMINATOR[0];
 
 pub fn process_instruction<'a>(
     program_id: &'a Pubkey,
@@ -82,6 +87,12 @@ pub fn process_instruction<'a>(
                 false,
             )?;
         }
+        // # Account references:
+        // - **0.**   `[WRITE]`         Delegated account
+        // - **1.**   `[]`              Delegation program
+        // - **2.**   `[WRITE]`         Buffer account
+        // - **3.**   `[WRITE]`         Payer
+        // - **4.**   `[]`              System program
         SCHEDULECOMMIT_AND_UNDELEGATE_CPI_IX => {
             // Same instruction input like [SCHEDULECOMMIT_CPI_IX].
             // Behavior differs that it will request undelegation of committed accounts.
@@ -92,9 +103,28 @@ pub fn process_instruction<'a>(
                 true,
             )?;
         }
+        // This is invoked by the delegation program when we request to undelegate
+        // accounts.
+        // # Account references:
+        // - **0.** `[WRITE]` Account to be undelegated
+        // - **1.** `[WRITE]` Buffer account
+        // - **2.** `[WRITE]` Payer
+        // - **3.** `[]` System program
+        UNDELEGATE_IX => {
+            let (disc, seeds_data) = instruction_data
+                .split_at(EXTERNAL_UNDELEGATE_DISCRIMINATOR.len());
+            if disc != EXTERNAL_UNDELEGATE_DISCRIMINATOR {
+                msg!("Error: unknown instruction: [{:?}] (had assumed undelegate)", disc);
+                msg!("Instruction data: {:?}", instruction_data);
+                return Err(ProgramError::InvalidInstructionData);
+            }
+
+            process_undelegate_request(accounts, seeds_data)?;
+        }
         discriminant => {
             msg!("Error: unknown instruction: [{}]", discriminant);
             msg!("Instruction data: {:?}", instruction_data);
+            return Err(ProgramError::InvalidInstructionData);
         }
     }
     Ok(())
@@ -303,4 +333,33 @@ pub fn create_schedule_commit_ix(
         &instruction_data,
         account_metas,
     )
+}
+
+// -----------------
+// Undelegate Request
+// -----------------
+fn process_undelegate_request(
+    accounts: &[AccountInfo],
+    seeds_data: &[u8],
+) -> ProgramResult {
+    msg!("Processing undelegate_request instruction");
+    let accounts_iter = &mut accounts.iter();
+    let delegated_account = next_account_info(accounts_iter)?;
+    let buffer = next_account_info(accounts_iter)?;
+    let payer = next_account_info(accounts_iter)?;
+    let system_program = next_account_info(accounts_iter)?;
+    let account_seeds =
+        <Vec<Vec<u8>>>::try_from_slice(seeds_data).map_err(|err| {
+            msg!("ERROR: failed to parse account seeds {:?}", err);
+            ProgramError::InvalidArgument
+        })?;
+    undelegate_account(
+        delegated_account,
+        &crate::id(),
+        buffer,
+        payer,
+        system_program,
+        account_seeds,
+    )?;
+    Ok(())
 }
