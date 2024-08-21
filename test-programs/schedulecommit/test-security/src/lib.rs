@@ -73,8 +73,9 @@ pub fn process_instruction<'a>(
             false,
             false,
         )?,
-        _ => {
-            msg!("Error: unknown instruction")
+        discriminant => {
+            msg!("Error: unknown instruction: [{}]", discriminant);
+            msg!("Instruction data: {:?}", instruction_data);
         }
     }
     Ok(())
