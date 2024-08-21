@@ -25,6 +25,7 @@ use crate::{
     utils::get_epoch,
     AccountCommittee, CommitAccountsPayload, LifecycleMode,
     ScheduledCommitsProcessor, SendableCommitAccountsPayload,
+    UndelegationRequest,
 };
 
 lazy_static! {
@@ -378,7 +379,7 @@ where
             .create_transactions_to_commit_specific_accounts(
                 accounts_to_be_committed,
                 slot,
-                false,
+                None,
             )
             .await?;
         let sendables = commit_infos
@@ -399,7 +400,7 @@ where
         &self,
         accounts_to_be_committed: Vec<Pubkey>,
         slot: u64,
-        request_undelegation: bool,
+        undelegation_request: Option<UndelegationRequest>,
     ) -> AccountsResult<Vec<CommitAccountsPayload>> {
         // Get current account states from internal account provider
         let mut committees = Vec::new();
@@ -411,7 +412,7 @@ where
                     pubkey: *pubkey,
                     account_data: acc,
                     slot,
-                    request_undelegation,
+                    undelegation_request: undelegation_request.clone(),
                 });
             } else {
                 error!(

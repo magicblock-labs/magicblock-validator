@@ -14,6 +14,7 @@ use crate::{
     errors::AccountsResult, utils::execute_legacy_transaction,
     AccountCommittee, AccountCommitter, InternalAccountProvider,
     ScheduledCommitsProcessor, SendableCommitAccountsPayload,
+    UndelegationRequest,
 };
 
 pub struct RemoteScheduledCommitsProcessor {
@@ -64,11 +65,19 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
             for pubkey in commit.accounts {
                 match account_provider.get_account(&pubkey) {
                     Some(account_data) => {
+                        let undelegation_request =
+                            if commit.request_undelegation {
+                                Some(UndelegationRequest {
+                                    owner: commit.owner,
+                                })
+                            } else {
+                                None
+                            };
                         committees.push(AccountCommittee {
                             pubkey,
                             account_data,
-                            request_undelegation: commit.request_undelegation,
                             slot: commit.slot,
+                            undelegation_request,
                         });
                     }
                     None => {
@@ -126,6 +135,7 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
 
             // Record that we are about to send the commit to chain including all
             // information (mainly signatures) needed to track its outcome on chain
+
             let sent_commit = SentCommit {
                 commit_id: commit.id,
                 slot: commit.slot,
@@ -134,7 +144,9 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
                 chain_signatures: signatures,
                 included_pubkeys: included_pubkeys.into_iter().collect(),
                 excluded_pubkeys,
-                requested_undelegation: commit.request_undelegation,
+                requested_undelegation_to_owner: commit
+                    .request_undelegation
+                    .then_some(commit.owner),
             };
             register_scheduled_commit_sent(sent_commit);
             let signature = execute_legacy_transaction(

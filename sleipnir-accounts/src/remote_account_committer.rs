@@ -1,7 +1,7 @@
 use async_trait::async_trait;
 use dlp::instruction::{commit_state, finalize, undelegate};
 use log::*;
-use sleipnir_program::ScheduledCommit;
+use sleipnir_program::{validator_authority_id, ScheduledCommit};
 use solana_rpc_client::{
     nonblocking::rpc_client::RpcClient, rpc_client::SerializableTransaction,
 };
@@ -19,7 +19,7 @@ use crate::{
     deleg::CommitAccountArgs,
     errors::{AccountsError, AccountsResult},
     AccountCommittee, AccountCommitter, CommitAccountsPayload,
-    SendableCommitAccountsPayload,
+    SendableCommitAccountsPayload, UndelegationRequest,
 };
 
 impl From<(ScheduledCommit, Vec<u8>)> for CommitAccountArgs {
@@ -70,21 +70,31 @@ impl AccountCommitter for RemoteAccountCommitter {
                 AccountsError::FailedToGetLatestBlockhash(err.to_string())
             })?;
 
+        let committee_count = u32::try_from(committees.len())
+            .map_err(|_| AccountsError::TooManyCommittees(committees.len()))?;
+        let undelegation_count = u32::try_from(
+            committees
+                .iter()
+                .filter(|c| c.undelegation_request.is_some())
+                .count(),
+        )
+        .map_err(|_| AccountsError::TooManyCommittees(committees.len()))?;
         let (compute_budget_ix, compute_unit_price_ix) =
-            self.compute_instructions();
+            self.compute_instructions(committee_count, undelegation_count);
+
         let mut ixs = vec![compute_budget_ix, compute_unit_price_ix];
 
         for AccountCommittee {
             pubkey,
             account_data,
             slot,
-            request_undelegation,
+            undelegation_request,
         } in committees.iter()
         {
             let committer = self.committer_authority.pubkey();
             let commit_args = CommitAccountArgs {
                 slot: *slot,
-                allow_undelegation: *request_undelegation,
+                allow_undelegation: undelegation_request.is_some(),
                 data: account_data.data().to_vec(),
             };
             let commit_ix =
@@ -92,15 +102,14 @@ impl AccountCommitter for RemoteAccountCommitter {
 
             let finalize_ix = finalize(committer, *pubkey, committer);
             ixs.extend(vec![commit_ix, finalize_ix]);
-            if *request_undelegation {
-                // payer: validator_id
-                // reimbursement use validator_id pubkey
-                // let undelegate_ix = undelegate(*pubkey, committer, vec![]);
-                // undelegate(*pubkey, committer, vec![]);
-                // TODO(thlorenz): @@@ Need discriminator which probably should get
-                // passed when scheduling the commit request
-                // let undelegate_ix = allow_undelegate(*pubkey);
-                eprintln!("WARN: Pending undelegation");
+            if let Some(UndelegationRequest { owner }) = undelegation_request {
+                let undelegate_ix = undelegate(
+                    validator_authority_id(),
+                    *pubkey,
+                    *owner,
+                    validator_authority_id(),
+                );
+                ixs.push(undelegate_ix);
             }
         }
 
@@ -181,13 +190,23 @@ impl AccountCommitter for RemoteAccountCommitter {
 }
 
 impl RemoteAccountCommitter {
-    fn compute_instructions(&self) -> (Instruction, Instruction) {
-        // TODO(thlorenz): We may need to compute this budget from the account size since
+    fn compute_instructions(
+        &self,
+        committee_count: u32,
+        undelegation_count: u32,
+    ) -> (Instruction, Instruction) {
+        // TODO(thlorenz): We may need to consider account size since as well since
         // the account is copied which could affect CUs
-        const COMPUTE_BUDGET: u32 = 80_000;
+        const BASE_COMPUTE_BUDGET: u32 = 50_000;
+        const COMPUTE_BUDGET_PER_COMMITTEE: u32 = 20_000;
+        const COMPUTE_BUDGET_PER_UNDELEGATION: u32 = 20_000;
+
+        let compute_budget = BASE_COMPUTE_BUDGET
+            + (COMPUTE_BUDGET_PER_COMMITTEE * committee_count)
+            + (COMPUTE_BUDGET_PER_UNDELEGATION * undelegation_count);
 
         let compute_budget_ix =
-            ComputeBudgetInstruction::set_compute_unit_limit(COMPUTE_BUDGET);
+            ComputeBudgetInstruction::set_compute_unit_limit(compute_budget);
         let compute_unit_price_ix =
             ComputeBudgetInstruction::set_compute_unit_price(
                 self.compute_unit_price,

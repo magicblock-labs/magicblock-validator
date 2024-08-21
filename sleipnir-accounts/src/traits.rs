@@ -36,11 +36,23 @@ pub trait AccountCloner {
     ) -> AccountsResult<Signature>;
 }
 
+#[derive(Clone)]
+pub struct UndelegationRequest {
+    /// The original owner of the account before it was delegated.
+    pub owner: Pubkey,
+}
+
 pub struct AccountCommittee {
+    /// The pubkey of the account to be committed.
     pub pubkey: Pubkey,
+    /// The current account state.
+    /// NOTE: if undelegation was requested the owner is set to the
+    /// delegation program when accounts are committed.
     pub account_data: AccountSharedData,
+    /// Slot at which the commit was scheduled.
     pub slot: u64,
-    pub request_undelegation: bool,
+    /// Only present if undelegation was requested.
+    pub undelegation_request: Option<UndelegationRequest>,
 }
 
 pub struct CommitAccountsPayload {

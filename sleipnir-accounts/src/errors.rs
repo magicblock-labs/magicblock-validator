@@ -36,4 +36,7 @@ pub enum AccountsError {
 
     #[error("FailedToConfirmTransaction '{0}'")]
     FailedToConfirmTransaction(String),
+
+    #[error("Too many committees: {0}")]
+    TooManyCommittees(usize),
 }

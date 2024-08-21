@@ -24,7 +24,7 @@ pub struct SentCommit {
     pub chain_signatures: Vec<Signature>,
     pub included_pubkeys: Vec<Pubkey>,
     pub excluded_pubkeys: Vec<Pubkey>,
-    pub requested_undelegation: bool,
+    pub requested_undelegation_to_owner: Option<Pubkey>,
 }
 
 /// This is a printable version of the SentCommit struct.
@@ -38,7 +38,7 @@ struct SentCommitPrintable {
     chain_signatures: Vec<String>,
     included_pubkeys: String,
     excluded_pubkeys: String,
-    requested_undelegation: bool,
+    requested_undelegation_to_owner: Option<String>,
 }
 
 impl From<SentCommit> for SentCommitPrintable {
@@ -65,7 +65,9 @@ impl From<SentCommit> for SentCommitPrintable {
                 .map(|x| x.to_string())
                 .collect::<Vec<_>>()
                 .join(", "),
-            requested_undelegation: commit.requested_undelegation,
+            requested_undelegation_to_owner: commit
+                .requested_undelegation_to_owner
+                .map(|x| x.to_string()),
         }
     }
 }
@@ -197,8 +199,12 @@ pub fn process_scheduled_commit_sent(
         );
     }
 
-    if commit.requested_undelegation {
-        ic_msg!(invoke_context, "ScheduledCommitSent requested undelegation");
+    if let Some(owner) = commit.requested_undelegation_to_owner {
+        ic_msg!(
+            invoke_context,
+            "ScheduledCommitSent requested undelegation to {}",
+            owner
+        );
     }
 
     Ok(())
@@ -235,7 +241,7 @@ mod tests {
             chain_signatures: vec![sig],
             included_pubkeys: vec![acc],
             excluded_pubkeys: Default::default(),
-            requested_undelegation: false,
+            requested_undelegation_to_owner: None,
         }
     }
 

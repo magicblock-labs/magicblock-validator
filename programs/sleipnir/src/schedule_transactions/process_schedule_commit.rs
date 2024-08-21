@@ -147,6 +147,11 @@ pub(crate) fn process_schedule_commit(
             // owner program needs to sign for the account which is not possible at
             // that point
             set_account_owner_to_delegation_program(acc);
+            ic_msg!(
+                invoke_context,
+                "ScheduleCommit: account {} owner set to delegation program",
+                acc_pubkey
+            );
         }
     }
 
