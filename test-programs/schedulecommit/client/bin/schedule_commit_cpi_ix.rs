@@ -1,10 +1,11 @@
-use schedulecommit_client::{
-    consts::MAGIC_PROGRAM_ADDR, verify, ScheduleCommitTestContext,
-};
+use std::str::FromStr;
+
+use schedulecommit_client::{verify, ScheduleCommitTestContext};
 use schedulecommit_program::api::schedule_commit_cpi_instruction;
+use sleipnir_core::magic_program;
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
-use solana_sdk::{signer::Signer, transaction::Transaction};
+use solana_sdk::{pubkey::Pubkey, signer::Signer, transaction::Transaction};
 
 pub fn main() {
     let ctx = if std::env::var("FIXED_KP").is_ok() {
@@ -27,7 +28,8 @@ pub fn main() {
 
     let ix = schedule_commit_cpi_instruction(
         payer.pubkey(),
-        MAGIC_PROGRAM_ADDR,
+        // Work around the different solana_sdk versions by creating pubkey from str
+        Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
         &committees
             .iter()
             .map(|(player, _)| player.pubkey())

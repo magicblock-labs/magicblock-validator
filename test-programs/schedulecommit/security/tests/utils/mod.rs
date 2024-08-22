@@ -1,4 +1,6 @@
-use schedulecommit_client::consts::MAGIC_PROGRAM_ADDR;
+use std::str::FromStr;
+
+use sleipnir_core::magic_program::MAGIC_PROGRAM_ADDR;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
@@ -12,9 +14,10 @@ pub fn create_sibling_schedule_cpis_instruction(
     pdas: &[Pubkey],
     player_pubkeys: &[Pubkey],
 ) -> Instruction {
+    let magic_program = Pubkey::from_str(MAGIC_PROGRAM_ADDR).unwrap();
     let mut account_metas = vec![
         AccountMeta::new(payer, true),
-        AccountMeta::new_readonly(MAGIC_PROGRAM_ADDR, false),
+        AccountMeta::new_readonly(magic_program, false),
         AccountMeta::new_readonly(schedulecommit_program::id(), false),
     ];
 
@@ -44,9 +47,10 @@ pub fn create_nested_schedule_cpis_instruction(
     pdas: &[Pubkey],
     player_pubkeys: &[Pubkey],
 ) -> Instruction {
+    let magic_program = Pubkey::from_str(MAGIC_PROGRAM_ADDR).unwrap();
     let mut account_metas = vec![
         AccountMeta::new(payer, true),
-        AccountMeta::new_readonly(MAGIC_PROGRAM_ADDR, false),
+        AccountMeta::new_readonly(magic_program, false),
     ];
 
     let mut instruction_data = vec![2];

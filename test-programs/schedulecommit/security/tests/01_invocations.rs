@@ -1,7 +1,8 @@
-use schedulecommit_client::{
-    consts::MAGIC_PROGRAM_ADDR, ScheduleCommitTestContext,
-};
+use std::str::FromStr;
+
+use schedulecommit_client::ScheduleCommitTestContext;
 use schedulecommit_program::api::schedule_commit_cpi_instruction;
+use sleipnir_core::magic_program;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
@@ -75,7 +76,7 @@ fn test_schedule_commit_directly_with_single_ix() {
     } = &ctx;
     let ix = create_schedule_commit_ix(
         payer.pubkey(),
-        MAGIC_PROGRAM_ADDR,
+        Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
         &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
     );
 
@@ -127,7 +128,7 @@ fn test_schedule_commit_directly_with_commit_ix_sandwiched() {
     // 2. Schedule commit
     let ix = create_schedule_commit_ix(
         payer.pubkey(),
-        MAGIC_PROGRAM_ADDR,
+        Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
         &committees.iter().map(|(_, pda)| *pda).collect::<Vec<_>>(),
     );
 
@@ -238,7 +239,7 @@ fn test_schedule_commit_via_direct_and_from_other_program_indirect_cpi_including
 
     let cpi_ix = schedule_commit_cpi_instruction(
         payer.pubkey(),
-        MAGIC_PROGRAM_ADDR,
+        Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
         players,
         pdas,
     );
