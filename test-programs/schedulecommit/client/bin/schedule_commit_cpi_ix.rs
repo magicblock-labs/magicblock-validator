@@ -1,6 +1,6 @@
-use std::str::FromStr;
-
-use schedulecommit_client::{verify, ScheduleCommitTestContext};
+use schedulecommit_client::{
+    consts::MAGIC_PROGRAM_ADDR, verify, ScheduleCommitTestContext,
+};
 use schedulecommit_program::api::schedule_commit_cpi_instruction;
 use sleipnir_core::magic_program;
 use solana_rpc_client::rpc_client::SerializableTransaction;
@@ -28,8 +28,7 @@ pub fn main() {
 
     let ix = schedule_commit_cpi_instruction(
         payer.pubkey(),
-        // Work around the different solana_sdk versions by creating pubkey from str
-        magic_program::MAGIC_PROGRAM_ADDR,
+        MAGIC_PROGRAM_ADDR,
         &committees
             .iter()
             .map(|(player, _)| player.pubkey())

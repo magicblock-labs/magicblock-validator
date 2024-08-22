@@ -7,7 +7,6 @@ use sleipnir_bank::{
             create_solx_send_post_transaction, SolanaxPostAccounts,
         },
     },
-    transaction_results::TransactionBalancesSet,
     LAMPORTS_PER_SIGNATURE,
 };
 use sleipnir_mutator::transactions::transactions_to_clone_account_from_cluster;
@@ -20,6 +19,7 @@ use solana_sdk::{
     hash::Hash,
     native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
+    system_program,
     transaction::Transaction,
 };
 use test_tools::{
@@ -119,8 +119,8 @@ async fn clone_solx_executable() {
                 executable: true,
                 rent_epoch
             } => {
-                assert!(lamports >= 1141440);
-                assert!(data.len() >= 36);
+                assert!(lamports == 1141440);
+                assert!(data.len() == 36);
                 assert_eq!(owner, bpf_loader_upgradeable::id());
                 assert_eq!(rent_epoch, u64::MAX);
             }
@@ -134,8 +134,8 @@ async fn clone_solx_executable() {
                 executable: false,
                 rent_epoch
             } => {
-                assert!(lamports >= 2890996080);
-                assert!(data.len() >= 415245);
+                assert!(lamports == 2890996080);
+                assert!(data.len() == 415245);
                 assert_eq!(owner, bpf_loader_upgradeable::id());
                 assert_eq!(rent_epoch, u64::MAX);
             }
@@ -149,8 +149,8 @@ async fn clone_solx_executable() {
                 executable: false,
                 rent_epoch
             } => {
-                assert!(lamports >= 6264000);
-                assert!(data.len() >= 772);
+                assert!(lamports == 6264000);
+                assert!(data.len() == 772);
                 assert_eq!(owner, elfs::solanax::id());
                 assert_eq!(rent_epoch, u64::MAX);
             }
@@ -163,7 +163,7 @@ async fn clone_solx_executable() {
         // Therefore to activate it we need to advance a slot
         tx_processor.bank().advance_slot();
 
-        let (tx, SolanaxPostAccounts { author: _, post }) =
+        let (tx, SolanaxPostAccounts { author, post }) =
             create_solx_send_post_transaction(tx_processor.bank());
         let sig = *tx.signature();
 
@@ -183,26 +183,18 @@ async fn clone_solx_executable() {
         assert!(sig_status.is_some());
         assert_matches!(sig_status.as_ref().unwrap(), Ok(()));
 
-        // Accounts
+        // Accounts checks
+        let author_acc = tx_processor.bank().get_account(&author).unwrap();
+        assert_eq!(author_acc.data().len(), 0);
+        assert_eq!(author_acc.owner(), &system_program::ID);
+        assert_eq!(
+            author_acc.lamports(),
+            LAMPORTS_PER_SOL - 2 * LAMPORTS_PER_SIGNATURE
+        );
+
         let post_acc = tx_processor.bank().get_account(&post).unwrap();
         assert_eq!(post_acc.data().len(), 1180);
         assert_eq!(post_acc.owner(), &elfs::solanax::ID);
-
-        // Balances
-        assert_eq!(result.balances.len(), 1);
-        let balances = &result.balances[0];
-        assert_matches!(
-            balances,
-            TransactionBalancesSet {
-                pre_balances: pre,
-                post_balances: post,
-            } => {
-                assert_eq!(pre.len(), 1);
-                assert_eq!(pre[0], [LAMPORTS_PER_SOL, 9103680, 1, 1141440]);
-
-                assert_eq!(post.len(), 1);
-                assert_eq!(post[0], [LAMPORTS_PER_SOL - 2 * LAMPORTS_PER_SIGNATURE , 9103680, 1, 1141440]);
-            }
-        );
+        assert_eq!(post_acc.lamports(), 9103680);
     }
 }

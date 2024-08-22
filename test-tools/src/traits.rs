@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use sleipnir_accounts_db::transaction_results::TransactionExecutionDetails;
-use sleipnir_bank::{bank::Bank, transaction_results::TransactionBalancesSet};
+use sleipnir_bank::bank::Bank;
 use solana_sdk::{
     signature::Signature,
     transaction::{SanitizedTransaction, Transaction},
@@ -11,7 +11,6 @@ use solana_sdk::{
 pub struct TransactionsProcessorProcessResult {
     pub transactions:
         HashMap<Signature, (SanitizedTransaction, TransactionExecutionDetails)>,
-    pub balances: Vec<TransactionBalancesSet>,
 }
 
 impl TransactionsProcessorProcessResult {

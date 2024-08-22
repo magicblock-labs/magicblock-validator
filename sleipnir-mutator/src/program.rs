@@ -1,3 +1,5 @@
+use std::u64;
+
 use sleipnir_program::{
     sleipnir_instruction::AccountModification, validator_authority_id,
 };
@@ -85,7 +87,7 @@ pub async fn resolve_program_modifications(
         data: program_data_data,
         owner: bpf_loader_upgradeable::id(),
         executable: false,
-        rent_epoch: 0,
+        rent_epoch: u64::MAX,
     };
     let program_data_modification = create_account_modification_from_account(
         &program_data_pubkey,
@@ -109,7 +111,7 @@ pub async fn resolve_program_modifications(
         data: program_buffer_data,
         owner: bpf_loader_upgradeable::id(),
         executable: false,
-        rent_epoch: 0,
+        rent_epoch: u64::MAX,
     };
     let program_buffer_modification = create_account_modification_from_account(
         &program_buffer_pubkey,

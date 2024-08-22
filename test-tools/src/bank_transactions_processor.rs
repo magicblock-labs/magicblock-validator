@@ -55,38 +55,44 @@ impl TransactionsProcessor for BankTransactionsProcessor {
         &self,
         transactions: Vec<SanitizedTransaction>,
     ) -> Result<TransactionsProcessorProcessResult, String> {
-        let mut timings = ExecuteTimings::default();
+        let mut transaction_outcomes = HashMap::new();
 
-        let (transaction_results, balances) = {
-            let batch = self.bank.prepare_sanitized_batch(&transactions);
+        for transaction in transactions {
+            let signature = *transaction.signature();
 
-            let (transaction_results, balances) =
-                self.bank.load_execute_and_commit_transactions(
-                    &batch,
-                    true,
-                    TransactionExecutionRecordingOpts::recording_logs(),
-                    &mut timings,
-                    None,
-                );
-            (transaction_results, balances)
-        };
+            let txs = vec![transaction.clone()];
+            let batch = self.bank.prepare_sanitized_batch(&txs);
+            let mut timings = ExecuteTimings::default();
+            let (
+                TransactionResults {
+                    execution_results, ..
+                },
+                _,
+            ) = self.bank.load_execute_and_commit_transactions(
+                &batch,
+                true,
+                TransactionExecutionRecordingOpts::recording_logs(),
+                &mut timings,
+                None,
+            );
 
-        let TransactionResults {
-            execution_results, ..
-        } = transaction_results;
+            let execution_result = execution_results
+                .first()
+                .expect("Could not find the transaction result");
+            let execution_details = match execution_result.details() {
+                Some(details) => details.clone(),
+                None => panic!(
+                    "Error resolving transaction results details: {:?}, tx: {:?}",
+                    execution_result, transaction
+                ),
+            };
 
-        // Assuming here that results come back in same order as the txs we sent in
-        let transactions = transactions
-            .into_iter()
-            .zip(execution_results)
-            .map(|(tx, res)| {
-                (*tx.signature(), (tx, res.details().cloned().unwrap()))
-            })
-            .collect::<HashMap<_, _>>();
+            transaction_outcomes
+                .insert(signature, (transaction, execution_details));
+        }
 
         Ok(TransactionsProcessorProcessResult {
-            transactions,
-            balances: vec![balances],
+            transactions: transaction_outcomes,
         })
     }
 
