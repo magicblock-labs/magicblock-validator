@@ -1,5 +1,3 @@
-use std::u64;
-
 use sleipnir_program::{
     sleipnir_instruction::AccountModification, validator_authority_id,
 };
