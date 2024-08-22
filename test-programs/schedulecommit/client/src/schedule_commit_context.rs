@@ -347,6 +347,36 @@ impl ScheduleCommitTestContext {
             })
     }
 
+    pub fn fetch_ephem_account_owner(
+        &self,
+        pubkey: Pubkey,
+    ) -> anyhow::Result<Pubkey> {
+        self.ephem_client
+            .get_account(&pubkey)
+            .map(|account| account.owner)
+            .with_context(|| {
+                format!(
+                    "Failed to fetch ephemeral account owner for '{:?}'",
+                    pubkey
+                )
+            })
+    }
+
+    pub fn fetch_chain_account_owner(
+        &self,
+        pubkey: Pubkey,
+    ) -> anyhow::Result<Pubkey> {
+        self.chain_client
+            .get_account(&pubkey)
+            .map(|account| account.owner)
+            .with_context(|| {
+                format!(
+                    "Failed to fetch chain account owner for '{:?}'",
+                    pubkey
+                )
+            })
+    }
+
     // -----------------
     // Airdrop/Transactions
     // -----------------

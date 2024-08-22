@@ -1,6 +1,8 @@
+use ephemeral_rollups_sdk::consts::DELEGATION_PROGRAM_ID;
 use schedulecommit_client::{
     verify::ScheduledCommitResult, ScheduleCommitTestContext,
 };
+use solana_sdk::pubkey::Pubkey;
 
 // -----------------
 // Setup
@@ -79,4 +81,48 @@ pub fn assert_two_committees_synchronized_count(
         pda2,
         expected_count
     );
+}
+
+#[allow(dead_code)] // used in 02_commit_and_undelegate.rs
+pub fn assert_two_committee_accounts_were_undelegated_on_chain(
+    ctx: &ScheduleCommitTestContext,
+) {
+    let pda1 = ctx.committees[0].1;
+    let pda2 = ctx.committees[1].1;
+    let id = schedulecommit_program::id();
+    assert_account_was_undelegated_on_chain(ctx, pda1, id);
+    assert_account_was_undelegated_on_chain(ctx, pda2, id);
+}
+
+#[allow(dead_code)] // used in 02_commit_and_undelegate.rs
+pub fn assert_account_was_undelegated_on_chain(
+    ctx: &ScheduleCommitTestContext,
+    pda: Pubkey,
+    new_owner: Pubkey,
+) {
+    let owner = ctx.fetch_chain_account_owner(pda).unwrap();
+    assert_ne!(
+        owner, DELEGATION_PROGRAM_ID,
+        "not owned by delegation program"
+    );
+    assert_eq!(owner, new_owner, "new owner");
+}
+
+#[allow(dead_code)] // used in 02_commit_and_undelegate.rs
+pub fn assert_two_committee_accounts_were_locked_on_ephem(
+    ctx: &ScheduleCommitTestContext,
+) {
+    let pda1 = ctx.committees[0].1;
+    let pda2 = ctx.committees[1].1;
+    assert_account_was_locked_in_ephem(ctx, pda1);
+    assert_account_was_locked_in_ephem(ctx, pda2);
+}
+
+#[allow(dead_code)] // used in 02_commit_and_undelegate.rs
+pub fn assert_account_was_locked_in_ephem(
+    ctx: &ScheduleCommitTestContext,
+    pda: Pubkey,
+) {
+    let owner = ctx.fetch_ephem_account_owner(pda).unwrap();
+    assert_eq!(owner, DELEGATION_PROGRAM_ID, "owned by delegation program");
 }

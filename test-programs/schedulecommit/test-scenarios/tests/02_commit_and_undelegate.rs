@@ -7,6 +7,8 @@ use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{pubkey::Pubkey, signer::Signer, transaction::Transaction};
 use utils::{
+    assert_two_committee_accounts_were_locked_on_ephem,
+    assert_two_committee_accounts_were_undelegated_on_chain,
     assert_two_committees_synchronized_count,
     assert_two_committees_were_committed,
     get_context_with_delegated_committees,
@@ -60,6 +62,6 @@ fn test_committing_and_undelegating_two_accounts() {
     assert_two_committees_were_committed(&ctx, &res);
     assert_two_committees_synchronized_count(&ctx, &res, 1);
 
-    // TODO: assert that accounts were undelegated and that
-    // the other accounts were closed on devnet
+    assert_two_committee_accounts_were_undelegated_on_chain(&ctx);
+    assert_two_committee_accounts_were_locked_on_ephem(&ctx);
 }

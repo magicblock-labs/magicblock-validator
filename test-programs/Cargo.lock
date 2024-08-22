@@ -2344,6 +2344,7 @@ dependencies = [
 name = "schedulecommit-test-scenarios"
 version = "0.0.0"
 dependencies = [
+ "ephemeral-rollups-sdk",
  "schedulecommit-client",
  "schedulecommit-program",
  "sleipnir-core",
