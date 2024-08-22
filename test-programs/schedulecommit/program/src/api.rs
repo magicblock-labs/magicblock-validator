@@ -9,7 +9,7 @@ use solana_program::{
 };
 
 use crate::{
-    DelegateCpiArgs, DELEGATE_CPI_IX, INIT_IX,
+    DelegateCpiArgs, DELEGATE_CPI_IX, INCREASE_COUNT_IX, INIT_IX,
     SCHEDULECOMMIT_AND_UNDELEGATE_CPI_IX, SCHEDULECOMMIT_CPI_IX,
 };
 
@@ -120,6 +120,14 @@ fn schedule_commit_cpi_instruction_impl(
     for player in players {
         instruction_data.extend_from_slice(player.as_ref());
     }
+    Instruction::new_with_bytes(program_id, &instruction_data, account_metas)
+}
+
+pub fn increase_count_instruction(committee: Pubkey) -> Instruction {
+    let program_id = crate::id();
+    let account_metas = vec![AccountMeta::new(committee, false)];
+
+    let instruction_data = vec![INCREASE_COUNT_IX];
     Instruction::new_with_bytes(program_id, &instruction_data, account_metas)
 }
 

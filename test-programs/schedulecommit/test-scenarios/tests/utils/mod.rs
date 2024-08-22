@@ -2,7 +2,10 @@ use ephemeral_rollups_sdk::consts::DELEGATION_PROGRAM_ID;
 use schedulecommit_client::{
     verify::ScheduledCommitResult, ScheduleCommitTestContext,
 };
-use solana_sdk::pubkey::Pubkey;
+use solana_sdk::{
+    instruction::InstructionError, pubkey::Pubkey, signature::Signature,
+    transaction::TransactionError,
+};
 
 // -----------------
 // Setup
@@ -125,4 +128,26 @@ pub fn assert_account_was_locked_in_ephem(
 ) {
     let owner = ctx.fetch_ephem_account_owner(pda).unwrap();
     assert_eq!(owner, DELEGATION_PROGRAM_ID, "owned by delegation program");
+}
+
+#[allow(dead_code)] // used in 02_commit_and_undelegate.rs
+pub fn assert_tx_failed_with_instruction_error(
+    tx_result: Result<Signature, solana_rpc_client_api::client_error::Error>,
+    ix_error: InstructionError,
+) {
+    let tx_err = match tx_result {
+        Ok(sig) => panic!("Expected error, got signature: {:?}", sig),
+        Err(err) => err,
+    };
+    assert!(
+        matches!(
+            tx_err.get_transaction_error()
+                .expect("Should be TransactionError"),
+            TransactionError::InstructionError(_, err)
+            if err == ix_error
+        ),
+        "Expected InstructionError({:?}), got: {:?}",
+        ix_error,
+        tx_err
+    );
 }

@@ -34,6 +34,7 @@ pub const INIT_IX: u8 = 0;
 pub const DELEGATE_CPI_IX: u8 = 1;
 pub const SCHEDULECOMMIT_CPI_IX: u8 = 2;
 pub const SCHEDULECOMMIT_AND_UNDELEGATE_CPI_IX: u8 = 3;
+pub const INCREASE_COUNT_IX: u8 = 4;
 
 const UNDELEGATE_IX: u8 = EXTERNAL_UNDELEGATE_DISCRIMINATOR[0];
 
@@ -102,6 +103,14 @@ pub fn process_instruction<'a>(
                 true,
                 true,
             )?;
+        }
+        // Increases the count of a PDA of this program by one.
+        // This instruction can only run on the ephemeral after the account was
+        // delegated or on chain while it is undelegated.
+        // # Account references:
+        // - **0.** `[WRITE]` Account to increase count
+        INCREASE_COUNT_IX => {
+            process_increase_count(accounts)?;
         }
         // This is invoked by the delegation program when we request to undelegate
         // accounts.
@@ -309,6 +318,24 @@ pub fn process_schedulecommit_cpi(
     Ok(())
 }
 
+fn process_increase_count(accounts: &[AccountInfo]) -> ProgramResult {
+    msg!("Processing increase_count instruction");
+    // NOTE: we don't check if the player owning the PDA is signer here for simplicity
+    let accounts_iter = &mut accounts.iter();
+    let account = next_account_info(accounts_iter)?;
+    let mut main_account = {
+        let main_account_data = account.try_borrow_data()?;
+        MainAccount::try_from_slice(&main_account_data)?
+    };
+    main_account.count += 1;
+    main_account
+        .serialize(&mut &mut account.try_borrow_mut_data()?.as_mut())?;
+    Ok(())
+}
+
+// -----------------
+// create_schedule_commit_ix
+// -----------------
 pub fn create_schedule_commit_ix(
     magic_program_key: Pubkey,
     account_infos: &[&AccountInfo],
