@@ -4376,7 +4376,6 @@ dependencies = [
 name = "sleipnir-core"
 version = "1.19.0"
 dependencies = [
- "solana-program",
  "solana-sdk",
 ]
 
