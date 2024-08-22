@@ -2,10 +2,9 @@ use schedulecommit_client::{
     consts::MAGIC_PROGRAM_ADDR, verify, ScheduleCommitTestContext,
 };
 use schedulecommit_program::api::schedule_commit_cpi_instruction;
-use sleipnir_core::magic_program;
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
-use solana_sdk::{pubkey::Pubkey, signer::Signer, transaction::Transaction};
+use solana_sdk::{signer::Signer, transaction::Transaction};
 
 pub fn main() {
     let ctx = if std::env::var("FIXED_KP").is_ok() {
