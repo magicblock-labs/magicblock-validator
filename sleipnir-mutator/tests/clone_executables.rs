@@ -10,22 +10,65 @@ use sleipnir_bank::{
     transaction_results::TransactionBalancesSet,
     LAMPORTS_PER_SIGNATURE,
 };
+use sleipnir_mutator::transactions::transactions_to_clone_account_from_cluster;
+use sleipnir_program::validator_authority_id;
 use solana_sdk::{
     account::{Account, ReadableAccount},
     bpf_loader_upgradeable,
+    clock::Slot,
+    genesis_config::ClusterType,
+    hash::Hash,
     native_token::LAMPORTS_PER_SOL,
+    pubkey::Pubkey,
+    transaction::Transaction,
 };
 use test_tools::{
     diagnostics::log_exec_details, init_logger, services::skip_if_devnet_down,
     transactions_processor, validator::ensure_funded_validator_authority,
 };
 
-use crate::utils::{
-    fund_luzifer, verified_tx_to_clone_from_devnet, SOLX_EXEC, SOLX_IDL,
-    SOLX_PROG,
-};
+use crate::utils::{fund_luzifer, SOLX_EXEC, SOLX_IDL, SOLX_PROG};
 
 mod utils;
+
+async fn verified_txs_to_clone_executable_from_devnet(
+    pubkey: &Pubkey,
+    slot: Slot,
+    recent_blockhash: Hash,
+) -> Vec<Transaction> {
+    let txs = transactions_to_clone_account_from_cluster(
+        &ClusterType::Devnet.into(),
+        pubkey,
+        None,
+        recent_blockhash,
+        slot,
+        None,
+    )
+    .await
+    .expect("Failed to create program clone transaction");
+
+    assert!(txs.len() == 2);
+
+    let tx_mutate = txs.first().unwrap();
+    assert!(tx_mutate.is_signed());
+    assert_eq!(tx_mutate.signatures.len(), 1);
+    assert_eq!(
+        tx_mutate.signer_key(0, 0).unwrap(),
+        &validator_authority_id()
+    );
+    assert!(tx_mutate.message().account_keys.len() >= 5);
+    assert!(tx_mutate.message().account_keys.len() <= 6);
+
+    let tx_upgrade = txs.get(1).unwrap();
+    assert!(tx_upgrade.is_signed());
+    assert_eq!(tx_upgrade.signatures.len(), 1);
+    assert_eq!(
+        tx_upgrade.signer_key(0, 0).unwrap(),
+        &validator_authority_id()
+    );
+
+    txs
+}
 
 #[tokio::test]
 async fn clone_solx_executable() {
@@ -39,14 +82,13 @@ async fn clone_solx_executable() {
     // 1. Exec Clone Transaction
     {
         let slot = tx_processor.bank().slot();
-        let tx = verified_tx_to_clone_from_devnet(
+        let txs = verified_txs_to_clone_executable_from_devnet(
             &SOLX_PROG,
             slot,
-            5,
             tx_processor.bank().last_blockhash(),
         )
         .await;
-        let result = tx_processor.process(vec![tx]).unwrap();
+        let result = tx_processor.process(txs).unwrap();
 
         let (_, exec_details) = result.transactions.values().next().unwrap();
         log_exec_details(exec_details);
@@ -69,46 +111,46 @@ async fn clone_solx_executable() {
         assert_matches!(
             solx_prog,
             Account {
-                lamports: l,
-                data: d,
-                owner: o,
+                lamports,
+                data,
+                owner,
                 executable: true,
-                rent_epoch: r
+                rent_epoch
             } => {
-                assert!(l >= 1141440);
-                assert!(d.len() >= 36);
-                assert_eq!(o, bpf_loader_upgradeable::id());
-                assert_eq!(r, u64::MAX);
+                assert!(lamports >= 1141440);
+                assert!(data.len() >= 36);
+                assert_eq!(owner, bpf_loader_upgradeable::id());
+                assert_eq!(rent_epoch, u64::MAX);
             }
         );
         assert_matches!(
             solx_exec,
             Account {
-                lamports: l,
-                data: d,
-                owner: o,
+                lamports,
+                data,
+                owner,
                 executable: false,
-                rent_epoch: r
+                rent_epoch
             } => {
-                assert!(l >= 2890996080);
-                assert!(d.len() >= 415245);
-                assert_eq!(o, bpf_loader_upgradeable::id());
-                assert_eq!(r, u64::MAX);
+                assert!(lamports >= 2890996080);
+                assert!(data.len() >= 415245);
+                assert_eq!(owner, bpf_loader_upgradeable::id());
+                assert_eq!(rent_epoch, u64::MAX);
             }
         );
         assert_matches!(
             solx_idl,
             Account {
-                lamports: l,
-                data: d,
-                owner: o,
+                lamports,
+                data,
+                owner,
                 executable: false,
-                rent_epoch: r
+                rent_epoch
             } => {
-                assert!(l >= 6264000);
-                assert!(d.len() >= 772);
-                assert_eq!(o, elfs::solanax::id());
-                assert_eq!(r, u64::MAX);
+                assert!(lamports >= 6264000);
+                assert!(data.len() >= 772);
+                assert_eq!(owner, elfs::solanax::id());
+                assert_eq!(rent_epoch, u64::MAX);
             }
         );
     }

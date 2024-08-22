@@ -1,8 +1,8 @@
-pub mod account_modifications;
-mod adjust_deployment_slot;
+pub mod account;
 mod cluster;
 pub mod errors;
-mod get_pubkey;
+pub mod program;
 pub mod transactions;
+mod utils;
 
 pub use cluster::*;

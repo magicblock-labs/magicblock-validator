@@ -41,9 +41,6 @@ pub enum MutatorError {
     #[error("Could not find executable data account '{0}' for program account '{1}'")]
     CouldNotFindExecutableDataAccount(Pubkey, Pubkey),
 
-    #[error("The executable data of account '{1}' for program account '{1}' is does not hold program data")]
-    InvalidExecutableDataAccountData(Pubkey, Pubkey),
-
     #[error("Invalid program data account '{0}' for program account '{1}'")]
     InvalidProgramDataContent(Pubkey, Pubkey),
 

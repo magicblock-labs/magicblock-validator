@@ -45,7 +45,7 @@ impl AccountCloner for RemoteAccountCloner {
         let blockhash = self.bank.last_blockhash();
         let clone_txs = transactions_to_clone_account_from_cluster(
             &self.cluster,
-            &pubkey,
+            pubkey,
             account,
             blockhash,
             slot,
