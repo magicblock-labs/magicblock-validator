@@ -74,6 +74,7 @@ impl TransactionsProcessor for BankTransactionsProcessor {
         let TransactionResults {
             execution_results, ..
         } = transaction_results;
+
         // Assuming here that results come back in same order as the txs we sent in
         let transactions = transactions
             .into_iter()
