@@ -66,7 +66,7 @@ pub struct CommitAccountsTransaction {
 
 impl CommitAccountsTransaction {
     pub fn get_signature(&self) -> Signature {
-        self.transaction.get_signature().clone()
+        *self.transaction.get_signature()
     }
 }
 
@@ -91,6 +91,17 @@ impl SendableCommitAccountsPayload {
     }
 }
 
+/// Represents a transaction that has been sent to chain and is pending
+/// completion.
+#[derive(Debug)]
+pub struct PendingCommitTransaction {
+    /// The signature of the transaction that was sent to chain.
+    pub signature: Signature,
+    /// The accounts that are undelegated on chain as part of this transaction.
+    /// They need to be removed from our validator when the transaction completes.
+    pub undelegated_accounts: Vec<Pubkey>,
+}
+
 #[async_trait]
 pub trait AccountCommitter: Send + Sync + 'static {
     /// Creates a transaction to commit each provided account unless it determines
@@ -110,5 +121,5 @@ pub trait AccountCommitter: Send + Sync + 'static {
     async fn send_commit_transactions(
         &self,
         payloads: Vec<SendableCommitAccountsPayload>,
-    ) -> AccountsResult<Vec<Signature>>;
+    ) -> AccountsResult<Vec<PendingCommitTransaction>>;
 }

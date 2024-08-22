@@ -4270,6 +4270,7 @@ dependencies = [
  "log",
  "sleipnir-account-updates",
  "sleipnir-bank",
+ "sleipnir-core",
  "sleipnir-mutator",
  "sleipnir-processor",
  "sleipnir-program",

@@ -24,8 +24,8 @@ use crate::{
     traits::{AccountCloner, AccountCommitter, InternalAccountProvider},
     utils::get_epoch,
     AccountCommittee, CommitAccountsPayload, LifecycleMode,
-    ScheduledCommitsProcessor, SendableCommitAccountsPayload,
-    UndelegationRequest,
+    PendingCommitTransaction, ScheduledCommitsProcessor,
+    SendableCommitAccountsPayload, UndelegationRequest,
 };
 
 lazy_static! {
@@ -77,7 +77,7 @@ where
 }
 
 impl<IAP, AFE, ACL, ACM, AUP, TAE, TAV, SCP>
-    ExternalAccountsManager<IAP, AFE, ACL, ACM, AUP, TAE, TAV, SCP>
+ExternalAccountsManager<IAP, AFE, ACL, ACM, AUP, TAE, TAV, SCP>
 where
     IAP: InternalAccountProvider,
     AFE: AccountFetcher,
@@ -108,7 +108,7 @@ where
             accounts_holder,
             tx.signature().to_string(),
         )
-        .await
+            .await
     }
 
     // Direct use for tests only
@@ -392,8 +392,11 @@ where
                 None => None,
             })
             .collect::<Vec<_>>();
+        // NOTE: we ignore the [PendingCommitTransaction::undelegated_accounts] here since for
+        // scheduled commits we never request undelegation
         self.run_transactions_to_commit_specific_accounts(now, sendables)
             .await
+            .map(|pendings| pendings.into_iter().map(|x| x.signature).collect())
     }
 
     pub async fn create_transactions_to_commit_specific_accounts(
@@ -437,14 +440,14 @@ where
         &self,
         now: Duration,
         payloads: Vec<SendableCommitAccountsPayload>,
-    ) -> AccountsResult<Vec<Signature>> {
+    ) -> AccountsResult<Vec<PendingCommitTransaction>> {
         let pubkeys = payloads
             .iter()
             .flat_map(|x| x.committees.iter().map(|x| x.0))
             .collect::<Vec<_>>();
 
         // Commit all transactions
-        let signatures = self
+        let pending_commits = self
             .account_committer
             .send_commit_transactions(payloads)
             .await?;
@@ -464,7 +467,7 @@ where
             }
         }
 
-        Ok(signatures)
+        Ok(pending_commits)
     }
 
     pub fn last_commit(&self, pubkey: &Pubkey) -> Option<Duration> {

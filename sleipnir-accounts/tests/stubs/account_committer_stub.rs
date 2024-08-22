@@ -6,7 +6,7 @@ use std::{
 use async_trait::async_trait;
 use sleipnir_accounts::{
     errors::AccountsResult, AccountCommittee, AccountCommitter,
-    CommitAccountsPayload, CommitAccountsTransaction,
+    CommitAccountsPayload, CommitAccountsTransaction, PendingCommitTransaction,
     SendableCommitAccountsPayload,
 };
 use solana_sdk::{
@@ -52,9 +52,14 @@ impl AccountCommitter for AccountCommitterStub {
     async fn send_commit_transactions(
         &self,
         payloads: Vec<SendableCommitAccountsPayload>,
-    ) -> AccountsResult<Vec<Signature>> {
-        let signatures =
-            payloads.iter().map(|_| Signature::new_unique()).collect();
+    ) -> AccountsResult<Vec<PendingCommitTransaction>> {
+        let signatures = payloads
+            .iter()
+            .map(|_| PendingCommitTransaction {
+                signature: Signature::new_unique(),
+                undelegated_accounts: Vec::new(),
+            })
+            .collect();
         for payload in payloads {
             for (pubkey, account) in payload.committees {
                 self.committed_accounts

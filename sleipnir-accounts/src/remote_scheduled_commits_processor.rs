@@ -3,6 +3,7 @@ use std::{collections::HashSet, sync::Arc};
 use async_trait::async_trait;
 use log::*;
 use sleipnir_bank::bank::Bank;
+use sleipnir_core::debug_panic;
 use sleipnir_mutator::Cluster;
 use sleipnir_program::{
     register_scheduled_commit_sent, SentCommit, TransactionScheduler,
@@ -182,17 +183,28 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
         // point where we do allow validator shutdown
         let committer = committer.clone();
         tokio::task::spawn(async move {
-            let signatures = committer
+            let pending_commits = match committer
                 .send_commit_transactions(sendable_payloads_queue)
-                .await;
-            debug!(
-                "Signaled commit with external signatures: {:?}",
-                signatures
-            );
+                .await
+            {
+                Ok(commits) => commits,
+                Err(err) => {
+                    debug_panic!(
+                        "Failed to send commit transactions: {:?}",
+                        err
+                    );
+                    return;
+                }
+            };
+            let undelegated_accounts = pending_commits
+                .into_iter()
+                .flat_map(|commit| commit.undelegated_accounts.into_iter())
+                .collect::<HashSet<Pubkey>>();
+            for pubkey in undelegated_accounts {
+                eprintln!("Undelegated account: {}", pubkey);
+            }
         });
 
         Ok(())
     }
 }
-
-// TODO: @@@ tests

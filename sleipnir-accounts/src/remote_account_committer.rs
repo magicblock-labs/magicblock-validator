@@ -7,11 +7,8 @@ use solana_rpc_client::{
 };
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{
-    account::ReadableAccount,
-    compute_budget::ComputeBudgetInstruction,
-    instruction::Instruction,
-    signature::{Keypair, Signature},
-    signer::Signer,
+    account::ReadableAccount, compute_budget::ComputeBudgetInstruction,
+    instruction::Instruction, signature::Keypair, signer::Signer,
     transaction::Transaction,
 };
 
@@ -19,8 +16,8 @@ use crate::{
     deleg::CommitAccountArgs,
     errors::{AccountsError, AccountsResult},
     AccountCommittee, AccountCommitter, CommitAccountsPayload,
-    CommitAccountsTransaction, SendableCommitAccountsPayload,
-    UndelegationRequest,
+    CommitAccountsTransaction, PendingCommitTransaction,
+    SendableCommitAccountsPayload, UndelegationRequest,
 };
 
 impl From<(ScheduledCommit, Vec<u8>)> for CommitAccountArgs {
@@ -142,13 +139,12 @@ impl AccountCommitter for RemoteAccountCommitter {
     async fn send_commit_transactions(
         &self,
         payloads: Vec<SendableCommitAccountsPayload>,
-    ) -> AccountsResult<Vec<Signature>> {
-        let mut signatures = Vec::new();
+    ) -> AccountsResult<Vec<PendingCommitTransaction>> {
+        let mut pending_commits = Vec::new();
         for SendableCommitAccountsPayload {
             transaction:
                 CommitAccountsTransaction {
                     transaction,
-                    // TODO(thlorenz): @@@@ handle those
                     undelegated_accounts,
                 },
             committees,
@@ -194,9 +190,12 @@ impl AccountCommitter for RemoteAccountCommitter {
                 "Sent commit for [{}] | signature: '{:?}'",
                 pubkeys_display, signature
             );
-            signatures.push(signature);
+            pending_commits.push(PendingCommitTransaction {
+                signature,
+                undelegated_accounts,
+            });
         }
-        Ok(signatures)
+        Ok(pending_commits)
     }
 }
 
