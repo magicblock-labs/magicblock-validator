@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use sleipnir_mutator::AccountModification;
+use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_sdk::{
     account::{Account, AccountSharedData},
     pubkey::Pubkey,
@@ -54,20 +55,40 @@ pub struct AccountCommittee {
     /// Only present if undelegation was requested.
     pub undelegation_request: Option<UndelegationRequest>,
 }
+pub struct CommitAccountsTransaction {
+    /// The transaction that is running on chain to commit and possibly undelegate
+    /// accounts.
+    pub transaction: Transaction,
+    /// Accounts that are undelegated as part of the transaction.
+    /// They need to be removed from our validator when the transaction completes.
+    pub undelegated_accounts: Vec<Pubkey>,
+}
+
+impl CommitAccountsTransaction {
+    pub fn get_signature(&self) -> Signature {
+        self.transaction.get_signature().clone()
+    }
+}
 
 pub struct CommitAccountsPayload {
     /// The transaction that commits the accounts.
     /// None if no accounts need to be committed.
-    pub transaction: Option<Transaction>,
+    pub transaction: Option<CommitAccountsTransaction>,
     /// The pubkeys and data of the accounts that were committed.
     pub committees: Vec<(Pubkey, AccountSharedData)>,
 }
 
 /// Same as [CommitAccountsPayload] but one that is actionable
 pub struct SendableCommitAccountsPayload {
-    pub transaction: Transaction,
+    pub transaction: CommitAccountsTransaction,
     /// The pubkeys and data of the accounts that were committed.
     pub committees: Vec<(Pubkey, AccountSharedData)>,
+}
+
+impl SendableCommitAccountsPayload {
+    pub fn get_signature(&self) -> Signature {
+        self.transaction.get_signature()
+    }
 }
 
 #[async_trait]

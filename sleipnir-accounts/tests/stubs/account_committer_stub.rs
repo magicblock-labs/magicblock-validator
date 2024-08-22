@@ -6,7 +6,8 @@ use std::{
 use async_trait::async_trait;
 use sleipnir_accounts::{
     errors::AccountsResult, AccountCommittee, AccountCommitter,
-    CommitAccountsPayload, SendableCommitAccountsPayload,
+    CommitAccountsPayload, CommitAccountsTransaction,
+    SendableCommitAccountsPayload,
 };
 use solana_sdk::{
     account::AccountSharedData, pubkey::Pubkey, signature::Signature,
@@ -36,7 +37,10 @@ impl AccountCommitter for AccountCommitterStub {
     ) -> AccountsResult<Vec<CommitAccountsPayload>> {
         let transaction = Transaction::default();
         let payload = CommitAccountsPayload {
-            transaction: Some(transaction),
+            transaction: Some(CommitAccountsTransaction {
+                transaction,
+                undelegated_accounts: Vec::new(),
+            }),
             committees: committees
                 .iter()
                 .map(|x| (x.pubkey, x.account_data.clone()))

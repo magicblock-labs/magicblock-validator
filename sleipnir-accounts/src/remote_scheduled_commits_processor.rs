@@ -130,7 +130,7 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
             // chain in order to realize the commits needed
             let signatures = sendable_payloads
                 .iter()
-                .flat_map(|payload| payload.transaction.signatures.clone())
+                .map(|payload| payload.get_signature())
                 .collect::<Vec<Signature>>();
 
             // Record that we are about to send the commit to chain including all

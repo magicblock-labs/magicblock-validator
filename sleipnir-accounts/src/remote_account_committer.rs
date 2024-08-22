@@ -19,7 +19,8 @@ use crate::{
     deleg::CommitAccountArgs,
     errors::{AccountsError, AccountsResult},
     AccountCommittee, AccountCommitter, CommitAccountsPayload,
-    SendableCommitAccountsPayload, UndelegationRequest,
+    CommitAccountsTransaction, SendableCommitAccountsPayload,
+    UndelegationRequest,
 };
 
 impl From<(ScheduledCommit, Vec<u8>)> for CommitAccountArgs {
@@ -82,6 +83,7 @@ impl AccountCommitter for RemoteAccountCommitter {
         let (compute_budget_ix, compute_unit_price_ix) =
             self.compute_instructions(committee_count, undelegation_count);
 
+        let mut undelegated_accounts = Vec::new();
         let mut ixs = vec![compute_budget_ix, compute_unit_price_ix];
 
         for AccountCommittee {
@@ -110,6 +112,7 @@ impl AccountCommitter for RemoteAccountCommitter {
                     validator_authority_id(),
                 );
                 ixs.push(undelegate_ix);
+                undelegated_accounts.push(*pubkey);
             }
         }
 
@@ -128,7 +131,10 @@ impl AccountCommitter for RemoteAccountCommitter {
             .collect();
 
         Ok(vec![CommitAccountsPayload {
-            transaction: Some(tx),
+            transaction: Some(CommitAccountsTransaction {
+                transaction: tx,
+                undelegated_accounts,
+            }),
             committees,
         }])
     }
@@ -139,7 +145,12 @@ impl AccountCommitter for RemoteAccountCommitter {
     ) -> AccountsResult<Vec<Signature>> {
         let mut signatures = Vec::new();
         for SendableCommitAccountsPayload {
-            transaction,
+            transaction:
+                CommitAccountsTransaction {
+                    transaction,
+                    // TODO(thlorenz): @@@@ handle those
+                    undelegated_accounts,
+                },
             committees,
         } in payloads
         {
