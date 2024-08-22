@@ -6,18 +6,17 @@ use sleipnir_core::magic_program;
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{pubkey::Pubkey, signer::Signer, transaction::Transaction};
+use utils::{
+    assert_two_committees_synchronized_count,
+    assert_two_committees_were_committed,
+    get_context_with_delegated_committees,
+};
+
+mod utils;
 
 #[test]
 fn test_committing_and_undelegating_two_accounts() {
-    let ctx = if std::env::var("FIXED_KP").is_ok() {
-        ScheduleCommitTestContext::new(2)
-    } else {
-        ScheduleCommitTestContext::new_random_keys(2)
-    };
-
-    ctx.init_committees().unwrap();
-    ctx.delegate_committees().unwrap();
-
+    let ctx = get_context_with_delegated_committees(2);
     let ScheduleCommitTestContext {
         payer,
         committees,
@@ -58,41 +57,9 @@ fn test_committing_and_undelegating_two_accounts() {
     eprintln!("Transaction res: '{:?}'", res);
 
     let res = verify::fetch_commit_result_from_logs(&ctx, *sig);
-    let pda1 = committees[0].1;
-    let pda2 = committees[1].1;
+    assert_two_committees_were_committed(&ctx, &res);
+    assert_two_committees_synchronized_count(&ctx, &res, 1);
 
-    assert_eq!(res.included.len(), 2, "includes 2 pdas");
-    assert_eq!(res.excluded.len(), 0, "excludes 0 pdas");
-
-    let commit1 = res.included.get(&pda1);
-    let commit2 = res.included.get(&pda2);
-    assert!(commit1.is_some(), "should have committed pda1");
-    assert!(commit2.is_some(), "should have committed pda2");
-
-    assert_eq!(
-        commit1.unwrap().ephem_account.count,
-        1,
-        "pda1 ({}) count is 1 on ephem",
-        pda1
-    );
-    assert_eq!(
-        commit1.unwrap().chain_account.count,
-        1,
-        "pda1 ({}) count is 1 on chain",
-        pda1
-    );
-    assert_eq!(
-        commit2.unwrap().ephem_account.count,
-        1,
-        "pda2 ({}) count is 1 on ephem",
-        pda2
-    );
-    assert_eq!(
-        commit2.unwrap().chain_account.count,
-        1,
-        "pda2 ({}) count is 1 on chain",
-        pda2
-    );
-
-    assert_eq!(res.sigs.len(), 1, "should have 1 on chain sig");
+    // TODO: assert that accounts were undelegated and that
+    // the other accounts were closed on devnet
 }
