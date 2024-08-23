@@ -56,7 +56,7 @@ pub async fn transactions_to_clone_account_from_cluster(
     if !account_remote.executable {
         return Ok(vec![transaction_to_clone_regular_account(
             account_pubkey,
-            &account_remote,
+            account_remote,
             overrides,
             recent_blockhash,
         )]);
@@ -66,7 +66,7 @@ pub async fn transactions_to_clone_account_from_cluster(
         cluster,
         is_upgrade,
         account_pubkey,
-        &account_remote,
+        account_remote,
         slot,
         recent_blockhash,
     )
