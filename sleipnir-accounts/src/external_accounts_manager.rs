@@ -95,7 +95,7 @@ where
         if self.lifecycle.is_clone_readable_none()
             && self.lifecycle.is_clone_writable_none()
         {
-            return Ok(vec![]);
+            return Ok(vec![]); // TODO
         }
 
         // 1. Extract all acounts from the transaction
