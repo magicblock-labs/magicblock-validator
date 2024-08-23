@@ -20,24 +20,43 @@ use crate::{
 /// If [overrides] are provided the included fields will be changed on the account
 /// that was downloaded from the cluster before the modification transaction is
 /// created.
-pub async fn transactions_to_clone_account_from_cluster(
+pub async fn transactions_to_clone_pubkey_from_cluster(
     cluster: &Cluster,
+    is_upgrade: bool,
     account_pubkey: &Pubkey,
-    account: Option<Account>,
     recent_blockhash: Hash,
     slot: Slot,
     overrides: Option<AccountModification>,
 ) -> MutatorResult<Vec<Transaction>> {
-    // Download the account if not already
-    let account = match account {
-        Some(account) => account,
-        None => fetch_account(cluster, account_pubkey).await?,
-    };
+    // Download the account
+    let account_remote = fetch_account(cluster, account_pubkey).await?;
+    // Run the normal procedure
+    transactions_to_clone_account_from_cluster(
+        cluster,
+        is_upgrade,
+        account_pubkey,
+        &account_remote,
+        recent_blockhash,
+        slot,
+        overrides,
+    )
+    .await
+}
+
+pub async fn transactions_to_clone_account_from_cluster(
+    cluster: &Cluster,
+    is_upgrade: bool,
+    account_pubkey: &Pubkey,
+    account_remote: &Account,
+    recent_blockhash: Hash,
+    slot: Slot,
+    overrides: Option<AccountModification>,
+) -> MutatorResult<Vec<Transaction>> {
     // If it's a regular account that's not executable (program), use happy path
-    if !account.executable {
+    if !account_remote.executable {
         return Ok(vec![transaction_to_clone_regular_account(
             account_pubkey,
-            &account,
+            &account_remote,
             overrides,
             recent_blockhash,
         )]);
@@ -45,8 +64,9 @@ pub async fn transactions_to_clone_account_from_cluster(
     // If it's a program we'll return the list of necessary transactions
     transactions_to_clone_program(
         cluster,
+        is_upgrade,
         account_pubkey,
-        &account,
+        &account_remote,
         slot,
         recent_blockhash,
     )
@@ -55,20 +75,22 @@ pub async fn transactions_to_clone_account_from_cluster(
 
 fn transaction_to_clone_regular_account(
     account_pubkey: &Pubkey,
-    account: &Account,
+    account_remote: &Account,
     overrides: Option<AccountModification>,
     recent_blockhash: Hash,
 ) -> Transaction {
     // Just a single mutation for regular accounts, just dump the data directly
     let account_modification =
-        resolve_account_modification(account_pubkey, account, overrides);
+        resolve_account_modification(account_pubkey, account_remote, overrides);
+    // We only need a single transaction with a single mutation in this case
     modify_accounts(vec![account_modification], recent_blockhash)
 }
 
 async fn transactions_to_clone_program(
     cluster: &Cluster,
+    is_upgrade: bool,
     account_pubkey: &Pubkey,
-    account: &Account,
+    account_remote: &Account,
     slot: Slot,
     recent_blockhash: Hash,
 ) -> MutatorResult<Vec<Transaction>> {
@@ -78,11 +100,17 @@ async fn transactions_to_clone_program(
         program_data_modification,
         program_buffer_modification,
         program_idl_modification,
-    } = resolve_program_modifications(cluster, account_pubkey, account, slot)
-        .await?;
+    } = resolve_program_modifications(
+        cluster,
+        account_pubkey,
+        account_remote,
+        slot,
+    )
+    .await?;
+    // We'll need to run the upgrade IX based on those
     let program_pubkey = program_modification.pubkey;
     let program_buffer_pubkey = program_buffer_modification.pubkey;
-    // List all necessary modifications
+    // List all necessary account modifications (for the first step)
     let mut account_modifications = vec![
         program_modification,
         program_data_modification,
@@ -91,7 +119,14 @@ async fn transactions_to_clone_program(
     if let Some(program_idl_modification) = program_idl_modification {
         account_modifications.push(program_idl_modification)
     }
-    // Generate the list of transactions to be run in order
+    // If the program does not exist yet, we just need to dump it
+    if !is_upgrade {
+        return Ok(vec![modify_accounts(
+            account_modifications,
+            recent_blockhash,
+        )]);
+    }
+    // Generate a modify TX and an Upgrade TX if we need to update the program
     Ok(vec![
         // First dump the necessary set of account to our bank/ledger
         modify_accounts(account_modifications, recent_blockhash),

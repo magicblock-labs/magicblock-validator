@@ -2,7 +2,7 @@ use sleipnir_bank::bank_dev_utils::transactions::{
     create_solx_send_post_transaction, SolanaxPostAccounts,
 };
 use sleipnir_mutator::{
-    transactions::transactions_to_clone_account_from_cluster, Cluster,
+    transactions::transactions_to_clone_pubkey_from_cluster, Cluster,
 };
 use solana_program::pubkey;
 use solana_sdk::pubkey::Pubkey;
@@ -32,12 +32,12 @@ async fn main() {
         let txs = {
             let slot = tx_processor.bank().slot();
             let recent_blockhash = tx_processor.bank().last_blockhash();
-            transactions_to_clone_account_from_cluster(
+            transactions_to_clone_pubkey_from_cluster(
                 // We could also use Cluster::Development here which has the same URL
                 // but wanted to demonstrate using a custom URL
                 &Cluster::Custom("http://localhost:8899".to_string()),
+                false,
                 &SOLX_PROG,
-                None,
                 recent_blockhash,
                 slot,
                 None,

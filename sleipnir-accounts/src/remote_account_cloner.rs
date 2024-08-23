@@ -3,7 +3,8 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use sleipnir_bank::bank::Bank;
 use sleipnir_mutator::{
-    transactions::transactions_to_clone_account_from_cluster, Cluster,
+    transactions::transactions_to_clone_account_from_cluster,
+    transactions::transactions_to_clone_pubkey_from_cluster, Cluster,
 };
 use sleipnir_program::sleipnir_instruction::AccountModification;
 use sleipnir_transaction_status::TransactionStatusSender;
@@ -38,20 +39,39 @@ impl AccountCloner for RemoteAccountCloner {
     async fn clone_account(
         &self,
         pubkey: &Pubkey,
-        account: Option<Account>,
+        account: Option<&Account>,
         overrides: Option<AccountModification>,
     ) -> AccountsResult<Vec<Signature>> {
         let slot = self.bank.slot();
         let blockhash = self.bank.last_blockhash();
-        let clone_txs = transactions_to_clone_account_from_cluster(
-            &self.cluster,
-            pubkey,
-            account,
-            blockhash,
-            slot,
-            overrides,
-        )
-        .await?;
+
+        let already_cloned = self.bank.get_account(pubkey).is_some();
+
+        let clone_txs = match account {
+            Some(account) => {
+                transactions_to_clone_account_from_cluster(
+                    &self.cluster,
+                    already_cloned,
+                    pubkey,
+                    account,
+                    blockhash,
+                    slot,
+                    overrides,
+                )
+                .await?
+            }
+            None => {
+                transactions_to_clone_pubkey_from_cluster(
+                    &self.cluster,
+                    already_cloned,
+                    pubkey,
+                    blockhash,
+                    slot,
+                    overrides,
+                )
+                .await?
+            }
+        };
 
         let signatures = clone_txs
             .into_iter()

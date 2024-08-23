@@ -41,7 +41,7 @@ pub async fn resolve_program_modifications(
 
     // The program data needs to be cloned, download the executable account
     let program_data_pubkey = get_pubkey_program_data(program_pubkey);
-    let program_data_account_onchain =
+    let program_data_account_remote =
         fetch_account(cluster, &program_data_pubkey)
             .await
             .map_err(|err| {
@@ -52,7 +52,7 @@ pub async fn resolve_program_modifications(
             })?;
     // If we didn't find it then something is off and cloning the program
     // account won't make sense either
-    if program_data_account_onchain.lamports == 0 {
+    if program_data_account_remote.lamports == 0 {
         return Err(MutatorError::CouldNotFindExecutableDataAccount(
             program_data_pubkey,
             *program_pubkey,
@@ -61,7 +61,7 @@ pub async fn resolve_program_modifications(
     // If we are not able to find the bytecode from the account, abort
     let program_data_bytecode_index =
         UpgradeableLoaderState::size_of_programdata_metadata();
-    if program_data_account_onchain.data.len() < program_data_bytecode_index {
+    if program_data_account_remote.data.len() < program_data_bytecode_index {
         return Err(MutatorError::InvalidProgramDataContent(
             program_data_pubkey,
             *program_pubkey,
@@ -71,12 +71,12 @@ pub async fn resolve_program_modifications(
     // Build the proper program_data that we will want to upgrade later
     let mut program_data_data =
         bincode::serialize(&UpgradeableLoaderState::ProgramData {
-            slot: if slot == 0 { slot } else { slot - 1 },
+            slot: slot.saturating_sub(1),
             upgrade_authority_address: Some(validator_authority_id()),
         })
         .unwrap();
     program_data_data.extend_from_slice(
-        &program_data_account_onchain.data[program_data_bytecode_index..],
+        &program_data_account_remote.data[program_data_bytecode_index..],
     );
     let program_data_account = Account {
         lamports: Rent::default()
@@ -100,7 +100,7 @@ pub async fn resolve_program_modifications(
         })
         .unwrap();
     program_buffer_data.extend_from_slice(
-        &program_data_account_onchain.data[program_data_bytecode_index..],
+        &program_data_account_remote.data[program_data_bytecode_index..],
     );
     let program_buffer_account = Account {
         lamports: Rent::default()

@@ -30,7 +30,7 @@ pub trait AccountCloner {
     async fn clone_account(
         &self,
         pubkey: &Pubkey,
-        account: Option<Account>,
+        account: Option<&Account>,
         overrides: Option<AccountModification>,
     ) -> AccountsResult<Vec<Signature>>;
 }

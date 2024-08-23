@@ -138,12 +138,11 @@ pub(crate) fn modify_accounts_instruction(
     for account_modification in account_modifications {
         account_metas
             .push(AccountMeta::new(account_modification.pubkey, false));
-        let data_key = account_modification.data.map(set_account_mod_data);
         let account_mod_for_instruction = AccountModificationForInstruction {
             lamports: account_modification.lamports,
             owner: account_modification.owner,
             executable: account_modification.executable,
-            data_key,
+            data_key: account_modification.data.map(set_account_mod_data),
             rent_epoch: account_modification.rent_epoch,
         };
         account_mods

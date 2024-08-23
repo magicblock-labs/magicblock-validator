@@ -286,8 +286,7 @@ where
                 .account_cloner
                 .clone_account(
                     &cloned_readonly_account.pubkey,
-                    // TODO(vbrunet) - This should not need to be cloned
-                    cloned_readonly_account.chain_state.account().cloned(),
+                    cloned_readonly_account.chain_state.account(),
                     None,
                 )
                 .await?;
@@ -327,7 +326,7 @@ where
                 .account_cloner
                 .clone_account(
                     &cloned_writable_account.pubkey,
-                    cloned_writable_account.chain_state.account().cloned(),
+                    cloned_writable_account.chain_state.account(),
                     overrides,
                 )
                 .await?;

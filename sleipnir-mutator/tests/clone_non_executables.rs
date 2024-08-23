@@ -1,6 +1,6 @@
 use assert_matches::assert_matches;
 use log::*;
-use sleipnir_mutator::transactions::transactions_to_clone_account_from_cluster;
+use sleipnir_mutator::transactions::transactions_to_clone_pubkey_from_cluster;
 use sleipnir_program::validator_authority_id;
 use solana_sdk::{
     account::Account, clock::Slot, genesis_config::ClusterType, hash::Hash,
@@ -21,10 +21,10 @@ async fn verified_tx_to_clone_non_executable_from_devnet(
     slot: Slot,
     recent_blockhash: Hash,
 ) -> Transaction {
-    let mut txs = transactions_to_clone_account_from_cluster(
+    let mut txs = transactions_to_clone_pubkey_from_cluster(
         &ClusterType::Devnet.into(),
+        false,
         pubkey,
-        None,
         recent_blockhash,
         slot,
         None,

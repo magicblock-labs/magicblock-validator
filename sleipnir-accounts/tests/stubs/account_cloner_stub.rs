@@ -71,7 +71,7 @@ impl AccountCloner for AccountClonerStub {
     async fn clone_account(
         &self,
         pubkey: &Pubkey,
-        _account: Option<Account>,
+        _account: Option<&Account>,
         overrides: Option<AccountModification>,
     ) -> AccountsResult<Vec<Signature>> {
         self.cloned_accounts
