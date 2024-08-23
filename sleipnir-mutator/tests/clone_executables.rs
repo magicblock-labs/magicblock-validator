@@ -111,7 +111,7 @@ async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
     ensure_funded_validator_authority(tx_processor.bank());
     fund_luzifer(&*tx_processor);
 
-    tx_processor.bank().advance_slot();
+    tx_processor.bank().advance_slot(); // We don't want to stay on slot 0
 
     // 1. Exec Clone Transaction
     {
@@ -191,12 +191,6 @@ async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
 
     // 3. Run a transaction against the cloned program
     {
-        /*
-        // For a deployed program: `effective_slot = deployed_slot + 1`
-        // Therefore to activate it we need to advance a slot
-        tx_processor.bank().advance_slot();
-         */
-
         let (tx, SolanaxPostAccounts { author, post }) =
             create_solx_send_post_transaction(tx_processor.bank());
         let sig = *tx.signature();
@@ -249,9 +243,7 @@ async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
 
     // 5. Run a transaction against the upgraded program
     {
-        /*
-         */
-        // For a deployed program: `effective_slot = deployed_slot + 1`
+        // For an upgraded program: `effective_slot = deployed_slot + 1`
         // Therefore to activate it we need to advance a slot
         tx_processor.bank().advance_slot();
 
