@@ -1,4 +1,3 @@
-use sleipnir_program::sleipnir_instruction::AccountModification;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
     account::Account, bpf_loader_upgradeable,
@@ -40,18 +39,4 @@ pub fn get_pubkey_program_data(program_id: &Pubkey) -> Pubkey {
     let (executable_address, _) =
         Pubkey::find_program_address(seeds, &bpf_loader_id);
     executable_address
-}
-
-pub fn create_account_modification_from_account(
-    account_pubkey: &Pubkey,
-    account: &Account,
-) -> AccountModification {
-    AccountModification {
-        pubkey: *account_pubkey,
-        lamports: Some(account.lamports),
-        owner: Some(account.owner),
-        executable: Some(account.executable),
-        data: Some(account.data.clone()),
-        rent_epoch: Some(account.rent_epoch),
-    }
 }

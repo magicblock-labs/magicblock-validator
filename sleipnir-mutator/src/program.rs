@@ -14,8 +14,8 @@ use solana_sdk::{
 use crate::{
     errors::{MutatorError, MutatorResult},
     utils::{
-        create_account_modification_from_account, fetch_account,
-        get_pubkey_anchor_idl, get_pubkey_program_data, get_pubkey_shank_idl,
+        fetch_account, get_pubkey_anchor_idl, get_pubkey_program_data,
+        get_pubkey_shank_idl,
     },
     Cluster,
 };
@@ -34,10 +34,8 @@ pub async fn resolve_program_modifications(
     slot: Slot,
 ) -> MutatorResult<ProgramModifications> {
     // If it's an executable, we will need to modify multiple accounts
-    let program_modification = create_account_modification_from_account(
-        program_pubkey,
-        program_account,
-    );
+    let program_modification =
+        AccountModification::from((program_pubkey, program_account));
 
     // The program data needs to be cloned, download the executable account
     let program_data_pubkey = get_pubkey_program_data(program_pubkey);
@@ -87,10 +85,10 @@ pub async fn resolve_program_modifications(
         executable: false,
         rent_epoch: u64::MAX,
     };
-    let program_data_modification = create_account_modification_from_account(
+    let program_data_modification = AccountModification::from((
         &program_data_pubkey,
         &program_data_account,
-    );
+    ));
 
     // We need to create the upgrade buffer we will use for the bpf_loader transaction later
     let program_buffer_pubkey = Keypair::new().pubkey();
@@ -111,10 +109,10 @@ pub async fn resolve_program_modifications(
         executable: false,
         rent_epoch: u64::MAX,
     };
-    let program_buffer_modification = create_account_modification_from_account(
+    let program_buffer_modification = AccountModification::from((
         &program_buffer_pubkey,
         &program_buffer_account,
-    );
+    ));
 
     // Finally try to find the IDL if we can
     let program_idl_modification =
@@ -161,9 +159,7 @@ async fn try_create_account_modification_from_pubkey(
 ) -> Option<AccountModification> {
     if let Some(pubkey) = pubkey {
         if let Ok(account) = fetch_account(cluster, &pubkey).await {
-            return Some(create_account_modification_from_account(
-                &pubkey, &account,
-            ));
+            return Some(AccountModification::from((&pubkey, &account)));
         }
     }
     None

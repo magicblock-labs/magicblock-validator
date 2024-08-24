@@ -3,6 +3,7 @@ use std::{collections::HashMap, vec};
 use num_derive::{FromPrimitive, ToPrimitive};
 use serde::{Deserialize, Serialize};
 use solana_sdk::{
+    account::Account,
     decode_error::DecodeError,
     hash::Hash,
     instruction::{AccountMeta, Instruction},
@@ -55,6 +56,21 @@ pub struct AccountModification {
     pub executable: Option<bool>,
     pub data: Option<Vec<u8>>,
     pub rent_epoch: Option<u64>,
+}
+
+impl From<(&Pubkey, &Account)> for AccountModification {
+    fn from(
+        (account_pubkey, account): (&Pubkey, &Account),
+    ) -> AccountModification {
+        AccountModification {
+            pubkey: *account_pubkey,
+            lamports: Some(account.lamports),
+            owner: Some(account.owner),
+            executable: Some(account.executable),
+            data: Some(account.data.clone()),
+            rent_epoch: Some(account.rent_epoch),
+        }
+    }
 }
 
 #[derive(Default, Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
