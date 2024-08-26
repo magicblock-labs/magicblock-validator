@@ -181,7 +181,7 @@ async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
                 executable: false,
                 rent_epoch
             } => {
-                assert!(lamports == 6264000);
+                assert_eq!(lamports,  6264000);
                 assert!(data.len() == 772);
                 assert_eq!(owner, elfs::solanax::id());
                 assert_eq!(rent_epoch, u64::MAX);
