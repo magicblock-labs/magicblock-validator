@@ -18,7 +18,7 @@ use crate::{
 };
 
 /// Downloads an account from the provided cluster and returns a list of transaction that
-/// that will apply modifications to match the state of the remote chain.
+/// will apply modifications to match the state of the remote chain.
 /// If [overrides] are provided the included fields will be changed on the account
 /// that was downloaded from the cluster before the modification transaction is
 /// created.
@@ -123,13 +123,15 @@ async fn transactions_to_clone_program(
     }
 
     /*
-    // If the program does not exist yet, we just need to dump it
+    // If the program does not exist yet, we just need to update it's data and don't
+    // need to explicitly update the BPF loader
     if !is_upgrade {
         return Ok(vec![modify_accounts(
             account_modifications,
             recent_blockhash,
         )]);
-    } */
+    }
+     */
 
     let validator_keypair = &validator_authority();
     let validator_pubkey = &validator_authority_id();

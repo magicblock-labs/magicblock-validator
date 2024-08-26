@@ -47,7 +47,7 @@ async fn verified_txs_to_clone_executable_from_devnet_first_deploy(
     .await
     .expect("Failed to create program clone transaction");
 
-    assert!(txs.len() == 1);
+    assert_eq!(txs.len(), 1);
 
     /*
     let mutate = txs.first().unwrap();
@@ -78,7 +78,7 @@ async fn verified_txs_to_clone_executable_from_devnet_as_upgrade(
     .expect("Failed to create program clone transaction");
 
     /*
-    assert!(txs.len() == 2);
+    assert_eq!(txs.len(), 2);
 
     let tx_mutate = txs.first().unwrap();
     assert!(tx_mutate.is_signed());
@@ -155,8 +155,8 @@ async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
                 executable: true,
                 rent_epoch
             } => {
-                assert!(lamports == 1141440);
-                assert!(data.len() == 36);
+                assert_eq!(lamports, 1141440);
+                assert_eq!(data.len(), 36);
                 assert_eq!(owner, bpf_loader_upgradeable::id());
                 assert_eq!(rent_epoch, u64::MAX);
             }
@@ -170,8 +170,8 @@ async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
                 executable: false,
                 rent_epoch
             } => {
-                assert!(lamports == 2890996080);
-                assert!(data.len() == 415245);
+                assert_eq!(lamports, 2890996080);
+                assert_eq!(data.len(), 415245);
                 assert_eq!(owner, bpf_loader_upgradeable::id());
                 assert_eq!(rent_epoch, u64::MAX);
             }
@@ -185,8 +185,8 @@ async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
                 executable: false,
                 rent_epoch
             } => {
-                assert!(lamports == 6264000);
-                assert!(data.len() == 772);
+                assert_eq!(lamports, 6264000);
+                assert_eq!(data.len(), 772);
                 assert_eq!(owner, elfs::solanax::id());
                 assert_eq!(rent_epoch, u64::MAX);
             }

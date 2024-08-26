@@ -1,5 +1,4 @@
-use solana_program::pubkey;
-use solana_sdk::pubkey::Pubkey;
+use solana_sdk::{pubkey, pubkey::Pubkey};
 use test_tools::{account::fund_account, traits::TransactionsProcessor};
 
 pub const SOLX_PROG: Pubkey =

@@ -15,7 +15,6 @@ bincode = { workspace = true }
 log = { workspace = true }
 sleipnir-program = { workspace = true }
 solana-loader-v4-program = { workspace = true }
-solana-program = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
