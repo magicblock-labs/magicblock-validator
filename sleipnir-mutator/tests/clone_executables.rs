@@ -167,7 +167,7 @@ async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
                 rent_epoch
             } => {
                 assert!(lamports == 2890996080);
-                assert!(data.len() == 415245);
+                assert_eq!(data.len(,  415245);
                 assert_eq!(owner, bpf_loader_upgradeable::id());
                 assert_eq!(rent_epoch, u64::MAX);
             }
