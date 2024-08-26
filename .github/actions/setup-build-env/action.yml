@@ -27,12 +27,15 @@ runs:
       path: conjunto
       ref: vbrunet/2024_08_08-individual-account-fetching
 
+  # NOTE: we need the older version of the delegation program until we
+  # merge the commit+undelegate PR
   - name: Checkout magicblock-labs/delegation-program
     uses: actions/checkout@v2
     with:
       repository: magicblock-labs/delegation-program
       token: ${{ inputs.github_access_token }}
       path: delegation-program
+      ref: f01e7160e90c8fe1b731aafb3272a1c87a107d1c
 
   - name: Checkout magicblock-labs/ephemeral-rollups-sdk
     uses: actions/checkout@v2
@@ -55,6 +58,7 @@ runs:
       shared-key: ${{ inputs.build_cache_key_name }}
       workspaces: |
         magicblock-validator -> target
+        magicblock-validator/test-programs -> target
       cache-targets: true
       cache-all-crates: true
       cache-on-failure: true

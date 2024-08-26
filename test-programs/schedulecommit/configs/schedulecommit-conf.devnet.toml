@@ -7,14 +7,9 @@ commit = { frequency_millis = 9_000_000_000_000, compute_unit_price = 1_000_000 
 millis_per_slot = 50
 sigverify = true
 
-# This errors with not loaded unless we load it from devnet
-# Due to being used to CPI maybe and the slot being 0?
-# Also when cloning we also load it _properly_ via the bpf loader, so
-# we should investigate the difference there
-# Same is the case when using Luzid
-# [[program]]
-# id = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
-# path = "../elfs/dlp.so"
+[[program]]
+id = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+path = "../elfs/dlp.so"
 
 [[program]]
 id = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY"
