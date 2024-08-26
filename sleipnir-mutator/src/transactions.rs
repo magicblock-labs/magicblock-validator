@@ -119,7 +119,8 @@ async fn transactions_to_clone_program(
     if let Some(program_idl_modification) = program_idl_modification {
         account_modifications.push(program_idl_modification)
     }
-    // If the program does not exist yet, we just need to dump it
+    // If the program does not exist yet, we just need to update it's data and don't
+    // need to explicitly update the BPF loader
     if !is_upgrade {
         return Ok(vec![modify_accounts(
             account_modifications,
