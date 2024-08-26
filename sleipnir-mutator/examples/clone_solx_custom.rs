@@ -4,8 +4,7 @@ use sleipnir_bank::bank_dev_utils::transactions::{
 use sleipnir_mutator::{
     transactions::transactions_to_clone_pubkey_from_cluster, Cluster,
 };
-use solana_program::pubkey;
-use solana_sdk::pubkey::Pubkey;
+use solana_sdk::{pubkey, pubkey::Pubkey};
 use test_tools::{
     account::fund_account, diagnostics::log_exec_details, init_logger,
     transactions_processor,
