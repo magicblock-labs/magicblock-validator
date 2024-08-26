@@ -16,7 +16,7 @@ use crate::{
 };
 
 /// Downloads an account from the provided cluster and returns a list of transaction that
-/// that will apply modifications to match the state of the remote chain.
+/// will apply modifications to match the state of the remote chain.
 /// If [overrides] are provided the included fields will be changed on the account
 /// that was downloaded from the cluster before the modification transaction is
 /// created.
