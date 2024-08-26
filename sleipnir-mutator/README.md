@@ -5,11 +5,9 @@
 
 *Important symbols:*
 
-- `AccountModification` struct
-
-- `transaction_to_clone_account_from_cluster` function
-  - Generate transaction using the sleipnir program
-  - Each transaction applies an `AccountModification` to a cloned account
+- `transactions_to_clone_account_from_cluster` function
+  - Generate a transaction for using the sleipnir program `ModifyAccount` ix
+  - If the account is executable: Generate a `bpf_loader_upgradeable` transaction
 
 # Notes
 

@@ -311,14 +311,14 @@ mod tests {
         ensure_funded_validator_authority(&mut account_data);
 
         let modification = AccountModification {
+            pubkey: mod_key,
             lamports: Some(200),
             owner: Some(owner_key),
             executable: Some(true),
             data: Some(vec![1, 2, 3, 4, 5]),
             rent_epoch: Some(88),
         };
-        let ix =
-            modify_accounts_instruction(vec![(mod_key, modification.clone())]);
+        let ix = modify_accounts_instruction(vec![modification.clone()]);
         let transaction_accounts = ix
             .accounts
             .iter()
@@ -384,20 +384,16 @@ mod tests {
         ensure_funded_validator_authority(&mut account_data);
 
         let ix = modify_accounts_instruction(vec![
-            (
-                mod_key1,
-                AccountModification {
-                    lamports: Some(300),
-                    ..AccountModification::default()
-                },
-            ),
-            (
-                mod_key2,
-                AccountModification {
-                    lamports: Some(400),
-                    ..AccountModification::default()
-                },
-            ),
+            AccountModification {
+                pubkey: mod_key1,
+                lamports: Some(300),
+                ..AccountModification::default()
+            },
+            AccountModification {
+                pubkey: mod_key2,
+                lamports: Some(400),
+                ..AccountModification::default()
+            },
         ]);
         let transaction_accounts = ix
             .accounts
@@ -483,39 +479,31 @@ mod tests {
         ensure_funded_validator_authority(&mut account_data);
 
         let ix = modify_accounts_instruction(vec![
-            (
-                mod_key1,
-                AccountModification {
-                    lamports: Some(1000),
-                    data: Some(vec![1, 2, 3, 4, 5]),
-                    ..Default::default()
-                },
-            ),
-            (
-                mod_key2,
-                AccountModification {
-                    owner: Some(mod_2_owner),
-                    ..Default::default()
-                },
-            ),
-            (
-                mod_key3,
-                AccountModification {
-                    lamports: Some(3000),
-                    rent_epoch: Some(90),
-                    ..Default::default()
-                },
-            ),
-            (
-                mod_key4,
-                AccountModification {
-                    lamports: Some(100),
-                    executable: Some(true),
-                    data: Some(vec![16, 17, 18, 19, 20]),
-                    rent_epoch: Some(91),
-                    ..Default::default()
-                },
-            ),
+            AccountModification {
+                pubkey: mod_key1,
+                lamports: Some(1000),
+                data: Some(vec![1, 2, 3, 4, 5]),
+                ..Default::default()
+            },
+            AccountModification {
+                pubkey: mod_key2,
+                owner: Some(mod_2_owner),
+                ..Default::default()
+            },
+            AccountModification {
+                pubkey: mod_key3,
+                lamports: Some(3000),
+                rent_epoch: Some(90),
+                ..Default::default()
+            },
+            AccountModification {
+                pubkey: mod_key4,
+                lamports: Some(100),
+                executable: Some(true),
+                data: Some(vec![16, 17, 18, 19, 20]),
+                rent_epoch: Some(91),
+                ..Default::default()
+            },
         ]);
 
         let transaction_accounts = ix

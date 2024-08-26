@@ -1,10 +1,11 @@
-pub mod account_modification;
-pub mod accounts;
-mod chainparser;
+pub mod account;
 mod cluster;
 pub mod errors;
-pub mod mutator;
-mod program_account;
+pub mod program;
+pub mod transactions;
+mod utils;
 
-pub use account_modification::{AccountModification, ModifyAccountOpts};
 pub use cluster::*;
+pub use sleipnir_program::sleipnir_instruction::{
+    modify_accounts, AccountModification,
+};

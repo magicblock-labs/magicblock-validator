@@ -1,19 +1,19 @@
 use sleipnir_bank::bank_dev_utils::transactions::{
     create_solx_send_post_transaction, SolanaxPostAccounts,
 };
-use sleipnir_mutator::{mutator, Cluster};
+use sleipnir_mutator::{
+    transactions::transactions_to_clone_pubkey_from_cluster, Cluster,
+};
+use solana_sdk::{pubkey, pubkey::Pubkey};
 use test_tools::{
-    account::fund_account_addr, diagnostics::log_exec_details, init_logger,
-    traits::TransactionsProcessor, transactions_processor,
+    account::fund_account, diagnostics::log_exec_details, init_logger,
+    transactions_processor,
 };
 
-pub const SOLX_PROG: &str = "SoLXmnP9JvL6vJ7TN1VqtTxqsc2izmPfF9CsMDEuRzJ";
-const LUZIFER: &str = "LuzifKo4E6QCF5r4uQmqbyko7zLS5WgayynivnCbtzk";
+pub const SOLX_PROG: Pubkey =
+    pubkey!("SoLXmnP9JvL6vJ7TN1VqtTxqsc2izmPfF9CsMDEuRzJ");
 
-fn fund_luzifer(bank: &dyn TransactionsProcessor) {
-    // TODO: we need to fund Luzifer at startup instead of doing it here
-    fund_account_addr(bank.bank(), LUZIFER, u64::MAX / 2);
-}
+const LUZIFER: Pubkey = pubkey!("LuzifKo4E6QCF5r4uQmqbyko7zLS5WgayynivnCbtzk");
 
 // IMPORTANT: Make sure to start a local validator/preferably Luzid and clone the
 // SolX program into it before running this example
@@ -23,19 +23,20 @@ async fn main() {
     init_logger!();
 
     let tx_processor = transactions_processor();
-    fund_luzifer(&*tx_processor);
+
+    fund_account(tx_processor.bank(), &LUZIFER, u64::MAX / 2);
 
     // 1. Exec Clone Transaction
     {
-        let tx = {
+        let txs = {
             let slot = tx_processor.bank().slot();
             let recent_blockhash = tx_processor.bank().last_blockhash();
-            mutator::transaction_to_clone_account_from_cluster(
+            transactions_to_clone_pubkey_from_cluster(
                 // We could also use Cluster::Development here which has the same URL
                 // but wanted to demonstrate using a custom URL
                 &Cluster::Custom("http://localhost:8899".to_string()),
-                SOLX_PROG,
-                None,
+                false,
+                &SOLX_PROG,
                 recent_blockhash,
                 slot,
                 None,
@@ -44,7 +45,7 @@ async fn main() {
             .expect("Failed to create clone transaction")
         };
 
-        let result = tx_processor.process(vec![tx]).unwrap();
+        let result = tx_processor.process(txs).unwrap();
 
         let (_, exec_details) = result.transactions.values().next().unwrap();
         log_exec_details(exec_details);

@@ -88,6 +88,10 @@ fn assert_cargo_tests_passed(output: process::Output) {
 
 fn run_test(manifest_dir: String) -> io::Result<process::Output> {
     process::Command::new("cargo")
+        .env(
+            "RUST_LOG",
+            std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
+        )
         .arg("test")
         .arg("--")
         .arg("--nocapture")

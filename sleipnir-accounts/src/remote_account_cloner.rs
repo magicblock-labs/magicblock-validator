@@ -3,9 +3,13 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use sleipnir_bank::bank::Bank;
 use sleipnir_mutator::{
-    mutator::transaction_to_clone_account_from_cluster, AccountModification,
+    transactions::{
+        transactions_to_clone_account_from_cluster,
+        transactions_to_clone_pubkey_from_cluster,
+    },
     Cluster,
 };
+use sleipnir_program::sleipnir_instruction::AccountModification;
 use sleipnir_transaction_status::TransactionStatusSender;
 use solana_sdk::{account::Account, pubkey::Pubkey, signature::Signature};
 
@@ -38,27 +42,51 @@ impl AccountCloner for RemoteAccountCloner {
     async fn clone_account(
         &self,
         pubkey: &Pubkey,
-        account: Option<Account>,
+        account: Option<&Account>,
         overrides: Option<AccountModification>,
-    ) -> AccountsResult<Signature> {
+    ) -> AccountsResult<Vec<Signature>> {
         let slot = self.bank.slot();
         let blockhash = self.bank.last_blockhash();
-        let clone_tx = transaction_to_clone_account_from_cluster(
-            &self.cluster,
-            &pubkey.to_string(),
-            account,
-            blockhash,
-            slot,
-            overrides,
-        )
-        .await?;
 
-        let signature = execute_legacy_transaction(
-            clone_tx,
-            &self.bank,
-            self.transaction_status_sender.as_ref(),
-        )?;
+        let already_cloned = self.bank.get_account(pubkey).is_some();
 
-        Ok(signature)
+        let clone_txs = match account {
+            Some(account) => {
+                transactions_to_clone_account_from_cluster(
+                    &self.cluster,
+                    already_cloned,
+                    pubkey,
+                    account,
+                    blockhash,
+                    slot,
+                    overrides,
+                )
+                .await?
+            }
+            None => {
+                transactions_to_clone_pubkey_from_cluster(
+                    &self.cluster,
+                    already_cloned,
+                    pubkey,
+                    blockhash,
+                    slot,
+                    overrides,
+                )
+                .await?
+            }
+        };
+
+        let signatures = clone_txs
+            .into_iter()
+            .map(|clone_tx| {
+                execute_legacy_transaction(
+                    clone_tx,
+                    &self.bank,
+                    self.transaction_status_sender.as_ref(),
+                )
+            })
+            .collect::<Result<_, _>>()?;
+
+        Ok(signatures)
     }
 }
