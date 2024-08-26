@@ -1,5 +1,7 @@
 use sleipnir_program::{
-    sleipnir_instruction::{modify_accounts, AccountModification},
+    sleipnir_instruction::{
+        modify_accounts, modify_accounts_instruction, AccountModification,
+    },
     validator_authority, validator_authority_id,
 };
 use solana_sdk::{
@@ -113,19 +115,44 @@ async fn transactions_to_clone_program(
     // List all necessary account modifications (for the first step)
     let mut account_modifications = vec![
         program_modification,
-        program_data_modification,
+        program_data_modification.clone(),
         program_buffer_modification,
     ];
     if let Some(program_idl_modification) = program_idl_modification {
         account_modifications.push(program_idl_modification)
     }
+
+    /*
     // If the program does not exist yet, we just need to dump it
     if !is_upgrade {
         return Ok(vec![modify_accounts(
             account_modifications,
             recent_blockhash,
         )]);
-    }
+    } */
+
+    let validator_keypair = &validator_authority();
+    let validator_pubkey = &validator_authority_id();
+
+    let ixs = [
+        modify_accounts_instruction(account_modifications),
+        bpf_loader_upgradeable::upgrade(
+            &program_pubkey,
+            &program_buffer_pubkey,
+            validator_pubkey,
+            validator_pubkey,
+        ),
+        modify_accounts_instruction(vec![program_data_modification]),
+    ];
+
+    return Ok(vec![Transaction::new_signed_with_payer(
+        &ixs,
+        Some(validator_pubkey),
+        &[validator_keypair],
+        recent_blockhash,
+    )]);
+
+    /*
     // Generate a modify TX and an Upgrade TX if we need to update the program
     Ok(vec![
         // First dump the necessary set of account to our bank/ledger
@@ -136,7 +163,7 @@ async fn transactions_to_clone_program(
             &program_buffer_pubkey,
             recent_blockhash,
         ),
-    ])
+    ]) */
 }
 
 fn transaction_to_run_bpf_loader_upgrade(
