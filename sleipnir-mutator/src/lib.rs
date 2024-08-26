@@ -6,3 +6,6 @@ pub mod transactions;
 mod utils;
 
 pub use cluster::*;
+
+pub use sleipnir_program::sleipnir_instruction::modify_accounts;
+pub use sleipnir_program::sleipnir_instruction::AccountModification;
