@@ -7,35 +7,32 @@ use std::{
 use lazy_static::lazy_static;
 use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 use solana_sdk::{
-    account::{Account, AccountSharedData, ReadableAccount, WritableAccount},
+    account::{ReadableAccount, WritableAccount},
     instruction::InstructionError,
     pubkey::Pubkey,
 };
 
-use crate::utils::accounts::{
-    get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
+use crate::{
+    traits::{AccountRemovalReason, AccountsRemover},
+    utils::accounts::{
+        get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
+    },
 };
 
 // -----------------
 // AccountsRemover
 // -----------------
-
-#[derive(Clone)]
-pub enum AccountRemovalReason {
-    Undelegated,
-}
-
 pub struct PendingAccountRemoval {
     pub pubkey: Pubkey,
     pub reason: AccountRemovalReason,
 }
 
 #[derive(Clone)]
-pub struct AccountsRemover {
+pub struct ValidatorAccountsRemover {
     accounts_pending_removal: Arc<RwLock<Vec<PendingAccountRemoval>>>,
 }
 
-impl Default for AccountsRemover {
+impl Default for ValidatorAccountsRemover {
     fn default() -> Self {
         lazy_static! {
             static ref ACCOUNTS_PENDING_REMOVAL: Arc<RwLock<Vec<PendingAccountRemoval>>> =
@@ -47,10 +44,28 @@ impl Default for AccountsRemover {
     }
 }
 
+impl AccountsRemover for ValidatorAccountsRemover {
+    fn request_accounts_removal(
+        &self,
+        pubkey: HashSet<Pubkey>,
+        reason: AccountRemovalReason,
+    ) {
+        let mut accounts_pending_removal = self
+            .accounts_pending_removal
+            .write()
+            .expect("accounts_pending_removal lock poisoned");
+        for p in pubkey {
+            accounts_pending_removal.push(PendingAccountRemoval {
+                pubkey: p,
+                reason: reason.clone(),
+            });
+        }
+    }
+}
+
 // -----------------
 // Processing removal from validator
 // -----------------
-
 pub fn process_remove_accounts_pending_removal(
     signers: HashSet<Pubkey>,
     invoke_context: &InvokeContext,
@@ -97,7 +112,7 @@ pub fn process_remove_accounts_pending_removal(
     }
 
     // All checks out, let's remove those accounts, shall we?
-    let pubkeys = AccountsRemover::default()
+    let pubkeys = ValidatorAccountsRemover::default()
         .accounts_pending_removal
         .read()
         .expect("accounts_pending_removal lock poisoned")
@@ -150,7 +165,7 @@ pub fn process_remove_accounts_pending_removal(
 
     // Mark them as processed
     {
-        let remover = AccountsRemover::default();
+        let remover = ValidatorAccountsRemover::default();
         let mut accounts_pending_removal = remover
             .accounts_pending_removal
             .write()

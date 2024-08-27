@@ -1,7 +1,9 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use sleipnir_program::sleipnir_instruction::AccountModification;
+use sleipnir_program::{
+    sleipnir_instruction::AccountModification, traits::AccountsRemover,
+};
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_sdk::{
     account::{Account, AccountSharedData},
@@ -14,10 +16,15 @@ use crate::errors::AccountsResult;
 
 #[async_trait]
 pub trait ScheduledCommitsProcessor {
-    async fn process<AC: AccountCommitter, IAP: InternalAccountProvider>(
+    async fn process<
+        AC: AccountCommitter,
+        IAP: InternalAccountProvider,
+        AR: AccountsRemover,
+    >(
         &self,
         committer: &Arc<AC>,
         account_provider: &IAP,
+        accounts_remover: &AR,
     ) -> AccountsResult<()>;
 }
 
