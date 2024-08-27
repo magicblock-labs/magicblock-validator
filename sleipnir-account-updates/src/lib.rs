@@ -1,7 +1,7 @@
 mod account_updates;
-mod remote_account_updates_reader;
-mod remote_account_updates_watcher;
+mod remote_account_updates_client;
+mod remote_account_updates_worker;
 
 pub use account_updates::*;
-pub use remote_account_updates_reader::*;
-pub use remote_account_updates_watcher::*;
+pub use remote_account_updates_client::*;
+pub use remote_account_updates_worker::*;

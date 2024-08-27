@@ -47,22 +47,13 @@ impl LifecycleMode {
         }
     }
 
-    pub fn requires_delegation_for_writables(&self) -> bool {
+    pub fn requires_ephemeral_validation(&self) -> bool {
         match self {
             LifecycleMode::Replica => false,
             LifecycleMode::ProgramsReplica => false,
             LifecycleMode::Ephemeral => true,
             LifecycleMode::EphemeralLimited => true,
             LifecycleMode::Offline => false,
-        }
-    }
-    pub fn allows_new_account_for_writables(&self) -> bool {
-        match self {
-            LifecycleMode::Replica => true,
-            LifecycleMode::ProgramsReplica => true,
-            LifecycleMode::Ephemeral => false,
-            LifecycleMode::EphemeralLimited => false,
-            LifecycleMode::Offline => true,
         }
     }
 }

@@ -1,29 +1,29 @@
 use std::collections::HashMap;
 
-use sleipnir_account_updates::AccountUpdates;
+use sleipnir_account_updates::{AccountUpdates, AccountUpdatesResult};
 use solana_sdk::{clock::Slot, pubkey::Pubkey};
 
 #[derive(Debug, Default, Clone)]
 pub struct AccountUpdatesStub {
-    last_update_slots: HashMap<Pubkey, Slot>,
+    last_known_update_slots: HashMap<Pubkey, Slot>,
 }
 
 #[allow(unused)] // used in tests
 impl AccountUpdatesStub {
-    pub fn add_known_update(&mut self, pubkey: Pubkey, at_slot: Slot) {
-        self.last_update_slots.insert(pubkey, at_slot);
+    pub fn add_known_update_slot(&mut self, pubkey: Pubkey, at_slot: Slot) {
+        self.last_known_update_slots.insert(pubkey, at_slot);
     }
 }
 
 impl AccountUpdates for AccountUpdatesStub {
-    fn request_account_monitoring(&self, _pubkey: &Pubkey) {
+    fn ensure_account_monitoring(
+        &self,
+        _pubkey: &Pubkey,
+    ) -> AccountUpdatesResult<()> {
         // Noop for stub
+        Ok(())
     }
-    fn has_known_update_since_slot(&self, pubkey: &Pubkey, slot: Slot) -> bool {
-        if let Some(last_update_slot) = self.last_update_slots.get(pubkey) {
-            *last_update_slot > slot
-        } else {
-            false
-        }
+    fn get_last_known_update_slot(&self, pubkey: &Pubkey) -> Option<Slot> {
+        self.last_known_update_slots.get(pubkey).cloned()
     }
 }
