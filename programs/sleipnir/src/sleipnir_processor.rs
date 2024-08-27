@@ -105,9 +105,25 @@ fn mutate_accounts(
     let accounts_len = instruction_context.get_number_of_instruction_accounts();
 
     // First account is the Sleipnir authority
-    // Last account is the implicit NativeLoader
-    let accounts_to_mod_len = accounts_len - 2;
+    let accounts_to_mod_len = accounts_len - 1;
     let account_mods_len = account_mods.len() as u64;
+
+    eprintln!(
+        "mutate_accounts:{},{}",
+        account_mods_len, accounts_to_mod_len
+    );
+    eprintln!("account_mods:{:?}", account_mods.keys());
+
+    for iidx in 0..accounts_len {
+        let tidx = instruction_context
+            .get_index_of_instruction_account_in_transaction(iidx)?;
+        eprintln!(
+            "account_info:{:?} -> {:?} -> {:?}",
+            iidx,
+            tidx,
+            transaction_context.get_key_of_account_at_index(tidx)
+        );
+    }
 
     // 1. Checks
     let validator_authority_acc = {
@@ -197,6 +213,13 @@ fn mutate_accounts(
             );
             SleipnirError::AccountModificationMissing
         })?;
+
+        eprintln!(
+            "MUTATING:{},{} data:{}",
+            idx,
+            account_key,
+            modification.data_key.is_some()
+        );
 
         if let Some(lamports) = modification.lamports {
             let current_lamports = account.borrow().lamports();

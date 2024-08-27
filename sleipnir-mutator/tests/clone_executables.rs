@@ -205,6 +205,8 @@ async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
         // Transaction
         let (tx, exec_details) = result.transactions.get(&sig).unwrap();
 
+        eprintln!("exec_details:{:?}", exec_details);
+
         log_exec_details(exec_details);
         assert!(exec_details.status.is_ok());
         assert_eq!(tx.signatures().len(), 2);

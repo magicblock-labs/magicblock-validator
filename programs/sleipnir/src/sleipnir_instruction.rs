@@ -161,6 +161,10 @@ pub fn modify_accounts_instruction(
             data_key: account_modification.data.map(set_account_mod_data),
             rent_epoch: account_modification.rent_epoch,
         };
+        eprintln!(
+            "modify_accounts_instruction:{}",
+            account_modification.pubkey
+        );
         account_mods
             .insert(account_modification.pubkey, account_mod_for_instruction);
     }
