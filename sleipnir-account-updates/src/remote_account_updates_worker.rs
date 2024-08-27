@@ -34,24 +34,25 @@ pub enum RemoteAccountUpdatesWorkerError {
 
 pub struct RemoteAccountUpdatesWorker {
     config: RpcProviderConfig,
-    request_receiver: UnboundedReceiver<Pubkey>,
-    request_sender: UnboundedSender<Pubkey>,
+    monitoring_request_receiver: UnboundedReceiver<Pubkey>,
+    monitoring_request_sender: UnboundedSender<Pubkey>,
     last_known_update_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
 }
 
 impl RemoteAccountUpdatesWorker {
     pub fn new(config: RpcProviderConfig) -> Self {
-        let (request_sender, request_receiver) = unbounded_channel();
+        let (monitoring_request_sender, monitoring_request_receiver) =
+            unbounded_channel();
         Self {
             config,
-            request_sender,
-            request_receiver,
+            monitoring_request_sender,
+            monitoring_request_receiver,
             last_known_update_slots: Default::default(),
         }
     }
 
-    pub fn get_request_sender(&self) -> UnboundedSender<Pubkey> {
-        self.request_sender.clone()
+    pub fn get_monitoring_request_sender(&self) -> UnboundedSender<Pubkey> {
+        self.monitoring_request_sender.clone()
     }
 
     pub fn get_last_known_update_slots(
@@ -60,7 +61,7 @@ impl RemoteAccountUpdatesWorker {
         self.last_known_update_slots.clone()
     }
 
-    pub async fn start_monitoring(
+    pub async fn start_monitoring_request_listener(
         &mut self,
         cancellation_token: CancellationToken,
     ) -> Result<(), RemoteAccountUpdatesWorkerError> {
@@ -76,7 +77,7 @@ impl RemoteAccountUpdatesWorker {
 
         loop {
             tokio::select! {
-                Some(request) = self.request_receiver.recv() => {
+                Some(request) = self.monitoring_request_receiver.recv() => {
                     if let Entry::Vacant(entry) = subscriptions_cancellation_tokens.entry(request) {
                         let subscription_cancellation_token = CancellationToken::new();
                         entry.insert(subscription_cancellation_token.clone());

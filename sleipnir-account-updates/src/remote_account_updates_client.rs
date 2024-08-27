@@ -9,14 +9,14 @@ use tokio::sync::mpsc::UnboundedSender;
 use crate::{AccountUpdates, AccountUpdatesError, RemoteAccountUpdatesWorker};
 
 pub struct RemoteAccountUpdatesClient {
-    request_sender: UnboundedSender<Pubkey>,
+    monitoring_request_sender: UnboundedSender<Pubkey>,
     last_known_update_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
 }
 
 impl RemoteAccountUpdatesClient {
     pub fn new(worker: &RemoteAccountUpdatesWorker) -> Self {
         Self {
-            request_sender: worker.get_request_sender(),
+            monitoring_request_sender: worker.get_monitoring_request_sender(),
             last_known_update_slots: worker.get_last_known_update_slots(),
         }
     }
@@ -27,7 +27,7 @@ impl AccountUpdates for RemoteAccountUpdatesClient {
         &self,
         pubkey: &Pubkey,
     ) -> Result<(), AccountUpdatesError> {
-        self.request_sender
+        self.monitoring_request_sender
             .send(*pubkey)
             .map_err(AccountUpdatesError::SendError)
     }

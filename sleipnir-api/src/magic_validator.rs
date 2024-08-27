@@ -476,7 +476,21 @@ impl MagicValidator {
             self.remote_account_updates_handle =
                 Some(tokio::spawn(async move {
                     remote_account_updates_worker
-                        .start_monitoring(cancellation_token)
+                        .start_monitoring_request_listener(cancellation_token)
+                        .await
+                }));
+        }
+    }
+
+    fn start_remote_account_cloner_worker(&mut self) {
+        if let Some(mut remote_account_cloner_worker) =
+            self.remote_account_cloner_worker.take()
+        {
+            let cancellation_token = self.token.clone();
+            self.remote_account_cloner_handle =
+                Some(tokio::spawn(async move {
+                    remote_account_cloner_worker
+                        .start_clone_request_listener(cancellation_token)
                         .await
                 }));
         }
