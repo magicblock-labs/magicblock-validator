@@ -418,29 +418,8 @@ impl MagicValidator {
             self.token.clone(),
         ));
 
-        if let Some(mut remote_account_fetcher_worker) =
-            self.remote_account_fetcher_worker.take()
-        {
-            let cancellation_token = self.token.clone();
-            self.remote_account_fetcher_handle =
-                Some(tokio::spawn(async move {
-                    remote_account_fetcher_worker
-                        .start_fetch_request_listener(cancellation_token)
-                        .await
-                }));
-        }
-
-        if let Some(mut remote_account_updates_worker) =
-            self.remote_account_updates_worker.take()
-        {
-            let cancellation_token = self.token.clone();
-            self.remote_account_updates_handle =
-                Some(tokio::spawn(async move {
-                    remote_account_updates_worker
-                        .start_monitoring(cancellation_token)
-                        .await
-                }));
-        }
+        self.start_remote_account_fetcher_worker();
+        self.start_remote_account_updates_worker();
 
         self.rpc_service.start().map_err(|err| {
             ApiError::FailedToStartJsonRpcService(format!("{:?}", err))
@@ -473,6 +452,34 @@ impl MagicValidator {
             ));
 
         Ok(())
+    }
+
+    fn start_remote_account_fetcher_worker(&mut self) {
+        if let Some(mut remote_account_fetcher_worker) =
+            self.remote_account_fetcher_worker.take()
+        {
+            let cancellation_token = self.token.clone();
+            self.remote_account_fetcher_handle =
+                Some(tokio::spawn(async move {
+                    remote_account_fetcher_worker
+                        .start_fetch_request_listener(cancellation_token)
+                        .await
+                }));
+        }
+    }
+
+    fn start_remote_account_updates_worker(&mut self) {
+        if let Some(mut remote_account_updates_worker) =
+            self.remote_account_updates_worker.take()
+        {
+            let cancellation_token = self.token.clone();
+            self.remote_account_updates_handle =
+                Some(tokio::spawn(async move {
+                    remote_account_updates_worker
+                        .start_monitoring(cancellation_token)
+                        .await
+                }));
+        }
     }
 
     pub fn stop(&self) {
