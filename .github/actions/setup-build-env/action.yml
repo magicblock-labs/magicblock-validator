@@ -25,7 +25,7 @@ runs:
       repository: magicblock-labs/conjunto
       token: ${{ inputs.github_access_token }}
       path: conjunto
-      ref: vbrunet/2024_08_08-individual-account-fetching
+      ref: master
 
   # NOTE: we need the older version of the delegation program until we
   # merge the commit+undelegate PR
