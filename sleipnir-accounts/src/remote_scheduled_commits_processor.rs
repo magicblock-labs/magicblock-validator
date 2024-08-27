@@ -168,7 +168,7 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
             sendable_payloads_queue.extend(sendable_payloads);
         }
 
-        self.process_accounts_commits_in_task(
+        self.process_accounts_commits_in_background(
             committer,
             accounts_remover,
             sendable_payloads_queue,
@@ -192,7 +192,7 @@ impl RemoteScheduledCommitsProcessor {
         }
     }
 
-    fn process_accounts_commits_in_task<
+    fn process_accounts_commits_in_background<
         AC: AccountCommitter,
         AR: AccountsRemover,
     >(
@@ -227,18 +227,22 @@ impl RemoteScheduledCommitsProcessor {
                 .into_iter()
                 .flat_map(|commit| commit.undelegated_accounts.into_iter())
                 .collect::<HashSet<Pubkey>>();
-            eprintln!(
-                "Undelegated account: {}",
-                undelegated_accounts
-                    .iter()
-                    .map(|x| x.to_string())
-                    .collect::<Vec<String>>()
-                    .join(", ")
-            );
-            remover.request_accounts_removal(
-                undelegated_accounts,
-                AccountRemovalReason::Undelegated,
-            );
+            if !undelegated_accounts.is_empty() {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Requesting to undelegate: {}",
+                        undelegated_accounts
+                            .iter()
+                            .map(|x| x.to_string())
+                            .collect::<Vec<String>>()
+                            .join(", ")
+                    );
+                }
+                remover.request_accounts_removal(
+                    undelegated_accounts,
+                    AccountRemovalReason::Undelegated,
+                );
+            }
         });
     }
 }

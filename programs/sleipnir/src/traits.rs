@@ -7,7 +7,7 @@ pub enum AccountRemovalReason {
     Undelegated,
 }
 
-pub trait AccountsRemover: Clone + Send + Sync {
+pub trait AccountsRemover: Clone + Send + Sync + 'static {
     fn request_accounts_removal(
         &self,
         pubkey: HashSet<Pubkey>,

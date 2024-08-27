@@ -1,5 +1,14 @@
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
+use crate::{
+    errors::{AccountsError, AccountsResult},
+    external_accounts::{ExternalReadonlyAccounts, ExternalWritableAccounts},
+    traits::{AccountCloner, AccountCommitter, InternalAccountProvider},
+    utils::get_epoch,
+    AccountCommittee, CommitAccountsPayload, LifecycleMode,
+    PendingCommitTransaction, ScheduledCommitsProcessor,
+    SendableCommitAccountsPayload, UndelegationRequest,
+};
 use conjunto_transwise::{
     transaction_accounts_extractor::TransactionAccountsExtractor,
     transaction_accounts_holder::TransactionAccountsHolder,
@@ -13,19 +22,10 @@ use log::*;
 use sleipnir_account_fetcher::AccountFetcher;
 use sleipnir_account_updates::AccountUpdates;
 use sleipnir_program::sleipnir_instruction::AccountModification;
+use sleipnir_program::traits::AccountsRemover;
 use solana_sdk::{
     pubkey::Pubkey, signature::Signature, sysvar,
     transaction::SanitizedTransaction,
-};
-
-use crate::{
-    errors::{AccountsError, AccountsResult},
-    external_accounts::{ExternalReadonlyAccounts, ExternalWritableAccounts},
-    traits::{AccountCloner, AccountCommitter, InternalAccountProvider},
-    utils::get_epoch,
-    AccountCommittee, CommitAccountsPayload, LifecycleMode,
-    PendingCommitTransaction, ScheduledCommitsProcessor,
-    SendableCommitAccountsPayload, UndelegationRequest,
 };
 
 lazy_static! {
@@ -50,12 +50,13 @@ lazy_static! {
 }
 
 #[derive(Debug)]
-pub struct ExternalAccountsManager<IAP, AFE, ACL, ACM, AUP, TAE, TAV, SCP>
+pub struct ExternalAccountsManager<IAP, AFE, ACL, ACM, ARE, AUP, TAE, TAV, SCP>
 where
     IAP: InternalAccountProvider,
     AFE: AccountFetcher,
     ACL: AccountCloner,
     ACM: AccountCommitter,
+    ARE: AccountsRemover,
     AUP: AccountUpdates,
     TAE: TransactionAccountsExtractor,
     TAV: TransactionAccountsValidator,
@@ -64,6 +65,7 @@ where
     pub internal_account_provider: IAP,
     pub account_fetcher: AFE,
     pub account_cloner: ACL,
+    pub accounts_remover: ARE,
     pub account_committer: Arc<ACM>,
     pub account_updates: AUP,
     pub transaction_accounts_extractor: TAE,
@@ -76,13 +78,14 @@ where
     pub validator_id: Pubkey,
 }
 
-impl<IAP, AFE, ACL, ACM, AUP, TAE, TAV, SCP>
-ExternalAccountsManager<IAP, AFE, ACL, ACM, AUP, TAE, TAV, SCP>
+impl<IAP, AFE, ACL, ACM, ARE, AUP, TAE, TAV, SCP>
+ExternalAccountsManager<IAP, AFE, ACL, ACM, ARE, AUP, TAE, TAV, SCP>
 where
     IAP: InternalAccountProvider,
     AFE: AccountFetcher,
     ACL: AccountCloner,
     ACM: AccountCommitter,
+    ARE: AccountsRemover,
     AUP: AccountUpdates,
     TAE: TransactionAccountsExtractor,
     TAV: TransactionAccountsValidator,
@@ -206,8 +209,8 @@ where
                 self.account_fetcher.fetch_account_chain_snapshot(pubkey)
             })),
         )
-        .await
-        .map_err(AccountsError::AccountFetcherError)?;
+            .await
+            .map_err(AccountsError::AccountFetcherError)?;
 
         // 3.B Validate the accounts that we see for the very first time
         let tx_snapshot = TransactionAccountsSnapshot {
@@ -484,7 +487,7 @@ where
 
     pub async fn process_scheduled_commits(&self) -> AccountsResult<()> {
         self.scheduled_commits_processor
-            .process(&self.account_committer, &self.internal_account_provider)
+            .process(&self.account_committer, &self.internal_account_provider, &self.accounts_remover)
             .await
     }
 }
