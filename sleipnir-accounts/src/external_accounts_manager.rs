@@ -61,6 +61,7 @@ where
     SCP: ScheduledCommitsProcessor,
 {
     pub internal_account_provider: IAP,
+    pub account_fetcher: AFE,
     pub account_cloner: ACL,
     pub account_committer: Arc<ACM>,
     pub transaction_accounts_extractor: TAE,

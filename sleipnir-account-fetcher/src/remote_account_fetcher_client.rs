@@ -38,7 +38,7 @@ impl AccountFetcher for RemoteAccountFetcherClient {
         &self,
         pubkey: &Pubkey,
     ) -> BoxFuture<AccountFetcherResult> {
-        let (is_first_request_to_fetch, receiver) = match self
+        let (should_request_fetch, receiver) = match self
             .fetch_result_listeners
             .write()
             .expect("RwLock of RemoteAccountFetcherClient.fetch_result_listeners is poisoned")
@@ -55,7 +55,7 @@ impl AccountFetcher for RemoteAccountFetcherClient {
                 (false, receiver)
             }
         };
-        if is_first_request_to_fetch {
+        if should_request_fetch {
             if let Err(error) = self.request_sender.send(*pubkey) {
                 return Box::pin(ready(Err(AccountFetcherError::SendError(
                     error,
