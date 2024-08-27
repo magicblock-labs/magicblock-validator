@@ -19,7 +19,7 @@ use solana_sdk::{
 };
 
 use crate::{
-    errors::AccountsResult,
+    errors::{AccountsError, AccountsResult},
     external_accounts_cache::ExternalAccountsCache,
     traits::{AccountCloner, AccountCommitter, InternalAccountProvider},
     utils::get_epoch,
@@ -61,14 +61,12 @@ where
     SCP: ScheduledCommitsProcessor,
 {
     pub internal_account_provider: IAP,
-    pub account_fetcher: AFE,
     pub account_cloner: ACL,
     pub account_committer: Arc<ACM>,
-    pub account_updates: AUP,
     pub transaction_accounts_extractor: TAE,
     pub transaction_accounts_validator: TAV,
     pub scheduled_commits_processor: SCP,
-    pub external_accounts_cache: ExternalAccountsCache,
+    pub external_accounts_cache: ExternalAccountsCache<AFE, AUP>,
     pub lifecycle: LifecycleMode,
     pub payer_init_lamports: Option<u64>,
     pub validator_id: Pubkey,
@@ -90,18 +88,15 @@ where
         &self,
         tx: &SanitizedTransaction,
     ) -> AccountsResult<Vec<Signature>> {
-        // If this validator does not clone any accounts then we're done
-        if self.lifecycle.is_clone_readable_none()
-            && self.lifecycle.is_clone_writable_none()
-        {
-            return Ok(vec![]); // TODO
+        // If this validator does not clone any accounts, then we're done
+        if self.lifecycle.is_offline() {
+            return Ok(vec![]);
         }
-
-        // 1. Extract all acounts from the transaction
+        // Extract all acounts from the transaction
         let accounts_holder = self
             .transaction_accounts_extractor
             .try_accounts_from_sanitized_transaction(tx)?;
-
+        // Make sure all accounts used by the transaction are cloned properly if needed
         self.ensure_accounts_from_holder(
             accounts_holder,
             tx.signature().to_string(),
@@ -117,10 +112,26 @@ where
     ) -> AccountsResult<Vec<Signature>> {
         let payer_id = accounts_holder.payer;
 
-        // Ensure that we are watching all readonly accounts
+        // List all accounts involved in the transaction
+        let accounts_ids = accounts_holder
+            .readonly
+            .iter()
+            .chain(accounts_holder.writable.iter());
+
+        // For each account individually
+        for account_id in accounts_ids {
+            match self.external_accounts_cache.get(account_id) {
+                Some(item) => {}
+                None => {}
+            }
+        }
+
+        // Ensure that we are watching all accounts
+        /*
         accounts_holder
             .readonly
             .iter()
+            .chain(accounts_holder.writable.iter())
             .try_for_each(|pubkey| {
                 // TODO(vbrunet)
                 //  - https://github.com/magicblock-labs/magicblock-validator/issues/95
@@ -128,6 +139,7 @@ where
                 self.account_updates.ensure_account_monitoring(pubkey)
             })
             .map_err(AccountsError::AccountUpdatesError)?;
+         */
 
         // 2.A Collect all readonly accounts we've never seen before and need to clone as readonly
         let unseen_readonly_ids = if self.lifecycle.is_clone_readable_none() {
@@ -148,6 +160,7 @@ where
                         return false;
                     }
                     // If there was an on-chain update since last clone, always re-clone
+                    /*
                     if let Some(cloned_at_slot) = self
                         .external_readonly_accounts
                         .get_cloned_at_slot(pubkey)
@@ -162,6 +175,7 @@ where
                             }
                         }
                     }
+                    */
                     // If we don't know of any recent update, and it's still in the cache, it can be used safely
                     if self.external_readonly_accounts.has(pubkey) {
                         return false;
