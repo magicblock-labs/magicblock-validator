@@ -19,6 +19,7 @@ use solana_sdk::{
     transaction_context::TransactionContext,
 };
 
+use crate::internal::process_remove_accounts_pending_removal;
 use crate::{
     process_scheduled_commit_sent,
     schedule_transactions::{
@@ -73,6 +74,9 @@ declare_process_instruction!(
                     transaction_context,
                     id,
                 )
+            }
+            SleipnirInstruction::RemoveAccountsPendingRemoval => {
+                process_remove_accounts_pending_removal(signers, invoke_context)
             }
         }
     }

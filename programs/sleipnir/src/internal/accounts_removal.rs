@@ -3,19 +3,27 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use lazy_static::lazy_static;
-use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
-use solana_sdk::{
-    account::{ReadableAccount, WritableAccount},
-    instruction::InstructionError,
-    pubkey::Pubkey,
+use crate::{
+    sleipnir_instruction::{into_transaction, SleipnirInstruction},
+    validator_authority, validator_authority_id,
 };
-
 use crate::{
     traits::{AccountRemovalReason, AccountsRemover},
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
     },
+};
+use lazy_static::lazy_static;
+use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
+use solana_sdk::{
+    account::{ReadableAccount, WritableAccount},
+    hash::Hash,
+    instruction::InstructionError,
+    pubkey::Pubkey,
+};
+use solana_sdk::{
+    instruction::{AccountMeta, Instruction},
+    transaction::Transaction,
 };
 
 // -----------------
@@ -60,6 +68,42 @@ impl AccountsRemover for ValidatorAccountsRemover {
             });
         }
     }
+
+    fn has_accounts_pending_removal(&self) -> bool {
+        let accounts_pending_removal = self
+            .accounts_pending_removal
+            .read()
+            .expect("accounts_pending_removal lock poisoned");
+        !accounts_pending_removal.is_empty()
+    }
+}
+
+// -----------------
+// Instruction to process removal from validator
+// -----------------
+pub fn process_accounts_pending_removal_transaction(
+    recent_blockhash: Hash,
+) -> Transaction {
+    let ix = process_accounts_pending_removal_instruction(
+        &crate::id(),
+        &validator_authority_id(),
+    );
+    into_transaction(&validator_authority(), ix, recent_blockhash)
+}
+
+fn process_accounts_pending_removal_instruction(
+    magic_block_program: &Pubkey,
+    validator_authority: &Pubkey,
+) -> Instruction {
+    let account_metas = vec![
+        AccountMeta::new_readonly(*magic_block_program, false),
+        AccountMeta::new_readonly(*validator_authority, true),
+    ];
+    Instruction::new_with_bincode(
+        *magic_block_program,
+        &SleipnirInstruction::RemoveAccountsPendingRemoval,
+        account_metas,
+    )
 }
 
 // -----------------

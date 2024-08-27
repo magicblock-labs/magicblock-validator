@@ -1,14 +1,5 @@
 use std::{collections::HashSet, sync::Arc, time::Duration};
 
-use crate::{
-    errors::{AccountsError, AccountsResult},
-    external_accounts::{ExternalReadonlyAccounts, ExternalWritableAccounts},
-    traits::{AccountCloner, AccountCommitter, InternalAccountProvider},
-    utils::get_epoch,
-    AccountCommittee, CommitAccountsPayload, LifecycleMode,
-    PendingCommitTransaction, ScheduledCommitsProcessor,
-    SendableCommitAccountsPayload, UndelegationRequest,
-};
 use conjunto_transwise::{
     transaction_accounts_extractor::TransactionAccountsExtractor,
     transaction_accounts_holder::TransactionAccountsHolder,
@@ -21,11 +12,26 @@ use lazy_static::lazy_static;
 use log::*;
 use sleipnir_account_fetcher::AccountFetcher;
 use sleipnir_account_updates::AccountUpdates;
-use sleipnir_program::sleipnir_instruction::AccountModification;
-use sleipnir_program::traits::AccountsRemover;
+use sleipnir_bank::bank::Bank;
+use sleipnir_program::{
+    process_accounts_pending_removal_transaction,
+    sleipnir_instruction::AccountModification, traits::AccountsRemover,
+};
+use sleipnir_transaction_status::TransactionStatusSender;
 use solana_sdk::{
     pubkey::Pubkey, signature::Signature, sysvar,
     transaction::SanitizedTransaction,
+};
+
+use crate::{
+    errors::{AccountsError, AccountsResult},
+    execute_legacy_transaction,
+    external_accounts::{ExternalReadonlyAccounts, ExternalWritableAccounts},
+    traits::{AccountCloner, AccountCommitter, InternalAccountProvider},
+    utils::get_epoch,
+    AccountCommittee, CommitAccountsPayload, LifecycleMode,
+    PendingCommitTransaction, ScheduledCommitsProcessor,
+    SendableCommitAccountsPayload, UndelegationRequest,
 };
 
 lazy_static! {
@@ -70,6 +76,7 @@ where
     pub account_updates: AUP,
     pub transaction_accounts_extractor: TAE,
     pub transaction_accounts_validator: TAV,
+    pub transaction_status_sender: Option<TransactionStatusSender>,
     pub scheduled_commits_processor: SCP,
     pub external_readonly_accounts: ExternalReadonlyAccounts,
     pub external_writable_accounts: ExternalWritableAccounts,
@@ -79,7 +86,7 @@ where
 }
 
 impl<IAP, AFE, ACL, ACM, ARE, AUP, TAE, TAV, SCP>
-ExternalAccountsManager<IAP, AFE, ACL, ACM, ARE, AUP, TAE, TAV, SCP>
+    ExternalAccountsManager<IAP, AFE, ACL, ACM, ARE, AUP, TAE, TAV, SCP>
 where
     IAP: InternalAccountProvider,
     AFE: AccountFetcher,
@@ -111,7 +118,7 @@ where
             accounts_holder,
             tx.signature().to_string(),
         )
-            .await
+        .await
     }
 
     // Direct use for tests only
@@ -209,8 +216,8 @@ where
                 self.account_fetcher.fetch_account_chain_snapshot(pubkey)
             })),
         )
-            .await
-            .map_err(AccountsError::AccountFetcherError)?;
+        .await
+        .map_err(AccountsError::AccountFetcherError)?;
 
         // 3.B Validate the accounts that we see for the very first time
         let tx_snapshot = TransactionAccountsSnapshot {
@@ -487,7 +494,27 @@ where
 
     pub async fn process_scheduled_commits(&self) -> AccountsResult<()> {
         self.scheduled_commits_processor
-            .process(&self.account_committer, &self.internal_account_provider, &self.accounts_remover)
+            .process(
+                &self.account_committer,
+                &self.internal_account_provider,
+                &self.accounts_remover,
+            )
             .await
+    }
+
+    // -----------------
+    // Accounts removal
+    // -----------------
+    pub fn remove_accounts_pending_removal(
+        &self,
+        bank: &Arc<Bank>,
+    ) -> AccountsResult<Signature> {
+        let blockhash = bank.last_blockhash();
+        let tx = process_accounts_pending_removal_transaction(blockhash);
+        execute_legacy_transaction(
+            tx,
+            bank,
+            self.transaction_status_sender.as_ref(),
+        )
     }
 }

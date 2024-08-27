@@ -121,6 +121,14 @@ pub(crate) enum SleipnirInstruction {
     /// We implement it this way so we can log the signature of this transaction
     /// as part of the [SleipnirInstruction::ScheduleCommit] instruction.
     ScheduledCommitSent(u64),
+
+    /// Removes accounts that were marked for removal for either of the following reasons:
+    ///
+    /// - an account was committed and undelegated on chain
+    ///
+    /// Marking an account for removal happens asynchronously whenever the on-chain transaction
+    /// is confirmed. We process all pending removals as part of a new slot.
+    RemoveAccountsPendingRemoval,
 }
 
 #[allow(unused)]
@@ -132,6 +140,7 @@ impl SleipnirInstruction {
             ScheduleCommit => 1,
             ScheduleCommitAndUndelegate => 2,
             ScheduledCommitSent(_) => 3,
+            RemoveAccountsPendingRemoval => 4,
         }
     }
 
@@ -272,7 +281,7 @@ pub(crate) fn scheduled_commit_sent_instruction(
 // -----------------
 // Utils
 // -----------------
-fn into_transaction(
+pub(crate) fn into_transaction(
     signer: &Keypair,
     instruction: Instruction,
     recent_blockhash: Hash,

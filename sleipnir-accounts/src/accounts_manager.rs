@@ -1,16 +1,5 @@
 use std::sync::Arc;
 
-use crate::{
-    bank_account_provider::BankAccountProvider,
-    config::AccountsConfig,
-    errors::AccountsResult,
-    external_accounts::{ExternalReadonlyAccounts, ExternalWritableAccounts},
-    remote_account_cloner::RemoteAccountCloner,
-    remote_account_committer::RemoteAccountCommitter,
-    remote_scheduled_commits_processor::RemoteScheduledCommitsProcessor,
-    utils::try_rpc_cluster_from_cluster,
-    ExternalAccountsManager,
-};
 use conjunto_transwise::{
     transaction_accounts_extractor::TransactionAccountsExtractorImpl,
     transaction_accounts_validator::TransactionAccountsValidatorImpl,
@@ -25,6 +14,18 @@ use solana_sdk::{
     commitment_config::CommitmentConfig, signature::Keypair, signer::Signer,
 };
 
+use crate::{
+    bank_account_provider::BankAccountProvider,
+    config::AccountsConfig,
+    errors::AccountsResult,
+    external_accounts::{ExternalReadonlyAccounts, ExternalWritableAccounts},
+    remote_account_cloner::RemoteAccountCloner,
+    remote_account_committer::RemoteAccountCommitter,
+    remote_scheduled_commits_processor::RemoteScheduledCommitsProcessor,
+    utils::try_rpc_cluster_from_cluster,
+    ExternalAccountsManager,
+};
+
 pub type AccountsManager = ExternalAccountsManager<
     BankAccountProvider,
     RemoteAccountFetcherClient,
@@ -37,19 +38,7 @@ pub type AccountsManager = ExternalAccountsManager<
     RemoteScheduledCommitsProcessor,
 >;
 
-impl
-ExternalAccountsManager<
-    BankAccountProvider,
-    RemoteAccountFetcherClient,
-    RemoteAccountCloner,
-    RemoteAccountCommitter,
-    ValidatorAccountsRemover,
-    RemoteAccountUpdatesClient,
-    TransactionAccountsExtractorImpl,
-    TransactionAccountsValidatorImpl,
-    RemoteScheduledCommitsProcessor,
->
-{
+impl AccountsManager {
     pub fn try_new(
         bank: &Arc<Bank>,
         remote_account_fetcher_client: RemoteAccountFetcherClient,
@@ -81,7 +70,7 @@ ExternalAccountsManager<
         let scheduled_commits_processor = RemoteScheduledCommitsProcessor::new(
             remote_cluster,
             bank.clone(),
-            transaction_status_sender,
+            transaction_status_sender.clone(),
         );
 
         Ok(Self {
@@ -93,6 +82,7 @@ ExternalAccountsManager<
             account_updates: remote_account_updates_client,
             transaction_accounts_extractor: TransactionAccountsExtractorImpl,
             transaction_accounts_validator: TransactionAccountsValidatorImpl,
+            transaction_status_sender,
             external_readonly_accounts: ExternalReadonlyAccounts::default(),
             external_writable_accounts: ExternalWritableAccounts::default(),
             lifecycle: config.lifecycle,

@@ -16,8 +16,10 @@ use stubs::{
     account_committer_stub::AccountCommitterStub,
     account_fetcher_stub::AccountFetcherStub,
     account_updates_stub::AccountUpdatesStub,
+    accounts_remover_stub::AccountsRemoverStub,
     internal_account_provider_stub::InternalAccountProviderStub,
     scheduled_commits_processor_stub::ScheduledCommitsProcessorStub,
+    StubbedAccountsManager,
 };
 use test_tools_core::init_logger;
 
@@ -30,27 +32,20 @@ fn setup(
     account_committer: AccountCommitterStub,
     account_updates: AccountUpdatesStub,
     validator_auth_id: Pubkey,
-) -> ExternalAccountsManager<
-    InternalAccountProviderStub,
-    AccountFetcherStub,
-    AccountClonerStub,
-    AccountCommitterStub,
-    AccountUpdatesStub,
-    TransactionAccountsExtractorImpl,
-    TransactionAccountsValidatorImpl,
-    ScheduledCommitsProcessorStub,
-> {
+) -> StubbedAccountsManager {
     ExternalAccountsManager {
         internal_account_provider,
         account_fetcher,
         account_committer: Arc::new(account_committer),
         account_updates,
         account_cloner,
+        accounts_remover: AccountsRemoverStub,
         transaction_accounts_extractor: TransactionAccountsExtractorImpl,
         transaction_accounts_validator: TransactionAccountsValidatorImpl,
         scheduled_commits_processor: ScheduledCommitsProcessorStub::default(),
         external_readonly_accounts: Default::default(),
         external_writable_accounts: Default::default(),
+        transaction_status_sender: None,
         lifecycle: LifecycleMode::Ephemeral,
         payer_init_lamports: Some(1_000 * LAMPORTS_PER_SOL),
         validator_id: validator_auth_id,

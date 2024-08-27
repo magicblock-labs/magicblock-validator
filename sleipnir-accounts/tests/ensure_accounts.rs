@@ -15,8 +15,10 @@ use stubs::{
     account_committer_stub::AccountCommitterStub,
     account_fetcher_stub::AccountFetcherStub,
     account_updates_stub::AccountUpdatesStub,
+    accounts_remover_stub::AccountsRemoverStub,
     internal_account_provider_stub::InternalAccountProviderStub,
     scheduled_commits_processor_stub::ScheduledCommitsProcessorStub,
+    StubbedAccountsManager,
 };
 use test_tools_core::init_logger;
 
@@ -30,25 +32,18 @@ fn setup_with_lifecycle(
     account_committer: AccountCommitterStub,
     account_updates: AccountUpdatesStub,
     lifecycle: LifecycleMode,
-) -> ExternalAccountsManager<
-    InternalAccountProviderStub,
-    AccountFetcherStub,
-    AccountClonerStub,
-    AccountCommitterStub,
-    AccountUpdatesStub,
-    TransactionAccountsExtractorImpl,
-    TransactionAccountsValidatorImpl,
-    ScheduledCommitsProcessorStub,
-> {
+) -> StubbedAccountsManager {
     let validator_auth_id = Pubkey::new_unique();
     ExternalAccountsManager {
         internal_account_provider,
         account_fetcher,
         account_cloner,
         account_committer: Arc::new(account_committer),
+        accounts_remover: AccountsRemoverStub,
         account_updates,
         transaction_accounts_extractor: TransactionAccountsExtractorImpl,
         transaction_accounts_validator: TransactionAccountsValidatorImpl,
+        transaction_status_sender: None,
         external_readonly_accounts: Default::default(),
         external_writable_accounts: Default::default(),
         scheduled_commits_processor: ScheduledCommitsProcessorStub::default(),
@@ -64,16 +59,7 @@ fn setup_ephem(
     account_cloner: AccountClonerStub,
     account_committer: AccountCommitterStub,
     account_updates: AccountUpdatesStub,
-) -> ExternalAccountsManager<
-    InternalAccountProviderStub,
-    AccountFetcherStub,
-    AccountClonerStub,
-    AccountCommitterStub,
-    AccountUpdatesStub,
-    TransactionAccountsExtractorImpl,
-    TransactionAccountsValidatorImpl,
-    ScheduledCommitsProcessorStub,
-> {
+) -> StubbedAccountsManager {
     setup_with_lifecycle(
         internal_account_provider,
         account_fetcher,
