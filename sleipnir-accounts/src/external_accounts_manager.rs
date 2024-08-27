@@ -20,7 +20,7 @@ use solana_sdk::{
 
 use crate::{
     errors::AccountsResult,
-    external_accounts::{ExternalReadonlyAccounts, ExternalWritableAccounts},
+    external_accounts_cache::ExternalAccountsCache,
     traits::{AccountCloner, AccountCommitter, InternalAccountProvider},
     utils::get_epoch,
     AccountCommittee, CommitAccountsPayload, LifecycleMode,
@@ -68,8 +68,7 @@ where
     pub transaction_accounts_extractor: TAE,
     pub transaction_accounts_validator: TAV,
     pub scheduled_commits_processor: SCP,
-    pub external_readonly_accounts: ExternalReadonlyAccounts,
-    pub external_writable_accounts: ExternalWritableAccounts,
+    pub external_accounts_cache: ExternalAccountsCache,
     pub lifecycle: LifecycleMode,
     pub payer_init_lamports: Option<u64>,
     pub validator_id: Pubkey,
