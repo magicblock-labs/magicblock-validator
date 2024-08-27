@@ -5,9 +5,11 @@ pub const MAINNET_URL: &str = "https://api.mainnet-beta.solana.com";
 pub const DEVNET_URL: &str = "https://api.devnet.solana.com";
 pub const DEVELOPMENT_URL: &str = "http://127.0.0.1:8899";
 
+/// TODO(vbrunet)
+///  - this probably belong in a different crate, "mutator" is specific to the data dump mechanisms
+///  - conjunto_addresses::cluster::RpcCluster already achieve this and is a full duplicate
+///  - deprecation tracked here: https://github.com/magicblock-labs/magicblock-validator/issues/138
 #[derive(Debug, Clone, PartialEq, Eq)]
-/// Extension of [solana_sdk::genesis_config::ClusterType] in order to support
-/// custom clusters
 pub enum Cluster {
     Known(ClusterType),
     Custom(String),

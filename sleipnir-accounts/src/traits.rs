@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use sleipnir_mutator::AccountModification;
+use sleipnir_program::sleipnir_instruction::AccountModification;
 use solana_sdk::{
     account::{Account, AccountSharedData},
     pubkey::Pubkey,
@@ -30,9 +30,9 @@ pub trait AccountCloner {
     async fn clone_account(
         &self,
         pubkey: &Pubkey,
-        account: Option<Account>,
+        account: Option<&Account>,
         overrides: Option<AccountModification>,
-    ) -> AccountsResult<Signature>;
+    ) -> AccountsResult<Vec<Signature>>;
 }
 
 pub struct AccountCommittee {

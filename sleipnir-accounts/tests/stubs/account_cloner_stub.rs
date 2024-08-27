@@ -1,8 +1,8 @@
-use std::{collections::HashMap, str::FromStr, sync::RwLock};
+use std::{collections::HashMap, sync::RwLock};
 
 use async_trait::async_trait;
 use sleipnir_accounts::{errors::AccountsResult, AccountCloner};
-use sleipnir_mutator::AccountModification;
+use sleipnir_program::sleipnir_instruction::AccountModification;
 use solana_sdk::{account::Account, pubkey::Pubkey, signature::Signature};
 
 #[derive(Default, Debug)]
@@ -19,11 +19,7 @@ impl AccountClonerStub {
     pub fn did_override_owner(&self, pubkey: &Pubkey, owner: &Pubkey) -> bool {
         let read_lock = self.cloned_accounts.read().unwrap();
         if let Some(overrides) = read_lock.get(pubkey) {
-            overrides
-                .as_ref()
-                .and_then(|x| x.owner.as_ref())
-                .map(|o| Pubkey::from_str(o).unwrap())
-                == Some(*owner)
+            overrides.as_ref().and_then(|x| x.owner.as_ref()) == Some(owner)
         } else {
             false
         }
@@ -75,13 +71,13 @@ impl AccountCloner for AccountClonerStub {
     async fn clone_account(
         &self,
         pubkey: &Pubkey,
-        _account: Option<Account>,
+        _account: Option<&Account>,
         overrides: Option<AccountModification>,
-    ) -> AccountsResult<Signature> {
+    ) -> AccountsResult<Vec<Signature>> {
         self.cloned_accounts
             .write()
             .unwrap()
             .insert(*pubkey, overrides);
-        Ok(Signature::new_unique())
+        Ok(vec![Signature::new_unique()])
     }
 }

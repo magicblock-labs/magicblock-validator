@@ -12,7 +12,7 @@ use conjunto_transwise::{
 use lazy_static::lazy_static;
 use log::*;
 use sleipnir_account_updates::AccountUpdates;
-use sleipnir_mutator::AccountModification;
+use sleipnir_program::sleipnir_instruction::AccountModification;
 use solana_sdk::{
     pubkey::Pubkey, signature::Signature, sysvar,
     transaction::SanitizedTransaction,
@@ -282,16 +282,15 @@ where
 
         // 5.A Clone the unseen readonly accounts without any modifications
         for cloned_readonly_account in cloned_readonly_accounts {
-            let signature = self
+            let mut clone_signatures = self
                 .account_cloner
                 .clone_account(
                     &cloned_readonly_account.pubkey,
-                    // TODO(vbrunet) - This should not need to be cloned
-                    cloned_readonly_account.chain_state.account().cloned(),
+                    cloned_readonly_account.chain_state.account(),
                     None,
                 )
                 .await?;
-            signatures.push(signature);
+            signatures.append(&mut clone_signatures);
             self.external_readonly_accounts.insert(
                 cloned_readonly_account.pubkey,
                 cloned_readonly_account.at_slot,
@@ -307,7 +306,7 @@ where
                 .delegation_record()
                 .as_ref()
                 .map(|x| AccountModification {
-                    owner: Some(x.owner.to_string()),
+                    owner: Some(x.owner),
                     ..Default::default()
                 });
             if cloned_writable_account.pubkey == acc_snapshot.payer {
@@ -323,15 +322,15 @@ where
                     }
                 }
             }
-            let signature = self
+            let mut clone_signatures = self
                 .account_cloner
                 .clone_account(
                     &cloned_writable_account.pubkey,
-                    cloned_writable_account.chain_state.account().cloned(),
+                    cloned_writable_account.chain_state.account(),
                     overrides,
                 )
                 .await?;
-            signatures.push(signature);
+            signatures.append(&mut clone_signatures);
             // Remove the account from the readonlys and add it to writables
             self.external_readonly_accounts
                 .remove(&cloned_writable_account.pubkey);

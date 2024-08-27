@@ -3,6 +3,7 @@ use std::collections::HashMap;
 use num_derive::{FromPrimitive, ToPrimitive};
 use serde::{Deserialize, Serialize};
 use solana_sdk::{
+    account::Account,
     decode_error::DecodeError,
     hash::Hash,
     instruction::{AccountMeta, Instruction},
@@ -49,11 +50,27 @@ impl<T> DecodeError<T> for SleipnirError {
 
 #[derive(Default, Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub struct AccountModification {
+    pub pubkey: Pubkey,
     pub lamports: Option<u64>,
     pub owner: Option<Pubkey>,
     pub executable: Option<bool>,
     pub data: Option<Vec<u8>>,
     pub rent_epoch: Option<u64>,
+}
+
+impl From<(&Pubkey, &Account)> for AccountModification {
+    fn from(
+        (account_pubkey, account): (&Pubkey, &Account),
+    ) -> AccountModification {
+        AccountModification {
+            pubkey: *account_pubkey,
+            lamports: Some(account.lamports),
+            owner: Some(account.owner),
+            executable: Some(account.executable),
+            data: Some(account.data.clone()),
+            rent_epoch: Some(account.rent_epoch),
+        }
+    }
 }
 
 #[derive(Default, Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -120,31 +137,32 @@ impl SleipnirInstruction {
 // ModifyAccounts
 // -----------------
 pub fn modify_accounts(
-    keyed_account_mods: Vec<(Pubkey, AccountModification)>,
+    account_modifications: Vec<AccountModification>,
     recent_blockhash: Hash,
 ) -> Transaction {
-    let ix = modify_accounts_instruction(keyed_account_mods);
+    let ix = modify_accounts_instruction(account_modifications);
     into_transaction(&validator_authority(), ix, recent_blockhash)
 }
 
 pub(crate) fn modify_accounts_instruction(
-    keyed_account_mods: Vec<(Pubkey, AccountModification)>,
+    account_modifications: Vec<AccountModification>,
 ) -> Instruction {
     let mut account_metas =
         vec![AccountMeta::new(validator_authority_id(), true)];
     let mut account_mods: HashMap<Pubkey, AccountModificationForInstruction> =
         HashMap::new();
-    for (pubkey, account_mod) in keyed_account_mods {
-        account_metas.push(AccountMeta::new(pubkey, false));
-        let data_key = account_mod.data.map(set_account_mod_data);
+    for account_modification in account_modifications {
+        account_metas
+            .push(AccountMeta::new(account_modification.pubkey, false));
         let account_mod_for_instruction = AccountModificationForInstruction {
-            lamports: account_mod.lamports,
-            owner: account_mod.owner,
-            executable: account_mod.executable,
-            data_key,
-            rent_epoch: account_mod.rent_epoch,
+            lamports: account_modification.lamports,
+            owner: account_modification.owner,
+            executable: account_modification.executable,
+            data_key: account_modification.data.map(set_account_mod_data),
+            rent_epoch: account_modification.rent_epoch,
         };
-        account_mods.insert(pubkey, account_mod_for_instruction);
+        account_mods
+            .insert(account_modification.pubkey, account_mod_for_instruction);
     }
     Instruction::new_with_bincode(
         crate::id(),
