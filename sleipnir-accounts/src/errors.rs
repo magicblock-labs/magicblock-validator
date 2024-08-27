@@ -1,3 +1,5 @@
+use sleipnir_account_fetcher::AccountFetcherError;
+use sleipnir_account_updates::AccountUpdatesError;
 use thiserror::Error;
 
 pub type AccountsResult<T> = std::result::Result<T, AccountsError>;
@@ -18,6 +20,12 @@ pub enum AccountsError {
 
     #[error("TransactionError")]
     TransactionError(#[from] solana_sdk::transaction::TransactionError),
+
+    #[error("AccountFetcherError")]
+    AccountFetcherError(#[from] AccountFetcherError),
+
+    #[error("AccountUpdatesError")]
+    AccountUpdatesError(#[from] AccountUpdatesError),
 
     #[error("InvalidRpcUrl '{0}'")]
     InvalidRpcUrl(String),

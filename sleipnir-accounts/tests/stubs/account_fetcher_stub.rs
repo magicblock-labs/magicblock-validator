@@ -2,12 +2,10 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use conjunto_transwise::{
-    account_fetcher::AccountFetcher, errors::TranswiseResult,
-    transaction_accounts_holder::TransactionAccountsHolder,
-    transaction_accounts_snapshot::TransactionAccountsSnapshot,
-    AccountChainSnapshot, AccountChainSnapshotShared, AccountChainState,
-    CommitFrequency, DelegationRecord,
+    AccountChainSnapshot, AccountChainState, CommitFrequency, DelegationRecord,
 };
+use futures_util::future::{ready, BoxFuture};
+use sleipnir_account_fetcher::{AccountFetcher, AccountFetcherResult};
 use solana_sdk::{account::Account, clock::Slot, pubkey::Pubkey};
 
 #[derive(Debug, Default)]
@@ -43,12 +41,11 @@ impl AccountFetcherStub {
 }
 
 impl AccountFetcherStub {
-    fn fetch_account_chain_snapshot(
+    fn get_or_fetch_account_chain_snapshot(
         &self,
         pubkey: &Pubkey,
-    ) -> AccountChainSnapshotShared {
-        let known_account = self.known_accounts.get(pubkey);
-        match known_account {
+    ) -> AccountFetcherResult {
+        Ok(match self.known_accounts.get(pubkey) {
             Some((owner, at_slot, delegation_record)) => AccountChainSnapshot {
                 pubkey: *pubkey,
                 at_slot: *at_slot,
@@ -75,28 +72,16 @@ impl AccountFetcherStub {
                 chain_state: AccountChainState::NewAccount,
             },
         }
-        .into()
+        .into())
     }
 }
 
 #[async_trait]
 impl AccountFetcher for AccountFetcherStub {
-    async fn fetch_transaction_accounts_snapshot(
+    fn fetch_account_chain_snapshot(
         &self,
-        accounts_holder: &TransactionAccountsHolder,
-    ) -> TranswiseResult<TransactionAccountsSnapshot> {
-        Ok(TransactionAccountsSnapshot {
-            readonly: accounts_holder
-                .readonly
-                .iter()
-                .map(|pubkey| self.fetch_account_chain_snapshot(pubkey))
-                .collect(),
-            writable: accounts_holder
-                .writable
-                .iter()
-                .map(|pubkey| self.fetch_account_chain_snapshot(pubkey))
-                .collect(),
-            payer: accounts_holder.payer,
-        })
+        pubkey: &Pubkey,
+    ) -> BoxFuture<AccountFetcherResult> {
+        Box::pin(ready(self.get_or_fetch_account_chain_snapshot(pubkey)))
     }
 }

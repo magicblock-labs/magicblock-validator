@@ -226,7 +226,7 @@ async fn test_ensure_readonly_account_tracked_but_has_been_updated_on_chain() {
 
     account_fetcher.add_undelegated(readonly_undelegated, fetchable_at_slot);
     account_updates
-        .add_known_update(readonly_undelegated, updated_last_at_slot);
+        .add_known_update_slot(readonly_undelegated, updated_last_at_slot);
 
     let manager = setup_ephem(
         internal_account_provider,
@@ -275,7 +275,7 @@ async fn test_ensure_readonly_account_tracked_and_no_recent_update_on_chain() {
     let updated_last_at_slot = 11;
 
     account_updates
-        .add_known_update(readonly_undelegated, updated_last_at_slot);
+        .add_known_update_slot(readonly_undelegated, updated_last_at_slot);
 
     let manager = setup_ephem(
         internal_account_provider,
@@ -867,7 +867,8 @@ async fn test_ensure_accounts_already_cloned_needs_reclone_after_updates() {
 
     internal_account_provider.add(account_undelegated, Default::default());
     account_fetcher.add_undelegated(account_undelegated, fetchable_at_slot);
-    account_updates.add_known_update(account_undelegated, last_updated_at_slot);
+    account_updates
+        .add_known_update_slot(account_undelegated, last_updated_at_slot);
 
     let manager = setup_ephem(
         internal_account_provider,
@@ -941,7 +942,8 @@ async fn test_ensure_accounts_already_known_can_be_reused_without_updates() {
 
     internal_account_provider.add(account_undelegated, Default::default());
     account_fetcher.add_undelegated(account_undelegated, fetchable_at_slot);
-    account_updates.add_known_update(account_undelegated, last_updated_at_slot);
+    account_updates
+        .add_known_update_slot(account_undelegated, last_updated_at_slot);
 
     let manager = setup_ephem(
         internal_account_provider,
