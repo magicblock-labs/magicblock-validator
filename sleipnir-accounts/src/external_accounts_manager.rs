@@ -52,16 +52,13 @@ lazy_static! {
 pub struct ExternalAccountsManager<IAP, AFE, ACL, ACM, AUP, TAE, TAV, SCP>
 where
     IAP: InternalAccountProvider,
-    AFE: AccountFetcher,
     ACL: AccountCloner,
     ACM: AccountCommitter,
-    AUP: AccountUpdates,
     TAE: TransactionAccountsExtractor,
     TAV: TransactionAccountsValidator,
     SCP: ScheduledCommitsProcessor,
 {
     pub internal_account_provider: IAP,
-    pub account_fetcher: AFE,
     pub account_cloner: ACL,
     pub account_committer: Arc<ACM>,
     pub transaction_accounts_extractor: TAE,
@@ -77,10 +74,8 @@ impl<IAP, AFE, ACL, ACM, AUP, TAE, TAV, SCP>
     ExternalAccountsManager<IAP, AFE, ACL, ACM, AUP, TAE, TAV, SCP>
 where
     IAP: InternalAccountProvider,
-    AFE: AccountFetcher,
     ACL: AccountCloner,
     ACM: AccountCommitter,
-    AUP: AccountUpdates,
     TAE: TransactionAccountsExtractor,
     TAV: TransactionAccountsValidator,
     SCP: ScheduledCommitsProcessor,

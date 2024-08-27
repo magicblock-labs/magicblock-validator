@@ -19,19 +19,35 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{AccountClonerError, AccountClonerResult};
 
-pub struct RemoteAccountClonerWorker {
+pub struct RemoteAccountClonerWorker<AFE, AUP> {
+    account_fetcher: AFE,
+    account_updates: AUP,
+    bank: Arc<Bank>,
+    transaction_status_sender: Option<TransactionStatusSender>,
     clone_request_receiver: UnboundedReceiver<Pubkey>,
     clone_request_sender: UnboundedSender<Pubkey>,
     clone_result_listeners:
         Arc<RwLock<HashMap<Pubkey, Vec<Sender<AccountClonerResult>>>>>,
 }
 
-impl RemoteAccountClonerWorker {
-    pub fn new() -> Self {
+impl<AFE, AUP> RemoteAccountClonerWorker<AFE, AUP>
+where
+    AFE: AccountFetcher,
+    AUP: AccountUpdates,
+{
+    pub fn new(
+        account_fetcher: AFE,
+        account_updates: AUP,
+        bank: Arc<Bank>,
+        transaction_status_sender: Option<TransactionStatusSender>,
+    ) -> Self {
         let (clone_request_sender, clone_request_receiver) =
             unbounded_channel();
         Self {
-            account_chain_snapshot_provider,
+            account_fetcher,
+            account_updates,
+            bank,
+            transaction_status_sender,
             clone_request_receiver,
             clone_request_sender,
             clone_result_listeners: Default::default(),
@@ -70,8 +86,6 @@ impl RemoteAccountClonerWorker {
     }
 
     async fn do_clone(&self, pubkey: Pubkey) {
-
-        
         // TODO(vbrunet) - clone
 
         let listeners = match self

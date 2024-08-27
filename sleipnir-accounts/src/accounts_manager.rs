@@ -47,8 +47,7 @@ impl
 {
     pub fn try_new(
         bank: &Arc<Bank>,
-        remote_account_fetcher_client: RemoteAccountFetcherClient,
-        remote_account_updates_client: RemoteAccountUpdatesClient,
+        remote_account_cloner_client: RemoteAccountClonerClient,
         transaction_status_sender: Option<TransactionStatusSender>,
         validator_keypair: Keypair,
         config: AccountsConfig,
@@ -81,10 +80,8 @@ impl
 
         Ok(Self {
             internal_account_provider,
-            account_fetcher: remote_account_fetcher_client,
-            account_cloner,
+            account_cloner: remote_account_cloner_client,
             account_committer: Arc::new(account_committer),
-            account_updates: remote_account_updates_client,
             transaction_accounts_extractor: TransactionAccountsExtractorImpl,
             transaction_accounts_validator: TransactionAccountsValidatorImpl,
             external_accounts_cache: ExternalAccountsCache::default(),

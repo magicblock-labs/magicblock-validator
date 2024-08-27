@@ -27,6 +27,9 @@ pub enum AccountsError {
     #[error("AccountUpdatesError")]
     AccountUpdatesError(#[from] AccountUpdatesError),
 
+    #[error("AccountClonerError")]
+    AccountClonerError(#[from] AccountClonerError),
+
     #[error("InvalidRpcUrl '{0}'")]
     InvalidRpcUrl(String),
 

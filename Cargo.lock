@@ -4244,6 +4244,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "sleipnir-account-cloner"
+version = "1.19.0"
+dependencies = [
+ "async-trait",
+ "conjunto-transwise",
+ "futures-util",
+ "log",
+ "solana-sdk",
+ "test-tools",
+ "thiserror",
+ "tokio",
+ "tokio-util 0.7.11",
+]
+
+[[package]]
 name = "sleipnir-account-fetcher"
 version = "1.19.0"
 dependencies = [
@@ -4285,6 +4300,7 @@ dependencies = [
  "futures-util",
  "lazy_static",
  "log",
+ "sleipnir-account-cloner",
  "sleipnir-account-fetcher",
  "sleipnir-account-updates",
  "sleipnir-bank",
@@ -4326,6 +4342,7 @@ dependencies = [
  "crossbeam-channel",
  "itertools 0.10.5",
  "log",
+ "sleipnir-account-cloner",
  "sleipnir-account-fetcher",
  "sleipnir-account-updates",
  "sleipnir-accounts",

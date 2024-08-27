@@ -15,8 +15,9 @@ pub enum AccountClonerError {
     FailedToClone(String),
 }
 
-pub type AccountCloneResult = Result<(), AccountClonerError>;
+pub type AccountClonerResult =
+    Result<AccountChainSnapshotShared, AccountClonerError>;
 
 pub trait AccountCloner {
-    fn clone_account(&self, pubkey: &Pubkey) -> BoxFuture<AccountCloneResult>;
+    fn clone_account(&self, pubkey: &Pubkey) -> BoxFuture<AccountClonerResult>;
 }

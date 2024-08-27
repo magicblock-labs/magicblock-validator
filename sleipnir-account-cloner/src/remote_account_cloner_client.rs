@@ -35,7 +35,7 @@ impl RemoteAccountClonerClient {
 
 impl AccountCloner for RemoteAccountClonerClient {
     fn clone_account(&self, pubkey: &Pubkey) -> BoxFuture<AccountClonerResult> {
-        let (is_first_request_to_fetch, receiver) = match self
+        let (should_request_clone, receiver) = match self
             .clone_result_listeners
             .write()
             .expect("RwLock of RemoteAccountClonerClient.clone_result_listeners is poisoned")
@@ -52,7 +52,7 @@ impl AccountCloner for RemoteAccountClonerClient {
                 (false, receiver)
             }
         };
-        if is_first_request_to_fetch {
+        if should_request_clone {
             if let Err(error) = self.clone_request_sender.send(*pubkey) {
                 return Box::pin(ready(Err(AccountClonerError::SendError(
                     error,

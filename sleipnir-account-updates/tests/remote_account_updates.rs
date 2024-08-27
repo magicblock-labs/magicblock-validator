@@ -29,7 +29,9 @@ fn setup() -> (
     let worker_handle = {
         let cancellation_token = cancellation_token.clone();
         tokio::spawn(async move {
-            worker.start_monitoring(cancellation_token).await
+            worker
+                .start_monitoring_request_listener(cancellation_token)
+                .await
         })
     };
     // Ready to run
