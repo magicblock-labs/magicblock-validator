@@ -142,7 +142,10 @@ impl ScheduleCommitTestContext {
             .with_context(|| "Failed to initialize committees")
     }
 
-    pub fn delegate_committees(&self) -> Result<Signature> {
+    pub fn delegate_committees(
+        &self,
+        blockhash: Option<Hash>,
+    ) -> Result<Signature> {
         let mut ixs = vec![];
         let mut payers = vec![];
         for (payer, _) in &self.committees {
@@ -155,7 +158,7 @@ impl ScheduleCommitTestContext {
             &ixs,
             Some(&payers[0].pubkey()),
             &payers,
-            self.chain_blockhash,
+            blockhash.unwrap_or(self.chain_blockhash),
         );
         self.chain_client
             .send_and_confirm_transaction_with_spinner_and_config(

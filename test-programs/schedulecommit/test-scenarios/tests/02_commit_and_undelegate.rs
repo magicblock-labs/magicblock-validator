@@ -5,11 +5,16 @@ use schedulecommit_program::api::{
     increase_count_instruction, schedule_commit_and_undelegate_cpi_instruction,
 };
 use sleipnir_core::magic_program;
-use solana_rpc_client::rpc_client::SerializableTransaction;
+use solana_rpc_client::rpc_client::{RpcClient, SerializableTransaction};
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{
-    instruction::InstructionError, pubkey::Pubkey, signature::Signature,
-    signer::Signer, transaction::Transaction,
+    commitment_config::CommitmentConfig,
+    hash::Hash,
+    instruction::InstructionError,
+    pubkey::Pubkey,
+    signature::{Keypair, Signature},
+    signer::Signer,
+    transaction::Transaction,
 };
 use utils::{
     assert_one_committee_account_was_undelegated_on_chain,
@@ -140,6 +145,65 @@ fn test_committing_and_undelegating_two_accounts() {
     assert_two_committee_accounts_were_undelegated_on_chain(&ctx);
 }
 
+// -----------------
+// Delegate -> Increase in Ephem -> Undelegate -> Increase in Chain
+// -> Redelegate -> Increase in Ephem
+// -----------------
+fn assert_cannot_increase_committee_count(
+    pda: Pubkey,
+    payer: &Keypair,
+    blockhash: Hash,
+    chain_client: &RpcClient,
+    commitment: &CommitmentConfig,
+) {
+    let ix = increase_count_instruction(pda);
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&payer.pubkey()),
+        &[&payer],
+        blockhash,
+    );
+    let tx_res = chain_client
+        .send_and_confirm_transaction_with_spinner_and_config(
+            &tx,
+            *commitment,
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        );
+    assert_tx_failed_with_instruction_error(
+        tx_res,
+        InstructionError::ExternalAccountDataModified,
+    );
+}
+
+fn assert_can_increase_committee_count(
+    pda: Pubkey,
+    payer: &Keypair,
+    blockhash: Hash,
+    chain_client: &RpcClient,
+    commitment: &CommitmentConfig,
+) {
+    let ix = increase_count_instruction(pda);
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&payer.pubkey()),
+        &[&payer],
+        blockhash,
+    );
+    let tx_res = chain_client
+        .send_and_confirm_transaction_with_spinner_and_config(
+            &tx,
+            *commitment,
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        );
+    assert!(tx_res.is_ok());
+}
+
 #[test]
 fn test_committed_and_undelegated_single_account_usage() {
     let (ctx, sig) = commit_and_undelegate_one_account();
@@ -155,111 +219,72 @@ fn test_committed_and_undelegated_single_account_usage() {
     } = &ctx;
 
     // 1. Show we cannot use it in the ehpemeral anymore
-    // TODO: function
-    {
-        let pda1 = committees[0].1;
-        let ix = increase_count_instruction(pda1);
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&payer.pubkey()),
-            &[&payer],
-            *ephem_blockhash,
-        );
-        let tx_res = ephem_client
-            .send_and_confirm_transaction_with_spinner_and_config(
-                &tx,
-                *commitment,
-                RpcSendTransactionConfig {
-                    skip_preflight: true,
-                    ..Default::default()
-                },
-            );
-        assert_tx_failed_with_instruction_error(
-            tx_res,
-            InstructionError::ExternalAccountDataModified,
-        );
-    }
+    assert_cannot_increase_committee_count(
+        committees[0].1,
+        payer,
+        *ephem_blockhash,
+        ephem_client,
+        commitment,
+    );
 
     // 2. Show that we cannot use it on chain while it is being undelegated
-    // TODO: function
-    {
-        let pda1 = committees[0].1;
-        let ix = increase_count_instruction(pda1);
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&payer.pubkey()),
-            &[&payer],
-            *chain_blockhash,
-        );
-        let tx_res = chain_client
-            .send_and_confirm_transaction_with_spinner_and_config(
-                &tx,
-                *commitment,
-                RpcSendTransactionConfig {
-                    skip_preflight: true,
-                    ..Default::default()
-                },
-            );
-        assert_tx_failed_with_instruction_error(
-            tx_res,
-            InstructionError::ExternalAccountDataModified,
-        );
-    }
+    assert_cannot_increase_committee_count(
+        committees[0].1,
+        payer,
+        *chain_blockhash,
+        chain_client,
+        commitment,
+    );
 
     // 3. Wait for commit + undelegation to finish and try chain again
     {
         verify::fetch_commit_result_from_logs(&ctx, sig);
 
-        // we need a new blockhash otherwise the tx is identical to the above
         let blockhash = chain_client.get_latest_blockhash().unwrap();
-
-        let pda1 = committees[0].1;
-        let ix = increase_count_instruction(pda1);
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&payer.pubkey()),
-            &[&payer],
+        assert_can_increase_committee_count(
+            committees[0].1,
+            payer,
             blockhash,
+            chain_client,
+            commitment,
         );
-        let tx_res = chain_client
-            .send_and_confirm_transaction_with_spinner_and_config(
-                &tx,
-                *commitment,
-                RpcSendTransactionConfig {
-                    skip_preflight: true,
-                    ..Default::default()
-                },
-            );
-
-        eprintln!("Increase Count Transaction result: '{:?}'", tx_res);
-        assert!(tx_res.is_ok());
     }
 
-    // 4. Now try using the undelegated account again on ephem, it should still fail,
-    //    but the error should indicate that the account is not delegated
+    // 4. Now verify that the account was removed from the ephemeral
     {
-        // we need a new blockhash otherwise the tx is identical to the above
-        let blockhash = ephem_client.get_latest_blockhash().unwrap();
-
+        // TODO: wait for chain confirmation instead?
+        std::thread::sleep(std::time::Duration::from_millis(200));
         let pda1 = committees[0].1;
-        let ix = increase_count_instruction(pda1);
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&payer.pubkey()),
-            &[&payer],
-            blockhash,
+        let data = ctx.fetch_ephem_account_data(pda1).unwrap();
+        assert!(data.is_empty(), "ephemeral account was removed");
+    }
+
+    // 5. Re-delegate the same account and show that we can use it in the ephemeral again
+    {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        let blockhash = chain_client.get_latest_blockhash().unwrap();
+        ctx.delegate_committees(Some(blockhash)).unwrap();
+    }
+
+    // 6. Now we can modify it in the ephemeral again and no longer on chain
+    {
+        let chain_blockhash = chain_client.get_latest_blockhash().unwrap();
+        assert_cannot_increase_committee_count(
+            committees[0].1,
+            payer,
+            chain_blockhash,
+            chain_client,
+            commitment,
         );
-        let tx_res = ephem_client
-            .send_and_confirm_transaction_with_spinner_and_config(
-                &tx,
-                *commitment,
-                RpcSendTransactionConfig {
-                    skip_preflight: true,
-                    ..Default::default()
-                },
-            );
-        // TODO: @@@
-        eprintln!("Increase Count Transaction result: '{:?}'", tx_res);
+
+        let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
+        assert_can_increase_committee_count(
+            committees[0].1,
+            payer,
+            ephem_blockhash,
+            ephem_client,
+            commitment,
+        );
     }
 }
 

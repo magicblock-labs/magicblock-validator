@@ -20,7 +20,7 @@ pub fn get_context_with_delegated_committees(
     };
 
     ctx.init_committees().unwrap();
-    ctx.delegate_committees().unwrap();
+    ctx.delegate_committees(None).unwrap();
     ctx
 }
 
