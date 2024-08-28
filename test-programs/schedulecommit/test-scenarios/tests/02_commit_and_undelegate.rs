@@ -1,3 +1,4 @@
+use log::*;
 use std::str::FromStr;
 
 use schedulecommit_client::{verify, ScheduleCommitTestContext};
@@ -16,6 +17,7 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
+use test_tools_core::init_logger;
 use utils::{
     assert_one_committee_account_was_undelegated_on_chain,
     assert_one_committee_synchronized_count_and_was_removed_from_ephem,
@@ -69,7 +71,7 @@ fn commit_and_undelegate_one_account() -> (ScheduleCommitTestContext, Signature)
                 ..Default::default()
             },
         );
-    eprintln!("Commit and Undelegate Transaction result: '{:?}'", tx_res);
+    debug!("Commit and Undelegate Transaction result: '{:?}'", tx_res);
     (ctx, *sig)
 }
 
@@ -113,12 +115,15 @@ fn commit_and_undelegate_two_accounts() -> (ScheduleCommitTestContext, Signature
                 ..Default::default()
             },
         );
-    eprintln!("Commit and Undelegate Transaction result: '{:?}'", tx_res);
+    debug!("Commit and Undelegate Transaction result: '{:?}'", tx_res);
     (ctx, *sig)
 }
 
 #[test]
 fn test_committing_and_undelegating_one_account() {
+    init_logger!();
+    info!("==== test_committing_and_undelegating_one_account ====");
+
     let (ctx, sig) = commit_and_undelegate_one_account();
 
     let res = verify::fetch_commit_result_from_logs(&ctx, sig);
@@ -133,6 +138,9 @@ fn test_committing_and_undelegating_one_account() {
 
 #[test]
 fn test_committing_and_undelegating_two_accounts() {
+    init_logger!();
+    info!("==== test_committing_and_undelegating_two_accounts ====");
+
     let (ctx, sig) = commit_and_undelegate_two_accounts();
 
     let res = verify::fetch_commit_result_from_logs(&ctx, sig);
@@ -206,6 +214,11 @@ fn assert_can_increase_committee_count(
 
 #[test]
 fn test_committed_and_undelegated_single_account_redelegation() {
+    init_logger!();
+    info!(
+        "==== test_committed_and_undelegated_single_account_redelegation ===="
+    );
+
     let (ctx, sig) = commit_and_undelegate_one_account();
     let ScheduleCommitTestContext {
         payer,
@@ -292,6 +305,9 @@ fn test_committed_and_undelegated_single_account_redelegation() {
 // but for two accounts
 #[test]
 fn test_committed_and_undelegated_accounts_redelegation() {
+    init_logger!();
+    info!("==== test_committed_and_undelegated_accounts_redelegation ====");
+
     let (ctx, sig) = commit_and_undelegate_two_accounts();
     let ScheduleCommitTestContext {
         payer,

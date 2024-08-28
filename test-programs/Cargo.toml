@@ -16,7 +16,9 @@ edition = "2021"
 anyhow = "1.0.86"
 borsh = "0.10.3"
 ephemeral-rollups-sdk = { path = "../../ephemeral-rollups-sdk/sdk" }
+log = "0.4.20"
 sleipnir-core = { path = "../sleipnir-core" }
+test-tools-core = { path = "../test-tools-core" }
 # Need to pin solana version here as newer ones require a rust version that conficts with
 # the one used by cargo build-sbf
 solana-program = "=1.17.22"
