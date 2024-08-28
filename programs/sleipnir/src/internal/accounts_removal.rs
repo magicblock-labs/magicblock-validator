@@ -1,3 +1,4 @@
+use log::*;
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, RwLock},
@@ -29,21 +30,15 @@ use solana_sdk::{
 // -----------------
 // AccountsRemover
 // -----------------
-#[derive(Debug)]
-pub struct PendingAccountRemoval {
-    pub pubkey: Pubkey,
-    pub reason: AccountRemovalReason,
-}
-
 #[derive(Clone)]
 pub struct ValidatorAccountsRemover {
-    accounts_pending_removal: Arc<RwLock<Vec<PendingAccountRemoval>>>,
+    accounts_pending_removal: Arc<RwLock<HashSet<Pubkey>>>,
 }
 
 impl Default for ValidatorAccountsRemover {
     fn default() -> Self {
         lazy_static! {
-            static ref ACCOUNTS_PENDING_REMOVAL: Arc<RwLock<Vec<PendingAccountRemoval>>> =
+            static ref ACCOUNTS_PENDING_REMOVAL: Arc<RwLock<HashSet<Pubkey>>> =
                 Default::default();
         }
         Self {
@@ -62,11 +57,12 @@ impl AccountsRemover for ValidatorAccountsRemover {
             .accounts_pending_removal
             .write()
             .expect("accounts_pending_removal lock poisoned");
+        debug!(
+            "Requesting removal of accounts: {:?} for reason: {:?}",
+            pubkey, reason
+        );
         for p in pubkey {
-            accounts_pending_removal.push(PendingAccountRemoval {
-                pubkey: p,
-                reason: reason.clone(),
-            });
+            accounts_pending_removal.insert(p);
         }
     }
 
@@ -74,9 +70,7 @@ impl AccountsRemover for ValidatorAccountsRemover {
         self.accounts_pending_removal
             .read()
             .expect("accounts_pending_removal lock poisoned")
-            .iter()
-            .map(|x| x.pubkey)
-            .collect()
+            .clone()
     }
 }
 
@@ -163,13 +157,8 @@ pub fn process_remove_accounts_pending_removal(
     }
 
     // All checks out, let's remove those accounts
-    let pubkeys = ValidatorAccountsRemover::default()
-        .accounts_pending_removal
-        .read()
-        .expect("accounts_pending_removal lock poisoned")
-        .iter()
-        .map(|x| x.pubkey)
-        .collect::<HashSet<_>>();
+    let pending_removal =
+        ValidatorAccountsRemover::default().accounts_pending_removal();
 
     let mut to_remove = HashMap::new();
     let mut not_pending = HashSet::new();
@@ -180,7 +169,7 @@ pub fn process_remove_accounts_pending_removal(
             get_instruction_pubkey_with_idx(transaction_context, idx as u16)?;
         let acc =
             get_instruction_account_with_idx(transaction_context, idx as u16)?;
-        if pubkeys.contains(acc_pubkey) {
+        if pending_removal.contains(acc_pubkey) {
             to_remove.insert(*acc_pubkey, acc);
         } else {
             not_pending.insert(acc_pubkey);
@@ -225,8 +214,7 @@ pub fn process_remove_accounts_pending_removal(
             .accounts_pending_removal
             .write()
             .expect("accounts_pending_removal lock poisoned");
-        accounts_pending_removal
-            .retain(|x| !removed_pubkeys.contains(&x.pubkey));
+        accounts_pending_removal.retain(|x| !removed_pubkeys.contains(x));
         ic_msg!(
             invoke_context,
             "RemoveAccount: Removed accounts: {:?}. Remaining: {:?}",
@@ -237,5 +225,3 @@ pub fn process_remove_accounts_pending_removal(
 
     Ok(())
 }
-
-// TODO: test this
