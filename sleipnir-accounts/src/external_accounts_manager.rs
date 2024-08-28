@@ -509,12 +509,16 @@ where
         &self,
         bank: &Arc<Bank>,
     ) -> AccountsResult<Option<Signature>> {
-        // TODO: all this logic including purging removed accounts could
-        // be part of accounts remover
-        // however we still will need to know the keys in order to remove them
-        // from cloned account caches
         let accounts = self.accounts_remover.accounts_pending_removal();
         if !accounts.is_empty() {
+            // We first clear the accounts from the accounts manager in order to
+            // force a fresh clone should anyone want to use the account
+            for pubkey in &accounts {
+                self.external_readonly_accounts.remove(pubkey);
+                self.external_writable_accounts.remove(pubkey);
+            }
+
+            // Then we remove the accounts from the bank via a transaction
             let blockhash = bank.last_blockhash();
             let tx = process_accounts_pending_removal_transaction(
                 accounts, blockhash,
@@ -524,6 +528,7 @@ where
                 bank,
                 self.transaction_status_sender.as_ref(),
             )?;
+
             Ok(Some(sig))
         } else {
             Ok(None)

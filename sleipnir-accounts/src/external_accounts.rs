@@ -158,6 +158,10 @@ impl ExternalWritableAccounts {
             ),
         );
     }
+
+    pub fn remove(&self, pubkey: &Pubkey) {
+        self.write_accounts().remove(pubkey);
+    }
 }
 
 #[derive(Debug)]

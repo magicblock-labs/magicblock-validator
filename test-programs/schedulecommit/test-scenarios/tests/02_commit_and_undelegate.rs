@@ -205,7 +205,7 @@ fn assert_can_increase_committee_count(
 }
 
 #[test]
-fn test_committed_and_undelegated_single_account_usage() {
+fn test_committed_and_undelegated_single_account_redelegation() {
     let (ctx, sig) = commit_and_undelegate_one_account();
     let ScheduleCommitTestContext {
         payer,
@@ -252,8 +252,8 @@ fn test_committed_and_undelegated_single_account_usage() {
 
     // 4. Now verify that the account was removed from the ephemeral
     {
-        // TODO: wait for chain confirmation instead?
-        std::thread::sleep(std::time::Duration::from_millis(200));
+        // Wait for account removal transaction to run inside the ephemeral
+        std::thread::sleep(std::time::Duration::from_millis(100));
         let pda1 = committees[0].1;
         let data = ctx.fetch_ephem_account_data(pda1).unwrap();
         assert!(data.is_empty(), "ephemeral account was removed");
@@ -268,21 +268,21 @@ fn test_committed_and_undelegated_single_account_usage() {
 
     // 6. Now we can modify it in the ephemeral again and no longer on chain
     {
-        let chain_blockhash = chain_client.get_latest_blockhash().unwrap();
-        assert_cannot_increase_committee_count(
-            committees[0].1,
-            payer,
-            chain_blockhash,
-            chain_client,
-            commitment,
-        );
-
         let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
         assert_can_increase_committee_count(
             committees[0].1,
             payer,
             ephem_blockhash,
             ephem_client,
+            commitment,
+        );
+
+        let chain_blockhash = chain_client.get_latest_blockhash().unwrap();
+        assert_cannot_increase_committee_count(
+            committees[0].1,
+            payer,
+            chain_blockhash,
+            chain_client,
             commitment,
         );
     }
