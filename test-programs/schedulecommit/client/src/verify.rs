@@ -9,8 +9,8 @@ use std::collections::HashMap;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct CommittedAccount {
-    pub ephem_account: MainAccount,
-    pub chain_account: MainAccount,
+    pub ephem_account: Option<MainAccount>,
+    pub chain_account: Option<MainAccount>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -65,9 +65,17 @@ pub fn fetch_commit_result_from_logs(
     let mut committed_accounts = HashMap::new();
     for pubkey in included {
         let ephem_data = ctx.fetch_ephem_account_data(pubkey).unwrap();
-        let ephem_account = MainAccount::try_from_slice(&ephem_data).unwrap();
+        let ephem_account = if ephem_data.is_empty() {
+            None
+        } else {
+            Some(MainAccount::try_from_slice(&ephem_data).unwrap())
+        };
         let chain_data = ctx.fetch_chain_account_data(pubkey).unwrap();
-        let chain_account = MainAccount::try_from_slice(&chain_data).unwrap();
+        let chain_account = if chain_data.is_empty() {
+            None
+        } else {
+            Some(MainAccount::try_from_slice(&chain_data).unwrap())
+        };
         committed_accounts.insert(
             pubkey,
             CommittedAccount {

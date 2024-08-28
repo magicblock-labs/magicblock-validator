@@ -27,6 +27,7 @@ pub fn get_context_with_delegated_committees(
 // -----------------
 // Asserts
 // -----------------
+#[allow(dead_code)] // used in 02_commit_and_undelegate.rs
 pub fn assert_one_committee_was_committed(
     ctx: &ScheduleCommitTestContext,
     res: &ScheduledCommitResult,
@@ -42,6 +43,7 @@ pub fn assert_one_committee_was_committed(
     assert_eq!(res.sigs.len(), 1, "should have 1 on chain sig");
 }
 
+#[allow(dead_code)] // used in 02_commit_and_undelegate.rs
 pub fn assert_two_committees_were_committed(
     ctx: &ScheduleCommitTestContext,
     res: &ScheduledCommitResult,
@@ -61,7 +63,7 @@ pub fn assert_two_committees_were_committed(
 }
 
 #[allow(dead_code)] // used in 02_commit_and_undelegate.rs
-pub fn assert_one_committee_synchronized_count(
+pub fn assert_one_committee_synchronized_count_and_was_removed_from_ephem(
     ctx: &ScheduleCommitTestContext,
     res: &ScheduledCommitResult,
     expected_count: u64,
@@ -71,21 +73,19 @@ pub fn assert_one_committee_synchronized_count(
     let commit = res.included.get(&pda);
     assert!(commit.is_some(), "should have committed pda");
 
-    assert_eq!(
-        commit.unwrap().ephem_account.count,
-        expected_count,
-        "pda count is {} on ephem",
-        expected_count
+    assert!(
+        commit.unwrap().ephem_account.is_none(),
+        "ephem account was removed"
     );
     assert_eq!(
-        commit.unwrap().chain_account.count,
+        commit.unwrap().chain_account.as_ref().unwrap().count,
         expected_count,
         "pda count is {} on chain",
         expected_count
     );
 }
 
-#[allow(dead_code)] // used in 02_commit_and_undelegate.rs
+#[allow(dead_code)] // used in 01_commits.rs
 pub fn assert_two_committees_synchronized_count(
     ctx: &ScheduleCommitTestContext,
     res: &ScheduledCommitResult,
@@ -98,28 +98,64 @@ pub fn assert_two_committees_synchronized_count(
     let commit2 = res.included.get(&pda2);
 
     assert_eq!(
-        commit1.unwrap().ephem_account.count,
+        commit1.unwrap().ephem_account.as_ref().unwrap().count,
         expected_count,
         "pda1 ({}) count is {} on ephem",
         pda1,
         expected_count
     );
     assert_eq!(
-        commit1.unwrap().chain_account.count,
+        commit1.unwrap().chain_account.as_ref().unwrap().count,
         expected_count,
         "pda1 ({}) count is {} on chain",
         pda1,
         expected_count
     );
     assert_eq!(
-        commit2.unwrap().ephem_account.count,
+        commit2.unwrap().ephem_account.as_ref().unwrap().count,
         expected_count,
         "pda2 ({}) count is {} on ephem",
         pda2,
         expected_count
     );
     assert_eq!(
-        commit2.unwrap().chain_account.count,
+        commit2.unwrap().chain_account.as_ref().unwrap().count,
+        expected_count,
+        "pda2 ({}) count is {} on chain",
+        pda2,
+        expected_count
+    );
+}
+
+#[allow(dead_code)] // used in 02_commit_and_undelegate.rs
+pub fn assert_two_committees_synchronized_count_and_where_removed_from_ephem(
+    ctx: &ScheduleCommitTestContext,
+    res: &ScheduledCommitResult,
+    expected_count: u64,
+) {
+    let pda1 = ctx.committees[0].1;
+    let pda2 = ctx.committees[1].1;
+
+    let commit1 = res.included.get(&pda1);
+    let commit2 = res.included.get(&pda2);
+
+    assert!(
+        commit1.unwrap().ephem_account.is_none(),
+        "pda1 ephem account was removed"
+    );
+    assert_eq!(
+        commit1.unwrap().chain_account.as_ref().unwrap().count,
+        expected_count,
+        "pda1 ({}) count is {} on chain",
+        pda1,
+        expected_count
+    );
+    assert!(
+        commit2.unwrap().ephem_account.is_none(),
+        "pda2 ephem account was removed"
+    );
+    assert_eq!(
+        commit2.unwrap().chain_account.as_ref().unwrap().count,
         expected_count,
         "pda2 ({}) count is {} on chain",
         pda2,
@@ -159,38 +195,6 @@ pub fn assert_account_was_undelegated_on_chain(
         "not owned by delegation program"
     );
     assert_eq!(owner, new_owner, "new owner");
-}
-
-#[allow(dead_code)] // used in 02_commit_and_undelegate.rs
-pub fn assert_one_committee_account_was_locked_on_ephem(
-    ctx: &ScheduleCommitTestContext,
-    res: &ScheduledCommitResult,
-) {
-    let pda = ctx.committees[0].1;
-
-    let commit = res.included.get(&pda);
-    assert!(commit.is_some(), "should have committed pda");
-
-    assert_account_was_locked_in_ephem(ctx, pda);
-}
-
-#[allow(dead_code)] // used in 02_commit_and_undelegate.rs
-pub fn assert_two_committee_accounts_were_locked_on_ephem(
-    ctx: &ScheduleCommitTestContext,
-) {
-    let pda1 = ctx.committees[0].1;
-    let pda2 = ctx.committees[1].1;
-    assert_account_was_locked_in_ephem(ctx, pda1);
-    assert_account_was_locked_in_ephem(ctx, pda2);
-}
-
-#[allow(dead_code)] // used in 02_commit_and_undelegate.rs
-pub fn assert_account_was_locked_in_ephem(
-    ctx: &ScheduleCommitTestContext,
-    pda: Pubkey,
-) {
-    let owner = ctx.fetch_ephem_account_owner(pda).unwrap();
-    assert_eq!(owner, DELEGATION_PROGRAM_ID, "owned by delegation program");
 }
 
 #[allow(dead_code)] // used in 02_commit_and_undelegate.rs

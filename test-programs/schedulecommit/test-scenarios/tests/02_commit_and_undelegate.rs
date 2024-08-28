@@ -12,13 +12,11 @@ use solana_sdk::{
     signer::Signer, transaction::Transaction,
 };
 use utils::{
-    assert_one_committee_account_was_locked_on_ephem,
     assert_one_committee_account_was_undelegated_on_chain,
-    assert_one_committee_synchronized_count,
+    assert_one_committee_synchronized_count_and_was_removed_from_ephem,
     assert_one_committee_was_committed,
-    assert_two_committee_accounts_were_locked_on_ephem,
     assert_two_committee_accounts_were_undelegated_on_chain,
-    assert_two_committees_synchronized_count,
+    assert_two_committees_synchronized_count_and_where_removed_from_ephem,
     assert_two_committees_were_committed,
     assert_tx_failed_with_instruction_error,
     get_context_with_delegated_committees,
@@ -121,10 +119,11 @@ fn test_committing_and_undelegating_one_account() {
     let res = verify::fetch_commit_result_from_logs(&ctx, sig);
 
     assert_one_committee_was_committed(&ctx, &res);
-    assert_one_committee_synchronized_count(&ctx, &res, 1);
+    assert_one_committee_synchronized_count_and_was_removed_from_ephem(
+        &ctx, &res, 1,
+    );
 
     assert_one_committee_account_was_undelegated_on_chain(&ctx);
-    assert_one_committee_account_was_locked_on_ephem(&ctx, &res);
 }
 
 #[test]
@@ -134,10 +133,11 @@ fn test_committing_and_undelegating_two_accounts() {
     let res = verify::fetch_commit_result_from_logs(&ctx, sig);
 
     assert_two_committees_were_committed(&ctx, &res);
-    assert_two_committees_synchronized_count(&ctx, &res, 1);
+    assert_two_committees_synchronized_count_and_where_removed_from_ephem(
+        &ctx, &res, 1,
+    );
 
     assert_two_committee_accounts_were_undelegated_on_chain(&ctx);
-    assert_two_committee_accounts_were_locked_on_ephem(&ctx);
 }
 
 #[test]
