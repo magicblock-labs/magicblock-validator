@@ -19,6 +19,8 @@ fn cleanup(ephem_validator: &mut Child, devnet_validator: &mut Child) {
 pub fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
 
+    eprintln!("======== Starting DEVNET Validator ========");
+
     // Start validators via `cargo run --release  -- <config>
     let mut devnet_validator = match start_validator_with_config(
         "test-programs/schedulecommit/configs/schedulecommit-conf.devnet.toml",
@@ -29,6 +31,8 @@ pub fn main() {
             panic!("Failed to start devnet validator properly");
         }
     };
+
+    eprintln!("======== Starting EPHEM Validator ========");
     let mut ephem_validator = match start_validator_with_config(
         "test-programs/schedulecommit/configs/schedulecommit-conf.ephem.toml",
         8899,
@@ -42,6 +46,7 @@ pub fn main() {
         }
     };
 
+    eprintln!("======== RUNNING SECURITY TESTS ========");
     let test_security_dir =
         format!("{}/../{}", manifest_dir.clone(), "test-security");
     let test_security_output = match run_test(test_security_dir) {
@@ -52,6 +57,7 @@ pub fn main() {
             return;
         }
     };
+    eprintln!("======== RUNNING SCENARIOS TESTS ========");
     let test_scenarios_dir =
         format!("{}/../{}", manifest_dir.clone(), "test-scenarios");
     let test_scenarios_output = match run_test(test_scenarios_dir) {
@@ -94,6 +100,7 @@ fn run_test(manifest_dir: String) -> io::Result<process::Output> {
         )
         .arg("test")
         .arg("--")
+        .arg("--test-threads=1")
         .arg("--nocapture")
         .current_dir(manifest_dir.clone())
         .output()
