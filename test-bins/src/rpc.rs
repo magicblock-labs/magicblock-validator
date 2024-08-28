@@ -7,7 +7,6 @@ use sleipnir_config::{GeyserGrpcConfig, SleipnirConfig};
 use sleipnir_ledger::Ledger;
 use solana_sdk::signature::Keypair;
 use tempfile::TempDir;
-use test_tools::init_logger;
 
 // mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev
 const TEST_KEYPAIR_BYTES: [u8; 64] = [
@@ -17,10 +16,46 @@ const TEST_KEYPAIR_BYTES: [u8; 64] = [
     202, 240, 105, 168, 157, 64, 233, 249, 100, 104, 210, 41, 83, 87,
 ];
 
+fn init_logger() {
+    let mut builder = env_logger::builder();
+    builder.format_timestamp_micros().is_test(false);
+
+    if let Ok(style) = std::env::var("RUST_LOG_STYLE") {
+        use std::io::Write;
+        match style.as_str() {
+            "EPHEM" => {
+                builder.format(|buf, record| {
+                    writeln!(
+                        buf,
+                        "EPHEM [{}] {}: {} {}",
+                        record.level(),
+                        buf.timestamp_millis(),
+                        record.module_path().unwrap_or_default(),
+                        record.args()
+                    )
+                });
+            }
+            "DEVNET" => {
+                builder.format(|buf, record| {
+                    writeln!(
+                        buf,
+                        "DEVNET [{}] {}: {} {}",
+                        record.level(),
+                        buf.timestamp_millis(),
+                        record.module_path().unwrap_or_default(),
+                        record.args()
+                    )
+                });
+            }
+            _ => {}
+        }
+    }
+    let _ = builder.try_init();
+}
+
 #[tokio::main]
 async fn main() {
-    init_logger!();
-
+    init_logger();
     #[cfg(feature = "tokio-console")]
     console_subscriber::init();
 

@@ -25,6 +25,7 @@ pub fn main() {
     let mut devnet_validator = match start_validator_with_config(
         "test-programs/schedulecommit/configs/schedulecommit-conf.devnet.toml",
         7799,
+        "DEVNET",
     ) {
         Some(validator) => validator,
         None => {
@@ -36,6 +37,7 @@ pub fn main() {
     let mut ephem_validator = match start_validator_with_config(
         "test-programs/schedulecommit/configs/schedulecommit-conf.ephem.toml",
         8899,
+        "EPHEM",
     ) {
         Some(validator) => validator,
         None => {
@@ -109,6 +111,7 @@ fn run_test(manifest_dir: String) -> io::Result<process::Output> {
 fn start_validator_with_config(
     config_path: &str,
     port: u16,
+    log_suffix: &str,
 ) -> Option<process::Child> {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
     let workspace_dir = Path::new(&manifest_dir).join("..").join("..");
@@ -130,6 +133,7 @@ fn start_validator_with_config(
         .arg("run")
         .arg("--")
         .arg(config_path)
+        .env("RUST_LOG_STYLE", log_suffix)
         .current_dir(root_dir)
         .spawn()
         .expect("Failed to start validator");
