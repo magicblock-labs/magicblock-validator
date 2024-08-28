@@ -218,21 +218,21 @@ fn test_committed_and_undelegated_single_account_redelegation() {
         ..
     } = &ctx;
 
-    // 1. Show we cannot use it in the ehpemeral anymore
-    assert_cannot_increase_committee_count(
-        committees[0].1,
-        payer,
-        *ephem_blockhash,
-        ephem_client,
-        commitment,
-    );
-
-    // 2. Show that we cannot use it on chain while it is being undelegated
+    // 1. Show that we cannot use it on chain while it is being undelegated
     assert_cannot_increase_committee_count(
         committees[0].1,
         payer,
         *chain_blockhash,
         chain_client,
+        commitment,
+    );
+
+    // 2. Show we cannot use it in the ehpemeral anymore
+    assert_cannot_increase_committee_count(
+        committees[0].1,
+        payer,
+        *ephem_blockhash,
+        ephem_client,
         commitment,
     );
 
@@ -259,7 +259,7 @@ fn test_committed_and_undelegated_single_account_redelegation() {
         assert!(data.is_empty(), "ephemeral account was removed");
     }
 
-    // 5. Re-delegate the same account and show that we can use it in the ephemeral again
+    // 5. Re-delegate the same account
     {
         std::thread::sleep(std::time::Duration::from_secs(2));
         let blockhash = chain_client.get_latest_blockhash().unwrap();
@@ -288,8 +288,10 @@ fn test_committed_and_undelegated_single_account_redelegation() {
     }
 }
 
+// The below is the same as test_committed_and_undelegated_single_account_redelegation
+// but for two accounts
 #[test]
-fn test_committed_and_undelegated_accounts_usage() {
+fn test_committed_and_undelegated_accounts_redelegation() {
     let (ctx, sig) = commit_and_undelegate_two_accounts();
     let ScheduleCommitTestContext {
         payer,
@@ -302,53 +304,39 @@ fn test_committed_and_undelegated_accounts_usage() {
         ..
     } = &ctx;
 
-    // 1. Show we cannot use it in the ehpemeral anymore
+    // 1. Show that we cannot use them on chain while they are being undelegated
     {
-        let pda1 = committees[0].1;
-        let ix = increase_count_instruction(pda1);
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&payer.pubkey()),
-            &[&payer],
-            *ephem_blockhash,
+        assert_cannot_increase_committee_count(
+            committees[0].1,
+            payer,
+            *chain_blockhash,
+            chain_client,
+            commitment,
         );
-        let tx_res = ephem_client
-            .send_and_confirm_transaction_with_spinner_and_config(
-                &tx,
-                *commitment,
-                RpcSendTransactionConfig {
-                    skip_preflight: true,
-                    ..Default::default()
-                },
-            );
-        assert_tx_failed_with_instruction_error(
-            tx_res,
-            InstructionError::ExternalAccountDataModified,
+        assert_cannot_increase_committee_count(
+            committees[1].1,
+            payer,
+            *chain_blockhash,
+            chain_client,
+            commitment,
         );
     }
 
-    // 2. Show that we cannot use it on chain while it is being undelegated
+    // 2. Show we cannot use them in the ehpemeral anymore
     {
-        let pda1 = committees[0].1;
-        let ix = increase_count_instruction(pda1);
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&payer.pubkey()),
-            &[&payer],
-            *chain_blockhash,
+        assert_cannot_increase_committee_count(
+            committees[0].1,
+            payer,
+            *ephem_blockhash,
+            ephem_client,
+            commitment,
         );
-        let tx_res = chain_client
-            .send_and_confirm_transaction_with_spinner_and_config(
-                &tx,
-                *commitment,
-                RpcSendTransactionConfig {
-                    skip_preflight: true,
-                    ..Default::default()
-                },
-            );
-        assert_tx_failed_with_instruction_error(
-            tx_res,
-            InstructionError::ExternalAccountDataModified,
+        assert_cannot_increase_committee_count(
+            committees[1].1,
+            payer,
+            *ephem_blockhash,
+            ephem_client,
+            commitment,
         );
     }
 
@@ -358,53 +346,74 @@ fn test_committed_and_undelegated_accounts_usage() {
 
         // we need a new blockhash otherwise the tx is identical to the above
         let blockhash = chain_client.get_latest_blockhash().unwrap();
-
-        let pda1 = committees[0].1;
-        let ix = increase_count_instruction(pda1);
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&payer.pubkey()),
-            &[&payer],
+        assert_can_increase_committee_count(
+            committees[0].1,
+            payer,
             blockhash,
+            chain_client,
+            commitment,
         );
-        let tx_res = chain_client
-            .send_and_confirm_transaction_with_spinner_and_config(
-                &tx,
-                *commitment,
-                RpcSendTransactionConfig {
-                    skip_preflight: true,
-                    ..Default::default()
-                },
-            );
-
-        eprintln!("Increase Count Transaction result: '{:?}'", tx_res);
-        assert!(tx_res.is_ok());
+        assert_can_increase_committee_count(
+            committees[1].1,
+            payer,
+            blockhash,
+            chain_client,
+            commitment,
+        );
     }
 
-    // 4. Now try using the undelegated account again on ephem, it should still fail,
-    //    but the error should indicate that the account is not delegated
+    // 4. Now verify that the accounts were removed from the ephemeral
     {
-        // we need a new blockhash otherwise the tx is identical to the above
-        let blockhash = ephem_client.get_latest_blockhash().unwrap();
-
+        // Wait for account removal transaction to run inside the ephemeral
+        std::thread::sleep(std::time::Duration::from_millis(100));
         let pda1 = committees[0].1;
-        let ix = increase_count_instruction(pda1);
-        let tx = Transaction::new_signed_with_payer(
-            &[ix],
-            Some(&payer.pubkey()),
-            &[&payer],
-            blockhash,
+        let data = ctx.fetch_ephem_account_data(pda1).unwrap();
+        assert!(data.is_empty(), "pda1 ephemeral account was removed");
+
+        let pda2 = committees[1].1;
+        let data = ctx.fetch_ephem_account_data(pda2).unwrap();
+        assert!(data.is_empty(), "pda2 ephemeral account was removed");
+    }
+
+    // 5. Re-delegate the same accounts
+    {
+        std::thread::sleep(std::time::Duration::from_secs(2));
+        let blockhash = chain_client.get_latest_blockhash().unwrap();
+        ctx.delegate_committees(Some(blockhash)).unwrap();
+    }
+
+    // 6. Now we can modify them in the ephemeral again and no longer on chain
+    {
+        let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
+        assert_can_increase_committee_count(
+            committees[0].1,
+            payer,
+            ephem_blockhash,
+            ephem_client,
+            commitment,
         );
-        let tx_res = ephem_client
-            .send_and_confirm_transaction_with_spinner_and_config(
-                &tx,
-                *commitment,
-                RpcSendTransactionConfig {
-                    skip_preflight: true,
-                    ..Default::default()
-                },
-            );
-        // TODO: @@@
-        eprintln!("Increase Count Transaction result: '{:?}'", tx_res);
+        assert_can_increase_committee_count(
+            committees[1].1,
+            payer,
+            ephem_blockhash,
+            ephem_client,
+            commitment,
+        );
+
+        let chain_blockhash = chain_client.get_latest_blockhash().unwrap();
+        assert_cannot_increase_committee_count(
+            committees[0].1,
+            payer,
+            chain_blockhash,
+            chain_client,
+            commitment,
+        );
+        assert_cannot_increase_committee_count(
+            committees[1].1,
+            payer,
+            chain_blockhash,
+            chain_client,
+            commitment,
+        );
     }
 }
