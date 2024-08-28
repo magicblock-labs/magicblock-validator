@@ -462,7 +462,7 @@ impl MagicValidator {
             self.remote_account_fetcher_handle =
                 Some(tokio::spawn(async move {
                     remote_account_fetcher_worker
-                        .start_fetch_request_listener(cancellation_token)
+                        .start_fetch_request_processing(cancellation_token)
                         .await
                 }));
         }
@@ -476,7 +476,7 @@ impl MagicValidator {
             self.remote_account_updates_handle =
                 Some(tokio::spawn(async move {
                     remote_account_updates_worker
-                        .start_monitoring_request_listener(cancellation_token)
+                        .start_monitoring_request_processing(cancellation_token)
                         .await
                 }));
         }
@@ -490,7 +490,7 @@ impl MagicValidator {
             self.remote_account_cloner_handle =
                 Some(tokio::spawn(async move {
                     remote_account_cloner_worker
-                        .start_clone_request_listener(cancellation_token)
+                        .start_clone_request_processing(cancellation_token)
                         .await
                 }));
         }

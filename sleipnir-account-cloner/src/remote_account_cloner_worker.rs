@@ -10,6 +10,10 @@ use conjunto_transwise::{
 };
 use futures_util::future::join_all;
 use log::*;
+use sleipnir_account_fetcher::AccountFetcher;
+use sleipnir_account_updates::AccountUpdates;
+use sleipnir_bank::bank::Bank;
+use sleipnir_transaction_status::TransactionStatusSender;
 use solana_sdk::pubkey::Pubkey;
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
@@ -64,7 +68,7 @@ where
         self.clone_result_listeners.clone()
     }
 
-    pub async fn start_clone_request_listener(
+    pub async fn start_clone_request_processing(
         &mut self,
         cancellation_token: CancellationToken,
     ) {
@@ -86,6 +90,24 @@ where
     }
 
     async fn do_clone(&self, pubkey: Pubkey) {
+        let chain_snapshot = match self
+            .account_fetcher
+            .fetch_account_chain_snapshot(&pubkey)
+            .await
+        {
+            Ok(snapshot) => Ok(AccountChainSnapshotShared::from(snapshot)),
+            Err(error) => {
+                // Log the error now, since we're going to lose the stacktrace later
+                warn!("Failed to clone account: {} :{:?}", pubkey, error);
+                // Lose the error content and create a simplified clonable version
+                Err(AccountClonerError::FailedToClone(error.to_string()))
+            }
+        };
+
+        match chain_snapshot.chain_state {
+            NewAccount => {}
+        };
+
         // TODO(vbrunet) - clone
 
         let listeners = match self
@@ -104,9 +126,11 @@ where
             Entry::Occupied(entry) => entry.remove(),
         };
         for listener in listeners {
-            if let Err(error) = listener.send(result.clone()) {
+            if let Err(error) = listener.send(chain_snapshot.clone()) {
                 error!("Could not send clone resut: {}: {:?}", pubkey, error);
             }
         }
     }
+
+    async fn do_clone_undelegated(&self, pubkey: Pubkey) {}
 }

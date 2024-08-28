@@ -33,18 +33,18 @@ pub enum RemoteAccountUpdatesWorkerError {
 }
 
 pub struct RemoteAccountUpdatesWorker {
-    config: RpcProviderConfig,
+    rpc_provider_config: RpcProviderConfig,
     monitoring_request_receiver: UnboundedReceiver<Pubkey>,
     monitoring_request_sender: UnboundedSender<Pubkey>,
     last_known_update_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
 }
 
 impl RemoteAccountUpdatesWorker {
-    pub fn new(config: RpcProviderConfig) -> Self {
+    pub fn new(rpc_provider_config: RpcProviderConfig) -> Self {
         let (monitoring_request_sender, monitoring_request_receiver) =
             unbounded_channel();
         Self {
-            config,
+            rpc_provider_config,
             monitoring_request_sender,
             monitoring_request_receiver,
             last_known_update_slots: Default::default(),
@@ -61,16 +61,16 @@ impl RemoteAccountUpdatesWorker {
         self.last_known_update_slots.clone()
     }
 
-    pub async fn start_monitoring_request_listener(
+    pub async fn start_monitoring_request_processing(
         &mut self,
         cancellation_token: CancellationToken,
     ) -> Result<(), RemoteAccountUpdatesWorkerError> {
         let pubsub_client = Arc::new(
-            PubsubClient::new(self.config.ws_url())
+            PubsubClient::new(self.rpc_provider_config.ws_url())
                 .await
                 .map_err(RemoteAccountUpdatesWorkerError::PubsubClientError)?,
         );
-        let commitment = self.config.commitment();
+        let commitment = self.rpc_provider_config.commitment();
 
         let mut subscriptions_cancellation_tokens = HashMap::new();
         let mut subscriptions_join_handles = vec![];

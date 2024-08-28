@@ -7,6 +7,8 @@ use futures_util::{
     future::{ready, BoxFuture},
     FutureExt,
 };
+use sleipnir_account_fetcher::AccountFetcher;
+use sleipnir_account_updates::AccountUpdates;
 use solana_sdk::pubkey::Pubkey;
 use tokio::sync::{
     mpsc::UnboundedSender,
@@ -25,10 +27,14 @@ pub struct RemoteAccountClonerClient {
 }
 
 impl RemoteAccountClonerClient {
-    pub fn new(runner: &RemoteAccountClonerWorker) -> Self {
+    pub fn new<AFE, AUP>(worker: &RemoteAccountClonerWorker<AFE, AUP>) -> Self
+    where
+        AFE: AccountFetcher,
+        AUP: AccountUpdates,
+    {
         Self {
-            clone_request_sender: runner.get_clone_request_sender(),
-            clone_result_listeners: runner.get_clone_result_listeners(),
+            clone_request_sender: worker.get_clone_request_sender(),
+            clone_result_listeners: worker.get_clone_result_listeners(),
         }
     }
 }

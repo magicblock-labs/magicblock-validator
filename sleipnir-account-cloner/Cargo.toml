@@ -12,6 +12,10 @@ async-trait = { workspace = true }
 conjunto-transwise = { workspace = true }
 futures-util = { workspace = true }
 log = { workspace = true }
+sleipnir-account-fetcher = { workspace = true }
+sleipnir-account-updates = { workspace = true }
+sleipnir-bank = { workspace = true }
+sleipnir-transaction-status = { workspace = true }
 solana-sdk = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }

@@ -24,8 +24,8 @@ pub struct RemoteAccountFetcherWorker {
         RpcAccountProvider,
         DelegationRecordParserImpl,
     >,
-    request_receiver: UnboundedReceiver<Pubkey>,
-    request_sender: UnboundedSender<Pubkey>,
+    fetch_request_receiver: UnboundedReceiver<Pubkey>,
+    fetch_request_sender: UnboundedSender<Pubkey>,
     fetch_result_listeners:
         Arc<RwLock<HashMap<Pubkey, Vec<Sender<AccountFetcherResult>>>>>,
 }
@@ -36,17 +36,18 @@ impl RemoteAccountFetcherWorker {
             RpcAccountProvider::new(config),
             DelegationRecordParserImpl,
         );
-        let (request_sender, request_receiver) = unbounded_channel();
+        let (fetch_request_sender, fetch_request_receiver) =
+            unbounded_channel();
         Self {
             account_chain_snapshot_provider,
-            request_receiver,
-            request_sender,
+            fetch_request_receiver,
+            fetch_request_sender,
             fetch_result_listeners: Default::default(),
         }
     }
 
-    pub fn get_request_sender(&self) -> UnboundedSender<Pubkey> {
-        self.request_sender.clone()
+    pub fn get_fetch_request_sender(&self) -> UnboundedSender<Pubkey> {
+        self.fetch_request_sender.clone()
     }
 
     pub fn get_fetch_result_listeners(
@@ -55,14 +56,14 @@ impl RemoteAccountFetcherWorker {
         self.fetch_result_listeners.clone()
     }
 
-    pub async fn start_fetch_request_listener(
+    pub async fn start_fetch_request_processing(
         &mut self,
         cancellation_token: CancellationToken,
     ) {
         loop {
             let mut requests = vec![];
             tokio::select! {
-                _ = self.request_receiver.recv_many(&mut requests, 100) => {
+                _ = self.fetch_request_receiver.recv_many(&mut requests, 100) => {
                     join_all(
                         requests
                             .into_iter()
@@ -83,10 +84,11 @@ impl RemoteAccountFetcherWorker {
             .await
         {
             Ok(snapshot) => Ok(AccountChainSnapshotShared::from(snapshot)),
+            // LockboxError is unclonable, so we have to downgrade it to a clonable error type
             Err(error) => {
-                // Log the error now, since we're going to lose the stacktrace later
+                // Log the error now, since we're going to lose the stacktrace after string conversion
                 warn!("Failed to fetch account: {} :{:?}", pubkey, error);
-                // Lose the error content and create a simplified clonable version
+                // Lose the error full stack trace and create a simplified clonable string version
                 Err(AccountFetcherError::FailedToFetch(error.to_string()))
             }
         };

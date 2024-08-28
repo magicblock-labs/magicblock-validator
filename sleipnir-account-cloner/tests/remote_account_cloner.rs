@@ -29,7 +29,7 @@ fn setup() -> (
         let cancellation_token = cancellation_token.clone();
         tokio::spawn(async move {
             worker
-                .start_fetch_request_listener(cancellation_token)
+                .start_fetch_request_processing(cancellation_token)
                 .await
         })
     };

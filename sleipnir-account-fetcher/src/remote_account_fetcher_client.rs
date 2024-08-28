@@ -19,16 +19,16 @@ use crate::{
 };
 
 pub struct RemoteAccountFetcherClient {
-    request_sender: UnboundedSender<Pubkey>,
+    fetch_request_sender: UnboundedSender<Pubkey>,
     fetch_result_listeners:
         Arc<RwLock<HashMap<Pubkey, Vec<Sender<AccountFetcherResult>>>>>,
 }
 
 impl RemoteAccountFetcherClient {
-    pub fn new(runner: &RemoteAccountFetcherWorker) -> Self {
+    pub fn new(worker: &RemoteAccountFetcherWorker) -> Self {
         Self {
-            request_sender: runner.get_request_sender(),
-            fetch_result_listeners: runner.get_fetch_result_listeners(),
+            fetch_request_sender: worker.get_fetch_request_sender(),
+            fetch_result_listeners: worker.get_fetch_result_listeners(),
         }
     }
 }
@@ -56,7 +56,7 @@ impl AccountFetcher for RemoteAccountFetcherClient {
             }
         };
         if should_request_fetch {
-            if let Err(error) = self.request_sender.send(*pubkey) {
+            if let Err(error) = self.fetch_request_sender.send(*pubkey) {
                 return Box::pin(ready(Err(AccountFetcherError::SendError(
                     error,
                 ))));
