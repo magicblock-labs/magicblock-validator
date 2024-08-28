@@ -326,7 +326,8 @@ mod tests {
     #[test]
     fn test_schedule_commit_single_account_success() {
         let payer =
-            Keypair::from_seed(b"test_schedule_commit_single_account").unwrap();
+            Keypair::from_seed(b"schedule_commit_single_account_success")
+                .unwrap();
         let program = Pubkey::new_unique();
         let committee = Pubkey::new_unique();
 
@@ -384,10 +385,9 @@ mod tests {
 
     #[test]
     fn test_schedule_commit_single_account_and_request_undelegate_success() {
-        let payer = Keypair::from_seed(
-            b"test_schedule_commit_single_account_with_undelegate",
-        )
-        .unwrap();
+        let payer =
+            Keypair::from_seed(b"single_account_with_undelegate_success")
+                .unwrap();
         let program = Pubkey::new_unique();
         let committee = Pubkey::new_unique();
 
@@ -450,7 +450,8 @@ mod tests {
     #[test]
     fn test_schedule_commit_three_accounts_success() {
         let payer =
-            Keypair::from_seed(b"test_schedule_commit_three_accounts").unwrap();
+            Keypair::from_seed(b"schedule_commit_three_accounts_success")
+                .unwrap();
 
         let PreparedTransactionThreeCommittees {
             mut accounts_data,
@@ -518,7 +519,7 @@ mod tests {
     #[test]
     fn test_schedule_commit_three_accounts_and_request_undelegate_success() {
         let payer = Keypair::from_seed(
-            b"test_schedule_commit_three_accounts_and_request_undelegate",
+            b"three_accounts_and_request_undelegate_success",
         )
         .unwrap();
 
@@ -622,7 +623,7 @@ mod tests {
     #[test]
     fn test_schedule_commit_no_pdas_provided_to_ix() {
         let payer =
-            Keypair::from_seed(b"test_schedule_commit_no_pdas_provided_to_ix")
+            Keypair::from_seed(b"schedule_commit_no_pdas_provided_to_ix")
                 .unwrap();
 
         let PreparedTransactionThreeCommittees {
@@ -652,10 +653,9 @@ mod tests {
 
     #[test]
     fn test_schedule_commit_three_accounts_second_not_owned_by_program() {
-        let payer = Keypair::from_seed(
-            b"test_schedule_commit_three_accounts_last_not_owned_by_program",
-        )
-        .unwrap();
+        let payer =
+            Keypair::from_seed(b"three_accounts_last_not_owned_by_program")
+                .unwrap();
 
         let PreparedTransactionThreeCommittees {
             mut accounts_data,
