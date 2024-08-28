@@ -1,31 +1,29 @@
-use log::*;
 use std::{
     collections::{HashMap, HashSet},
     sync::{Arc, RwLock},
 };
 
-use crate::{
-    sleipnir_instruction::{into_transaction, SleipnirInstruction},
-    utils::DELEGATION_PROGRAM_ID,
-    validator_authority, validator_authority_id,
-};
-use crate::{
-    traits::{AccountRemovalReason, AccountsRemover},
-    utils::accounts::{
-        get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
-    },
-};
 use lazy_static::lazy_static;
+use log::*;
 use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 use solana_sdk::{
     account::{ReadableAccount, WritableAccount},
     hash::Hash,
-    instruction::InstructionError,
+    instruction::{AccountMeta, Instruction, InstructionError},
     pubkey::Pubkey,
-};
-use solana_sdk::{
-    instruction::{AccountMeta, Instruction},
     transaction::Transaction,
+};
+
+use crate::{
+    sleipnir_instruction::{into_transaction, SleipnirInstruction},
+    traits::{AccountRemovalReason, AccountsRemover},
+    utils::{
+        accounts::{
+            get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
+        },
+        DELEGATION_PROGRAM_ID,
+    },
+    validator_authority, validator_authority_id,
 };
 
 // -----------------

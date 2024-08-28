@@ -19,8 +19,8 @@ use solana_sdk::{
     transaction_context::TransactionContext,
 };
 
-use crate::internal::process_remove_accounts_pending_removal;
 use crate::{
+    internal::process_remove_accounts_pending_removal,
     process_scheduled_commit_sent,
     schedule_transactions::{
         process_schedule_commit, ProcessScheduleCommitOptions,
