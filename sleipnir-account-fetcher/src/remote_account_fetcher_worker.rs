@@ -26,6 +26,7 @@ pub struct RemoteAccountFetcherWorker {
     >,
     fetch_request_receiver: UnboundedReceiver<Pubkey>,
     fetch_request_sender: UnboundedSender<Pubkey>,
+    fetch_result_cache: Arc<RwLock<HashMap<Pubkey, AccountFetcherResult>>>,
     fetch_result_listeners:
         Arc<RwLock<HashMap<Pubkey, Vec<Sender<AccountFetcherResult>>>>>,
 }
@@ -42,12 +43,19 @@ impl RemoteAccountFetcherWorker {
             account_chain_snapshot_provider,
             fetch_request_receiver,
             fetch_request_sender,
+            fetch_result_cache: Default::default(),
             fetch_result_listeners: Default::default(),
         }
     }
 
     pub fn get_fetch_request_sender(&self) -> UnboundedSender<Pubkey> {
         self.fetch_request_sender.clone()
+    }
+
+    pub fn get_fetch_result_cache(
+        &self,
+    ) -> Arc<RwLock<HashMap<Pubkey, AccountFetcherResult>>> {
+        self.fetch_result_cache.clone()
     }
 
     pub fn get_fetch_result_listeners(
@@ -67,7 +75,7 @@ impl RemoteAccountFetcherWorker {
                     join_all(
                         requests
                             .into_iter()
-                            .map(|request| self.do_fetch(request))
+                            .map(|request| self.process_fetch_request(request))
                     ).await;
                 }
                 _ = cancellation_token.cancelled() => {
@@ -77,7 +85,8 @@ impl RemoteAccountFetcherWorker {
         }
     }
 
-    async fn do_fetch(&self, pubkey: Pubkey) {
+    async fn process_fetch_request(&self, pubkey: Pubkey) {
+        // Actually fetch the account asynchronously
         let result = match self
             .account_chain_snapshot_provider
             .try_fetch_chain_snapshot_of_pubkey(&pubkey)
@@ -92,6 +101,21 @@ impl RemoteAccountFetcherWorker {
                 Err(AccountFetcherError::FailedToFetch(error.to_string()))
             }
         };
+        // Update the local fetch cache if the fetch was successfull
+        match self
+            .fetch_result_cache
+            .write()
+            .expect("RwLock of RemoteAccountFetcherWorker.fetch_result_cache is poisoned")
+            .entry(pubkey)
+        {
+            Entry::Occupied(mut entry) => {
+                *entry.get_mut() = result.clone();
+            },
+            Entry::Vacant(entry) => {
+                entry.insert(result.clone());
+            },
+        };
+        // Collect the listeners waiting for the result
         let listeners = match self
             .fetch_result_listeners
             .write()
@@ -107,6 +131,7 @@ impl RemoteAccountFetcherWorker {
             // If the entry exists, we want to consume the list of listeners
             Entry::Occupied(entry) => entry.remove(),
         };
+        // Notify the listeners of the arrival of the result
         for listener in listeners {
             if let Err(error) = listener.send(result.clone()) {
                 error!("Could not send fetch resut: {}: {:?}", pubkey, error);

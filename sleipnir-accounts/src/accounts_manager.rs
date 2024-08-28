@@ -4,8 +4,7 @@ use conjunto_transwise::{
     transaction_accounts_extractor::TransactionAccountsExtractorImpl,
     transaction_accounts_validator::TransactionAccountsValidatorImpl,
 };
-use sleipnir_account_fetcher::RemoteAccountFetcherClient;
-use sleipnir_account_updates::RemoteAccountUpdatesClient;
+use sleipnir_account_cloner::RemoteAccountClonerClient;
 use sleipnir_bank::bank::Bank;
 use sleipnir_transaction_status::TransactionStatusSender;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -15,8 +14,7 @@ use solana_sdk::{
 
 use crate::{
     bank_account_provider::BankAccountProvider, config::AccountsConfig,
-    errors::AccountsResult, external_accounts_cache::ExternalAccountsCache,
-    remote_account_cloner::RemoteAccountCloner,
+    errors::AccountsResult, remote_account_cloner::RemoteAccountCloner,
     remote_account_committer::RemoteAccountCommitter,
     remote_scheduled_commits_processor::RemoteScheduledCommitsProcessor,
     utils::try_rpc_cluster_from_cluster, ExternalAccountsManager,
@@ -24,10 +22,8 @@ use crate::{
 
 pub type AccountsManager = ExternalAccountsManager<
     BankAccountProvider,
-    RemoteAccountFetcherClient,
-    RemoteAccountCloner,
+    RemoteAccountClonerClient,
     RemoteAccountCommitter,
-    RemoteAccountUpdatesClient,
     TransactionAccountsExtractorImpl,
     TransactionAccountsValidatorImpl,
     RemoteScheduledCommitsProcessor,
@@ -36,10 +32,8 @@ pub type AccountsManager = ExternalAccountsManager<
 impl
     ExternalAccountsManager<
         BankAccountProvider,
-        RemoteAccountFetcherClient,
-        RemoteAccountCloner,
+        RemoteAccountClonerClient,
         RemoteAccountCommitter,
-        RemoteAccountUpdatesClient,
         TransactionAccountsExtractorImpl,
         TransactionAccountsValidatorImpl,
         RemoteScheduledCommitsProcessor,
@@ -84,7 +78,6 @@ impl
             account_committer: Arc::new(account_committer),
             transaction_accounts_extractor: TransactionAccountsExtractorImpl,
             transaction_accounts_validator: TransactionAccountsValidatorImpl,
-            external_accounts_cache: ExternalAccountsCache::default(),
             lifecycle: config.lifecycle,
             scheduled_commits_processor,
             payer_init_lamports: config.payer_init_lamports,

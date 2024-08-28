@@ -131,6 +131,8 @@ pub struct MagicValidator {
     remote_account_updates_handle: Option<
         tokio::task::JoinHandle<Result<(), RemoteAccountUpdatesWorkerError>>,
     >,
+    remote_account_cloner_worker: Option<RemoteAccountClonerWorker>,
+    remote_account_cloner_handle: Option<tokio::task::JoinHandle<()>>,
     accounts_manager: Arc<AccountsManager>,
     transaction_listener: GeyserTransactionNotifyListener,
     rpc_service: JsonRpcService,
@@ -420,6 +422,7 @@ impl MagicValidator {
 
         self.start_remote_account_fetcher_worker();
         self.start_remote_account_updates_worker();
+        self.start_remote_account_cloner_worker();
 
         self.rpc_service.start().map_err(|err| {
             ApiError::FailedToStartJsonRpcService(format!("{:?}", err))

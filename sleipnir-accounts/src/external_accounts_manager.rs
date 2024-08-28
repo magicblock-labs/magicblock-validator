@@ -10,8 +10,6 @@ use conjunto_transwise::{
 use futures_util::future::{try_join, try_join_all};
 use lazy_static::lazy_static;
 use log::*;
-use sleipnir_account_fetcher::AccountFetcher;
-use sleipnir_account_updates::AccountUpdates;
 use sleipnir_program::sleipnir_instruction::AccountModification;
 use solana_sdk::{
     pubkey::Pubkey, signature::Signature, sysvar,
@@ -20,7 +18,6 @@ use solana_sdk::{
 
 use crate::{
     errors::{AccountsError, AccountsResult},
-    external_accounts_cache::ExternalAccountsCache,
     traits::{AccountCloner, AccountCommitter, InternalAccountProvider},
     utils::get_epoch,
     AccountCommittee, CommitAccountsPayload, LifecycleMode,
@@ -49,7 +46,7 @@ lazy_static! {
 }
 
 #[derive(Debug)]
-pub struct ExternalAccountsManager<IAP, AFE, ACL, ACM, AUP, TAE, TAV, SCP>
+pub struct ExternalAccountsManager<IAP, ACL, ACM, TAE, TAV, SCP>
 where
     IAP: InternalAccountProvider,
     ACL: AccountCloner,
@@ -64,14 +61,13 @@ where
     pub transaction_accounts_extractor: TAE,
     pub transaction_accounts_validator: TAV,
     pub scheduled_commits_processor: SCP,
-    pub external_accounts_cache: ExternalAccountsCache<AFE, AUP>,
     pub lifecycle: LifecycleMode,
     pub payer_init_lamports: Option<u64>,
     pub validator_id: Pubkey,
 }
 
-impl<IAP, AFE, ACL, ACM, AUP, TAE, TAV, SCP>
-    ExternalAccountsManager<IAP, AFE, ACL, ACM, AUP, TAE, TAV, SCP>
+impl<IAP, ACL, ACM, TAE, TAV, SCP>
+    ExternalAccountsManager<IAP, ACL, ACM, TAE, TAV, SCP>
 where
     IAP: InternalAccountProvider,
     ACL: AccountCloner,
@@ -236,63 +232,6 @@ where
         //     it's `is_program` field is `None`.
         let programs_only = self.lifecycle.is_clone_readable_programs_only();
 
-        let cloned_readonly_accounts = tx_snapshot
-            .readonly
-            .into_iter()
-            .filter(|acc| match acc.chain_state.account() {
-                // If it exists: Allow the account if its a program or if we allow non-programs to be cloned
-                Some(account) => account.executable || !programs_only,
-                // Otherwise, don't clone it
-                None => false,
-            })
-            .collect::<Vec<_>>();
-
-        // 4.B We will want to make sure that all accounts that exist on chain and are writable have been cloned
-        let cloned_writable_accounts = tx_snapshot
-            .writable
-            .into_iter()
-            .filter(|acc| acc.chain_state.account().is_some())
-            .collect::<Vec<_>>();
-
-        // Useful logging of involved writable/readables pubkeys
-        if log::log_enabled!(log::Level::Debug) {
-            if !cloned_readonly_accounts.is_empty() {
-                debug!(
-                    "Transaction '{}' triggered readonly account clones: {:?}",
-                    signature,
-                    cloned_readonly_accounts
-                        .iter()
-                        .map(|acc| acc.pubkey)
-                        .collect::<Vec<_>>(),
-                );
-            }
-            if !cloned_writable_accounts.is_empty() {
-                let cloned_writable_descriptions = cloned_writable_accounts
-                    .iter()
-                    .map(|x| {
-                        format!(
-                            "{}{}{}",
-                            if x.pubkey == payer_id { "[payer]:" } else { "" },
-                            x.pubkey,
-                            match x.chain_state {
-                                AccountChainState::NewAccount => "NewAccount",
-                                AccountChainState::Undelegated { .. } =>
-                                    "Undelegated",
-                                AccountChainState::Delegated { .. } =>
-                                    "Delegated",
-                                AccountChainState::Inconsistent { .. } =>
-                                    "Inconsistent",
-                            },
-                        )
-                    })
-                    .collect::<Vec<_>>();
-                debug!(
-                    "Transaction '{}' triggered writable account clones: {:?}",
-                    signature, cloned_writable_descriptions
-                );
-            }
-        }
-
         let mut signatures = vec![];
 
         // 5.A Clone the unseen readonly accounts without any modifications
@@ -358,10 +297,6 @@ where
                     .as_ref()
                     .map(|x| x.commit_frequency),
             );
-        }
-
-        if log::log_enabled!(log::Level::Debug) && !signatures.is_empty() {
-            debug!("Transactions {:?}", signatures,);
         }
 
         Ok(signatures)

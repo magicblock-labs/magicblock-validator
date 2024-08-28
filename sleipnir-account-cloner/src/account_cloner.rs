@@ -1,5 +1,7 @@
 use conjunto_transwise::AccountChainSnapshotShared;
 use futures_util::future::BoxFuture;
+use sleipnir_account_fetcher::AccountFetcherError;
+use sleipnir_account_updates::AccountUpdatesError;
 use solana_sdk::pubkey::Pubkey;
 use thiserror::Error;
 
@@ -11,8 +13,11 @@ pub enum AccountClonerError {
     #[error("RecvError")]
     RecvError(#[from] tokio::sync::oneshot::error::RecvError),
 
-    #[error("FailedToClone '{0}'")]
-    FailedToClone(String),
+    #[error("AccountFetcherError")]
+    AccountFetcherError(#[from] AccountFetcherError),
+
+    #[error("AccountUpdatesError")]
+    AccountUpdatesError(#[from] AccountUpdatesError),
 }
 
 pub type AccountClonerResult =

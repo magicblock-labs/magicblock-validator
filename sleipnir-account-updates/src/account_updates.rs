@@ -1,7 +1,7 @@
 use solana_sdk::{clock::Slot, pubkey::Pubkey};
 use thiserror::Error;
 
-#[derive(Debug, Error)]
+#[derive(Debug, Clone, Error)]
 pub enum AccountUpdatesError {
     #[error("SendError")]
     SendError(#[from] tokio::sync::mpsc::error::SendError<Pubkey>),
