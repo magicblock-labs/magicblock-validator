@@ -2,7 +2,7 @@ use std::collections::HashSet;
 
 use solana_sdk::pubkey::Pubkey;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum AccountRemovalReason {
     Undelegated,
 }
@@ -14,5 +14,5 @@ pub trait AccountsRemover: Clone + Send + Sync + 'static {
         reason: AccountRemovalReason,
     );
 
-    fn has_accounts_pending_removal(&self) -> bool;
+    fn accounts_pending_removal(&self) -> HashSet<Pubkey>;
 }

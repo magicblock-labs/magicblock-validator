@@ -12,12 +12,10 @@ impl AccountsRemover for AccountsRemoverStub {
         _pubkey: HashSet<Pubkey>,
         _reason: AccountRemovalReason,
     ) {
-        // TODO @@@
-        todo!("AccountsRemoverStub::request_accounts_removal")
+        unimplemented!("AccountsRemoverStub::request_accounts_removal not expected to be called during tests")
     }
 
     fn has_accounts_pending_removal(&self) -> bool {
-        // TODO @@@
-        todo!("AccountsRemoverStub::has_accounts_pending_removal")
+        unimplemented!("AccountsRemoverStub::has_accounts_pending_removal not expected to be called during tests")
     }
 }

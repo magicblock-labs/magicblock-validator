@@ -1,5 +1,5 @@
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     sync::{Arc, RwLock},
 };
 
@@ -29,6 +29,7 @@ use solana_sdk::{
 // -----------------
 // AccountsRemover
 // -----------------
+#[derive(Debug)]
 pub struct PendingAccountRemoval {
     pub pubkey: Pubkey,
     pub reason: AccountRemovalReason,
@@ -69,12 +70,13 @@ impl AccountsRemover for ValidatorAccountsRemover {
         }
     }
 
-    fn has_accounts_pending_removal(&self) -> bool {
-        let accounts_pending_removal = self
-            .accounts_pending_removal
+    fn accounts_pending_removal(&self) -> HashSet<Pubkey> {
+        self.accounts_pending_removal
             .read()
-            .expect("accounts_pending_removal lock poisoned");
-        !accounts_pending_removal.is_empty()
+            .expect("accounts_pending_removal lock poisoned")
+            .iter()
+            .map(|x| x.pubkey)
+            .collect()
     }
 }
 
@@ -82,11 +84,13 @@ impl AccountsRemover for ValidatorAccountsRemover {
 // Instruction to process removal from validator
 // -----------------
 pub fn process_accounts_pending_removal_transaction(
+    accounts: HashSet<Pubkey>,
     recent_blockhash: Hash,
 ) -> Transaction {
     let ix = process_accounts_pending_removal_instruction(
         &crate::id(),
         &validator_authority_id(),
+        accounts,
     );
     into_transaction(&validator_authority(), ix, recent_blockhash)
 }
@@ -94,11 +98,15 @@ pub fn process_accounts_pending_removal_transaction(
 fn process_accounts_pending_removal_instruction(
     magic_block_program: &Pubkey,
     validator_authority: &Pubkey,
+    accounts: HashSet<Pubkey>,
 ) -> Instruction {
-    let account_metas = vec![
+    let mut account_metas = vec![
         AccountMeta::new_readonly(*magic_block_program, false),
         AccountMeta::new_readonly(*validator_authority, true),
     ];
+    account_metas
+        .extend(accounts.into_iter().map(|x| AccountMeta::new(x, false)));
+
     Instruction::new_with_bincode(
         *magic_block_program,
         &SleipnirInstruction::RemoveAccountsPendingRemoval,
@@ -154,7 +162,7 @@ pub fn process_remove_accounts_pending_removal(
         return Err(InstructionError::MissingRequiredSignature);
     }
 
-    // All checks out, let's remove those accounts, shall we?
+    // All checks out, let's remove those accounts
     let pubkeys = ValidatorAccountsRemover::default()
         .accounts_pending_removal
         .read()
@@ -163,8 +171,8 @@ pub fn process_remove_accounts_pending_removal(
         .map(|x| x.pubkey)
         .collect::<HashSet<_>>();
 
-    // The remaining accounts should include all pubkeys we are trying to remove
-    let mut to_remove = Vec::new();
+    let mut to_remove = HashMap::new();
+    let mut not_pending = HashSet::new();
 
     // For each account we remove, we transfer all its lamports to the validator authority
     for idx in ACCOUNTS_START..ix_accs_len {
@@ -173,23 +181,27 @@ pub fn process_remove_accounts_pending_removal(
         let acc =
             get_instruction_account_with_idx(transaction_context, idx as u16)?;
         if pubkeys.contains(acc_pubkey) {
-            to_remove.push((*acc_pubkey, acc));
+            to_remove.insert(*acc_pubkey, acc);
+        } else {
+            not_pending.insert(acc_pubkey);
         }
     }
 
-    // Ensure we were passed an account for each pubkey pending removal
-    if !pubkeys.is_empty() {
+    // The only place where accounts pending removal are taken out of the global
+    // list is here.
+    // Therefore we expect all accounts passed to still be in that list.
+    // We clean them out of that list after we drain their lamports.
+    if !not_pending.is_empty() {
         ic_msg!(
             invoke_context,
-            "ScheduleCommit ERR: Missing account for pubkey(s) {:?}",
-            pubkeys
+            "RemoveAccount ERR: Trying to remove accounts that aren't pending removal {:?}",
+            not_pending
         );
         return Err(InstructionError::MissingAccount);
     }
 
     // Remove each account by draining its lamports
-    let to_remove_pubkeys =
-        to_remove.iter().map(|x| x.0).collect::<HashSet<_>>();
+    let removed_pubkeys = to_remove.keys().cloned().collect::<HashSet<_>>();
 
     let mut total_drained_lamports = 0;
     for (_, acc) in to_remove.into_iter() {
@@ -206,7 +218,7 @@ pub fn process_remove_accounts_pending_removal(
         .borrow_mut()
         .set_lamports(current_lamports + total_drained_lamports);
 
-    // Mark them as processed
+    // Mark them as processed by removing from accounts pending removal
     {
         let remover = ValidatorAccountsRemover::default();
         let mut accounts_pending_removal = remover
@@ -214,7 +226,13 @@ pub fn process_remove_accounts_pending_removal(
             .write()
             .expect("accounts_pending_removal lock poisoned");
         accounts_pending_removal
-            .retain(|x| !to_remove_pubkeys.contains(&x.pubkey));
+            .retain(|x| !removed_pubkeys.contains(&x.pubkey));
+        ic_msg!(
+            invoke_context,
+            "RemoveAccount: Removed accounts: {:?}. Remaining: {:?}",
+            removed_pubkeys,
+            accounts_pending_removal
+        );
     }
 
     Ok(())

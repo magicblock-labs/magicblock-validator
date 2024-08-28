@@ -508,13 +508,25 @@ where
     pub fn remove_accounts_pending_removal(
         &self,
         bank: &Arc<Bank>,
-    ) -> AccountsResult<Signature> {
-        let blockhash = bank.last_blockhash();
-        let tx = process_accounts_pending_removal_transaction(blockhash);
-        execute_legacy_transaction(
-            tx,
-            bank,
-            self.transaction_status_sender.as_ref(),
-        )
+    ) -> AccountsResult<Option<Signature>> {
+        // TODO: all this logic including purging removed accounts could
+        // be part of accounts remover
+        // however we still will need to know the keys in order to remove them
+        // from cloned account caches
+        let accounts = self.accounts_remover.accounts_pending_removal();
+        if !accounts.is_empty() {
+            let blockhash = bank.last_blockhash();
+            let tx = process_accounts_pending_removal_transaction(
+                accounts, blockhash,
+            );
+            let sig = execute_legacy_transaction(
+                tx,
+                bank,
+                self.transaction_status_sender.as_ref(),
+            )?;
+            Ok(Some(sig))
+        } else {
+            Ok(None)
+        }
     }
 }

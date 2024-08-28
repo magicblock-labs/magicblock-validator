@@ -39,8 +39,11 @@ pub fn init_slot_ticker(
                 },
             );
             match accounts_manager.remove_accounts_pending_removal(&bank) {
-                Ok(sig) => {
+                Ok(Some(sig)) => {
                     debug!("Removed accounts pending removal: {:?}", sig)
+                }
+                Ok(None) => {
+                    // No accounts were removed
                 }
                 Err(e) => {
                     error!(
