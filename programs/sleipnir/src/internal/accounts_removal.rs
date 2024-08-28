@@ -6,6 +6,7 @@ use std::{
 
 use crate::{
     sleipnir_instruction::{into_transaction, SleipnirInstruction},
+    utils::DELEGATION_PROGRAM_ID,
     validator_authority, validator_authority_id,
 };
 use crate::{
@@ -162,6 +163,7 @@ pub fn process_remove_accounts_pending_removal(
 
     let mut to_remove = HashMap::new();
     let mut not_pending = HashSet::new();
+    let mut owner_changed_since_removal_request = HashSet::new();
 
     // For each account we remove, we transfer all its lamports to the validator authority
     for idx in ACCOUNTS_START..ix_accs_len {
@@ -170,7 +172,15 @@ pub fn process_remove_accounts_pending_removal(
         let acc =
             get_instruction_account_with_idx(transaction_context, idx as u16)?;
         if pending_removal.contains(acc_pubkey) {
-            to_remove.insert(*acc_pubkey, acc);
+            // If the account was updated since the removal request we don't want to
+            // remove it. This could happen if the account is first marked for removal
+            // and then cloned into the validator due to a change on mainchain or
+            // because it was redelegated in the meantime.
+            if *acc.borrow().owner() != *DELEGATION_PROGRAM_ID {
+                owner_changed_since_removal_request.insert(acc_pubkey);
+            } else {
+                to_remove.insert(*acc_pubkey, acc);
+            }
         } else {
             not_pending.insert(acc_pubkey);
         }
@@ -190,7 +200,7 @@ pub fn process_remove_accounts_pending_removal(
     }
 
     // Remove each account by draining its lamports
-    let removed_pubkeys = to_remove.keys().cloned().collect::<HashSet<_>>();
+    let to_remove_pubkeys = to_remove.keys().cloned().collect::<HashSet<_>>();
 
     let mut total_drained_lamports = 0;
     for (_, acc) in to_remove.into_iter() {
@@ -207,18 +217,23 @@ pub fn process_remove_accounts_pending_removal(
         .borrow_mut()
         .set_lamports(current_lamports + total_drained_lamports);
 
-    // Mark them as processed by removing from accounts pending removal
+    // Mark the following accounts as processed by removing from accounts pending removal
+    // - accounts that were removed
+    // - accounts that changed owner since the removal request and thus were not removed
     {
         let remover = ValidatorAccountsRemover::default();
         let mut accounts_pending_removal = remover
             .accounts_pending_removal
             .write()
             .expect("accounts_pending_removal lock poisoned");
-        accounts_pending_removal.retain(|x| !removed_pubkeys.contains(x));
+        accounts_pending_removal.retain(|x| {
+            !to_remove_pubkeys.contains(x)
+                && !owner_changed_since_removal_request.contains(x)
+        });
         ic_msg!(
             invoke_context,
             "RemoveAccount: Removed accounts: {:?}. Remaining: {:?}",
-            removed_pubkeys,
+            to_remove_pubkeys,
             accounts_pending_removal
         );
     }
