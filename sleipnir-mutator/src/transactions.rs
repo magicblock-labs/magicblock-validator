@@ -9,9 +9,9 @@ use solana_sdk::{
 
 use crate::{
     account::resolve_account_modification,
-    errors::MutatorResult,
+    errors::{MutatorError, MutatorResult},
     program::{resolve_program_modifications, ProgramModifications},
-    utils::fetch_account,
+    utils::{fetch_account, get_pubkey_program_data},
     Cluster,
 };
 
@@ -61,7 +61,20 @@ pub async fn transactions_to_clone_account_from_cluster(
             recent_blockhash,
         )]);
     }
-    // If it's a program we'll return the list of necessary transactions
+    // To clone a program we need to update multiple accounts at the same time
+    let program_pubkey = account_pubkey;
+    let program_data_pubkey = get_pubkey_program_data(program_pubkey);
+
+    // The program data needs to be cloned, download the executable account
+    let program_data_account = fetch_account(cluster, &program_data_pubkey)
+        .await
+        .map_err(|err| {
+            MutatorError::FailedToCloneProgramExecutableDataAccount(
+                *program_pubkey,
+                err,
+            )
+        })?;
+
     transactions_to_clone_program(
         cluster,
         is_upgrade,
@@ -73,7 +86,18 @@ pub async fn transactions_to_clone_account_from_cluster(
     .await
 }
 
-fn transaction_to_clone_regular_account(
+pub async fn transactions_to_clone_program_from_cluster(
+    cluster: &Cluster,
+    is_upgrade: bool,
+    account_pubkey: &Pubkey,
+    account_remote: &Account,
+    recent_blockhash: Hash,
+    slot: Slot,
+    overrides: Option<AccountModification>,
+) -> MutatorResult<Vec<Transaction>> {
+}
+
+pub fn transaction_to_clone_regular_account(
     account_pubkey: &Pubkey,
     account_remote: &Account,
     overrides: Option<AccountModification>,
@@ -86,27 +110,15 @@ fn transaction_to_clone_regular_account(
     modify_accounts(vec![account_modification], recent_blockhash)
 }
 
-async fn transactions_to_clone_program(
-    cluster: &Cluster,
-    is_upgrade: bool,
-    account_pubkey: &Pubkey,
-    account_remote: &Account,
+pub fn transactions_to_clone_program(
+    needs_upgrade: bool,
+    program_modification: AccountModification,
+    program_data_modification: AccountModification,
+    program_buffer_modification: AccountModification,
+    program_idl_modification: Option<AccountModification>,
     slot: Slot,
     recent_blockhash: Hash,
 ) -> MutatorResult<Vec<Transaction>> {
-    // To clone a program we need to update multiple accounts at the same time
-    let ProgramModifications {
-        program_modification,
-        program_data_modification,
-        program_buffer_modification,
-        program_idl_modification,
-    } = resolve_program_modifications(
-        cluster,
-        account_pubkey,
-        account_remote,
-        slot,
-    )
-    .await?;
     // We'll need to run the upgrade IX based on those
     let program_pubkey = program_modification.pubkey;
     let program_buffer_pubkey = program_buffer_modification.pubkey;
@@ -120,14 +132,15 @@ async fn transactions_to_clone_program(
         account_modifications.push(program_idl_modification)
     }
     // If the program does not exist yet, we just need to update it's data and don't
-    // need to explicitly update the BPF loader
-    if !is_upgrade {
+    // need to explicitly update using the BPF loader's Upgrade IX
+    if !needs_upgrade {
         return Ok(vec![modify_accounts(
             account_modifications,
             recent_blockhash,
         )]);
     }
-    // Generate a modify TX and an Upgrade TX if we need to update the program
+    // If it's an upgrade of the program rather than the first deployment,
+    // generate a modify TX and an Upgrade TX following it
     Ok(vec![
         // First dump the necessary set of account to our bank/ledger
         modify_accounts(account_modifications, recent_blockhash),

@@ -1,4 +1,3 @@
-use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
     account::Account, bpf_loader_upgradeable,
     commitment_config::CommitmentConfig, pubkey::Pubkey,
@@ -8,20 +7,6 @@ use crate::Cluster;
 
 const ANCHOR_SEED: &str = "anchor:idl";
 const SHANK_SEED: &str = "shank:idl";
-
-pub async fn fetch_account(
-    cluster: &Cluster,
-    pubkey: &Pubkey,
-) -> Result<Account, solana_rpc_client_api::client_error::Error> {
-    // TODO(vbrunet)
-    //  - Long term this should probably use the validator's AccountFetcher
-    //  - Tracked here: https://github.com/magicblock-labs/magicblock-validator/issues/136
-    let rpc_client = RpcClient::new_with_commitment(
-        cluster.url().to_string(),
-        CommitmentConfig::confirmed(),
-    );
-    rpc_client.get_account(pubkey).await
-}
 
 pub fn get_pubkey_anchor_idl(program_id: &Pubkey) -> Option<Pubkey> {
     let (base, _) = Pubkey::find_program_address(&[], program_id);

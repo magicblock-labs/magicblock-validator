@@ -10,7 +10,14 @@ use log::*;
 use sleipnir_account_fetcher::{AccountFetcher, AccountFetcherResult};
 use sleipnir_account_updates::AccountUpdates;
 use sleipnir_bank::bank::Bank;
-use sleipnir_mutator::transactions::transactions_to_clone_account_from_cluster;
+use sleipnir_mutator::{
+    errors::MutatorResult,
+    transactions::{
+        transaction_to_clone_regular_account,
+        transactions_to_clone_account_from_cluster,
+    },
+    AccountModification,
+};
 use sleipnir_processor::execute_transaction::execute_legacy_transaction;
 use sleipnir_transaction_status::TransactionStatusSender;
 use solana_sdk::{
@@ -19,6 +26,7 @@ use solana_sdk::{
     hash::Hash,
     pubkey::{self, Pubkey},
     signature::Signature,
+    system_program,
     transaction::{Result, Transaction, TransactionError},
 };
 use tokio::sync::{
@@ -167,7 +175,11 @@ where
         // Generate cloning transactions if we need
         let txs = match &account_chain_snapshot.chain_state {
             // If the account is not present on-chain, we don't need to clone anything
-            AccountChainState::NewAccount => vec![],
+            AccountChainState::NewAccount => Ok(vec![
+                // TODO(vbrunet)
+                // - we may need to make sure we wipe this account locally?
+                // - since we cant create account in ephemerals this might not be a problem?
+            ]),
             // If the account is present on-chain, but not delegated
             // We need to clone it if its a program, we have a special procedure.
             // If it is not a program, we can just clone it without overrides
@@ -233,11 +245,11 @@ where
         Ok(account_chain_snapshot)
     }
 
-    fn build_transactions_for_program_cloning(
+    async fn build_transactions_for_program_cloning(
         &self,
         pubkey: &Pubkey,
         account: &Account,
-    ) -> Vec<Transaction> {
+    ) -> MutatorResult<Vec<Transaction>> {
         let slot = self.bank.slot();
         let recent_blockhash = self.bank.last_blockhash();
         let needs_override = self.bank.get_account(pubkey).is_some();
@@ -247,28 +259,35 @@ where
             needs_override,
             pubkey,
             account,
-            blockhash,
+            recent_blockhash,
             slot,
             overrides,
         )
+        .await
     }
 
-    fn build_transaction_for_regular_account_cloning(
+    async fn build_transaction_for_regular_account_cloning(
         &self,
         pubkey: &Pubkey,
         account: &Account,
-    ) -> Vec<Transaction> {
-        let slot = self.bank.slot();
-        let recent_blockhash = self.bank.last_blockhash();
-
-        transactions_to_clone_account_from_cluster(
-            &self.cluster,
-            needs_override,
+    ) -> Transaction {
+        // If this is an account that may be used as a payer, airdrop lamports to it.
+        // This logic will be replaced once we implement value reconcilation
+        let overrides = if account.owner == system_program::ID {
+            Some(AccountModification {
+                pubkey: *pubkey,
+                lamports: Some(account.lamports + 1_000_000),
+                ..Default::default()
+            })
+        } else {
+            None
+        };
+        // Simply mutate the account to match the on-chain state
+        transaction_to_clone_regular_account(
             pubkey,
             account,
-            blockhash,
-            slot,
             overrides,
+            self.bank.last_blockhash(),
         )
     }
 }

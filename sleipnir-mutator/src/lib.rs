@@ -1,6 +1,8 @@
 pub mod account;
 mod cluster;
 pub mod errors;
+pub mod fetch;
+pub mod idl;
 pub mod program;
 pub mod transactions;
 mod utils;

@@ -21,6 +21,9 @@ pub enum AccountClonerError {
 
     #[error("AccountUpdatesError")]
     AccountUpdatesError(#[from] AccountUpdatesError),
+
+    #[error("FailedToMutate '{0}'")]
+    FailedToMutate(String),
 }
 
 pub type AccountClonerResult =
