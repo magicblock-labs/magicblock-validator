@@ -11,10 +11,15 @@ use sleipnir_account_fetcher::{AccountFetcher, AccountFetcherResult};
 use sleipnir_account_updates::AccountUpdates;
 use sleipnir_bank::bank::Bank;
 use sleipnir_mutator::transactions::transactions_to_clone_account_from_cluster;
+use sleipnir_processor::execute_transaction::execute_legacy_transaction;
 use sleipnir_transaction_status::TransactionStatusSender;
 use solana_sdk::{
+    account::Account,
     clock::Slot,
+    hash::Hash,
     pubkey::{self, Pubkey},
+    signature::Signature,
+    transaction::{Result, Transaction, TransactionError},
 };
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
@@ -94,8 +99,9 @@ where
     }
 
     async fn process_clone_request(&self, pubkey: Pubkey) {
+        // Actually run the whole cloning process on the bank, yield until done
         let result = self.clone_if_needed(&pubkey).await;
-
+        // Collecting the list of listeners awaiting for the clone to be done
         let listeners = match self
             .clone_result_listeners
             .write()
@@ -111,6 +117,7 @@ where
             // If the entry exists, we want to consume the list of listeners
             Entry::Occupied(entry) => entry.remove(),
         };
+        // Notify every listeners of the clone's result
         for listener in listeners {
             if let Err(error) = listener.send(result.clone()) {
                 error!("Could not send clone resut: {}: {:?}", pubkey, error);
@@ -157,42 +164,44 @@ where
             .await
             .map_err(AccountClonerError::AccountFetcherError)?;
 
-        // Check bank status
-        let blockhash = self.bank.last_blockhash();
-        let needs_override = self.bank.get_account(pubkey).is_some();
-
-        let txs = match account_chain_snapshot.chain_state {
+        // Generate cloning transactions if we need
+        let txs = match &account_chain_snapshot.chain_state {
             // If the account is not present on-chain, we don't need to clone anything
-            AccountChainState::NewAccount => {
-                vec![]
-            }
-            // If the account is present on-chain, but not delegated, we'd need to do some work
+            AccountChainState::NewAccount => vec![],
+            // If the account is present on-chain, but not delegated
+            // We need to clone it if its a program, we have a special procedure.
+            // If it is not a program, we can just clone it without overrides
             AccountChainState::Undelegated { account } => {
-                transactions_to_clone_account_from_cluster(
-                    &self.cluster,
-                    needs_override,
-                    pubkey,
-                    &account,
-                    blockhash,
-                    slot,
-                    overrides,
-                )
-                .await?
+                if account.executable {
+                    self.build_transactions_for_program_cloning(
+                        pubkey, &account,
+                    )
+                } else {
+                    self.build_transaction_for_regular_account_cloning(
+                        pubkey, &account,
+                    )
+                }
             }
-            // If the account is present and delegated on-chain, we'd need to bring it up
+            // If the account delegated on-chain,
+            // we need to apply some overrides to if we are in ephemeral mode (so it can be used as writable)
+            // Otherwise we can just clone it like a regular account
             AccountChainState::Delegated {
                 account,
                 delegation_pda,
                 delegation_record,
-            } => {}
-            // If the account is inconsistant on-chain, we can just dump it
-            AccountChainState::Inconsistent {
-                account,
-                delegation_pda,
-                delegation_inconsistencies,
-            } => {}
+            } => self.build_transaction_for_regular_account_cloning(
+                pubkey, &account,
+            ),
+            // If the account is delegated but inconsistant on-chain,
+            // We can just clone it, it won't be usable as writable,
+            // but nothing stopping it from being used as a readonly
+            AccountChainState::Inconsistent { account, .. } => self
+                .build_transaction_for_regular_account_cloning(
+                    pubkey, &account,
+                ),
         };
 
+        // Execute the cloning transactions in the bank
         let signatures = txs
             .into_iter()
             .map(|clone_tx| {
@@ -202,7 +211,8 @@ where
                     self.transaction_status_sender.as_ref(),
                 )
             })
-            .collect::<Result<_, _>>()?;
+            .collect::<Result<Vec<Signature>>>()
+            .map_err(AccountClonerError::TransactionError)?;
 
         // If the cloning succeeded, save it into the cache for later use
         match self
@@ -221,5 +231,44 @@ where
 
         // Return the result
         Ok(account_chain_snapshot)
+    }
+
+    fn build_transactions_for_program_cloning(
+        &self,
+        pubkey: &Pubkey,
+        account: &Account,
+    ) -> Vec<Transaction> {
+        let slot = self.bank.slot();
+        let recent_blockhash = self.bank.last_blockhash();
+        let needs_override = self.bank.get_account(pubkey).is_some();
+
+        transactions_to_clone_account_from_cluster(
+            &self.cluster,
+            needs_override,
+            pubkey,
+            account,
+            blockhash,
+            slot,
+            overrides,
+        )
+    }
+
+    fn build_transaction_for_regular_account_cloning(
+        &self,
+        pubkey: &Pubkey,
+        account: &Account,
+    ) -> Vec<Transaction> {
+        let slot = self.bank.slot();
+        let recent_blockhash = self.bank.last_blockhash();
+
+        transactions_to_clone_account_from_cluster(
+            &self.cluster,
+            needs_override,
+            pubkey,
+            account,
+            blockhash,
+            slot,
+            overrides,
+        )
     }
 }

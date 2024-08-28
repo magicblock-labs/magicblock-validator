@@ -26,7 +26,6 @@ pub struct RemoteAccountFetcherWorker {
     >,
     fetch_request_receiver: UnboundedReceiver<Pubkey>,
     fetch_request_sender: UnboundedSender<Pubkey>,
-    fetch_result_cache: Arc<RwLock<HashMap<Pubkey, AccountFetcherResult>>>,
     fetch_result_listeners:
         Arc<RwLock<HashMap<Pubkey, Vec<Sender<AccountFetcherResult>>>>>,
 }
@@ -43,19 +42,12 @@ impl RemoteAccountFetcherWorker {
             account_chain_snapshot_provider,
             fetch_request_receiver,
             fetch_request_sender,
-            fetch_result_cache: Default::default(),
             fetch_result_listeners: Default::default(),
         }
     }
 
     pub fn get_fetch_request_sender(&self) -> UnboundedSender<Pubkey> {
         self.fetch_request_sender.clone()
-    }
-
-    pub fn get_fetch_result_cache(
-        &self,
-    ) -> Arc<RwLock<HashMap<Pubkey, AccountFetcherResult>>> {
-        self.fetch_result_cache.clone()
     }
 
     pub fn get_fetch_result_listeners(
@@ -100,20 +92,6 @@ impl RemoteAccountFetcherWorker {
                 // Lose the error full stack trace and create a simplified clonable string version
                 Err(AccountFetcherError::FailedToFetch(error.to_string()))
             }
-        };
-        // Update the local fetch cache if the fetch was successfull
-        match self
-            .fetch_result_cache
-            .write()
-            .expect("RwLock of RemoteAccountFetcherWorker.fetch_result_cache is poisoned")
-            .entry(pubkey)
-        {
-            Entry::Occupied(mut entry) => {
-                *entry.get_mut() = result.clone();
-            },
-            Entry::Vacant(entry) => {
-                entry.insert(result.clone());
-            },
         };
         // Collect the listeners waiting for the result
         let listeners = match self

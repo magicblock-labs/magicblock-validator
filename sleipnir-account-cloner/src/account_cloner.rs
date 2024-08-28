@@ -13,6 +13,9 @@ pub enum AccountClonerError {
     #[error("RecvError")]
     RecvError(#[from] tokio::sync::oneshot::error::RecvError),
 
+    #[error("TransactionError")]
+    TransactionError(#[from] solana_sdk::transaction::TransactionError),
+
     #[error("AccountFetcherError")]
     AccountFetcherError(#[from] AccountFetcherError),
 
