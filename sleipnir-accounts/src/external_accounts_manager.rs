@@ -29,22 +29,39 @@ use crate::{
 #[derive(Debug)]
 pub struct ExternalCommitableAccount {
     pubkey: Pubkey,
+    commit_frequency: Duration,
+    last_commit_at: Duration,
 }
 
 impl ExternalCommitableAccount {
-    pub fn new(pubkey: &Pubkey, commit_frequency: &CommitFrequency) -> Self {
-        Self { pubkey: *pubkey }
+    pub fn new(
+        pubkey: &Pubkey,
+        commit_frequency: &CommitFrequency,
+        now: &Duration,
+    ) -> Self {
+        let commit_frequency = Duration::from(*commit_frequency);
+        // We don't want to commit immediately after cloning, thus we consider
+        // the account as committed at clone time until it is updated after
+        // a commit
+        let last_commit_at = *now;
+        Self {
+            pubkey: *pubkey,
+            commit_frequency,
+            last_commit_at,
+        }
     }
 
     pub fn needs_commit(&self, now: &Duration) -> bool {
-        false
+        *now - self.last_commit_at >= self.commit_frequency
     }
 
     pub fn last_committed_at(&self) -> Duration {
-
+        self.last_commit_at
     }
 
-    pub fn mark_as_committed(&mut self, now: &Duration) {}
+    pub fn mark_as_committed(&mut self, now: &Duration) {
+        self.last_commit_at = *now
+    }
 
     pub fn get_pubkey(&self) -> Pubkey {
         self.pubkey
@@ -135,21 +152,21 @@ where
                 .validate_ephemeral_transaction_accounts(&tx_snapshot)?;
         }
         // Commitable account scheduling initialization
+        let now = get_epoch();
         for writable_snapshot in writable_snapshots {
             match &writable_snapshot.chain_state {
                 AccountChainState::Delegated {
                     delegation_record,
                     ..
-                } => 
+                } =>
                     match self.external_commitable_accounts.write()            .expect(
                         "RwLock of ExternalAccountsManager.external_commitable_accounts is poisoned",
                     ).entry(writable_snapshot.pubkey) {
-                        Entry::Occupied(mut entry) => {},
+                        Entry::Occupied(mut _entry) => {},
                         Entry::Vacant(entry) => {
-                            entry.insert(ExternalCommitableAccount::new(&writable_snapshot.pubkey, &delegation_record.commit_frequency));
+                            entry.insert(ExternalCommitableAccount::new(&writable_snapshot.pubkey, &delegation_record.commit_frequency, &now));
                         },
                     }
-                
                 _ => {}
             }
         }
@@ -170,7 +187,7 @@ where
                 "RwLock of ExternalAccountsManager.external_commitable_accounts is poisoned",
             )
             .values()
-            .filter(|x| x.needs_commit(now))
+            .filter(|x| x.needs_commit(&now))
             .map(|x| x.get_pubkey())
             .collect::<Vec<_>>();
         let commit_infos = self

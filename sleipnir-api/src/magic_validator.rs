@@ -12,6 +12,9 @@ use std::{
 
 use conjunto_transwise::RpcProviderConfig;
 use log::*;
+use sleipnir_account_cloner::{
+    RemoteAccountClonerClient, RemoteAccountClonerWorker,
+};
 use sleipnir_account_fetcher::{
     RemoteAccountFetcherClient, RemoteAccountFetcherWorker,
 };
@@ -131,7 +134,12 @@ pub struct MagicValidator {
     remote_account_updates_handle: Option<
         tokio::task::JoinHandle<Result<(), RemoteAccountUpdatesWorkerError>>,
     >,
-    remote_account_cloner_worker: Option<RemoteAccountClonerWorker>,
+    remote_account_cloner_worker: Option<
+        RemoteAccountClonerWorker<
+            RemoteAccountFetcherClient,
+            RemoteAccountUpdatesClient,
+        >,
+    >,
     remote_account_cloner_handle: Option<tokio::task::JoinHandle<()>>,
     accounts_manager: Arc<AccountsManager>,
     transaction_listener: GeyserTransactionNotifyListener,
@@ -204,10 +212,19 @@ impl MagicValidator {
             sender: transaction_sndr,
         };
 
-        let accounts_manager = Self::init_accounts_manager(
-            &bank,
+        let remote_account_cloner_worker = RemoteAccountClonerWorker::new(
             RemoteAccountFetcherClient::new(&remote_account_fetcher_worker),
             RemoteAccountUpdatesClient::new(&remote_account_updates_worker),
+            bank.clone(),
+            Some(transaction_status_sender.clone()),
+            &identity_keypair.pubkey(),
+            Some(1_000_000_000),
+            true,
+        );
+
+        let accounts_manager = Self::init_accounts_manager(
+            &bank,
+            RemoteAccountClonerClient::new(&remote_account_cloner_worker),
             transaction_status_sender.clone(),
             &identity_keypair,
             &config.validator_config,
@@ -241,6 +258,8 @@ impl MagicValidator {
             remote_account_fetcher_handle: None,
             remote_account_updates_worker: Some(remote_account_updates_worker),
             remote_account_updates_handle: None,
+            remote_account_cloner_worker: Some(remote_account_cloner_worker),
+            remote_account_cloner_handle: None,
             pubsub_handle: Default::default(),
             pubsub_close_handle: Default::default(),
             sample_performance_service: None,
@@ -281,8 +300,7 @@ impl MagicValidator {
 
     fn init_accounts_manager(
         bank: &Arc<Bank>,
-        remote_account_fetcher_client: RemoteAccountFetcherClient,
-        remote_account_updates_client: RemoteAccountUpdatesClient,
+        remote_account_cloner_client: RemoteAccountClonerClient,
         transaction_status_sender: TransactionStatusSender,
         validator_keypair: &Keypair,
         config: &SleipnirConfig,
@@ -293,8 +311,7 @@ impl MagicValidator {
         );
         let accounts_manager = AccountsManager::try_new(
             bank,
-            remote_account_fetcher_client,
-            remote_account_updates_client,
+            remote_account_cloner_client,
             Some(transaction_status_sender),
             // NOTE: we could avoid passing a copy of the keypair here if we instead pass
             // something akin to a ValidatorTransactionSigner that gets it via the [validator_authority]
