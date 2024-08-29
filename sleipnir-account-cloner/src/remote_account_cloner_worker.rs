@@ -12,9 +12,9 @@ use sleipnir_account_updates::AccountUpdates;
 use sleipnir_bank::bank::Bank;
 use sleipnir_mutator::{
     errors::MutatorResult,
+    program::{create_program_modifications, ProgramModifications},
     transactions::{
-        transaction_to_clone_regular_account,
-        transactions_to_clone_account_from_cluster,
+        transaction_to_clone_regular_account, transactions_to_clone_program,
     },
     AccountModification,
 };
@@ -22,6 +22,7 @@ use sleipnir_processor::execute_transaction::execute_legacy_transaction;
 use sleipnir_transaction_status::TransactionStatusSender;
 use solana_sdk::{
     account::Account,
+    bpf_loader_upgradeable::get_program_data_address,
     clock::Slot,
     hash::Hash,
     pubkey::{self, Pubkey},
@@ -35,7 +36,7 @@ use tokio::sync::{
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::{AccountClonerError, AccountClonerResult};
+use crate::{AccountClonerError, AccountClonerOutput, AccountClonerResult};
 
 pub struct RemoteAccountClonerWorker<AFE, AUP> {
     account_fetcher: AFE,
@@ -45,7 +46,7 @@ pub struct RemoteAccountClonerWorker<AFE, AUP> {
     clone_request_receiver: UnboundedReceiver<Pubkey>,
     clone_request_sender: UnboundedSender<Pubkey>,
     clone_result_listeners:
-        Arc<RwLock<HashMap<Pubkey, Vec<Sender<AccountClonerResult>>>>>,
+        Arc<RwLock<HashMap<Pubkey, Vec<Sender<AccountClonerOutput>>>>>,
     last_cloned_snapshot:
         Arc<RwLock<HashMap<Pubkey, AccountChainSnapshotShared>>>,
 }
@@ -81,7 +82,7 @@ where
 
     pub fn get_clone_result_listeners(
         &self,
-    ) -> Arc<RwLock<HashMap<Pubkey, Vec<Sender<AccountClonerResult>>>>> {
+    ) -> Arc<RwLock<HashMap<Pubkey, Vec<Sender<AccountClonerOutput>>>>> {
         self.clone_result_listeners.clone()
     }
 
@@ -133,7 +134,7 @@ where
         }
     }
 
-    async fn clone_if_needed(&self, pubkey: &Pubkey) -> AccountClonerResult {
+    async fn clone_if_needed(&self, pubkey: &Pubkey) -> AccountClonerOutput {
         // Check for the happy/fast path, we may already have cloned this account before
         match self
             .last_cloned_snapshot
@@ -159,18 +160,14 @@ where
         }
     }
 
-    async fn do_clone(&self, pubkey: &Pubkey) -> AccountClonerResult {
+    async fn do_clone(&self, pubkey: &Pubkey) -> AccountClonerOutput {
         // Mark the account for monitoring, we want to detect updates on it since we're cloning it
         self.account_updates
             .ensure_account_monitoring(pubkey)
             .map_err(AccountClonerError::AccountUpdatesError)?;
 
         // Fetch the account
-        let account_chain_snapshot = self
-            .account_fetcher
-            .fetch_account_chain_snapshot(&pubkey)
-            .await
-            .map_err(AccountClonerError::AccountFetcherError)?;
+        let account_chain_snapshot = self.fetch_account(&pubkey).await?;
 
         // Generate cloning transactions if we need
         let txs = match &account_chain_snapshot.chain_state {
@@ -188,10 +185,11 @@ where
                     self.build_transactions_for_program_cloning(
                         pubkey, &account,
                     )
+                    .await?
                 } else {
-                    self.build_transaction_for_regular_account_cloning(
+                    vec![self.build_transaction_for_regular_account_cloning(
                         pubkey, &account,
-                    )
+                    )]
                 }
             }
             // If the account delegated on-chain,
@@ -249,21 +247,40 @@ where
         &self,
         pubkey: &Pubkey,
         account: &Account,
-    ) -> MutatorResult<Vec<Transaction>> {
-        let slot = self.bank.slot();
-        let recent_blockhash = self.bank.last_blockhash();
-        let needs_override = self.bank.get_account(pubkey).is_some();
+    ) -> AccountClonerResult<Vec<Transaction>> {
+        let program_id_pubkey = pubkey;
+        let program_id_account = account;
 
-        transactions_to_clone_account_from_cluster(
-            &self.cluster,
-            needs_override,
-            pubkey,
-            account,
-            recent_blockhash,
-            slot,
-            overrides,
+        let program_data_pubkey = &get_program_data_address(program_id_pubkey);
+        let program_data_snapshot =
+            self.fetch_account(&program_data_pubkey).await?;
+        let program_data_account = program_data_snapshot
+            .chain_state
+            .account()
+            .ok_or(AccountClonerError::ProgramDataDoesNotExist)?;
+
+        let ProgramModifications {
+            program_id_modification,
+            program_data_modification,
+            program_buffer_modification,
+        } = create_program_modifications(
+            program_id_pubkey,
+            program_id_account,
+            program_data_pubkey,
+            program_data_account,
+            self.bank.slot(),
         )
-        .await
+        .map_err(AccountClonerError::MutatorModificationError)?;
+
+        let needs_upgrade = self.bank.get_account(pubkey).is_some();
+        Ok(transactions_to_clone_program(
+            needs_upgrade,
+            program_id_modification,
+            program_data_modification,
+            program_buffer_modification,
+            None, // TODO(vbrunet) - fetch IDL too
+            self.bank.last_blockhash(),
+        ))
     }
 
     async fn build_transaction_for_regular_account_cloning(
@@ -289,5 +306,12 @@ where
             overrides,
             self.bank.last_blockhash(),
         )
+    }
+
+    async fn fetch_account(&self, pubkey: &Pubkey) -> AccountClonerOutput {
+        self.account_fetcher
+            .fetch_account_chain_snapshot(&pubkey)
+            .await
+            .map_err(AccountClonerError::AccountFetcherError)
     }
 }

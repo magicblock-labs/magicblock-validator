@@ -11,47 +11,45 @@ use solana_sdk::{
     signer::Signer,
 };
 
-use crate::{
-    errors::{MutatorError, MutatorResult},
-    utils::{fetch_account, get_pubkey_program_data},
-    Cluster,
-};
+use crate::errors::{MutatorModificationError, MutatorModificationResult};
 
 pub struct ProgramModifications {
-    pub program_modification: AccountModification,
+    pub program_id_modification: AccountModification,
     pub program_data_modification: AccountModification,
     pub program_buffer_modification: AccountModification,
 }
 
 pub fn create_program_modifications(
-    program_pubkey: &Pubkey,
-    program_account: &Account,
+    program_id_pubkey: &Pubkey,
+    program_id_account: &Account,
     program_data_pubkey: &Pubkey,
     program_data_account: &Account,
     slot: Slot,
-) -> MutatorResult<ProgramModifications> {
+) -> MutatorModificationResult<ProgramModifications> {
     // If we didn't find it then something is off and cloning the program
     // account won't make sense either
     if program_data_account.lamports == 0 {
-        return Err(MutatorError::CouldNotFindExecutableDataAccount(
-            *program_data_pubkey,
-            *program_pubkey,
-        ));
+        return Err(
+            MutatorModificationError::CouldNotFindExecutableDataAccount(
+                *program_data_pubkey,
+                *program_id_pubkey,
+            ),
+        );
     }
     // If we are not able to find the bytecode from the account, abort
     let program_data_bytecode_index =
         UpgradeableLoaderState::size_of_programdata_metadata();
     if program_data_account.data.len() < program_data_bytecode_index {
-        return Err(MutatorError::InvalidProgramDataContent(
+        return Err(MutatorModificationError::InvalidProgramDataContent(
             *program_data_pubkey,
-            *program_pubkey,
+            *program_id_pubkey,
         ));
     }
     let program_data_bytecode =
         &program_data_account.data[program_data_bytecode_index..];
     // We'll need to edit the main program account
-    let program_modification =
-        AccountModification::from((program_pubkey, program_account));
+    let program_id_modification =
+        AccountModification::from((program_id_pubkey, program_id_account));
     // Build the proper program_data that we will want to upgrade later
     let program_data_modification = create_program_data_modification(
         &program_data_pubkey,
@@ -63,7 +61,7 @@ pub fn create_program_modifications(
         create_program_buffer_modification(program_data_bytecode);
     // Done
     Ok(ProgramModifications {
-        program_modification,
+        program_id_modification,
         program_data_modification,
         program_buffer_modification,
     })

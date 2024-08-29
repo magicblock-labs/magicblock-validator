@@ -1,17 +1,27 @@
 use sleipnir_program::sleipnir_instruction::AccountModification;
 use solana_sdk::pubkey::Pubkey;
 
-use crate::{
-    utils::{fetch_account, get_pubkey_anchor_idl, get_pubkey_shank_idl},
-    Cluster,
-};
+use crate::{fetch::fetch_account, Cluster};
 
-async fn get_program_idl_modification(
+const ANCHOR_SEED: &str = "anchor:idl";
+const SHANK_SEED: &str = "shank:idl";
+
+pub fn get_pubkey_anchor_idl(program_id: &Pubkey) -> Option<Pubkey> {
+    let (base, _) = Pubkey::find_program_address(&[], program_id);
+    Pubkey::create_with_seed(&base, ANCHOR_SEED, program_id).ok()
+}
+
+pub fn get_pubkey_shank_idl(program_id: &Pubkey) -> Option<Pubkey> {
+    let (base, _) = Pubkey::find_program_address(&[], program_id);
+    Pubkey::create_with_seed(&base, SHANK_SEED, program_id).ok()
+}
+
+pub async fn find_program_idl_modification_from_cluster(
     cluster: &Cluster,
     program_pubkey: &Pubkey,
 ) -> Option<AccountModification> {
     // First check if we can find an anchor IDL
-    let anchor_idl_modification = try_create_account_modification_from_pubkey(
+    let anchor_idl_modification = try_program_idl_modification_from_cluster(
         cluster,
         get_pubkey_anchor_idl(program_pubkey),
     )
@@ -20,7 +30,7 @@ async fn get_program_idl_modification(
         return anchor_idl_modification;
     }
     // Otherwise try to find a shank IDL
-    let shank_idl_modification = try_create_account_modification_from_pubkey(
+    let shank_idl_modification = try_program_idl_modification_from_cluster(
         cluster,
         get_pubkey_shank_idl(program_pubkey),
     )
@@ -32,7 +42,7 @@ async fn get_program_idl_modification(
     None
 }
 
-async fn try_create_account_modification_from_pubkey(
+async fn try_program_idl_modification_from_cluster(
     cluster: &Cluster,
     pubkey: Option<Pubkey>,
 ) -> Option<AccountModification> {

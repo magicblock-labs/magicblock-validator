@@ -1,24 +1,33 @@
 use sleipnir_program::sleipnir_instruction::AccountModification;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
-    account::Account, clock::Slot, commitment_config::CommitmentConfig,
-    pubkey::Pubkey,
+    account::Account, bpf_loader_upgradeable::get_program_data_address,
+    clock::Slot, commitment_config::CommitmentConfig, hash::Hash,
+    pubkey::Pubkey, transaction::Transaction,
 };
 
-use crate::Cluster;
+use crate::{
+    errors::{MutatorError, MutatorResult},
+    idl::find_program_idl_modification_from_cluster,
+    program::{create_program_modifications, ProgramModifications},
+    transactions::{
+        transaction_to_clone_regular_account, transactions_to_clone_program,
+    },
+    Cluster,
+};
 
-// TODO(vbrunet)
-//  - Long term this should probably use the validator's AccountFetcher
-//  - Tracked here: https://github.com/magicblock-labs/magicblock-validator/issues/136
 pub async fn fetch_account(
     cluster: &Cluster,
     pubkey: &Pubkey,
-) -> Result<Account, solana_rpc_client_api::client_error::Error> {
+) -> MutatorResult<Account> {
     let rpc_client = RpcClient::new_with_commitment(
         cluster.url().to_string(),
         CommitmentConfig::confirmed(),
     );
-    rpc_client.get_account(pubkey).await
+    rpc_client
+        .get_account(pubkey)
+        .await
+        .map_err(MutatorError::RpcClientError)
 }
 
 /// Downloads an account from the provided cluster and returns a list of transaction that
@@ -28,23 +37,54 @@ pub async fn fetch_account(
 /// created.
 pub async fn transactions_to_clone_pubkey_from_cluster(
     cluster: &Cluster,
-    is_upgrade: bool,
-    account_pubkey: &Pubkey,
+    needs_upgrade: bool,
+    pubkey: &Pubkey,
     recent_blockhash: Hash,
     slot: Slot,
     overrides: Option<AccountModification>,
 ) -> MutatorResult<Vec<Transaction>> {
     // Download the account
-    let account_remote = fetch_account(cluster, account_pubkey).await?;
-    // Run the normal procedure
-    transactions_to_clone_account_from_cluster(
-        cluster,
-        is_upgrade,
-        account_pubkey,
-        &account_remote,
-        recent_blockhash,
+    let account = &fetch_account(cluster, pubkey).await?;
+    // If it's a regular account that's not executable (program), use happy path
+    if !account.executable {
+        return Ok(vec![transaction_to_clone_regular_account(
+            pubkey,
+            account,
+            overrides,
+            recent_blockhash,
+        )]);
+    }
+    // To clone a program we need to update multiple accounts at the same time
+    let program_id_pubkey = pubkey;
+    let program_id_account = account;
+    // The program data needs to be cloned, download the executable account
+    let program_data_pubkey = get_program_data_address(program_id_pubkey);
+    let program_data_account =
+        fetch_account(cluster, &program_data_pubkey).await?;
+    // Compute the modifications needed to update the program
+    let ProgramModifications {
+        program_id_modification,
+        program_data_modification,
+        program_buffer_modification,
+    } = create_program_modifications(
+        program_id_pubkey,
+        program_id_account,
+        &program_data_pubkey,
+        &program_data_account,
         slot,
-        overrides,
     )
-    .await
+    .map_err(MutatorError::MutatorModificationError)?;
+    // Try to fetch the IDL if possible
+    let program_idl_modification =
+        find_program_idl_modification_from_cluster(cluster, program_id_pubkey)
+            .await;
+    // Done, generate the transaction as normal
+    Ok(transactions_to_clone_program(
+        needs_upgrade,
+        program_id_modification,
+        program_data_modification,
+        program_buffer_modification,
+        program_idl_modification,
+        recent_blockhash,
+    ))
 }

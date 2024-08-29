@@ -16,14 +16,14 @@ use tokio::sync::{
 };
 
 use crate::{
-    AccountCloner, AccountClonerError, AccountClonerResult,
+    AccountCloner, AccountClonerError, AccountClonerOutput,
     RemoteAccountClonerWorker,
 };
 
 pub struct RemoteAccountClonerClient {
     clone_request_sender: UnboundedSender<Pubkey>,
     clone_result_listeners:
-        Arc<RwLock<HashMap<Pubkey, Vec<Sender<AccountClonerResult>>>>>,
+        Arc<RwLock<HashMap<Pubkey, Vec<Sender<AccountClonerOutput>>>>>,
 }
 
 impl RemoteAccountClonerClient {
@@ -40,7 +40,7 @@ impl RemoteAccountClonerClient {
 }
 
 impl AccountCloner for RemoteAccountClonerClient {
-    fn clone_account(&self, pubkey: &Pubkey) -> BoxFuture<AccountClonerResult> {
+    fn clone_account(&self, pubkey: &Pubkey) -> BoxFuture<AccountClonerOutput> {
         let (should_request_clone, receiver) = match self
             .clone_result_listeners
             .write()

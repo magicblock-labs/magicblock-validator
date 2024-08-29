@@ -1,6 +1,6 @@
 use assert_matches::assert_matches;
 use log::*;
-use sleipnir_mutator::transactions::transactions_to_clone_pubkey_from_cluster;
+use sleipnir_mutator::fetch::transactions_to_clone_pubkey_from_cluster;
 use sleipnir_program::validator_authority_id;
 use solana_sdk::{
     account::Account, clock::Slot, genesis_config::ClusterType, hash::Hash,

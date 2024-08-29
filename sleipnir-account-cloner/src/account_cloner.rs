@@ -22,13 +22,20 @@ pub enum AccountClonerError {
     #[error("AccountUpdatesError")]
     AccountUpdatesError(#[from] AccountUpdatesError),
 
+    #[error("MutatorModificationError")]
+    MutatorModificationError(#[from] MutatorModificationError),
+
     #[error("FailedToMutate '{0}'")]
     FailedToMutate(String),
+
+    #[error("ProgramDataDoesNotExist")]
+    ProgramDataDoesNotExist,
 }
 
-pub type AccountClonerResult =
-    Result<AccountChainSnapshotShared, AccountClonerError>;
+pub type AccountClonerResult<T> = Result<T, AccountClonerError>;
+
+pub type AccountClonerOutput = AccountClonerResult<AccountChainSnapshotShared>;
 
 pub trait AccountCloner {
-    fn clone_account(&self, pubkey: &Pubkey) -> BoxFuture<AccountClonerResult>;
+    fn clone_account(&self, pubkey: &Pubkey) -> BoxFuture<AccountClonerOutput>;
 }
