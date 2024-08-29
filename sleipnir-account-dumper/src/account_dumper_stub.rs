@@ -1,12 +1,6 @@
-use solana_sdk::{
-    account::Account,
-    clock::Slot,
-    hash::Hash,
-    lamports,
-    pubkey::Pubkey,
-    signature::Signature,
-    transaction::{Result, Transaction},
-};
+use std::sync::RwLock;
+
+use solana_sdk::{account::Account, pubkey::Pubkey, signature::Signature};
 
 use crate::{AccountDumper, AccountDumperResult};
 

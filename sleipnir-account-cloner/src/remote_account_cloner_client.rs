@@ -16,13 +16,12 @@ use tokio::sync::{mpsc::UnboundedSender, oneshot::channel};
 
 use crate::{
     AccountCloner, AccountClonerError, AccountClonerListeners,
-    AccountClonerResult, RemoteAccountClonerWorker,
+    AccountClonerOutput, AccountClonerResult, RemoteAccountClonerWorker,
 };
 
 pub struct RemoteAccountClonerClient {
     clone_request_sender: UnboundedSender<Pubkey>,
-    clone_output_listeners:
-        Arc<RwLock<HashMap<Pubkey, AccountClonerListeners>>>,
+    clone_listeners: Arc<RwLock<HashMap<Pubkey, AccountClonerListeners>>>,
 }
 
 impl RemoteAccountClonerClient {
@@ -36,7 +35,7 @@ impl RemoteAccountClonerClient {
     {
         Self {
             clone_request_sender: worker.get_clone_request_sender(),
-            clone_output_listeners: worker.get_clone_output_listeners(),
+            clone_listeners: worker.get_clone_listeners(),
         }
     }
 }
@@ -45,11 +44,11 @@ impl AccountCloner for RemoteAccountClonerClient {
     fn clone_account(
         &self,
         pubkey: &Pubkey,
-    ) -> BoxFuture<AccountClonerResult<AccountChainSnapshotShared>> {
+    ) -> BoxFuture<AccountClonerResult<AccountClonerOutput>> {
         let (should_request_clone, receiver) = match self
-            .clone_output_listeners
+            .clone_listeners
             .write()
-            .expect("RwLock of RemoteAccountClonerClient.clone_output_listeners is poisoned")
+            .expect("RwLock of RemoteAccountClonerClient.clone_listeners is poisoned")
             .entry(*pubkey)
         {
             Entry::Vacant(entry) => {

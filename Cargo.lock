@@ -4254,6 +4254,8 @@ dependencies = [
  "sleipnir-account-dumper",
  "sleipnir-account-fetcher",
  "sleipnir-account-updates",
+ "sleipnir-accounts-api",
+ "sleipnir-bank",
  "solana-sdk",
  "test-tools",
  "thiserror",
@@ -4323,6 +4325,30 @@ dependencies = [
  "sleipnir-account-cloner",
  "sleipnir-account-fetcher",
  "sleipnir-account-updates",
+ "sleipnir-accounts-api",
+ "sleipnir-bank",
+ "sleipnir-mutator",
+ "sleipnir-processor",
+ "sleipnir-program",
+ "sleipnir-transaction-status",
+ "solana-rpc-client",
+ "solana-rpc-client-api",
+ "solana-sdk",
+ "test-tools-core",
+ "thiserror",
+ "tokio",
+ "url 2.5.1",
+]
+
+[[package]]
+name = "sleipnir-accounts-api"
+version = "1.19.0"
+dependencies = [
+ "async-trait",
+ "conjunto-transwise",
+ "delegation-program",
+ "futures-util",
+ "log",
  "sleipnir-bank",
  "sleipnir-mutator",
  "sleipnir-processor",

@@ -12,6 +12,7 @@ members = [
   "sleipnir-account-fetcher",
   "sleipnir-account-updates",
   "sleipnir-accounts",
+  "sleipnir-accounts-api",
   "sleipnir-accounts-db",
   "sleipnir-api",
   "sleipnir-bank",
@@ -105,8 +106,9 @@ sleipnir-account-cloner = { path = "./sleipnir-account-cloner" }
 sleipnir-account-dumper = { path = "./sleipnir-account-dumper" }
 sleipnir-account-fetcher = { path = "./sleipnir-account-fetcher" }
 sleipnir-account-updates = { path = "./sleipnir-account-updates" }
-sleipnir-accounts-db = { path = "./sleipnir-accounts-db" }
 sleipnir-accounts = { path = "./sleipnir-accounts" }
+sleipnir-accounts-api = { path = "./sleipnir-accounts-api" }
+sleipnir-accounts-db = { path = "./sleipnir-accounts-db" }
 sleipnir-api = { path = "./sleipnir-api" }
 sleipnir-bank = { path = "./sleipnir-bank" }
 sleipnir-config = { path = "./sleipnir-config" }

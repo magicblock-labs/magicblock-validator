@@ -17,11 +17,6 @@ pub trait ScheduledCommitsProcessor {
     ) -> AccountsResult<()>;
 }
 
-pub trait InternalAccountProvider: Send + Sync {
-    fn has_account(&self, pubkey: &Pubkey) -> bool;
-    fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData>;
-}
-
 pub struct AccountCommittee {
     pub pubkey: Pubkey,
     pub account_data: AccountSharedData,

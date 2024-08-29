@@ -14,21 +14,19 @@ use sleipnir_account_dumper::AccountDumper;
 use sleipnir_account_fetcher::AccountFetcher;
 use sleipnir_account_updates::AccountUpdates;
 use solana_sdk::{
-    account::Account,
-    bpf_loader_upgradeable::get_program_data_address,
-    compute_budget,
-    pubkey::Pubkey,
-    signature::Signature,
-    system_program, sysvar,
-    transaction::{Result, Transaction},
+    account::Account, bpf_loader_upgradeable::get_program_data_address,
+    compute_budget, pubkey::Pubkey, signature::Signature, system_program,
+    sysvar,
 };
-use tokio::sync::{
-    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
-    oneshot::Sender,
+use tokio::sync::mpsc::{
+    unbounded_channel, UnboundedReceiver, UnboundedSender,
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::{AccountClonerError, AccountClonerListeners, AccountClonerResult};
+use crate::{
+    AccountClonerError, AccountClonerListeners, AccountClonerOutput,
+    AccountClonerResult,
+};
 
 pub struct RemoteAccountClonerWorker<AFE, AUP, ADU> {
     account_fetcher: AFE,
@@ -39,14 +37,14 @@ pub struct RemoteAccountClonerWorker<AFE, AUP, ADU> {
     allow_non_programs_undelegated: bool,
     clone_request_receiver: UnboundedReceiver<Pubkey>,
     clone_request_sender: UnboundedSender<Pubkey>,
-    clone_output_listeners:
-        Arc<RwLock<HashMap<Pubkey, AccountClonerListeners>>>,
-    clone_output_cache:
+    clone_listeners: Arc<RwLock<HashMap<Pubkey, AccountClonerListeners>>>,
+    last_cloned_account_chain_snapshot:
         Arc<RwLock<HashMap<Pubkey, AccountChainSnapshotShared>>>,
 }
 
-impl<AFE, AUP, ADU> RemoteAccountClonerWorker<AFE, AUP, ADU>
+impl<IAP, AFE, AUP, ADU> RemoteAccountClonerWorker<IAP, AFE, AUP, ADU>
 where
+    IAP: InternalAccountProvider,
     AFE: AccountFetcher,
     AUP: AccountUpdates,
     ADU: AccountDumper,
@@ -85,8 +83,8 @@ where
             allow_non_programs_undelegated,
             clone_request_receiver,
             clone_request_sender,
-            clone_output_listeners: Default::default(),
-            clone_output_cache: Default::default(),
+            clone_listeners: Default::default(),
+            last_cloned_account_chain_snapshot: Default::default(),
         }
     }
 
@@ -94,10 +92,10 @@ where
         self.clone_request_sender.clone()
     }
 
-    pub fn get_clone_output_listeners(
+    pub fn get_clone_listeners(
         &self,
     ) -> Arc<RwLock<HashMap<Pubkey, AccountClonerListeners>>> {
-        self.clone_output_listeners.clone()
+        self.clone_listeners.clone()
     }
 
     pub async fn start_clone_request_processing(
@@ -126,10 +124,10 @@ where
         let result = self.clone_if_needed(&pubkey).await;
         // Collecting the list of listeners awaiting for the clone to be done
         let listeners = match self
-            .clone_output_listeners
+            .clone_listeners
             .write()
             .expect(
-                "RwLock of RemoteAccountClonerWorker.clone_output_listeners is poisoned",
+                "RwLock of RemoteAccountClonerWorker.clone_listeners is poisoned",
             )
             .entry(pubkey)
         {
@@ -151,25 +149,29 @@ where
     async fn clone_if_needed(
         &self,
         pubkey: &Pubkey,
-    ) -> AccountClonerResult<AccountChainSnapshotShared> {
+    ) -> AccountClonerResult<AccountClonerOutput> {
         // If the account is blacklisted against cloning, no need to do anything
         if self.blacklisted_accounts.contains(pubkey) {
-            return self.skipped_clone_output(pubkey);
+            return Ok(AccountClonerOutput::Skipped);
         }
         // Check for the happy/fast path, we may already have cloned this account before
-        match self.get_last_clone_output(pubkey) {
+        match self.get_last_cloned_account_chain_snapshot(pubkey) {
             // If we cloned for the account before, check for the latest updates onchain
             Some(account_chain_snapshot) => {
                 match self.account_updates.get_last_known_update_slot(pubkey) {
-                    // If we cloned the account and it was never updated, use the cache
-                    None => Ok(account_chain_snapshot.clone()),
-                    // If we cloned the account before, check how recently
+                    // If we cloned the account and it was not updated on chain, use the cache
+                    None => Ok(AccountClonerOutput::Cloned(
+                        account_chain_snapshot.clone(),
+                    )),
+                    // If we cloned the account before, but it was updated on chain, check how recently
                     Some(last_known_update_slot) => {
                         match account_chain_snapshot.at_slot
                             >= last_known_update_slot
                         {
                             // If the cloned account is recent enough, use the cache
-                            true => Ok(account_chain_snapshot.clone()),
+                            true => Ok(AccountClonerOutput::Cloned(
+                                account_chain_snapshot,
+                            )),
                             // If the cloned account is too old, don't use the cache
                             false => self.do_clone(pubkey).await,
                         }
@@ -180,7 +182,7 @@ where
             None => {
                 // If somehow we already have this account in the bank, use it as is
                 if self.bank.has_account(pubkey) {
-                    self.skipped_clone_output(pubkey)
+                    Ok(AccountClonerOutput::Skipped)
                 }
                 // If we need to load it for the first time
                 else {
@@ -193,7 +195,7 @@ where
     async fn do_clone(
         &self,
         pubkey: &Pubkey,
-    ) -> AccountClonerResult<AccountChainSnapshotShared> {
+    ) -> AccountClonerResult<AccountClonerOutput> {
         // Mark the account for monitoring, we want to start to detect updates on it since we're cloning it now
         // TODO(vbrunet)
         //  - https://github.com/magicblock-labs/magicblock-validator/issues/95
@@ -207,7 +209,7 @@ where
         let account_chain_snapshot = self.fetch_account(pubkey).await?;
 
         // Generate cloning transactions if we need
-        let signatures = match &account_chain_snapshot.chain_state {
+        let _signatures = match &account_chain_snapshot.chain_state {
             // If the account is not present on-chain, we don't need to clone anything
             AccountChainState::NewAccount => vec![],
             // If the account is present on-chain, but not delegated
@@ -215,9 +217,9 @@ where
             // If it is not a program, we can just clone it without overrides
             AccountChainState::Undelegated { account } => {
                 if account.executable {
-                    self.do_clone_program(pubkey, account)
+                    self.do_clone_program(pubkey, account).await?
                 } else {
-                    self.do_clone_undelegated_account(pubkey, account)
+                    self.do_clone_undelegated_account(pubkey, account)?
                 }
             }
             // If the account delegated on-chain,
@@ -231,20 +233,20 @@ where
                 pubkey,
                 account,
                 &delegation_record.owner,
-            ),
+            )?,
             // If the account is delegated but inconsistant on-chain,
             // We can just clone it, it won't be usable as writable,
             // but nothing stopping it from being used as a readonly
             AccountChainState::Inconsistent { account, .. } => {
-                self.do_clone_undelegated_account(pubkey, account)
+                self.do_clone_undelegated_account(pubkey, account)?
             }
         };
 
         // If the cloning succeeded, save it into the cache for later use
         match self
-            .clone_output_cache
+            .last_cloned_account_chain_snapshot
             .write()
-            .expect("RwLock of RemoteAccountClonerWorker.clone_output_cache is poisoned")
+            .expect("RwLock of RemoteAccountClonerWorker.last_cloned_account_chain_snapshot is poisoned")
             .entry(*pubkey)
         {
             Entry::Occupied(mut entry) => {
@@ -256,7 +258,7 @@ where
         };
 
         // Return the result
-        Ok(account_chain_snapshot)
+        Ok(AccountClonerOutput::Cloned(account_chain_snapshot))
     }
 
     async fn do_clone_program(
@@ -313,8 +315,10 @@ where
         account: &Account,
         owner: &Pubkey,
     ) -> AccountClonerResult<Vec<Signature>> {
-        // If we already cloned the delegated account, make sure to not re-clone it
-        let last_clone_output = self.get_last_clone_output(pubkey);
+        // If the delegated account is already present in the bank,
+        // don't override it as it may contain precious state
+        let last_clone_output =
+            self.get_last_cloned_account_chain_snapshot(pubkey);
         if last_clone_output.is_some() {
             return Ok(vec![]);
         }
@@ -334,26 +338,14 @@ where
             .map_err(AccountClonerError::AccountFetcherError)
     }
 
-    fn get_last_clone_output(
+    fn get_last_cloned_account_chain_snapshot(
         &self,
         pubkey: &Pubkey,
     ) -> Option<AccountChainSnapshotShared> {
-        self.clone_output_cache
+        self.last_cloned_account_chain_snapshot
             .read()
-            .expect("RwLock of RemoteAccountClonerWorker.clone_output_cache is poisoned")
+            .expect("RwLock of RemoteAccountClonerWorker.last_cloned_account_chain_snapshot is poisoned")
             .get(pubkey)
             .cloned()
-    }
-
-    fn skipped_clone_output(
-        &self,
-        pubkey: &Pubkey,
-    ) -> AccountClonerResult<AccountChainSnapshotShared> {
-        Ok(AccountChainSnapshot {
-            pubkey: *pubkey,
-            at_slot: self.account_dumper.slot(),
-            chain_state: AccountChainState::NewAccount,
-        }
-        .into())
     }
 }

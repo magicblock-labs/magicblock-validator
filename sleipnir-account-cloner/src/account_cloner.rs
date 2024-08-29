@@ -31,11 +31,17 @@ pub enum AccountClonerError {
 pub type AccountClonerResult<T> = Result<T, AccountClonerError>;
 
 pub type AccountClonerListeners =
-    Vec<Sender<AccountClonerResult<AccountChainSnapshotShared>>>;
+    Vec<Sender<AccountClonerResult<AccountClonerOutput>>>;
+
+#[derive(Debug, Clone)]
+pub enum AccountClonerOutput {
+    Cloned(AccountChainSnapshotShared),
+    Skipped,
+}
 
 pub trait AccountCloner {
     fn clone_account(
         &self,
         pubkey: &Pubkey,
-    ) -> BoxFuture<AccountClonerResult<AccountChainSnapshotShared>>;
+    ) -> BoxFuture<AccountClonerResult<AccountClonerOutput>>;
 }
