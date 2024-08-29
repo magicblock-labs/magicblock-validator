@@ -22,7 +22,7 @@ use crate::{
 
 pub struct RemoteAccountClonerClient {
     clone_request_sender: UnboundedSender<Pubkey>,
-    clone_result_listeners:
+    clone_output_listeners:
         Arc<RwLock<HashMap<Pubkey, Vec<Sender<AccountClonerOutput>>>>>,
 }
 
@@ -34,7 +34,7 @@ impl RemoteAccountClonerClient {
     {
         Self {
             clone_request_sender: worker.get_clone_request_sender(),
-            clone_result_listeners: worker.get_clone_result_listeners(),
+            clone_output_listeners: worker.get_clone_output_listeners(),
         }
     }
 }
@@ -42,9 +42,9 @@ impl RemoteAccountClonerClient {
 impl AccountCloner for RemoteAccountClonerClient {
     fn clone_account(&self, pubkey: &Pubkey) -> BoxFuture<AccountClonerOutput> {
         let (should_request_clone, receiver) = match self
-            .clone_result_listeners
+            .clone_output_listeners
             .write()
-            .expect("RwLock of RemoteAccountClonerClient.clone_result_listeners is poisoned")
+            .expect("RwLock of RemoteAccountClonerClient.clone_output_listeners is poisoned")
             .entry(*pubkey)
         {
             Entry::Vacant(entry) => {

@@ -4,6 +4,7 @@ use async_trait::async_trait;
 use log::*;
 use sleipnir_bank::bank::Bank;
 use sleipnir_mutator::Cluster;
+use sleipnir_processor::execute_transaction::execute_legacy_transaction;
 use sleipnir_program::{
     register_scheduled_commit_sent, SentCommit, TransactionScheduler,
 };
@@ -11,9 +12,9 @@ use sleipnir_transaction_status::TransactionStatusSender;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 
 use crate::{
-    errors::AccountsResult, utils::execute_legacy_transaction,
-    AccountCommittee, AccountCommitter, InternalAccountProvider,
-    ScheduledCommitsProcessor, SendableCommitAccountsPayload,
+    errors::AccountsResult, AccountCommittee, AccountCommitter,
+    InternalAccountProvider, ScheduledCommitsProcessor,
+    SendableCommitAccountsPayload,
 };
 
 pub struct RemoteScheduledCommitsProcessor {

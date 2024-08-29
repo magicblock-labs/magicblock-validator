@@ -1,11 +1,8 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use sleipnir_program::sleipnir_instruction::AccountModification;
 use solana_sdk::{
-    account::{Account, AccountSharedData},
-    pubkey::Pubkey,
-    signature::Signature,
+    account::AccountSharedData, pubkey::Pubkey, signature::Signature,
     transaction::Transaction,
 };
 
@@ -23,16 +20,6 @@ pub trait ScheduledCommitsProcessor {
 pub trait InternalAccountProvider: Send + Sync {
     fn has_account(&self, pubkey: &Pubkey) -> bool;
     fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData>;
-}
-
-#[async_trait]
-pub trait AccountCloner {
-    async fn clone_account(
-        &self,
-        pubkey: &Pubkey,
-        account: Option<&Account>,
-        overrides: Option<AccountModification>,
-    ) -> AccountsResult<Vec<Signature>>;
 }
 
 pub struct AccountCommittee {

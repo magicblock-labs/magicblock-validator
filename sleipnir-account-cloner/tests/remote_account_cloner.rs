@@ -1,8 +1,8 @@
 use std::time::Duration;
 
 use conjunto_transwise::RpcProviderConfig;
-use sleipnir_account_fetcher::{
-    AccountFetcher, RemoteAccountFetcherClient, RemoteAccountFetcherWorker,
+use sleipnir_account_cloner::{
+    RemoteAccountClonerClient, RemoteAccountClonerWorker,
 };
 use solana_sdk::{
     signature::Keypair,
@@ -15,14 +15,14 @@ use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
 fn setup() -> (
-    RemoteAccountFetcherClient,
+    RemoteAccountClonerClient,
     CancellationToken,
     tokio::task::JoinHandle<()>,
 ) {
-    // Create account fetcher worker and client
+    // Create account cloner worker and client
     let mut worker =
-        RemoteAccountFetcherWorker::new(RpcProviderConfig::devnet());
-    let client = RemoteAccountFetcherClient::new(&worker);
+        RemoteAccountClonerWorker::new(RpcProviderConfig::devnet());
+    let client = RemoteAccountClonerClient::new(&worker);
     // Run the worker in a separate task
     let cancellation_token = CancellationToken::new();
     let worker_handle = {
@@ -40,7 +40,7 @@ fn setup() -> (
 #[tokio::test]
 async fn test_devnet_fetch_clock_multiple_times() {
     skip_if_devnet_down!();
-    // Create account fetcher worker and client
+    // Create account cloner worker and client
     let (client, cancellation_token, worker_handle) = setup();
     // Sysvar clock should change every slot
     let key_sysvar_clock = clock::ID;
@@ -74,7 +74,7 @@ async fn test_devnet_fetch_clock_multiple_times() {
 #[tokio::test]
 async fn test_devnet_fetch_multiple_accounts_same_time() {
     skip_if_devnet_down!();
-    // Create account fetcher worker and client
+    // Create account cloner worker and client
     let (client, cancellation_token, worker_handle) = setup();
     // A few accounts we'd want to try to fetch at the same time
     let key_system_program = system_program::ID;

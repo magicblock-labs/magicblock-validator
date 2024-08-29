@@ -2,6 +2,7 @@ use conjunto_transwise::AccountChainSnapshotShared;
 use futures_util::future::BoxFuture;
 use sleipnir_account_fetcher::AccountFetcherError;
 use sleipnir_account_updates::AccountUpdatesError;
+use sleipnir_mutator::errors::MutatorModificationError;
 use solana_sdk::pubkey::Pubkey;
 use thiserror::Error;
 

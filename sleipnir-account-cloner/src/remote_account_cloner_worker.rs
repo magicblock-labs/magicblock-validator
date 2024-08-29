@@ -1,17 +1,19 @@
 use std::{
-    collections::{hash_map::Entry, HashMap},
+    collections::{hash_map::Entry, HashMap, HashSet},
     sync::{Arc, RwLock},
     vec,
 };
 
-use conjunto_transwise::{AccountChainSnapshotShared, AccountChainState};
-use futures_util::future::{join_all, ready, BoxFuture};
+use conjunto_transwise::{
+    AccountChainSnapshot, AccountChainSnapshotShared, AccountChainState,
+    DelegationRecord,
+};
+use futures_util::future::join_all;
 use log::*;
-use sleipnir_account_fetcher::{AccountFetcher, AccountFetcherResult};
+use sleipnir_account_fetcher::AccountFetcher;
 use sleipnir_account_updates::AccountUpdates;
 use sleipnir_bank::bank::Bank;
 use sleipnir_mutator::{
-    errors::MutatorResult,
     program::{create_program_modifications, ProgramModifications},
     transactions::{
         transaction_to_clone_regular_account, transactions_to_clone_program,
@@ -23,12 +25,11 @@ use sleipnir_transaction_status::TransactionStatusSender;
 use solana_sdk::{
     account::Account,
     bpf_loader_upgradeable::get_program_data_address,
-    clock::Slot,
-    hash::Hash,
-    pubkey::{self, Pubkey},
+    compute_budget,
+    pubkey::Pubkey,
     signature::Signature,
-    system_program,
-    transaction::{Result, Transaction, TransactionError},
+    system_program, sysvar,
+    transaction::{Result, Transaction},
 };
 use tokio::sync::{
     mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
@@ -43,11 +44,14 @@ pub struct RemoteAccountClonerWorker<AFE, AUP> {
     account_updates: AUP,
     bank: Arc<Bank>,
     transaction_status_sender: Option<TransactionStatusSender>,
+    blacklisted_accounts: HashSet<Pubkey>,
+    payer_init_lamports: Option<u64>,
+    allow_non_programs_undelegated: bool,
     clone_request_receiver: UnboundedReceiver<Pubkey>,
     clone_request_sender: UnboundedSender<Pubkey>,
-    clone_result_listeners:
+    clone_output_listeners:
         Arc<RwLock<HashMap<Pubkey, Vec<Sender<AccountClonerOutput>>>>>,
-    last_cloned_snapshot:
+    clone_output_cache:
         Arc<RwLock<HashMap<Pubkey, AccountChainSnapshotShared>>>,
 }
 
@@ -61,18 +65,39 @@ where
         account_updates: AUP,
         bank: Arc<Bank>,
         transaction_status_sender: Option<TransactionStatusSender>,
+        validator_id: &Pubkey,
+        payer_init_lamports: Option<u64>,
+        allow_non_programs_undelegated: bool,
     ) -> Self {
         let (clone_request_sender, clone_request_receiver) =
             unbounded_channel();
+        let mut blacklisted_accounts = HashSet::new();
+        blacklisted_accounts.insert(sysvar::clock::ID);
+        blacklisted_accounts.insert(sysvar::epoch_rewards::ID);
+        blacklisted_accounts.insert(sysvar::epoch_schedule::ID);
+        blacklisted_accounts.insert(sysvar::fees::ID);
+        blacklisted_accounts.insert(sysvar::instructions::ID);
+        blacklisted_accounts.insert(sysvar::last_restart_slot::ID);
+        blacklisted_accounts.insert(sysvar::recent_blockhashes::ID);
+        blacklisted_accounts.insert(sysvar::rent::ID);
+        blacklisted_accounts.insert(sysvar::rewards::ID);
+        blacklisted_accounts.insert(sysvar::slot_hashes::ID);
+        blacklisted_accounts.insert(sysvar::slot_history::ID);
+        blacklisted_accounts.insert(sysvar::stake_history::ID);
+        blacklisted_accounts.insert(compute_budget::ID);
+        blacklisted_accounts.insert(*validator_id);
         Self {
             account_fetcher,
             account_updates,
             bank,
             transaction_status_sender,
+            blacklisted_accounts,
+            payer_init_lamports,
+            allow_non_programs_undelegated,
             clone_request_receiver,
             clone_request_sender,
-            clone_result_listeners: Default::default(),
-            last_cloned_snapshot: Default::default(),
+            clone_output_listeners: Default::default(),
+            clone_output_cache: Default::default(),
         }
     }
 
@@ -80,10 +105,10 @@ where
         self.clone_request_sender.clone()
     }
 
-    pub fn get_clone_result_listeners(
+    pub fn get_clone_output_listeners(
         &self,
     ) -> Arc<RwLock<HashMap<Pubkey, Vec<Sender<AccountClonerOutput>>>>> {
-        self.clone_result_listeners.clone()
+        self.clone_output_listeners.clone()
     }
 
     pub async fn start_clone_request_processing(
@@ -112,10 +137,10 @@ where
         let result = self.clone_if_needed(&pubkey).await;
         // Collecting the list of listeners awaiting for the clone to be done
         let listeners = match self
-            .clone_result_listeners
+            .clone_output_listeners
             .write()
             .expect(
-                "RwLock of RemoteAccountClonerWorker.clone_result_listeners is poisoned",
+                "RwLock of RemoteAccountClonerWorker.clone_output_listeners is poisoned",
             )
             .entry(pubkey)
         {
@@ -135,33 +160,50 @@ where
     }
 
     async fn clone_if_needed(&self, pubkey: &Pubkey) -> AccountClonerOutput {
+        // If the account is blacklisted against cloning, no need to do anything
+        if self.blacklisted_accounts.contains(pubkey) {
+            return self.skipped_clone_output(pubkey);
+        }
         // Check for the happy/fast path, we may already have cloned this account before
-        match self
-            .last_cloned_snapshot
-            .read()
-            .expect("RwLock of RemoteAccountClonerWorker.last_cloned_snapshot is poisoned")
-            .get(pubkey)
-        {
+        match self.get_last_clone_output(pubkey) {
             // If we cloned for the account before, check for the latest updates onchain
-            Some(account_chain_snapshot) => match
-                self.account_updates.get_last_known_update_slot(pubkey) {
+            Some(account_chain_snapshot) => {
+                match self.account_updates.get_last_known_update_slot(pubkey) {
                     // If we cloned the account and it was never updated, use the cache
                     None => return Ok(account_chain_snapshot.clone()),
                     // If we cloned the account before, check how recently
-                    Some(last_known_update_slot) => match account_chain_snapshot.at_slot >= last_known_update_slot {
-                        // If the cloned account is recent enough, use the cache
-                        true => Ok(account_chain_snapshot.clone()),
-                        // If the cloned account is too old, don't use the cache
-                        false => self.do_clone(pubkey).await,
-                    },
-                },
+                    Some(last_known_update_slot) => {
+                        match account_chain_snapshot.at_slot
+                            >= last_known_update_slot
+                        {
+                            // If the cloned account is recent enough, use the cache
+                            true => Ok(account_chain_snapshot.clone()),
+                            // If the cloned account is too old, don't use the cache
+                            false => self.do_clone(pubkey).await,
+                        }
+                    }
+                }
+            }
             // If we never cloned the account before, don't use the cache
-            None => self.do_clone(pubkey).await,
+            None => {
+                // If somehow we already have this account in the bank, use it as is
+                if self.bank.has_account(pubkey) {
+                    self.skipped_clone_output(pubkey)
+                }
+                // If we need to load it for the first time
+                else {
+                    self.do_clone(pubkey).await
+                }
+            }
         }
     }
 
     async fn do_clone(&self, pubkey: &Pubkey) -> AccountClonerOutput {
-        // Mark the account for monitoring, we want to detect updates on it since we're cloning it
+        // Mark the account for monitoring, we want to start to detect updates on it since we're cloning it now
+        // TODO(vbrunet)
+        //  - https://github.com/magicblock-labs/magicblock-validator/issues/95
+        //  - handle the case of the lamports updates better
+        //  - we may not want to track lamport changes, especially for payers
         self.account_updates
             .ensure_account_monitoring(pubkey)
             .map_err(AccountClonerError::AccountUpdatesError)?;
@@ -172,11 +214,11 @@ where
         // Generate cloning transactions if we need
         let txs = match &account_chain_snapshot.chain_state {
             // If the account is not present on-chain, we don't need to clone anything
-            AccountChainState::NewAccount => Ok(vec![
+            AccountChainState::NewAccount => vec![
                 // TODO(vbrunet)
                 // - we may need to make sure we wipe this account locally?
                 // - since we cant create account in ephemerals this might not be a problem?
-            ]),
+            ],
             // If the account is present on-chain, but not delegated
             // We need to clone it if its a program, we have a special procedure.
             // If it is not a program, we can just clone it without overrides
@@ -187,9 +229,9 @@ where
                     )
                     .await?
                 } else {
-                    vec![self.build_transaction_for_regular_account_cloning(
+                    self.build_transaction_for_regular_account_cloning(
                         pubkey, &account,
-                    )]
+                    )
                 }
             }
             // If the account delegated on-chain,
@@ -197,10 +239,12 @@ where
             // Otherwise we can just clone it like a regular account
             AccountChainState::Delegated {
                 account,
-                delegation_pda,
                 delegation_record,
-            } => self.build_transaction_for_regular_account_cloning(
-                pubkey, &account,
+                ..
+            } => self.build_transaction_for_delegated_account_cloning(
+                pubkey,
+                &account,
+                delegation_record,
             ),
             // If the account is delegated but inconsistant on-chain,
             // We can just clone it, it won't be usable as writable,
@@ -212,7 +256,7 @@ where
         };
 
         // Execute the cloning transactions in the bank
-        let signatures = txs
+        let _signatures = txs
             .into_iter()
             .map(|clone_tx| {
                 execute_legacy_transaction(
@@ -226,9 +270,9 @@ where
 
         // If the cloning succeeded, save it into the cache for later use
         match self
-            .last_cloned_snapshot
+            .clone_output_cache
             .write()
-            .expect("RwLock of RemoteAccountClonerWorker.last_cloned_snapshot is poisoned")
+            .expect("RwLock of RemoteAccountClonerWorker.clone_output_cache is poisoned")
             .entry(*pubkey)
         {
             Entry::Occupied(mut entry) => {
@@ -283,29 +327,64 @@ where
         ))
     }
 
-    async fn build_transaction_for_regular_account_cloning(
+    fn build_transaction_for_regular_account_cloning(
         &self,
         pubkey: &Pubkey,
         account: &Account,
-    ) -> Transaction {
+    ) -> Vec<Transaction> {
+        // We may want to disable cloning undelegated regular accounts
+        if !self.allow_non_programs_undelegated {
+            return vec![];
+        }
         // If this is an account that may be used as a payer, airdrop lamports to it.
         // This logic will be replaced once we implement value reconcilation
-        let overrides = if account.owner == system_program::ID {
-            Some(AccountModification {
-                pubkey: *pubkey,
-                lamports: Some(account.lamports + 1_000_000),
-                ..Default::default()
-            })
-        } else {
-            None
+        let overrides = match self.payer_init_lamports {
+            Some(payer_init_lamports) => {
+                if account.owner == system_program::ID {
+                    Some(AccountModification {
+                        pubkey: *pubkey,
+                        lamports: Some(account.lamports + payer_init_lamports),
+                        ..Default::default()
+                    })
+                } else {
+                    None
+                }
+            }
+            None => None,
         };
         // Simply mutate the account to match the on-chain state
-        transaction_to_clone_regular_account(
+        vec![transaction_to_clone_regular_account(
             pubkey,
             account,
             overrides,
             self.bank.last_blockhash(),
-        )
+        )]
+    }
+
+    fn build_transaction_for_delegated_account_cloning(
+        &self,
+        pubkey: &Pubkey,
+        account: &Account,
+        delegation_record: &DelegationRecord,
+    ) -> Vec<Transaction> {
+        let last_clone_output = self.get_last_clone_output(pubkey);
+        if last_clone_output.is_some() {
+            // If we already cloned the delegated account, make sure to not re-clone it
+            return vec![];
+        }
+
+        let overrides = Some(AccountModification {
+            pubkey: *pubkey,
+            owner: Some(delegation_record.owner),
+            ..Default::default()
+        });
+        // Simply mutate the account to match the on-chain state
+        vec![transaction_to_clone_regular_account(
+            pubkey,
+            account,
+            overrides,
+            self.bank.last_blockhash(),
+        )]
     }
 
     async fn fetch_account(&self, pubkey: &Pubkey) -> AccountClonerOutput {
@@ -313,5 +392,23 @@ where
             .fetch_account_chain_snapshot(&pubkey)
             .await
             .map_err(AccountClonerError::AccountFetcherError)
+    }
+
+    fn get_last_clone_output(
+        &self,
+        pubkey: &Pubkey,
+    ) -> Option<AccountChainSnapshotShared> {
+        self.clone_output_cache.read()
+        .expect("RwLock of RemoteAccountClonerWorker.clone_output_cache is poisoned")
+        .get(pubkey).cloned()
+    }
+
+    fn skipped_clone_output(&self, pubkey: &Pubkey) -> AccountClonerOutput {
+        Ok(AccountChainSnapshot {
+            pubkey: *pubkey,
+            at_slot: self.bank.slot(),
+            chain_state: AccountChainState::NewAccount,
+        }
+        .into())
     }
 }
