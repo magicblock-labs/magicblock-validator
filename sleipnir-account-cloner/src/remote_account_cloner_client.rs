@@ -3,34 +3,36 @@ use std::{
     sync::{Arc, RwLock},
 };
 
+use conjunto_transwise::AccountChainSnapshotShared;
 use futures_util::{
     future::{ready, BoxFuture},
     FutureExt,
 };
+use sleipnir_account_dumper::AccountDumper;
 use sleipnir_account_fetcher::AccountFetcher;
 use sleipnir_account_updates::AccountUpdates;
 use solana_sdk::pubkey::Pubkey;
-use tokio::sync::{
-    mpsc::UnboundedSender,
-    oneshot::{channel, Sender},
-};
+use tokio::sync::{mpsc::UnboundedSender, oneshot::channel};
 
 use crate::{
-    AccountCloner, AccountClonerError, AccountClonerOutput,
-    RemoteAccountClonerWorker,
+    AccountCloner, AccountClonerError, AccountClonerListeners,
+    AccountClonerResult, RemoteAccountClonerWorker,
 };
 
 pub struct RemoteAccountClonerClient {
     clone_request_sender: UnboundedSender<Pubkey>,
     clone_output_listeners:
-        Arc<RwLock<HashMap<Pubkey, Vec<Sender<AccountClonerOutput>>>>>,
+        Arc<RwLock<HashMap<Pubkey, AccountClonerListeners>>>,
 }
 
 impl RemoteAccountClonerClient {
-    pub fn new<AFE, AUP>(worker: &RemoteAccountClonerWorker<AFE, AUP>) -> Self
+    pub fn new<AFE, AUP, ADU>(
+        worker: &RemoteAccountClonerWorker<AFE, AUP, ADU>,
+    ) -> Self
     where
         AFE: AccountFetcher,
         AUP: AccountUpdates,
+        ADU: AccountDumper,
     {
         Self {
             clone_request_sender: worker.get_clone_request_sender(),
@@ -40,7 +42,10 @@ impl RemoteAccountClonerClient {
 }
 
 impl AccountCloner for RemoteAccountClonerClient {
-    fn clone_account(&self, pubkey: &Pubkey) -> BoxFuture<AccountClonerOutput> {
+    fn clone_account(
+        &self,
+        pubkey: &Pubkey,
+    ) -> BoxFuture<AccountClonerResult<AccountChainSnapshotShared>> {
         let (should_request_clone, receiver) = match self
             .clone_output_listeners
             .write()

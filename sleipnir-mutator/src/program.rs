@@ -52,7 +52,7 @@ pub fn create_program_modifications(
         AccountModification::from((program_id_pubkey, program_id_account));
     // Build the proper program_data that we will want to upgrade later
     let program_data_modification = create_program_data_modification(
-        &program_data_pubkey,
+        program_data_pubkey,
         program_data_bytecode,
         slot,
     );

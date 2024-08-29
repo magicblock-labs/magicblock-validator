@@ -1,33 +1,28 @@
 use conjunto_transwise::AccountChainSnapshotShared;
 use futures_util::future::BoxFuture;
+use sleipnir_account_dumper::AccountDumperError;
 use sleipnir_account_fetcher::AccountFetcherError;
 use sleipnir_account_updates::AccountUpdatesError;
-use sleipnir_mutator::errors::MutatorModificationError;
 use solana_sdk::pubkey::Pubkey;
 use thiserror::Error;
+use tokio::sync::oneshot::Sender;
 
 #[derive(Debug, Clone, Error)]
 pub enum AccountClonerError {
-    #[error("SendError")]
+    #[error(transparent)]
     SendError(#[from] tokio::sync::mpsc::error::SendError<Pubkey>),
 
-    #[error("RecvError")]
+    #[error(transparent)]
     RecvError(#[from] tokio::sync::oneshot::error::RecvError),
 
-    #[error("TransactionError")]
-    TransactionError(#[from] solana_sdk::transaction::TransactionError),
-
-    #[error("AccountFetcherError")]
+    #[error(transparent)]
     AccountFetcherError(#[from] AccountFetcherError),
 
-    #[error("AccountUpdatesError")]
+    #[error(transparent)]
     AccountUpdatesError(#[from] AccountUpdatesError),
 
-    #[error("MutatorModificationError")]
-    MutatorModificationError(#[from] MutatorModificationError),
-
-    #[error("FailedToMutate '{0}'")]
-    FailedToMutate(String),
+    #[error(transparent)]
+    AccountDumperError(#[from] AccountDumperError),
 
     #[error("ProgramDataDoesNotExist")]
     ProgramDataDoesNotExist,
@@ -35,8 +30,12 @@ pub enum AccountClonerError {
 
 pub type AccountClonerResult<T> = Result<T, AccountClonerError>;
 
-pub type AccountClonerOutput = AccountClonerResult<AccountChainSnapshotShared>;
+pub type AccountClonerListeners =
+    Vec<Sender<AccountClonerResult<AccountChainSnapshotShared>>>;
 
 pub trait AccountCloner {
-    fn clone_account(&self, pubkey: &Pubkey) -> BoxFuture<AccountClonerOutput>;
+    fn clone_account(
+        &self,
+        pubkey: &Pubkey,
+    ) -> BoxFuture<AccountClonerResult<AccountChainSnapshotShared>>;
 }

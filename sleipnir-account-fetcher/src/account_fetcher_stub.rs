@@ -2,11 +2,13 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use conjunto_transwise::{
-    AccountChainSnapshot, AccountChainState, CommitFrequency, DelegationRecord,
+    AccountChainSnapshot, AccountChainSnapshotShared, AccountChainState,
+    CommitFrequency, DelegationRecord,
 };
 use futures_util::future::{ready, BoxFuture};
-use sleipnir_account_fetcher::{AccountFetcher, AccountFetcherResult};
 use solana_sdk::{account::Account, clock::Slot, pubkey::Pubkey};
+
+use crate::{AccountFetcher, AccountFetcherResult};
 
 #[derive(Debug, Default)]
 pub struct AccountFetcherStub {
@@ -14,7 +16,6 @@ pub struct AccountFetcherStub {
     known_accounts: HashMap<Pubkey, (Pubkey, Slot, Option<DelegationRecord>)>,
 }
 
-#[allow(unused)] // used in tests
 impl AccountFetcherStub {
     pub fn add_undelegated(&mut self, pubkey: Pubkey, at_slot: Slot) {
         self.known_accounts
@@ -41,11 +42,11 @@ impl AccountFetcherStub {
 }
 
 impl AccountFetcherStub {
-    fn get_or_fetch_account_chain_snapshot(
+    fn generate_account_chain_snapshot(
         &self,
         pubkey: &Pubkey,
-    ) -> AccountFetcherResult {
-        Ok(match self.known_accounts.get(pubkey) {
+    ) -> AccountChainSnapshot {
+        match self.known_accounts.get(pubkey) {
             Some((owner, at_slot, delegation_record)) => AccountChainSnapshot {
                 pubkey: *pubkey,
                 at_slot: *at_slot,
@@ -72,7 +73,7 @@ impl AccountFetcherStub {
                 chain_state: AccountChainState::NewAccount,
             },
         }
-        .into())
+        .into()
     }
 }
 
@@ -81,7 +82,9 @@ impl AccountFetcher for AccountFetcherStub {
     fn fetch_account_chain_snapshot(
         &self,
         pubkey: &Pubkey,
-    ) -> BoxFuture<AccountFetcherResult> {
-        Box::pin(ready(self.get_or_fetch_account_chain_snapshot(pubkey)))
+    ) -> BoxFuture<AccountFetcherResult<AccountChainSnapshotShared>> {
+        Box::pin(ready(Ok(self
+            .generate_account_chain_snapshot(pubkey)
+            .into())))
     }
 }

@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::RwLock};
 
 use async_trait::async_trait;
-use sleipnir_accounts::{errors::AccountsResult, AccountCloner};
+use sleipnir_accounts::errors::AccountsResult;
 use sleipnir_program::sleipnir_instruction::AccountModification;
 use solana_sdk::{account::Account, pubkey::Pubkey, signature::Signature};
 
@@ -71,13 +71,8 @@ impl AccountCloner for AccountClonerStub {
     async fn clone_account(
         &self,
         pubkey: &Pubkey,
-        _account: Option<&Account>,
-        overrides: Option<AccountModification>,
     ) -> AccountsResult<Vec<Signature>> {
-        self.cloned_accounts
-            .write()
-            .unwrap()
-            .insert(*pubkey, overrides);
+        self.cloned_accounts.write().unwrap().insert(*pubkey);
         Ok(vec![Signature::new_unique()])
     }
 }

@@ -6,6 +6,8 @@ use conjunto_transwise::{
     transaction_accounts_holder::TransactionAccountsHolder,
     transaction_accounts_validator::TransactionAccountsValidatorImpl,
 };
+use sleipnir_account_fetcher::AccountFetcherStub;
+use sleipnir_account_updates::AccountUpdatesStub;
 use sleipnir_accounts::{
     errors::AccountsError, ExternalAccountsManager, LifecycleMode,
 };
@@ -13,8 +15,6 @@ use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
 use stubs::{
     account_cloner_stub::AccountClonerStub,
     account_committer_stub::AccountCommitterStub,
-    account_fetcher_stub::AccountFetcherStub,
-    account_updates_stub::AccountUpdatesStub,
     internal_account_provider_stub::InternalAccountProviderStub,
     scheduled_commits_processor_stub::ScheduledCommitsProcessorStub,
 };

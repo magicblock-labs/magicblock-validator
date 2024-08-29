@@ -1,7 +1,8 @@
 use std::collections::HashMap;
 
-use sleipnir_account_updates::{AccountUpdates, AccountUpdatesResult};
 use solana_sdk::{clock::Slot, pubkey::Pubkey};
+
+use crate::{AccountUpdates, AccountUpdatesResult};
 
 #[derive(Debug, Default, Clone)]
 pub struct AccountUpdatesStub {
@@ -20,7 +21,6 @@ impl AccountUpdates for AccountUpdatesStub {
         &self,
         _pubkey: &Pubkey,
     ) -> AccountUpdatesResult<()> {
-        // Noop for stub
         Ok(())
     }
     fn get_last_known_update_slot(&self, pubkey: &Pubkey) -> Option<Slot> {

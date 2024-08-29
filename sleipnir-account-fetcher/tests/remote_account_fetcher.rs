@@ -44,11 +44,11 @@ async fn test_devnet_fetch_clock_multiple_times() {
     let (client, cancellation_token, worker_handle) = setup();
     // Sysvar clock should change every slot
     let key_sysvar_clock = clock::ID;
-    // Request to fetch the clock now
+    // Start to fetch the clock now
     let future_clock1 = client.fetch_account_chain_snapshot(&key_sysvar_clock);
-    // Request to fetch the clock immediately again, we should not have any reply yet from the first one
+    // Start to fetch the clock immediately again, we should not have any reply yet from the first one
     let future_clock2 = client.fetch_account_chain_snapshot(&key_sysvar_clock);
-    // Wait for the RPC to reply
+    // Wait for a few slots to happen on-chain
     sleep(Duration::from_millis(3000)).await;
     // Start to fetch the clock again, it should have changed on chain (and the first fetch should have finished)
     let future_clock3 = client.fetch_account_chain_snapshot(&key_sysvar_clock);
@@ -60,7 +60,7 @@ async fn test_devnet_fetch_clock_multiple_times() {
     assert!(result_clock1.is_ok());
     assert!(result_clock2.is_ok());
     assert!(result_clock3.is_ok());
-    // The first 2 requests should get the same result, but the 3rd one should get a different clock
+    // The first 2 fetch should get the same result, but the 3rd one should get a different clock
     let snapshot_clock1 = result_clock1.unwrap();
     let snapshot_clock2 = result_clock2.unwrap();
     let snapshot_clock3 = result_clock3.unwrap();
@@ -126,6 +126,4 @@ async fn test_devnet_fetch_multiple_accounts_same_time() {
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());
-
-    // TODO(vbrunet) - test the fetch cache
 }

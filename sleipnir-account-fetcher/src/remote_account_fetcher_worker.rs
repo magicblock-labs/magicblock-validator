@@ -11,13 +11,12 @@ use conjunto_transwise::{
 use futures_util::future::join_all;
 use log::*;
 use solana_sdk::pubkey::Pubkey;
-use tokio::sync::{
-    mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
-    oneshot::Sender,
+use tokio::sync::mpsc::{
+    unbounded_channel, UnboundedReceiver, UnboundedSender,
 };
 use tokio_util::sync::CancellationToken;
 
-use crate::{AccountFetcherError, AccountFetcherResult};
+use crate::{AccountFetcherError, AccountFetcherListeners};
 
 pub struct RemoteAccountFetcherWorker {
     account_chain_snapshot_provider: AccountChainSnapshotProvider<
@@ -26,8 +25,7 @@ pub struct RemoteAccountFetcherWorker {
     >,
     fetch_request_receiver: UnboundedReceiver<Pubkey>,
     fetch_request_sender: UnboundedSender<Pubkey>,
-    fetch_result_listeners:
-        Arc<RwLock<HashMap<Pubkey, Vec<Sender<AccountFetcherResult>>>>>,
+    fetch_listeners: Arc<RwLock<HashMap<Pubkey, AccountFetcherListeners>>>,
 }
 
 impl RemoteAccountFetcherWorker {
@@ -42,7 +40,7 @@ impl RemoteAccountFetcherWorker {
             account_chain_snapshot_provider,
             fetch_request_receiver,
             fetch_request_sender,
-            fetch_result_listeners: Default::default(),
+            fetch_listeners: Default::default(),
         }
     }
 
@@ -50,10 +48,10 @@ impl RemoteAccountFetcherWorker {
         self.fetch_request_sender.clone()
     }
 
-    pub fn get_fetch_result_listeners(
+    pub fn get_fetch_listeners(
         &self,
-    ) -> Arc<RwLock<HashMap<Pubkey, Vec<Sender<AccountFetcherResult>>>>> {
-        self.fetch_result_listeners.clone()
+    ) -> Arc<RwLock<HashMap<Pubkey, AccountFetcherListeners>>> {
+        self.fetch_listeners.clone()
     }
 
     pub async fn start_fetch_request_processing(
@@ -95,10 +93,10 @@ impl RemoteAccountFetcherWorker {
         };
         // Collect the listeners waiting for the result
         let listeners = match self
-            .fetch_result_listeners
+            .fetch_listeners
             .write()
             .expect(
-                "RwLock of RemoteAccountFetcherWorker.fetch_result_listeners is poisoned",
+                "RwLock of RemoteAccountFetcherWorker.fetch_listeners is poisoned",
             )
             .entry(pubkey)
         {

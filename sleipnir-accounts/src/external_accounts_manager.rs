@@ -52,7 +52,7 @@ impl ExternalCommitableAccount {
     }
 
     pub fn needs_commit(&self, now: &Duration) -> bool {
-        *now - self.last_commit_at >= self.commit_frequency
+        self.last_commit_at + self.commit_frequency > *now
     }
 
     pub fn last_committed_at(&self) -> Duration {
@@ -159,9 +159,13 @@ where
                     delegation_record,
                     ..
                 } =>
-                    match self.external_commitable_accounts.write()            .expect(
+                    match self.external_commitable_accounts
+                        .write()
+                        .expect(
                         "RwLock of ExternalAccountsManager.external_commitable_accounts is poisoned",
-                    ).entry(writable_snapshot.pubkey) {
+                        )
+                        .entry(writable_snapshot.pubkey)
+                    {
                         Entry::Occupied(mut _entry) => {},
                         Entry::Vacant(entry) => {
                             entry.insert(ExternalCommitableAccount::new(&writable_snapshot.pubkey, &delegation_record.commit_frequency, &now));
@@ -260,13 +264,17 @@ where
 
         // Mark committed accounts
         for pubkey in pubkeys {
-            if let Some(acc) = self.external_commitable_accounts            .write()
-            .expect(
+            if let Some(acc) = self
+                .external_commitable_accounts
+                .write()
+                .expect(
                 "RwLock of ExternalAccountsManager.external_commitable_accounts is poisoned",
-            )
-.get_mut(&pubkey) {
+                )
+                .get_mut(&pubkey)
+            {
                 acc.mark_as_committed(&now);
-            } else {
+            }
+            else {
                 // This should never happen
                 error!(
                     "Account '{}' disappeared while being committed",
@@ -279,11 +287,11 @@ where
     }
 
     pub fn last_commit(&self, pubkey: &Pubkey) -> Option<Duration> {
-        self.external_commitable_accounts            .read()
-        .expect(
+        self.external_commitable_accounts
+            .read()
+            .expect(
             "RwLock of ExternalAccountsManager.external_commitable_accounts is poisoned",
-        )
-
+            )
             .get(pubkey)
             .map(|x| x.last_committed_at())
     }

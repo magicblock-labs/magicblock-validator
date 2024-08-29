@@ -2,6 +2,7 @@ use conjunto_transwise::AccountChainSnapshotShared;
 use futures_util::future::BoxFuture;
 use solana_sdk::pubkey::Pubkey;
 use thiserror::Error;
+use tokio::sync::oneshot::Sender;
 
 #[derive(Debug, Clone, Error)]
 pub enum AccountFetcherError {
@@ -15,12 +16,14 @@ pub enum AccountFetcherError {
     FailedToFetch(String),
 }
 
-pub type AccountFetcherResult =
-    Result<AccountChainSnapshotShared, AccountFetcherError>;
+pub type AccountFetcherResult<T> = Result<T, AccountFetcherError>;
+
+pub type AccountFetcherListeners =
+    Vec<Sender<AccountFetcherResult<AccountChainSnapshotShared>>>;
 
 pub trait AccountFetcher {
     fn fetch_account_chain_snapshot(
         &self,
         pubkey: &Pubkey,
-    ) -> BoxFuture<AccountFetcherResult>;
+    ) -> BoxFuture<AccountFetcherResult<AccountChainSnapshotShared>>;
 }
