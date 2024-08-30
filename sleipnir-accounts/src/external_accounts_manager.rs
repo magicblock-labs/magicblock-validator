@@ -9,18 +9,19 @@ use conjunto_transwise::{
     transaction_accounts_holder::TransactionAccountsHolder,
     transaction_accounts_snapshot::TransactionAccountsSnapshot,
     transaction_accounts_validator::TransactionAccountsValidator,
-    AccountChainState, CommitFrequency,
+    AccountChainSnapshotShared, AccountChainState, CommitFrequency,
 };
 use futures_util::future::{try_join, try_join_all};
 use log::*;
-use sleipnir_account_cloner::AccountCloner;
+use sleipnir_account_cloner::{AccountCloner, AccountClonerOutput};
+use sleipnir_accounts_api::InternalAccountProvider;
 use solana_sdk::{
     pubkey::Pubkey, signature::Signature, transaction::SanitizedTransaction,
 };
 
 use crate::{
     errors::{AccountsError, AccountsResult},
-    traits::{AccountCommitter, InternalAccountProvider},
+    traits::AccountCommitter,
     utils::get_epoch,
     AccountCommittee, CommitAccountsPayload, LifecycleMode,
     ScheduledCommitsProcessor, SendableCommitAccountsPayload,
@@ -126,7 +127,7 @@ where
         _signature: String,
     ) -> AccountsResult<Vec<Signature>> {
         // Clone all the accounts involved in the transaction in parallel
-        let (readonly_snapshots, writable_snapshots) =
+        let (readonly_clone_outputs, writable_clone_outputs) =
             try_join(
                 try_join_all(
                     accounts_holder.readonly.iter().map(|pubkey| {
@@ -141,6 +142,25 @@ where
             )
             .await
             .map_err(AccountsError::AccountClonerError)?;
+
+        // Filter clone results to only what succeeded
+        let readonly_snapshots: Vec<AccountChainSnapshotShared> =
+            readonly_clone_outputs
+                .into_iter()
+                .filter_map(|output| match output {
+                    AccountClonerOutput::Cloned(snapshot) => Some(snapshot),
+                    AccountClonerOutput::Skipped => None,
+                })
+                .collect();
+        let writable_snapshots: Vec<AccountChainSnapshotShared> =
+            writable_clone_outputs
+                .into_iter()
+                .filter_map(|output| match output {
+                    AccountClonerOutput::Cloned(snapshot) => Some(snapshot),
+                    AccountClonerOutput::Skipped => None,
+                })
+                .collect();
+
         // Validate the accounts involved in the transaction
         let tx_snapshot = TransactionAccountsSnapshot {
             readonly: readonly_snapshots,

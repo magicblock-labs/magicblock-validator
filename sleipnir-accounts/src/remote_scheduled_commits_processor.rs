@@ -2,6 +2,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use async_trait::async_trait;
 use log::*;
+use sleipnir_accounts_api::InternalAccountProvider;
 use sleipnir_bank::bank::Bank;
 use sleipnir_mutator::Cluster;
 use sleipnir_processor::execute_transaction::execute_legacy_transaction;
@@ -13,8 +14,7 @@ use solana_sdk::{pubkey::Pubkey, signature::Signature};
 
 use crate::{
     errors::AccountsResult, AccountCommittee, AccountCommitter,
-    InternalAccountProvider, ScheduledCommitsProcessor,
-    SendableCommitAccountsPayload,
+    ScheduledCommitsProcessor, SendableCommitAccountsPayload,
 };
 
 pub struct RemoteScheduledCommitsProcessor {

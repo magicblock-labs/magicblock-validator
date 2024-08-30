@@ -4,19 +4,16 @@ use std::{
     vec,
 };
 
-use conjunto_transwise::{
-    AccountChainSnapshot, AccountChainSnapshotShared, AccountChainState,
-    DelegationRecord,
-};
+use conjunto_transwise::{AccountChainSnapshotShared, AccountChainState};
 use futures_util::future::join_all;
 use log::*;
 use sleipnir_account_dumper::AccountDumper;
 use sleipnir_account_fetcher::AccountFetcher;
 use sleipnir_account_updates::AccountUpdates;
+use sleipnir_accounts_api::InternalAccountProvider;
 use solana_sdk::{
     account::Account, bpf_loader_upgradeable::get_program_data_address,
-    compute_budget, pubkey::Pubkey, signature::Signature, system_program,
-    sysvar,
+    pubkey::Pubkey, signature::Signature, system_program,
 };
 use tokio::sync::mpsc::{
     unbounded_channel, UnboundedReceiver, UnboundedSender,
@@ -28,7 +25,8 @@ use crate::{
     AccountClonerResult,
 };
 
-pub struct RemoteAccountClonerWorker<AFE, AUP, ADU> {
+pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU> {
+    internal_account_provider: IAP,
     account_fetcher: AFE,
     account_updates: AUP,
     account_dumper: ADU,
@@ -50,31 +48,18 @@ where
     ADU: AccountDumper,
 {
     pub fn new(
+        internal_account_provider: IAP,
         account_fetcher: AFE,
         account_updates: AUP,
         account_dumper: ADU,
-        validator_id: &Pubkey,
+        blacklisted_accounts: HashSet<Pubkey>,
         payer_init_lamports: Option<u64>,
         allow_non_programs_undelegated: bool,
     ) -> Self {
         let (clone_request_sender, clone_request_receiver) =
             unbounded_channel();
-        let mut blacklisted_accounts = HashSet::new();
-        blacklisted_accounts.insert(sysvar::clock::ID);
-        blacklisted_accounts.insert(sysvar::epoch_rewards::ID);
-        blacklisted_accounts.insert(sysvar::epoch_schedule::ID);
-        blacklisted_accounts.insert(sysvar::fees::ID);
-        blacklisted_accounts.insert(sysvar::instructions::ID);
-        blacklisted_accounts.insert(sysvar::last_restart_slot::ID);
-        blacklisted_accounts.insert(sysvar::recent_blockhashes::ID);
-        blacklisted_accounts.insert(sysvar::rent::ID);
-        blacklisted_accounts.insert(sysvar::rewards::ID);
-        blacklisted_accounts.insert(sysvar::slot_hashes::ID);
-        blacklisted_accounts.insert(sysvar::slot_history::ID);
-        blacklisted_accounts.insert(sysvar::stake_history::ID);
-        blacklisted_accounts.insert(compute_budget::ID);
-        blacklisted_accounts.insert(*validator_id);
         Self {
+            internal_account_provider,
             account_fetcher,
             account_updates,
             account_dumper,
@@ -181,7 +166,7 @@ where
             // If we never cloned the account before, don't use the cache
             None => {
                 // If somehow we already have this account in the bank, use it as is
-                if self.bank.has_account(pubkey) {
+                if self.internal_account_provider.has_account(pubkey) {
                     Ok(AccountClonerOutput::Skipped)
                 }
                 // If we need to load it for the first time
@@ -317,9 +302,7 @@ where
     ) -> AccountClonerResult<Vec<Signature>> {
         // If the delegated account is already present in the bank,
         // don't override it as it may contain precious state
-        let last_clone_output =
-            self.get_last_cloned_account_chain_snapshot(pubkey);
-        if last_clone_output.is_some() {
+        if self.internal_account_provider.has_account(pubkey) {
             return Ok(vec![]);
         }
         self.account_dumper

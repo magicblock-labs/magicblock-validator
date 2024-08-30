@@ -5,6 +5,7 @@ use conjunto_transwise::{
     transaction_accounts_validator::TransactionAccountsValidatorImpl,
     CommitFrequency,
 };
+use sleipnir_account_cloner::RemoteAccountClonerWorker;
 use sleipnir_accounts::{ExternalAccountsManager, LifecycleMode};
 use solana_sdk::{
     account::{Account, AccountSharedData},
@@ -26,9 +27,9 @@ mod stubs;
 fn setup(
     internal_account_provider: InternalAccountProviderStub,
     account_fetcher: AccountFetcherStub,
-    account_cloner: AccountClonerStub,
-    account_committer: AccountCommitterStub,
     account_updates: AccountUpdatesStub,
+    account_dumper: AccountDumperStub,
+    account_committer: AccountCommitterStub,
     validator_auth_id: Pubkey,
 ) -> ExternalAccountsManager<
     InternalAccountProviderStub,
@@ -40,6 +41,7 @@ fn setup(
     TransactionAccountsValidatorImpl,
     ScheduledCommitsProcessorStub,
 > {
+    let account_cloner = RemoteAccountClonerWorker::new(internal_account_provider, account_fetcher, account_updates, account_dumper, validator_id, payer_init_lamports, allow_non_programs_undelegated)
     ExternalAccountsManager {
         internal_account_provider,
         account_fetcher,
@@ -50,8 +52,7 @@ fn setup(
         transaction_accounts_validator: TransactionAccountsValidatorImpl,
         scheduled_commits_processor: ScheduledCommitsProcessorStub::default(),
         lifecycle: LifecycleMode::Ephemeral,
-        payer_init_lamports: Some(1_000 * LAMPORTS_PER_SOL),
-        validator_id: validator_auth_id,
+        external_commitable_accounts: Default::default(),
     }
 }
 
@@ -86,9 +87,9 @@ async fn test_commit_two_delegated_accounts_one_needs_commit() {
     let manager = setup(
         internal_account_provider,
         AccountFetcherStub::default(),
+        AccountUpdatesStub::default(),
         AccountClonerStub::default(),
         account_committer.clone(),
-        AccountUpdatesStub::default(),
         validator_auth_id,
     );
 

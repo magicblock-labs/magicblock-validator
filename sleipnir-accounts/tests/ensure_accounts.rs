@@ -26,9 +26,9 @@ mod stubs;
 fn setup_with_lifecycle(
     internal_account_provider: InternalAccountProviderStub,
     account_fetcher: AccountFetcherStub,
-    account_cloner: AccountClonerStub,
-    account_committer: AccountCommitterStub,
     account_updates: AccountUpdatesStub,
+    account_dumper: AccountDumperStub,
+    account_committer: AccountCommitterStub,
     lifecycle: LifecycleMode,
 ) -> ExternalAccountsManager<
     InternalAccountProviderStub,
@@ -43,7 +43,6 @@ fn setup_with_lifecycle(
     let validator_auth_id = Pubkey::new_unique();
     ExternalAccountsManager {
         internal_account_provider,
-        account_fetcher,
         account_cloner,
         account_committer: Arc::new(account_committer),
         account_updates,

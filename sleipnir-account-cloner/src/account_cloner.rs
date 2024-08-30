@@ -1,9 +1,11 @@
+use std::collections::HashSet;
+
 use conjunto_transwise::AccountChainSnapshotShared;
 use futures_util::future::BoxFuture;
 use sleipnir_account_dumper::AccountDumperError;
 use sleipnir_account_fetcher::AccountFetcherError;
 use sleipnir_account_updates::AccountUpdatesError;
-use solana_sdk::pubkey::Pubkey;
+use solana_sdk::{compute_budget, pubkey::Pubkey, sysvar};
 use thiserror::Error;
 use tokio::sync::oneshot::Sender;
 
@@ -44,4 +46,23 @@ pub trait AccountCloner {
         &self,
         pubkey: &Pubkey,
     ) -> BoxFuture<AccountClonerResult<AccountClonerOutput>>;
+}
+
+pub fn standard_blacklisted_accounts(validator_id: &Pubkey) -> HashSet<Pubkey> {
+    let mut blacklisted_accounts = HashSet::new();
+    blacklisted_accounts.insert(sysvar::clock::ID);
+    blacklisted_accounts.insert(sysvar::epoch_rewards::ID);
+    blacklisted_accounts.insert(sysvar::epoch_schedule::ID);
+    blacklisted_accounts.insert(sysvar::fees::ID);
+    blacklisted_accounts.insert(sysvar::instructions::ID);
+    blacklisted_accounts.insert(sysvar::last_restart_slot::ID);
+    blacklisted_accounts.insert(sysvar::recent_blockhashes::ID);
+    blacklisted_accounts.insert(sysvar::rent::ID);
+    blacklisted_accounts.insert(sysvar::rewards::ID);
+    blacklisted_accounts.insert(sysvar::slot_hashes::ID);
+    blacklisted_accounts.insert(sysvar::slot_history::ID);
+    blacklisted_accounts.insert(sysvar::stake_history::ID);
+    blacklisted_accounts.insert(compute_budget::ID);
+    blacklisted_accounts.insert(*validator_id);
+    blacklisted_accounts
 }

@@ -15,6 +15,7 @@ futures-util = { workspace = true }
 log = { workspace = true }
 sleipnir-account-fetcher = { workspace = true }
 sleipnir-account-updates = { workspace = true }
+sleipnir-account-dumper = { workspace = true }
 sleipnir-account-cloner = { workspace = true }
 sleipnir-accounts-api = { workspace = true }
 sleipnir-bank = { workspace = true }

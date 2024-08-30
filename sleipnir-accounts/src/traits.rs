@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
+use sleipnir_accounts_api::InternalAccountProvider;
 use solana_sdk::{
     account::AccountSharedData, pubkey::Pubkey, signature::Signature,
     transaction::Transaction,

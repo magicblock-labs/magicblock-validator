@@ -13,8 +13,10 @@ use std::{
 use conjunto_transwise::RpcProviderConfig;
 use log::*;
 use sleipnir_account_cloner::{
-    RemoteAccountClonerClient, RemoteAccountClonerWorker,
+    standard_blacklisted_accounts, RemoteAccountClonerClient,
+    RemoteAccountClonerWorker,
 };
+use sleipnir_account_dumper::AccountDumperBank;
 use sleipnir_account_fetcher::{
     RemoteAccountFetcherClient, RemoteAccountFetcherWorker,
 };
@@ -23,6 +25,7 @@ use sleipnir_account_updates::{
     RemoteAccountUpdatesWorkerError,
 };
 use sleipnir_accounts::{utils::try_rpc_cluster_from_cluster, AccountsManager};
+use sleipnir_accounts_api::BankAccountProvider;
 use sleipnir_bank::{
     bank::Bank, genesis_utils::create_genesis_config_with_leader,
     program_loader::load_programs_into_bank,
@@ -136,8 +139,10 @@ pub struct MagicValidator {
     >,
     remote_account_cloner_worker: Option<
         RemoteAccountClonerWorker<
+            BankAccountProvider,
             RemoteAccountFetcherClient,
             RemoteAccountUpdatesClient,
+            AccountDumperBank,
         >,
     >,
     remote_account_cloner_handle: Option<tokio::task::JoinHandle<()>>,
@@ -212,13 +217,25 @@ impl MagicValidator {
             sender: transaction_sndr,
         };
 
-        let remote_account_cloner_worker = RemoteAccountClonerWorker::new(
-            RemoteAccountFetcherClient::new(&remote_account_fetcher_worker),
-            RemoteAccountUpdatesClient::new(&remote_account_updates_worker),
+        let bank_account_provider = BankAccountProvider::new(bank.clone());
+        let remote_account_fetcher_client =
+            RemoteAccountFetcherClient::new(&remote_account_fetcher_worker);
+        let remote_account_updates_client =
+            RemoteAccountUpdatesClient::new(&remote_account_updates_worker);
+        let account_dumper_bank = AccountDumperBank::new(
             bank.clone(),
             Some(transaction_status_sender.clone()),
-            &identity_keypair.pubkey(),
-            Some(1_000_000_000),
+        );
+        let blacklisted_accounts =
+            standard_blacklisted_accounts(&identity_keypair.pubkey());
+
+        let remote_account_cloner_worker = RemoteAccountClonerWorker::new(
+            bank_account_provider,
+            remote_account_fetcher_client,
+            remote_account_updates_client,
+            account_dumper_bank,
+            blacklisted_accounts,
+            Some(1_000_000_000), // TODO(vbrunet) - inject from config
             true,
         );
 

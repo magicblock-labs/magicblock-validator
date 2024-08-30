@@ -3,7 +3,6 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use conjunto_transwise::AccountChainSnapshotShared;
 use futures_util::{
     future::{ready, BoxFuture},
     FutureExt,
@@ -11,6 +10,7 @@ use futures_util::{
 use sleipnir_account_dumper::AccountDumper;
 use sleipnir_account_fetcher::AccountFetcher;
 use sleipnir_account_updates::AccountUpdates;
+use sleipnir_accounts_api::InternalAccountProvider;
 use solana_sdk::pubkey::Pubkey;
 use tokio::sync::{mpsc::UnboundedSender, oneshot::channel};
 
@@ -25,10 +25,11 @@ pub struct RemoteAccountClonerClient {
 }
 
 impl RemoteAccountClonerClient {
-    pub fn new<AFE, AUP, ADU>(
-        worker: &RemoteAccountClonerWorker<AFE, AUP, ADU>,
+    pub fn new<IAP, AFE, AUP, ADU>(
+        worker: &RemoteAccountClonerWorker<IAP, AFE, AUP, ADU>,
     ) -> Self
     where
+        IAP: InternalAccountProvider,
         AFE: AccountFetcher,
         AUP: AccountUpdates,
         ADU: AccountDumper,

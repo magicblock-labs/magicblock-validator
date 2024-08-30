@@ -1,4 +1,7 @@
-use std::collections::HashMap;
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
+};
 
 use async_trait::async_trait;
 use conjunto_transwise::{
@@ -10,16 +13,32 @@ use solana_sdk::{account::Account, clock::Slot, pubkey::Pubkey};
 
 use crate::{AccountFetcher, AccountFetcherResult};
 
-#[derive(Debug, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct AccountFetcherStub {
     unknown_at_slot: Slot,
-    known_accounts: HashMap<Pubkey, (Pubkey, Slot, Option<DelegationRecord>)>,
+    known_accounts:
+        Arc<RwLock<HashMap<Pubkey, (Pubkey, Slot, Option<DelegationRecord>)>>>,
 }
 
 impl AccountFetcherStub {
-    pub fn add_undelegated(&mut self, pubkey: Pubkey, at_slot: Slot) {
+    fn insert_known_account(
+        &self,
+        pubkey: Pubkey,
+        value: (Pubkey, Slot, Option<DelegationRecord>),
+    ) {
         self.known_accounts
-            .insert(pubkey, (Pubkey::new_unique(), at_slot, None));
+            .write()
+            .expect("RwLock of AccountFetcherStub.known_accounts is poisone")
+            .insert(pubkey, value);
+    }
+}
+
+impl AccountFetcherStub {
+    pub fn add_undelegated(&self, pubkey: Pubkey, at_slot: Slot) {
+        self.insert_known_account(
+            pubkey,
+            (Pubkey::new_unique(), at_slot, None),
+        );
     }
     pub fn add_delegated(
         &mut self,
@@ -27,7 +46,7 @@ impl AccountFetcherStub {
         owner: Pubkey,
         at_slot: Slot,
     ) {
-        self.known_accounts.insert(
+        self.insert_known_account(
             pubkey,
             (
                 Pubkey::new_unique(),
@@ -46,7 +65,12 @@ impl AccountFetcherStub {
         &self,
         pubkey: &Pubkey,
     ) -> AccountChainSnapshot {
-        match self.known_accounts.get(pubkey) {
+        match self
+            .known_accounts
+            .read()
+            .expect("RwLock of AccountFetcherStub.known_accounts is poisone")
+            .get(pubkey)
+        {
             Some((owner, at_slot, delegation_record)) => AccountChainSnapshot {
                 pubkey: *pubkey,
                 at_slot: *at_slot,
