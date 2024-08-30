@@ -12,27 +12,6 @@ pub struct AccountDumperStub {
     dumped_programs: Arc<RwLock<Vec<Pubkey>>>,
 }
 
-impl AccountDumperStub {
-    fn append<T>(container: &RwLock<Vec<T>>, value: T)
-    where
-        T: Clone,
-    {
-        container
-            .write()
-            .expect("RwLock of AccountDumperStub poisoned")
-            .push(value)
-    }
-    fn list<T>(container: &RwLock<Vec<T>>) -> Vec<T>
-    where
-        T: Clone,
-    {
-        container
-            .read()
-            .expect("RwLock of AccountDumperStub poisoned")
-            .clone()
-    }
-}
-
 impl AccountDumper for AccountDumperStub {
     fn dump_system_account(
         &self,
@@ -40,7 +19,7 @@ impl AccountDumper for AccountDumperStub {
         _account: &Account,
         _lamports: Option<u64>,
     ) -> AccountDumperResult<Signature> {
-        AccountDumperStub::append(&self.dumped_system_accounts, *pubkey);
+        self.dumped_system_accounts.write().unwrap().push(*pubkey);
         Ok(Signature::new_unique())
     }
     fn dump_pda_account(
@@ -48,7 +27,7 @@ impl AccountDumper for AccountDumperStub {
         pubkey: &Pubkey,
         _account: &Account,
     ) -> AccountDumperResult<Signature> {
-        AccountDumperStub::append(&self.dumped_pda_accounts, *pubkey);
+        self.dumped_pda_accounts.write().unwrap().push(*pubkey);
         Ok(Signature::new_unique())
     }
     fn dump_delegated_account(
@@ -57,7 +36,10 @@ impl AccountDumper for AccountDumperStub {
         _account: &Account,
         _owner: &Pubkey,
     ) -> AccountDumperResult<Signature> {
-        AccountDumperStub::append(&self.dumped_delegated_accounts, *pubkey);
+        self.dumped_delegated_accounts
+            .write()
+            .unwrap()
+            .push(*pubkey);
         Ok(Signature::new_unique())
     }
     fn dump_program(
@@ -68,22 +50,25 @@ impl AccountDumper for AccountDumperStub {
         _program_data_account: &Account,
         _program_idl: Option<(&Pubkey, &Account)>,
     ) -> AccountDumperResult<Vec<Signature>> {
-        AccountDumperStub::append(&self.dumped_programs, *program_id_pubkey);
+        self.dumped_programs
+            .write()
+            .unwrap()
+            .push(*program_id_pubkey);
         Ok(vec![Signature::new_unique()])
     }
 }
 
 impl AccountDumperStub {
     pub fn list_dumped_system_account(&self) -> Vec<Pubkey> {
-        AccountDumperStub::list(&self.dumped_system_accounts)
+        self.dumped_system_accounts.read().unwrap().clone()
     }
     pub fn list_dumped_pda_account(&self) -> Vec<Pubkey> {
-        AccountDumperStub::list(&self.dumped_pda_accounts)
+        self.dumped_pda_accounts.read().unwrap().clone()
     }
     pub fn list_dumped_delegated_account(&self) -> Vec<Pubkey> {
-        AccountDumperStub::list(&self.dumped_delegated_accounts)
+        self.dumped_delegated_accounts.read().unwrap().clone()
     }
     pub fn list_dumped_programs(&self) -> Vec<Pubkey> {
-        AccountDumperStub::list(&self.dumped_programs)
+        self.dumped_programs.read().unwrap().clone()
     }
 }

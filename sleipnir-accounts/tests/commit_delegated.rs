@@ -5,19 +5,16 @@ use conjunto_transwise::{
     transaction_accounts_validator::TransactionAccountsValidatorImpl,
     CommitFrequency,
 };
-use sleipnir_account_cloner::RemoteAccountClonerWorker;
+use sleipnir_account_cloner::AccountClonerStub;
 use sleipnir_accounts::{ExternalAccountsManager, LifecycleMode};
+use sleipnir_accounts_api::InternalAccountProviderStub;
 use solana_sdk::{
     account::{Account, AccountSharedData},
     native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
 };
 use stubs::{
-    account_cloner_stub::AccountClonerStub,
     account_committer_stub::AccountCommitterStub,
-    account_fetcher_stub::AccountFetcherStub,
-    account_updates_stub::AccountUpdatesStub,
-    internal_account_provider_stub::InternalAccountProviderStub,
     scheduled_commits_processor_stub::ScheduledCommitsProcessorStub,
 };
 use test_tools_core::init_logger;
@@ -26,28 +23,21 @@ mod stubs;
 
 fn setup(
     internal_account_provider: InternalAccountProviderStub,
-    account_fetcher: AccountFetcherStub,
-    account_updates: AccountUpdatesStub,
-    account_dumper: AccountDumperStub,
+    account_cloner: AccountClonerStub,
     account_committer: AccountCommitterStub,
     validator_auth_id: Pubkey,
 ) -> ExternalAccountsManager<
     InternalAccountProviderStub,
-    AccountFetcherStub,
     AccountClonerStub,
     AccountCommitterStub,
-    AccountUpdatesStub,
     TransactionAccountsExtractorImpl,
     TransactionAccountsValidatorImpl,
     ScheduledCommitsProcessorStub,
 > {
-    let account_cloner = RemoteAccountClonerWorker::new(internal_account_provider, account_fetcher, account_updates, account_dumper, validator_id, payer_init_lamports, allow_non_programs_undelegated)
     ExternalAccountsManager {
         internal_account_provider,
-        account_fetcher,
-        account_committer: Arc::new(account_committer),
-        account_updates,
         account_cloner,
+        account_committer: Arc::new(account_committer),
         transaction_accounts_extractor: TransactionAccountsExtractorImpl,
         transaction_accounts_validator: TransactionAccountsValidatorImpl,
         scheduled_commits_processor: ScheduledCommitsProcessorStub::default(),
@@ -77,24 +67,25 @@ async fn test_commit_two_delegated_accounts_one_needs_commit() {
     let commit_not_needed = Pubkey::new_unique();
     let commit_not_needed_acc = acount_shared_data(commit_not_needed);
 
-    let mut internal_account_provider = InternalAccountProviderStub::default();
+    let internal_account_provider = InternalAccountProviderStub::default();
     internal_account_provider.add(commit_needed, commit_needed_acc.clone());
     internal_account_provider.add(commit_not_needed, commit_not_needed_acc);
+
+    let account_cloner = AccountClonerStub::default();
 
     let account_committer = AccountCommitterStub::default();
     let validator_auth_id = Pubkey::new_unique();
 
     let manager = setup(
         internal_account_provider,
-        AccountFetcherStub::default(),
-        AccountUpdatesStub::default(),
-        AccountClonerStub::default(),
+        account_cloner,
         account_committer.clone(),
         validator_auth_id,
     );
 
     let cloned_at_slot = 12;
 
+    /*
     manager.external_writable_accounts.insert(
         commit_needed,
         cloned_at_slot,
@@ -106,6 +97,7 @@ async fn test_commit_two_delegated_accounts_one_needs_commit() {
         cloned_at_slot,
         Some(CommitFrequency::Millis(60_000)),
     );
+     */
 
     let last_commit_of_commit_needed =
         manager.last_commit(&commit_needed).unwrap();

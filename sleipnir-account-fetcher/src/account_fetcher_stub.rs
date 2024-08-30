@@ -26,10 +26,7 @@ impl AccountFetcherStub {
         pubkey: Pubkey,
         value: (Pubkey, Slot, Option<DelegationRecord>),
     ) {
-        self.known_accounts
-            .write()
-            .expect("RwLock of AccountFetcherStub.known_accounts is poisone")
-            .insert(pubkey, value);
+        self.known_accounts.write().unwrap().insert(pubkey, value);
     }
 }
 
@@ -65,12 +62,7 @@ impl AccountFetcherStub {
         &self,
         pubkey: &Pubkey,
     ) -> AccountChainSnapshot {
-        match self
-            .known_accounts
-            .read()
-            .expect("RwLock of AccountFetcherStub.known_accounts is poisone")
-            .get(pubkey)
-        {
+        match self.known_accounts.read().unwrap().get(pubkey) {
             Some((owner, at_slot, delegation_record)) => AccountChainSnapshot {
                 pubkey: *pubkey,
                 at_slot: *at_slot,

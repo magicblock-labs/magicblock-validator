@@ -2,9 +2,9 @@ use std::sync::Arc;
 
 use async_trait::async_trait;
 use sleipnir_accounts::{
-    errors::AccountsResult, AccountCommitter, InternalAccountProvider,
-    ScheduledCommitsProcessor,
+    errors::AccountsResult, AccountCommitter, ScheduledCommitsProcessor,
 };
+use sleipnir_accounts_api::InternalAccountProvider;
 
 #[derive(Default)]
 pub struct ScheduledCommitsProcessorStub {}

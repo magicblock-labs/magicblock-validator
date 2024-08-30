@@ -161,13 +161,13 @@ where
                 })
                 .collect();
 
-        // Validate the accounts involved in the transaction
-        let tx_snapshot = TransactionAccountsSnapshot {
-            readonly: readonly_snapshots,
-            writable: writable_snapshots.clone(),
-            payer: accounts_holder.payer,
-        };
+        // Validate that the accounts involved in the transaction are valid for an ephemeral
         if self.lifecycle.requires_ephemeral_validation() {
+            let tx_snapshot = TransactionAccountsSnapshot {
+                readonly: readonly_snapshots,
+                writable: writable_snapshots.clone(),
+                payer: accounts_holder.payer,
+            };
             self.transaction_accounts_validator
                 .validate_ephemeral_transaction_accounts(&tx_snapshot)?;
         }

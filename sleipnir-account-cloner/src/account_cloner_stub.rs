@@ -20,9 +20,7 @@ impl AccountClonerStub {
     pub fn add(&self, pubkey: &Pubkey, output: AccountClonerOutput) {
         self.clone_account_outputs
             .write()
-            .expect(
-                "RwLock of AccountClonerStub.clone_account_outputs poisoned",
-            )
+            .unwrap()
             .insert(*pubkey, output);
     }
 }
@@ -35,9 +33,7 @@ impl AccountCloner for AccountClonerStub {
         let output = self
             .clone_account_outputs
             .read()
-            .expect(
-                "RwLock of AccountClonerStub.clone_account_outputs poisoned",
-            )
+            .unwrap()
             .get(pubkey)
             .cloned()
             .ok_or(AccountClonerError::AccountFetcherError(
