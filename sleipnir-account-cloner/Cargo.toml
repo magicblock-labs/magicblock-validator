@@ -17,6 +17,7 @@ sleipnir-account-updates = { workspace = true }
 sleipnir-account-dumper = { workspace = true }
 sleipnir-accounts-api = { workspace = true }
 sleipnir-bank = { workspace = true }
+sleipnir-mutator = { workspace = true }
 solana-sdk = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }

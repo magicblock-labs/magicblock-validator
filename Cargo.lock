@@ -4256,6 +4256,7 @@ dependencies = [
  "sleipnir-account-updates",
  "sleipnir-accounts-api",
  "sleipnir-bank",
+ "sleipnir-mutator",
  "solana-sdk",
  "test-tools",
  "thiserror",
@@ -4268,6 +4269,7 @@ name = "sleipnir-account-dumper"
 version = "1.19.0"
 dependencies = [
  "async-trait",
+ "conjunto-transwise",
  "futures-util",
  "log",
  "sleipnir-bank",

@@ -11,6 +11,7 @@ use sleipnir_account_dumper::AccountDumper;
 use sleipnir_account_fetcher::AccountFetcher;
 use sleipnir_account_updates::AccountUpdates;
 use sleipnir_accounts_api::InternalAccountProvider;
+use sleipnir_mutator::idl::get_pubkey_anchor_idl;
 use solana_sdk::{
     account::Account, bpf_loader_upgradeable::get_program_data_address,
     pubkey::Pubkey, signature::Signature, system_program,
@@ -141,24 +142,21 @@ where
         }
         // Check for the happy/fast path, we may already have cloned this account before
         match self.get_last_cloned_account_chain_snapshot(pubkey) {
-            // If we cloned for the account before, check for the latest updates onchain
-            Some(account_chain_snapshot) => {
+            // If we cloned for the account before
+            Some(snapshot) => {
+                // Check for the latest updates onchain
                 match self.account_updates.get_last_known_update_slot(pubkey) {
                     // If we cloned the account and it was not updated on chain, use the cache
-                    None => Ok(AccountClonerOutput::Cloned(
-                        account_chain_snapshot.clone(),
-                    )),
+                    None => Ok(AccountClonerOutput::Cloned(snapshot)),
                     // If we cloned the account before, but it was updated on chain, check how recently
                     Some(last_known_update_slot) => {
-                        match account_chain_snapshot.at_slot
-                            >= last_known_update_slot
-                        {
-                            // If the cloned account is recent enough, use the cache
-                            true => Ok(AccountClonerOutput::Cloned(
-                                account_chain_snapshot,
-                            )),
-                            // If the cloned account is too old, don't use the cache
-                            false => self.do_clone(pubkey).await,
+                        // If the cloned account is recent enough, use the cache
+                        if snapshot.at_slot >= last_known_update_slot {
+                            Ok(AccountClonerOutput::Cloned(snapshot))
+                        }
+                        // If the cloned account is too old, don't use the cache
+                        else {
+                            self.do_clone(pubkey).await
                         }
                     }
                 }
@@ -253,7 +251,6 @@ where
     ) -> AccountClonerResult<Vec<Signature>> {
         let program_id_pubkey = pubkey;
         let program_id_account = account;
-
         let program_data_pubkey = &get_program_data_address(program_id_pubkey);
         let program_data_snapshot =
             self.fetch_account(program_data_pubkey).await?;
@@ -261,14 +258,20 @@ where
             .chain_state
             .account()
             .ok_or(AccountClonerError::ProgramDataDoesNotExist)?;
-
+        let program_idl_snapshot_anchor =
+            match get_pubkey_anchor_idl(program_id_pubkey) {
+                Some(program_idl_anchor_pubkey) => {
+                    Some(self.fetch_account(&program_idl_anchor_pubkey).await?)
+                }
+                None => None,
+            };
         self.account_dumper
-            .dump_program(
+            .dump_program_accounts(
                 program_id_pubkey,
                 program_id_account,
                 program_data_pubkey,
                 program_data_account,
-                None, // TODO - handle IDL
+                program_idl_snapshot_anchor,
             )
             .map_err(AccountClonerError::AccountDumperError)
     }

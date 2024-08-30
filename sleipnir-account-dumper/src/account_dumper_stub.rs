@@ -1,5 +1,6 @@
 use std::sync::{Arc, RwLock};
 
+use conjunto_transwise::AccountChainSnapshotShared;
 use solana_sdk::{account::Account, pubkey::Pubkey, signature::Signature};
 
 use crate::{AccountDumper, AccountDumperResult};
@@ -9,7 +10,7 @@ pub struct AccountDumperStub {
     dumped_system_accounts: Arc<RwLock<Vec<Pubkey>>>,
     dumped_pda_accounts: Arc<RwLock<Vec<Pubkey>>>,
     dumped_delegated_accounts: Arc<RwLock<Vec<Pubkey>>>,
-    dumped_programs: Arc<RwLock<Vec<Pubkey>>>,
+    dumped_program_ids: Arc<RwLock<Vec<Pubkey>>>,
 }
 
 impl AccountDumper for AccountDumperStub {
@@ -22,6 +23,7 @@ impl AccountDumper for AccountDumperStub {
         self.dumped_system_accounts.write().unwrap().push(*pubkey);
         Ok(Signature::new_unique())
     }
+
     fn dump_pda_account(
         &self,
         pubkey: &Pubkey,
@@ -30,6 +32,7 @@ impl AccountDumper for AccountDumperStub {
         self.dumped_pda_accounts.write().unwrap().push(*pubkey);
         Ok(Signature::new_unique())
     }
+
     fn dump_delegated_account(
         &self,
         pubkey: &Pubkey,
@@ -42,15 +45,16 @@ impl AccountDumper for AccountDumperStub {
             .push(*pubkey);
         Ok(Signature::new_unique())
     }
-    fn dump_program(
+
+    fn dump_program_accounts(
         &self,
         program_id_pubkey: &Pubkey,
         _program_id_account: &Account,
         _program_data_pubkey: &Pubkey,
         _program_data_account: &Account,
-        _program_idl: Option<(&Pubkey, &Account)>,
+        _program_idl_snapshot: Option<AccountChainSnapshotShared>,
     ) -> AccountDumperResult<Vec<Signature>> {
-        self.dumped_programs
+        self.dumped_program_ids
             .write()
             .unwrap()
             .push(*program_id_pubkey);
@@ -62,13 +66,16 @@ impl AccountDumperStub {
     pub fn list_dumped_system_account(&self) -> Vec<Pubkey> {
         self.dumped_system_accounts.read().unwrap().clone()
     }
+
     pub fn list_dumped_pda_account(&self) -> Vec<Pubkey> {
         self.dumped_pda_accounts.read().unwrap().clone()
     }
+
     pub fn list_dumped_delegated_account(&self) -> Vec<Pubkey> {
         self.dumped_delegated_accounts.read().unwrap().clone()
     }
-    pub fn list_dumped_programs(&self) -> Vec<Pubkey> {
-        self.dumped_programs.read().unwrap().clone()
+
+    pub fn list_dumped_program_ids(&self) -> Vec<Pubkey> {
+        self.dumped_program_ids.read().unwrap().clone()
     }
 }
