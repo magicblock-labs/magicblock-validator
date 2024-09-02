@@ -444,7 +444,7 @@ mod tests {
         );
 
         let committed_account = processed_accounts.last().unwrap();
-        assert_eq!(*committed_account.owner(), *DELEGATION_PROGRAM_ID);
+        assert_eq!(*committed_account.owner(), DELEGATION_PROGRAM_ID);
     }
 
     #[test]
@@ -582,7 +582,7 @@ mod tests {
 
         for _ in &[committee_uno, committee_dos, committee_tres] {
             let committed_account = processed_accounts.pop().unwrap();
-            assert_eq!(*committed_account.owner(), *DELEGATION_PROGRAM_ID);
+            assert_eq!(*committed_account.owner(), DELEGATION_PROGRAM_ID);
         }
     }
 

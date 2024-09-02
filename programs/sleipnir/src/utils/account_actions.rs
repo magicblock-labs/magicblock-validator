@@ -17,5 +17,5 @@ pub(crate) fn set_account_owner(
 pub(crate) fn set_account_owner_to_delegation_program(
     acc: &RefCell<AccountSharedData>,
 ) {
-    set_account_owner(acc, *DELEGATION_PROGRAM_ID);
+    set_account_owner(acc, DELEGATION_PROGRAM_ID);
 }

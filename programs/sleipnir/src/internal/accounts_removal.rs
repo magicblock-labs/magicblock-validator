@@ -174,7 +174,7 @@ pub fn process_remove_accounts_pending_removal(
             // remove it. This could happen if the account is first marked for removal
             // and then cloned into the validator due to a change on mainchain or
             // because it was redelegated in the meantime.
-            if *acc.borrow().owner() != *DELEGATION_PROGRAM_ID {
+            if *acc.borrow().owner() != DELEGATION_PROGRAM_ID {
                 owner_changed_since_removal_request.insert(acc_pubkey);
             } else {
                 to_remove.insert(*acc_pubkey, acc);
