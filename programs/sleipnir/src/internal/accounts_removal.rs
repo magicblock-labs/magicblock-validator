@@ -127,7 +127,7 @@ pub fn process_remove_accounts_pending_removal(
     if program_id.ne(&crate::id()) {
         ic_msg!(
             invoke_context,
-            "ScheduleCommit ERR: Invalid program id '{}'",
+            "RemoveAccount ERR: Invalid program id '{}'",
             program_id
         );
         return Err(InstructionError::IncorrectProgramId);
@@ -140,7 +140,7 @@ pub fn process_remove_accounts_pending_removal(
     if validator_pubkey != &validator_authority_id {
         ic_msg!(
             invoke_context,
-            "ScheduleCommit ERR: provided validator account {} does not match validator identity {}",
+            "RemoveAccount ERR: provided validator account {} does not match validator identity {}",
             validator_pubkey, validator_authority_id
         );
         return Err(InstructionError::IncorrectAuthority);
@@ -150,7 +150,7 @@ pub fn process_remove_accounts_pending_removal(
     if !signers.contains(&validator_authority_id) {
         ic_msg!(
             invoke_context,
-            "ScheduleCommit ERR: validator authority not found in signers"
+            "RemoveAccount ERR: validator authority not found in signers"
         );
         return Err(InstructionError::MissingRequiredSignature);
     }
@@ -198,7 +198,7 @@ pub fn process_remove_accounts_pending_removal(
     }
 
     // Remove each account by draining its lamports
-    let to_remove_pubkeys = to_remove.keys().cloned().collect::<HashSet<_>>();
+    let to_remove_pubkeys = to_remove.keys().copied().collect::<HashSet<_>>();
 
     let mut total_drained_lamports = 0;
     for (_, acc) in to_remove.into_iter() {

@@ -68,15 +68,16 @@ impl AccountCommitter for RemoteAccountCommitter {
                 AccountsError::FailedToGetLatestBlockhash(err.to_string())
             })?;
 
-        let committee_count = u32::try_from(committees.len())
+        let committee_count: u32 = committees
+            .len()
+            .try_into()
             .map_err(|_| AccountsError::TooManyCommittees(committees.len()))?;
-        let undelegation_count = u32::try_from(
-            committees
-                .iter()
-                .filter(|c| c.undelegation_request.is_some())
-                .count(),
-        )
-        .map_err(|_| AccountsError::TooManyCommittees(committees.len()))?;
+        let undelegation_count: u32 = committees
+            .iter()
+            .filter(|c| c.undelegation_request.is_some())
+            .count()
+            .try_into()
+            .map_err(|_| AccountsError::TooManyCommittees(committees.len()))?;
         let (compute_budget_ix, compute_unit_price_ix) =
             self.compute_instructions(committee_count, undelegation_count);
 
