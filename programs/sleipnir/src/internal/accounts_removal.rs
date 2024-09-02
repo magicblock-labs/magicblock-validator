@@ -210,10 +210,9 @@ pub fn process_remove_accounts_pending_removal(
     // Credit the drained lamports to the validator account
     let validator_acc =
         get_instruction_account_with_idx(transaction_context, VALIDATOR_IDX)?;
-    let current_lamports = validator_acc.borrow().lamports();
     validator_acc
         .borrow_mut()
-        .set_lamports(current_lamports + total_drained_lamports);
+        .checked_add_lamports(total_drained_lamports)?;
 
     // Mark the following accounts as processed by removing from accounts pending removal
     // - accounts that were removed
