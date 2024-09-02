@@ -205,7 +205,7 @@ impl RemoteAccountCommitter {
         committee_count: u32,
         undelegation_count: u32,
     ) -> (Instruction, Instruction) {
-        // TODO(thlorenz): We may need to consider account size since as well since
+        // TODO(thlorenz): We may need to consider account size as well since
         // the account is copied which could affect CUs
         const BASE_COMPUTE_BUDGET: u32 = 50_000;
         const COMPUTE_BUDGET_PER_COMMITTEE: u32 = 20_000;
