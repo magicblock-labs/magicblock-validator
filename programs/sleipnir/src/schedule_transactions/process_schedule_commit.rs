@@ -361,22 +361,22 @@ mod tests {
         assert_matches!(
             commit,
             ScheduledCommit {
-                id: i,
-                slot: s,
-                accounts: accs,
+                id,
+                slot,
+                accounts,
                 payer: p,
-                owner: o,
+                owner,
                 blockhash: _,
-                commit_sent_transaction: tx,
+                commit_sent_transaction,
                 request_undelegation: false,
             } => {
-                assert!(i >= &0);
-                assert_eq!(s, &test_clock.slot);
+                assert!(id >= &0);
+                assert_eq!(slot, &test_clock.slot);
                 assert_eq!(p, &payer.pubkey());
-                assert_eq!(o, &program);
-                assert_eq!(accs, &vec![committee]);
-                let ix = SleipnirInstruction::ScheduledCommitSent(*i);
-                assert_eq!(tx.data(0), ix.try_to_vec().unwrap());
+                assert_eq!(owner, &program);
+                assert_eq!(accounts, &vec![committee]);
+                let ix = SleipnirInstruction::ScheduledCommitSent(*id);
+                assert_eq!(commit_sent_transaction.data(0), ix.try_to_vec().unwrap());
             }
         );
         let committed_account = processed_accounts.last().unwrap();
@@ -424,22 +424,22 @@ mod tests {
         assert_matches!(
             commit,
             ScheduledCommit {
-                id: i,
-                slot: s,
-                accounts: accs,
+                id,
+                slot,
+                accounts,
                 payer: p,
-                owner: o,
+                owner,
                 blockhash: _,
-                commit_sent_transaction: tx,
+                commit_sent_transaction,
                 request_undelegation: true,
             } => {
-                assert!(i >= &0);
-                assert_eq!(s, &test_clock.slot);
+                assert!(id >= &0);
+                assert_eq!(slot, &test_clock.slot);
                 assert_eq!(p, &payer.pubkey());
-                assert_eq!(o, &program);
-                assert_eq!(accs, &vec![committee]);
-                let ix = SleipnirInstruction::ScheduledCommitSent(*i);
-                assert_eq!(tx.data(0), ix.try_to_vec().unwrap());
+                assert_eq!(owner, &program);
+                assert_eq!(accounts, &vec![committee]);
+                let ix = SleipnirInstruction::ScheduledCommitSent(*id);
+                assert_eq!(commit_sent_transaction.data(0), ix.try_to_vec().unwrap());
             }
         );
 

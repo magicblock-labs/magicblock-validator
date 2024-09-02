@@ -414,7 +414,7 @@ where
             .map(|pendings| pendings.into_iter().map(|x| x.signature).collect())
     }
 
-    pub async fn create_transactions_to_commit_specific_accounts(
+    async fn create_transactions_to_commit_specific_accounts(
         &self,
         accounts_to_be_committed: Vec<Pubkey>,
         slot: u64,
