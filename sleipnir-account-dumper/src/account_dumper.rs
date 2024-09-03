@@ -1,4 +1,3 @@
-use conjunto_transwise::AccountChainSnapshotShared;
 use sleipnir_mutator::errors::MutatorModificationError;
 use solana_sdk::{account::Account, pubkey::Pubkey, signature::Signature};
 use thiserror::Error;
@@ -41,6 +40,6 @@ pub trait AccountDumper {
         program_id_account: &Account,
         program_data: &Pubkey,
         program_data_account: &Account,
-        program_idl_snapshot: Option<AccountChainSnapshotShared>,
+        program_idl: Option<(Pubkey, Account)>,
     ) -> AccountDumperResult<Vec<Signature>>;
 }

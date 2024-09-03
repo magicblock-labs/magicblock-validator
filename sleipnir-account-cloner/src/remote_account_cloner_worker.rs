@@ -277,11 +277,12 @@ where
     ) -> AccountClonerResult<Vec<Signature>> {
         // If we already cloned this account from the same delegation slot
         // Keep the local state as source of truth even if it changes on-chain
-        match self.get_last_cloned_account_chain_snapshot(pubkey) {
-            Some(last_account_chain_snapshot) => {
-                match &last_account_chain_snapshot.chain_state {
+        if let Some(last_account_chain_snapshot) =
+            self.get_last_cloned_account_chain_snapshot(pubkey)
+        {
+            match &last_account_chain_snapshot.chain_state {
                     AccountChainState::Delegated {
-                        delegation_record, ..
+                        ..
                     } if /* delegation_record.delegation_slot */ 42
                         == delegation_slot =>
                     {
@@ -289,8 +290,6 @@ where
                     }
                     _ => {}
                 }
-            }
-            _ => {}
         };
         // If its the first time we're seeing this delegated account, dump it to the bank
         self.account_dumper
@@ -314,46 +313,62 @@ where
             .chain_state
             .account()
             .ok_or(AccountClonerError::ProgramDataDoesNotExist)?;
+        let program_idl = self.fetch_program_idl(program_id_pubkey).await?;
         self.account_dumper
             .dump_program_accounts(
                 program_id_pubkey,
                 program_id_account,
                 program_data_pubkey,
                 program_data_account,
-                self.fetch_program_idl_snapshot(program_id_pubkey).await?,
+                program_idl,
             )
             .map_err(AccountClonerError::AccountDumperError)
     }
 
-    async fn fetch_program_idl_snapshot(
+    async fn fetch_program_idl(
         &self,
         program_id_pubkey: &Pubkey,
-    ) -> AccountClonerResult<Option<AccountChainSnapshotShared>> {
+    ) -> AccountClonerResult<Option<(Pubkey, Account)>> {
         // First check if we can find an anchor IDL
-        match get_pubkey_anchor_idl(program_id_pubkey) {
-            Some(program_anchor_idl_pubkey) => {
-                return Ok(Some(
-                    self.fetch_account_chain_snapshot(
-                        &program_anchor_idl_pubkey,
-                    )
-                    .await?,
-                ));
-            }
-            None => {}
+        let program_idl_anchor = self
+            .try_fetch_program_idl_snapshot(get_pubkey_anchor_idl(
+                program_id_pubkey,
+            ))
+            .await?;
+        if program_idl_anchor.is_some() {
+            return Ok(program_idl_anchor);
         }
         // If we coulnd't find anchor, try to find shank IDL
-        match get_pubkey_shank_idl(program_id_pubkey) {
-            Some(program_shank_idl_pubkey) => {
-                return Ok(Some(
-                    self.fetch_account_chain_snapshot(
-                        &program_shank_idl_pubkey,
-                    )
-                    .await?,
-                ));
-            }
-            None => {}
+        let program_idl_shank = self
+            .try_fetch_program_idl_snapshot(get_pubkey_shank_idl(
+                program_id_pubkey,
+            ))
+            .await?;
+        if program_idl_shank.is_some() {
+            return Ok(program_idl_shank);
         }
         // Otherwise give up
+        Ok(None)
+    }
+
+    async fn try_fetch_program_idl_snapshot(
+        &self,
+        program_idl_pubkey: Option<Pubkey>,
+    ) -> AccountClonerResult<Option<(Pubkey, Account)>> {
+        if let Some(program_idl_pubkey) = program_idl_pubkey {
+            let program_idl_snapshot = self
+                .fetch_account_chain_snapshot(&program_idl_pubkey)
+                .await?;
+            let program_idl_account =
+                program_idl_snapshot.chain_state.account();
+            if let Some(program_idl_account) = program_idl_account {
+                return Ok(Some((
+                    program_idl_pubkey,
+                    program_idl_account.clone(),
+                )));
+            }
+            return Ok(None);
+        }
         Ok(None)
     }
 

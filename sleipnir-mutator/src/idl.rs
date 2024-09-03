@@ -1,9 +1,7 @@
 use sleipnir_program::sleipnir_instruction::AccountModification;
 use solana_sdk::pubkey::Pubkey;
 
-use crate::{
-    errors::MutatorResult, fetch::fetch_account_from_cluster, Cluster,
-};
+use crate::{fetch::fetch_account_from_cluster, Cluster};
 
 const ANCHOR_SEED: &str = "anchor:idl";
 const SHANK_SEED: &str = "shank:idl";
@@ -20,34 +18,41 @@ pub fn get_pubkey_shank_idl(program_id: &Pubkey) -> Option<Pubkey> {
 
 pub async fn fetch_program_idl_modification_from_cluster(
     cluster: &Cluster,
-    program_id_pubkey: &Pubkey,
-) -> MutatorResult<Option<AccountModification>> {
+    program_pubkey: &Pubkey,
+) -> Option<AccountModification> {
     // First check if we can find an anchor IDL
-    match get_pubkey_anchor_idl(program_id_pubkey) {
-        Some(program_anchor_idl_pubkey) => {
-            let program_anchor_idl_account =
-                fetch_account_from_cluster(cluster, &program_anchor_idl_pubkey)
-                    .await?;
-            return Ok(Some(AccountModification::from((
-                &program_anchor_idl_pubkey,
-                &program_anchor_idl_account,
-            ))));
-        }
-        None => {}
+    let anchor_idl_modification =
+        try_fetch_program_idl_modification_from_cluster(
+            cluster,
+            get_pubkey_anchor_idl(program_pubkey),
+        )
+        .await;
+    if anchor_idl_modification.is_some() {
+        return anchor_idl_modification;
     }
-    // If we coulnd't find anchor, try to find shank IDL
-    match get_pubkey_shank_idl(program_id_pubkey) {
-        Some(program_shank_idl_pubkey) => {
-            let program_shank_idl_account =
-                fetch_account_from_cluster(cluster, &program_shank_idl_pubkey)
-                    .await?;
-            return Ok(Some(AccountModification::from((
-                &program_shank_idl_pubkey,
-                &program_shank_idl_account,
-            ))));
-        }
-        None => {}
+    // Otherwise try to find a shank IDL
+    let shank_idl_modification =
+        try_fetch_program_idl_modification_from_cluster(
+            cluster,
+            get_pubkey_shank_idl(program_pubkey),
+        )
+        .await;
+    if shank_idl_modification.is_some() {
+        return shank_idl_modification;
     }
     // Otherwise give up
-    Ok(None)
+    None
+}
+
+async fn try_fetch_program_idl_modification_from_cluster(
+    cluster: &Cluster,
+    pubkey: Option<Pubkey>,
+) -> Option<AccountModification> {
+    if let Some(pubkey) = pubkey {
+        if let Ok(account) = fetch_account_from_cluster(cluster, &pubkey).await
+        {
+            return Some(AccountModification::from((&pubkey, &account)));
+        }
+    }
+    None
 }

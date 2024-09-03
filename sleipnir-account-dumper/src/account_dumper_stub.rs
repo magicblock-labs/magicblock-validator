@@ -3,7 +3,6 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use conjunto_transwise::AccountChainSnapshotShared;
 use solana_sdk::{account::Account, pubkey::Pubkey, signature::Signature};
 
 use crate::{AccountDumper, AccountDumperResult};
@@ -55,7 +54,7 @@ impl AccountDumper for AccountDumperStub {
         _program_id_account: &Account,
         _program_data_pubkey: &Pubkey,
         _program_data_account: &Account,
-        _program_idl_snapshot: Option<AccountChainSnapshotShared>,
+        _program_idl_snapshot: Option<(Pubkey, Account)>,
     ) -> AccountDumperResult<Vec<Signature>> {
         self.dumped_program_ids
             .write()

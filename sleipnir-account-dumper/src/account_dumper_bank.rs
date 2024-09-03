@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use conjunto_transwise::AccountChainSnapshotShared;
 use sleipnir_bank::bank::Bank;
 use sleipnir_mutator::{
     program::{create_program_modifications, ProgramModifications},
@@ -118,7 +117,7 @@ impl AccountDumper for AccountDumperBank {
         program_id_account: &Account,
         program_data_pubkey: &Pubkey,
         program_data_account: &Account,
-        program_idl_snapshot: Option<AccountChainSnapshotShared>,
+        program_idl: Option<(Pubkey, Account)>,
     ) -> AccountDumperResult<Vec<Signature>> {
         let ProgramModifications {
             program_id_modification,
@@ -132,15 +131,13 @@ impl AccountDumper for AccountDumperBank {
             self.bank.slot(),
         )
         .map_err(AccountDumperError::MutatorModificationError)?;
-        let program_idl_modification = match program_idl_snapshot {
-            Some(snapshot) => match snapshot.chain_state.account() {
-                Some(account) => {
-                    Some(AccountModification::from((&snapshot.pubkey, account)))
-                }
-                None => None,
-            },
-            None => None,
-        };
+        let program_idl_modification =
+            program_idl.map(|(program_idl_pubkey, program_idl_account)| {
+                AccountModification::from((
+                    &program_idl_pubkey,
+                    &program_idl_account,
+                ))
+            });
         let needs_upgrade = self.bank.get_account(program_id_pubkey).is_some();
         let transactions = transactions_to_clone_program(
             needs_upgrade,

@@ -77,7 +77,7 @@ pub async fn transactions_to_clone_pubkey_from_cluster(
     // Try to fetch the IDL if possible
     let program_idl_modification =
         fetch_program_idl_modification_from_cluster(cluster, program_id_pubkey)
-            .await?;
+            .await;
     // Done, generate the transaction as normal
     Ok(transactions_to_clone_program(
         needs_upgrade,

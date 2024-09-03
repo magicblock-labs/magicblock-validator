@@ -15,11 +15,18 @@ use solana_sdk::{
 
 use crate::{AccountFetcher, AccountFetcherResult};
 
+#[derive(Debug)]
+struct AccountFetcherStubKnownAccount {
+    owner: Pubkey,
+    slot: Slot,
+    delegation_record: Option<DelegationRecord>,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct AccountFetcherStub {
     unknown_at_slot: Slot,
     known_accounts:
-        Arc<RwLock<HashMap<Pubkey, (Pubkey, Slot, Option<DelegationRecord>)>>>,
+        Arc<RwLock<HashMap<Pubkey, AccountFetcherStubKnownAccount>>>,
 }
 
 impl AccountFetcherStub {
@@ -28,25 +35,29 @@ impl AccountFetcherStub {
         pubkey: Pubkey,
         owner: Pubkey,
         slot: Slot,
-        delegation: Option<DelegationRecord>,
+        delegation_record: Option<DelegationRecord>,
     ) {
-        self.known_accounts
-            .write()
-            .unwrap()
-            .insert(pubkey, (owner, slot, delegation));
+        self.known_accounts.write().unwrap().insert(
+            pubkey,
+            AccountFetcherStubKnownAccount {
+                owner,
+                slot,
+                delegation_record,
+            },
+        );
     }
     fn generate_account_chain_snapshot(
         &self,
         pubkey: &Pubkey,
     ) -> AccountChainSnapshot {
         match self.known_accounts.read().unwrap().get(pubkey) {
-            Some((owner, at_slot, delegation_record)) => AccountChainSnapshot {
+            Some(known_account) => AccountChainSnapshot {
                 pubkey: *pubkey,
-                at_slot: *at_slot,
-                chain_state: match delegation_record {
+                at_slot: known_account.slot,
+                chain_state: match &known_account.delegation_record {
                     Some(delegation_record) => AccountChainState::Delegated {
                         account: Account {
-                            owner: *owner,
+                            owner: known_account.owner,
                             ..Default::default()
                         },
                         delegation_pda: Pubkey::new_unique(),
@@ -54,7 +65,7 @@ impl AccountFetcherStub {
                     },
                     None => AccountChainState::Undelegated {
                         account: Account {
-                            owner: *owner,
+                            owner: known_account.owner,
                             ..Default::default()
                         },
                     },
@@ -66,7 +77,6 @@ impl AccountFetcherStub {
                 chain_state: AccountChainState::NewAccount,
             },
         }
-        .into()
     }
 }
 
