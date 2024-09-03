@@ -37,6 +37,8 @@ pub struct AccountCommittee {
     /// Only present if undelegation was requested.
     pub undelegation_request: Option<UndelegationRequest>,
 }
+
+#[derive(Debug)]
 pub struct CommitAccountsTransaction {
     /// The transaction that is running on chain to commit and possibly undelegate
     /// accounts.
@@ -52,6 +54,7 @@ impl CommitAccountsTransaction {
     }
 }
 
+#[derive(Debug)]
 pub struct CommitAccountsPayload {
     /// The transaction that commits the accounts.
     /// None if no accounts need to be committed.
@@ -61,6 +64,7 @@ pub struct CommitAccountsPayload {
 }
 
 /// Same as [CommitAccountsPayload] but one that is actionable
+#[derive(Debug)]
 pub struct SendableCommitAccountsPayload {
     pub transaction: CommitAccountsTransaction,
     /// The pubkeys and data of the accounts that were committed.

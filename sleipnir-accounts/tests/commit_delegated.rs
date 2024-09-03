@@ -2,6 +2,7 @@ use std::sync::Arc;
 
 use conjunto_transwise::{
     transaction_accounts_extractor::TransactionAccountsExtractorImpl,
+    transaction_accounts_holder::TransactionAccountsHolder,
     transaction_accounts_validator::TransactionAccountsValidatorImpl,
     AccountChainSnapshot, AccountChainSnapshotShared, AccountChainState,
     CommitFrequency, DelegationRecord,
@@ -103,11 +104,7 @@ async fn test_commit_two_delegated_accounts_one_needs_commit() {
         account_committer.clone(),
     );
 
-    internal_account_provider
-        .set(commit_needed_pubkey, commit_needed_account_shared);
-    internal_account_provider
-        .set(commit_not_needed_pubkey, commit_not_needed_account_shared);
-
+    // Clone the accounts through a dummy transaction
     account_cloner.set(
         &commit_needed_pubkey,
         AccountClonerOutput::Cloned(generate_delegated_account_chain_snapshot(
@@ -124,21 +121,41 @@ async fn test_commit_two_delegated_accounts_one_needs_commit() {
             CommitFrequency::Millis(60_000),
         )),
     );
+    let result = manager
+        .ensure_accounts_from_holder(
+            TransactionAccountsHolder {
+                readonly: vec![commit_needed_pubkey, commit_not_needed_pubkey],
+                writable: vec![],
+                payer: Pubkey::new_unique(),
+            },
+            "tx-sig".to_string(),
+        )
+        .await;
+    assert!(result.is_ok());
 
+    // Once the accounts are cloned, make sure they've been added to the bank (Stubbed dumper doesn't do anything)
+    internal_account_provider
+        .set(commit_needed_pubkey, commit_needed_account_shared.clone());
+    internal_account_provider
+        .set(commit_not_needed_pubkey, commit_not_needed_account_shared);
+
+    // Since accounts are delegated, we should have initialized the commit timestamp
     let last_commit_of_commit_needed =
         manager.last_commit(&commit_needed_pubkey).unwrap();
     let last_commit_of_commit_not_needed =
         manager.last_commit(&commit_not_needed_pubkey).unwrap();
 
+    // Wait for one of the commit's frequency to be triggered
     tokio::time::sleep(tokio::time::Duration::from_millis(2)).await;
 
+    // Execute the commits of the accounts that needs it
     let result = manager.commit_delegated().await;
     // Ensure we committed the account that was due
     assert_eq!(account_committer.len(), 1);
     // with the current account data
     assert_eq!(
         account_committer.committed(&commit_needed_pubkey),
-        Some(commit_needed_account.into())
+        Some(commit_needed_account_shared)
     );
     // and that we returned that transaction signature for it.
     assert_eq!(result.unwrap().len(), 1);

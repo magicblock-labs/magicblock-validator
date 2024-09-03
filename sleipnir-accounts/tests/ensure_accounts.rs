@@ -430,7 +430,7 @@ async fn test_ensure_delegated_with_owner_and_unlocked_writable_payer() {
     // Check proper behaviour
     assert!(account_dumper
         .was_dumped_as_system_account(&writable_undelegated_payer));
-    assert!(manager.last_commit(&writable_delegated).is_none());
+    assert!(manager.last_commit(&writable_undelegated_payer).is_none());
 
     assert!(account_dumper.was_dumped_as_delegated_account(&writable_delegated));
     assert!(manager.last_commit(&writable_delegated).is_some());
@@ -828,7 +828,7 @@ async fn test_ensure_accounts_already_known_can_be_reused_as_writable_later() {
         assert!(result.is_ok());
 
         // Check proper behaviour
-        assert!(!account_dumper.was_untouched(&account_delegated));
+        assert!(account_dumper.was_untouched(&account_delegated));
         assert!(manager.last_commit(&account_delegated).is_none());
     }
 
@@ -851,9 +851,7 @@ async fn test_ensure_accounts_already_known_can_be_reused_as_writable_later() {
         // Check proper behaviour
         assert!(matches!(
             result,
-            Err(AccountsError::TranswiseError(
-                TranswiseError::NotAllWritablesDelegated { .. }
-            ))
+            Err(AccountsError::UnclonableAccountUsedAsWritableInEphemeral(_))
         ));
     }
 

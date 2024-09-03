@@ -54,7 +54,7 @@ impl ExternalCommitableAccount {
     }
 
     pub fn needs_commit(&self, now: &Duration) -> bool {
-        self.last_commit_at + self.commit_frequency > *now
+        self.last_commit_at + self.commit_frequency <= *now
     }
 
     pub fn last_committed_at(&self) -> Duration {
@@ -144,57 +144,80 @@ where
             .await
             .map_err(AccountsError::AccountClonerError)?;
 
-        // Filter clone results to only what succeeded
-        let readonly_snapshots = readonly_clone_outputs
-            .into_iter()
-            .filter_map(|output| match output {
-                AccountClonerOutput::Cloned(snapshot) => Some(snapshot),
-                AccountClonerOutput::Skipped => None,
-            })
-            .collect::<Vec<AccountChainSnapshotShared>>();
-        let writable_snapshots = writable_clone_outputs
-            .into_iter()
-            .filter_map(|output| match output {
-                AccountClonerOutput::Cloned(snapshot) => Some(snapshot),
-                AccountClonerOutput::Skipped => None,
-            })
-            .collect::<Vec<AccountChainSnapshotShared>>();
+        // Commitable account scheduling initialization
+        for readonly_clone_output in readonly_clone_outputs.iter() {
+            self.start_commit_frequency_counters_if_needed(
+                readonly_clone_output,
+            );
+        }
+        for writable_clone_output in writable_clone_outputs.iter() {
+            self.start_commit_frequency_counters_if_needed(
+                writable_clone_output,
+            );
+        }
 
         // Validate that the accounts involved in the transaction are valid for an ephemeral
         if self.lifecycle.requires_ephemeral_validation() {
-            let tx_snapshot = TransactionAccountsSnapshot {
-                readonly: readonly_snapshots,
-                writable: writable_snapshots.clone(),
-                payer: accounts_holder.payer,
-            };
-            self.transaction_accounts_validator
-                .validate_ephemeral_transaction_accounts(&tx_snapshot)?;
-        }
-        // Commitable account scheduling initialization
-        let now = get_epoch();
-        for writable_snapshot in writable_snapshots {
-            match &writable_snapshot.chain_state {
-                AccountChainState::Delegated {
-                    delegation_record,
-                    ..
-                } =>
-                    match self.external_commitable_accounts
-                        .write()
-                        .expect(
-                        "RwLock of ExternalAccountsManager.external_commitable_accounts is poisoned",
-                        )
-                        .entry(writable_snapshot.pubkey)
-                    {
-                        Entry::Occupied(mut _entry) => {},
-                        Entry::Vacant(entry) => {
-                            entry.insert(ExternalCommitableAccount::new(&writable_snapshot.pubkey, &delegation_record.commit_frequency, &now));
-                        },
+            // For now we'll allow readonly accounts to be not properly clonable but still usable in a transaction
+            let readonly_snapshots = readonly_clone_outputs
+                .into_iter()
+                .filter_map(|output| match output {
+                    AccountClonerOutput::Cloned(snapshot) => Some(snapshot),
+                    AccountClonerOutput::Unclonable(_) => None,
+                })
+                .collect::<Vec<AccountChainSnapshotShared>>();
+            // Ephemeral will only work if all writable accounts involved in a transaction are properly cloned
+            let writable_snapshots = writable_clone_outputs.into_iter()
+                .map(|output| match output {
+                    AccountClonerOutput::Cloned(snapshot) => Ok(snapshot),
+                    AccountClonerOutput::Unclonable(pubkey) => {
+                        Err(AccountsError::UnclonableAccountUsedAsWritableInEphemeral(pubkey))
                     }
-                _ => {}
-            }
+                })
+                .collect::<AccountsResult<Vec<AccountChainSnapshotShared>>>()?;
+            // Run the validation specific to the ephemeral
+            self.transaction_accounts_validator
+                .validate_ephemeral_transaction_accounts(
+                    &TransactionAccountsSnapshot {
+                        readonly: readonly_snapshots,
+                        writable: writable_snapshots,
+                        payer: accounts_holder.payer,
+                    },
+                )?;
         }
+
         // Done
         Ok(vec![])
+    }
+
+    fn start_commit_frequency_counters_if_needed(
+        &self,
+        clone_output: &AccountClonerOutput,
+    ) {
+        match clone_output {
+            AccountClonerOutput::Cloned(account_chain_snapshot) => {
+                match &account_chain_snapshot.chain_state {
+                    AccountChainState::Delegated {
+                        delegation_record,
+                        ..
+                    } =>
+                        match self.external_commitable_accounts
+                            .write()
+                            .expect(
+                            "RwLock of ExternalAccountsManager.external_commitable_accounts is poisoned",
+                            )
+                            .entry(account_chain_snapshot.pubkey)
+                        {
+                            Entry::Occupied(mut _entry) => {},
+                            Entry::Vacant(entry) => {
+                                entry.insert(ExternalCommitableAccount::new(&account_chain_snapshot.pubkey, &delegation_record.commit_frequency, &get_epoch()));
+                            },
+                        }
+                    _ => {}
+                }
+            },
+            AccountClonerOutput::Unclonable(_) => {},
+        };
     }
 
     /// This will look at the time that passed since the last commit and determine
@@ -213,7 +236,6 @@ where
             .filter(|x| x.needs_commit(&now))
             .map(|x| x.get_pubkey())
             .collect::<Vec<_>>();
-
         if accounts_to_be_committed.is_empty() {
             return Ok(vec![]);
         }

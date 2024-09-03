@@ -38,7 +38,7 @@ pub type AccountClonerListeners =
 #[derive(Debug, Clone)]
 pub enum AccountClonerOutput {
     Cloned(AccountChainSnapshotShared),
-    Skipped,
+    Unclonable(Pubkey),
 }
 
 pub trait AccountCloner {

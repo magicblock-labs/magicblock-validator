@@ -140,7 +140,7 @@ where
     ) -> AccountClonerResult<AccountClonerOutput> {
         // If the account is blacklisted against cloning, no need to do anything
         if self.blacklisted_accounts.contains(pubkey) {
-            return Ok(AccountClonerOutput::Skipped);
+            return Ok(AccountClonerOutput::Unclonable(*pubkey));
         }
         // Check for the happy/fast path, we may already have cloned this account before
         match self.get_last_cloned_account_chain_snapshot(pubkey) {
@@ -167,7 +167,7 @@ where
             None => {
                 // If somehow we already have this account in the bank, use it as is
                 if self.internal_account_provider.has_account(pubkey) {
-                    Ok(AccountClonerOutput::Skipped)
+                    Ok(AccountClonerOutput::Unclonable(*pubkey))
                 }
                 // If we need to load it for the first time
                 else {
