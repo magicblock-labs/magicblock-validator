@@ -56,7 +56,7 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     errors::{ApiError, ApiResult},
-    external_config::{cluster_from_remote, try_convert_accounts_config},
+    external_config::try_convert_accounts_config,
     fund_account::{fund_validator_identity, funded_faucet},
     geyser_transaction_notify_listener::GeyserTransactionNotifyListener,
     init_geyser_service::{init_geyser_service, InitGeyserServiceConfig},
@@ -201,10 +201,12 @@ impl MagicValidator {
                 geyser_service.get_transaction_notifier(),
             );
 
+        let accounts_config =
+            try_convert_accounts_config(&config.validator_config.accounts)
+                .map_err(ApiError::ConfigError)?;
+
         let remote_rpc_config = RpcProviderConfig::new(
-            try_rpc_cluster_from_cluster(&cluster_from_remote(
-                &config.validator_config.accounts.remote,
-            ))?,
+            try_rpc_cluster_from_cluster(&accounts_config.remote_cluster)?,
             None,
         );
 
@@ -235,8 +237,10 @@ impl MagicValidator {
             remote_account_updates_client,
             account_dumper_bank,
             blacklisted_accounts,
-            Some(1_000_000_000), // TODO(vbrunet) - inject from config
-            true,
+            accounts_config.payer_init_lamports,
+            accounts_config
+                .lifecycle
+                .allow_cloning_undelegated_non_programs(),
         );
 
         let accounts_manager = Self::init_accounts_manager(

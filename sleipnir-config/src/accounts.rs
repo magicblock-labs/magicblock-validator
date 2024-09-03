@@ -1,9 +1,9 @@
-use std::error::Error;
-
 use serde::{Deserialize, Serialize};
 use solana_sdk::native_token::LAMPORTS_PER_SOL;
 use strum_macros::EnumString;
 use url::Url;
+
+use crate::errors::{ConfigError, ConfigResult};
 
 // -----------------
 // AccountsConfig
@@ -132,9 +132,9 @@ impl Payer {
             init_sol,
         }
     }
-    pub fn try_init_lamports(&self) -> Result<Option<u64>, Box<dyn Error>> {
+    pub fn try_init_lamports(&self) -> ConfigResult<Option<u64>> {
         if self.init_lamports.is_some() && self.init_sol.is_some() {
-            return Err("Cannot specify both init_lamports and init_sol".into());
+            return Err(ConfigError::CannotSpecifyBothInitLamportAndInitSol);
         }
         Ok(match self.init_lamports {
             Some(lamports) => Some(lamports),
