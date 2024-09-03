@@ -66,19 +66,36 @@ impl AccountDumper for AccountDumperStub {
 }
 
 impl AccountDumperStub {
-    pub fn get_dumped_system_accounts(&self) -> HashSet<Pubkey> {
-        self.dumped_system_accounts.read().unwrap().clone()
+    pub fn was_dumped_as_system_account(&self, pubkey: &Pubkey) -> bool {
+        self.dumped_system_accounts.read().unwrap().contains(pubkey)
     }
 
-    pub fn get_dumped_pda_accounts(&self) -> HashSet<Pubkey> {
-        self.dumped_pda_accounts.read().unwrap().clone()
+    pub fn was_dumped_as_pda_account(&self, pubkey: &Pubkey) -> bool {
+        self.dumped_pda_accounts.read().unwrap().contains(pubkey)
     }
 
-    pub fn get_dumped_delegated_accounts(&self) -> HashSet<Pubkey> {
-        self.dumped_delegated_accounts.read().unwrap().clone()
+    pub fn was_dumped_as_delegated_account(&self, pubkey: &Pubkey) -> bool {
+        self.dumped_delegated_accounts
+            .read()
+            .unwrap()
+            .contains(pubkey)
     }
 
-    pub fn get_dumped_program_ids(&self) -> HashSet<Pubkey> {
-        self.dumped_program_ids.read().unwrap().clone()
+    pub fn was_dumped_as_program_id(&self, pubkey: &Pubkey) -> bool {
+        self.dumped_program_ids.read().unwrap().contains(pubkey)
+    }
+
+    pub fn was_untouched(&self, pubkey: &Pubkey) -> bool {
+        !self.was_dumped_as_system_account(pubkey)
+            && !self.was_dumped_as_pda_account(pubkey)
+            && !self.was_dumped_as_delegated_account(pubkey)
+            && !self.was_dumped_as_program_id(pubkey)
+    }
+
+    pub fn clear_history(&self) {
+        self.dumped_system_accounts.write().unwrap().clear();
+        self.dumped_pda_accounts.write().unwrap().clear();
+        self.dumped_delegated_accounts.write().unwrap().clear();
+        self.dumped_program_ids.write().unwrap().clear();
     }
 }

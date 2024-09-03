@@ -5,7 +5,6 @@ use sleipnir_accounts::{
     errors::AccountsResult, AccountCommitter, ScheduledCommitsProcessor,
 };
 use sleipnir_accounts_api::InternalAccountProvider;
-use sleipnir_program::traits::AccountsRemover;
 
 #[derive(Default)]
 pub struct ScheduledCommitsProcessorStub {}

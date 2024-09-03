@@ -63,7 +63,7 @@ async fn test_devnet_clone_invalid_and_valid() {
         account_updates,
         account_dumper,
     );
-
+    // TODO(vbrunet) - write cloner TESTS
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());

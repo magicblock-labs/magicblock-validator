@@ -9,7 +9,9 @@ use conjunto_transwise::{
     CommitFrequency, DelegationRecord,
 };
 use futures_util::future::{ready, BoxFuture};
-use solana_sdk::{account::Account, clock::Slot, pubkey::Pubkey};
+use solana_sdk::{
+    account::Account, clock::Slot, pubkey::Pubkey, system_program,
+};
 
 use crate::{AccountFetcher, AccountFetcherResult};
 
@@ -69,15 +71,13 @@ impl AccountFetcherStub {
 }
 
 impl AccountFetcherStub {
-    pub fn add_undelegated(&self, pubkey: Pubkey, at_slot: Slot) {
+    pub fn set_system_account(&self, pubkey: Pubkey, at_slot: Slot) {
+        self.insert_known_account(pubkey, system_program::ID, at_slot, None);
+    }
+    pub fn set_undelegated(&self, pubkey: Pubkey, at_slot: Slot) {
         self.insert_known_account(pubkey, Pubkey::new_unique(), at_slot, None);
     }
-    pub fn add_delegated(
-        &mut self,
-        pubkey: Pubkey,
-        owner: Pubkey,
-        at_slot: Slot,
-    ) {
+    pub fn set_delegated(&self, pubkey: Pubkey, owner: Pubkey, at_slot: Slot) {
         self.insert_known_account(
             pubkey,
             Pubkey::new_unique(),

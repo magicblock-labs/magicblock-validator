@@ -17,7 +17,7 @@ pub struct AccountClonerStub {
 }
 
 impl AccountClonerStub {
-    pub fn add(&self, pubkey: &Pubkey, output: AccountClonerOutput) {
+    pub fn set(&self, pubkey: &Pubkey, output: AccountClonerOutput) {
         self.clone_account_outputs
             .write()
             .unwrap()
@@ -38,7 +38,7 @@ impl AccountCloner for AccountClonerStub {
             .cloned()
             .ok_or(AccountClonerError::AccountFetcherError(
                 AccountFetcherError::FailedToFetch(
-                    "not included in stub".to_owned(),
+                    "Account not set in AccountClonerStub".to_owned(),
                 ),
             ));
         Box::pin(ready(output))

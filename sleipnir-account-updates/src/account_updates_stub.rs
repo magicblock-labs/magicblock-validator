@@ -14,7 +14,7 @@ pub struct AccountUpdatesStub {
 
 #[allow(unused)] // used in tests
 impl AccountUpdatesStub {
-    pub fn add_known_update_slot(&mut self, pubkey: Pubkey, at_slot: Slot) {
+    pub fn set_known_update_slot(&self, pubkey: Pubkey, at_slot: Slot) {
         self.last_known_update_slots
             .write()
             .unwrap()

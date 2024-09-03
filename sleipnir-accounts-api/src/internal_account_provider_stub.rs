@@ -14,7 +14,7 @@ pub struct InternalAccountProviderStub {
 }
 
 impl InternalAccountProviderStub {
-    pub fn add(&self, pubkey: Pubkey, account: AccountSharedData) {
+    pub fn set(&self, pubkey: Pubkey, account: AccountSharedData) {
         self.accounts.write().unwrap().insert(pubkey, account);
     }
 }

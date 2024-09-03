@@ -224,32 +224,16 @@ where
         };
 
         // If the cloning succeeded, save it into the cache for later use
-        match self
+        self
             .last_cloned_account_chain_snapshot
             .write()
             .expect("RwLock of RemoteAccountClonerWorker.last_cloned_account_chain_snapshot is poisoned")
-            .entry(*pubkey)
-        {
-            Entry::Occupied(mut entry) => {
-                *entry.get_mut() = account_chain_snapshot.clone();
-            }
-            Entry::Vacant(entry) => {
-                entry.insert(account_chain_snapshot.clone());
-            },
-        };
-        match self
+            .insert(*pubkey, account_chain_snapshot.clone());
+        self
             .last_clone_dump_signatures
             .write()
             .expect("RwLock of RemoteAccountClonerWorker.last_clone_dump_signatures is poisoned")
-            .entry(*pubkey)
-        {
-            Entry::Occupied(mut entry) => {
-                *entry.get_mut() = signatures;
-            }
-            Entry::Vacant(entry) => {
-                entry.insert(signatures);
-            },
-        };
+            .insert(*pubkey, signatures);
 
         // Return the result
         Ok(AccountClonerOutput::Cloned(account_chain_snapshot))
