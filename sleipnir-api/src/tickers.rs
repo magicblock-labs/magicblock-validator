@@ -38,20 +38,6 @@ pub fn init_slot_ticker(
                     error!("Failed to process scheduled commits: {:?}", e);
                 },
             );
-            match accounts_manager.remove_accounts_pending_removal(&bank) {
-                Ok(Some(sig)) => {
-                    debug!("Removed accounts pending removal: {:?}", sig)
-                }
-                Ok(None) => {
-                    // No accounts were removed
-                }
-                Err(e) => {
-                    error!(
-                        "Failed to remove accounts pending removal: {:?}",
-                        e
-                    );
-                }
-            }
             if log {
                 info!("Advanced to slot {}", slot);
             }

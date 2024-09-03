@@ -23,6 +23,12 @@ pub trait ScheduledCommitsProcessor {
     ) -> AccountsResult<()>;
 }
 
+#[derive(Clone)]
+pub struct UndelegationRequest {
+    /// The original owner of the account before it was delegated.
+    pub owner: Pubkey,
+}
+
 pub struct AccountCommittee {
     /// The pubkey of the account to be committed.
     pub pubkey: Pubkey,

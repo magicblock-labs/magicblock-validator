@@ -24,18 +24,20 @@ impl AccountFetcherStub {
     fn insert_known_account(
         &self,
         pubkey: Pubkey,
-        value: (Pubkey, Slot, Option<DelegationRecord>),
+        owner: Pubkey,
+        slot: Slot,
+        delegation: Option<DelegationRecord>,
     ) {
-        self.known_accounts.write().unwrap().insert(pubkey, value);
+        self.known_accounts
+            .write()
+            .unwrap()
+            .insert(pubkey, (owner, slot, delegation));
     }
 }
 
 impl AccountFetcherStub {
     pub fn add_undelegated(&self, pubkey: Pubkey, at_slot: Slot) {
-        self.insert_known_account(
-            pubkey,
-            (Pubkey::new_unique(), at_slot, None),
-        );
+        self.insert_known_account(pubkey, Pubkey::new_unique(), at_slot, None);
     }
     pub fn add_delegated(
         &mut self,
@@ -45,14 +47,12 @@ impl AccountFetcherStub {
     ) {
         self.insert_known_account(
             pubkey,
-            (
-                Pubkey::new_unique(),
-                at_slot,
-                Some(DelegationRecord {
-                    owner,
-                    commit_frequency: CommitFrequency::default(),
-                }),
-            ),
+            Pubkey::new_unique(),
+            at_slot,
+            Some(DelegationRecord {
+                owner,
+                commit_frequency: CommitFrequency::default(),
+            }),
         );
     }
 }

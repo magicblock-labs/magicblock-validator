@@ -13,7 +13,6 @@ use solana_sdk::{
 };
 
 use crate::{
-    deleg::CommitAccountArgs,
     errors::{AccountsError, AccountsResult},
     AccountCommittee, AccountCommitter, CommitAccountsPayload,
     CommitAccountsTransaction, PendingCommitTransaction,

@@ -8,7 +8,7 @@ use solana_sdk::{
 
 use crate::{
     errors::{MutatorError, MutatorResult},
-    idl::find_program_idl_modification_from_cluster,
+    idl::fetch_program_idl_modification_from_cluster,
     program::{create_program_modifications, ProgramModifications},
     transactions::{
         transaction_to_clone_regular_account, transactions_to_clone_program,
@@ -16,7 +16,7 @@ use crate::{
     Cluster,
 };
 
-pub async fn fetch_account(
+pub async fn fetch_account_from_cluster(
     cluster: &Cluster,
     pubkey: &Pubkey,
 ) -> MutatorResult<Account> {
@@ -44,7 +44,7 @@ pub async fn transactions_to_clone_pubkey_from_cluster(
     overrides: Option<AccountModification>,
 ) -> MutatorResult<Vec<Transaction>> {
     // Download the account
-    let account = &fetch_account(cluster, pubkey).await?;
+    let account = &fetch_account_from_cluster(cluster, pubkey).await?;
     // If it's a regular account that's not executable (program), use happy path
     if !account.executable {
         return Ok(vec![transaction_to_clone_regular_account(
@@ -60,7 +60,7 @@ pub async fn transactions_to_clone_pubkey_from_cluster(
     // The program data needs to be cloned, download the executable account
     let program_data_pubkey = get_program_data_address(program_id_pubkey);
     let program_data_account =
-        fetch_account(cluster, &program_data_pubkey).await?;
+        fetch_account_from_cluster(cluster, &program_data_pubkey).await?;
     // Compute the modifications needed to update the program
     let ProgramModifications {
         program_id_modification,
@@ -76,8 +76,8 @@ pub async fn transactions_to_clone_pubkey_from_cluster(
     .map_err(MutatorError::MutatorModificationError)?;
     // Try to fetch the IDL if possible
     let program_idl_modification =
-        find_program_idl_modification_from_cluster(cluster, program_id_pubkey)
-            .await;
+        fetch_program_idl_modification_from_cluster(cluster, program_id_pubkey)
+            .await?;
     // Done, generate the transaction as normal
     Ok(transactions_to_clone_program(
         needs_upgrade,

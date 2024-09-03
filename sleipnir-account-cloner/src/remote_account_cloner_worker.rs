@@ -4,7 +4,9 @@ use std::{
     vec,
 };
 
-use conjunto_transwise::{AccountChainSnapshotShared, AccountChainState};
+use conjunto_transwise::{
+    AccountChainSnapshotShared, AccountChainState, DelegationRecord,
+};
 use futures_util::future::join_all;
 use log::*;
 use sleipnir_account_dumper::AccountDumper;
@@ -215,7 +217,7 @@ where
             } => self.do_clone_delegated_account(
                 pubkey,
                 account,
-                &delegation_record.owner,
+                &delegation_record,
             )?,
             // If the account is delegated but inconsistant on-chain,
             // We can just clone it, it won't be usable as writable,
@@ -301,15 +303,29 @@ where
         &self,
         pubkey: &Pubkey,
         account: &Account,
-        owner: &Pubkey,
+        delegation_record: &DelegationRecord,
     ) -> AccountClonerResult<Vec<Signature>> {
+        /*
+        if Some(last_account_chain_snapshot) =
+            self.get_last_cloned_account_chain_snapshot(pubkey)
+        {
+            match last_account_chain_snapshot.chain_state {
+                AccountChainState::Delegated {
+                    delegation_record,
+                    ..
+                } => {
+                    if delegation_record.slot
+                }
+            }
+        }
+         */
         // If the delegated account is already present in the bank,
         // don't override it as it may contain precious state
         if self.internal_account_provider.has_account(pubkey) {
             return Ok(vec![]);
         }
         self.account_dumper
-            .dump_delegated_account(pubkey, account, owner)
+            .dump_delegated_account(pubkey, account, &delegation_record.owner)
             .map_err(AccountClonerError::AccountDumperError)
             .map(|signature| vec![signature])
     }
