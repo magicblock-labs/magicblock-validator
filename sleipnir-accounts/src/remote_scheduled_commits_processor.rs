@@ -4,10 +4,13 @@ use async_trait::async_trait;
 use log::*;
 use sleipnir_accounts_api::InternalAccountProvider;
 use sleipnir_bank::bank::Bank;
+use sleipnir_core::debug_panic;
 use sleipnir_mutator::Cluster;
 use sleipnir_processor::execute_transaction::execute_legacy_transaction;
 use sleipnir_program::{
-    register_scheduled_commit_sent, SentCommit, TransactionScheduler,
+    register_scheduled_commit_sent,
+    traits::{AccountRemovalReason, AccountsRemover},
+    SentCommit, TransactionScheduler,
 };
 use sleipnir_transaction_status::TransactionStatusSender;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
@@ -15,6 +18,7 @@ use solana_sdk::{pubkey::Pubkey, signature::Signature};
 use crate::{
     errors::AccountsResult, AccountCommittee, AccountCommitter,
     ScheduledCommitsProcessor, SendableCommitAccountsPayload,
+    UndelegationRequest,
 };
 
 pub struct RemoteScheduledCommitsProcessor {
@@ -25,28 +29,19 @@ pub struct RemoteScheduledCommitsProcessor {
     transaction_scheduler: TransactionScheduler,
 }
 
-impl RemoteScheduledCommitsProcessor {
-    pub(crate) fn new(
-        cluster: Cluster,
-        bank: Arc<Bank>,
-        transaction_status_sender: Option<TransactionStatusSender>,
-    ) -> Self {
-        Self {
-            cluster,
-            bank,
-            transaction_status_sender,
-            transaction_scheduler: TransactionScheduler::default(),
-        }
-    }
-}
-
 #[async_trait]
 impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
-    async fn process<AC: AccountCommitter, IAP: InternalAccountProvider>(
+    async fn process<AC, IAP, AR>(
         &self,
         committer: &Arc<AC>,
         account_provider: &IAP,
-    ) -> AccountsResult<()> {
+        accounts_remover: &AR,
+    ) -> AccountsResult<()>
+    where
+        AC: AccountCommitter,
+        IAP: InternalAccountProvider,
+        AR: AccountsRemover,
+    {
         let scheduled_commits =
             self.transaction_scheduler.take_scheduled_commits();
         if scheduled_commits.is_empty() {
@@ -65,9 +60,19 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
             for pubkey in commit.accounts {
                 match account_provider.get_account(&pubkey) {
                     Some(account_data) => {
+                        let undelegation_request =
+                            if commit.request_undelegation {
+                                Some(UndelegationRequest {
+                                    owner: commit.owner,
+                                })
+                            } else {
+                                None
+                            };
                         committees.push(AccountCommittee {
                             pubkey,
                             account_data,
+                            slot: commit.slot,
+                            undelegation_request,
                         });
                     }
                     None => {
@@ -120,20 +125,24 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
             // chain in order to realize the commits needed
             let signatures = sendable_payloads
                 .iter()
-                .flat_map(|payload| payload.transaction.signatures.clone())
+                .map(|payload| payload.get_signature())
                 .collect::<Vec<Signature>>();
 
             // Record that we are about to send the commit to chain including all
             // information (mainly signatures) needed to track its outcome on chain
-            let sent_commit = SentCommit::new(
-                commit.id,
-                commit.slot,
-                commit.blockhash,
-                commit.payer,
-                signatures,
-                included_pubkeys.into_iter().collect(),
+
+            let sent_commit = SentCommit {
+                commit_id: commit.id,
+                slot: commit.slot,
+                blockhash: commit.blockhash,
+                payer: commit.payer,
+                chain_signatures: signatures,
+                included_pubkeys: included_pubkeys.into_iter().collect(),
                 excluded_pubkeys,
-            );
+                requested_undelegation_to_owner: commit
+                    .request_undelegation
+                    .then_some(commit.owner),
+            };
             register_scheduled_commit_sent(sent_commit);
             let signature = execute_legacy_transaction(
                 commit.commit_sent_transaction,
@@ -160,25 +169,81 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
             sendable_payloads_queue.extend(sendable_payloads);
         }
 
-        // Finally we process the queue on a separate task in order to not block
+        self.process_accounts_commits_in_background(
+            committer,
+            accounts_remover,
+            sendable_payloads_queue,
+        );
+
+        Ok(())
+    }
+}
+
+impl RemoteScheduledCommitsProcessor {
+    pub(crate) fn new(
+        cluster: Cluster,
+        bank: Arc<Bank>,
+        transaction_status_sender: Option<TransactionStatusSender>,
+    ) -> Self {
+        Self {
+            cluster,
+            bank,
+            transaction_status_sender,
+            transaction_scheduler: TransactionScheduler::default(),
+        }
+    }
+
+    fn process_accounts_commits_in_background<
+        AC: AccountCommitter,
+        AR: AccountsRemover,
+    >(
+        &self,
+        committer: &Arc<AC>,
+        remover: &AR,
+        sendable_payloads_queue: Vec<SendableCommitAccountsPayload>,
+    ) {
+        // We process the queue on a separate task in order to not block
         // the validator (slot advance) itself
         // NOTE: @@ we have to be careful here and ensure that the validator does not
         // shutdown before this task is done
         // We will need some tracking machinery which is overkill until we get to the
         // point where we do allow validator shutdown
         let committer = committer.clone();
+        let remover = remover.clone();
         tokio::task::spawn(async move {
-            let signatures = committer
+            let pending_commits = match committer
                 .send_commit_transactions(sendable_payloads_queue)
-                .await;
-            debug!(
-                "Signaled commit with external signatures: {:?}",
-                signatures
-            );
+                .await
+            {
+                Ok(commits) => commits,
+                Err(err) => {
+                    debug_panic!(
+                        "Failed to send commit transactions: {:?}",
+                        err
+                    );
+                    return;
+                }
+            };
+            let undelegated_accounts = pending_commits
+                .into_iter()
+                .flat_map(|commit| commit.undelegated_accounts.into_iter())
+                .collect::<HashSet<Pubkey>>();
+            if !undelegated_accounts.is_empty() {
+                if log::log_enabled!(log::Level::Debug) {
+                    debug!(
+                        "Requesting to undelegate: {}",
+                        undelegated_accounts
+                            .iter()
+                            .map(|x| x.to_string())
+                            .collect::<Vec<String>>()
+                            .join(", ")
+                    );
+                }
+                remover.request_accounts_removal(
+                    undelegated_accounts,
+                    AccountRemovalReason::Undelegated,
+                );
+            }
         });
-
-        Ok(())
     }
 }
-
-// TODO: @@@ tests

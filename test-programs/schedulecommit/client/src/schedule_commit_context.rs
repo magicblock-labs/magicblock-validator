@@ -142,7 +142,10 @@ impl ScheduleCommitTestContext {
             .with_context(|| "Failed to initialize committees")
     }
 
-    pub fn delegate_committees(&self) -> Result<Signature> {
+    pub fn delegate_committees(
+        &self,
+        blockhash: Option<Hash>,
+    ) -> Result<Signature> {
         let mut ixs = vec![];
         let mut payers = vec![];
         for (payer, _) in &self.committees {
@@ -155,7 +158,7 @@ impl ScheduleCommitTestContext {
             &ixs,
             Some(&payers[0].pubkey()),
             &payers,
-            self.chain_blockhash,
+            blockhash.unwrap_or(self.chain_blockhash),
         );
         self.chain_client
             .send_and_confirm_transaction_with_spinner_and_config(
@@ -342,6 +345,36 @@ impl ScheduleCommitTestContext {
             .with_context(|| {
                 format!(
                     "Failed to fetch chain account balance for '{:?}'",
+                    pubkey
+                )
+            })
+    }
+
+    pub fn fetch_ephem_account_owner(
+        &self,
+        pubkey: Pubkey,
+    ) -> anyhow::Result<Pubkey> {
+        self.ephem_client
+            .get_account(&pubkey)
+            .map(|account| account.owner)
+            .with_context(|| {
+                format!(
+                    "Failed to fetch ephemeral account owner for '{:?}'",
+                    pubkey
+                )
+            })
+    }
+
+    pub fn fetch_chain_account_owner(
+        &self,
+        pubkey: Pubkey,
+    ) -> anyhow::Result<Pubkey> {
+        self.chain_client
+            .get_account(&pubkey)
+            .map(|account| account.owner)
+            .with_context(|| {
+                format!(
+                    "Failed to fetch chain account owner for '{:?}'",
                     pubkey
                 )
             })

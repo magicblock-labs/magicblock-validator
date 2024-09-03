@@ -8,7 +8,10 @@ use solana_program::{
     system_program,
 };
 
-use crate::DelegateCpiArgs;
+use crate::{
+    DelegateCpiArgs, DELEGATE_CPI_IX, INCREASE_COUNT_IX, INIT_IX,
+    SCHEDULECOMMIT_AND_UNDELEGATE_CPI_IX, SCHEDULECOMMIT_CPI_IX,
+};
 
 pub fn init_account_instruction(
     payer: Pubkey,
@@ -21,7 +24,7 @@ pub fn init_account_instruction(
         AccountMeta::new_readonly(system_program::id(), false),
     ];
 
-    let instruction_data = vec![0];
+    let instruction_data = vec![INIT_IX];
     Instruction::new_with_bytes(program_id, &instruction_data, account_metas)
 }
 
@@ -49,7 +52,7 @@ pub fn delegate_account_cpi_instruction(player: Pubkey) -> Instruction {
     ];
 
     let mut instruction_data = args.try_to_vec().unwrap();
-    instruction_data.insert(0, 2);
+    instruction_data.insert(0, DELEGATE_CPI_IX);
     Instruction::new_with_bytes(program_id, &instruction_data, account_metas)
 }
 
@@ -69,6 +72,37 @@ pub fn schedule_commit_cpi_instruction(
     players: &[Pubkey],
     committees: &[Pubkey],
 ) -> Instruction {
+    schedule_commit_cpi_instruction_impl(
+        payer,
+        magic_program_id,
+        players,
+        committees,
+        false,
+    )
+}
+
+pub fn schedule_commit_and_undelegate_cpi_instruction(
+    payer: Pubkey,
+    magic_program_id: Pubkey,
+    players: &[Pubkey],
+    committees: &[Pubkey],
+) -> Instruction {
+    schedule_commit_cpi_instruction_impl(
+        payer,
+        magic_program_id,
+        players,
+        committees,
+        true,
+    )
+}
+
+fn schedule_commit_cpi_instruction_impl(
+    payer: Pubkey,
+    magic_program_id: Pubkey,
+    players: &[Pubkey],
+    committees: &[Pubkey],
+    undelegate: bool,
+) -> Instruction {
     let program_id = crate::id();
     let mut account_metas = vec![
         AccountMeta::new(payer, true),
@@ -78,10 +112,22 @@ pub fn schedule_commit_cpi_instruction(
         account_metas.push(AccountMeta::new(*committee, false));
     }
 
-    let mut instruction_data = vec![1];
+    let mut instruction_data = if undelegate {
+        vec![SCHEDULECOMMIT_AND_UNDELEGATE_CPI_IX]
+    } else {
+        vec![SCHEDULECOMMIT_CPI_IX]
+    };
     for player in players {
         instruction_data.extend_from_slice(player.as_ref());
     }
+    Instruction::new_with_bytes(program_id, &instruction_data, account_metas)
+}
+
+pub fn increase_count_instruction(committee: Pubkey) -> Instruction {
+    let program_id = crate::id();
+    let account_metas = vec![AccountMeta::new(committee, false)];
+
+    let instruction_data = vec![INCREASE_COUNT_IX];
     Instruction::new_with_bytes(program_id, &instruction_data, account_metas)
 }
 

@@ -37,4 +37,7 @@ pub enum AccountsError {
 
     #[error("FailedToSendTransaction '{0}'")]
     FailedToSendTransaction(String),
+
+    #[error("Too many committees: {0}")]
+    TooManyCommittees(usize),
 }

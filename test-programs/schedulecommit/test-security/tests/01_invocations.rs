@@ -33,7 +33,7 @@ fn prepare_ctx_with_account_to_commit() -> ScheduleCommitTestContext {
         ScheduleCommitTestContext::new_random_keys(2)
     };
     ctx.init_committees().unwrap();
-    ctx.delegate_committees().unwrap();
+    ctx.delegate_committees(None).unwrap();
 
     ctx
 }

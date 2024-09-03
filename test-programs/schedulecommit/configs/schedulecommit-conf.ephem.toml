@@ -12,4 +12,4 @@ path = "../elfs/schedulecommit_program.so"
 
 [[program]]
 id = "4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr"
-path = "../elfs/schedulecommit_security.so"
+path = "../elfs/schedulecommit_test_security.so"

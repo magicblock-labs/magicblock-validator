@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use sleipnir_bank::bank::Bank;
-use solana_sdk::{account::AccountSharedData, pubkey::Pubkey};
+use solana_sdk::{account::AccountSharedData, clock::Slot, pubkey::Pubkey};
 
 use crate::InternalAccountProvider;
 
@@ -19,5 +19,8 @@ impl InternalAccountProvider for BankAccountProvider {
     }
     fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
         self.0.get_account(pubkey)
+    }
+    fn get_slot(&self) -> Slot {
+        self.0.slot()
     }
 }

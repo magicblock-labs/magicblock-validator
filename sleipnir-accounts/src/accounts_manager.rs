@@ -7,6 +7,7 @@ use conjunto_transwise::{
 use sleipnir_account_cloner::RemoteAccountClonerClient;
 use sleipnir_accounts_api::BankAccountProvider;
 use sleipnir_bank::bank::Bank;
+use sleipnir_program::ValidatorAccountsRemover;
 use sleipnir_transaction_status::TransactionStatusSender;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{commitment_config::CommitmentConfig, signature::Keypair};
@@ -22,21 +23,13 @@ pub type AccountsManager = ExternalAccountsManager<
     BankAccountProvider,
     RemoteAccountClonerClient,
     RemoteAccountCommitter,
+    ValidatorAccountsRemover,
     TransactionAccountsExtractorImpl,
     TransactionAccountsValidatorImpl,
     RemoteScheduledCommitsProcessor,
 >;
 
-impl
-    ExternalAccountsManager<
-        BankAccountProvider,
-        RemoteAccountClonerClient,
-        RemoteAccountCommitter,
-        TransactionAccountsExtractorImpl,
-        TransactionAccountsValidatorImpl,
-        RemoteScheduledCommitsProcessor,
-    >
-{
+impl AccountsManager {
     pub fn try_new(
         bank: &Arc<Bank>,
         remote_account_cloner_client: RemoteAccountClonerClient,
@@ -60,13 +53,14 @@ impl
         let scheduled_commits_processor = RemoteScheduledCommitsProcessor::new(
             remote_cluster,
             bank.clone(),
-            transaction_status_sender,
+            transaction_status_sender.clone(),
         );
 
         Ok(Self {
             internal_account_provider,
             account_cloner: remote_account_cloner_client,
             account_committer: Arc::new(account_committer),
+            accounts_remover: ValidatorAccountsRemover::default(),
             transaction_accounts_extractor: TransactionAccountsExtractorImpl,
             transaction_accounts_validator: TransactionAccountsValidatorImpl,
             lifecycle: config.lifecycle,

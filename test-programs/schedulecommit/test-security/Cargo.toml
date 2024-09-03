@@ -1,5 +1,5 @@
 [package]
-name = "schedulecommit-security"
+name = "schedulecommit-test-security"
 version.workspace = true
 edition.workspace = true
 

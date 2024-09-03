@@ -20,13 +20,17 @@ use solana_sdk::{
 };
 
 use crate::{
+    internal::process_remove_accounts_pending_removal,
     process_scheduled_commit_sent,
-    schedule_transactions::process_schedule_commit,
+    schedule_transactions::{
+        process_schedule_commit, ProcessScheduleCommitOptions,
+    },
     sleipnir_instruction::{
         AccountModificationForInstruction, SleipnirError, SleipnirInstruction,
     },
     validator_authority_id,
 };
+
 pub const DEFAULT_COMPUTE_UNITS: u64 = 150;
 
 declare_process_instruction!(
@@ -49,8 +53,21 @@ declare_process_instruction!(
                     &mut account_mods,
                 )
             }
-            SleipnirInstruction::ScheduleCommit => {
-                process_schedule_commit(signers, invoke_context)
+            SleipnirInstruction::ScheduleCommit => process_schedule_commit(
+                signers,
+                invoke_context,
+                ProcessScheduleCommitOptions {
+                    request_undelegation: false,
+                },
+            ),
+            SleipnirInstruction::ScheduleCommitAndUndelegate => {
+                process_schedule_commit(
+                    signers,
+                    invoke_context,
+                    ProcessScheduleCommitOptions {
+                        request_undelegation: true,
+                    },
+                )
             }
             SleipnirInstruction::ScheduledCommitSent(id) => {
                 process_scheduled_commit_sent(
@@ -59,6 +76,9 @@ declare_process_instruction!(
                     transaction_context,
                     id,
                 )
+            }
+            SleipnirInstruction::RemoveAccountsPendingRemoval => {
+                process_remove_accounts_pending_removal(signers, invoke_context)
             }
         }
     }

@@ -16,6 +16,7 @@ use solana_sdk::{
 use stubs::{
     account_committer_stub::AccountCommitterStub,
     scheduled_commits_processor_stub::ScheduledCommitsProcessorStub,
+    StubbedAccountsManager,
 };
 use test_tools_core::init_logger;
 
@@ -26,23 +27,18 @@ fn setup(
     account_cloner: AccountClonerStub,
     account_committer: AccountCommitterStub,
     validator_auth_id: Pubkey,
-) -> ExternalAccountsManager<
-    InternalAccountProviderStub,
-    AccountClonerStub,
-    AccountCommitterStub,
-    TransactionAccountsExtractorImpl,
-    TransactionAccountsValidatorImpl,
-    ScheduledCommitsProcessorStub,
-> {
+) -> StubbedAccountsManager {
     ExternalAccountsManager {
         internal_account_provider,
         account_cloner,
         account_committer: Arc::new(account_committer),
+        accounts_remover: AccountsRemoverStub,
         transaction_accounts_extractor: TransactionAccountsExtractorImpl,
         transaction_accounts_validator: TransactionAccountsValidatorImpl,
         scheduled_commits_processor: ScheduledCommitsProcessorStub::default(),
         lifecycle: LifecycleMode::Ephemeral,
         external_commitable_accounts: Default::default(),
+        transaction_status_sender: todo!(),
     }
 }
 

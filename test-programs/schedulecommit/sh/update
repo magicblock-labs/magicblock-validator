@@ -9,6 +9,6 @@ cargo build-sbf --manifest-path=$PROGRAM_CARGO_TOML --sbf-out-dir=$ELFS_DIR
 echo "Built schedulecommit in $ELFS_DIR"
 
 
-SECURITY_PROGRAM_CARGO_TOML=$DIR/../security/Cargo.toml
+SECURITY_PROGRAM_CARGO_TOML=$DIR/../test-security/Cargo.toml
 cargo build-sbf --manifest-path=$SECURITY_PROGRAM_CARGO_TOML --sbf-out-dir=$ELFS_DIR
 echo "Built schedulecommit-security in $ELFS_DIR"

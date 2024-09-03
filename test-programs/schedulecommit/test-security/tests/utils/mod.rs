@@ -34,7 +34,7 @@ pub fn create_sibling_schedule_cpis_instruction(
         instruction_data.extend_from_slice(&pubkey.to_bytes());
     }
     Instruction::new_with_bytes(
-        schedulecommit_security::id(),
+        schedulecommit_test_security::id(),
         &instruction_data,
         account_metas,
     )
@@ -66,7 +66,7 @@ pub fn create_nested_schedule_cpis_instruction(
         instruction_data.extend_from_slice(&pubkey.to_bytes());
     }
     Instruction::new_with_bytes(
-        schedulecommit_security::id(),
+        schedulecommit_test_security::id(),
         &instruction_data,
         account_metas,
     )
@@ -78,7 +78,7 @@ pub fn create_sibling_non_cpi_instruction(payer: Pubkey) -> Instruction {
     let account_metas = vec![AccountMeta::new(payer, true)];
     let instruction_data = vec![1, 0, 0, 0];
     Instruction::new_with_bytes(
-        schedulecommit_security::id(),
+        schedulecommit_test_security::id(),
         &instruction_data,
         account_metas,
     )

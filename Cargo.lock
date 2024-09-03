@@ -4330,6 +4330,7 @@ dependencies = [
  "sleipnir-account-updates",
  "sleipnir-accounts-api",
  "sleipnir-bank",
+ "sleipnir-core",
  "sleipnir-mutator",
  "sleipnir-processor",
  "sleipnir-program",
@@ -5881,6 +5882,7 @@ name = "test-bins"
 version = "1.19.0"
 dependencies = [
  "console-subscriber",
+ "env_logger 0.11.3",
  "log",
  "sleipnir-api",
  "sleipnir-config",

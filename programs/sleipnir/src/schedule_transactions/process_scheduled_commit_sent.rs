@@ -17,35 +17,14 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct SentCommit {
-    id: u64,
-    slot: Slot,
-    blockhash: Hash,
-    payer: Pubkey,
-    chain_signatures: Vec<Signature>,
-    included_pubkeys: Vec<Pubkey>,
-    excluded_pubkeys: Vec<Pubkey>,
-}
-
-impl SentCommit {
-    pub fn new(
-        id: u64,
-        slot: Slot,
-        blockhash: Hash,
-        payer: Pubkey,
-        chain_signatures: Vec<Signature>,
-        included_pubkeys: Vec<Pubkey>,
-        excluded_pubkeys: Vec<Pubkey>,
-    ) -> Self {
-        Self {
-            id,
-            slot,
-            blockhash,
-            payer,
-            chain_signatures,
-            included_pubkeys,
-            excluded_pubkeys,
-        }
-    }
+    pub commit_id: u64,
+    pub slot: Slot,
+    pub blockhash: Hash,
+    pub payer: Pubkey,
+    pub chain_signatures: Vec<Signature>,
+    pub included_pubkeys: Vec<Pubkey>,
+    pub excluded_pubkeys: Vec<Pubkey>,
+    pub requested_undelegation_to_owner: Option<Pubkey>,
 }
 
 /// This is a printable version of the SentCommit struct.
@@ -59,12 +38,13 @@ struct SentCommitPrintable {
     chain_signatures: Vec<String>,
     included_pubkeys: String,
     excluded_pubkeys: String,
+    requested_undelegation_to_owner: Option<String>,
 }
 
 impl From<SentCommit> for SentCommitPrintable {
     fn from(commit: SentCommit) -> Self {
         Self {
-            id: commit.id,
+            id: commit.commit_id,
             slot: commit.slot,
             blockhash: commit.blockhash.to_string(),
             payer: commit.payer.to_string(),
@@ -85,6 +65,9 @@ impl From<SentCommit> for SentCommitPrintable {
                 .map(|x| x.to_string())
                 .collect::<Vec<_>>()
                 .join(", "),
+            requested_undelegation_to_owner: commit
+                .requested_undelegation_to_owner
+                .map(|x| x.to_string()),
         }
     }
 }
@@ -99,7 +82,7 @@ lazy_static! {
 }
 
 pub fn register_scheduled_commit_sent(commit: SentCommit) {
-    let id = commit.id;
+    let id = commit.commit_id;
     SENT_COMMITS
         .write()
         .expect("SENT_COMMITS lock poisoned")
@@ -115,7 +98,7 @@ pub fn process_scheduled_commit_sent(
     signers: HashSet<Pubkey>,
     invoke_context: &InvokeContext,
     transaction_context: &TransactionContext,
-    id: u64,
+    commit_id: u64,
 ) -> Result<(), InstructionError> {
     const PROGRAM_IDX: u16 = 0;
     const VALIDATOR_IDX: u16 = 1;
@@ -158,13 +141,13 @@ pub fn process_scheduled_commit_sent(
     // Otherwise a malicious actor could remove a commit from the hashmap without
     // signing as the validator
     let commit = match SENT_COMMITS.write() {
-        Ok(mut commits) => match commits.remove(&id) {
+        Ok(mut commits) => match commits.remove(&commit_id) {
             Some(commit) => commit,
             None => {
                 ic_msg!(
                     invoke_context,
                     "ScheduleCommit ERR: commit with id {} not found",
-                    id
+                    commit_id
                 );
                 return Err(InstructionError::Custom(
                     custom_error_codes::UNABLE_TO_UNLOCK_SENT_COMMITS,
@@ -216,6 +199,14 @@ pub fn process_scheduled_commit_sent(
         );
     }
 
+    if let Some(owner) = commit.requested_undelegation_to_owner {
+        ic_msg!(
+            invoke_context,
+            "ScheduledCommitSent requested undelegation to {}",
+            owner
+        );
+    }
+
     Ok(())
 }
 
@@ -237,20 +228,21 @@ mod tests {
         validator_authority_id,
     };
 
-    fn single_acc_commit(id: u64) -> SentCommit {
+    fn single_acc_commit(commit_id: u64) -> SentCommit {
         let slot = 10;
         let sig = Signature::default();
         let payer = Pubkey::new_unique();
         let acc = Pubkey::new_unique();
-        SentCommit::new(
-            id,
+        SentCommit {
+            commit_id,
             slot,
-            Hash::default(),
+            blockhash: Hash::default(),
             payer,
-            vec![sig],
-            vec![acc],
-            vec![],
-        )
+            chain_signatures: vec![sig],
+            included_pubkeys: vec![acc],
+            excluded_pubkeys: Default::default(),
+            requested_undelegation_to_owner: None,
+        }
     }
 
     fn transaction_accounts_from_map(
@@ -285,7 +277,7 @@ mod tests {
         let mut ix = scheduled_commit_sent_instruction(
             &crate::id(),
             &validator_authority_id(),
-            commit.id,
+            commit.commit_id,
         );
         ix.accounts[1].is_signer = false;
 
@@ -299,7 +291,7 @@ mod tests {
         );
 
         assert!(
-            get_scheduled_commit(commit.id).is_some(),
+            get_scheduled_commit(commit.commit_id).is_some(),
             "does not remove scheduled commit data"
         );
     }
@@ -322,7 +314,7 @@ mod tests {
         let ix = scheduled_commit_sent_instruction(
             &crate::id(),
             &fake_validator.pubkey(),
-            commit.id,
+            commit.commit_id,
         );
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
@@ -334,7 +326,7 @@ mod tests {
         );
 
         assert!(
-            get_scheduled_commit(commit.id).is_some(),
+            get_scheduled_commit(commit.commit_id).is_some(),
             "does not remove scheduled commit data"
         );
     }
@@ -357,7 +349,7 @@ mod tests {
         let ix = scheduled_commit_sent_instruction(
             &fake_program.pubkey(),
             &validator_authority_id(),
-            commit.id,
+            commit.commit_id,
         );
         let transaction_accounts =
             transaction_accounts_from_map(&ix, &mut account_data);
@@ -370,7 +362,7 @@ mod tests {
         );
 
         assert!(
-            get_scheduled_commit(commit.id).is_some(),
+            get_scheduled_commit(commit.commit_id).is_some(),
             "does not remove scheduled commit data"
         );
     }
@@ -386,7 +378,7 @@ mod tests {
         let ix = scheduled_commit_sent_instruction(
             &crate::id(),
             &validator_authority_id(),
-            commit.id,
+            commit.commit_id,
         );
 
         let transaction_accounts =
@@ -399,7 +391,7 @@ mod tests {
         );
 
         assert!(
-            get_scheduled_commit(commit.id).is_none(),
+            get_scheduled_commit(commit.commit_id).is_none(),
             "removes scheduled commit data"
         );
     }
