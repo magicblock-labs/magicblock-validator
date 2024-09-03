@@ -218,17 +218,17 @@ impl RemoteScheduledCommitsProcessor {
                 .into_iter()
                 .flat_map(|commit| commit.undelegated_accounts.into_iter())
                 .collect::<HashSet<Pubkey>>();
-            if !undelegated_accounts.is_empty() {
-                if log::log_enabled!(log::Level::Debug) {
-                    debug!(
-                        "Requesting to undelegate: {}",
-                        undelegated_accounts
-                            .iter()
-                            .map(|x| x.to_string())
-                            .collect::<Vec<String>>()
-                            .join(", ")
-                    );
-                }
+            if !undelegated_accounts.is_empty()
+                && log::log_enabled!(log::Level::Debug)
+            {
+                debug!(
+                    "Requesting to undelegate: {}",
+                    undelegated_accounts
+                        .iter()
+                        .map(|x| x.to_string())
+                        .collect::<Vec<String>>()
+                        .join(", ")
+                );
             }
         });
     }

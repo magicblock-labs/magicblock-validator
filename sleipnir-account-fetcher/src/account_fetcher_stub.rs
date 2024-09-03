@@ -94,6 +94,7 @@ impl AccountFetcherStub {
             at_slot,
             Some(DelegationRecord {
                 owner,
+                delegation_slot: 0,
                 commit_frequency: CommitFrequency::default(),
             }),
         );

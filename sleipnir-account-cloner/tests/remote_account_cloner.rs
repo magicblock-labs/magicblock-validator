@@ -57,7 +57,7 @@ async fn test_devnet_clone_invalid_and_valid() {
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
     // Create account cloner worker and client
-    let (client, cancellation_token, worker_handle) = setup(
+    let (_client, cancellation_token, worker_handle) = setup(
         internal_account_provider,
         account_fetcher,
         account_updates,

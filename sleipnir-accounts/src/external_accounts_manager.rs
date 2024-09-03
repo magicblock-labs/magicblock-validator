@@ -194,29 +194,26 @@ where
         &self,
         clone_output: &AccountClonerOutput,
     ) {
-        match clone_output {
-            AccountClonerOutput::Cloned(account_chain_snapshot) => {
-                match &account_chain_snapshot.chain_state {
-                    AccountChainState::Delegated {
-                        delegation_record,
-                        ..
-                    } =>
-                        match self.external_commitable_accounts
-                            .write()
-                            .expect(
-                            "RwLock of ExternalAccountsManager.external_commitable_accounts is poisoned",
-                            )
-                            .entry(account_chain_snapshot.pubkey)
-                        {
-                            Entry::Occupied(mut _entry) => {},
-                            Entry::Vacant(entry) => {
-                                entry.insert(ExternalCommitableAccount::new(&account_chain_snapshot.pubkey, &delegation_record.commit_frequency, &get_epoch()));
-                            },
-                        }
-                    _ => {}
+        if let AccountClonerOutput::Cloned(account_chain_snapshot) =
+            clone_output
+        {
+            if let AccountChainState::Delegated {
+                delegation_record, ..
+            } = &account_chain_snapshot.chain_state
+            {
+                match self.external_commitable_accounts
+                    .write()
+                    .expect(
+                    "RwLock of ExternalAccountsManager.external_commitable_accounts is poisoned",
+                    )
+                    .entry(account_chain_snapshot.pubkey)
+                {
+                    Entry::Occupied(mut _entry) => {},
+                    Entry::Vacant(entry) => {
+                        entry.insert(ExternalCommitableAccount::new(&account_chain_snapshot.pubkey, &delegation_record.commit_frequency, &get_epoch()));
+                    },
                 }
-            },
-            AccountClonerOutput::Unclonable(_) => {},
+            }
         };
     }
 

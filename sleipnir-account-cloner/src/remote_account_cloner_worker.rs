@@ -213,7 +213,7 @@ where
                 pubkey,
                 account,
                 &delegation_record.owner,
-                42, // TODO(vbrunet) - use real
+                delegation_record.delegation_slot,
             )?,
             // If the account is delegated but inconsistant on-chain,
             // We can just clone it, it won't be usable as writable,
@@ -280,16 +280,14 @@ where
         if let Some(last_account_chain_snapshot) =
             self.get_last_cloned_account_chain_snapshot(pubkey)
         {
-            match &last_account_chain_snapshot.chain_state {
-                    AccountChainState::Delegated {
-                        ..
-                    } if /* delegation_record.delegation_slot */ 42
-                        == delegation_slot =>
-                    {
-                        return Ok(vec![]);
-                    }
-                    _ => {}
+            if let AccountChainState::Delegated {
+                delegation_record, ..
+            } = &last_account_chain_snapshot.chain_state
+            {
+                if delegation_record.delegation_slot == delegation_slot {
+                    return Ok(vec![]);
                 }
+            }
         };
         // If its the first time we're seeing this delegated account, dump it to the bank
         self.account_dumper

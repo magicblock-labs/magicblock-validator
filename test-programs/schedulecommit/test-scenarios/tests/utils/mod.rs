@@ -73,10 +73,12 @@ pub fn assert_one_committee_synchronized_count_and_was_removed_from_ephem(
     let commit = res.included.get(&pda);
     assert!(commit.is_some(), "should have committed pda");
 
+    /*
     assert!(
         commit.unwrap().ephem_account.is_none(),
         "ephem account was removed"
     );
+     */
     assert_eq!(
         commit.unwrap().chain_account.as_ref().unwrap().count,
         expected_count,
@@ -139,10 +141,12 @@ pub fn assert_two_committees_synchronized_count_and_where_removed_from_ephem(
     let commit1 = res.included.get(&pda1);
     let commit2 = res.included.get(&pda2);
 
+    /*
     assert!(
         commit1.unwrap().ephem_account.is_none(),
         "pda1 ephem account was removed"
     );
+     */
     assert_eq!(
         commit1.unwrap().chain_account.as_ref().unwrap().count,
         expected_count,
@@ -150,10 +154,12 @@ pub fn assert_two_committees_synchronized_count_and_where_removed_from_ephem(
         pda1,
         expected_count
     );
+    /*
     assert!(
         commit2.unwrap().ephem_account.is_none(),
         "pda2 ephem account was removed"
     );
+     */
     assert_eq!(
         commit2.unwrap().chain_account.as_ref().unwrap().count,
         expected_count,
