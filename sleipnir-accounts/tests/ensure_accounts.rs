@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use conjunto_transwise::{
     errors::TranswiseError,
@@ -6,21 +6,25 @@ use conjunto_transwise::{
     transaction_accounts_holder::TransactionAccountsHolder,
     transaction_accounts_validator::TransactionAccountsValidatorImpl,
 };
+use sleipnir_account_cloner::{
+    RemoteAccountClonerClient, RemoteAccountClonerWorker,
+};
+use sleipnir_account_dumper::AccountDumperStub;
 use sleipnir_account_fetcher::AccountFetcherStub;
 use sleipnir_account_updates::AccountUpdatesStub;
 use sleipnir_accounts::{
     errors::AccountsError, ExternalAccountsManager, LifecycleMode,
 };
+use sleipnir_accounts_api::InternalAccountProviderStub;
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
 use stubs::{
-    account_cloner_stub::AccountClonerStub,
     account_committer_stub::AccountCommitterStub,
-    accounts_remover_stub::AccountsRemoverStub,
-    internal_account_provider_stub::InternalAccountProviderStub,
     scheduled_commits_processor_stub::ScheduledCommitsProcessorStub,
     StubbedAccountsManager,
 };
 use test_tools_core::init_logger;
+use tokio::task::JoinHandle;
+use tokio_util::sync::CancellationToken;
 
 mod stubs;
 
@@ -30,41 +34,59 @@ fn setup_with_lifecycle(
     account_fetcher: AccountFetcherStub,
     account_updates: AccountUpdatesStub,
     account_dumper: AccountDumperStub,
-    account_committer: AccountCommitterStub,
     lifecycle: LifecycleMode,
-) -> StubbedAccountsManager {
+) -> (StubbedAccountsManager, CancellationToken, JoinHandle<()>) {
     let validator_auth_id = Pubkey::new_unique();
-    ExternalAccountsManager {
+    let cancellation_token = CancellationToken::new();
+
+    let remote_account_cloner_worker = RemoteAccountClonerWorker::new(
         internal_account_provider,
-        account_cloner,
-        account_committer: Arc::new(account_committer),
-        accounts_remover: AccountsRemoverStub,
+        account_fetcher,
         account_updates,
+        account_dumper,
+        HashSet::new(),
+        Some(1_000_000_000),
+        lifecycle.allow_cloning_undelegated_non_programs(),
+    );
+    let remote_account_cloner_client =
+        RemoteAccountClonerClient::new(&remote_account_cloner_worker);
+    let remote_account_cloner_worker_handle = {
+        let cloner_cancellation_token = cancellation_token.clone();
+        tokio::spawn(async move {
+            remote_account_cloner_worker
+                .start_clone_request_processing(cloner_cancellation_token)
+                .await
+        })
+    };
+
+    let external_account_manager = ExternalAccountsManager {
+        internal_account_provider,
+        account_cloner: remote_account_cloner_client,
+        account_committer: Arc::new(AccountCommitterStub::default()),
         transaction_accounts_extractor: TransactionAccountsExtractorImpl,
         transaction_accounts_validator: TransactionAccountsValidatorImpl,
-        transaction_status_sender: None,
-        external_readonly_accounts: Default::default(),
-        external_writable_accounts: Default::default(),
         scheduled_commits_processor: ScheduledCommitsProcessorStub::default(),
         lifecycle,
-        payer_init_lamports: Some(1_000 * LAMPORTS_PER_SOL),
-        validator_id: validator_auth_id,
-    }
+        external_commitable_accounts: Default::default(),
+    };
+    (
+        external_account_manager,
+        cancellation_token,
+        remote_account_cloner_worker_handle,
+    )
 }
 
 fn setup_ephem(
     internal_account_provider: InternalAccountProviderStub,
     account_fetcher: AccountFetcherStub,
-    account_cloner: AccountClonerStub,
-    account_committer: AccountCommitterStub,
     account_updates: AccountUpdatesStub,
-) -> StubbedAccountsManager {
+    account_dumper: AccountDumperStub,
+) -> (StubbedAccountsManager, CancellationToken, JoinHandle<()>) {
     setup_with_lifecycle(
         internal_account_provider,
         account_fetcher,
-        account_cloner,
-        account_committer,
         account_updates,
+        account_dumper,
         LifecycleMode::Ephemeral,
     )
 }
@@ -75,20 +97,18 @@ async fn test_ensure_readonly_account_not_tracked_nor_in_our_validator() {
     let readonly_undelegated = Pubkey::new_unique();
 
     let internal_account_provider = InternalAccountProviderStub::default();
-    let mut account_fetcher = AccountFetcherStub::default();
-    let account_cloner = AccountClonerStub::default();
-    let account_committer = AccountCommitterStub::default();
+    let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
+    let account_dumper = AccountDumperStub::default();
 
     let fetchable_at_slot = 42;
     account_fetcher.add_undelegated(readonly_undelegated, fetchable_at_slot);
 
-    let manager = setup_ephem(
+    let (manager, cancel, handle) = setup_ephem(
         internal_account_provider,
         account_fetcher,
-        account_cloner,
-        account_committer,
         account_updates,
+        account_dumper,
     );
 
     let holder = TransactionAccountsHolder {
@@ -97,18 +117,16 @@ async fn test_ensure_readonly_account_not_tracked_nor_in_our_validator() {
         payer: Pubkey::new_unique(),
     };
 
-    let result = manager
+    manager
         .ensure_accounts_from_holder(holder, "tx-sig".to_string())
         .await;
 
-    assert_eq!(result.unwrap().len(), 1);
+    assert!(account_dumper
+        .get_dumped_pda_accounts()
+        .contains(&readonly_undelegated));
 
-    assert!(manager.account_cloner.did_clone(&readonly_undelegated));
-
-    assert!(manager
-        .external_readonly_accounts
-        .has(&readonly_undelegated));
-    assert!(manager.external_writable_accounts.is_empty());
+    cancel.cancel();
+    assert!(handle.await.is_ok());
 }
 
 #[tokio::test]
@@ -116,20 +134,18 @@ async fn test_ensure_readonly_account_not_tracked_but_in_our_validator() {
     init_logger!();
     let readonly_already_loaded = Pubkey::new_unique();
 
-    let mut internal_account_provider = InternalAccountProviderStub::default();
+    let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
-    let account_cloner = AccountClonerStub::default();
-    let account_committer = AccountCommitterStub::default();
     let account_updates = AccountUpdatesStub::default();
+    let account_dumper = AccountDumperStub::default();
 
     internal_account_provider.add(readonly_already_loaded, Default::default());
 
-    let manager = setup_ephem(
+    let (manager, cancel, handle) = setup_ephem(
         internal_account_provider,
         account_fetcher,
-        account_cloner,
-        account_committer,
         account_updates,
+        account_dumper,
     );
 
     let holder = TransactionAccountsHolder {
@@ -138,16 +154,16 @@ async fn test_ensure_readonly_account_not_tracked_but_in_our_validator() {
         payer: Pubkey::new_unique(),
     };
 
-    let result = manager
+    manager
         .ensure_accounts_from_holder(holder, "tx-sig".to_string())
         .await;
 
-    assert_eq!(result.unwrap().len(), 0);
+    assert!(!account_dumper
+        .get_dumped_pda_accounts()
+        .contains(&readonly_already_loaded));
 
-    assert!(!manager.account_cloner.did_clone(&readonly_already_loaded));
-
-    assert!(manager.external_readonly_accounts.is_empty());
-    assert!(manager.external_writable_accounts.is_empty());
+    cancel.cancel();
+    assert!(handle.await.is_ok());
 }
 
 #[tokio::test]
@@ -157,16 +173,14 @@ async fn test_ensure_readonly_account_cloned_but_not_in_our_validator() {
 
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
-    let account_cloner = AccountClonerStub::default();
-    let account_committer = AccountCommitterStub::default();
     let account_updates = AccountUpdatesStub::default();
+    let account_dumper = AccountDumperStub::default();
 
-    let manager = setup_ephem(
+    let (manager, cancel, handle) = setup_ephem(
         internal_account_provider,
         account_fetcher,
-        account_cloner,
-        account_committer,
         account_updates,
+        account_dumper,
     );
 
     let cloned_at_slot = 42;
@@ -186,12 +200,12 @@ async fn test_ensure_readonly_account_cloned_but_not_in_our_validator() {
 
     assert_eq!(result.unwrap().len(), 0);
 
-    assert!(!manager.account_cloner.did_clone(&readonly_already_cloned));
+    assert!(!account_dumper
+        .get_dumped_pda_accounts()
+        .contains(&readonly_already_cloned));
 
-    assert!(manager
-        .external_readonly_accounts
-        .has(&readonly_already_cloned));
-    assert!(manager.external_writable_accounts.is_empty());
+    cancel.cancel();
+    assert!(handle.await.is_ok());
 }
 
 #[tokio::test]
@@ -200,10 +214,9 @@ async fn test_ensure_readonly_account_tracked_but_has_been_updated_on_chain() {
     let readonly_undelegated = Pubkey::new_unique();
 
     let internal_account_provider = InternalAccountProviderStub::default();
-    let mut account_fetcher = AccountFetcherStub::default();
-    let account_cloner = AccountClonerStub::default();
-    let account_committer = AccountCommitterStub::default();
-    let mut account_updates = AccountUpdatesStub::default();
+    let account_fetcher = AccountFetcherStub::default();
+    let account_dumper = AccountDumperStub::default();
+    let account_updates = AccountUpdatesStub::default();
 
     let cloned_at_slot = 11;
     let updated_last_at_slot = 42;
@@ -213,12 +226,11 @@ async fn test_ensure_readonly_account_tracked_but_has_been_updated_on_chain() {
     account_updates
         .add_known_update_slot(readonly_undelegated, updated_last_at_slot);
 
-    let manager = setup_ephem(
+    let (manager, cancel, handle) = setup_ephem(
         internal_account_provider,
         account_fetcher,
-        account_cloner,
-        account_committer,
         account_updates,
+        account_dumper,
     );
 
     manager
@@ -237,7 +249,9 @@ async fn test_ensure_readonly_account_tracked_but_has_been_updated_on_chain() {
 
     assert_eq!(result.unwrap().len(), 1);
 
-    assert!(manager.account_cloner.did_clone(&readonly_undelegated));
+    assert!(account_dumper
+        .get_dumped_pda_accounts()
+        .contains(&readonly_undelegated));
 
     assert!(manager
         .external_readonly_accounts
@@ -252,9 +266,8 @@ async fn test_ensure_readonly_account_tracked_and_no_recent_update_on_chain() {
 
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
-    let account_cloner = AccountClonerStub::default();
-    let account_committer = AccountCommitterStub::default();
-    let mut account_updates = AccountUpdatesStub::default();
+    let account_dumper = AccountDumperStub::default();
+    let account_updates = AccountUpdatesStub::default();
 
     let cloned_at_slot = 42;
     let updated_last_at_slot = 11;
@@ -262,12 +275,11 @@ async fn test_ensure_readonly_account_tracked_and_no_recent_update_on_chain() {
     account_updates
         .add_known_update_slot(readonly_undelegated, updated_last_at_slot);
 
-    let manager = setup_ephem(
+    let (manager, cancel, handle) = setup_ephem(
         internal_account_provider,
         account_fetcher,
-        account_cloner,
-        account_committer,
         account_updates,
+        account_dumper,
     );
 
     manager
@@ -286,7 +298,9 @@ async fn test_ensure_readonly_account_tracked_and_no_recent_update_on_chain() {
 
     assert_eq!(result.unwrap().len(), 0);
 
-    assert!(!manager.account_cloner.did_clone(&readonly_undelegated));
+    assert!(!account_dumper
+        .get_dumped_pda_accounts()
+        .contains(&readonly_undelegated));
 
     assert!(manager
         .external_readonly_accounts
@@ -301,10 +315,9 @@ async fn test_ensure_readonly_account_in_our_validator_and_unseen_writable() {
     let writable_delegated = Pubkey::new_unique();
     let writable_delegated_owner = Pubkey::new_unique();
 
-    let mut internal_account_provider = InternalAccountProviderStub::default();
-    let mut account_fetcher = AccountFetcherStub::default();
-    let account_cloner = AccountClonerStub::default();
-    let account_committer = AccountCommitterStub::default();
+    let internal_account_provider = InternalAccountProviderStub::default();
+    let account_fetcher = AccountFetcherStub::default();
+    let account_dumper = AccountDumperStub::default();
     let account_updates = AccountUpdatesStub::default();
 
     internal_account_provider.add(readonly_already_loaded, Default::default());
@@ -316,12 +329,11 @@ async fn test_ensure_readonly_account_in_our_validator_and_unseen_writable() {
         fetchable_at_slot,
     );
 
-    let manager = setup_ephem(
+    let (manager, cancel, handle) = setup_ephem(
         internal_account_provider,
         account_fetcher,
-        account_cloner,
-        account_committer,
         account_updates,
+        account_dumper,
     );
 
     let holder = TransactionAccountsHolder {
@@ -335,8 +347,12 @@ async fn test_ensure_readonly_account_in_our_validator_and_unseen_writable() {
         .await;
     assert_eq!(result.unwrap().len(), 1);
 
-    assert!(!manager.account_cloner.did_clone(&readonly_already_loaded));
-    assert!(manager.account_cloner.did_clone(&writable_delegated));
+    assert!(!account_dumper
+        .get_dumped_pda_accounts()
+        .contains(&readonly_already_loaded));
+    assert!(account_dumper
+        .get_dumped_pda_accounts()
+        .contains(&writable_delegated));
 
     assert!(manager
         .account_cloner
@@ -357,9 +373,8 @@ async fn test_ensure_delegated_with_owner_and_unlocked_writable_payer() {
     let writable_undelegated_payer = Pubkey::new_unique();
 
     let internal_account_provider = InternalAccountProviderStub::default();
-    let mut account_fetcher = AccountFetcherStub::default();
-    let account_cloner = AccountClonerStub::default();
-    let account_committer = AccountCommitterStub::default();
+    let account_fetcher = AccountFetcherStub::default();
+    let account_dumper = AccountDumperStub::default();
     let account_updates = AccountUpdatesStub::default();
 
     let fetchable_at_slot = 45;
@@ -371,12 +386,11 @@ async fn test_ensure_delegated_with_owner_and_unlocked_writable_payer() {
     account_fetcher
         .add_undelegated(writable_undelegated_payer, fetchable_at_slot);
 
-    let manager = setup_ephem(
+    let (manager, cancel, handle) = setup_ephem(
         internal_account_provider,
         account_fetcher,
-        account_cloner,
-        account_committer,
         account_updates,
+        account_dumper,
     );
 
     let holder = TransactionAccountsHolder {
@@ -390,7 +404,9 @@ async fn test_ensure_delegated_with_owner_and_unlocked_writable_payer() {
         .await;
     assert_eq!(result.unwrap().len(), 2);
 
-    assert!(manager.account_cloner.did_clone(&writable_delegated));
+    assert!(account_dumper
+        .get_dumped_pda_accounts()
+        .contains(&writable_delegated));
     assert!(manager
         .account_cloner
         .did_clone(&writable_undelegated_payer));
@@ -424,9 +440,8 @@ async fn test_ensure_one_delegated_and_one_new_account_writable() {
     let writable_new_account = Pubkey::new_unique();
 
     let internal_account_provider = InternalAccountProviderStub::default();
-    let mut account_fetcher = AccountFetcherStub::default();
-    let account_cloner = AccountClonerStub::default();
-    let account_committer = AccountCommitterStub::default();
+    let account_fetcher = AccountFetcherStub::default();
+    let account_dumper = AccountDumperStub::default();
     let account_updates = AccountUpdatesStub::default();
 
     let fetchable_at_slot = 42;
@@ -441,9 +456,8 @@ async fn test_ensure_one_delegated_and_one_new_account_writable() {
     let manager = setup_with_lifecycle(
         internal_account_provider,
         account_fetcher,
-        account_cloner,
-        account_committer,
         account_updates,
+        account_dumper,
         LifecycleMode::Replica,
     );
 
@@ -459,8 +473,12 @@ async fn test_ensure_one_delegated_and_one_new_account_writable() {
 
     assert_eq!(result.unwrap().len(), 1);
 
-    assert!(manager.account_cloner.did_clone(&writable_delegated));
-    assert!(!manager.account_cloner.did_clone(&writable_new_account));
+    assert!(account_dumper
+        .get_dumped_pda_accounts()
+        .contains(&writable_delegated));
+    assert!(!account_dumper
+        .get_dumped_pda_accounts()
+        .contains(&writable_new_account));
 
     assert!(manager.external_readonly_accounts.is_empty());
 
@@ -481,9 +499,8 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
     let writable2_delegated = Pubkey::new_unique();
 
     let internal_account_provider = InternalAccountProviderStub::default();
-    let mut account_fetcher = AccountFetcherStub::default();
-    let account_cloner = AccountClonerStub::default();
-    let account_committer = AccountCommitterStub::default();
+    let account_fetcher = AccountFetcherStub::default();
+    let account_dumper = AccountDumperStub::default();
     let account_updates = AccountUpdatesStub::default();
 
     let fetchable_at_slot = 42;
@@ -501,12 +518,11 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
         fetchable_at_slot,
     );
 
-    let manager = setup_ephem(
+    let (manager, cancel, handle) = setup_ephem(
         internal_account_provider,
         account_fetcher,
-        account_cloner,
-        account_committer,
         account_updates,
+        account_dumper,
     );
 
     // First Transaction
@@ -522,12 +538,22 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
             .await;
         assert_eq!(result.unwrap().len(), 3);
 
-        assert!(manager.account_cloner.did_clone(&readonly1_undelegated));
-        assert!(manager.account_cloner.did_clone(&readonly2_undelegated));
-        assert!(!manager.account_cloner.did_clone(&readonly3_undelegated));
+        assert!(account_dumper
+            .get_dumped_pda_accounts()
+            .contains(&readonly1_undelegated));
+        assert!(account_dumper
+            .get_dumped_pda_accounts()
+            .contains(&readonly2_undelegated));
+        assert!(!account_dumper
+            .get_dumped_pda_accounts()
+            .contains(&readonly3_undelegated));
 
-        assert!(manager.account_cloner.did_clone(&writable1_delegated));
-        assert!(!manager.account_cloner.did_clone(&writable2_delegated));
+        assert!(account_dumper
+            .get_dumped_pda_accounts()
+            .contains(&writable1_delegated));
+        assert!(!account_dumper
+            .get_dumped_pda_accounts()
+            .contains(&writable2_delegated));
 
         assert!(manager
             .external_readonly_accounts
@@ -558,12 +584,22 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
             .await;
         assert!(result.unwrap().is_empty());
 
-        assert!(!manager.account_cloner.did_clone(&readonly1_undelegated));
-        assert!(!manager.account_cloner.did_clone(&readonly2_undelegated));
-        assert!(!manager.account_cloner.did_clone(&readonly3_undelegated));
+        assert!(!account_dumper
+            .get_dumped_pda_accounts()
+            .contains(&readonly1_undelegated));
+        assert!(!account_dumper
+            .get_dumped_pda_accounts()
+            .contains(&readonly2_undelegated));
+        assert!(!account_dumper
+            .get_dumped_pda_accounts()
+            .contains(&readonly3_undelegated));
 
-        assert!(!manager.account_cloner.did_clone(&writable1_delegated));
-        assert!(!manager.account_cloner.did_clone(&writable2_delegated));
+        assert!(!account_dumper
+            .get_dumped_pda_accounts()
+            .contains(&writable1_delegated));
+        assert!(!account_dumper
+            .get_dumped_pda_accounts()
+            .contains(&writable2_delegated));
 
         assert!(manager
             .external_readonly_accounts
@@ -594,12 +630,22 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
             .await;
         assert_eq!(result.unwrap().len(), 2);
 
-        assert!(!manager.account_cloner.did_clone(&readonly1_undelegated));
-        assert!(!manager.account_cloner.did_clone(&readonly2_undelegated));
-        assert!(manager.account_cloner.did_clone(&readonly3_undelegated));
+        assert!(!account_dumper
+            .get_dumped_pda_accounts()
+            .contains(&readonly1_undelegated));
+        assert!(!account_dumper
+            .get_dumped_pda_accounts()
+            .contains(&readonly2_undelegated));
+        assert!(account_dumper
+            .get_dumped_pda_accounts()
+            .contains(&readonly3_undelegated));
 
-        assert!(!manager.account_cloner.did_clone(&writable1_delegated));
-        assert!(manager.account_cloner.did_clone(&writable2_delegated));
+        assert!(!account_dumper
+            .get_dumped_pda_accounts()
+            .contains(&writable1_delegated));
+        assert!(account_dumper
+            .get_dumped_pda_accounts()
+            .contains(&writable2_delegated));
 
         assert!(manager
             .external_readonly_accounts
@@ -623,16 +669,14 @@ async fn test_ensure_writable_account_fails_to_validate() {
 
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
-    let account_cloner = AccountClonerStub::default();
-    let account_committer = AccountCommitterStub::default();
     let account_updates = AccountUpdatesStub::default();
+    let account_dumper = AccountDumperStub::default();
 
-    let manager = setup_ephem(
+    let (manager, cancel, handle) = setup_ephem(
         internal_account_provider,
         account_fetcher,
-        account_cloner,
-        account_committer,
         account_updates,
+        account_dumper,
     );
 
     let holder = TransactionAccountsHolder {
@@ -661,9 +705,8 @@ async fn test_ensure_accounts_seen_first_as_readonly_can_be_used_as_writable_lat
     let account_delegated_owner = Pubkey::new_unique();
 
     let internal_account_provider = InternalAccountProviderStub::default();
-    let mut account_fetcher = AccountFetcherStub::default();
-    let account_cloner = AccountClonerStub::default();
-    let account_committer = AccountCommitterStub::default();
+    let account_fetcher = AccountFetcherStub::default();
+    let account_dumper = AccountDumperStub::default();
     let account_updates = AccountUpdatesStub::default();
 
     let fetchable_at_slot = 42;
@@ -673,12 +716,11 @@ async fn test_ensure_accounts_seen_first_as_readonly_can_be_used_as_writable_lat
         fetchable_at_slot,
     );
 
-    let manager = setup_ephem(
+    let (manager, cancel, handle) = setup_ephem(
         internal_account_provider,
         account_fetcher,
-        account_cloner,
-        account_committer,
         account_updates,
+        account_dumper,
     );
 
     // First Transaction uses the account as a readable
@@ -695,7 +737,9 @@ async fn test_ensure_accounts_seen_first_as_readonly_can_be_used_as_writable_lat
 
         assert_eq!(result.unwrap().len(), 1);
 
-        assert!(manager.account_cloner.did_clone(&account_delegated));
+        assert!(account_dumper
+            .get_dumped_pda_accounts()
+            .contains(&account_delegated));
 
         assert!(manager
             .account_cloner
@@ -722,7 +766,9 @@ async fn test_ensure_accounts_seen_first_as_readonly_can_be_used_as_writable_lat
         assert_eq!(result.unwrap().len(), 1);
 
         // TODO(vbrunet) - this should not need to re-clone
-        assert!(manager.account_cloner.did_clone(&account_delegated));
+        assert!(account_dumper
+            .get_dumped_pda_accounts()
+            .contains(&account_delegated));
 
         assert!(manager
             .account_cloner
@@ -748,7 +794,9 @@ async fn test_ensure_accounts_seen_first_as_readonly_can_be_used_as_writable_lat
 
         assert_eq!(result.unwrap().len(), 0);
 
-        assert!(!manager.account_cloner.did_clone(&account_delegated));
+        assert!(!account_dumper
+            .get_dumped_pda_accounts()
+            .contains(&account_delegated));
 
         assert!(manager.external_readonly_accounts.is_empty());
         assert!(manager.external_writable_accounts.has(&account_delegated));
@@ -761,10 +809,9 @@ async fn test_ensure_accounts_already_known_can_be_reused_as_writable_later() {
     let account_delegated = Pubkey::new_unique();
     let account_delegated_owner = Pubkey::new_unique();
 
-    let mut internal_account_provider = InternalAccountProviderStub::default();
-    let mut account_fetcher = AccountFetcherStub::default();
-    let account_cloner = AccountClonerStub::default();
-    let account_committer = AccountCommitterStub::default();
+    let internal_account_provider = InternalAccountProviderStub::default();
+    let account_fetcher = AccountFetcherStub::default();
+    let account_dumper = AccountDumperStub::default();
     let account_updates = AccountUpdatesStub::default();
 
     internal_account_provider.add(account_delegated, Default::default());
@@ -776,12 +823,11 @@ async fn test_ensure_accounts_already_known_can_be_reused_as_writable_later() {
         fetchable_at_slot,
     );
 
-    let manager = setup_ephem(
+    let (manager, cancel, handle) = setup_ephem(
         internal_account_provider,
         account_fetcher,
-        account_cloner,
-        account_committer,
         account_updates,
+        account_dumper,
     );
 
     // First Transaction does not need to re-clone account to use it as readonly
@@ -798,7 +844,9 @@ async fn test_ensure_accounts_already_known_can_be_reused_as_writable_later() {
 
         assert_eq!(result.unwrap().len(), 0);
 
-        assert!(!manager.account_cloner.did_clone(&account_delegated));
+        assert!(!account_dumper
+            .get_dumped_pda_accounts()
+            .contains(&account_delegated));
 
         assert!(manager
             .account_cloner
@@ -824,7 +872,9 @@ async fn test_ensure_accounts_already_known_can_be_reused_as_writable_later() {
 
         assert_eq!(result.unwrap().len(), 1);
 
-        assert!(manager.account_cloner.did_clone(&account_delegated));
+        assert!(account_dumper
+            .get_dumped_pda_accounts()
+            .contains(&account_delegated));
 
         assert!(manager
             .account_cloner
@@ -840,11 +890,10 @@ async fn test_ensure_accounts_already_cloned_needs_reclone_after_updates() {
     init_logger!();
     let account_undelegated = Pubkey::new_unique();
 
-    let mut internal_account_provider = InternalAccountProviderStub::default();
-    let mut account_fetcher = AccountFetcherStub::default();
-    let account_cloner = AccountClonerStub::default();
-    let account_committer = AccountCommitterStub::default();
-    let mut account_updates = AccountUpdatesStub::default();
+    let internal_account_provider = InternalAccountProviderStub::default();
+    let account_fetcher = AccountFetcherStub::default();
+    let account_dumper = AccountDumperStub::default();
+    let account_updates = AccountUpdatesStub::default();
 
     let cloned_at_slot = 11;
     let fetchable_at_slot = 14;
@@ -855,12 +904,11 @@ async fn test_ensure_accounts_already_cloned_needs_reclone_after_updates() {
     account_updates
         .add_known_update_slot(account_undelegated, last_updated_at_slot);
 
-    let manager = setup_ephem(
+    let (manager, cancel, handle) = setup_ephem(
         internal_account_provider,
         account_fetcher,
-        account_cloner,
-        account_committer,
         account_updates,
+        account_dumper,
     );
 
     manager
@@ -881,7 +929,9 @@ async fn test_ensure_accounts_already_cloned_needs_reclone_after_updates() {
 
         assert_eq!(result.unwrap().len(), 1);
 
-        assert!(manager.account_cloner.did_clone(&account_undelegated));
+        assert!(account_dumper
+            .get_dumped_pda_accounts()
+            .contains(&account_undelegated));
 
         assert!(manager.external_readonly_accounts.has(&account_undelegated));
         assert!(manager.external_writable_accounts.is_empty());
@@ -903,7 +953,9 @@ async fn test_ensure_accounts_already_cloned_needs_reclone_after_updates() {
 
         assert_eq!(result.unwrap().len(), 1);
 
-        assert!(manager.account_cloner.did_clone(&account_undelegated));
+        assert!(account_dumper
+            .get_dumped_pda_accounts()
+            .contains(&account_undelegated));
 
         assert!(manager.external_readonly_accounts.has(&account_undelegated));
         assert!(manager.external_writable_accounts.is_empty());
@@ -915,11 +967,10 @@ async fn test_ensure_accounts_already_known_can_be_reused_without_updates() {
     init_logger!();
     let account_undelegated = Pubkey::new_unique();
 
-    let mut internal_account_provider = InternalAccountProviderStub::default();
-    let mut account_fetcher = AccountFetcherStub::default();
-    let account_cloner = AccountClonerStub::default();
-    let account_committer = AccountCommitterStub::default();
-    let mut account_updates = AccountUpdatesStub::default();
+    let internal_account_provider = InternalAccountProviderStub::default();
+    let account_fetcher = AccountFetcherStub::default();
+    let account_dumper = AccountDumperStub::default();
+    let account_updates = AccountUpdatesStub::default();
 
     let cloned_at_slot = 11;
     let last_updated_at_slot = 15;
@@ -930,12 +981,11 @@ async fn test_ensure_accounts_already_known_can_be_reused_without_updates() {
     account_updates
         .add_known_update_slot(account_undelegated, last_updated_at_slot);
 
-    let manager = setup_ephem(
+    let (manager, cancel, handle) = setup_ephem(
         internal_account_provider,
         account_fetcher,
-        account_cloner,
-        account_committer,
         account_updates,
+        account_dumper,
     );
 
     manager
@@ -956,7 +1006,9 @@ async fn test_ensure_accounts_already_known_can_be_reused_without_updates() {
 
         assert_eq!(result.unwrap().len(), 1);
 
-        assert!(manager.account_cloner.did_clone(&account_undelegated));
+        assert!(account_dumper
+            .get_dumped_pda_accounts()
+            .contains(&account_undelegated));
 
         assert!(manager.external_readonly_accounts.has(&account_undelegated));
         assert!(manager.external_writable_accounts.is_empty());
@@ -978,7 +1030,9 @@ async fn test_ensure_accounts_already_known_can_be_reused_without_updates() {
 
         assert_eq!(result.unwrap().len(), 0);
 
-        assert!(!manager.account_cloner.did_clone(&account_undelegated));
+        assert!(!account_dumper
+            .get_dumped_pda_accounts()
+            .contains(&account_undelegated));
 
         assert!(manager.external_readonly_accounts.has(&account_undelegated));
         assert!(manager.external_writable_accounts.is_empty());

@@ -4,19 +4,17 @@ use std::{
     vec,
 };
 
-use conjunto_transwise::{
-    AccountChainSnapshotShared, AccountChainState, DelegationRecord,
-};
+use conjunto_transwise::{AccountChainSnapshotShared, AccountChainState};
 use futures_util::future::join_all;
 use log::*;
 use sleipnir_account_dumper::AccountDumper;
 use sleipnir_account_fetcher::AccountFetcher;
 use sleipnir_account_updates::AccountUpdates;
 use sleipnir_accounts_api::InternalAccountProvider;
-use sleipnir_mutator::idl::get_pubkey_anchor_idl;
+use sleipnir_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
 use solana_sdk::{
     account::Account, bpf_loader_upgradeable::get_program_data_address,
-    pubkey::Pubkey, signature::Signature, system_program,
+    clock::Slot, pubkey::Pubkey, signature::Signature, system_program,
 };
 use tokio::sync::mpsc::{
     unbounded_channel, UnboundedReceiver, UnboundedSender,
@@ -36,11 +34,12 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU> {
     blacklisted_accounts: HashSet<Pubkey>,
     payer_init_lamports: Option<u64>,
     allow_non_programs_undelegated: bool,
-    clone_request_receiver: UnboundedReceiver<Pubkey>,
     clone_request_sender: UnboundedSender<Pubkey>,
+    clone_request_receiver: UnboundedReceiver<Pubkey>,
     clone_listeners: Arc<RwLock<HashMap<Pubkey, AccountClonerListeners>>>,
     last_cloned_account_chain_snapshot:
         Arc<RwLock<HashMap<Pubkey, AccountChainSnapshotShared>>>,
+    last_clone_dump_signatures: Arc<RwLock<HashMap<Pubkey, Vec<Signature>>>>,
 }
 
 impl<IAP, AFE, AUP, ADU> RemoteAccountClonerWorker<IAP, AFE, AUP, ADU>
@@ -69,10 +68,11 @@ where
             blacklisted_accounts,
             payer_init_lamports,
             allow_non_programs_undelegated,
-            clone_request_receiver,
             clone_request_sender,
+            clone_request_receiver,
             clone_listeners: Default::default(),
             last_cloned_account_chain_snapshot: Default::default(),
+            last_clone_dump_signatures: Default::default(),
         }
     }
 
@@ -191,21 +191,16 @@ where
             .map_err(AccountClonerError::AccountUpdatesError)?;
 
         // Fetch the account
-        let account_chain_snapshot = self.fetch_account(pubkey).await?;
+        let account_chain_snapshot =
+            self.fetch_account_chain_snapshot(pubkey).await?;
 
         // Generate cloning transactions if we need
-        let _signatures = match &account_chain_snapshot.chain_state {
+        let signatures = match &account_chain_snapshot.chain_state {
             // If the account is not present on-chain, we don't need to clone anything
             AccountChainState::NewAccount => vec![],
             // If the account is present on-chain, but not delegated
-            // We need to clone it if its a program, we have a special procedure.
-            // If it is not a program, we can just clone it without overrides
             AccountChainState::Undelegated { account } => {
-                if account.executable {
-                    self.do_clone_program(pubkey, account).await?
-                } else {
-                    self.do_clone_undelegated_account(pubkey, account)?
-                }
+                self.do_clone_undelegated_account(pubkey, account).await?
             }
             // If the account delegated on-chain,
             // we need to apply some overrides to if we are in ephemeral mode (so it can be used as writable)
@@ -217,13 +212,14 @@ where
             } => self.do_clone_delegated_account(
                 pubkey,
                 account,
-                &delegation_record,
+                &delegation_record.owner,
+                42, // TODO(vbrunet) - use real
             )?,
             // If the account is delegated but inconsistant on-chain,
             // We can just clone it, it won't be usable as writable,
             // but nothing stopping it from being used as a readonly
             AccountChainState::Inconsistent { account, .. } => {
-                self.do_clone_undelegated_account(pubkey, account)?
+                self.do_clone_undelegated_account(pubkey, account).await?
             }
         };
 
@@ -241,57 +237,46 @@ where
                 entry.insert(account_chain_snapshot.clone());
             },
         };
+        match self
+            .last_clone_dump_signatures
+            .write()
+            .expect("RwLock of RemoteAccountClonerWorker.last_clone_dump_signatures is poisoned")
+            .entry(*pubkey)
+        {
+            Entry::Occupied(mut entry) => {
+                *entry.get_mut() = signatures;
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(signatures);
+            },
+        };
 
         // Return the result
         Ok(AccountClonerOutput::Cloned(account_chain_snapshot))
     }
 
-    async fn do_clone_program(
+    async fn do_clone_undelegated_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,
     ) -> AccountClonerResult<Vec<Signature>> {
-        let program_id_pubkey = pubkey;
-        let program_id_account = account;
-        let program_data_pubkey = &get_program_data_address(program_id_pubkey);
-        let program_data_snapshot =
-            self.fetch_account(program_data_pubkey).await?;
-        let program_data_account = program_data_snapshot
-            .chain_state
-            .account()
-            .ok_or(AccountClonerError::ProgramDataDoesNotExist)?;
-        let program_idl_snapshot_anchor =
-            match get_pubkey_anchor_idl(program_id_pubkey) {
-                Some(program_idl_anchor_pubkey) => {
-                    Some(self.fetch_account(&program_idl_anchor_pubkey).await?)
-                }
-                None => None,
-            };
-        self.account_dumper
-            .dump_program_accounts(
-                program_id_pubkey,
-                program_id_account,
-                program_data_pubkey,
-                program_data_account,
-                program_idl_snapshot_anchor,
-            )
-            .map_err(AccountClonerError::AccountDumperError)
-    }
-
-    fn do_clone_undelegated_account(
-        &self,
-        pubkey: &Pubkey,
-        account: &Account,
-    ) -> AccountClonerResult<Vec<Signature>> {
+        // We need to clone it if its a program, we have a special procedure.
+        if account.executable {
+            return self.do_clone_program(pubkey, account).await;
+        }
+        // In come configuration we don't allow cloning of non-programs
         if !self.allow_non_programs_undelegated {
             return Ok(vec![]);
         }
+        // If it's a system account, we have a special lamport override
         if account.owner == system_program::ID {
             self.account_dumper
                 .dump_system_account(pubkey, account, self.payer_init_lamports)
                 .map_err(AccountClonerError::AccountDumperError)
                 .map(|signature| vec![signature])
-        } else {
+        }
+        // Otherwise we just clone the account normally without any change
+        else {
             self.account_dumper
                 .dump_pda_account(pubkey, account)
                 .map_err(AccountClonerError::AccountDumperError)
@@ -303,34 +288,92 @@ where
         &self,
         pubkey: &Pubkey,
         account: &Account,
-        delegation_record: &DelegationRecord,
+        owner: &Pubkey,
+        delegation_slot: Slot,
     ) -> AccountClonerResult<Vec<Signature>> {
-        /*
-        if Some(last_account_chain_snapshot) =
-            self.get_last_cloned_account_chain_snapshot(pubkey)
-        {
-            match last_account_chain_snapshot.chain_state {
-                AccountChainState::Delegated {
-                    delegation_record,
-                    ..
-                } => {
-                    if delegation_record.slot
+        // If we already cloned this account from the same delegation slot
+        // Keep the local state as source of truth even if it changes on-chain
+        match self.get_last_cloned_account_chain_snapshot(pubkey) {
+            Some(last_account_chain_snapshot) => {
+                match &last_account_chain_snapshot.chain_state {
+                    AccountChainState::Delegated {
+                        delegation_record, ..
+                    } if /* delegation_record.delegation_slot */ 42
+                        == delegation_slot =>
+                    {
+                        return Ok(vec![]);
+                    }
+                    _ => {}
                 }
             }
-        }
-         */
-        // If the delegated account is already present in the bank,
-        // don't override it as it may contain precious state
-        if self.internal_account_provider.has_account(pubkey) {
-            return Ok(vec![]);
-        }
+            _ => {}
+        };
+        // If its the first time we're seeing this delegated account, dump it to the bank
         self.account_dumper
-            .dump_delegated_account(pubkey, account, &delegation_record.owner)
+            .dump_delegated_account(pubkey, account, owner)
             .map_err(AccountClonerError::AccountDumperError)
             .map(|signature| vec![signature])
     }
 
-    async fn fetch_account(
+    async fn do_clone_program(
+        &self,
+        pubkey: &Pubkey,
+        account: &Account,
+    ) -> AccountClonerResult<Vec<Signature>> {
+        let program_id_pubkey = pubkey;
+        let program_id_account = account;
+        let program_data_pubkey = &get_program_data_address(program_id_pubkey);
+        let program_data_snapshot = self
+            .fetch_account_chain_snapshot(program_data_pubkey)
+            .await?;
+        let program_data_account = program_data_snapshot
+            .chain_state
+            .account()
+            .ok_or(AccountClonerError::ProgramDataDoesNotExist)?;
+        self.account_dumper
+            .dump_program_accounts(
+                program_id_pubkey,
+                program_id_account,
+                program_data_pubkey,
+                program_data_account,
+                self.fetch_program_idl_snapshot(program_id_pubkey).await?,
+            )
+            .map_err(AccountClonerError::AccountDumperError)
+    }
+
+    async fn fetch_program_idl_snapshot(
+        &self,
+        program_id_pubkey: &Pubkey,
+    ) -> AccountClonerResult<Option<AccountChainSnapshotShared>> {
+        // First check if we can find an anchor IDL
+        match get_pubkey_anchor_idl(program_id_pubkey) {
+            Some(program_anchor_idl_pubkey) => {
+                return Ok(Some(
+                    self.fetch_account_chain_snapshot(
+                        &program_anchor_idl_pubkey,
+                    )
+                    .await?,
+                ));
+            }
+            None => {}
+        }
+        // If we coulnd't find anchor, try to find shank IDL
+        match get_pubkey_shank_idl(program_id_pubkey) {
+            Some(program_shank_idl_pubkey) => {
+                return Ok(Some(
+                    self.fetch_account_chain_snapshot(
+                        &program_shank_idl_pubkey,
+                    )
+                    .await?,
+                ));
+            }
+            None => {}
+        }
+        // Otherwise give up
+        Ok(None)
+    }
+
+    async fn fetch_account_chain_snapshot(
         &self,
         pubkey: &Pubkey,
     ) -> AccountClonerResult<AccountChainSnapshotShared> {

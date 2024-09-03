@@ -21,7 +21,7 @@ use solana_sdk::{
 
 use crate::{
     errors::{AccountsError, AccountsResult},
-    traits::AccountCommitter,
+    traits::{AccountCommitter, UndelegationRequest},
     utils::get_epoch,
     AccountCommittee, CommitAccountsPayload, LifecycleMode,
     PendingCommitTransaction, ScheduledCommitsProcessor,
@@ -71,7 +71,7 @@ impl ExternalCommitableAccount {
 }
 
 #[derive(Debug)]
-pub struct ExternalAccountsManager<IAP, ACL, ACM, ARE, TAE, TAV, SCP>
+pub struct ExternalAccountsManager<IAP, ACL, ACM, TAE, TAV, SCP>
 where
     IAP: InternalAccountProvider,
     ACL: AccountCloner,
@@ -82,24 +82,21 @@ where
 {
     pub internal_account_provider: IAP,
     pub account_cloner: ACL,
-    pub accounts_remover: ARE,
     pub account_committer: Arc<ACM>,
     pub transaction_accounts_extractor: TAE,
     pub transaction_accounts_validator: TAV,
-    pub transaction_status_sender: Option<TransactionStatusSender>,
     pub scheduled_commits_processor: SCP,
     pub lifecycle: LifecycleMode,
     pub external_commitable_accounts:
         RwLock<HashMap<Pubkey, ExternalCommitableAccount>>,
 }
 
-impl<IAP, ACL, ACM, ARE, TAE, TAV, SCP>
-    ExternalAccountsManager<IAP, ACL, ACM, ARE, TAE, TAV, SCP>
+impl<IAP, ACL, ACM, TAE, TAV, SCP>
+    ExternalAccountsManager<IAP, ACL, ACM, TAE, TAV, SCP>
 where
     IAP: InternalAccountProvider,
     ACL: AccountCloner,
     ACM: AccountCommitter,
-    ARE: AccountsRemover,
     TAE: TransactionAccountsExtractor,
     TAV: TransactionAccountsValidator,
     SCP: ScheduledCommitsProcessor,
@@ -148,22 +145,20 @@ where
             .map_err(AccountsError::AccountClonerError)?;
 
         // Filter clone results to only what succeeded
-        let readonly_snapshots: Vec<AccountChainSnapshotShared> =
-            readonly_clone_outputs
-                .into_iter()
-                .filter_map(|output| match output {
-                    AccountClonerOutput::Cloned(snapshot) => Some(snapshot),
-                    AccountClonerOutput::Skipped => None,
-                })
-                .collect();
-        let writable_snapshots: Vec<AccountChainSnapshotShared> =
-            writable_clone_outputs
-                .into_iter()
-                .filter_map(|output| match output {
-                    AccountClonerOutput::Cloned(snapshot) => Some(snapshot),
-                    AccountClonerOutput::Skipped => None,
-                })
-                .collect();
+        let readonly_snapshots = readonly_clone_outputs
+            .into_iter()
+            .filter_map(|output| match output {
+                AccountClonerOutput::Cloned(snapshot) => Some(snapshot),
+                AccountClonerOutput::Skipped => None,
+            })
+            .collect::<Vec<AccountChainSnapshotShared>>();
+        let writable_snapshots = writable_clone_outputs
+            .into_iter()
+            .filter_map(|output| match output {
+                AccountClonerOutput::Cloned(snapshot) => Some(snapshot),
+                AccountClonerOutput::Skipped => None,
+            })
+            .collect::<Vec<AccountChainSnapshotShared>>();
 
         // Validate that the accounts involved in the transaction are valid for an ephemeral
         if self.lifecycle.requires_ephemeral_validation() {
@@ -343,11 +338,7 @@ where
 
     pub async fn process_scheduled_commits(&self) -> AccountsResult<()> {
         self.scheduled_commits_processor
-            .process(
-                &self.account_committer,
-                &self.internal_account_provider,
-                &self.accounts_remover,
-            )
+            .process(&self.account_committer, &self.internal_account_provider)
             .await
     }
 }

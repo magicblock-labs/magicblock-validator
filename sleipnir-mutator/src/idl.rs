@@ -20,27 +20,30 @@ pub fn get_pubkey_shank_idl(program_id: &Pubkey) -> Option<Pubkey> {
 
 pub async fn fetch_program_idl_modification_from_cluster(
     cluster: &Cluster,
-    program_pubkey: &Pubkey,
+    program_id_pubkey: &Pubkey,
 ) -> MutatorResult<Option<AccountModification>> {
     // First check if we can find an anchor IDL
-    match get_pubkey_anchor_idl(program_pubkey) {
-        Some(anchor_idl_pubkey) => {
-            let anchor_idl_account =
-                fetch_account_from_cluster(cluster, &anchor_idl_pubkey).await?;
+    match get_pubkey_anchor_idl(program_id_pubkey) {
+        Some(program_anchor_idl_pubkey) => {
+            let program_anchor_idl_account =
+                fetch_account_from_cluster(cluster, &program_anchor_idl_pubkey)
+                    .await?;
             return Ok(Some(AccountModification::from((
-                &anchor_idl_pubkey,
-                &anchor_idl_account,
+                &program_anchor_idl_pubkey,
+                &program_anchor_idl_account,
             ))));
         }
         None => {}
     }
-    match get_pubkey_shank_idl(program_pubkey) {
-        Some(shank_idl_pubkey) => {
-            let shank_idl_account =
-                fetch_account_from_cluster(cluster, &shank_idl_pubkey).await?;
+    // If we coulnd't find anchor, try to find shank IDL
+    match get_pubkey_shank_idl(program_id_pubkey) {
+        Some(program_shank_idl_pubkey) => {
+            let program_shank_idl_account =
+                fetch_account_from_cluster(cluster, &program_shank_idl_pubkey)
+                    .await?;
             return Ok(Some(AccountModification::from((
-                &shank_idl_pubkey,
-                &shank_idl_account,
+                &program_shank_idl_pubkey,
+                &program_shank_idl_account,
             ))));
         }
         None => {}

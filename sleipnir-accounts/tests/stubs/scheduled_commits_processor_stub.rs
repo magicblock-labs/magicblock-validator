@@ -12,15 +12,10 @@ pub struct ScheduledCommitsProcessorStub {}
 
 #[async_trait]
 impl ScheduledCommitsProcessor for ScheduledCommitsProcessorStub {
-    async fn process<
-        AC: AccountCommitter,
-        IAP: InternalAccountProvider,
-        ARE: AccountsRemover,
-    >(
+    async fn process<AC: AccountCommitter, IAP: InternalAccountProvider>(
         &self,
         _committer: &Arc<AC>,
         _account_provider: &IAP,
-        _accounts_remover: &ARE,
     ) -> AccountsResult<()> {
         Ok(())
     }

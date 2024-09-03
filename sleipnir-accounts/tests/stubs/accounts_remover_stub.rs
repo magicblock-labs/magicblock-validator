@@ -6,6 +6,7 @@ use solana_sdk::pubkey::Pubkey;
 #[derive(Clone)]
 pub struct AccountsRemoverStub;
 
+// TODO(vbrunet) - we can remove all account removal code now
 impl AccountsRemover for AccountsRemoverStub {
     fn request_accounts_removal(
         &self,

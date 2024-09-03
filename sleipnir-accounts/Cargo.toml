@@ -33,3 +33,4 @@ url = { workspace = true }
 
 [dev-dependencies]
 test-tools-core = { workspace = true }
+tokio-util = { workspace = true }

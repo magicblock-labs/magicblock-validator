@@ -7,6 +7,8 @@ use url::Url;
 
 use crate::errors::{AccountsError, AccountsResult};
 
+pub(crate) mod deleg;
+
 pub(crate) fn get_epoch() -> Duration {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

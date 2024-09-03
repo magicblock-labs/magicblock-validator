@@ -33,31 +33,6 @@ impl AccountFetcherStub {
             .unwrap()
             .insert(pubkey, (owner, slot, delegation));
     }
-}
-
-impl AccountFetcherStub {
-    pub fn add_undelegated(&self, pubkey: Pubkey, at_slot: Slot) {
-        self.insert_known_account(pubkey, Pubkey::new_unique(), at_slot, None);
-    }
-    pub fn add_delegated(
-        &mut self,
-        pubkey: Pubkey,
-        owner: Pubkey,
-        at_slot: Slot,
-    ) {
-        self.insert_known_account(
-            pubkey,
-            Pubkey::new_unique(),
-            at_slot,
-            Some(DelegationRecord {
-                owner,
-                commit_frequency: CommitFrequency::default(),
-            }),
-        );
-    }
-}
-
-impl AccountFetcherStub {
     fn generate_account_chain_snapshot(
         &self,
         pubkey: &Pubkey,
@@ -90,6 +65,28 @@ impl AccountFetcherStub {
             },
         }
         .into()
+    }
+}
+
+impl AccountFetcherStub {
+    pub fn add_undelegated(&self, pubkey: Pubkey, at_slot: Slot) {
+        self.insert_known_account(pubkey, Pubkey::new_unique(), at_slot, None);
+    }
+    pub fn add_delegated(
+        &mut self,
+        pubkey: Pubkey,
+        owner: Pubkey,
+        at_slot: Slot,
+    ) {
+        self.insert_known_account(
+            pubkey,
+            Pubkey::new_unique(),
+            at_slot,
+            Some(DelegationRecord {
+                owner,
+                commit_frequency: CommitFrequency::default(),
+            }),
+        );
     }
 }
 
