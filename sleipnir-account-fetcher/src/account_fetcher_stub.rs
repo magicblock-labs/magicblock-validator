@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{hash_map::Entry, HashMap},
     sync::{Arc, RwLock},
 };
 
@@ -16,35 +16,32 @@ use solana_sdk::{
 use crate::{AccountFetcher, AccountFetcherResult};
 
 #[derive(Debug)]
-struct AccountFetcherStubKnownAccount {
-    owner: Pubkey,
+enum AccountFetcherStubState {
+    Basic { owner: Pubkey },
+    Delegated { delegation_record: DelegationRecord },
+    Executable,
+}
+
+#[derive(Debug)]
+struct AccountFetcherStubSnapshot {
     slot: Slot,
-    delegation_record: Option<DelegationRecord>,
+    state: AccountFetcherStubState,
 }
 
 #[derive(Debug, Clone, Default)]
 pub struct AccountFetcherStub {
     unknown_at_slot: Slot,
-    known_accounts:
-        Arc<RwLock<HashMap<Pubkey, AccountFetcherStubKnownAccount>>>,
+    fetched_counters: Arc<RwLock<HashMap<Pubkey, u64>>>,
+    known_accounts: Arc<RwLock<HashMap<Pubkey, AccountFetcherStubSnapshot>>>,
 }
 
 impl AccountFetcherStub {
     fn insert_known_account(
         &self,
         pubkey: Pubkey,
-        owner: Pubkey,
-        slot: Slot,
-        delegation_record: Option<DelegationRecord>,
+        info: AccountFetcherStubSnapshot,
     ) {
-        self.known_accounts.write().unwrap().insert(
-            pubkey,
-            AccountFetcherStubKnownAccount {
-                owner,
-                slot,
-                delegation_record,
-            },
-        );
+        self.known_accounts.write().unwrap().insert(pubkey, info);
     }
     fn generate_account_chain_snapshot(
         &self,
@@ -54,20 +51,29 @@ impl AccountFetcherStub {
             Some(known_account) => AccountChainSnapshot {
                 pubkey: *pubkey,
                 at_slot: known_account.slot,
-                chain_state: match &known_account.delegation_record {
-                    Some(delegation_record) => AccountChainState::Delegated {
-                        account: Account {
-                            owner: known_account.owner,
-                            ..Default::default()
-                        },
+                chain_state: match &known_account.state {
+                    AccountFetcherStubState::Basic { owner } => {
+                        AccountChainState::Undelegated {
+                            account: Account {
+                                owner: *owner,
+                                ..Default::default()
+                            },
+                        }
+                    }
+                    AccountFetcherStubState::Executable => {
+                        AccountChainState::Undelegated {
+                            account: Account {
+                                executable: true,
+                                ..Default::default()
+                            },
+                        }
+                    }
+                    AccountFetcherStubState::Delegated {
+                        delegation_record,
+                    } => AccountChainState::Delegated {
+                        account: Default::default(),
                         delegation_pda: Pubkey::new_unique(),
                         delegation_record: delegation_record.clone(),
-                    },
-                    None => AccountChainState::Undelegated {
-                        account: Account {
-                            owner: known_account.owner,
-                            ..Default::default()
-                        },
                     },
                 },
             },
@@ -82,22 +88,64 @@ impl AccountFetcherStub {
 
 impl AccountFetcherStub {
     pub fn set_system_account(&self, pubkey: Pubkey, at_slot: Slot) {
-        self.insert_known_account(pubkey, system_program::ID, at_slot, None);
-    }
-    pub fn set_undelegated(&self, pubkey: Pubkey, at_slot: Slot) {
-        self.insert_known_account(pubkey, Pubkey::new_unique(), at_slot, None);
-    }
-    pub fn set_delegated(&self, pubkey: Pubkey, owner: Pubkey, at_slot: Slot) {
         self.insert_known_account(
             pubkey,
-            Pubkey::new_unique(),
-            at_slot,
-            Some(DelegationRecord {
-                owner,
-                delegation_slot: 0,
-                commit_frequency: CommitFrequency::default(),
-            }),
+            AccountFetcherStubSnapshot {
+                slot: at_slot,
+                state: AccountFetcherStubState::Basic {
+                    owner: system_program::ID,
+                },
+            },
         );
+    }
+    pub fn set_pda_account(&self, pubkey: Pubkey, at_slot: Slot) {
+        self.insert_known_account(
+            pubkey,
+            AccountFetcherStubSnapshot {
+                slot: at_slot,
+                state: AccountFetcherStubState::Basic {
+                    owner: Pubkey::new_unique(),
+                },
+            },
+        );
+    }
+    pub fn set_delegated_account(
+        &self,
+        pubkey: Pubkey,
+        owner: Pubkey,
+        at_slot: Slot,
+    ) {
+        self.insert_known_account(
+            pubkey,
+            AccountFetcherStubSnapshot {
+                slot: at_slot,
+                state: AccountFetcherStubState::Delegated {
+                    delegation_record: DelegationRecord {
+                        owner,
+                        delegation_slot: 0,
+                        commit_frequency: CommitFrequency::default(),
+                    },
+                },
+            },
+        );
+    }
+    pub fn set_executable_account(&self, pubkey: Pubkey, at_slot: Slot) {
+        self.insert_known_account(
+            pubkey,
+            AccountFetcherStubSnapshot {
+                slot: at_slot,
+                state: AccountFetcherStubState::Executable,
+            },
+        );
+    }
+
+    pub fn get_fetch_count(&self, pubkey: &Pubkey) -> u64 {
+        self.fetched_counters
+            .read()
+            .unwrap()
+            .get(pubkey)
+            .cloned()
+            .unwrap_or(0)
     }
 }
 
@@ -107,6 +155,14 @@ impl AccountFetcher for AccountFetcherStub {
         &self,
         pubkey: &Pubkey,
     ) -> BoxFuture<AccountFetcherResult<AccountChainSnapshotShared>> {
+        match self.fetched_counters.write().unwrap().entry(*pubkey) {
+            Entry::Occupied(mut entry) => {
+                *entry.get_mut() = *entry.get() + 1;
+            }
+            Entry::Vacant(entry) => {
+                entry.insert(1);
+            }
+        };
         Box::pin(ready(Ok(self
             .generate_account_chain_snapshot(pubkey)
             .into())))

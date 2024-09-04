@@ -13,6 +13,7 @@ pub struct AccountDumperStub {
     dumped_pda_accounts: Arc<RwLock<HashSet<Pubkey>>>,
     dumped_delegated_accounts: Arc<RwLock<HashSet<Pubkey>>>,
     dumped_program_ids: Arc<RwLock<HashSet<Pubkey>>>,
+    dumped_program_datas: Arc<RwLock<HashSet<Pubkey>>>,
 }
 
 impl AccountDumper for AccountDumperStub {
@@ -52,7 +53,7 @@ impl AccountDumper for AccountDumperStub {
         &self,
         program_id_pubkey: &Pubkey,
         _program_id_account: &Account,
-        _program_data_pubkey: &Pubkey,
+        program_data_pubkey: &Pubkey,
         _program_data_account: &Account,
         _program_idl_snapshot: Option<(Pubkey, Account)>,
     ) -> AccountDumperResult<Vec<Signature>> {
@@ -60,6 +61,10 @@ impl AccountDumper for AccountDumperStub {
             .write()
             .unwrap()
             .insert(*program_id_pubkey);
+        self.dumped_program_datas
+            .write()
+            .unwrap()
+            .insert(*program_data_pubkey);
         Ok(vec![Signature::new_unique()])
     }
 }
@@ -83,12 +88,16 @@ impl AccountDumperStub {
     pub fn was_dumped_as_program_id(&self, pubkey: &Pubkey) -> bool {
         self.dumped_program_ids.read().unwrap().contains(pubkey)
     }
+    pub fn was_dumped_as_program_data(&self, pubkey: &Pubkey) -> bool {
+        self.dumped_program_datas.read().unwrap().contains(pubkey)
+    }
 
     pub fn was_untouched(&self, pubkey: &Pubkey) -> bool {
         !self.was_dumped_as_system_account(pubkey)
             && !self.was_dumped_as_pda_account(pubkey)
             && !self.was_dumped_as_delegated_account(pubkey)
             && !self.was_dumped_as_program_id(pubkey)
+            && !self.was_dumped_as_program_data(pubkey)
     }
 
     pub fn clear_history(&self) {
@@ -96,5 +105,6 @@ impl AccountDumperStub {
         self.dumped_pda_accounts.write().unwrap().clear();
         self.dumped_delegated_accounts.write().unwrap().clear();
         self.dumped_program_ids.write().unwrap().clear();
+        self.dumped_program_datas.write().unwrap().clear();
     }
 }

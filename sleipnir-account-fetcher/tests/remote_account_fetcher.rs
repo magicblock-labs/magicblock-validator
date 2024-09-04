@@ -1,3 +1,5 @@
+use std::time::Duration;
+
 use conjunto_transwise::RpcProviderConfig;
 use sleipnir_account_fetcher::{
     AccountFetcher, RemoteAccountFetcherClient, RemoteAccountFetcherWorker,
@@ -9,6 +11,7 @@ use solana_sdk::{
     sysvar::{clock, recent_blockhashes, rent},
 };
 use test_tools::skip_if_devnet_down;
+use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
 fn setup() -> (
@@ -48,6 +51,8 @@ async fn test_devnet_fetch_clock_multiple_times() {
     // Wait for the first fetch to finish
     let result_clock1 = future_clock1.await;
     let result_clock2 = future_clock2.await;
+    // Wait for a few slots to happen on-chain
+    sleep(Duration::from_millis(3000)).await;
     // Start to fetch the clock again, it should have changed on chain (and the first fetch should have finished)
     let future_clock3 = client.fetch_account_chain_snapshot(&key_sysvar_clock);
     let future_clock4 = client.fetch_account_chain_snapshot(&key_sysvar_clock);
