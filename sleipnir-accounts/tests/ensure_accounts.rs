@@ -340,7 +340,6 @@ async fn test_ensure_readonly_account_in_our_validator_and_unseen_writable() {
     init_logger!();
     let readonly_already_loaded = Pubkey::new_unique();
     let writable_delegated = Pubkey::new_unique();
-    let writable_delegated_owner = Pubkey::new_unique();
 
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
@@ -356,11 +355,7 @@ async fn test_ensure_readonly_account_in_our_validator_and_unseen_writable() {
 
     // One already loaded, and one properly delegated
     internal_account_provider.set(readonly_already_loaded, Default::default());
-    account_fetcher.set_delegated_account(
-        writable_delegated,
-        writable_delegated_owner,
-        42,
-    );
+    account_fetcher.set_delegated_account(writable_delegated, 42, 11);
 
     // Ensure accounts
     let result = manager
@@ -392,7 +387,6 @@ async fn test_ensure_delegated_with_owner_and_undelegated_writable_payer() {
     init_logger!();
     let writable_undelegated_payer = Pubkey::new_unique();
     let writable_delegated = Pubkey::new_unique();
-    let writable_delegated_owner = Pubkey::new_unique();
 
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
@@ -408,11 +402,7 @@ async fn test_ensure_delegated_with_owner_and_undelegated_writable_payer() {
 
     // One delegated, one undelegated system account
     account_fetcher.set_system_account(writable_undelegated_payer, 42);
-    account_fetcher.set_delegated_account(
-        writable_delegated,
-        writable_delegated_owner,
-        42,
-    );
+    account_fetcher.set_delegated_account(writable_delegated, 42, 11);
 
     // Ensure accounts
     let result = manager
@@ -462,11 +452,7 @@ async fn test_ensure_one_delegated_and_one_new_account_writable() {
     );
 
     // One writable delegated (new account is not fetchable)
-    account_fetcher.set_delegated_account(
-        writable_delegated,
-        Pubkey::new_unique(),
-        42,
-    );
+    account_fetcher.set_delegated_account(writable_delegated, 42, 11);
 
     // Ensure account
     let result = manager
@@ -518,16 +504,8 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
     account_fetcher.set_pda_account(readonly1_undelegated, 42);
     account_fetcher.set_pda_account(readonly2_undelegated, 42);
     account_fetcher.set_pda_account(readonly3_undelegated, 42);
-    account_fetcher.set_delegated_account(
-        writable1_delegated,
-        Pubkey::new_unique(),
-        42,
-    );
-    account_fetcher.set_delegated_account(
-        writable2_delegated,
-        Pubkey::new_unique(),
-        42,
-    );
+    account_fetcher.set_delegated_account(writable1_delegated, 42, 11);
+    account_fetcher.set_delegated_account(writable2_delegated, 42, 11);
 
     // First Transaction
     {
@@ -698,7 +676,6 @@ async fn test_ensure_accounts_seen_first_as_readonly_can_be_used_as_writable_lat
 ) {
     init_logger!();
     let account_delegated = Pubkey::new_unique();
-    let account_delegated_owner = Pubkey::new_unique();
 
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
@@ -713,11 +690,7 @@ async fn test_ensure_accounts_seen_first_as_readonly_can_be_used_as_writable_lat
     );
 
     // A delegated account
-    account_fetcher.set_delegated_account(
-        account_delegated,
-        account_delegated_owner,
-        42,
-    );
+    account_fetcher.set_delegated_account(account_delegated, 42, 11);
 
     // First Transaction uses the account as a readable (it should still be detected as a delegated)
     {
@@ -794,7 +767,6 @@ async fn test_ensure_accounts_seen_first_as_readonly_can_be_used_as_writable_lat
 async fn test_ensure_accounts_already_known_can_be_reused_as_writable_later() {
     init_logger!();
     let account_delegated = Pubkey::new_unique();
-    let account_delegated_owner = Pubkey::new_unique();
 
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
@@ -810,11 +782,7 @@ async fn test_ensure_accounts_already_known_can_be_reused_as_writable_later() {
 
     // Account already loaded in the bank, but is a delegated on-chain
     internal_account_provider.set(account_delegated, Default::default());
-    account_fetcher.set_delegated_account(
-        account_delegated,
-        account_delegated_owner,
-        42,
-    );
+    account_fetcher.set_delegated_account(account_delegated, 42, 11);
 
     // First Transaction should not clone the account to use it as readonly
     {

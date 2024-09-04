@@ -149,11 +149,7 @@ async fn test_clone_simple_delegated_account() {
     );
     // A properly delegated account
     let delegated_account_pubkey = Pubkey::new_unique();
-    account_fetcher.set_delegated_account(
-        delegated_account_pubkey,
-        Pubkey::new_unique(),
-        42,
-    );
+    account_fetcher.set_delegated_account(delegated_account_pubkey, 42, 11);
     // Run test
     let result = cloner.clone_account(&delegated_account_pubkey).await;
     assert!(result.is_ok());
@@ -323,7 +319,7 @@ async fn test_clone_will_not_fetch_the_same_thing_multiple_times() {
     let program_data_pubkey = get_program_data_address(&program_id_pubkey);
     account_fetcher.set_executable_account(program_id_pubkey, 42);
     account_fetcher.set_pda_account(program_data_pubkey, 42);
-    // Run test
+    // Run test (2 cloned at the same time for the same thing)
     let future1 = cloner.clone_account(&program_id_pubkey);
     let future2 = cloner.clone_account(&program_id_pubkey);
     let result1 = future1.await;
@@ -339,6 +335,142 @@ async fn test_clone_will_not_fetch_the_same_thing_multiple_times() {
     assert_eq!(account_fetcher.get_fetch_count(&program_data_pubkey), 1);
     assert!(!account_updates.has_account_monitoring(&program_data_pubkey));
     assert!(account_dumper.was_dumped_as_program_data(&program_data_pubkey));
+    // Cleanup everything correctly
+    cancellation_token.cancel();
+    assert!(worker_handle.await.is_ok());
+}
+
+#[tokio::test]
+async fn test_clone_properly_cached_pda_account() {
+    // Stubs
+    let internal_account_provider = InternalAccountProviderStub::default();
+    let account_fetcher = AccountFetcherStub::default();
+    let account_updates = AccountUpdatesStub::default();
+    let account_dumper = AccountDumperStub::default();
+    // Create account cloner worker and client
+    let (cloner, cancellation_token, worker_handle) = setup_ephem(
+        internal_account_provider.clone(),
+        account_fetcher.clone(),
+        account_updates.clone(),
+        account_dumper.clone(),
+    );
+    // A simple account not owned by the system program
+    let pda_account_pubkey = Pubkey::new_unique();
+    account_fetcher.set_system_account(pda_account_pubkey, 42);
+    // Run test (we clone the account for the first time)
+    let result1 = cloner.clone_account(&pda_account_pubkey).await;
+    assert!(result1.is_ok());
+    // Check expected result1
+    assert!(matches!(result1.unwrap(), AccountClonerOutput::Cloned(_)));
+    assert_eq!(account_fetcher.get_fetch_count(&pda_account_pubkey), 1);
+    assert!(account_updates.has_account_monitoring(&pda_account_pubkey));
+    assert!(account_dumper.was_dumped_as_system_account(&pda_account_pubkey));
+    // Clear dump history
+    account_dumper.clear_history();
+    // Run test (we re-clone the account and it should be in the cache)
+    let result2 = cloner.clone_account(&pda_account_pubkey).await;
+    assert!(result2.is_ok());
+    assert!(matches!(result2.unwrap(), AccountClonerOutput::Cloned(_)));
+    assert_eq!(account_fetcher.get_fetch_count(&pda_account_pubkey), 1);
+    assert!(account_updates.has_account_monitoring(&pda_account_pubkey));
+    assert!(account_dumper.was_untouched(&pda_account_pubkey));
+    // The account is now updated remotely
+    account_updates.set_known_update_slot(pda_account_pubkey, 66);
+    // Run test (we re-clone the account and it should clear the cache and re-dump)
+    let result3 = cloner.clone_account(&pda_account_pubkey).await;
+    assert!(result3.is_ok());
+    assert!(matches!(result3.unwrap(), AccountClonerOutput::Cloned(_)));
+    assert_eq!(account_fetcher.get_fetch_count(&pda_account_pubkey), 2);
+    assert!(account_updates.has_account_monitoring(&pda_account_pubkey));
+    assert!(account_dumper.was_dumped_as_system_account(&pda_account_pubkey));
+    // Cleanup everything correctly
+    cancellation_token.cancel();
+    assert!(worker_handle.await.is_ok());
+}
+
+#[tokio::test]
+async fn test_clone_properly_cached_delegated_account_that_changes_state() {
+    // Stubs
+    let internal_account_provider = InternalAccountProviderStub::default();
+    let account_fetcher = AccountFetcherStub::default();
+    let account_updates = AccountUpdatesStub::default();
+    let account_dumper = AccountDumperStub::default();
+    // Create account cloner worker and client
+    let (cloner, cancellation_token, worker_handle) = setup_ephem(
+        internal_account_provider.clone(),
+        account_fetcher.clone(),
+        account_updates.clone(),
+        account_dumper.clone(),
+    );
+    // A simple account not owned by the system program
+    let changed_account_pubkey = Pubkey::new_unique();
+    account_fetcher.set_delegated_account(changed_account_pubkey, 42, 11);
+    // Run test (we clone the account for the first time as delegated)
+    let result1 = cloner.clone_account(&changed_account_pubkey).await;
+    assert!(result1.is_ok());
+    // Check expected result1
+    assert!(matches!(result1.unwrap(), AccountClonerOutput::Cloned(_)));
+    assert_eq!(account_fetcher.get_fetch_count(&changed_account_pubkey), 1);
+    assert!(account_updates.has_account_monitoring(&changed_account_pubkey));
+    assert!(
+        account_dumper.was_dumped_as_delegated_account(&changed_account_pubkey)
+    );
+    // Clear dump history
+    account_dumper.clear_history();
+    // Run test (we re-clone the account and it should be in the cache)
+    let result2 = cloner.clone_account(&changed_account_pubkey).await;
+    assert!(result2.is_ok());
+    assert!(matches!(result2.unwrap(), AccountClonerOutput::Cloned(_)));
+    assert_eq!(account_fetcher.get_fetch_count(&changed_account_pubkey), 1);
+    assert!(account_updates.has_account_monitoring(&changed_account_pubkey));
+    assert!(account_dumper.was_untouched(&changed_account_pubkey));
+    // The account is now updated remotely (but its delegation status didnt change)
+    account_updates.set_known_update_slot(changed_account_pubkey, 66);
+    // Run test (we MUST NOT re-dump)
+    let result3 = cloner.clone_account(&changed_account_pubkey).await;
+    assert!(result3.is_ok());
+    assert!(matches!(result3.unwrap(), AccountClonerOutput::Cloned(_)));
+    assert_eq!(account_fetcher.get_fetch_count(&changed_account_pubkey), 2);
+    assert!(account_updates.has_account_monitoring(&changed_account_pubkey));
+    assert!(account_dumper.was_untouched(&changed_account_pubkey));
+    // The account is now updated remotely (AND IT BECOMES UNDELEGATED)
+    account_updates.set_known_update_slot(changed_account_pubkey, 77);
+    account_fetcher.set_pda_account(changed_account_pubkey, 77);
+    // Run test (now we MUST RE-DUMP as an undelegated account)
+    let result4 = cloner.clone_account(&changed_account_pubkey).await;
+    assert!(result4.is_ok());
+    assert!(matches!(result4.unwrap(), AccountClonerOutput::Cloned(_)));
+    assert_eq!(account_fetcher.get_fetch_count(&changed_account_pubkey), 3);
+    assert!(account_updates.has_account_monitoring(&changed_account_pubkey));
+    assert!(account_dumper.was_dumped_as_pda_account(&changed_account_pubkey));
+    // Clear dump history
+    account_dumper.clear_history();
+    // The account is now updated remotely (AND IT BECOMES RE-DELEGATED)
+    account_updates.set_known_update_slot(changed_account_pubkey, 88);
+    account_fetcher.set_delegated_account(changed_account_pubkey, 88, 88);
+    // Run test (now we MUST RE-DUMP as an delegated account)
+    let result5 = cloner.clone_account(&changed_account_pubkey).await;
+    assert!(result5.is_ok());
+    assert!(matches!(result5.unwrap(), AccountClonerOutput::Cloned(_)));
+    assert_eq!(account_fetcher.get_fetch_count(&changed_account_pubkey), 4);
+    assert!(account_updates.has_account_monitoring(&changed_account_pubkey));
+    assert!(
+        account_dumper.was_dumped_as_delegated_account(&changed_account_pubkey)
+    );
+    // Clear dump history
+    account_dumper.clear_history();
+    // The account is now re-delegated from a different slot
+    account_updates.set_known_update_slot(changed_account_pubkey, 99);
+    account_fetcher.set_delegated_account(changed_account_pubkey, 99, 99);
+    // Run test (now we MUST RE-DUMP as an delegated account because the delegation_slot changed, even if delegation status DIDNT)
+    let result6 = cloner.clone_account(&changed_account_pubkey).await;
+    assert!(result6.is_ok());
+    assert!(matches!(result6.unwrap(), AccountClonerOutput::Cloned(_)));
+    assert_eq!(account_fetcher.get_fetch_count(&changed_account_pubkey), 5);
+    assert!(account_updates.has_account_monitoring(&changed_account_pubkey));
+    assert!(
+        account_dumper.was_dumped_as_delegated_account(&changed_account_pubkey)
+    );
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());

@@ -15,7 +15,7 @@ pub struct AccountUpdatesStub {
 
 impl AccountUpdatesStub {
     pub fn has_account_monitoring(&self, pubkey: &Pubkey) -> bool {
-        self.account_monitoring.read().unwrap().contains(&pubkey)
+        self.account_monitoring.read().unwrap().contains(pubkey)
     }
     pub fn set_known_update_slot(&self, pubkey: Pubkey, at_slot: Slot) {
         self.last_known_update_slots

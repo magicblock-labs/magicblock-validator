@@ -112,8 +112,8 @@ impl AccountFetcherStub {
     pub fn set_delegated_account(
         &self,
         pubkey: Pubkey,
-        owner: Pubkey,
         at_slot: Slot,
+        delegation_slot: Slot,
     ) {
         self.insert_known_account(
             pubkey,
@@ -121,8 +121,8 @@ impl AccountFetcherStub {
                 slot: at_slot,
                 state: AccountFetcherStubState::Delegated {
                     delegation_record: DelegationRecord {
-                        owner,
-                        delegation_slot: 0,
+                        owner: Pubkey::new_unique(),
+                        delegation_slot,
                         commit_frequency: CommitFrequency::default(),
                     },
                 },
