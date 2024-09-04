@@ -34,8 +34,8 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU> {
     blacklisted_accounts: HashSet<Pubkey>,
     payer_init_lamports: Option<u64>,
     allow_non_programs_undelegated: bool,
-    clone_request_sender: UnboundedSender<Pubkey>,
     clone_request_receiver: UnboundedReceiver<Pubkey>,
+    clone_request_sender: UnboundedSender<Pubkey>,
     clone_listeners: Arc<RwLock<HashMap<Pubkey, AccountClonerListeners>>>,
     last_cloned_account_chain_snapshot:
         Arc<RwLock<HashMap<Pubkey, AccountChainSnapshotShared>>>,
@@ -68,8 +68,8 @@ where
             blacklisted_accounts,
             payer_init_lamports,
             allow_non_programs_undelegated,
-            clone_request_sender,
             clone_request_receiver,
+            clone_request_sender,
             clone_listeners: Default::default(),
             last_cloned_account_chain_snapshot: Default::default(),
             last_clone_dump_signatures: Default::default(),
@@ -250,6 +250,7 @@ where
         }
         // In come configuration we don't allow cloning of non-programs
         if !self.allow_non_programs_undelegated {
+            // TODO - should there be a special case for system account cache? depends on how we want to init lamports
             return Ok(vec![]);
         }
         // If it's a system account, we have a special lamport override

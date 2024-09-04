@@ -8,6 +8,7 @@ use sleipnir_account_dumper::AccountDumperStub;
 use sleipnir_account_fetcher::AccountFetcherStub;
 use sleipnir_account_updates::AccountUpdatesStub;
 use sleipnir_accounts_api::InternalAccountProviderStub;
+use sleipnir_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
 use solana_sdk::{
     bpf_loader_upgradeable::get_program_data_address,
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, sysvar::clock,
@@ -184,8 +185,10 @@ async fn test_clone_simple_program_accounts() {
     // A simple program with its executable data alongside it
     let program_id_pubkey = Pubkey::new_unique();
     let program_data_pubkey = get_program_data_address(&program_id_pubkey);
+    let program_idl_pubkey = get_pubkey_shank_idl(&program_id_pubkey).unwrap();
     account_fetcher.set_executable_account(program_id_pubkey, 42);
     account_fetcher.set_pda_account(program_data_pubkey, 42);
+    account_fetcher.set_pda_account(program_idl_pubkey, 42);
     // Run test
     let result = cloner.clone_account(&program_id_pubkey).await;
     eprintln!("result:{:?}", result);
@@ -198,6 +201,9 @@ async fn test_clone_simple_program_accounts() {
     assert_eq!(account_fetcher.get_fetch_count(&program_data_pubkey), 1);
     assert!(!account_updates.has_account_monitoring(&program_data_pubkey));
     assert!(account_dumper.was_dumped_as_program_data(&program_data_pubkey));
+    assert_eq!(account_fetcher.get_fetch_count(&program_idl_pubkey), 1);
+    assert!(!account_updates.has_account_monitoring(&program_idl_pubkey));
+    assert!(account_dumper.was_dumped_as_program_idl(&program_idl_pubkey));
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());
@@ -317,24 +323,33 @@ async fn test_clone_will_not_fetch_the_same_thing_multiple_times() {
     // A simple program with its executable data alongside it
     let program_id_pubkey = Pubkey::new_unique();
     let program_data_pubkey = get_program_data_address(&program_id_pubkey);
+    let program_idl_pubkey = get_pubkey_anchor_idl(&program_id_pubkey).unwrap();
     account_fetcher.set_executable_account(program_id_pubkey, 42);
     account_fetcher.set_pda_account(program_data_pubkey, 42);
+    account_fetcher.set_pda_account(program_idl_pubkey, 42);
     // Run test (2 cloned at the same time for the same thing)
     let future1 = cloner.clone_account(&program_id_pubkey);
     let future2 = cloner.clone_account(&program_id_pubkey);
+    let future3 = cloner.clone_account(&program_id_pubkey);
     let result1 = future1.await;
     let result2 = future2.await;
+    let result3 = future3.await;
     assert!(result1.is_ok());
     assert!(result2.is_ok());
+    assert!(result3.is_ok());
     // Check expected result
     assert!(matches!(result1.unwrap(), AccountClonerOutput::Cloned(_)));
     assert!(matches!(result2.unwrap(), AccountClonerOutput::Cloned(_)));
+    assert!(matches!(result3.unwrap(), AccountClonerOutput::Cloned(_)));
     assert_eq!(account_fetcher.get_fetch_count(&program_id_pubkey), 1);
     assert!(account_updates.has_account_monitoring(&program_id_pubkey));
     assert!(account_dumper.was_dumped_as_program_id(&program_id_pubkey));
     assert_eq!(account_fetcher.get_fetch_count(&program_data_pubkey), 1);
     assert!(!account_updates.has_account_monitoring(&program_data_pubkey));
     assert!(account_dumper.was_dumped_as_program_data(&program_data_pubkey));
+    assert_eq!(account_fetcher.get_fetch_count(&program_idl_pubkey), 1);
+    assert!(!account_updates.has_account_monitoring(&program_idl_pubkey));
+    assert!(account_dumper.was_dumped_as_program_idl(&program_idl_pubkey));
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());
@@ -405,8 +420,10 @@ async fn test_clone_properly_cached_program() {
     // A simple program
     let program_id_pubkey = Pubkey::new_unique();
     let program_data_pubkey = get_program_data_address(&program_id_pubkey);
+    let program_idl_pubkey = get_pubkey_anchor_idl(&program_id_pubkey).unwrap();
     account_fetcher.set_executable_account(program_id_pubkey, 42);
     account_fetcher.set_pda_account(program_data_pubkey, 42);
+    account_fetcher.set_pda_account(program_idl_pubkey, 42);
     // Run test (we clone the account for the first time)
     let result1 = cloner.clone_account(&program_id_pubkey).await;
     assert!(result1.is_ok());
@@ -418,6 +435,9 @@ async fn test_clone_properly_cached_program() {
     assert_eq!(account_fetcher.get_fetch_count(&program_data_pubkey), 1);
     assert!(!account_updates.has_account_monitoring(&program_data_pubkey));
     assert!(account_dumper.was_dumped_as_program_data(&program_data_pubkey));
+    assert_eq!(account_fetcher.get_fetch_count(&program_idl_pubkey), 1);
+    assert!(!account_updates.has_account_monitoring(&program_idl_pubkey));
+    assert!(account_dumper.was_dumped_as_program_idl(&program_idl_pubkey));
     // Clear dump history
     account_dumper.clear_history();
     // Run test (we re-clone the account and it should be in the cache)
@@ -430,6 +450,9 @@ async fn test_clone_properly_cached_program() {
     assert_eq!(account_fetcher.get_fetch_count(&program_data_pubkey), 1);
     assert!(!account_updates.has_account_monitoring(&program_data_pubkey));
     assert!(account_dumper.was_untouched(&program_data_pubkey));
+    assert_eq!(account_fetcher.get_fetch_count(&program_idl_pubkey), 1);
+    assert!(!account_updates.has_account_monitoring(&program_idl_pubkey));
+    assert!(account_dumper.was_untouched(&program_idl_pubkey));
     // The account is now updated remotely
     account_updates.set_known_update_slot(program_id_pubkey, 66);
     // Run test (we re-clone the account and it should clear the cache and re-dump)
@@ -442,6 +465,9 @@ async fn test_clone_properly_cached_program() {
     assert_eq!(account_fetcher.get_fetch_count(&program_data_pubkey), 2);
     assert!(!account_updates.has_account_monitoring(&program_data_pubkey));
     assert!(account_dumper.was_dumped_as_program_data(&program_data_pubkey));
+    assert_eq!(account_fetcher.get_fetch_count(&program_idl_pubkey), 2);
+    assert!(!account_updates.has_account_monitoring(&program_idl_pubkey));
+    assert!(account_dumper.was_dumped_as_program_idl(&program_idl_pubkey));
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());

@@ -45,8 +45,8 @@ impl RemoteAccountUpdatesWorker {
             unbounded_channel();
         Self {
             rpc_provider_config,
-            monitoring_request_sender,
             monitoring_request_receiver,
+            monitoring_request_sender,
             last_known_update_slots: Default::default(),
         }
     }

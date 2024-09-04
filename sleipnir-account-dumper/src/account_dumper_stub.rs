@@ -14,6 +14,7 @@ pub struct AccountDumperStub {
     dumped_delegated_accounts: Arc<RwLock<HashSet<Pubkey>>>,
     dumped_program_ids: Arc<RwLock<HashSet<Pubkey>>>,
     dumped_program_datas: Arc<RwLock<HashSet<Pubkey>>>,
+    dumped_program_idls: Arc<RwLock<HashSet<Pubkey>>>,
 }
 
 impl AccountDumper for AccountDumperStub {
@@ -55,7 +56,7 @@ impl AccountDumper for AccountDumperStub {
         _program_id_account: &Account,
         program_data_pubkey: &Pubkey,
         _program_data_account: &Account,
-        _program_idl_snapshot: Option<(Pubkey, Account)>,
+        program_idl: Option<(Pubkey, Account)>,
     ) -> AccountDumperResult<Vec<Signature>> {
         self.dumped_program_ids
             .write()
@@ -65,6 +66,12 @@ impl AccountDumper for AccountDumperStub {
             .write()
             .unwrap()
             .insert(*program_data_pubkey);
+        if let Some(program_idl) = program_idl {
+            self.dumped_program_idls
+                .write()
+                .unwrap()
+                .insert(program_idl.0);
+        }
         Ok(vec![Signature::new_unique()])
     }
 }
@@ -91,6 +98,9 @@ impl AccountDumperStub {
     pub fn was_dumped_as_program_data(&self, pubkey: &Pubkey) -> bool {
         self.dumped_program_datas.read().unwrap().contains(pubkey)
     }
+    pub fn was_dumped_as_program_idl(&self, pubkey: &Pubkey) -> bool {
+        self.dumped_program_idls.read().unwrap().contains(pubkey)
+    }
 
     pub fn was_untouched(&self, pubkey: &Pubkey) -> bool {
         !self.was_dumped_as_system_account(pubkey)
@@ -98,6 +108,7 @@ impl AccountDumperStub {
             && !self.was_dumped_as_delegated_account(pubkey)
             && !self.was_dumped_as_program_id(pubkey)
             && !self.was_dumped_as_program_data(pubkey)
+            && !self.was_dumped_as_program_idl(pubkey)
     }
 
     pub fn clear_history(&self) {
@@ -106,5 +117,6 @@ impl AccountDumperStub {
         self.dumped_delegated_accounts.write().unwrap().clear();
         self.dumped_program_ids.write().unwrap().clear();
         self.dumped_program_datas.write().unwrap().clear();
+        self.dumped_program_idls.write().unwrap().clear();
     }
 }
