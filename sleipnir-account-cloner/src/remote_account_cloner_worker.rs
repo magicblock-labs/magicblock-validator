@@ -312,14 +312,13 @@ where
             .chain_state
             .account()
             .ok_or(AccountClonerError::ProgramDataDoesNotExist)?;
-        let program_idl = self.fetch_program_idl(program_id_pubkey).await?;
         self.account_dumper
             .dump_program_accounts(
                 program_id_pubkey,
                 program_id_account,
                 program_data_pubkey,
                 program_data_account,
-                program_idl,
+                self.fetch_program_idl(program_id_pubkey).await?,
             )
             .map_err(AccountClonerError::AccountDumperError)
     }
@@ -366,7 +365,6 @@ where
                     program_idl_account.clone(),
                 )));
             }
-            return Ok(None);
         }
         Ok(None)
     }

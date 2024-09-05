@@ -75,6 +75,35 @@ fn setup_ephem(
 }
 
 #[tokio::test]
+async fn test_clone_simple_new_account() {
+    // Stubs
+    let internal_account_provider = InternalAccountProviderStub::default();
+    let account_fetcher = AccountFetcherStub::default();
+    let account_updates = AccountUpdatesStub::default();
+    let account_dumper = AccountDumperStub::default();
+    // Create account cloner worker and client
+    let (cloner, cancellation_token, worker_handle) = setup_ephem(
+        internal_account_provider.clone(),
+        account_fetcher.clone(),
+        account_updates.clone(),
+        account_dumper.clone(),
+    );
+    // A new account that does not exist remotely
+    let new_account_pubkey = Pubkey::new_unique();
+    // Run test
+    let result = cloner.clone_account(&new_account_pubkey).await;
+    assert!(result.is_ok());
+    // Check expected result
+    assert!(matches!(result.unwrap(), AccountClonerOutput::Cloned(_)));
+    assert_eq!(account_fetcher.get_fetch_count(&new_account_pubkey), 1);
+    assert!(account_updates.has_account_monitoring(&new_account_pubkey));
+    assert!(account_dumper.was_untouched(&new_account_pubkey));
+    // Cleanup everything correctly
+    cancellation_token.cancel();
+    assert!(worker_handle.await.is_ok());
+}
+
+#[tokio::test]
 async fn test_clone_simple_system_account() {
     // Stubs
     let internal_account_provider = InternalAccountProviderStub::default();
@@ -191,7 +220,6 @@ async fn test_clone_simple_program_accounts() {
     account_fetcher.set_pda_account(program_idl_pubkey, 42);
     // Run test
     let result = cloner.clone_account(&program_id_pubkey).await;
-    eprintln!("result:{:?}", result);
     assert!(result.is_ok());
     // Check expected result
     assert!(matches!(result.unwrap(), AccountClonerOutput::Cloned(_)));
@@ -327,7 +355,7 @@ async fn test_clone_will_not_fetch_the_same_thing_multiple_times() {
     account_fetcher.set_executable_account(program_id_pubkey, 42);
     account_fetcher.set_pda_account(program_data_pubkey, 42);
     account_fetcher.set_pda_account(program_idl_pubkey, 42);
-    // Run test (2 cloned at the same time for the same thing)
+    // Run test (cloned at the same time for the same thing, must run once and share the result)
     let future1 = cloner.clone_account(&program_id_pubkey);
     let future2 = cloner.clone_account(&program_id_pubkey);
     let future3 = cloner.clone_account(&program_id_pubkey);
@@ -556,6 +584,54 @@ async fn test_clone_properly_cached_delegated_account_that_changes_state() {
     assert!(
         account_dumper.was_dumped_as_delegated_account(&changed_account_pubkey)
     );
+    // Cleanup everything correctly
+    cancellation_token.cancel();
+    assert!(worker_handle.await.is_ok());
+}
+
+#[tokio::test]
+async fn test_clone_properly_upgrading_new_account_when_it_gets_created() {
+    // Stubs
+    let internal_account_provider = InternalAccountProviderStub::default();
+    let account_fetcher = AccountFetcherStub::default();
+    let account_updates = AccountUpdatesStub::default();
+    let account_dumper = AccountDumperStub::default();
+    // Create account cloner worker and client
+    let (cloner, cancellation_token, worker_handle) = setup_ephem(
+        internal_account_provider.clone(),
+        account_fetcher.clone(),
+        account_updates.clone(),
+        account_dumper.clone(),
+    );
+    // A simple account that initially doesnt exist but we will create it after the clone
+    let created_account_pubkey = Pubkey::new_unique();
+    // Run test (we clone the account for the first time)
+    let result1 = cloner.clone_account(&created_account_pubkey).await;
+    assert!(result1.is_ok());
+    // Check expected result1
+    assert!(matches!(result1.unwrap(), AccountClonerOutput::Cloned(_)));
+    assert_eq!(account_fetcher.get_fetch_count(&created_account_pubkey), 1);
+    assert!(account_updates.has_account_monitoring(&created_account_pubkey));
+    assert!(account_dumper.was_untouched(&created_account_pubkey));
+    // Clear dump history
+    account_dumper.clear_history();
+    // Run test (we re-clone the account and it should be in the cache)
+    let result2 = cloner.clone_account(&created_account_pubkey).await;
+    assert!(result2.is_ok());
+    assert!(matches!(result2.unwrap(), AccountClonerOutput::Cloned(_)));
+    assert_eq!(account_fetcher.get_fetch_count(&created_account_pubkey), 1);
+    assert!(account_updates.has_account_monitoring(&created_account_pubkey));
+    assert!(account_dumper.was_untouched(&created_account_pubkey));
+    // The account is now updated remotely, as it becomes as pda account (not new anymore)
+    account_fetcher.set_pda_account(created_account_pubkey, 66);
+    account_updates.set_known_update_slot(created_account_pubkey, 66);
+    // Run test (we re-clone the account and it should clear the cache and re-dump)
+    let result3 = cloner.clone_account(&created_account_pubkey).await;
+    assert!(result3.is_ok());
+    assert!(matches!(result3.unwrap(), AccountClonerOutput::Cloned(_)));
+    assert_eq!(account_fetcher.get_fetch_count(&created_account_pubkey), 2);
+    assert!(account_updates.has_account_monitoring(&created_account_pubkey));
+    assert!(account_dumper.was_dumped_as_pda_account(&created_account_pubkey));
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());
