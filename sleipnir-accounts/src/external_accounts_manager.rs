@@ -52,19 +52,15 @@ impl ExternalCommitableAccount {
             last_commit_at,
         }
     }
-
     pub fn needs_commit(&self, now: &Duration) -> bool {
-        self.last_commit_at + self.commit_frequency <= *now
+        *now > self.last_commit_at + self.commit_frequency
     }
-
     pub fn last_committed_at(&self) -> Duration {
         self.last_commit_at
     }
-
     pub fn mark_as_committed(&mut self, now: &Duration) {
         self.last_commit_at = *now
     }
-
     pub fn get_pubkey(&self) -> Pubkey {
         self.pubkey
     }

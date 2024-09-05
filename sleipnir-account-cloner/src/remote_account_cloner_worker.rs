@@ -129,7 +129,7 @@ where
         // Notify every listeners of the clone's result
         for listener in listeners {
             if let Err(error) = listener.send(result.clone()) {
-                error!("Could not send clone resut: {}: {:?}", pubkey, error);
+                error!("Could not send clone result: {}: {:?}", pubkey, error);
             }
         }
     }
@@ -337,7 +337,7 @@ where
         if program_idl_anchor.is_some() {
             return Ok(program_idl_anchor);
         }
-        // If we coulnd't find anchor, try to find shank IDL
+        // If we couldn't find anchor, try to find shank IDL
         let program_idl_shank = self
             .try_fetch_program_idl_snapshot(get_pubkey_shank_idl(
                 program_id_pubkey,

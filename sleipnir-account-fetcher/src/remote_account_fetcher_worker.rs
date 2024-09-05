@@ -110,7 +110,7 @@ impl RemoteAccountFetcherWorker {
         // Notify the listeners of the arrival of the result
         for listener in listeners {
             if let Err(error) = listener.send(result.clone()) {
-                error!("Could not send fetch resut: {}: {:?}", pubkey, error);
+                error!("Could not send fetch result: {}: {:?}", pubkey, error);
             }
         }
     }
