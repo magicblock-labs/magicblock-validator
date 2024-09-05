@@ -18,7 +18,7 @@ mod utils;
 #[test]
 fn test_committing_two_accounts() {
     init_logger!();
-    info!("==== test_committing_two_accounts====");
+    info!("==== test_committing_two_accounts ====");
 
     let ctx = get_context_with_delegated_committees(2);
 
