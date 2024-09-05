@@ -4057,8 +4057,8 @@ dependencies = [
 name = "test-issues"
 version = "0.0.0"
 dependencies = [
+ "integration-test-tools",
  "log",
- "schedulecommit-client",
  "sleipnir-core",
  "solana-program 1.17.22",
  "solana-rpc-client",

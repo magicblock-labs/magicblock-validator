@@ -383,9 +383,9 @@ where
             .map(|x| x.pubkey)
             .collect::<Vec<_>>();
 
-        if accounts_to_be_committed.is_empty() {
-            return Ok(vec![]);
-        }
+        // if accounts_to_be_committed.is_empty() {
+        //     return Ok(vec![]);
+        // }
 
         // NOTE: the scheduled commits use the slot at which the commit was scheduled
         // However frequent commits run async and could be running before a slot is completed
