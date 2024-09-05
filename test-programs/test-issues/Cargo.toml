@@ -6,11 +6,6 @@ edition.workspace = true
 [dev-dependencies]
 integration-test-tools = { workspace = true }
 log = { workspace = true }
-sleipnir-core = { workspace = true }
-solana-program = { workspace = true }
-solana-rpc-client = { workspace = true }
-solana-rpc-client-api = { workspace = true }
-solana-sdk = { workspace = true }
 test-tools-core = { workspace = true }
 
 [features]

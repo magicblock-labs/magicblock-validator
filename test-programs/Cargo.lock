@@ -1621,7 +1621,6 @@ name = "integration-test-tools"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "sleipnir-core",
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk 1.17.22",
@@ -4059,11 +4058,6 @@ version = "0.0.0"
 dependencies = [
  "integration-test-tools",
  "log",
- "sleipnir-core",
- "solana-program 1.17.22",
- "solana-rpc-client",
- "solana-rpc-client-api",
- "solana-sdk 1.17.22",
  "test-tools-core",
 ]
 
