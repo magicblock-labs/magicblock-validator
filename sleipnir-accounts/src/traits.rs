@@ -44,7 +44,6 @@ pub struct CommitAccountsTransaction {
     /// accounts.
     pub transaction: Transaction,
     /// Accounts that are undelegated as part of the transaction.
-    /// They need to be removed from our validator when the transaction completes.
     pub undelegated_accounts: Vec<Pubkey>,
 }
 
@@ -84,7 +83,6 @@ pub struct PendingCommitTransaction {
     /// The signature of the transaction that was sent to chain.
     pub signature: Signature,
     /// The accounts that are undelegated on chain as part of this transaction.
-    /// They need to be removed from our validator when the transaction completes.
     pub undelegated_accounts: Vec<Pubkey>,
 }
 

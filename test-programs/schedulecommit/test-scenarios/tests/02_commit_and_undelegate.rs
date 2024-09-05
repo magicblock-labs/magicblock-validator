@@ -20,10 +20,10 @@ use solana_sdk::{
 use test_tools_core::init_logger;
 use utils::{
     assert_one_committee_account_was_undelegated_on_chain,
-    assert_one_committee_synchronized_count_and_was_removed_from_ephem,
+    assert_one_committee_synchronized_count,
     assert_one_committee_was_committed,
     assert_two_committee_accounts_were_undelegated_on_chain,
-    assert_two_committees_synchronized_count_and_where_removed_from_ephem,
+    assert_two_committees_synchronized_count,
     assert_two_committees_were_committed,
     assert_tx_failed_with_instruction_error,
     get_context_with_delegated_committees,
@@ -129,9 +129,7 @@ fn test_committing_and_undelegating_one_account() {
     let res = verify::fetch_commit_result_from_logs(&ctx, sig);
 
     assert_one_committee_was_committed(&ctx, &res);
-    assert_one_committee_synchronized_count_and_was_removed_from_ephem(
-        &ctx, &res, 1,
-    );
+    assert_one_committee_synchronized_count(&ctx, &res, 1);
 
     assert_one_committee_account_was_undelegated_on_chain(&ctx);
 }
@@ -146,9 +144,7 @@ fn test_committing_and_undelegating_two_accounts() {
     let res = verify::fetch_commit_result_from_logs(&ctx, sig);
 
     assert_two_committees_were_committed(&ctx, &res);
-    assert_two_committees_synchronized_count_and_where_removed_from_ephem(
-        &ctx, &res, 1,
-    );
+    assert_two_committees_synchronized_count(&ctx, &res, 1);
 
     assert_two_committee_accounts_were_undelegated_on_chain(&ctx);
 }
@@ -264,25 +260,14 @@ fn test_committed_and_undelegated_single_account_redelegation() {
         );
     }
 
-    // 4. Now verify that the account was removed from the ephemeral
-    {
-        /*
-        // Wait for account removal transaction to run inside the ephemeral
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        let pda1 = committees[0].1;
-        let data = ctx.fetch_ephem_account_data(pda1).unwrap();
-        assert!(data.is_empty(), "ephemeral account was removed");
-         */
-    }
-
-    // 5. Re-delegate the same account
+    // 4. Re-delegate the same account
     {
         std::thread::sleep(std::time::Duration::from_secs(2));
         let blockhash = chain_client.get_latest_blockhash().unwrap();
         ctx.delegate_committees(Some(blockhash)).unwrap();
     }
 
-    // 6. Now we can modify it in the ephemeral again and no longer on chain
+    // 5. Now we can modify it in the ephemeral again and no longer on chain
     {
         let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
         assert_can_increase_committee_count(
@@ -381,29 +366,14 @@ fn test_committed_and_undelegated_accounts_redelegation() {
         );
     }
 
-    // 4. Now verify that the accounts were removed from the ephemeral
-    {
-        /*
-        // Wait for account removal transaction to run inside the ephemeral
-        std::thread::sleep(std::time::Duration::from_millis(100));
-        let pda1 = committees[0].1;
-        let data = ctx.fetch_ephem_account_data(pda1).unwrap();
-        assert!(data.is_empty(), "pda1 ephemeral account was removed");
-
-        let pda2 = committees[1].1;
-        let data = ctx.fetch_ephem_account_data(pda2).unwrap();
-        assert!(data.is_empty(), "pda2 ephemeral account was removed");
-         */
-    }
-
-    // 5. Re-delegate the same accounts
+    // 4. Re-delegate the same accounts
     {
         std::thread::sleep(std::time::Duration::from_secs(2));
         let blockhash = chain_client.get_latest_blockhash().unwrap();
         ctx.delegate_committees(Some(blockhash)).unwrap();
     }
 
-    // 6. Now we can modify them in the ephemeral again and no longer on chain
+    // 5. Now we can modify them in the ephemeral again and no longer on chain
     {
         let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
         assert_can_increase_committee_count(
