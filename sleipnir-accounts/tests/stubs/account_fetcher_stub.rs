@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use async_trait::async_trait;
 use conjunto_transwise::{
-    AccountChainSnapshot, AccountChainState, CommitFrequency, DelegationRecord,
+    AccountChainSnapshot, AccountChainState, DelegationRecord,
 };
 use futures_util::future::{ready, BoxFuture};
 use sleipnir_account_fetcher::{AccountFetcher, AccountFetcherResult};
@@ -31,10 +31,7 @@ impl AccountFetcherStub {
             (
                 Pubkey::new_unique(),
                 at_slot,
-                Some(DelegationRecord {
-                    owner,
-                    commit_frequency: CommitFrequency::default(),
-                }),
+                Some(DelegationRecord::default_with_owner(owner)),
             ),
         );
     }
