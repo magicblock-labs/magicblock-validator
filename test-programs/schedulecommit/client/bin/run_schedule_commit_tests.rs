@@ -24,34 +24,34 @@ pub fn main() {
     // These share a common config that includes the program to schedule commits
     // Thus they can run against the same validator instances
     let (security_output, scenarios_output) = {
-        eprintln!("======== Starting DEVNET Validator ========");
+        eprintln!("======== Starting DEVNET Validator for Scenarios + Security ========");
 
         // Start validators via `cargo run --release  -- <config>
         let mut devnet_validator = match start_validator_with_config(
-        "test-programs/schedulecommit/configs/schedulecommit-conf.devnet.toml",
-        7799,
-        "DEVNET",
-    ) {
-        Some(validator) => validator,
-        None => {
-            panic!("Failed to start devnet validator properly");
-        }
-    };
+            "test-programs/schedulecommit/configs/schedulecommit-conf.devnet.toml",
+            7799,
+            "DEVNET",
+        ) {
+            Some(validator) => validator,
+            None => {
+                panic!("Failed to start devnet validator properly");
+            }
+        };
 
-        eprintln!("======== Starting EPHEM Validator ========");
+        eprintln!("======== Starting EPHEM Validator for Scenarios + Security ========");
         let mut ephem_validator = match start_validator_with_config(
-        "test-programs/schedulecommit/configs/schedulecommit-conf.ephem.toml",
-        8899,
-        "EPHEM",
-    ) {
-        Some(validator) => validator,
-        None => {
-            devnet_validator
-                .kill()
-                .expect("Failed to kill devnet validator");
-            panic!("Failed to start ephemeral validator properly");
-        }
-    };
+            "test-programs/schedulecommit/configs/schedulecommit-conf.ephem.toml",
+            8899,
+            "EPHEM",
+        ) {
+            Some(validator) => validator,
+            None => {
+                devnet_validator
+                    .kill()
+                    .expect("Failed to kill devnet validator");
+                panic!("Failed to start ephemeral validator properly");
+            }
+        };
 
         eprintln!("======== RUNNING SECURITY TESTS ========");
         let test_security_dir =
@@ -65,6 +65,7 @@ pub fn main() {
                     return;
                 }
             };
+
         eprintln!("======== RUNNING SCENARIOS TESTS ========");
         let test_scenarios_dir =
             format!("{}/../{}", manifest_dir.clone(), "test-scenarios");
@@ -91,28 +92,28 @@ pub fn main() {
     let issues_frequent_commits_output = {
         eprintln!("======== RUNNING ISSUES TESTS - Frequent Commits ========");
         let mut devnet_validator = match start_validator_with_config(
-        "test-programs/schedulecommit/configs/schedulecommit-conf.devnet.toml",
-        7799,
-        "DEVNET",
-    ) {
-        Some(validator) => validator,
-        None => {
-            panic!("Failed to start devnet validator properly");
-        }
-    };
+            "test-programs/schedulecommit/configs/schedulecommit-conf.devnet.toml",
+            7799,
+            "DEVNET",
+        ) {
+            Some(validator) => validator,
+            None => {
+                panic!("Failed to start devnet validator properly");
+            }
+        };
         let mut ephem_validator = match start_validator_with_config(
-        "test-programs/schedulecommit/configs/schedulecommit-conf.ephem.frequent-commits.toml",
-        8899,
-        "EPHEM",
-    ) {
-        Some(validator) => validator,
-        None => {
-            devnet_validator
-                .kill()
-                .expect("Failed to kill devnet validator");
-            panic!("Failed to start ephemeral validator properly");
-        }
-    };
+            "test-programs/schedulecommit/configs/schedulecommit-conf.ephem.frequent-commits.toml",
+            8899,
+            "EPHEM",
+        ) {
+            Some(validator) => validator,
+            None => {
+                devnet_validator
+                    .kill()
+                    .expect("Failed to kill devnet validator");
+                panic!("Failed to start ephemeral validator properly");
+            }
+        };
         let test_issues_dir =
             format!("{}/../../{}", manifest_dir.clone(), "test-issues");
         let test_output = match run_test(
@@ -133,7 +134,7 @@ pub fn main() {
         test_output
     };
 
-    // Assert that all test suites passed
+    // Assert that all tests passed
     assert_cargo_tests_passed(security_output);
     assert_cargo_tests_passed(scenarios_output);
     assert_cargo_tests_passed(issues_frequent_commits_output);
@@ -200,7 +201,7 @@ fn start_validator_with_config(
         return None;
     }
 
-    // Start validator via `cargo run -- test-programs/triggercommit/triggercommit-conf.toml
+    // Start validator via `cargo run -- <path to config>`
     let mut validator = process::Command::new("cargo")
         .arg("run")
         .arg("--")
