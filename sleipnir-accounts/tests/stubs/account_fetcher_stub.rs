@@ -31,11 +31,7 @@ impl AccountFetcherStub {
             (
                 Pubkey::new_unique(),
                 at_slot,
-                Some(DelegationRecord {
-                    owner,
-                    delegation_slot: 0,
-                    commit_frequency: CommitFrequency::default(),
-                }),
+                Some(DelegationRecord::default_with_owner(owner)),
             ),
         );
     }
