@@ -1,6 +1,8 @@
 use std::str::FromStr;
 
-use schedulecommit_client::ScheduleCommitTestContext;
+use schedulecommit_client::{
+    ScheduleCommitTestContext, ScheduleCommitTestContextFields,
+};
 use schedulecommit_program::api::schedule_commit_cpi_instruction;
 use sleipnir_core::magic_program;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
@@ -66,14 +68,14 @@ fn test_schedule_commit_directly_with_single_ix() {
     // Attempts to directly commit PDAs via the MagicBlock program.
     // This fails since a CPI program id cannot be found.
     let ctx = prepare_ctx_with_account_to_commit();
-    let ScheduleCommitTestContext {
+    let ScheduleCommitTestContextFields {
         payer,
         commitment,
         committees,
         ephem_blockhash,
         ephem_client,
         ..
-    } = &ctx;
+    } = ctx.fields();
     let ix = create_schedule_commit_ix(
         payer.pubkey(),
         Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
@@ -106,14 +108,14 @@ fn test_schedule_commit_directly_with_commit_ix_sandwiched() {
     // two other instructions around the main one in order to confuse the CPI check algorithm.
     // Fails since a CPI program id cannot be found.
     let ctx = prepare_ctx_with_account_to_commit();
-    let ScheduleCommitTestContext {
+    let ScheduleCommitTestContextFields {
         payer,
         commitment,
         committees,
         ephem_blockhash,
         ephem_client,
         ..
-    } = &ctx;
+    } = ctx.fields();
 
     // Send money to one of the PDAs since it is delegated and can be cloned
     let (_, rcvr_pda) = committees[0];
@@ -166,14 +168,14 @@ fn test_schedule_commit_via_direct_and_indirect_cpi_of_other_program() {
     // but then again directly. The second attempt should fail due to the invoking program
     // not matching the PDA's owner.
     let ctx = prepare_ctx_with_account_to_commit();
-    let ScheduleCommitTestContext {
+    let ScheduleCommitTestContextFields {
         payer,
         commitment,
         committees,
         ephem_blockhash,
         ephem_client,
         ..
-    } = &ctx;
+    } = ctx.fields();
 
     let players = &committees
         .iter()
@@ -220,14 +222,14 @@ fn test_schedule_commit_via_direct_and_from_other_program_indirect_cpi_including
     //   directly via the MagicBlock program
     // The last one fails due to it not owning the PDAs.
     let ctx = prepare_ctx_with_account_to_commit();
-    let ScheduleCommitTestContext {
+    let ScheduleCommitTestContextFields {
         payer,
         commitment,
         committees,
         ephem_blockhash,
         ephem_client,
         ..
-    } = &ctx;
+    } = ctx.fields();
 
     let players = &committees
         .iter()

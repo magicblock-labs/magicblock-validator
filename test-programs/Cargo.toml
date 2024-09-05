@@ -6,7 +6,7 @@ members = [
   "schedulecommit/client",
   "schedulecommit/test-scenarios",
   "schedulecommit/test-security",
-  "integration-test-tools",
+  "test-tools",
 ]
 resolver = "2"
 

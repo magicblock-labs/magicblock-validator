@@ -1,7 +1,9 @@
 use log::*;
 use std::str::FromStr;
 
-use schedulecommit_client::{verify, ScheduleCommitTestContext};
+use schedulecommit_client::{
+    verify, ScheduleCommitTestContext, ScheduleCommitTestContextFields,
+};
 use schedulecommit_program::api::{
     increase_count_instruction, schedule_commit_and_undelegate_cpi_instruction,
 };
@@ -34,14 +36,14 @@ mod utils;
 fn commit_and_undelegate_one_account() -> (ScheduleCommitTestContext, Signature)
 {
     let ctx = get_context_with_delegated_committees(1);
-    let ScheduleCommitTestContext {
+    let ScheduleCommitTestContextFields {
         payer,
         committees,
         commitment,
         ephem_client,
         ephem_blockhash,
         ..
-    } = &ctx;
+    } = ctx.fields();
 
     let ix = schedule_commit_and_undelegate_cpi_instruction(
         payer.pubkey(),
@@ -78,14 +80,14 @@ fn commit_and_undelegate_one_account() -> (ScheduleCommitTestContext, Signature)
 fn commit_and_undelegate_two_accounts() -> (ScheduleCommitTestContext, Signature)
 {
     let ctx = get_context_with_delegated_committees(2);
-    let ScheduleCommitTestContext {
+    let ScheduleCommitTestContextFields {
         payer,
         committees,
         commitment,
         ephem_client,
         ephem_blockhash,
         ..
-    } = &ctx;
+    } = ctx.fields();
 
     let ix = schedule_commit_and_undelegate_cpi_instruction(
         payer.pubkey(),
@@ -220,7 +222,7 @@ fn test_committed_and_undelegated_single_account_redelegation() {
     );
 
     let (ctx, sig) = commit_and_undelegate_one_account();
-    let ScheduleCommitTestContext {
+    let ScheduleCommitTestContextFields {
         payer,
         committees,
         commitment,
@@ -229,7 +231,7 @@ fn test_committed_and_undelegated_single_account_redelegation() {
         chain_client,
         chain_blockhash,
         ..
-    } = &ctx;
+    } = ctx.fields();
 
     // 1. Show that we cannot use it on chain while it is being undelegated
     assert_cannot_increase_committee_count(
@@ -309,7 +311,7 @@ fn test_committed_and_undelegated_accounts_redelegation() {
     info!("==== test_committed_and_undelegated_accounts_redelegation ====");
 
     let (ctx, sig) = commit_and_undelegate_two_accounts();
-    let ScheduleCommitTestContext {
+    let ScheduleCommitTestContextFields {
         payer,
         committees,
         commitment,
@@ -318,7 +320,7 @@ fn test_committed_and_undelegated_accounts_redelegation() {
         chain_client,
         chain_blockhash,
         ..
-    } = &ctx;
+    } = ctx.fields();
 
     // 1. Show that we cannot use them on chain while they are being undelegated
     {

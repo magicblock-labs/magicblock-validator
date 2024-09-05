@@ -1,7 +1,7 @@
 use log::*;
 use std::str::FromStr;
 
-use schedulecommit_client::{verify, ScheduleCommitTestContext};
+use schedulecommit_client::{verify, ScheduleCommitTestContextFields};
 use schedulecommit_program::api::schedule_commit_cpi_instruction;
 use sleipnir_core::magic_program;
 use solana_rpc_client::rpc_client::SerializableTransaction;
@@ -18,18 +18,18 @@ mod utils;
 #[test]
 fn test_committing_two_accounts() {
     init_logger!();
-    info!("==== test_committing_two_accounts ====");
+    info!("==== test_committing_two_accounts====");
 
     let ctx = get_context_with_delegated_committees(2);
 
-    let ScheduleCommitTestContext {
+    let ScheduleCommitTestContextFields {
         payer,
         committees,
         commitment,
         ephem_client,
         ephem_blockhash,
         ..
-    } = &ctx;
+    } = ctx.fields();
 
     let ix = schedule_commit_cpi_instruction(
         payer.pubkey(),
