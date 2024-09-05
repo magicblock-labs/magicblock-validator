@@ -38,7 +38,7 @@ declare_process_instruction!(
     DEFAULT_COMPUTE_UNITS,
     |invoke_context| {
         let transaction_context = &invoke_context.transaction_context;
-        let instruction_context =
+        let instruction_context = // BLAH BLAH
             transaction_context.get_current_instruction_context()?;
         let instruction_data = instruction_context.get_instruction_data();
         let instruction = limited_deserialize(instruction_data)?;
