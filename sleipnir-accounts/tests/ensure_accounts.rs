@@ -451,8 +451,9 @@ async fn test_ensure_one_delegated_and_one_new_account_writable() {
         LifecycleMode::Replica,
     );
 
-    // One writable delegated (new account is not fetchable)
+    // One writable delegated and one new account
     account_fetcher.set_delegated_account(writable_delegated, 42, 11);
+    account_fetcher.set_new_account(writable_new_account, 42);
 
     // Ensure account
     let result = manager
@@ -471,7 +472,7 @@ async fn test_ensure_one_delegated_and_one_new_account_writable() {
     assert!(account_dumper.was_dumped_as_delegated_account(&writable_delegated));
     assert!(manager.last_commit(&writable_delegated).is_some());
 
-    assert!(account_dumper.was_untouched(&writable_new_account));
+    assert!(account_dumper.was_dumped_as_new_account(&writable_new_account));
     assert!(manager.last_commit(&writable_new_account).is_none());
 
     // Cleanup
@@ -645,6 +646,9 @@ async fn test_ensure_writable_account_fails_to_validate() {
         account_updates.clone(),
         account_dumper.clone(),
     );
+
+    // One new account
+    account_fetcher.set_new_account(writable_new_account, 42);
 
     // Ensure accounts
     let result = manager

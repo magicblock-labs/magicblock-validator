@@ -14,6 +14,11 @@ pub enum AccountDumperError {
 pub type AccountDumperResult<T> = Result<T, AccountDumperError>;
 
 pub trait AccountDumper {
+    fn dump_new_account(
+        &self,
+        pubkey: &Pubkey,
+    ) -> AccountDumperResult<Signature>;
+
     fn dump_system_account(
         &self,
         pubkey: &Pubkey,

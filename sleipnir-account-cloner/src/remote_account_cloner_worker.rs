@@ -197,7 +197,9 @@ where
         // Generate cloning transactions if we need
         let signatures = match &account_chain_snapshot.chain_state {
             // If the account is not present on-chain, we don't need to clone anything
-            AccountChainState::NewAccount => vec![],
+            AccountChainState::NewAccount => {
+                self.do_clone_new_account(pubkey)?
+            }
             // If the account is present on-chain, but not delegated
             AccountChainState::Undelegated { account } => {
                 self.do_clone_undelegated_account(pubkey, account).await?
@@ -237,6 +239,16 @@ where
 
         // Return the result
         Ok(AccountClonerOutput::Cloned(account_chain_snapshot))
+    }
+
+    fn do_clone_new_account(
+        &self,
+        pubkey: &Pubkey,
+    ) -> AccountClonerResult<Vec<Signature>> {
+        self.account_dumper
+            .dump_new_account(pubkey)
+            .map_err(AccountClonerError::AccountDumperError)
+            .map(|signature| vec![signature])
     }
 
     async fn do_clone_undelegated_account(

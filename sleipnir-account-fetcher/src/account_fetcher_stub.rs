@@ -17,6 +17,7 @@ use crate::{AccountFetcher, AccountFetcherResult};
 
 #[derive(Debug)]
 enum AccountFetcherStubState {
+    New,
     Basic { owner: Pubkey },
     Delegated { delegation_record: DelegationRecord },
     Executable,
@@ -30,7 +31,6 @@ struct AccountFetcherStubSnapshot {
 
 #[derive(Debug, Clone, Default)]
 pub struct AccountFetcherStub {
-    unknown_at_slot: Slot,
     fetched_counters: Arc<RwLock<HashMap<Pubkey, u64>>>,
     known_accounts: Arc<RwLock<HashMap<Pubkey, AccountFetcherStubSnapshot>>>,
 }
@@ -46,12 +46,15 @@ impl AccountFetcherStub {
     fn generate_account_chain_snapshot(
         &self,
         pubkey: &Pubkey,
-    ) -> AccountChainSnapshot {
+    ) -> AccountFetcherResult<AccountChainSnapshotShared> {
         match self.known_accounts.read().unwrap().get(pubkey) {
-            Some(known_account) => AccountChainSnapshot {
+            Some(known_account) => Ok(AccountChainSnapshot {
                 pubkey: *pubkey,
                 at_slot: known_account.slot,
                 chain_state: match &known_account.state {
+                    AccountFetcherStubState::New => {
+                        AccountChainState::NewAccount
+                    }
                     AccountFetcherStubState::Basic { owner } => {
                         AccountChainState::Undelegated {
                             account: Account {
@@ -76,17 +79,26 @@ impl AccountFetcherStub {
                         delegation_record: delegation_record.clone(),
                     },
                 },
-            },
-            None => AccountChainSnapshot {
-                pubkey: *pubkey,
-                at_slot: self.unknown_at_slot,
-                chain_state: AccountChainState::NewAccount,
-            },
+            }
+            .into()),
+            None => Err(crate::AccountFetcherError::FailedToFetch(format!(
+                "Account not supposed to be fetched during the tests: {:?}",
+                pubkey
+            ))),
         }
     }
 }
 
 impl AccountFetcherStub {
+    pub fn set_new_account(&self, pubkey: Pubkey, at_slot: Slot) {
+        self.insert_known_account(
+            pubkey,
+            AccountFetcherStubSnapshot {
+                slot: at_slot,
+                state: AccountFetcherStubState::New,
+            },
+        );
+    }
     pub fn set_system_account(&self, pubkey: Pubkey, at_slot: Slot) {
         self.insert_known_account(
             pubkey,
@@ -163,8 +175,6 @@ impl AccountFetcher for AccountFetcherStub {
                 entry.insert(1);
             }
         };
-        Box::pin(ready(Ok(self
-            .generate_account_chain_snapshot(pubkey)
-            .into())))
+        Box::pin(ready(self.generate_account_chain_snapshot(pubkey)))
     }
 }

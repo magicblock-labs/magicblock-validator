@@ -8,7 +8,6 @@ use sleipnir_account_updates::AccountUpdatesError;
 use solana_sdk::{
     compute_budget,
     pubkey::Pubkey,
-    signature::Signature,
     sysvar::{
         clock, epoch_rewards, epoch_schedule, fees, instructions,
         last_restart_slot, recent_blockhashes, rent, rewards, slot_hashes,
