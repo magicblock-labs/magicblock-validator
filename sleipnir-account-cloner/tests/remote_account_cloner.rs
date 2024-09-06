@@ -16,6 +16,7 @@ use solana_sdk::{
 };
 use tokio_util::sync::CancellationToken;
 
+#[allow(clippy::too_many_arguments)]
 fn setup_custom(
     internal_account_provider: InternalAccountProviderStub,
     account_fetcher: AccountFetcherStub,
