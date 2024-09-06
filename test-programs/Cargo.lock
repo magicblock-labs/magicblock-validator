@@ -1617,6 +1617,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "integration-test-tools"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "solana-rpc-client",
+ "solana-rpc-client-api",
+ "solana-sdk 1.17.22",
+]
+
+[[package]]
 name = "ipnet"
 version = "2.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2592,6 +2602,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "borsh 0.10.3",
+ "integration-test-tools",
  "schedulecommit-program",
  "sleipnir-core",
  "solana-program 1.17.22",
@@ -4039,6 +4050,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "test-issues"
+version = "0.0.0"
+dependencies = [
+ "integration-test-tools",
+ "log",
+ "test-tools-core",
 ]
 
 [[package]]

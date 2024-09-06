@@ -1,16 +1,12 @@
-use std::{str::FromStr, thread::sleep, time::Duration};
+use std::{ops::Deref, str::FromStr};
 
 use anyhow::{Context, Result};
+use integration_test_tools::IntegrationTestContext;
 use schedulecommit_program::api::{
     delegate_account_cpi_instruction, init_account_instruction, pda_and_bump,
 };
 use solana_rpc_client::rpc_client::RpcClient;
-use solana_rpc_client_api::{
-    client_error,
-    client_error::Error as ClientError,
-    client_error::ErrorKind as ClientErrorKind,
-    config::{RpcSendTransactionConfig, RpcTransactionConfig},
-};
+use solana_rpc_client_api::config::RpcSendTransactionConfig;
 #[allow(unused_imports)]
 use solana_sdk::signer::SeedDerivable;
 use solana_sdk::{
@@ -28,18 +24,24 @@ pub struct ScheduleCommitTestContext {
     pub payer: Keypair,
     // The Payer keypairs along with its PDA pubkey which we'll commit
     pub committees: Vec<(Keypair, Pubkey)>,
-    pub commitment: CommitmentConfig,
-    pub chain_client: RpcClient,
-    pub ephem_client: RpcClient,
-    pub validator_identity: Pubkey,
-    pub chain_blockhash: Hash,
-    pub ephem_blockhash: Hash,
+
+    common_ctx: IntegrationTestContext,
 }
 
 impl Default for ScheduleCommitTestContext {
     fn default() -> Self {
         Self::new(1)
     }
+}
+pub struct ScheduleCommitTestContextFields<'a> {
+    pub payer: &'a Keypair,
+    pub committees: &'a Vec<(Keypair, Pubkey)>,
+    pub commitment: &'a CommitmentConfig,
+    pub chain_client: &'a RpcClient,
+    pub ephem_client: &'a RpcClient,
+    pub validator_identity: &'a Pubkey,
+    pub chain_blockhash: &'a Hash,
+    pub ephem_blockhash: &'a Hash,
 }
 
 impl ScheduleCommitTestContext {
@@ -54,16 +56,7 @@ impl ScheduleCommitTestContext {
     }
 
     fn new_internal(ncommittees: usize, random_keys: bool) -> Self {
-        let commitment = CommitmentConfig::confirmed();
-
-        let chain_client = RpcClient::new_with_commitment(
-            "http://localhost:7799".to_string(),
-            commitment,
-        );
-        let ephem_client = RpcClient::new_with_commitment(
-            "http://localhost:8899".to_string(),
-            commitment,
-        );
+        let ictx = IntegrationTestContext::new();
 
         // Each committee is the payer and the matching PDA
         // The payer has money airdropped in order to init its PDA.
@@ -76,32 +69,18 @@ impl ScheduleCommitTestContext {
                 } else {
                     Keypair::from_seed(&[_idx as u8; 32]).unwrap()
                 };
-                Self::airdrop(
-                    &chain_client,
-                    &payer.pubkey(),
-                    LAMPORTS_PER_SOL,
-                    commitment,
-                )
-                .unwrap();
+                ictx.airdrop_chain(&payer.pubkey(), LAMPORTS_PER_SOL)
+                    .unwrap();
                 let (pda, _) = pda_and_bump(&payer.pubkey());
                 (payer, pda)
             })
             .collect::<Vec<(Keypair, Pubkey)>>();
 
-        let validator_identity = chain_client.get_identity().unwrap();
-        let chain_blockhash = chain_client.get_latest_blockhash().unwrap();
-        let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
-
         let payer = committees[0].0.insecure_clone();
         Self {
             payer,
             committees,
-            commitment,
-            chain_client,
-            ephem_client,
-            chain_blockhash,
-            ephem_blockhash,
-            validator_identity,
+            common_ctx: ictx,
         }
     }
 
@@ -175,311 +154,6 @@ impl ScheduleCommitTestContext {
                     tx.signatures[0]
                 )
             })
-    }
-
-    // -----------------
-    // Fetch Logs
-    // -----------------
-    pub fn fetch_ephemeral_logs(&self, sig: Signature) -> Option<Vec<String>> {
-        self.fetch_logs(sig, Some(&self.ephem_client))
-    }
-
-    pub fn fetch_chain_logs(&self, sig: Signature) -> Option<Vec<String>> {
-        self.fetch_logs(sig, Some(&self.chain_client))
-    }
-
-    fn fetch_logs(
-        &self,
-        sig: Signature,
-        rpc_client: Option<&RpcClient>,
-    ) -> Option<Vec<String>> {
-        // Try this up to 10 times since devnet here returns the version response instead of
-        // the EncodedConfirmedTransactionWithStatusMeta at times
-        for _ in 0..10 {
-            let status = match rpc_client
-                .unwrap_or(&self.chain_client)
-                .get_transaction_with_config(
-                    &sig,
-                    RpcTransactionConfig {
-                        commitment: Some(self.commitment),
-                        ..Default::default()
-                    },
-                ) {
-                Ok(status) => status,
-                Err(_) => {
-                    sleep(Duration::from_millis(400));
-                    continue;
-                }
-            };
-            return Option::<Vec<String>>::from(
-                status
-                    .transaction
-                    .meta
-                    .as_ref()
-                    .unwrap()
-                    .log_messages
-                    .clone(),
-            );
-        }
-        None
-    }
-
-    pub fn dump_chain_logs(&self, sig: Signature) {
-        let logs = self.fetch_chain_logs(sig).unwrap();
-        eprintln!("Chain Logs for '{}':\n{:#?}", sig, logs);
-    }
-
-    pub fn dump_ephemeral_logs(&self, sig: Signature) {
-        let logs = self.fetch_ephemeral_logs(sig).unwrap();
-        eprintln!("Ephemeral Logs for '{}':\n{:#?}", sig, logs);
-    }
-
-    pub fn assert_chain_logs_contain(&self, sig: Signature, expected: &str) {
-        let logs = self.fetch_chain_logs(sig).unwrap();
-        assert!(
-            self.logs_contain(&logs, expected),
-            "Logs do not contain '{}': {:?}",
-            expected,
-            logs
-        );
-    }
-
-    pub fn assert_ephemeral_logs_contain(
-        &self,
-        sig: Signature,
-        expected: &str,
-    ) {
-        let logs = self.fetch_ephemeral_logs(sig).unwrap();
-        assert!(
-            self.logs_contain(&logs, expected),
-            "Logs do not contain '{}': {:?}",
-            expected,
-            logs
-        );
-    }
-
-    fn logs_contain(&self, logs: &[String], expected: &str) -> bool {
-        logs.iter().any(|log| log.contains(expected))
-    }
-
-    pub fn assert_ephemeral_transaction_error(
-        &self,
-        sig: Signature,
-        res: &Result<Signature, ClientError>,
-        expected_msg: &str,
-    ) {
-        Self::assert_transaction_error(res);
-        self.assert_ephemeral_logs_contain(sig, expected_msg);
-    }
-
-    pub fn assert_chain_transaction_error(
-        &self,
-        sig: Signature,
-        res: &Result<Signature, ClientError>,
-        expected_msg: &str,
-    ) {
-        Self::assert_transaction_error(res);
-        self.assert_chain_logs_contain(sig, expected_msg);
-    }
-
-    fn assert_transaction_error(res: &Result<Signature, ClientError>) {
-        assert!(matches!(
-            res,
-            Err(ClientError {
-                kind: ClientErrorKind::TransactionError(_),
-                ..
-            })
-        ));
-    }
-
-    // -----------------
-    // Fetch Account Data/Balance
-    // -----------------
-    pub fn fetch_ephem_account_data(
-        &self,
-        pubkey: Pubkey,
-    ) -> anyhow::Result<Vec<u8>> {
-        self.ephem_client
-            .get_account_data(&pubkey)
-            .with_context(|| {
-                format!(
-                    "Failed to fetch ephemeral account data for '{:?}'",
-                    pubkey
-                )
-            })
-    }
-
-    pub fn fetch_chain_account_data(
-        &self,
-        pubkey: Pubkey,
-    ) -> anyhow::Result<Vec<u8>> {
-        self.chain_client
-            .get_account_data(&pubkey)
-            .with_context(|| {
-                format!("Failed to fetch chain account data for '{:?}'", pubkey)
-            })
-    }
-
-    pub fn fetch_ephem_account_balance(
-        &self,
-        pubkey: Pubkey,
-    ) -> anyhow::Result<u64> {
-        self.ephem_client
-            .get_balance_with_commitment(&pubkey, self.commitment)
-            .map(|balance| balance.value)
-            .with_context(|| {
-                format!(
-                    "Failed to fetch ephemeral account balance for '{:?}'",
-                    pubkey
-                )
-            })
-    }
-
-    pub fn fetch_chain_account_balance(
-        &self,
-        pubkey: Pubkey,
-    ) -> anyhow::Result<u64> {
-        self.chain_client
-            .get_balance_with_commitment(&pubkey, self.commitment)
-            .map(|balance| balance.value)
-            .with_context(|| {
-                format!(
-                    "Failed to fetch chain account balance for '{:?}'",
-                    pubkey
-                )
-            })
-    }
-
-    pub fn fetch_ephem_account_owner(
-        &self,
-        pubkey: Pubkey,
-    ) -> anyhow::Result<Pubkey> {
-        self.ephem_client
-            .get_account(&pubkey)
-            .map(|account| account.owner)
-            .with_context(|| {
-                format!(
-                    "Failed to fetch ephemeral account owner for '{:?}'",
-                    pubkey
-                )
-            })
-    }
-
-    pub fn fetch_chain_account_owner(
-        &self,
-        pubkey: Pubkey,
-    ) -> anyhow::Result<Pubkey> {
-        self.chain_client
-            .get_account(&pubkey)
-            .map(|account| account.owner)
-            .with_context(|| {
-                format!(
-                    "Failed to fetch chain account owner for '{:?}'",
-                    pubkey
-                )
-            })
-    }
-
-    // -----------------
-    // Airdrop/Transactions
-    // -----------------
-    pub fn airdrop_chain(
-        &self,
-        pubkey: &Pubkey,
-        lamports: u64,
-    ) -> anyhow::Result<()> {
-        Self::airdrop(&self.chain_client, pubkey, lamports, self.commitment)
-    }
-
-    pub fn airdrop_ephem(
-        &self,
-        pubkey: &Pubkey,
-        lamports: u64,
-    ) -> anyhow::Result<()> {
-        Self::airdrop(&self.ephem_client, pubkey, lamports, self.commitment)
-    }
-
-    pub fn airdrop(
-        rpc_client: &RpcClient,
-        pubkey: &Pubkey,
-        lamports: u64,
-        commitment_config: CommitmentConfig,
-    ) -> anyhow::Result<()> {
-        let sig = rpc_client.request_airdrop(pubkey, lamports).with_context(
-            || format!("Failed to airdrop chain account '{:?}'", pubkey),
-        )?;
-
-        let succeeded =
-            Self::confirm_transaction(&sig, rpc_client, commitment_config)
-                .with_context(|| {
-                    format!(
-                        "Failed to confirm airdrop chain account '{:?}'",
-                        pubkey
-                    )
-                })?;
-        if !succeeded {
-            return Err(anyhow::anyhow!(
-                "Failed to airdrop chain account '{:?}'",
-                pubkey
-            ));
-        }
-        Ok(())
-    }
-
-    pub fn confirm_transaction_chain(
-        &self,
-        sig: &Signature,
-    ) -> Result<bool, client_error::Error> {
-        Self::confirm_transaction(sig, &self.chain_client, self.commitment)
-    }
-
-    pub fn confirm_transaction_ephem(
-        &self,
-        sig: &Signature,
-    ) -> Result<bool, client_error::Error> {
-        Self::confirm_transaction(sig, &self.ephem_client, self.commitment)
-    }
-
-    pub fn confirm_transaction(
-        sig: &Signature,
-        rpc_client: &RpcClient,
-        commitment_config: CommitmentConfig,
-    ) -> Result<bool, client_error::Error> {
-        // Allow RPC failures to persist for up to 1 sec
-        const MAX_FAILURES: u64 = 5;
-        const MILLIS_UNTIL_RETRY: u64 = 200;
-        let mut failure_count = 0;
-
-        // Allow transactions to take up to 20 seconds to confirm
-        const MAX_UNCONFIRMED_COUNT: u64 = 40;
-        const MILLIS_UNTIL_RECONFIRM: u64 = 500;
-        let mut unconfirmed_count = 0;
-
-        loop {
-            match rpc_client
-                .confirm_transaction_with_commitment(sig, commitment_config)
-            {
-                Ok(res) if res.value => {
-                    return Ok(res.value);
-                }
-                Ok(_) => {
-                    unconfirmed_count += 1;
-                    if unconfirmed_count >= MAX_UNCONFIRMED_COUNT {
-                        return Ok(false);
-                    } else {
-                        sleep(Duration::from_millis(MILLIS_UNTIL_RECONFIRM));
-                    }
-                }
-                Err(err) => {
-                    failure_count += 1;
-                    if failure_count >= MAX_FAILURES {
-                        return Err(err);
-                    } else {
-                        sleep(Duration::from_millis(MILLIS_UNTIL_RETRY));
-                    }
-                }
-            }
-        }
     }
 
     // -----------------
@@ -561,5 +235,45 @@ impl ScheduleCommitTestContext {
             }
         }
         None
+    }
+
+    // -----------------
+    // Integration Test Context Fields
+    // -----------------
+    pub fn chain_client(&self) -> &RpcClient {
+        &self.common_ctx.chain_client
+    }
+    pub fn chain_blockhash(&self) -> &Hash {
+        &self.common_ctx.chain_blockhash
+    }
+    pub fn ephem_client(&self) -> &RpcClient {
+        &self.common_ctx.ephem_client
+    }
+    pub fn ephem_blockhash(&self) -> &Hash {
+        &self.common_ctx.ephem_blockhash
+    }
+
+    pub fn fields(&self) -> ScheduleCommitTestContextFields {
+        ScheduleCommitTestContextFields {
+            payer: &self.payer,
+            committees: &self.committees,
+            commitment: &self.commitment,
+            chain_client: &self.common_ctx.chain_client,
+            ephem_client: &self.common_ctx.ephem_client,
+            validator_identity: &self.common_ctx.validator_identity,
+            chain_blockhash: &self.common_ctx.chain_blockhash,
+            ephem_blockhash: &self.common_ctx.ephem_blockhash,
+        }
+    }
+}
+
+// -----------------
+// Integration Test Methods and Fields exposed via Deref
+// -----------------
+impl Deref for ScheduleCommitTestContext {
+    type Target = IntegrationTestContext;
+
+    fn deref(&self) -> &Self::Target {
+        &self.common_ctx
     }
 }

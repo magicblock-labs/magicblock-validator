@@ -34,7 +34,8 @@ pub const INIT_IX: u8 = 0;
 pub const DELEGATE_CPI_IX: u8 = 1;
 pub const SCHEDULECOMMIT_CPI_IX: u8 = 2;
 pub const SCHEDULECOMMIT_AND_UNDELEGATE_CPI_IX: u8 = 3;
-pub const INCREASE_COUNT_IX: u8 = 4;
+pub const SCHEDULECOMMIT_AND_UNDELEGATE_CPI_MOD_AFTER_IX: u8 = 4;
+pub const INCREASE_COUNT_IX: u8 = 5;
 
 const UNDELEGATE_IX: u8 = EXTERNAL_UNDELEGATE_DISCRIMINATOR[0];
 
@@ -102,6 +103,21 @@ pub fn process_instruction<'a>(
                 instruction_data_inner,
                 true,
                 true,
+            )?;
+        }
+        // # Account references:
+        // - **0.**   `[WRITE]`         Delegated account
+        // - **1.**   `[]`              Delegation program
+        // - **2.**   `[WRITE]`         Buffer account
+        // - **3.**   `[WRITE]`         Payer
+        // - **4.**   `[]`              System program
+        SCHEDULECOMMIT_AND_UNDELEGATE_CPI_MOD_AFTER_IX => {
+            // Same instruction input like [SCHEDULECOMMIT_AND_UNDELEGATE_CPI_IX].
+            // Behavior differs that it will modify the accounts after it
+            // requested commit + undelegation.
+            process_schedulecommit_and_undelegation_cpi_with_mod_after(
+                accounts,
+                instruction_data_inner,
             )?;
         }
         // Increases the count of a PDA of this program by one.
@@ -330,6 +346,70 @@ fn process_increase_count(accounts: &[AccountInfo]) -> ProgramResult {
     main_account.count += 1;
     main_account
         .serialize(&mut &mut account.try_borrow_mut_data()?.as_mut())?;
+    Ok(())
+}
+
+// -----------------
+// process_schedulecommit_and_undelegation_cpi_with_mod_after
+// -----------------
+fn process_schedulecommit_and_undelegation_cpi_with_mod_after(
+    accounts: &[AccountInfo],
+    instruction_data: &[u8],
+) -> Result<(), ProgramError> {
+    msg!("Processing schedulecommit_and_undelegation_cpi_with_mod_after instruction");
+
+    let accounts_iter = &mut accounts.iter();
+    let payer = next_account_info(accounts_iter)?;
+    let magic_program = next_account_info(accounts_iter)?;
+    let mut remaining = vec![];
+    for info in accounts_iter.by_ref() {
+        remaining.push(info.clone());
+    }
+
+    let args = instruction_data.chunks(32).collect::<Vec<_>>();
+    let player_pubkeys = args
+        .into_iter()
+        .map(Pubkey::try_from)
+        .collect::<Result<Vec<Pubkey>, _>>()
+        .map_err(|err| {
+            msg!("ERROR: failed to parse player pubkey {:?}", err);
+            ProgramError::InvalidArgument
+        })?;
+
+    if remaining.len() != player_pubkeys.len() {
+        msg!(
+            "ERROR: player_pubkeys.len() != committes.len() | {} != {}",
+            player_pubkeys.len(),
+            remaining.len()
+        );
+        return Err(ProgramError::InvalidArgument);
+    }
+
+    // Request the PDA accounts to be committed and undelegated
+    let mut account_infos = vec![payer];
+    account_infos.extend(remaining.iter());
+
+    let ix =
+        create_schedule_commit_ix(*magic_program.key, &account_infos, true);
+
+    invoke(&ix, &account_infos.into_iter().cloned().collect::<Vec<_>>())?;
+
+    // Then try to modify them
+    // This fails because the owner is already changed to the delegation program
+    // as part of undelegating the accounts
+    for committee in &remaining {
+        // Increase count of the PDA account
+        let main_account = {
+            let main_account_data = committee.try_borrow_data()?;
+            let mut main_account =
+                MainAccount::try_from_slice(&main_account_data)?;
+            main_account.count += 1;
+            main_account
+        };
+        main_account
+            .serialize(&mut &mut committee.try_borrow_mut_data()?.as_mut())?;
+    }
+
     Ok(())
 }
 

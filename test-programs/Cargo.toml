@@ -1,10 +1,12 @@
 [workspace]
 members = [
   "sysvars",
+  "test-issues",
   "schedulecommit/program",
   "schedulecommit/client",
   "schedulecommit/test-scenarios",
   "schedulecommit/test-security",
+  "test-tools",
 ]
 resolver = "2"
 
@@ -27,3 +29,4 @@ solana-rpc-client-api = "=1.17.22"
 solana-sdk = "=1.17.22"
 schedulecommit-client = { path = "schedulecommit/client" }
 schedulecommit-program = { path = "schedulecommit/program" }
+integration-test-tools = { path = "test-tools" }
