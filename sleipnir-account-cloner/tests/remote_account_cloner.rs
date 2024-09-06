@@ -22,7 +22,8 @@ fn setup_custom(
     account_updates: AccountUpdatesStub,
     account_dumper: AccountDumperStub,
     blacklisted_accounts: HashSet<Pubkey>,
-    allow_non_programs_undelegated: bool,
+    allow_cloning_system_accounts: bool,
+    allow_cloning_undelegated_non_programs: bool,
 ) -> (
     RemoteAccountClonerClient,
     CancellationToken,
@@ -38,7 +39,8 @@ fn setup_custom(
         account_dumper,
         blacklisted_accounts,
         payer_init_lamports,
-        allow_non_programs_undelegated,
+        allow_cloning_system_accounts,
+        allow_cloning_undelegated_non_programs,
     );
     let cloner_client = RemoteAccountClonerClient::new(&cloner_worker);
     // Run the worker in a separate task
@@ -71,6 +73,7 @@ fn setup_ephem(
         account_updates,
         account_dumper,
         standard_blacklisted_accounts(&Pubkey::new_unique()),
+        true,
         true,
     )
 }
@@ -311,7 +314,7 @@ async fn test_clone_refuse_blacklisted_account() {
 }
 
 #[tokio::test]
-async fn test_clone_refuse_non_programs_new_account_when_configured() {
+async fn test_clone_refuse_new_account_when_configured() {
     // Stubs
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
@@ -325,6 +328,7 @@ async fn test_clone_refuse_non_programs_new_account_when_configured() {
         account_dumper.clone(),
         HashSet::new(),
         false,
+        false,
     );
     // An account that doesnt exist on remote chain
     let new_account_pubkey = Pubkey::new_unique();
@@ -335,8 +339,7 @@ async fn test_clone_refuse_non_programs_new_account_when_configured() {
     assert!(matches!(
         result,
         Ok(AccountClonerOutput::Unclonable {
-            reason:
-                AccountClonerUnclonableReason::IsForbiddenNonProgramNewAccount,
+            reason: AccountClonerUnclonableReason::DisallowNewAccount,
             ..
         })
     ));
@@ -349,7 +352,7 @@ async fn test_clone_refuse_non_programs_new_account_when_configured() {
 }
 
 #[tokio::test]
-async fn test_clone_refuse_non_programs_undelegated_when_configured() {
+async fn test_clone_refuse_pda_account_when_configured() {
     // Stubs
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
@@ -363,8 +366,9 @@ async fn test_clone_refuse_non_programs_undelegated_when_configured() {
         account_dumper.clone(),
         HashSet::new(),
         false,
+        false,
     );
-    // A simple account that is not delegated and not a program (a PDA or system account)
+    // A simple account that is not delegated and not a program (a PDA)
     let pda_account_pubkey = Pubkey::new_unique();
     account_fetcher.set_pda_account(pda_account_pubkey, 42);
     // Run test
@@ -373,14 +377,132 @@ async fn test_clone_refuse_non_programs_undelegated_when_configured() {
     assert!(matches!(
         result,
         Ok(AccountClonerOutput::Unclonable {
-            reason:
-                AccountClonerUnclonableReason::IsForbiddenNonProgramUndelegated,
+            reason: AccountClonerUnclonableReason::DisallowPdaAccount,
             ..
         })
     ));
     assert_eq!(account_fetcher.get_fetch_count(&pda_account_pubkey), 1);
     assert!(account_updates.has_account_monitoring(&pda_account_pubkey));
     assert!(account_dumper.was_untouched(&pda_account_pubkey));
+    // Cleanup everything correctly
+    cancellation_token.cancel();
+    assert!(worker_handle.await.is_ok());
+}
+
+#[tokio::test]
+async fn test_clone_refuse_system_account_when_configured() {
+    // Stubs
+    let internal_account_provider = InternalAccountProviderStub::default();
+    let account_fetcher = AccountFetcherStub::default();
+    let account_updates = AccountUpdatesStub::default();
+    let account_dumper = AccountDumperStub::default();
+    // Create account cloner worker and client
+    let (cloner, cancellation_token, worker_handle) = setup_custom(
+        internal_account_provider.clone(),
+        account_fetcher.clone(),
+        account_updates.clone(),
+        account_dumper.clone(),
+        HashSet::new(),
+        false,
+        false,
+    );
+    // A system owned account (probably a payer)
+    let system_account_pubkey = Pubkey::new_unique();
+    account_fetcher.set_system_account(system_account_pubkey, 42);
+    // Run test
+    let result = cloner.clone_account(&system_account_pubkey).await;
+    // Check expected result
+    assert!(matches!(
+        result,
+        Ok(AccountClonerOutput::Unclonable {
+            reason: AccountClonerUnclonableReason::DisallowSystemAccount,
+            ..
+        })
+    ));
+    assert_eq!(account_fetcher.get_fetch_count(&system_account_pubkey), 1);
+    assert!(account_updates.has_account_monitoring(&system_account_pubkey));
+    assert!(account_dumper.was_untouched(&system_account_pubkey));
+    // Cleanup everything correctly
+    cancellation_token.cancel();
+    assert!(worker_handle.await.is_ok());
+}
+
+#[tokio::test]
+async fn test_clone_allow_system_account_when_configured() {
+    // Stubs
+    let internal_account_provider = InternalAccountProviderStub::default();
+    let account_fetcher = AccountFetcherStub::default();
+    let account_updates = AccountUpdatesStub::default();
+    let account_dumper = AccountDumperStub::default();
+    // Create account cloner worker and client
+    let (cloner, cancellation_token, worker_handle) = setup_custom(
+        internal_account_provider.clone(),
+        account_fetcher.clone(),
+        account_updates.clone(),
+        account_dumper.clone(),
+        HashSet::new(),
+        true,
+        false,
+    );
+    // A system owned account (probably a payer)
+    let system_account_pubkey = Pubkey::new_unique();
+    account_fetcher.set_system_account(system_account_pubkey, 42);
+    // Run test
+    let result = cloner.clone_account(&system_account_pubkey).await;
+    // Check expected result
+    assert!(matches!(result, Ok(AccountClonerOutput::Cloned { .. })));
+    assert_eq!(account_fetcher.get_fetch_count(&system_account_pubkey), 1);
+    assert!(account_updates.has_account_monitoring(&system_account_pubkey));
+    assert!(account_dumper.was_dumped_as_system_account(&system_account_pubkey));
+    // Cleanup everything correctly
+    cancellation_token.cancel();
+    assert!(worker_handle.await.is_ok());
+}
+
+#[tokio::test]
+async fn test_clone_refuse_then_allow_pda_account_when_configured() {
+    // Stubs
+    let internal_account_provider = InternalAccountProviderStub::default();
+    let account_fetcher = AccountFetcherStub::default();
+    let account_updates = AccountUpdatesStub::default();
+    let account_dumper = AccountDumperStub::default();
+    // Create account cloner worker and client
+    let (cloner, cancellation_token, worker_handle) = setup_custom(
+        internal_account_provider.clone(),
+        account_fetcher.clone(),
+        account_updates.clone(),
+        account_dumper.clone(),
+        HashSet::new(),
+        false,
+        false,
+    );
+    // A simple account that is initially undelegated that will become delegated during the test
+    let modified_account_pubkey = Pubkey::new_unique();
+    account_fetcher.set_pda_account(modified_account_pubkey, 42);
+    // Run test
+    let result1 = cloner.clone_account(&modified_account_pubkey).await;
+    // Check expected result1
+    assert!(matches!(
+        result1,
+        Ok(AccountClonerOutput::Unclonable {
+            reason: AccountClonerUnclonableReason::DisallowPdaAccount,
+            ..
+        })
+    ));
+    assert_eq!(account_fetcher.get_fetch_count(&modified_account_pubkey), 1);
+    assert!(account_updates.has_account_monitoring(&modified_account_pubkey));
+    assert!(account_dumper.was_untouched(&modified_account_pubkey));
+    // The account is then updated on-chain to become delegated
+    account_updates.set_known_update_slot(modified_account_pubkey, 55);
+    account_fetcher.set_delegated_account(modified_account_pubkey, 55, 55);
+    // Run test
+    let result2 = cloner.clone_account(&modified_account_pubkey).await;
+    // Check expected result2
+    assert!(matches!(result2, Ok(AccountClonerOutput::Cloned { .. })));
+    assert_eq!(account_fetcher.get_fetch_count(&modified_account_pubkey), 2);
+    assert!(account_updates.has_account_monitoring(&modified_account_pubkey));
+    assert!(account_dumper
+        .was_dumped_as_delegated_account(&modified_account_pubkey));
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());
@@ -446,7 +568,7 @@ async fn test_clone_properly_cached_pda_account() {
         account_updates.clone(),
         account_dumper.clone(),
     );
-    // A simple account not owned by the system program
+    // A simple account not owned by the system program (a PDA)
     let pda_account_pubkey = Pubkey::new_unique();
     account_fetcher.set_pda_account(pda_account_pubkey, 42);
     // Run test (we clone the account for the first time)

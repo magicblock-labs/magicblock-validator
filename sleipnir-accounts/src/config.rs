@@ -27,6 +27,15 @@ impl LifecycleMode {
             LifecycleMode::Offline => true,
         }
     }
+    pub fn allow_cloning_system_accounts(&self) -> bool {
+        match self {
+            LifecycleMode::Replica => true,
+            LifecycleMode::ProgramsReplica => false,
+            LifecycleMode::Ephemeral => true,
+            LifecycleMode::EphemeralLimited => true,
+            LifecycleMode::Offline => false,
+        }
+    }
     pub fn allow_cloning_undelegated_non_programs(&self) -> bool {
         match self {
             LifecycleMode::Replica => true,

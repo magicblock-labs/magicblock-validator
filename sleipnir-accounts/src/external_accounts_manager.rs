@@ -183,7 +183,7 @@ where
             let writable_snapshots = writable_clone_outputs.into_iter()
                 .map(|clone_output| match clone_output {
                     AccountClonerOutput::Cloned{account_chain_snapshot, ..} => Ok(account_chain_snapshot),
-                    AccountClonerOutput::Unclonable{ pubkey, reason} => {
+                    AccountClonerOutput::Unclonable{ pubkey, reason, ..} => {
                         Err(AccountsError::UnclonableAccountUsedAsWritableInEphemeral(pubkey, reason))
                     }
                 })

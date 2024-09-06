@@ -6,6 +6,7 @@ use sleipnir_account_dumper::AccountDumperError;
 use sleipnir_account_fetcher::AccountFetcherError;
 use sleipnir_account_updates::AccountUpdatesError;
 use solana_sdk::{
+    clock::Slot,
     compute_budget,
     pubkey::Pubkey,
     signature::Signature,
@@ -48,8 +49,9 @@ pub type AccountClonerListeners =
 pub enum AccountClonerUnclonableReason {
     AlreadyLocallyOverriden,
     IsBlacklisted,
-    IsForbiddenNonProgramNewAccount,
-    IsForbiddenNonProgramUndelegated,
+    DisallowNewAccount,
+    DisallowSystemAccount,
+    DisallowPdaAccount,
 }
 
 #[derive(Debug, Clone)]
@@ -61,6 +63,7 @@ pub enum AccountClonerOutput {
     Unclonable {
         pubkey: Pubkey,
         reason: AccountClonerUnclonableReason,
+        at_slot: Slot,
     },
 }
 

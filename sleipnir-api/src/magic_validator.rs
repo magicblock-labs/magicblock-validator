@@ -238,6 +238,7 @@ impl MagicValidator {
             account_dumper_bank,
             blacklisted_accounts,
             accounts_config.payer_init_lamports,
+            accounts_config.lifecycle.allow_cloning_system_accounts(),
             accounts_config
                 .lifecycle
                 .allow_cloning_undelegated_non_programs(),
