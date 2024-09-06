@@ -18,15 +18,6 @@ pub enum LifecycleMode {
 }
 
 impl LifecycleMode {
-    pub fn allow_cloning_undelegated_non_programs(&self) -> bool {
-        match self {
-            LifecycleMode::Replica => true,
-            LifecycleMode::ProgramsReplica => false,
-            LifecycleMode::Ephemeral => true,
-            LifecycleMode::EphemeralLimited => false,
-            LifecycleMode::Offline => false,
-        }
-    }
     pub fn is_offline(&self) -> bool {
         match self {
             LifecycleMode::Replica => false,
@@ -34,6 +25,15 @@ impl LifecycleMode {
             LifecycleMode::Ephemeral => false,
             LifecycleMode::EphemeralLimited => false,
             LifecycleMode::Offline => true,
+        }
+    }
+    pub fn allow_cloning_undelegated_non_programs(&self) -> bool {
+        match self {
+            LifecycleMode::Replica => true,
+            LifecycleMode::ProgramsReplica => false,
+            LifecycleMode::Ephemeral => true,
+            LifecycleMode::EphemeralLimited => false,
+            LifecycleMode::Offline => false,
         }
     }
     pub fn requires_ephemeral_validation(&self) -> bool {

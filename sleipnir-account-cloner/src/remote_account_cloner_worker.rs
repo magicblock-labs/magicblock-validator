@@ -106,7 +106,7 @@ where
 
     async fn process_clone_request(&self, pubkey: Pubkey) {
         // Actually run the whole cloning process on the bank, yield until done
-        let result = self.clone_if_needed(&pubkey).await;
+        let result = self.do_clone_or_use_cache(&pubkey).await;
         // Collecting the list of listeners awaiting for the clone to be done
         let listeners = match self
             .clone_listeners
@@ -131,7 +131,7 @@ where
         }
     }
 
-    async fn clone_if_needed(
+    async fn do_clone_or_use_cache(
         &self,
         pubkey: &Pubkey,
     ) -> AccountClonerResult<AccountClonerOutput> {
@@ -143,14 +143,14 @@ where
                     account_chain_snapshot,
                     ..
                 } => {
-                    // Check for the latest updates onchain
+                    // Check for the latest updates onchain for that account
                     match self
                         .account_updates
                         .get_last_known_update_slot(pubkey)
                     {
                         // If the account was updated on chain, check how recently
                         Some(last_known_update_slot) => {
-                            // If the cloned account is recent enough, use the cache
+                            // If the clone output is recent enough, use the cache directly
                             if account_chain_snapshot.at_slot
                                 >= last_known_update_slot
                             {
@@ -168,9 +168,9 @@ where
                 // If the previous clone marked the account as unclonable, we can use that cache forever
                 AccountClonerOutput::Unclonable { .. } => Ok(last_clone_output),
             },
-            // If we never cloned the account before, don't use the cache
+            // If we never cloned the account before, we can't use the cache
             None => {
-                // If somehow we already have this account in the bank, use it as is
+                // If somehow we already have this account in the bank, keep it as is
                 if self.internal_account_provider.has_account(pubkey) {
                     Ok(AccountClonerOutput::Unclonable {
                         pubkey: *pubkey,

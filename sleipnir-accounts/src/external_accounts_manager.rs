@@ -171,8 +171,7 @@ where
             // For now we'll allow readonly accounts to be not properly clonable but still usable in a transaction
             let readonly_snapshots = readonly_clone_outputs
                 .into_iter()
-                .filter_map(|readonly_clone_output| match readonly_clone_output
-                {
+                .filter_map(|clone_output| match clone_output {
                     AccountClonerOutput::Cloned {
                         account_chain_snapshot,
                         ..
@@ -182,7 +181,7 @@ where
                 .collect::<Vec<AccountChainSnapshotShared>>();
             // Ephemeral will only work if all writable accounts involved in a transaction are properly cloned
             let writable_snapshots = writable_clone_outputs.into_iter()
-                .map(|writable_clone_output| match writable_clone_output {
+                .map(|clone_output| match clone_output {
                     AccountClonerOutput::Cloned{account_chain_snapshot, ..} => Ok(account_chain_snapshot),
                     AccountClonerOutput::Unclonable{ pubkey, reason} => {
                         Err(AccountsError::UnclonableAccountUsedAsWritableInEphemeral(pubkey, reason))
