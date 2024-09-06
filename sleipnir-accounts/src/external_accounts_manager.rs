@@ -2,6 +2,7 @@ use std::{
     collections::{hash_map::Entry, HashMap},
     sync::{Arc, RwLock},
     time::Duration,
+    vec,
 };
 
 use conjunto_transwise::{
@@ -152,22 +153,39 @@ where
             );
         }
 
+        // Collect all the signatures involved in the cloning
+        let signatures: Vec<Signature> = readonly_clone_outputs
+            .iter()
+            .chain(writable_clone_outputs.iter())
+            .filter_map(|clone_output| match clone_output {
+                AccountClonerOutput::Cloned { signatures, .. } => {
+                    Some(signatures.as_ref().clone())
+                }
+                AccountClonerOutput::Unclonable { .. } => None,
+            })
+            .flatten()
+            .collect();
+
         // Validate that the accounts involved in the transaction are valid for an ephemeral
         if self.lifecycle.requires_ephemeral_validation() {
             // For now we'll allow readonly accounts to be not properly clonable but still usable in a transaction
             let readonly_snapshots = readonly_clone_outputs
                 .into_iter()
-                .filter_map(|output| match output {
-                    AccountClonerOutput::Cloned(snapshot) => Some(snapshot),
-                    AccountClonerOutput::Unclonable(_) => None,
+                .filter_map(|readonly_clone_output| match readonly_clone_output
+                {
+                    AccountClonerOutput::Cloned {
+                        account_chain_snapshot,
+                        ..
+                    } => Some(account_chain_snapshot),
+                    AccountClonerOutput::Unclonable { .. } => None,
                 })
                 .collect::<Vec<AccountChainSnapshotShared>>();
             // Ephemeral will only work if all writable accounts involved in a transaction are properly cloned
             let writable_snapshots = writable_clone_outputs.into_iter()
-                .map(|output| match output {
-                    AccountClonerOutput::Cloned(snapshot) => Ok(snapshot),
-                    AccountClonerOutput::Unclonable(pubkey) => {
-                        Err(AccountsError::UnclonableAccountUsedAsWritableInEphemeral(pubkey))
+                .map(|writable_clone_output| match writable_clone_output {
+                    AccountClonerOutput::Cloned{account_chain_snapshot, ..} => Ok(account_chain_snapshot),
+                    AccountClonerOutput::Unclonable{ pubkey, reason} => {
+                        Err(AccountsError::UnclonableAccountUsedAsWritableInEphemeral(pubkey, reason))
                     }
                 })
                 .collect::<AccountsResult<Vec<AccountChainSnapshotShared>>>()?;
@@ -183,15 +201,17 @@ where
         }
 
         // Done
-        Ok(vec![])
+        Ok(signatures)
     }
 
     fn start_commit_frequency_counters_if_needed(
         &self,
         clone_output: &AccountClonerOutput,
     ) {
-        if let AccountClonerOutput::Cloned(account_chain_snapshot) =
-            clone_output
+        if let AccountClonerOutput::Cloned {
+            account_chain_snapshot,
+            ..
+        } = clone_output
         {
             if let AccountChainState::Delegated {
                 delegation_record, ..

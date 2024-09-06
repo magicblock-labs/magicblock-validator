@@ -205,7 +205,6 @@ fn assert_can_increase_committee_count(
                 ..Default::default()
             },
         );
-    eprintln!("What the fuck: {:?}", tx_res);
     assert!(tx_res.is_ok());
 }
 

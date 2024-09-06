@@ -151,7 +151,7 @@ impl AccountDumper for AccountDumperBank {
                     &program_idl_account,
                 ))
             });
-        let needs_upgrade = self.bank.get_account(program_id_pubkey).is_some();
+        let needs_upgrade = self.bank.has_account(program_id_pubkey);
         let transactions = transactions_to_clone_program(
             needs_upgrade,
             program_id_modification,

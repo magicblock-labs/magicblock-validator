@@ -14,6 +14,7 @@ use solana_sdk::{
     account::{Account, AccountSharedData},
     native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
+    signature::Signature,
 };
 use stubs::{
     account_committer_stub::AccountCommitterStub,
@@ -108,19 +109,25 @@ async fn test_commit_two_delegated_accounts_one_needs_commit() {
     // Clone the accounts through a dummy transaction
     account_cloner.set(
         &commit_needed_pubkey,
-        AccountClonerOutput::Cloned(generate_delegated_account_chain_snapshot(
-            &commit_needed_pubkey,
-            &commit_needed_account,
-            CommitFrequency::Millis(1),
-        )),
+        AccountClonerOutput::Cloned {
+            account_chain_snapshot: generate_delegated_account_chain_snapshot(
+                &commit_needed_pubkey,
+                &commit_needed_account,
+                CommitFrequency::Millis(1),
+            ),
+            signatures: vec![Signature::new_unique()].into(),
+        },
     );
     account_cloner.set(
         &commit_not_needed_pubkey,
-        AccountClonerOutput::Cloned(generate_delegated_account_chain_snapshot(
-            &commit_not_needed_pubkey,
-            &commit_not_needed_account,
-            CommitFrequency::Millis(60_000),
-        )),
+        AccountClonerOutput::Cloned {
+            account_chain_snapshot: generate_delegated_account_chain_snapshot(
+                &commit_not_needed_pubkey,
+                &commit_not_needed_account,
+                CommitFrequency::Millis(60_000),
+            ),
+            signatures: vec![Signature::new_unique()].into(),
+        },
     );
     let result = manager
         .ensure_accounts_from_holder(

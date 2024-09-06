@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use conjunto_transwise::AccountChainSnapshotShared;
 use futures_util::future::BoxFuture;
@@ -8,6 +8,7 @@ use sleipnir_account_updates::AccountUpdatesError;
 use solana_sdk::{
     compute_budget,
     pubkey::Pubkey,
+    signature::Signature,
     sysvar::{
         clock, epoch_rewards, epoch_schedule, fees, instructions,
         last_restart_slot, recent_blockhashes, rent, rewards, slot_hashes,
@@ -44,23 +45,24 @@ pub type AccountClonerListeners =
     Vec<Sender<AccountClonerResult<AccountClonerOutput>>>;
 
 #[derive(Debug, Clone)]
-pub enum AccountClonerOutput {
-    Cloned(AccountChainSnapshotShared),
-    Unclonable(Pubkey),
+pub enum AccountClonerUnclonableReason {
+    AlreadyLocallyOverriden,
+    IsBlacklisted,
+    IsForbiddenNonProgramNewAccount,
+    IsForbiddenNonProgramUndelegated,
 }
 
-/*
 #[derive(Debug, Clone)]
 pub enum AccountClonerOutput {
     Cloned {
-        snapshot: AccountChainSnapshotShared,
-        signatures: Vec<Signature>,
+        account_chain_snapshot: AccountChainSnapshotShared,
+        signatures: Arc<Vec<Signature>>,
     },
     Unclonable {
         pubkey: Pubkey,
+        reason: AccountClonerUnclonableReason,
     },
 }
- */
 
 pub trait AccountCloner {
     fn clone_account(

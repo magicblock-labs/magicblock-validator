@@ -827,7 +827,9 @@ async fn test_ensure_accounts_already_known_can_be_reused_as_writable_later() {
         // Check proper behaviour
         assert!(matches!(
             result,
-            Err(AccountsError::UnclonableAccountUsedAsWritableInEphemeral(_))
+            Err(
+                AccountsError::UnclonableAccountUsedAsWritableInEphemeral { .. }
+            )
         ));
     }
 
