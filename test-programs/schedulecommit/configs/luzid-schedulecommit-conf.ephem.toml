@@ -3,7 +3,7 @@ name = "Ephem:8899"
 
 [node.accounts]
 remote = "http://0.0.0.0:7799"
-lifecycle = "ephemeral-limited"
+lifecycle = "ephemeral"
 commit = { frequency_millis = 500_000, trigger = true, compute_unit_price = 1_000_000 }
 
 [node.rpc]
