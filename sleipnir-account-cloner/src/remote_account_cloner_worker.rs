@@ -1,7 +1,7 @@
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     sync::{Arc, RwLock},
-    u64, vec,
+    vec,
 };
 
 use conjunto_transwise::{AccountChainSnapshotShared, AccountChainState};
