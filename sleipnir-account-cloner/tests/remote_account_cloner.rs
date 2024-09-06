@@ -22,8 +22,11 @@ fn setup_custom(
     account_updates: AccountUpdatesStub,
     account_dumper: AccountDumperStub,
     blacklisted_accounts: HashSet<Pubkey>,
+    allow_cloning_new_accounts: bool,
     allow_cloning_system_accounts: bool,
-    allow_cloning_undelegated_non_programs: bool,
+    allow_cloning_pda_accounts: bool,
+    allow_cloning_delegated_accounts: bool,
+    allow_cloning_program_accounts: bool,
 ) -> (
     RemoteAccountClonerClient,
     CancellationToken,
@@ -39,8 +42,11 @@ fn setup_custom(
         account_dumper,
         blacklisted_accounts,
         payer_init_lamports,
+        allow_cloning_new_accounts,
         allow_cloning_system_accounts,
-        allow_cloning_undelegated_non_programs,
+        allow_cloning_pda_accounts,
+        allow_cloning_delegated_accounts,
+        allow_cloning_program_accounts,
     );
     let cloner_client = RemoteAccountClonerClient::new(&cloner_worker);
     // Run the worker in a separate task
@@ -57,7 +63,7 @@ fn setup_custom(
     (cloner_client, cancellation_token, cloner_worker_handle)
 }
 
-fn setup_ephem(
+fn setup_ephemeral(
     internal_account_provider: InternalAccountProviderStub,
     account_fetcher: AccountFetcherStub,
     account_updates: AccountUpdatesStub,
@@ -75,18 +81,69 @@ fn setup_ephem(
         standard_blacklisted_accounts(&Pubkey::new_unique()),
         true,
         true,
+        true,
+        true,
+        true,
+    )
+}
+
+fn setup_programs_replica(
+    internal_account_provider: InternalAccountProviderStub,
+    account_fetcher: AccountFetcherStub,
+    account_updates: AccountUpdatesStub,
+    account_dumper: AccountDumperStub,
+) -> (
+    RemoteAccountClonerClient,
+    CancellationToken,
+    tokio::task::JoinHandle<()>,
+) {
+    setup_custom(
+        internal_account_provider,
+        account_fetcher,
+        account_updates,
+        account_dumper,
+        standard_blacklisted_accounts(&Pubkey::new_unique()),
+        false,
+        false,
+        false,
+        false,
+        true,
+    )
+}
+
+fn setup_ephemera_limited(
+    internal_account_provider: InternalAccountProviderStub,
+    account_fetcher: AccountFetcherStub,
+    account_updates: AccountUpdatesStub,
+    account_dumper: AccountDumperStub,
+) -> (
+    RemoteAccountClonerClient,
+    CancellationToken,
+    tokio::task::JoinHandle<()>,
+) {
+    setup_custom(
+        internal_account_provider,
+        account_fetcher,
+        account_updates,
+        account_dumper,
+        standard_blacklisted_accounts(&Pubkey::new_unique()),
+        true,
+        true,
+        false,
+        true,
+        true,
     )
 }
 
 #[tokio::test]
-async fn test_clone_simple_new_account() {
+async fn test_clone_allow_new_account_when_ephemeral() {
     // Stubs
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
     // Create account cloner worker and client
-    let (cloner, cancellation_token, worker_handle) = setup_ephem(
+    let (cloner, cancellation_token, worker_handle) = setup_ephemeral(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
@@ -108,14 +165,14 @@ async fn test_clone_simple_new_account() {
 }
 
 #[tokio::test]
-async fn test_clone_simple_system_account() {
+async fn test_clone_sllow_system_account_when_ephemeral() {
     // Stubs
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
     // Create account cloner worker and client
-    let (cloner, cancellation_token, worker_handle) = setup_ephem(
+    let (cloner, cancellation_token, worker_handle) = setup_ephemeral(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
@@ -137,14 +194,14 @@ async fn test_clone_simple_system_account() {
 }
 
 #[tokio::test]
-async fn test_clone_simple_pda_account() {
+async fn test_clone_allow_pda_account_when_ephemeral() {
     // Stubs
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
     // Create account cloner worker and client
-    let (cloner, cancellation_token, worker_handle) = setup_ephem(
+    let (cloner, cancellation_token, worker_handle) = setup_ephemeral(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
@@ -166,14 +223,14 @@ async fn test_clone_simple_pda_account() {
 }
 
 #[tokio::test]
-async fn test_clone_simple_delegated_account() {
+async fn test_clone_allow_delegated_account_when_ephemeral() {
     // Stubs
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
     // Create account cloner worker and client
-    let (cloner, cancellation_token, worker_handle) = setup_ephem(
+    let (cloner, cancellation_token, worker_handle) = setup_ephemeral(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
@@ -199,14 +256,14 @@ async fn test_clone_simple_delegated_account() {
 }
 
 #[tokio::test]
-async fn test_clone_simple_program_accounts() {
+async fn test_clone_allow_program_accounts_when_ephemeral() {
     // Stubs
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
     // Create account cloner worker and client
-    let (cloner, cancellation_token, worker_handle) = setup_ephem(
+    let (cloner, cancellation_token, worker_handle) = setup_ephemeral(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
@@ -252,7 +309,7 @@ async fn test_clone_refuse_already_written_in_bank() {
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
     // Create account cloner worker and client
-    let (cloner, cancellation_token, worker_handle) = setup_ephem(
+    let (cloner, cancellation_token, worker_handle) = setup_ephemeral(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
@@ -287,7 +344,7 @@ async fn test_clone_refuse_blacklisted_account() {
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
     // Create account cloner worker and client
-    let (cloner, cancellation_token, worker_handle) = setup_ephem(
+    let (cloner, cancellation_token, worker_handle) = setup_ephemeral(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
@@ -314,21 +371,18 @@ async fn test_clone_refuse_blacklisted_account() {
 }
 
 #[tokio::test]
-async fn test_clone_refuse_new_account_when_configured() {
+async fn test_clone_refuse_new_account_when_programs_replica() {
     // Stubs
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
     // Create account cloner worker and client
-    let (cloner, cancellation_token, worker_handle) = setup_custom(
+    let (cloner, cancellation_token, worker_handle) = setup_programs_replica(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
         account_dumper.clone(),
-        HashSet::new(),
-        false,
-        false,
     );
     // An account that doesnt exist on remote chain
     let new_account_pubkey = Pubkey::new_unique();
@@ -352,59 +406,18 @@ async fn test_clone_refuse_new_account_when_configured() {
 }
 
 #[tokio::test]
-async fn test_clone_refuse_pda_account_when_configured() {
+async fn test_clone_refuse_system_account_when_programs_replica() {
     // Stubs
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
     // Create account cloner worker and client
-    let (cloner, cancellation_token, worker_handle) = setup_custom(
+    let (cloner, cancellation_token, worker_handle) = setup_programs_replica(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
         account_dumper.clone(),
-        HashSet::new(),
-        false,
-        false,
-    );
-    // A simple account that is not delegated and not a program (a PDA)
-    let pda_account_pubkey = Pubkey::new_unique();
-    account_fetcher.set_pda_account(pda_account_pubkey, 42);
-    // Run test
-    let result = cloner.clone_account(&pda_account_pubkey).await;
-    // Check expected result
-    assert!(matches!(
-        result,
-        Ok(AccountClonerOutput::Unclonable {
-            reason: AccountClonerUnclonableReason::DisallowPdaAccount,
-            ..
-        })
-    ));
-    assert_eq!(account_fetcher.get_fetch_count(&pda_account_pubkey), 1);
-    assert!(account_updates.has_account_monitoring(&pda_account_pubkey));
-    assert!(account_dumper.was_untouched(&pda_account_pubkey));
-    // Cleanup everything correctly
-    cancellation_token.cancel();
-    assert!(worker_handle.await.is_ok());
-}
-
-#[tokio::test]
-async fn test_clone_refuse_system_account_when_configured() {
-    // Stubs
-    let internal_account_provider = InternalAccountProviderStub::default();
-    let account_fetcher = AccountFetcherStub::default();
-    let account_updates = AccountUpdatesStub::default();
-    let account_dumper = AccountDumperStub::default();
-    // Create account cloner worker and client
-    let (cloner, cancellation_token, worker_handle) = setup_custom(
-        internal_account_provider.clone(),
-        account_fetcher.clone(),
-        account_updates.clone(),
-        account_dumper.clone(),
-        HashSet::new(),
-        false,
-        false,
     );
     // A system owned account (probably a payer)
     let system_account_pubkey = Pubkey::new_unique();
@@ -428,21 +441,166 @@ async fn test_clone_refuse_system_account_when_configured() {
 }
 
 #[tokio::test]
-async fn test_clone_allow_system_account_when_configured() {
+async fn test_clone_refuse_pda_account_when_programs_replica() {
     // Stubs
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
     // Create account cloner worker and client
-    let (cloner, cancellation_token, worker_handle) = setup_custom(
+    let (cloner, cancellation_token, worker_handle) = setup_programs_replica(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
         account_dumper.clone(),
-        HashSet::new(),
-        true,
-        false,
+    );
+    // A simple account that is not delegated and not a program (a PDA)
+    let pda_account_pubkey = Pubkey::new_unique();
+    account_fetcher.set_pda_account(pda_account_pubkey, 42);
+    // Run test
+    let result = cloner.clone_account(&pda_account_pubkey).await;
+    // Check expected result
+    assert!(matches!(
+        result,
+        Ok(AccountClonerOutput::Unclonable {
+            reason: AccountClonerUnclonableReason::DisallowPdaAccount,
+            ..
+        })
+    ));
+    assert_eq!(account_fetcher.get_fetch_count(&pda_account_pubkey), 1);
+    assert!(account_updates.has_account_monitoring(&pda_account_pubkey));
+    assert!(account_dumper.was_untouched(&pda_account_pubkey));
+    // Cleanup everything correctly
+    cancellation_token.cancel();
+    assert!(worker_handle.await.is_ok());
+}
+
+#[tokio::test]
+async fn test_clone_refuse_delegated_account_when_programs_replica() {
+    // Stubs
+    let internal_account_provider = InternalAccountProviderStub::default();
+    let account_fetcher = AccountFetcherStub::default();
+    let account_updates = AccountUpdatesStub::default();
+    let account_dumper = AccountDumperStub::default();
+    // Create account cloner worker and client
+    let (cloner, cancellation_token, worker_handle) = setup_programs_replica(
+        internal_account_provider.clone(),
+        account_fetcher.clone(),
+        account_updates.clone(),
+        account_dumper.clone(),
+    );
+    // A properly delegated account
+    let delegated_account_pubkey = Pubkey::new_unique();
+    account_fetcher.set_delegated_account(delegated_account_pubkey, 42, 11);
+    // Run test
+    let result = cloner.clone_account(&delegated_account_pubkey).await;
+    // Check expected result
+    assert!(matches!(
+        result,
+        Ok(AccountClonerOutput::Unclonable {
+            reason: AccountClonerUnclonableReason::DisallowDelegatedAccount,
+            ..
+        })
+    ));
+    assert_eq!(
+        account_fetcher.get_fetch_count(&delegated_account_pubkey),
+        1
+    );
+    assert!(account_updates.has_account_monitoring(&delegated_account_pubkey));
+    assert!(account_dumper.was_untouched(&delegated_account_pubkey));
+    // Cleanup everything correctly
+    cancellation_token.cancel();
+    assert!(worker_handle.await.is_ok());
+}
+
+#[tokio::test]
+async fn test_clone_allow_program_accounts_when_programs_replica() {
+    // Stubs
+    let internal_account_provider = InternalAccountProviderStub::default();
+    let account_fetcher = AccountFetcherStub::default();
+    let account_updates = AccountUpdatesStub::default();
+    let account_dumper = AccountDumperStub::default();
+    // Create account cloner worker and client
+    let (cloner, cancellation_token, worker_handle) = setup_programs_replica(
+        internal_account_provider.clone(),
+        account_fetcher.clone(),
+        account_updates.clone(),
+        account_dumper.clone(),
+    );
+    // A simple program with its executable data alongside it
+    let program_id_pubkey = Pubkey::new_unique();
+    let program_data_pubkey = get_program_data_address(&program_id_pubkey);
+    let program_anchor_pubkey =
+        get_pubkey_anchor_idl(&program_id_pubkey).unwrap();
+    let program_shank_pubkey =
+        get_pubkey_shank_idl(&program_id_pubkey).unwrap();
+    account_fetcher.set_executable_account(program_id_pubkey, 42);
+    account_fetcher.set_pda_account(program_data_pubkey, 42);
+    account_fetcher.set_new_account(program_anchor_pubkey, 42); // The anchor IDL does not exist, so it should use shank
+    account_fetcher.set_pda_account(program_shank_pubkey, 42);
+    // Run test
+    let result = cloner.clone_account(&program_id_pubkey).await;
+    // Check expected result
+    assert!(matches!(result, Ok(AccountClonerOutput::Cloned { .. })));
+    assert_eq!(account_fetcher.get_fetch_count(&program_id_pubkey), 1);
+    assert!(account_updates.has_account_monitoring(&program_id_pubkey));
+    assert!(account_dumper.was_dumped_as_program_id(&program_id_pubkey));
+    assert_eq!(account_fetcher.get_fetch_count(&program_data_pubkey), 1);
+    assert!(!account_updates.has_account_monitoring(&program_data_pubkey));
+    assert!(account_dumper.was_dumped_as_program_data(&program_data_pubkey));
+    assert_eq!(account_fetcher.get_fetch_count(&program_anchor_pubkey), 1);
+    assert!(!account_updates.has_account_monitoring(&program_anchor_pubkey));
+    assert!(account_dumper.was_untouched(&program_anchor_pubkey));
+    assert_eq!(account_fetcher.get_fetch_count(&program_shank_pubkey), 1);
+    assert!(!account_updates.has_account_monitoring(&program_shank_pubkey));
+    assert!(account_dumper.was_dumped_as_program_idl(&program_shank_pubkey));
+    // Cleanup everything correctly
+    cancellation_token.cancel();
+    assert!(worker_handle.await.is_ok());
+}
+
+#[tokio::test]
+async fn test_clone_allow_new_account_when_ephemeral_limited() {
+    // Stubs
+    let internal_account_provider = InternalAccountProviderStub::default();
+    let account_fetcher = AccountFetcherStub::default();
+    let account_updates = AccountUpdatesStub::default();
+    let account_dumper = AccountDumperStub::default();
+    // Create account cloner worker and client
+    let (cloner, cancellation_token, worker_handle) = setup_ephemera_limited(
+        internal_account_provider.clone(),
+        account_fetcher.clone(),
+        account_updates.clone(),
+        account_dumper.clone(),
+    );
+    // A new account (probably a payer)
+    let new_account_pubkey = Pubkey::new_unique();
+    account_fetcher.set_new_account(new_account_pubkey, 42);
+    // Run test
+    let result = cloner.clone_account(&new_account_pubkey).await;
+    // Check expected result
+    assert!(matches!(result, Ok(AccountClonerOutput::Cloned { .. })));
+    assert_eq!(account_fetcher.get_fetch_count(&new_account_pubkey), 1);
+    assert!(account_updates.has_account_monitoring(&new_account_pubkey));
+    assert!(account_dumper.was_dumped_as_new_account(&new_account_pubkey));
+    // Cleanup everything correctly
+    cancellation_token.cancel();
+    assert!(worker_handle.await.is_ok());
+}
+
+#[tokio::test]
+async fn test_clone_allow_system_account_when_ephemeral_limited() {
+    // Stubs
+    let internal_account_provider = InternalAccountProviderStub::default();
+    let account_fetcher = AccountFetcherStub::default();
+    let account_updates = AccountUpdatesStub::default();
+    let account_dumper = AccountDumperStub::default();
+    // Create account cloner worker and client
+    let (cloner, cancellation_token, worker_handle) = setup_ephemera_limited(
+        internal_account_provider.clone(),
+        account_fetcher.clone(),
+        account_updates.clone(),
+        account_dumper.clone(),
     );
     // A system owned account (probably a payer)
     let system_account_pubkey = Pubkey::new_unique();
@@ -460,21 +618,18 @@ async fn test_clone_allow_system_account_when_configured() {
 }
 
 #[tokio::test]
-async fn test_clone_refuse_then_allow_pda_account_when_configured() {
+async fn test_clone_refuse_then_allow_pda_account_when_ephemeral_limited() {
     // Stubs
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
     // Create account cloner worker and client
-    let (cloner, cancellation_token, worker_handle) = setup_custom(
+    let (cloner, cancellation_token, worker_handle) = setup_ephemera_limited(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
         account_dumper.clone(),
-        HashSet::new(),
-        false,
-        false,
     );
     // A simple account that is initially undelegated that will become delegated during the test
     let modified_account_pubkey = Pubkey::new_unique();
@@ -516,7 +671,7 @@ async fn test_clone_will_not_fetch_the_same_thing_multiple_times() {
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
     // Create account cloner worker and client
-    let (cloner, cancellation_token, worker_handle) = setup_ephem(
+    let (cloner, cancellation_token, worker_handle) = setup_ephemeral(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
@@ -555,14 +710,14 @@ async fn test_clone_will_not_fetch_the_same_thing_multiple_times() {
 }
 
 #[tokio::test]
-async fn test_clone_properly_cached_pda_account() {
+async fn test_clone_properly_cached_pda_account_when_ephemeral() {
     // Stubs
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
     // Create account cloner worker and client
-    let (cloner, cancellation_token, worker_handle) = setup_ephem(
+    let (cloner, cancellation_token, worker_handle) = setup_ephemeral(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
@@ -609,7 +764,7 @@ async fn test_clone_properly_cached_program() {
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
     // Create account cloner worker and client
-    let (cloner, cancellation_token, worker_handle) = setup_ephem(
+    let (cloner, cancellation_token, worker_handle) = setup_ephemeral(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
@@ -679,7 +834,7 @@ async fn test_clone_properly_cached_delegated_account_that_changes_state() {
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
     // Create account cloner worker and client
-    let (cloner, cancellation_token, worker_handle) = setup_ephem(
+    let (cloner, cancellation_token, worker_handle) = setup_ephemeral(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
@@ -763,7 +918,7 @@ async fn test_clone_properly_upgrading_downgrading_when_created_and_deleted() {
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
     // Create account cloner worker and client
-    let (cloner, cancellation_token, worker_handle) = setup_ephem(
+    let (cloner, cancellation_token, worker_handle) = setup_ephemeral(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),

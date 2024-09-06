@@ -33,8 +33,11 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU> {
     account_dumper: ADU,
     blacklisted_accounts: HashSet<Pubkey>,
     payer_init_lamports: Option<u64>,
+    allow_cloning_new_accounts: bool,
     allow_cloning_system_accounts: bool,
-    allow_cloning_undelegated_non_programs: bool,
+    allow_cloning_pda_accounts: bool,
+    allow_cloning_delegated_accounts: bool,
+    allow_cloning_program_accounts: bool,
     clone_request_receiver: UnboundedReceiver<Pubkey>,
     clone_request_sender: UnboundedSender<Pubkey>,
     clone_listeners: Arc<RwLock<HashMap<Pubkey, AccountClonerListeners>>>,
@@ -56,8 +59,11 @@ where
         account_dumper: ADU,
         blacklisted_accounts: HashSet<Pubkey>,
         payer_init_lamports: Option<u64>,
+        allow_cloning_new_accounts: bool,
         allow_cloning_system_accounts: bool,
-        allow_cloning_undelegated_non_programs: bool,
+        allow_cloning_pda_accounts: bool,
+        allow_cloning_delegated_accounts: bool,
+        allow_cloning_program_accounts: bool,
     ) -> Self {
         let (clone_request_sender, clone_request_receiver) =
             unbounded_channel();
@@ -68,8 +74,11 @@ where
             account_dumper,
             blacklisted_accounts,
             payer_init_lamports,
+            allow_cloning_new_accounts,
             allow_cloning_system_accounts,
-            allow_cloning_undelegated_non_programs,
+            allow_cloning_pda_accounts,
+            allow_cloning_delegated_accounts,
+            allow_cloning_program_accounts,
             clone_request_receiver,
             clone_request_sender,
             clone_listeners: Default::default(),
@@ -143,7 +152,7 @@ where
         let last_known_update_slot = self
             .account_updates
             .get_last_known_update_slot(pubkey)
-            .unwrap_or(0);
+            .unwrap_or(u64::MIN);
         // Check for the happy/fast path, we may already have cloned this account before
         match self.get_last_clone_output(pubkey) {
             // If we already cloned this account, check what the output of the clone was
@@ -182,7 +191,7 @@ where
                     Ok(AccountClonerOutput::Unclonable {
                         pubkey: *pubkey,
                         reason: AccountClonerUnclonableReason::AlreadyLocallyOverriden,
-                        at_slot: u64::MAX, // we will never try again
+                        at_slot: u64::MAX, // we will never try cloning again
                     })
                 }
                 // If we need to clone it for the first time and update the cache
@@ -233,7 +242,7 @@ where
             // If the account is not present on-chain
             // we may want to clear the local state
             AccountChainState::NewAccount => {
-                if !self.allow_cloning_undelegated_non_programs {
+                if !self.allow_cloning_new_accounts {
                     return Ok(AccountClonerOutput::Unclonable {
                         pubkey: *pubkey,
                         reason:
@@ -248,6 +257,13 @@ where
             AccountChainState::Undelegated { account } => {
                 // If it's an executable, we may have some special fetching to do
                 if account.executable {
+                    if !self.allow_cloning_program_accounts {
+                        return Ok(AccountClonerOutput::Unclonable {
+                            pubkey: *pubkey,
+                            reason: AccountClonerUnclonableReason::DisallowProgramAccount,
+                            at_slot: account_chain_snapshot.at_slot,
+                        });
+                    }
                     self.do_clone_program_accounts(pubkey, account).await?
                 }
                 // If it's not an executble, different rules apply depending on owner
@@ -265,7 +281,7 @@ where
                     }
                     // Otherwise we just clone the account normally without any change
                     else {
-                        if !self.allow_cloning_undelegated_non_programs {
+                        if !self.allow_cloning_pda_accounts {
                             return Ok(AccountClonerOutput::Unclonable {
                                 pubkey: *pubkey,
                                 reason: AccountClonerUnclonableReason::DisallowPdaAccount,
@@ -282,15 +298,33 @@ where
                 account,
                 delegation_record,
                 ..
-            } => self.do_clone_delegated_account(
-                pubkey,
-                account,
-                &delegation_record.owner,
-                delegation_record.delegation_slot,
-            )?,
+            } => {
+                if !self.allow_cloning_delegated_accounts {
+                    return Ok(AccountClonerOutput::Unclonable {
+                        pubkey: *pubkey,
+                        reason:
+                            AccountClonerUnclonableReason::DisallowDelegatedAccount,
+                        at_slot: account_chain_snapshot.at_slot,
+                    });
+                }
+                self.do_clone_delegated_account(
+                    pubkey,
+                    account,
+                    &delegation_record.owner,
+                    delegation_record.delegation_slot,
+                )?
+            }
             // If the account is delegated but inconsistant on-chain,
             // we clone it as non-delegated pda to keep things simple for now
             AccountChainState::Inconsistent { account, .. } => {
+                if !self.allow_cloning_pda_accounts {
+                    return Ok(AccountClonerOutput::Unclonable {
+                        pubkey: *pubkey,
+                        reason:
+                            AccountClonerUnclonableReason::DisallowPdaAccount,
+                        at_slot: account_chain_snapshot.at_slot,
+                    });
+                }
                 self.do_clone_pda_account(pubkey, account)?
             }
         };

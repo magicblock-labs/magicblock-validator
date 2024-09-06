@@ -52,8 +52,11 @@ fn setup_with_lifecycle(
         account_dumper,
         HashSet::new(),
         Some(1_000_000_000),
+        lifecycle.allow_cloning_new_accounts(),
         lifecycle.allow_cloning_system_accounts(),
-        lifecycle.allow_cloning_undelegated_non_programs(),
+        lifecycle.allow_cloning_pda_accounts(),
+        lifecycle.allow_cloning_delegated_accounts(),
+        lifecycle.allow_cloning_program_accounts(),
     );
     let remote_account_cloner_client =
         RemoteAccountClonerClient::new(&remote_account_cloner_worker);

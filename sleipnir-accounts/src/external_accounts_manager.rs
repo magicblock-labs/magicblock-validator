@@ -102,10 +102,6 @@ where
         &self,
         tx: &SanitizedTransaction,
     ) -> AccountsResult<Vec<Signature>> {
-        // If this validator does not clone any accounts, then we're done
-        if self.lifecycle.is_offline() {
-            return Ok(vec![]);
-        }
         // Extract all acounts from the transaction
         let accounts_holder = self
             .transaction_accounts_extractor

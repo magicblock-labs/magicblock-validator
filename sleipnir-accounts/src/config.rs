@@ -18,13 +18,13 @@ pub enum LifecycleMode {
 }
 
 impl LifecycleMode {
-    pub fn is_offline(&self) -> bool {
+    pub fn allow_cloning_new_accounts(&self) -> bool {
         match self {
-            LifecycleMode::Replica => false,
+            LifecycleMode::Replica => true,
             LifecycleMode::ProgramsReplica => false,
-            LifecycleMode::Ephemeral => false,
-            LifecycleMode::EphemeralLimited => false,
-            LifecycleMode::Offline => true,
+            LifecycleMode::Ephemeral => true,
+            LifecycleMode::EphemeralLimited => true,
+            LifecycleMode::Offline => false,
         }
     }
     pub fn allow_cloning_system_accounts(&self) -> bool {
@@ -36,12 +36,30 @@ impl LifecycleMode {
             LifecycleMode::Offline => false,
         }
     }
-    pub fn allow_cloning_undelegated_non_programs(&self) -> bool {
+    pub fn allow_cloning_pda_accounts(&self) -> bool {
         match self {
             LifecycleMode::Replica => true,
             LifecycleMode::ProgramsReplica => false,
             LifecycleMode::Ephemeral => true,
             LifecycleMode::EphemeralLimited => false,
+            LifecycleMode::Offline => false,
+        }
+    }
+    pub fn allow_cloning_delegated_accounts(&self) -> bool {
+        match self {
+            LifecycleMode::Replica => true,
+            LifecycleMode::ProgramsReplica => false,
+            LifecycleMode::Ephemeral => true,
+            LifecycleMode::EphemeralLimited => true,
+            LifecycleMode::Offline => false,
+        }
+    }
+    pub fn allow_cloning_program_accounts(&self) -> bool {
+        match self {
+            LifecycleMode::Replica => true,
+            LifecycleMode::ProgramsReplica => true,
+            LifecycleMode::Ephemeral => true,
+            LifecycleMode::EphemeralLimited => true,
             LifecycleMode::Offline => false,
         }
     }

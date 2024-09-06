@@ -238,10 +238,11 @@ impl MagicValidator {
             account_dumper_bank,
             blacklisted_accounts,
             accounts_config.payer_init_lamports,
+            accounts_config.lifecycle.allow_cloning_new_accounts(),
             accounts_config.lifecycle.allow_cloning_system_accounts(),
-            accounts_config
-                .lifecycle
-                .allow_cloning_undelegated_non_programs(),
+            accounts_config.lifecycle.allow_cloning_pda_accounts(),
+            accounts_config.lifecycle.allow_cloning_delegated_accounts(),
+            accounts_config.lifecycle.allow_cloning_program_accounts(),
         );
 
         let accounts_manager = Self::init_accounts_manager(

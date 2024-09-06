@@ -50,8 +50,10 @@ pub enum AccountClonerUnclonableReason {
     AlreadyLocallyOverriden,
     IsBlacklisted,
     DisallowNewAccount,
+    DisallowProgramAccount,
     DisallowSystemAccount,
     DisallowPdaAccount,
+    DisallowDelegatedAccount,
 }
 
 #[derive(Debug, Clone)]
