@@ -221,7 +221,8 @@ where
             self.fetch_account_chain_snapshot(pubkey).await?;
         // Generate cloning transactions
         let signatures = match &account_chain_snapshot.chain_state {
-            // If the account is not present on-chain, we may want to close the local state
+            // If the account is not present on-chain
+            // we may want to clear the local state
             AccountChainState::NewAccount => {
                 if !self.allow_non_programs_undelegated {
                     return Ok(AccountClonerOutput::Unclonable {
@@ -259,7 +260,7 @@ where
                 delegation_record.delegation_slot,
             )?,
             // If the account is delegated but inconsistant on-chain,
-            // we clone it as non-delegated to keep things simple
+            // we clone it as non-delegated to keep things simple for now
             AccountChainState::Inconsistent { account, .. } => {
                 self.do_clone_undelegated_account(pubkey, account).await?
             }
