@@ -13,6 +13,10 @@ pub enum AccountDumperError {
 
 pub type AccountDumperResult<T> = Result<T, AccountDumperError>;
 
+// TODO - this could probably be deprecated in favor of:
+//  - a TransactionExecutor trait with a service implementation passed as parameter to the AccountCloner
+//  - using the mutator's functionality directly inside of the AccountCloner
+//  - work tracked here: https://github.com/magicblock-labs/magicblock-validator/issues/159
 pub trait AccountDumper {
     fn dump_new_account(
         &self,

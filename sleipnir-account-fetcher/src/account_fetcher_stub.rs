@@ -18,9 +18,9 @@ use crate::{AccountFetcher, AccountFetcherResult};
 #[derive(Debug)]
 enum AccountFetcherStubState {
     New,
-    Basic { owner: Pubkey },
-    Delegated { delegation_record: DelegationRecord },
+    Standard { owner: Pubkey },
     Executable,
+    Delegated { delegation_record: DelegationRecord },
 }
 
 #[derive(Debug)]
@@ -55,7 +55,7 @@ impl AccountFetcherStub {
                     AccountFetcherStubState::New => {
                         AccountChainState::NewAccount
                     }
-                    AccountFetcherStubState::Basic { owner } => {
+                    AccountFetcherStubState::Standard { owner } => {
                         AccountChainState::Undelegated {
                             account: Account {
                                 owner: *owner,
@@ -104,7 +104,7 @@ impl AccountFetcherStub {
             pubkey,
             AccountFetcherStubSnapshot {
                 slot: at_slot,
-                state: AccountFetcherStubState::Basic {
+                state: AccountFetcherStubState::Standard {
                     owner: system_program::ID,
                 },
             },
@@ -115,7 +115,7 @@ impl AccountFetcherStub {
             pubkey,
             AccountFetcherStubSnapshot {
                 slot: at_slot,
-                state: AccountFetcherStubState::Basic {
+                state: AccountFetcherStubState::Standard {
                     owner: Pubkey::new_unique(),
                 },
             },
