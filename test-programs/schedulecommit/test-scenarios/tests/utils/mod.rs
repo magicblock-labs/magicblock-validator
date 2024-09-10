@@ -74,9 +74,17 @@ pub fn assert_one_committee_synchronized_count(
     assert!(commit.is_some(), "should have committed pda");
 
     assert_eq!(
+        commit.unwrap().ephem_account.as_ref().unwrap().count,
+        expected_count,
+        "pda ({}) count is {} on ephem",
+        pda,
+        expected_count
+    );
+    assert_eq!(
         commit.unwrap().chain_account.as_ref().unwrap().count,
         expected_count,
-        "pda count is {} on chain",
+        "pda ({}) count is {} on chain",
+        pda,
         expected_count
     );
 }

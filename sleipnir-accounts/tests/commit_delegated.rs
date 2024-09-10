@@ -73,6 +73,7 @@ fn generate_delegated_account_chain_snapshot(
             account: account.clone(),
             delegation_pda: Pubkey::new_unique(),
             delegation_record: DelegationRecord {
+                authority: Pubkey::new_unique(),
                 owner: account.owner,
                 delegation_slot: 42,
                 commit_frequency,
