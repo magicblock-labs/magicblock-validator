@@ -26,7 +26,7 @@ pub trait AccountDumper {
         lamports: Option<u64>,
     ) -> AccountDumperResult<Signature>;
 
-    fn dump_pda_account(
+    fn dump_regular_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,

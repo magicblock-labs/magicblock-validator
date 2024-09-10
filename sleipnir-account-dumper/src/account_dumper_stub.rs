@@ -9,13 +9,13 @@ use crate::{AccountDumper, AccountDumperResult};
 
 #[derive(Debug, Clone, Default)]
 pub struct AccountDumperStub {
-    dumped_new_accounts: Arc<RwLock<HashSet<Pubkey>>>,
-    dumped_system_accounts: Arc<RwLock<HashSet<Pubkey>>>,
-    dumped_pda_accounts: Arc<RwLock<HashSet<Pubkey>>>,
-    dumped_delegated_accounts: Arc<RwLock<HashSet<Pubkey>>>,
-    dumped_program_ids: Arc<RwLock<HashSet<Pubkey>>>,
-    dumped_program_datas: Arc<RwLock<HashSet<Pubkey>>>,
-    dumped_program_idls: Arc<RwLock<HashSet<Pubkey>>>,
+    new_accounts: Arc<RwLock<HashSet<Pubkey>>>,
+    system_accounts: Arc<RwLock<HashSet<Pubkey>>>,
+    regular_accounts: Arc<RwLock<HashSet<Pubkey>>>,
+    delegated_accounts: Arc<RwLock<HashSet<Pubkey>>>,
+    program_ids: Arc<RwLock<HashSet<Pubkey>>>,
+    program_datas: Arc<RwLock<HashSet<Pubkey>>>,
+    program_idls: Arc<RwLock<HashSet<Pubkey>>>,
 }
 
 impl AccountDumper for AccountDumperStub {
@@ -23,7 +23,7 @@ impl AccountDumper for AccountDumperStub {
         &self,
         pubkey: &Pubkey,
     ) -> AccountDumperResult<Signature> {
-        self.dumped_new_accounts.write().unwrap().insert(*pubkey);
+        self.new_accounts.write().unwrap().insert(*pubkey);
         Ok(Signature::new_unique())
     }
 
@@ -33,16 +33,16 @@ impl AccountDumper for AccountDumperStub {
         _account: &Account,
         _lamports: Option<u64>,
     ) -> AccountDumperResult<Signature> {
-        self.dumped_system_accounts.write().unwrap().insert(*pubkey);
+        self.system_accounts.write().unwrap().insert(*pubkey);
         Ok(Signature::new_unique())
     }
 
-    fn dump_pda_account(
+    fn dump_regular_account(
         &self,
         pubkey: &Pubkey,
         _account: &Account,
     ) -> AccountDumperResult<Signature> {
-        self.dumped_pda_accounts.write().unwrap().insert(*pubkey);
+        self.regular_accounts.write().unwrap().insert(*pubkey);
         Ok(Signature::new_unique())
     }
 
@@ -52,10 +52,7 @@ impl AccountDumper for AccountDumperStub {
         _account: &Account,
         _owner: &Pubkey,
     ) -> AccountDumperResult<Signature> {
-        self.dumped_delegated_accounts
-            .write()
-            .unwrap()
-            .insert(*pubkey);
+        self.delegated_accounts.write().unwrap().insert(*pubkey);
         Ok(Signature::new_unique())
     }
 
@@ -67,19 +64,13 @@ impl AccountDumper for AccountDumperStub {
         _program_data_account: &Account,
         program_idl: Option<(Pubkey, Account)>,
     ) -> AccountDumperResult<Vec<Signature>> {
-        self.dumped_program_ids
-            .write()
-            .unwrap()
-            .insert(*program_id_pubkey);
-        self.dumped_program_datas
+        self.program_ids.write().unwrap().insert(*program_id_pubkey);
+        self.program_datas
             .write()
             .unwrap()
             .insert(*program_data_pubkey);
         if let Some(program_idl) = program_idl {
-            self.dumped_program_idls
-                .write()
-                .unwrap()
-                .insert(program_idl.0);
+            self.program_idls.write().unwrap().insert(program_idl.0);
         }
         Ok(vec![Signature::new_unique()])
     }
@@ -87,38 +78,35 @@ impl AccountDumper for AccountDumperStub {
 
 impl AccountDumperStub {
     pub fn was_dumped_as_new_account(&self, pubkey: &Pubkey) -> bool {
-        self.dumped_new_accounts.read().unwrap().contains(pubkey)
+        self.new_accounts.read().unwrap().contains(pubkey)
     }
 
     pub fn was_dumped_as_system_account(&self, pubkey: &Pubkey) -> bool {
-        self.dumped_system_accounts.read().unwrap().contains(pubkey)
+        self.system_accounts.read().unwrap().contains(pubkey)
     }
 
-    pub fn was_dumped_as_pda_account(&self, pubkey: &Pubkey) -> bool {
-        self.dumped_pda_accounts.read().unwrap().contains(pubkey)
+    pub fn was_dumped_as_regular_account(&self, pubkey: &Pubkey) -> bool {
+        self.regular_accounts.read().unwrap().contains(pubkey)
     }
 
     pub fn was_dumped_as_delegated_account(&self, pubkey: &Pubkey) -> bool {
-        self.dumped_delegated_accounts
-            .read()
-            .unwrap()
-            .contains(pubkey)
+        self.delegated_accounts.read().unwrap().contains(pubkey)
     }
 
     pub fn was_dumped_as_program_id(&self, pubkey: &Pubkey) -> bool {
-        self.dumped_program_ids.read().unwrap().contains(pubkey)
+        self.program_ids.read().unwrap().contains(pubkey)
     }
     pub fn was_dumped_as_program_data(&self, pubkey: &Pubkey) -> bool {
-        self.dumped_program_datas.read().unwrap().contains(pubkey)
+        self.program_datas.read().unwrap().contains(pubkey)
     }
     pub fn was_dumped_as_program_idl(&self, pubkey: &Pubkey) -> bool {
-        self.dumped_program_idls.read().unwrap().contains(pubkey)
+        self.program_idls.read().unwrap().contains(pubkey)
     }
 
     pub fn was_untouched(&self, pubkey: &Pubkey) -> bool {
         !self.was_dumped_as_new_account(pubkey)
             && !self.was_dumped_as_system_account(pubkey)
-            && !self.was_dumped_as_pda_account(pubkey)
+            && !self.was_dumped_as_regular_account(pubkey)
             && !self.was_dumped_as_delegated_account(pubkey)
             && !self.was_dumped_as_program_id(pubkey)
             && !self.was_dumped_as_program_data(pubkey)
@@ -126,12 +114,12 @@ impl AccountDumperStub {
     }
 
     pub fn clear_history(&self) {
-        self.dumped_new_accounts.write().unwrap().clear();
-        self.dumped_system_accounts.write().unwrap().clear();
-        self.dumped_pda_accounts.write().unwrap().clear();
-        self.dumped_delegated_accounts.write().unwrap().clear();
-        self.dumped_program_ids.write().unwrap().clear();
-        self.dumped_program_datas.write().unwrap().clear();
-        self.dumped_program_idls.write().unwrap().clear();
+        self.new_accounts.write().unwrap().clear();
+        self.system_accounts.write().unwrap().clear();
+        self.regular_accounts.write().unwrap().clear();
+        self.delegated_accounts.write().unwrap().clear();
+        self.program_ids.write().unwrap().clear();
+        self.program_datas.write().unwrap().clear();
+        self.program_idls.write().unwrap().clear();
     }
 }

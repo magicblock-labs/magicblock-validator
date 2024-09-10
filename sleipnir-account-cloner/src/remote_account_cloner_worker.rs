@@ -35,7 +35,7 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU> {
     payer_init_lamports: Option<u64>,
     allow_cloning_new_accounts: bool,
     allow_cloning_system_accounts: bool,
-    allow_cloning_pda_accounts: bool,
+    allow_cloning_regular_accounts: bool,
     allow_cloning_delegated_accounts: bool,
     allow_cloning_program_accounts: bool,
     clone_request_receiver: UnboundedReceiver<Pubkey>,
@@ -61,7 +61,7 @@ where
         payer_init_lamports: Option<u64>,
         allow_cloning_new_accounts: bool,
         allow_cloning_system_accounts: bool,
-        allow_cloning_pda_accounts: bool,
+        allow_cloning_regular_accounts: bool,
         allow_cloning_delegated_accounts: bool,
         allow_cloning_program_accounts: bool,
     ) -> Self {
@@ -76,7 +76,7 @@ where
             payer_init_lamports,
             allow_cloning_new_accounts,
             allow_cloning_system_accounts,
-            allow_cloning_pda_accounts,
+            allow_cloning_regular_accounts,
             allow_cloning_delegated_accounts,
             allow_cloning_program_accounts,
             clone_request_receiver,
@@ -173,9 +173,12 @@ where
                     }
                 }
                 // If the previous clone marked the account as unclonable, we may be able to re-use that output
-                AccountClonerOutput::Unclonable { at_slot, .. } => {
+                AccountClonerOutput::Unclonable {
+                    at_slot: until_slot,
+                    ..
+                } => {
                     // If the clone output is recent enough, use that
-                    if *at_slot >= last_known_update_slot {
+                    if *until_slot >= last_known_update_slot {
                         Ok(last_clone_output)
                     }
                     // If the cloned account has been updated since clone, try to update the cache
@@ -206,12 +209,12 @@ where
         &self,
         pubkey: &Pubkey,
     ) -> AccountClonerResult<AccountClonerOutput> {
-        let update_clone_cache = self.do_clone(pubkey).await?;
+        let updated_clone_output = self.do_clone(pubkey).await?;
         self.last_clone_output
             .write()
             .expect("RwLock of RemoteAccountClonerWorker.last_clone_output is poisoned")
-            .insert(*pubkey, update_clone_cache.clone());
-        Ok(update_clone_cache)
+            .insert(*pubkey, updated_clone_output.clone());
+        Ok(updated_clone_output)
     }
 
     async fn do_clone(
@@ -281,14 +284,14 @@ where
                     }
                     // Otherwise we just clone the account normally without any change
                     else {
-                        if !self.allow_cloning_pda_accounts {
+                        if !self.allow_cloning_regular_accounts {
                             return Ok(AccountClonerOutput::Unclonable {
                                 pubkey: *pubkey,
-                                reason: AccountClonerUnclonableReason::DisallowPdaAccount,
+                                reason: AccountClonerUnclonableReason::DisallowRegularAccount,
                                 at_slot: account_chain_snapshot.at_slot,
                             });
                         }
-                        self.do_clone_pda_account(pubkey, account)?
+                        self.do_clone_regular_account(pubkey, account)?
                     }
                 }
             }
@@ -315,17 +318,17 @@ where
                 )?
             }
             // If the account is delegated but inconsistant on-chain,
-            // we clone it as non-delegated pda to keep things simple for now
+            // we clone it as non-delegated account to keep things simple for now
             AccountChainState::Inconsistent { account, .. } => {
-                if !self.allow_cloning_pda_accounts {
+                if !self.allow_cloning_regular_accounts {
                     return Ok(AccountClonerOutput::Unclonable {
                         pubkey: *pubkey,
                         reason:
-                            AccountClonerUnclonableReason::DisallowPdaAccount,
+                            AccountClonerUnclonableReason::DisallowRegularAccount,
                         at_slot: account_chain_snapshot.at_slot,
                     });
                 }
-                self.do_clone_pda_account(pubkey, account)?
+                self.do_clone_regular_account(pubkey, account)?
             }
         };
         // Return the result
@@ -356,13 +359,13 @@ where
             .map(|signature| vec![signature])
     }
 
-    fn do_clone_pda_account(
+    fn do_clone_regular_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,
     ) -> AccountClonerResult<Vec<Signature>> {
         self.account_dumper
-            .dump_pda_account(pubkey, account)
+            .dump_regular_account(pubkey, account)
             .map_err(AccountClonerError::AccountDumperError)
             .map(|signature| vec![signature])
     }

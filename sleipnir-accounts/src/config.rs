@@ -36,7 +36,7 @@ impl LifecycleMode {
             LifecycleMode::Offline => false,
         }
     }
-    pub fn allow_cloning_pda_accounts(&self) -> bool {
+    pub fn allow_cloning_regular_accounts(&self) -> bool {
         match self {
             LifecycleMode::Replica => true,
             LifecycleMode::ProgramsReplica => false,

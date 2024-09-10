@@ -52,7 +52,7 @@ pub enum AccountClonerUnclonableReason {
     DisallowNewAccount,
     DisallowProgramAccount,
     DisallowSystemAccount,
-    DisallowPdaAccount,
+    DisallowRegularAccount,
     DisallowDelegatedAccount,
 }
 

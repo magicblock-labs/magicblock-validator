@@ -240,7 +240,7 @@ impl MagicValidator {
             accounts_config.payer_init_lamports,
             accounts_config.lifecycle.allow_cloning_new_accounts(),
             accounts_config.lifecycle.allow_cloning_system_accounts(),
-            accounts_config.lifecycle.allow_cloning_pda_accounts(),
+            accounts_config.lifecycle.allow_cloning_regular_accounts(),
             accounts_config.lifecycle.allow_cloning_delegated_accounts(),
             accounts_config.lifecycle.allow_cloning_program_accounts(),
         );
