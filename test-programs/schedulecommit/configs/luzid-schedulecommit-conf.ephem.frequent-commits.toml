@@ -4,7 +4,7 @@ name = "Ephem:8899"
 [node.accounts]
 remote = "http://0.0.0.0:7799"
 lifecycle = "ephemeral"
-commit = { frequency_millis = 60, trigger = true, compute_unit_price = 1_000_000 }
+commit = { frequency_millis = 60, compute_unit_price = 1_000_000 }
 
 [node.rpc]
 port = 8899
