@@ -49,6 +49,7 @@ pub type AccountClonerListeners =
 pub enum AccountClonerUnclonableReason {
     AlreadyLocallyOverriden,
     IsBlacklisted,
+    IsNotWhitelistedProgram,
     DisallowNewAccount,
     DisallowProgramAccount,
     DisallowPayerAccount,

@@ -50,6 +50,7 @@ fn setup_with_lifecycle(
         account_fetcher,
         account_updates,
         account_dumper,
+        None,
         HashSet::new(),
         Some(1_000_000_000),
         lifecycle.allow_cloning_new_accounts(),
