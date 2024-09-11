@@ -1,6 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct ValidatorConfig {
     #[serde(default = "default_millis_per_slot")]
     pub millis_per_slot: u64,
