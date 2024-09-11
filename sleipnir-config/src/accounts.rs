@@ -83,9 +83,6 @@ pub enum LifecycleMode {
 // -----------------
 // CommitStrategy
 // -----------------
-// This is the lowest we found to pass the transactions through mainnet fairly
-// consistently
-const COMPUTE_UNIT_PRICE: u64 = 1_000_000; // 1 Lamport
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct CommitStrategy {
@@ -102,7 +99,9 @@ fn default_frequency_millis() -> u64 {
 }
 
 fn default_compute_unit_price() -> u64 {
-    COMPUTE_UNIT_PRICE
+    // This is the lowest we found to pass the transactions through mainnet fairly
+    // consistently
+    1_000_000 // 1 Lamport
 }
 
 impl Default for CommitStrategy {
