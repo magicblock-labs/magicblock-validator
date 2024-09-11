@@ -50,7 +50,7 @@ fn lifecycle_mode_from_lifecycle_mode(
 fn whitelisted_program_ids_from_whitelisted_programs(
     whitelisted_programs: &Vec<sleipnir_config::WhitelistedProgram>,
 ) -> Option<HashSet<Pubkey>> {
-    if whitelisted_programs.len() > 0 {
+    if !whitelisted_programs.is_empty() {
         Some(HashSet::from_iter(
             whitelisted_programs
                 .iter()
