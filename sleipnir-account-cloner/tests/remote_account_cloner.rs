@@ -330,7 +330,7 @@ async fn test_clone_allow_program_accounts_when_ephemeral() {
 #[tokio::test]
 async fn test_clone_program_accounts_when_ephemeral_with_whitelist() {
     // Important pubkeys
-    let invalid_program_id = generate_pda_pubkey();
+    let unallowed_program_id = generate_pda_pubkey();
     let allowed_program_id = generate_pda_pubkey();
     // Stubs
     let internal_account_provider = InternalAccountProviderStub::default();
@@ -347,15 +347,16 @@ async fn test_clone_program_accounts_when_ephemeral_with_whitelist() {
         account_dumper.clone(),
         Some(allowed_program_ids),
     );
-    // Blacklisted program accounts
-    let invalid_program_data = get_program_data_address(&invalid_program_id);
-    let invalid_program_idl =
-        get_pubkey_anchor_idl(&invalid_program_id).unwrap();
-    account_fetcher.set_executable_account(invalid_program_id, 42);
-    account_fetcher.set_pda_account(invalid_program_data, 42);
-    account_fetcher.set_pda_account(invalid_program_idl, 42);
+    // Not allowed program account
+    let unallowed_program_data =
+        get_program_data_address(&unallowed_program_id);
+    let unallowed_program_idl =
+        get_pubkey_anchor_idl(&unallowed_program_id).unwrap();
+    account_fetcher.set_executable_account(unallowed_program_id, 42);
+    account_fetcher.set_pda_account(unallowed_program_data, 42);
+    account_fetcher.set_pda_account(unallowed_program_idl, 42);
     // Run test
-    let result = cloner.clone_account(&invalid_program_id).await;
+    let result = cloner.clone_account(&unallowed_program_id).await;
     // Check expected result
     assert!(matches!(
         result,
@@ -364,15 +365,15 @@ async fn test_clone_program_accounts_when_ephemeral_with_whitelist() {
             ..
         })
     ));
-    assert_eq!(account_fetcher.get_fetch_count(&invalid_program_id), 1);
-    assert!(account_updates.has_account_monitoring(&invalid_program_id));
-    assert!(account_dumper.was_untouched(&invalid_program_id));
-    assert_eq!(account_fetcher.get_fetch_count(&invalid_program_data), 0);
-    assert!(!account_updates.has_account_monitoring(&invalid_program_data));
-    assert!(account_dumper.was_untouched(&invalid_program_data));
-    assert_eq!(account_fetcher.get_fetch_count(&invalid_program_idl), 0);
-    assert!(!account_updates.has_account_monitoring(&invalid_program_idl));
-    assert!(account_dumper.was_untouched(&invalid_program_idl));
+    assert_eq!(account_fetcher.get_fetch_count(&unallowed_program_id), 1);
+    assert!(account_updates.has_account_monitoring(&unallowed_program_id));
+    assert!(account_dumper.was_untouched(&unallowed_program_id));
+    assert_eq!(account_fetcher.get_fetch_count(&unallowed_program_data), 0);
+    assert!(!account_updates.has_account_monitoring(&unallowed_program_data));
+    assert!(account_dumper.was_untouched(&unallowed_program_data));
+    assert_eq!(account_fetcher.get_fetch_count(&unallowed_program_idl), 0);
+    assert!(!account_updates.has_account_monitoring(&unallowed_program_idl));
+    assert!(account_dumper.was_untouched(&unallowed_program_idl));
     // Allowed program accounts
     let allowed_program_data = get_program_data_address(&allowed_program_id);
     let allowed_program_idl =
