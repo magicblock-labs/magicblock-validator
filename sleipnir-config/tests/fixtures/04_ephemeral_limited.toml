@@ -1,5 +1,0 @@
-# We clone all programs and all accounts that are properly delegated
-# Otherwise we fail with account missing and/or not properly delegate.
-# We never create accounts at this point
-[accounts]
-lifecycle = "ephemeral-limited"

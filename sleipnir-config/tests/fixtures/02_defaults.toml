@@ -4,10 +4,12 @@
 
 # devnet | mainnet/mainnet-beta | testnet | development/local | custom(url)
 remote = "devnet"
-# lifecycle: replica | programs-replica | ephemeral | ephemeral-limited | offline
+# lifecycle: replica | programs-replica | ephemeral | offline
 lifecycle = "programs-replica"
 
 commit = { frequency_millis = 500, compute_unit_price = 1_000_000 }
+
+whitelisted_program_ids = []
 
 [rpc]
 addr = "0.0.0.0"

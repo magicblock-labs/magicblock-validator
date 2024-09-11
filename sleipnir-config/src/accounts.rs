@@ -1,5 +1,7 @@
+use std::str::FromStr;
+
 use serde::{Deserialize, Serialize};
-use solana_sdk::native_token::LAMPORTS_PER_SOL;
+use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
 use strum_macros::EnumString;
 use url::Url;
 
@@ -18,6 +20,8 @@ pub struct AccountsConfig {
     pub commit: CommitStrategy,
     #[serde(default)]
     pub payer: Payer,
+    #[serde(default)]
+    pub whitelisted_programs: Vec<WhitelistedProgram>,
 }
 
 // -----------------
@@ -75,7 +79,6 @@ pub enum LifecycleMode {
     #[default]
     ProgramsReplica,
     Ephemeral,
-    EphemeralLimited,
     Offline,
 }
 
@@ -141,4 +144,28 @@ impl Payer {
             None => self.init_sol.map(|sol| sol * LAMPORTS_PER_SOL),
         })
     }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+pub struct WhitelistedProgram {
+    #[serde(
+        deserialize_with = "pubkey_deserialize",
+        serialize_with = "pubkey_serialize"
+    )]
+    pub id: Pubkey,
+}
+
+fn pubkey_deserialize<'de, D>(deserializer: D) -> Result<Pubkey, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    Pubkey::from_str(&s).map_err(serde::de::Error::custom)
+}
+
+fn pubkey_serialize<S>(key: &Pubkey, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    key.to_string().serialize(serializer)
 }

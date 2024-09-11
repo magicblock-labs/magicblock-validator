@@ -236,7 +236,7 @@ impl MagicValidator {
             remote_account_fetcher_client,
             remote_account_updates_client,
             account_dumper_bank,
-            None,
+            accounts_config.whitelisted_program_ids,
             blacklisted_accounts,
             accounts_config.payer_init_lamports,
             accounts_config.lifecycle.allow_cloning_new_accounts(),
