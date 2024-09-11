@@ -219,13 +219,12 @@ fn mutate_accounts(
         if let Some(data_key) = modification.data_key.take() {
             let data = get_data(data_key)
                 .ok_or(SleipnirError::AccountDataMissing)
-                .map_err(|err| {
+                .inspect_err(|err| {
                     ic_msg!(
                         invoke_context,
                         "MutateAccounts: account data for the provided key {} is missing",
                         data_key
                     );
-                    err
                 })?;
             account.borrow_mut().set_data_from_slice(data.as_slice());
         }
