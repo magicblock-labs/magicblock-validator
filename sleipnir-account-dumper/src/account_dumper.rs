@@ -18,11 +18,15 @@ pub type AccountDumperResult<T> = Result<T, AccountDumperError>;
 //  - using the mutator's functionality directly inside of the AccountCloner
 //  - work tracked here: https://github.com/magicblock-labs/magicblock-validator/issues/159
 pub trait AccountDumper {
+    // Overrides the account in the bank to make sure it's "new" in the eyes of the transction
+    // Close it if we need to if it already exists in the bank
     fn dump_new_account(
         &self,
         pubkey: &Pubkey,
     ) -> AccountDumperResult<Signature>;
 
+    // Overrides the account in the bank to make sure it's usable as a potential payer account
+    // in future transactions that account can be used for signing things, and we need to sync its lamports
     fn dump_payer_account(
         &self,
         pubkey: &Pubkey,
@@ -30,12 +34,16 @@ pub trait AccountDumper {
         lamports: Option<u64>,
     ) -> AccountDumperResult<Signature>;
 
+    // Overrides the account in the bank to make sure it's a PDA that can be used as readonly
+    // Future transactions should be able to read from it (but not write) on the account as-is
     fn dump_pda_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,
     ) -> AccountDumperResult<Signature>;
 
+    // Overrides the account in the bank to make sure it's a ready to use delegated account
+    // Transactions should be able to write to it, we need to make sure the owner is set correctly
     fn dump_delegated_account(
         &self,
         pubkey: &Pubkey,
@@ -43,6 +51,8 @@ pub trait AccountDumper {
         owner: &Pubkey,
     ) -> AccountDumperResult<Signature>;
 
+    // Overrides the accounts in the bank to make sure the program is usable normally (and upgraded)
+    // We make sure all accounts involved in the program are present in the bank with latest state
     fn dump_program_accounts(
         &self,
         program_id: &Pubkey,
