@@ -219,7 +219,7 @@ fn mutate_accounts(
         if let Some(data_key) = modification.data_key.take() {
             let data = get_data(data_key)
                 .ok_or(SleipnirError::AccountDataMissing)
-                .inspect_err(|err| {
+                .inspect_err(|_| {
                     ic_msg!(
                         invoke_context,
                         "MutateAccounts: account data for the provided key {} is missing",
