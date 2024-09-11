@@ -48,8 +48,8 @@ use sleipnir_transaction_status::{
 };
 use solana_geyser_plugin_manager::geyser_plugin_service::GeyserPluginService;
 use solana_sdk::{
-    genesis_config::GenesisConfig, pubkey::Pubkey, signature::Keypair,
-    signer::Signer,
+    commitment_config::CommitmentLevel, genesis_config::GenesisConfig,
+    pubkey::Pubkey, signature::Keypair, signer::Signer,
 };
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
@@ -207,7 +207,7 @@ impl MagicValidator {
 
         let remote_rpc_config = RpcProviderConfig::new(
             try_rpc_cluster_from_cluster(&accounts_config.remote_cluster)?,
-            None,
+            Some(CommitmentLevel::Confirmed),
         );
 
         let remote_account_fetcher_worker =
