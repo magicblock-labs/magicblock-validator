@@ -51,8 +51,8 @@ pub enum AccountClonerUnclonableReason {
     IsBlacklisted,
     DisallowNewAccount,
     DisallowProgramAccount,
-    DisallowSystemAccount,
-    DisallowRegularAccount,
+    DisallowPayerAccount,
+    DisallowPdaAccount,
     DisallowDelegatedAccount,
 }
 

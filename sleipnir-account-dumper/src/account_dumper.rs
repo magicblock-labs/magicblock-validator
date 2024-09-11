@@ -23,14 +23,14 @@ pub trait AccountDumper {
         pubkey: &Pubkey,
     ) -> AccountDumperResult<Signature>;
 
-    fn dump_system_account(
+    fn dump_payer_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,
         lamports: Option<u64>,
     ) -> AccountDumperResult<Signature>;
 
-    fn dump_regular_account(
+    fn dump_pda_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,

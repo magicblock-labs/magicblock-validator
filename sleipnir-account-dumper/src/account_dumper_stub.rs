@@ -10,8 +10,8 @@ use crate::{AccountDumper, AccountDumperResult};
 #[derive(Debug, Clone, Default)]
 pub struct AccountDumperStub {
     new_accounts: Arc<RwLock<HashSet<Pubkey>>>,
-    system_accounts: Arc<RwLock<HashSet<Pubkey>>>,
-    regular_accounts: Arc<RwLock<HashSet<Pubkey>>>,
+    payer_accounts: Arc<RwLock<HashSet<Pubkey>>>,
+    pda_accounts: Arc<RwLock<HashSet<Pubkey>>>,
     delegated_accounts: Arc<RwLock<HashSet<Pubkey>>>,
     program_ids: Arc<RwLock<HashSet<Pubkey>>>,
     program_datas: Arc<RwLock<HashSet<Pubkey>>>,
@@ -27,22 +27,22 @@ impl AccountDumper for AccountDumperStub {
         Ok(Signature::new_unique())
     }
 
-    fn dump_system_account(
+    fn dump_payer_account(
         &self,
         pubkey: &Pubkey,
         _account: &Account,
         _lamports: Option<u64>,
     ) -> AccountDumperResult<Signature> {
-        self.system_accounts.write().unwrap().insert(*pubkey);
+        self.payer_accounts.write().unwrap().insert(*pubkey);
         Ok(Signature::new_unique())
     }
 
-    fn dump_regular_account(
+    fn dump_pda_account(
         &self,
         pubkey: &Pubkey,
         _account: &Account,
     ) -> AccountDumperResult<Signature> {
-        self.regular_accounts.write().unwrap().insert(*pubkey);
+        self.pda_accounts.write().unwrap().insert(*pubkey);
         Ok(Signature::new_unique())
     }
 
@@ -81,12 +81,12 @@ impl AccountDumperStub {
         self.new_accounts.read().unwrap().contains(pubkey)
     }
 
-    pub fn was_dumped_as_system_account(&self, pubkey: &Pubkey) -> bool {
-        self.system_accounts.read().unwrap().contains(pubkey)
+    pub fn was_dumped_as_payer_account(&self, pubkey: &Pubkey) -> bool {
+        self.payer_accounts.read().unwrap().contains(pubkey)
     }
 
-    pub fn was_dumped_as_regular_account(&self, pubkey: &Pubkey) -> bool {
-        self.regular_accounts.read().unwrap().contains(pubkey)
+    pub fn was_dumped_as_pda_account(&self, pubkey: &Pubkey) -> bool {
+        self.pda_accounts.read().unwrap().contains(pubkey)
     }
 
     pub fn was_dumped_as_delegated_account(&self, pubkey: &Pubkey) -> bool {
@@ -105,8 +105,8 @@ impl AccountDumperStub {
 
     pub fn was_untouched(&self, pubkey: &Pubkey) -> bool {
         !self.was_dumped_as_new_account(pubkey)
-            && !self.was_dumped_as_system_account(pubkey)
-            && !self.was_dumped_as_regular_account(pubkey)
+            && !self.was_dumped_as_payer_account(pubkey)
+            && !self.was_dumped_as_pda_account(pubkey)
             && !self.was_dumped_as_delegated_account(pubkey)
             && !self.was_dumped_as_program_id(pubkey)
             && !self.was_dumped_as_program_data(pubkey)
@@ -115,8 +115,8 @@ impl AccountDumperStub {
 
     pub fn clear_history(&self) {
         self.new_accounts.write().unwrap().clear();
-        self.system_accounts.write().unwrap().clear();
-        self.regular_accounts.write().unwrap().clear();
+        self.payer_accounts.write().unwrap().clear();
+        self.pda_accounts.write().unwrap().clear();
         self.delegated_accounts.write().unwrap().clear();
         self.program_ids.write().unwrap().clear();
         self.program_datas.write().unwrap().clear();

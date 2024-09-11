@@ -70,7 +70,7 @@ impl AccountDumper for AccountDumperBank {
         self.execute_transaction(transaction)
     }
 
-    fn dump_system_account(
+    fn dump_payer_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,
@@ -90,7 +90,7 @@ impl AccountDumper for AccountDumperBank {
         self.execute_transaction(transaction)
     }
 
-    fn dump_regular_account(
+    fn dump_pda_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,

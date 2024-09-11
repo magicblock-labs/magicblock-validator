@@ -99,7 +99,7 @@ impl AccountFetcherStub {
             },
         );
     }
-    pub fn set_system_account(&self, pubkey: Pubkey, at_slot: Slot) {
+    pub fn set_payer_account(&self, pubkey: Pubkey, at_slot: Slot) {
         self.insert_known_account(
             pubkey,
             AccountFetcherStubSnapshot {
@@ -110,7 +110,7 @@ impl AccountFetcherStub {
             },
         );
     }
-    pub fn set_regular_account(&self, pubkey: Pubkey, at_slot: Slot) {
+    pub fn set_pda_account(&self, pubkey: Pubkey, at_slot: Slot) {
         self.insert_known_account(
             pubkey,
             AccountFetcherStubSnapshot {

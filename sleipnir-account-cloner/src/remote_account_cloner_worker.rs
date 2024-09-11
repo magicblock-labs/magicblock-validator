@@ -14,7 +14,7 @@ use sleipnir_accounts_api::InternalAccountProvider;
 use sleipnir_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
 use solana_sdk::{
     account::Account, bpf_loader_upgradeable::get_program_data_address,
-    clock::Slot, pubkey::Pubkey, signature::Signature, system_program,
+    clock::Slot, pubkey::Pubkey, signature::Signature,
 };
 use tokio::sync::mpsc::{
     unbounded_channel, UnboundedReceiver, UnboundedSender,
@@ -34,8 +34,8 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU> {
     blacklisted_accounts: HashSet<Pubkey>,
     payer_init_lamports: Option<u64>,
     allow_cloning_new_accounts: bool,
-    allow_cloning_system_accounts: bool,
-    allow_cloning_regular_accounts: bool,
+    allow_cloning_payer_accounts: bool,
+    allow_cloning_pda_accounts: bool,
     allow_cloning_delegated_accounts: bool,
     allow_cloning_program_accounts: bool,
     clone_request_receiver: UnboundedReceiver<Pubkey>,
@@ -60,8 +60,8 @@ where
         blacklisted_accounts: HashSet<Pubkey>,
         payer_init_lamports: Option<u64>,
         allow_cloning_new_accounts: bool,
-        allow_cloning_system_accounts: bool,
-        allow_cloning_regular_accounts: bool,
+        allow_cloning_payer_accounts: bool,
+        allow_cloning_pda_accounts: bool,
         allow_cloning_delegated_accounts: bool,
         allow_cloning_program_accounts: bool,
     ) -> Self {
@@ -75,8 +75,8 @@ where
             blacklisted_accounts,
             payer_init_lamports,
             allow_cloning_new_accounts,
-            allow_cloning_system_accounts,
-            allow_cloning_regular_accounts,
+            allow_cloning_payer_accounts,
+            allow_cloning_pda_accounts,
             allow_cloning_delegated_accounts,
             allow_cloning_program_accounts,
             clone_request_receiver,
@@ -271,27 +271,27 @@ where
                 }
                 // If it's not an executble, different rules apply depending on owner
                 else {
-                    // If it's a system account, we have a special lamport override to do
-                    if account.owner == system_program::ID {
-                        if !self.allow_cloning_system_accounts {
+                    // If it's a payer account, we have a special lamport override to do
+                    if pubkey.is_on_curve() {
+                        if !self.allow_cloning_payer_accounts {
                             return Ok(AccountClonerOutput::Unclonable {
                                 pubkey: *pubkey,
-                                reason: AccountClonerUnclonableReason::DisallowSystemAccount,
+                                reason: AccountClonerUnclonableReason::DisallowPayerAccount,
                                 at_slot: account_chain_snapshot.at_slot,
                             });
                         }
-                        self.do_clone_system_account(pubkey, account)?
+                        self.do_clone_payer_account(pubkey, account)?
                     }
                     // Otherwise we just clone the account normally without any change
                     else {
-                        if !self.allow_cloning_regular_accounts {
+                        if !self.allow_cloning_pda_accounts {
                             return Ok(AccountClonerOutput::Unclonable {
                                 pubkey: *pubkey,
-                                reason: AccountClonerUnclonableReason::DisallowRegularAccount,
+                                reason: AccountClonerUnclonableReason::DisallowPdaAccount,
                                 at_slot: account_chain_snapshot.at_slot,
                             });
                         }
-                        self.do_clone_regular_account(pubkey, account)?
+                        self.do_clone_pda_account(pubkey, account)?
                     }
                 }
             }
@@ -320,15 +320,15 @@ where
             // If the account is delegated but inconsistant on-chain,
             // we clone it as non-delegated account to keep things simple for now
             AccountChainState::Inconsistent { account, .. } => {
-                if !self.allow_cloning_regular_accounts {
+                if !self.allow_cloning_pda_accounts {
                     return Ok(AccountClonerOutput::Unclonable {
                         pubkey: *pubkey,
                         reason:
-                            AccountClonerUnclonableReason::DisallowRegularAccount,
+                            AccountClonerUnclonableReason::DisallowPdaAccount,
                         at_slot: account_chain_snapshot.at_slot,
                     });
                 }
-                self.do_clone_regular_account(pubkey, account)?
+                self.do_clone_pda_account(pubkey, account)?
             }
         };
         // Return the result
@@ -348,24 +348,24 @@ where
             .map(|signature| vec![signature])
     }
 
-    fn do_clone_system_account(
+    fn do_clone_payer_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,
     ) -> AccountClonerResult<Vec<Signature>> {
         self.account_dumper
-            .dump_system_account(pubkey, account, self.payer_init_lamports)
+            .dump_payer_account(pubkey, account, self.payer_init_lamports)
             .map_err(AccountClonerError::AccountDumperError)
             .map(|signature| vec![signature])
     }
 
-    fn do_clone_regular_account(
+    fn do_clone_pda_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,
     ) -> AccountClonerResult<Vec<Signature>> {
         self.account_dumper
-            .dump_regular_account(pubkey, account)
+            .dump_pda_account(pubkey, account)
             .map_err(AccountClonerError::AccountDumperError)
             .map(|signature| vec![signature])
     }
