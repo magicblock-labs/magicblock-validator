@@ -1,4 +1,7 @@
+use std::collections::HashSet;
+
 use sleipnir_mutator::Cluster;
+use solana_sdk::pubkey::Pubkey;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct AccountsConfig {
@@ -6,6 +9,7 @@ pub struct AccountsConfig {
     pub lifecycle: LifecycleMode,
     pub commit_compute_unit_price: u64,
     pub payer_init_lamports: Option<u64>,
+    pub allowed_program_ids: Option<HashSet<Pubkey>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -13,7 +17,6 @@ pub enum LifecycleMode {
     Replica,
     ProgramsReplica,
     Ephemeral,
-    EphemeralLimited,
     Offline,
 }
 
@@ -23,7 +26,6 @@ impl LifecycleMode {
             LifecycleMode::Replica => true,
             LifecycleMode::ProgramsReplica => false,
             LifecycleMode::Ephemeral => true,
-            LifecycleMode::EphemeralLimited => true,
             LifecycleMode::Offline => false,
         }
     }
@@ -32,7 +34,6 @@ impl LifecycleMode {
             LifecycleMode::Replica => true,
             LifecycleMode::ProgramsReplica => false,
             LifecycleMode::Ephemeral => true,
-            LifecycleMode::EphemeralLimited => true,
             LifecycleMode::Offline => false,
         }
     }
@@ -41,7 +42,6 @@ impl LifecycleMode {
             LifecycleMode::Replica => true,
             LifecycleMode::ProgramsReplica => false,
             LifecycleMode::Ephemeral => true,
-            LifecycleMode::EphemeralLimited => false,
             LifecycleMode::Offline => false,
         }
     }
@@ -50,7 +50,6 @@ impl LifecycleMode {
             LifecycleMode::Replica => true,
             LifecycleMode::ProgramsReplica => false,
             LifecycleMode::Ephemeral => true,
-            LifecycleMode::EphemeralLimited => true,
             LifecycleMode::Offline => false,
         }
     }
@@ -59,7 +58,6 @@ impl LifecycleMode {
             LifecycleMode::Replica => true,
             LifecycleMode::ProgramsReplica => true,
             LifecycleMode::Ephemeral => true,
-            LifecycleMode::EphemeralLimited => true,
             LifecycleMode::Offline => false,
         }
     }
@@ -68,7 +66,6 @@ impl LifecycleMode {
             LifecycleMode::Replica => false,
             LifecycleMode::ProgramsReplica => false,
             LifecycleMode::Ephemeral => true,
-            LifecycleMode::EphemeralLimited => true,
             LifecycleMode::Offline => false,
         }
     }

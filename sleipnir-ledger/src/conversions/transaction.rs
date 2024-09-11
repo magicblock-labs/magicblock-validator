@@ -163,9 +163,8 @@ fn signatures_from_slices(signatures: Vec<Vec<u8>>) -> Vec<Signature> {
         .into_iter()
         .flat_map(|slice| {
             Signature::try_from(slice.as_slice())
-                .map_err(|e| {
+                .inspect_err(|e| {
                     warn!("Invalid signature: {:?}", e);
-                    e
                 })
                 .ok()
         })
