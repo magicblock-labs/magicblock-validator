@@ -46,7 +46,7 @@ fn lifecycle_mode_from_lifecycle_mode(
 }
 
 fn allowed_program_ids_from_allowed_programs(
-    allowed_programs: &Vec<sleipnir_config::AllowedProgram>,
+    allowed_programs: &[sleipnir_config::AllowedProgram],
 ) -> Option<HashSet<Pubkey>> {
     if !allowed_programs.is_empty() {
         Some(HashSet::from_iter(
