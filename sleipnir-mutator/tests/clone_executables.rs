@@ -9,7 +9,6 @@ use sleipnir_bank::{
     },
     LAMPORTS_PER_SIGNATURE,
 };
-use sleipnir_mutator::fetch::transactions_to_clone_pubkey_from_cluster;
 use sleipnir_program::validator_authority_id;
 use solana_sdk::{
     account::{Account, ReadableAccount},
