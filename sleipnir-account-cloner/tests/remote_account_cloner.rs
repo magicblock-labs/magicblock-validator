@@ -22,7 +22,7 @@ fn setup_custom(
     account_fetcher: AccountFetcherStub,
     account_updates: AccountUpdatesStub,
     account_dumper: AccountDumperStub,
-    whitelisted_program_ids: Option<HashSet<Pubkey>>,
+    allowed_program_ids: Option<HashSet<Pubkey>>,
     blacklisted_accounts: HashSet<Pubkey>,
     allow_cloning_new_accounts: bool,
     allow_cloning_payer_accounts: bool,
@@ -42,7 +42,7 @@ fn setup_custom(
         account_fetcher,
         account_updates,
         account_dumper,
-        whitelisted_program_ids,
+        allowed_program_ids,
         blacklisted_accounts,
         payer_init_lamports,
         allow_cloning_new_accounts,
@@ -71,7 +71,7 @@ fn setup_ephemeral(
     account_fetcher: AccountFetcherStub,
     account_updates: AccountUpdatesStub,
     account_dumper: AccountDumperStub,
-    whitelisted_program_ids: Option<HashSet<Pubkey>>,
+    allowed_program_ids: Option<HashSet<Pubkey>>,
 ) -> (
     RemoteAccountClonerClient,
     CancellationToken,
@@ -82,7 +82,7 @@ fn setup_ephemeral(
         account_fetcher,
         account_updates,
         account_dumper,
-        whitelisted_program_ids,
+        allowed_program_ids,
         standard_blacklisted_accounts(&Pubkey::new_unique()),
         true,
         true,
@@ -97,7 +97,7 @@ fn setup_programs_replica(
     account_fetcher: AccountFetcherStub,
     account_updates: AccountUpdatesStub,
     account_dumper: AccountDumperStub,
-    whitelisted_program_ids: Option<HashSet<Pubkey>>,
+    allowed_program_ids: Option<HashSet<Pubkey>>,
 ) -> (
     RemoteAccountClonerClient,
     CancellationToken,
@@ -108,7 +108,7 @@ fn setup_programs_replica(
         account_fetcher,
         account_updates,
         account_dumper,
-        whitelisted_program_ids,
+        allowed_program_ids,
         standard_blacklisted_accounts(&Pubkey::new_unique()),
         false,
         false,
@@ -123,7 +123,7 @@ fn setup_ephemera_limited(
     account_fetcher: AccountFetcherStub,
     account_updates: AccountUpdatesStub,
     account_dumper: AccountDumperStub,
-    whitelisted_program_ids: Option<HashSet<Pubkey>>,
+    allowed_program_ids: Option<HashSet<Pubkey>>,
 ) -> (
     RemoteAccountClonerClient,
     CancellationToken,
@@ -134,7 +134,7 @@ fn setup_ephemera_limited(
         account_fetcher,
         account_updates,
         account_dumper,
-        whitelisted_program_ids,
+        allowed_program_ids,
         standard_blacklisted_accounts(&Pubkey::new_unique()),
         true,
         true,
@@ -330,79 +330,69 @@ async fn test_clone_allow_program_accounts_when_ephemeral() {
 #[tokio::test]
 async fn test_clone_program_accounts_when_ephemeral_with_whitelist() {
     // Important pubkeys
-    let blacklisted_program_id = generate_pda_pubkey();
-    let whitelisted_program_id = generate_pda_pubkey();
+    let invalid_program_id = generate_pda_pubkey();
+    let allowed_program_id = generate_pda_pubkey();
     // Stubs
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
-    let mut whitelisted_program_ids = HashSet::new();
-    whitelisted_program_ids.insert(whitelisted_program_id);
+    let mut allowed_program_ids = HashSet::new();
+    allowed_program_ids.insert(allowed_program_id);
     // Create account cloner worker and client
     let (cloner, cancellation_token, worker_handle) = setup_ephemeral(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
         account_dumper.clone(),
-        Some(whitelisted_program_ids),
+        Some(allowed_program_ids),
     );
     // Blacklisted program accounts
-    let blacklisted_program_data =
-        get_program_data_address(&blacklisted_program_id);
-    let blacklisted_program_idl =
-        get_pubkey_anchor_idl(&blacklisted_program_id).unwrap();
-    account_fetcher.set_executable_account(blacklisted_program_id, 42);
-    account_fetcher.set_pda_account(blacklisted_program_data, 42);
-    account_fetcher.set_pda_account(blacklisted_program_idl, 42);
+    let invalid_program_data = get_program_data_address(&invalid_program_id);
+    let invalid_program_idl =
+        get_pubkey_anchor_idl(&invalid_program_id).unwrap();
+    account_fetcher.set_executable_account(invalid_program_id, 42);
+    account_fetcher.set_pda_account(invalid_program_data, 42);
+    account_fetcher.set_pda_account(invalid_program_idl, 42);
     // Run test
-    let result = cloner.clone_account(&blacklisted_program_id).await;
+    let result = cloner.clone_account(&invalid_program_id).await;
     // Check expected result
     assert!(matches!(
         result,
         Ok(AccountClonerOutput::Unclonable {
-            reason: AccountClonerUnclonableReason::IsNotWhitelistedProgram,
+            reason: AccountClonerUnclonableReason::IsNotAllowedProgram,
             ..
         })
     ));
-    assert_eq!(account_fetcher.get_fetch_count(&blacklisted_program_id), 1);
-    assert!(account_updates.has_account_monitoring(&blacklisted_program_id));
-    assert!(account_dumper.was_untouched(&blacklisted_program_id));
-    assert_eq!(
-        account_fetcher.get_fetch_count(&blacklisted_program_data),
-        0
-    );
-    assert!(!account_updates.has_account_monitoring(&blacklisted_program_data));
-    assert!(account_dumper.was_untouched(&blacklisted_program_data));
-    assert_eq!(account_fetcher.get_fetch_count(&blacklisted_program_idl), 0);
-    assert!(!account_updates.has_account_monitoring(&blacklisted_program_idl));
-    assert!(account_dumper.was_untouched(&blacklisted_program_idl));
-    // Whitelisted program accounts
-    let whitelisted_program_data =
-        get_program_data_address(&whitelisted_program_id);
-    let whitelisted_program_idl =
-        get_pubkey_anchor_idl(&whitelisted_program_id).unwrap();
-    account_fetcher.set_executable_account(whitelisted_program_id, 52);
-    account_fetcher.set_pda_account(whitelisted_program_data, 52);
-    account_fetcher.set_pda_account(whitelisted_program_idl, 52);
+    assert_eq!(account_fetcher.get_fetch_count(&invalid_program_id), 1);
+    assert!(account_updates.has_account_monitoring(&invalid_program_id));
+    assert!(account_dumper.was_untouched(&invalid_program_id));
+    assert_eq!(account_fetcher.get_fetch_count(&invalid_program_data), 0);
+    assert!(!account_updates.has_account_monitoring(&invalid_program_data));
+    assert!(account_dumper.was_untouched(&invalid_program_data));
+    assert_eq!(account_fetcher.get_fetch_count(&invalid_program_idl), 0);
+    assert!(!account_updates.has_account_monitoring(&invalid_program_idl));
+    assert!(account_dumper.was_untouched(&invalid_program_idl));
+    // Allowed program accounts
+    let allowed_program_data = get_program_data_address(&allowed_program_id);
+    let allowed_program_idl =
+        get_pubkey_anchor_idl(&allowed_program_id).unwrap();
+    account_fetcher.set_executable_account(allowed_program_id, 52);
+    account_fetcher.set_pda_account(allowed_program_data, 52);
+    account_fetcher.set_pda_account(allowed_program_idl, 52);
     // Run test
-    let result = cloner.clone_account(&whitelisted_program_id).await;
+    let result = cloner.clone_account(&allowed_program_id).await;
     // Check expected result
     assert!(matches!(result, Ok(AccountClonerOutput::Cloned { .. })));
-    assert_eq!(account_fetcher.get_fetch_count(&whitelisted_program_id), 1);
-    assert!(account_updates.has_account_monitoring(&whitelisted_program_id));
-    assert!(account_dumper.was_dumped_as_program_id(&whitelisted_program_id));
-    assert_eq!(
-        account_fetcher.get_fetch_count(&whitelisted_program_data),
-        1
-    );
-    assert!(!account_updates.has_account_monitoring(&whitelisted_program_data));
-    assert!(
-        account_dumper.was_dumped_as_program_data(&whitelisted_program_data)
-    );
-    assert_eq!(account_fetcher.get_fetch_count(&whitelisted_program_idl), 1);
-    assert!(!account_updates.has_account_monitoring(&whitelisted_program_idl));
-    assert!(account_dumper.was_dumped_as_program_idl(&whitelisted_program_idl));
+    assert_eq!(account_fetcher.get_fetch_count(&allowed_program_id), 1);
+    assert!(account_updates.has_account_monitoring(&allowed_program_id));
+    assert!(account_dumper.was_dumped_as_program_id(&allowed_program_id));
+    assert_eq!(account_fetcher.get_fetch_count(&allowed_program_data), 1);
+    assert!(!account_updates.has_account_monitoring(&allowed_program_data));
+    assert!(account_dumper.was_dumped_as_program_data(&allowed_program_data));
+    assert_eq!(account_fetcher.get_fetch_count(&allowed_program_idl), 1);
+    assert!(!account_updates.has_account_monitoring(&allowed_program_idl));
+    assert!(account_dumper.was_dumped_as_program_idl(&allowed_program_idl));
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());

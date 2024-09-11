@@ -11,16 +11,14 @@ pub(crate) fn try_convert_accounts_config(
     let lifecycle = lifecycle_mode_from_lifecycle_mode(&conf.lifecycle);
     let commit_compute_unit_price = conf.commit.compute_unit_price;
     let payer_init_lamports = conf.payer.try_init_lamports()?;
-    let whitelisted_program_ids =
-        whitelisted_program_ids_from_whitelisted_programs(
-            &conf.whitelisted_programs,
-        );
+    let allowed_program_ids =
+        allowed_program_ids_from_allowed_programs(&conf.allowed_programs);
     Ok(AccountsConfig {
         remote_cluster,
         lifecycle,
         commit_compute_unit_price,
         payer_init_lamports,
-        whitelisted_program_ids,
+        allowed_program_ids,
     })
 }
 
@@ -47,14 +45,14 @@ fn lifecycle_mode_from_lifecycle_mode(
     }
 }
 
-fn whitelisted_program_ids_from_whitelisted_programs(
-    whitelisted_programs: &Vec<sleipnir_config::WhitelistedProgram>,
+fn allowed_program_ids_from_allowed_programs(
+    allowed_programs: &Vec<sleipnir_config::AllowedProgram>,
 ) -> Option<HashSet<Pubkey>> {
-    if !whitelisted_programs.is_empty() {
+    if !allowed_programs.is_empty() {
         Some(HashSet::from_iter(
-            whitelisted_programs
+            allowed_programs
                 .iter()
-                .map(|whitelisted_program| whitelisted_program.id),
+                .map(|allowed_program| allowed_program.id),
         ))
     } else {
         None

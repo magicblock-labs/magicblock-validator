@@ -31,7 +31,7 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU> {
     account_fetcher: AFE,
     account_updates: AUP,
     account_dumper: ADU,
-    whitelisted_program_ids: Option<HashSet<Pubkey>>,
+    allowed_program_ids: Option<HashSet<Pubkey>>,
     blacklisted_accounts: HashSet<Pubkey>,
     payer_init_lamports: Option<u64>,
     allow_cloning_new_accounts: bool,
@@ -58,7 +58,7 @@ where
         account_fetcher: AFE,
         account_updates: AUP,
         account_dumper: ADU,
-        whitelisted_program_ids: Option<HashSet<Pubkey>>,
+        allowed_program_ids: Option<HashSet<Pubkey>>,
         blacklisted_accounts: HashSet<Pubkey>,
         payer_init_lamports: Option<u64>,
         allow_cloning_new_accounts: bool,
@@ -74,7 +74,7 @@ where
             account_fetcher,
             account_updates,
             account_dumper,
-            whitelisted_program_ids,
+            allowed_program_ids,
             blacklisted_accounts,
             payer_init_lamports,
             allow_cloning_new_accounts,
@@ -263,13 +263,12 @@ where
             AccountChainState::Undelegated { account } => {
                 // If it's an executable, we may have some special fetching to do
                 if account.executable {
-                    if let Some(whitelisted_program_ids) =
-                        &self.whitelisted_program_ids
+                    if let Some(allowed_program_ids) = &self.allowed_program_ids
                     {
-                        if !whitelisted_program_ids.contains(pubkey) {
+                        if !allowed_program_ids.contains(pubkey) {
                             return Ok(AccountClonerOutput::Unclonable {
                                 pubkey: *pubkey,
-                                reason: AccountClonerUnclonableReason::IsNotWhitelistedProgram,
+                                reason: AccountClonerUnclonableReason::IsNotAllowedProgram,
                                 at_slot: u64::MAX, // we will never try again
                             });
                         }

@@ -21,7 +21,7 @@ pub struct AccountsConfig {
     #[serde(default)]
     pub payer: Payer,
     #[serde(default)]
-    pub whitelisted_programs: Vec<WhitelistedProgram>,
+    pub allowed_programs: Vec<AllowedProgram>,
 }
 
 // -----------------
@@ -147,7 +147,7 @@ impl Payer {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
-pub struct WhitelistedProgram {
+pub struct AllowedProgram {
     #[serde(
         deserialize_with = "pubkey_deserialize",
         serialize_with = "pubkey_serialize"

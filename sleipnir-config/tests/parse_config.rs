@@ -1,9 +1,9 @@
 use std::net::{IpAddr, Ipv4Addr};
 
 use sleipnir_config::{
-    AccountsConfig, CommitStrategy, GeyserGrpcConfig, LifecycleMode, Payer,
-    ProgramConfig, RemoteConfig, RpcConfig, SleipnirConfig, ValidatorConfig,
-    WhitelistedProgram,
+    AccountsConfig, AllowedProgram, CommitStrategy, GeyserGrpcConfig,
+    LifecycleMode, Payer, ProgramConfig, RemoteConfig, RpcConfig,
+    SleipnirConfig, ValidatorConfig,
 };
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey};
 use url::Url;
@@ -39,7 +39,7 @@ fn test_ephemeral_toml() {
         SleipnirConfig {
             accounts: AccountsConfig {
                 lifecycle: LifecycleMode::Ephemeral,
-                whitelisted_programs: vec![WhitelistedProgram {
+                allowed_programs: vec![AllowedProgram {
                     id: pubkey!("wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4")
                 }],
                 ..Default::default()

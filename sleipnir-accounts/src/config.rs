@@ -9,7 +9,7 @@ pub struct AccountsConfig {
     pub lifecycle: LifecycleMode,
     pub commit_compute_unit_price: u64,
     pub payer_init_lamports: Option<u64>,
-    pub whitelisted_program_ids: Option<HashSet<Pubkey>>,
+    pub allowed_program_ids: Option<HashSet<Pubkey>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
