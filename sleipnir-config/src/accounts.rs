@@ -149,6 +149,7 @@ impl Payer {
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AllowedProgram {
     #[serde(
         deserialize_with = "pubkey_deserialize",
