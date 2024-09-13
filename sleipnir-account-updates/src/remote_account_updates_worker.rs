@@ -5,18 +5,13 @@ use std::{
 };
 
 use conjunto_transwise::RpcProviderConfig;
-use futures_util::{
-    stream::{select_all, SelectAll},
-    Stream, StreamExt,
-};
+use futures_util::StreamExt;
 use log::*;
-use solana_account_decoder::{UiAccount, UiDataSliceConfig};
+use solana_account_decoder::UiDataSliceConfig;
 use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
-use solana_rpc_client_api::{config::RpcAccountInfoConfig, response::Response};
+use solana_rpc_client_api::config::RpcAccountInfoConfig;
 use solana_sdk::{
-    clock::Slot,
-    commitment_config::{CommitmentConfig, CommitmentLevel},
-    pubkey::Pubkey,
+    clock::Slot, commitment_config::CommitmentConfig, pubkey::Pubkey,
 };
 use thiserror::Error;
 use tokio::sync::mpsc::{
@@ -32,8 +27,6 @@ pub enum RemoteAccountUpdatesWorkerError {
         #[from]
         solana_pubsub_client::nonblocking::pubsub_client::PubsubClientError,
     ),
-    #[error(transparent)]
-    JoinError(#[from] tokio::task::JoinError),
 }
 
 pub struct RemoteAccountUpdatesWorker {
@@ -87,139 +80,62 @@ impl RemoteAccountUpdatesWorker {
             min_context_slot: None,
         };
 
-        let mut subscriptions_cancellation_tokens = HashMap::new();
+        // We'll store maps of the subscriptions
+        let mut streams = StreamMap::new();
+        let mut unsubscribes = HashMap::new();
 
-        //let mut subscriptions_join_handles = vec![];
-
-        let mut lala = StreamMap::new();
-
-        let mut papa = HashMap::new();
-
-        //let mut streams = vec![];
-
+        // Loop forever until we stop the worker
         loop {
+            eprintln!("Looping!");
             tokio::select! {
-                Some(request) = self.monitoring_request_receiver.recv() => {
-                    if let Entry::Vacant(entry) = subscriptions_cancellation_tokens.entry(request) {
-                        let subscription_cancellation_token = CancellationToken::new();
-                        entry.insert(subscription_cancellation_token.clone());
-
-                        let (stream, unsubscribe) = pubsub_client
-                            .account_subscribe(&request, Some(rpc_account_info_config.clone()))
-                            .await
-                            .map_err(RemoteAccountUpdatesWorkerError::PubsubClientError)?;
-
-                        lala.insert(request, stream);
-                        papa.insert(request, unsubscribe);
-                        /*
-                        let pubsub_client = pubsub_client.clone();
-                        let last_known_update_slots = self.last_known_update_slots.clone();
-                        let rpc_account_info_config = rpc_account_info_config.clone();
-                        subscriptions_join_handles.push((request, tokio::spawn(async move {
-                            let result = Self::start_monitoring_subscription(
-                                last_known_update_slots,
-                                pubsub_client,
-                                rpc_account_info_config,
-                                request,
-                                subscription_cancellation_token,
-                            ).await;
-                            if let Err(error) = result {
-                                warn!("Failed to monitor account: {}: {:?}", request, error);
-                            }
-                        })));
-                         */
-                    }
+                // When we receive a message to start monitoring an account
+                Some(account) = self.monitoring_request_receiver.recv() => {
+                    info!(
+                        "Account monitoring start: {}",
+                        account
+                    );
+                    let (stream, unsubscribe) = pubsub_client
+                        .account_subscribe(&account, Some(rpc_account_info_config.clone()))
+                        .await
+                        .map_err(RemoteAccountUpdatesWorkerError::PubsubClientError)?;
+                    streams.insert(account, stream);
+                    unsubscribes.insert(account, unsubscribe);
                 }
-                opop = lala.next() => {
-                    if let Some((account, update)) = opop {
-                        let current_update_slot = update.context.slot;
-                        debug!(
-                            "Account changed: {}, in slot: {}",
-                            account, current_update_slot
-                        );
-                        match self.last_known_update_slots
-                            .write()
-                            .expect("RwLock of RemoteAccountUpdatesWorker.last_known_update_slots poisoned")
-                            .entry(account)
-                        {
-                            Entry::Vacant(entry) => {
-                                entry.insert(current_update_slot);
-                            }
-                            Entry::Occupied(mut entry) => {
-                                *entry.get_mut() = max(*entry.get(), current_update_slot);
-                            }
-                        };                    }
+                // When we receive an update from any account subscriptions
+                Some((account, update)) = streams.next() => {
+                    let current_update_slot = update.context.slot;
+                    info!(
+                        "Account update received: {}, in slot: {}",
+                        account, current_update_slot
+                    );
+                    match self.last_known_update_slots
+                        .write()
+                        .expect("RwLock of RemoteAccountUpdatesWorker.last_known_update_slots poisoned")
+                        .entry(account)
+                    {
+                        Entry::Vacant(entry) => {
+                            entry.insert(current_update_slot);
+                        }
+                        Entry::Occupied(mut entry) => {
+                            *entry.get_mut() = max(*entry.get(), current_update_slot);
+                        }
+                    };
                 }
+                // When we want to stop the worker (it was cancelled)
                 _ = cancellation_token.cancelled() => {
-                    for cancellation_token in subscriptions_cancellation_tokens.into_values() {
-                        cancellation_token.cancel();
-                    }
                     break;
                 }
             }
         }
 
-        for dada in papa.into_values() {
-            dada().await;
+        // Cleanup all subscriptions and wait for proper shutdown
+        drop(streams);
+        for unsubscribe in unsubscribes.into_values() {
+            unsubscribe().await;
         }
-
-        drop(lala);
-
         pubsub_client.shutdown().await?;
 
-        /*
-        for (_account, handle) in subscriptions_join_handles {
-            handle
-                .await
-                .map_err(RemoteAccountUpdatesWorkerError::JoinError)?;
-        } */
-
+        // Done
         Ok(())
-    }
-
-    async fn start_monitoring_subscription(
-        last_known_update_slots: Arc<RwLock<HashMap<Pubkey, u64>>>,
-        pubsub_client: Arc<PubsubClient>,
-        rpc_account_info_config: RpcAccountInfoConfig,
-        account: Pubkey,
-        cancellation_token: CancellationToken,
-    ) -> Result<(), RemoteAccountUpdatesWorkerError> {
-        let (mut stream, unsubscribe) = pubsub_client
-            .account_subscribe(&account, Some(rpc_account_info_config))
-            .await
-            .map_err(RemoteAccountUpdatesWorkerError::PubsubClientError)?;
-
-        let cancel_handle = tokio::spawn(async move {
-            cancellation_token.cancelled().await;
-            unsubscribe().await;
-        });
-
-        debug!("Started monitoring updates for account: {}", account);
-
-        while let Some(update) = stream.next().await {
-            let current_update_slot = update.context.slot;
-            debug!(
-                "Account changed: {}, in slot: {}",
-                account, current_update_slot
-            );
-            match last_known_update_slots
-                .write()
-                .expect("last_known_update_slots poisoned")
-                .entry(account)
-            {
-                Entry::Vacant(entry) => {
-                    entry.insert(current_update_slot);
-                }
-                Entry::Occupied(mut entry) => {
-                    *entry.get_mut() = max(*entry.get(), current_update_slot);
-                }
-            };
-        }
-
-        debug!("Stopped monitoring updates for account: {}", account);
-
-        cancel_handle
-            .await
-            .map_err(RemoteAccountUpdatesWorkerError::JoinError)
     }
 }
