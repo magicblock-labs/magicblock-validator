@@ -90,10 +90,7 @@ impl RemoteAccountUpdatesWorker {
             tokio::select! {
                 // When we receive a message to start monitoring an account
                 Some(account) = self.monitoring_request_receiver.recv() => {
-                    info!(
-                        "Account monitoring start: {}",
-                        account
-                    );
+                    info!("Account monitoring started: {}", account);
                     let (stream, unsubscribe) = pubsub_client
                         .account_subscribe(&account, Some(rpc_account_info_config.clone()))
                         .await
@@ -119,7 +116,7 @@ impl RemoteAccountUpdatesWorker {
                         Entry::Occupied(mut entry) => {
                             *entry.get_mut() = max(*entry.get(), current_update_slot);
                         }
-                    };
+                    }
                 }
                 // When we want to stop the worker (it was cancelled)
                 _ = cancellation_token.cancelled() => {
