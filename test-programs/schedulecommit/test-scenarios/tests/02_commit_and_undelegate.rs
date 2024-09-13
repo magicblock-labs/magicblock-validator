@@ -1,6 +1,7 @@
 use log::*;
 use std::str::FromStr;
 
+use crate::utils::iteration_count;
 use schedulecommit_client::{
     verify, ScheduleCommitTestContext, ScheduleCommitTestContextFields,
 };
@@ -31,7 +32,7 @@ use utils::{
     assert_two_committees_synchronized_count,
     assert_two_committees_were_committed,
     assert_tx_failed_with_instruction_error,
-    get_context_with_delegated_committees,
+    get_context_with_delegated_committees, get_iteration_count_for_suite,
 };
 
 mod utils;
@@ -164,14 +165,17 @@ fn test_committing_and_undelegating_one_account() {
     init_logger!();
     info!("==== test_committing_and_undelegating_one_account ====");
 
-    let (ctx, sig, _) = commit_and_undelegate_one_account(false);
+    for i in 0..iteration_count() {
+        let (ctx, sig, tx_res) = commit_and_undelegate_one_account(false);
+        info!("{}: {} '{:?}'", i, sig, tx_res);
 
-    let res = verify::fetch_commit_result_from_logs(&ctx, sig);
+        let res = verify::fetch_commit_result_from_logs(&ctx, sig);
 
-    assert_one_committee_was_committed(&ctx, &res);
-    assert_one_committee_synchronized_count(&ctx, &res, 1);
+        assert_one_committee_was_committed(&ctx, &res);
+        assert_one_committee_synchronized_count(&ctx, &res, 1);
 
-    assert_one_committee_account_was_undelegated_on_chain(&ctx);
+        assert_one_committee_account_was_undelegated_on_chain(&ctx);
+    }
 }
 
 #[test]
@@ -179,14 +183,17 @@ fn test_committing_and_undelegating_two_accounts() {
     init_logger!();
     info!("==== test_committing_and_undelegating_two_accounts ====");
 
-    let (ctx, sig, _) = commit_and_undelegate_two_accounts(false);
+    for i in 0..iteration_count() {
+        let (ctx, sig, tx_res) = commit_and_undelegate_two_accounts(false);
+        info!("{}: {} '{:?}'", i, sig, tx_res);
 
-    let res = verify::fetch_commit_result_from_logs(&ctx, sig);
+        let res = verify::fetch_commit_result_from_logs(&ctx, sig);
 
-    assert_two_committees_were_committed(&ctx, &res);
-    assert_two_committees_synchronized_count(&ctx, &res, 1);
+        assert_two_committees_were_committed(&ctx, &res);
+        assert_two_committees_synchronized_count(&ctx, &res, 1);
 
-    assert_two_committee_accounts_were_undelegated_on_chain(&ctx);
+        assert_two_committee_accounts_were_undelegated_on_chain(&ctx);
+    }
 }
 
 // -----------------
@@ -255,76 +262,79 @@ fn test_committed_and_undelegated_single_account_redelegation() {
         "==== test_committed_and_undelegated_single_account_redelegation ===="
     );
 
-    let (ctx, sig, _) = commit_and_undelegate_one_account(false);
-    let ScheduleCommitTestContextFields {
-        payer,
-        committees,
-        commitment,
-        ephem_client,
-        ephem_blockhash,
-        chain_client,
-        chain_blockhash,
-        ..
-    } = ctx.fields();
+    for i in 0..iteration_count() {
+        let (ctx, sig, tx_res) = commit_and_undelegate_one_account(false);
+        info!("{}: {} '{:?}'", i, sig, tx_res);
+        let ScheduleCommitTestContextFields {
+            payer,
+            committees,
+            commitment,
+            ephem_client,
+            ephem_blockhash,
+            chain_client,
+            chain_blockhash,
+            ..
+        } = ctx.fields();
 
-    // 1. Show that we cannot use it on chain while it is being undelegated
-    assert_cannot_increase_committee_count(
-        committees[0].1,
-        payer,
-        *chain_blockhash,
-        chain_client,
-        commitment,
-    );
-
-    // 2. Show we cannot use it in the ehpemeral anymore
-    assert_cannot_increase_committee_count(
-        committees[0].1,
-        payer,
-        *ephem_blockhash,
-        ephem_client,
-        commitment,
-    );
-
-    // 3. Wait for commit + undelegation to finish and try chain again
-    {
-        verify::fetch_commit_result_from_logs(&ctx, sig);
-
-        let blockhash = chain_client.get_latest_blockhash().unwrap();
-        assert_can_increase_committee_count(
+        // 1. Show that we cannot use it on chain while it is being undelegated
+        assert_cannot_increase_committee_count(
             committees[0].1,
             payer,
-            blockhash,
+            *chain_blockhash,
             chain_client,
             commitment,
         );
-    }
 
-    // 4. Re-delegate the same account
-    {
-        std::thread::sleep(std::time::Duration::from_secs(2));
-        let blockhash = chain_client.get_latest_blockhash().unwrap();
-        ctx.delegate_committees(Some(blockhash)).unwrap();
-    }
-
-    // 5. Now we can modify it in the ephemeral again and no longer on chain
-    {
-        let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
-        assert_can_increase_committee_count(
+        // 2. Show we cannot use it in the ehpemeral anymore
+        assert_cannot_increase_committee_count(
             committees[0].1,
             payer,
-            ephem_blockhash,
+            *ephem_blockhash,
             ephem_client,
             commitment,
         );
 
-        let chain_blockhash = chain_client.get_latest_blockhash().unwrap();
-        assert_cannot_increase_committee_count(
-            committees[0].1,
-            payer,
-            chain_blockhash,
-            chain_client,
-            commitment,
-        );
+        // 3. Wait for commit + undelegation to finish and try chain again
+        {
+            verify::fetch_commit_result_from_logs(&ctx, sig);
+
+            let blockhash = chain_client.get_latest_blockhash().unwrap();
+            assert_can_increase_committee_count(
+                committees[0].1,
+                payer,
+                blockhash,
+                chain_client,
+                commitment,
+            );
+        }
+
+        // 4. Re-delegate the same account
+        {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            let blockhash = chain_client.get_latest_blockhash().unwrap();
+            ctx.delegate_committees(Some(blockhash)).unwrap();
+        }
+
+        // 5. Now we can modify it in the ephemeral again and no longer on chain
+        {
+            let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
+            assert_can_increase_committee_count(
+                committees[0].1,
+                payer,
+                ephem_blockhash,
+                ephem_client,
+                commitment,
+            );
+
+            let chain_blockhash = chain_client.get_latest_blockhash().unwrap();
+            assert_cannot_increase_committee_count(
+                committees[0].1,
+                payer,
+                chain_blockhash,
+                chain_client,
+                commitment,
+            );
+        }
     }
 }
 
@@ -335,116 +345,118 @@ fn test_committed_and_undelegated_accounts_redelegation() {
     init_logger!();
     info!("==== test_committed_and_undelegated_accounts_redelegation ====");
 
-    let (ctx, sig, _) = commit_and_undelegate_two_accounts(false);
-    let ScheduleCommitTestContextFields {
-        payer,
-        committees,
-        commitment,
-        ephem_client,
-        ephem_blockhash,
-        chain_client,
-        chain_blockhash,
-        ..
-    } = ctx.fields();
-
-    // 1. Show that we cannot use them on chain while they are being undelegated
-    {
-        assert_cannot_increase_committee_count(
-            committees[0].1,
+    for i in 0..iteration_count() {
+        let (ctx, sig, tx_res) = commit_and_undelegate_two_accounts(false);
+        let ScheduleCommitTestContextFields {
             payer,
-            *chain_blockhash,
-            chain_client,
+            committees,
             commitment,
-        );
-        assert_cannot_increase_committee_count(
-            committees[1].1,
-            payer,
-            *chain_blockhash,
-            chain_client,
-            commitment,
-        );
-    }
-
-    // 2. Show we cannot use them in the ehpemeral anymore
-    {
-        assert_cannot_increase_committee_count(
-            committees[0].1,
-            payer,
-            *ephem_blockhash,
             ephem_client,
-            commitment,
-        );
-        assert_cannot_increase_committee_count(
-            committees[1].1,
-            payer,
-            *ephem_blockhash,
-            ephem_client,
-            commitment,
-        );
-    }
-
-    // 3. Wait for commit + undelegation to finish and try chain again
-    {
-        verify::fetch_commit_result_from_logs(&ctx, sig);
-
-        // we need a new blockhash otherwise the tx is identical to the above
-        let blockhash = chain_client.get_latest_blockhash().unwrap();
-        assert_can_increase_committee_count(
-            committees[0].1,
-            payer,
-            blockhash,
-            chain_client,
-            commitment,
-        );
-        assert_can_increase_committee_count(
-            committees[1].1,
-            payer,
-            blockhash,
-            chain_client,
-            commitment,
-        );
-    }
-
-    // 4. Re-delegate the same accounts
-    {
-        std::thread::sleep(std::time::Duration::from_secs(2));
-        let blockhash = chain_client.get_latest_blockhash().unwrap();
-        ctx.delegate_committees(Some(blockhash)).unwrap();
-    }
-
-    // 5. Now we can modify them in the ephemeral again and no longer on chain
-    {
-        let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
-        assert_can_increase_committee_count(
-            committees[0].1,
-            payer,
             ephem_blockhash,
-            ephem_client,
-            commitment,
-        );
-        assert_can_increase_committee_count(
-            committees[1].1,
-            payer,
-            ephem_blockhash,
-            ephem_client,
-            commitment,
-        );
+            chain_client,
+            chain_blockhash,
+            ..
+        } = ctx.fields();
 
-        let chain_blockhash = chain_client.get_latest_blockhash().unwrap();
-        assert_cannot_increase_committee_count(
-            committees[0].1,
-            payer,
-            chain_blockhash,
-            chain_client,
-            commitment,
-        );
-        assert_cannot_increase_committee_count(
-            committees[1].1,
-            payer,
-            chain_blockhash,
-            chain_client,
-            commitment,
-        );
+        // 1. Show that we cannot use them on chain while they are being undelegated
+        {
+            assert_cannot_increase_committee_count(
+                committees[0].1,
+                payer,
+                *chain_blockhash,
+                chain_client,
+                commitment,
+            );
+            assert_cannot_increase_committee_count(
+                committees[1].1,
+                payer,
+                *chain_blockhash,
+                chain_client,
+                commitment,
+            );
+        }
+
+        // 2. Show we cannot use them in the ehpemeral anymore
+        {
+            assert_cannot_increase_committee_count(
+                committees[0].1,
+                payer,
+                *ephem_blockhash,
+                ephem_client,
+                commitment,
+            );
+            assert_cannot_increase_committee_count(
+                committees[1].1,
+                payer,
+                *ephem_blockhash,
+                ephem_client,
+                commitment,
+            );
+        }
+
+        // 3. Wait for commit + undelegation to finish and try chain again
+        {
+            verify::fetch_commit_result_from_logs(&ctx, sig);
+
+            // we need a new blockhash otherwise the tx is identical to the above
+            let blockhash = chain_client.get_latest_blockhash().unwrap();
+            assert_can_increase_committee_count(
+                committees[0].1,
+                payer,
+                blockhash,
+                chain_client,
+                commitment,
+            );
+            assert_can_increase_committee_count(
+                committees[1].1,
+                payer,
+                blockhash,
+                chain_client,
+                commitment,
+            );
+        }
+
+        // 4. Re-delegate the same accounts
+        {
+            std::thread::sleep(std::time::Duration::from_secs(2));
+            let blockhash = chain_client.get_latest_blockhash().unwrap();
+            ctx.delegate_committees(Some(blockhash)).unwrap();
+        }
+
+        // 5. Now we can modify them in the ephemeral again and no longer on chain
+        {
+            let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
+            assert_can_increase_committee_count(
+                committees[0].1,
+                payer,
+                ephem_blockhash,
+                ephem_client,
+                commitment,
+            );
+            assert_can_increase_committee_count(
+                committees[1].1,
+                payer,
+                ephem_blockhash,
+                ephem_client,
+                commitment,
+            );
+
+            let chain_blockhash = chain_client.get_latest_blockhash().unwrap();
+            assert_cannot_increase_committee_count(
+                committees[0].1,
+                payer,
+                chain_blockhash,
+                chain_client,
+                commitment,
+            );
+            assert_cannot_increase_committee_count(
+                committees[1].1,
+                payer,
+                chain_blockhash,
+                chain_client,
+                commitment,
+            );
+        }
     }
 }
 
@@ -456,17 +468,20 @@ fn test_committing_and_undelegating_one_account_modifying_it_after() {
     init_logger!();
     info!("==== test_committing_and_undelegating_one_account_modifying_it_after ====");
 
-    let (ctx, sig, res) = commit_and_undelegate_one_account(true);
+    for i in 0..iteration_count() {
+        let (ctx, sig, res) = commit_and_undelegate_one_account(true);
+        info!("{}: {} '{:?}'", i, sig, res);
 
-    ctx.assert_ephemeral_transaction_error(
-        sig,
-        &res,
-        "instruction modified data of an account it does not own",
-    );
+        ctx.assert_ephemeral_transaction_error(
+            sig,
+            &res,
+            "instruction modified data of an account it does not own",
+        );
 
-    // TODO(thlorenz): even though the transaction failse the account is still committed and undelegated
-    // this should be fixed ASAP and this test extended to verify that
-    // Same for test_committing_and_undelegating_two_accounts_modifying_them_after
+        // TODO(thlorenz): even though the transaction failse the account is still committed and undelegated
+        // this should be fixed ASAP and this test extended to verify that
+        // Same for test_committing_and_undelegating_two_accounts_modifying_them_after
+    }
 }
 
 #[test]
@@ -474,11 +489,14 @@ fn test_committing_and_undelegating_two_accounts_modifying_them_after() {
     init_logger!();
     info!("==== test_committing_and_undelegating_two_accounts_modifying_them_after ====");
 
-    let (ctx, sig, res) = commit_and_undelegate_two_accounts(true);
+    for i in 0..iteration_count() {
+        let (ctx, sig, res) = commit_and_undelegate_two_accounts(true);
+        info!("{}: {} '{:?}'", i, sig, res);
 
-    ctx.assert_ephemeral_transaction_error(
-        sig,
-        &res,
-        "instruction modified data of an account it does not own",
-    );
+        ctx.assert_ephemeral_transaction_error(
+            sig,
+            &res,
+            "instruction modified data of an account it does not own",
+        );
+    }
 }
