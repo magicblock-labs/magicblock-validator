@@ -308,10 +308,11 @@ where
         // NOTE: Once we run into issues that the data to be committed in a single
         // transaction is too large, we can split these into multiple batches
         // That is why we return a Vec of CreateCommitAccountsTransactionResult
-        let txs = self
-            .account_committer
-            .create_commit_accounts_transactions(committees)
-            .await?;
+        let txs = try_join_all(committees.into_iter().map(|commitee| {
+            self.account_committer
+                .create_commit_accounts_transaction(vec![commitee])
+        }))
+        .await?;
 
         Ok(txs)
     }
