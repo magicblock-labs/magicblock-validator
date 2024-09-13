@@ -503,7 +503,7 @@ impl MagicValidator {
             let cancellation_token = self.token.clone();
             self.remote_account_fetcher_handle =
                 Some(thread::spawn(move || {
-                    create_worker_runtime("Remote Account Fetcher Worker")
+                    create_worker_runtime("remote_account_fetcher_worker")
                         .block_on(async move {
                             remote_account_fetcher_worker
                                 .start_fetch_request_processing(
