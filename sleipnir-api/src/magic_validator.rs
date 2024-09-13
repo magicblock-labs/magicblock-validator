@@ -7,6 +7,7 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc, RwLock,
     },
+    thread,
     time::Duration,
 };
 
@@ -22,7 +23,6 @@ use sleipnir_account_fetcher::{
 };
 use sleipnir_account_updates::{
     RemoteAccountUpdatesClient, RemoteAccountUpdatesWorker,
-    RemoteAccountUpdatesWorkerError,
 };
 use sleipnir_accounts::{utils::try_rpc_cluster_from_cluster, AccountsManager};
 use sleipnir_accounts_api::BankAccountProvider;
@@ -127,16 +127,14 @@ pub struct MagicValidator {
     bank: Arc<Bank>,
     ledger: Arc<Ledger>,
     slot_ticker: Option<tokio::task::JoinHandle<()>>,
-    pubsub_handle: RwLock<Option<std::thread::JoinHandle<()>>>,
+    pubsub_handle: RwLock<Option<thread::JoinHandle<()>>>,
     pubsub_close_handle: PubsubServiceCloseHandle,
     sample_performance_service: Option<SamplePerformanceService>,
     commit_accounts_ticker: Option<tokio::task::JoinHandle<()>>,
     remote_account_fetcher_worker: Option<RemoteAccountFetcherWorker>,
-    remote_account_fetcher_handle: Option<tokio::task::JoinHandle<()>>,
+    remote_account_fetcher_handle: Option<thread::JoinHandle<()>>,
     remote_account_updates_worker: Option<RemoteAccountUpdatesWorker>,
-    remote_account_updates_handle: Option<
-        tokio::task::JoinHandle<Result<(), RemoteAccountUpdatesWorkerError>>,
-    >,
+    remote_account_updates_handle: Option<thread::JoinHandle<()>>,
     remote_account_cloner_worker: Option<
         RemoteAccountClonerWorker<
             BankAccountProvider,
@@ -145,7 +143,7 @@ pub struct MagicValidator {
             AccountDumperBank,
         >,
     >,
-    remote_account_cloner_handle: Option<tokio::task::JoinHandle<()>>,
+    remote_account_cloner_handle: Option<thread::JoinHandle<()>>,
     accounts_manager: Arc<AccountsManager>,
     transaction_listener: GeyserTransactionNotifyListener,
     rpc_service: JsonRpcService,
@@ -504,10 +502,15 @@ impl MagicValidator {
         {
             let cancellation_token = self.token.clone();
             self.remote_account_fetcher_handle =
-                Some(tokio::spawn(async move {
-                    remote_account_fetcher_worker
-                        .start_fetch_request_processing(cancellation_token)
-                        .await
+                Some(thread::spawn(move || {
+                    create_worker_runtime("remote_account_fetcher_worker")
+                        .block_on(async move {
+                            remote_account_fetcher_worker
+                                .start_fetch_request_processing(
+                                    cancellation_token,
+                                )
+                                .await;
+                        });
                 }));
         }
     }
@@ -517,12 +520,24 @@ impl MagicValidator {
             self.remote_account_updates_worker.take()
         {
             let cancellation_token = self.token.clone();
-            self.remote_account_updates_handle =
-                Some(tokio::spawn(async move {
-                    remote_account_updates_worker
-                        .start_monitoring_request_processing(cancellation_token)
-                        .await
-                }));
+            self.remote_account_updates_handle = Some(thread::spawn(
+                move || {
+                    create_worker_runtime("remote_account_updates_worker")
+                        .block_on(async move {
+                            let _ = remote_account_updates_worker
+                                .start_monitoring_request_processing(
+                                    cancellation_token,
+                                )
+                                .await
+                                .inspect_err(|err| {
+                                    error!(
+                                        "Remote Account Updates Worker failed: {:?}",
+                                        err
+                                    );
+                                });
+                        });
+                },
+            ));
         }
     }
 
@@ -532,10 +547,15 @@ impl MagicValidator {
         {
             let cancellation_token = self.token.clone();
             self.remote_account_cloner_handle =
-                Some(tokio::spawn(async move {
-                    remote_account_cloner_worker
-                        .start_clone_request_processing(cancellation_token)
-                        .await
+                Some(thread::spawn(move || {
+                    create_worker_runtime("remote_account_cloner_worker")
+                        .block_on(async move {
+                            remote_account_cloner_worker
+                                .start_clone_request_processing(
+                                    cancellation_token,
+                                )
+                                .await
+                        });
                 }));
         }
     }
@@ -589,4 +609,12 @@ fn remove_directory_contents_if_exists(
         }
     }
     Ok(())
+}
+
+fn create_worker_runtime(thread_name: &str) -> tokio::runtime::Runtime {
+    tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .thread_name(thread_name)
+        .build()
+        .unwrap()
 }
