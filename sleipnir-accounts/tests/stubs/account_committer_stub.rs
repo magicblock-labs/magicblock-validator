@@ -31,10 +31,10 @@ impl AccountCommitterStub {
 
 #[async_trait]
 impl AccountCommitter for AccountCommitterStub {
-    async fn create_commit_accounts_transactions(
+    async fn create_commit_accounts_transaction(
         &self,
         committees: Vec<AccountCommittee>,
-    ) -> AccountsResult<Vec<CommitAccountsPayload>> {
+    ) -> AccountsResult<CommitAccountsPayload> {
         let transaction = Transaction::default();
         let payload = CommitAccountsPayload {
             transaction: Some(CommitAccountsTransaction {
@@ -46,7 +46,7 @@ impl AccountCommitter for AccountCommitterStub {
                 .map(|x| (x.pubkey, x.account_data.clone()))
                 .collect(),
         };
-        Ok(vec![payload])
+        Ok(payload)
     }
 
     async fn send_commit_transactions(

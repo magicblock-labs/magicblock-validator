@@ -524,18 +524,13 @@ impl MagicValidator {
                 move || {
                     create_worker_runtime("remote_account_updates_worker")
                         .block_on(async move {
-                            let _ = remote_account_updates_worker
-                                .start_monitoring_request_processing(
-                                    cancellation_token,
-                                )
+                            if let Err(err) = remote_account_updates_worker
+                                .start_monitoring_request_processing(cancellation_token)
                                 .await
-                                .inspect_err(|err| {
-                                    error!(
-                                        "Remote Account Updates Worker failed: {:?}",
-                                        err
-                                    );
-                                });
-                        });
+                            {
+                                error!("remote_account_updates_worker failed: {:?}", err);
+                            }
+                    });
                 },
             ));
         }
