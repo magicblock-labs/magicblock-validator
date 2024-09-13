@@ -17,6 +17,7 @@ solana-rpc-client-api = { workspace = true }
 solana-pubsub-client = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+tokio-stream = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]

@@ -6,10 +6,10 @@ use tokio::sync::oneshot::Sender;
 
 #[derive(Debug, Clone, Error)]
 pub enum AccountFetcherError {
-    #[error("SendError")]
+    #[error(transparent)]
     SendError(#[from] tokio::sync::mpsc::error::SendError<Pubkey>),
 
-    #[error("RecvError")]
+    #[error(transparent)]
     RecvError(#[from] tokio::sync::oneshot::error::RecvError),
 
     #[error("FailedToFetch '{0}'")]
