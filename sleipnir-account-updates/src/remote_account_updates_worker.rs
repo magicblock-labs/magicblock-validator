@@ -62,11 +62,12 @@ impl RemoteAccountUpdatesWorker {
         &mut self,
         cancellation_token: CancellationToken,
     ) -> Result<(), RemoteAccountUpdatesWorkerError> {
+        // Create a pubsub client
         let pubsub_client =
             PubsubClient::new(self.rpc_provider_config.ws_url())
                 .await
                 .map_err(RemoteAccountUpdatesWorkerError::PubsubClientError)?;
-
+        // For every account, we only want the updates, not the actual content of the accounts
         let rpc_account_info_config = RpcAccountInfoConfig {
             commitment: self
                 .rpc_provider_config
@@ -79,17 +80,17 @@ impl RemoteAccountUpdatesWorker {
             }),
             min_context_slot: None,
         };
-
-        // We'll store maps of the subscriptions
+        // We'll store useful maps for each of the subscriptions
         let mut streams = StreamMap::new();
         let mut unsubscribes = HashMap::new();
-
         // Loop forever until we stop the worker
         loop {
-            eprintln!("Looping!");
             tokio::select! {
                 // When we receive a message to start monitoring an account
                 Some(account) = self.monitoring_request_receiver.recv() => {
+                    if unsubscribes.contains_key(&account) {
+                        continue;
+                    }
                     info!("Account monitoring started: {}", account);
                     let (stream, unsubscribe) = pubsub_client
                         .account_subscribe(&account, Some(rpc_account_info_config.clone()))
@@ -124,14 +125,12 @@ impl RemoteAccountUpdatesWorker {
                 }
             }
         }
-
         // Cleanup all subscriptions and wait for proper shutdown
         drop(streams);
         for unsubscribe in unsubscribes.into_values() {
             unsubscribe().await;
         }
         pubsub_client.shutdown().await?;
-
         // Done
         Ok(())
     }
