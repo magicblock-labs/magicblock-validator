@@ -7,6 +7,7 @@ use sleipnir_config::{GeyserGrpcConfig, SleipnirConfig};
 use sleipnir_ledger::Ledger;
 use solana_sdk::signature::Keypair;
 use tempfile::TempDir;
+use test_tools::init_logger;
 
 // mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev
 const TEST_KEYPAIR_BYTES: [u8; 64] = [
@@ -17,11 +18,10 @@ const TEST_KEYPAIR_BYTES: [u8; 64] = [
 ];
 
 fn init_logger() {
-    let mut builder = env_logger::builder();
-    builder.format_timestamp_micros().is_test(false);
-
     if let Ok(style) = std::env::var("RUST_LOG_STYLE") {
         use std::io::Write;
+        let mut builder = env_logger::builder();
+        builder.format_timestamp_micros().is_test(false);
         match style.as_str() {
             "EPHEM" => {
                 builder.format(|buf, record| {
@@ -49,8 +49,10 @@ fn init_logger() {
             }
             _ => {}
         }
+        let _ = builder.try_init();
+    } else {
+        init_logger!();
     }
-    let _ = builder.try_init();
 }
 
 #[tokio::main]
