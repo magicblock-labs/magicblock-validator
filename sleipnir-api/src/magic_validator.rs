@@ -548,7 +548,7 @@ impl MagicValidator {
             let cancellation_token = self.token.clone();
             self.remote_account_cloner_handle =
                 Some(thread::spawn(move || {
-                    create_worker_runtime("Remote Account Cloner Worker")
+                    create_worker_runtime("remote_account_cloner_worker")
                         .block_on(async move {
                             remote_account_cloner_worker
                                 .start_clone_request_processing(
