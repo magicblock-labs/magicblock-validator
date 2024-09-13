@@ -85,6 +85,7 @@ impl RemoteAccountUpdatesWorker {
         let mut unsubscribes = HashMap::new();
         // Loop forever until we stop the worker
         loop {
+            info!("Looping start_monitoring_request_processing");
             tokio::select! {
                 // When we receive a message to start monitoring an account
                 Some(account) = self.monitoring_request_receiver.recv() => {
@@ -125,11 +126,12 @@ impl RemoteAccountUpdatesWorker {
                 }
             }
         }
+        info!("FINISHED start_monitoring_request_processing");
         // Cleanup all subscriptions and wait for proper shutdown
-        drop(streams);
         for unsubscribe in unsubscribes.into_values() {
             unsubscribe().await;
         }
+        drop(streams);
         pubsub_client.shutdown().await?;
         // Done
         Ok(())
