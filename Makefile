@@ -55,8 +55,15 @@ ci-test:
 	cargo $(CARGO_TEST_NOCAP) && \
 	$(MAKE) -C $(DIR)/test-programs
 
+## NOTE: We're getting the following error in github CI when trying to use
+#  nightly Rust. Until that is fixed we have to use stable to verify format.
+#
+#  error: failed to install component: 'rustc-x86_64-unknown-linux-gnu', detected conflict: 'lib/rustlib/x86_64-unknown-linux-gnu/bin/llc'
+#
+#  However this should not be a problem as our formatting rules for nightly
+#  are more strict than the non-nightly ones.
 ci-fmt:
-	cargo +nightly fmt --check -- --config-path rustfmt-nightly.toml
+	cargo fmt --check -- --config-path rustfmt.toml
 
 ci-lint: lint
 
