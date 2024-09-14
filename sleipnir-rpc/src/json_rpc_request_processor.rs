@@ -1,15 +1,10 @@
-use std::{
-    net::SocketAddr, str::FromStr, sync::Arc,
-    time::Duration,
-};
+use std::{net::SocketAddr, str::FromStr, sync::Arc, time::Duration};
 
 use jsonrpc_core::{Error, ErrorCode, Metadata, Result, Value};
 use log::*;
 use sleipnir_accounts::AccountsManager;
 use sleipnir_accounts_db::accounts_index::AccountSecondaryIndexes;
-use sleipnir_bank::{
-    bank::Bank,
-};
+use sleipnir_bank::bank::Bank;
 use sleipnir_ledger::{Ledger, SignatureInfosForAddress};
 use sleipnir_transaction_status::TransactionStatusSender;
 use solana_account_decoder::{UiAccount, UiAccountEncoding};
@@ -33,14 +28,11 @@ use solana_sdk::{
     hash::Hash,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
-    transaction::{
-        SanitizedTransaction, VersionedTransaction,
-    },
+    transaction::{SanitizedTransaction, VersionedTransaction},
 };
 use solana_transaction_status::{
-    EncodedConfirmedTransactionWithStatusMeta,
-    TransactionConfirmationStatus, TransactionStatus,
-    UiTransactionEncoding,
+    EncodedConfirmedTransactionWithStatusMeta, TransactionConfirmationStatus,
+    TransactionStatus, UiTransactionEncoding,
 };
 
 use crate::{
