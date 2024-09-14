@@ -83,9 +83,11 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
             // NOTE: when we address https://github.com/magicblock-labs/magicblock-validator/issues/100
             // we should report if we cannot get the blockhash as part of the _sent commit_
             // transaction
-            let payloads = committer
-                .create_commit_accounts_transactions(committees)
-                .await?;
+            let payloads = vec![
+                committer
+                    .create_commit_accounts_transaction(committees)
+                    .await?,
+            ];
 
             // Determine which payloads are a noop since all accounts are up to date
             // and which require a commit to chain

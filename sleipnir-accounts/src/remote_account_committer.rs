@@ -55,10 +55,10 @@ impl RemoteAccountCommitter {
 
 #[async_trait]
 impl AccountCommitter for RemoteAccountCommitter {
-    async fn create_commit_accounts_transactions(
+    async fn create_commit_accounts_transaction(
         &self,
         committees: Vec<AccountCommittee>,
-    ) -> AccountsResult<Vec<CommitAccountsPayload>> {
+    ) -> AccountsResult<CommitAccountsPayload> {
         // Get blockhash once since this is a slow operation
         let latest_blockhash = self
             .rpc_client
@@ -128,13 +128,13 @@ impl AccountCommitter for RemoteAccountCommitter {
             .map(|c| (c.pubkey, c.account_data))
             .collect();
 
-        Ok(vec![CommitAccountsPayload {
+        Ok(CommitAccountsPayload {
             transaction: Some(CommitAccountsTransaction {
                 transaction: tx,
                 undelegated_accounts,
             }),
             committees,
-        }])
+        })
     }
 
     async fn send_commit_transactions(

@@ -93,10 +93,10 @@ pub trait AccountCommitter: Send + Sync + 'static {
     /// as the [commit_state_data].
     /// Returns the transaction committing the accounts and the pubkeys of accounts
     /// it did commit
-    async fn create_commit_accounts_transactions(
+    async fn create_commit_accounts_transaction(
         &self,
         committees: Vec<AccountCommittee>,
-    ) -> AccountsResult<Vec<CommitAccountsPayload>>;
+    ) -> AccountsResult<CommitAccountsPayload>;
 
     /// Returns the main-chain signatures of the commit transactions
     /// This will only fail due to network issues, not if the transaction failed.
