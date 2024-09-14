@@ -46,6 +46,8 @@ macro_rules! function_name {
 macro_rules! run_test {
     ($test_body:block) => {
         use $crate::rayon_prelude::*;
+        let TOTAL_COMPLETED: ::std::sync::atomic::AtomicUsize =
+            ::std::sync::atomic::AtomicUsize::new(0);
 
         init_logger!();
 
@@ -61,8 +63,16 @@ macro_rules! run_test {
         );
         thread_pool.install(|| {
             (0..iterations).into_par_iter().for_each(|i| {
-                info!("{}[{}]", test_name, i);
-                test()
+                info!("Start {}[{}]", test_name, i);
+                test();
+                // write as 0001
+                info!(
+                    "Completed {}[{}] - completed {}/{}",
+                    test_name,
+                    format!("{:04}", i),
+                    format!("{:04}", TOTAL_COMPLETED.fetch_add(1, ::std::sync::atomic::Ordering::Relaxed)),
+                    format!("{:04}", iterations)
+                );
             });
         });
     };
