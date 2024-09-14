@@ -62,15 +62,20 @@ macro_rules! run_test {
             test_name, iterations, concurrency
         );
         thread_pool.install(|| {
-            (0..iterations).into_par_iter().for_each(|i| {
+            (1..=iterations).into_par_iter().for_each(|i| {
                 info!("Start {}[{}]", test_name, i);
                 test();
-                // write as 0001
                 info!(
                     "Completed {}[{}] - completed {}/{}",
                     test_name,
                     format!("{:04}", i),
-                    format!("{:04}", TOTAL_COMPLETED.fetch_add(1, ::std::sync::atomic::Ordering::Relaxed)),
+                    format!(
+                        "{:04}",
+                        TOTAL_COMPLETED.fetch_add(
+                            1,
+                            ::std::sync::atomic::Ordering::Relaxed
+                        ) + 1
+                    ),
                     format!("{:04}", iterations)
                 );
             });
