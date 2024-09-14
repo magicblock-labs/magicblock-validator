@@ -6,6 +6,7 @@ edition.workspace = true
 [dev-dependencies]
 ephemeral-rollups-sdk = { workspace = true }
 log = { workspace = true }
+rayon = { workspace = true }
 schedulecommit-program = { workspace = true, features = ["no-entrypoint"] }
 schedulecommit-client = { workspace = true }
 sleipnir-core = { workspace = true }
