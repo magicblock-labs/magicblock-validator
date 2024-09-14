@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap, net::SocketAddr, str::FromStr, sync::Arc,
+    net::SocketAddr, str::FromStr, sync::Arc,
     time::Duration,
 };
 
@@ -8,7 +8,7 @@ use log::*;
 use sleipnir_accounts::AccountsManager;
 use sleipnir_accounts_db::accounts_index::AccountSecondaryIndexes;
 use sleipnir_bank::{
-    bank::Bank, transaction_simulation::TransactionSimulationResult,
+    bank::Bank,
 };
 use sleipnir_ledger::{Ledger, SignatureInfosForAddress};
 use sleipnir_transaction_status::TransactionStatusSender;
@@ -34,24 +34,21 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::{Keypair, Signature},
     transaction::{
-        SanitizedTransaction, TransactionError, VersionedTransaction,
+        SanitizedTransaction, VersionedTransaction,
     },
 };
 use solana_transaction_status::{
-    map_inner_instructions, EncodedConfirmedTransactionWithStatusMeta,
-    TransactionConfirmationStatus, TransactionStatus, UiInnerInstructions,
+    EncodedConfirmedTransactionWithStatusMeta,
+    TransactionConfirmationStatus, TransactionStatus,
     UiTransactionEncoding,
 };
 
 use crate::{
     account_resolver::{encode_account, get_encoded_account},
     filters::{get_filtered_program_accounts, optimize_filters},
-    rpc_health::{RpcHealth, RpcHealthStatus},
-    transaction::{
-        airdrop_transaction, ensure_accounts, sanitize_transaction,
-        sig_verify_transaction_and_check_precompiles,
-    },
-    utils::{new_response, verify_pubkey},
+    rpc_health::RpcHealth,
+    transaction::airdrop_transaction,
+    utils::new_response,
     RpcCustomResult,
 };
 
