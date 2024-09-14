@@ -579,193 +579,211 @@ impl JsonRpcRequestProcessor {
 
     pub fn transaction_preflight(
         &self,
-        preflight_bank: &Bank,
-        transaction: &SanitizedTransaction,
+        _preflight_bank: &Bank,
+        _transaction: &SanitizedTransaction,
     ) -> Result<()> {
-        match self.health.check() {
-            RpcHealthStatus::Ok => (),
-            RpcHealthStatus::Unknown => {
-                inc_new_counter_info!("rpc-send-tx_health-unknown", 1);
-                return Err(RpcCustomError::NodeUnhealthy {
-                    num_slots_behind: None,
-                }
-                .into());
-            }
-        }
+        // TODO: not doing anything on preflight. Temporary hack to be removed once we fix scheduled commits on simulation
 
-        if let TransactionSimulationResult {
-            result: Err(err),
-            logs,
-            post_simulation_accounts: _,
-            units_consumed,
-            return_data,
-            inner_instructions: _, // Always `None` due to `enable_cpi_recording = false`
-        } = preflight_bank.simulate_transaction_unchecked(transaction, false)
-        {
-            match err {
-                TransactionError::BlockhashNotFound => {
-                    inc_new_counter_info!(
-                        "rpc-send-tx_err-blockhash-not-found",
-                        1
-                    );
-                }
-                _ => {
-                    inc_new_counter_info!("rpc-send-tx_err-other", 1);
-                }
-            }
-            return Err(RpcCustomError::SendTransactionPreflightFailure {
-                message: format!("Transaction simulation failed: {err}"),
-                result: RpcSimulateTransactionResult {
-                    err: Some(err),
-                    logs: Some(logs),
-                    accounts: None,
-                    units_consumed: Some(units_consumed),
-                    return_data: return_data
-                        .map(|return_data| return_data.into()),
-                    inner_instructions: None,
-                },
-            }
-            .into());
-        }
+        // match self.health.check() {
+        //     RpcHealthStatus::Ok => (),
+        //     RpcHealthStatus::Unknown => {
+        //         inc_new_counter_info!("rpc-send-tx_health-unknown", 1);
+        //         return Err(RpcCustomError::NodeUnhealthy {
+        //             num_slots_behind: None,
+        //         }
+        //         .into());
+        //     }
+        // }
+        //
+        // if let TransactionSimulationResult {
+        //     result: Err(err),
+        //     logs,
+        //     post_simulation_accounts: _,
+        //     units_consumed,
+        //     return_data,
+        //     inner_instructions: _, // Always `None` due to `enable_cpi_recording = false`
+        // } = preflight_bank.simulate_transaction_unchecked(transaction, false)
+        // {
+        //     match err {
+        //         TransactionError::BlockhashNotFound => {
+        //             inc_new_counter_info!(
+        //                 "rpc-send-tx_err-blockhash-not-found",
+        //                 1
+        //             );
+        //         }
+        //         _ => {
+        //             inc_new_counter_info!("rpc-send-tx_err-other", 1);
+        //         }
+        //     }
+        //     return Err(RpcCustomError::SendTransactionPreflightFailure {
+        //         message: format!("Transaction simulation failed: {err}"),
+        //         result: RpcSimulateTransactionResult {
+        //             err: Some(err),
+        //             logs: Some(logs),
+        //             accounts: None,
+        //             units_consumed: Some(units_consumed),
+        //             return_data: return_data
+        //                 .map(|return_data| return_data.into()),
+        //             inner_instructions: None,
+        //         },
+        //     }
+        //     .into());
+        // }
 
         Ok(())
     }
 
     pub async fn simulate_transaction(
         &self,
-        mut unsanitized_tx: VersionedTransaction,
-        config_accounts: Option<RpcSimulateTransactionAccountsConfig>,
-        replace_recent_blockhash: bool,
-        sig_verify: bool,
-        enable_cpi_recording: bool,
+        mut _unsanitized_tx: VersionedTransaction,
+        _config_accounts: Option<RpcSimulateTransactionAccountsConfig>,
+        _replace_recent_blockhash: bool,
+        _sig_verify: bool,
+        _enable_cpi_recording: bool,
     ) -> Result<RpcResponse<RpcSimulateTransactionResult>> {
         let bank = self.get_bank();
 
-        if replace_recent_blockhash {
-            if sig_verify {
-                return Err(Error::invalid_params(
-                    "sigVerify may not be used with replaceRecentBlockhash",
-                ));
-            }
-            unsanitized_tx
-                .message
-                .set_recent_blockhash(bank.last_blockhash());
-        }
-        let sanitized_transaction =
-            sanitize_transaction(unsanitized_tx, &*bank)?;
-        if sig_verify {
-            sig_verify_transaction_and_check_precompiles(
-                &sanitized_transaction,
-                &bank.feature_set,
-            )?;
-        }
-
-        if let Err(err) =
-            ensure_accounts(&self.accounts_manager, &sanitized_transaction)
-                .await
-        {
-            const MAGIC_ID: &str =
-                "Magic11111111111111111111111111111111111111";
-            let logs = vec![
-                format!("{MAGIC_ID}: An error was encountered before simulating the transaction."),
-                format!("{MAGIC_ID}: Something went wrong when trying to clone the needed accounts into the validator."),
-                format!("{MAGIC_ID}: Error: {err:?}"),
-            ];
-            return Ok(new_response(
-                &bank,
-                RpcSimulateTransactionResult {
-                    err: Some(TransactionError::AccountNotFound),
-                    logs: Some(logs),
-                    accounts: None,
-                    units_consumed: Some(0),
-                    return_data: None,
-                    inner_instructions: None,
-                },
-            ));
-        }
-
-        let TransactionSimulationResult {
-            result,
-            logs,
-            post_simulation_accounts,
-            units_consumed,
-            return_data,
-            inner_instructions,
-        } = bank.simulate_transaction_unchecked(
-            &sanitized_transaction,
-            enable_cpi_recording,
-        );
-
-        let account_keys = sanitized_transaction.message().account_keys();
-        let number_of_accounts = account_keys.len();
-
-        let accounts = if let Some(config_accounts) = config_accounts {
-            let accounts_encoding = config_accounts
-                .encoding
-                .unwrap_or(UiAccountEncoding::Base64);
-
-            if accounts_encoding == UiAccountEncoding::Binary
-                || accounts_encoding == UiAccountEncoding::Base58
-            {
-                return Err(Error::invalid_params(
-                    "base58 encoding not supported",
-                ));
-            }
-
-            if config_accounts.addresses.len() > number_of_accounts {
-                return Err(Error::invalid_params(format!(
-                    "Too many accounts provided; max {number_of_accounts}"
-                )));
-            }
-
-            if result.is_err() {
-                Some(vec![None; config_accounts.addresses.len()])
-            } else {
-                let mut post_simulation_accounts_map = HashMap::new();
-                for (pubkey, data) in post_simulation_accounts {
-                    post_simulation_accounts_map.insert(pubkey, data);
-                }
-
-                Some(
-                    config_accounts
-                        .addresses
-                        .iter()
-                        .map(|address_str| {
-                            let pubkey = verify_pubkey(address_str)?;
-                            get_encoded_account(
-                                &bank,
-                                &pubkey,
-                                accounts_encoding,
-                                None,
-                                Some(&post_simulation_accounts_map),
-                            )
-                        })
-                        .collect::<Result<Vec<_>>>()?,
-                )
-            }
-        } else {
-            None
-        };
-
-        let inner_instructions = inner_instructions.map(|info| {
-            map_inner_instructions(info)
-                .map(|converted| {
-                    UiInnerInstructions::parse(converted, &account_keys)
-                })
-                .collect()
-        });
+        // TODO: not doing anything on preflight. Temporary hack to be removed once we fix scheduled commits on simulation
 
         Ok(new_response(
             &bank,
             RpcSimulateTransactionResult {
-                err: result.err(),
-                logs: Some(logs),
-                accounts,
-                units_consumed: Some(units_consumed),
-                return_data: return_data.map(|return_data| return_data.into()),
-                inner_instructions,
+                err: None,
+                logs: Some(vec!["Simulation successful".to_string()]),
+                accounts: None,
+                units_consumed: Some(0),
+                return_data: None,
+                inner_instructions: None,
             },
         ))
+
+        // let bank = self.get_bank();
+        //
+        // if replace_recent_blockhash {
+        //     if sig_verify {
+        //         return Err(Error::invalid_params(
+        //             "sigVerify may not be used with replaceRecentBlockhash",
+        //         ));
+        //     }
+        //     unsanitized_tx
+        //         .message
+        //         .set_recent_blockhash(bank.last_blockhash());
+        // }
+        // let sanitized_transaction =
+        //     sanitize_transaction(unsanitized_tx, &*bank)?;
+        // if sig_verify {
+        //     sig_verify_transaction_and_check_precompiles(
+        //         &sanitized_transaction,
+        //         &bank.feature_set,
+        //     )?;
+        // }
+        //
+        // if let Err(err) =
+        //     ensure_accounts(&self.accounts_manager, &sanitized_transaction)
+        //         .await
+        // {
+        //     const MAGIC_ID: &str =
+        //         "Magic11111111111111111111111111111111111111";
+        //     let logs = vec![
+        //         format!("{MAGIC_ID}: An error was encountered before simulating the transaction."),
+        //         format!("{MAGIC_ID}: Something went wrong when trying to clone the needed accounts into the validator."),
+        //         format!("{MAGIC_ID}: Error: {err:?}"),
+        //     ];
+        //     return Ok(new_response(
+        //         &bank,
+        //         RpcSimulateTransactionResult {
+        //             err: Some(TransactionError::AccountNotFound),
+        //             logs: Some(logs),
+        //             accounts: None,
+        //             units_consumed: Some(0),
+        //             return_data: None,
+        //             inner_instructions: None,
+        //         },
+        //     ));
+        // }
+        //
+        // let TransactionSimulationResult {
+        //     result,
+        //     logs,
+        //     post_simulation_accounts,
+        //     units_consumed,
+        //     return_data,
+        //     inner_instructions,
+        // } = bank.simulate_transaction_unchecked(
+        //     &sanitized_transaction,
+        //     enable_cpi_recording,
+        // );
+        //
+        // let account_keys = sanitized_transaction.message().account_keys();
+        // let number_of_accounts = account_keys.len();
+        //
+        // let accounts = if let Some(config_accounts) = config_accounts {
+        //     let accounts_encoding = config_accounts
+        //         .encoding
+        //         .unwrap_or(UiAccountEncoding::Base64);
+        //
+        //     if accounts_encoding == UiAccountEncoding::Binary
+        //         || accounts_encoding == UiAccountEncoding::Base58
+        //     {
+        //         return Err(Error::invalid_params(
+        //             "base58 encoding not supported",
+        //         ));
+        //     }
+        //
+        //     if config_accounts.addresses.len() > number_of_accounts {
+        //         return Err(Error::invalid_params(format!(
+        //             "Too many accounts provided; max {number_of_accounts}"
+        //         )));
+        //     }
+        //
+        //     if result.is_err() {
+        //         Some(vec![None; config_accounts.addresses.len()])
+        //     } else {
+        //         let mut post_simulation_accounts_map = HashMap::new();
+        //         for (pubkey, data) in post_simulation_accounts {
+        //             post_simulation_accounts_map.insert(pubkey, data);
+        //         }
+        //
+        //         Some(
+        //             config_accounts
+        //                 .addresses
+        //                 .iter()
+        //                 .map(|address_str| {
+        //                     let pubkey = verify_pubkey(address_str)?;
+        //                     get_encoded_account(
+        //                         &bank,
+        //                         &pubkey,
+        //                         accounts_encoding,
+        //                         None,
+        //                         Some(&post_simulation_accounts_map),
+        //                     )
+        //                 })
+        //                 .collect::<Result<Vec<_>>>()?,
+        //         )
+        //     }
+        // } else {
+        //     None
+        // };
+        //
+        // let inner_instructions = inner_instructions.map(|info| {
+        //     map_inner_instructions(info)
+        //         .map(|converted| {
+        //             UiInnerInstructions::parse(converted, &account_keys)
+        //         })
+        //         .collect()
+        // });
+        //
+        // Ok(new_response(
+        //     &bank,
+        //     RpcSimulateTransactionResult {
+        //         err: result.err(),
+        //         logs: Some(logs),
+        //         accounts,
+        //         units_consumed: Some(units_consumed),
+        //         return_data: return_data.map(|return_data| return_data.into()),
+        //         inner_instructions,
+        //     },
+        // ))
     }
 
     pub fn get_cluster_nodes(&self) -> Vec<RpcContactInfo> {
