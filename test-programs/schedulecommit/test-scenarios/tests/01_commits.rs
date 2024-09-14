@@ -1,3 +1,4 @@
+use integration_test_tools::run_test;
 use log::*;
 use std::str::FromStr;
 
@@ -11,16 +12,13 @@ use test_tools_core::init_logger;
 use utils::{
     assert_two_committees_synchronized_count,
     assert_two_committees_were_committed,
-    get_context_with_delegated_committees, iteration_count,
+    get_context_with_delegated_committees,
 };
 mod utils;
 
 #[test]
 fn test_committing_two_accounts() {
-    init_logger!();
-    info!("==== test_committing_two_accounts ====");
-
-    for i in 0..iteration_count() {
+    run_test!({
         let ctx = get_context_with_delegated_committees(2);
 
         let ScheduleCommitTestContextFields {
@@ -60,10 +58,10 @@ fn test_committing_two_accounts() {
                     ..Default::default()
                 },
             );
-        info!("{}: {} '{:?}'", i, sig, tx_res);
+        info!("{} '{:?}'", sig, res);
 
         let res = verify::fetch_commit_result_from_logs(&ctx, *sig);
         assert_two_committees_were_committed(&ctx, &res);
         assert_two_committees_synchronized_count(&ctx, &res, 1);
-    }
+    });
 }

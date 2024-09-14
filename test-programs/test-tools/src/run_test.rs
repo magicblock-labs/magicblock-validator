@@ -52,7 +52,7 @@ macro_rules! run_test {
         let test_name = $crate::function_name!();
         let test = || $test_body;
 
-        let iterations = iteration_count();
+        let iterations = $crate::iteration_count();
         let (thread_pool, concurrency) = $crate::iteration_thread_pool();
 
         info!(

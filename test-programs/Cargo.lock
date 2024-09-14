@@ -2626,6 +2626,7 @@ name = "schedulecommit-test-scenarios"
 version = "0.0.0"
 dependencies = [
  "ephemeral-rollups-sdk",
+ "integration-test-tools",
  "log",
  "schedulecommit-client",
  "schedulecommit-program",

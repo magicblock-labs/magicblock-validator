@@ -1,7 +1,5 @@
+use integration_test_tools::run_test;
 use log::*;
-use std::str::FromStr;
-
-use crate::utils::iteration_count;
 use schedulecommit_client::{
     verify, ScheduleCommitTestContext, ScheduleCommitTestContextFields,
 };
@@ -23,6 +21,7 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
+use std::str::FromStr;
 use test_tools_core::init_logger;
 use utils::{
     assert_one_committee_account_was_undelegated_on_chain,
@@ -32,7 +31,7 @@ use utils::{
     assert_two_committees_synchronized_count,
     assert_two_committees_were_committed,
     assert_tx_failed_with_instruction_error,
-    get_context_with_delegated_committees, get_iteration_count_for_suite,
+    get_context_with_delegated_committees,
 };
 
 mod utils;
@@ -162,12 +161,9 @@ fn commit_and_undelegate_two_accounts(
 
 #[test]
 fn test_committing_and_undelegating_one_account() {
-    init_logger!();
-    info!("==== test_committing_and_undelegating_one_account ====");
-
-    for i in 0..iteration_count() {
+    run_test!({
         let (ctx, sig, tx_res) = commit_and_undelegate_one_account(false);
-        info!("{}: {} '{:?}'", i, sig, tx_res);
+        info!("'{}' {:?}", sig, tx_res);
 
         let res = verify::fetch_commit_result_from_logs(&ctx, sig);
 
@@ -175,17 +171,14 @@ fn test_committing_and_undelegating_one_account() {
         assert_one_committee_synchronized_count(&ctx, &res, 1);
 
         assert_one_committee_account_was_undelegated_on_chain(&ctx);
-    }
+    });
 }
 
 #[test]
-fn test_committing_and_undelegating_two_accounts() {
-    init_logger!();
-    info!("==== test_committing_and_undelegating_two_accounts ====");
-
-    for i in 0..iteration_count() {
+fn test_committing_and_undelegating_two_accounts_success() {
+    run_test!({
         let (ctx, sig, tx_res) = commit_and_undelegate_two_accounts(false);
-        info!("{}: {} '{:?}'", i, sig, tx_res);
+        info!("'{}' {:?}", sig, tx_res);
 
         let res = verify::fetch_commit_result_from_logs(&ctx, sig);
 
@@ -193,7 +186,7 @@ fn test_committing_and_undelegating_two_accounts() {
         assert_two_committees_synchronized_count(&ctx, &res, 1);
 
         assert_two_committee_accounts_were_undelegated_on_chain(&ctx);
-    }
+    });
 }
 
 // -----------------
@@ -257,14 +250,9 @@ fn assert_can_increase_committee_count(
 
 #[test]
 fn test_committed_and_undelegated_single_account_redelegation() {
-    init_logger!();
-    info!(
-        "==== test_committed_and_undelegated_single_account_redelegation ===="
-    );
-
-    for i in 0..iteration_count() {
+    run_test!({
         let (ctx, sig, tx_res) = commit_and_undelegate_one_account(false);
-        info!("{}: {} '{:?}'", i, sig, tx_res);
+        info!("{} '{:?}'", sig, tx_res);
         let ScheduleCommitTestContextFields {
             payer,
             committees,
@@ -335,18 +323,16 @@ fn test_committed_and_undelegated_single_account_redelegation() {
                 commitment,
             );
         }
-    }
+    });
 }
 
 // The below is the same as test_committed_and_undelegated_single_account_redelegation
 // but for two accounts
 #[test]
 fn test_committed_and_undelegated_accounts_redelegation() {
-    init_logger!();
-    info!("==== test_committed_and_undelegated_accounts_redelegation ====");
-
-    for i in 0..iteration_count() {
+    run_test!({
         let (ctx, sig, tx_res) = commit_and_undelegate_two_accounts(false);
+        info!("{} '{:?}'", sig, tx_res);
         let ScheduleCommitTestContextFields {
             payer,
             committees,
@@ -457,7 +443,7 @@ fn test_committed_and_undelegated_accounts_redelegation() {
                 commitment,
             );
         }
-    }
+    });
 }
 
 // -----------------
@@ -465,12 +451,9 @@ fn test_committed_and_undelegated_accounts_redelegation() {
 // -----------------
 #[test]
 fn test_committing_and_undelegating_one_account_modifying_it_after() {
-    init_logger!();
-    info!("==== test_committing_and_undelegating_one_account_modifying_it_after ====");
-
-    for i in 0..iteration_count() {
+    run_test!({
         let (ctx, sig, res) = commit_and_undelegate_one_account(true);
-        info!("{}: {} '{:?}'", i, sig, res);
+        info!("{} '{:?}'", sig, res);
 
         ctx.assert_ephemeral_transaction_error(
             sig,
@@ -478,25 +461,22 @@ fn test_committing_and_undelegating_one_account_modifying_it_after() {
             "instruction modified data of an account it does not own",
         );
 
-        // TODO(thlorenz): even though the transaction failse the account is still committed and undelegated
+        // TODO(thlorenz): even though the transaction fails the account is still committed and undelegated
         // this should be fixed ASAP and this test extended to verify that
         // Same for test_committing_and_undelegating_two_accounts_modifying_them_after
-    }
+    });
 }
 
 #[test]
 fn test_committing_and_undelegating_two_accounts_modifying_them_after() {
-    init_logger!();
-    info!("==== test_committing_and_undelegating_two_accounts_modifying_them_after ====");
-
-    for i in 0..iteration_count() {
+    run_test!({
         let (ctx, sig, res) = commit_and_undelegate_two_accounts(true);
-        info!("{}: {} '{:?}'", i, sig, res);
+        info!("{} '{:?}'", sig, res);
 
         ctx.assert_ephemeral_transaction_error(
             sig,
             &res,
             "instruction modified data of an account it does not own",
         );
-    }
+    });
 }

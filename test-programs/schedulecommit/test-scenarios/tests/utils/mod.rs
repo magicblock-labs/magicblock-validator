@@ -10,13 +10,6 @@ use solana_sdk::{
 // -----------------
 // Setup
 // -----------------
-pub fn iteration_count() -> u32 {
-    std::env::var("TEST_ITERATION_COUNT")
-        .unwrap_or_else(|_| "1".to_string())
-        .parse()
-        .unwrap()
-}
-
 pub fn get_context_with_delegated_committees(
     ncommittees: usize,
 ) -> ScheduleCommitTestContext {
