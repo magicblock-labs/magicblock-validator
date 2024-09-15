@@ -1,7 +1,8 @@
+use integration_test_tools::toml_to_args::rpc_port_from_config;
 use std::{
     io,
     net::TcpStream,
-    path::Path,
+    path::{Path, PathBuf},
     process::{self, Child},
     thread::sleep,
     time::Duration,
@@ -27,9 +28,8 @@ pub fn main() {
         eprintln!("======== Starting DEVNET Validator for Scenarios + Security ========");
 
         // Start validators via `cargo run --release  -- <config>
-        let mut devnet_validator = match start_validator_with_config(
+        let mut devnet_validator = match start_magic_block_validator_with_config(
             "schedulecommit-conf.devnet.toml",
-            7799,
             "DEVNET",
         ) {
             Some(validator) => validator,
@@ -39,9 +39,8 @@ pub fn main() {
         };
 
         eprintln!("======== Starting EPHEM Validator for Scenarios + Security ========");
-        let mut ephem_validator = match start_validator_with_config(
+        let mut ephem_validator = match start_magic_block_validator_with_config(
             "schedulecommit-conf.ephem.toml",
-            8899,
             "EPHEM",
         ) {
             Some(validator) => validator,
@@ -54,8 +53,12 @@ pub fn main() {
         };
 
         eprintln!("======== RUNNING SECURITY TESTS ========");
-        let test_security_dir =
-            format!("{}/../{}", manifest_dir.clone(), "test-security");
+        let test_security_dir = format!(
+            "{}/../{}",
+            manifest_dir.clone(),
+            "schedulecommit/test-security"
+        );
+        eprintln!("Running security tests in {}", test_security_dir);
         let test_security_output =
             match run_test(test_security_dir, Default::default()) {
                 Ok(output) => output,
@@ -67,8 +70,11 @@ pub fn main() {
             };
 
         eprintln!("======== RUNNING SCENARIOS TESTS ========");
-        let test_scenarios_dir =
-            format!("{}/../{}", manifest_dir.clone(), "test-scenarios");
+        let test_scenarios_dir = format!(
+            "{}/../{}",
+            manifest_dir.clone(),
+            "schedulecommit/test-scenarios"
+        );
         let test_scenarios_output =
             match run_test(test_scenarios_dir, Default::default()) {
                 Ok(output) => output,
@@ -91,9 +97,8 @@ pub fn main() {
     // -----------------
     let issues_frequent_commits_output = {
         eprintln!("======== RUNNING ISSUES TESTS - Frequent Commits ========");
-        let mut devnet_validator = match start_validator_with_config(
+        let mut devnet_validator = match start_magic_block_validator_with_config(
             "schedulecommit-conf.devnet.toml",
-            7799,
             "DEVNET",
         ) {
             Some(validator) => validator,
@@ -101,9 +106,8 @@ pub fn main() {
                 panic!("Failed to start devnet validator properly");
             }
         };
-        let mut ephem_validator = match start_validator_with_config(
+        let mut ephem_validator = match start_magic_block_validator_with_config(
             "schedulecommit-conf.ephem.frequent-commits.toml",
-            8899,
             "EPHEM",
         ) {
             Some(validator) => validator,
@@ -115,7 +119,7 @@ pub fn main() {
             }
         };
         let test_issues_dir =
-            format!("{}/../../{}", manifest_dir.clone(), "test-issues");
+            format!("{}/../{}", manifest_dir.clone(), "test-issues");
         let test_output = match run_test(
             test_issues_dir,
             RunTestConfig {
@@ -181,19 +185,63 @@ fn run_test(
     cmd.current_dir(manifest_dir.clone()).output()
 }
 
-fn start_validator_with_config(
-    config_file: &str,
-    port: u16,
-    log_suffix: &str,
-) -> Option<process::Child> {
+// -----------------
+// Validator Startup
+// -----------------
+struct TestRunnerPaths {
+    config_path: PathBuf,
+    root_dir: PathBuf,
+}
+
+fn resolve_paths(config_file: &str) -> TestRunnerPaths {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let workspace_dir =
-        Path::new(&manifest_dir).join("..").canonicalize().unwrap();
-    let root_dir = Path::new(&workspace_dir).join("..").canonicalize().unwrap();
+    let workspace_dir = Path::new(&manifest_dir)
+        .join("..")
+        .canonicalize()
+        .unwrap()
+        .to_path_buf();
+    let root_dir = Path::new(&workspace_dir)
+        .join("..")
+        .canonicalize()
+        .unwrap()
+        .to_path_buf();
     let config_path = Path::new(&manifest_dir)
         .join("..")
         .join("configs")
         .join(config_file);
+    TestRunnerPaths {
+        config_path,
+        root_dir,
+    }
+}
+
+fn wait_for_validator(mut validator: Child, port: u16) -> Option<Child> {
+    let mut count = 0;
+    loop {
+        if TcpStream::connect(format!("0.0.0.0:{}", port)).is_ok() {
+            break Some(validator);
+        }
+        count += 1;
+        // 30 seconds
+        if count >= 75 {
+            eprintln!("Validator RPC on port {} failed to listen", port);
+            validator.kill().expect("Failed to kill validator");
+            break None;
+        }
+        sleep(Duration::from_millis(400));
+    }
+}
+
+fn start_magic_block_validator_with_config(
+    config_file: &str,
+    log_suffix: &str,
+) -> Option<process::Child> {
+    let TestRunnerPaths {
+        config_path,
+        root_dir,
+        ..
+    } = resolve_paths(config_file);
+    let port = rpc_port_from_config(&config_path);
 
     // First build so that the validator can start fast
     let build_res = process::Command::new("cargo")
@@ -217,21 +265,18 @@ fn start_validator_with_config(
 
     eprintln!("Starting validator with {:?}", command);
 
-    let mut validator = command.spawn().expect("Failed to start validator");
+    let validator = command.spawn().expect("Failed to start validator");
+    wait_for_validator(validator, port)
+}
 
-    // Wait until the validator is listening on 0.0.0.0:<port>
-    let mut count = 0;
-    loop {
-        if TcpStream::connect(format!("0.0.0.0:{}", port)).is_ok() {
-            break Some(validator);
-        }
-        count += 1;
-        // 30 seconds
-        if count >= 75 {
-            eprintln!("Validator RPC on port {} failed to listen", port);
-            validator.kill().expect("Failed to kill validator");
-            break None;
-        }
-        sleep(Duration::from_millis(400));
-    }
+fn start_test_validator_with_config(
+    config_file: &str,
+    log_suffix: &str,
+) -> Option<process::Child> {
+    let TestRunnerPaths {
+        config_path,
+        root_dir,
+        ..
+    } = resolve_paths(config_file);
+    todo!()
 }

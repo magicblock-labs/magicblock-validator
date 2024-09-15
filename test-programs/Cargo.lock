@@ -4077,6 +4077,9 @@ dependencies = [
 [[package]]
 name = "test-runner"
 version = "0.0.0"
+dependencies = [
+ "integration-test-tools",
+]
 
 [[package]]
 name = "test-tools-core"

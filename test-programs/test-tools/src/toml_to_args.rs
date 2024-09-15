@@ -1,9 +1,11 @@
 use serde::Deserialize;
-use std::{fs, path::Path};
+use std::{fs, path::Path, path::PathBuf};
 
 #[derive(Deserialize)]
 struct Config {
+    #[serde(default)]
     rpc: Rpc,
+    #[serde(default)]
     program: Vec<Program>,
 }
 
@@ -12,12 +14,21 @@ struct Rpc {
     port: u16,
 }
 
+impl Default for Rpc {
+    fn default() -> Self {
+        Rpc { port: 8899 }
+    }
+}
+
 #[derive(Deserialize)]
 struct Program {
     id: String,
     path: String,
 }
 
+/// Converts a config file to a list of arguments to pass to the solana test validator
+/// executable. This will result it in running on the RPC port specified and with the programs
+/// specified in the config file.
 pub fn config_to_args(config_path: &str) -> Vec<String> {
     let config_file =
         fs::read_to_string(config_path).expect("Failed to read config file");
@@ -46,4 +57,14 @@ pub fn config_to_args(config_path: &str) -> Vec<String> {
     }
 
     args
+}
+
+/// Resolves the RPC port from the config file
+pub fn rpc_port_from_config(config_path: &PathBuf) -> u16 {
+    let config_file =
+        fs::read_to_string(config_path).expect("Failed to read config file");
+    let config: Config =
+        toml::from_str(&config_file).expect("Failed to parse config file");
+
+    config.rpc.port
 }
