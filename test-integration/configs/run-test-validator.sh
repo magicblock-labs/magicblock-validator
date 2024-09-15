@@ -9,7 +9,7 @@ solana-test-validator \
   --account LUzidNSiPNjYNkxZcUm5hYHwnWPwsUfh2US1cpWwaBm \
   $DIR/accounts/luzid-authority.json \
   --limit-ledger-size \
-  10000 \
+  1000000 \
   --bpf-program \
   DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh \
   $DIR/../schedulecommit/elfs/dlp.so \
