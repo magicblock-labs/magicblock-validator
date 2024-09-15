@@ -1,4 +1,6 @@
-use integration_test_tools::toml_to_args::rpc_port_from_config;
+use integration_test_tools::toml_to_args::{
+    config_to_args, rpc_port_from_config,
+};
 use std::{
     io,
     net::TcpStream,
@@ -28,9 +30,9 @@ pub fn main() {
         eprintln!("======== Starting DEVNET Validator for Scenarios + Security ========");
 
         // Start validators via `cargo run --release  -- <config>
-        let mut devnet_validator = match start_magic_block_validator_with_config(
+        let mut devnet_validator = match start_validator(
             "schedulecommit-conf.devnet.toml",
-            "DEVNET",
+            ValidatorCluster::Chain,
         ) {
             Some(validator) => validator,
             None => {
@@ -39,9 +41,9 @@ pub fn main() {
         };
 
         eprintln!("======== Starting EPHEM Validator for Scenarios + Security ========");
-        let mut ephem_validator = match start_magic_block_validator_with_config(
+        let mut ephem_validator = match start_validator(
             "schedulecommit-conf.ephem.toml",
-            "EPHEM",
+            ValidatorCluster::Ephem,
         ) {
             Some(validator) => validator,
             None => {
@@ -97,18 +99,18 @@ pub fn main() {
     // -----------------
     let issues_frequent_commits_output = {
         eprintln!("======== RUNNING ISSUES TESTS - Frequent Commits ========");
-        let mut devnet_validator = match start_magic_block_validator_with_config(
+        let mut devnet_validator = match start_validator(
             "schedulecommit-conf.devnet.toml",
-            "DEVNET",
+            ValidatorCluster::Chain,
         ) {
             Some(validator) => validator,
             None => {
                 panic!("Failed to start devnet validator properly");
             }
         };
-        let mut ephem_validator = match start_magic_block_validator_with_config(
+        let mut ephem_validator = match start_validator(
             "schedulecommit-conf.ephem.frequent-commits.toml",
-            "EPHEM",
+            ValidatorCluster::Ephem,
         ) {
             Some(validator) => validator,
             None => {
@@ -232,6 +234,35 @@ fn wait_for_validator(mut validator: Child, port: u16) -> Option<Child> {
     }
 }
 
+enum ValidatorCluster {
+    Chain,
+    Ephem,
+}
+
+impl ValidatorCluster {
+    fn log_suffix(&self) -> &'static str {
+        match self {
+            ValidatorCluster::Chain => "CHAIN",
+            ValidatorCluster::Ephem => "EPHEM",
+        }
+    }
+}
+
+fn start_validator(
+    config_file: &str,
+    cluster: ValidatorCluster,
+) -> Option<process::Child> {
+    let log_suffix = cluster.log_suffix();
+    match cluster {
+        ValidatorCluster::Chain
+            if std::env::var("FORCE_MAGIC_BLOCK_VALIDATOR").is_err() =>
+        {
+            start_test_validator_with_config(config_file, log_suffix)
+        }
+        _ => start_magic_block_validator_with_config(config_file, log_suffix),
+    }
+}
+
 fn start_magic_block_validator_with_config(
     config_file: &str,
     log_suffix: &str,
@@ -278,5 +309,17 @@ fn start_test_validator_with_config(
         root_dir,
         ..
     } = resolve_paths(config_file);
-    todo!()
+
+    let port = rpc_port_from_config(&config_path);
+    let args = config_to_args(&config_path);
+
+    let mut command = process::Command::new("solana-test-validator");
+    command
+        .args(args)
+        .env("RUST_LOG_STYLE", log_suffix)
+        .current_dir(root_dir);
+
+    eprintln!("Starting test validator with {:?}", command);
+    let validator = command.spawn().expect("Failed to start validator");
+    wait_for_validator(validator, port)
 }
