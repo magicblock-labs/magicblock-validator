@@ -1,6 +1,6 @@
 [accounts]
 remote = "devnet"
-lifecycle = "programs-replica"
+lifecycle = "offline"
 commit = { frequency_millis = 9_000_000_000_000, compute_unit_price = 1_000_000 }
 
 [validator]
@@ -9,15 +9,15 @@ sigverify = true
 
 [[program]]
 id = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
-path = "../elfs/dlp.so"
+path = "../schedulecommit/elfs/dlp.so"
 
 [[program]]
 id = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY"
-path = "../elfs/schedulecommit_program.so"
+path = "../schedulecommit/elfs/schedulecommit_program.so"
 
 [[program]]
 id = "4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr"
-path = "../elfs/schedulecommit_test_security.so"
+path = "../schedulecommit/elfs/schedulecommit_test_security.so"
 
 [rpc]
 port = 7799
