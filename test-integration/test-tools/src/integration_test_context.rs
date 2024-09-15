@@ -23,7 +23,7 @@ pub struct IntegrationTestContext {
     pub ephem_blockhash: Hash,
 }
 
-// Copy the impl of the ScheduleCommitTestContext here from test-programs/schedulecommit/client/src/schedule_commit_context.rs
+// Copy the impl of the ScheduleCommitTestContext here from test-integration/schedulecommit/client/src/schedule_commit_context.rs
 // Omit the ones that need committees or whichever else needs fields we don't have here
 impl IntegrationTestContext {
     pub fn new() -> Self {
