@@ -28,7 +28,7 @@ pub fn main() {
 
         // Start validators via `cargo run --release  -- <config>
         let mut devnet_validator = match start_validator_with_config(
-            "test-programs/schedulecommit/configs/schedulecommit-conf.devnet.toml",
+            "schedulecommit-conf.devnet.toml",
             7799,
             "DEVNET",
         ) {
@@ -40,7 +40,7 @@ pub fn main() {
 
         eprintln!("======== Starting EPHEM Validator for Scenarios + Security ========");
         let mut ephem_validator = match start_validator_with_config(
-            "test-programs/schedulecommit/configs/schedulecommit-conf.ephem.toml",
+            "schedulecommit-conf.ephem.toml",
             8899,
             "EPHEM",
         ) {
@@ -92,7 +92,7 @@ pub fn main() {
     let issues_frequent_commits_output = {
         eprintln!("======== RUNNING ISSUES TESTS - Frequent Commits ========");
         let mut devnet_validator = match start_validator_with_config(
-            "test-programs/schedulecommit/configs/schedulecommit-conf.devnet.toml",
+            "schedulecommit-conf.devnet.toml",
             7799,
             "DEVNET",
         ) {
@@ -102,7 +102,7 @@ pub fn main() {
             }
         };
         let mut ephem_validator = match start_validator_with_config(
-            "test-programs/schedulecommit/configs/schedulecommit-conf.ephem.frequent-commits.toml",
+            "schedulecommit-conf.ephem.frequent-commits.toml",
             8899,
             "EPHEM",
         ) {
@@ -182,13 +182,18 @@ fn run_test(
 }
 
 fn start_validator_with_config(
-    config_path: &str,
+    config_file: &str,
     port: u16,
     log_suffix: &str,
 ) -> Option<process::Child> {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let workspace_dir = Path::new(&manifest_dir).join("..").join("..");
-    let root_dir = Path::new(&workspace_dir).join("..");
+    let workspace_dir =
+        Path::new(&manifest_dir).join("..").canonicalize().unwrap();
+    let root_dir = Path::new(&workspace_dir).join("..").canonicalize().unwrap();
+    let config_path = Path::new(&manifest_dir)
+        .join("..")
+        .join("configs")
+        .join(config_file);
 
     // First build so that the validator can start fast
     let build_res = process::Command::new("cargo")
@@ -202,14 +207,17 @@ fn start_validator_with_config(
     }
 
     // Start validator via `cargo run -- <path to config>`
-    let mut validator = process::Command::new("cargo")
+    let mut command = process::Command::new("cargo");
+    command
         .arg("run")
         .arg("--")
         .arg(config_path)
         .env("RUST_LOG_STYLE", log_suffix)
-        .current_dir(root_dir)
-        .spawn()
-        .expect("Failed to start validator");
+        .current_dir(root_dir);
+
+    eprintln!("Starting validator with {:?}", command);
+
+    let mut validator = command.spawn().expect("Failed to start validator");
 
     // Wait until the validator is listening on 0.0.0.0:<port>
     let mut count = 0;
