@@ -13,7 +13,3 @@ solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
 schedulecommit-program = { workspace = true, features = ["no-entrypoint"] }
-
-[[bin]]
-name = "run-schedule-commit-tests"
-path = "bin/run_schedule_commit_tests.rs"

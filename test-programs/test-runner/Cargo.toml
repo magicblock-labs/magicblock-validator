@@ -1,0 +1,8 @@
+[package]
+name = "test-runner"
+version.workspace = true
+edition.workspace = true
+
+[[bin]]
+name = "run-tests"
+path = "bin/run_tests.rs"
