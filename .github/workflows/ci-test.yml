@@ -24,6 +24,13 @@ jobs:
           github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
+
+      - name: Install Solana Test Validator
+        shell: "bash"
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/1.18.22/install)"
+          solana-test-validator --version
+
       - name: Run tests (also increase system limits for solana tests)
         run: |
           sudo prlimit --pid $$ --nofile=1048576:1048576
