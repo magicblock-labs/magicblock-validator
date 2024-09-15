@@ -193,6 +193,7 @@ fn run_test(
 struct TestRunnerPaths {
     config_path: PathBuf,
     root_dir: PathBuf,
+    workspace_dir: PathBuf,
 }
 
 fn resolve_paths(config_file: &str) -> TestRunnerPaths {
@@ -214,6 +215,7 @@ fn resolve_paths(config_file: &str) -> TestRunnerPaths {
     TestRunnerPaths {
         config_path,
         root_dir,
+        workspace_dir,
     }
 }
 
@@ -307,11 +309,37 @@ fn start_test_validator_with_config(
     let TestRunnerPaths {
         config_path,
         root_dir,
-        ..
+        workspace_dir,
     } = resolve_paths(config_file);
 
     let port = rpc_port_from_config(&config_path);
-    let args = config_to_args(&config_path);
+    let mut args = config_to_args(&config_path);
+
+    let accounts_dir = workspace_dir.join("configs").join("accounts");
+    let accounts = [
+        (
+            "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev",
+            "validator-authority.json",
+        ),
+        (
+            "LUzidNSiPNjYNkxZcUm5hYHwnWPwsUfh2US1cpWwaBm",
+            "luzid-authority.json",
+        ),
+    ];
+
+    let account_args = accounts
+        .iter()
+        .flat_map(|(account, file)| {
+            let account_path = accounts_dir.join(file).canonicalize().unwrap();
+            vec![
+                "--account".to_string(),
+                account.to_string(),
+                account_path.to_str().unwrap().to_string(),
+            ]
+        })
+        .collect::<Vec<_>>();
+
+    args.extend(account_args);
 
     let mut command = process::Command::new("solana-test-validator");
     command
