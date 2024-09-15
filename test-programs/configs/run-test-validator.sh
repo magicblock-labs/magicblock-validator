@@ -1,8 +1,13 @@
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
 solana-test-validator \
+  --log \
   --rpc-port 7799 \
   -r \
+  --account mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev \
+  $DIR/accounts/validator-authority.json \
+  --account LUzidNSiPNjYNkxZcUm5hYHwnWPwsUfh2US1cpWwaBm \
+  $DIR/accounts/luzid-authority.json \
   --limit-ledger-size \
   10000 \
   --bpf-program \
