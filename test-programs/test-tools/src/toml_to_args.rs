@@ -26,14 +26,14 @@ struct Program {
     path: String,
 }
 
-/// Converts a config file to a list of arguments to pass to the solana test validator
-/// executable. This will result it in running on the RPC port specified and with the programs
-/// specified in the config file.
-pub fn config_to_args(config_path: &PathBuf) -> Vec<String> {
+fn parse_config(config_path: &PathBuf) -> Config {
     let config_toml =
         fs::read_to_string(config_path).expect("Failed to read config file");
-    let config: Config =
-        toml::from_str(&config_toml).expect("Failed to parse config file");
+    toml::from_str(&config_toml).expect("Failed to parse config file")
+}
+
+pub fn config_to_args(config_path: &PathBuf) -> Vec<String> {
+    let config = parse_config(config_path);
 
     let mut args = vec![
         "--log".to_string(),
@@ -60,12 +60,7 @@ pub fn config_to_args(config_path: &PathBuf) -> Vec<String> {
     args
 }
 
-/// Resolves the RPC port from the config file
 pub fn rpc_port_from_config(config_path: &PathBuf) -> u16 {
-    let config_file =
-        fs::read_to_string(config_path).expect("Failed to read config file");
-    let config: Config =
-        toml::from_str(&config_file).expect("Failed to parse config file");
-
+    let config = parse_config(config_path);
     config.rpc.port
 }
