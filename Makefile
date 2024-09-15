@@ -53,7 +53,7 @@ lint:
 
 ci-test:
 	cargo $(CARGO_TEST_NOCAP) && \
-	$(MAKE) -C $(DIR)/test-programs
+	$(MAKE) -C $(DIR)/test-integration
 
 ## NOTE: We're getting the following error in github CI when trying to use
 #  nightly Rust. Until that is fixed we have to use stable to verify format.
