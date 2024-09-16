@@ -173,6 +173,7 @@ pub(crate) async fn send_transaction(
             data: None,
         })?;
 
+    // TODO(thlorenz): @@@@ verify scheduled commits here
     if let Some(preflight_bank) = preflight_bank {
         meta.transaction_preflight(preflight_bank, &sanitized_transaction)?;
     }
