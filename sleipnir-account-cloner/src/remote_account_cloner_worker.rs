@@ -154,6 +154,19 @@ where
         &self,
         pubkey: &Pubkey,
     ) -> AccountClonerResult<AccountClonerOutput> {
+        // If we don't allow any cloning, no need to do anything at all
+        if !self.allow_cloning_new_accounts
+            && !self.allow_cloning_payer_accounts
+            && !self.allow_cloning_pda_accounts
+            && !self.allow_cloning_delegated_accounts
+            && !self.allow_cloning_program_accounts
+        {
+            return Ok(AccountClonerOutput::Unclonable {
+                pubkey: *pubkey,
+                reason: AccountClonerUnclonableReason::NoCloningAllowed,
+                at_slot: u64::MAX, // we should never try cloning, ever
+            });
+        }
         // Check for the latest updates onchain for that account
         let last_known_update_slot = self
             .account_updates
@@ -226,19 +239,6 @@ where
         &self,
         pubkey: &Pubkey,
     ) -> AccountClonerResult<AccountClonerOutput> {
-        // If we don't any cloning, no need to do anything, shortcut for offline fail
-        if !self.allow_cloning_new_accounts
-            && !self.allow_cloning_payer_accounts
-            && !self.allow_cloning_pda_accounts
-            && !self.allow_cloning_delegated_accounts
-            && !self.allow_cloning_program_accounts
-        {
-            return Ok(AccountClonerOutput::Unclonable {
-                pubkey: *pubkey,
-                reason: AccountClonerUnclonableReason::NoCloningAllowed,
-                at_slot: u64::MAX, // we should never try cloning again
-            });
-        }
         // If the account is blacklisted against cloning, no need to do anything anytime
         if self.blacklisted_accounts.contains(pubkey) {
             return Ok(AccountClonerOutput::Unclonable {

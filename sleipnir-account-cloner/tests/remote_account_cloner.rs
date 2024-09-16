@@ -707,7 +707,7 @@ async fn test_clone_allow_pda_account_when_replica() {
         None,
     );
     // A simple pda account
-    let pda_account = Pubkey::new_unique();
+    let pda_account = generate_pda_pubkey();
     account_fetcher.set_pda_account(pda_account, 42);
     // Run test
     let result = cloner.clone_account(&pda_account).await;
