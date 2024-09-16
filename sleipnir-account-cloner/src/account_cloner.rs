@@ -48,13 +48,14 @@ pub type AccountClonerListeners =
 #[derive(Debug, Clone)]
 pub enum AccountClonerUnclonableReason {
     AlreadyLocallyOverriden,
+    NoCloningAllowed,
     IsBlacklisted,
     IsNotAllowedProgram,
     DisallowNewAccount,
-    DisallowProgramAccount,
     DisallowPayerAccount,
     DisallowPdaAccount,
     DisallowDelegatedAccount,
+    DisallowProgramAccount,
 }
 
 #[derive(Debug, Clone)]

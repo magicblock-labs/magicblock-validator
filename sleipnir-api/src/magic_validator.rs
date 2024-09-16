@@ -237,6 +237,7 @@ impl MagicValidator {
             accounts_config.allowed_program_ids,
             blacklisted_accounts,
             accounts_config.payer_init_lamports,
+            accounts_config.lifecycle.allow_cloning_refresh(),
             accounts_config.lifecycle.allow_cloning_new_accounts(),
             accounts_config.lifecycle.allow_cloning_payer_accounts(),
             accounts_config.lifecycle.allow_cloning_pda_accounts(),

@@ -53,6 +53,7 @@ fn setup_with_lifecycle(
         None,
         HashSet::new(),
         Some(1_000_000_000),
+        lifecycle.allow_cloning_refresh(),
         lifecycle.allow_cloning_new_accounts(),
         lifecycle.allow_cloning_payer_accounts(),
         lifecycle.allow_cloning_pda_accounts(),

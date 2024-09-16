@@ -21,6 +21,14 @@ pub enum LifecycleMode {
 }
 
 impl LifecycleMode {
+    pub fn allow_cloning_refresh(&self) -> bool {
+        match self {
+            LifecycleMode::Replica => false,
+            LifecycleMode::ProgramsReplica => false,
+            LifecycleMode::Ephemeral => true,
+            LifecycleMode::Offline => false,
+        }
+    }
     pub fn allow_cloning_new_accounts(&self) -> bool {
         match self {
             LifecycleMode::Replica => true,
