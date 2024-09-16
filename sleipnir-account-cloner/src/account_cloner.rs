@@ -87,12 +87,16 @@ pub fn standard_blacklisted_accounts(validator_id: &Pubkey) -> HashSet<Pubkey> {
     blacklisted_accounts.insert(solana_sdk::bpf_loader_deprecated::ID);
     blacklisted_accounts.insert(solana_sdk::bpf_loader_upgradeable::ID);
     blacklisted_accounts.insert(solana_sdk::loader_v4::ID);
+    blacklisted_accounts.insert(solana_sdk::incinerator::ID);
     blacklisted_accounts.insert(solana_sdk::secp256k1_program::ID);
     blacklisted_accounts.insert(solana_sdk::ed25519_program::ID);
     blacklisted_accounts.insert(solana_sdk::address_lookup_table::program::ID);
     blacklisted_accounts.insert(solana_sdk::config::program::ID);
     blacklisted_accounts.insert(solana_sdk::stake::program::ID);
+    blacklisted_accounts.insert(solana_sdk::stake::config::ID);
     blacklisted_accounts.insert(solana_sdk::vote::program::ID);
+    blacklisted_accounts.insert(solana_sdk::feature::ID);
+    blacklisted_accounts.insert(solana_sdk::sysvar::ID);
     blacklisted_accounts.insert(solana_sdk::sysvar::clock::ID);
     blacklisted_accounts.insert(solana_sdk::sysvar::epoch_rewards::ID);
     blacklisted_accounts.insert(solana_sdk::sysvar::epoch_schedule::ID);
@@ -105,6 +109,7 @@ pub fn standard_blacklisted_accounts(validator_id: &Pubkey) -> HashSet<Pubkey> {
     blacklisted_accounts.insert(solana_sdk::sysvar::slot_hashes::ID);
     blacklisted_accounts.insert(solana_sdk::sysvar::slot_history::ID);
     blacklisted_accounts.insert(solana_sdk::sysvar::stake_history::ID);
+    blacklisted_accounts.insert(solana_sdk::sysvar::instructions::ID);
     blacklisted_accounts.insert(*validator_id);
     blacklisted_accounts
 }
