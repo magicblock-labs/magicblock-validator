@@ -2,8 +2,8 @@ use std::collections::HashSet;
 
 use sleipnir_account_cloner::{
     standard_blacklisted_accounts, AccountCloner, AccountClonerOutput,
-    AccountClonerUnclonableReason, RemoteAccountClonerClient,
-    RemoteAccountClonerWorker,
+    AccountClonerPermissions, AccountClonerUnclonableReason,
+    RemoteAccountClonerClient, RemoteAccountClonerWorker,
 };
 use sleipnir_account_dumper::AccountDumperStub;
 use sleipnir_account_fetcher::AccountFetcherStub;
@@ -24,12 +24,7 @@ fn setup_custom(
     account_dumper: AccountDumperStub,
     allowed_program_ids: Option<HashSet<Pubkey>>,
     blacklisted_accounts: HashSet<Pubkey>,
-    allow_cloning_refresh: bool,
-    allow_cloning_new_accounts: bool,
-    allow_cloning_payer_accounts: bool,
-    allow_cloning_pda_accounts: bool,
-    allow_cloning_delegated_accounts: bool,
-    allow_cloning_program_accounts: bool,
+    permissions: AccountClonerPermissions,
 ) -> (
     RemoteAccountClonerClient,
     CancellationToken,
@@ -46,12 +41,7 @@ fn setup_custom(
         allowed_program_ids,
         blacklisted_accounts,
         payer_init_lamports,
-        allow_cloning_refresh,
-        allow_cloning_new_accounts,
-        allow_cloning_payer_accounts,
-        allow_cloning_pda_accounts,
-        allow_cloning_delegated_accounts,
-        allow_cloning_program_accounts,
+        permissions,
     );
     let cloner_client = RemoteAccountClonerClient::new(&cloner_worker);
     // Run the worker in a separate task
@@ -86,12 +76,14 @@ fn setup_replica(
         account_dumper,
         allowed_program_ids,
         standard_blacklisted_accounts(&Pubkey::new_unique()),
-        false,
-        true,
-        true,
-        true,
-        true,
-        true,
+        AccountClonerPermissions {
+            allow_cloning_refresh: false,
+            allow_cloning_new_accounts: true,
+            allow_cloning_payer_accounts: true,
+            allow_cloning_pda_accounts: true,
+            allow_cloning_delegated_accounts: true,
+            allow_cloning_program_accounts: true,
+        },
     )
 }
 
@@ -113,12 +105,14 @@ fn setup_programs_replica(
         account_dumper,
         allowed_program_ids,
         standard_blacklisted_accounts(&Pubkey::new_unique()),
-        false,
-        false,
-        false,
-        false,
-        false,
-        true,
+        AccountClonerPermissions {
+            allow_cloning_refresh: false,
+            allow_cloning_new_accounts: false,
+            allow_cloning_payer_accounts: false,
+            allow_cloning_pda_accounts: false,
+            allow_cloning_delegated_accounts: false,
+            allow_cloning_program_accounts: true,
+        },
     )
 }
 
@@ -140,12 +134,14 @@ fn setup_ephemeral(
         account_dumper,
         allowed_program_ids,
         standard_blacklisted_accounts(&Pubkey::new_unique()),
-        true,
-        true,
-        true,
-        true,
-        true,
-        true,
+        AccountClonerPermissions {
+            allow_cloning_refresh: true,
+            allow_cloning_new_accounts: true,
+            allow_cloning_payer_accounts: true,
+            allow_cloning_pda_accounts: true,
+            allow_cloning_delegated_accounts: true,
+            allow_cloning_program_accounts: true,
+        },
     )
 }
 
@@ -167,12 +163,14 @@ fn setup_offline(
         account_dumper,
         allowed_program_ids,
         standard_blacklisted_accounts(&Pubkey::new_unique()),
-        false,
-        false,
-        false,
-        false,
-        false,
-        false,
+        AccountClonerPermissions {
+            allow_cloning_refresh: false,
+            allow_cloning_new_accounts: false,
+            allow_cloning_payer_accounts: false,
+            allow_cloning_pda_accounts: false,
+            allow_cloning_delegated_accounts: false,
+            allow_cloning_program_accounts: false,
+        },
     )
 }
 

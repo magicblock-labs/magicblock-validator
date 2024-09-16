@@ -23,7 +23,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     AccountClonerError, AccountClonerListeners, AccountClonerOutput,
-    AccountClonerResult, AccountClonerUnclonableReason,
+    AccountClonerPermissions, AccountClonerResult,
+    AccountClonerUnclonableReason,
 };
 
 pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU> {
@@ -34,12 +35,7 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU> {
     allowed_program_ids: Option<HashSet<Pubkey>>,
     blacklisted_accounts: HashSet<Pubkey>,
     payer_init_lamports: Option<u64>,
-    allow_cloning_refresh: bool,
-    allow_cloning_new_accounts: bool,
-    allow_cloning_payer_accounts: bool,
-    allow_cloning_pda_accounts: bool,
-    allow_cloning_delegated_accounts: bool,
-    allow_cloning_program_accounts: bool,
+    permissions: AccountClonerPermissions,
     clone_request_receiver: UnboundedReceiver<Pubkey>,
     clone_request_sender: UnboundedSender<Pubkey>,
     clone_listeners: Arc<RwLock<HashMap<Pubkey, AccountClonerListeners>>>,
@@ -62,12 +58,7 @@ where
         allowed_program_ids: Option<HashSet<Pubkey>>,
         blacklisted_accounts: HashSet<Pubkey>,
         payer_init_lamports: Option<u64>,
-        allow_cloning_refresh: bool,
-        allow_cloning_new_accounts: bool,
-        allow_cloning_payer_accounts: bool,
-        allow_cloning_pda_accounts: bool,
-        allow_cloning_delegated_accounts: bool,
-        allow_cloning_program_accounts: bool,
+        permissions: AccountClonerPermissions,
     ) -> Self {
         let (clone_request_sender, clone_request_receiver) =
             unbounded_channel();
@@ -79,12 +70,7 @@ where
             allowed_program_ids,
             blacklisted_accounts,
             payer_init_lamports,
-            allow_cloning_refresh,
-            allow_cloning_new_accounts,
-            allow_cloning_payer_accounts,
-            allow_cloning_pda_accounts,
-            allow_cloning_delegated_accounts,
-            allow_cloning_program_accounts,
+            permissions,
             clone_request_receiver,
             clone_request_sender,
             clone_listeners: Default::default(),
@@ -155,11 +141,11 @@ where
         pubkey: &Pubkey,
     ) -> AccountClonerResult<AccountClonerOutput> {
         // If we don't allow any cloning, no need to do anything at all
-        if !self.allow_cloning_new_accounts
-            && !self.allow_cloning_payer_accounts
-            && !self.allow_cloning_pda_accounts
-            && !self.allow_cloning_delegated_accounts
-            && !self.allow_cloning_program_accounts
+        if !self.permissions.allow_cloning_new_accounts
+            && !self.permissions.allow_cloning_payer_accounts
+            && !self.permissions.allow_cloning_pda_accounts
+            && !self.permissions.allow_cloning_delegated_accounts
+            && !self.permissions.allow_cloning_program_accounts
         {
             return Ok(AccountClonerOutput::Unclonable {
                 pubkey: *pubkey,
@@ -249,7 +235,7 @@ where
         }
         // Mark the account for monitoring, we want to start to detect futures updates on it
         // since we're cloning it now, it's now part of the validator monitored accounts
-        if self.allow_cloning_refresh {
+        if self.permissions.allow_cloning_refresh {
             // TODO(vbrunet)
             //  - https://github.com/magicblock-labs/magicblock-validator/issues/95
             //  - handle the case of the lamports updates better
@@ -266,7 +252,7 @@ where
             // If the account is not present on-chain
             // we may want to clear the local state
             AccountChainState::NewAccount => {
-                if !self.allow_cloning_new_accounts {
+                if !self.permissions.allow_cloning_new_accounts {
                     return Ok(AccountClonerOutput::Unclonable {
                         pubkey: *pubkey,
                         reason:
@@ -291,7 +277,7 @@ where
                             });
                         }
                     }
-                    if !self.allow_cloning_program_accounts {
+                    if !self.permissions.allow_cloning_program_accounts {
                         return Ok(AccountClonerOutput::Unclonable {
                             pubkey: *pubkey,
                             reason: AccountClonerUnclonableReason::DisallowProgramAccount,
@@ -304,7 +290,7 @@ where
                 else {
                     // If it's a payer account, we have a special lamport override to do
                     if pubkey.is_on_curve() {
-                        if !self.allow_cloning_payer_accounts {
+                        if !self.permissions.allow_cloning_payer_accounts {
                             return Ok(AccountClonerOutput::Unclonable {
                                 pubkey: *pubkey,
                                 reason: AccountClonerUnclonableReason::DisallowPayerAccount,
@@ -315,7 +301,7 @@ where
                     }
                     // Otherwise we just clone the account normally without any change
                     else {
-                        if !self.allow_cloning_pda_accounts {
+                        if !self.permissions.allow_cloning_pda_accounts {
                             return Ok(AccountClonerOutput::Unclonable {
                                 pubkey: *pubkey,
                                 reason: AccountClonerUnclonableReason::DisallowPdaAccount,
@@ -333,7 +319,7 @@ where
                 delegation_record,
                 ..
             } => {
-                if !self.allow_cloning_delegated_accounts {
+                if !self.permissions.allow_cloning_delegated_accounts {
                     return Ok(AccountClonerOutput::Unclonable {
                         pubkey: *pubkey,
                         reason:
@@ -351,7 +337,7 @@ where
             // If the account is delegated but inconsistant on-chain,
             // we clone it as non-delegated account to keep things simple for now
             AccountChainState::Inconsistent { account, .. } => {
-                if !self.allow_cloning_pda_accounts {
+                if !self.permissions.allow_cloning_pda_accounts {
                     return Ok(AccountClonerOutput::Unclonable {
                         pubkey: *pubkey,
                         reason:

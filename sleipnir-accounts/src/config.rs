@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use sleipnir_account_cloner::AccountClonerPermissions;
 use sleipnir_mutator::Cluster;
 use solana_sdk::pubkey::Pubkey;
 
@@ -21,54 +22,43 @@ pub enum LifecycleMode {
 }
 
 impl LifecycleMode {
-    pub fn allow_cloning_refresh(&self) -> bool {
+    pub fn to_account_cloner_permissions(&self) -> AccountClonerPermissions {
         match self {
-            LifecycleMode::Replica => false,
-            LifecycleMode::ProgramsReplica => false,
-            LifecycleMode::Ephemeral => true,
-            LifecycleMode::Offline => false,
+            LifecycleMode::Replica => AccountClonerPermissions {
+                allow_cloning_refresh: false,
+                allow_cloning_new_accounts: true,
+                allow_cloning_payer_accounts: true,
+                allow_cloning_pda_accounts: true,
+                allow_cloning_delegated_accounts: true,
+                allow_cloning_program_accounts: true,
+            },
+            LifecycleMode::ProgramsReplica => AccountClonerPermissions {
+                allow_cloning_refresh: false,
+                allow_cloning_new_accounts: false,
+                allow_cloning_payer_accounts: false,
+                allow_cloning_pda_accounts: false,
+                allow_cloning_delegated_accounts: false,
+                allow_cloning_program_accounts: true,
+            },
+            LifecycleMode::Ephemeral => AccountClonerPermissions {
+                allow_cloning_refresh: true,
+                allow_cloning_new_accounts: true,
+                allow_cloning_payer_accounts: true,
+                allow_cloning_pda_accounts: true,
+                allow_cloning_delegated_accounts: true,
+                allow_cloning_program_accounts: true,
+            },
+            LifecycleMode::Offline => AccountClonerPermissions {
+                allow_cloning_refresh: false,
+                allow_cloning_new_accounts: false,
+                allow_cloning_payer_accounts: false,
+                allow_cloning_pda_accounts: false,
+                allow_cloning_delegated_accounts: false,
+                allow_cloning_program_accounts: false,
+            },
         }
     }
-    pub fn allow_cloning_new_accounts(&self) -> bool {
-        match self {
-            LifecycleMode::Replica => true,
-            LifecycleMode::ProgramsReplica => false,
-            LifecycleMode::Ephemeral => true,
-            LifecycleMode::Offline => false,
-        }
-    }
-    pub fn allow_cloning_payer_accounts(&self) -> bool {
-        match self {
-            LifecycleMode::Replica => true,
-            LifecycleMode::ProgramsReplica => false,
-            LifecycleMode::Ephemeral => true,
-            LifecycleMode::Offline => false,
-        }
-    }
-    pub fn allow_cloning_pda_accounts(&self) -> bool {
-        match self {
-            LifecycleMode::Replica => true,
-            LifecycleMode::ProgramsReplica => false,
-            LifecycleMode::Ephemeral => true,
-            LifecycleMode::Offline => false,
-        }
-    }
-    pub fn allow_cloning_delegated_accounts(&self) -> bool {
-        match self {
-            LifecycleMode::Replica => true,
-            LifecycleMode::ProgramsReplica => false,
-            LifecycleMode::Ephemeral => true,
-            LifecycleMode::Offline => false,
-        }
-    }
-    pub fn allow_cloning_program_accounts(&self) -> bool {
-        match self {
-            LifecycleMode::Replica => true,
-            LifecycleMode::ProgramsReplica => true,
-            LifecycleMode::Ephemeral => true,
-            LifecycleMode::Offline => false,
-        }
-    }
+
     pub fn requires_ephemeral_validation(&self) -> bool {
         match self {
             LifecycleMode::Replica => false,

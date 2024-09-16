@@ -59,6 +59,16 @@ pub enum AccountClonerUnclonableReason {
 }
 
 #[derive(Debug, Clone)]
+pub struct AccountClonerPermissions {
+    pub allow_cloning_refresh: bool,
+    pub allow_cloning_new_accounts: bool,
+    pub allow_cloning_payer_accounts: bool,
+    pub allow_cloning_pda_accounts: bool,
+    pub allow_cloning_delegated_accounts: bool,
+    pub allow_cloning_program_accounts: bool,
+}
+
+#[derive(Debug, Clone)]
 pub enum AccountClonerOutput {
     Cloned {
         account_chain_snapshot: AccountChainSnapshotShared,
