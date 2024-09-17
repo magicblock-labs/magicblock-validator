@@ -72,20 +72,19 @@ impl RemoteAccountUpdatesWorker {
     ) {
         // Maintain a runner for each config passed as parameter
         let mut runners = vec![];
+        let mut monitored_accounts = HashSet::new();
         // Initialize all the runners for all configs
         for (index, rpc_provider_config) in
             self.rpc_provider_configs.iter().enumerate()
         {
-            runners.push(
-                self.start_runner_from_config(
-                    index,
-                    rpc_provider_config.clone(),
-                ),
-            );
+            runners.push(self.start_runner_from_config(
+                index,
+                rpc_provider_config.clone(),
+                &monitored_accounts,
+            ));
         }
         // Useful states
         let mut current_refresh_index = 0;
-        let mut monitored_accounts = HashSet::new();
         let mut refresh_interval = interval(Duration::from_millis(60_000));
         refresh_interval.reset();
         // Loop forever until we stop the worker
@@ -104,7 +103,15 @@ impl RemoteAccountUpdatesWorker {
                 // Periodically we refresh runners to keep them fresh
                 _ = refresh_interval.tick() => {
                     current_refresh_index = (current_refresh_index + 1) % self.rpc_provider_configs.len();
-                    let new_runner = self.start_runner_for_index(current_refresh_index, &monitored_accounts);
+                    let rpc_provider_config = self.rpc_provider_configs
+                        .get(current_refresh_index)
+                        .unwrap()
+                        .clone();
+                    let new_runner = self.start_runner_from_config(
+                        current_refresh_index,
+                        rpc_provider_config,
+                        &monitored_accounts
+                    );
                     let old_runner = std::mem::replace(&mut runners[current_refresh_index], new_runner);
                     self.cancel_and_join_runner(old_runner).await;
                 }
@@ -121,39 +128,11 @@ impl RemoteAccountUpdatesWorker {
         }
     }
 
-    fn start_runner_for_index(
-        &self,
-        current_refresh_index: usize,
-        monitored_accounts: &HashSet<Pubkey>,
-    ) -> RemoteAccountUpdatesWorkerRunner {
-        let index = current_refresh_index % self.rpc_provider_configs.len();
-        let rpc_provider_config =
-            self.rpc_provider_configs.get(index).unwrap().clone();
-        let new_runner =
-            self.start_runner_from_config(index, rpc_provider_config);
-        for pubkey in monitored_accounts.iter() {
-            self.notify_runner_of_monitoring_request(&new_runner, *pubkey);
-        }
-        new_runner
-    }
-
-    fn notify_runner_of_monitoring_request(
-        &self,
-        runner: &RemoteAccountUpdatesWorkerRunner,
-        pubkey: Pubkey,
-    ) {
-        if let Err(error) = runner.monitoring_request_sender.send(pubkey) {
-            error!(
-                "Could not send request to runner: {}: {:?}",
-                runner.id, error
-            );
-        }
-    }
-
     fn start_runner_from_config(
         &self,
         index: usize,
         rpc_provider_config: RpcProviderConfig,
+        monitored_accounts: &HashSet<Pubkey>,
     ) -> RemoteAccountUpdatesWorkerRunner {
         let (monitoring_request_sender, monitoring_request_receiver) =
             unbounded_channel();
@@ -185,7 +164,23 @@ impl RemoteAccountUpdatesWorker {
             join_handle,
         };
         info!("Started new runner {}", runner.id);
+        for pubkey in monitored_accounts.iter() {
+            self.notify_runner_of_monitoring_request(&runner, *pubkey);
+        }
         runner
+    }
+
+    fn notify_runner_of_monitoring_request(
+        &self,
+        runner: &RemoteAccountUpdatesWorkerRunner,
+        pubkey: Pubkey,
+    ) {
+        if let Err(error) = runner.monitoring_request_sender.send(pubkey) {
+            error!(
+                "Could not send request to runner: {}: {:?}",
+                runner.id, error
+            );
+        }
     }
 
     async fn cancel_and_join_runner(
