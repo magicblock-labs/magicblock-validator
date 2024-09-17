@@ -6,12 +6,13 @@ use std::{
 
 use conjunto_transwise::RpcProviderConfig;
 use log::*;
+use rand::distributions::{Alphanumeric, DistString};
 use solana_sdk::{clock::Slot, pubkey::Pubkey};
 use thiserror::Error;
 use tokio::{
     sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     task::JoinHandle,
-    time::{interval, sleep},
+    time::interval,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -86,6 +87,7 @@ impl RemoteAccountUpdatesWorker {
         let mut current_refresh_index = 0;
         let mut monitored_accounts = HashSet::new();
         let mut refresh_interval = interval(Duration::from_millis(60_000));
+        refresh_interval.reset();
         // Loop forever until we stop the worker
         loop {
             tokio::select! {
@@ -113,7 +115,7 @@ impl RemoteAccountUpdatesWorker {
             }
         }
         // Cancel all runners one by one when we are done
-        while runners.len() > 0 {
+        while !runners.is_empty() {
             let runner = runners.swap_remove(0);
             self.cancel_and_join_runner(runner).await;
         }
@@ -156,7 +158,9 @@ impl RemoteAccountUpdatesWorker {
         let (monitoring_request_sender, monitoring_request_receiver) =
             unbounded_channel();
         let last_known_update_slots = self.last_known_update_slots.clone();
-        let id = format!("[{}] {}", index, rpc_provider_config.ws_url());
+        let random_name =
+            Alphanumeric.sample_string(&mut rand::thread_rng(), 6);
+        let id = format!("[{}:{}]", index, random_name);
         let cancellation_token = CancellationToken::new();
         let shard_id = id.clone();
         let shard_cancellation_token = cancellation_token.clone();

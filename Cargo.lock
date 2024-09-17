@@ -4305,6 +4305,7 @@ dependencies = [
  "conjunto-transwise",
  "futures-util",
  "log",
+ "rand 0.8.5",
  "solana-account-decoder",
  "solana-pubsub-client",
  "solana-rpc-client-api",

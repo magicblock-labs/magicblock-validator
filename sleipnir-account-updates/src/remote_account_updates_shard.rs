@@ -71,12 +71,7 @@ impl RemoteAccountUpdatesShard {
             }),
             min_context_slot: None,
         };
-        info!(
-            "Shard {}: Starting with configuration: {:?}, {:?}",
-            self.shard_id,
-            self.rpc_provider_config.ws_url(),
-            rpc_account_info_config
-        );
+        info!("Shard {}: Starting", self.shard_id);
         // We'll store useful maps for each of the subscriptions
         let mut streams = StreamMap::new();
         let mut unsubscribes = HashMap::new();
@@ -121,6 +116,7 @@ impl RemoteAccountUpdatesShard {
         }
         drop(streams);
         pubsub_client.shutdown().await?;
+        info!("Shard {}: Stopped", self.shard_id);
         // Done
         Ok(())
     }
