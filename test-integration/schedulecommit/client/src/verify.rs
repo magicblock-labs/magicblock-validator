@@ -33,15 +33,18 @@ pub fn fetch_commit_result_from_logs(
         .extract_scheduled_commit_sent_signature(&logs)
         .unwrap_or_else(|| {
             panic!(
-                "ScheduledCommitSent signature not found in logs, {:#?}",
-                logs
+                "ScheduledCommitSent signature not found in logs, {:#?}\n{}",
+                logs, ctx
             )
         });
     // 2. Find chain commit signature via
     let logs = ctx
         .fetch_ephemeral_logs(scheduled_commmit_send_sig)
         .unwrap_or_else(|| {
-            panic!("Logs not found for sig {:?}", scheduled_commmit_send_sig)
+            panic!(
+                "Logs not found for sig {:?}\n{}",
+                scheduled_commmit_send_sig, ctx
+            )
         });
 
     let (included, excluded, sigs) = ctx.extract_sent_commit_info(&logs);
@@ -50,14 +53,14 @@ pub fn fetch_commit_result_from_logs(
     for sig in &sigs {
         let confirmed = ctx.confirm_transaction_chain(sig).unwrap_or_else(|e| {
             panic!(
-                "Transaction with sig {:?} confirmation on chain failed, error: {:?}",
-                sig, e
+                "Transaction with sig {:?} confirmation on chain failed, error: {:?}\n{}",
+                sig, e, ctx
             )
         });
         if !confirmed {
             panic!(
-                "Transaction {:?} not confirmed on chain within timeout",
-                sig
+                "Transaction {:?} not confirmed on chain within timeout\n{}",
+                sig, ctx
             );
         }
     }

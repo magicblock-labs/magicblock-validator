@@ -1,4 +1,4 @@
-use std::{ops::Deref, str::FromStr};
+use std::{fmt, ops::Deref, str::FromStr};
 
 use anyhow::{Context, Result};
 use integration_test_tools::IntegrationTestContext;
@@ -33,6 +33,17 @@ impl Default for ScheduleCommitTestContext {
         Self::new(1)
     }
 }
+
+impl fmt::Display for ScheduleCommitTestContext {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(f, "ScheduleCommitTestContext {{ committees: [")?;
+        for (payer, pda) in &self.committees {
+            writeln!(f, "Payer: {} PDA: {}, ", payer.pubkey(), pda)?;
+        }
+        writeln!(f, "] }}")
+    }
+}
+
 pub struct ScheduleCommitTestContextFields<'a> {
     pub payer: &'a Keypair,
     pub committees: &'a Vec<(Keypair, Pubkey)>,

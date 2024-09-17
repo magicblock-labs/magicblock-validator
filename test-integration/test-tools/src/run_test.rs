@@ -46,7 +46,7 @@ macro_rules! function_name {
 macro_rules! run_test {
     ($test_body:block) => {
         use $crate::rayon_prelude::*;
-        let TOTAL_COMPLETED: ::std::sync::atomic::AtomicUsize =
+        let total_completed: ::std::sync::atomic::AtomicUsize =
             ::std::sync::atomic::AtomicUsize::new(0);
 
         init_logger!();
@@ -71,7 +71,7 @@ macro_rules! run_test {
                     format!("{:04}", i),
                     format!(
                         "{:04}",
-                        TOTAL_COMPLETED.fetch_add(
+                        total_completed.fetch_add(
                             1,
                             ::std::sync::atomic::Ordering::Relaxed
                         ) + 1

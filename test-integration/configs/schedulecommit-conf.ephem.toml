@@ -1,18 +1,15 @@
-[meta]
-name = "Ephem:8899"
-
-[node.accounts]
+[accounts]
 remote = "http://0.0.0.0:7799"
 lifecycle = "ephemeral"
 commit = { frequency_millis = 500_000, compute_unit_price = 1_000_000 }
 
-[node.rpc]
+[rpc]
 port = 8899
 
-[[node.program]]
+[[program]]
 id = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY"
-path = "../elfs/schedulecommit_program.so"
+path = "../schedulecommit/elfs/schedulecommit_program.so"
 
-[[node.program]]
+[[program]]
 id = "4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr"
-path = "../elfs/schedulecommit_test_security.so"
+path = "../schedulecommit/elfs/schedulecommit_test_security.so"
