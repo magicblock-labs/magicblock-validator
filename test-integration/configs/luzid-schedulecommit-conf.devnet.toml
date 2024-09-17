@@ -1,26 +1,33 @@
-[accounts]
+[meta]
+name = "Devnet:7799"
+
+[node.accounts]
 remote = "devnet"
 lifecycle = "offline"
 commit = { frequency_millis = 9_000_000_000_000, compute_unit_price = 1_000_000 }
 
-[validator]
+[node.validator]
 millis_per_slot = 50
 sigverify = true
 
-[[program]]
+[[node.program]]
 id = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
-path = "../elfs/dlp.so"
+path = "../schedulecommit/elfs/dlp.so"
 
-[[program]]
+[[node.program]]
 id = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY"
-path = "../elfs/schedulecommit_program.so"
+path = "../schedulecommit/elfs/schedulecommit_program.so"
 
-[[program]]
+[[node.program]]
 id = "4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr"
-path = "../elfs/schedulecommit_test_security.so"
+path = "../schedulecommit/elfs/schedulecommit_test_security.so"
 
-[rpc]
+
+[node.rpc]
 port = 7799
 
-[geyser_grpc]
+[node.geyser_grpc]
 port = 10001
+
+[grpc]
+port = 60062

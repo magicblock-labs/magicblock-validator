@@ -240,11 +240,7 @@ impl MagicValidator {
             accounts_config.allowed_program_ids,
             blacklisted_accounts,
             accounts_config.payer_init_lamports,
-            accounts_config.lifecycle.allow_cloning_new_accounts(),
-            accounts_config.lifecycle.allow_cloning_payer_accounts(),
-            accounts_config.lifecycle.allow_cloning_pda_accounts(),
-            accounts_config.lifecycle.allow_cloning_delegated_accounts(),
-            accounts_config.lifecycle.allow_cloning_program_accounts(),
+            accounts_config.lifecycle.to_account_cloner_permissions(),
         );
 
         let accounts_manager = Self::init_accounts_manager(

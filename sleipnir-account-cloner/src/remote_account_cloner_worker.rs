@@ -5,6 +5,7 @@ use std::{
 };
 
 use conjunto_transwise::{AccountChainSnapshotShared, AccountChainState};
+use dlp::consts::DELEGATION_PROGRAM_ID;
 use futures_util::future::join_all;
 use log::*;
 use sleipnir_account_dumper::AccountDumper;
@@ -13,8 +14,11 @@ use sleipnir_account_updates::AccountUpdates;
 use sleipnir_accounts_api::InternalAccountProvider;
 use sleipnir_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
 use solana_sdk::{
-    account::Account, bpf_loader_upgradeable::get_program_data_address,
-    clock::Slot, pubkey::Pubkey, signature::Signature,
+    account::{Account, ReadableAccount},
+    bpf_loader_upgradeable::get_program_data_address,
+    clock::Slot,
+    pubkey::Pubkey,
+    signature::Signature,
 };
 use tokio::sync::mpsc::{
     unbounded_channel, UnboundedReceiver, UnboundedSender,
@@ -23,7 +27,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     AccountClonerError, AccountClonerListeners, AccountClonerOutput,
-    AccountClonerResult, AccountClonerUnclonableReason,
+    AccountClonerPermissions, AccountClonerResult,
+    AccountClonerUnclonableReason,
 };
 
 pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU> {
@@ -34,11 +39,7 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU> {
     allowed_program_ids: Option<HashSet<Pubkey>>,
     blacklisted_accounts: HashSet<Pubkey>,
     payer_init_lamports: Option<u64>,
-    allow_cloning_new_accounts: bool,
-    allow_cloning_payer_accounts: bool,
-    allow_cloning_pda_accounts: bool,
-    allow_cloning_delegated_accounts: bool,
-    allow_cloning_program_accounts: bool,
+    permissions: AccountClonerPermissions,
     clone_request_receiver: UnboundedReceiver<Pubkey>,
     clone_request_sender: UnboundedSender<Pubkey>,
     clone_listeners: Arc<RwLock<HashMap<Pubkey, AccountClonerListeners>>>,
@@ -61,11 +62,7 @@ where
         allowed_program_ids: Option<HashSet<Pubkey>>,
         blacklisted_accounts: HashSet<Pubkey>,
         payer_init_lamports: Option<u64>,
-        allow_cloning_new_accounts: bool,
-        allow_cloning_payer_accounts: bool,
-        allow_cloning_pda_accounts: bool,
-        allow_cloning_delegated_accounts: bool,
-        allow_cloning_program_accounts: bool,
+        permissions: AccountClonerPermissions,
     ) -> Self {
         let (clone_request_sender, clone_request_receiver) =
             unbounded_channel();
@@ -77,11 +74,7 @@ where
             allowed_program_ids,
             blacklisted_accounts,
             payer_init_lamports,
-            allow_cloning_new_accounts,
-            allow_cloning_payer_accounts,
-            allow_cloning_pda_accounts,
-            allow_cloning_delegated_accounts,
-            allow_cloning_program_accounts,
+            permissions,
             clone_request_receiver,
             clone_request_sender,
             clone_listeners: Default::default(),
@@ -151,6 +144,19 @@ where
         &self,
         pubkey: &Pubkey,
     ) -> AccountClonerResult<AccountClonerOutput> {
+        // If we don't allow any cloning, no need to do anything at all
+        if !self.permissions.allow_cloning_new_accounts
+            && !self.permissions.allow_cloning_payer_accounts
+            && !self.permissions.allow_cloning_pda_accounts
+            && !self.permissions.allow_cloning_delegated_accounts
+            && !self.permissions.allow_cloning_program_accounts
+        {
+            return Ok(AccountClonerOutput::Unclonable {
+                pubkey: *pubkey,
+                reason: AccountClonerUnclonableReason::NoCloningAllowed,
+                at_slot: u64::MAX, // we should never try cloning, ever
+            });
+        }
         // Check for the latest updates onchain for that account
         let last_known_update_slot = self
             .account_updates
@@ -162,13 +168,30 @@ where
             Some(last_clone_output) => match &last_clone_output {
                 // If the previous clone suceeded, we may be able to re-use it, need to check further
                 AccountClonerOutput::Cloned {
-                    account_chain_snapshot,
+                    account_chain_snapshot: snapshot,
                     ..
                 } => {
                     // If the clone output is recent enough, that directly
-                    if account_chain_snapshot.at_slot >= last_known_update_slot
-                    {
-                        Ok(last_clone_output)
+                    if snapshot.at_slot >= last_known_update_slot {
+                        // Special case temporarily to unblock zeebit:
+                        // If the account is in a bork state after we somehow missed the undelegation/redelegation update
+                        // We can force a bypass of the cache to get that account out of the bork state exceptionally
+                        // Long-term fix tracked here: https://github.com/magicblock-labs/magicblock-validator/issues/186
+                        if snapshot.chain_state.is_delegated()
+                            && self
+                                .internal_account_provider
+                                .get_account(pubkey)
+                                .map(|account| {
+                                    *account.owner() == DELEGATION_PROGRAM_ID
+                                })
+                                .unwrap_or(false)
+                        {
+                            self.do_clone_and_update_cache(pubkey).await
+                        }
+                        // Otherwise no problem, we can use the cache
+                        else {
+                            Ok(last_clone_output)
+                        }
                     }
                     // If the cloned account has been updated since clone, update the cache
                     else {
@@ -232,14 +255,17 @@ where
                 at_slot: u64::MAX, // we should never try cloning again
             });
         }
-        // Mark the account for monitoring, we want to start to detect updates on it since we're cloning it now
-        // TODO(vbrunet)
-        //  - https://github.com/magicblock-labs/magicblock-validator/issues/95
-        //  - handle the case of the lamports updates better
-        //  - we may not want to track lamport changes, especially for payers
-        self.account_updates
-            .ensure_account_monitoring(pubkey)
-            .map_err(AccountClonerError::AccountUpdatesError)?;
+        // Mark the account for monitoring, we want to start to detect futures updates on it
+        // since we're cloning it now, it's now part of the validator monitored accounts
+        if self.permissions.allow_cloning_refresh {
+            // TODO(vbrunet)
+            //  - https://github.com/magicblock-labs/magicblock-validator/issues/95
+            //  - handle the case of the lamports updates better
+            //  - we may not want to track lamport changes, especially for payers
+            self.account_updates
+                .ensure_account_monitoring(pubkey)
+                .map_err(AccountClonerError::AccountUpdatesError)?;
+        }
         // Fetch the account
         let account_chain_snapshot =
             self.fetch_account_chain_snapshot(pubkey).await?;
@@ -248,7 +274,7 @@ where
             // If the account is not present on-chain
             // we may want to clear the local state
             AccountChainState::NewAccount => {
-                if !self.allow_cloning_new_accounts {
+                if !self.permissions.allow_cloning_new_accounts {
                     return Ok(AccountClonerOutput::Unclonable {
                         pubkey: *pubkey,
                         reason:
@@ -273,7 +299,7 @@ where
                             });
                         }
                     }
-                    if !self.allow_cloning_program_accounts {
+                    if !self.permissions.allow_cloning_program_accounts {
                         return Ok(AccountClonerOutput::Unclonable {
                             pubkey: *pubkey,
                             reason: AccountClonerUnclonableReason::DisallowProgramAccount,
@@ -286,7 +312,7 @@ where
                 else {
                     // If it's a payer account, we have a special lamport override to do
                     if pubkey.is_on_curve() {
-                        if !self.allow_cloning_payer_accounts {
+                        if !self.permissions.allow_cloning_payer_accounts {
                             return Ok(AccountClonerOutput::Unclonable {
                                 pubkey: *pubkey,
                                 reason: AccountClonerUnclonableReason::DisallowPayerAccount,
@@ -297,7 +323,7 @@ where
                     }
                     // Otherwise we just clone the account normally without any change
                     else {
-                        if !self.allow_cloning_pda_accounts {
+                        if !self.permissions.allow_cloning_pda_accounts {
                             return Ok(AccountClonerOutput::Unclonable {
                                 pubkey: *pubkey,
                                 reason: AccountClonerUnclonableReason::DisallowPdaAccount,
@@ -315,7 +341,7 @@ where
                 delegation_record,
                 ..
             } => {
-                if !self.allow_cloning_delegated_accounts {
+                if !self.permissions.allow_cloning_delegated_accounts {
                     return Ok(AccountClonerOutput::Unclonable {
                         pubkey: *pubkey,
                         reason:
@@ -333,7 +359,7 @@ where
             // If the account is delegated but inconsistant on-chain,
             // we clone it as non-delegated account to keep things simple for now
             AccountChainState::Inconsistent { account, .. } => {
-                if !self.allow_cloning_pda_accounts {
+                if !self.permissions.allow_cloning_pda_accounts {
                     return Ok(AccountClonerOutput::Unclonable {
                         pubkey: *pubkey,
                         reason:
@@ -391,7 +417,7 @@ where
         delegation_slot: Slot,
     ) -> AccountClonerResult<Vec<Signature>> {
         // If we already cloned this account from the same delegation slot
-        // Keep the local state as source of truth even if it changes on-chain
+        // Keep the local state as source of truth even if it changed on-chain
         if let Some(AccountClonerOutput::Cloned {
             account_chain_snapshot,
             ..

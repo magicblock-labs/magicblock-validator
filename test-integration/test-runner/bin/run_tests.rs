@@ -1,7 +1,10 @@
+use integration_test_tools::toml_to_args::{
+    config_to_args, rpc_port_from_config,
+};
 use std::{
     io,
     net::TcpStream,
-    path::Path,
+    path::{Path, PathBuf},
     process::{self, Child},
     thread::sleep,
     time::Duration,
@@ -27,10 +30,9 @@ pub fn main() {
         eprintln!("======== Starting DEVNET Validator for Scenarios + Security ========");
 
         // Start validators via `cargo run --release  -- <config>
-        let mut devnet_validator = match start_validator_with_config(
-            "test-programs/schedulecommit/configs/schedulecommit-conf.devnet.toml",
-            7799,
-            "DEVNET",
+        let mut devnet_validator = match start_validator(
+            "schedulecommit-conf.devnet.toml",
+            ValidatorCluster::Chain,
         ) {
             Some(validator) => validator,
             None => {
@@ -39,10 +41,9 @@ pub fn main() {
         };
 
         eprintln!("======== Starting EPHEM Validator for Scenarios + Security ========");
-        let mut ephem_validator = match start_validator_with_config(
-            "test-programs/schedulecommit/configs/schedulecommit-conf.ephem.toml",
-            8899,
-            "EPHEM",
+        let mut ephem_validator = match start_validator(
+            "schedulecommit-conf.ephem.toml",
+            ValidatorCluster::Ephem,
         ) {
             Some(validator) => validator,
             None => {
@@ -54,8 +55,12 @@ pub fn main() {
         };
 
         eprintln!("======== RUNNING SECURITY TESTS ========");
-        let test_security_dir =
-            format!("{}/../{}", manifest_dir.clone(), "test-security");
+        let test_security_dir = format!(
+            "{}/../{}",
+            manifest_dir.clone(),
+            "schedulecommit/test-security"
+        );
+        eprintln!("Running security tests in {}", test_security_dir);
         let test_security_output =
             match run_test(test_security_dir, Default::default()) {
                 Ok(output) => output,
@@ -67,8 +72,11 @@ pub fn main() {
             };
 
         eprintln!("======== RUNNING SCENARIOS TESTS ========");
-        let test_scenarios_dir =
-            format!("{}/../{}", manifest_dir.clone(), "test-scenarios");
+        let test_scenarios_dir = format!(
+            "{}/../{}",
+            manifest_dir.clone(),
+            "schedulecommit/test-scenarios"
+        );
         let test_scenarios_output =
             match run_test(test_scenarios_dir, Default::default()) {
                 Ok(output) => output,
@@ -91,20 +99,18 @@ pub fn main() {
     // -----------------
     let issues_frequent_commits_output = {
         eprintln!("======== RUNNING ISSUES TESTS - Frequent Commits ========");
-        let mut devnet_validator = match start_validator_with_config(
-            "test-programs/schedulecommit/configs/schedulecommit-conf.devnet.toml",
-            7799,
-            "DEVNET",
+        let mut devnet_validator = match start_validator(
+            "schedulecommit-conf.devnet.toml",
+            ValidatorCluster::Chain,
         ) {
             Some(validator) => validator,
             None => {
                 panic!("Failed to start devnet validator properly");
             }
         };
-        let mut ephem_validator = match start_validator_with_config(
-            "test-programs/schedulecommit/configs/schedulecommit-conf.ephem.frequent-commits.toml",
-            8899,
-            "EPHEM",
+        let mut ephem_validator = match start_validator(
+            "schedulecommit-conf.ephem.frequent-commits.toml",
+            ValidatorCluster::Ephem,
         ) {
             Some(validator) => validator,
             None => {
@@ -115,7 +121,7 @@ pub fn main() {
             }
         };
         let test_issues_dir =
-            format!("{}/../../{}", manifest_dir.clone(), "test-issues");
+            format!("{}/../{}", manifest_dir.clone(), "test-issues");
         let test_output = match run_test(
             test_issues_dir,
             RunTestConfig {
@@ -181,37 +187,39 @@ fn run_test(
     cmd.current_dir(manifest_dir.clone()).output()
 }
 
-fn start_validator_with_config(
-    config_path: &str,
-    port: u16,
-    log_suffix: &str,
-) -> Option<process::Child> {
+// -----------------
+// Validator Startup
+// -----------------
+struct TestRunnerPaths {
+    config_path: PathBuf,
+    root_dir: PathBuf,
+    workspace_dir: PathBuf,
+}
+
+fn resolve_paths(config_file: &str) -> TestRunnerPaths {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let workspace_dir = Path::new(&manifest_dir).join("..").join("..");
-    let root_dir = Path::new(&workspace_dir).join("..");
-
-    // First build so that the validator can start fast
-    let build_res = process::Command::new("cargo")
-        .arg("build")
-        .current_dir(root_dir.clone())
-        .output();
-
-    if build_res.map_or(false, |output| !output.status.success()) {
-        eprintln!("Failed to build validator");
-        return None;
+    let workspace_dir = Path::new(&manifest_dir)
+        .join("..")
+        .canonicalize()
+        .unwrap()
+        .to_path_buf();
+    let root_dir = Path::new(&workspace_dir)
+        .join("..")
+        .canonicalize()
+        .unwrap()
+        .to_path_buf();
+    let config_path = Path::new(&manifest_dir)
+        .join("..")
+        .join("configs")
+        .join(config_file);
+    TestRunnerPaths {
+        config_path,
+        root_dir,
+        workspace_dir,
     }
+}
 
-    // Start validator via `cargo run -- <path to config>`
-    let mut validator = process::Command::new("cargo")
-        .arg("run")
-        .arg("--")
-        .arg(config_path)
-        .env("RUST_LOG_STYLE", log_suffix)
-        .current_dir(root_dir)
-        .spawn()
-        .expect("Failed to start validator");
-
-    // Wait until the validator is listening on 0.0.0.0:<port>
+fn wait_for_validator(mut validator: Child, port: u16) -> Option<Child> {
     let mut count = 0;
     loop {
         if TcpStream::connect(format!("0.0.0.0:{}", port)).is_ok() {
@@ -226,4 +234,120 @@ fn start_validator_with_config(
         }
         sleep(Duration::from_millis(400));
     }
+}
+
+enum ValidatorCluster {
+    Chain,
+    Ephem,
+}
+
+impl ValidatorCluster {
+    fn log_suffix(&self) -> &'static str {
+        match self {
+            ValidatorCluster::Chain => "CHAIN",
+            ValidatorCluster::Ephem => "EPHEM",
+        }
+    }
+}
+
+fn start_validator(
+    config_file: &str,
+    cluster: ValidatorCluster,
+) -> Option<process::Child> {
+    let log_suffix = cluster.log_suffix();
+    match cluster {
+        ValidatorCluster::Chain
+            if std::env::var("FORCE_MAGIC_BLOCK_VALIDATOR").is_err() =>
+        {
+            start_test_validator_with_config(config_file, log_suffix)
+        }
+        _ => start_magic_block_validator_with_config(config_file, log_suffix),
+    }
+}
+
+fn start_magic_block_validator_with_config(
+    config_file: &str,
+    log_suffix: &str,
+) -> Option<process::Child> {
+    let TestRunnerPaths {
+        config_path,
+        root_dir,
+        ..
+    } = resolve_paths(config_file);
+    let port = rpc_port_from_config(&config_path);
+
+    // First build so that the validator can start fast
+    let build_res = process::Command::new("cargo")
+        .arg("build")
+        .current_dir(root_dir.clone())
+        .output();
+
+    if build_res.map_or(false, |output| !output.status.success()) {
+        eprintln!("Failed to build validator");
+        return None;
+    }
+
+    // Start validator via `cargo run -- <path to config>`
+    let mut command = process::Command::new("cargo");
+    command
+        .arg("run")
+        .arg("--")
+        .arg(config_path)
+        .env("RUST_LOG_STYLE", log_suffix)
+        .current_dir(root_dir);
+
+    eprintln!("Starting validator with {:?}", command);
+
+    let validator = command.spawn().expect("Failed to start validator");
+    wait_for_validator(validator, port)
+}
+
+fn start_test_validator_with_config(
+    config_file: &str,
+    log_suffix: &str,
+) -> Option<process::Child> {
+    let TestRunnerPaths {
+        config_path,
+        root_dir,
+        workspace_dir,
+    } = resolve_paths(config_file);
+
+    let port = rpc_port_from_config(&config_path);
+    let mut args = config_to_args(&config_path);
+
+    let accounts_dir = workspace_dir.join("configs").join("accounts");
+    let accounts = [
+        (
+            "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev",
+            "validator-authority.json",
+        ),
+        (
+            "LUzidNSiPNjYNkxZcUm5hYHwnWPwsUfh2US1cpWwaBm",
+            "luzid-authority.json",
+        ),
+    ];
+
+    let account_args = accounts
+        .iter()
+        .flat_map(|(account, file)| {
+            let account_path = accounts_dir.join(file).canonicalize().unwrap();
+            vec![
+                "--account".to_string(),
+                account.to_string(),
+                account_path.to_str().unwrap().to_string(),
+            ]
+        })
+        .collect::<Vec<_>>();
+
+    args.extend(account_args);
+
+    let mut command = process::Command::new("solana-test-validator");
+    command
+        .args(args)
+        .env("RUST_LOG_STYLE", log_suffix)
+        .current_dir(root_dir);
+
+    eprintln!("Starting test validator with {:?}", command);
+    let validator = command.spawn().expect("Failed to start validator");
+    wait_for_validator(validator, port)
 }

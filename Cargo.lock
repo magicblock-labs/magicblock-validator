@@ -4249,6 +4249,7 @@ version = "1.19.0"
 dependencies = [
  "async-trait",
  "conjunto-transwise",
+ "delegation-program",
  "futures-util",
  "log",
  "sleipnir-account-dumper",

@@ -1,4 +1,5 @@
-use std::sync::Arc;
+use lazy_static::lazy_static;
+use std::sync::{Arc, Mutex};
 
 use sleipnir_bank::bank::Bank;
 use sleipnir_transaction_status::TransactionStatusSender;
@@ -21,6 +22,10 @@ pub fn execute_legacy_transaction(
     execute_sanitized_transaction(sanitized_tx, bank, transaction_status_sender)
 }
 
+lazy_static! {
+    static ref TRANSACTION_MUTEX: Mutex<()> = Mutex::new(());
+}
+
 pub fn execute_sanitized_transaction(
     sanitized_tx: SanitizedTransaction,
     bank: &Arc<Bank>,
@@ -28,6 +33,15 @@ pub fn execute_sanitized_transaction(
 ) -> Result<Signature> {
     let signature = *sanitized_tx.signature();
     let txs = &[sanitized_tx];
+
+    // Ensure that only one transaction is processed at a time even if it is initiated from
+    // multiple threads.
+    // TODO: This is a temporary solution until we have a transaction executor which schedules
+    // transactions to be executed in parallel without account lock conflicts.
+    // If we choose this as a long term solution we need to lock simulations/preflight with the
+    // same mutex once we enable them again
+    let _transaction_lock = TRANSACTION_MUTEX.lock().unwrap();
+
     let batch = bank.prepare_sanitized_batch(txs);
 
     let batch_with_indexes = TransactionBatchWithIndexes {
