@@ -118,7 +118,8 @@ impl RemoteAccountUpdatesWorker {
                         &monitored_accounts
                     );
                     let old_runner = std::mem::replace(&mut runners[current_refresh_index], new_runner);
-                    self.cancel_and_join_runner(old_runner).await;
+                    // We hope it ultimately joins, but we don't care to wait for it, just let it be
+                    let _join = self.cancel_and_join_runner(old_runner);
                 }
                 // When we want to stop the worker (it was cancelled)
                 _ = cancellation_token.cancelled() => {
