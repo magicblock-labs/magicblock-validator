@@ -6,7 +6,7 @@ $(if $(shell command -v cargo-nextest 2> /dev/null),,$(eval CARGO_TEST=test))
 $(if $(shell command -v cargo-nextest 2> /dev/null),,$(eval CARGO_TEST_NOCAP=test -- --nocapture))
 
 test:
-	cargo $(CARGO_TEST) && \
+	RUST_BACKTRACE=1 cargo $(CARGO_TEST) && \
 	$(MAKE) -C $(DIR)/test-programs
 
 test-log:
@@ -52,7 +52,7 @@ lint:
 	cargo clippy --all-targets -- -D warnings -A unexpected_cfgs
 
 ci-test:
-	cargo $(CARGO_TEST_NOCAP) && \
+	RUST_BACKTRACE=1 cargo $(CARGO_TEST_NOCAP) && \
 	$(MAKE) -C $(DIR)/test-integration
 
 ## NOTE: We're getting the following error in github CI when trying to use
