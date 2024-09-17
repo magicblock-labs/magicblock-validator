@@ -3,7 +3,6 @@ use std::time::Duration;
 use conjunto_transwise::RpcProviderConfig;
 use sleipnir_account_updates::{
     AccountUpdates, RemoteAccountUpdatesClient, RemoteAccountUpdatesWorker,
-    RemoteAccountUpdatesWorkerError,
 };
 use solana_sdk::{
     signature::Keypair,
@@ -18,11 +17,13 @@ use tokio_util::sync::CancellationToken;
 fn setup() -> (
     RemoteAccountUpdatesClient,
     CancellationToken,
-    tokio::task::JoinHandle<Result<(), RemoteAccountUpdatesWorkerError>>,
+    tokio::task::JoinHandle<()>,
 ) {
     // Create account updates worker and client
-    let mut worker =
-        RemoteAccountUpdatesWorker::new(RpcProviderConfig::devnet());
+    let mut worker = RemoteAccountUpdatesWorker::new(vec![
+        RpcProviderConfig::devnet(),
+        RpcProviderConfig::devnet(),
+    ]);
     let client = RemoteAccountUpdatesClient::new(&worker);
     // Run the worker in a separate task
     let cancellation_token = CancellationToken::new();

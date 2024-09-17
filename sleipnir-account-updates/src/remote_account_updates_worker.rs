@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, RwLock},
     time::Duration,
 };
@@ -11,7 +11,7 @@ use thiserror::Error;
 use tokio::{
     sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
     task::JoinHandle,
-    time::sleep,
+    time::{interval, sleep},
 };
 use tokio_util::sync::CancellationToken;
 
@@ -24,32 +24,33 @@ pub enum RemoteAccountUpdatesWorkerError {
         #[from]
         solana_pubsub_client::nonblocking::pubsub_client::PubsubClientError,
     ),
+    #[error(transparent)]
+    SendError(#[from] tokio::sync::mpsc::error::SendError<Pubkey>),
 }
 
+#[derive(Debug)]
 struct RemoteAccountUpdatesWorkerRunner {
-    shard: RemoteAccountUpdatesShard,
+    id: String,
     monitoring_request_sender: UnboundedSender<Pubkey>,
     cancellation_token: CancellationToken,
     join_handle: JoinHandle<()>,
 }
 
 pub struct RemoteAccountUpdatesWorker {
-    rpc_provider_config: RpcProviderConfig,
+    rpc_provider_configs: Vec<RpcProviderConfig>,
     monitoring_request_receiver: UnboundedReceiver<Pubkey>,
     monitoring_request_sender: UnboundedSender<Pubkey>,
-    runners: RwLock<Vec<RemoteAccountUpdatesWorkerRunner>>,
     last_known_update_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
 }
 
 impl RemoteAccountUpdatesWorker {
-    pub fn new(rpc_provider_config: RpcProviderConfig) -> Self {
+    pub fn new(rpc_provider_configs: Vec<RpcProviderConfig>) -> Self {
         let (monitoring_request_sender, monitoring_request_receiver) =
             unbounded_channel();
         Self {
-            rpc_provider_config,
+            rpc_provider_configs,
             monitoring_request_receiver,
             monitoring_request_sender,
-            runners: Default::default(),
             last_known_update_slots: Default::default(),
         }
     }
@@ -67,12 +68,43 @@ impl RemoteAccountUpdatesWorker {
     pub async fn start_monitoring_request_processing(
         &mut self,
         cancellation_token: CancellationToken,
-    ) -> Result<(), RemoteAccountUpdatesWorkerError> {
+    ) {
+        // Maintain a runner for each config passed as parameter
+        let mut runners = vec![];
+        // Initialize all the runners for all configs
+        for (index, rpc_provider_config) in
+            self.rpc_provider_configs.iter().enumerate()
+        {
+            runners.push(
+                self.start_runner_from_config(
+                    index,
+                    rpc_provider_config.clone(),
+                ),
+            );
+        }
+        // Useful states
+        let mut current_refresh_index = 0;
+        let mut monitored_accounts = HashSet::new();
+        let mut refresh_interval = interval(Duration::from_millis(60_000));
         // Loop forever until we stop the worker
         loop {
             tokio::select! {
-                // When we receive a message to start monitoring an account
+                // When we receive a message to start monitoring an account, propagate request to all runners
                 Some(pubkey) = self.monitoring_request_receiver.recv() => {
+                    if monitored_accounts.contains(&pubkey) {
+                        continue;
+                    }
+                    monitored_accounts.insert(pubkey);
+                    for runner in runners.iter() {
+                        self.notify_runner_of_monitoring_request(runner, pubkey);
+                    }
+                }
+                // Periodically we refresh runners to keep them fresh
+                _ = refresh_interval.tick() => {
+                    current_refresh_index = (current_refresh_index + 1) % self.rpc_provider_configs.len();
+                    let new_runner = self.start_runner_for_index(current_refresh_index, &monitored_accounts);
+                    let old_runner = std::mem::replace(&mut runners[current_refresh_index], new_runner);
+                    self.cancel_and_join_runner(old_runner).await;
                 }
                 // When we want to stop the worker (it was cancelled)
                 _ = cancellation_token.cancelled() => {
@@ -80,25 +112,86 @@ impl RemoteAccountUpdatesWorker {
                 }
             }
         }
-        // Done
-        Ok(())
+        // Cancel all runners one by one when we are done
+        while runners.len() > 0 {
+            let runner = runners.swap_remove(0);
+            self.cancel_and_join_runner(runner).await;
+        }
     }
 
-    async fn start_monitoring_shard_auto_refresh(
+    fn start_runner_for_index(
         &self,
-        cancellation_token: CancellationToken,
-    ) {
-        loop {
-            tokio::select! {
-                // Periodically we refresh our subscriptions shards
-                _ = sleep(Duration::from_millis(10_000)) => {
+        current_refresh_index: usize,
+        monitored_accounts: &HashSet<Pubkey>,
+    ) -> RemoteAccountUpdatesWorkerRunner {
+        let index = current_refresh_index % self.rpc_provider_configs.len();
+        let rpc_provider_config =
+            self.rpc_provider_configs.get(index).unwrap().clone();
+        let new_runner =
+            self.start_runner_from_config(index, rpc_provider_config);
+        for pubkey in monitored_accounts.iter() {
+            self.notify_runner_of_monitoring_request(&new_runner, *pubkey);
+        }
+        new_runner
+    }
 
-                }
-                // When we want to stop the worker (it was cancelled)
-                _ = cancellation_token.cancelled() => {
-                    break;
-                }
+    fn notify_runner_of_monitoring_request(
+        &self,
+        runner: &RemoteAccountUpdatesWorkerRunner,
+        pubkey: Pubkey,
+    ) {
+        if let Err(error) = runner.monitoring_request_sender.send(pubkey) {
+            error!(
+                "Could not send request to runner: {}: {:?}",
+                runner.id, error
+            );
+        }
+    }
+
+    fn start_runner_from_config(
+        &self,
+        index: usize,
+        rpc_provider_config: RpcProviderConfig,
+    ) -> RemoteAccountUpdatesWorkerRunner {
+        let (monitoring_request_sender, monitoring_request_receiver) =
+            unbounded_channel();
+        let last_known_update_slots = self.last_known_update_slots.clone();
+        let id = format!("[{}] {}", index, rpc_provider_config.ws_url());
+        let cancellation_token = CancellationToken::new();
+        let shard_id = id.clone();
+        let shard_cancellation_token = cancellation_token.clone();
+        let join_handle = tokio::spawn(async move {
+            let mut shard = RemoteAccountUpdatesShard::new(
+                shard_id.clone(),
+                rpc_provider_config,
+                monitoring_request_receiver,
+                last_known_update_slots,
+            );
+            if let Err(error) = shard
+                .start_monitoring_request_processing(shard_cancellation_token)
+                .await
+            {
+                error!("Runner shard has failed: {}: {:?}", shard_id, error);
             }
+        });
+        let runner = RemoteAccountUpdatesWorkerRunner {
+            id,
+            monitoring_request_sender,
+            cancellation_token,
+            join_handle,
+        };
+        info!("Started new runner {}", runner.id);
+        runner
+    }
+
+    async fn cancel_and_join_runner(
+        &self,
+        runner: RemoteAccountUpdatesWorkerRunner,
+    ) {
+        info!("Stopping runner {}", runner.id);
+        runner.cancellation_token.cancel();
+        if let Err(error) = runner.join_handle.await {
+            error!("Runner failed to shutdown: {}: {:?}", runner.id, error);
         }
     }
 }
