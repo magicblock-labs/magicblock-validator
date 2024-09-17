@@ -210,11 +210,17 @@ impl MagicValidator {
 
         let remote_account_fetcher_worker =
             RemoteAccountFetcherWorker::new(remote_rpc_config.clone());
-        let remote_account_updates_worker =
-            RemoteAccountUpdatesWorker::new(vec![
+
+        let remote_account_updates_worker = RemoteAccountUpdatesWorker::new(
+            // We'll maintain 3 connections constantly (those could be on different nodes if we wanted to)
+            vec![
                 remote_rpc_config.clone(),
                 remote_rpc_config.clone(),
-            ]);
+                remote_rpc_config.clone(),
+            ],
+            // We'll kill/refresh one connection every 5 minutes
+            Duration::from_secs(60 * 5),
+        );
 
         let transaction_status_sender = TransactionStatusSender {
             sender: transaction_sndr,

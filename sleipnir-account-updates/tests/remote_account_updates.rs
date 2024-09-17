@@ -20,10 +20,10 @@ fn setup() -> (
     tokio::task::JoinHandle<()>,
 ) {
     // Create account updates worker and client
-    let mut worker = RemoteAccountUpdatesWorker::new(vec![
-        RpcProviderConfig::devnet(),
-        RpcProviderConfig::devnet(),
-    ]);
+    let mut worker = RemoteAccountUpdatesWorker::new(
+        vec![RpcProviderConfig::devnet(), RpcProviderConfig::devnet()],
+        Duration::from_secs(1), // We constantly refresh stuff to make it struggle
+    );
     let client = RemoteAccountUpdatesClient::new(&worker);
     // Run the worker in a separate task
     let cancellation_token = CancellationToken::new();
@@ -40,7 +40,7 @@ fn setup() -> (
 }
 
 #[tokio::test]
-async fn test_devnet_monitoring_clock_sysvar_changes() {
+async fn test_devnet_monitoring_clock_sysvar_changes_over_time() {
     skip_if_devnet_down!();
     // Create account updates worker and client
     let (client, cancellation_token, worker_handle) = setup();
@@ -51,9 +51,17 @@ async fn test_devnet_monitoring_clock_sysvar_changes() {
     // Start the monitoring
     assert!(client.ensure_account_monitoring(&sysvar_clock).is_ok());
     // Wait for a few slots to happen on-chain
-    sleep(Duration::from_millis(3000)).await;
+    sleep(Duration::from_millis(2000)).await;
     // Check that we detected the clock change
     assert!(client.get_last_known_update_slot(&sysvar_clock).is_some());
+    let first_slot_detected =
+        client.get_last_known_update_slot(&sysvar_clock).unwrap();
+    // Wait for a few more slots to happen on-chain (some of the connections should be refreshed now)
+    sleep(Duration::from_millis(2000)).await;
+    // We should still detect the updates correctly even when the connections are refreshed
+    let second_slot_detected =
+        client.get_last_known_update_slot(&sysvar_clock).unwrap();
+    assert_ne!(first_slot_detected, second_slot_detected);
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());

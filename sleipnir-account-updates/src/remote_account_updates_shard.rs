@@ -54,6 +54,7 @@ impl RemoteAccountUpdatesShard {
         cancellation_token: CancellationToken,
     ) -> Result<(), RemoteAccountUpdatesShardError> {
         // Create a pubsub client
+        info!("Shard {}: Starting", self.shard_id);
         let pubsub_client =
             PubsubClient::new(self.rpc_provider_config.ws_url())
                 .await
@@ -71,7 +72,6 @@ impl RemoteAccountUpdatesShard {
             }),
             min_context_slot: None,
         };
-        info!("Shard {}: Starting", self.shard_id);
         // We'll store useful maps for each of the subscriptions
         let mut streams = StreamMap::new();
         let mut unsubscribes = HashMap::new();
@@ -109,7 +109,7 @@ impl RemoteAccountUpdatesShard {
         // Cleanup all subscriptions and wait for proper shutdown
         for (pubkey, unsubscribe) in unsubscribes.into_iter() {
             info!(
-                "Shard {}: Account monitoring stopped: {:?}",
+                "Shard {}: Account monitoring killed: {:?}",
                 self.shard_id, pubkey
             );
             unsubscribe().await;

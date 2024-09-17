@@ -39,17 +39,22 @@ struct RemoteAccountUpdatesWorkerRunner {
 
 pub struct RemoteAccountUpdatesWorker {
     rpc_provider_configs: Vec<RpcProviderConfig>,
+    refresh_interval: Duration,
     monitoring_request_receiver: UnboundedReceiver<Pubkey>,
     monitoring_request_sender: UnboundedSender<Pubkey>,
     last_known_update_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
 }
 
 impl RemoteAccountUpdatesWorker {
-    pub fn new(rpc_provider_configs: Vec<RpcProviderConfig>) -> Self {
+    pub fn new(
+        rpc_provider_configs: Vec<RpcProviderConfig>,
+        refresh_interval: Duration,
+    ) -> Self {
         let (monitoring_request_sender, monitoring_request_receiver) =
             unbounded_channel();
         Self {
             rpc_provider_configs,
+            refresh_interval,
             monitoring_request_receiver,
             monitoring_request_sender,
             last_known_update_slots: Default::default(),
@@ -77,7 +82,7 @@ impl RemoteAccountUpdatesWorker {
         for (index, rpc_provider_config) in
             self.rpc_provider_configs.iter().enumerate()
         {
-            runners.push(self.start_runner_from_config(
+            runners.push(self.create_runner_from_config(
                 index,
                 rpc_provider_config.clone(),
                 &monitored_accounts,
@@ -85,7 +90,7 @@ impl RemoteAccountUpdatesWorker {
         }
         // Useful states
         let mut current_refresh_index = 0;
-        let mut refresh_interval = interval(Duration::from_millis(60_000));
+        let mut refresh_interval = interval(self.refresh_interval);
         refresh_interval.reset();
         // Loop forever until we stop the worker
         loop {
@@ -107,7 +112,7 @@ impl RemoteAccountUpdatesWorker {
                         .get(current_refresh_index)
                         .unwrap()
                         .clone();
-                    let new_runner = self.start_runner_from_config(
+                    let new_runner = self.create_runner_from_config(
                         current_refresh_index,
                         rpc_provider_config,
                         &monitored_accounts
@@ -128,7 +133,7 @@ impl RemoteAccountUpdatesWorker {
         }
     }
 
-    fn start_runner_from_config(
+    fn create_runner_from_config(
         &self,
         index: usize,
         rpc_provider_config: RpcProviderConfig,
