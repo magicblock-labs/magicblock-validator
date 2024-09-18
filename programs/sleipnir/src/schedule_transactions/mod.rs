@@ -5,4 +5,3 @@ pub(crate) use process_schedule_commit::*;
 pub use process_scheduled_commit_sent::{
     process_scheduled_commit_sent, register_scheduled_commit_sent, SentCommit,
 };
-pub use transaction_scheduler::ScheduledCommit;

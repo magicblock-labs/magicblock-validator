@@ -1,25 +1,11 @@
-#![allow(unused)]
+use crate::magic_context::{MagicContext, ScheduledCommit};
+use lazy_static::lazy_static;
+use solana_sdk::{account::AccountSharedData, pubkey::Pubkey};
+use std::cell::RefCell;
 use std::{
     mem,
     sync::{Arc, RwLock},
 };
-
-use lazy_static::lazy_static;
-use solana_sdk::{
-    clock::Slot, hash::Hash, pubkey::Pubkey, transaction::Transaction,
-};
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ScheduledCommit {
-    pub id: u64,
-    pub slot: Slot,
-    pub blockhash: Hash,
-    pub accounts: Vec<Pubkey>,
-    pub payer: Pubkey,
-    pub owner: Pubkey,
-    pub commit_sent_transaction: Transaction,
-    pub request_undelegation: bool,
-}
 
 #[derive(Clone)]
 pub struct TransactionScheduler {
@@ -39,11 +25,19 @@ impl Default for TransactionScheduler {
 }
 
 impl TransactionScheduler {
-    pub fn schedule_commit(&self, commit: ScheduledCommit) {
-        self.scheduled_commits
-            .write()
-            .expect("scheduled_commits lock poisoned")
-            .push(commit);
+    pub fn schedule_commit(
+        &self,
+        context_account: &RefCell<AccountSharedData>,
+        commit: ScheduledCommit,
+    ) -> Result<(), bincode::Error> {
+        let context_data = context_account.borrow_mut();
+        let mut context = context_data.deserialize_data::<MagicContext>()?;
+        context.add_scheduled_commit(commit);
+        Ok(())
+    }
+
+    pub fn accept_scheduled_commits(&self) {
+        todo!()
     }
 
     pub fn get_scheduled_commits_by_payer(

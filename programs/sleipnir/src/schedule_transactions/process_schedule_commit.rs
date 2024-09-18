@@ -8,8 +8,8 @@ use solana_sdk::{
     account::ReadableAccount, instruction::InstructionError, pubkey::Pubkey,
 };
 
-use super::transaction_scheduler::ScheduledCommit;
 use crate::{
+    magic_context::ScheduledCommit,
     schedule_transactions::transaction_scheduler::TransactionScheduler,
     sleipnir_instruction::scheduled_commit_sent,
     utils::{
@@ -33,11 +33,12 @@ pub(crate) fn process_schedule_commit(
     static COMMIT_ID: AtomicU64 = AtomicU64::new(0);
 
     const PAYER_IDX: u16 = 0;
+    const CONTEXT_IDX: u16 = PAYER_IDX + 1;
 
     let transaction_context = &invoke_context.transaction_context.clone();
     let ix_ctx = transaction_context.get_current_instruction_context()?;
     let ix_accs_len = ix_ctx.get_number_of_instruction_accounts() as usize;
-    const COMMITTEES_START: usize = PAYER_IDX as usize + 1;
+    const COMMITTEES_START: usize = CONTEXT_IDX as usize + 1;
 
     // Assert MagicBlock program
     ix_ctx
@@ -188,7 +189,18 @@ pub(crate) fn process_schedule_commit(
     // NOTE: this is only protected by all the above checks however if the
     // instruction fails for other reasons detected afterward then the commit
     // stays scheduled
-    TransactionScheduler::default().schedule_commit(scheduled_commit);
+    let context_acc =
+        get_instruction_account_with_idx(transaction_context, CONTEXT_IDX)?;
+    TransactionScheduler::default()
+        .schedule_commit(context_acc, scheduled_commit)
+        .map_err(|err| {
+            ic_msg!(
+                invoke_context,
+                "ScheduleCommit ERR: failed to schedule commit: {}",
+                err
+            );
+            InstructionError::GenericError
+        })?;
     ic_msg!(invoke_context, "Scheduled commit with ID: {}", commit_id,);
     ic_msg!(
         invoke_context,
@@ -220,15 +232,14 @@ mod tests {
     };
 
     use crate::{
-        schedule_transactions::transaction_scheduler::{
-            ScheduledCommit, TransactionScheduler,
-        },
+        schedule_transactions::transaction_scheduler::TransactionScheduler,
         sleipnir_instruction::{
             schedule_commit_and_undelegate_instruction,
             schedule_commit_instruction, SleipnirInstruction,
         },
         test_utils::{ensure_funded_validator_authority, process_instruction},
         utils::DELEGATION_PROGRAM_ID,
+        ScheduledCommit,
     };
 
     // For the scheduling itself and the debit to fund the scheduled transaction
