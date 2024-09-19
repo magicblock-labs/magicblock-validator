@@ -94,7 +94,7 @@ impl RemoteAccountUpdatesShard {
                 // When we receive an update from any account subscriptions
                 Some((pubkey, update)) = streams.next() => {
                     let current_update_slot = update.context.slot;
-                    info!(
+                    debug!(
                         "Shard {}: Account update: {:?}, at slot: {}, data: {:?}",
                         self.shard_id, pubkey, current_update_slot, update.value.data.decode(),
                     );
