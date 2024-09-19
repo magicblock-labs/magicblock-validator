@@ -118,9 +118,8 @@ fn mutate_accounts(
     let instruction_context =
         transaction_context.get_current_instruction_context()?;
 
-    let accounts_len = instruction_context.get_number_of_instruction_accounts();
-
     // First account is the Sleipnir authority
+    let accounts_len = instruction_context.get_number_of_instruction_accounts();
     let accounts_to_mod_len = accounts_len - 1;
     let account_mods_len = account_mods.len() as u64;
 

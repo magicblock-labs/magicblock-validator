@@ -67,6 +67,7 @@ pub fn transaction_to_clone_program(
     let modify_ix = modify_accounts_instruction(account_modifications);
     // The validator is marked as the upgrade authority of all program accounts
     let validator_pubkey = &validator_authority_id();
+    // Then we run the official BPF upgrade IX to notify the system of the new program
     let upgrade_ix = bpf_loader_upgradeable::upgrade(
         &program_id_pubkey,
         &program_buffer_pubkey,
