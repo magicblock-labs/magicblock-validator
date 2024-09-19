@@ -17,10 +17,47 @@ const TEST_KEYPAIR_BYTES: [u8; 64] = [
     202, 240, 105, 168, 157, 64, 233, 249, 100, 104, 210, 41, 83, 87,
 ];
 
+fn init_logger() {
+    if let Ok(style) = std::env::var("RUST_LOG_STYLE") {
+        use std::io::Write;
+        let mut builder = env_logger::builder();
+        builder.format_timestamp_micros().is_test(false);
+        match style.as_str() {
+            "EPHEM" => {
+                builder.format(|buf, record| {
+                    writeln!(
+                        buf,
+                        "EPHEM [{}] {}: {} {}",
+                        record.level(),
+                        buf.timestamp_millis(),
+                        record.module_path().unwrap_or_default(),
+                        record.args()
+                    )
+                });
+            }
+            "DEVNET" => {
+                builder.format(|buf, record| {
+                    writeln!(
+                        buf,
+                        "DEVNET [{}] {}: {} {}",
+                        record.level(),
+                        buf.timestamp_millis(),
+                        record.module_path().unwrap_or_default(),
+                        record.args()
+                    )
+                });
+            }
+            _ => {}
+        }
+        let _ = builder.try_init();
+    } else {
+        init_logger!();
+    }
+}
+
 #[tokio::main]
 async fn main() {
-    init_logger!();
-
+    init_logger();
     #[cfg(feature = "tokio-console")]
     console_subscriber::init();
 

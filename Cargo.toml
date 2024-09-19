@@ -7,8 +7,12 @@ split-debuginfo = "packed"
 members = [
   "geyser-grpc-proto",
   "programs/sleipnir",
+  "sleipnir-account-cloner",
+  "sleipnir-account-dumper",
+  "sleipnir-account-fetcher",
   "sleipnir-account-updates",
   "sleipnir-accounts",
+  "sleipnir-accounts-api",
   "sleipnir-accounts-db",
   "sleipnir-api",
   "sleipnir-bank",
@@ -98,9 +102,13 @@ semver = "1.0.22"
 serde = "1.0.196"
 serde_derive = "1.0.103"
 serde_json = "1.0.113"
+sleipnir-account-cloner = { path = "./sleipnir-account-cloner" }
+sleipnir-account-dumper = { path = "./sleipnir-account-dumper" }
+sleipnir-account-fetcher = { path = "./sleipnir-account-fetcher" }
 sleipnir-account-updates = { path = "./sleipnir-account-updates" }
-sleipnir-accounts-db = { path = "./sleipnir-accounts-db" }
 sleipnir-accounts = { path = "./sleipnir-accounts" }
+sleipnir-accounts-api = { path = "./sleipnir-accounts-api" }
+sleipnir-accounts-db = { path = "./sleipnir-accounts-db" }
 sleipnir-api = { path = "./sleipnir-api" }
 sleipnir-bank = { path = "./sleipnir-bank" }
 sleipnir-config = { path = "./sleipnir-config" }

@@ -1,11 +1,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use sleipnir_program::sleipnir_instruction::AccountModification;
+use sleipnir_accounts_api::InternalAccountProvider;
+use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_sdk::{
-    account::{Account, AccountSharedData},
-    pubkey::Pubkey,
-    signature::Signature,
+    account::AccountSharedData, pubkey::Pubkey, signature::Signature,
     transaction::Transaction,
 };
 
@@ -20,39 +19,71 @@ pub trait ScheduledCommitsProcessor {
     ) -> AccountsResult<()>;
 }
 
-pub trait InternalAccountProvider: Send + Sync {
-    fn has_account(&self, pubkey: &Pubkey) -> bool;
-    fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData>;
-}
-
-#[async_trait]
-pub trait AccountCloner {
-    async fn clone_account(
-        &self,
-        pubkey: &Pubkey,
-        account: Option<&Account>,
-        overrides: Option<AccountModification>,
-    ) -> AccountsResult<Vec<Signature>>;
+#[derive(Clone)]
+pub struct UndelegationRequest {
+    /// The original owner of the account before it was delegated.
+    pub owner: Pubkey,
 }
 
 pub struct AccountCommittee {
+    /// The pubkey of the account to be committed.
     pub pubkey: Pubkey,
+    /// The current account state.
+    /// NOTE: if undelegation was requested the owner is set to the
+    /// delegation program when accounts are committed.
     pub account_data: AccountSharedData,
+    /// Slot at which the commit was scheduled.
+    pub slot: u64,
+    /// Only present if undelegation was requested.
+    pub undelegation_request: Option<UndelegationRequest>,
 }
 
+#[derive(Debug)]
+pub struct CommitAccountsTransaction {
+    /// The transaction that is running on chain to commit and possibly undelegate
+    /// accounts.
+    pub transaction: Transaction,
+    /// Accounts that are undelegated as part of the transaction.
+    pub undelegated_accounts: Vec<Pubkey>,
+}
+
+impl CommitAccountsTransaction {
+    pub fn get_signature(&self) -> Signature {
+        *self.transaction.get_signature()
+    }
+}
+
+#[derive(Debug)]
 pub struct CommitAccountsPayload {
     /// The transaction that commits the accounts.
     /// None if no accounts need to be committed.
-    pub transaction: Option<Transaction>,
+    pub transaction: Option<CommitAccountsTransaction>,
     /// The pubkeys and data of the accounts that were committed.
     pub committees: Vec<(Pubkey, AccountSharedData)>,
 }
 
 /// Same as [CommitAccountsPayload] but one that is actionable
+#[derive(Debug)]
 pub struct SendableCommitAccountsPayload {
-    pub transaction: Transaction,
+    pub transaction: CommitAccountsTransaction,
     /// The pubkeys and data of the accounts that were committed.
     pub committees: Vec<(Pubkey, AccountSharedData)>,
+}
+
+impl SendableCommitAccountsPayload {
+    pub fn get_signature(&self) -> Signature {
+        self.transaction.get_signature()
+    }
+}
+
+/// Represents a transaction that has been sent to chain and is pending
+/// completion.
+#[derive(Debug)]
+pub struct PendingCommitTransaction {
+    /// The signature of the transaction that was sent to chain.
+    pub signature: Signature,
+    /// The accounts that are undelegated on chain as part of this transaction.
+    pub undelegated_accounts: Vec<Pubkey>,
 }
 
 #[async_trait]
@@ -62,10 +93,10 @@ pub trait AccountCommitter: Send + Sync + 'static {
     /// as the [commit_state_data].
     /// Returns the transaction committing the accounts and the pubkeys of accounts
     /// it did commit
-    async fn create_commit_accounts_transactions(
+    async fn create_commit_accounts_transaction(
         &self,
         committees: Vec<AccountCommittee>,
-    ) -> AccountsResult<Vec<CommitAccountsPayload>>;
+    ) -> AccountsResult<CommitAccountsPayload>;
 
     /// Returns the main-chain signatures of the commit transactions
     /// This will only fail due to network issues, not if the transaction failed.
@@ -74,5 +105,5 @@ pub trait AccountCommitter: Send + Sync + 'static {
     async fn send_commit_transactions(
         &self,
         payloads: Vec<SendableCommitAccountsPayload>,
-    ) -> AccountsResult<Vec<Signature>>;
+    ) -> AccountsResult<Vec<PendingCommitTransaction>>;
 }

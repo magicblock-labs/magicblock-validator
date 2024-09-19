@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+
+DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
+
+ELFS_DIR=$DIR/../elfs
+
+PROGRAM_CARGO_TOML=$DIR/../program/Cargo.toml
+cargo build-sbf --manifest-path=$PROGRAM_CARGO_TOML --sbf-out-dir=$ELFS_DIR
+echo "Built schedulecommit in $ELFS_DIR"
+
+
+SECURITY_PROGRAM_CARGO_TOML=$DIR/../test-security/Cargo.toml
+cargo build-sbf --manifest-path=$SECURITY_PROGRAM_CARGO_TOML --sbf-out-dir=$ELFS_DIR
+echo "Built schedulecommit-security in $ELFS_DIR"

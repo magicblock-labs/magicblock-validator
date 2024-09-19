@@ -2,138 +2,181 @@ use std::sync::Arc;
 
 use conjunto_transwise::{
     transaction_accounts_extractor::TransactionAccountsExtractorImpl,
+    transaction_accounts_holder::TransactionAccountsHolder,
     transaction_accounts_validator::TransactionAccountsValidatorImpl,
-    CommitFrequency,
+    AccountChainSnapshot, AccountChainSnapshotShared, AccountChainState,
+    CommitFrequency, DelegationRecord,
 };
+use sleipnir_account_cloner::{AccountClonerOutput, AccountClonerStub};
 use sleipnir_accounts::{ExternalAccountsManager, LifecycleMode};
+use sleipnir_accounts_api::InternalAccountProviderStub;
 use solana_sdk::{
     account::{Account, AccountSharedData},
     native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
+    signature::Signature,
 };
 use stubs::{
-    account_cloner_stub::AccountClonerStub,
     account_committer_stub::AccountCommitterStub,
-    account_fetcher_stub::AccountFetcherStub,
-    account_updates_stub::AccountUpdatesStub,
-    internal_account_provider_stub::InternalAccountProviderStub,
     scheduled_commits_processor_stub::ScheduledCommitsProcessorStub,
 };
 use test_tools_core::init_logger;
 
 mod stubs;
 
-fn setup(
-    internal_account_provider: InternalAccountProviderStub,
-    account_fetcher: AccountFetcherStub,
-    account_cloner: AccountClonerStub,
-    account_committer: AccountCommitterStub,
-    account_updates: AccountUpdatesStub,
-    validator_auth_id: Pubkey,
-) -> ExternalAccountsManager<
+type StubbedAccountsManager = ExternalAccountsManager<
     InternalAccountProviderStub,
-    AccountFetcherStub,
     AccountClonerStub,
     AccountCommitterStub,
-    AccountUpdatesStub,
     TransactionAccountsExtractorImpl,
     TransactionAccountsValidatorImpl,
     ScheduledCommitsProcessorStub,
-> {
+>;
+
+fn setup(
+    internal_account_provider: InternalAccountProviderStub,
+    account_cloner: AccountClonerStub,
+    account_committer: AccountCommitterStub,
+) -> StubbedAccountsManager {
     ExternalAccountsManager {
         internal_account_provider,
-        account_fetcher,
-        account_committer: Arc::new(account_committer),
-        account_updates,
         account_cloner,
+        account_committer: Arc::new(account_committer),
         transaction_accounts_extractor: TransactionAccountsExtractorImpl,
         transaction_accounts_validator: TransactionAccountsValidatorImpl,
         scheduled_commits_processor: ScheduledCommitsProcessorStub::default(),
-        external_readonly_accounts: Default::default(),
-        external_writable_accounts: Default::default(),
         lifecycle: LifecycleMode::Ephemeral,
-        payer_init_lamports: Some(1_000 * LAMPORTS_PER_SOL),
-        validator_id: validator_auth_id,
+        external_commitable_accounts: Default::default(),
     }
 }
 
-fn acount_shared_data(pubkey: Pubkey) -> AccountSharedData {
-    AccountSharedData::from(Account {
+fn generate_account(pubkey: &Pubkey) -> Account {
+    Account {
         lamports: 1_000 * LAMPORTS_PER_SOL,
         // Account owns itself for simplicity, just so we can identify them
         // via an equality check
-        owner: pubkey,
+        owner: *pubkey,
         data: vec![],
         executable: false,
         rent_epoch: 0,
-    })
+    }
+}
+fn generate_delegated_account_chain_snapshot(
+    pubkey: &Pubkey,
+    account: &Account,
+    commit_frequency: CommitFrequency,
+) -> AccountChainSnapshotShared {
+    AccountChainSnapshot {
+        pubkey: *pubkey,
+        at_slot: 42,
+        chain_state: AccountChainState::Delegated {
+            account: account.clone(),
+            delegation_pda: Pubkey::new_unique(),
+            delegation_record: DelegationRecord {
+                authority: Pubkey::new_unique(),
+                owner: account.owner,
+                delegation_slot: 42,
+                commit_frequency,
+            },
+        },
+    }
+    .into()
 }
 
 #[tokio::test]
 async fn test_commit_two_delegated_accounts_one_needs_commit() {
     init_logger!();
 
-    let commit_needed = Pubkey::new_unique();
-    let commit_needed_acc = acount_shared_data(commit_needed);
-    let commit_not_needed = Pubkey::new_unique();
-    let commit_not_needed_acc = acount_shared_data(commit_not_needed);
+    let commit_needed_pubkey = Pubkey::new_unique();
+    let commit_needed_account = generate_account(&commit_needed_pubkey);
+    let commit_needed_account_shared =
+        AccountSharedData::from(commit_needed_account.clone());
 
-    let mut internal_account_provider = InternalAccountProviderStub::default();
-    internal_account_provider.add(commit_needed, commit_needed_acc.clone());
-    internal_account_provider.add(commit_not_needed, commit_not_needed_acc);
+    let commit_not_needed_pubkey = Pubkey::new_unique();
+    let commit_not_needed_account = generate_account(&commit_not_needed_pubkey);
+    let commit_not_needed_account_shared =
+        AccountSharedData::from(commit_not_needed_account.clone());
 
+    let internal_account_provider = InternalAccountProviderStub::default();
+    let account_cloner = AccountClonerStub::default();
     let account_committer = AccountCommitterStub::default();
-    let validator_auth_id = Pubkey::new_unique();
 
     let manager = setup(
-        internal_account_provider,
-        AccountFetcherStub::default(),
-        AccountClonerStub::default(),
+        internal_account_provider.clone(),
+        account_cloner.clone(),
         account_committer.clone(),
-        AccountUpdatesStub::default(),
-        validator_auth_id,
     );
 
-    let cloned_at_slot = 12;
-
-    manager.external_writable_accounts.insert(
-        commit_needed,
-        cloned_at_slot,
-        Some(CommitFrequency::Millis(1)),
+    // Clone the accounts through a dummy transaction
+    account_cloner.set(
+        &commit_needed_pubkey,
+        AccountClonerOutput::Cloned {
+            account_chain_snapshot: generate_delegated_account_chain_snapshot(
+                &commit_needed_pubkey,
+                &commit_needed_account,
+                CommitFrequency::Millis(1),
+            ),
+            signatures: vec![Signature::new_unique()].into(),
+        },
     );
-
-    manager.external_writable_accounts.insert(
-        commit_not_needed,
-        cloned_at_slot,
-        Some(CommitFrequency::Millis(60_000)),
+    account_cloner.set(
+        &commit_not_needed_pubkey,
+        AccountClonerOutput::Cloned {
+            account_chain_snapshot: generate_delegated_account_chain_snapshot(
+                &commit_not_needed_pubkey,
+                &commit_not_needed_account,
+                CommitFrequency::Millis(60_000),
+            ),
+            signatures: vec![Signature::new_unique()].into(),
+        },
     );
+    let result = manager
+        .ensure_accounts_from_holder(
+            TransactionAccountsHolder {
+                readonly: vec![commit_needed_pubkey, commit_not_needed_pubkey],
+                writable: vec![],
+                payer: Pubkey::new_unique(),
+            },
+            "tx-sig".to_string(),
+        )
+        .await;
+    assert!(result.is_ok());
 
+    // Once the accounts are cloned, make sure they've been added to the bank (Stubbed dumper doesn't do anything)
+    internal_account_provider
+        .set(commit_needed_pubkey, commit_needed_account_shared.clone());
+    internal_account_provider
+        .set(commit_not_needed_pubkey, commit_not_needed_account_shared);
+
+    // Since accounts are delegated, we should have initialized the commit timestamp
     let last_commit_of_commit_needed =
-        manager.last_commit(&commit_needed).unwrap();
+        manager.last_commit(&commit_needed_pubkey).unwrap();
     let last_commit_of_commit_not_needed =
-        manager.last_commit(&commit_not_needed).unwrap();
+        manager.last_commit(&commit_not_needed_pubkey).unwrap();
 
+    // Wait for one of the commit's frequency to be triggered
     tokio::time::sleep(tokio::time::Duration::from_millis(2)).await;
 
+    // Execute the commits of the accounts that needs it
     let result = manager.commit_delegated().await;
     // Ensure we committed the account that was due
     assert_eq!(account_committer.len(), 1);
     // with the current account data
     assert_eq!(
-        account_committer.committed(&commit_needed),
-        Some(commit_needed_acc)
+        account_committer.committed(&commit_needed_pubkey),
+        Some(commit_needed_account_shared)
     );
     // and that we returned that transaction signature for it.
     assert_eq!(result.unwrap().len(), 1);
 
     // Ensure that the last commit time was updated of the committed account
     assert!(
-        manager.last_commit(&commit_needed).unwrap()
+        manager.last_commit(&commit_needed_pubkey).unwrap()
             > last_commit_of_commit_needed
     );
     // but not of the one that didn't need commit.
     assert_eq!(
-        manager.last_commit(&commit_not_needed).unwrap(),
+        manager.last_commit(&commit_not_needed_pubkey).unwrap(),
         last_commit_of_commit_not_needed
     );
 }

@@ -9,6 +9,7 @@ edition.workspace = true
 
 [dependencies]
 console-subscriber = { workspace = true, optional = true }
+env_logger = { workspace = true }
 log = { workspace = true }
 sleipnir-api = { workspace = true }
 sleipnir-config = { workspace = true }

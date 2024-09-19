@@ -1,13 +1,11 @@
-use std::{
-    net::{IpAddr, Ipv4Addr},
-    str::FromStr,
-};
+use std::net::{IpAddr, Ipv4Addr};
 
 use sleipnir_config::{
-    AccountsConfig, CommitStrategy, GeyserGrpcConfig, LifecycleMode, Payer,
-    ProgramConfig, RemoteConfig, RpcConfig, SleipnirConfig, ValidatorConfig,
+    AccountsConfig, AllowedProgram, CommitStrategy, GeyserGrpcConfig,
+    LifecycleMode, Payer, ProgramConfig, RemoteConfig, RpcConfig,
+    SleipnirConfig, ValidatorConfig,
 };
-use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
+use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey};
 use url::Url;
 
 #[test]
@@ -41,22 +39,9 @@ fn test_ephemeral_toml() {
         SleipnirConfig {
             accounts: AccountsConfig {
                 lifecycle: LifecycleMode::Ephemeral,
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-    );
-}
-
-#[test]
-fn test_ephemeral_limited_toml() {
-    let toml = include_str!("fixtures/04_ephemeral_limited.toml");
-    let config = toml::from_str::<SleipnirConfig>(toml).unwrap();
-    assert_eq!(
-        config,
-        SleipnirConfig {
-            accounts: AccountsConfig {
-                lifecycle: LifecycleMode::EphemeralLimited,
+                allowed_programs: vec![AllowedProgram {
+                    id: pubkey!("wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4")
+                }],
                 ..Default::default()
             },
             ..Default::default()
@@ -101,10 +86,7 @@ fn test_local_dev_with_programs_toml() {
                 ..Default::default()
             },
             programs: vec![ProgramConfig {
-                id: Pubkey::from_str(
-                    "wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4"
-                )
-                .unwrap(),
+                id: pubkey!("wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4"),
                 path: "../demos/magic-worm/target/deploy/program_solana.so"
                     .to_string(),
             }],

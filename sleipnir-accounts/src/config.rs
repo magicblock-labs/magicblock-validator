@@ -1,4 +1,8 @@
+use std::collections::HashSet;
+
+use sleipnir_account_cloner::AccountClonerPermissions;
 use sleipnir_mutator::Cluster;
+use solana_sdk::pubkey::Pubkey;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct AccountsConfig {
@@ -6,6 +10,7 @@ pub struct AccountsConfig {
     pub lifecycle: LifecycleMode,
     pub commit_compute_unit_price: u64,
     pub payer_init_lamports: Option<u64>,
+    pub allowed_program_ids: Option<HashSet<Pubkey>>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -13,56 +18,53 @@ pub enum LifecycleMode {
     Replica,
     ProgramsReplica,
     Ephemeral,
-    EphemeralLimited,
     Offline,
 }
 
 impl LifecycleMode {
-    pub fn is_clone_readable_none(&self) -> bool {
+    pub fn to_account_cloner_permissions(&self) -> AccountClonerPermissions {
         match self {
-            LifecycleMode::Replica => false,
-            LifecycleMode::ProgramsReplica => false,
-            LifecycleMode::Ephemeral => false,
-            LifecycleMode::EphemeralLimited => false,
-            LifecycleMode::Offline => true,
-        }
-    }
-    pub fn is_clone_readable_programs_only(&self) -> bool {
-        match self {
-            LifecycleMode::Replica => false,
-            LifecycleMode::ProgramsReplica => true,
-            LifecycleMode::Ephemeral => false,
-            LifecycleMode::EphemeralLimited => true,
-            LifecycleMode::Offline => false,
+            LifecycleMode::Replica => AccountClonerPermissions {
+                allow_cloning_refresh: false,
+                allow_cloning_new_accounts: true,
+                allow_cloning_payer_accounts: true,
+                allow_cloning_pda_accounts: true,
+                allow_cloning_delegated_accounts: true,
+                allow_cloning_program_accounts: true,
+            },
+            LifecycleMode::ProgramsReplica => AccountClonerPermissions {
+                allow_cloning_refresh: false,
+                allow_cloning_new_accounts: false,
+                allow_cloning_payer_accounts: false,
+                allow_cloning_pda_accounts: false,
+                allow_cloning_delegated_accounts: false,
+                allow_cloning_program_accounts: true,
+            },
+            LifecycleMode::Ephemeral => AccountClonerPermissions {
+                allow_cloning_refresh: true,
+                allow_cloning_new_accounts: true,
+                allow_cloning_payer_accounts: true,
+                allow_cloning_pda_accounts: true,
+                allow_cloning_delegated_accounts: true,
+                allow_cloning_program_accounts: true,
+            },
+            LifecycleMode::Offline => AccountClonerPermissions {
+                allow_cloning_refresh: false,
+                allow_cloning_new_accounts: false,
+                allow_cloning_payer_accounts: false,
+                allow_cloning_pda_accounts: false,
+                allow_cloning_delegated_accounts: false,
+                allow_cloning_program_accounts: false,
+            },
         }
     }
 
-    pub fn is_clone_writable_none(&self) -> bool {
-        match self {
-            LifecycleMode::Replica => false,
-            LifecycleMode::ProgramsReplica => true,
-            LifecycleMode::Ephemeral => false,
-            LifecycleMode::EphemeralLimited => false,
-            LifecycleMode::Offline => true,
-        }
-    }
-
-    pub fn requires_delegation_for_writables(&self) -> bool {
+    pub fn requires_ephemeral_validation(&self) -> bool {
         match self {
             LifecycleMode::Replica => false,
             LifecycleMode::ProgramsReplica => false,
             LifecycleMode::Ephemeral => true,
-            LifecycleMode::EphemeralLimited => true,
             LifecycleMode::Offline => false,
-        }
-    }
-    pub fn allows_new_account_for_writables(&self) -> bool {
-        match self {
-            LifecycleMode::Replica => true,
-            LifecycleMode::ProgramsReplica => true,
-            LifecycleMode::Ephemeral => false,
-            LifecycleMode::EphemeralLimited => false,
-            LifecycleMode::Offline => true,
         }
     }
 }

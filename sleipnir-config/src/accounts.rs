@@ -1,14 +1,17 @@
-use std::error::Error;
+use std::str::FromStr;
 
 use serde::{Deserialize, Serialize};
-use solana_sdk::native_token::LAMPORTS_PER_SOL;
+use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
 use strum_macros::EnumString;
 use url::Url;
+
+use crate::errors::{ConfigError, ConfigResult};
 
 // -----------------
 // AccountsConfig
 // -----------------
 #[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct AccountsConfig {
     #[serde(default)]
     pub remote: RemoteConfig,
@@ -18,6 +21,8 @@ pub struct AccountsConfig {
     pub commit: CommitStrategy,
     #[serde(default)]
     pub payer: Payer,
+    #[serde(default)]
+    pub allowed_programs: Vec<AllowedProgram>,
 }
 
 // -----------------
@@ -75,17 +80,14 @@ pub enum LifecycleMode {
     #[default]
     ProgramsReplica,
     Ephemeral,
-    EphemeralLimited,
     Offline,
 }
 
 // -----------------
 // CommitStrategy
 // -----------------
-// This is the lowest we found to pass the transactions through mainnet fairly
-// consistently
-const COMPUTE_UNIT_PRICE: u64 = 1_000_000; // 1 Lamport
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct CommitStrategy {
     #[serde(default = "default_frequency_millis")]
     pub frequency_millis: u64,
@@ -100,7 +102,9 @@ fn default_frequency_millis() -> u64 {
 }
 
 fn default_compute_unit_price() -> u64 {
-    COMPUTE_UNIT_PRICE
+    // This is the lowest we found to pass the transactions through mainnet fairly
+    // consistently
+    1_000_000 // 1_000_000 micro-lamports == 1 Lamport
 }
 
 impl Default for CommitStrategy {
@@ -116,6 +120,7 @@ impl Default for CommitStrategy {
 // Payer
 // -----------------
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct Payer {
     /// The payer init balance in lamports.
     /// Read it via [Self::try_init_lamports].
@@ -132,13 +137,38 @@ impl Payer {
             init_sol,
         }
     }
-    pub fn try_init_lamports(&self) -> Result<Option<u64>, Box<dyn Error>> {
+    pub fn try_init_lamports(&self) -> ConfigResult<Option<u64>> {
         if self.init_lamports.is_some() && self.init_sol.is_some() {
-            return Err("Cannot specify both init_lamports and init_sol".into());
+            return Err(ConfigError::CannotSpecifyBothInitLamportAndInitSol);
         }
         Ok(match self.init_lamports {
             Some(lamports) => Some(lamports),
             None => self.init_sol.map(|sol| sol * LAMPORTS_PER_SOL),
         })
     }
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct AllowedProgram {
+    #[serde(
+        deserialize_with = "pubkey_deserialize",
+        serialize_with = "pubkey_serialize"
+    )]
+    pub id: Pubkey,
+}
+
+fn pubkey_deserialize<'de, D>(deserializer: D) -> Result<Pubkey, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let s = String::deserialize(deserializer)?;
+    Pubkey::from_str(&s).map_err(serde::de::Error::custom)
+}
+
+fn pubkey_serialize<S>(key: &Pubkey, serializer: S) -> Result<S::Ok, S::Error>
+where
+    S: serde::Serializer,
+{
+    key.to_string().serialize(serializer)
 }

@@ -1,0 +1,14 @@
+[package]
+name = "test-issues"
+version.workspace = true
+edition.workspace = true
+
+[dev-dependencies]
+integration-test-tools = { workspace = true }
+log = { workspace = true }
+test-tools-core = { workspace = true }
+
+[features]
+no-entrypoint = []
+cpi = ["no-entrypoint"]
+default = []

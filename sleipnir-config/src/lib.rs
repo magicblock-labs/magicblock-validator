@@ -22,6 +22,7 @@ pub use rpc::*;
 pub use validator::*;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 pub struct SleipnirConfig {
     #[serde(default)]
     pub accounts: AccountsConfig,

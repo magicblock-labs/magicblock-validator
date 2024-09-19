@@ -4244,6 +4244,62 @@ dependencies = [
 ]
 
 [[package]]
+name = "sleipnir-account-cloner"
+version = "1.19.0"
+dependencies = [
+ "async-trait",
+ "conjunto-transwise",
+ "delegation-program",
+ "futures-util",
+ "log",
+ "sleipnir-account-dumper",
+ "sleipnir-account-fetcher",
+ "sleipnir-account-updates",
+ "sleipnir-accounts-api",
+ "sleipnir-bank",
+ "sleipnir-mutator",
+ "solana-sdk",
+ "test-tools",
+ "thiserror",
+ "tokio",
+ "tokio-util 0.7.11",
+]
+
+[[package]]
+name = "sleipnir-account-dumper"
+version = "1.19.0"
+dependencies = [
+ "async-trait",
+ "conjunto-transwise",
+ "futures-util",
+ "log",
+ "sleipnir-bank",
+ "sleipnir-mutator",
+ "sleipnir-processor",
+ "sleipnir-transaction-status",
+ "solana-sdk",
+ "test-tools",
+ "thiserror",
+ "tokio",
+ "tokio-util 0.7.11",
+]
+
+[[package]]
+name = "sleipnir-account-fetcher"
+version = "1.19.0"
+dependencies = [
+ "async-trait",
+ "conjunto-transwise",
+ "futures-util",
+ "log",
+ "solana-sdk",
+ "test-tools",
+ "thiserror",
+ "tokio",
+ "tokio-util 0.7.11",
+]
+
+[[package]]
 name = "sleipnir-account-updates"
 version = "1.19.0"
 dependencies = [
@@ -4254,6 +4310,7 @@ dependencies = [
  "solana-pubsub-client",
  "solana-rpc-client-api",
  "solana-sdk",
+ "test-tools",
  "thiserror",
  "tokio",
  "tokio-util 0.7.11",
@@ -4266,9 +4323,38 @@ dependencies = [
  "async-trait",
  "conjunto-transwise",
  "delegation-program",
- "lazy_static",
+ "futures-util",
  "log",
+ "sleipnir-account-cloner",
+ "sleipnir-account-dumper",
+ "sleipnir-account-fetcher",
  "sleipnir-account-updates",
+ "sleipnir-accounts-api",
+ "sleipnir-bank",
+ "sleipnir-core",
+ "sleipnir-mutator",
+ "sleipnir-processor",
+ "sleipnir-program",
+ "sleipnir-transaction-status",
+ "solana-rpc-client",
+ "solana-rpc-client-api",
+ "solana-sdk",
+ "test-tools-core",
+ "thiserror",
+ "tokio",
+ "tokio-util 0.7.11",
+ "url 2.5.1",
+]
+
+[[package]]
+name = "sleipnir-accounts-api"
+version = "1.19.0"
+dependencies = [
+ "async-trait",
+ "conjunto-transwise",
+ "delegation-program",
+ "futures-util",
+ "log",
  "sleipnir-bank",
  "sleipnir-mutator",
  "sleipnir-processor",
@@ -4308,8 +4394,12 @@ dependencies = [
  "crossbeam-channel",
  "itertools 0.10.5",
  "log",
+ "sleipnir-account-cloner",
+ "sleipnir-account-dumper",
+ "sleipnir-account-fetcher",
  "sleipnir-account-updates",
  "sleipnir-accounts",
+ "sleipnir-accounts-api",
  "sleipnir-accounts-db",
  "sleipnir-bank",
  "sleipnir-config",
@@ -5794,6 +5884,7 @@ name = "test-bins"
 version = "1.19.0"
 dependencies = [
  "console-subscriber",
+ "env_logger 0.11.3",
  "log",
  "sleipnir-api",
  "sleipnir-config",

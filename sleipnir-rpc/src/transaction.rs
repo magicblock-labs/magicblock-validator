@@ -4,14 +4,12 @@ use base64::{prelude::BASE64_STANDARD, Engine};
 use bincode::Options;
 use jsonrpc_core::{Error, ErrorCode, Result};
 use log::*;
-use sleipnir_accounts::{
-    errors::AccountsResult, execute_sanitized_transaction, AccountsManager,
-};
+use sleipnir_accounts::{errors::AccountsResult, AccountsManager};
 use sleipnir_bank::bank::Bank;
+use sleipnir_processor::execute_transaction::execute_sanitized_transaction;
 use solana_metrics::inc_new_counter_info;
 use solana_rpc_client_api::custom_error::RpcCustomError;
 use solana_sdk::{
-    feature_set,
     hash::Hash,
     message::AddressLoader,
     packet::PACKET_DATA_SIZE,
@@ -224,28 +222,28 @@ pub(crate) fn sig_verify_transaction(
 
 /// Verifies both transaction signature and precompiles which results in
 /// max overhead and thus should only be used when simulating transactions
-pub(crate) fn sig_verify_transaction_and_check_precompiles(
-    transaction: &SanitizedTransaction,
-    feature_set: &feature_set::FeatureSet,
-) -> Result<()> {
-    sig_verify_transaction(transaction)?;
-
-    #[allow(clippy::question_mark)]
-    if transaction.verify().is_err() {
-        return Err(
-            RpcCustomError::TransactionSignatureVerificationFailure.into()
-        );
-    }
-
-    if let Err(e) = transaction.verify_precompiles(feature_set) {
-        return Err(RpcCustomError::TransactionPrecompileVerificationFailure(
-            e,
-        )
-        .into());
-    }
-
-    Ok(())
-}
+// pub(crate) fn sig_verify_transaction_and_check_precompiles(
+//     transaction: &SanitizedTransaction,
+//     feature_set: &feature_set::FeatureSet,
+// ) -> Result<()> {
+//     sig_verify_transaction(transaction)?;
+//
+//     #[allow(clippy::question_mark)]
+//     if transaction.verify().is_err() {
+//         return Err(
+//             RpcCustomError::TransactionSignatureVerificationFailure.into()
+//         );
+//     }
+//
+//     if let Err(e) = transaction.verify_precompiles(feature_set) {
+//         return Err(RpcCustomError::TransactionPrecompileVerificationFailure(
+//             e,
+//         )
+//         .into());
+//     }
+//
+//     Ok(())
+// }
 
 pub(crate) async fn ensure_accounts(
     accounts_manager: &AccountsManager,

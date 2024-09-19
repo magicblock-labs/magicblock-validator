@@ -12,8 +12,12 @@ conjunto-transwise = { workspace = true }
 crossbeam-channel = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }
+sleipnir-account-cloner = { workspace = true }
+sleipnir-account-dumper = { workspace = true }
+sleipnir-account-fetcher = { workspace = true }
 sleipnir-account-updates = { workspace = true }
 sleipnir-accounts = { workspace = true }
+sleipnir-accounts-api = { workspace = true }
 sleipnir-accounts-db = { workspace = true }
 sleipnir-bank = { workspace = true }
 sleipnir-config = { workspace = true }

@@ -21,12 +21,15 @@ use solana_sdk::{
 
 use crate::{
     process_scheduled_commit_sent,
-    schedule_transactions::process_schedule_commit,
+    schedule_transactions::{
+        process_schedule_commit, ProcessScheduleCommitOptions,
+    },
     sleipnir_instruction::{
         AccountModificationForInstruction, SleipnirError, SleipnirInstruction,
     },
     validator_authority_id,
 };
+
 pub const DEFAULT_COMPUTE_UNITS: u64 = 150;
 
 declare_process_instruction!(
@@ -49,8 +52,21 @@ declare_process_instruction!(
                     &mut account_mods,
                 )
             }
-            SleipnirInstruction::ScheduleCommit => {
-                process_schedule_commit(signers, invoke_context)
+            SleipnirInstruction::ScheduleCommit => process_schedule_commit(
+                signers,
+                invoke_context,
+                ProcessScheduleCommitOptions {
+                    request_undelegation: false,
+                },
+            ),
+            SleipnirInstruction::ScheduleCommitAndUndelegate => {
+                process_schedule_commit(
+                    signers,
+                    invoke_context,
+                    ProcessScheduleCommitOptions {
+                        request_undelegation: true,
+                    },
+                )
             }
             SleipnirInstruction::ScheduledCommitSent(id) => {
                 process_scheduled_commit_sent(
@@ -236,13 +252,12 @@ fn mutate_accounts(
         if let Some(data_key) = modification.data_key.take() {
             let data = get_data(data_key)
                 .ok_or(SleipnirError::AccountDataMissing)
-                .map_err(|err| {
+                .inspect_err(|_| {
                     ic_msg!(
                         invoke_context,
                         "MutateAccounts: account data for the provided key {} is missing",
                         data_key
                     );
-                    err
                 })?;
             account.borrow_mut().set_data_from_slice(data.as_slice());
         }

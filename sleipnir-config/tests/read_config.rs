@@ -1,14 +1,13 @@
 use std::{
     env,
     net::{IpAddr, Ipv4Addr},
-    str::FromStr,
 };
 
 use sleipnir_config::{
     AccountsConfig, CommitStrategy, GeyserGrpcConfig, LifecycleMode,
     ProgramConfig, RemoteConfig, RpcConfig, SleipnirConfig, ValidatorConfig,
 };
-use solana_sdk::pubkey::Pubkey;
+use solana_sdk::pubkey;
 use test_tools_core::paths::cargo_workspace_dir;
 use url::Url;
 
@@ -35,10 +34,7 @@ fn test_load_local_dev_with_programs_toml() {
                 ..Default::default()
             },
             programs: vec![ProgramConfig {
-                id: Pubkey::from_str(
-                    "wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4"
-                )
-                .unwrap(),
+                id: pubkey!("wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4"),
                 path: format!(
                     "{}/../demos/magic-worm/target/deploy/program_solana.so",
                     config_file_dir.parent().unwrap().to_str().unwrap()
@@ -74,7 +70,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
 
     // Set the ENV variables
     env::set_var("ACCOUNTS_REMOTE", base_cluster);
-    env::set_var("ACCOUNTS_LIFECYCLE", "ephemeral-limited");
+    env::set_var("ACCOUNTS_LIFECYCLE", "ephemeral");
     env::set_var("ACCOUNTS_COMMIT_FREQUENCY_MILLIS", "123");
     env::set_var("ACCOUNTS_COMMIT_COMPUTE_UNIT_PRICE", "1");
     env::set_var("RPC_ADDR", "0.1.0.1");
@@ -92,7 +88,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
         config,
         SleipnirConfig {
             accounts: AccountsConfig {
-                lifecycle: LifecycleMode::EphemeralLimited,
+                lifecycle: LifecycleMode::Ephemeral,
                 commit: CommitStrategy {
                     frequency_millis: 123,
                     compute_unit_price: 1,
@@ -101,10 +97,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
                 ..Default::default()
             },
             programs: vec![ProgramConfig {
-                id: Pubkey::from_str(
-                    "wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4"
-                )
-                .unwrap(),
+                id: pubkey!("wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4"),
                 path: format!(
                     "{}/../demos/magic-worm/target/deploy/program_solana.so",
                     config_file_dir.parent().unwrap().to_str().unwrap()

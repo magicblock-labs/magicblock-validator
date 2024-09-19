@@ -6,7 +6,8 @@ use std::{
 use async_trait::async_trait;
 use sleipnir_accounts::{
     errors::AccountsResult, AccountCommittee, AccountCommitter,
-    CommitAccountsPayload, SendableCommitAccountsPayload,
+    CommitAccountsPayload, CommitAccountsTransaction, PendingCommitTransaction,
+    SendableCommitAccountsPayload,
 };
 use solana_sdk::{
     account::AccountSharedData, pubkey::Pubkey, signature::Signature,
@@ -30,27 +31,35 @@ impl AccountCommitterStub {
 
 #[async_trait]
 impl AccountCommitter for AccountCommitterStub {
-    async fn create_commit_accounts_transactions(
+    async fn create_commit_accounts_transaction(
         &self,
         committees: Vec<AccountCommittee>,
-    ) -> AccountsResult<Vec<CommitAccountsPayload>> {
+    ) -> AccountsResult<CommitAccountsPayload> {
         let transaction = Transaction::default();
         let payload = CommitAccountsPayload {
-            transaction: Some(transaction),
+            transaction: Some(CommitAccountsTransaction {
+                transaction,
+                undelegated_accounts: Vec::new(),
+            }),
             committees: committees
                 .iter()
                 .map(|x| (x.pubkey, x.account_data.clone()))
                 .collect(),
         };
-        Ok(vec![payload])
+        Ok(payload)
     }
 
     async fn send_commit_transactions(
         &self,
         payloads: Vec<SendableCommitAccountsPayload>,
-    ) -> AccountsResult<Vec<Signature>> {
-        let signatures =
-            payloads.iter().map(|_| Signature::new_unique()).collect();
+    ) -> AccountsResult<Vec<PendingCommitTransaction>> {
+        let signatures = payloads
+            .iter()
+            .map(|_| PendingCommitTransaction {
+                signature: Signature::new_unique(),
+                undelegated_accounts: Vec::new(),
+            })
+            .collect();
         for payload in payloads {
             for (pubkey, account) in payload.committees {
                 self.committed_accounts

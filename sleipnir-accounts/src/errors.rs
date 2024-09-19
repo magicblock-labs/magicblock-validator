@@ -1,3 +1,7 @@
+use sleipnir_account_cloner::{
+    AccountClonerError, AccountClonerUnclonableReason,
+};
+use solana_sdk::pubkey::Pubkey;
 use thiserror::Error;
 
 pub type AccountsResult<T> = std::result::Result<T, AccountsError>;
@@ -19,6 +23,15 @@ pub enum AccountsError {
     #[error("TransactionError")]
     TransactionError(#[from] solana_sdk::transaction::TransactionError),
 
+    #[error("AccountClonerError")]
+    AccountClonerError(#[from] AccountClonerError),
+
+    #[error("UnclonableAccountUsedAsWritableInEphemeral '{0}' ('{1:?}')")]
+    UnclonableAccountUsedAsWritableInEphemeral(
+        Pubkey,
+        AccountClonerUnclonableReason,
+    ),
+
     #[error("InvalidRpcUrl '{0}'")]
     InvalidRpcUrl(String),
 
@@ -34,6 +47,6 @@ pub enum AccountsError {
     #[error("FailedToSendTransaction '{0}'")]
     FailedToSendTransaction(String),
 
-    #[error("FailedToConfirmTransaction '{0}'")]
-    FailedToConfirmTransaction(String),
+    #[error("Too many committees: {0}")]
+    TooManyCommittees(usize),
 }

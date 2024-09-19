@@ -1,0 +1,23 @@
+[meta]
+name = "Devtool:8899"
+
+[node.accounts]
+remote = "devnet"
+lifecycle = "offline"
+commit = { frequency_millis = 9_000_000_000_000, compute_unit_price = 1_000_000 }
+
+[node.validator]
+millis_per_slot = 50
+sigverify = true
+
+[[node.program]]
+id = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+path = "../schedulecommit/elfs/dlp.so"
+
+[[node.program]]
+id = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY"
+path = "../schedulecommit/elfs/schedulecommit_program.so"
+
+[[node.program]]
+id = "4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr"
+path = "../schedulecommit/elfs/schedulecommit_test_security.so"

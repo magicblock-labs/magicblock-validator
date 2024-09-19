@@ -107,6 +107,7 @@ impl Full for FullImpl {
             "get_signature_statuses rpc request received: {:?}",
             signature_strs.len()
         );
+        trace!("signatures: {:?}", signature_strs);
         if signature_strs.len() > MAX_GET_SIGNATURE_STATUSES_QUERY_ITEMS {
             return Box::pin(future::err(Error::invalid_params(format!(
                     "Too many inputs provided; max {MAX_GET_SIGNATURE_STATUSES_QUERY_ITEMS}"

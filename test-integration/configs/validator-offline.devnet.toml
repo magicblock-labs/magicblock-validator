@@ -1,0 +1,26 @@
+[accounts]
+remote = "devnet"
+lifecycle = "offline"
+commit = { frequency_millis = 9_000_000_000_000, compute_unit_price = 1_000_000 }
+
+[validator]
+millis_per_slot = 50
+sigverify = true
+
+[[program]]
+id = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+path = "../schedulecommit/elfs/dlp.so"
+
+[[program]]
+id = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY"
+path = "../schedulecommit/elfs/schedulecommit_program.so"
+
+[[program]]
+id = "4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr"
+path = "../schedulecommit/elfs/schedulecommit_test_security.so"
+
+[rpc]
+port = 7799
+
+[geyser_grpc]
+port = 10001
