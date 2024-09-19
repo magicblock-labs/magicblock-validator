@@ -156,7 +156,7 @@ pub fn modify_accounts(
     into_transaction(&validator_authority(), ix, recent_blockhash)
 }
 
-pub(crate) fn modify_accounts_instruction(
+pub fn modify_accounts_instruction(
     account_modifications: Vec<AccountModification>,
 ) -> Instruction {
     let mut account_metas =

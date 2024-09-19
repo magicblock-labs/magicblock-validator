@@ -4,7 +4,7 @@ use sleipnir_bank::bank::Bank;
 use sleipnir_mutator::{
     program::{create_program_modifications, ProgramModifications},
     transactions::{
-        transaction_to_clone_regular_account, transactions_to_clone_program,
+        transaction_to_clone_program, transaction_to_clone_regular_account,
     },
     AccountModification,
 };
@@ -43,16 +43,6 @@ impl AccountDumperBank {
             self.transaction_status_sender.as_ref(),
         )
         .map_err(AccountDumperError::TransactionError)
-    }
-
-    fn execute_transactions(
-        &self,
-        transactions: Vec<Transaction>,
-    ) -> AccountDumperResult<Vec<Signature>> {
-        transactions
-            .into_iter()
-            .map(|transaction| self.execute_transaction(transaction))
-            .collect()
     }
 }
 
@@ -131,7 +121,7 @@ impl AccountDumper for AccountDumperBank {
         program_data_pubkey: &Pubkey,
         program_data_account: &Account,
         program_idl: Option<(Pubkey, Account)>,
-    ) -> AccountDumperResult<Vec<Signature>> {
+    ) -> AccountDumperResult<Signature> {
         let ProgramModifications {
             program_id_modification,
             program_data_modification,
@@ -152,7 +142,7 @@ impl AccountDumper for AccountDumperBank {
                 ))
             });
         let needs_upgrade = self.bank.has_account(program_id_pubkey);
-        let transactions = transactions_to_clone_program(
+        let transaction = transaction_to_clone_program(
             needs_upgrade,
             program_id_modification,
             program_data_modification,
@@ -160,6 +150,6 @@ impl AccountDumper for AccountDumperBank {
             program_idl_modification,
             self.bank.last_blockhash(),
         );
-        self.execute_transactions(transactions)
+        self.execute_transaction(transaction)
     }
 }

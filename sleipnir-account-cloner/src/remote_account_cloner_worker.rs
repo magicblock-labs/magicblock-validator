@@ -270,7 +270,7 @@ where
         let account_chain_snapshot =
             self.fetch_account_chain_snapshot(pubkey).await?;
         // Generate cloning transactions
-        let signatures = match &account_chain_snapshot.chain_state {
+        let signature = match &account_chain_snapshot.chain_state {
             // If the account is not present on-chain
             // we may want to clear the local state
             AccountChainState::NewAccount => {
@@ -373,40 +373,37 @@ where
         // Return the result
         Ok(AccountClonerOutput::Cloned {
             account_chain_snapshot,
-            signatures: Arc::new(signatures),
+            signatures: Arc::new(vec![signature]),
         })
     }
 
     fn do_clone_new_account(
         &self,
         pubkey: &Pubkey,
-    ) -> AccountClonerResult<Vec<Signature>> {
+    ) -> AccountClonerResult<Signature> {
         self.account_dumper
             .dump_new_account(pubkey)
             .map_err(AccountClonerError::AccountDumperError)
-            .map(|signature| vec![signature])
     }
 
     fn do_clone_payer_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,
-    ) -> AccountClonerResult<Vec<Signature>> {
+    ) -> AccountClonerResult<Signature> {
         self.account_dumper
             .dump_payer_account(pubkey, account, self.payer_init_lamports)
             .map_err(AccountClonerError::AccountDumperError)
-            .map(|signature| vec![signature])
     }
 
     fn do_clone_pda_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,
-    ) -> AccountClonerResult<Vec<Signature>> {
+    ) -> AccountClonerResult<Signature> {
         self.account_dumper
             .dump_pda_account(pubkey, account)
             .map_err(AccountClonerError::AccountDumperError)
-            .map(|signature| vec![signature])
     }
 
     fn do_clone_delegated_account(
@@ -415,7 +412,7 @@ where
         account: &Account,
         owner: &Pubkey,
         delegation_slot: Slot,
-    ) -> AccountClonerResult<Vec<Signature>> {
+    ) -> AccountClonerResult<Signature> {
         // If we already cloned this account from the same delegation slot
         // Keep the local state as source of truth even if it changed on-chain
         if let Some(AccountClonerOutput::Cloned {
@@ -428,7 +425,7 @@ where
             } = &account_chain_snapshot.chain_state
             {
                 if delegation_record.delegation_slot == delegation_slot {
-                    return Ok(vec![]);
+                    return Ok(Signature::default());
                 }
             }
         };
@@ -436,14 +433,13 @@ where
         self.account_dumper
             .dump_delegated_account(pubkey, account, owner)
             .map_err(AccountClonerError::AccountDumperError)
-            .map(|signature| vec![signature])
     }
 
     async fn do_clone_program_accounts(
         &self,
         pubkey: &Pubkey,
         account: &Account,
-    ) -> AccountClonerResult<Vec<Signature>> {
+    ) -> AccountClonerResult<Signature> {
         let program_id_pubkey = pubkey;
         let program_id_account = account;
         let program_data_pubkey = &get_program_data_address(program_id_pubkey);

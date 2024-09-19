@@ -2,7 +2,7 @@ use sleipnir_bank::bank_dev_utils::transactions::{
     create_solx_send_post_transaction, SolanaxPostAccounts,
 };
 use sleipnir_mutator::{
-    fetch::transactions_to_clone_pubkey_from_cluster, Cluster,
+    fetch::transaction_to_clone_pubkey_from_cluster, Cluster,
 };
 use solana_sdk::{pubkey, pubkey::Pubkey};
 use test_tools::{
@@ -28,10 +28,10 @@ async fn main() {
 
     // 1. Exec Clone Transaction
     {
-        let txs = {
+        let tx = {
             let slot = tx_processor.bank().slot();
             let recent_blockhash = tx_processor.bank().last_blockhash();
-            transactions_to_clone_pubkey_from_cluster(
+            transaction_to_clone_pubkey_from_cluster(
                 // We could also use Cluster::Development here which has the same URL
                 // but wanted to demonstrate using a custom URL
                 &Cluster::Custom("http://localhost:8899".to_string()),
@@ -45,7 +45,7 @@ async fn main() {
             .expect("Failed to create clone transaction")
         };
 
-        let result = tx_processor.process(txs).unwrap();
+        let result = tx_processor.process(vec![tx]).unwrap();
 
         let (_, exec_details) = result.transactions.values().next().unwrap();
         log_exec_details(exec_details);

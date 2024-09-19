@@ -115,11 +115,31 @@ fn mutate_accounts(
     transaction_context: &TransactionContext,
     account_mods: &mut HashMap<Pubkey, AccountModificationForInstruction>,
 ) -> Result<(), InstructionError> {
-    let accounts_len = transaction_context.get_number_of_accounts();
+    let instruction_context =
+        transaction_context.get_current_instruction_context()?;
+
+    let accounts_len = instruction_context.get_number_of_instruction_accounts();
+
     // First account is the Sleipnir authority
-    // Last account is the implicit NativeLoader
-    let accounts_to_mod_len = accounts_len - 2;
+    let accounts_to_mod_len = accounts_len - 1;
     let account_mods_len = account_mods.len() as u64;
+
+    eprintln!(
+        "mutate_accounts:{},{}",
+        account_mods_len, accounts_to_mod_len
+    );
+    eprintln!("account_mods:{:?}", account_mods.keys());
+
+    for iidx in 0..accounts_len {
+        let tidx = instruction_context
+            .get_index_of_instruction_account_in_transaction(iidx)?;
+        eprintln!(
+            "account_info:{:?} -> {:?} -> {:?}",
+            iidx,
+            tidx,
+            transaction_context.get_key_of_account_at_index(tidx)
+        );
+    }
 
     // 1. Checks
     let validator_authority_acc = {
@@ -154,9 +174,12 @@ fn mutate_accounts(
             );
         }
 
+        let authority_transaction_index = instruction_context
+            .get_index_of_instruction_account_in_transaction(0)?;
+
         // 1.4. Check that first account is the Sleipnir authority
-        let sleipnir_authority_key =
-            transaction_context.get_key_of_account_at_index(0)?;
+        let sleipnir_authority_key = transaction_context
+            .get_key_of_account_at_index(authority_transaction_index)?;
         if sleipnir_authority_key != &validator_authority_id {
             ic_msg!(
                 invoke_context,
@@ -166,8 +189,8 @@ fn mutate_accounts(
                 SleipnirError::FirstAccountNeedsToBeSleipnirAuthority.into()
             );
         }
-        let sleipnir_authority_acc =
-            transaction_context.get_account_at_index(0)?;
+        let sleipnir_authority_acc = transaction_context
+            .get_account_at_index(authority_transaction_index)?;
         if sleipnir_authority_acc
             .borrow()
             .owner()
@@ -188,12 +211,15 @@ fn mutate_accounts(
     let mut lamports_to_debit: i128 = 0;
 
     // 2. Apply account modifications
-    for idx in 0..accounts_to_mod_len {
+    for idx in 0..account_mods_len {
         // NOTE: first account is the Sleipnir authority, account mods start at second account
-        let account_idx = idx + 1;
-        let account = transaction_context.get_account_at_index(account_idx)?;
-        let account_key =
-            transaction_context.get_key_of_account_at_index(account_idx)?;
+        let account_idx = (idx + 1) as u16;
+        let account_transaction_index = instruction_context
+            .get_index_of_instruction_account_in_transaction(account_idx)?;
+        let account = transaction_context
+            .get_account_at_index(account_transaction_index)?;
+        let account_key = transaction_context
+            .get_key_of_account_at_index(account_transaction_index)?;
 
         let mut modification = account_mods.remove(account_key).ok_or_else(|| {
             ic_msg!(
@@ -203,6 +229,13 @@ fn mutate_accounts(
             );
             SleipnirError::AccountModificationMissing
         })?;
+
+        eprintln!(
+            "MUTATING:{},{} data:{}",
+            idx,
+            account_key,
+            modification.data_key.is_some()
+        );
 
         if let Some(lamports) = modification.lamports {
             let current_lamports = account.borrow().lamports();

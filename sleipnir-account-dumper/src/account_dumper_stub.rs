@@ -63,7 +63,7 @@ impl AccountDumper for AccountDumperStub {
         program_data_pubkey: &Pubkey,
         _program_data_account: &Account,
         program_idl: Option<(Pubkey, Account)>,
-    ) -> AccountDumperResult<Vec<Signature>> {
+    ) -> AccountDumperResult<Signature> {
         self.program_ids.write().unwrap().insert(*program_id_pubkey);
         self.program_datas
             .write()
@@ -72,7 +72,7 @@ impl AccountDumper for AccountDumperStub {
         if let Some(program_idl) = program_idl {
             self.program_idls.write().unwrap().insert(program_idl.0);
         }
-        Ok(vec![Signature::new_unique()])
+        Ok(Signature::new_unique())
     }
 }
 
