@@ -121,7 +121,7 @@ impl RemoteAccountUpdatesWorker {
                     );
                     let old_runner = std::mem::replace(&mut runners[current_refresh_index], new_runner);
                     // We hope it ultimately joins, but we don't care to wait for it, just let it be
-                    let _join = self.cancel_and_join_runner(old_runner);
+                    self.cancel_and_join_runner(old_runner);
                 }
                 // When we want to stop the worker (it was cancelled)
                 _ = cancellation_token.cancelled() => {
@@ -132,7 +132,7 @@ impl RemoteAccountUpdatesWorker {
         // Cancel all runners one by one when we are done
         while !runners.is_empty() {
             let runner = runners.swap_remove(0);
-            self.cancel_and_join_runner(runner).await;
+            self.cancel_and_join_runner(runner);
         }
     }
 
@@ -189,15 +189,14 @@ impl RemoteAccountUpdatesWorker {
         }
     }
 
-    async fn cancel_and_join_runner(
-        &self,
-        runner: RemoteAccountUpdatesWorkerRunner,
-    ) {
+    fn cancel_and_join_runner(&self, runner: RemoteAccountUpdatesWorkerRunner) {
         info!("Stopping runner {}", runner.id);
         runner.cancellation_token.cancel();
-        if let Err(error) = runner.join_handle.await {
-            error!("Runner failed to shutdown: {}: {:?}", runner.id, error);
-        }
+        let _join = tokio::spawn(async move {
+            if let Err(error) = runner.join_handle.await {
+                error!("Runner failed to shutdown: {}: {:?}", runner.id, error);
+            }
+        });
     }
 
     fn generate_runner_id(&self) -> u32 {
