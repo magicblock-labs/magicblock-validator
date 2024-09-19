@@ -11,7 +11,7 @@ use crate::{
     idl::fetch_program_idl_modification_from_cluster,
     program::{create_program_modifications, ProgramModifications},
     transactions::{
-        transaction_to_clone_regular_account, transactions_to_clone_program,
+        transaction_to_clone_program, transaction_to_clone_regular_account,
     },
     Cluster,
 };
@@ -35,24 +35,24 @@ pub async fn fetch_account_from_cluster(
 /// If [overrides] are provided the included fields will be changed on the account
 /// that was downloaded from the cluster before the modification transaction is
 /// created.
-pub async fn transactions_to_clone_pubkey_from_cluster(
+pub async fn transaction_to_clone_pubkey_from_cluster(
     cluster: &Cluster,
     needs_upgrade: bool,
     pubkey: &Pubkey,
     recent_blockhash: Hash,
     slot: Slot,
     overrides: Option<AccountModification>,
-) -> MutatorResult<Vec<Transaction>> {
+) -> MutatorResult<Transaction> {
     // Download the account
     let account = &fetch_account_from_cluster(cluster, pubkey).await?;
     // If it's a regular account that's not executable (program), use happy path
     if !account.executable {
-        return Ok(vec![transaction_to_clone_regular_account(
+        return Ok(transaction_to_clone_regular_account(
             pubkey,
             account,
             overrides,
             recent_blockhash,
-        )]);
+        ));
     }
     // To clone a program we need to update multiple accounts at the same time
     let program_id_pubkey = pubkey;
@@ -79,7 +79,7 @@ pub async fn transactions_to_clone_pubkey_from_cluster(
         fetch_program_idl_modification_from_cluster(cluster, program_id_pubkey)
             .await;
     // Done, generate the transaction as normal
-    Ok(transactions_to_clone_program(
+    Ok(transaction_to_clone_program(
         needs_upgrade,
         program_id_modification,
         program_data_modification,

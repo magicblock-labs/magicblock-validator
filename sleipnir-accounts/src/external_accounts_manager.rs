@@ -154,12 +154,11 @@ where
             .iter()
             .chain(writable_clone_outputs.iter())
             .filter_map(|clone_output| match clone_output {
-                AccountClonerOutput::Cloned { signatures, .. } => {
-                    Some(signatures.as_ref().clone())
+                AccountClonerOutput::Cloned { signature, .. } => {
+                    Some(*signature)
                 }
                 AccountClonerOutput::Unclonable { .. } => None,
             })
-            .flatten()
             .collect();
 
         // Validate that the accounts involved in the transaction are valid for an ephemeral

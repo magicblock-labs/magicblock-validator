@@ -3,7 +3,7 @@ use thiserror::Error;
 
 #[derive(Debug, Clone, Error)]
 pub enum AccountUpdatesError {
-    #[error("SendError")]
+    #[error(transparent)]
     SendError(#[from] tokio::sync::mpsc::error::SendError<Pubkey>),
 }
 

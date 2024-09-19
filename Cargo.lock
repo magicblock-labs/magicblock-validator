@@ -4313,6 +4313,7 @@ dependencies = [
  "test-tools",
  "thiserror",
  "tokio",
+ "tokio-stream",
  "tokio-util 0.7.11",
 ]
 

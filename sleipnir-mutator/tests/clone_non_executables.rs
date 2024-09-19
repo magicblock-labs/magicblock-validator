@@ -1,6 +1,6 @@
 use assert_matches::assert_matches;
 use log::*;
-use sleipnir_mutator::fetch::transactions_to_clone_pubkey_from_cluster;
+use sleipnir_mutator::fetch::transaction_to_clone_pubkey_from_cluster;
 use sleipnir_program::validator_authority_id;
 use solana_sdk::{
     account::Account, clock::Slot, genesis_config::ClusterType, hash::Hash,
@@ -21,7 +21,7 @@ async fn verified_tx_to_clone_non_executable_from_devnet(
     slot: Slot,
     recent_blockhash: Hash,
 ) -> Transaction {
-    let mut txs = transactions_to_clone_pubkey_from_cluster(
+    let tx = transaction_to_clone_pubkey_from_cluster(
         &ClusterType::Devnet.into(),
         false,
         pubkey,
@@ -32,15 +32,12 @@ async fn verified_tx_to_clone_non_executable_from_devnet(
     .await
     .expect("Failed to create clone transaction");
 
-    assert_eq!(txs.len(), 1);
+    assert!(tx.is_signed());
+    assert_eq!(tx.signatures.len(), 1);
+    assert_eq!(tx.signer_key(0, 0).unwrap(), &validator_authority_id());
+    assert_eq!(tx.message().account_keys.len(), 3);
 
-    let first = txs.remove(0);
-    assert!(first.is_signed());
-    assert_eq!(first.signatures.len(), 1);
-    assert_eq!(first.signer_key(0, 0).unwrap(), &validator_authority_id());
-    assert_eq!(first.message().account_keys.len(), 3);
-
-    first
+    tx
 }
 
 #[tokio::test]

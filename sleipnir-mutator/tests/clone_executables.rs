@@ -9,7 +9,7 @@ use sleipnir_bank::{
     },
     LAMPORTS_PER_SIGNATURE,
 };
-use sleipnir_mutator::fetch::transactions_to_clone_pubkey_from_cluster;
+use sleipnir_mutator::fetch::transaction_to_clone_pubkey_from_cluster;
 use sleipnir_program::validator_authority_id;
 use solana_sdk::{
     account::{Account, ReadableAccount},
@@ -31,12 +31,12 @@ use crate::utils::{fund_luzifer, SOLX_EXEC, SOLX_IDL, SOLX_PROG};
 
 mod utils;
 
-async fn verified_txs_to_clone_executable_from_devnet_first_deploy(
+async fn verified_tx_to_clone_executable_from_devnet_first_deploy(
     pubkey: &Pubkey,
     slot: Slot,
     recent_blockhash: Hash,
-) -> Vec<Transaction> {
-    let txs = transactions_to_clone_pubkey_from_cluster(
+) -> Transaction {
+    let tx = transaction_to_clone_pubkey_from_cluster(
         &ClusterType::Devnet.into(),
         false, // We are deploying the program for the first time
         pubkey,
@@ -47,24 +47,21 @@ async fn verified_txs_to_clone_executable_from_devnet_first_deploy(
     .await
     .expect("Failed to create program clone transaction");
 
-    assert_eq!(txs.len(), 1);
+    assert!(tx.is_signed());
+    assert_eq!(tx.signatures.len(), 1);
+    assert_eq!(tx.signer_key(0, 0).unwrap(), &validator_authority_id());
+    assert!(tx.message().account_keys.len() >= 5);
+    assert!(tx.message().account_keys.len() <= 6);
 
-    let mutate = txs.first().unwrap();
-    assert!(mutate.is_signed());
-    assert_eq!(mutate.signatures.len(), 1);
-    assert_eq!(mutate.signer_key(0, 0).unwrap(), &validator_authority_id());
-    assert!(mutate.message().account_keys.len() >= 5);
-    assert!(mutate.message().account_keys.len() <= 6);
-
-    txs
+    tx
 }
 
-async fn verified_txs_to_clone_executable_from_devnet_as_upgrade(
+async fn verified_tx_to_clone_executable_from_devnet_as_upgrade(
     pubkey: &Pubkey,
     slot: Slot,
     recent_blockhash: Hash,
-) -> Vec<Transaction> {
-    let txs = transactions_to_clone_pubkey_from_cluster(
+) -> Transaction {
+    let tx = transaction_to_clone_pubkey_from_cluster(
         &ClusterType::Devnet.into(),
         true, // We are upgrading the program
         pubkey,
@@ -75,31 +72,13 @@ async fn verified_txs_to_clone_executable_from_devnet_as_upgrade(
     .await
     .expect("Failed to create program clone transaction");
 
-    assert_eq!(txs.len(), 2);
+    assert!(tx.is_signed());
+    assert_eq!(tx.signatures.len(), 1);
+    assert_eq!(tx.signer_key(0, 0).unwrap(), &validator_authority_id());
+    assert!(tx.message().account_keys.len() >= 8);
+    assert!(tx.message().account_keys.len() <= 9);
 
-    let tx_mutate = txs.first().unwrap();
-    assert!(tx_mutate.is_signed());
-    assert_eq!(tx_mutate.signatures.len(), 1);
-    assert_eq!(
-        tx_mutate.signer_key(0, 0).unwrap(),
-        &validator_authority_id()
-    );
-    assert!(tx_mutate.message().account_keys.len() >= 5);
-    assert!(tx_mutate.message().account_keys.len() <= 6);
-
-    let tx_upgrade = txs.get(1).unwrap();
-    assert!(tx_upgrade.is_signed());
-    assert_eq!(tx_upgrade.signatures.len(), 1);
-    assert_eq!(
-        tx_upgrade.signer_key(0, 3).unwrap(),
-        &validator_authority_id()
-    );
-    assert_eq!(
-        tx_upgrade.signer_key(0, 6).unwrap(),
-        &validator_authority_id()
-    );
-
-    txs
+    tx
 }
 
 #[tokio::test]
@@ -116,13 +95,13 @@ async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
     // 1. Exec Clone Transaction
     {
         let slot = tx_processor.bank().slot();
-        let txs = verified_txs_to_clone_executable_from_devnet_first_deploy(
+        let tx = verified_tx_to_clone_executable_from_devnet_first_deploy(
             &SOLX_PROG,
             slot,
             tx_processor.bank().last_blockhash(),
         )
         .await;
-        let result = tx_processor.process(txs).unwrap();
+        let result = tx_processor.process(vec![tx]).unwrap();
 
         let (_, exec_details) = result.transactions.values().next().unwrap();
         log_exec_details(exec_details);
@@ -229,13 +208,13 @@ async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
     // 4. Exec Upgrade Transactions
     {
         let slot = tx_processor.bank().slot();
-        let txs = verified_txs_to_clone_executable_from_devnet_as_upgrade(
+        let tx = verified_tx_to_clone_executable_from_devnet_as_upgrade(
             &SOLX_PROG,
             slot,
             tx_processor.bank().last_blockhash(),
         )
         .await;
-        let result = tx_processor.process(txs).unwrap();
+        let result = tx_processor.process(vec![tx]).unwrap();
 
         let (_, exec_details) = result.transactions.values().next().unwrap();
         log_exec_details(exec_details);
