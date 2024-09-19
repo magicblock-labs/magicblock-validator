@@ -75,7 +75,7 @@ impl<T: Clone> StatusCache<T> {
                     return Some((*slot, needle.clone()));
                 }
             }
-            warn!(
+            debug!(
                 "Missed tx status from cache for '{}', lookback={}",
                 signature, lookback_slots
             );
