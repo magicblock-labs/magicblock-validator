@@ -306,7 +306,7 @@ where
                             at_slot: account_chain_snapshot.at_slot,
                         });
                     }
-                    self.do_clone_program_accounts(pubkey, account).await?
+                    Some(self.do_clone_program_accounts(pubkey, account).await?)
                 }
                 // If it's not an executble, different rules apply depending on owner
                 else {
@@ -430,17 +430,18 @@ where
             }
         };
         // If its the first time we're seeing this delegated account, dump it to the bank
-        self.account_dumper
-            .dump_delegated_account(pubkey, account, owner)
-            .map_err(AccountClonerError::AccountDumperError)
-            .map(|signature| Some(signature))
+        Ok(Some(
+            self.account_dumper
+                .dump_delegated_account(pubkey, account, owner)
+                .map_err(AccountClonerError::AccountDumperError)?,
+        ))
     }
 
     async fn do_clone_program_accounts(
         &self,
         pubkey: &Pubkey,
         account: &Account,
-    ) -> AccountClonerResult<Option<Signature>> {
+    ) -> AccountClonerResult<Signature> {
         let program_id_pubkey = pubkey;
         let program_id_account = account;
         let program_data_pubkey = &get_program_data_address(program_id_pubkey);
@@ -460,7 +461,6 @@ where
                 self.fetch_program_idl(program_id_pubkey).await?,
             )
             .map_err(AccountClonerError::AccountDumperError)
-            .map(|signature| Some(signature))
     }
 
     async fn fetch_program_idl(

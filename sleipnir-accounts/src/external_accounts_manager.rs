@@ -154,9 +154,7 @@ where
             .iter()
             .chain(writable_clone_outputs.iter())
             .filter_map(|clone_output| match clone_output {
-                AccountClonerOutput::Cloned { signature, .. } => {
-                    signature.clone()
-                }
+                AccountClonerOutput::Cloned { signature, .. } => *signature,
                 AccountClonerOutput::Unclonable { .. } => None,
             })
             .collect();

@@ -157,10 +157,9 @@ fn mutate_accounts(
             );
         }
 
+        // 1.4. Check that first account is the Sleipnir authority
         let authority_transaction_index = instruction_context
             .get_index_of_instruction_account_in_transaction(0)?;
-
-        // 1.4. Check that first account is the Sleipnir authority
         let sleipnir_authority_key = transaction_context
             .get_key_of_account_at_index(authority_transaction_index)?;
         if sleipnir_authority_key != &validator_authority_id {
