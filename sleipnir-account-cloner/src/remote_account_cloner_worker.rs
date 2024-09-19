@@ -282,7 +282,7 @@ where
                         at_slot: account_chain_snapshot.at_slot,
                     });
                 }
-                self.do_clone_new_account(pubkey)?
+                Some(self.do_clone_new_account(pubkey)?)
             }
             // If the account is present on-chain, but not delegated
             // We need to differenciate between programs and other accounts
@@ -319,7 +319,7 @@ where
                                 at_slot: account_chain_snapshot.at_slot,
                             });
                         }
-                        self.do_clone_payer_account(pubkey, account)?
+                        Some(self.do_clone_payer_account(pubkey, account)?)
                     }
                     // Otherwise we just clone the account normally without any change
                     else {
@@ -330,7 +330,7 @@ where
                                 at_slot: account_chain_snapshot.at_slot,
                             });
                         }
-                        self.do_clone_pda_account(pubkey, account)?
+                        Some(self.do_clone_pda_account(pubkey, account)?)
                     }
                 }
             }
@@ -367,7 +367,7 @@ where
                         at_slot: account_chain_snapshot.at_slot,
                     });
                 }
-                self.do_clone_pda_account(pubkey, account)?
+                Some(self.do_clone_pda_account(pubkey, account)?)
             }
         };
         // Return the result
@@ -380,33 +380,30 @@ where
     fn do_clone_new_account(
         &self,
         pubkey: &Pubkey,
-    ) -> AccountClonerResult<Option<Signature>> {
+    ) -> AccountClonerResult<Signature> {
         self.account_dumper
             .dump_new_account(pubkey)
             .map_err(AccountClonerError::AccountDumperError)
-            .map(|signature| Some(signature))
     }
 
     fn do_clone_payer_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,
-    ) -> AccountClonerResult<Option<Signature>> {
+    ) -> AccountClonerResult<Signature> {
         self.account_dumper
             .dump_payer_account(pubkey, account, self.payer_init_lamports)
             .map_err(AccountClonerError::AccountDumperError)
-            .map(|signature| Some(signature))
     }
 
     fn do_clone_pda_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,
-    ) -> AccountClonerResult<Option<Signature>> {
+    ) -> AccountClonerResult<Signature> {
         self.account_dumper
             .dump_pda_account(pubkey, account)
             .map_err(AccountClonerError::AccountDumperError)
-            .map(|signature| Some(signature))
     }
 
     fn do_clone_delegated_account(
