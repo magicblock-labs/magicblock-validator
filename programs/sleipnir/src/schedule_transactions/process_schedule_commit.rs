@@ -3,13 +3,15 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
+use sleipnir_core::magic_program::MAGIC_CONTEXT_PUBKEY;
 use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 use solana_sdk::{
     account::ReadableAccount, instruction::InstructionError, pubkey::Pubkey,
+    transaction_context::TransactionContext,
 };
 
 use crate::{
-    magic_context::ScheduledCommit,
+    magic_context::{MagicContext, ScheduledCommit},
     schedule_transactions::transaction_scheduler::TransactionScheduler,
     sleipnir_instruction::scheduled_commit_sent,
     utils::{
@@ -18,6 +20,7 @@ use crate::{
             get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
         },
     },
+    validator_authority_id,
 };
 
 #[derive(Default)]
@@ -33,12 +36,14 @@ pub(crate) fn process_schedule_commit(
     static COMMIT_ID: AtomicU64 = AtomicU64::new(0);
 
     const PAYER_IDX: u16 = 0;
-    const CONTEXT_IDX: u16 = PAYER_IDX + 1;
+    const MAGIC_CONTEXT_IDX: u16 = PAYER_IDX + 1;
+
+    check_magic_context_id(invoke_context, MAGIC_CONTEXT_IDX)?;
 
     let transaction_context = &invoke_context.transaction_context.clone();
     let ix_ctx = transaction_context.get_current_instruction_context()?;
     let ix_accs_len = ix_ctx.get_number_of_instruction_accounts() as usize;
-    const COMMITTEES_START: usize = CONTEXT_IDX as usize + 1;
+    const COMMITTEES_START: usize = MAGIC_CONTEXT_IDX as usize + 1;
 
     // Assert MagicBlock program
     ix_ctx
@@ -148,6 +153,8 @@ pub(crate) fn process_schedule_commit(
             // Setting the owner will prevent both, since in both cases the _actual_
             // owner program needs to sign for the account which is not possible at
             // that point
+            // NOTE: this owner change only takes effect if the transaction which
+            // includes this instruction succeeds.
             set_account_owner_to_delegation_program(acc);
             ic_msg!(
                 invoke_context,
@@ -189,10 +196,11 @@ pub(crate) fn process_schedule_commit(
     // NOTE: this is only protected by all the above checks however if the
     // instruction fails for other reasons detected afterward then the commit
     // stays scheduled
-    let context_acc =
-        get_instruction_account_with_idx(transaction_context, CONTEXT_IDX)?;
-    TransactionScheduler::default()
-        .schedule_commit(context_acc, scheduled_commit)
+    let context_acc = get_instruction_account_with_idx(
+        transaction_context,
+        MAGIC_CONTEXT_IDX,
+    )?;
+    TransactionScheduler::schedule_commit(context_acc, scheduled_commit)
         .map_err(|err| {
             ic_msg!(
                 invoke_context,
@@ -207,6 +215,89 @@ pub(crate) fn process_schedule_commit(
         "ScheduledCommitSent signature: {}",
         commit_sent_sig,
     );
+
+    Ok(())
+}
+
+pub fn process_accept_scheduled_commits(
+    signers: HashSet<Pubkey>,
+    invoke_context: &mut InvokeContext,
+) -> Result<(), InstructionError> {
+    const VALIDATOR_AUTHORITY_IDX: u16 = 0;
+    const MAGIC_CONTEXT_IDX: u16 = VALIDATOR_AUTHORITY_IDX + 1;
+
+    let transaction_context = &invoke_context.transaction_context.clone();
+
+    // 1. Read all scheduled commits from the `MagicContext` account
+    //    We do this first so we can skip all checks in case there is nothing
+    //    to be processed
+    check_magic_context_id(invoke_context, MAGIC_CONTEXT_IDX)?;
+    let magic_context_acc = get_instruction_account_with_idx(
+        transaction_context,
+        MAGIC_CONTEXT_IDX,
+    )?;
+    let mut magic_context =
+        MagicContext::try_from_slice(&magic_context_acc.borrow().data())
+            .map_err(|err| {
+                ic_msg!(
+                    invoke_context,
+                    "Failed to deserialize MagicContext: {}",
+                    err
+                );
+                InstructionError::InvalidAccountData
+            })?;
+    if magic_context.scheduled_commits.is_empty() {
+        return Ok(());
+    }
+
+    // 2. Check that the validator authority (first account) is correct and signer
+    let provided_validator_auth = get_instruction_pubkey_with_idx(
+        transaction_context,
+        VALIDATOR_AUTHORITY_IDX,
+    )?;
+    let validator_auth = validator_authority_id();
+    if !provided_validator_auth.eq(&validator_auth) {
+        ic_msg!(
+            invoke_context,
+            "AcceptScheduledCommits ERR: invalid validator authority {}, should be {}",
+            provided_validator_auth,
+            validator_auth
+        );
+        return Err(InstructionError::InvalidArgument);
+    }
+    if !signers.contains(&validator_auth) {
+        ic_msg!(
+            invoke_context,
+            "AcceptScheduledCommits ERR: validator authority pubkey {} not in signers",
+            provided_validator_auth
+        );
+        return Err(InstructionError::MissingRequiredSignature);
+    }
+
+    // 3. Move scheduled commits (without copying)
+    let scheduled_commits =
+        std::mem::take(&mut magic_context.scheduled_commits);
+    TransactionScheduler::default().accept_scheduled_commits(scheduled_commits);
+
+    Ok(())
+}
+
+fn check_magic_context_id(
+    invoke_context: &InvokeContext,
+    idx: u16,
+) -> Result<(), InstructionError> {
+    let provided_magic_context = get_instruction_pubkey_with_idx(
+        invoke_context.transaction_context,
+        idx,
+    )?;
+    if !provided_magic_context.eq(&MAGIC_CONTEXT_PUBKEY) {
+        ic_msg!(
+            invoke_context,
+            "AcceptScheduledCommits ERR: invalid magic context account {}",
+            provided_magic_context
+        );
+        return Err(InstructionError::InvalidArgument);
+    }
 
     Ok(())
 }

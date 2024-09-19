@@ -2,6 +2,7 @@ use std::collections::HashMap;
 
 use num_derive::{FromPrimitive, ToPrimitive};
 use serde::{Deserialize, Serialize};
+use sleipnir_core::magic_program::MAGIC_CONTEXT_PUBKEY;
 use solana_sdk::{
     account::Account,
     decode_error::DecodeError,
@@ -96,6 +97,10 @@ pub(crate) enum SleipnirInstruction {
     /// It should be invoked from the program whose PDA accounts are to be
     /// committed.
     ///
+    /// This is the first part of scheduling a commit.
+    /// A second transaction [SleipnirInstruction::AcceptScheduleCommits] has to run in order
+    /// to finish scheduling the commit.
+    ///
     /// # Account references
     /// - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
     /// - **1..n** `[]`              Accounts to be committed
@@ -107,10 +112,25 @@ pub(crate) enum SleipnirInstruction {
     /// Additionally the validator will refuse anymore transactions for the specific account
     /// since they are no longer considered delegated to it.
     ///
+    /// This is the first part of scheduling a commit.
+    /// A second transaction [SleipnirInstruction::AcceptScheduleCommits] has to run in order
+    /// to finish scheduling the commit.
+    ///
     /// # Account references
     /// - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
     /// - **1..n** `[]`              Accounts to be committed and undelegated
     ScheduleCommitAndUndelegate,
+
+    /// Moves the scheduled commit from the MagicContext to the global scheduled commits
+    /// map. This is the second part of scheduling a commit.
+    ///
+    /// It is run at the start of the slot to update the global scheduled commits map just
+    /// in time for the validator to realize the commits right after.
+    ///
+    /// # Account references
+    /// - **0.**  `[SIGNER]` Validator Authority
+    /// - **1.n** `[WRITE]`  Magic Context Account containing the initially scheduled commits
+    AcceptScheduleCommits,
 
     /// Records the the attempt to realize a scheduled commit on chain.
     ///
@@ -234,6 +254,26 @@ pub(crate) fn schedule_commit_and_undelegate_instruction(
     Instruction::new_with_bincode(
         crate::id(),
         &SleipnirInstruction::ScheduleCommitAndUndelegate,
+        account_metas,
+    )
+}
+
+// -----------------
+// Accept Scheduled Commits
+// -----------------
+pub fn accept_scheduled_commits(recent_blockhash: Hash) -> Transaction {
+    let ix = accept_scheduled_commits_instruction();
+    into_transaction(&validator_authority(), ix, recent_blockhash)
+}
+
+pub(crate) fn accept_scheduled_commits_instruction() -> Instruction {
+    let account_metas = vec![
+        AccountMeta::new_readonly(validator_authority_id(), true),
+        AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+    ];
+    Instruction::new_with_bincode(
+        crate::id(),
+        &SleipnirInstruction::AcceptScheduleCommits,
         account_metas,
     )
 }

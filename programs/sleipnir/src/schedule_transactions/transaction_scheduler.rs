@@ -15,6 +15,9 @@ pub struct TransactionScheduler {
 impl Default for TransactionScheduler {
     fn default() -> Self {
         lazy_static! {
+            /// This vec tracks commits that went through the entire process of first
+            /// being scheduled into the MagicContext, and then being moved
+            /// over to this global.
             static ref SCHEDULED_COMMITS: Arc<RwLock<Vec<ScheduledCommit>>> =
                 Default::default();
         }
@@ -26,7 +29,6 @@ impl Default for TransactionScheduler {
 
 impl TransactionScheduler {
     pub fn schedule_commit(
-        &self,
         context_account: &RefCell<AccountSharedData>,
         commit: ScheduledCommit,
     ) -> Result<(), bincode::Error> {
@@ -36,8 +38,11 @@ impl TransactionScheduler {
         Ok(())
     }
 
-    pub fn accept_scheduled_commits(&self) {
-        todo!()
+    pub fn accept_scheduled_commits(&self, commits: Vec<ScheduledCommit>) {
+        self.scheduled_commits
+            .write()
+            .expect("scheduled_commits lock poisoned")
+            .extend(commits);
     }
 
     pub fn get_scheduled_commits_by_payer(
