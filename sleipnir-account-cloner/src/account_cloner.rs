@@ -35,9 +35,6 @@ pub enum AccountClonerError {
 
     #[error(transparent)]
     AccountDumperError(#[from] AccountDumperError),
-
-    #[error("ProgramDataDoesNotExist")]
-    ProgramDataDoesNotExist,
 }
 
 pub type AccountClonerResult<T> = Result<T, AccountClonerError>;
@@ -51,9 +48,8 @@ pub enum AccountClonerUnclonableReason {
     NoCloningAllowed,
     IsBlacklisted,
     IsNotAllowedProgram,
-    DisallowNewAccount,
-    DisallowPayerAccount,
-    DisallowPdaAccount,
+    DisallowWalletAccount,
+    DisallowUndelegatedAccount,
     DisallowDelegatedAccount,
     DisallowProgramAccount,
 }
@@ -61,9 +57,8 @@ pub enum AccountClonerUnclonableReason {
 #[derive(Debug, Clone)]
 pub struct AccountClonerPermissions {
     pub allow_cloning_refresh: bool,
-    pub allow_cloning_new_accounts: bool,
-    pub allow_cloning_payer_accounts: bool,
-    pub allow_cloning_pda_accounts: bool,
+    pub allow_cloning_wallet_accounts: bool,
+    pub allow_cloning_undelegated_accounts: bool,
     pub allow_cloning_delegated_accounts: bool,
     pub allow_cloning_program_accounts: bool,
 }

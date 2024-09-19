@@ -98,7 +98,7 @@ fn setup_ephem(
     )
 }
 
-fn generate_payer_pubkey() -> Pubkey {
+fn generate_wallet_pubkey() -> Pubkey {
     loop {
         let pubkey = Pubkey::new_unique();
         if pubkey.is_on_curve() {
@@ -134,7 +134,7 @@ async fn test_ensure_readonly_account_not_tracked_nor_in_our_validator() {
 
     // Account should be fetchable as undelegated
     let pda_account = generate_pda_pubkey();
-    account_fetcher.set_pda_account(pda_account, 42);
+    account_fetcher.set_undelegated_account(pda_account, 42);
 
     // Ensure accounts
     let result = manager
@@ -217,7 +217,7 @@ async fn test_ensure_readonly_account_cloned_but_not_in_our_validator() {
 
     // Pre-clone the account
     let pda_account = generate_pda_pubkey();
-    account_fetcher.set_pda_account(pda_account, 42);
+    account_fetcher.set_undelegated_account(pda_account, 42);
     assert!(manager
         .account_cloner
         .clone_account(&pda_account)
@@ -266,7 +266,7 @@ async fn test_ensure_readonly_account_cloned_but_has_been_updated_on_chain() {
 
     // Pre-clone account
     let pda_account = generate_pda_pubkey();
-    account_fetcher.set_pda_account(pda_account, 42);
+    account_fetcher.set_undelegated_account(pda_account, 42);
     assert!(manager
         .account_cloner
         .clone_account(&pda_account)
@@ -277,7 +277,7 @@ async fn test_ensure_readonly_account_cloned_but_has_been_updated_on_chain() {
 
     // Make the account re-fetchable at a later slot with a pending update
     account_updates.set_known_update_slot(pda_account, 55);
-    account_fetcher.set_pda_account(pda_account, 55);
+    account_fetcher.set_undelegated_account(pda_account, 55);
 
     // Ensure accounts
     let result = manager
@@ -319,7 +319,7 @@ async fn test_ensure_readonly_account_cloned_and_no_recent_update_on_chain() {
 
     // Pre-clone the account
     let pda_account = generate_pda_pubkey();
-    account_fetcher.set_pda_account(pda_account, 11);
+    account_fetcher.set_undelegated_account(pda_account, 11);
     assert!(manager
         .account_cloner
         .clone_account(&pda_account)
@@ -417,9 +417,9 @@ async fn test_ensure_delegated_with_owner_and_undelegated_writable_payer() {
     );
 
     // One delegated, one undelegated system account
-    let payer_account = generate_payer_pubkey();
+    let payer_account = generate_wallet_pubkey();
     let delegated_account = generate_pda_pubkey();
-    account_fetcher.set_payer_account(payer_account, 42);
+    account_fetcher.set_wallet_account(payer_account, 42);
     account_fetcher.set_delegated_account(delegated_account, 42, 11);
 
     // Ensure accounts
@@ -436,7 +436,7 @@ async fn test_ensure_delegated_with_owner_and_undelegated_writable_payer() {
     assert!(result.is_ok());
 
     // Check proper behaviour
-    assert!(account_dumper.was_dumped_as_payer_account(&payer_account));
+    assert!(account_dumper.was_dumped_as_wallet_account(&payer_account));
     assert!(manager.last_commit(&payer_account).is_none());
 
     assert!(account_dumper.was_dumped_as_delegated_account(&delegated_account));
@@ -520,9 +520,9 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
     let delegated_account1 = generate_pda_pubkey();
     let delegated_account2 = generate_pda_pubkey();
 
-    account_fetcher.set_pda_account(pda_account1, 42);
-    account_fetcher.set_pda_account(pda_account2, 42);
-    account_fetcher.set_pda_account(pda_account3, 42);
+    account_fetcher.set_undelegated_account(pda_account1, 42);
+    account_fetcher.set_undelegated_account(pda_account2, 42);
+    account_fetcher.set_undelegated_account(pda_account3, 42);
     account_fetcher.set_delegated_account(delegated_account1, 42, 11);
     account_fetcher.set_delegated_account(delegated_account2, 42, 11);
 
@@ -860,7 +860,7 @@ async fn test_ensure_accounts_already_ensured_needs_reclone_after_updates() {
 
     // Pre-clone account
     let pda_account = generate_pda_pubkey();
-    account_fetcher.set_pda_account(pda_account, 42);
+    account_fetcher.set_undelegated_account(pda_account, 42);
     assert!(manager
         .account_cloner
         .clone_account(&pda_account)
@@ -873,7 +873,7 @@ async fn test_ensure_accounts_already_ensured_needs_reclone_after_updates() {
     account_updates.set_known_update_slot(pda_account, 88);
 
     // But for this case, the account fetcher is too slow and can only fetch an old version for some reason
-    account_fetcher.set_pda_account(pda_account, 77);
+    account_fetcher.set_undelegated_account(pda_account, 77);
 
     // The first transaction should need to clone since there was an update
     {
@@ -940,7 +940,7 @@ async fn test_ensure_accounts_already_cloned_can_be_reused_without_updates() {
 
     // Pre-clone the account
     let pda_account = generate_pda_pubkey();
-    account_fetcher.set_pda_account(pda_account, 42);
+    account_fetcher.set_undelegated_account(pda_account, 42);
     assert!(manager
         .account_cloner
         .clone_account(&pda_account)
@@ -950,7 +950,7 @@ async fn test_ensure_accounts_already_cloned_can_be_reused_without_updates() {
     account_dumper.clear_history();
 
     // The account has been updated on-chain since the last clone
-    account_fetcher.set_pda_account(pda_account, 66);
+    account_fetcher.set_undelegated_account(pda_account, 66);
     account_updates.set_known_update_slot(pda_account, 66);
 
     // The first transaction should need to clone since the account was updated on-chain since the last clone

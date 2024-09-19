@@ -6,7 +6,7 @@ use std::{
 use async_trait::async_trait;
 use conjunto_transwise::{
     AccountChainSnapshot, AccountChainSnapshotShared, AccountChainState,
-    CommitFrequency, DelegationRecord,
+    CommitFrequency, DelegationInconsistency, DelegationRecord,
 };
 use futures_util::future::{ready, BoxFuture};
 use solana_sdk::{
@@ -17,9 +17,9 @@ use crate::{AccountFetcher, AccountFetcherResult};
 
 #[derive(Debug)]
 enum AccountFetcherStubState {
-    New,
-    Standard { owner: Pubkey },
+    Wallet,
     Executable,
+    Undelegated { owner: Pubkey },
     Delegated { delegation_record: DelegationRecord },
 }
 
@@ -52,19 +52,24 @@ impl AccountFetcherStub {
                 pubkey: *pubkey,
                 at_slot: known_account.slot,
                 chain_state: match &known_account.state {
-                    AccountFetcherStubState::New => {
-                        AccountChainState::NewAccount
+                    AccountFetcherStubState::Wallet => {
+                        AccountChainState::Wallet {
+                            account: Account {
+                                ..Default::default()
+                            }
+                        }
                     }
-                    AccountFetcherStubState::Standard { owner } => {
+                    AccountFetcherStubState::Undelegated { owner } => {
                         AccountChainState::Undelegated {
                             account: Account {
                                 owner: *owner,
                                 ..Default::default()
                             },
+                            delegation_inconsistency: DelegationInconsistency::DelegationRecordNotFound,
                         }
                     }
                     AccountFetcherStubState::Executable => {
-                        AccountChainState::Undelegated {
+                        AccountChainState::Wallet {
                             account: Account {
                                 executable: true,
                                 ..Default::default()
@@ -89,32 +94,21 @@ impl AccountFetcherStub {
 }
 
 impl AccountFetcherStub {
-    pub fn set_new_account(&self, pubkey: Pubkey, at_slot: Slot) {
+    pub fn set_wallet_account(&self, pubkey: Pubkey, at_slot: Slot) {
         self.insert_known_account(
             pubkey,
             AccountFetcherStubSnapshot {
                 slot: at_slot,
-                state: AccountFetcherStubState::New,
+                state: AccountFetcherStubState::Wallet,
             },
         );
     }
-    pub fn set_payer_account(&self, pubkey: Pubkey, at_slot: Slot) {
+    pub fn set_undelegated_account(&self, pubkey: Pubkey, at_slot: Slot) {
         self.insert_known_account(
             pubkey,
             AccountFetcherStubSnapshot {
                 slot: at_slot,
-                state: AccountFetcherStubState::Standard {
-                    owner: system_program::ID,
-                },
-            },
-        );
-    }
-    pub fn set_pda_account(&self, pubkey: Pubkey, at_slot: Slot) {
-        self.insert_known_account(
-            pubkey,
-            AccountFetcherStubSnapshot {
-                slot: at_slot,
-                state: AccountFetcherStubState::Standard {
+                state: AccountFetcherStubState::Undelegated {
                     owner: Pubkey::new_unique(),
                 },
             },

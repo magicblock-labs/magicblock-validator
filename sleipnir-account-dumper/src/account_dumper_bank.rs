@@ -57,20 +57,7 @@ impl AccountDumperBank {
 }
 
 impl AccountDumper for AccountDumperBank {
-    fn dump_new_account(
-        &self,
-        pubkey: &Pubkey,
-    ) -> AccountDumperResult<Signature> {
-        let transaction = transaction_to_clone_regular_account(
-            pubkey,
-            &Account::default(),
-            None,
-            self.bank.last_blockhash(),
-        );
-        self.execute_transaction(transaction)
-    }
-
-    fn dump_payer_account(
+    fn dump_wallet_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,
@@ -90,7 +77,7 @@ impl AccountDumper for AccountDumperBank {
         self.execute_transaction(transaction)
     }
 
-    fn dump_pda_account(
+    fn dump_undelegated_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,

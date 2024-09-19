@@ -78,9 +78,8 @@ fn setup_replica(
         standard_blacklisted_accounts(&Pubkey::new_unique()),
         AccountClonerPermissions {
             allow_cloning_refresh: false,
-            allow_cloning_new_accounts: true,
-            allow_cloning_payer_accounts: true,
-            allow_cloning_pda_accounts: true,
+            allow_cloning_wallet_accounts: true,
+            allow_cloning_undelegated_accounts: true,
             allow_cloning_delegated_accounts: true,
             allow_cloning_program_accounts: true,
         },
@@ -107,9 +106,8 @@ fn setup_programs_replica(
         standard_blacklisted_accounts(&Pubkey::new_unique()),
         AccountClonerPermissions {
             allow_cloning_refresh: false,
-            allow_cloning_new_accounts: false,
-            allow_cloning_payer_accounts: false,
-            allow_cloning_pda_accounts: false,
+            allow_cloning_wallet_accounts: false,
+            allow_cloning_undelegated_accounts: false,
             allow_cloning_delegated_accounts: false,
             allow_cloning_program_accounts: true,
         },
@@ -136,9 +134,8 @@ fn setup_ephemeral(
         standard_blacklisted_accounts(&Pubkey::new_unique()),
         AccountClonerPermissions {
             allow_cloning_refresh: true,
-            allow_cloning_new_accounts: true,
-            allow_cloning_payer_accounts: true,
-            allow_cloning_pda_accounts: true,
+            allow_cloning_wallet_accounts: true,
+            allow_cloning_undelegated_accounts: true,
             allow_cloning_delegated_accounts: true,
             allow_cloning_program_accounts: true,
         },
@@ -165,16 +162,15 @@ fn setup_offline(
         standard_blacklisted_accounts(&Pubkey::new_unique()),
         AccountClonerPermissions {
             allow_cloning_refresh: false,
-            allow_cloning_new_accounts: false,
-            allow_cloning_payer_accounts: false,
-            allow_cloning_pda_accounts: false,
+            allow_cloning_wallet_accounts: false,
+            allow_cloning_undelegated_accounts: false,
             allow_cloning_delegated_accounts: false,
             allow_cloning_program_accounts: false,
         },
     )
 }
 
-fn generate_payer_pubkey() -> Pubkey {
+fn generate_wallet_pubkey() -> Pubkey {
     loop {
         let pubkey = Pubkey::new_unique();
         if pubkey.is_on_curve() {
@@ -193,7 +189,7 @@ fn generate_pda_pubkey() -> Pubkey {
 }
 
 #[tokio::test]
-async fn test_clone_allow_new_account_payer_when_ephemeral() {
+async fn test_clone_allow_wallet_account_payer_when_ephemeral() {
     // Stubs
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
@@ -207,16 +203,16 @@ async fn test_clone_allow_new_account_payer_when_ephemeral() {
         account_dumper.clone(),
         None,
     );
-    // A new account that does not exist remotely
-    let new_account = Pubkey::new_unique();
-    account_fetcher.set_new_account(new_account, 42);
+    // A simple wallet account
+    let wallet_account = generate_wallet_pubkey();
+    account_fetcher.set_wallet_account(wallet_account, 42);
     // Run test
-    let result = cloner.clone_account(&new_account).await;
+    let result = cloner.clone_account(&wallet_account).await;
     // Check expected result
     assert!(matches!(result, Ok(AccountClonerOutput::Cloned { .. })));
-    assert_eq!(account_fetcher.get_fetch_count(&new_account), 1);
-    assert!(account_updates.has_account_monitoring(&new_account));
-    assert!(account_dumper.was_dumped_as_new_account(&new_account));
+    assert_eq!(account_fetcher.get_fetch_count(&wallet_account), 1);
+    assert!(account_updates.has_account_monitoring(&wallet_account));
+    assert!(account_dumper.was_dumped_as_wallet_account(&wallet_account));
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());
@@ -238,15 +234,15 @@ async fn test_clone_allow_payer_account_when_ephemeral() {
         None,
     );
     // A simple payer account
-    let payer_account = generate_payer_pubkey();
-    account_fetcher.set_payer_account(payer_account, 42);
+    let payer_account = generate_wallet_pubkey();
+    account_fetcher.set_wallet_account(payer_account, 42);
     // Run test
     let result = cloner.clone_account(&payer_account).await;
     // Check expected result
     assert!(matches!(result, Ok(AccountClonerOutput::Cloned { .. })));
     assert_eq!(account_fetcher.get_fetch_count(&payer_account), 1);
     assert!(account_updates.has_account_monitoring(&payer_account));
-    assert!(account_dumper.was_dumped_as_payer_account(&payer_account));
+    assert!(account_dumper.was_dumped_as_wallet_account(&payer_account));
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());
@@ -269,7 +265,7 @@ async fn test_clone_allow_pda_account_when_ephemeral() {
     );
     // A simple PDA account
     let pda_account = generate_pda_pubkey();
-    account_fetcher.set_pda_account(pda_account, 42);
+    account_fetcher.set_undelegated_account(pda_account, 42);
     // Run test
     let result = cloner.clone_account(&pda_account).await;
     // Check expected result
@@ -333,9 +329,9 @@ async fn test_clone_allow_program_accounts_when_ephemeral() {
     let program_anchor = get_pubkey_anchor_idl(&program_id).unwrap();
     let program_shank = get_pubkey_shank_idl(&program_id).unwrap();
     account_fetcher.set_executable_account(program_id, 42);
-    account_fetcher.set_pda_account(program_data, 42);
+    account_fetcher.set_undelegated_account(program_data, 42);
     account_fetcher.set_new_account(program_anchor, 42); // The anchor IDL does not exist, so it should use shank
-    account_fetcher.set_pda_account(program_shank, 42);
+    account_fetcher.set_undelegated_account(program_shank, 42);
     // Run test
     let result = cloner.clone_account(&program_id).await;
     // Check expected result
@@ -383,8 +379,8 @@ async fn test_clone_program_accounts_when_ephemeral_with_whitelist() {
     let unallowed_program_idl =
         get_pubkey_anchor_idl(&unallowed_program_id).unwrap();
     account_fetcher.set_executable_account(unallowed_program_id, 42);
-    account_fetcher.set_pda_account(unallowed_program_data, 42);
-    account_fetcher.set_pda_account(unallowed_program_idl, 42);
+    account_fetcher.set_undelegated_account(unallowed_program_data, 42);
+    account_fetcher.set_undelegated_account(unallowed_program_idl, 42);
     // Run test
     let result = cloner.clone_account(&unallowed_program_id).await;
     // Check expected result
@@ -409,8 +405,8 @@ async fn test_clone_program_accounts_when_ephemeral_with_whitelist() {
     let allowed_program_idl =
         get_pubkey_anchor_idl(&allowed_program_id).unwrap();
     account_fetcher.set_executable_account(allowed_program_id, 52);
-    account_fetcher.set_pda_account(allowed_program_data, 52);
-    account_fetcher.set_pda_account(allowed_program_idl, 52);
+    account_fetcher.set_undelegated_account(allowed_program_data, 52);
+    account_fetcher.set_undelegated_account(allowed_program_idl, 52);
     // Run test
     let result = cloner.clone_account(&allowed_program_id).await;
     // Check expected result
@@ -552,15 +548,15 @@ async fn test_clone_refuse_payer_account_when_programs_replica() {
         None,
     );
     // A payer account
-    let payer_account = generate_payer_pubkey();
-    account_fetcher.set_payer_account(payer_account, 42);
+    let payer_account = generate_wallet_pubkey();
+    account_fetcher.set_wallet_account(payer_account, 42);
     // Run test
     let result = cloner.clone_account(&payer_account).await;
     // Check expected result
     assert!(matches!(
         result,
         Ok(AccountClonerOutput::Unclonable {
-            reason: AccountClonerUnclonableReason::DisallowPayerAccount,
+            reason: AccountClonerUnclonableReason::DisallowWalletAccount,
             ..
         })
     ));
@@ -589,14 +585,14 @@ async fn test_clone_refuse_pda_account_when_programs_replica() {
     );
     // A simple account that is not delegated and not a program (a PDA)
     let pda_account = generate_pda_pubkey();
-    account_fetcher.set_pda_account(pda_account, 42);
+    account_fetcher.set_undelegated_account(pda_account, 42);
     // Run test
     let result = cloner.clone_account(&pda_account).await;
     // Check expected result
     assert!(matches!(
         result,
         Ok(AccountClonerOutput::Unclonable {
-            reason: AccountClonerUnclonableReason::DisallowPdaAccount,
+            reason: AccountClonerUnclonableReason::DisallowUndelegatedAccount,
             ..
         })
     ));
@@ -665,9 +661,9 @@ async fn test_clone_allow_program_accounts_when_programs_replica() {
     let program_anchor = get_pubkey_anchor_idl(&program_id).unwrap();
     let program_shank = get_pubkey_shank_idl(&program_id).unwrap();
     account_fetcher.set_executable_account(program_id, 42);
-    account_fetcher.set_pda_account(program_data, 42);
+    account_fetcher.set_undelegated_account(program_data, 42);
     account_fetcher.set_new_account(program_anchor, 42); // The anchor IDL does not exist, so it should use shank
-    account_fetcher.set_pda_account(program_shank, 42);
+    account_fetcher.set_undelegated_account(program_shank, 42);
     // Run test
     let result = cloner.clone_account(&program_id).await;
     // Check expected result
@@ -706,7 +702,7 @@ async fn test_clone_allow_pda_account_when_replica() {
     );
     // A simple pda account
     let pda_account = generate_pda_pubkey();
-    account_fetcher.set_pda_account(pda_account, 42);
+    account_fetcher.set_undelegated_account(pda_account, 42);
     // Run test
     let result = cloner.clone_account(&pda_account).await;
     // Check expected result
@@ -735,15 +731,15 @@ async fn test_clone_allow_payer_account_when_replica() {
         None,
     );
     // A payer account
-    let payer_account = generate_payer_pubkey();
-    account_fetcher.set_payer_account(payer_account, 42);
+    let payer_account = generate_wallet_pubkey();
+    account_fetcher.set_wallet_account(payer_account, 42);
     // Run test
     let result = cloner.clone_account(&payer_account).await;
     // Check expected result
     assert!(matches!(result, Ok(AccountClonerOutput::Cloned { .. })));
     assert_eq!(account_fetcher.get_fetch_count(&payer_account), 1);
     assert!(!account_updates.has_account_monitoring(&payer_account));
-    assert!(account_dumper.was_dumped_as_payer_account(&payer_account));
+    assert!(account_dumper.was_dumped_as_wallet_account(&payer_account));
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());
@@ -765,16 +761,16 @@ async fn test_clone_refuse_any_account_when_offline() {
         None,
     );
     // A simple account that is initially undelegated that will become delegated during the test
-    let payer_account = generate_payer_pubkey();
+    let payer_account = generate_wallet_pubkey();
     let pda_account = generate_pda_pubkey();
     let program_id = generate_pda_pubkey();
     let program_data = get_program_data_address(&program_id);
     let program_idl = get_pubkey_anchor_idl(&program_id).unwrap();
-    account_fetcher.set_payer_account(payer_account, 42);
-    account_fetcher.set_pda_account(pda_account, 42);
+    account_fetcher.set_wallet_account(payer_account, 42);
+    account_fetcher.set_undelegated_account(pda_account, 42);
     account_fetcher.set_executable_account(program_id, 42);
-    account_fetcher.set_pda_account(program_data, 42);
-    account_fetcher.set_pda_account(program_idl, 42);
+    account_fetcher.set_undelegated_account(program_data, 42);
+    account_fetcher.set_undelegated_account(program_idl, 42);
     // Run test
     let result1 = cloner.clone_account(&payer_account).await;
     // Check expected result1
@@ -845,8 +841,8 @@ async fn test_clone_will_not_fetch_the_same_thing_multiple_times() {
     let program_data = get_program_data_address(&program_id);
     let program_idl = get_pubkey_anchor_idl(&program_id).unwrap();
     account_fetcher.set_executable_account(program_id, 42);
-    account_fetcher.set_pda_account(program_data, 42);
-    account_fetcher.set_pda_account(program_idl, 42);
+    account_fetcher.set_undelegated_account(program_data, 42);
+    account_fetcher.set_undelegated_account(program_idl, 42);
     // Run test (cloned at the same time for the same thing, must run once and share the result)
     let future1 = cloner.clone_account(&program_id);
     let future2 = cloner.clone_account(&program_id);
@@ -889,7 +885,7 @@ async fn test_clone_properly_cached_pda_account_when_ephemeral() {
     );
     // A simple PDA account
     let pda_account = generate_pda_pubkey();
-    account_fetcher.set_pda_account(pda_account, 42);
+    account_fetcher.set_undelegated_account(pda_account, 42);
     // Run test (we clone the account for the first time)
     let result1 = cloner.clone_account(&pda_account).await;
     // Check expected result1
@@ -940,8 +936,8 @@ async fn test_clone_properly_cached_program() {
     let program_data = get_program_data_address(&program_id);
     let program_idl_pubkey = get_pubkey_anchor_idl(&program_id).unwrap();
     account_fetcher.set_executable_account(program_id, 42);
-    account_fetcher.set_pda_account(program_data, 42);
-    account_fetcher.set_pda_account(program_idl_pubkey, 42);
+    account_fetcher.set_undelegated_account(program_data, 42);
+    account_fetcher.set_undelegated_account(program_idl_pubkey, 42);
     // Run test (we clone the account for the first time)
     let result1 = cloner.clone_account(&program_id).await;
     // Check expected result1
@@ -1036,7 +1032,7 @@ async fn test_clone_properly_cached_delegated_account_that_changes_state() {
     assert!(account_dumper.was_untouched(&pda_account));
     // The account is now updated remotely (AND IT BECOMES UNDELEGATED)
     account_updates.set_known_update_slot(pda_account, 77);
-    account_fetcher.set_pda_account(pda_account, 77);
+    account_fetcher.set_undelegated_account(pda_account, 77);
     // Run test (now we MUST RE-DUMP as an undelegated account)
     let result4 = cloner.clone_account(&pda_account).await;
     // Check expected result4
@@ -1108,7 +1104,7 @@ async fn test_clone_properly_upgrading_downgrading_when_created_and_deleted() {
     assert!(account_updates.has_account_monitoring(&pda_account));
     assert!(account_dumper.was_untouched(&pda_account));
     // The account is now updated remotely, as it becomes a pda account (not new anymore)
-    account_fetcher.set_pda_account(pda_account, 66);
+    account_fetcher.set_undelegated_account(pda_account, 66);
     account_updates.set_known_update_slot(pda_account, 66);
     // Run test (we re-clone the account and it should clear the cache and re-dump)
     let result3 = cloner.clone_account(&pda_account).await;
