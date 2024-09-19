@@ -1,12 +1,14 @@
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, RwLock},
+    sync::{
+        atomic::{AtomicU32, Ordering},
+        Arc, RwLock,
+    },
     time::Duration,
 };
 
 use conjunto_transwise::RpcProviderConfig;
 use log::*;
-use rand::distributions::{Alphanumeric, DistString};
 use solana_sdk::{clock::Slot, pubkey::Pubkey};
 use thiserror::Error;
 use tokio::{
@@ -143,11 +145,9 @@ impl RemoteAccountUpdatesWorker {
         let (monitoring_request_sender, monitoring_request_receiver) =
             unbounded_channel();
         let last_known_update_slots = self.last_known_update_slots.clone();
-        let random_name =
-            Alphanumeric.sample_string(&mut rand::thread_rng(), 6);
-        let id = format!("[{}:{}]", index, random_name);
+        let runner_id = format!("[{}:{:06}]", index, self.generate_runner_id());
         let cancellation_token = CancellationToken::new();
-        let shard_id = id.clone();
+        let shard_id = runner_id.clone();
         let shard_cancellation_token = cancellation_token.clone();
         let join_handle = tokio::spawn(async move {
             let mut shard = RemoteAccountUpdatesShard::new(
@@ -164,7 +164,7 @@ impl RemoteAccountUpdatesWorker {
             }
         });
         let runner = RemoteAccountUpdatesWorkerRunner {
-            id,
+            id: runner_id,
             monitoring_request_sender,
             cancellation_token,
             join_handle,
@@ -198,5 +198,10 @@ impl RemoteAccountUpdatesWorker {
         if let Err(error) = runner.join_handle.await {
             error!("Runner failed to shutdown: {}: {:?}", runner.id, error);
         }
+    }
+
+    fn generate_runner_id(&self) -> u32 {
+        static COUNTER: AtomicU32 = AtomicU32::new(1);
+        COUNTER.fetch_add(1, Ordering::Relaxed)
     }
 }
