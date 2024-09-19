@@ -373,37 +373,40 @@ where
         // Return the result
         Ok(AccountClonerOutput::Cloned {
             account_chain_snapshot,
-            signatures: Arc::new(vec![signature]),
+            signature,
         })
     }
 
     fn do_clone_new_account(
         &self,
         pubkey: &Pubkey,
-    ) -> AccountClonerResult<Signature> {
+    ) -> AccountClonerResult<Option<Signature>> {
         self.account_dumper
             .dump_new_account(pubkey)
             .map_err(AccountClonerError::AccountDumperError)
+            .map(|signature| Some(signature))
     }
 
     fn do_clone_payer_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,
-    ) -> AccountClonerResult<Signature> {
+    ) -> AccountClonerResult<Option<Signature>> {
         self.account_dumper
             .dump_payer_account(pubkey, account, self.payer_init_lamports)
             .map_err(AccountClonerError::AccountDumperError)
+            .map(|signature| Some(signature))
     }
 
     fn do_clone_pda_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,
-    ) -> AccountClonerResult<Signature> {
+    ) -> AccountClonerResult<Option<Signature>> {
         self.account_dumper
             .dump_pda_account(pubkey, account)
             .map_err(AccountClonerError::AccountDumperError)
+            .map(|signature| Some(signature))
     }
 
     fn do_clone_delegated_account(
@@ -412,7 +415,7 @@ where
         account: &Account,
         owner: &Pubkey,
         delegation_slot: Slot,
-    ) -> AccountClonerResult<Signature> {
+    ) -> AccountClonerResult<Option<Signature>> {
         // If we already cloned this account from the same delegation slot
         // Keep the local state as source of truth even if it changed on-chain
         if let Some(AccountClonerOutput::Cloned {
@@ -425,7 +428,7 @@ where
             } = &account_chain_snapshot.chain_state
             {
                 if delegation_record.delegation_slot == delegation_slot {
-                    return Ok(Signature::default());
+                    return Ok(None);
                 }
             }
         };
@@ -433,13 +436,14 @@ where
         self.account_dumper
             .dump_delegated_account(pubkey, account, owner)
             .map_err(AccountClonerError::AccountDumperError)
+            .map(|signature| Some(signature))
     }
 
     async fn do_clone_program_accounts(
         &self,
         pubkey: &Pubkey,
         account: &Account,
-    ) -> AccountClonerResult<Signature> {
+    ) -> AccountClonerResult<Option<Signature>> {
         let program_id_pubkey = pubkey;
         let program_id_account = account;
         let program_data_pubkey = &get_program_data_address(program_id_pubkey);
@@ -459,6 +463,7 @@ where
                 self.fetch_program_idl(program_id_pubkey).await?,
             )
             .map_err(AccountClonerError::AccountDumperError)
+            .map(|signature| Some(signature))
     }
 
     async fn fetch_program_idl(

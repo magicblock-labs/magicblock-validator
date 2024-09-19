@@ -116,7 +116,7 @@ async fn test_commit_two_delegated_accounts_one_needs_commit() {
                 &commit_needed_account,
                 CommitFrequency::Millis(1),
             ),
-            signatures: vec![Signature::new_unique()].into(),
+            signature: Some(Signature::new_unique()),
         },
     );
     account_cloner.set(
@@ -127,7 +127,7 @@ async fn test_commit_two_delegated_accounts_one_needs_commit() {
                 &commit_not_needed_account,
                 CommitFrequency::Millis(60_000),
             ),
-            signatures: vec![Signature::new_unique()].into(),
+            signature: Some(Signature::new_unique()),
         },
     );
     let result = manager

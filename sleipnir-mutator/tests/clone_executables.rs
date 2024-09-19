@@ -72,29 +72,11 @@ async fn verified_tx_to_clone_executable_from_devnet_as_upgrade(
     .await
     .expect("Failed to create program clone transaction");
 
-    /*
-    let tx_mutate = txs.first().unwrap();
-    assert!(tx_mutate.is_signed());
-    assert_eq!(tx_mutate.signatures.len(), 1);
-    assert_eq!(
-        tx_mutate.signer_key(0, 0).unwrap(),
-        &validator_authority_id()
-    );
-    assert!(tx_mutate.message().account_keys.len() >= 5);
-    assert!(tx_mutate.message().account_keys.len() <= 6);
-
-    let tx_upgrade = txs.get(1).unwrap();
-    assert!(tx_upgrade.is_signed());
-    assert_eq!(tx_upgrade.signatures.len(), 1);
-    assert_eq!(
-        tx_upgrade.signer_key(0, 3).unwrap(),
-        &validator_authority_id()
-    );
-    assert_eq!(
-        tx_upgrade.signer_key(0, 6).unwrap(),
-        &validator_authority_id()
-    );
-    */
+    assert!(tx.is_signed());
+    assert_eq!(tx.signatures.len(), 1);
+    assert_eq!(tx.signer_key(0, 0).unwrap(), &validator_authority_id());
+    assert!(tx.message().account_keys.len() >= 8);
+    assert!(tx.message().account_keys.len() <= 9);
 
     tx
 }

@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::Arc};
+use std::collections::HashSet;
 
 use conjunto_transwise::AccountChainSnapshotShared;
 use futures_util::future::BoxFuture;
@@ -72,7 +72,7 @@ pub struct AccountClonerPermissions {
 pub enum AccountClonerOutput {
     Cloned {
         account_chain_snapshot: AccountChainSnapshotShared,
-        signatures: Arc<Vec<Signature>>,
+        signature: Option<Signature>,
     },
     Unclonable {
         pubkey: Pubkey,

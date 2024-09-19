@@ -76,7 +76,7 @@ pub fn transaction_to_clone_program(
     // Sign the transaction
     Transaction::new_signed_with_payer(
         &[modify_ix, upgrade_ix],
-        Some(&validator_pubkey),
+        Some(validator_pubkey),
         &[&validator_authority()],
         recent_blockhash,
     )
