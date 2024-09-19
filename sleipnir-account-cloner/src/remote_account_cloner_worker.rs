@@ -282,7 +282,7 @@ where
                         at_slot: account_chain_snapshot.at_slot,
                     });
                 }
-                Some(self.do_clone_new_account(pubkey)?)
+                self.do_clone_new_account(pubkey)?
             }
             // If the account is present on-chain, but not delegated
             // We need to differenciate between programs and other accounts
@@ -306,7 +306,7 @@ where
                             at_slot: account_chain_snapshot.at_slot,
                         });
                     }
-                    Some(self.do_clone_program_accounts(pubkey, account).await?)
+                    self.do_clone_program_accounts(pubkey, account).await?
                 }
                 // If it's not an executble, different rules apply depending on owner
                 else {
@@ -319,7 +319,7 @@ where
                                 at_slot: account_chain_snapshot.at_slot,
                             });
                         }
-                        Some(self.do_clone_payer_account(pubkey, account)?)
+                        self.do_clone_payer_account(pubkey, account)?
                     }
                     // Otherwise we just clone the account normally without any change
                     else {
@@ -330,7 +330,7 @@ where
                                 at_slot: account_chain_snapshot.at_slot,
                             });
                         }
-                        Some(self.do_clone_pda_account(pubkey, account)?)
+                        self.do_clone_pda_account(pubkey, account)?
                     }
                 }
             }
@@ -367,7 +367,7 @@ where
                         at_slot: account_chain_snapshot.at_slot,
                     });
                 }
-                Some(self.do_clone_pda_account(pubkey, account)?)
+                self.do_clone_pda_account(pubkey, account)?
             }
         };
         // Return the result
@@ -412,12 +412,12 @@ where
         account: &Account,
         owner: &Pubkey,
         delegation_slot: Slot,
-    ) -> AccountClonerResult<Option<Signature>> {
+    ) -> AccountClonerResult<Signature> {
         // If we already cloned this account from the same delegation slot
         // Keep the local state as source of truth even if it changed on-chain
         if let Some(AccountClonerOutput::Cloned {
             account_chain_snapshot,
-            ..
+            signature,
         }) = self.get_last_clone_output(pubkey)
         {
             if let AccountChainState::Delegated {
@@ -425,16 +425,14 @@ where
             } = &account_chain_snapshot.chain_state
             {
                 if delegation_record.delegation_slot == delegation_slot {
-                    return Ok(None);
+                    return Ok(signature);
                 }
             }
         };
         // If its the first time we're seeing this delegated account, dump it to the bank
-        Ok(Some(
-            self.account_dumper
-                .dump_delegated_account(pubkey, account, owner)
-                .map_err(AccountClonerError::AccountDumperError)?,
-        ))
+        self.account_dumper
+            .dump_delegated_account(pubkey, account, owner)
+            .map_err(AccountClonerError::AccountDumperError)
     }
 
     async fn do_clone_program_accounts(

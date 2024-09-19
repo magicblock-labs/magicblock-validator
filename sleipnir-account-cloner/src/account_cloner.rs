@@ -72,7 +72,7 @@ pub struct AccountClonerPermissions {
 pub enum AccountClonerOutput {
     Cloned {
         account_chain_snapshot: AccountChainSnapshotShared,
-        signature: Option<Signature>,
+        signature: Signature,
     },
     Unclonable {
         pubkey: Pubkey,
