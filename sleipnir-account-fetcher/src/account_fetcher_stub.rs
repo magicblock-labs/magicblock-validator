@@ -75,7 +75,6 @@ impl AccountFetcherStub {
                         delegation_record,
                     } => AccountChainState::Delegated {
                         account: Default::default(),
-                        delegation_pda: Pubkey::new_unique(),
                         delegation_record: delegation_record.clone(),
                     },
                 },

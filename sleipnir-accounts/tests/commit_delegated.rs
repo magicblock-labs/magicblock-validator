@@ -71,7 +71,6 @@ fn generate_delegated_account_chain_snapshot(
         at_slot: 42,
         chain_state: AccountChainState::Delegated {
             account: account.clone(),
-            delegation_pda: Pubkey::new_unique(),
             delegation_record: DelegationRecord {
                 authority: Pubkey::new_unique(),
                 owner: account.owner,
