@@ -17,7 +17,7 @@ pub struct ScheduledCommit {
 
 #[derive(Serialize, Deserialize)]
 pub struct MagicContext {
-    scheduled_commits: Vec<ScheduledCommit>,
+    pub scheduled_commits: Vec<ScheduledCommit>,
 }
 
 impl MagicContext {

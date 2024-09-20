@@ -22,7 +22,8 @@ use solana_sdk::{
 use crate::{
     process_scheduled_commit_sent,
     schedule_transactions::{
-        process_schedule_commit, ProcessScheduleCommitOptions,
+        process_accept_scheduled_commits, process_schedule_commit,
+        ProcessScheduleCommitOptions,
     },
     sleipnir_instruction::{
         AccountModificationForInstruction, SleipnirError, SleipnirInstruction,
@@ -67,6 +68,9 @@ declare_process_instruction!(
                         request_undelegation: true,
                     },
                 )
+            }
+            SleipnirInstruction::AcceptScheduleCommits => {
+                process_accept_scheduled_commits(signers, invoke_context)
             }
             SleipnirInstruction::ScheduledCommitSent(id) => {
                 process_scheduled_commit_sent(

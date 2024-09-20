@@ -151,7 +151,8 @@ impl SleipnirInstruction {
             ModifyAccounts(_) => 0,
             ScheduleCommit => 1,
             ScheduleCommitAndUndelegate => 2,
-            ScheduledCommitSent(_) => 3,
+            AcceptScheduleCommits => 3,
+            ScheduledCommitSent(_) => 4,
         }
     }
 
@@ -219,7 +220,10 @@ pub(crate) fn schedule_commit_instruction(
     payer: &Pubkey,
     pdas: Vec<Pubkey>,
 ) -> Instruction {
-    let mut account_metas = vec![AccountMeta::new(*payer, true)];
+    let mut account_metas = vec![
+        AccountMeta::new(*payer, true),
+        AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+    ];
     for pubkey in &pdas {
         account_metas.push(AccountMeta::new_readonly(*pubkey, true));
     }
@@ -247,7 +251,10 @@ pub(crate) fn schedule_commit_and_undelegate_instruction(
     payer: &Pubkey,
     pdas: Vec<Pubkey>,
 ) -> Instruction {
-    let mut account_metas = vec![AccountMeta::new(*payer, true)];
+    let mut account_metas = vec![
+        AccountMeta::new(*payer, true),
+        AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+    ];
     for pubkey in &pdas {
         account_metas.push(AccountMeta::new_readonly(*pubkey, true));
     }

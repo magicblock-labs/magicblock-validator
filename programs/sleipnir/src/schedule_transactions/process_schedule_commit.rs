@@ -7,7 +7,6 @@ use sleipnir_core::magic_program::MAGIC_CONTEXT_PUBKEY;
 use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 use solana_sdk::{
     account::ReadableAccount, instruction::InstructionError, pubkey::Pubkey,
-    transaction_context::TransactionContext,
 };
 
 use crate::{
@@ -38,183 +37,204 @@ pub(crate) fn process_schedule_commit(
     const PAYER_IDX: u16 = 0;
     const MAGIC_CONTEXT_IDX: u16 = PAYER_IDX + 1;
 
+    for i in 0..10 {
+        let addr = get_instruction_pubkey_with_idx(
+            invoke_context.transaction_context,
+            i,
+        )
+        .ok();
+        if addr.is_none() {
+            break;
+        }
+        eprintln!("Address {}: {:?}", i, addr);
+    }
     check_magic_context_id(invoke_context, MAGIC_CONTEXT_IDX)?;
+    if false {
+        let transaction_context = &invoke_context.transaction_context.clone();
+        let ix_ctx = transaction_context.get_current_instruction_context()?;
+        let ix_accs_len = ix_ctx.get_number_of_instruction_accounts() as usize;
+        const COMMITTEES_START: usize = MAGIC_CONTEXT_IDX as usize + 1;
 
-    let transaction_context = &invoke_context.transaction_context.clone();
-    let ix_ctx = transaction_context.get_current_instruction_context()?;
-    let ix_accs_len = ix_ctx.get_number_of_instruction_accounts() as usize;
-    const COMMITTEES_START: usize = MAGIC_CONTEXT_IDX as usize + 1;
+        // Assert MagicBlock program
+        ix_ctx
+            .find_index_of_program_account(transaction_context, &crate::id())
+            .ok_or_else(|| {
+                ic_msg!(
+                    invoke_context,
+                    "ScheduleCommit ERR: Magic program account not found"
+                );
+                InstructionError::UnsupportedProgramId
+            })?;
 
-    // Assert MagicBlock program
-    ix_ctx
-        .find_index_of_program_account(transaction_context, &crate::id())
-        .ok_or_else(|| {
+        // Assert enough accounts
+        if ix_accs_len <= COMMITTEES_START {
             ic_msg!(
-                invoke_context,
-                "ScheduleCommit ERR: Magic program account not found"
-            );
-            InstructionError::UnsupportedProgramId
-        })?;
-
-    // Assert enough accounts
-    if ix_accs_len <= COMMITTEES_START {
-        ic_msg!(
             invoke_context,
             "ScheduleCommit ERR: not enough accounts to schedule commit ({}), need payer, signing program an account for each pubkey to be committed",
             ix_accs_len
         );
-        return Err(InstructionError::NotEnoughAccountKeys);
-    }
+            return Err(InstructionError::NotEnoughAccountKeys);
+        }
 
-    // Assert Payer is signer
-    let payer_pubkey =
-        get_instruction_pubkey_with_idx(transaction_context, PAYER_IDX)?;
-    if !signers.contains(payer_pubkey) {
-        ic_msg!(
-            invoke_context,
-            "ScheduleCommit ERR: payer pubkey {} not in signers",
-            payer_pubkey
-        );
-        return Err(InstructionError::MissingRequiredSignature);
-    }
+        // Assert Payer is signer
+        let payer_pubkey =
+            get_instruction_pubkey_with_idx(transaction_context, PAYER_IDX)?;
+        if !signers.contains(payer_pubkey) {
+            ic_msg!(
+                invoke_context,
+                "ScheduleCommit ERR: payer pubkey {} not in signers",
+                payer_pubkey
+            );
+            return Err(InstructionError::MissingRequiredSignature);
+        }
 
-    //
-    // Get the program_id of the parent instruction that invoked this one via CPI
-    //
+        //
+        // Get the program_id of the parent instruction that invoked this one via CPI
+        //
 
-    // We cannot easily simulate the transaction being invoked via CPI
-    // from the owning program during unit tests
-    // Instead the integration tests ensure that this works as expected
-    #[cfg(not(test))]
+        // We cannot easily simulate the transaction being invoked via CPI
+        // from the owning program during unit tests
+        // Instead the integration tests ensure that this works as expected
+        #[cfg(not(test))]
     let frames = crate::utils::instruction_context_frames::InstructionContextFrames::try_from(transaction_context)?;
-    #[cfg(not(test))]
-    let parent_program_id = {
-        let parent_program_id = frames
-            .find_program_id_of_parent_of_current_instruction()
-            .ok_or_else(|| {
-                ic_msg!(
-                    invoke_context,
-                    "ScheduleCommit ERR: failed to find parent program id"
-                );
-                InstructionError::InvalidInstructionData
-            })?;
+        #[cfg(not(test))]
+        let parent_program_id = {
+            let parent_program_id = frames
+                .find_program_id_of_parent_of_current_instruction()
+                .ok_or_else(|| {
+                    ic_msg!(
+                        invoke_context,
+                        "ScheduleCommit ERR: failed to find parent program id"
+                    );
+                    InstructionError::InvalidInstructionData
+                })?;
 
-        ic_msg!(
-            invoke_context,
-            "ScheduleCommit: parent program id: {}",
+            ic_msg!(
+                invoke_context,
+                "ScheduleCommit: parent program id: {}",
+                parent_program_id
+            );
             parent_program_id
-        );
-        parent_program_id
-    };
+        };
 
-    // During unit tests we assume the first committee has the correct program ID
-    #[cfg(test)]
-    let first_committee_owner = {
-        *get_instruction_account_with_idx(
-            transaction_context,
-            COMMITTEES_START as u16,
-        )?
-        .borrow()
-        .owner()
-    };
+        // During unit tests we assume the first committee has the correct program ID
+        #[cfg(test)]
+        let first_committee_owner = {
+            *get_instruction_account_with_idx(
+                transaction_context,
+                COMMITTEES_START as u16,
+            )?
+            .borrow()
+            .owner()
+        };
 
-    #[cfg(test)]
-    let parent_program_id = &first_committee_owner;
+        #[cfg(test)]
+        let parent_program_id = &first_committee_owner;
 
-    // Assert all PDAs are owned by invoking program
-    // NOTE: we don't require them to be signers as in our case verifying that the
-    // program owning the PDAs invoked us via CPI is sufficient
-    // Thus we can be `invoke`d unsigned and no seeds need to be provided
-    let mut pubkeys = Vec::new();
-    for idx in COMMITTEES_START..ix_accs_len {
-        let acc_pubkey =
-            get_instruction_pubkey_with_idx(transaction_context, idx as u16)?;
-        let acc =
-            get_instruction_account_with_idx(transaction_context, idx as u16)?;
+        // Assert all PDAs are owned by invoking program
+        // NOTE: we don't require them to be signers as in our case verifying that the
+        // program owning the PDAs invoked us via CPI is sufficient
+        // Thus we can be `invoke`d unsigned and no seeds need to be provided
+        let mut pubkeys = Vec::new();
+        for idx in COMMITTEES_START..ix_accs_len {
+            let acc_pubkey = get_instruction_pubkey_with_idx(
+                transaction_context,
+                idx as u16,
+            )?;
+            let acc = get_instruction_account_with_idx(
+                transaction_context,
+                idx as u16,
+            )?;
 
-        {
-            if parent_program_id != acc.borrow().owner() {
-                ic_msg!(
+            {
+                if parent_program_id != acc.borrow().owner() {
+                    ic_msg!(
                 invoke_context,
                 "ScheduleCommit ERR: account {} needs to be owned by the invoking program {} to be committed, but is owned by {}",
                 acc_pubkey, parent_program_id, acc.borrow().owner()
             );
-                return Err(InstructionError::InvalidAccountOwner);
+                    return Err(InstructionError::InvalidAccountOwner);
+                }
+                pubkeys.push(*acc_pubkey);
             }
-            pubkeys.push(*acc_pubkey);
-        }
 
-        if opts.request_undelegation {
-            // If the account is scheduled to be undelegated then we need to lock it
-            // immediately in order to prevent the following actions:
-            // - writes to the account
-            // - scheduling further commits for this account
-            //
-            // Setting the owner will prevent both, since in both cases the _actual_
-            // owner program needs to sign for the account which is not possible at
-            // that point
-            // NOTE: this owner change only takes effect if the transaction which
-            // includes this instruction succeeds.
-            set_account_owner_to_delegation_program(acc);
-            ic_msg!(
+            if opts.request_undelegation {
+                // If the account is scheduled to be undelegated then we need to lock it
+                // immediately in order to prevent the following actions:
+                // - writes to the account
+                // - scheduling further commits for this account
+                //
+                // Setting the owner will prevent both, since in both cases the _actual_
+                // owner program needs to sign for the account which is not possible at
+                // that point
+                // NOTE: this owner change only takes effect if the transaction which
+                // includes this instruction succeeds.
+                set_account_owner_to_delegation_program(acc);
+                ic_msg!(
                 invoke_context,
                 "ScheduleCommit: account {} owner set to delegation program",
                 acc_pubkey
             );
+            }
         }
-    }
 
-    // Determine id and slot
-    let commit_id = COMMIT_ID.fetch_add(1, Ordering::Relaxed);
+        // Determine id and slot
+        let commit_id = COMMIT_ID.fetch_add(1, Ordering::Relaxed);
 
-    // It appears that in builtin programs `Clock::get` doesn't work as expected, thus
-    // we have to get it directly from the sysvar cache.
-    let clock =
-        invoke_context
-            .get_sysvar_cache()
-            .get_clock()
+        // It appears that in builtin programs `Clock::get` doesn't work as expected, thus
+        // we have to get it directly from the sysvar cache.
+        let clock =
+            invoke_context
+                .get_sysvar_cache()
+                .get_clock()
+                .map_err(|err| {
+                    ic_msg!(
+                        invoke_context,
+                        "Failed to get clock sysvar: {}",
+                        err
+                    );
+                    InstructionError::UnsupportedSysvar
+                })?;
+
+        let blockhash = invoke_context.blockhash;
+        let commit_sent_transaction =
+            scheduled_commit_sent(commit_id, blockhash);
+
+        let commit_sent_sig = commit_sent_transaction.signatures[0];
+        let scheduled_commit = ScheduledCommit {
+            id: commit_id,
+            slot: clock.slot,
+            blockhash,
+            accounts: pubkeys,
+            payer: *payer_pubkey,
+            owner: *parent_program_id,
+            commit_sent_transaction,
+            request_undelegation: opts.request_undelegation,
+        };
+
+        // NOTE: this is only protected by all the above checks however if the
+        // instruction fails for other reasons detected afterward then the commit
+        // stays scheduled
+        let context_acc = get_instruction_account_with_idx(
+            transaction_context,
+            MAGIC_CONTEXT_IDX,
+        )?;
+        TransactionScheduler::schedule_commit(context_acc, scheduled_commit)
             .map_err(|err| {
-                ic_msg!(invoke_context, "Failed to get clock sysvar: {}", err);
-                InstructionError::UnsupportedSysvar
+                ic_msg!(
+                    invoke_context,
+                    "ScheduleCommit ERR: failed to schedule commit: {}",
+                    err
+                );
+                InstructionError::GenericError
             })?;
-
-    let blockhash = invoke_context.blockhash;
-    let commit_sent_transaction = scheduled_commit_sent(commit_id, blockhash);
-
-    let commit_sent_sig = commit_sent_transaction.signatures[0];
-    let scheduled_commit = ScheduledCommit {
-        id: commit_id,
-        slot: clock.slot,
-        blockhash,
-        accounts: pubkeys,
-        payer: *payer_pubkey,
-        owner: *parent_program_id,
-        commit_sent_transaction,
-        request_undelegation: opts.request_undelegation,
+        ic_msg!(invoke_context, "Scheduled commit with ID: {}", commit_id,);
+        ic_msg!(
+            invoke_context,
+            "ScheduledCommitSent signature: {}",
+            commit_sent_sig,
+        );
     };
-
-    // NOTE: this is only protected by all the above checks however if the
-    // instruction fails for other reasons detected afterward then the commit
-    // stays scheduled
-    let context_acc = get_instruction_account_with_idx(
-        transaction_context,
-        MAGIC_CONTEXT_IDX,
-    )?;
-    TransactionScheduler::schedule_commit(context_acc, scheduled_commit)
-        .map_err(|err| {
-            ic_msg!(
-                invoke_context,
-                "ScheduleCommit ERR: failed to schedule commit: {}",
-                err
-            );
-            InstructionError::GenericError
-        })?;
-    ic_msg!(invoke_context, "Scheduled commit with ID: {}", commit_id,);
-    ic_msg!(
-        invoke_context,
-        "ScheduledCommitSent signature: {}",
-        commit_sent_sig,
-    );
 
     Ok(())
 }
@@ -237,7 +257,7 @@ pub fn process_accept_scheduled_commits(
         MAGIC_CONTEXT_IDX,
     )?;
     let mut magic_context =
-        MagicContext::try_from_slice(&magic_context_acc.borrow().data())
+        bincode::deserialize::<MagicContext>(magic_context_acc.borrow().data())
             .map_err(|err| {
                 ic_msg!(
                     invoke_context,
@@ -279,6 +299,28 @@ pub fn process_accept_scheduled_commits(
         std::mem::take(&mut magic_context.scheduled_commits);
     TransactionScheduler::default().accept_scheduled_commits(scheduled_commits);
 
+    // 4. Serialize and store the updated `MagicContext` account
+    let magic_context_data =
+        bincode::serialize(&magic_context).map_err(|err| {
+            ic_msg!(
+                invoke_context,
+                "Failed to serialize MagicContext: {}",
+                err
+            );
+            InstructionError::GenericError
+        })?;
+    magic_context_acc
+        .borrow_mut()
+        .serialize_data(&magic_context_data)
+        .map_err(|err| {
+            ic_msg!(
+                invoke_context,
+                "Failed to serialize MagicContext: {}",
+                err
+            );
+            InstructionError::GenericError
+        })?;
+
     Ok(())
 }
 
@@ -291,12 +333,12 @@ fn check_magic_context_id(
         idx,
     )?;
     if !provided_magic_context.eq(&MAGIC_CONTEXT_PUBKEY) {
-        ic_msg!(
-            invoke_context,
+        eprintln!(
+            // invoke_context,
             "AcceptScheduledCommits ERR: invalid magic context account {}",
             provided_magic_context
         );
-        return Err(InstructionError::InvalidArgument);
+        return Err(InstructionError::MissingAccount);
     }
 
     Ok(())
@@ -307,6 +349,7 @@ mod tests {
     use std::collections::HashMap;
 
     use assert_matches::assert_matches;
+    use sleipnir_core::magic_program::MAGIC_CONTEXT_PUBKEY;
     use solana_sdk::{
         account::{
             create_account_shared_data_for_test, AccountSharedData,
@@ -363,6 +406,10 @@ mod tests {
                     0,
                     &system_program::id(),
                 ),
+            );
+            map.insert(
+                committee,
+                AccountSharedData::new(0, 0, &MAGIC_CONTEXT_PUBKEY),
             );
             map.insert(committee, AccountSharedData::new(0, 0, &program));
             map

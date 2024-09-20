@@ -32,9 +32,10 @@ impl TransactionScheduler {
         context_account: &RefCell<AccountSharedData>,
         commit: ScheduledCommit,
     ) -> Result<(), bincode::Error> {
-        let context_data = context_account.borrow_mut();
+        let context_data = &mut context_account.borrow_mut();
         let mut context = context_data.deserialize_data::<MagicContext>()?;
         context.add_scheduled_commit(commit);
+        context_data.serialize_data(&context)?;
         Ok(())
     }
 
