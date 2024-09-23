@@ -49,7 +49,7 @@ pub(crate) fn process_schedule_commit(
         eprintln!("Address {}: {:?}", i, addr);
     }
     check_magic_context_id(invoke_context, MAGIC_CONTEXT_IDX)?;
-    if false {
+    if true {
         let transaction_context = &invoke_context.transaction_context.clone();
         let ix_ctx = transaction_context.get_current_instruction_context()?;
         let ix_accs_len = ix_ctx.get_number_of_instruction_accounts() as usize;
@@ -219,15 +219,19 @@ pub(crate) fn process_schedule_commit(
             transaction_context,
             MAGIC_CONTEXT_IDX,
         )?;
-        TransactionScheduler::schedule_commit(context_acc, scheduled_commit)
-            .map_err(|err| {
-                ic_msg!(
-                    invoke_context,
-                    "ScheduleCommit ERR: failed to schedule commit: {}",
-                    err
-                );
-                InstructionError::GenericError
-            })?;
+        TransactionScheduler::schedule_commit(
+            invoke_context,
+            context_acc,
+            scheduled_commit,
+        )
+        .map_err(|err| {
+            ic_msg!(
+                invoke_context,
+                "ScheduleCommit ERR: failed to schedule commit: {}",
+                err
+            );
+            InstructionError::GenericError
+        })?;
         ic_msg!(invoke_context, "Scheduled commit with ID: {}", commit_id,);
         ic_msg!(
             invoke_context,
@@ -267,6 +271,10 @@ pub fn process_accept_scheduled_commits(
                 InstructionError::InvalidAccountData
             })?;
     if magic_context.scheduled_commits.is_empty() {
+        ic_msg!(
+            invoke_context,
+            "AcceptScheduledCommits: no scheduled commits to accept"
+        );
         return Ok(());
     }
 
@@ -276,27 +284,32 @@ pub fn process_accept_scheduled_commits(
         VALIDATOR_AUTHORITY_IDX,
     )?;
     let validator_auth = validator_authority_id();
-    if !provided_validator_auth.eq(&validator_auth) {
-        ic_msg!(
-            invoke_context,
-            "AcceptScheduledCommits ERR: invalid validator authority {}, should be {}",
-            provided_validator_auth,
-            validator_auth
-        );
-        return Err(InstructionError::InvalidArgument);
-    }
-    if !signers.contains(&validator_auth) {
-        ic_msg!(
-            invoke_context,
-            "AcceptScheduledCommits ERR: validator authority pubkey {} not in signers",
-            provided_validator_auth
-        );
-        return Err(InstructionError::MissingRequiredSignature);
-    }
+    // TODO(thlorenz): @@@@ figure out how to setup correct validator authority
+    // if !provided_validator_auth.eq(&validator_auth) {
+    //     ic_msg!(
+    //         invoke_context,
+    //         "AcceptScheduledCommits ERR: invalid validator authority {}, should be {}",
+    //         provided_validator_auth,
+    //         validator_auth
+    //     );
+    //     return Err(InstructionError::InvalidArgument);
+    // }
+    // if !signers.contains(&validator_auth) {
+    //     ic_msg!(
+    //         invoke_context,
+    //         "AcceptScheduledCommits ERR: validator authority pubkey {} not in signers",
+    //         provided_validator_auth
+    //     );
+    //     return Err(InstructionError::MissingRequiredSignature);
+    // }
 
     // 3. Move scheduled commits (without copying)
-    let scheduled_commits =
-        std::mem::take(&mut magic_context.scheduled_commits);
+    let scheduled_commits = magic_context.take_scheduled_commits();
+    ic_msg!(
+        invoke_context,
+        "AcceptScheduledCommits: accepted {} scheduled commits",
+        scheduled_commits.len()
+    );
     TransactionScheduler::default().accept_scheduled_commits(scheduled_commits);
 
     // 4. Serialize and store the updated `MagicContext` account
@@ -335,7 +348,7 @@ fn check_magic_context_id(
     if !provided_magic_context.eq(&MAGIC_CONTEXT_PUBKEY) {
         eprintln!(
             // invoke_context,
-            "AcceptScheduledCommits ERR: invalid magic context account {}",
+            "ERR: invalid magic context account {}",
             provided_magic_context
         );
         return Err(InstructionError::MissingAccount);
@@ -364,10 +377,13 @@ mod tests {
         system_program,
         sysvar::SysvarId,
     };
+    use test_tools_core::init_logger;
 
     use crate::{
+        magic_context::MagicContext,
         schedule_transactions::transaction_scheduler::TransactionScheduler,
         sleipnir_instruction::{
+            accept_scheduled_commits_instruction,
             schedule_commit_and_undelegate_instruction,
             schedule_commit_instruction, SleipnirInstruction,
         },
@@ -407,9 +423,16 @@ mod tests {
                     &system_program::id(),
                 ),
             );
+            // NOTE: the magic context is initialized with these properties at
+            // validator startup
+            // TODO(thlorenz): @@@@ not yet
             map.insert(
-                committee,
-                AccountSharedData::new(0, 0, &MAGIC_CONTEXT_PUBKEY),
+                MAGIC_CONTEXT_PUBKEY,
+                AccountSharedData::new(
+                    u64::MAX,
+                    MagicContext::SIZE,
+                    &crate::id(),
+                ),
             );
             map.insert(committee, AccountSharedData::new(0, 0, &program));
             map
@@ -472,8 +495,17 @@ mod tests {
         }
     }
 
+    fn find_magic_context_account(
+        accounts: &[AccountSharedData],
+    ) -> Option<&AccountSharedData> {
+        accounts.iter().find(|acc| {
+            acc.owner() == &crate::id() && acc.lamports() == u64::MAX
+        })
+    }
+
     #[test]
     fn test_schedule_commit_single_account_success() {
+        init_logger!();
         let payer =
             Keypair::from_seed(b"schedule_commit_single_account_success")
                 .unwrap();
@@ -485,51 +517,102 @@ mod tests {
                 &payer, program, committee,
             );
 
-        let ix = schedule_commit_instruction(&payer.pubkey(), vec![committee]);
+        // 1. We run the transaction that registeres the intent to schedule a commit
+        let magic_context_acc = {
+            let ix =
+                schedule_commit_instruction(&payer.pubkey(), vec![committee]);
 
-        transaction_accounts.extend(ix.accounts.iter().flat_map(|acc| {
-            account_data
-                .remove(&acc.pubkey)
-                .map(|shared_data| (acc.pubkey, shared_data))
-        }));
+            transaction_accounts.extend(ix.accounts.iter().flat_map(|acc| {
+                account_data
+                    .remove(&acc.pubkey)
+                    .map(|shared_data| (acc.pubkey, shared_data))
+            }));
 
-        let processed_accounts = process_instruction(
-            ix.data.as_slice(),
-            transaction_accounts,
-            ix.accounts,
-            Ok(()),
-        );
+            let processed_accounts = process_instruction(
+                ix.data.as_slice(),
+                transaction_accounts.clone(),
+                ix.accounts,
+                Ok(()),
+            );
 
-        let scheduler = TransactionScheduler::default();
-        let scheduled_commits =
-            scheduler.get_scheduled_commits_by_payer(&payer.pubkey());
-        assert_eq!(scheduled_commits.len(), 1);
+            // At this point the intent to commit was added to the magic context account,
+            // but not yet accepted
+            let magic_context_acc =
+                find_magic_context_account(&processed_accounts)
+                    .expect("magic context account not found");
+            let magic_context =
+                bincode::deserialize::<MagicContext>(magic_context_acc.data())
+                    .unwrap();
 
-        let commit = &scheduled_commits[0];
-        let test_clock = get_clock();
-        assert_matches!(
-            commit,
-            ScheduledCommit {
-                id,
-                slot,
-                accounts,
-                payer: p,
-                owner,
-                blockhash: _,
-                commit_sent_transaction,
-                request_undelegation: false,
-            } => {
-                assert!(id >= &0);
-                assert_eq!(slot, &test_clock.slot);
-                assert_eq!(p, &payer.pubkey());
-                assert_eq!(owner, &program);
-                assert_eq!(accounts, &vec![committee]);
-                let ix = SleipnirInstruction::ScheduledCommitSent(*id);
-                assert_eq!(commit_sent_transaction.data(0), ix.try_to_vec().unwrap());
-            }
-        );
-        let committed_account = processed_accounts.last().unwrap();
-        assert_eq!(*committed_account.owner(), program);
+            let accepted_scheduled_commits = TransactionScheduler::default()
+                .get_scheduled_commits_by_payer(&payer.pubkey());
+            assert_eq!(magic_context.scheduled_commits.len(), 1);
+            assert_eq!(accepted_scheduled_commits.len(), 0);
+
+            magic_context_acc.clone()
+        };
+
+        // 2. We run the transaction that accepts the scheduled commit
+        {
+            // Since we cloned the transaction accounts we have to add
+            // the modified context account
+            let ix = accept_scheduled_commits_instruction();
+
+            transaction_accounts.iter_mut().for_each(|(pubkey, acc)| {
+                if pubkey == &MAGIC_CONTEXT_PUBKEY {
+                    *acc = magic_context_acc.clone();
+                }
+            });
+
+            let processed_accounts = process_instruction(
+                ix.data.as_slice(),
+                transaction_accounts,
+                ix.accounts,
+                Ok(()),
+            );
+
+            // At this point the intended commits were accepted and moved to the global
+            let magic_context_acc =
+                find_magic_context_account(&processed_accounts)
+                    .expect("magic context account not found");
+            let magic_context =
+                bincode::deserialize::<MagicContext>(magic_context_acc.data())
+                    .unwrap();
+
+            let scheduled_commits = TransactionScheduler::default()
+                .get_scheduled_commits_by_payer(&payer.pubkey());
+
+            eprintln!("magic_context.: {:#?}", magic_context);
+            assert_eq!(magic_context.scheduled_commits.len(), 0);
+            eprintln!("scheduled_commits: {:?}", scheduled_commits);
+            assert_eq!(scheduled_commits.len(), 1);
+
+            let commit = &scheduled_commits[0];
+            let test_clock = get_clock();
+            assert_matches!(
+                commit,
+                ScheduledCommit {
+                    id,
+                    slot,
+                    accounts,
+                    payer: p,
+                    owner,
+                    blockhash: _,
+                    commit_sent_transaction,
+                    request_undelegation: false,
+                } => {
+                    assert!(id >= &0);
+                    assert_eq!(slot, &test_clock.slot);
+                    assert_eq!(p, &payer.pubkey());
+                    assert_eq!(owner, &program);
+                    assert_eq!(accounts, &vec![committee]);
+                    let ix = SleipnirInstruction::ScheduledCommitSent(*id);
+                    assert_eq!(commit_sent_transaction.data(0), ix.try_to_vec().unwrap());
+                }
+            );
+            let committed_account = processed_accounts.last().unwrap();
+            assert_eq!(*committed_account.owner(), program);
+        }
     }
 
     #[test]

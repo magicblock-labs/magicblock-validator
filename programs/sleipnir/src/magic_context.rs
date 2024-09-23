@@ -1,6 +1,12 @@
+use std::mem;
+
 use serde::{Deserialize, Serialize};
 use solana_sdk::{
-    clock::Slot, hash::Hash, pubkey::Pubkey, transaction::Transaction,
+    account::{AccountSharedData, ReadableAccount},
+    clock::Slot,
+    hash::Hash,
+    pubkey::Pubkey,
+    transaction::Transaction,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -15,13 +21,29 @@ pub struct ScheduledCommit {
     pub request_undelegation: bool,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct MagicContext {
+    #[serde(default)]
     pub scheduled_commits: Vec<ScheduledCommit>,
 }
 
 impl MagicContext {
+    pub const SIZE: usize = 1024 * 1024 * 100; // 100 MB
+    pub(crate) fn deserialize(
+        data: &AccountSharedData,
+    ) -> Result<Self, bincode::Error> {
+        if data.data().is_empty() {
+            Ok(Self::default())
+        } else {
+            data.deserialize_data()
+        }
+    }
+
     pub(crate) fn add_scheduled_commit(&mut self, commit: ScheduledCommit) {
         self.scheduled_commits.push(commit);
+    }
+
+    pub(crate) fn take_scheduled_commits(&mut self) -> Vec<ScheduledCommit> {
+        mem::take(&mut self.scheduled_commits)
     }
 }

@@ -24,6 +24,7 @@ thiserror = { workspace = true }
 [dev-dependencies]
 assert_matches = { workspace = true }
 rand = { workspace = true }
+test-tools-core = { workspace = true }
 tokio = { workspace = true, features = ["macros"] }
 
 sleipnir-program = { workspace = true, features = ["dev-context-only-utils"] }

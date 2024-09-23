@@ -4601,6 +4601,7 @@ dependencies = [
  "sleipnir-program",
  "solana-program-runtime",
  "solana-sdk",
+ "test-tools-core",
  "thiserror",
  "tokio",
 ]

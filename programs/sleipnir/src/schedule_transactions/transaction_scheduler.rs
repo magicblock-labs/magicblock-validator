@@ -1,6 +1,11 @@
 use crate::magic_context::{MagicContext, ScheduledCommit};
 use lazy_static::lazy_static;
-use solana_sdk::{account::AccountSharedData, pubkey::Pubkey};
+use solana_program_runtime::ic_msg;
+use solana_program_runtime::invoke_context::InvokeContext;
+use solana_sdk::instruction::InstructionError;
+use solana_sdk::{
+    account::AccountSharedData, account_utils::StateMut, pubkey::Pubkey,
+};
 use std::cell::RefCell;
 use std::{
     mem,
@@ -29,17 +34,27 @@ impl Default for TransactionScheduler {
 
 impl TransactionScheduler {
     pub fn schedule_commit(
+        invoke_context: &InvokeContext,
         context_account: &RefCell<AccountSharedData>,
         commit: ScheduledCommit,
-    ) -> Result<(), bincode::Error> {
+    ) -> Result<(), InstructionError> {
         let context_data = &mut context_account.borrow_mut();
-        let mut context = context_data.deserialize_data::<MagicContext>()?;
+        let mut context =
+            MagicContext::deserialize(context_data).map_err(|err| {
+                ic_msg!(
+                    invoke_context,
+                    "Failed to deserialize MagicContext: {}",
+                    err
+                );
+                InstructionError::GenericError
+            })?;
         context.add_scheduled_commit(commit);
-        context_data.serialize_data(&context)?;
+        context_data.set_state(&context)?;
         Ok(())
     }
 
     pub fn accept_scheduled_commits(&self, commits: Vec<ScheduledCommit>) {
+        eprintln!("======== accept_scheduled_commits ========= {:#?}", commits);
         self.scheduled_commits
             .write()
             .expect("scheduled_commits lock poisoned")
