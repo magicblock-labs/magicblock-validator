@@ -18,3 +18,9 @@ solana-sdk = { workspace = true }
 
 [build-dependencies]
 rustc_version = { workspace = true }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = [
+  'cfg(RUSTC_WITH_SPECIALIZATION)',
+  'cfg(RUSTC_WITHOUT_SPECIALIZATION)',
+] }
