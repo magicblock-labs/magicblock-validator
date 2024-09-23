@@ -54,7 +54,6 @@ impl TransactionScheduler {
     }
 
     pub fn accept_scheduled_commits(&self, commits: Vec<ScheduledCommit>) {
-        eprintln!("======== accept_scheduled_commits ========= {:#?}", commits);
         self.scheduled_commits
             .write()
             .expect("scheduled_commits lock poisoned")

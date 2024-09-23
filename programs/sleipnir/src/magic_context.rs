@@ -23,12 +23,12 @@ pub struct ScheduledCommit {
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct MagicContext {
-    #[serde(default)]
     pub scheduled_commits: Vec<ScheduledCommit>,
 }
 
 impl MagicContext {
     pub const SIZE: usize = 1024 * 1024 * 100; // 100 MB
+    pub const ZERO: [u8; Self::SIZE] = [0; Self::SIZE];
     pub(crate) fn deserialize(
         data: &AccountSharedData,
     ) -> Result<Self, bincode::Error> {

@@ -307,7 +307,7 @@ pub fn process_accept_scheduled_commits(
     let scheduled_commits = magic_context.take_scheduled_commits();
     ic_msg!(
         invoke_context,
-        "AcceptScheduledCommits: accepted {} scheduled commits",
+        "AcceptScheduledCommits: accepted {} scheduled commit(s)",
         scheduled_commits.len()
     );
     TransactionScheduler::default().accept_scheduled_commits(scheduled_commits);
@@ -322,9 +322,22 @@ pub fn process_accept_scheduled_commits(
             );
             InstructionError::GenericError
         })?;
+    ic_msg!(
+        invoke_context,
+        "AcceptScheduledCommits: updated MagicContext {:?}",
+        magic_context_data,
+    );
+
+    // Zero fill account before updating data
+    // NOTE: this may become expensive, but is a security measure and also prevents
+    // accidentally interpreting old data when deserializing
     magic_context_acc
         .borrow_mut()
-        .serialize_data(&magic_context_data)
+        .set_data_from_slice(&MagicContext::ZERO);
+
+    magic_context_acc
+        .borrow_mut()
+        .serialize_data(&magic_context)
         .map_err(|err| {
             ic_msg!(
                 invoke_context,
@@ -582,9 +595,7 @@ mod tests {
             let scheduled_commits = TransactionScheduler::default()
                 .get_scheduled_commits_by_payer(&payer.pubkey());
 
-            eprintln!("magic_context.: {:#?}", magic_context);
             assert_eq!(magic_context.scheduled_commits.len(), 0);
-            eprintln!("scheduled_commits: {:?}", scheduled_commits);
             assert_eq!(scheduled_commits.len(), 1);
 
             let commit = &scheduled_commits[0];
