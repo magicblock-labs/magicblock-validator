@@ -37,17 +37,6 @@ pub(crate) fn process_schedule_commit(
     const PAYER_IDX: u16 = 0;
     const MAGIC_CONTEXT_IDX: u16 = PAYER_IDX + 1;
 
-    for i in 0..10 {
-        let addr = get_instruction_pubkey_with_idx(
-            invoke_context.transaction_context,
-            i,
-        )
-        .ok();
-        if addr.is_none() {
-            break;
-        }
-        eprintln!("Address {}: {:?}", i, addr);
-    }
     check_magic_context_id(invoke_context, MAGIC_CONTEXT_IDX)?;
     if true {
         let transaction_context = &invoke_context.transaction_context.clone();
@@ -284,24 +273,23 @@ pub fn process_accept_scheduled_commits(
         VALIDATOR_AUTHORITY_IDX,
     )?;
     let validator_auth = validator_authority_id();
-    // TODO(thlorenz): @@@@ figure out how to setup correct validator authority
-    // if !provided_validator_auth.eq(&validator_auth) {
-    //     ic_msg!(
-    //         invoke_context,
-    //         "AcceptScheduledCommits ERR: invalid validator authority {}, should be {}",
-    //         provided_validator_auth,
-    //         validator_auth
-    //     );
-    //     return Err(InstructionError::InvalidArgument);
-    // }
-    // if !signers.contains(&validator_auth) {
-    //     ic_msg!(
-    //         invoke_context,
-    //         "AcceptScheduledCommits ERR: validator authority pubkey {} not in signers",
-    //         provided_validator_auth
-    //     );
-    //     return Err(InstructionError::MissingRequiredSignature);
-    // }
+    if !provided_validator_auth.eq(&validator_auth) {
+        ic_msg!(
+             invoke_context,
+             "AcceptScheduledCommits ERR: invalid validator authority {}, should be {}",
+             provided_validator_auth,
+             validator_auth
+         );
+        return Err(InstructionError::InvalidArgument);
+    }
+    if !signers.contains(&validator_auth) {
+        ic_msg!(
+            invoke_context,
+            "AcceptScheduledCommits ERR: validator authority pubkey {} not in signers",
+            validator_auth
+        );
+        return Err(InstructionError::MissingRequiredSignature);
+    }
 
     // 3. Move scheduled commits (without copying)
     let scheduled_commits = magic_context.take_scheduled_commits();
@@ -313,21 +301,6 @@ pub fn process_accept_scheduled_commits(
     TransactionScheduler::default().accept_scheduled_commits(scheduled_commits);
 
     // 4. Serialize and store the updated `MagicContext` account
-    let magic_context_data =
-        bincode::serialize(&magic_context).map_err(|err| {
-            ic_msg!(
-                invoke_context,
-                "Failed to serialize MagicContext: {}",
-                err
-            );
-            InstructionError::GenericError
-        })?;
-    ic_msg!(
-        invoke_context,
-        "AcceptScheduledCommits: updated MagicContext {:?}",
-        magic_context_data,
-    );
-
     // Zero fill account before updating data
     // NOTE: this may become expensive, but is a security measure and also prevents
     // accidentally interpreting old data when deserializing
@@ -359,8 +332,8 @@ fn check_magic_context_id(
         idx,
     )?;
     if !provided_magic_context.eq(&MAGIC_CONTEXT_PUBKEY) {
-        eprintln!(
-            // invoke_context,
+        ic_msg!(
+            invoke_context,
             "ERR: invalid magic context account {}",
             provided_magic_context
         );
@@ -525,13 +498,13 @@ mod tests {
         let program = Pubkey::new_unique();
         let committee = Pubkey::new_unique();
 
-        let (mut account_data, mut transaction_accounts) =
-            prepare_transaction_with_single_committee(
-                &payer, program, committee,
-            );
+        // 1. We run the transaction that registers the intent to schedule a commit
+        let (processed_scheduled, magic_context_acc) = {
+            let (mut account_data, mut transaction_accounts) =
+                prepare_transaction_with_single_committee(
+                    &payer, program, committee,
+                );
 
-        // 1. We run the transaction that registeres the intent to schedule a commit
-        let magic_context_acc = {
             let ix =
                 schedule_commit_instruction(&payer.pubkey(), vec![committee]);
 
@@ -541,7 +514,7 @@ mod tests {
                     .map(|shared_data| (acc.pubkey, shared_data))
             }));
 
-            let processed_accounts = process_instruction(
+            let processed_scheduled = process_instruction(
                 ix.data.as_slice(),
                 transaction_accounts.clone(),
                 ix.accounts,
@@ -551,7 +524,7 @@ mod tests {
             // At this point the intent to commit was added to the magic context account,
             // but not yet accepted
             let magic_context_acc =
-                find_magic_context_account(&processed_accounts)
+                find_magic_context_account(&processed_scheduled)
                     .expect("magic context account not found");
             let magic_context =
                 bincode::deserialize::<MagicContext>(magic_context_acc.data())
@@ -562,22 +535,29 @@ mod tests {
             assert_eq!(magic_context.scheduled_commits.len(), 1);
             assert_eq!(accepted_scheduled_commits.len(), 0);
 
-            magic_context_acc.clone()
+            (processed_scheduled.clone(), magic_context_acc.clone())
         };
 
         // 2. We run the transaction that accepts the scheduled commit
         {
-            // Since we cloned the transaction accounts we have to add
-            // the modified context account
+            let (mut account_data, mut transaction_accounts) =
+                prepare_transaction_with_single_committee(
+                    &payer, program, committee,
+                );
+
             let ix = accept_scheduled_commits_instruction();
+            transaction_accounts.extend(ix.accounts.iter().flat_map(|acc| {
+                account_data.remove(&acc.pubkey).map(|shared_data| {
+                    let shared_data = if acc.pubkey == MAGIC_CONTEXT_PUBKEY {
+                        magic_context_acc.clone()
+                    } else {
+                        shared_data
+                    };
+                    (acc.pubkey, shared_data)
+                })
+            }));
 
-            transaction_accounts.iter_mut().for_each(|(pubkey, acc)| {
-                if pubkey == &MAGIC_CONTEXT_PUBKEY {
-                    *acc = magic_context_acc.clone();
-                }
-            });
-
-            let processed_accounts = process_instruction(
+            let processed_accepted = process_instruction(
                 ix.data.as_slice(),
                 transaction_accounts,
                 ix.accounts,
@@ -586,7 +566,7 @@ mod tests {
 
             // At this point the intended commits were accepted and moved to the global
             let magic_context_acc =
-                find_magic_context_account(&processed_accounts)
+                find_magic_context_account(&processed_accepted)
                     .expect("magic context account not found");
             let magic_context =
                 bincode::deserialize::<MagicContext>(magic_context_acc.data())
@@ -621,9 +601,9 @@ mod tests {
                     assert_eq!(commit_sent_transaction.data(0), ix.try_to_vec().unwrap());
                 }
             );
-            let committed_account = processed_accounts.last().unwrap();
-            assert_eq!(*committed_account.owner(), program);
         }
+        let committed_account = processed_scheduled.last().unwrap();
+        assert_eq!(*committed_account.owner(), program);
     }
 
     #[test]
