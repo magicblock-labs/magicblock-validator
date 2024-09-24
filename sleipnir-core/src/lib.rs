@@ -1,6 +1,6 @@
 pub mod magic_program {
     use solana_sdk::pubkey;
-    use solana_sdk::pubkey::Pubkey;
+    pub use solana_sdk::pubkey::Pubkey;
 
     pub const MAGIC_PROGRAM_ADDR: &str =
         "Magic11111111111111111111111111111111111111";

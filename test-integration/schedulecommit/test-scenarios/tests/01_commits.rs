@@ -1,7 +1,7 @@
 use integration_test_tools::run_test;
 use log::*;
-use std::str::FromStr;
 
+use integration_test_tools::conversions::pubkey_from_magic_program;
 use schedulecommit_client::{verify, ScheduleCommitTestContextFields};
 use schedulecommit_program::api::schedule_commit_cpi_instruction;
 use sleipnir_core::magic_program;
@@ -32,8 +32,8 @@ fn test_committing_two_accounts() {
 
         let ix = schedule_commit_cpi_instruction(
             payer.pubkey(),
-            // Work around the different solana_sdk versions by creating pubkey from str
-            Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
+            pubkey_from_magic_program(magic_program::id()),
+            pubkey_from_magic_program(magic_program::MAGIC_CONTEXT_PUBKEY),
             &committees
                 .iter()
                 .map(|(player, _)| player.pubkey())

@@ -91,6 +91,7 @@ fn process_sibling_schedule_cpis(
 
     let accounts_iter = &mut accounts.iter();
     let payer = next_account_info(accounts_iter)?;
+    let magic_context = next_account_info(accounts_iter)?;
     let magic_program = next_account_info(accounts_iter)?;
     // Passed to us to allow CPI into it
     let _schedule_commmit_program = next_account_info(accounts_iter);
@@ -117,6 +118,7 @@ fn process_sibling_schedule_cpis(
         // 1. CPI into the program owning the PDAs
         let indirect_ix = schedule_commit_cpi_instruction(
             *payer.key,
+            *magic_context.key,
             *magic_program.key,
             &players,
             &pdas,

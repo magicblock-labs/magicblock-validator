@@ -1,4 +1,6 @@
-use integration_test_tools::run_test;
+use integration_test_tools::{
+    conversions::pubkey_from_magic_program, run_test,
+};
 use log::*;
 use schedulecommit_client::{
     verify, ScheduleCommitTestContext, ScheduleCommitTestContextFields,
@@ -21,7 +23,6 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
-use std::str::FromStr;
 use test_tools_core::init_logger;
 use utils::{
     assert_one_committee_account_was_undelegated_on_chain,
@@ -56,8 +57,8 @@ fn commit_and_undelegate_one_account(
     let ix = if modify_after {
         schedule_commit_and_undelegate_cpi_with_mod_after_instruction(
             payer.pubkey(),
-            // Work around the different solana_sdk versions by creating pubkey from str
-            Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
+            pubkey_from_magic_program(magic_program::id()),
+            pubkey_from_magic_program(magic_program::MAGIC_CONTEXT_PUBKEY),
             &committees
                 .iter()
                 .map(|(player, _)| player.pubkey())
@@ -67,8 +68,8 @@ fn commit_and_undelegate_one_account(
     } else {
         schedule_commit_and_undelegate_cpi_instruction(
             payer.pubkey(),
-            // Work around the different solana_sdk versions by creating pubkey from str
-            Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
+            pubkey_from_magic_program(magic_program::id()),
+            pubkey_from_magic_program(magic_program::MAGIC_CONTEXT_PUBKEY),
             &committees
                 .iter()
                 .map(|(player, _)| player.pubkey())
@@ -117,8 +118,8 @@ fn commit_and_undelegate_two_accounts(
     let ix = if modify_after {
         schedule_commit_and_undelegate_cpi_with_mod_after_instruction(
             payer.pubkey(),
-            // Work around the different solana_sdk versions by creating pubkey from str
-            Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
+            pubkey_from_magic_program(magic_program::id()),
+            pubkey_from_magic_program(magic_program::MAGIC_CONTEXT_PUBKEY),
             &committees
                 .iter()
                 .map(|(player, _)| player.pubkey())
@@ -128,8 +129,8 @@ fn commit_and_undelegate_two_accounts(
     } else {
         schedule_commit_and_undelegate_cpi_instruction(
             payer.pubkey(),
-            // Work around the different solana_sdk versions by creating pubkey from str
-            Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
+            pubkey_from_magic_program(magic_program::id()),
+            pubkey_from_magic_program(magic_program::MAGIC_CONTEXT_PUBKEY),
             &committees
                 .iter()
                 .map(|(player, _)| player.pubkey())

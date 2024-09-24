@@ -1,3 +1,4 @@
+pub mod conversions;
 mod integration_test_context;
 mod run_test;
 pub mod toml_to_args;

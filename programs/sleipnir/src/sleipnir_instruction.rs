@@ -103,7 +103,9 @@ pub(crate) enum SleipnirInstruction {
     ///
     /// # Account references
     /// - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
-    /// - **1..n** `[]`              Accounts to be committed
+    /// - **1.**   `[WRITE]`         Magic Context Account containing to which we store
+    ///                              the scheduled commits
+    /// - **2..n** `[]`              Accounts to be committed
     ScheduleCommit,
 
     /// This is the exact same instruction as [SleipnirInstruction::ScheduleCommit] except
@@ -118,7 +120,9 @@ pub(crate) enum SleipnirInstruction {
     ///
     /// # Account references
     /// - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
-    /// - **1..n** `[]`              Accounts to be committed and undelegated
+    /// - **1.**   `[WRITE]`         Magic Context Account containing to which we store
+    ///                              the scheduled commits
+    /// - **2..n** `[]`              Accounts to be committed and undelegated
     ScheduleCommitAndUndelegate,
 
     /// Moves the scheduled commit from the MagicContext to the global scheduled commits
@@ -129,7 +133,7 @@ pub(crate) enum SleipnirInstruction {
     ///
     /// # Account references
     /// - **0.**  `[SIGNER]` Validator Authority
-    /// - **1.n** `[WRITE]`  Magic Context Account containing the initially scheduled commits
+    /// - **1.**  `[WRITE]`  Magic Context Account containing the initially scheduled commits
     AcceptScheduleCommits,
 
     /// Records the the attempt to realize a scheduled commit on chain.

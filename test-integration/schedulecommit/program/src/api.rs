@@ -62,6 +62,7 @@ pub fn delegate_account_cpi_instruction(player: Pubkey) -> Instruction {
 /// It provides the following account metas to the invoked program:
 ///
 /// - `[WRITE, SIGNER]` Payer
+/// - `[WRITE]` MagicBlock Context
 /// - `[]` MagicBlock Program
 ///
 /// If this is invoked directly then no other accounts are needed.
@@ -70,12 +71,14 @@ pub fn delegate_account_cpi_instruction(player: Pubkey) -> Instruction {
 pub fn schedule_commit_cpi_instruction(
     payer: Pubkey,
     magic_program_id: Pubkey,
+    magic_context_id: Pubkey,
     players: &[Pubkey],
     committees: &[Pubkey],
 ) -> Instruction {
     schedule_commit_cpi_instruction_impl(
         payer,
         magic_program_id,
+        magic_context_id,
         players,
         committees,
         false,
@@ -85,12 +88,14 @@ pub fn schedule_commit_cpi_instruction(
 pub fn schedule_commit_and_undelegate_cpi_instruction(
     payer: Pubkey,
     magic_program_id: Pubkey,
+    magic_context_id: Pubkey,
     players: &[Pubkey],
     committees: &[Pubkey],
 ) -> Instruction {
     schedule_commit_cpi_instruction_impl(
         payer,
         magic_program_id,
+        magic_context_id,
         players,
         committees,
         true,
@@ -100,6 +105,7 @@ pub fn schedule_commit_and_undelegate_cpi_instruction(
 fn schedule_commit_cpi_instruction_impl(
     payer: Pubkey,
     magic_program_id: Pubkey,
+    magic_context_id: Pubkey,
     players: &[Pubkey],
     committees: &[Pubkey],
     undelegate: bool,
@@ -107,6 +113,7 @@ fn schedule_commit_cpi_instruction_impl(
     let program_id = crate::id();
     let mut account_metas = vec![
         AccountMeta::new(payer, true),
+        AccountMeta::new(magic_context_id, false),
         AccountMeta::new_readonly(magic_program_id, false),
     ];
     for committee in committees {
@@ -127,12 +134,14 @@ fn schedule_commit_cpi_instruction_impl(
 pub fn schedule_commit_and_undelegate_cpi_with_mod_after_instruction(
     payer: Pubkey,
     magic_program_id: Pubkey,
+    magic_context_id: Pubkey,
     players: &[Pubkey],
     committees: &[Pubkey],
 ) -> Instruction {
     let program_id = crate::id();
     let mut account_metas = vec![
         AccountMeta::new(payer, true),
+        AccountMeta::new(magic_context_id, false),
         AccountMeta::new_readonly(magic_program_id, false),
     ];
     for committee in committees {
