@@ -561,6 +561,39 @@ mod tests {
         }));
     }
 
+    fn assert_first_commit(
+        scheduled_commits: &[ScheduledCommit],
+        payer: &Pubkey,
+        owner: &Pubkey,
+        committees: &[Pubkey],
+        expected_request_undelegation: bool,
+    ) {
+        let commit = &scheduled_commits[0];
+        let test_clock = get_clock();
+        assert_matches!(
+            commit,
+            ScheduledCommit {
+                id,
+                slot,
+                accounts,
+                payer: p,
+                owner: o,
+                blockhash: _,
+                commit_sent_transaction,
+                request_undelegation,
+            } => {
+                assert!(id >= &0);
+                assert_eq!(slot, &test_clock.slot);
+                assert_eq!(p, payer);
+                assert_eq!(o, owner);
+                assert_eq!(accounts, committees);
+                let instruction = SleipnirInstruction::ScheduledCommitSent(*id);
+                assert_eq!(commit_sent_transaction.data(0), instruction.try_to_vec().unwrap());
+                assert_eq!(*request_undelegation, expected_request_undelegation);
+            }
+        );
+    }
+
     #[test]
     fn test_schedule_commit_single_account_success() {
         init_logger!();
@@ -656,6 +689,13 @@ mod tests {
                     assert_eq!(commit_sent_transaction.data(0), ix.try_to_vec().unwrap());
                 }
             );
+            assert_first_commit(
+                &scheduled_commits,
+                &payer.pubkey(),
+                &program,
+                &[committee],
+                false,
+            );
         }
         let committed_account = processed_scheduled.last().unwrap();
         assert_eq!(*committed_account.owner(), program);
@@ -735,28 +775,12 @@ mod tests {
                 1,
             );
 
-            let commit = &scheduled_commits[0];
-            let test_clock = get_clock();
-            assert_matches!(
-                commit,
-                ScheduledCommit {
-                    id,
-                    slot,
-                    accounts,
-                    payer: p,
-                    owner,
-                    blockhash: _,
-                    commit_sent_transaction,
-                    request_undelegation: true,
-                } => {
-                    assert!(id >= &0);
-                    assert_eq!(slot, &test_clock.slot);
-                    assert_eq!(p, &payer.pubkey());
-                    assert_eq!(owner, &program);
-                    assert_eq!(accounts, &vec![committee]);
-                    let ix = SleipnirInstruction::ScheduledCommitSent(*id);
-                    assert_eq!(commit_sent_transaction.data(0), ix.try_to_vec().unwrap());
-                }
+            assert_first_commit(
+                &scheduled_commits,
+                &payer.pubkey(),
+                &program,
+                &[committee],
+                true,
             );
         }
         let committed_account = processed_scheduled.last().unwrap();
