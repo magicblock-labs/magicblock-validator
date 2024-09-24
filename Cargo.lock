@@ -4402,6 +4402,7 @@ dependencies = [
  "sleipnir-accounts-db",
  "sleipnir-bank",
  "sleipnir-config",
+ "sleipnir-core",
  "sleipnir-geyser-plugin",
  "sleipnir-ledger",
  "sleipnir-perf-service",

@@ -1,6 +1,7 @@
 use std::mem;
 
 use serde::{Deserialize, Serialize};
+use sleipnir_core::magic_program;
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
     clock::Slot,
@@ -27,7 +28,7 @@ pub struct MagicContext {
 }
 
 impl MagicContext {
-    pub const SIZE: usize = 1024 * 1024 * 100; // 100 MB
+    pub const SIZE: usize = magic_program::MAGIC_CONTEXT_SIZE;
     pub const ZERO: [u8; Self::SIZE] = [0; Self::SIZE];
     pub(crate) fn deserialize(
         data: &AccountSharedData,

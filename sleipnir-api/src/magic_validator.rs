@@ -57,7 +57,9 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     errors::{ApiError, ApiResult},
     external_config::try_convert_accounts_config,
-    fund_account::{fund_validator_identity, funded_faucet},
+    fund_account::{
+        fund_magic_context, fund_validator_identity, funded_faucet,
+    },
     geyser_transaction_notify_listener::GeyserTransactionNotifyListener,
     init_geyser_service::{init_geyser_service, InitGeyserServiceConfig},
     tickers::{init_commit_accounts_ticker, init_slot_ticker},
@@ -183,6 +185,7 @@ impl MagicValidator {
         )?;
 
         fund_validator_identity(&bank, &validator_pubkey);
+        fund_magic_context(&bank);
         let faucet_keypair = funded_faucet(&bank);
 
         load_programs_into_bank(
