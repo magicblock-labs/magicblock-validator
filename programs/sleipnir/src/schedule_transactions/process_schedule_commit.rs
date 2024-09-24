@@ -531,6 +531,36 @@ mod tests {
         scheduled_commits
     }
 
+    fn extend_transaction_accounts_from_ix(
+        ix: &Instruction,
+        account_data: &mut HashMap<Pubkey, AccountSharedData>,
+        transaction_accounts: &mut Vec<(Pubkey, AccountSharedData)>,
+    ) {
+        transaction_accounts.extend(ix.accounts.iter().flat_map(|acc| {
+            account_data
+                .remove(&acc.pubkey)
+                .map(|shared_data| (acc.pubkey, shared_data))
+        }));
+    }
+
+    fn extend_transaction_accounts_from_ix_adding_magic_context(
+        ix: &Instruction,
+        magic_context_acc: &AccountSharedData,
+        account_data: &mut HashMap<Pubkey, AccountSharedData>,
+        transaction_accounts: &mut Vec<(Pubkey, AccountSharedData)>,
+    ) {
+        transaction_accounts.extend(ix.accounts.iter().flat_map(|acc| {
+            account_data.remove(&acc.pubkey).map(|shared_data| {
+                let shared_data = if acc.pubkey == MAGIC_CONTEXT_PUBKEY {
+                    magic_context_acc.clone()
+                } else {
+                    shared_data
+                };
+                (acc.pubkey, shared_data)
+            })
+        }));
+    }
+
     #[test]
     fn test_schedule_commit_single_account_success() {
         init_logger!();
@@ -550,11 +580,11 @@ mod tests {
             let ix =
                 schedule_commit_instruction(&payer.pubkey(), vec![committee]);
 
-            transaction_accounts.extend(ix.accounts.iter().flat_map(|acc| {
-                account_data
-                    .remove(&acc.pubkey)
-                    .map(|shared_data| (acc.pubkey, shared_data))
-            }));
+            extend_transaction_accounts_from_ix(
+                &ix,
+                &mut account_data,
+                &mut transaction_accounts,
+            );
 
             let processed_scheduled = process_instruction(
                 ix.data.as_slice(),
@@ -582,16 +612,12 @@ mod tests {
                 );
 
             let ix = accept_scheduled_commits_instruction();
-            transaction_accounts.extend(ix.accounts.iter().flat_map(|acc| {
-                account_data.remove(&acc.pubkey).map(|shared_data| {
-                    let shared_data = if acc.pubkey == MAGIC_CONTEXT_PUBKEY {
-                        magic_context_acc.clone()
-                    } else {
-                        shared_data
-                    };
-                    (acc.pubkey, shared_data)
-                })
-            }));
+            extend_transaction_accounts_from_ix_adding_magic_context(
+                &ix,
+                &magic_context_acc,
+                &mut account_data,
+                &mut transaction_accounts,
+            );
 
             let processed_accepted = process_instruction(
                 ix.data.as_slice(),
@@ -634,6 +660,7 @@ mod tests {
         let committed_account = processed_scheduled.last().unwrap();
         assert_eq!(*committed_account.owner(), program);
     }
+
     #[test]
     fn test_schedule_commit_single_account_and_request_undelegate_success() {
         init_logger!();
@@ -655,11 +682,11 @@ mod tests {
                 vec![committee],
             );
 
-            transaction_accounts.extend(ix.accounts.iter().flat_map(|acc| {
-                account_data
-                    .remove(&acc.pubkey)
-                    .map(|shared_data| (acc.pubkey, shared_data))
-            }));
+            extend_transaction_accounts_from_ix(
+                &ix,
+                &mut account_data,
+                &mut transaction_accounts,
+            );
 
             let processed_scheduled = process_instruction(
                 ix.data.as_slice(),
@@ -687,16 +714,12 @@ mod tests {
                 );
 
             let ix = accept_scheduled_commits_instruction();
-            transaction_accounts.extend(ix.accounts.iter().flat_map(|acc| {
-                account_data.remove(&acc.pubkey).map(|shared_data| {
-                    let shared_data = if acc.pubkey == MAGIC_CONTEXT_PUBKEY {
-                        magic_context_acc.clone()
-                    } else {
-                        shared_data
-                    };
-                    (acc.pubkey, shared_data)
-                })
-            }));
+            extend_transaction_accounts_from_ix_adding_magic_context(
+                &ix,
+                &magic_context_acc,
+                &mut account_data,
+                &mut transaction_accounts,
+            );
 
             let processed_accepted = process_instruction(
                 ix.data.as_slice(),
