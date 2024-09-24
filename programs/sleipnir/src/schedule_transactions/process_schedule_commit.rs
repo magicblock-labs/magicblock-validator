@@ -444,11 +444,16 @@ mod tests {
 
     fn prepare_transaction_with_three_committees(
         payer: &Keypair,
+        committees: Option<(Pubkey, Pubkey, Pubkey)>,
     ) -> PreparedTransactionThreeCommittees {
         let program = Pubkey::new_unique();
-        let committee_uno = Pubkey::new_unique();
-        let committee_dos = Pubkey::new_unique();
-        let committee_tres = Pubkey::new_unique();
+        let (committee_uno, committee_dos, committee_tres) = committees
+            .unwrap_or((
+                Pubkey::new_unique(),
+                Pubkey::new_unique(),
+                Pubkey::new_unique(),
+            ));
+
         let mut accounts_data = {
             let mut map = HashMap::new();
             map.insert(
@@ -457,6 +462,14 @@ mod tests {
                     REQUIRED_TX_COST,
                     0,
                     &system_program::id(),
+                ),
+            );
+            map.insert(
+                MAGIC_CONTEXT_PUBKEY,
+                AccountSharedData::new(
+                    u64::MAX,
+                    MagicContext::SIZE,
+                    &crate::id(),
                 ),
             );
             map.insert(committee_uno, AccountSharedData::new(0, 0, &program));
@@ -666,29 +679,6 @@ mod tests {
                 1,
             );
 
-            let commit = &scheduled_commits[0];
-            let test_clock = get_clock();
-            assert_matches!(
-                commit,
-                ScheduledCommit {
-                    id,
-                    slot,
-                    accounts,
-                    payer: p,
-                    owner,
-                    blockhash: _,
-                    commit_sent_transaction,
-                    request_undelegation: false,
-                } => {
-                    assert!(id >= &0);
-                    assert_eq!(slot, &test_clock.slot);
-                    assert_eq!(p, &payer.pubkey());
-                    assert_eq!(owner, &program);
-                    assert_eq!(accounts, &vec![committee]);
-                    let ix = SleipnirInstruction::ScheduledCommitSent(*id);
-                    assert_eq!(commit_sent_transaction.data(0), ix.try_to_vec().unwrap());
-                }
-            );
             assert_first_commit(
                 &scheduled_commits,
                 &payer.pubkey(),
@@ -789,70 +779,110 @@ mod tests {
 
     #[test]
     fn test_schedule_commit_three_accounts_success() {
+        init_logger!();
+
         let payer =
             Keypair::from_seed(b"schedule_commit_three_accounts_success")
                 .unwrap();
 
-        let PreparedTransactionThreeCommittees {
-            mut accounts_data,
+        // 1. We run the transaction that registers the intent to schedule a commit
+        let (
+            mut processed_scheduled,
+            magic_context_acc,
+            program,
             committee_uno,
             committee_dos,
             committee_tres,
-            mut transaction_accounts,
-            program,
-            ..
-        } = prepare_transaction_with_three_committees(&payer);
+        ) = {
+            let PreparedTransactionThreeCommittees {
+                mut accounts_data,
+                committee_uno,
+                committee_dos,
+                committee_tres,
+                mut transaction_accounts,
+                program,
+                ..
+            } = prepare_transaction_with_three_committees(&payer, None);
 
-        let ix = schedule_commit_instruction(
-            &payer.pubkey(),
-            vec![committee_uno, committee_dos, committee_tres],
-        );
+            let ix = schedule_commit_instruction(
+                &payer.pubkey(),
+                vec![committee_uno, committee_dos, committee_tres],
+            );
+            extend_transaction_accounts_from_ix(
+                &ix,
+                &mut accounts_data,
+                &mut transaction_accounts,
+            );
 
-        for acc in ix.accounts.iter() {
-            if let Some(shared_data) = accounts_data.remove(&acc.pubkey) {
-                transaction_accounts.push((acc.pubkey, shared_data));
+            let processed_scheduled = process_instruction(
+                ix.data.as_slice(),
+                transaction_accounts,
+                ix.accounts,
+                Ok(()),
+            );
+
+            // At this point the intent to commit was added to the magic context account,
+            // but not yet accepted
+            let magic_context_acc = assert_non_accepted_commits(
+                &processed_scheduled,
+                &payer.pubkey(),
+                1,
+            );
+
+            (
+                processed_scheduled.clone(),
+                magic_context_acc.clone(),
+                program,
+                committee_uno,
+                committee_dos,
+                committee_tres,
+            )
+        };
+
+        // 2. We run the transaction that accepts the scheduled commit
+        {
+            let PreparedTransactionThreeCommittees {
+                mut accounts_data,
+                mut transaction_accounts,
+                ..
+            } = prepare_transaction_with_three_committees(
+                &payer,
+                Some((committee_uno, committee_dos, committee_tres)),
+            );
+
+            let ix = accept_scheduled_commits_instruction();
+            extend_transaction_accounts_from_ix_adding_magic_context(
+                &ix,
+                &magic_context_acc,
+                &mut accounts_data,
+                &mut transaction_accounts,
+            );
+
+            let processed_accepted = process_instruction(
+                ix.data.as_slice(),
+                transaction_accounts,
+                ix.accounts,
+                Ok(()),
+            );
+
+            // At this point the intended commits were accepted and moved to the global
+            let scheduled_commits = assert_accepted_commits(
+                &processed_accepted,
+                &payer.pubkey(),
+                1,
+            );
+
+            assert_first_commit(
+                &scheduled_commits,
+                &payer.pubkey(),
+                &program,
+                &[committee_uno, committee_dos, committee_tres],
+                false,
+            );
+            for _ in &[committee_uno, committee_dos, committee_tres] {
+                let committed_account = processed_scheduled.pop().unwrap();
+                assert_eq!(*committed_account.owner(), program);
             }
-        }
-
-        let mut processed_accounts = process_instruction(
-            ix.data.as_slice(),
-            transaction_accounts,
-            ix.accounts,
-            Ok(()),
-        );
-
-        let scheduler = TransactionScheduler::default();
-        let scheduled_commits =
-            scheduler.get_scheduled_commits_by_payer(&payer.pubkey());
-        assert_eq!(scheduled_commits.len(), 1);
-
-        let commit = &scheduled_commits[0];
-        let test_clock = get_clock();
-        assert_matches!(
-            commit,
-            ScheduledCommit {
-                id: i,
-                slot: s,
-                accounts: accs,
-                payer: p,
-                owner: o,
-                blockhash: _,
-                commit_sent_transaction: tx,
-                request_undelegation: false,
-            } => {
-                assert!(i >= &0);
-                assert_eq!(s, &test_clock.slot);
-                assert_eq!(p, &payer.pubkey());
-                assert_eq!(o, &program);
-                assert_eq!(accs, &vec![committee_uno, committee_dos, committee_tres]);
-                let ix = SleipnirInstruction::ScheduledCommitSent(*i);
-                assert_eq!(tx.data(0), ix.try_to_vec().unwrap());
-            }
-        );
-
-        for _ in &[committee_uno, committee_dos, committee_tres] {
-            let committed_account = processed_accounts.pop().unwrap();
-            assert_eq!(*committed_account.owner(), program);
         }
     }
 
@@ -871,7 +901,7 @@ mod tests {
             committee_tres,
             mut transaction_accounts,
             ..
-        } = prepare_transaction_with_three_committees(&payer);
+        } = prepare_transaction_with_three_committees(&payer, None);
 
         let ix = schedule_commit_and_undelegate_instruction(
             &payer.pubkey(),
@@ -970,7 +1000,7 @@ mod tests {
             mut accounts_data,
             mut transaction_accounts,
             ..
-        } = prepare_transaction_with_three_committees(&payer);
+        } = prepare_transaction_with_three_committees(&payer, None);
 
         let ix = instruction_from_account_metas(get_account_metas(
             &payer.pubkey(),
@@ -1004,7 +1034,7 @@ mod tests {
             committee_tres,
             mut transaction_accounts,
             ..
-        } = prepare_transaction_with_three_committees(&payer);
+        } = prepare_transaction_with_three_committees(&payer, None);
 
         accounts_data.insert(
             committee_dos,
