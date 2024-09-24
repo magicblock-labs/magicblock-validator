@@ -213,8 +213,17 @@ impl MagicValidator {
 
         let remote_account_fetcher_worker =
             RemoteAccountFetcherWorker::new(remote_rpc_config.clone());
-        let remote_account_updates_worker =
-            RemoteAccountUpdatesWorker::new(remote_rpc_config.clone());
+
+        let remote_account_updates_worker = RemoteAccountUpdatesWorker::new(
+            // We'll maintain 3 connections constantly (those could be on different nodes if we wanted to)
+            vec![
+                remote_rpc_config.clone(),
+                remote_rpc_config.clone(),
+                remote_rpc_config.clone(),
+            ],
+            // We'll kill/refresh one connection every 5 minutes
+            Duration::from_secs(60 * 5),
+        );
 
         let transaction_status_sender = TransactionStatusSender {
             sender: transaction_sndr,
@@ -519,19 +528,17 @@ impl MagicValidator {
             self.remote_account_updates_worker.take()
         {
             let cancellation_token = self.token.clone();
-            self.remote_account_updates_handle = Some(thread::spawn(
-                move || {
+            self.remote_account_updates_handle =
+                Some(thread::spawn(move || {
                     create_worker_runtime("remote_account_updates_worker")
                         .block_on(async move {
-                            if let Err(err) = remote_account_updates_worker
-                                .start_monitoring_request_processing(cancellation_token)
+                            remote_account_updates_worker
+                                .start_monitoring_request_processing(
+                                    cancellation_token,
+                                )
                                 .await
-                            {
-                                error!("remote_account_updates_worker failed: {:?}", err);
-                            }
-                    });
-                },
-            ));
+                        });
+                }));
         }
     }
 

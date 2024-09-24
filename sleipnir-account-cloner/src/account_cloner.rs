@@ -1,21 +1,11 @@
-use std::{collections::HashSet, sync::Arc};
+use std::collections::HashSet;
 
 use conjunto_transwise::AccountChainSnapshotShared;
 use futures_util::future::BoxFuture;
 use sleipnir_account_dumper::AccountDumperError;
 use sleipnir_account_fetcher::AccountFetcherError;
 use sleipnir_account_updates::AccountUpdatesError;
-use solana_sdk::{
-    clock::Slot,
-    compute_budget,
-    pubkey::Pubkey,
-    signature::Signature,
-    sysvar::{
-        clock, epoch_rewards, epoch_schedule, fees, instructions,
-        last_restart_slot, recent_blockhashes, rent, rewards, slot_hashes,
-        slot_history, stake_history,
-    },
-};
+use solana_sdk::{clock::Slot, pubkey::Pubkey, signature::Signature};
 use thiserror::Error;
 use tokio::sync::oneshot::Sender;
 
@@ -72,7 +62,7 @@ pub struct AccountClonerPermissions {
 pub enum AccountClonerOutput {
     Cloned {
         account_chain_snapshot: AccountChainSnapshotShared,
-        signatures: Arc<Vec<Signature>>,
+        signature: Signature,
     },
     Unclonable {
         pubkey: Pubkey,
@@ -90,19 +80,35 @@ pub trait AccountCloner {
 
 pub fn standard_blacklisted_accounts(validator_id: &Pubkey) -> HashSet<Pubkey> {
     let mut blacklisted_accounts = HashSet::new();
-    blacklisted_accounts.insert(clock::ID);
-    blacklisted_accounts.insert(epoch_rewards::ID);
-    blacklisted_accounts.insert(epoch_schedule::ID);
-    blacklisted_accounts.insert(fees::ID);
-    blacklisted_accounts.insert(instructions::ID);
-    blacklisted_accounts.insert(last_restart_slot::ID);
-    blacklisted_accounts.insert(recent_blockhashes::ID);
-    blacklisted_accounts.insert(rent::ID);
-    blacklisted_accounts.insert(rewards::ID);
-    blacklisted_accounts.insert(slot_hashes::ID);
-    blacklisted_accounts.insert(slot_history::ID);
-    blacklisted_accounts.insert(stake_history::ID);
-    blacklisted_accounts.insert(compute_budget::ID);
+    blacklisted_accounts.insert(solana_sdk::system_program::ID);
+    blacklisted_accounts.insert(solana_sdk::compute_budget::ID);
+    blacklisted_accounts.insert(solana_sdk::native_loader::ID);
+    blacklisted_accounts.insert(solana_sdk::bpf_loader::ID);
+    blacklisted_accounts.insert(solana_sdk::bpf_loader_deprecated::ID);
+    blacklisted_accounts.insert(solana_sdk::bpf_loader_upgradeable::ID);
+    blacklisted_accounts.insert(solana_sdk::loader_v4::ID);
+    blacklisted_accounts.insert(solana_sdk::incinerator::ID);
+    blacklisted_accounts.insert(solana_sdk::secp256k1_program::ID);
+    blacklisted_accounts.insert(solana_sdk::ed25519_program::ID);
+    blacklisted_accounts.insert(solana_sdk::address_lookup_table::program::ID);
+    blacklisted_accounts.insert(solana_sdk::config::program::ID);
+    blacklisted_accounts.insert(solana_sdk::stake::program::ID);
+    blacklisted_accounts.insert(solana_sdk::stake::config::ID);
+    blacklisted_accounts.insert(solana_sdk::vote::program::ID);
+    blacklisted_accounts.insert(solana_sdk::feature::ID);
+    blacklisted_accounts.insert(solana_sdk::sysvar::ID);
+    blacklisted_accounts.insert(solana_sdk::sysvar::clock::ID);
+    blacklisted_accounts.insert(solana_sdk::sysvar::epoch_rewards::ID);
+    blacklisted_accounts.insert(solana_sdk::sysvar::epoch_schedule::ID);
+    blacklisted_accounts.insert(solana_sdk::sysvar::fees::ID);
+    blacklisted_accounts.insert(solana_sdk::sysvar::instructions::ID);
+    blacklisted_accounts.insert(solana_sdk::sysvar::last_restart_slot::ID);
+    blacklisted_accounts.insert(solana_sdk::sysvar::recent_blockhashes::ID);
+    blacklisted_accounts.insert(solana_sdk::sysvar::rent::ID);
+    blacklisted_accounts.insert(solana_sdk::sysvar::rewards::ID);
+    blacklisted_accounts.insert(solana_sdk::sysvar::slot_hashes::ID);
+    blacklisted_accounts.insert(solana_sdk::sysvar::slot_history::ID);
+    blacklisted_accounts.insert(solana_sdk::sysvar::stake_history::ID);
     blacklisted_accounts.insert(*validator_id);
     blacklisted_accounts
 }

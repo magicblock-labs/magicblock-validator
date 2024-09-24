@@ -5,6 +5,7 @@ use std::{
 };
 
 use conjunto_transwise::{AccountChainSnapshotShared, AccountChainState};
+use dlp::consts::DELEGATION_PROGRAM_ID;
 use futures_util::future::join_all;
 use log::*;
 use sleipnir_account_dumper::AccountDumper;
@@ -13,8 +14,11 @@ use sleipnir_account_updates::AccountUpdates;
 use sleipnir_accounts_api::InternalAccountProvider;
 use sleipnir_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
 use solana_sdk::{
-    account::Account, bpf_loader_upgradeable::get_program_data_address,
-    clock::Slot, pubkey::Pubkey, signature::Signature,
+    account::{Account, ReadableAccount},
+    bpf_loader_upgradeable::get_program_data_address,
+    clock::Slot,
+    pubkey::Pubkey,
+    signature::Signature,
 };
 use tokio::sync::mpsc::{
     unbounded_channel, UnboundedReceiver, UnboundedSender,
@@ -169,7 +173,25 @@ where
                 } => {
                     // If the clone output is recent enough, that directly
                     if snapshot.at_slot >= last_known_update_slot {
-                        Ok(last_clone_output)
+                        // Special case temporarily to unblock zeebit:
+                        // If the account is in a bork state after we somehow missed the undelegation/redelegation update
+                        // We can force a bypass of the cache to get that account out of the bork state exceptionally
+                        // Long-term fix tracked here: https://github.com/magicblock-labs/magicblock-validator/issues/186
+                        if snapshot.chain_state.is_delegated()
+                            && self
+                                .internal_account_provider
+                                .get_account(pubkey)
+                                .map(|account| {
+                                    *account.owner() == DELEGATION_PROGRAM_ID
+                                })
+                                .unwrap_or(false)
+                        {
+                            self.do_clone_and_update_cache(pubkey).await
+                        }
+                        // Otherwise no problem, we can use the cache
+                        else {
+                            Ok(last_clone_output)
+                        }
                     }
                     // If the cloned account has been updated since clone, update the cache
                     else {
@@ -248,7 +270,7 @@ where
         let account_chain_snapshot =
             self.fetch_account_chain_snapshot(pubkey).await?;
         // Generate cloning transactions
-        let signatures = match &account_chain_snapshot.chain_state {
+        let signature = match &account_chain_snapshot.chain_state {
             // If the account is not present on-chain
             // we may want to clear the local state
             AccountChainState::NewAccount => {
@@ -351,40 +373,37 @@ where
         // Return the result
         Ok(AccountClonerOutput::Cloned {
             account_chain_snapshot,
-            signatures: Arc::new(signatures),
+            signature,
         })
     }
 
     fn do_clone_new_account(
         &self,
         pubkey: &Pubkey,
-    ) -> AccountClonerResult<Vec<Signature>> {
+    ) -> AccountClonerResult<Signature> {
         self.account_dumper
             .dump_new_account(pubkey)
             .map_err(AccountClonerError::AccountDumperError)
-            .map(|signature| vec![signature])
     }
 
     fn do_clone_payer_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,
-    ) -> AccountClonerResult<Vec<Signature>> {
+    ) -> AccountClonerResult<Signature> {
         self.account_dumper
             .dump_payer_account(pubkey, account, self.payer_init_lamports)
             .map_err(AccountClonerError::AccountDumperError)
-            .map(|signature| vec![signature])
     }
 
     fn do_clone_pda_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,
-    ) -> AccountClonerResult<Vec<Signature>> {
+    ) -> AccountClonerResult<Signature> {
         self.account_dumper
             .dump_pda_account(pubkey, account)
             .map_err(AccountClonerError::AccountDumperError)
-            .map(|signature| vec![signature])
     }
 
     fn do_clone_delegated_account(
@@ -393,12 +412,12 @@ where
         account: &Account,
         owner: &Pubkey,
         delegation_slot: Slot,
-    ) -> AccountClonerResult<Vec<Signature>> {
+    ) -> AccountClonerResult<Signature> {
         // If we already cloned this account from the same delegation slot
         // Keep the local state as source of truth even if it changed on-chain
         if let Some(AccountClonerOutput::Cloned {
             account_chain_snapshot,
-            ..
+            signature,
         }) = self.get_last_clone_output(pubkey)
         {
             if let AccountChainState::Delegated {
@@ -406,7 +425,7 @@ where
             } = &account_chain_snapshot.chain_state
             {
                 if delegation_record.delegation_slot == delegation_slot {
-                    return Ok(vec![]);
+                    return Ok(signature);
                 }
             }
         };
@@ -414,14 +433,13 @@ where
         self.account_dumper
             .dump_delegated_account(pubkey, account, owner)
             .map_err(AccountClonerError::AccountDumperError)
-            .map(|signature| vec![signature])
     }
 
     async fn do_clone_program_accounts(
         &self,
         pubkey: &Pubkey,
         account: &Account,
-    ) -> AccountClonerResult<Vec<Signature>> {
+    ) -> AccountClonerResult<Signature> {
         let program_id_pubkey = pubkey;
         let program_id_account = account;
         let program_data_pubkey = &get_program_data_address(program_id_pubkey);

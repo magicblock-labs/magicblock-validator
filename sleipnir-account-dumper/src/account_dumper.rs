@@ -60,5 +60,5 @@ pub trait AccountDumper {
         program_data: &Pubkey,
         program_data_account: &Account,
         program_idl: Option<(Pubkey, Account)>,
-    ) -> AccountDumperResult<Vec<Signature>>;
+    ) -> AccountDumperResult<Signature>;
 }

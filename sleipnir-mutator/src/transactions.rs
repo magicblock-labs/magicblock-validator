@@ -1,5 +1,7 @@
 use sleipnir_program::{
-    sleipnir_instruction::{modify_accounts, AccountModification},
+    sleipnir_instruction::{
+        modify_accounts, modify_accounts_instruction, AccountModification,
+    },
     validator_authority, validator_authority_id,
 };
 use solana_sdk::{
@@ -36,16 +38,16 @@ pub fn transaction_to_clone_regular_account(
     modify_accounts(vec![account_modification], recent_blockhash)
 }
 
-pub fn transactions_to_clone_program(
+pub fn transaction_to_clone_program(
     needs_upgrade: bool,
     program_id_modification: AccountModification,
     program_data_modification: AccountModification,
     program_buffer_modification: AccountModification,
     program_idl_modification: Option<AccountModification>,
     recent_blockhash: Hash,
-) -> Vec<Transaction> {
+) -> Transaction {
     // We'll need to run the upgrade IX based on those
-    let program_pubkey = program_id_modification.pubkey;
+    let program_id_pubkey = program_id_modification.pubkey;
     let program_buffer_pubkey = program_buffer_modification.pubkey;
     // List all necessary account modifications (for the first step)
     let mut account_modifications = vec![
@@ -59,40 +61,24 @@ pub fn transactions_to_clone_program(
     // If the program does not exist yet, we just need to update it's data and don't
     // need to explicitly update using the BPF loader's Upgrade IX
     if !needs_upgrade {
-        return vec![modify_accounts(account_modifications, recent_blockhash)];
+        return modify_accounts(account_modifications, recent_blockhash);
     }
-    // If it's an upgrade of the program rather than the first deployment,
-    // generate a modify TX and an Upgrade TX following it
-    vec![
-        // First dump the necessary set of account to our bank/ledger
-        modify_accounts(account_modifications, recent_blockhash),
-        // Then we run the official BPF upgrade IX to notify the system of the new program
-        transaction_to_run_bpf_loader_upgrade(
-            &program_pubkey,
-            &program_buffer_pubkey,
-            recent_blockhash,
-        ),
-    ]
-}
-
-fn transaction_to_run_bpf_loader_upgrade(
-    program_pubkey: &Pubkey,
-    program_buffer_pubkey: &Pubkey,
-    recent_blockhash: Hash,
-) -> Transaction {
+    // First dump the necessary set of account to our bank/ledger
+    let modify_ix = modify_accounts_instruction(account_modifications);
     // The validator is marked as the upgrade authority of all program accounts
-    let validator_keypair = &validator_authority();
     let validator_pubkey = &validator_authority_id();
-    let ix = bpf_loader_upgradeable::upgrade(
-        program_pubkey,
-        program_buffer_pubkey,
+    // Then we run the official BPF upgrade IX to notify the system of the new program
+    let upgrade_ix = bpf_loader_upgradeable::upgrade(
+        &program_id_pubkey,
+        &program_buffer_pubkey,
         validator_pubkey,
         validator_pubkey,
     );
+    // Sign the transaction
     Transaction::new_signed_with_payer(
-        &[ix],
+        &[modify_ix, upgrade_ix],
         Some(validator_pubkey),
-        &[validator_keypair],
+        &[&validator_authority()],
         recent_blockhash,
     )
 }

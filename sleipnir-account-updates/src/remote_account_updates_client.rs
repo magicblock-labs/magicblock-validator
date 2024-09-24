@@ -34,7 +34,7 @@ impl AccountUpdates for RemoteAccountUpdatesClient {
     fn get_last_known_update_slot(&self, pubkey: &Pubkey) -> Option<Slot> {
         self.last_known_update_slots
             .read()
-            .unwrap()
+            .expect("RwLock of RemoteAccountUpdatesClient.last_known_update_slots poisoned")
             .get(pubkey)
             .cloned()
     }
