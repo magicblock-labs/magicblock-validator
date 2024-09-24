@@ -998,11 +998,14 @@ mod tests {
     // -----------------
     // Failure Cases
     // ----------------
-    fn get_account_metas(
+    fn get_account_metas_for_schedule_commit(
         payer: &Pubkey,
         pdas: Vec<Pubkey>,
     ) -> Vec<AccountMeta> {
-        let mut account_metas = vec![AccountMeta::new(*payer, true)];
+        let mut account_metas = vec![
+            AccountMeta::new(*payer, true),
+            AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+        ];
         for pubkey in &pdas {
             account_metas.push(AccountMeta::new_readonly(*pubkey, true));
         }
@@ -1013,7 +1016,8 @@ mod tests {
         payer: &Pubkey,
         pdas: Vec<Pubkey>,
     ) -> Vec<AccountMeta> {
-        let mut account_metas = get_account_metas(payer, pdas);
+        let mut account_metas =
+            get_account_metas_for_schedule_commit(payer, pdas);
         let last = account_metas.pop().unwrap();
         account_metas.push(AccountMeta::new_readonly(last.pubkey, false));
         account_metas
@@ -1031,6 +1035,8 @@ mod tests {
 
     #[test]
     fn test_schedule_commit_no_pdas_provided_to_ix() {
+        init_logger!();
+
         let payer =
             Keypair::from_seed(b"schedule_commit_no_pdas_provided_to_ix")
                 .unwrap();
@@ -1041,16 +1047,14 @@ mod tests {
             ..
         } = prepare_transaction_with_three_committees(&payer, None);
 
-        let ix = instruction_from_account_metas(get_account_metas(
-            &payer.pubkey(),
-            vec![],
-        ));
-
-        transaction_accounts.extend(ix.accounts.iter().flat_map(|acc| {
-            accounts_data
-                .remove(&acc.pubkey)
-                .map(|shared_data| (acc.pubkey, shared_data))
-        }));
+        let ix = instruction_from_account_metas(
+            get_account_metas_for_schedule_commit(&payer.pubkey(), vec![]),
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut accounts_data,
+            &mut transaction_accounts,
+        );
 
         process_instruction(
             ix.data.as_slice(),
@@ -1062,6 +1066,8 @@ mod tests {
 
     #[test]
     fn test_schedule_commit_three_accounts_second_not_owned_by_program() {
+        init_logger!();
+
         let payer =
             Keypair::from_seed(b"three_accounts_last_not_owned_by_program")
                 .unwrap();
@@ -1086,12 +1092,11 @@ mod tests {
                 vec![committee_uno, committee_dos, committee_tres],
             ),
         );
-
-        transaction_accounts.extend(ix.accounts.iter().flat_map(|acc| {
-            accounts_data
-                .remove(&acc.pubkey)
-                .map(|shared_data| (acc.pubkey, shared_data))
-        }));
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut accounts_data,
+            &mut transaction_accounts,
+        );
 
         process_instruction(
             ix.data.as_slice(),
