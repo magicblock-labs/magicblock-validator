@@ -4408,6 +4408,7 @@ dependencies = [
  "sleipnir-geyser-plugin",
  "sleipnir-ledger",
  "sleipnir-perf-service",
+ "sleipnir-processor",
  "sleipnir-program",
  "sleipnir-pubsub",
  "sleipnir-rpc",

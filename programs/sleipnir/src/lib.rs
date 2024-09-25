@@ -1,7 +1,7 @@
 pub mod errors;
 mod magic_context;
 mod schedule_transactions;
-pub use magic_context::ScheduledCommit;
+pub use magic_context::{MagicContext, ScheduledCommit};
 pub mod sleipnir_instruction;
 pub mod sleipnir_processor;
 #[cfg(test)]

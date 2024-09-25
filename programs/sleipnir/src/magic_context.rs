@@ -52,6 +52,7 @@ impl MagicContext {
         // Currently we only store a vec of scheduduled commits in the MagicContext
         // The first 8 bytes contain the length of the vec
         // This works even if the length is actually stored as a u32
+        // since we zero out the entire context whenever we update the vec
         match bincode::deserialize::<u64>(&data[0..8]) {
             Ok(len) => len == 0,
             Err(_) => false,

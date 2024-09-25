@@ -9,12 +9,20 @@ use std::{
 use log::*;
 use sleipnir_accounts::AccountsManager;
 use sleipnir_bank::bank::Bank;
+use sleipnir_core::magic_program;
 use sleipnir_ledger::Ledger;
+use sleipnir_processor::execute_transaction::execute_legacy_transaction;
+use sleipnir_program::{
+    sleipnir_instruction::accept_scheduled_commits, MagicContext,
+};
+use sleipnir_transaction_status::TransactionStatusSender;
+use solana_sdk::account::ReadableAccount;
 use tokio_util::sync::CancellationToken;
 
 pub fn init_slot_ticker(
     bank: &Arc<Bank>,
     accounts_manager: &Arc<AccountsManager>,
+    transaction_status_sender: Option<TransactionStatusSender>,
     ledger: Arc<Ledger>,
     tick_duration: Duration,
     exit: Arc<AtomicBool>,
@@ -31,13 +39,35 @@ pub fn init_slot_ticker(
                 .map_err(|e| {
                     error!("Failed to cache block time: {:?}", e);
                 });
-            // TODO: fix the possible delay here
-            // https://github.com/magicblock-labs/magicblock-validator/issues/104
-            let _ = accounts_manager.process_scheduled_commits().await.map_err(
-                |e| {
-                    error!("Failed to process scheduled commits: {:?}", e);
-                },
-            );
+
+            // If accounts were scheduled to be committed, we accept them here
+            // and processs the commits
+            let magic_context_acc = bank.get_account(&magic_program::MAGIC_CONTEXT_PUBKEY)
+                .expect("Validator found to be running without MagicContext account!");
+
+            if MagicContext::has_scheduled_commits(magic_context_acc.data()) {
+                // 1. Send the transaction to move the scheduled commits from the MagicContext
+                //    to the global ScheduledCommit store
+                let tx = accept_scheduled_commits(bank.last_blockhash());
+                let _ = execute_legacy_transaction(
+                    tx,
+                    &bank,
+                    transaction_status_sender.as_ref(),
+                )
+                .inspect_err(|e| {
+                    error!("Failed to accept scheduled commits: {:?}", e);
+                });
+
+                // 2. Process those scheduled commits
+                // TODO: fix the possible delay here
+                // https://github.com/magicblock-labs/magicblock-validator/issues/104
+                let _ = accounts_manager
+                    .process_scheduled_commits()
+                    .await
+                    .map_err(|e| {
+                        error!("Failed to process scheduled commits: {:?}", e);
+                    });
+            }
             if log {
                 info!("Advanced to slot {}", slot);
             }

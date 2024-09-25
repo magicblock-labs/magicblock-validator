@@ -151,6 +151,7 @@ pub struct MagicValidator {
     rpc_service: JsonRpcService,
     geyser_rpc_service: Arc<GeyserRpcService>,
     pubsub_config: PubsubConfig,
+    pub transaction_status_sender: TransactionStatusSender,
 }
 
 impl MagicValidator {
@@ -192,9 +193,9 @@ impl MagicValidator {
             &bank,
             &programs_to_load(&config.validator_config.programs),
         )
-        .map_err(|err| {
-            ApiError::FailedToLoadProgramsIntoBank(format!("{:?}", err))
-        })?;
+            .map_err(|err| {
+                ApiError::FailedToLoadProgramsIntoBank(format!("{:?}", err))
+            })?;
 
         let (transaction_sndr, transaction_listener) =
             Self::init_transaction_listener(
@@ -270,7 +271,7 @@ impl MagicValidator {
             faucet_keypair,
             &genesis_config,
             accounts_manager.clone(),
-            transaction_status_sender,
+            transaction_status_sender.clone(),
             &pubsub_config,
             &config.validator_config,
         )?;
@@ -300,6 +301,7 @@ impl MagicValidator {
             ledger,
             accounts_manager,
             transaction_listener,
+            transaction_status_sender,
         })
     }
 
@@ -337,8 +339,8 @@ impl MagicValidator {
     ) -> Arc<AccountsManager> {
         let accounts_config = try_convert_accounts_config(&config.accounts)
             .expect(
-            "Failed to derive accounts config from provided sleipnir config",
-        );
+                "Failed to derive accounts config from provided sleipnir config",
+            );
         let accounts_manager = AccountsManager::try_new(
             bank,
             remote_account_cloner_client,
@@ -351,7 +353,7 @@ impl MagicValidator {
             validator_keypair.insecure_clone(),
             accounts_config,
         )
-        .expect("Failed to create accounts manager");
+            .expect("Failed to create accounts manager");
 
         Arc::new(accounts_manager)
     }
@@ -390,9 +392,9 @@ impl MagicValidator {
             accounts_manager,
             rpc_json_config,
         )
-        .map_err(|err| {
-            ApiError::FailedToInitJsonRpcService(format!("{:?}", err))
-        })
+            .map_err(|err| {
+                ApiError::FailedToInitJsonRpcService(format!("{:?}", err))
+            })
     }
 
     fn init_ledger(
@@ -456,6 +458,7 @@ impl MagicValidator {
         self.slot_ticker = Some(init_slot_ticker(
             &self.bank,
             &self.accounts_manager,
+            Some(self.transaction_status_sender.clone()),
             self.ledger.clone(),
             Duration::from_millis(self.config.validator.millis_per_slot),
             self.exit.clone(),
