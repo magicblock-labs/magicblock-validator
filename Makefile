@@ -7,7 +7,7 @@ $(if $(shell command -v cargo-nextest 2> /dev/null),,$(eval CARGO_TEST_NOCAP=tes
 
 test:
 	RUST_BACKTRACE=1 cargo $(CARGO_TEST) && \
-	$(MAKE) -C $(DIR)/test-programs
+	$(MAKE) -C $(DIR)/test-programs test
 
 test-log:
 	cargo $(CARGO_TEST_NOCAP)
