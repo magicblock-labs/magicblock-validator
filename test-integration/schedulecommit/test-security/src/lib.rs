@@ -17,6 +17,10 @@ declare_id!("4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr");
 #[cfg(not(feature = "no-entrypoint"))]
 solana_program::entrypoint!(process_instruction);
 
+pub const SIBLING_SCHEDULE_COMMIT_CPIS: u8 = 0;
+pub const NON_CPI: u8 = 1;
+pub const DIRECT_SCHEDULE_COMMIT_CPI: u8 = 2;
+
 pub fn process_instruction<'a>(
     _program_id: &'a Pubkey,
     accounts: &'a [AccountInfo<'a>],
@@ -46,11 +50,13 @@ pub fn process_instruction<'a>(
         // - **0..32**   Player 1 pubkey from which first PDA was derived
         // - **32..64**  Player 2 pubkey from which second PDA was derived
         // - **n..n+32** Player n pubkey from which n-th PDA was derived
-        0 => process_sibling_schedule_cpis(accounts, instruction_data_inner)?,
+        SIBLING_SCHEDULE_COMMIT_CPIS => {
+            process_sibling_schedule_cpis(accounts, instruction_data_inner)?
+        }
 
         // Just an instruction to process without any CPI into any other program
         // - **0.**   `[WRITE, SIGNER]` Payer
-        1 => process_non_cpi(accounts, instruction_data_inner)?,
+        NON_CPI => process_non_cpi(accounts, instruction_data_inner)?,
 
         // This instruction attempts to commit the CPI directly via MagicBlock program,
         // however this only works if it is also the owner of the PDAs.
@@ -70,7 +76,7 @@ pub fn process_instruction<'a>(
         // - **0..32**   Player 1 pubkey from which first PDA was derived
         // - **32..64**  Player 2 pubkey from which second PDA was derived
         // - **n..n+32** Player n pubkey from which n-th PDA was derived
-        2 => process_schedulecommit_cpi(
+        DIRECT_SCHEDULE_COMMIT_CPI => process_schedulecommit_cpi(
             accounts,
             instruction_data_inner,
             false,
@@ -101,10 +107,10 @@ fn process_sibling_schedule_cpis(
     let accounts_iter = &mut accounts.iter();
 
     let mut pda_infos = vec![];
-    for info in accounts_iter.by_ref().skip(3) {
+    for info in accounts_iter.by_ref().skip(4) {
         pda_infos.push(info.clone());
     }
-    let account_infos = vec![payer];
+    let account_infos = vec![payer, magic_context];
 
     msg!("Creating schedule commit CPI");
     let players = instruction_data
@@ -120,8 +126,8 @@ fn process_sibling_schedule_cpis(
         // 1. CPI into the program owning the PDAs
         let indirect_ix = schedule_commit_cpi_instruction(
             *payer.key,
-            *magic_context.key,
             *magic_program.key,
+            *magic_context.key,
             &players,
             &pdas,
         );
@@ -136,7 +142,7 @@ fn process_sibling_schedule_cpis(
 
     {
         // 2. CPI into the schedule commit directly
-        let mut account_infos = account_infos.clone();
+        let mut account_infos = vec![payer, magic_context];
         account_infos.extend(pda_infos.iter());
 
         let direct_ix = create_schedule_commit_ix(
