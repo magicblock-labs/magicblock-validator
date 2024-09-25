@@ -402,7 +402,6 @@ mod tests {
             );
             // NOTE: the magic context is initialized with these properties at
             // validator startup
-            // TODO(thlorenz): @@@@ not yet
             map.insert(
                 MAGIC_CONTEXT_PUBKEY,
                 AccountSharedData::new(
