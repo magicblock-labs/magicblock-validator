@@ -9,9 +9,7 @@ use conjunto_transwise::{
     CommitFrequency, DelegationInconsistency, DelegationRecord,
 };
 use futures_util::future::{ready, BoxFuture};
-use solana_sdk::{
-    account::Account, clock::Slot, pubkey::Pubkey, system_program,
-};
+use solana_sdk::{account::Account, clock::Slot, pubkey::Pubkey};
 
 use crate::{AccountFetcher, AccountFetcherResult};
 
@@ -54,9 +52,8 @@ impl AccountFetcherStub {
                 chain_state: match &known_account.state {
                     AccountFetcherStubState::Wallet => {
                         AccountChainState::Wallet {
-                            account: Account {
-                                ..Default::default()
-                            }
+                            lamports: 42,
+                            owner: Pubkey::new_unique(),
                         }
                     }
                     AccountFetcherStubState::Undelegated { owner } => {
@@ -69,11 +66,12 @@ impl AccountFetcherStub {
                         }
                     }
                     AccountFetcherStubState::Executable => {
-                        AccountChainState::Wallet {
+                        AccountChainState::Undelegated {
                             account: Account {
                                 executable: true,
                                 ..Default::default()
                             },
+                            delegation_inconsistency: DelegationInconsistency::DelegationRecordNotFound,
                         }
                     }
                     AccountFetcherStubState::Delegated {

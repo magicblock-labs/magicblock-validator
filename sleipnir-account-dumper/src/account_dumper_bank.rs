@@ -50,18 +50,16 @@ impl AccountDumper for AccountDumperBank {
     fn dump_wallet_account(
         &self,
         pubkey: &Pubkey,
-        account: &Account,
-        lamports: Option<u64>,
+        lamports: u64,
+        owner: &Pubkey,
     ) -> AccountDumperResult<Signature> {
-        let overrides = lamports.map(|lamports| AccountModification {
-            pubkey: *pubkey,
-            lamports: Some(lamports),
-            ..Default::default()
-        });
+        let mut account = Account::default();
+        account.owner = *owner;
+        account.lamports = lamports;
         let transaction = transaction_to_clone_regular_account(
             pubkey,
-            account,
-            overrides,
+            &account,
+            None,
             self.bank.last_blockhash(),
         );
         self.execute_transaction(transaction)

@@ -21,8 +21,8 @@ impl AccountDumper for AccountDumperStub {
     fn dump_wallet_account(
         &self,
         pubkey: &Pubkey,
-        _account: &Account,
-        _lamports: Option<u64>,
+        _lamports: u64,
+        _owner: &Pubkey,
     ) -> AccountDumperResult<Signature> {
         self.wallet_accounts.write().unwrap().insert(*pubkey);
         Ok(Signature::new_unique())

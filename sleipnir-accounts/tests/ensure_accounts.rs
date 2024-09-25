@@ -470,7 +470,7 @@ async fn test_ensure_one_delegated_and_one_new_account_writable() {
     let delegated_account = generate_pda_pubkey();
     let new_account = Pubkey::new_unique();
     account_fetcher.set_delegated_account(delegated_account, 42, 11);
-    account_fetcher.set_new_account(new_account, 42);
+    account_fetcher.set_wallet_account(new_account, 42);
 
     // Ensure account
     let result = manager
@@ -489,7 +489,7 @@ async fn test_ensure_one_delegated_and_one_new_account_writable() {
     assert!(account_dumper.was_dumped_as_delegated_account(&delegated_account));
     assert!(manager.last_commit(&delegated_account).is_some());
 
-    assert!(account_dumper.was_dumped_as_new_account(&new_account));
+    assert!(account_dumper.was_dumped_as_wallet_account(&new_account));
     assert!(manager.last_commit(&new_account).is_none());
 
     // Cleanup
@@ -629,51 +629,6 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
         );
         assert!(manager.last_commit(&delegated_account2).is_some());
     }
-
-    // Cleanup
-    cancel.cancel();
-    assert!(handle.await.is_ok());
-}
-
-#[tokio::test]
-async fn test_ensure_writable_account_fails_to_validate() {
-    init_logger!();
-
-    let internal_account_provider = InternalAccountProviderStub::default();
-    let account_fetcher = AccountFetcherStub::default();
-    let account_updates = AccountUpdatesStub::default();
-    let account_dumper = AccountDumperStub::default();
-
-    let (manager, cancel, handle) = setup_ephem(
-        internal_account_provider.clone(),
-        account_fetcher.clone(),
-        account_updates.clone(),
-        account_dumper.clone(),
-    );
-
-    // One new account
-    let new_account = Pubkey::new_unique();
-    account_fetcher.set_new_account(new_account, 42);
-
-    // Ensure accounts
-    let result = manager
-        .ensure_accounts_from_holder(
-            TransactionAccountsHolder {
-                readonly: vec![],
-                writable: vec![new_account],
-                payer: Pubkey::new_unique(),
-            },
-            "tx-sig".to_string(),
-        )
-        .await;
-
-    // Check proper behaviour
-    assert!(matches!(
-        result,
-        Err(AccountsError::TranswiseError(
-            TranswiseError::WritablesIncludeNewAccounts { .. }
-        ))
-    ));
 
     // Cleanup
     cancel.cancel();

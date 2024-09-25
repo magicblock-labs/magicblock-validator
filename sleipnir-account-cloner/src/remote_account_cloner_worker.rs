@@ -269,8 +269,23 @@ where
         let account_chain_snapshot =
             self.fetch_account_chain_snapshot(pubkey).await?;
         // Generate cloning transactions
-        let signatures = match &account_chain_snapshot.chain_state {
-            AccountChainState::Wallet { account } => {
+        let signature = match &account_chain_snapshot.chain_state {
+            // If the account has no data, we can use it for lamport transfers only
+            // We'll use the escrowed lamport value rather than its actual on-chain info
+            AccountChainState::Wallet { lamports, owner } => {
+                if !self.permissions.allow_cloning_wallet_accounts {
+                    return Ok(AccountClonerOutput::Unclonable {
+                        pubkey: *pubkey,
+                        reason:
+                            AccountClonerUnclonableReason::DisallowWalletAccount,
+                        at_slot: account_chain_snapshot.at_slot,
+                    });
+                }
+                self.do_clone_wallet_account(pubkey, *lamports, owner)?
+            }
+            // If the account is present on-chain, but not delegated
+            // We need to differenciate between programs and other accounts
+            AccountChainState::Undelegated { account, .. } => {
                 // If it's an executable, we may have some special fetching to do
                 if account.executable {
                     if let Some(allowed_program_ids) = &self.allowed_program_ids
@@ -294,28 +309,15 @@ where
                 }
                 // If it's not an executble, simpler rules apply
                 else {
-                    if !self.permissions.allow_cloning_wallet_accounts {
+                    if !self.permissions.allow_cloning_undelegated_accounts {
                         return Ok(AccountClonerOutput::Unclonable {
                             pubkey: *pubkey,
-                            reason:
-                                AccountClonerUnclonableReason::DisallowWalletAccount,
+                            reason: AccountClonerUnclonableReason::DisallowUndelegatedAccount,
                             at_slot: account_chain_snapshot.at_slot,
                         });
                     }
-                    self.do_clone_wallet_account(pubkey, account)?
+                    self.do_clone_undelegated_account(pubkey, account)?
                 }
-            }
-            // If the account is present on-chain, but not delegated
-            // We need to differenciate between programs and other accounts
-            AccountChainState::Undelegated { account, .. } => {
-                if !self.permissions.allow_cloning_undelegated_accounts {
-                    return Ok(AccountClonerOutput::Unclonable {
-                        pubkey: *pubkey,
-                        reason: AccountClonerUnclonableReason::DisallowUndelegatedAccount,
-                        at_slot: account_chain_snapshot.at_slot,
-                    });
-                }
-                self.do_clone_undelegated_account(pubkey, account)?
             }
             // If the account delegated on-chain, we need to apply some overrides
             // So that if we are in ephemeral mode it can be used as writable
@@ -350,10 +352,12 @@ where
     fn do_clone_wallet_account(
         &self,
         pubkey: &Pubkey,
-        account: &Account,
+        lamports: u64,
+        owner: &Pubkey,
     ) -> AccountClonerResult<Signature> {
+        let lamports = self.payer_init_lamports.unwrap_or(lamports);
         self.account_dumper
-            .dump_wallet_account(pubkey, account, self.payer_init_lamports)
+            .dump_wallet_account(pubkey, lamports, owner)
             .map_err(AccountClonerError::AccountDumperError)
     }
 
@@ -407,7 +411,10 @@ where
         let program_data_snapshot = self
             .fetch_account_chain_snapshot(program_data_pubkey)
             .await?;
-        let program_data_account = program_data_snapshot.chain_state.account();
+        let program_data_account = program_data_snapshot
+            .chain_state
+            .account()
+            .ok_or(AccountClonerError::ProgramDataDoesNotExist)?;
         self.account_dumper
             .dump_program_accounts(
                 program_id_pubkey,
@@ -455,7 +462,12 @@ where
                 .await?;
             let program_idl_account =
                 program_idl_snapshot.chain_state.account();
-            return Ok(Some((program_idl_pubkey, program_idl_account.clone())));
+            if let Some(program_idl_account) = program_idl_account {
+                return Ok(Some((
+                    program_idl_pubkey,
+                    program_idl_account.clone(),
+                )));
+            }
         }
         Ok(None)
     }
