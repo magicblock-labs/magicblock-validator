@@ -49,7 +49,7 @@ impl MagicContext {
     }
 
     pub fn has_scheduled_commits(data: &[u8]) -> bool {
-        // Currently we only store a vec of scheduduled commits in the MagicContext
+        // Currently we only store a vec of scheduled commits in the MagicContext
         // The first 8 bytes contain the length of the vec
         // This works even if the length is actually stored as a u32
         // since we zero out the entire context whenever we update the vec
