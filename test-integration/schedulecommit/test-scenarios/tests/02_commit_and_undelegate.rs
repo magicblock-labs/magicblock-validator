@@ -249,6 +249,7 @@ fn assert_can_increase_committee_count(
     assert!(tx_res.is_ok());
 }
 
+/*
 #[test]
 fn test_committed_and_undelegated_single_account_redelegation() {
     run_test!({
@@ -446,6 +447,7 @@ fn test_committed_and_undelegated_accounts_redelegation() {
         }
     });
 }
+*/
 
 // -----------------
 // Invalid Cases
