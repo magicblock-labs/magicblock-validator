@@ -1,7 +1,6 @@
 use std::{collections::HashSet, sync::Arc};
 
 use conjunto_transwise::{
-    errors::TranswiseError,
     transaction_accounts_extractor::TransactionAccountsExtractorImpl,
     transaction_accounts_holder::TransactionAccountsHolder,
     transaction_accounts_validator::TransactionAccountsValidatorImpl,

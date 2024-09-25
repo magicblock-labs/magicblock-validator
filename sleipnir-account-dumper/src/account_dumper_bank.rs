@@ -53,9 +53,11 @@ impl AccountDumper for AccountDumperBank {
         lamports: u64,
         owner: &Pubkey,
     ) -> AccountDumperResult<Signature> {
-        let mut account = Account::default();
-        account.owner = *owner;
-        account.lamports = lamports;
+        let account = Account {
+            lamports,
+            owner: *owner,
+            ..Default::default()
+        };
         let transaction = transaction_to_clone_regular_account(
             pubkey,
             &account,
