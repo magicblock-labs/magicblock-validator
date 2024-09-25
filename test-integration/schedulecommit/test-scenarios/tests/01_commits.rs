@@ -7,7 +7,7 @@ use schedulecommit_program::api::schedule_commit_cpi_instruction;
 use sleipnir_core::magic_program;
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
-use solana_sdk::{pubkey::Pubkey, signer::Signer, transaction::Transaction};
+use solana_sdk::{signer::Signer, transaction::Transaction};
 use test_tools_core::init_logger;
 use utils::{
     assert_two_committees_synchronized_count,
