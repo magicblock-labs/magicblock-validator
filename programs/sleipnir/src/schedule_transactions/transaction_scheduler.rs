@@ -1,16 +1,17 @@
-use crate::magic_context::{MagicContext, ScheduledCommit};
-use lazy_static::lazy_static;
-use solana_program_runtime::ic_msg;
-use solana_program_runtime::invoke_context::InvokeContext;
-use solana_sdk::instruction::InstructionError;
-use solana_sdk::{
-    account::AccountSharedData, account_utils::StateMut, pubkey::Pubkey,
-};
-use std::cell::RefCell;
 use std::{
+    cell::RefCell,
     mem,
     sync::{Arc, RwLock},
 };
+
+use lazy_static::lazy_static;
+use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
+use solana_sdk::{
+    account::AccountSharedData, account_utils::StateMut,
+    instruction::InstructionError, pubkey::Pubkey,
+};
+
+use crate::magic_context::{MagicContext, ScheduledCommit};
 
 #[derive(Clone)]
 pub struct TransactionScheduler {
