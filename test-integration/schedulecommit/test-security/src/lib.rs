@@ -36,9 +36,10 @@ pub fn process_instruction<'a>(
         //
         // # Account references
         // - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
-        // - **1**    `[]`              MagicBlock Program (used to schedule commit)
-        // - **2..n** `[]`              The ScheduleCommit program
-        // - **3..n** `[]`              PDA accounts to be committed
+        // - **1**    `[WRITE]`         MagicBlock Context (schedule commit are written to it)
+        // - **2**    `[]`              MagicBlock Program (used to schedule commit)
+        // - **3**    `[]`              The ScheduleCommit program
+        // - **4..n** `[]`              PDA accounts to be committed
         //
         // # Instruction Args
         //
@@ -60,7 +61,8 @@ pub fn process_instruction<'a>(
         //
         // # Account references
         // - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
-        // - **1**    `[]`              MagicBlock Program (used to schedule commit)
+        // - **1**    `[WRITE]`         MagicBlock Context (schedule commit are written to it)
+        // - **2**    `[]`              MagicBlock Program (used to schedule commit)
         // - **2..n** `[]`              PDA accounts to be committed
         //
         // # Instruction Args

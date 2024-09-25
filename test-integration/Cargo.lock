@@ -2645,6 +2645,7 @@ dependencies = [
 name = "schedulecommit-test-security"
 version = "0.0.0"
 dependencies = [
+ "integration-test-tools",
  "schedulecommit-client",
  "schedulecommit-program",
  "sleipnir-core",
