@@ -47,4 +47,14 @@ impl MagicContext {
     pub(crate) fn take_scheduled_commits(&mut self) -> Vec<ScheduledCommit> {
         mem::take(&mut self.scheduled_commits)
     }
+
+    pub fn has_scheduled_commits(data: &[u8]) -> bool {
+        // Currently we only store a vec of scheduduled commits in the MagicContext
+        // The first 8 bytes contain the length of the vec
+        // This works even if the length is actually stored as a u32
+        match bincode::deserialize::<u64>(&data[0..8]) {
+            Ok(len) => len == 0,
+            Err(_) => false,
+        }
+    }
 }
