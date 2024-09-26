@@ -97,24 +97,6 @@ fn setup_ephem(
     )
 }
 
-fn generate_wallet_pubkey() -> Pubkey {
-    loop {
-        let pubkey = Pubkey::new_unique();
-        if pubkey.is_on_curve() {
-            return pubkey;
-        }
-    }
-}
-
-fn generate_pda_pubkey() -> Pubkey {
-    loop {
-        let pubkey = Pubkey::new_unique();
-        if !pubkey.is_on_curve() {
-            return pubkey;
-        }
-    }
-}
-
 #[tokio::test]
 async fn test_ensure_readonly_account_not_tracked_nor_in_our_validator() {
     init_logger!();
@@ -132,7 +114,7 @@ async fn test_ensure_readonly_account_not_tracked_nor_in_our_validator() {
     );
 
     // Account should be fetchable as undelegated
-    let pda_account = generate_pda_pubkey();
+    let pda_account = Pubkey::new_unique();
     account_fetcher.set_undelegated_account(pda_account, 42);
 
     // Ensure accounts
@@ -215,7 +197,7 @@ async fn test_ensure_readonly_account_cloned_but_not_in_our_validator() {
     );
 
     // Pre-clone the account
-    let pda_account = generate_pda_pubkey();
+    let pda_account = Pubkey::new_unique();
     account_fetcher.set_undelegated_account(pda_account, 42);
     assert!(manager
         .account_cloner
@@ -264,7 +246,7 @@ async fn test_ensure_readonly_account_cloned_but_has_been_updated_on_chain() {
     );
 
     // Pre-clone account
-    let pda_account = generate_pda_pubkey();
+    let pda_account = Pubkey::new_unique();
     account_fetcher.set_undelegated_account(pda_account, 42);
     assert!(manager
         .account_cloner
@@ -317,7 +299,7 @@ async fn test_ensure_readonly_account_cloned_and_no_recent_update_on_chain() {
     );
 
     // Pre-clone the account
-    let pda_account = generate_pda_pubkey();
+    let pda_account = Pubkey::new_unique();
     account_fetcher.set_undelegated_account(pda_account, 11);
     assert!(manager
         .account_cloner
@@ -370,7 +352,7 @@ async fn test_ensure_readonly_account_in_our_validator_and_unseen_writable() {
 
     // One already loaded, and one properly delegated
     let already_loaded_account = Pubkey::new_unique();
-    let delegated_account = generate_pda_pubkey();
+    let delegated_account = Pubkey::new_unique();
     internal_account_provider.set(already_loaded_account, Default::default());
     account_fetcher.set_delegated_account(delegated_account, 42, 11);
 
@@ -416,8 +398,8 @@ async fn test_ensure_delegated_with_owner_and_undelegated_writable_payer() {
     );
 
     // One delegated, one undelegated system account
-    let payer_account = generate_wallet_pubkey();
-    let delegated_account = generate_pda_pubkey();
+    let payer_account = Pubkey::new_unique();
+    let delegated_account = Pubkey::new_unique();
     account_fetcher.set_wallet_account(payer_account, 42);
     account_fetcher.set_delegated_account(delegated_account, 42, 11);
 
@@ -466,7 +448,7 @@ async fn test_ensure_one_delegated_and_one_new_account_writable() {
     );
 
     // One writable delegated and one new account
-    let delegated_account = generate_pda_pubkey();
+    let delegated_account = Pubkey::new_unique();
     let new_account = Pubkey::new_unique();
     account_fetcher.set_delegated_account(delegated_account, 42, 11);
     account_fetcher.set_wallet_account(new_account, 42);
@@ -513,11 +495,11 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
     );
 
     // Multiple delegated and undelegated accounts fetchable
-    let pda_account1 = generate_pda_pubkey();
-    let pda_account2 = generate_pda_pubkey();
-    let pda_account3 = generate_pda_pubkey();
-    let delegated_account1 = generate_pda_pubkey();
-    let delegated_account2 = generate_pda_pubkey();
+    let pda_account1 = Pubkey::new_unique();
+    let pda_account2 = Pubkey::new_unique();
+    let pda_account3 = Pubkey::new_unique();
+    let delegated_account1 = Pubkey::new_unique();
+    let delegated_account2 = Pubkey::new_unique();
 
     account_fetcher.set_undelegated_account(pda_account1, 42);
     account_fetcher.set_undelegated_account(pda_account2, 42);
@@ -651,7 +633,7 @@ async fn test_ensure_accounts_seen_as_readonly_can_be_used_as_writable_later() {
     );
 
     // A delegated account
-    let delegated_account = generate_pda_pubkey();
+    let delegated_account = Pubkey::new_unique();
     account_fetcher.set_delegated_account(delegated_account, 42, 11);
 
     // First Transaction uses the account as a readable (it should still be detected as a delegated)
@@ -742,7 +724,7 @@ async fn test_ensure_accounts_already_known_can_be_reused_as_writable_later() {
     );
 
     // Account already loaded in the bank, but is a delegated on-chain
-    let delegated_account = generate_pda_pubkey();
+    let delegated_account = Pubkey::new_unique();
     internal_account_provider.set(delegated_account, Default::default());
     account_fetcher.set_delegated_account(delegated_account, 42, 11);
 
@@ -813,7 +795,7 @@ async fn test_ensure_accounts_already_ensured_needs_reclone_after_updates() {
     );
 
     // Pre-clone account
-    let pda_account = generate_pda_pubkey();
+    let pda_account = Pubkey::new_unique();
     account_fetcher.set_undelegated_account(pda_account, 42);
     assert!(manager
         .account_cloner
@@ -893,7 +875,7 @@ async fn test_ensure_accounts_already_cloned_can_be_reused_without_updates() {
     );
 
     // Pre-clone the account
-    let pda_account = generate_pda_pubkey();
+    let pda_account = Pubkey::new_unique();
     account_fetcher.set_undelegated_account(pda_account, 42);
     assert!(manager
         .account_cloner
