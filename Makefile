@@ -50,7 +50,7 @@ lint:
 
 ci-test:
 	RUST_BACKTRACE=1 cargo $(CARGO_TEST_NOCAP) && \
-	$(MAKE) -C $(DIR)/test-integration test-force-mb
+	$(MAKE) -C $(DIR)/test-integration test
 
 ## NOTE: We're getting the following error in github CI when trying to use
 #  nightly Rust. Until that is fixed we have to use stable to verify format.
