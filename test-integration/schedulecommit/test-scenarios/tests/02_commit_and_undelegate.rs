@@ -352,7 +352,6 @@ fn test_committed_and_undelegated_single_account_redelegation() {
     });
 }
 
-/*
 // The below is the same as test_committed_and_undelegated_single_account_redelegation
 // but for two accounts
 #[test]
@@ -472,7 +471,6 @@ fn test_committed_and_undelegated_accounts_redelegation() {
         }
     });
 }
-*/
 
 // -----------------
 // Invalid Cases
