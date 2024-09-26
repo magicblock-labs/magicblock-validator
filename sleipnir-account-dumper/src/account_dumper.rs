@@ -29,7 +29,7 @@ pub trait AccountDumper {
 
     // Overrides the account in the bank to make sure it's a PDA that can be used as readonly
     // Future transactions should be able to read from it (but not write) on the account as-is
-    fn dump_undelegated_account(
+    fn dump_data_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,

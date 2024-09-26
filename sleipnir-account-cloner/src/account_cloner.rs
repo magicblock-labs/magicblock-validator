@@ -42,7 +42,7 @@ pub enum AccountClonerUnclonableReason {
     IsBlacklisted,
     IsNotAllowedProgram,
     DisallowWalletAccount,
-    DisallowUndelegatedAccount,
+    DisallowDataAccount,
     DisallowDelegatedAccount,
     DisallowProgramAccount,
 }
@@ -51,7 +51,7 @@ pub enum AccountClonerUnclonableReason {
 pub struct AccountClonerPermissions {
     pub allow_cloning_refresh: bool,
     pub allow_cloning_wallet_accounts: bool,
-    pub allow_cloning_undelegated_accounts: bool,
+    pub allow_cloning_data_accounts: bool,
     pub allow_cloning_delegated_accounts: bool,
     pub allow_cloning_program_accounts: bool,
 }

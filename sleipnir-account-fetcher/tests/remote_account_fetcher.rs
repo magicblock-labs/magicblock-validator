@@ -124,10 +124,10 @@ async fn test_devnet_fetch_multiple_accounts_same_time() {
     assert_eq!(snapshot_sysvar_rent.pubkey, key_sysvar_rent);
     assert_eq!(snapshot_new_account.pubkey, key_new_account);
     // Extra checks
-    assert!(snapshot_system_program.chain_state.is_undelegated());
-    assert!(snapshot_sysvar_blockhashes.chain_state.is_undelegated());
-    assert!(snapshot_sysvar_clock.chain_state.is_undelegated());
-    assert!(snapshot_sysvar_rent.chain_state.is_undelegated());
+    assert!(snapshot_system_program.chain_state.is_data());
+    assert!(snapshot_sysvar_blockhashes.chain_state.is_data());
+    assert!(snapshot_sysvar_clock.chain_state.is_data());
+    assert!(snapshot_sysvar_rent.chain_state.is_data());
     assert!(snapshot_new_account.chain_state.is_wallet());
     // Cleanup everything correctly
     cancellation_token.cancel();

@@ -10,7 +10,7 @@ use crate::{AccountDumper, AccountDumperResult};
 #[derive(Debug, Clone, Default)]
 pub struct AccountDumperStub {
     wallet_accounts: Arc<RwLock<HashSet<Pubkey>>>,
-    undelegated_accounts: Arc<RwLock<HashSet<Pubkey>>>,
+    data_accounts: Arc<RwLock<HashSet<Pubkey>>>,
     delegated_accounts: Arc<RwLock<HashSet<Pubkey>>>,
     program_ids: Arc<RwLock<HashSet<Pubkey>>>,
     program_datas: Arc<RwLock<HashSet<Pubkey>>>,
@@ -28,12 +28,12 @@ impl AccountDumper for AccountDumperStub {
         Ok(Signature::new_unique())
     }
 
-    fn dump_undelegated_account(
+    fn dump_data_account(
         &self,
         pubkey: &Pubkey,
         _account: &Account,
     ) -> AccountDumperResult<Signature> {
-        self.undelegated_accounts.write().unwrap().insert(*pubkey);
+        self.data_accounts.write().unwrap().insert(*pubkey);
         Ok(Signature::new_unique())
     }
 
@@ -71,8 +71,8 @@ impl AccountDumperStub {
     pub fn was_dumped_as_wallet_account(&self, pubkey: &Pubkey) -> bool {
         self.wallet_accounts.read().unwrap().contains(pubkey)
     }
-    pub fn was_dumped_as_pda_account(&self, pubkey: &Pubkey) -> bool {
-        self.undelegated_accounts.read().unwrap().contains(pubkey)
+    pub fn was_dumped_as_data_account(&self, pubkey: &Pubkey) -> bool {
+        self.data_accounts.read().unwrap().contains(pubkey)
     }
     pub fn was_dumped_as_delegated_account(&self, pubkey: &Pubkey) -> bool {
         self.delegated_accounts.read().unwrap().contains(pubkey)
@@ -90,7 +90,7 @@ impl AccountDumperStub {
 
     pub fn was_untouched(&self, pubkey: &Pubkey) -> bool {
         !self.was_dumped_as_wallet_account(pubkey)
-            && !self.was_dumped_as_pda_account(pubkey)
+            && !self.was_dumped_as_data_account(pubkey)
             && !self.was_dumped_as_delegated_account(pubkey)
             && !self.was_dumped_as_program_id(pubkey)
             && !self.was_dumped_as_program_data(pubkey)
@@ -99,7 +99,7 @@ impl AccountDumperStub {
 
     pub fn clear_history(&self) {
         self.wallet_accounts.write().unwrap().clear();
-        self.undelegated_accounts.write().unwrap().clear();
+        self.data_accounts.write().unwrap().clear();
         self.delegated_accounts.write().unwrap().clear();
         self.program_ids.write().unwrap().clear();
         self.program_datas.write().unwrap().clear();

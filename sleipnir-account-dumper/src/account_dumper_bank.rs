@@ -67,7 +67,7 @@ impl AccountDumper for AccountDumperBank {
         self.execute_transaction(transaction)
     }
 
-    fn dump_undelegated_account(
+    fn dump_data_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,

@@ -146,7 +146,7 @@ where
     ) -> AccountClonerResult<AccountClonerOutput> {
         // If we don't allow any cloning, no need to do anything at all
         if !self.permissions.allow_cloning_wallet_accounts
-            && !self.permissions.allow_cloning_undelegated_accounts
+            && !self.permissions.allow_cloning_data_accounts
             && !self.permissions.allow_cloning_delegated_accounts
             && !self.permissions.allow_cloning_program_accounts
         {
@@ -283,9 +283,9 @@ where
                 }
                 self.do_clone_wallet_account(pubkey, *lamports, owner)?
             }
-            // If the account is present on-chain, but not delegated
+            // If the account is present on-chain, but not delegated, it's just readonly data
             // We need to differenciate between programs and other accounts
-            AccountChainState::Undelegated { account, .. } => {
+            AccountChainState::Data { account, .. } => {
                 // If it's an executable, we may have some special fetching to do
                 if account.executable {
                     if let Some(allowed_program_ids) = &self.allowed_program_ids
@@ -309,14 +309,14 @@ where
                 }
                 // If it's not an executble, simpler rules apply
                 else {
-                    if !self.permissions.allow_cloning_undelegated_accounts {
+                    if !self.permissions.allow_cloning_data_accounts {
                         return Ok(AccountClonerOutput::Unclonable {
                             pubkey: *pubkey,
-                            reason: AccountClonerUnclonableReason::DisallowUndelegatedAccount,
+                            reason: AccountClonerUnclonableReason::DisallowDataAccount,
                             at_slot: account_chain_snapshot.at_slot,
                         });
                     }
-                    self.do_clone_undelegated_account(pubkey, account)?
+                    self.do_clone_data_account(pubkey, account)?
                 }
             }
             // If the account delegated on-chain, we need to apply some overrides
@@ -361,13 +361,13 @@ where
             .map_err(AccountClonerError::AccountDumperError)
     }
 
-    fn do_clone_undelegated_account(
+    fn do_clone_data_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,
     ) -> AccountClonerResult<Signature> {
         self.account_dumper
-            .dump_undelegated_account(pubkey, account)
+            .dump_data_account(pubkey, account)
             .map_err(AccountClonerError::AccountDumperError)
     }
 

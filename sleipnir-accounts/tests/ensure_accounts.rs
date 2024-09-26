@@ -113,15 +113,15 @@ async fn test_ensure_readonly_account_not_tracked_nor_in_our_validator() {
         account_dumper.clone(),
     );
 
-    // Account should be fetchable as undelegated
-    let pda_account = Pubkey::new_unique();
-    account_fetcher.set_undelegated_account(pda_account, 42);
+    // Account should be fetchable as data
+    let data_account = Pubkey::new_unique();
+    account_fetcher.set_data_account(data_account, 42);
 
     // Ensure accounts
     let result = manager
         .ensure_accounts_from_holder(
             TransactionAccountsHolder {
-                readonly: vec![pda_account],
+                readonly: vec![data_account],
                 writable: vec![],
                 payer: Pubkey::new_unique(),
             },
@@ -131,8 +131,8 @@ async fn test_ensure_readonly_account_not_tracked_nor_in_our_validator() {
     assert!(result.is_ok());
 
     // Check proper behaviour
-    assert!(account_dumper.was_dumped_as_pda_account(&pda_account));
-    assert!(manager.last_commit(&pda_account).is_none());
+    assert!(account_dumper.was_dumped_as_data_account(&data_account));
+    assert!(manager.last_commit(&data_account).is_none());
 
     // Cleanup
     cancel.cancel();
@@ -197,21 +197,21 @@ async fn test_ensure_readonly_account_cloned_but_not_in_our_validator() {
     );
 
     // Pre-clone the account
-    let pda_account = Pubkey::new_unique();
-    account_fetcher.set_undelegated_account(pda_account, 42);
+    let data_account = Pubkey::new_unique();
+    account_fetcher.set_data_account(data_account, 42);
     assert!(manager
         .account_cloner
-        .clone_account(&pda_account)
+        .clone_account(&data_account)
         .await
         .is_ok());
-    assert!(account_dumper.was_dumped_as_pda_account(&pda_account));
+    assert!(account_dumper.was_dumped_as_data_account(&data_account));
     account_dumper.clear_history();
 
     // Ensure accounts
     let result = manager
         .ensure_accounts_from_holder(
             TransactionAccountsHolder {
-                readonly: vec![pda_account],
+                readonly: vec![data_account],
                 writable: vec![],
                 payer: Pubkey::new_unique(),
             },
@@ -221,8 +221,8 @@ async fn test_ensure_readonly_account_cloned_but_not_in_our_validator() {
     assert!(result.is_ok());
 
     // Check proper behaviour
-    assert!(account_dumper.was_untouched(&pda_account));
-    assert!(manager.last_commit(&pda_account).is_none());
+    assert!(account_dumper.was_untouched(&data_account));
+    assert!(manager.last_commit(&data_account).is_none());
 
     // Cleanup
     cancel.cancel();
@@ -246,25 +246,25 @@ async fn test_ensure_readonly_account_cloned_but_has_been_updated_on_chain() {
     );
 
     // Pre-clone account
-    let pda_account = Pubkey::new_unique();
-    account_fetcher.set_undelegated_account(pda_account, 42);
+    let data_account = Pubkey::new_unique();
+    account_fetcher.set_data_account(data_account, 42);
     assert!(manager
         .account_cloner
-        .clone_account(&pda_account)
+        .clone_account(&data_account)
         .await
         .is_ok());
-    assert!(account_dumper.was_dumped_as_pda_account(&pda_account));
+    assert!(account_dumper.was_dumped_as_data_account(&data_account));
     account_dumper.clear_history();
 
     // Make the account re-fetchable at a later slot with a pending update
-    account_updates.set_known_update_slot(pda_account, 55);
-    account_fetcher.set_undelegated_account(pda_account, 55);
+    account_updates.set_known_update_slot(data_account, 55);
+    account_fetcher.set_data_account(data_account, 55);
 
     // Ensure accounts
     let result = manager
         .ensure_accounts_from_holder(
             TransactionAccountsHolder {
-                readonly: vec![pda_account],
+                readonly: vec![data_account],
                 writable: vec![],
                 payer: Pubkey::new_unique(),
             },
@@ -274,8 +274,8 @@ async fn test_ensure_readonly_account_cloned_but_has_been_updated_on_chain() {
     assert!(result.is_ok());
 
     // Check proper behaviour
-    assert!(account_dumper.was_dumped_as_pda_account(&pda_account));
-    assert!(manager.last_commit(&pda_account).is_none());
+    assert!(account_dumper.was_dumped_as_data_account(&data_account));
+    assert!(manager.last_commit(&data_account).is_none());
 
     // Cleanup
     cancel.cancel();
@@ -299,24 +299,24 @@ async fn test_ensure_readonly_account_cloned_and_no_recent_update_on_chain() {
     );
 
     // Pre-clone the account
-    let pda_account = Pubkey::new_unique();
-    account_fetcher.set_undelegated_account(pda_account, 11);
+    let data_account = Pubkey::new_unique();
+    account_fetcher.set_data_account(data_account, 11);
     assert!(manager
         .account_cloner
-        .clone_account(&pda_account)
+        .clone_account(&data_account)
         .await
         .is_ok());
-    assert!(account_dumper.was_dumped_as_pda_account(&pda_account));
+    assert!(account_dumper.was_dumped_as_data_account(&data_account));
     account_dumper.clear_history();
 
     // Account was updated, but before the last clone's slot
-    account_updates.set_known_update_slot(pda_account, 5);
+    account_updates.set_known_update_slot(data_account, 5);
 
     // Ensure accounts
     let result = manager
         .ensure_accounts_from_holder(
             TransactionAccountsHolder {
-                readonly: vec![pda_account],
+                readonly: vec![data_account],
                 writable: vec![],
                 payer: Pubkey::new_unique(),
             },
@@ -326,8 +326,8 @@ async fn test_ensure_readonly_account_cloned_and_no_recent_update_on_chain() {
     assert!(result.is_ok());
 
     // Check proper behaviour
-    assert!(account_dumper.was_untouched(&pda_account));
-    assert!(manager.last_commit(&pda_account).is_none());
+    assert!(account_dumper.was_untouched(&data_account));
+    assert!(manager.last_commit(&data_account).is_none());
 
     // Cleanup
     cancel.cancel();
@@ -382,54 +382,7 @@ async fn test_ensure_readonly_account_in_our_validator_and_unseen_writable() {
 }
 
 #[tokio::test]
-async fn test_ensure_delegated_with_owner_and_undelegated_writable_payer() {
-    init_logger!();
-
-    let internal_account_provider = InternalAccountProviderStub::default();
-    let account_fetcher = AccountFetcherStub::default();
-    let account_updates = AccountUpdatesStub::default();
-    let account_dumper = AccountDumperStub::default();
-
-    let (manager, cancel, handle) = setup_ephem(
-        internal_account_provider.clone(),
-        account_fetcher.clone(),
-        account_updates.clone(),
-        account_dumper.clone(),
-    );
-
-    // One delegated, one undelegated system account
-    let payer_account = Pubkey::new_unique();
-    let delegated_account = Pubkey::new_unique();
-    account_fetcher.set_wallet_account(payer_account, 42);
-    account_fetcher.set_delegated_account(delegated_account, 42, 11);
-
-    // Ensure accounts
-    let result = manager
-        .ensure_accounts_from_holder(
-            TransactionAccountsHolder {
-                readonly: vec![],
-                writable: vec![payer_account, delegated_account],
-                payer: payer_account,
-            },
-            "tx-sig".to_string(),
-        )
-        .await;
-    assert!(result.is_ok());
-
-    // Check proper behaviour
-    assert!(account_dumper.was_dumped_as_wallet_account(&payer_account));
-    assert!(manager.last_commit(&payer_account).is_none());
-
-    assert!(account_dumper.was_dumped_as_delegated_account(&delegated_account));
-    assert!(manager.last_commit(&delegated_account).is_some());
-
-    // Cleanup
-    cancel.cancel();
-    assert!(handle.await.is_ok());
-}
-
-#[tokio::test]
-async fn test_ensure_one_delegated_and_one_new_account_writable() {
+async fn test_ensure_one_delegated_and_one_wallet_account_writable() {
     init_logger!();
 
     let internal_account_provider = InternalAccountProviderStub::default();
@@ -447,18 +400,18 @@ async fn test_ensure_one_delegated_and_one_new_account_writable() {
         LifecycleMode::Replica,
     );
 
-    // One writable delegated and one new account
+    // One writable delegated and one wallet account
     let delegated_account = Pubkey::new_unique();
-    let new_account = Pubkey::new_unique();
+    let wallet_account = Pubkey::new_unique();
     account_fetcher.set_delegated_account(delegated_account, 42, 11);
-    account_fetcher.set_wallet_account(new_account, 42);
+    account_fetcher.set_wallet_account(wallet_account, 42);
 
     // Ensure account
     let result = manager
         .ensure_accounts_from_holder(
             TransactionAccountsHolder {
                 readonly: vec![],
-                writable: vec![new_account, delegated_account],
+                writable: vec![wallet_account, delegated_account],
                 payer: Pubkey::new_unique(),
             },
             "tx-sig".to_string(),
@@ -470,8 +423,8 @@ async fn test_ensure_one_delegated_and_one_new_account_writable() {
     assert!(account_dumper.was_dumped_as_delegated_account(&delegated_account));
     assert!(manager.last_commit(&delegated_account).is_some());
 
-    assert!(account_dumper.was_dumped_as_wallet_account(&new_account));
-    assert!(manager.last_commit(&new_account).is_none());
+    assert!(account_dumper.was_dumped_as_wallet_account(&wallet_account));
+    assert!(manager.last_commit(&wallet_account).is_none());
 
     // Cleanup
     cancel.cancel();
@@ -494,16 +447,16 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
         account_dumper.clone(),
     );
 
-    // Multiple delegated and undelegated accounts fetchable
-    let pda_account1 = Pubkey::new_unique();
-    let pda_account2 = Pubkey::new_unique();
-    let pda_account3 = Pubkey::new_unique();
+    // Multiple delegated and data accounts fetchable
+    let data_account1 = Pubkey::new_unique();
+    let data_account2 = Pubkey::new_unique();
+    let data_account3 = Pubkey::new_unique();
     let delegated_account1 = Pubkey::new_unique();
     let delegated_account2 = Pubkey::new_unique();
 
-    account_fetcher.set_undelegated_account(pda_account1, 42);
-    account_fetcher.set_undelegated_account(pda_account2, 42);
-    account_fetcher.set_undelegated_account(pda_account3, 42);
+    account_fetcher.set_data_account(data_account1, 42);
+    account_fetcher.set_data_account(data_account2, 42);
+    account_fetcher.set_data_account(data_account3, 42);
     account_fetcher.set_delegated_account(delegated_account1, 42, 11);
     account_fetcher.set_delegated_account(delegated_account2, 42, 11);
 
@@ -513,7 +466,7 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
         let result = manager
             .ensure_accounts_from_holder(
                 TransactionAccountsHolder {
-                    readonly: vec![pda_account1, pda_account2],
+                    readonly: vec![data_account1, data_account2],
                     writable: vec![delegated_account1],
                     payer: Pubkey::new_unique(),
                 },
@@ -523,14 +476,14 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
         assert!(result.is_ok());
 
         // Check proper behaviour
-        assert!(account_dumper.was_dumped_as_pda_account(&pda_account1));
-        assert!(manager.last_commit(&pda_account1).is_none());
+        assert!(account_dumper.was_dumped_as_data_account(&data_account1));
+        assert!(manager.last_commit(&data_account1).is_none());
 
-        assert!(account_dumper.was_dumped_as_pda_account(&pda_account2));
-        assert!(manager.last_commit(&pda_account2).is_none());
+        assert!(account_dumper.was_dumped_as_data_account(&data_account2));
+        assert!(manager.last_commit(&data_account2).is_none());
 
-        assert!(account_dumper.was_untouched(&pda_account3));
-        assert!(manager.last_commit(&pda_account3).is_none());
+        assert!(account_dumper.was_untouched(&data_account3));
+        assert!(manager.last_commit(&data_account3).is_none());
 
         assert!(
             account_dumper.was_dumped_as_delegated_account(&delegated_account1)
@@ -549,7 +502,7 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
         let result = manager
             .ensure_accounts_from_holder(
                 TransactionAccountsHolder {
-                    readonly: vec![pda_account1, pda_account2],
+                    readonly: vec![data_account1, data_account2],
                     writable: vec![],
                     payer: Pubkey::new_unique(),
                 },
@@ -559,14 +512,14 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
         assert!(result.is_ok());
 
         // Check proper behaviour
-        assert!(account_dumper.was_untouched(&pda_account1));
-        assert!(manager.last_commit(&pda_account1).is_none());
+        assert!(account_dumper.was_untouched(&data_account1));
+        assert!(manager.last_commit(&data_account1).is_none());
 
-        assert!(account_dumper.was_untouched(&pda_account2));
-        assert!(manager.last_commit(&pda_account2).is_none());
+        assert!(account_dumper.was_untouched(&data_account2));
+        assert!(manager.last_commit(&data_account2).is_none());
 
-        assert!(account_dumper.was_untouched(&pda_account3));
-        assert!(manager.last_commit(&pda_account3).is_none());
+        assert!(account_dumper.was_untouched(&data_account3));
+        assert!(manager.last_commit(&data_account3).is_none());
 
         assert!(account_dumper.was_untouched(&delegated_account1));
         assert!(manager.last_commit(&delegated_account1).is_some());
@@ -583,7 +536,7 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
         let result = manager
             .ensure_accounts_from_holder(
                 TransactionAccountsHolder {
-                    readonly: vec![pda_account2, pda_account3],
+                    readonly: vec![data_account2, data_account3],
                     writable: vec![delegated_account2],
                     payer: Pubkey::new_unique(),
                 },
@@ -593,14 +546,14 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
         assert!(result.is_ok());
 
         // Check proper behaviour
-        assert!(account_dumper.was_untouched(&pda_account1));
-        assert!(manager.last_commit(&pda_account1).is_none());
+        assert!(account_dumper.was_untouched(&data_account1));
+        assert!(manager.last_commit(&data_account1).is_none());
 
-        assert!(account_dumper.was_untouched(&pda_account2));
-        assert!(manager.last_commit(&pda_account2).is_none());
+        assert!(account_dumper.was_untouched(&data_account2));
+        assert!(manager.last_commit(&data_account2).is_none());
 
-        assert!(account_dumper.was_dumped_as_pda_account(&pda_account3));
-        assert!(manager.last_commit(&pda_account3).is_none());
+        assert!(account_dumper.was_dumped_as_data_account(&data_account3));
+        assert!(manager.last_commit(&data_account3).is_none());
 
         assert!(account_dumper.was_untouched(&delegated_account1));
         assert!(manager.last_commit(&delegated_account1).is_some());
@@ -795,21 +748,21 @@ async fn test_ensure_accounts_already_ensured_needs_reclone_after_updates() {
     );
 
     // Pre-clone account
-    let pda_account = Pubkey::new_unique();
-    account_fetcher.set_undelegated_account(pda_account, 42);
+    let data_account = Pubkey::new_unique();
+    account_fetcher.set_data_account(data_account, 42);
     assert!(manager
         .account_cloner
-        .clone_account(&pda_account)
+        .clone_account(&data_account)
         .await
         .is_ok());
-    assert!(account_dumper.was_dumped_as_pda_account(&pda_account));
+    assert!(account_dumper.was_dumped_as_data_account(&data_account));
     account_dumper.clear_history();
 
     // We detect an update that's more recent
-    account_updates.set_known_update_slot(pda_account, 88);
+    account_updates.set_known_update_slot(data_account, 88);
 
     // But for this case, the account fetcher is too slow and can only fetch an old version for some reason
-    account_fetcher.set_undelegated_account(pda_account, 77);
+    account_fetcher.set_data_account(data_account, 77);
 
     // The first transaction should need to clone since there was an update
     {
@@ -817,7 +770,7 @@ async fn test_ensure_accounts_already_ensured_needs_reclone_after_updates() {
         let result = manager
             .ensure_accounts_from_holder(
                 TransactionAccountsHolder {
-                    readonly: vec![pda_account],
+                    readonly: vec![data_account],
                     writable: vec![],
                     payer: Pubkey::new_unique(),
                 },
@@ -827,8 +780,8 @@ async fn test_ensure_accounts_already_ensured_needs_reclone_after_updates() {
         assert!(result.is_ok());
 
         // Check proper behaviour
-        assert!(account_dumper.was_dumped_as_pda_account(&pda_account));
-        assert!(manager.last_commit(&pda_account).is_none());
+        assert!(account_dumper.was_dumped_as_data_account(&data_account));
+        assert!(manager.last_commit(&data_account).is_none());
     }
 
     account_dumper.clear_history();
@@ -839,7 +792,7 @@ async fn test_ensure_accounts_already_ensured_needs_reclone_after_updates() {
         let result = manager
             .ensure_accounts_from_holder(
                 TransactionAccountsHolder {
-                    readonly: vec![pda_account],
+                    readonly: vec![data_account],
                     writable: vec![],
                     payer: Pubkey::new_unique(),
                 },
@@ -849,8 +802,8 @@ async fn test_ensure_accounts_already_ensured_needs_reclone_after_updates() {
         assert!(result.is_ok());
 
         // Check proper behaviour
-        assert!(account_dumper.was_dumped_as_pda_account(&pda_account));
-        assert!(manager.last_commit(&pda_account).is_none());
+        assert!(account_dumper.was_dumped_as_data_account(&data_account));
+        assert!(manager.last_commit(&data_account).is_none());
     }
 
     // Cleanup
@@ -875,19 +828,19 @@ async fn test_ensure_accounts_already_cloned_can_be_reused_without_updates() {
     );
 
     // Pre-clone the account
-    let pda_account = Pubkey::new_unique();
-    account_fetcher.set_undelegated_account(pda_account, 42);
+    let data_account = Pubkey::new_unique();
+    account_fetcher.set_data_account(data_account, 42);
     assert!(manager
         .account_cloner
-        .clone_account(&pda_account)
+        .clone_account(&data_account)
         .await
         .is_ok());
-    assert!(account_dumper.was_dumped_as_pda_account(&pda_account));
+    assert!(account_dumper.was_dumped_as_data_account(&data_account));
     account_dumper.clear_history();
 
     // The account has been updated on-chain since the last clone
-    account_fetcher.set_undelegated_account(pda_account, 66);
-    account_updates.set_known_update_slot(pda_account, 66);
+    account_fetcher.set_data_account(data_account, 66);
+    account_updates.set_known_update_slot(data_account, 66);
 
     // The first transaction should need to clone since the account was updated on-chain since the last clone
     {
@@ -895,7 +848,7 @@ async fn test_ensure_accounts_already_cloned_can_be_reused_without_updates() {
         let result = manager
             .ensure_accounts_from_holder(
                 TransactionAccountsHolder {
-                    readonly: vec![pda_account],
+                    readonly: vec![data_account],
                     writable: vec![],
                     payer: Pubkey::new_unique(),
                 },
@@ -905,8 +858,8 @@ async fn test_ensure_accounts_already_cloned_can_be_reused_without_updates() {
         assert!(result.is_ok());
 
         // Check proper behaviour
-        assert!(account_dumper.was_dumped_as_pda_account(&pda_account));
-        assert!(manager.last_commit(&pda_account).is_none());
+        assert!(account_dumper.was_dumped_as_data_account(&data_account));
+        assert!(manager.last_commit(&data_account).is_none());
     }
 
     account_dumper.clear_history();
@@ -917,7 +870,7 @@ async fn test_ensure_accounts_already_cloned_can_be_reused_without_updates() {
         let result = manager
             .ensure_accounts_from_holder(
                 TransactionAccountsHolder {
-                    readonly: vec![pda_account],
+                    readonly: vec![data_account],
                     writable: vec![],
                     payer: Pubkey::new_unique(),
                 },
@@ -927,8 +880,8 @@ async fn test_ensure_accounts_already_cloned_can_be_reused_without_updates() {
         assert!(result.is_ok());
 
         // Check proper behaviour
-        assert!(account_dumper.was_untouched(&pda_account));
-        assert!(manager.last_commit(&pda_account).is_none());
+        assert!(account_dumper.was_untouched(&data_account));
+        assert!(manager.last_commit(&data_account).is_none());
     }
 
     // Cleanup

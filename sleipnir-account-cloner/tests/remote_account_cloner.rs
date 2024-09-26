@@ -79,7 +79,7 @@ fn setup_replica(
         AccountClonerPermissions {
             allow_cloning_refresh: false,
             allow_cloning_wallet_accounts: true,
-            allow_cloning_undelegated_accounts: true,
+            allow_cloning_data_accounts: true,
             allow_cloning_delegated_accounts: true,
             allow_cloning_program_accounts: true,
         },
@@ -107,7 +107,7 @@ fn setup_programs_replica(
         AccountClonerPermissions {
             allow_cloning_refresh: false,
             allow_cloning_wallet_accounts: false,
-            allow_cloning_undelegated_accounts: false,
+            allow_cloning_data_accounts: false,
             allow_cloning_delegated_accounts: false,
             allow_cloning_program_accounts: true,
         },
@@ -135,7 +135,7 @@ fn setup_ephemeral(
         AccountClonerPermissions {
             allow_cloning_refresh: true,
             allow_cloning_wallet_accounts: true,
-            allow_cloning_undelegated_accounts: true,
+            allow_cloning_data_accounts: true,
             allow_cloning_delegated_accounts: true,
             allow_cloning_program_accounts: true,
         },
@@ -163,7 +163,7 @@ fn setup_offline(
         AccountClonerPermissions {
             allow_cloning_refresh: false,
             allow_cloning_wallet_accounts: false,
-            allow_cloning_undelegated_accounts: false,
+            allow_cloning_data_accounts: false,
             allow_cloning_delegated_accounts: false,
             allow_cloning_program_accounts: false,
         },
@@ -171,7 +171,7 @@ fn setup_offline(
 }
 
 #[tokio::test]
-async fn test_clone_allow_wallet_account_payer_when_ephemeral() {
+async fn test_clone_allow_wallet_account_when_ephemeral() {
     // Stubs
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
@@ -185,7 +185,7 @@ async fn test_clone_allow_wallet_account_payer_when_ephemeral() {
         account_dumper.clone(),
         None,
     );
-    // A simple wallet account
+    // Account(s) involved
     let wallet_account = Pubkey::new_unique();
     account_fetcher.set_wallet_account(wallet_account, 42);
     // Run test
@@ -201,7 +201,7 @@ async fn test_clone_allow_wallet_account_payer_when_ephemeral() {
 }
 
 #[tokio::test]
-async fn test_clone_allow_payer_account_when_ephemeral() {
+async fn test_clone_allow_data_account_when_ephemeral() {
     // Stubs
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
@@ -215,46 +215,16 @@ async fn test_clone_allow_payer_account_when_ephemeral() {
         account_dumper.clone(),
         None,
     );
-    // A simple payer account
-    let payer_account = Pubkey::new_unique();
-    account_fetcher.set_wallet_account(payer_account, 42);
+    // Account(s) involved
+    let data_account = Pubkey::new_unique();
+    account_fetcher.set_data_account(data_account, 42);
     // Run test
-    let result = cloner.clone_account(&payer_account).await;
+    let result = cloner.clone_account(&data_account).await;
     // Check expected result
     assert!(matches!(result, Ok(AccountClonerOutput::Cloned { .. })));
-    assert_eq!(account_fetcher.get_fetch_count(&payer_account), 1);
-    assert!(account_updates.has_account_monitoring(&payer_account));
-    assert!(account_dumper.was_dumped_as_wallet_account(&payer_account));
-    // Cleanup everything correctly
-    cancellation_token.cancel();
-    assert!(worker_handle.await.is_ok());
-}
-
-#[tokio::test]
-async fn test_clone_allow_pda_account_when_ephemeral() {
-    // Stubs
-    let internal_account_provider = InternalAccountProviderStub::default();
-    let account_fetcher = AccountFetcherStub::default();
-    let account_updates = AccountUpdatesStub::default();
-    let account_dumper = AccountDumperStub::default();
-    // Create account cloner worker and client
-    let (cloner, cancellation_token, worker_handle) = setup_ephemeral(
-        internal_account_provider.clone(),
-        account_fetcher.clone(),
-        account_updates.clone(),
-        account_dumper.clone(),
-        None,
-    );
-    // A simple PDA account
-    let pda_account = Pubkey::new_unique();
-    account_fetcher.set_undelegated_account(pda_account, 42);
-    // Run test
-    let result = cloner.clone_account(&pda_account).await;
-    // Check expected result
-    assert!(matches!(result, Ok(AccountClonerOutput::Cloned { .. })));
-    assert_eq!(account_fetcher.get_fetch_count(&pda_account), 1);
-    assert!(account_updates.has_account_monitoring(&pda_account));
-    assert!(account_dumper.was_dumped_as_pda_account(&pda_account));
+    assert_eq!(account_fetcher.get_fetch_count(&data_account), 1);
+    assert!(account_updates.has_account_monitoring(&data_account));
+    assert!(account_dumper.was_dumped_as_data_account(&data_account));
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());
@@ -275,7 +245,7 @@ async fn test_clone_allow_delegated_account_when_ephemeral() {
         account_dumper.clone(),
         None,
     );
-    // A properly delegated account
+    // Account(s) involved
     let delegated_account = Pubkey::new_unique();
     account_fetcher.set_delegated_account(delegated_account, 42, 11);
     // Run test
@@ -305,15 +275,15 @@ async fn test_clone_allow_program_accounts_when_ephemeral() {
         account_dumper.clone(),
         None,
     );
-    // A simple program with its executable data alongside it
+    // Account(s) involved
     let program_id = Pubkey::new_unique();
     let program_data = get_program_data_address(&program_id);
     let program_anchor = get_pubkey_anchor_idl(&program_id).unwrap();
     let program_shank = get_pubkey_shank_idl(&program_id).unwrap();
     account_fetcher.set_executable_account(program_id, 42);
-    account_fetcher.set_undelegated_account(program_data, 42);
+    account_fetcher.set_data_account(program_data, 42);
     account_fetcher.set_wallet_account(program_anchor, 42); // The anchor IDL does not exist, so it should use shank
-    account_fetcher.set_undelegated_account(program_shank, 42);
+    account_fetcher.set_data_account(program_shank, 42);
     // Run test
     let result = cloner.clone_account(&program_id).await;
     // Check expected result
@@ -355,14 +325,14 @@ async fn test_clone_program_accounts_when_ephemeral_with_whitelist() {
         account_dumper.clone(),
         Some(allowed_program_ids),
     );
-    // Not allowed program account
+    // Account(s) involved
     let unallowed_program_data =
         get_program_data_address(&unallowed_program_id);
     let unallowed_program_idl =
         get_pubkey_anchor_idl(&unallowed_program_id).unwrap();
     account_fetcher.set_executable_account(unallowed_program_id, 42);
-    account_fetcher.set_undelegated_account(unallowed_program_data, 42);
-    account_fetcher.set_undelegated_account(unallowed_program_idl, 42);
+    account_fetcher.set_data_account(unallowed_program_data, 42);
+    account_fetcher.set_data_account(unallowed_program_idl, 42);
     // Run test
     let result = cloner.clone_account(&unallowed_program_id).await;
     // Check expected result
@@ -382,13 +352,13 @@ async fn test_clone_program_accounts_when_ephemeral_with_whitelist() {
     assert_eq!(account_fetcher.get_fetch_count(&unallowed_program_idl), 0);
     assert!(!account_updates.has_account_monitoring(&unallowed_program_idl));
     assert!(account_dumper.was_untouched(&unallowed_program_idl));
-    // Allowed program accounts
+    // Account(s) involved
     let allowed_program_data = get_program_data_address(&allowed_program_id);
     let allowed_program_idl =
         get_pubkey_anchor_idl(&allowed_program_id).unwrap();
     account_fetcher.set_executable_account(allowed_program_id, 52);
-    account_fetcher.set_undelegated_account(allowed_program_data, 52);
-    account_fetcher.set_undelegated_account(allowed_program_idl, 52);
+    account_fetcher.set_data_account(allowed_program_data, 52);
+    account_fetcher.set_data_account(allowed_program_idl, 52);
     // Run test
     let result = cloner.clone_account(&allowed_program_id).await;
     // Check expected result
@@ -422,7 +392,7 @@ async fn test_clone_refuse_already_written_in_bank() {
         account_dumper.clone(),
         None,
     );
-    // The account is already in the bank and should not be cloned under any circumstances
+    // Account(s) involved
     let already_in_the_bank = Pubkey::new_unique();
     internal_account_provider.set(already_in_the_bank, Default::default());
     // Run test
@@ -458,7 +428,7 @@ async fn test_clone_refuse_blacklisted_account() {
         account_dumper.clone(),
         None,
     );
-    // The remote clock is blacklisted by default on our ephemeral
+    // Account(s) involved
     let blacklisted_account = clock::ID;
     // Run test
     let result = cloner.clone_account(&blacklisted_account).await;
@@ -493,7 +463,7 @@ async fn test_clone_refuse_wallet_account_when_programs_replica() {
         account_dumper.clone(),
         None,
     );
-    // A wallet account
+    // Account(s) involved
     let wallet_account = Pubkey::new_unique();
     account_fetcher.set_wallet_account(wallet_account, 42);
     // Run test
@@ -515,7 +485,7 @@ async fn test_clone_refuse_wallet_account_when_programs_replica() {
 }
 
 #[tokio::test]
-async fn test_clone_refuse_pda_account_when_programs_replica() {
+async fn test_clone_refuse_data_account_when_programs_replica() {
     // Stubs
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
@@ -529,22 +499,22 @@ async fn test_clone_refuse_pda_account_when_programs_replica() {
         account_dumper.clone(),
         None,
     );
-    // A simple account that is not delegated and not a program (a PDA)
-    let pda_account = Pubkey::new_unique();
-    account_fetcher.set_undelegated_account(pda_account, 42);
+    // Account(s) involved
+    let data_account = Pubkey::new_unique();
+    account_fetcher.set_data_account(data_account, 42);
     // Run test
-    let result = cloner.clone_account(&pda_account).await;
+    let result = cloner.clone_account(&data_account).await;
     // Check expected result
     assert!(matches!(
         result,
         Ok(AccountClonerOutput::Unclonable {
-            reason: AccountClonerUnclonableReason::DisallowUndelegatedAccount,
+            reason: AccountClonerUnclonableReason::DisallowDataAccount,
             ..
         })
     ));
-    assert_eq!(account_fetcher.get_fetch_count(&pda_account), 1);
-    assert!(!account_updates.has_account_monitoring(&pda_account));
-    assert!(account_dumper.was_untouched(&pda_account));
+    assert_eq!(account_fetcher.get_fetch_count(&data_account), 1);
+    assert!(!account_updates.has_account_monitoring(&data_account));
+    assert!(account_dumper.was_untouched(&data_account));
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());
@@ -565,7 +535,7 @@ async fn test_clone_refuse_delegated_account_when_programs_replica() {
         account_dumper.clone(),
         None,
     );
-    // A properly delegated account
+    // Account(s) involved
     let delegated_account = Pubkey::new_unique();
     account_fetcher.set_delegated_account(delegated_account, 42, 11);
     // Run test
@@ -601,15 +571,15 @@ async fn test_clone_allow_program_accounts_when_programs_replica() {
         account_dumper.clone(),
         None,
     );
-    // A simple program with its executable data alongside it
+    // Account(s) involved
     let program_id = Pubkey::new_unique();
     let program_data = get_program_data_address(&program_id);
     let program_anchor = get_pubkey_anchor_idl(&program_id).unwrap();
     let program_shank = get_pubkey_shank_idl(&program_id).unwrap();
     account_fetcher.set_executable_account(program_id, 42);
-    account_fetcher.set_undelegated_account(program_data, 42);
+    account_fetcher.set_data_account(program_data, 42);
     account_fetcher.set_wallet_account(program_anchor, 42); // The anchor IDL does not exist, so it should use shank
-    account_fetcher.set_undelegated_account(program_shank, 42);
+    account_fetcher.set_data_account(program_shank, 42);
     // Run test
     let result = cloner.clone_account(&program_id).await;
     // Check expected result
@@ -632,7 +602,7 @@ async fn test_clone_allow_program_accounts_when_programs_replica() {
 }
 
 #[tokio::test]
-async fn test_clone_allow_pda_account_when_replica() {
+async fn test_clone_allow_data_account_when_replica() {
     // Stubs
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
@@ -646,23 +616,23 @@ async fn test_clone_allow_pda_account_when_replica() {
         account_dumper.clone(),
         None,
     );
-    // A simple pda account
-    let pda_account = Pubkey::new_unique();
-    account_fetcher.set_undelegated_account(pda_account, 42);
+    // Account(s) involved
+    let data_account = Pubkey::new_unique();
+    account_fetcher.set_data_account(data_account, 42);
     // Run test
-    let result = cloner.clone_account(&pda_account).await;
+    let result = cloner.clone_account(&data_account).await;
     // Check expected result
     assert!(matches!(result, Ok(AccountClonerOutput::Cloned { .. })));
-    assert_eq!(account_fetcher.get_fetch_count(&pda_account), 1);
-    assert!(!account_updates.has_account_monitoring(&pda_account));
-    assert!(account_dumper.was_dumped_as_pda_account(&pda_account));
+    assert_eq!(account_fetcher.get_fetch_count(&data_account), 1);
+    assert!(!account_updates.has_account_monitoring(&data_account));
+    assert!(account_dumper.was_dumped_as_data_account(&data_account));
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());
 }
 
 #[tokio::test]
-async fn test_clone_allow_payer_account_when_replica() {
+async fn test_clone_allow_wallet_account_when_replica() {
     // Stubs
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
@@ -676,16 +646,16 @@ async fn test_clone_allow_payer_account_when_replica() {
         account_dumper.clone(),
         None,
     );
-    // A payer account
-    let payer_account = Pubkey::new_unique();
-    account_fetcher.set_wallet_account(payer_account, 42);
+    // Account(s) involved
+    let wallet_account = Pubkey::new_unique();
+    account_fetcher.set_wallet_account(wallet_account, 42);
     // Run test
-    let result = cloner.clone_account(&payer_account).await;
+    let result = cloner.clone_account(&wallet_account).await;
     // Check expected result
     assert!(matches!(result, Ok(AccountClonerOutput::Cloned { .. })));
-    assert_eq!(account_fetcher.get_fetch_count(&payer_account), 1);
-    assert!(!account_updates.has_account_monitoring(&payer_account));
-    assert!(account_dumper.was_dumped_as_wallet_account(&payer_account));
+    assert_eq!(account_fetcher.get_fetch_count(&wallet_account), 1);
+    assert!(!account_updates.has_account_monitoring(&wallet_account));
+    assert!(account_dumper.was_dumped_as_wallet_account(&wallet_account));
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());
@@ -706,19 +676,19 @@ async fn test_clone_refuse_any_account_when_offline() {
         account_dumper.clone(),
         None,
     );
-    // A simple account that is initially undelegated that will become delegated during the test
-    let payer_account = Pubkey::new_unique();
-    let pda_account = Pubkey::new_unique();
+    // Account(s) involved
+    let wallet_account = Pubkey::new_unique();
+    let data_account = Pubkey::new_unique();
     let program_id = Pubkey::new_unique();
     let program_data = get_program_data_address(&program_id);
     let program_idl = get_pubkey_anchor_idl(&program_id).unwrap();
-    account_fetcher.set_wallet_account(payer_account, 42);
-    account_fetcher.set_undelegated_account(pda_account, 42);
+    account_fetcher.set_wallet_account(wallet_account, 42);
+    account_fetcher.set_data_account(data_account, 42);
     account_fetcher.set_executable_account(program_id, 42);
-    account_fetcher.set_undelegated_account(program_data, 42);
-    account_fetcher.set_undelegated_account(program_idl, 42);
+    account_fetcher.set_data_account(program_data, 42);
+    account_fetcher.set_data_account(program_idl, 42);
     // Run test
-    let result1 = cloner.clone_account(&payer_account).await;
+    let result1 = cloner.clone_account(&wallet_account).await;
     // Check expected result1
     assert!(matches!(
         result1,
@@ -727,11 +697,11 @@ async fn test_clone_refuse_any_account_when_offline() {
             ..
         })
     ));
-    assert_eq!(account_fetcher.get_fetch_count(&payer_account), 0);
-    assert!(!account_updates.has_account_monitoring(&payer_account));
-    assert!(account_dumper.was_untouched(&payer_account));
+    assert_eq!(account_fetcher.get_fetch_count(&wallet_account), 0);
+    assert!(!account_updates.has_account_monitoring(&wallet_account));
+    assert!(account_dumper.was_untouched(&wallet_account));
     // Run test
-    let result2 = cloner.clone_account(&pda_account).await;
+    let result2 = cloner.clone_account(&data_account).await;
     // Check expected result2
     assert!(matches!(
         result2,
@@ -740,9 +710,9 @@ async fn test_clone_refuse_any_account_when_offline() {
             ..
         })
     ));
-    assert_eq!(account_fetcher.get_fetch_count(&pda_account), 0);
-    assert!(!account_updates.has_account_monitoring(&pda_account));
-    assert!(account_dumper.was_untouched(&pda_account));
+    assert_eq!(account_fetcher.get_fetch_count(&data_account), 0);
+    assert!(!account_updates.has_account_monitoring(&data_account));
+    assert!(account_dumper.was_untouched(&data_account));
     // Run test
     let result3 = cloner.clone_account(&program_id).await;
     // Check expected result3
@@ -782,13 +752,13 @@ async fn test_clone_will_not_fetch_the_same_thing_multiple_times() {
         account_dumper.clone(),
         None,
     );
-    // A simple program with its executable data alongside it
+    // Account(s) involved
     let program_id = Pubkey::new_unique();
     let program_data = get_program_data_address(&program_id);
     let program_idl = get_pubkey_anchor_idl(&program_id).unwrap();
     account_fetcher.set_executable_account(program_id, 42);
-    account_fetcher.set_undelegated_account(program_data, 42);
-    account_fetcher.set_undelegated_account(program_idl, 42);
+    account_fetcher.set_data_account(program_data, 42);
+    account_fetcher.set_data_account(program_idl, 42);
     // Run test (cloned at the same time for the same thing, must run once and share the result)
     let future1 = cloner.clone_account(&program_id);
     let future2 = cloner.clone_account(&program_id);
@@ -815,7 +785,7 @@ async fn test_clone_will_not_fetch_the_same_thing_multiple_times() {
 }
 
 #[tokio::test]
-async fn test_clone_properly_cached_pda_account_when_ephemeral() {
+async fn test_clone_properly_cached_data_account_when_ephemeral() {
     // Stubs
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
@@ -829,34 +799,34 @@ async fn test_clone_properly_cached_pda_account_when_ephemeral() {
         account_dumper.clone(),
         None,
     );
-    // A simple PDA account
-    let pda_account = Pubkey::new_unique();
-    account_fetcher.set_undelegated_account(pda_account, 42);
+    // Account(s) involved
+    let data_account = Pubkey::new_unique();
+    account_fetcher.set_data_account(data_account, 42);
     // Run test (we clone the account for the first time)
-    let result1 = cloner.clone_account(&pda_account).await;
+    let result1 = cloner.clone_account(&data_account).await;
     // Check expected result1
     assert!(matches!(result1, Ok(AccountClonerOutput::Cloned { .. })));
-    assert_eq!(account_fetcher.get_fetch_count(&pda_account), 1);
-    assert!(account_updates.has_account_monitoring(&pda_account));
-    assert!(account_dumper.was_dumped_as_pda_account(&pda_account));
+    assert_eq!(account_fetcher.get_fetch_count(&data_account), 1);
+    assert!(account_updates.has_account_monitoring(&data_account));
+    assert!(account_dumper.was_dumped_as_data_account(&data_account));
     // Clear dump history
     account_dumper.clear_history();
     // Run test (we re-clone the account and it should be in the cache)
-    let result2 = cloner.clone_account(&pda_account).await;
+    let result2 = cloner.clone_account(&data_account).await;
     // Check expected result2
     assert!(matches!(result2, Ok(AccountClonerOutput::Cloned { .. })));
-    assert_eq!(account_fetcher.get_fetch_count(&pda_account), 1);
-    assert!(account_updates.has_account_monitoring(&pda_account));
-    assert!(account_dumper.was_untouched(&pda_account));
+    assert_eq!(account_fetcher.get_fetch_count(&data_account), 1);
+    assert!(account_updates.has_account_monitoring(&data_account));
+    assert!(account_dumper.was_untouched(&data_account));
     // The account is now updated remotely
-    account_updates.set_known_update_slot(pda_account, 66);
+    account_updates.set_known_update_slot(data_account, 66);
     // Run test (we re-clone the account and it should clear the cache and re-dump)
-    let result3 = cloner.clone_account(&pda_account).await;
+    let result3 = cloner.clone_account(&data_account).await;
     // Check expected result3
     assert!(matches!(result3, Ok(AccountClonerOutput::Cloned { .. })));
-    assert_eq!(account_fetcher.get_fetch_count(&pda_account), 2);
-    assert!(account_updates.has_account_monitoring(&pda_account));
-    assert!(account_dumper.was_dumped_as_pda_account(&pda_account));
+    assert_eq!(account_fetcher.get_fetch_count(&data_account), 2);
+    assert!(account_updates.has_account_monitoring(&data_account));
+    assert!(account_dumper.was_dumped_as_data_account(&data_account));
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());
@@ -877,13 +847,13 @@ async fn test_clone_properly_cached_program() {
         account_dumper.clone(),
         None,
     );
-    // A simple program
+    // Account(s) involved
     let program_id = Pubkey::new_unique();
     let program_data = get_program_data_address(&program_id);
     let program_idl_pubkey = get_pubkey_anchor_idl(&program_id).unwrap();
     account_fetcher.set_executable_account(program_id, 42);
-    account_fetcher.set_undelegated_account(program_data, 42);
-    account_fetcher.set_undelegated_account(program_idl_pubkey, 42);
+    account_fetcher.set_data_account(program_data, 42);
+    account_fetcher.set_data_account(program_idl_pubkey, 42);
     // Run test (we clone the account for the first time)
     let result1 = cloner.clone_account(&program_id).await;
     // Check expected result1
@@ -948,68 +918,68 @@ async fn test_clone_properly_cached_delegated_account_that_changes_state() {
         account_dumper.clone(),
         None,
     );
-    // A properly delegated account at first (delegation status will change during the test)
-    let pda_account = Pubkey::new_unique();
-    account_fetcher.set_delegated_account(pda_account, 42, 11);
+    // Account(s) involved
+    let data_account = Pubkey::new_unique();
+    account_fetcher.set_delegated_account(data_account, 42, 11);
     // Run test (we clone the account for the first time as delegated)
-    let result1 = cloner.clone_account(&pda_account).await;
+    let result1 = cloner.clone_account(&data_account).await;
     // Check expected result1
     assert!(matches!(result1, Ok(AccountClonerOutput::Cloned { .. })));
-    assert_eq!(account_fetcher.get_fetch_count(&pda_account), 1);
-    assert!(account_updates.has_account_monitoring(&pda_account));
-    assert!(account_dumper.was_dumped_as_delegated_account(&pda_account));
+    assert_eq!(account_fetcher.get_fetch_count(&data_account), 1);
+    assert!(account_updates.has_account_monitoring(&data_account));
+    assert!(account_dumper.was_dumped_as_delegated_account(&data_account));
     // Clear dump history
     account_dumper.clear_history();
     // Run test (we re-clone the account and it should be in the cache)
-    let result2 = cloner.clone_account(&pda_account).await;
+    let result2 = cloner.clone_account(&data_account).await;
     // Check expected result3
     assert!(matches!(result2, Ok(AccountClonerOutput::Cloned { .. })));
-    assert_eq!(account_fetcher.get_fetch_count(&pda_account), 1);
-    assert!(account_updates.has_account_monitoring(&pda_account));
-    assert!(account_dumper.was_untouched(&pda_account));
+    assert_eq!(account_fetcher.get_fetch_count(&data_account), 1);
+    assert!(account_updates.has_account_monitoring(&data_account));
+    assert!(account_dumper.was_untouched(&data_account));
     // The account is now updated remotely (but its delegation status didnt change)
-    account_updates.set_known_update_slot(pda_account, 66);
+    account_updates.set_known_update_slot(data_account, 66);
     // Run test (we MUST NOT re-dump)
-    let result3 = cloner.clone_account(&pda_account).await;
+    let result3 = cloner.clone_account(&data_account).await;
     // Check expected result3
     assert!(matches!(result3, Ok(AccountClonerOutput::Cloned { .. })));
-    assert_eq!(account_fetcher.get_fetch_count(&pda_account), 2);
-    assert!(account_updates.has_account_monitoring(&pda_account));
-    assert!(account_dumper.was_untouched(&pda_account));
+    assert_eq!(account_fetcher.get_fetch_count(&data_account), 2);
+    assert!(account_updates.has_account_monitoring(&data_account));
+    assert!(account_dumper.was_untouched(&data_account));
     // The account is now updated remotely (AND IT BECOMES UNDELEGATED)
-    account_updates.set_known_update_slot(pda_account, 77);
-    account_fetcher.set_undelegated_account(pda_account, 77);
-    // Run test (now we MUST RE-DUMP as an undelegated account)
-    let result4 = cloner.clone_account(&pda_account).await;
+    account_updates.set_known_update_slot(data_account, 77);
+    account_fetcher.set_data_account(data_account, 77);
+    // Run test (now we MUST RE-DUMP as an data account)
+    let result4 = cloner.clone_account(&data_account).await;
     // Check expected result4
     assert!(matches!(result4, Ok(AccountClonerOutput::Cloned { .. })));
-    assert_eq!(account_fetcher.get_fetch_count(&pda_account), 3);
-    assert!(account_updates.has_account_monitoring(&pda_account));
-    assert!(account_dumper.was_dumped_as_pda_account(&pda_account));
+    assert_eq!(account_fetcher.get_fetch_count(&data_account), 3);
+    assert!(account_updates.has_account_monitoring(&data_account));
+    assert!(account_dumper.was_dumped_as_data_account(&data_account));
     // Clear dump history
     account_dumper.clear_history();
     // The account is now updated remotely (AND IT BECOMES RE-DELEGATED)
-    account_updates.set_known_update_slot(pda_account, 88);
-    account_fetcher.set_delegated_account(pda_account, 88, 88);
+    account_updates.set_known_update_slot(data_account, 88);
+    account_fetcher.set_delegated_account(data_account, 88, 88);
     // Run test (now we MUST RE-DUMP as an delegated account)
-    let result5 = cloner.clone_account(&pda_account).await;
+    let result5 = cloner.clone_account(&data_account).await;
     // Check expected result5
     assert!(matches!(result5, Ok(AccountClonerOutput::Cloned { .. })));
-    assert_eq!(account_fetcher.get_fetch_count(&pda_account), 4);
-    assert!(account_updates.has_account_monitoring(&pda_account));
-    assert!(account_dumper.was_dumped_as_delegated_account(&pda_account));
+    assert_eq!(account_fetcher.get_fetch_count(&data_account), 4);
+    assert!(account_updates.has_account_monitoring(&data_account));
+    assert!(account_dumper.was_dumped_as_delegated_account(&data_account));
     // Clear dump history
     account_dumper.clear_history();
     // The account is now re-delegated from a different slot
-    account_updates.set_known_update_slot(pda_account, 99);
-    account_fetcher.set_delegated_account(pda_account, 99, 99);
+    account_updates.set_known_update_slot(data_account, 99);
+    account_fetcher.set_delegated_account(data_account, 99, 99);
     // Run test (now we MUST RE-DUMP as an delegated account because the delegation_slot changed, even if delegation status DIDNT)
-    let result6 = cloner.clone_account(&pda_account).await;
+    let result6 = cloner.clone_account(&data_account).await;
     // Check expected result6
     assert!(matches!(result6, Ok(AccountClonerOutput::Cloned { .. })));
-    assert_eq!(account_fetcher.get_fetch_count(&pda_account), 5);
-    assert!(account_updates.has_account_monitoring(&pda_account));
-    assert!(account_dumper.was_dumped_as_delegated_account(&pda_account));
+    assert_eq!(account_fetcher.get_fetch_count(&data_account), 5);
+    assert!(account_updates.has_account_monitoring(&data_account));
+    assert!(account_dumper.was_dumped_as_delegated_account(&data_account));
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());
@@ -1030,63 +1000,63 @@ async fn test_clone_properly_upgrading_downgrading_when_created_and_deleted() {
         account_dumper.clone(),
         None,
     );
-    // A simple account that initially doesnt exist but we will create it after the clone
-    let pda_account = Pubkey::new_unique();
-    account_fetcher.set_wallet_account(pda_account, 42);
+    // Account(s) involved
+    let data_account = Pubkey::new_unique();
+    account_fetcher.set_wallet_account(data_account, 42);
     // Run test (we clone the account for the first time)
-    let result1 = cloner.clone_account(&pda_account).await;
+    let result1 = cloner.clone_account(&data_account).await;
     // Check expected result1
     assert!(matches!(result1, Ok(AccountClonerOutput::Cloned { .. })));
-    assert_eq!(account_fetcher.get_fetch_count(&pda_account), 1);
-    assert!(account_updates.has_account_monitoring(&pda_account));
-    assert!(account_dumper.was_dumped_as_wallet_account(&pda_account));
+    assert_eq!(account_fetcher.get_fetch_count(&data_account), 1);
+    assert!(account_updates.has_account_monitoring(&data_account));
+    assert!(account_dumper.was_dumped_as_wallet_account(&data_account));
     // Clear dump history
     account_dumper.clear_history();
     // Run test (we re-clone the account and it should be in the cache)
-    let result2 = cloner.clone_account(&pda_account).await;
+    let result2 = cloner.clone_account(&data_account).await;
     // Check expected result2
     assert!(matches!(result2, Ok(AccountClonerOutput::Cloned { .. })));
-    assert_eq!(account_fetcher.get_fetch_count(&pda_account), 1);
-    assert!(account_updates.has_account_monitoring(&pda_account));
-    assert!(account_dumper.was_untouched(&pda_account));
-    // The account is now updated remotely, as it becomes a pda account (not new anymore)
-    account_fetcher.set_undelegated_account(pda_account, 66);
-    account_updates.set_known_update_slot(pda_account, 66);
+    assert_eq!(account_fetcher.get_fetch_count(&data_account), 1);
+    assert!(account_updates.has_account_monitoring(&data_account));
+    assert!(account_dumper.was_untouched(&data_account));
+    // The account is now updated remotely, as it becomes a data account (not wallet anymore)
+    account_fetcher.set_data_account(data_account, 66);
+    account_updates.set_known_update_slot(data_account, 66);
     // Run test (we re-clone the account and it should clear the cache and re-dump)
-    let result3 = cloner.clone_account(&pda_account).await;
+    let result3 = cloner.clone_account(&data_account).await;
     // Check expected result3
     assert!(matches!(result3, Ok(AccountClonerOutput::Cloned { .. })));
-    assert_eq!(account_fetcher.get_fetch_count(&pda_account), 2);
-    assert!(account_updates.has_account_monitoring(&pda_account));
-    assert!(account_dumper.was_dumped_as_pda_account(&pda_account));
+    assert_eq!(account_fetcher.get_fetch_count(&data_account), 2);
+    assert!(account_updates.has_account_monitoring(&data_account));
+    assert!(account_dumper.was_dumped_as_data_account(&data_account));
     // Clear dump history
     account_dumper.clear_history();
     // Run test (we re-clone the account and it should be in the cache)
-    let result4 = cloner.clone_account(&pda_account).await;
+    let result4 = cloner.clone_account(&data_account).await;
     // Check expected result4
     assert!(matches!(result4, Ok(AccountClonerOutput::Cloned { .. })));
-    assert_eq!(account_fetcher.get_fetch_count(&pda_account), 2);
-    assert!(account_updates.has_account_monitoring(&pda_account));
-    assert!(account_dumper.was_untouched(&pda_account));
+    assert_eq!(account_fetcher.get_fetch_count(&data_account), 2);
+    assert!(account_updates.has_account_monitoring(&data_account));
+    assert!(account_dumper.was_untouched(&data_account));
     // The account is now removed/closed remotely
-    account_fetcher.set_wallet_account(pda_account, 77);
-    account_updates.set_known_update_slot(pda_account, 77);
+    account_fetcher.set_wallet_account(data_account, 77);
+    account_updates.set_known_update_slot(data_account, 77);
     // Run test (we re-clone the account and it should clear the cache and re-dump)
-    let result5 = cloner.clone_account(&pda_account).await;
+    let result5 = cloner.clone_account(&data_account).await;
     // Check expected result5
     assert!(matches!(result5, Ok(AccountClonerOutput::Cloned { .. })));
-    assert_eq!(account_fetcher.get_fetch_count(&pda_account), 3);
-    assert!(account_updates.has_account_monitoring(&pda_account));
-    assert!(account_dumper.was_dumped_as_wallet_account(&pda_account));
+    assert_eq!(account_fetcher.get_fetch_count(&data_account), 3);
+    assert!(account_updates.has_account_monitoring(&data_account));
+    assert!(account_dumper.was_dumped_as_wallet_account(&data_account));
     // Clear dump history
     account_dumper.clear_history();
     // Run test (we re-clone the account and it should be in the cache)
-    let result6 = cloner.clone_account(&pda_account).await;
+    let result6 = cloner.clone_account(&data_account).await;
     assert!(matches!(result6, Ok(AccountClonerOutput::Cloned { .. })));
     // Check expected result6
-    assert_eq!(account_fetcher.get_fetch_count(&pda_account), 3);
-    assert!(account_updates.has_account_monitoring(&pda_account));
-    assert!(account_dumper.was_untouched(&pda_account));
+    assert_eq!(account_fetcher.get_fetch_count(&data_account), 3);
+    assert!(account_updates.has_account_monitoring(&data_account));
+    assert!(account_dumper.was_untouched(&data_account));
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());
