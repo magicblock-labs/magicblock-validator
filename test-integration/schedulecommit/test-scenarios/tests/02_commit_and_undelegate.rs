@@ -25,13 +25,13 @@ use solana_sdk::{
 };
 use test_tools_core::init_logger;
 use utils::{
+    assert_is_instruction_error,
     assert_one_committee_account_was_undelegated_on_chain,
     assert_one_committee_synchronized_count,
     assert_one_committee_was_committed,
     assert_two_committee_accounts_were_undelegated_on_chain,
     assert_two_committees_synchronized_count,
-    assert_two_committees_were_committed,
-    assert_tx_failed_with_instruction_error,
+    assert_two_committees_were_committed, extract_transaction_error,
     get_context_with_delegated_committees,
 };
 
@@ -216,10 +216,21 @@ fn assert_cannot_increase_committee_count(
             ..Default::default()
         },
     );
-    assert_tx_failed_with_instruction_error(
-        tx_res,
-        InstructionError::ExternalAccountDataModified,
-    );
+    let (tx_result_err, tx_err) = extract_transaction_error(tx_res);
+    if let Some(tx_err) = tx_err {
+        assert_is_instruction_error(
+            tx_err,
+            &tx_result_err,
+            InstructionError::ExternalAccountDataModified,
+        );
+    } else {
+        // If we did not get a transaction error then that means that the transaction
+        // was blocked because the account was found to not be delegated
+        // For undelegation tests this is the case if undelegation completes before
+        // we run the transaction that tried to increase the count
+        eprintln!("tx_result_err: {:?}", tx_result_err);
+        panic!("Expected transaction error, got: {:?}", tx_result_err);
+    }
 }
 
 fn assert_can_increase_committee_count(
