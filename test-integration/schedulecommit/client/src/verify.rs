@@ -41,8 +41,12 @@ pub fn fetch_commit_result_from_logs(
     let logs = ctx
         .fetch_ephemeral_logs(scheduled_commmit_sent_sig)
         .unwrap_or_else(|| {
+            eprintln!(
+                "Logs {:#?}\nScheduled commit sent sig {:?}",
+                logs, scheduled_commmit_sent_sig
+            );
             panic!(
-                "Chain commit logs not found for sig {:?}\n{}",
+                "Ephemeral commit logs not found for sig {:?}\n{}",
                 scheduled_commmit_sent_sig, ctx
             )
         });
