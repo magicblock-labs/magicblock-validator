@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 
 use conjunto_transwise::AccountChainSnapshotShared;
+use dlp::consts::DELEGATION_PROGRAM_ID;
 use futures_util::future::BoxFuture;
 use sleipnir_account_dumper::AccountDumperError;
 use sleipnir_account_fetcher::AccountFetcherError;
@@ -109,6 +110,7 @@ pub fn standard_blacklisted_accounts(validator_id: &Pubkey) -> HashSet<Pubkey> {
     blacklisted_accounts.insert(solana_sdk::sysvar::slot_hashes::ID);
     blacklisted_accounts.insert(solana_sdk::sysvar::slot_history::ID);
     blacklisted_accounts.insert(solana_sdk::sysvar::stake_history::ID);
+    blacklisted_accounts.insert(DELEGATION_PROGRAM_ID);
     blacklisted_accounts.insert(*validator_id);
     blacklisted_accounts
 }
