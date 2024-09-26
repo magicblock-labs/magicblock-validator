@@ -11,6 +11,8 @@ use schedulecommit_program::api::{
 };
 use sleipnir_core::magic_program;
 use solana_rpc_client::rpc_client::{RpcClient, SerializableTransaction};
+use solana_rpc_client_api::client_error::ErrorKind;
+use solana_rpc_client_api::request::RpcError;
 use solana_rpc_client_api::{
     client_error::Error as ClientError, config::RpcSendTransactionConfig,
 };
@@ -228,8 +230,21 @@ fn assert_cannot_increase_committee_count(
         // was blocked because the account was found to not be delegated
         // For undelegation tests this is the case if undelegation completes before
         // we run the transaction that tried to increase the count
-        eprintln!("tx_result_err: {:?}", tx_result_err);
-        panic!("Expected transaction error, got: {:?}", tx_result_err);
+        macro_rules! invalid_error {
+            ($tx_result_err:expr) => {
+                panic!("Expected transaction or transwise NotAllWritablesDelegated error, got: {:?}", $tx_result_err)
+            };
+        }
+        match &tx_result_err.kind {
+            ErrorKind::RpcError(RpcError::RpcResponseError {
+                message, ..
+            }) => {
+                if !message.contains("NotAllWritablesDelegated") {
+                    invalid_error!(tx_result_err);
+                }
+            }
+            _ => invalid_error!(tx_result_err),
+        }
     }
 }
 
