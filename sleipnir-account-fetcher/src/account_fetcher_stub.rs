@@ -16,9 +16,9 @@ use crate::{AccountFetcher, AccountFetcherResult};
 #[derive(Debug)]
 enum AccountFetcherStubState {
     Wallet,
-    Executable,
-    Data { owner: Pubkey },
+    Data,
     Delegated { delegation_record: DelegationRecord },
+    Executable,
 }
 
 #[derive(Debug)]
@@ -56,19 +56,10 @@ impl AccountFetcherStub {
                             owner: Pubkey::new_unique(),
                         }
                     }
-                    AccountFetcherStubState::Data { owner } => {
+                    AccountFetcherStubState::Data => {
                         AccountChainState::Data {
                             account: Account {
-                                owner: *owner,
-                                ..Default::default()
-                            },
-                            delegation_inconsistency: DelegationInconsistency::DelegationRecordNotFound,
-                        }
-                    }
-                    AccountFetcherStubState::Executable => {
-                        AccountChainState::Data {
-                            account: Account {
-                                executable: true,
+                                owner: Pubkey::new_unique(),
                                 ..Default::default()
                             },
                             delegation_inconsistency: DelegationInconsistency::DelegationRecordNotFound,
@@ -80,6 +71,15 @@ impl AccountFetcherStub {
                         account: Default::default(),
                         delegation_record: delegation_record.clone(),
                     },
+                    AccountFetcherStubState::Executable => {
+                        AccountChainState::Data {
+                            account: Account {
+                                executable: true,
+                                ..Default::default()
+                            },
+                            delegation_inconsistency: DelegationInconsistency::DelegationRecordNotFound,
+                        }
+                    }
                 },
             }
             .into()),
@@ -106,9 +106,7 @@ impl AccountFetcherStub {
             pubkey,
             AccountFetcherStubSnapshot {
                 slot: at_slot,
-                state: AccountFetcherStubState::Data {
-                    owner: Pubkey::new_unique(),
-                },
+                state: AccountFetcherStubState::Data,
             },
         );
     }
