@@ -198,7 +198,7 @@ fn assert_cannot_increase_committee_count(
     pda: Pubkey,
     payer: &Keypair,
     blockhash: Hash,
-    chain_client: &RpcClient,
+    client: &RpcClient,
     commitment: &CommitmentConfig,
 ) {
     let ix = increase_count_instruction(pda);
@@ -208,15 +208,14 @@ fn assert_cannot_increase_committee_count(
         &[&payer],
         blockhash,
     );
-    let tx_res = chain_client
-        .send_and_confirm_transaction_with_spinner_and_config(
-            &tx,
-            *commitment,
-            RpcSendTransactionConfig {
-                skip_preflight: true,
-                ..Default::default()
-            },
-        );
+    let tx_res = client.send_and_confirm_transaction_with_spinner_and_config(
+        &tx,
+        *commitment,
+        RpcSendTransactionConfig {
+            skip_preflight: true,
+            ..Default::default()
+        },
+    );
     assert_tx_failed_with_instruction_error(
         tx_res,
         InstructionError::ExternalAccountDataModified,
@@ -249,7 +248,6 @@ fn assert_can_increase_committee_count(
     assert!(tx_res.is_ok());
 }
 
-/*
 #[test]
 fn test_committed_and_undelegated_single_account_redelegation() {
     run_test!({
@@ -328,6 +326,7 @@ fn test_committed_and_undelegated_single_account_redelegation() {
     });
 }
 
+/*
 // The below is the same as test_committed_and_undelegated_single_account_redelegation
 // but for two accounts
 #[test]
