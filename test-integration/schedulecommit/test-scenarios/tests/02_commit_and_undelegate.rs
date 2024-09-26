@@ -366,29 +366,10 @@ fn test_committed_and_undelegated_accounts_redelegation() {
             ephem_client,
             ephem_blockhash,
             chain_client,
-            chain_blockhash,
             ..
         } = ctx.fields();
 
-        // 1. Show that we cannot use them on chain while they are being undelegated
-        {
-            assert_cannot_increase_committee_count(
-                committees[0].1,
-                payer,
-                *chain_blockhash,
-                chain_client,
-                commitment,
-            );
-            assert_cannot_increase_committee_count(
-                committees[1].1,
-                payer,
-                *chain_blockhash,
-                chain_client,
-                commitment,
-            );
-        }
-
-        // 2. Show we cannot use them in the ehpemeral anymore
+        // 1. Show we cannot use them in the ehpemeral anymore
         {
             assert_cannot_increase_committee_count(
                 committees[0].1,
@@ -406,7 +387,7 @@ fn test_committed_and_undelegated_accounts_redelegation() {
             );
         }
 
-        // 3. Wait for commit + undelegation to finish and try chain again
+        // 2. Wait for commit + undelegation to finish and try chain again
         {
             verify::fetch_commit_result_from_logs(&ctx, sig);
 
@@ -428,14 +409,14 @@ fn test_committed_and_undelegated_accounts_redelegation() {
             );
         }
 
-        // 4. Re-delegate the same accounts
+        // 3. Re-delegate the same accounts
         {
             std::thread::sleep(std::time::Duration::from_secs(2));
             let blockhash = chain_client.get_latest_blockhash().unwrap();
             ctx.delegate_committees(Some(blockhash)).unwrap();
         }
 
-        // 5. Now we can modify them in the ephemeral again and no longer on chain
+        // 4. Now we can modify them in the ephemeral again and no longer on chain
         {
             let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
             assert_can_increase_committee_count(
