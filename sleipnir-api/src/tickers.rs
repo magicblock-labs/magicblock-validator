@@ -49,24 +49,25 @@ pub fn init_slot_ticker(
                 // 1. Send the transaction to move the scheduled commits from the MagicContext
                 //    to the global ScheduledCommit store
                 let tx = accept_scheduled_commits(bank.last_blockhash());
-                let _ = execute_legacy_transaction(
+                if let Err(err) = execute_legacy_transaction(
                     tx,
                     &bank,
                     transaction_status_sender.as_ref(),
-                )
-                .inspect_err(|e| {
-                    error!("Failed to accept scheduled commits: {:?}", e);
-                });
-
-                // 2. Process those scheduled commits
-                // TODO: fix the possible delay here
-                // https://github.com/magicblock-labs/magicblock-validator/issues/104
-                let _ = accounts_manager
-                    .process_scheduled_commits()
-                    .await
-                    .map_err(|e| {
-                        error!("Failed to process scheduled commits: {:?}", e);
-                    });
+                ) {
+                    error!("Failed to accept scheduled commits: {:?}", err);
+                } else {
+                    // 2. Process those scheduled commits
+                    // TODO: fix the possible delay here
+                    // https://github.com/magicblock-labs/magicblock-validator/issues/104
+                    if let Err(err) =
+                        accounts_manager.process_scheduled_commits().await
+                    {
+                        error!(
+                            "Failed to process scheduled commits: {:?}",
+                            err
+                        );
+                    }
+                }
             }
             if log {
                 info!("Advanced to slot {}", slot);
