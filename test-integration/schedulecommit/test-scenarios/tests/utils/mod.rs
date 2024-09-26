@@ -172,19 +172,24 @@ pub fn assert_tx_failed_with_instruction_error(
     tx_result: Result<Signature, solana_rpc_client_api::client_error::Error>,
     ix_error: InstructionError,
 ) {
-    let tx_err = match tx_result {
+    let tx_result_err = match tx_result {
         Ok(sig) => panic!("Expected error, got signature: {:?}", sig),
         Err(err) => err,
     };
+    let tx_err = match tx_result_err.get_transaction_error() {
+        Some(err) => err,
+        None => {
+            panic!("Expected TransactionError, got: {:?}", tx_result_err)
+        }
+    };
     assert!(
         matches!(
-            tx_err.get_transaction_error()
-                .expect("Should be TransactionError"),
+            tx_err,
             TransactionError::InstructionError(_, err)
             if err == ix_error
         ),
         "Expected InstructionError({:?}), got: {:?}",
         ix_error,
-        tx_err
+        tx_result_err
     );
 }
