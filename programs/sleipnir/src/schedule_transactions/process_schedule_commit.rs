@@ -85,7 +85,7 @@ pub(crate) fn process_schedule_commit(
     // from the owning program during unit tests
     // Instead the integration tests ensure that this works as expected
     #[cfg(not(test))]
-        let frames = crate::utils::instruction_context_frames::InstructionContextFrames::try_from(transaction_context)?;
+    let frames = crate::utils::instruction_context_frames::InstructionContextFrames::try_from(transaction_context)?;
     #[cfg(not(test))]
     let parent_program_id = {
         let parent_program_id = frames
