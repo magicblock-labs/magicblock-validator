@@ -9,6 +9,13 @@ Accounts come in 3 different important flavors:
 - `Data` accounts, which do contain data and can never be written to in the ephemeral
 - `Delegated` accounts, which have a valid delegation record, therefore can be locally modified
 
+Here are all possible cases:
+
+- `if !properly_delegated && !has_data` -> `Wallet`
+- `if !properly_delegated && has_data` -> `Data`
+- `if properly_delegated && !has_data` -> `Delegated`
+- `if properly_delegated && has_data` -> `Delegated`
+
 # Details
 
 For each transaction in the ephemeral we need to ensure a few things:
