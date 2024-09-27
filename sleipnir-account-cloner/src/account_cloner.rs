@@ -40,11 +40,11 @@ pub enum AccountClonerUnclonableReason {
     AlreadyLocallyOverriden,
     NoCloningAllowed,
     IsBlacklisted,
-    IsNotAllowedProgram,
-    DisallowWalletAccount,
-    DisallowDataAccount,
-    DisallowDelegatedAccount,
-    DisallowProgramAccount,
+    IsNotAnAllowedProgram,
+    DoesNotAllowWalletAccount,
+    DoesNotAllowDataAccount,
+    DoesNotAllowDelegatedAccount,
+    DoesNotAllowProgramAccount,
 }
 
 #[derive(Debug, Clone)]

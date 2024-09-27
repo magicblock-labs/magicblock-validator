@@ -339,7 +339,7 @@ async fn test_clone_program_accounts_when_ephemeral_with_whitelist() {
     assert!(matches!(
         result,
         Ok(AccountClonerOutput::Unclonable {
-            reason: AccountClonerUnclonableReason::IsNotAllowedProgram,
+            reason: AccountClonerUnclonableReason::IsNotAnAllowedProgram,
             ..
         })
     ));
@@ -472,7 +472,7 @@ async fn test_clone_refuse_wallet_account_when_programs_replica() {
     assert!(matches!(
         result,
         Ok(AccountClonerOutput::Unclonable {
-            reason: AccountClonerUnclonableReason::DisallowWalletAccount,
+            reason: AccountClonerUnclonableReason::DoesNotAllowWalletAccount,
             ..
         })
     ));
@@ -508,7 +508,7 @@ async fn test_clone_refuse_data_account_when_programs_replica() {
     assert!(matches!(
         result,
         Ok(AccountClonerOutput::Unclonable {
-            reason: AccountClonerUnclonableReason::DisallowDataAccount,
+            reason: AccountClonerUnclonableReason::DoesNotAllowDataAccount,
             ..
         })
     ));
@@ -544,7 +544,7 @@ async fn test_clone_refuse_delegated_account_when_programs_replica() {
     assert!(matches!(
         result,
         Ok(AccountClonerOutput::Unclonable {
-            reason: AccountClonerUnclonableReason::DisallowDelegatedAccount,
+            reason: AccountClonerUnclonableReason::DoesNotAllowDelegatedAccount,
             ..
         })
     ));

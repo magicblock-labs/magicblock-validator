@@ -277,7 +277,7 @@ where
                     return Ok(AccountClonerOutput::Unclonable {
                         pubkey: *pubkey,
                         reason:
-                            AccountClonerUnclonableReason::DisallowWalletAccount,
+                            AccountClonerUnclonableReason::DoesNotAllowWalletAccount,
                         at_slot: account_chain_snapshot.at_slot,
                     });
                 }
@@ -293,7 +293,7 @@ where
                         if !allowed_program_ids.contains(pubkey) {
                             return Ok(AccountClonerOutput::Unclonable {
                                 pubkey: *pubkey,
-                                reason: AccountClonerUnclonableReason::IsNotAllowedProgram,
+                                reason: AccountClonerUnclonableReason::IsNotAnAllowedProgram,
                                 at_slot: u64::MAX, // we will never try again
                             });
                         }
@@ -301,7 +301,7 @@ where
                     if !self.permissions.allow_cloning_program_accounts {
                         return Ok(AccountClonerOutput::Unclonable {
                             pubkey: *pubkey,
-                            reason: AccountClonerUnclonableReason::DisallowProgramAccount,
+                            reason: AccountClonerUnclonableReason::DoesNotAllowProgramAccount,
                             at_slot: account_chain_snapshot.at_slot,
                         });
                     }
@@ -312,7 +312,7 @@ where
                     if !self.permissions.allow_cloning_data_accounts {
                         return Ok(AccountClonerOutput::Unclonable {
                             pubkey: *pubkey,
-                            reason: AccountClonerUnclonableReason::DisallowDataAccount,
+                            reason: AccountClonerUnclonableReason::DoesNotAllowDataAccount,
                             at_slot: account_chain_snapshot.at_slot,
                         });
                     }
@@ -330,7 +330,7 @@ where
                     return Ok(AccountClonerOutput::Unclonable {
                         pubkey: *pubkey,
                         reason:
-                            AccountClonerUnclonableReason::DisallowDelegatedAccount,
+                            AccountClonerUnclonableReason::DoesNotAllowDelegatedAccount,
                         at_slot: account_chain_snapshot.at_slot,
                     });
                 }
