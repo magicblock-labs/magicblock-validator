@@ -19,7 +19,7 @@ pub type AccountDumperResult<T> = Result<T, AccountDumperError>;
 //  - work tracked here: https://github.com/magicblock-labs/magicblock-validator/issues/159
 pub trait AccountDumper {
     // Overrides the account in the bank to make sure it's usable as a wallet account (it has no-data)
-    // in future transactions that account can be used for signing things and moving lamports
+    // in future transactions that account can be used for signing transactions and transferring lamports
     fn dump_wallet_account(
         &self,
         pubkey: &Pubkey,
