@@ -272,6 +272,7 @@ pub fn process_schedulecommit_cpi(
 
     let accounts_iter = &mut accounts.iter();
     let payer = next_account_info(accounts_iter)?;
+    let magic_context = next_account_info(accounts_iter)?;
     let magic_program = next_account_info(accounts_iter)?;
     let mut remaining = vec![];
     for info in accounts_iter.by_ref() {
@@ -314,7 +315,7 @@ pub fn process_schedulecommit_cpi(
     }
 
     // Then request the PDA accounts to be committed
-    let mut account_infos = vec![payer];
+    let mut account_infos = vec![payer, magic_context];
     account_infos.extend(remaining.iter());
 
     // NOTE: logging this increases CPUs by 70K, so in order to show about how
@@ -360,6 +361,7 @@ fn process_schedulecommit_and_undelegation_cpi_with_mod_after(
 
     let accounts_iter = &mut accounts.iter();
     let payer = next_account_info(accounts_iter)?;
+    let magic_context = next_account_info(accounts_iter)?;
     let magic_program = next_account_info(accounts_iter)?;
     let mut remaining = vec![];
     for info in accounts_iter.by_ref() {
@@ -386,7 +388,7 @@ fn process_schedulecommit_and_undelegation_cpi_with_mod_after(
     }
 
     // Request the PDA accounts to be committed and undelegated
-    let mut account_infos = vec![payer];
+    let mut account_infos = vec![payer, magic_context];
     account_infos.extend(remaining.iter());
 
     let ix =

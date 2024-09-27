@@ -1107,7 +1107,7 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk"
-version = "0.0.1"
+version = "0.0.4"
 dependencies = [
  "borsh 0.10.3",
  "ephemeral-rollups-sdk-attribute-delegate",
@@ -1117,7 +1117,7 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-delegate"
-version = "0.0.1"
+version = "0.0.4"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1623,6 +1623,7 @@ dependencies = [
  "anyhow",
  "rayon",
  "serde",
+ "sleipnir-core",
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk 1.17.22",
@@ -2644,6 +2645,7 @@ dependencies = [
 name = "schedulecommit-test-security"
 version = "0.0.0"
 dependencies = [
+ "integration-test-tools",
  "schedulecommit-client",
  "schedulecommit-program",
  "sleipnir-core",

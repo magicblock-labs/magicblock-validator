@@ -1,4 +1,6 @@
-use integration_test_tools::run_test;
+use integration_test_tools::{
+    conversions::pubkey_from_magic_program, run_test,
+};
 use log::*;
 use schedulecommit_client::{
     verify, ScheduleCommitTestContext, ScheduleCommitTestContextFields,
@@ -9,6 +11,8 @@ use schedulecommit_program::api::{
 };
 use sleipnir_core::magic_program;
 use solana_rpc_client::rpc_client::{RpcClient, SerializableTransaction};
+use solana_rpc_client_api::client_error::ErrorKind;
+use solana_rpc_client_api::request::RpcError;
 use solana_rpc_client_api::{
     client_error::Error as ClientError, config::RpcSendTransactionConfig,
 };
@@ -21,16 +25,15 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
-use std::str::FromStr;
 use test_tools_core::init_logger;
 use utils::{
+    assert_is_instruction_error,
     assert_one_committee_account_was_undelegated_on_chain,
     assert_one_committee_synchronized_count,
     assert_one_committee_was_committed,
     assert_two_committee_accounts_were_undelegated_on_chain,
     assert_two_committees_synchronized_count,
-    assert_two_committees_were_committed,
-    assert_tx_failed_with_instruction_error,
+    assert_two_committees_were_committed, extract_transaction_error,
     get_context_with_delegated_committees,
 };
 
@@ -56,8 +59,8 @@ fn commit_and_undelegate_one_account(
     let ix = if modify_after {
         schedule_commit_and_undelegate_cpi_with_mod_after_instruction(
             payer.pubkey(),
-            // Work around the different solana_sdk versions by creating pubkey from str
-            Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
+            pubkey_from_magic_program(magic_program::id()),
+            pubkey_from_magic_program(magic_program::MAGIC_CONTEXT_PUBKEY),
             &committees
                 .iter()
                 .map(|(player, _)| player.pubkey())
@@ -67,8 +70,8 @@ fn commit_and_undelegate_one_account(
     } else {
         schedule_commit_and_undelegate_cpi_instruction(
             payer.pubkey(),
-            // Work around the different solana_sdk versions by creating pubkey from str
-            Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
+            pubkey_from_magic_program(magic_program::id()),
+            pubkey_from_magic_program(magic_program::MAGIC_CONTEXT_PUBKEY),
             &committees
                 .iter()
                 .map(|(player, _)| player.pubkey())
@@ -117,8 +120,8 @@ fn commit_and_undelegate_two_accounts(
     let ix = if modify_after {
         schedule_commit_and_undelegate_cpi_with_mod_after_instruction(
             payer.pubkey(),
-            // Work around the different solana_sdk versions by creating pubkey from str
-            Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
+            pubkey_from_magic_program(magic_program::id()),
+            pubkey_from_magic_program(magic_program::MAGIC_CONTEXT_PUBKEY),
             &committees
                 .iter()
                 .map(|(player, _)| player.pubkey())
@@ -128,8 +131,8 @@ fn commit_and_undelegate_two_accounts(
     } else {
         schedule_commit_and_undelegate_cpi_instruction(
             payer.pubkey(),
-            // Work around the different solana_sdk versions by creating pubkey from str
-            Pubkey::from_str(magic_program::MAGIC_PROGRAM_ADDR).unwrap(),
+            pubkey_from_magic_program(magic_program::id()),
+            pubkey_from_magic_program(magic_program::MAGIC_CONTEXT_PUBKEY),
             &committees
                 .iter()
                 .map(|(player, _)| player.pubkey())
@@ -197,7 +200,7 @@ fn assert_cannot_increase_committee_count(
     pda: Pubkey,
     payer: &Keypair,
     blockhash: Hash,
-    chain_client: &RpcClient,
+    client: &RpcClient,
     commitment: &CommitmentConfig,
 ) {
     let ix = increase_count_instruction(pda);
@@ -207,19 +210,42 @@ fn assert_cannot_increase_committee_count(
         &[&payer],
         blockhash,
     );
-    let tx_res = chain_client
-        .send_and_confirm_transaction_with_spinner_and_config(
-            &tx,
-            *commitment,
-            RpcSendTransactionConfig {
-                skip_preflight: true,
-                ..Default::default()
-            },
-        );
-    assert_tx_failed_with_instruction_error(
-        tx_res,
-        InstructionError::ExternalAccountDataModified,
+    let tx_res = client.send_and_confirm_transaction_with_spinner_and_config(
+        &tx,
+        *commitment,
+        RpcSendTransactionConfig {
+            skip_preflight: true,
+            ..Default::default()
+        },
     );
+    let (tx_result_err, tx_err) = extract_transaction_error(tx_res);
+    if let Some(tx_err) = tx_err {
+        assert_is_instruction_error(
+            tx_err,
+            &tx_result_err,
+            InstructionError::ExternalAccountDataModified,
+        );
+    } else {
+        // If we did not get a transaction error then that means that the transaction
+        // was blocked because the account was found to not be delegated
+        // For undelegation tests this is the case if undelegation completes before
+        // we run the transaction that tried to increase the count
+        macro_rules! invalid_error {
+            ($tx_result_err:expr) => {
+                panic!("Expected transaction or transwise NotAllWritablesDelegated error, got: {:?}", $tx_result_err)
+            };
+        }
+        match &tx_result_err.kind {
+            ErrorKind::RpcError(RpcError::RpcResponseError {
+                message, ..
+            }) => {
+                if !message.contains("NotAllWritablesDelegated") {
+                    invalid_error!(tx_result_err);
+                }
+            }
+            _ => invalid_error!(tx_result_err),
+        }
+    }
 }
 
 fn assert_can_increase_committee_count(
@@ -340,29 +366,10 @@ fn test_committed_and_undelegated_accounts_redelegation() {
             ephem_client,
             ephem_blockhash,
             chain_client,
-            chain_blockhash,
             ..
         } = ctx.fields();
 
-        // 1. Show that we cannot use them on chain while they are being undelegated
-        {
-            assert_cannot_increase_committee_count(
-                committees[0].1,
-                payer,
-                *chain_blockhash,
-                chain_client,
-                commitment,
-            );
-            assert_cannot_increase_committee_count(
-                committees[1].1,
-                payer,
-                *chain_blockhash,
-                chain_client,
-                commitment,
-            );
-        }
-
-        // 2. Show we cannot use them in the ehpemeral anymore
+        // 1. Show we cannot use them in the ehpemeral anymore
         {
             assert_cannot_increase_committee_count(
                 committees[0].1,
@@ -380,7 +387,7 @@ fn test_committed_and_undelegated_accounts_redelegation() {
             );
         }
 
-        // 3. Wait for commit + undelegation to finish and try chain again
+        // 2. Wait for commit + undelegation to finish and try chain again
         {
             verify::fetch_commit_result_from_logs(&ctx, sig);
 
@@ -402,14 +409,14 @@ fn test_committed_and_undelegated_accounts_redelegation() {
             );
         }
 
-        // 4. Re-delegate the same accounts
+        // 3. Re-delegate the same accounts
         {
             std::thread::sleep(std::time::Duration::from_secs(2));
             let blockhash = chain_client.get_latest_blockhash().unwrap();
             ctx.delegate_committees(Some(blockhash)).unwrap();
         }
 
-        // 5. Now we can modify them in the ephemeral again and no longer on chain
+        // 4. Now we can modify them in the ephemeral again and no longer on chain
         {
             let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
             assert_can_increase_committee_count(

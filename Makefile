@@ -7,7 +7,7 @@ $(if $(shell command -v cargo-nextest 2> /dev/null),,$(eval CARGO_TEST_NOCAP=tes
 
 test:
 	RUST_BACKTRACE=1 cargo $(CARGO_TEST) && \
-	$(MAKE) -C $(DIR)/test-programs
+	$(MAKE) -C $(DIR)/test-integration test
 
 test-log:
 	cargo $(CARGO_TEST_NOCAP)
@@ -39,10 +39,7 @@ run-release-no-geyser:
 	cargo run --release
 
 update-sysvars:
-	$(DIR)/test-programs/sysvars/sh/update
-
-update-triggercommit:
-	$(DIR)/test-programs/triggercommit/sh/update
+	$(DIR)/test-integration/sysvars/sh/update
 
 fmt:
 	cargo +nightly fmt -- --config-path rustfmt-nightly.toml
@@ -53,7 +50,7 @@ lint:
 
 ci-test:
 	RUST_BACKTRACE=1 cargo $(CARGO_TEST_NOCAP) && \
-	$(MAKE) -C $(DIR)/test-integration
+	$(MAKE) -C $(DIR)/test-integration test
 
 ## NOTE: We're getting the following error in github CI when trying to use
 #  nightly Rust. Until that is fixed we have to use stable to verify format.

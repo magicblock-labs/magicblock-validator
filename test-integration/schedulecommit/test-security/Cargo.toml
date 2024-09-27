@@ -12,6 +12,7 @@ schedulecommit-client = { workspace = true }
 sleipnir-core = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
+integration-test-tools = { workspace = true }
 
 [lib]
 crate-type = ["cdylib", "lib"]

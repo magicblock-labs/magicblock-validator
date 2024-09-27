@@ -12,15 +12,23 @@ pub fn iteration_count() -> u32 {
 }
 
 #[allow(dead_code)] // used in tests
-pub fn iteration_thread_pool() -> (ThreadPool, u32) {
+/// Resolves concurrency and returns an initialized threadpool if
+/// concurrency > 1
+pub fn iteration_thread_pool() -> (Option<ThreadPool>, u32) {
     let concurrency = iteration_concurrency();
-    (
-        ThreadPoolBuilder::new()
-            .num_threads(concurrency as usize)
-            .build()
-            .unwrap(),
-        concurrency,
-    )
+    if concurrency == 1 {
+        (None, concurrency)
+    } else {
+        (
+            Some(
+                ThreadPoolBuilder::new()
+                    .num_threads(concurrency as usize)
+                    .build()
+                    .unwrap(),
+            ),
+            concurrency,
+        )
+    }
 }
 
 fn iteration_concurrency() -> u32 {
@@ -45,7 +53,6 @@ macro_rules! function_name {
 #[macro_export]
 macro_rules! run_test {
     ($test_body:block) => {
-        use $crate::rayon_prelude::*;
         let total_completed: ::std::sync::atomic::AtomicUsize =
             ::std::sync::atomic::AtomicUsize::new(0);
 
@@ -61,14 +68,15 @@ macro_rules! run_test {
             "==== {}: (ITER: {}, CONCURRENCY: {}) ====",
             test_name, iterations, concurrency
         );
-        thread_pool.install(|| {
-            (1..=iterations).into_par_iter().for_each(|i| {
-                info!("Start {}[{}]", test_name, i);
+
+        macro_rules! do_run {
+            ($i:ident) => {
+                info!("Start {}[{}]", test_name, $i);
                 test();
                 info!(
                     "Completed {}[{}] - completed {}/{}",
                     test_name,
-                    format!("{:04}", i),
+                    format!("{:04}", $i),
                     format!(
                         "{:04}",
                         total_completed.fetch_add(
@@ -78,7 +86,20 @@ macro_rules! run_test {
                     ),
                     format!("{:04}", iterations)
                 );
+            };
+        };
+
+        if let Some(thread_pool) = thread_pool {
+            use $crate::rayon_prelude::*;
+            thread_pool.install(|| {
+                (1..=iterations).into_par_iter().for_each(|i| {
+                    do_run!(i);
+                });
             });
-        });
+        } else {
+            for i in 1..=iterations {
+                do_run!(i);
+            }
+        }
     };
 }

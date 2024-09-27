@@ -26,10 +26,10 @@ pub fn fetch_commit_result_from_logs(
 ) -> ScheduledCommitResult {
     // 1. Find scheduled commit sent signature via
     // ScheduledCommitSent signature: <signature>
-    let logs = ctx
-        .fetch_ephemeral_logs(sig)
-        .unwrap_or_else(|| panic!("Logs not found for sig {:?}", sig));
-    let scheduled_commmit_send_sig = ctx
+    let logs = ctx.fetch_ephemeral_logs(sig).unwrap_or_else(|| {
+        panic!("Scheduled commit sent logs not found for sig {:?}", sig)
+    });
+    let scheduled_commmit_sent_sig = ctx
         .extract_scheduled_commit_sent_signature(&logs)
         .unwrap_or_else(|| {
             panic!(
@@ -39,11 +39,15 @@ pub fn fetch_commit_result_from_logs(
         });
     // 2. Find chain commit signature via
     let logs = ctx
-        .fetch_ephemeral_logs(scheduled_commmit_send_sig)
+        .fetch_ephemeral_logs(scheduled_commmit_sent_sig)
         .unwrap_or_else(|| {
+            eprintln!(
+                "Logs {:#?}\nScheduled commit sent sig {:?}",
+                logs, scheduled_commmit_sent_sig
+            );
             panic!(
-                "Logs not found for sig {:?}\n{}",
-                scheduled_commmit_send_sig, ctx
+                "Ephemeral commit logs not found for sig {:?}\n{}",
+                scheduled_commmit_sent_sig, ctx
             )
         });
 

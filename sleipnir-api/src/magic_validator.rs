@@ -57,7 +57,9 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     errors::{ApiError, ApiResult},
     external_config::try_convert_accounts_config,
-    fund_account::{fund_validator_identity, funded_faucet},
+    fund_account::{
+        fund_magic_context, fund_validator_identity, funded_faucet,
+    },
     geyser_transaction_notify_listener::GeyserTransactionNotifyListener,
     init_geyser_service::{init_geyser_service, InitGeyserServiceConfig},
     tickers::{init_commit_accounts_ticker, init_slot_ticker},
@@ -149,6 +151,7 @@ pub struct MagicValidator {
     rpc_service: JsonRpcService,
     geyser_rpc_service: Arc<GeyserRpcService>,
     pubsub_config: PubsubConfig,
+    pub transaction_status_sender: TransactionStatusSender,
 }
 
 impl MagicValidator {
@@ -183,6 +186,7 @@ impl MagicValidator {
         )?;
 
         fund_validator_identity(&bank, &validator_pubkey);
+        fund_magic_context(&bank);
         let faucet_keypair = funded_faucet(&bank);
 
         load_programs_into_bank(
@@ -267,7 +271,7 @@ impl MagicValidator {
             faucet_keypair,
             &genesis_config,
             accounts_manager.clone(),
-            transaction_status_sender,
+            transaction_status_sender.clone(),
             &pubsub_config,
             &config.validator_config,
         )?;
@@ -297,6 +301,7 @@ impl MagicValidator {
             ledger,
             accounts_manager,
             transaction_listener,
+            transaction_status_sender,
         })
     }
 
@@ -453,6 +458,7 @@ impl MagicValidator {
         self.slot_ticker = Some(init_slot_ticker(
             &self.bank,
             &self.accounts_manager,
+            Some(self.transaction_status_sender.clone()),
             self.ledger.clone(),
             Duration::from_millis(self.config.validator.millis_per_slot),
             self.exit.clone(),

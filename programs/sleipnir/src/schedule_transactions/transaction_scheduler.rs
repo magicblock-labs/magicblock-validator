@@ -1,25 +1,17 @@
-#![allow(unused)]
 use std::{
+    cell::RefCell,
     mem,
     sync::{Arc, RwLock},
 };
 
 use lazy_static::lazy_static;
+use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 use solana_sdk::{
-    clock::Slot, hash::Hash, pubkey::Pubkey, transaction::Transaction,
+    account::AccountSharedData, account_utils::StateMut,
+    instruction::InstructionError, pubkey::Pubkey,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ScheduledCommit {
-    pub id: u64,
-    pub slot: Slot,
-    pub blockhash: Hash,
-    pub accounts: Vec<Pubkey>,
-    pub payer: Pubkey,
-    pub owner: Pubkey,
-    pub commit_sent_transaction: Transaction,
-    pub request_undelegation: bool,
-}
+use crate::magic_context::{MagicContext, ScheduledCommit};
 
 #[derive(Clone)]
 pub struct TransactionScheduler {
@@ -29,6 +21,9 @@ pub struct TransactionScheduler {
 impl Default for TransactionScheduler {
     fn default() -> Self {
         lazy_static! {
+            /// This vec tracks commits that went through the entire process of first
+            /// being scheduled into the MagicContext, and then being moved
+            /// over to this global.
             static ref SCHEDULED_COMMITS: Arc<RwLock<Vec<ScheduledCommit>>> =
                 Default::default();
         }
@@ -39,11 +34,31 @@ impl Default for TransactionScheduler {
 }
 
 impl TransactionScheduler {
-    pub fn schedule_commit(&self, commit: ScheduledCommit) {
+    pub fn schedule_commit(
+        invoke_context: &InvokeContext,
+        context_account: &RefCell<AccountSharedData>,
+        commit: ScheduledCommit,
+    ) -> Result<(), InstructionError> {
+        let context_data = &mut context_account.borrow_mut();
+        let mut context =
+            MagicContext::deserialize(context_data).map_err(|err| {
+                ic_msg!(
+                    invoke_context,
+                    "Failed to deserialize MagicContext: {}",
+                    err
+                );
+                InstructionError::GenericError
+            })?;
+        context.add_scheduled_commit(commit);
+        context_data.set_state(&context)?;
+        Ok(())
+    }
+
+    pub fn accept_scheduled_commits(&self, commits: Vec<ScheduledCommit>) {
         self.scheduled_commits
             .write()
             .expect("scheduled_commits lock poisoned")
-            .push(commit);
+            .extend(commits);
     }
 
     pub fn get_scheduled_commits_by_payer(

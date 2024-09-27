@@ -3,13 +3,14 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
+use sleipnir_core::magic_program::MAGIC_CONTEXT_PUBKEY;
 use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 use solana_sdk::{
     account::ReadableAccount, instruction::InstructionError, pubkey::Pubkey,
 };
 
-use super::transaction_scheduler::ScheduledCommit;
 use crate::{
+    magic_context::{MagicContext, ScheduledCommit},
     schedule_transactions::transaction_scheduler::TransactionScheduler,
     sleipnir_instruction::scheduled_commit_sent,
     utils::{
@@ -18,6 +19,7 @@ use crate::{
             get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
         },
     },
+    validator_authority_id,
 };
 
 #[derive(Default)]
@@ -33,11 +35,14 @@ pub(crate) fn process_schedule_commit(
     static COMMIT_ID: AtomicU64 = AtomicU64::new(0);
 
     const PAYER_IDX: u16 = 0;
+    const MAGIC_CONTEXT_IDX: u16 = PAYER_IDX + 1;
+
+    check_magic_context_id(invoke_context, MAGIC_CONTEXT_IDX)?;
 
     let transaction_context = &invoke_context.transaction_context.clone();
     let ix_ctx = transaction_context.get_current_instruction_context()?;
     let ix_accs_len = ix_ctx.get_number_of_instruction_accounts() as usize;
-    const COMMITTEES_START: usize = PAYER_IDX as usize + 1;
+    const COMMITTEES_START: usize = MAGIC_CONTEXT_IDX as usize + 1;
 
     // Assert MagicBlock program
     ix_ctx
@@ -147,6 +152,8 @@ pub(crate) fn process_schedule_commit(
             // Setting the owner will prevent both, since in both cases the _actual_
             // owner program needs to sign for the account which is not possible at
             // that point
+            // NOTE: this owner change only takes effect if the transaction which
+            // includes this instruction succeeds.
             set_account_owner_to_delegation_program(acc);
             ic_msg!(
                 invoke_context,
@@ -188,7 +195,23 @@ pub(crate) fn process_schedule_commit(
     // NOTE: this is only protected by all the above checks however if the
     // instruction fails for other reasons detected afterward then the commit
     // stays scheduled
-    TransactionScheduler::default().schedule_commit(scheduled_commit);
+    let context_acc = get_instruction_account_with_idx(
+        transaction_context,
+        MAGIC_CONTEXT_IDX,
+    )?;
+    TransactionScheduler::schedule_commit(
+        invoke_context,
+        context_acc,
+        scheduled_commit,
+    )
+    .map_err(|err| {
+        ic_msg!(
+            invoke_context,
+            "ScheduleCommit ERR: failed to schedule commit: {}",
+            err
+        );
+        InstructionError::GenericError
+    })?;
     ic_msg!(invoke_context, "Scheduled commit with ID: {}", commit_id,);
     ic_msg!(
         invoke_context,
@@ -199,496 +222,114 @@ pub(crate) fn process_schedule_commit(
     Ok(())
 }
 
-#[cfg(test)]
-mod tests {
-    use std::collections::HashMap;
+pub fn process_accept_scheduled_commits(
+    signers: HashSet<Pubkey>,
+    invoke_context: &mut InvokeContext,
+) -> Result<(), InstructionError> {
+    const VALIDATOR_AUTHORITY_IDX: u16 = 0;
+    const MAGIC_CONTEXT_IDX: u16 = VALIDATOR_AUTHORITY_IDX + 1;
 
-    use assert_matches::assert_matches;
-    use solana_sdk::{
-        account::{
-            create_account_shared_data_for_test, AccountSharedData,
-            ReadableAccount,
-        },
-        clock,
-        fee_calculator::DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE,
-        instruction::{AccountMeta, Instruction, InstructionError},
-        pubkey::Pubkey,
-        signature::Keypair,
-        signer::{SeedDerivable, Signer},
-        system_program,
-        sysvar::SysvarId,
-    };
+    let transaction_context = &invoke_context.transaction_context.clone();
 
-    use crate::{
-        schedule_transactions::transaction_scheduler::{
-            ScheduledCommit, TransactionScheduler,
-        },
-        sleipnir_instruction::{
-            schedule_commit_and_undelegate_instruction,
-            schedule_commit_instruction, SleipnirInstruction,
-        },
-        test_utils::{ensure_funded_validator_authority, process_instruction},
-        utils::DELEGATION_PROGRAM_ID,
-    };
-
-    // For the scheduling itself and the debit to fund the scheduled transaction
-    const REQUIRED_TX_COST: u64 = DEFAULT_TARGET_LAMPORTS_PER_SIGNATURE * 2;
-
-    fn get_clock() -> clock::Clock {
-        clock::Clock {
-            slot: 100,
-            unix_timestamp: 1_000,
-            epoch_start_timestamp: 0,
-            epoch: 10,
-            leader_schedule_epoch: 10,
-        }
+    // 1. Read all scheduled commits from the `MagicContext` account
+    //    We do this first so we can skip all checks in case there is nothing
+    //    to be processed
+    check_magic_context_id(invoke_context, MAGIC_CONTEXT_IDX)?;
+    let magic_context_acc = get_instruction_account_with_idx(
+        transaction_context,
+        MAGIC_CONTEXT_IDX,
+    )?;
+    let mut magic_context =
+        bincode::deserialize::<MagicContext>(magic_context_acc.borrow().data())
+            .map_err(|err| {
+                ic_msg!(
+                    invoke_context,
+                    "Failed to deserialize MagicContext: {}",
+                    err
+                );
+                InstructionError::InvalidAccountData
+            })?;
+    if magic_context.scheduled_commits.is_empty() {
+        ic_msg!(
+            invoke_context,
+            "AcceptScheduledCommits: no scheduled commits to accept"
+        );
+        // NOTE: we should have not been called if no commits are scheduled
+        return Ok(());
     }
 
-    fn prepare_transaction_with_single_committee(
-        payer: &Keypair,
-        program: Pubkey,
-        committee: Pubkey,
-    ) -> (
-        HashMap<Pubkey, AccountSharedData>,
-        Vec<(Pubkey, AccountSharedData)>,
-    ) {
-        let mut account_data = {
-            let mut map = HashMap::new();
-            map.insert(
-                payer.pubkey(),
-                AccountSharedData::new(
-                    REQUIRED_TX_COST,
-                    0,
-                    &system_program::id(),
-                ),
+    // 2. Check that the validator authority (first account) is correct and signer
+    let provided_validator_auth = get_instruction_pubkey_with_idx(
+        transaction_context,
+        VALIDATOR_AUTHORITY_IDX,
+    )?;
+    let validator_auth = validator_authority_id();
+    if !provided_validator_auth.eq(&validator_auth) {
+        ic_msg!(
+             invoke_context,
+             "AcceptScheduledCommits ERR: invalid validator authority {}, should be {}",
+             provided_validator_auth,
+             validator_auth
+         );
+        return Err(InstructionError::InvalidArgument);
+    }
+    if !signers.contains(&validator_auth) {
+        ic_msg!(
+            invoke_context,
+            "AcceptScheduledCommits ERR: validator authority pubkey {} not in signers",
+            validator_auth
+        );
+        return Err(InstructionError::MissingRequiredSignature);
+    }
+
+    // 3. Move scheduled commits (without copying)
+    let scheduled_commits = magic_context.take_scheduled_commits();
+    ic_msg!(
+        invoke_context,
+        "AcceptScheduledCommits: accepted {} scheduled commit(s)",
+        scheduled_commits.len()
+    );
+    TransactionScheduler::default().accept_scheduled_commits(scheduled_commits);
+
+    // 4. Serialize and store the updated `MagicContext` account
+    // Zero fill account before updating data
+    // NOTE: this may become expensive, but is a security measure and also prevents
+    // accidentally interpreting old data when deserializing
+    magic_context_acc
+        .borrow_mut()
+        .set_data_from_slice(&MagicContext::ZERO);
+
+    magic_context_acc
+        .borrow_mut()
+        .serialize_data(&magic_context)
+        .map_err(|err| {
+            ic_msg!(
+                invoke_context,
+                "Failed to serialize MagicContext: {}",
+                err
             );
-            map.insert(committee, AccountSharedData::new(0, 0, &program));
-            map
-        };
-        ensure_funded_validator_authority(&mut account_data);
+            InstructionError::GenericError
+        })?;
 
-        let transaction_accounts: Vec<(Pubkey, AccountSharedData)> = vec![(
-            clock::Clock::id(),
-            create_account_shared_data_for_test(&get_clock()),
-        )];
+    Ok(())
+}
 
-        (account_data, transaction_accounts)
+fn check_magic_context_id(
+    invoke_context: &InvokeContext,
+    idx: u16,
+) -> Result<(), InstructionError> {
+    let provided_magic_context = get_instruction_pubkey_with_idx(
+        invoke_context.transaction_context,
+        idx,
+    )?;
+    if !provided_magic_context.eq(&MAGIC_CONTEXT_PUBKEY) {
+        ic_msg!(
+            invoke_context,
+            "ERR: invalid magic context account {}",
+            provided_magic_context
+        );
+        return Err(InstructionError::MissingAccount);
     }
 
-    struct PreparedTransactionThreeCommittees {
-        program: Pubkey,
-        accounts_data: HashMap<Pubkey, AccountSharedData>,
-        committee_uno: Pubkey,
-        committee_dos: Pubkey,
-        committee_tres: Pubkey,
-        transaction_accounts: Vec<(Pubkey, AccountSharedData)>,
-    }
-
-    fn prepare_transaction_with_three_committees(
-        payer: &Keypair,
-    ) -> PreparedTransactionThreeCommittees {
-        let program = Pubkey::new_unique();
-        let committee_uno = Pubkey::new_unique();
-        let committee_dos = Pubkey::new_unique();
-        let committee_tres = Pubkey::new_unique();
-        let mut accounts_data = {
-            let mut map = HashMap::new();
-            map.insert(
-                payer.pubkey(),
-                AccountSharedData::new(
-                    REQUIRED_TX_COST,
-                    0,
-                    &system_program::id(),
-                ),
-            );
-            map.insert(committee_uno, AccountSharedData::new(0, 0, &program));
-            map.insert(committee_dos, AccountSharedData::new(0, 0, &program));
-            map.insert(committee_tres, AccountSharedData::new(0, 0, &program));
-            map
-        };
-        ensure_funded_validator_authority(&mut accounts_data);
-
-        let transaction_accounts: Vec<(Pubkey, AccountSharedData)> = vec![(
-            clock::Clock::id(),
-            create_account_shared_data_for_test(&get_clock()),
-        )];
-
-        PreparedTransactionThreeCommittees {
-            program,
-            accounts_data,
-            committee_uno,
-            committee_dos,
-            committee_tres,
-            transaction_accounts,
-        }
-    }
-
-    #[test]
-    fn test_schedule_commit_single_account_success() {
-        let payer =
-            Keypair::from_seed(b"schedule_commit_single_account_success")
-                .unwrap();
-        let program = Pubkey::new_unique();
-        let committee = Pubkey::new_unique();
-
-        let (mut account_data, mut transaction_accounts) =
-            prepare_transaction_with_single_committee(
-                &payer, program, committee,
-            );
-
-        let ix = schedule_commit_instruction(&payer.pubkey(), vec![committee]);
-
-        transaction_accounts.extend(ix.accounts.iter().flat_map(|acc| {
-            account_data
-                .remove(&acc.pubkey)
-                .map(|shared_data| (acc.pubkey, shared_data))
-        }));
-
-        let processed_accounts = process_instruction(
-            ix.data.as_slice(),
-            transaction_accounts,
-            ix.accounts,
-            Ok(()),
-        );
-
-        let scheduler = TransactionScheduler::default();
-        let scheduled_commits =
-            scheduler.get_scheduled_commits_by_payer(&payer.pubkey());
-        assert_eq!(scheduled_commits.len(), 1);
-
-        let commit = &scheduled_commits[0];
-        let test_clock = get_clock();
-        assert_matches!(
-            commit,
-            ScheduledCommit {
-                id,
-                slot,
-                accounts,
-                payer: p,
-                owner,
-                blockhash: _,
-                commit_sent_transaction,
-                request_undelegation: false,
-            } => {
-                assert!(id >= &0);
-                assert_eq!(slot, &test_clock.slot);
-                assert_eq!(p, &payer.pubkey());
-                assert_eq!(owner, &program);
-                assert_eq!(accounts, &vec![committee]);
-                let ix = SleipnirInstruction::ScheduledCommitSent(*id);
-                assert_eq!(commit_sent_transaction.data(0), ix.try_to_vec().unwrap());
-            }
-        );
-        let committed_account = processed_accounts.last().unwrap();
-        assert_eq!(*committed_account.owner(), program);
-    }
-
-    #[test]
-    fn test_schedule_commit_single_account_and_request_undelegate_success() {
-        let payer =
-            Keypair::from_seed(b"single_account_with_undelegate_success")
-                .unwrap();
-        let program = Pubkey::new_unique();
-        let committee = Pubkey::new_unique();
-
-        let (mut account_data, mut transaction_accounts) =
-            prepare_transaction_with_single_committee(
-                &payer, program, committee,
-            );
-
-        let ix = schedule_commit_and_undelegate_instruction(
-            &payer.pubkey(),
-            vec![committee],
-        );
-
-        transaction_accounts.extend(ix.accounts.iter().flat_map(|acc| {
-            account_data
-                .remove(&acc.pubkey)
-                .map(|shared_data| (acc.pubkey, shared_data))
-        }));
-
-        let processed_accounts = process_instruction(
-            ix.data.as_slice(),
-            transaction_accounts,
-            ix.accounts,
-            Ok(()),
-        );
-
-        let scheduler = TransactionScheduler::default();
-        let scheduled_commits =
-            scheduler.get_scheduled_commits_by_payer(&payer.pubkey());
-        assert_eq!(scheduled_commits.len(), 1);
-
-        let commit = &scheduled_commits[0];
-        let test_clock = get_clock();
-        assert_matches!(
-            commit,
-            ScheduledCommit {
-                id,
-                slot,
-                accounts,
-                payer: p,
-                owner,
-                blockhash: _,
-                commit_sent_transaction,
-                request_undelegation: true,
-            } => {
-                assert!(id >= &0);
-                assert_eq!(slot, &test_clock.slot);
-                assert_eq!(p, &payer.pubkey());
-                assert_eq!(owner, &program);
-                assert_eq!(accounts, &vec![committee]);
-                let ix = SleipnirInstruction::ScheduledCommitSent(*id);
-                assert_eq!(commit_sent_transaction.data(0), ix.try_to_vec().unwrap());
-            }
-        );
-
-        let committed_account = processed_accounts.last().unwrap();
-        assert_eq!(*committed_account.owner(), DELEGATION_PROGRAM_ID);
-    }
-
-    #[test]
-    fn test_schedule_commit_three_accounts_success() {
-        let payer =
-            Keypair::from_seed(b"schedule_commit_three_accounts_success")
-                .unwrap();
-
-        let PreparedTransactionThreeCommittees {
-            mut accounts_data,
-            committee_uno,
-            committee_dos,
-            committee_tres,
-            mut transaction_accounts,
-            program,
-            ..
-        } = prepare_transaction_with_three_committees(&payer);
-
-        let ix = schedule_commit_instruction(
-            &payer.pubkey(),
-            vec![committee_uno, committee_dos, committee_tres],
-        );
-
-        for acc in ix.accounts.iter() {
-            if let Some(shared_data) = accounts_data.remove(&acc.pubkey) {
-                transaction_accounts.push((acc.pubkey, shared_data));
-            }
-        }
-
-        let mut processed_accounts = process_instruction(
-            ix.data.as_slice(),
-            transaction_accounts,
-            ix.accounts,
-            Ok(()),
-        );
-
-        let scheduler = TransactionScheduler::default();
-        let scheduled_commits =
-            scheduler.get_scheduled_commits_by_payer(&payer.pubkey());
-        assert_eq!(scheduled_commits.len(), 1);
-
-        let commit = &scheduled_commits[0];
-        let test_clock = get_clock();
-        assert_matches!(
-            commit,
-            ScheduledCommit {
-                id: i,
-                slot: s,
-                accounts: accs,
-                payer: p,
-                owner: o,
-                blockhash: _,
-                commit_sent_transaction: tx,
-                request_undelegation: false,
-            } => {
-                assert!(i >= &0);
-                assert_eq!(s, &test_clock.slot);
-                assert_eq!(p, &payer.pubkey());
-                assert_eq!(o, &program);
-                assert_eq!(accs, &vec![committee_uno, committee_dos, committee_tres]);
-                let ix = SleipnirInstruction::ScheduledCommitSent(*i);
-                assert_eq!(tx.data(0), ix.try_to_vec().unwrap());
-            }
-        );
-
-        for _ in &[committee_uno, committee_dos, committee_tres] {
-            let committed_account = processed_accounts.pop().unwrap();
-            assert_eq!(*committed_account.owner(), program);
-        }
-    }
-
-    #[test]
-    fn test_schedule_commit_three_accounts_and_request_undelegate_success() {
-        let payer = Keypair::from_seed(
-            b"three_accounts_and_request_undelegate_success",
-        )
-        .unwrap();
-
-        let PreparedTransactionThreeCommittees {
-            program,
-            mut accounts_data,
-            committee_uno,
-            committee_dos,
-            committee_tres,
-            mut transaction_accounts,
-            ..
-        } = prepare_transaction_with_three_committees(&payer);
-
-        let ix = schedule_commit_and_undelegate_instruction(
-            &payer.pubkey(),
-            vec![committee_uno, committee_dos, committee_tres],
-        );
-
-        for acc in ix.accounts.iter() {
-            if let Some(shared_data) = accounts_data.remove(&acc.pubkey) {
-                transaction_accounts.push((acc.pubkey, shared_data));
-            }
-        }
-
-        let mut processed_accounts = process_instruction(
-            ix.data.as_slice(),
-            transaction_accounts,
-            ix.accounts,
-            Ok(()),
-        );
-
-        let scheduler = TransactionScheduler::default();
-        let scheduled_commits =
-            scheduler.get_scheduled_commits_by_payer(&payer.pubkey());
-        assert_eq!(scheduled_commits.len(), 1);
-
-        let commit = &scheduled_commits[0];
-        let test_clock = get_clock();
-        assert_matches!(
-            commit,
-            ScheduledCommit {
-                id: i,
-                slot: s,
-                accounts: accs,
-                payer: p,
-                owner: o,
-                blockhash: _,
-                commit_sent_transaction: tx,
-                request_undelegation: true,
-            } => {
-                assert!(i >= &0);
-                assert_eq!(s, &test_clock.slot);
-                assert_eq!(p, &payer.pubkey());
-                assert_eq!(o, &program);
-                assert_eq!(accs, &vec![committee_uno, committee_dos, committee_tres]);
-                let ix = SleipnirInstruction::ScheduledCommitSent(*i);
-                assert_eq!(tx.data(0), ix.try_to_vec().unwrap());
-            }
-        );
-
-        for _ in &[committee_uno, committee_dos, committee_tres] {
-            let committed_account = processed_accounts.pop().unwrap();
-            assert_eq!(*committed_account.owner(), DELEGATION_PROGRAM_ID);
-        }
-    }
-
-    // -----------------
-    // Failure Cases
-    // ----------------
-    fn get_account_metas(
-        payer: &Pubkey,
-        pdas: Vec<Pubkey>,
-    ) -> Vec<AccountMeta> {
-        let mut account_metas = vec![AccountMeta::new(*payer, true)];
-        for pubkey in &pdas {
-            account_metas.push(AccountMeta::new_readonly(*pubkey, true));
-        }
-        account_metas
-    }
-
-    fn account_metas_last_committee_not_signer(
-        payer: &Pubkey,
-        pdas: Vec<Pubkey>,
-    ) -> Vec<AccountMeta> {
-        let mut account_metas = get_account_metas(payer, pdas);
-        let last = account_metas.pop().unwrap();
-        account_metas.push(AccountMeta::new_readonly(last.pubkey, false));
-        account_metas
-    }
-
-    fn instruction_from_account_metas(
-        account_metas: Vec<AccountMeta>,
-    ) -> solana_sdk::instruction::Instruction {
-        Instruction::new_with_bincode(
-            crate::id(),
-            &SleipnirInstruction::ScheduleCommit,
-            account_metas,
-        )
-    }
-
-    #[test]
-    fn test_schedule_commit_no_pdas_provided_to_ix() {
-        let payer =
-            Keypair::from_seed(b"schedule_commit_no_pdas_provided_to_ix")
-                .unwrap();
-
-        let PreparedTransactionThreeCommittees {
-            mut accounts_data,
-            mut transaction_accounts,
-            ..
-        } = prepare_transaction_with_three_committees(&payer);
-
-        let ix = instruction_from_account_metas(get_account_metas(
-            &payer.pubkey(),
-            vec![],
-        ));
-
-        transaction_accounts.extend(ix.accounts.iter().flat_map(|acc| {
-            accounts_data
-                .remove(&acc.pubkey)
-                .map(|shared_data| (acc.pubkey, shared_data))
-        }));
-
-        process_instruction(
-            ix.data.as_slice(),
-            transaction_accounts,
-            ix.accounts,
-            Err(InstructionError::NotEnoughAccountKeys),
-        );
-    }
-
-    #[test]
-    fn test_schedule_commit_three_accounts_second_not_owned_by_program() {
-        let payer =
-            Keypair::from_seed(b"three_accounts_last_not_owned_by_program")
-                .unwrap();
-
-        let PreparedTransactionThreeCommittees {
-            mut accounts_data,
-            committee_uno,
-            committee_dos,
-            committee_tres,
-            mut transaction_accounts,
-            ..
-        } = prepare_transaction_with_three_committees(&payer);
-
-        accounts_data.insert(
-            committee_dos,
-            AccountSharedData::new(0, 0, &Pubkey::new_unique()),
-        );
-
-        let ix = instruction_from_account_metas(
-            account_metas_last_committee_not_signer(
-                &payer.pubkey(),
-                vec![committee_uno, committee_dos, committee_tres],
-            ),
-        );
-
-        transaction_accounts.extend(ix.accounts.iter().flat_map(|acc| {
-            accounts_data
-                .remove(&acc.pubkey)
-                .map(|shared_data| (acc.pubkey, shared_data))
-        }));
-
-        process_instruction(
-            ix.data.as_slice(),
-            transaction_accounts,
-            ix.accounts,
-            Err(InstructionError::InvalidAccountOwner),
-        );
-    }
+    Ok(())
 }

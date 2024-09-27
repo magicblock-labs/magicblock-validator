@@ -16,6 +16,7 @@ use futures_util::future::{try_join, try_join_all};
 use log::*;
 use sleipnir_account_cloner::{AccountCloner, AccountClonerOutput};
 use sleipnir_accounts_api::InternalAccountProvider;
+use sleipnir_core::magic_program;
 use solana_sdk::{
     pubkey::Pubkey, signature::Signature, transaction::SanitizedTransaction,
 };
@@ -121,21 +122,24 @@ where
         _signature: String,
     ) -> AccountsResult<Vec<Signature>> {
         // Clone all the accounts involved in the transaction in parallel
-        let (readonly_clone_outputs, writable_clone_outputs) =
-            try_join(
-                try_join_all(
-                    accounts_holder.readonly.iter().map(|pubkey| {
-                        self.account_cloner.clone_account(pubkey)
-                    }),
-                ),
-                try_join_all(
-                    accounts_holder.writable.iter().map(|pubkey| {
-                        self.account_cloner.clone_account(pubkey)
-                    }),
-                ),
-            )
-            .await
-            .map_err(AccountsError::AccountClonerError)?;
+        let (readonly_clone_outputs, writable_clone_outputs) = try_join(
+            try_join_all(
+                accounts_holder
+                    .readonly
+                    .into_iter()
+                    .filter(should_clone_account)
+                    .map(|pubkey| self.account_cloner.clone_account(&pubkey)),
+            ),
+            try_join_all(
+                accounts_holder
+                    .writable
+                    .into_iter()
+                    .filter(should_clone_account)
+                    .map(|pubkey| self.account_cloner.clone_account(&pubkey)),
+            ),
+        )
+        .await
+        .map_err(AccountsError::AccountClonerError)?;
 
         // Commitable account scheduling initialization
         for readonly_clone_output in readonly_clone_outputs.iter() {
@@ -371,4 +375,8 @@ where
             .process(&self.account_committer, &self.internal_account_provider)
             .await
     }
+}
+
+fn should_clone_account(pubkey: &Pubkey) -> bool {
+    pubkey != &magic_program::MAGIC_CONTEXT_PUBKEY
 }

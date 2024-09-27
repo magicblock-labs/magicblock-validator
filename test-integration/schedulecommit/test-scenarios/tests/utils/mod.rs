@@ -172,19 +172,40 @@ pub fn assert_tx_failed_with_instruction_error(
     tx_result: Result<Signature, solana_rpc_client_api::client_error::Error>,
     ix_error: InstructionError,
 ) {
-    let tx_err = match tx_result {
-        Ok(sig) => panic!("Expected error, got signature: {:?}", sig),
-        Err(err) => err,
-    };
+    let (tx_result_err, tx_err) = extract_transaction_error(tx_result);
+    let tx_err = tx_err.unwrap_or_else(|| {
+        panic!("Expected TransactionError, got: {:?}", tx_result_err)
+    });
+    assert_is_instruction_error(tx_err, &tx_result_err, ix_error);
+}
+
+pub fn assert_is_instruction_error(
+    tx_err: TransactionError,
+    tx_result_err: &solana_rpc_client_api::client_error::Error,
+    ix_error: InstructionError,
+) {
     assert!(
         matches!(
-            tx_err.get_transaction_error()
-                .expect("Should be TransactionError"),
+            tx_err,
             TransactionError::InstructionError(_, err)
             if err == ix_error
         ),
         "Expected InstructionError({:?}), got: {:?}",
         ix_error,
-        tx_err
+        tx_result_err
     );
+}
+
+pub fn extract_transaction_error(
+    tx_result: Result<Signature, solana_rpc_client_api::client_error::Error>,
+) -> (
+    solana_rpc_client_api::client_error::Error,
+    Option<TransactionError>,
+) {
+    let tx_result_err = match tx_result {
+        Ok(sig) => panic!("Expected error, got signature: {:?}", sig),
+        Err(err) => err,
+    };
+    let tx_err = tx_result_err.get_transaction_error();
+    (tx_result_err, tx_err)
 }

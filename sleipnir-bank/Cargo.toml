@@ -41,3 +41,9 @@ test-tools-core = { workspace = true }
 
 [features]
 dev-context-only-utils = ["rayon", "env_logger"]
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = [
+  'cfg(RUSTC_WITH_SPECIALIZATION)',
+  'cfg(RUSTC_WITHOUT_SPECIALIZATION)',
+] }
