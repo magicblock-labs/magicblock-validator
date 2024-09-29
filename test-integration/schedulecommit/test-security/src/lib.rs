@@ -1,6 +1,6 @@
+use ephemeral_rollups_sdk::ephem::create_schedule_commit_ix;
 use schedulecommit_program::{
-    api::schedule_commit_cpi_instruction, create_schedule_commit_ix,
-    process_schedulecommit_cpi,
+    api::schedule_commit_cpi_instruction, process_schedulecommit_cpi,
 };
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
@@ -142,12 +142,14 @@ fn process_sibling_schedule_cpis(
 
     {
         // 2. CPI into the schedule commit directly
-        let mut account_infos = vec![payer, magic_context];
+        let mut account_infos = vec![];
         account_infos.extend(pda_infos.iter());
 
         let direct_ix = create_schedule_commit_ix(
-            *magic_program.key,
+            payer,
             &account_infos.to_vec(),
+            magic_context,
+            magic_program,
             false,
         );
         invoke(

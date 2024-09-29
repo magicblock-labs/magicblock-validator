@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 schedulecommit-program = { workspace = true, features = ["no-entrypoint"] }
 solana-program = { workspace = true }
+ephemeral-rollups-sdk = { workspace = true }
 
 [dev-dependencies]
 schedulecommit-client = { workspace = true }

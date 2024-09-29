@@ -1107,7 +1107,7 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "borsh 0.10.3",
  "ephemeral-rollups-sdk-attribute-delegate",
@@ -1117,7 +1117,7 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-delegate"
-version = "0.0.4"
+version = "0.0.5"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2645,6 +2645,7 @@ dependencies = [
 name = "schedulecommit-test-security"
 version = "0.0.0"
 dependencies = [
+ "ephemeral-rollups-sdk",
  "integration-test-tools",
  "schedulecommit-client",
  "schedulecommit-program",
