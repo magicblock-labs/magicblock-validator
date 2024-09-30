@@ -1,4 +1,7 @@
 use borsh::{BorshDeserialize, BorshSerialize};
+use ephemeral_rollups_sdk::ephem::{
+    commit_accounts, commit_and_undelegate_accounts,
+};
 use ephemeral_rollups_sdk::{
     consts::EXTERNAL_UNDELEGATE_DISCRIMINATOR,
     cpi::{delegate_account, undelegate_account},
@@ -7,9 +10,7 @@ use solana_program::{
     account_info::{next_account_info, AccountInfo},
     declare_id,
     entrypoint::{self, ProgramResult},
-    instruction::{AccountMeta, Instruction},
     msg,
-    program::invoke,
     program_error::ProgramError,
     pubkey::Pubkey,
 };
@@ -324,13 +325,21 @@ pub fn process_schedulecommit_cpi(
     //     "Committees are {:?}",
     //     remaining.iter().map(|x| x.key).collect::<Vec<_>>()
     // );
-    let ix = create_schedule_commit_ix(
-        *magic_program.key,
-        &account_infos,
-        undelegate,
-    );
-
-    invoke(&ix, &account_infos.into_iter().cloned().collect::<Vec<_>>())?;
+    if undelegate {
+        commit_and_undelegate_accounts(
+            payer,
+            remaining.iter().collect::<Vec<_>>(),
+            magic_context,
+            magic_program,
+        )?;
+    } else {
+        commit_accounts(
+            payer,
+            remaining.iter().collect::<Vec<_>>(),
+            magic_context,
+            magic_program,
+        )?;
+    }
 
     Ok(())
 }
@@ -391,10 +400,12 @@ fn process_schedulecommit_and_undelegation_cpi_with_mod_after(
     let mut account_infos = vec![payer, magic_context];
     account_infos.extend(remaining.iter());
 
-    let ix =
-        create_schedule_commit_ix(*magic_program.key, &account_infos, true);
-
-    invoke(&ix, &account_infos.into_iter().cloned().collect::<Vec<_>>())?;
+    commit_and_undelegate_accounts(
+        payer,
+        remaining.iter().collect::<Vec<_>>(),
+        magic_context,
+        magic_program,
+    )?;
 
     // Then try to modify them
     // This fails because the owner is already changed to the delegation program
@@ -413,35 +424,6 @@ fn process_schedulecommit_and_undelegation_cpi_with_mod_after(
     }
 
     Ok(())
-}
-
-// -----------------
-// create_schedule_commit_ix
-// -----------------
-pub fn create_schedule_commit_ix(
-    magic_program_key: Pubkey,
-    account_infos: &[&AccountInfo],
-    undelegate: bool,
-) -> Instruction {
-    let ix = if undelegate {
-        sleipnir_program::SleipnirInstruction::ScheduleCommitAndUndelegate
-    } else {
-        sleipnir_program::SleipnirInstruction::ScheduleCommit
-    };
-    let instruction_data = ix.discriminant();
-    let account_metas = account_infos
-        .iter()
-        .map(|x| AccountMeta {
-            pubkey: *x.key,
-            is_signer: x.is_signer,
-            is_writable: x.is_writable,
-        })
-        .collect::<Vec<AccountMeta>>();
-    Instruction::new_with_bytes(
-        magic_program_key,
-        &instruction_data,
-        account_metas,
-    )
 }
 
 // -----------------
