@@ -16,7 +16,7 @@ use crate::{AccountFetcher, AccountFetcherResult};
 #[derive(Debug)]
 enum AccountFetcherStubState {
     Wallet,
-    Data,
+    Undelegated,
     Delegated { delegation_record: DelegationRecord },
     Executable,
 }
@@ -56,8 +56,8 @@ impl AccountFetcherStub {
                             owner: Pubkey::new_unique(),
                         }
                     }
-                    AccountFetcherStubState::Data => {
-                        AccountChainState::Data {
+                    AccountFetcherStubState::Undelegated => {
+                        AccountChainState::Undelegated {
                             account: Account {
                                 owner: Pubkey::new_unique(),
                                 ..Default::default()
@@ -72,7 +72,7 @@ impl AccountFetcherStub {
                         delegation_record: delegation_record.clone(),
                     },
                     AccountFetcherStubState::Executable => {
-                        AccountChainState::Data {
+                        AccountChainState::Undelegated {
                             account: Account {
                                 executable: true,
                                 ..Default::default()
@@ -101,12 +101,12 @@ impl AccountFetcherStub {
             },
         );
     }
-    pub fn set_data_account(&self, pubkey: Pubkey, at_slot: Slot) {
+    pub fn set_undelegated_account(&self, pubkey: Pubkey, at_slot: Slot) {
         self.insert_known_account(
             pubkey,
             AccountFetcherStubSnapshot {
                 slot: at_slot,
-                state: AccountFetcherStubState::Data,
+                state: AccountFetcherStubState::Undelegated,
             },
         );
     }

@@ -12,7 +12,7 @@ Accounts come in 3 different important flavors:
 Here are all possible cases:
 
 - `if !properly_delegated && !has_data` -> `Wallet`
-- `if !properly_delegated && has_data` -> `Data`
+- `if !properly_delegated && has_data` -> `Undelegated`
 - `if properly_delegated && !has_data` -> `Delegated`
 - `if properly_delegated && has_data` -> `Delegated`
 
