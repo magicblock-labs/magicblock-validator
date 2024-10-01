@@ -147,9 +147,8 @@ where
         pubkey: &Pubkey,
     ) -> AccountClonerResult<AccountClonerOutput> {
         // If we don't allow any cloning, no need to do anything at all
-        if !self.permissions.allow_cloning_new_accounts
-            && !self.permissions.allow_cloning_payer_accounts
-            && !self.permissions.allow_cloning_pda_accounts
+        if !self.permissions.allow_cloning_wallet_accounts
+            && !self.permissions.allow_cloning_undelegated_accounts
             && !self.permissions.allow_cloning_delegated_accounts
             && !self.permissions.allow_cloning_program_accounts
         {
@@ -273,22 +272,22 @@ where
             self.fetch_account_chain_snapshot(pubkey).await?;
         // Generate cloning transactions
         let signature = match &account_chain_snapshot.chain_state {
-            // If the account is not present on-chain
-            // we may want to clear the local state
-            AccountChainState::NewAccount => {
-                if !self.permissions.allow_cloning_new_accounts {
+            // If the account has no data, we can use it for lamport transfers only
+            // We'll use the escrowed lamport value rather than its actual on-chain info
+            AccountChainState::Wallet { lamports, owner } => {
+                if !self.permissions.allow_cloning_wallet_accounts {
                     return Ok(AccountClonerOutput::Unclonable {
                         pubkey: *pubkey,
                         reason:
-                            AccountClonerUnclonableReason::DisallowNewAccount,
+                            AccountClonerUnclonableReason::DoesNotAllowWalletAccount,
                         at_slot: account_chain_snapshot.at_slot,
                     });
                 }
-                self.do_clone_new_account(pubkey)?
+                self.do_clone_wallet_account(pubkey, *lamports, owner)?
             }
-            // If the account is present on-chain, but not delegated
+            // If the account is present on-chain, but not delegated, it's just readonly data
             // We need to differenciate between programs and other accounts
-            AccountChainState::Undelegated { account } => {
+            AccountChainState::Undelegated { account, .. } => {
                 // If it's an executable, we may have some special fetching to do
                 if account.executable {
                     if let Some(allowed_program_ids) = &self.allowed_program_ids
@@ -296,7 +295,7 @@ where
                         if !allowed_program_ids.contains(pubkey) {
                             return Ok(AccountClonerOutput::Unclonable {
                                 pubkey: *pubkey,
-                                reason: AccountClonerUnclonableReason::IsNotAllowedProgram,
+                                reason: AccountClonerUnclonableReason::IsNotAnAllowedProgram,
                                 at_slot: u64::MAX, // we will never try again
                             });
                         }
@@ -304,36 +303,22 @@ where
                     if !self.permissions.allow_cloning_program_accounts {
                         return Ok(AccountClonerOutput::Unclonable {
                             pubkey: *pubkey,
-                            reason: AccountClonerUnclonableReason::DisallowProgramAccount,
+                            reason: AccountClonerUnclonableReason::DoesNotAllowProgramAccount,
                             at_slot: account_chain_snapshot.at_slot,
                         });
                     }
                     self.do_clone_program_accounts(pubkey, account).await?
                 }
-                // If it's not an executble, different rules apply depending on owner
+                // If it's not an executble, simpler rules apply
                 else {
-                    // If it's a payer account, we have a special lamport override to do
-                    if pubkey.is_on_curve() {
-                        if !self.permissions.allow_cloning_payer_accounts {
-                            return Ok(AccountClonerOutput::Unclonable {
-                                pubkey: *pubkey,
-                                reason: AccountClonerUnclonableReason::DisallowPayerAccount,
-                                at_slot: account_chain_snapshot.at_slot,
-                            });
-                        }
-                        self.do_clone_payer_account(pubkey, account)?
+                    if !self.permissions.allow_cloning_undelegated_accounts {
+                        return Ok(AccountClonerOutput::Unclonable {
+                            pubkey: *pubkey,
+                            reason: AccountClonerUnclonableReason::DoesNotAllowUndelegatedAccount,
+                            at_slot: account_chain_snapshot.at_slot,
+                        });
                     }
-                    // Otherwise we just clone the account normally without any change
-                    else {
-                        if !self.permissions.allow_cloning_pda_accounts {
-                            return Ok(AccountClonerOutput::Unclonable {
-                                pubkey: *pubkey,
-                                reason: AccountClonerUnclonableReason::DisallowPdaAccount,
-                                at_slot: account_chain_snapshot.at_slot,
-                            });
-                        }
-                        self.do_clone_pda_account(pubkey, account)?
-                    }
+                    self.do_clone_undelegated_account(pubkey, account)?
                 }
             }
             // If the account delegated on-chain, we need to apply some overrides
@@ -347,7 +332,7 @@ where
                     return Ok(AccountClonerOutput::Unclonable {
                         pubkey: *pubkey,
                         reason:
-                            AccountClonerUnclonableReason::DisallowDelegatedAccount,
+                            AccountClonerUnclonableReason::DoesNotAllowDelegatedAccount,
                         at_slot: account_chain_snapshot.at_slot,
                     });
                 }
@@ -358,19 +343,6 @@ where
                     delegation_record.delegation_slot,
                 )?
             }
-            // If the account is delegated but inconsistant on-chain,
-            // we clone it as non-delegated account to keep things simple for now
-            AccountChainState::Inconsistent { account, .. } => {
-                if !self.permissions.allow_cloning_pda_accounts {
-                    return Ok(AccountClonerOutput::Unclonable {
-                        pubkey: *pubkey,
-                        reason:
-                            AccountClonerUnclonableReason::DisallowPdaAccount,
-                        at_slot: account_chain_snapshot.at_slot,
-                    });
-                }
-                self.do_clone_pda_account(pubkey, account)?
-            }
         };
         // Return the result
         Ok(AccountClonerOutput::Cloned {
@@ -379,32 +351,25 @@ where
         })
     }
 
-    fn do_clone_new_account(
+    fn do_clone_wallet_account(
         &self,
         pubkey: &Pubkey,
+        lamports: u64,
+        owner: &Pubkey,
     ) -> AccountClonerResult<Signature> {
+        let lamports = self.payer_init_lamports.unwrap_or(lamports);
         self.account_dumper
-            .dump_new_account(pubkey)
+            .dump_wallet_account(pubkey, lamports, owner)
             .map_err(AccountClonerError::AccountDumperError)
     }
 
-    fn do_clone_payer_account(
+    fn do_clone_undelegated_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,
     ) -> AccountClonerResult<Signature> {
         self.account_dumper
-            .dump_payer_account(pubkey, account, self.payer_init_lamports)
-            .map_err(AccountClonerError::AccountDumperError)
-    }
-
-    fn do_clone_pda_account(
-        &self,
-        pubkey: &Pubkey,
-        account: &Account,
-    ) -> AccountClonerResult<Signature> {
-        self.account_dumper
-            .dump_pda_account(pubkey, account)
+            .dump_undelegated_account(pubkey, account)
             .map_err(AccountClonerError::AccountDumperError)
     }
 

@@ -40,20 +40,18 @@ pub enum AccountClonerUnclonableReason {
     AlreadyLocallyOverriden,
     NoCloningAllowed,
     IsBlacklisted,
-    IsNotAllowedProgram,
-    DisallowNewAccount,
-    DisallowPayerAccount,
-    DisallowPdaAccount,
-    DisallowDelegatedAccount,
-    DisallowProgramAccount,
+    IsNotAnAllowedProgram,
+    DoesNotAllowWalletAccount,
+    DoesNotAllowUndelegatedAccount,
+    DoesNotAllowDelegatedAccount,
+    DoesNotAllowProgramAccount,
 }
 
 #[derive(Debug, Clone)]
 pub struct AccountClonerPermissions {
     pub allow_cloning_refresh: bool,
-    pub allow_cloning_new_accounts: bool,
-    pub allow_cloning_payer_accounts: bool,
-    pub allow_cloning_pda_accounts: bool,
+    pub allow_cloning_wallet_accounts: bool,
+    pub allow_cloning_undelegated_accounts: bool,
     pub allow_cloning_delegated_accounts: bool,
     pub allow_cloning_program_accounts: bool,
 }

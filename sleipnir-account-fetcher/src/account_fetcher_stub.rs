@@ -6,21 +6,19 @@ use std::{
 use async_trait::async_trait;
 use conjunto_transwise::{
     AccountChainSnapshot, AccountChainSnapshotShared, AccountChainState,
-    CommitFrequency, DelegationRecord,
+    CommitFrequency, DelegationInconsistency, DelegationRecord,
 };
 use futures_util::future::{ready, BoxFuture};
-use solana_sdk::{
-    account::Account, clock::Slot, pubkey::Pubkey, system_program,
-};
+use solana_sdk::{account::Account, clock::Slot, pubkey::Pubkey};
 
 use crate::{AccountFetcher, AccountFetcherResult};
 
 #[derive(Debug)]
 enum AccountFetcherStubState {
-    New,
-    Standard { owner: Pubkey },
-    Executable,
+    Wallet,
+    Undelegated,
     Delegated { delegation_record: DelegationRecord },
+    Executable,
 }
 
 #[derive(Debug)]
@@ -52,32 +50,36 @@ impl AccountFetcherStub {
                 pubkey: *pubkey,
                 at_slot: known_account.slot,
                 chain_state: match &known_account.state {
-                    AccountFetcherStubState::New => {
-                        AccountChainState::NewAccount
-                    }
-                    AccountFetcherStubState::Standard { owner } => {
-                        AccountChainState::Undelegated {
-                            account: Account {
-                                owner: *owner,
-                                ..Default::default()
-                            },
+                    AccountFetcherStubState::Wallet => {
+                        AccountChainState::Wallet {
+                            lamports: 42,
+                            owner: Pubkey::new_unique(),
                         }
                     }
-                    AccountFetcherStubState::Executable => {
+                    AccountFetcherStubState::Undelegated => {
                         AccountChainState::Undelegated {
                             account: Account {
-                                executable: true,
+                                owner: Pubkey::new_unique(),
                                 ..Default::default()
                             },
+                            delegation_inconsistency: DelegationInconsistency::DelegationRecordNotFound,
                         }
                     }
                     AccountFetcherStubState::Delegated {
                         delegation_record,
                     } => AccountChainState::Delegated {
                         account: Default::default(),
-                        delegation_pda: Pubkey::new_unique(),
                         delegation_record: delegation_record.clone(),
                     },
+                    AccountFetcherStubState::Executable => {
+                        AccountChainState::Undelegated {
+                            account: Account {
+                                executable: true,
+                                ..Default::default()
+                            },
+                            delegation_inconsistency: DelegationInconsistency::DelegationRecordNotFound,
+                        }
+                    }
                 },
             }
             .into()),
@@ -90,34 +92,21 @@ impl AccountFetcherStub {
 }
 
 impl AccountFetcherStub {
-    pub fn set_new_account(&self, pubkey: Pubkey, at_slot: Slot) {
+    pub fn set_wallet_account(&self, pubkey: Pubkey, at_slot: Slot) {
         self.insert_known_account(
             pubkey,
             AccountFetcherStubSnapshot {
                 slot: at_slot,
-                state: AccountFetcherStubState::New,
+                state: AccountFetcherStubState::Wallet,
             },
         );
     }
-    pub fn set_payer_account(&self, pubkey: Pubkey, at_slot: Slot) {
+    pub fn set_undelegated_account(&self, pubkey: Pubkey, at_slot: Slot) {
         self.insert_known_account(
             pubkey,
             AccountFetcherStubSnapshot {
                 slot: at_slot,
-                state: AccountFetcherStubState::Standard {
-                    owner: system_program::ID,
-                },
-            },
-        );
-    }
-    pub fn set_pda_account(&self, pubkey: Pubkey, at_slot: Slot) {
-        self.insert_known_account(
-            pubkey,
-            AccountFetcherStubSnapshot {
-                slot: at_slot,
-                state: AccountFetcherStubState::Standard {
-                    owner: Pubkey::new_unique(),
-                },
+                state: AccountFetcherStubState::Undelegated,
             },
         );
     }

@@ -47,40 +47,27 @@ impl AccountDumperBank {
 }
 
 impl AccountDumper for AccountDumperBank {
-    fn dump_new_account(
+    fn dump_wallet_account(
         &self,
         pubkey: &Pubkey,
+        lamports: u64,
+        owner: &Pubkey,
     ) -> AccountDumperResult<Signature> {
+        let account = Account {
+            lamports,
+            owner: *owner,
+            ..Default::default()
+        };
         let transaction = transaction_to_clone_regular_account(
             pubkey,
-            &Account::default(),
+            &account,
             None,
             self.bank.last_blockhash(),
         );
         self.execute_transaction(transaction)
     }
 
-    fn dump_payer_account(
-        &self,
-        pubkey: &Pubkey,
-        account: &Account,
-        lamports: Option<u64>,
-    ) -> AccountDumperResult<Signature> {
-        let overrides = lamports.map(|lamports| AccountModification {
-            pubkey: *pubkey,
-            lamports: Some(lamports),
-            ..Default::default()
-        });
-        let transaction = transaction_to_clone_regular_account(
-            pubkey,
-            account,
-            overrides,
-            self.bank.last_blockhash(),
-        );
-        self.execute_transaction(transaction)
-    }
-
-    fn dump_pda_account(
+    fn dump_undelegated_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,

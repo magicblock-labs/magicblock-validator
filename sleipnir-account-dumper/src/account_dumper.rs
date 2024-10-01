@@ -18,25 +18,18 @@ pub type AccountDumperResult<T> = Result<T, AccountDumperError>;
 //  - using the mutator's functionality directly inside of the AccountCloner
 //  - work tracked here: https://github.com/magicblock-labs/magicblock-validator/issues/159
 pub trait AccountDumper {
-    // Overrides the account in the bank to make sure it's "new" in the eyes of the transction
-    // Close it if we need to if it already exists in the bank
-    fn dump_new_account(
+    // Overrides the account in the bank to make sure it's usable as a wallet account (it has no-data)
+    // in future transactions that account can be used for signing transactions and transferring lamports
+    fn dump_wallet_account(
         &self,
         pubkey: &Pubkey,
-    ) -> AccountDumperResult<Signature>;
-
-    // Overrides the account in the bank to make sure it's usable as a potential payer account
-    // in future transactions that account can be used for signing things, and we need to sync its lamports
-    fn dump_payer_account(
-        &self,
-        pubkey: &Pubkey,
-        account: &Account,
-        lamports: Option<u64>,
+        lamports: u64,
+        owner: &Pubkey,
     ) -> AccountDumperResult<Signature>;
 
     // Overrides the account in the bank to make sure it's a PDA that can be used as readonly
     // Future transactions should be able to read from it (but not write) on the account as-is
-    fn dump_pda_account(
+    fn dump_undelegated_account(
         &self,
         pubkey: &Pubkey,
         account: &Account,
