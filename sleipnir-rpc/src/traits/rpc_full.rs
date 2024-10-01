@@ -4,10 +4,11 @@ use jsonrpc_core::{BoxFuture, Result};
 use jsonrpc_derive::rpc;
 use solana_rpc_client_api::{
     config::{
-        RpcBlocksConfigWrapper, RpcContextConfig, RpcEncodingConfigWrapper,
-        RpcEpochConfig, RpcRequestAirdropConfig, RpcSendTransactionConfig,
-        RpcSignatureStatusConfig, RpcSignaturesForAddressConfig,
-        RpcSimulateTransactionConfig, RpcTransactionConfig,
+        RpcBlockConfig, RpcBlocksConfigWrapper, RpcContextConfig,
+        RpcEncodingConfigWrapper, RpcEpochConfig, RpcRequestAirdropConfig,
+        RpcSendTransactionConfig, RpcSignatureStatusConfig,
+        RpcSignaturesForAddressConfig, RpcSimulateTransactionConfig,
+        RpcTransactionConfig,
     },
     response::{
         Response as RpcResponse, RpcBlockhash,
@@ -22,6 +23,7 @@ use solana_sdk::{
 };
 use solana_transaction_status::{
     EncodedConfirmedTransactionWithStatusMeta, TransactionStatus,
+    UiConfirmedBlock,
 };
 
 #[rpc]
@@ -91,7 +93,6 @@ pub trait Full {
     #[rpc(meta, name = "minimumLedgerSlot")]
     fn minimum_ledger_slot(&self, meta: Self::Metadata) -> Result<Slot>;
 
-    /* TODO: Needs solana_transaction_status::UiConfirmedBlock
     #[rpc(meta, name = "getBlock")]
     fn get_block(
         &self,
@@ -99,7 +100,6 @@ pub trait Full {
         slot: Slot,
         config: Option<RpcEncodingConfigWrapper<RpcBlockConfig>>,
     ) -> BoxFuture<Result<Option<UiConfirmedBlock>>>;
-    */
 
     #[rpc(meta, name = "getBlockTime")]
     fn get_block_time(

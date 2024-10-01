@@ -5,11 +5,11 @@ use jsonrpc_core::{futures::future, BoxFuture, Error, Result};
 use log::*;
 use solana_rpc_client_api::{
     config::{
-        RpcBlocksConfigWrapper, RpcContextConfig, RpcEncodingConfigWrapper,
-        RpcEpochConfig, RpcRequestAirdropConfig, RpcSendTransactionConfig,
-        RpcSignatureStatusConfig, RpcSignaturesForAddressConfig,
-        RpcSimulateTransactionAccountsConfig, RpcSimulateTransactionConfig,
-        RpcTransactionConfig,
+        RpcBlockConfig, RpcBlocksConfigWrapper, RpcContextConfig,
+        RpcEncodingConfigWrapper, RpcEpochConfig, RpcRequestAirdropConfig,
+        RpcSendTransactionConfig, RpcSignatureStatusConfig,
+        RpcSignaturesForAddressConfig, RpcSimulateTransactionAccountsConfig,
+        RpcSimulateTransactionConfig, RpcTransactionConfig,
     },
     request::MAX_GET_SIGNATURE_STATUSES_QUERY_ITEMS,
     response::{
@@ -29,7 +29,7 @@ use solana_sdk::{
 };
 use solana_transaction_status::{
     EncodedConfirmedTransactionWithStatusMeta, TransactionBinaryEncoding,
-    TransactionStatus, UiTransactionEncoding,
+    TransactionStatus, UiConfirmedBlock, UiTransactionEncoding,
 };
 
 use crate::{
@@ -63,6 +63,14 @@ impl Full for FullImpl {
         todo!("get_inflation_reward")
     }
 
+    fn get_cluster_nodes(
+        &self,
+        meta: Self::Metadata,
+    ) -> Result<Vec<RpcContactInfo>> {
+        debug!("get_cluster_nodes rpc request received");
+        Ok(meta.get_cluster_nodes())
+    }
+
     fn get_recent_performance_samples(
         &self,
         meta: Self::Metadata,
@@ -87,14 +95,6 @@ impl Full for FullImpl {
             .into_iter()
             .map(|(slot, sample)| rpc_perf_sample_from((slot, sample)))
             .collect())
-    }
-
-    fn get_cluster_nodes(
-        &self,
-        meta: Self::Metadata,
-    ) -> Result<Vec<RpcContactInfo>> {
-        debug!("get_cluster_nodes rpc request received");
-        Ok(meta.get_cluster_nodes())
     }
 
     fn get_signature_statuses(
@@ -148,6 +148,37 @@ impl Full for FullImpl {
         )
     }
 
+    fn simulate_transaction(
+        &self,
+        meta: Self::Metadata,
+        data: String,
+        config: Option<RpcSimulateTransactionConfig>,
+    ) -> BoxFuture<Result<RpcResponse<RpcSimulateTransactionResult>>> {
+        let RpcSimulateTransactionConfig {
+            sig_verify,
+            replace_recent_blockhash,
+            commitment,
+            encoding,
+            accounts: config_accounts,
+            min_context_slot,
+            inner_instructions: enable_cpi_recording,
+        } = config.unwrap_or_default();
+        let tx_encoding = encoding.unwrap_or(UiTransactionEncoding::Base58);
+
+        Box::pin(async move {
+            simulate_transaction_impl(
+                &meta,
+                data,
+                tx_encoding,
+                config_accounts,
+                replace_recent_blockhash,
+                sig_verify,
+                enable_cpi_recording,
+            )
+            .await
+        })
+    }
+
     fn send_transaction(
         &self,
         meta: Self::Metadata,
@@ -182,38 +213,19 @@ impl Full for FullImpl {
         })
     }
 
-    fn simulate_transaction(
-        &self,
-        meta: Self::Metadata,
-        data: String,
-        config: Option<RpcSimulateTransactionConfig>,
-    ) -> BoxFuture<Result<RpcResponse<RpcSimulateTransactionResult>>> {
-        let RpcSimulateTransactionConfig {
-            sig_verify,
-            replace_recent_blockhash,
-            commitment,
-            encoding,
-            accounts: config_accounts,
-            min_context_slot,
-            inner_instructions: enable_cpi_recording,
-        } = config.unwrap_or_default();
-        let tx_encoding = encoding.unwrap_or(UiTransactionEncoding::Base58);
-
-        Box::pin(async move {
-            simulate_transaction_impl(
-                &meta,
-                data,
-                tx_encoding,
-                config_accounts,
-                replace_recent_blockhash,
-                sig_verify,
-                enable_cpi_recording,
-            )
-            .await
-        })
-    }
     fn minimum_ledger_slot(&self, meta: Self::Metadata) -> Result<Slot> {
         todo!("minimum_ledger_slot")
+    }
+
+    fn get_block(
+        &self,
+        meta: Self::Metadata,
+        slot: Slot,
+        config: Option<RpcEncodingConfigWrapper<RpcBlockConfig>>,
+    ) -> BoxFuture<Result<Option<UiConfirmedBlock>>> {
+        debug!("get_block rpc request received");
+
+        todo!("lol");
     }
 
     fn get_block_time(
@@ -222,23 +234,6 @@ impl Full for FullImpl {
         slot: Slot,
     ) -> BoxFuture<Result<Option<UnixTimestamp>>> {
         Box::pin(async move { meta.get_block_time(slot).await })
-    }
-
-    fn get_transaction(
-        &self,
-        meta: Self::Metadata,
-        signature_str: String,
-        config: Option<RpcEncodingConfigWrapper<RpcTransactionConfig>>,
-    ) -> BoxFuture<Result<Option<EncodedConfirmedTransactionWithStatusMeta>>>
-    {
-        debug!("get_transaction rpc request received: {:?}", signature_str);
-        let signature = verify_signature(&signature_str);
-        if let Err(err) = signature {
-            return Box::pin(future::err(err));
-        }
-        Box::pin(async move {
-            meta.get_transaction(signature.unwrap(), config).await
-        })
     }
 
     fn get_blocks(
@@ -259,6 +254,23 @@ impl Full for FullImpl {
         commitment: Option<CommitmentConfig>,
     ) -> BoxFuture<Result<Vec<Slot>>> {
         todo!("get_blocks_with_limit")
+    }
+
+    fn get_transaction(
+        &self,
+        meta: Self::Metadata,
+        signature_str: String,
+        config: Option<RpcEncodingConfigWrapper<RpcTransactionConfig>>,
+    ) -> BoxFuture<Result<Option<EncodedConfirmedTransactionWithStatusMeta>>>
+    {
+        debug!("get_transaction rpc request received: {:?}", signature_str);
+        let signature = verify_signature(&signature_str);
+        if let Err(err) = signature {
+            return Box::pin(future::err(err));
+        }
+        Box::pin(async move {
+            meta.get_transaction(signature.unwrap(), config).await
+        })
     }
 
     fn get_signatures_for_address(
