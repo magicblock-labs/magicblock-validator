@@ -1,6 +1,7 @@
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     sync::{Arc, RwLock},
+    time::Duration,
     vec,
 };
 
@@ -20,8 +21,9 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::Signature,
 };
-use tokio::sync::mpsc::{
-    unbounded_channel, UnboundedReceiver, UnboundedSender,
+use tokio::{
+    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    time::sleep,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -450,7 +452,8 @@ where
             .chain_state
             .account()
             .ok_or(AccountClonerError::ProgramDataDoesNotExist)?;
-        self.account_dumper
+        let result = self
+            .account_dumper
             .dump_program_accounts(
                 program_id_pubkey,
                 program_id_account,
@@ -458,7 +461,15 @@ where
                 program_data_account,
                 self.fetch_program_idl(program_id_pubkey).await?,
             )
-            .map_err(AccountClonerError::AccountDumperError)
+            .map_err(AccountClonerError::AccountDumperError);
+        // This is a temporary hack:
+        // We force all transactions depending on the newly cloned program to wait a slot before executing.
+        // This is temporarily helpful because:
+        // Transactions in the same slot as the program upgrade always fail
+        // Will be deprecated when we make cloning greedy:
+        // - context here: https://github.com/magicblock-labs/magicblock-validator/issues/139
+        sleep(Duration::from_millis(50)).await;
+        result
     }
 
     async fn fetch_program_idl(
