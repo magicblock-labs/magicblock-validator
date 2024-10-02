@@ -14,13 +14,13 @@ use solana_sdk::{
     hash::Hash,
     pubkey::Pubkey,
     signature::Signature,
-    transaction::SanitizedTransaction,
+    transaction::{SanitizedTransaction, VersionedTransaction},
 };
 use solana_storage_proto::convert::generated::{self, ConfirmedTransaction};
 use solana_transaction_status::{
     ConfirmedTransactionStatusWithSignature,
     ConfirmedTransactionWithStatusMeta, TransactionStatusMeta,
-    VersionedConfirmedBlock,
+    VersionedConfirmedBlock, VersionedTransactionWithStatusMeta,
 };
 
 use crate::{
@@ -293,7 +293,7 @@ impl Ledger {
         slot: Slot,
         blockhash: Hash,
     ) -> LedgerResult<()> {
-        self.blockhash_cf.put(slot, &timestamp)
+        self.blockhash_cf.put(slot, &blockhash)
     }
 
     fn get_block_hash(&self, slot: Slot) -> LedgerResult<Option<Hash>> {
@@ -304,13 +304,48 @@ impl Ledger {
     // Block
     // -----------------
 
-    fn get_block(&self, slot: Slot) -> LedgerResult<VersionedConfirmedBlock> {
+    pub fn get_block(
+        &self,
+        slot: Slot,
+    ) -> LedgerResult<VersionedConfirmedBlock> {
         let previous_slot = slot.saturating_sub(1);
         let previous_blockhash = self.get_block_hash(previous_slot)?;
 
         let blockhash = self.get_block_hash(slot)?;
-        let block_time = self.blocktime_cf.get(slot)?;
+        let block_time = self.get_block_time(slot)?;
         let block_height = Some(slot);
+
+        let index_iterator = self
+            .slot_signatures_cf
+            .iter_current_index_filtered(IteratorMode::From(
+                (slot, u32::MAX),
+                IteratorDirection::Reverse,
+            ))?;
+
+        let mut signatures = vec![];
+        for ((tx_slot, _tx_idx), tx_signature) in index_iterator {
+            if tx_slot != slot {
+                break;
+            }
+            signatures.push(tx_signature);
+        }
+
+        let transactions = signatures
+            .into_iter()
+            .map(|signature| {
+                let tx_signature = Signature::try_from(&*signature)?;
+                let transaction = self
+                    .transaction_cf
+                    .get_protobuf((tx_signature, slot))?
+                    .map(VersionedTransaction::from)
+                    .ok_or(LedgerError::TransactionNotFound)?;
+                let meta = self
+                    .transaction_status_cf
+                    .get_protobuf((tx_signature, slot))?
+                    .ok_or(LedgerError::TransactionStatusMetaNotFound)?;
+                Ok(VersionedTransactionWithStatusMeta { transaction, meta })
+            })
+            .collect::<LedgerResult<Vec<_>>>()?;
 
         let block = VersionedConfirmedBlock {
             previous_blockhash: previous_blockhash
@@ -319,7 +354,7 @@ impl Ledger {
             blockhash: blockhash.unwrap_or_default().to_string(),
 
             parent_slot: previous_slot,
-            transactions: vec![],
+            transactions,
 
             rewards: vec![], // This validator doesn't do voting
 

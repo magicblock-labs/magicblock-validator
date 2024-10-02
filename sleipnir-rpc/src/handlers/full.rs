@@ -28,8 +28,9 @@ use solana_sdk::{
     transaction::VersionedTransaction,
 };
 use solana_transaction_status::{
-    EncodedConfirmedTransactionWithStatusMeta, TransactionBinaryEncoding,
-    TransactionStatus, UiConfirmedBlock, UiTransactionEncoding,
+    BlockEncodingOptions, EncodedConfirmedTransactionWithStatusMeta,
+    TransactionBinaryEncoding, TransactionStatus, UiConfirmedBlock,
+    UiTransactionEncoding,
 };
 
 use crate::{
@@ -236,6 +237,10 @@ impl Full for FullImpl {
                 .max_supported_transaction_version,
         };
         let commitment = config.commitment.unwrap_or_default();
+
+        let block = meta.get_block(slot);
+
+        let result = block.encode_with_options(encoding, encoding_options);
 
         todo!("get_block");
     }
