@@ -168,6 +168,8 @@ impl JsonRpcRequestProcessor {
         Ok(results)
     }
 
+    pub async fn get_block(&self, slot: Slot) {}
+
     // -----------------
     // Accounts
     // -----------------

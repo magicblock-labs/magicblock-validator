@@ -225,7 +225,19 @@ impl Full for FullImpl {
     ) -> BoxFuture<Result<Option<UiConfirmedBlock>>> {
         debug!("get_block rpc request received");
 
-        todo!("lol");
+        let config = config
+            .map(|config| config.convert_to_current())
+            .unwrap_or_default();
+        let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Json);
+        let encoding_options = BlockEncodingOptions {
+            transaction_details: config.transaction_details.unwrap_or_default(),
+            show_rewards: config.rewards.unwrap_or(true),
+            max_supported_transaction_version: config
+                .max_supported_transaction_version,
+        };
+        let commitment = config.commitment.unwrap_or_default();
+
+        todo!("get_block");
     }
 
     fn get_block_time(

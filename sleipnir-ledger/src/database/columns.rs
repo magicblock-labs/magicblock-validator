@@ -67,6 +67,12 @@ pub struct TransactionStatusIndex;
 /// * value type: [`UnixTimestamp`]
 pub struct Blocktime;
 
+/// The block hash column
+///
+/// * index type: `u64` (see [`SlotColumn`])
+/// * value type: [`solana_sdk::hash::Hash`]
+pub struct Blockhash;
+
 /// The transaction with status column
 ///
 /// NOTE: this doesn't exist in the original solana validator

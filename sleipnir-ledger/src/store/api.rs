@@ -12,6 +12,7 @@ use solana_measure::measure::Measure;
 use solana_sdk::{
     clock::{Slot, UnixTimestamp},
     pubkey::Pubkey,
+    hash::Hash,
     signature::Signature,
     transaction::SanitizedTransaction,
 };
@@ -52,6 +53,7 @@ pub struct Ledger {
     slot_signatures_cf: LedgerColumn<cf::SlotSignatures>,
     transaction_status_index_cf: LedgerColumn<cf::TransactionStatusIndex>,
     blocktime_cf: LedgerColumn<cf::Blocktime>,
+    blockhash_cf: LedgerColumn<cf::Blockhash>,
     transaction_cf: LedgerColumn<cf::Transaction>,
     transaction_memos_cf: LedgerColumn<cf::TransactionMemos>,
     perf_samples_cf: LedgerColumn<cf::PerfSamples>,
@@ -110,6 +112,7 @@ impl Ledger {
         let slot_signatures_cf = db.column();
         let transaction_status_index_cf = db.column();
         let blocktime_cf = db.column();
+        let blockhash_cf = db.column();
         let transaction_cf = db.column();
         let transaction_memos_cf = db.column();
         let perf_samples_cf = db.column();
@@ -130,6 +133,7 @@ impl Ledger {
             slot_signatures_cf,
             transaction_status_index_cf,
             blocktime_cf,
+            blockhash_cf,
             transaction_cf,
             transaction_memos_cf,
             perf_samples_cf,
@@ -156,6 +160,7 @@ impl Ledger {
         self.slot_signatures_cf.submit_rocksdb_cf_metrics();
         self.transaction_status_index_cf.submit_rocksdb_cf_metrics();
         self.blocktime_cf.submit_rocksdb_cf_metrics();
+        self.blockhash_cf.submit_rocksdb_cf_metrics();
         self.transaction_cf.submit_rocksdb_cf_metrics();
         self.transaction_memos_cf.submit_rocksdb_cf_metrics();
         self.perf_samples_cf.submit_rocksdb_cf_metrics();
@@ -256,7 +261,7 @@ impl Ledger {
     }
 
     // -----------------
-    // BlockTime
+    // Block time
     // -----------------
 
     // NOTE: we kept the term block time even tough we don't produce blocks.
@@ -276,6 +281,53 @@ impl Ledger {
     ) -> LedgerResult<Option<solana_sdk::clock::UnixTimestamp>> {
         let _lock = self.check_lowest_cleanup_slot(slot)?;
         self.blocktime_cf.get(slot)
+    }
+
+    // -----------------
+    // Block hash
+    // -----------------
+
+    pub fn cache_block_hash(
+        &self,
+        slot: Slot,
+        blockhash: Hash,
+    ) -> LedgerResult<()> {
+        self.blockhash_cf.put(slot, &timestamp)
+    }
+
+    fn get_block_hash(
+        &self,
+        slot: Slot,
+    ) -> LedgerResult<Option<Hash>> {
+        self.blockhash_cf.get(slot)
+    }
+
+    // -----------------
+    // Block
+    // -----------------
+
+    fn get_block(&self, slot: Slot) {
+        let previous_slot = slot.saturating_sub(1);
+        let previous_blockhash = self.get_block_hash(previous_slot)?;
+
+        let block_hash = self.get_block_hash(slot)?;
+        let block_time = self.blocktime_cf.get(slot)?;
+        let block_height = slot;
+
+        let block = VersionedConfirmedBlock {
+            previous_blockhash: previous_blockhash.unwrap_or_default().to_string(),
+            blockhash: blockhash.unwrap_or_default().to_string(),
+
+            parent_slot: previous_slot,
+            transactions: vec![],
+
+            rewards: vec![],
+
+            block_time,
+            block_height,
+        };
+
+        return Ok(VersionedConfirmedBlockWithEntries { block, entries });
     }
 
     // -----------------

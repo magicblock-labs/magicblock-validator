@@ -34,11 +34,18 @@ pub fn init_slot_ticker(
         while !exit.load(Ordering::Relaxed) {
             tokio::time::sleep(tick_duration).await;
             let slot = bank.advance_slot();
-            let _ = ledger
-                .cache_block_time(slot, timestamp_in_secs() as i64)
-                .map_err(|e| {
-                    error!("Failed to cache block time: {:?}", e);
-                });
+
+            // Update ledger
+            if let Err(error) =
+                ledger.cache_block_time(slot, timestamp_in_secs() as i64)
+            {
+                error!("Failed to cache block time: {:?}", err);
+            }
+            if let Err(err) =
+                ledger.cache_block_hash(slot, bank.last_blockhash())
+            {
+                error!("Failed to cache block hash: {:?}", err);
+            }
 
             // If accounts were scheduled to be committed, we accept them here
             // and processs the commits
