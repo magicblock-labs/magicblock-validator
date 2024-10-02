@@ -11,8 +11,8 @@ use rocksdb::Direction as IteratorDirection;
 use solana_measure::measure::Measure;
 use solana_sdk::{
     clock::{Slot, UnixTimestamp},
-    pubkey::Pubkey,
     hash::Hash,
+    pubkey::Pubkey,
     signature::Signature,
     transaction::SanitizedTransaction,
 };
@@ -20,6 +20,7 @@ use solana_storage_proto::convert::generated::{self, ConfirmedTransaction};
 use solana_transaction_status::{
     ConfirmedTransactionStatusWithSignature,
     ConfirmedTransactionWithStatusMeta, TransactionStatusMeta,
+    VersionedConfirmedBlock,
 };
 
 use crate::{
@@ -295,10 +296,7 @@ impl Ledger {
         self.blockhash_cf.put(slot, &timestamp)
     }
 
-    fn get_block_hash(
-        &self,
-        slot: Slot,
-    ) -> LedgerResult<Option<Hash>> {
+    fn get_block_hash(&self, slot: Slot) -> LedgerResult<Option<Hash>> {
         self.blockhash_cf.get(slot)
     }
 
@@ -306,28 +304,30 @@ impl Ledger {
     // Block
     // -----------------
 
-    fn get_block(&self, slot: Slot) {
+    fn get_block(&self, slot: Slot) -> LedgerResult<VersionedConfirmedBlock> {
         let previous_slot = slot.saturating_sub(1);
         let previous_blockhash = self.get_block_hash(previous_slot)?;
 
-        let block_hash = self.get_block_hash(slot)?;
+        let blockhash = self.get_block_hash(slot)?;
         let block_time = self.blocktime_cf.get(slot)?;
-        let block_height = slot;
+        let block_height = Some(slot);
 
         let block = VersionedConfirmedBlock {
-            previous_blockhash: previous_blockhash.unwrap_or_default().to_string(),
+            previous_blockhash: previous_blockhash
+                .unwrap_or_default()
+                .to_string(),
             blockhash: blockhash.unwrap_or_default().to_string(),
 
             parent_slot: previous_slot,
             transactions: vec![],
 
-            rewards: vec![],
+            rewards: vec![], // This validator doesn't do voting
 
             block_time,
             block_height,
         };
 
-        return Ok(VersionedConfirmedBlockWithEntries { block, entries });
+        return Ok(block);
     }
 
     // -----------------
