@@ -659,8 +659,8 @@ impl Bank {
 
     pub fn advance_slot(&self) -> (Slot, Slot) {
         // 1. Determine next slot and set it
-        let last_slot = self.slot();
-        let next_slot = last_slot + 1;
+        let prev_slot = self.slot();
+        let next_slot = prev_slot + 1;
         self.set_slot(next_slot);
         self.rc.accounts.set_slot(next_slot);
 
@@ -683,7 +683,7 @@ impl Bank {
         self.status_cache
             .write()
             .expect("RwLock of status cache poisoned")
-            .add_root(last_slot);
+            .add_root(prev_slot);
 
         // 4. Update sysvars
         self.update_clock(self.genesis_creation_time);
@@ -722,12 +722,12 @@ impl Bank {
         // 9. Update slot hashes since they are needed to sanitize a transaction in some cases
         //    NOTE: slothash and blockhash are the same for us
         //          in solana the blockhash is set to the hash of the slot that is finalized
-        self.update_slot_hashes(last_slot, current_hash);
+        self.update_slot_hashes(prev_slot, current_hash);
 
         // 9. Update slot history
-        self.update_slot_history(last_slot);
+        self.update_slot_history(prev_slot);
 
-        (last_slot, next_slot)
+        (prev_slot, next_slot)
     }
 
     pub fn epoch(&self) -> Epoch {
