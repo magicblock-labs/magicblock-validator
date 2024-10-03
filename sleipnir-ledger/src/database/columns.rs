@@ -112,6 +112,7 @@ pub fn columns() -> Vec<&'static str> {
         SlotSignatures::NAME,
         TransactionStatusIndex::NAME,
         Blocktime::NAME,
+        Blockhash::NAME,
         Transaction::NAME,
         TransactionMemos::NAME,
         PerfSamples::NAME,

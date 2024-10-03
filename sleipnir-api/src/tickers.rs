@@ -36,7 +36,7 @@ pub fn init_slot_ticker(
             let slot = bank.advance_slot();
 
             // Update ledger
-            if let Err(error) =
+            if let Err(err) =
                 ledger.cache_block_time(slot, timestamp_in_secs() as i64)
             {
                 error!("Failed to cache block time: {:?}", err);

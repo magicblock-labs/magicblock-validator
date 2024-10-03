@@ -307,12 +307,17 @@ impl Ledger {
     pub fn get_block(
         &self,
         slot: Slot,
-    ) -> LedgerResult<VersionedConfirmedBlock> {
+    ) -> LedgerResult<Option<VersionedConfirmedBlock>> {
+        let blockhash = self.get_block_hash(slot)?;
+        let block_time = self.get_block_time(slot)?;
+
+        if block_time.is_none() || blockhash.is_none() {
+            return Ok(None);
+        }
+
         let previous_slot = slot.saturating_sub(1);
         let previous_blockhash = self.get_block_hash(previous_slot)?;
 
-        let blockhash = self.get_block_hash(slot)?;
-        let block_time = self.get_block_time(slot)?;
         let block_height = Some(slot);
 
         let index_iterator = self
@@ -343,7 +348,10 @@ impl Ledger {
                     .transaction_status_cf
                     .get_protobuf((tx_signature, slot))?
                     .ok_or(LedgerError::TransactionStatusMetaNotFound)?;
-                Ok(VersionedTransactionWithStatusMeta { transaction, meta })
+                Ok(VersionedTransactionWithStatusMeta {
+                    transaction,
+                    meta: TransactionStatusMeta::try_from(meta).unwrap(),
+                })
             })
             .collect::<LedgerResult<Vec<_>>>()?;
 
@@ -362,7 +370,7 @@ impl Ledger {
             block_height,
         };
 
-        return Ok(block);
+        return Ok(Some(block));
     }
 
     // -----------------

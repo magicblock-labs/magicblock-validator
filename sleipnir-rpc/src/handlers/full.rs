@@ -236,13 +236,19 @@ impl Full for FullImpl {
             max_supported_transaction_version: config
                 .max_supported_transaction_version,
         };
-        let commitment = config.commitment.unwrap_or_default();
 
-        let block = meta.get_block(slot);
+        Box::pin(async move {
+            let block = meta.get_block(slot)?;
 
-        let result = block.encode_with_options(encoding, encoding_options);
+            let encoded = block
+                .map(|block| {
+                    block.encode_with_options(encoding, encoding_options)
+                })
+                .transpose()
+                .map_err(|e| Error::invalid_params(format!("{e:?}")))?;
 
-        todo!("get_block");
+            Ok(encoded)
+        })
     }
 
     fn get_block_time(

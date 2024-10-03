@@ -171,14 +171,12 @@ impl JsonRpcRequestProcessor {
     // -----------------
     // Block
     // -----------------
-    pub fn get_block(&self, slot: Slot) -> Result<ConfirmedBlock> {
+    pub fn get_block(&self, slot: Slot) -> Result<Option<ConfirmedBlock>> {
         let block = self
             .ledger
             .get_block(slot)
-            .map(ConfirmedBlock::from)
             .map_err(|err| Error::invalid_params(format!("{err}")))?;
-
-        Ok(block)
+        Ok(block.map(ConfirmedBlock::from))
     }
 
     // -----------------
