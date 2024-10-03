@@ -34,9 +34,10 @@ pub fn init_slot_ticker(
         while !exit.load(Ordering::Relaxed) {
             tokio::time::sleep(tick_duration).await;
 
+            // Slot cutoff, update the bank
             let (prev_slot, next_slot) = bank.advance_slot();
 
-            // Update ledger with new block's metas
+            // Update ledger with previous block's metas
             if let Err(err) = ledger.write_block(
                 prev_slot,
                 timestamp_in_secs() as i64,

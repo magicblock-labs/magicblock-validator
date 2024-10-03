@@ -1198,6 +1198,88 @@ mod tests {
             assert_eq!(found, meta);
         }
     }
+
+    #[test]
+    fn test_get_transaction_status_by_signature() {
+        init_logger!();
+
+        let ledger_path = get_tmp_ledger_path_auto_delete!();
+        let store = Ledger::open(ledger_path.path()).unwrap();
+
+        let (sig_uno, slot_uno) = (Signature::default(), 10);
+        let (sig_dos, slot_dos) = (Signature::from([2u8; 64]), 20);
+
+        // result not found
+        assert!(store
+            .read_transaction_status((Signature::default(), slot_uno))
+            .unwrap()
+            .is_none());
+
+        // insert value
+        let (status_uno, writable_keys, readonly_keys) =
+            create_transaction_status_meta(5);
+        assert!(store
+            .write_transaction_status(
+                slot_uno,
+                sig_uno,
+                keys_as_ref!(writable_keys),
+                keys_as_ref!(readonly_keys),
+                status_uno.clone(),
+                0
+            )
+            .is_ok());
+
+        // Finds by matching signature
+        {
+            let (slot, status) = store
+                .get_transaction_status(sig_uno, slot_uno + 5)
+                .unwrap()
+                .unwrap();
+            assert_eq!(slot, slot_uno);
+            assert_eq!(status, status_uno);
+
+            // Does not find it by other signature
+            assert!(store
+                .get_transaction_status(sig_dos, slot_uno)
+                .unwrap()
+                .is_none());
+        }
+
+        // Add a status for the other signature
+        let (status_dos, writable_keys, readonly_keys) =
+            create_transaction_status_meta(5);
+        assert!(store
+            .write_transaction_status(
+                slot_dos,
+                sig_dos,
+                keys_as_ref!(writable_keys),
+                keys_as_ref!(readonly_keys),
+                status_dos.clone(),
+                0,
+            )
+            .is_ok());
+
+        // First still there
+        {
+            let (slot, status) = store
+                .get_transaction_status(sig_uno, slot_uno)
+                .unwrap()
+                .unwrap();
+            assert_eq!(slot, slot_uno);
+            assert_eq!(status, status_uno);
+        }
+
+        // Second one is found now as well
+        {
+            let (slot, status) = store
+                .get_transaction_status(sig_dos, slot_dos)
+                .unwrap()
+                .unwrap();
+            assert_eq!(slot, slot_dos);
+            assert_eq!(status, status_dos);
+        }
+    }
+
     #[test]
     fn test_get_complete_transaction_by_signature() {
         init_logger!();
@@ -1281,87 +1363,6 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(tx, tx_dos);
-    }
-
-    #[test]
-    fn test_get_transaction_status_by_signature() {
-        init_logger!();
-
-        let ledger_path = get_tmp_ledger_path_auto_delete!();
-        let store = Ledger::open(ledger_path.path()).unwrap();
-
-        let (sig_uno, slot_uno) = (Signature::default(), 10);
-        let (sig_dos, slot_dos) = (Signature::from([2u8; 64]), 20);
-
-        // result not found
-        assert!(store
-            .read_transaction_status((Signature::default(), slot_uno))
-            .unwrap()
-            .is_none());
-
-        // insert value
-        let (status_uno, writable_keys, readonly_keys) =
-            create_transaction_status_meta(5);
-        assert!(store
-            .write_transaction_status(
-                slot_uno,
-                sig_uno,
-                keys_as_ref!(writable_keys),
-                keys_as_ref!(readonly_keys),
-                status_uno.clone(),
-                0
-            )
-            .is_ok());
-
-        // Finds by matching signature
-        {
-            let (slot, status) = store
-                .get_transaction_status(sig_uno, slot_uno + 5)
-                .unwrap()
-                .unwrap();
-            assert_eq!(slot, slot_uno);
-            assert_eq!(status, status_uno);
-
-            // Does not find it by other signature
-            assert!(store
-                .get_transaction_status(sig_dos, slot_uno)
-                .unwrap()
-                .is_none());
-        }
-
-        // Add a status for the other signature
-        let (status_dos, writable_keys, readonly_keys) =
-            create_transaction_status_meta(5);
-        assert!(store
-            .write_transaction_status(
-                slot_dos,
-                sig_dos,
-                keys_as_ref!(writable_keys),
-                keys_as_ref!(readonly_keys),
-                status_dos.clone(),
-                0,
-            )
-            .is_ok());
-
-        // First still there
-        {
-            let (slot, status) = store
-                .get_transaction_status(sig_uno, slot_uno)
-                .unwrap()
-                .unwrap();
-            assert_eq!(slot, slot_uno);
-            assert_eq!(status, status_uno);
-        }
-
-        // Second one is found now as well
-        {
-            let (slot, status) = store
-                .get_transaction_status(sig_dos, slot_dos)
-                .unwrap()
-                .unwrap();
-            assert_eq!(slot, slot_dos);
-            assert_eq!(status, status_dos);
-        }
     }
 
     #[test]
