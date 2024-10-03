@@ -1198,6 +1198,90 @@ mod tests {
             assert_eq!(found, meta);
         }
     }
+    #[test]
+    fn test_get_complete_transaction_by_signature() {
+        init_logger!();
+
+        let ledger_path = get_tmp_ledger_path_auto_delete!();
+        let store = Ledger::open(ledger_path.path()).unwrap();
+
+        let (sig_uno, slot_uno, block_time_uno, block_hash_uno) =
+            (Signature::default(), 10, 100, Hash::new_unique());
+        let (sig_dos, slot_dos, block_time_dos, block_hash_dos) =
+            (Signature::from([2u8; 64]), 20, 200, Hash::new_unique());
+
+        let (tx_uno, sanitized_uno) = create_confirmed_transaction(
+            slot_uno,
+            5,
+            Some(block_time_uno),
+            None,
+        );
+
+        let (tx_dos, sanitized_dos) = create_confirmed_transaction(
+            slot_dos,
+            9,
+            Some(block_time_dos),
+            None,
+        );
+
+        // 0. Neither transaction is in the store
+        assert!(store
+            .get_confirmed_transaction(sig_uno, 0)
+            .unwrap()
+            .is_none());
+        assert!(store
+            .get_confirmed_transaction(sig_dos, 0)
+            .unwrap()
+            .is_none());
+
+        // 1. Write first transaction and block time for relevant slot
+        assert!(store
+            .write_transaction(
+                sig_uno,
+                slot_uno,
+                sanitized_uno.clone(),
+                tx_uno.tx_with_meta.get_status_meta().unwrap(),
+                0,
+            )
+            .is_ok());
+        assert!(store
+            .write_block(slot_uno, block_time_uno, block_hash_uno)
+            .is_ok());
+
+        // Get first transaction by signature providing high enough slot
+        let tx = store
+            .get_complete_transaction(sig_uno, slot_uno)
+            .unwrap()
+            .unwrap();
+        assert_eq!(tx, tx_uno);
+
+        // Get first transaction by signature providing slot that's too low
+        assert!(store
+            .get_complete_transaction(sig_uno, slot_uno - 1)
+            .unwrap()
+            .is_none());
+
+        // 2. Write second transaction and block time for relevant slot
+        assert!(store
+            .write_transaction(
+                sig_dos,
+                slot_dos,
+                sanitized_dos.clone(),
+                tx_dos.tx_with_meta.get_status_meta().unwrap(),
+                0
+            )
+            .is_ok());
+        assert!(store
+            .write_block(slot_dos, block_time_dos, block_hash_dos)
+            .is_ok());
+
+        // Get second transaction by signature providing slot at which it was stored
+        let tx = store
+            .get_complete_transaction(sig_dos, slot_dos)
+            .unwrap()
+            .unwrap();
+        assert_eq!(tx, tx_dos);
+    }
 
     #[test]
     fn test_get_transaction_status_by_signature() {
