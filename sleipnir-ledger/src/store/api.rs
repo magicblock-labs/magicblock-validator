@@ -370,7 +370,7 @@ impl Ledger {
             block_height,
         };
 
-        return Ok(Some(block));
+        Ok(Some(block))
     }
 
     // -----------------
