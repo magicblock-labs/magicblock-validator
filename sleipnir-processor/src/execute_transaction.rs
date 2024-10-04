@@ -23,7 +23,7 @@ pub fn execute_legacy_transaction(
 }
 
 lazy_static! {
-    static ref TRANSACTION_MUTEX: Mutex<()> = Mutex::new(());
+    static ref TRANSACTION_MUTEX: Mutex<usize> = Mutex::new(0);
 }
 
 pub fn execute_sanitized_transaction(
@@ -40,7 +40,7 @@ pub fn execute_sanitized_transaction(
     // transactions to be executed in parallel without account lock conflicts.
     // If we choose this as a long term solution we need to lock simulations/preflight with the
     // same mutex once we enable them again
-    let _transaction_lock = TRANSACTION_MUTEX.lock().unwrap();
+    let mut transaction_index = TRANSACTION_MUTEX.lock().unwrap();
 
     let batch = bank.prepare_sanitized_batch(txs);
 
@@ -49,10 +49,12 @@ pub fn execute_sanitized_transaction(
         // TODO: figure out how to properly derive transaction_indexes (index within the slot)
         // - This is important for the ledger history of each slot
         // - tracked: https://github.com/magicblock-labs/magicblock-validator/issues/201
-        transaction_indexes: txs
+        transaction_slot_indexes: txs
             .iter()
-            .enumerate()
-            .map(|(idx, _)| idx)
+            .map(|_| {
+                *transaction_index += 1;
+                *transaction_index
+            })
             .collect(),
     };
     let mut timings = Default::default();

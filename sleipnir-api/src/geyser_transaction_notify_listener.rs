@@ -48,7 +48,7 @@ impl GeyserTransactionNotifyListener {
                             execution_results,
                             balances,
                             token_balances,
-                            transaction_indexes,
+                            transaction_slot_indexes: transaction_indexes,
                             ..
                         },
                     ) => {

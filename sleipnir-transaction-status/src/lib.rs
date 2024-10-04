@@ -27,7 +27,7 @@ pub struct TransactionStatusBatch {
     pub balances: TransactionBalancesSet,
     pub token_balances: TransactionTokenBalancesSet,
     pub rent_debits: Vec<RentDebits>,
-    pub transaction_indexes: Vec<usize>,
+    pub transaction_slot_indexes: Vec<usize>,
 }
 
 impl std::fmt::Debug for TransactionStatusBatch {
@@ -37,7 +37,7 @@ impl std::fmt::Debug for TransactionStatusBatch {
             .field("execution_results", &self.execution_results)
             .field("balances", &self.balances)
             .field("rent_debits", &self.rent_debits)
-            .field("transaction_indexes", &self.transaction_indexes)
+            .field("transaction_slot_indexes", &self.transaction_slot_indexes)
             .finish()
     }
 }
@@ -57,7 +57,7 @@ impl TransactionStatusSender {
         balances: TransactionBalancesSet,
         token_balances: TransactionTokenBalancesSet,
         rent_debits: Vec<RentDebits>,
-        transaction_indexes: Vec<usize>,
+        transaction_slot_indexes: Vec<usize>,
     ) {
         let slot = bank.slot();
 
@@ -78,7 +78,7 @@ impl TransactionStatusSender {
                 balances,
                 token_balances,
                 rent_debits,
-                transaction_indexes,
+                transaction_slot_indexes,
             },
         )) {
             trace!(

@@ -657,7 +657,7 @@ impl Bank {
         self.slot.store(slot, Ordering::Relaxed);
     }
 
-    pub fn advance_slot(&self) -> (Slot, Slot) {
+    pub fn advance_slot(&self) -> Slot {
         // 1. Determine next slot and set it
         let prev_slot = self.slot();
         let next_slot = prev_slot + 1;
@@ -727,7 +727,7 @@ impl Bank {
         // 9. Update slot history
         self.update_slot_history(prev_slot);
 
-        (prev_slot, next_slot)
+        next_slot
     }
 
     pub fn epoch(&self) -> Epoch {
