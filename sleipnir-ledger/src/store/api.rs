@@ -328,13 +328,12 @@ impl Ledger {
             if tx_slot != slot {
                 break;
             }
-            signatures.push(tx_signature);
+            signatures.push(Signature::try_from(&*tx_signature)?);
         }
 
         let transactions = signatures
             .into_iter()
-            .map(|signature| {
-                let tx_signature = Signature::try_from(&*signature)?;
+            .map(|tx_signature| {
                 let transaction = self
                     .transaction_cf
                     .get_protobuf((tx_signature, slot))?
@@ -775,7 +774,7 @@ impl Ledger {
         slot: Slot,
         transaction: SanitizedTransaction,
         status: TransactionStatusMeta,
-        transaction_index: usize,
+        transaction_slot_index: usize,
     ) -> LedgerResult<()> {
         let tx_account_locks = transaction.get_account_locks_unchecked();
 
@@ -786,7 +785,7 @@ impl Ledger {
             tx_account_locks.writable,
             tx_account_locks.readonly,
             status,
-            transaction_index,
+            transaction_slot_index,
         )?;
 
         // 2. Write Transaction
@@ -895,24 +894,24 @@ impl Ledger {
         writable_keys: Vec<&Pubkey>,
         readonly_keys: Vec<&Pubkey>,
         status: TransactionStatusMeta,
-        transaction_index: usize,
+        transaction_slot_index: usize,
     ) -> LedgerResult<()> {
-        let transaction_index = u32::try_from(transaction_index)
+        let transaction_slot_index = u32::try_from(transaction_slot_index)
             .map_err(|_| LedgerError::TransactionIndexOverflow)?;
         for address in writable_keys {
             self.address_signatures_cf.put(
-                (*address, slot, transaction_index, signature),
+                (*address, slot, transaction_slot_index, signature),
                 &AddressSignatureMeta { writeable: true },
             )?;
         }
         for address in readonly_keys {
             self.address_signatures_cf.put(
-                (*address, slot, transaction_index, signature),
+                (*address, slot, transaction_slot_index, signature),
                 &AddressSignatureMeta { writeable: false },
             )?;
         }
         self.slot_signatures_cf
-            .put((slot, transaction_index), &signature)?;
+            .put((slot, transaction_slot_index), &signature)?;
 
         let status = status.into();
         self.transaction_status_cf

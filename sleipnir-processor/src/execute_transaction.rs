@@ -46,7 +46,9 @@ pub fn execute_sanitized_transaction(
 
     let batch_with_indexes = TransactionBatchWithIndexes {
         batch,
-        // TODO(thlorenz): figure out how to properly derive transaction_indexes
+        // TODO: figure out how to properly derive transaction_indexes (index within the slot)
+        // - This is important for the ledger history of each slot
+        // - tracked: https://github.com/magicblock-labs/magicblock-validator/issues/201
         transaction_indexes: txs
             .iter()
             .enumerate()
