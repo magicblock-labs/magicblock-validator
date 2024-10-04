@@ -39,7 +39,7 @@ fn write_transfer_transaction_executed(
     let signature = Signature::new_unique();
     let transaction = SanitizedTransaction::from_transaction_for_tests(tx);
     let status = TransactionStatusMeta::default();
-    let message_hash = transaction.message_hash().clone();
+    let message_hash = *transaction.message_hash();
     ledger
         .write_transaction(
             signature,
@@ -158,7 +158,7 @@ fn test_get_block_transactions() {
         slot_41_tx2,
         block_41
             .transactions
-            .get(0)
+            .first()
             .unwrap()
             .transaction
             .message
@@ -182,7 +182,7 @@ fn test_get_block_transactions() {
         slot_42_tx2,
         block_42
             .transactions
-            .get(0)
+            .first()
             .unwrap()
             .transaction
             .message
