@@ -23,7 +23,7 @@ pub fn execute_legacy_transaction(
 }
 
 lazy_static! {
-    static ref TRANSACTION_MUTEX: Mutex<usize> = Mutex::new(0);
+    static ref TRANSACTION_INDEX_MUTEX: Mutex<usize> = Mutex::new(0);
 }
 
 pub fn execute_sanitized_transaction(
@@ -41,7 +41,7 @@ pub fn execute_sanitized_transaction(
     // If we choose this as a long term solution we need to lock simulations/preflight with the
     // same mutex once we enable them again
     // Work tracked here: https://github.com/magicblock-labs/magicblock-validator/issues/181
-    let mut transaction_index = TRANSACTION_MUTEX.lock().unwrap();
+    let mut transaction_index_locked = TRANSACTION_INDEX_MUTEX.lock().unwrap();
 
     let batch = bank.prepare_sanitized_batch(txs);
 
@@ -53,8 +53,8 @@ pub fn execute_sanitized_transaction(
         transaction_slot_indexes: txs
             .iter()
             .map(|_| {
-                *transaction_index += 1;
-                *transaction_index
+                *transaction_index_locked += 1;
+                *transaction_index_locked
             })
             .collect(),
     };
