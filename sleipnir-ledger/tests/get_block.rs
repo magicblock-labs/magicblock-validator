@@ -23,7 +23,7 @@ fn setup() -> Ledger {
     Ledger::open(&path).unwrap()
 }
 
-fn write_dummy_transaction_executed(
+fn write_dummy_transaction(
     ledger: &Ledger,
     slot: Slot,
     transaction_slot_index: usize,
@@ -62,11 +62,11 @@ fn get_block(ledger: &Ledger, slot: Slot) -> VersionedConfirmedBlock {
 
 fn get_block_transaction_hash(
     block: &VersionedConfirmedBlock,
-    transaction_index: usize,
+    transaction_slot_index: usize,
 ) -> Hash {
     block
         .transactions
-        .get(transaction_index)
+        .get(transaction_slot_index)
         .expect("Transaction not found in block")
         .transaction
         .message
@@ -110,8 +110,8 @@ fn test_get_block_transactions() {
 
     let ledger = setup();
 
-    let slot_41_tx1 = write_dummy_transaction_executed(&ledger, 41, 1);
-    let slot_41_tx2 = write_dummy_transaction_executed(&ledger, 41, 2);
+    let slot_41_tx1 = write_dummy_transaction(&ledger, 41, 0);
+    let slot_41_tx2 = write_dummy_transaction(&ledger, 41, 1);
 
     let slot_41_block_time = 410;
     let slot_41_block_hash = Hash::new_unique();
@@ -119,8 +119,8 @@ fn test_get_block_transactions() {
         .write_block(41, slot_41_block_time, slot_41_block_hash)
         .unwrap();
 
-    let slot_42_tx1 = write_dummy_transaction_executed(&ledger, 42, 1);
-    let slot_42_tx2 = write_dummy_transaction_executed(&ledger, 42, 2);
+    let slot_42_tx1 = write_dummy_transaction(&ledger, 42, 0);
+    let slot_42_tx2 = write_dummy_transaction(&ledger, 42, 1);
 
     let slot_42_block_time = 420;
     let slot_42_block_hash = Hash::new_unique();
@@ -129,13 +129,11 @@ fn test_get_block_transactions() {
         .unwrap();
 
     let block_41 = get_block(&ledger, 41);
-
     assert_eq!(2, block_41.transactions.len());
     assert_eq!(slot_41_tx2, get_block_transaction_hash(&block_41, 0));
     assert_eq!(slot_41_tx1, get_block_transaction_hash(&block_41, 1));
 
     let block_42 = get_block(&ledger, 42);
-
     assert_eq!(2, block_42.transactions.len());
     assert_eq!(slot_42_tx2, get_block_transaction_hash(&block_42, 0));
     assert_eq!(slot_42_tx1, get_block_transaction_hash(&block_42, 1));
