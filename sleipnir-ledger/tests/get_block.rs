@@ -56,8 +56,8 @@ fn write_dummy_transaction_executed(
 fn get_block(ledger: &Ledger, slot: Slot) -> VersionedConfirmedBlock {
     ledger
         .get_block(slot)
-        .expect(&format!("Failed to read ledger for slot: {}", slot))
-        .expect(&format!("Block not found for slot: {}", slot))
+        .expect("Failed to read ledger")
+        .expect("Block not found")
 }
 
 fn get_block_transaction_hash(
@@ -67,10 +67,7 @@ fn get_block_transaction_hash(
     block
         .transactions
         .get(transaction_index)
-        .expect(&format!(
-            "Block does not have a transaction at index: {}",
-            transaction_index
-        ))
+        .expect("Transaction not found in block")
         .transaction
         .message
         .hash()

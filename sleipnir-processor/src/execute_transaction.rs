@@ -40,6 +40,7 @@ pub fn execute_sanitized_transaction(
     // transactions to be executed in parallel without account lock conflicts.
     // If we choose this as a long term solution we need to lock simulations/preflight with the
     // same mutex once we enable them again
+    // Work tracked here: https://github.com/magicblock-labs/magicblock-validator/issues/181
     let mut transaction_index = TRANSACTION_MUTEX.lock().unwrap();
 
     let batch = bank.prepare_sanitized_batch(txs);
