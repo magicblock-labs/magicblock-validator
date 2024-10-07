@@ -271,9 +271,9 @@ impl Full for FullImpl {
             start_slot, end_slot
         );
         Box::pin(async move {
-            let mut slots = vec![];
             let top_slot = meta.get_bank().slot();
-            let current_slot = start_slot;
+            let mut slots = vec![];
+            let mut current_slot = start_slot;
             loop {
                 if current_slot >= top_slot {
                     break;
@@ -284,6 +284,7 @@ impl Full for FullImpl {
                     }
                 }
                 slots.push(current_slot);
+                current_slot += 1;
             }
             Ok(slots)
         })
@@ -301,9 +302,9 @@ impl Full for FullImpl {
             start_slot, limit
         );
         Box::pin(async move {
-            let mut slots = vec![];
             let top_slot = meta.get_bank().slot();
-            let current_slot = start_slot;
+            let mut slots = vec![];
+            let mut current_slot = start_slot;
             loop {
                 if current_slot >= top_slot {
                     break;
@@ -312,6 +313,7 @@ impl Full for FullImpl {
                     break;
                 }
                 slots.push(current_slot);
+                current_slot += 1;
             }
             Ok(slots)
         })
