@@ -267,7 +267,7 @@ impl Full for FullImpl {
         let (end_slot, _) =
             config.map(|wrapper| wrapper.unzip()).unwrap_or_default();
         debug!(
-            "get_blocks rpc request received: {}-{:?}",
+            "get_blocks rpc request received: {} -> {:?}",
             start_slot, end_slot
         );
         Box::pin(async move {
@@ -297,7 +297,7 @@ impl Full for FullImpl {
         commitment: Option<CommitmentConfig>,
     ) -> BoxFuture<Result<Vec<Slot>>> {
         debug!(
-            "get_blocks_with_limit rpc request received: {}-{:?}",
+            "get_blocks_with_limit rpc request received: {} (x{:?})",
             start_slot, limit
         );
         Box::pin(async move {
