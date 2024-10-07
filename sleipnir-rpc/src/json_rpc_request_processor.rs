@@ -31,8 +31,8 @@ use solana_sdk::{
     transaction::{SanitizedTransaction, VersionedTransaction},
 };
 use solana_transaction_status::{
-    EncodedConfirmedTransactionWithStatusMeta, TransactionConfirmationStatus,
-    TransactionStatus, UiTransactionEncoding,
+    ConfirmedBlock, EncodedConfirmedTransactionWithStatusMeta,
+    TransactionConfirmationStatus, TransactionStatus, UiTransactionEncoding,
 };
 
 use crate::{
@@ -166,6 +166,17 @@ impl JsonRpcRequestProcessor {
             .collect();
 
         Ok(results)
+    }
+
+    // -----------------
+    // Block
+    // -----------------
+    pub fn get_block(&self, slot: Slot) -> Result<Option<ConfirmedBlock>> {
+        let block = self
+            .ledger
+            .get_block(slot)
+            .map_err(|err| Error::invalid_params(format!("{err}")))?;
+        Ok(block.map(ConfirmedBlock::from))
     }
 
     // -----------------

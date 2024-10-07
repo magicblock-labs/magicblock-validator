@@ -33,12 +33,19 @@ pub fn init_slot_ticker(
     tokio::task::spawn(async move {
         while !exit.load(Ordering::Relaxed) {
             tokio::time::sleep(tick_duration).await;
-            let slot = bank.advance_slot();
-            let _ = ledger
-                .cache_block_time(slot, timestamp_in_secs() as i64)
-                .map_err(|e| {
-                    error!("Failed to cache block time: {:?}", e);
-                });
+
+            // Slot cutoff, update the bank
+            let prev_slot = bank.slot();
+            let next_slot = bank.advance_slot();
+
+            // Update ledger with previous block's metas
+            if let Err(err) = ledger.write_block(
+                prev_slot,
+                timestamp_in_secs() as i64,
+                bank.last_blockhash(),
+            ) {
+                error!("Failed to write block: {:?}", err);
+            }
 
             // If accounts were scheduled to be committed, we accept them here
             // and processs the commits
@@ -70,7 +77,7 @@ pub fn init_slot_ticker(
                 }
             }
             if log {
-                info!("Advanced to slot {}", slot);
+                info!("Advanced to slot {}", next_slot);
             }
         }
     })

@@ -48,7 +48,7 @@ impl GeyserTransactionNotifyListener {
                             execution_results,
                             balances,
                             token_balances,
-                            transaction_indexes,
+                            transaction_slot_indexes,
                             ..
                         },
                     ) => {
@@ -60,7 +60,7 @@ impl GeyserTransactionNotifyListener {
                             post_balances,
                             pre_token_balances,
                             post_token_balances,
-                            transaction_index,
+                            transaction_slot_index,
                         ) in izip!(
                             transactions,
                             execution_results,
@@ -68,7 +68,7 @@ impl GeyserTransactionNotifyListener {
                             balances.post_balances,
                             token_balances.pre_token_balances,
                             token_balances.post_token_balances,
-                            transaction_indexes,
+                            transaction_slot_indexes,
                         ) {
                             if let Some(details) = execution_result {
                                 let TransactionExecutionDetails {
@@ -120,7 +120,7 @@ impl GeyserTransactionNotifyListener {
 
                                 transaction_notifier.notify_transaction(
                                     slot,
-                                    transaction_index,
+                                    transaction_slot_index,
                                     transaction.signature(),
                                     &transaction_status_meta,
                                     &transaction,
@@ -138,7 +138,7 @@ impl GeyserTransactionNotifyListener {
                                         slot,
                                         transaction,
                                         transaction_status_meta,
-                                        transaction_index,
+                                        transaction_slot_index,
                                     )
                                     .expect("Expect database write to succeed: TransactionStatus");
                                 }

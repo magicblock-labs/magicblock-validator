@@ -11,14 +11,16 @@ use rocksdb::Direction as IteratorDirection;
 use solana_measure::measure::Measure;
 use solana_sdk::{
     clock::{Slot, UnixTimestamp},
+    hash::Hash,
     pubkey::Pubkey,
     signature::Signature,
-    transaction::SanitizedTransaction,
+    transaction::{SanitizedTransaction, VersionedTransaction},
 };
 use solana_storage_proto::convert::generated::{self, ConfirmedTransaction};
 use solana_transaction_status::{
     ConfirmedTransactionStatusWithSignature,
     ConfirmedTransactionWithStatusMeta, TransactionStatusMeta,
+    VersionedConfirmedBlock, VersionedTransactionWithStatusMeta,
 };
 
 use crate::{
@@ -52,6 +54,7 @@ pub struct Ledger {
     slot_signatures_cf: LedgerColumn<cf::SlotSignatures>,
     transaction_status_index_cf: LedgerColumn<cf::TransactionStatusIndex>,
     blocktime_cf: LedgerColumn<cf::Blocktime>,
+    blockhash_cf: LedgerColumn<cf::Blockhash>,
     transaction_cf: LedgerColumn<cf::Transaction>,
     transaction_memos_cf: LedgerColumn<cf::TransactionMemos>,
     perf_samples_cf: LedgerColumn<cf::PerfSamples>,
@@ -110,6 +113,7 @@ impl Ledger {
         let slot_signatures_cf = db.column();
         let transaction_status_index_cf = db.column();
         let blocktime_cf = db.column();
+        let blockhash_cf = db.column();
         let transaction_cf = db.column();
         let transaction_memos_cf = db.column();
         let perf_samples_cf = db.column();
@@ -130,6 +134,7 @@ impl Ledger {
             slot_signatures_cf,
             transaction_status_index_cf,
             blocktime_cf,
+            blockhash_cf,
             transaction_cf,
             transaction_memos_cf,
             perf_samples_cf,
@@ -156,6 +161,7 @@ impl Ledger {
         self.slot_signatures_cf.submit_rocksdb_cf_metrics();
         self.transaction_status_index_cf.submit_rocksdb_cf_metrics();
         self.blocktime_cf.submit_rocksdb_cf_metrics();
+        self.blockhash_cf.submit_rocksdb_cf_metrics();
         self.transaction_cf.submit_rocksdb_cf_metrics();
         self.transaction_memos_cf.submit_rocksdb_cf_metrics();
         self.perf_samples_cf.submit_rocksdb_cf_metrics();
@@ -256,26 +262,110 @@ impl Ledger {
     }
 
     // -----------------
-    // BlockTime
+    // Block time
+    // -----------------
+
+    fn get_block_time(
+        &self,
+        slot: Slot,
+    ) -> LedgerResult<Option<UnixTimestamp>> {
+        let _lock = self.check_lowest_cleanup_slot(slot)?;
+        self.blocktime_cf.get(slot)
+    }
+
+    // -----------------
+    // Block hash
+    // -----------------
+
+    fn get_block_hash(&self, slot: Slot) -> LedgerResult<Option<Hash>> {
+        let _lock = self.check_lowest_cleanup_slot(slot)?;
+        self.blockhash_cf.get(slot)
+    }
+
+    // -----------------
+    // Block
     // -----------------
 
     // NOTE: we kept the term block time even tough we don't produce blocks.
     // As far as we are concerned these are just the time when we advanced to
     // a specific slot.
-    pub fn cache_block_time(
+    pub fn write_block(
         &self,
         slot: Slot,
-        timestamp: solana_sdk::clock::UnixTimestamp,
+        timestamp: UnixTimestamp,
+        blockhash: Hash,
     ) -> LedgerResult<()> {
-        self.blocktime_cf.put(slot, &timestamp)
+        self.blocktime_cf.put(slot, &timestamp)?;
+        self.blockhash_cf.put(slot, &blockhash)?;
+        Ok(())
     }
 
-    fn get_block_time(
+    pub fn get_block(
         &self,
         slot: Slot,
-    ) -> LedgerResult<Option<solana_sdk::clock::UnixTimestamp>> {
-        let _lock = self.check_lowest_cleanup_slot(slot)?;
-        self.blocktime_cf.get(slot)
+    ) -> LedgerResult<Option<VersionedConfirmedBlock>> {
+        let blockhash = self.get_block_hash(slot)?;
+        let block_time = self.get_block_time(slot)?;
+
+        if block_time.is_none() || blockhash.is_none() {
+            return Ok(None);
+        }
+
+        let previous_slot = slot.saturating_sub(1);
+        let previous_blockhash = self.get_block_hash(previous_slot)?;
+
+        let block_height = Some(slot);
+
+        let index_iterator = self
+            .slot_signatures_cf
+            .iter_current_index_filtered(IteratorMode::From(
+                (slot, u32::MAX),
+                IteratorDirection::Reverse,
+            ))?;
+
+        let mut signatures = vec![];
+        for ((tx_slot, _tx_idx), tx_signature) in index_iterator {
+            if tx_slot != slot {
+                break;
+            }
+            signatures.push(Signature::try_from(&*tx_signature)?);
+        }
+
+        let transactions = signatures
+            .into_iter()
+            .map(|tx_signature| {
+                let transaction = self
+                    .transaction_cf
+                    .get_protobuf((tx_signature, slot))?
+                    .map(VersionedTransaction::from)
+                    .ok_or(LedgerError::TransactionNotFound)?;
+                let meta = self
+                    .transaction_status_cf
+                    .get_protobuf((tx_signature, slot))?
+                    .ok_or(LedgerError::TransactionStatusMetaNotFound)?;
+                Ok(VersionedTransactionWithStatusMeta {
+                    transaction,
+                    meta: TransactionStatusMeta::try_from(meta).unwrap(),
+                })
+            })
+            .collect::<LedgerResult<Vec<_>>>()?;
+
+        let block = VersionedConfirmedBlock {
+            previous_blockhash: previous_blockhash
+                .unwrap_or_default()
+                .to_string(),
+            blockhash: blockhash.unwrap_or_default().to_string(),
+
+            parent_slot: previous_slot,
+            transactions,
+
+            rewards: vec![], // This validator doesn't do voting
+
+            block_time,
+            block_height,
+        };
+
+        Ok(Some(block))
     }
 
     // -----------------
@@ -684,7 +774,7 @@ impl Ledger {
         slot: Slot,
         transaction: SanitizedTransaction,
         status: TransactionStatusMeta,
-        transaction_index: usize,
+        transaction_slot_index: usize,
     ) -> LedgerResult<()> {
         let tx_account_locks = transaction.get_account_locks_unchecked();
 
@@ -695,7 +785,7 @@ impl Ledger {
             tx_account_locks.writable,
             tx_account_locks.readonly,
             status,
-            transaction_index,
+            transaction_slot_index,
         )?;
 
         // 2. Write Transaction
@@ -804,24 +894,24 @@ impl Ledger {
         writable_keys: Vec<&Pubkey>,
         readonly_keys: Vec<&Pubkey>,
         status: TransactionStatusMeta,
-        transaction_index: usize,
+        transaction_slot_index: usize,
     ) -> LedgerResult<()> {
-        let transaction_index = u32::try_from(transaction_index)
+        let transaction_slot_index = u32::try_from(transaction_slot_index)
             .map_err(|_| LedgerError::TransactionIndexOverflow)?;
         for address in writable_keys {
             self.address_signatures_cf.put(
-                (*address, slot, transaction_index, signature),
+                (*address, slot, transaction_slot_index, signature),
                 &AddressSignatureMeta { writeable: true },
             )?;
         }
         for address in readonly_keys {
             self.address_signatures_cf.put(
-                (*address, slot, transaction_index, signature),
+                (*address, slot, transaction_slot_index, signature),
                 &AddressSignatureMeta { writeable: false },
             )?;
         }
         self.slot_signatures_cf
-            .put((slot, transaction_index), &signature)?;
+            .put((slot, transaction_slot_index), &signature)?;
 
         let status = status.into();
         self.transaction_status_cf
@@ -1044,26 +1134,6 @@ mod tests {
     }
 
     #[test]
-    fn test_persist_block_time() {
-        init_logger!();
-
-        let ledger_path = get_tmp_ledger_path_auto_delete!();
-        let store = Ledger::open(ledger_path.path()).unwrap();
-
-        let slot_0 = 5;
-        let slot_1 = slot_0 + 1;
-        let slot_2 = slot_1 + 1;
-
-        assert!(store.cache_block_time(0, slot_0).is_ok());
-        assert!(store.cache_block_time(1, slot_1).is_ok());
-        assert!(store.cache_block_time(2, slot_2).is_ok());
-
-        assert_eq!(store.get_block_time(0).unwrap().unwrap(), slot_0);
-        assert_eq!(store.get_block_time(1).unwrap().unwrap(), slot_1);
-        assert_eq!(store.get_block_time(2).unwrap().unwrap(), slot_2);
-    }
-
-    #[test]
     fn test_persist_transaction_status() {
         init_logger!();
 
@@ -1216,10 +1286,10 @@ mod tests {
         let ledger_path = get_tmp_ledger_path_auto_delete!();
         let store = Ledger::open(ledger_path.path()).unwrap();
 
-        let (sig_uno, slot_uno, block_time_uno) =
-            (Signature::default(), 10, 100);
-        let (sig_dos, slot_dos, block_time_dos) =
-            (Signature::from([2u8; 64]), 20, 200);
+        let (sig_uno, slot_uno, block_time_uno, block_hash_uno) =
+            (Signature::default(), 10, 100, Hash::new_unique());
+        let (sig_dos, slot_dos, block_time_dos, block_hash_dos) =
+            (Signature::from([2u8; 64]), 20, 200, Hash::new_unique());
 
         let (tx_uno, sanitized_uno) = create_confirmed_transaction(
             slot_uno,
@@ -1255,7 +1325,9 @@ mod tests {
                 0,
             )
             .is_ok());
-        assert!(store.cache_block_time(slot_uno, block_time_uno).is_ok());
+        assert!(store
+            .write_block(slot_uno, block_time_uno, block_hash_uno)
+            .is_ok());
 
         // Get first transaction by signature providing high enough slot
         let tx = store
@@ -1280,7 +1352,9 @@ mod tests {
                 0
             )
             .is_ok());
-        assert!(store.cache_block_time(slot_dos, block_time_dos).is_ok());
+        assert!(store
+            .write_block(slot_dos, block_time_dos, block_hash_dos)
+            .is_ok());
 
         // Get second transaction by signature providing slot at which it was stored
         let tx = store
@@ -1461,12 +1535,14 @@ mod tests {
         //  read_seis | write_seis    : signature_seis
 
         // 2. Fill in block times
-        assert!(store.cache_block_time(slot_uno, 1).is_ok());
-        assert!(store.cache_block_time(slot_dos, 2).is_ok());
-        assert!(store.cache_block_time(slot_tres, 3).is_ok());
-        assert!(store.cache_block_time(slot_cuatro, 4).is_ok());
-        assert!(store.cache_block_time(slot_cinco, 5).is_ok());
-        assert!(store.cache_block_time(slot_seis, 6).is_ok());
+        assert!(store.write_block(slot_uno, 1, Hash::new_unique()).is_ok());
+        assert!(store.write_block(slot_dos, 2, Hash::new_unique()).is_ok());
+        assert!(store.write_block(slot_tres, 3, Hash::new_unique()).is_ok());
+        assert!(store
+            .write_block(slot_cuatro, 4, Hash::new_unique())
+            .is_ok());
+        assert!(store.write_block(slot_cinco, 5, Hash::new_unique()).is_ok());
+        assert!(store.write_block(slot_seis, 6, Hash::new_unique()).is_ok());
 
         // 3. Find signatures for address with default limits
         let res = store
@@ -1701,9 +1777,9 @@ mod tests {
                 tx_idx += 1;
             }
 
-            assert!(store.cache_block_time(slot1, 1).is_ok());
-            assert!(store.cache_block_time(slot2, 2).is_ok());
-            assert!(store.cache_block_time(slot3, 3).is_ok());
+            assert!(store.write_block(slot1, 1, Hash::new_unique()).is_ok());
+            assert!(store.write_block(slot2, 2, Hash::new_unique()).is_ok());
+            assert!(store.write_block(slot3, 3, Hash::new_unique()).is_ok());
             read_uno
         };
 
@@ -1916,7 +1992,9 @@ mod tests {
                 )
                 .is_ok());
 
-            assert!(store.cache_block_time(slot_uno, 100).is_ok());
+            assert!(store
+                .write_block(slot_uno, 100, Hash::new_unique())
+                .is_ok());
 
             assert!(store
                 .write_transaction_memos(
@@ -1937,7 +2015,9 @@ mod tests {
                     0,
                 )
                 .is_ok());
-            assert!(store.cache_block_time(slot_dos, 100).is_ok());
+            assert!(store
+                .write_block(slot_dos, 100, Hash::new_unique())
+                .is_ok());
             assert!(store
                 .write_transaction_memos(
                     &sig_dos,

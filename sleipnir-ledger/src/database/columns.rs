@@ -17,6 +17,8 @@ const SLOT_SIGNATURES_CF: &str = "slot_signatures";
 const TRANSACTION_STATUS_INDEX_CF: &str = "transaction_status_index";
 /// Column family for Blocktime
 const BLOCKTIME_CF: &str = "blocktime";
+/// Column family for Blockhash
+const BLOCKHASH_CF: &str = "blockhash";
 /// Column family for Confirmed Transaction
 const CONFIRMED_TRANSACTION_CF: &str = "confirmed_transaction";
 /// Column family for TransactionMemos
@@ -67,6 +69,12 @@ pub struct TransactionStatusIndex;
 /// * value type: [`UnixTimestamp`]
 pub struct Blocktime;
 
+/// The block hash column
+///
+/// * index type: `u64` (see [`SlotColumn`])
+/// * value type: [`solana_sdk::hash::Hash`]
+pub struct Blockhash;
+
 /// The transaction with status column
 ///
 /// NOTE: this doesn't exist in the original solana validator
@@ -104,6 +112,7 @@ pub fn columns() -> Vec<&'static str> {
         SlotSignatures::NAME,
         TransactionStatusIndex::NAME,
         Blocktime::NAME,
+        Blockhash::NAME,
         Transaction::NAME,
         TransactionMemos::NAME,
         PerfSamples::NAME,
@@ -495,6 +504,17 @@ impl ColumnName for Blocktime {
 }
 impl TypedColumn for Blocktime {
     type Type = solana_sdk::clock::UnixTimestamp;
+}
+
+// -----------------
+// Blockhash
+// -----------------
+impl SlotColumn for Blockhash {}
+impl ColumnName for Blockhash {
+    const NAME: &'static str = BLOCKHASH_CF;
+}
+impl TypedColumn for Blockhash {
+    type Type = solana_sdk::hash::Hash;
 }
 
 // -----------------

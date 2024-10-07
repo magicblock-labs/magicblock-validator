@@ -29,7 +29,7 @@ use crate::{
 
 pub struct TransactionBatchWithIndexes<'a, 'b> {
     pub batch: TransactionBatch<'a, 'b>,
-    pub transaction_indexes: Vec<usize>,
+    pub transaction_slot_indexes: Vec<usize>,
 }
 
 // -----------------
@@ -169,7 +169,7 @@ pub fn execute_batch(
     // 1. Record current balances
     let TransactionBatchWithIndexes {
         batch,
-        transaction_indexes,
+        transaction_slot_indexes,
     } = batch;
     let record_token_balances = transaction_status_sender.is_some();
 
@@ -226,7 +226,7 @@ pub fn execute_batch(
             balances,
             token_balances,
             rent_debits,
-            transaction_indexes.to_vec(),
+            transaction_slot_indexes.to_vec(),
         );
     }
 
