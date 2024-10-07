@@ -239,14 +239,12 @@ impl Full for FullImpl {
 
         Box::pin(async move {
             let block = meta.get_block(slot)?;
-
             let encoded = block
                 .map(|block| {
                     block.encode_with_options(encoding, encoding_options)
                 })
                 .transpose()
                 .map_err(|e| Error::invalid_params(format!("{e:?}")))?;
-
             Ok(encoded)
         })
     }
@@ -266,7 +264,29 @@ impl Full for FullImpl {
         config: Option<RpcBlocksConfigWrapper>,
         commitment: Option<CommitmentConfig>,
     ) -> BoxFuture<Result<Vec<Slot>>> {
-        todo!("get_blocks")
+        let (end_slot, _) =
+            config.map(|wrapper| wrapper.unzip()).unwrap_or_default();
+        debug!(
+            "get_blocks rpc request received: {}-{:?}",
+            start_slot, end_slot
+        );
+        Box::pin(async move {
+            let mut slots = vec![];
+            let top_slot = meta.get_bank().slot();
+            let current_slot = start_slot;
+            loop {
+                if current_slot >= top_slot {
+                    break;
+                }
+                if let Some(end_slot) = end_slot {
+                    if current_slot <= end_slot {
+                        break;
+                    }
+                }
+                slots.push(current_slot);
+            }
+            Ok(slots)
+        })
     }
 
     fn get_blocks_with_limit(
@@ -276,7 +296,25 @@ impl Full for FullImpl {
         limit: usize,
         commitment: Option<CommitmentConfig>,
     ) -> BoxFuture<Result<Vec<Slot>>> {
-        todo!("get_blocks_with_limit")
+        debug!(
+            "get_blocks_with_limit rpc request received: {}-{:?}",
+            start_slot, limit
+        );
+        Box::pin(async move {
+            let mut slots = vec![];
+            let top_slot = meta.get_bank().slot();
+            let current_slot = start_slot;
+            loop {
+                if current_slot >= top_slot {
+                    break;
+                }
+                if slots.len() >= limit {
+                    break;
+                }
+                slots.push(current_slot);
+            }
+            Ok(slots)
+        })
     }
 
     fn get_transaction(
