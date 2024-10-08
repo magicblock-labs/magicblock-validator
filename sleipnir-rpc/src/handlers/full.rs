@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{cmp::min, str::FromStr};
 
 // NOTE: from rpc/src/rpc.rs :3432
 use jsonrpc_core::{futures::future, BoxFuture, Error, Result};
@@ -11,7 +11,9 @@ use solana_rpc_client_api::{
         RpcSignaturesForAddressConfig, RpcSimulateTransactionAccountsConfig,
         RpcSimulateTransactionConfig, RpcTransactionConfig,
     },
-    request::MAX_GET_SIGNATURE_STATUSES_QUERY_ITEMS,
+    request::{
+        MAX_GET_CONFIRMED_BLOCKS_RANGE, MAX_GET_SIGNATURE_STATUSES_QUERY_ITEMS,
+    },
     response::{
         Response as RpcResponse, RpcBlockhash,
         RpcConfirmedTransactionStatusWithSignature, RpcContactInfo,
@@ -272,16 +274,19 @@ impl Full for FullImpl {
         );
         Box::pin(async move {
             let top_slot = meta.get_bank().slot();
+            let end_slot = min(top_slot, end_slot.unwrap_or(top_slot));
+            if end_slot.saturating_sub(start_slot)
+                > MAX_GET_CONFIRMED_BLOCKS_RANGE
+            {
+                return Err(Error::invalid_params(format!(
+                    "Slot range too large; max {MAX_GET_CONFIRMED_BLOCKS_RANGE}"
+                )));
+            }
             let mut slots = vec![];
             let mut current_slot = start_slot;
             loop {
-                if current_slot >= top_slot {
+                if current_slot >= end_slot {
                     break;
-                }
-                if let Some(end_slot) = end_slot {
-                    if current_slot >= end_slot {
-                        break;
-                    }
                 }
                 slots.push(current_slot);
                 current_slot += 1;
@@ -303,13 +308,21 @@ impl Full for FullImpl {
         );
         Box::pin(async move {
             let top_slot = meta.get_bank().slot();
+            let end_slot = min(
+                top_slot,
+                start_slot.saturating_add(limit.try_into().unwrap_or(0)),
+            );
+            if end_slot.saturating_sub(start_slot)
+                > MAX_GET_CONFIRMED_BLOCKS_RANGE
+            {
+                return Err(Error::invalid_params(format!(
+                    "Slot range too large; max {MAX_GET_CONFIRMED_BLOCKS_RANGE}"
+                )));
+            }
             let mut slots = vec![];
             let mut current_slot = start_slot;
             loop {
-                if current_slot >= top_slot {
-                    break;
-                }
-                if slots.len() >= limit {
+                if current_slot >= end_slot {
                     break;
                 }
                 slots.push(current_slot);
