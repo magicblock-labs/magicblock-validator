@@ -273,8 +273,8 @@ impl Full for FullImpl {
             start_slot, end_slot
         );
         Box::pin(async move {
-            let top_slot = meta.get_bank().slot();
-            let end_slot = min(top_slot, end_slot.unwrap_or(top_slot));
+            let end_slot =
+                min(meta.get_bank().slot(), end_slot.unwrap_or(u64::MAX));
             if end_slot.saturating_sub(start_slot)
                 > MAX_GET_CONFIRMED_BLOCKS_RANGE
             {
@@ -307,10 +307,10 @@ impl Full for FullImpl {
             start_slot, limit
         );
         Box::pin(async move {
-            let top_slot = meta.get_bank().slot();
             let end_slot = min(
-                top_slot,
-                start_slot.saturating_add(limit.try_into().unwrap_or(0)),
+                meta.get_bank().slot(),
+                start_slot
+                    .saturating_add(u64::try_from(limit).unwrap_or(u64::MAX)),
             );
             if end_slot.saturating_sub(start_slot)
                 > MAX_GET_CONFIRMED_BLOCKS_RANGE
