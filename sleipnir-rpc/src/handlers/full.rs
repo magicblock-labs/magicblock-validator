@@ -279,7 +279,7 @@ impl Full for FullImpl {
                     break;
                 }
                 if let Some(end_slot) = end_slot {
-                    if current_slot <= end_slot {
+                    if current_slot >= end_slot {
                         break;
                     }
                 }
