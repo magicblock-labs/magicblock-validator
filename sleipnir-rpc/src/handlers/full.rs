@@ -1,4 +1,4 @@
-use std::{cmp::min, str::FromStr, u64};
+use std::{cmp::min, str::FromStr};
 
 // NOTE: from rpc/src/rpc.rs :3432
 use jsonrpc_core::{futures::future, BoxFuture, Error, Result};
