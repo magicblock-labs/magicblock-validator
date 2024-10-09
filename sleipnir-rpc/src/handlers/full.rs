@@ -303,7 +303,7 @@ impl Full for FullImpl {
         Box::pin(async move {
             let end_slot = min(
                 meta.get_bank().slot().saturating_sub(1),
-                start_slot.saturating_add(limit.saturating_sub(1)),
+                start_slot.saturating_add(limit).saturating_sub(1),
             );
             if end_slot.saturating_sub(start_slot)
                 > MAX_GET_CONFIRMED_BLOCKS_RANGE
