@@ -273,8 +273,10 @@ impl Full for FullImpl {
             start_slot, end_slot
         );
         Box::pin(async move {
-            let end_slot =
-                min(meta.get_bank().slot(), end_slot.unwrap_or(u64::MAX));
+            let end_slot = min(
+                meta.get_bank().slot().saturating_sub(1),
+                end_slot.unwrap_or(u64::MAX),
+            );
             if end_slot.saturating_sub(start_slot)
                 > MAX_GET_CONFIRMED_BLOCKS_RANGE
             {
@@ -282,16 +284,7 @@ impl Full for FullImpl {
                     "Slot range too large; max {MAX_GET_CONFIRMED_BLOCKS_RANGE}"
                 )));
             }
-            let mut slots = vec![];
-            let mut current_slot = start_slot;
-            loop {
-                if current_slot >= end_slot {
-                    break;
-                }
-                slots.push(current_slot);
-                current_slot += 1;
-            }
-            Ok(slots)
+            Ok((start_slot..=end_slot).collect())
         })
     }
 
@@ -302,15 +295,15 @@ impl Full for FullImpl {
         limit: usize,
         commitment: Option<CommitmentConfig>,
     ) -> BoxFuture<Result<Vec<Slot>>> {
+        let count = u64::try_from(limit).unwrap_or(u64::MAX);
         debug!(
             "get_blocks_with_limit rpc request received: {} (x{:?})",
             start_slot, limit
         );
         Box::pin(async move {
             let end_slot = min(
-                meta.get_bank().slot(),
-                start_slot
-                    .saturating_add(u64::try_from(limit).unwrap_or(u64::MAX)),
+                meta.get_bank().slot().saturating_sub(1),
+                start_slot.saturating_add(count.saturating_sub(1)),
             );
             if end_slot.saturating_sub(start_slot)
                 > MAX_GET_CONFIRMED_BLOCKS_RANGE
@@ -319,16 +312,7 @@ impl Full for FullImpl {
                     "Slot range too large; max {MAX_GET_CONFIRMED_BLOCKS_RANGE}"
                 )));
             }
-            let mut slots = vec![];
-            let mut current_slot = start_slot;
-            loop {
-                if current_slot >= end_slot {
-                    break;
-                }
-                slots.push(current_slot);
-                current_slot += 1;
-            }
-            Ok(slots)
+            Ok((start_slot..=end_slot).collect())
         })
     }
 
