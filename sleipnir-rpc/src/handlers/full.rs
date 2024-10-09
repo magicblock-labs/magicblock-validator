@@ -64,7 +64,7 @@ impl Full for FullImpl {
         address_strs: Vec<String>,
         config: Option<RpcEpochConfig>,
     ) -> BoxFuture<Result<Vec<Option<RpcInflationReward>>>> {
-        debug!("get_cluster_nodes rpc request received");
+        debug!("get_inflation_reward rpc request received");
         Box::pin(async move {
             address_strs
                 .into_iter()
