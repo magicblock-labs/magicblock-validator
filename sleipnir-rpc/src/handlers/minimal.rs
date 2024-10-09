@@ -89,7 +89,13 @@ impl Minimal for MinimalImpl {
         &self,
         meta: Self::Metadata,
     ) -> Result<RpcSnapshotSlotInfo> {
-        todo!("get_highest_snapshot_slot")
+        debug!("get_highest_snapshot_slot rpc request received");
+        // We don't actually snapshot anything yet I believe, this will need to be done
+        // Will be addressed by: https://github.com/magicblock-labs/magicblock-validator/issues/112
+        Ok(RpcSnapshotSlotInfo {
+            full: 0,
+            incremental: None,
+        })
     }
 
     fn get_transaction_count(

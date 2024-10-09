@@ -1,4 +1,4 @@
-use std::{cmp::min, str::FromStr};
+use std::{cmp::min, str::FromStr, u64};
 
 // NOTE: from rpc/src/rpc.rs :3432
 use jsonrpc_core::{futures::future, BoxFuture, Error, Result};
@@ -26,8 +26,9 @@ use solana_sdk::{
     commitment_config::CommitmentConfig,
     hash::Hash,
     message::{SanitizedMessage, SanitizedVersionedMessage, VersionedMessage},
+    pubkey::Pubkey,
     signature::Signature,
-    transaction::VersionedTransaction,
+    transaction::{VersionedTransaction, MAX_TX_ACCOUNT_LOCKS},
 };
 use solana_transaction_status::{
     BlockEncodingOptions, EncodedConfirmedTransactionWithStatusMeta,
@@ -63,7 +64,18 @@ impl Full for FullImpl {
         address_strs: Vec<String>,
         config: Option<RpcEpochConfig>,
     ) -> BoxFuture<Result<Vec<Option<RpcInflationReward>>>> {
-        todo!("get_inflation_reward")
+        debug!("get_cluster_nodes rpc request received");
+        Box::pin(async move {
+            address_strs
+                .into_iter()
+                .map(|input| {
+                    Pubkey::from_str(&input).map_err(|e| {
+                        Error::invalid_params(format!("Invalid param {e:?}"))
+                    })?;
+                    Ok(None) // We never have any staking reward
+                })
+                .collect()
+        })
     }
 
     fn get_cluster_nodes(
@@ -131,11 +143,13 @@ impl Full for FullImpl {
     }
 
     fn get_max_retransmit_slot(&self, meta: Self::Metadata) -> Result<Slot> {
-        todo!("get_max_retransmit_slot")
+        debug!("get_max_retransmit_slot rpc request received");
+        Ok(meta.get_bank().slot()) // This doesn't really apply to our validator, but this value is best-effort
     }
 
     fn get_max_shred_insert_slot(&self, meta: Self::Metadata) -> Result<Slot> {
-        todo!("get_max_shred_insert_slot")
+        debug!("get_max_shred_insert_slot rpc request received");
+        Ok(meta.get_bank().slot()) // This doesn't really apply to our validator, but this value is best-effort
     }
 
     fn request_airdrop(
@@ -217,7 +231,8 @@ impl Full for FullImpl {
     }
 
     fn minimum_ledger_slot(&self, meta: Self::Metadata) -> Result<Slot> {
-        todo!("minimum_ledger_slot")
+        debug!("minimum_ledger_slot rpc request received");
+        Ok(0) // We always start from zero and never clear the ledger
     }
 
     fn get_block(
@@ -226,8 +241,7 @@ impl Full for FullImpl {
         slot: Slot,
         config: Option<RpcEncodingConfigWrapper<RpcBlockConfig>>,
     ) -> BoxFuture<Result<Option<UiConfirmedBlock>>> {
-        debug!("get_block rpc request received");
-
+        debug!("get_block rpc request received: {}", slot);
         let config = config
             .map(|config| config.convert_to_current())
             .unwrap_or_default();
@@ -238,7 +252,6 @@ impl Full for FullImpl {
             max_supported_transaction_version: config
                 .max_supported_transaction_version,
         };
-
         Box::pin(async move {
             let block = meta.get_block(slot)?;
             let encoded = block
@@ -433,7 +446,9 @@ impl Full for FullImpl {
         meta: Self::Metadata,
         config: Option<RpcContextConfig>,
     ) -> Result<RpcResponse<u64>> {
-        todo!("get_stake_minimum_delegation")
+        debug!("get_stake_minimum_delegation rpc request received");
+        let bank = &*meta.get_bank_with_config(config.unwrap_or_default())?;
+        Ok(new_response(bank, u64::MAX)) // It should be impossible to stake in our validator
     }
 
     fn get_recent_prioritization_fees(
@@ -441,7 +456,29 @@ impl Full for FullImpl {
         meta: Self::Metadata,
         pubkey_strs: Option<Vec<String>>,
     ) -> Result<Vec<RpcPrioritizationFee>> {
-        todo!("get_recent_prioritization_fees")
+        let pubkey_strs = pubkey_strs.unwrap_or_default();
+        debug!(
+            "get_recent_prioritization_fees rpc request received: {:?} pubkeys",
+            pubkey_strs.len()
+        );
+        if pubkey_strs.len() > MAX_TX_ACCOUNT_LOCKS {
+            return Err(Error::invalid_params(format!(
+                "Too many inputs provided; max {MAX_TX_ACCOUNT_LOCKS}"
+            )));
+        }
+        let slot = meta.get_bank().slot();
+        pubkey_strs
+            .into_iter()
+            .map(|input| {
+                Pubkey::from_str(&input).map_err(|e| {
+                    Error::invalid_params(format!("Invalid param {e:?}"))
+                })?;
+                Ok(RpcPrioritizationFee {
+                    slot,
+                    prioritization_fee: 0, // We don't handle prioritization fee ATM
+                })
+            })
+            .collect()
     }
 }
 
@@ -455,10 +492,10 @@ async fn send_transaction_impl(
     max_retries: Option<usize>,
 ) -> Result<String> {
     let binary_encoding = tx_encoding.into_binary_encoding().ok_or_else(|| {
-                Error::invalid_params(format!(
-                    "unsupported encoding: {tx_encoding}. Supported encodings: base58, base64"
-                ))
-            })?;
+        Error::invalid_params(format!(
+            "unsupported encoding: {tx_encoding}. Supported encodings: base58, base64"
+        ))
+    })?;
 
     let (_wire_transaction, unsanitized_tx) =
         decode_and_deserialize::<VersionedTransaction>(data, binary_encoding)?;
