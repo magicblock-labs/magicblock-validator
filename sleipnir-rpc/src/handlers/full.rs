@@ -295,7 +295,7 @@ impl Full for FullImpl {
         limit: usize,
         commitment: Option<CommitmentConfig>,
     ) -> BoxFuture<Result<Vec<Slot>>> {
-        let count = u64::try_from(limit).unwrap_or(u64::MAX);
+        let limit = u64::try_from(limit).unwrap_or(u64::MAX);
         debug!(
             "get_blocks_with_limit rpc request received: {} (x{:?})",
             start_slot, limit
@@ -303,7 +303,7 @@ impl Full for FullImpl {
         Box::pin(async move {
             let end_slot = min(
                 meta.get_bank().slot().saturating_sub(1),
-                start_slot.saturating_add(count.saturating_sub(1)),
+                start_slot.saturating_add(limit.saturating_sub(1)),
             );
             if end_slot.saturating_sub(start_slot)
                 > MAX_GET_CONFIRMED_BLOCKS_RANGE
