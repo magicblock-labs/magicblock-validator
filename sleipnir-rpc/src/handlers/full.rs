@@ -66,15 +66,9 @@ impl Full for FullImpl {
     ) -> BoxFuture<Result<Vec<Option<RpcInflationReward>>>> {
         debug!("get_inflation_reward rpc request received");
         Box::pin(async move {
-            address_strs
-                .into_iter()
-                .map(|input| {
-                    Pubkey::from_str(&input).map_err(|e| {
-                        Error::invalid_params(format!("Invalid param {e:?}"))
-                    })?;
-                    Ok(None) // We never have any staking reward
-                })
-                .collect()
+            Err(Error::invalid_params(format!(
+                "MagicBlock validator does not support native staking"
+            )))
         })
     }
 
@@ -149,7 +143,9 @@ impl Full for FullImpl {
 
     fn get_max_shred_insert_slot(&self, meta: Self::Metadata) -> Result<Slot> {
         debug!("get_max_shred_insert_slot rpc request received");
-        Ok(meta.get_bank().slot()) // This doesn't really apply to our validator, but this value is best-effort
+        Err(Error::invalid_params(format!(
+            "MagicBlock validator does not support gossiping of shreds"
+        )))
     }
 
     fn request_airdrop(
@@ -232,7 +228,9 @@ impl Full for FullImpl {
 
     fn minimum_ledger_slot(&self, meta: Self::Metadata) -> Result<Slot> {
         debug!("minimum_ledger_slot rpc request received");
-        Ok(0) // We always start from zero and never clear the ledger
+        // We always start the validator on slot 0 and never clear or snapshot the history
+        // There will be some related work here: https://github.com/magicblock-labs/magicblock-validator/issues/112
+        Ok(0)
     }
 
     fn get_block(
@@ -385,7 +383,10 @@ impl Full for FullImpl {
         &self,
         meta: Self::Metadata,
     ) -> BoxFuture<Result<Slot>> {
-        Box::pin(async move { Ok(meta.get_first_available_block().await) })
+        debug!("get_first_available_block rpc request received");
+        // In our case, minimum ledger slot is also the oldest slot we can query
+        let minimum_ledger_slot = self.minimum_ledger_slot(meta);
+        Box::pin(async move { minimum_ledger_slot })
     }
 
     fn get_latest_blockhash(
@@ -447,8 +448,9 @@ impl Full for FullImpl {
         config: Option<RpcContextConfig>,
     ) -> Result<RpcResponse<u64>> {
         debug!("get_stake_minimum_delegation rpc request received");
-        let bank = &*meta.get_bank_with_config(config.unwrap_or_default())?;
-        Ok(new_response(bank, u64::MAX)) // It should be impossible to stake in our validator
+        Err(Error::invalid_params(format!(
+            "MagicBlock validator does not support native staking"
+        )))
     }
 
     fn get_recent_prioritization_fees(
@@ -457,28 +459,9 @@ impl Full for FullImpl {
         pubkey_strs: Option<Vec<String>>,
     ) -> Result<Vec<RpcPrioritizationFee>> {
         let pubkey_strs = pubkey_strs.unwrap_or_default();
-        debug!(
-            "get_recent_prioritization_fees rpc request received: {:?} pubkeys",
-            pubkey_strs.len()
-        );
-        if pubkey_strs.len() > MAX_TX_ACCOUNT_LOCKS {
-            return Err(Error::invalid_params(format!(
-                "Too many inputs provided; max {MAX_TX_ACCOUNT_LOCKS}"
-            )));
-        }
-        let slot = meta.get_bank().slot();
-        pubkey_strs
-            .into_iter()
-            .map(|input| {
-                Pubkey::from_str(&input).map_err(|e| {
-                    Error::invalid_params(format!("Invalid param {e:?}"))
-                })?;
-                Ok(RpcPrioritizationFee {
-                    slot,
-                    prioritization_fee: 0, // We don't handle prioritization fee ATM
-                })
-            })
-            .collect()
+        Err(Error::invalid_params(format!(
+            "MagicBlock validator does not support or require priority fees"
+        )))
     }
 }
 
