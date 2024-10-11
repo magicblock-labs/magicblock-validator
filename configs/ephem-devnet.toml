@@ -10,5 +10,3 @@ port = 8899
 
 [validator]
 millis_per_slot = 50
-
-path_ledger = "/Users/vincent/LALALALA"

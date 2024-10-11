@@ -19,7 +19,7 @@ pub struct ValidatorConfig {
     // Optionally we allow specifying the path for the ledger
     // if left empty it will be auto-generated to a temporary folder
     #[serde(default = "default_path_ledger")]
-    pub path_ledger: String,
+    pub path_ledger: Option<String>,
 }
 
 fn default_millis_per_slot() -> u64 {
@@ -34,8 +34,8 @@ fn default_reset_ledger() -> bool {
     true
 }
 
-fn default_path_ledger() -> String {
-    "".to_string()
+fn default_path_ledger() -> Option<String> {
+    None
 }
 
 impl Default for ValidatorConfig {

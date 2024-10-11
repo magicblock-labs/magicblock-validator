@@ -101,7 +101,6 @@ impl Ledger {
                 .shred_storage_type
                 .blockstore_directory(),
         );
-        eprintln!("INNER ledger_path: {:?}", ledger_path);
         adjust_ulimit_nofile(options.enforce_ulimit_nofile)?;
 
         // Open the database
