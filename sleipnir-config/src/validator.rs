@@ -15,6 +15,11 @@ pub struct ValidatorConfig {
     /// This can be disabled by setting [Self::reset_ledger] to `false`.
     #[serde(default = "default_reset_ledger")]
     pub reset_ledger: bool,
+
+    // Optionally we allow specifying the path for the ledger
+    // if left empty it will be auto-generated to a temporary folder
+    #[serde(default = "default_path_ledger")]
+    pub path_ledger: String,
 }
 
 fn default_millis_per_slot() -> u64 {
@@ -29,12 +34,17 @@ fn default_reset_ledger() -> bool {
     true
 }
 
+fn default_path_ledger() -> String {
+    "".to_string()
+}
+
 impl Default for ValidatorConfig {
     fn default() -> Self {
         Self {
             millis_per_slot: default_millis_per_slot(),
             sigverify: default_sigverify(),
             reset_ledger: default_reset_ledger(),
+            path_ledger: default_path_ledger(),
         }
     }
 }
