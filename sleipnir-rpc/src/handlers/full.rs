@@ -1,4 +1,4 @@
-use std::str::FromStr;
+use std::{cmp::min, str::FromStr};
 
 // NOTE: from rpc/src/rpc.rs :3432
 use jsonrpc_core::{futures::future, BoxFuture, Error, Result};
@@ -11,7 +11,9 @@ use solana_rpc_client_api::{
         RpcSignaturesForAddressConfig, RpcSimulateTransactionAccountsConfig,
         RpcSimulateTransactionConfig, RpcTransactionConfig,
     },
-    request::MAX_GET_SIGNATURE_STATUSES_QUERY_ITEMS,
+    request::{
+        MAX_GET_CONFIRMED_BLOCKS_RANGE, MAX_GET_SIGNATURE_STATUSES_QUERY_ITEMS,
+    },
     response::{
         Response as RpcResponse, RpcBlockhash,
         RpcConfirmedTransactionStatusWithSignature, RpcContactInfo,
@@ -239,14 +241,12 @@ impl Full for FullImpl {
 
         Box::pin(async move {
             let block = meta.get_block(slot)?;
-
             let encoded = block
                 .map(|block| {
                     block.encode_with_options(encoding, encoding_options)
                 })
                 .transpose()
                 .map_err(|e| Error::invalid_params(format!("{e:?}")))?;
-
             Ok(encoded)
         })
     }
@@ -266,7 +266,26 @@ impl Full for FullImpl {
         config: Option<RpcBlocksConfigWrapper>,
         commitment: Option<CommitmentConfig>,
     ) -> BoxFuture<Result<Vec<Slot>>> {
-        todo!("get_blocks")
+        let (end_slot, _) =
+            config.map(|wrapper| wrapper.unzip()).unwrap_or_default();
+        debug!(
+            "get_blocks rpc request received: {} -> {:?}",
+            start_slot, end_slot
+        );
+        Box::pin(async move {
+            let end_slot = min(
+                meta.get_bank().slot().saturating_sub(1),
+                end_slot.unwrap_or(u64::MAX),
+            );
+            if end_slot.saturating_sub(start_slot)
+                > MAX_GET_CONFIRMED_BLOCKS_RANGE
+            {
+                return Err(Error::invalid_params(format!(
+                    "Slot range too large; max {MAX_GET_CONFIRMED_BLOCKS_RANGE}"
+                )));
+            }
+            Ok((start_slot..=end_slot).collect())
+        })
     }
 
     fn get_blocks_with_limit(
@@ -276,7 +295,25 @@ impl Full for FullImpl {
         limit: usize,
         commitment: Option<CommitmentConfig>,
     ) -> BoxFuture<Result<Vec<Slot>>> {
-        todo!("get_blocks_with_limit")
+        let limit = u64::try_from(limit).unwrap_or(u64::MAX);
+        debug!(
+            "get_blocks_with_limit rpc request received: {} (x{:?})",
+            start_slot, limit
+        );
+        Box::pin(async move {
+            let end_slot = min(
+                meta.get_bank().slot().saturating_sub(1),
+                start_slot.saturating_add(limit).saturating_sub(1),
+            );
+            if end_slot.saturating_sub(start_slot)
+                > MAX_GET_CONFIRMED_BLOCKS_RANGE
+            {
+                return Err(Error::invalid_params(format!(
+                    "Slot range too large; max {MAX_GET_CONFIRMED_BLOCKS_RANGE}"
+                )));
+            }
+            Ok((start_slot..=end_slot).collect())
+        })
     }
 
     fn get_transaction(
