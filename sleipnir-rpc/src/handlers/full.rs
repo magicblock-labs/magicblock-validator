@@ -26,9 +26,8 @@ use solana_sdk::{
     commitment_config::CommitmentConfig,
     hash::Hash,
     message::{SanitizedMessage, SanitizedVersionedMessage, VersionedMessage},
-    pubkey::Pubkey,
     signature::Signature,
-    transaction::{VersionedTransaction, MAX_TX_ACCOUNT_LOCKS},
+    transaction::VersionedTransaction,
 };
 use solana_transaction_status::{
     BlockEncodingOptions, EncodedConfirmedTransactionWithStatusMeta,
@@ -66,9 +65,9 @@ impl Full for FullImpl {
     ) -> BoxFuture<Result<Vec<Option<RpcInflationReward>>>> {
         debug!("get_inflation_reward rpc request received");
         Box::pin(async move {
-            Err(Error::invalid_params(format!(
-                "MagicBlock validator does not support native staking"
-            )))
+            Err(Error::invalid_params(
+                "MagicBlock validator does not support native staking",
+            ))
         })
     }
 
@@ -143,9 +142,9 @@ impl Full for FullImpl {
 
     fn get_max_shred_insert_slot(&self, meta: Self::Metadata) -> Result<Slot> {
         debug!("get_max_shred_insert_slot rpc request received");
-        Err(Error::invalid_params(format!(
-            "MagicBlock validator does not support gossiping of shreds"
-        )))
+        Err(Error::invalid_params(
+            "MagicBlock validator does not support gossiping of shreds",
+        ))
     }
 
     fn request_airdrop(
@@ -448,9 +447,9 @@ impl Full for FullImpl {
         config: Option<RpcContextConfig>,
     ) -> Result<RpcResponse<u64>> {
         debug!("get_stake_minimum_delegation rpc request received");
-        Err(Error::invalid_params(format!(
-            "MagicBlock validator does not support native staking"
-        )))
+        Err(Error::invalid_params(
+            "MagicBlock validator does not support native staking",
+        ))
     }
 
     fn get_recent_prioritization_fees(
@@ -459,9 +458,9 @@ impl Full for FullImpl {
         pubkey_strs: Option<Vec<String>>,
     ) -> Result<Vec<RpcPrioritizationFee>> {
         let pubkey_strs = pubkey_strs.unwrap_or_default();
-        Err(Error::invalid_params(format!(
-            "MagicBlock validator does not support or require priority fees"
-        )))
+        Err(Error::invalid_params(
+            "MagicBlock validator does not support or require priority fees",
+        ))
     }
 }
 
