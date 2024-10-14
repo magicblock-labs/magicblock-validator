@@ -8,5 +8,11 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
+log = { workspace = true }
+http-body-util = { workspace = true }
+hyper = { workspace = true, features = ["http1", "server"] }
+hyper-util = { workspace = true, features = ["tokio"] }
 lazy_static = { workspace = true }
 prometheus = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }

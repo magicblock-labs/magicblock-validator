@@ -1,11 +1,12 @@
-use prometheus::{IntCounter, Registry};
 use std::sync::Once;
 
-lazy_static::lazy_static! {
-    pub static ref REGISTRY: Registry = Registry::new();
+use prometheus::{IntCounter, Registry};
 
-    pub static ref SLOT: IntCounter = IntCounter::new(
-        "mbv_current_slot", "Current slot",
+lazy_static::lazy_static! {
+    pub(crate) static ref REGISTRY: Registry = Registry::new();
+
+    pub static ref SLOT_COUNTER: IntCounter = IntCounter::new(
+        "mbv_slot_counter", "Slot Counter",
     ).unwrap();
 }
 
@@ -19,6 +20,10 @@ pub(crate) fn register() {
                     .expect("collector can't be registered");
             };
         }
-        register!(SLOT);
+        register!(SLOT_COUNTER);
     });
+}
+
+pub fn inc_slot() {
+    SLOT_COUNTER.inc();
 }

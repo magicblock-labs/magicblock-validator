@@ -75,6 +75,9 @@ geyser-grpc-proto = { path = "./geyser-grpc-proto" }
 git-version = "0.3.9"
 histogram = "0.6.9"
 hostname = "0.4.0"
+http-body-util = "0.1.2"
+hyper = "1.4.1"
+hyper-util = "0.1.9"
 itertools = "0.10.5"
 json5 = "0.4.1"
 jsonrpc-core = "18.0.0"
@@ -117,6 +120,7 @@ sleipnir-core = { path = "./sleipnir-core" }
 sleipnir-geyser-plugin = { path = "./sleipnir-geyser-plugin" }
 sleipnir-ledger = { path = "./sleipnir-ledger" }
 sleipnir-messaging = { path = "./sleipnir-messaging" }
+sleipnir-metrics = { path = "./sleipnir-metrics" }
 sleipnir-mutator = { path = "./sleipnir-mutator" }
 sleipnir-perf-service = { path = "./sleipnir-perf-service" }
 sleipnir-processor = { path = "./sleipnir-processor" }
