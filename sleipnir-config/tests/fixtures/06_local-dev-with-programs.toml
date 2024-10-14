@@ -25,3 +25,7 @@ port = 11000
 [[program]]
 id = "wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4"
 path = "../demos/magic-worm/target/deploy/program_solana.so"
+
+[metrics]
+enabled = true
+port = 9999
