@@ -12,6 +12,7 @@ use url::Url;
 mod accounts;
 pub mod errors;
 mod geyser_grpc;
+mod helpers;
 mod program;
 mod rpc;
 mod validator;
