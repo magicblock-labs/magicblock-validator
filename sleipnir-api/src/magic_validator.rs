@@ -35,6 +35,7 @@ use sleipnir_bank::{
 use sleipnir_config::{ProgramConfig, SleipnirConfig};
 use sleipnir_geyser_plugin::rpc::GeyserRpcService;
 use sleipnir_ledger::Ledger;
+use sleipnir_metrics::MetricsService;
 use sleipnir_perf_service::SamplePerformanceService;
 use sleipnir_program::init_validator_authority;
 use sleipnir_pubsub::pubsub_service::{
@@ -149,7 +150,7 @@ pub struct MagicValidator {
     accounts_manager: Arc<AccountsManager>,
     transaction_listener: GeyserTransactionNotifyListener,
     rpc_service: JsonRpcService,
-    _metrics_service: sleipnir_metrics::MetricsService,
+    _metrics_service: Option<MetricsService>,
     geyser_rpc_service: Arc<GeyserRpcService>,
     pubsub_config: PubsubConfig,
     pub transaction_status_sender: TransactionStatusSender,
@@ -207,12 +208,18 @@ impl MagicValidator {
                 geyser_service.get_transaction_notifier(),
             );
 
-        // TODO(thlorenz): make enabling + address configurable
-        let metrics_service = sleipnir_metrics::try_start_metrics_service(
-            SocketAddr::from(([127, 0, 0, 1], 9000)),
-            token.clone(),
-        )
-        .map_err(ApiError::FailedToStartMetricsService)?;
+        let metrics_config = &config.validator_config.metrics;
+        let metrics_service = if metrics_config.enabled {
+            Some(
+                sleipnir_metrics::try_start_metrics_service(
+                    metrics_config.service.socket_addr(),
+                    token.clone(),
+                )
+                .map_err(ApiError::FailedToStartMetricsService)?,
+            )
+        } else {
+            None
+        };
 
         let accounts_config =
             try_convert_accounts_config(&config.validator_config.accounts)
