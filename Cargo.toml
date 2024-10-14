@@ -21,6 +21,7 @@ members = [
   "sleipnir-geyser-plugin",
   "sleipnir-ledger",
   "sleipnir-messaging",
+  "sleipnir-metrics",
   "sleipnir-mutator",
   "sleipnir-perf-service",
   "sleipnir-processor",
@@ -93,6 +94,7 @@ num-derive = "0.4"
 num-traits = "0.2"
 percentage = "0.1.0"
 prio-graph = "0.2.1"
+prometheus = "0.13.4"
 prost = "0.12.3"
 rand = "0.8.5"
 rayon = "1.8.1"
