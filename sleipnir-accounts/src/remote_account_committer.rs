@@ -1,7 +1,7 @@
 use async_trait::async_trait;
-use dlp::instruction::{commit_state, finalize, undelegate};
+use dlp::instruction::{commit_state, finalize, undelegate, CommitAccountArgs};
 use log::*;
-use sleipnir_program::{validator_authority_id, ScheduledCommit};
+use sleipnir_program::validator_authority_id;
 use solana_rpc_client::{
     nonblocking::rpc_client::RpcClient, rpc_client::SerializableTransaction,
 };
@@ -14,21 +14,10 @@ use solana_sdk::{
 
 use crate::{
     errors::{AccountsError, AccountsResult},
-    utils::deleg::CommitAccountArgs,
     AccountCommittee, AccountCommitter, CommitAccountsPayload,
     CommitAccountsTransaction, PendingCommitTransaction,
     SendableCommitAccountsPayload, UndelegationRequest,
 };
-
-impl From<(ScheduledCommit, Vec<u8>)> for CommitAccountArgs {
-    fn from((commit, data): (ScheduledCommit, Vec<u8>)) -> Self {
-        Self {
-            slot: commit.slot,
-            allow_undelegation: commit.request_undelegation,
-            data,
-        }
-    }
-}
 
 // -----------------
 // RemoteAccountCommitter
@@ -97,8 +86,7 @@ impl AccountCommitter for RemoteAccountCommitter {
                 allow_undelegation: undelegation_request.is_some(),
                 data: account_data.data().to_vec(),
             };
-            let commit_ix =
-                commit_state(committer, *pubkey, commit_args.into_vec());
+            let commit_ix = commit_state(committer, *pubkey, commit_args);
 
             let finalize_ix = finalize(committer, *pubkey, committer);
             ixs.extend(vec![commit_ix, finalize_ix]);
