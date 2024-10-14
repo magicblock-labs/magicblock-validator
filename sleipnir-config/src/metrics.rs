@@ -1,5 +1,6 @@
-use crate::helpers;
 use serde::{Deserialize, Serialize};
+
+use crate::helpers;
 
 helpers::socket_addr_config! {
     MetricsServiceConfig,
