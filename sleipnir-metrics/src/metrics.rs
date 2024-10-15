@@ -13,6 +13,10 @@ lazy_static::lazy_static! {
         Opts::new("mbv_transaction_count", "Transaction Count"),
         &["outcome"],
     ).unwrap();
+    pub static ref FEE_PAYER_VEC_COUNT: IntCounterVec = IntCounterVec::new(
+        Opts::new("mbv_fee_payer_count", "Count of transactions signed by specific fee payers"),
+        &["fee_payer", "outcome"],
+    ).unwrap();
 
     pub static ref EXECUTED_UNITS_COUNT: IntCounter = IntCounter::new(
         "mbv_executed_units_count", "Executed Units (CU) Count",
@@ -35,6 +39,7 @@ pub(crate) fn register() {
         }
         register!(SLOT_COUNT);
         register!(TRANSACTION_VEC_COUNT);
+        register!(FEE_PAYER_VEC_COUNT);
         register!(EXECUTED_UNITS_COUNT);
         register!(FEE_COUNT);
     });
@@ -44,12 +49,10 @@ pub fn inc_slot() {
     SLOT_COUNT.inc();
 }
 
-pub fn inc_transaction(is_ok: bool) {
-    if is_ok {
-        TRANSACTION_VEC_COUNT.with_label_values(&["success"]).inc();
-    } else {
-        TRANSACTION_VEC_COUNT.with_label_values(&["error"]).inc();
-    }
+pub fn inc_transaction(is_ok: bool, fee_payer: &str) {
+    let outcome = if is_ok { "success" } else { "error" };
+    TRANSACTION_VEC_COUNT.with_label_values(&[outcome]).inc();
+    FEE_PAYER_VEC_COUNT.with_label_values(&[fee_payer, outcome]).inc();
 }
 
 pub fn inc_executed_units(executed_units: u64) {
