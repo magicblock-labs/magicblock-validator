@@ -1,6 +1,8 @@
 use std::sync::Once;
 
 use prometheus::{IntCounter, IntCounterVec, Opts, Registry};
+pub use types::AccountClone;
+mod types;
 
 lazy_static::lazy_static! {
     pub(crate) static ref REGISTRY: Registry = Registry::new();
@@ -25,6 +27,10 @@ lazy_static::lazy_static! {
     pub static ref FEE_COUNT: IntCounter = IntCounter::new(
         "mbv_fee_count", "Fee Count",
     ).unwrap();
+    pub static ref ACCOUNT_CLONE_VEC_COUNT: IntCounterVec = IntCounterVec::new(
+        Opts::new("mbv_account_clone_count", "Count clones performed for specific accounts"),
+        &["kind", "pubkey", "owner"],
+    ).unwrap();
 }
 
 pub(crate) fn register() {
@@ -42,6 +48,7 @@ pub(crate) fn register() {
         register!(FEE_PAYER_VEC_COUNT);
         register!(EXECUTED_UNITS_COUNT);
         register!(FEE_COUNT);
+        register!(ACCOUNT_CLONE_VEC_COUNT);
     });
 }
 
@@ -52,7 +59,9 @@ pub fn inc_slot() {
 pub fn inc_transaction(is_ok: bool, fee_payer: &str) {
     let outcome = if is_ok { "success" } else { "error" };
     TRANSACTION_VEC_COUNT.with_label_values(&[outcome]).inc();
-    FEE_PAYER_VEC_COUNT.with_label_values(&[fee_payer, outcome]).inc();
+    FEE_PAYER_VEC_COUNT
+        .with_label_values(&[fee_payer, outcome])
+        .inc();
 }
 
 pub fn inc_executed_units(executed_units: u64) {
@@ -61,4 +70,30 @@ pub fn inc_executed_units(executed_units: u64) {
 
 pub fn inc_fee(fee: u64) {
     FEE_COUNT.inc_by(fee);
+}
+
+pub fn inc_account_clone(account_clone: AccountClone) {
+    use AccountClone::*;
+    match account_clone {
+        Wallet { pubkey } => {
+            ACCOUNT_CLONE_VEC_COUNT
+                .with_label_values(&["wallet", pubkey, ""])
+                .inc();
+        }
+        Undelegated { pubkey, owner } => {
+            ACCOUNT_CLONE_VEC_COUNT
+                .with_label_values(&["undelegated", pubkey, owner])
+                .inc();
+        }
+        Delegated { pubkey, owner } => {
+            ACCOUNT_CLONE_VEC_COUNT
+                .with_label_values(&["delegated", pubkey, owner])
+                .inc();
+        }
+        Program { pubkey } => {
+            ACCOUNT_CLONE_VEC_COUNT
+                .with_label_values(&["program", pubkey, ""])
+                .inc();
+        }
+    }
 }

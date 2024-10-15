@@ -4359,6 +4359,7 @@ dependencies = [
  "sleipnir-account-updates",
  "sleipnir-accounts-api",
  "sleipnir-bank",
+ "sleipnir-metrics",
  "sleipnir-mutator",
  "solana-sdk",
  "test-tools",
