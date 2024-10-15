@@ -63,7 +63,10 @@ use crate::{
     },
     geyser_transaction_notify_listener::GeyserTransactionNotifyListener,
     init_geyser_service::{init_geyser_service, InitGeyserServiceConfig},
-    tickers::{init_commit_accounts_ticker, init_slot_ticker},
+    tickers::{
+        init_commit_accounts_ticker, init_slot_ticker,
+        init_system_metrics_ticker,
+    },
 };
 
 // -----------------
@@ -150,7 +153,7 @@ pub struct MagicValidator {
     accounts_manager: Arc<AccountsManager>,
     transaction_listener: GeyserTransactionNotifyListener,
     rpc_service: JsonRpcService,
-    _metrics_service: Option<MetricsService>,
+    _metrics: Option<(MetricsService, tokio::task::JoinHandle<()>)>,
     geyser_rpc_service: Arc<GeyserRpcService>,
     pubsub_config: PubsubConfig,
     pub transaction_status_sender: TransactionStatusSender,
@@ -209,14 +212,22 @@ impl MagicValidator {
             );
 
         let metrics_config = &config.validator_config.metrics;
-        let metrics_service = if metrics_config.enabled {
-            Some(
-                sleipnir_metrics::try_start_metrics_service(
-                    metrics_config.service.socket_addr(),
-                    token.clone(),
-                )
-                .map_err(ApiError::FailedToStartMetricsService)?,
+        let metrics = if metrics_config.enabled {
+            let metrics_service = sleipnir_metrics::try_start_metrics_service(
+                metrics_config.service.socket_addr(),
+                token.clone(),
             )
+            .map_err(ApiError::FailedToStartMetricsService)?;
+
+            let system_metrics_ticker = init_system_metrics_ticker(
+                Duration::from_secs(
+                    metrics_config.system_metrics_tick_interval_secs,
+                ),
+                &ledger,
+                token.clone(),
+            );
+
+            Some((metrics_service, system_metrics_ticker))
         } else {
             None
         };
@@ -300,7 +311,7 @@ impl MagicValidator {
             config: config.validator_config,
             exit,
             rpc_service,
-            _metrics_service: metrics_service,
+            _metrics: metrics,
             geyser_rpc_service,
             slot_ticker: None,
             commit_accounts_ticker: None,
@@ -420,30 +431,37 @@ impl MagicValidator {
         reset: bool,
     ) -> ApiResult<Arc<Ledger>> {
         let ledger = match ledger {
-            Some(ledger) => Arc::new(ledger),
+            Some(ledger) => {
+                if reset {
+                    return Err(
+                        ApiError::CannotResetLedgerThatWasAlreadyInitialized,
+                    );
+                }
+                Arc::new(ledger)
+            }
             None => {
                 let ledger_path = TempDir::new().unwrap();
+                let ledger_path = ledger_path.path();
+                if reset {
+                    remove_directory_contents_if_exists(ledger_path).map_err(
+                        |err| {
+                            error!(
+                                "Error: Unable to remove {}: {}",
+                                ledger_path.display(),
+                                err
+                            );
+                            ApiError::UnableToCleanLedgerDirectory(
+                                ledger_path.display().to_string(),
+                            )
+                        },
+                    )?;
+                }
                 Arc::new(
-                    Ledger::open(ledger_path.path())
+                    Ledger::open(ledger_path)
                         .expect("Expected to be able to open database ledger"),
                 )
             }
         };
-        if reset {
-            let ledger_path = ledger.ledger_path();
-            remove_directory_contents_if_exists(ledger_path).map_err(
-                |err| {
-                    error!(
-                        "Error: Unable to remove {}: {}",
-                        ledger_path.display(),
-                        err
-                    );
-                    ApiError::UnableToCleanLedgerDirectory(
-                        ledger_path.display().to_string(),
-                    )
-                },
-            )?;
-        }
         Ok(ledger)
     }
 

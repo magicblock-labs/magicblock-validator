@@ -116,6 +116,36 @@ pub fn init_commit_accounts_ticker(
     })
 }
 
+pub fn init_system_metrics_ticker(
+    tick_duration: Duration,
+    ledger: &Arc<Ledger>,
+    token: CancellationToken,
+) -> tokio::task::JoinHandle<()> {
+    fn try_set_ledger_storage_size(ledger: &Ledger) {
+        match ledger.storage_size() {
+            Ok(byte_size) => metrics::set_ledger_size(byte_size),
+            Err(err) => warn!("Failed to get ledger storage size: {:?}", err),
+        }
+    }
+    let ledger = ledger.clone();
+    try_set_ledger_storage_size(&ledger);
+    tokio::task::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = tokio::time::sleep(tick_duration) => {
+                        match ledger.storage_size() {
+                            Ok(byte_size) => metrics::set_ledger_size(byte_size),
+                            Err(err) => warn!("Failed to get ledger storage size: {:?}", err),
+                        }
+                },
+                _ = token.cancelled() => {
+                    break;
+                }
+            }
+        }
+    })
+}
+
 fn timestamp_in_secs() -> u64 {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)

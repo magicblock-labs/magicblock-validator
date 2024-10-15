@@ -1,6 +1,6 @@
 use std::sync::Once;
 
-use prometheus::{IntCounter, IntCounterVec, Opts, Registry};
+use prometheus::{IntCounter, IntCounterVec, IntGauge, Opts, Registry};
 pub use types::{AccountClone, AccountCommit};
 mod types;
 
@@ -38,6 +38,10 @@ lazy_static::lazy_static! {
         Opts::new("account_commit_count", "Count commits performed for specific accounts"),
         &["kind", "pubkey"],
     ).unwrap();
+
+    pub static ref LEDGER_SIZE_GAUGE: IntGauge = IntGauge::new(
+        "ledger_size", "Ledger Size in Bytes",
+    ).unwrap();
 }
 
 pub(crate) fn register() {
@@ -57,6 +61,7 @@ pub(crate) fn register() {
         register!(FEE_COUNT);
         register!(ACCOUNT_CLONE_VEC_COUNT);
         register!(ACCOUNT_COMMIT_VEC_COUNT);
+        register!(LEDGER_SIZE_GAUGE);
     });
 }
 
@@ -120,4 +125,8 @@ pub fn inc_account_commit(account_commit: AccountCommit) {
                 .inc();
         }
     }
+}
+
+pub fn set_ledger_size(size: u64) {
+    LEDGER_SIZE_GAUGE.set(size as i64);
 }
