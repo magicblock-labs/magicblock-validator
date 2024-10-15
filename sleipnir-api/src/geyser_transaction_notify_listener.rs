@@ -88,8 +88,14 @@ impl GeyserTransactionNotifyListener {
                                     lamports_per_signature,
                                 );
 
-                                let fee_payer = transaction.message().fee_payer().to_string();
-                                metrics::inc_transaction(status.is_ok(), &fee_payer);
+                                let fee_payer = transaction
+                                    .message()
+                                    .fee_payer()
+                                    .to_string();
+                                metrics::inc_transaction(
+                                    status.is_ok(),
+                                    &fee_payer,
+                                );
                                 metrics::inc_executed_units(executed_units);
                                 metrics::inc_fee(fee);
 
@@ -98,7 +104,7 @@ impl GeyserTransactionNotifyListener {
                                         map_inner_instructions(
                                             inner_instructions,
                                         )
-                                            .collect()
+                                        .collect()
                                     });
                                 let pre_token_balances =
                                     Some(pre_token_balances);
