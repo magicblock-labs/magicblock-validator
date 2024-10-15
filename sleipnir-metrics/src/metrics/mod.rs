@@ -1,7 +1,7 @@
 use std::sync::Once;
 
 use prometheus::{IntCounter, IntCounterVec, Opts, Registry};
-pub use types::AccountClone;
+pub use types::{AccountClone, AccountCommit};
 mod types;
 
 lazy_static::lazy_static! {
@@ -33,6 +33,11 @@ lazy_static::lazy_static! {
         Opts::new("account_clone_count", "Count clones performed for specific accounts"),
         &["kind", "pubkey", "owner"],
     ).unwrap();
+
+    pub static ref ACCOUNT_COMMIT_VEC_COUNT: IntCounterVec = IntCounterVec::new(
+        Opts::new("account_commit_count", "Count commits performed for specific accounts"),
+        &["kind", "pubkey"],
+    ).unwrap();
 }
 
 pub(crate) fn register() {
@@ -51,6 +56,7 @@ pub(crate) fn register() {
         register!(EXECUTED_UNITS_COUNT);
         register!(FEE_COUNT);
         register!(ACCOUNT_CLONE_VEC_COUNT);
+        register!(ACCOUNT_COMMIT_VEC_COUNT);
     });
 }
 
@@ -95,6 +101,22 @@ pub fn inc_account_clone(account_clone: AccountClone) {
         Program { pubkey } => {
             ACCOUNT_CLONE_VEC_COUNT
                 .with_label_values(&["program", pubkey, ""])
+                .inc();
+        }
+    }
+}
+
+pub fn inc_account_commit(account_commit: AccountCommit) {
+    use AccountCommit::*;
+    match account_commit {
+        CommitOnly { pubkey } => {
+            ACCOUNT_COMMIT_VEC_COUNT
+                .with_label_values(&["commit", pubkey])
+                .inc();
+        }
+        CommitAndUndelegate { pubkey } => {
+            ACCOUNT_COMMIT_VEC_COUNT
+                .with_label_values(&["commit_and_undelegate", pubkey])
                 .inc();
         }
     }
