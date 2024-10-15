@@ -5,30 +5,32 @@ pub use types::AccountClone;
 mod types;
 
 lazy_static::lazy_static! {
-    pub(crate) static ref REGISTRY: Registry = Registry::new();
+    pub(crate) static ref REGISTRY: Registry = Registry::new_custom(Some("mbv".to_string()), None).unwrap();
 
     pub static ref SLOT_COUNT: IntCounter = IntCounter::new(
-        "mbv_slot_count", "Slot Count",
+        "slot_count", "Slot Count",
     ).unwrap();
 
     pub static ref TRANSACTION_VEC_COUNT: IntCounterVec = IntCounterVec::new(
-        Opts::new("mbv_transaction_count", "Transaction Count"),
+        Opts::new("transaction_count", "Transaction Count"),
         &["outcome"],
     ).unwrap();
+
     pub static ref FEE_PAYER_VEC_COUNT: IntCounterVec = IntCounterVec::new(
-        Opts::new("mbv_fee_payer_count", "Count of transactions signed by specific fee payers"),
+        Opts::new("fee_payer_count", "Count of transactions signed by specific fee payers"),
         &["fee_payer", "outcome"],
     ).unwrap();
 
     pub static ref EXECUTED_UNITS_COUNT: IntCounter = IntCounter::new(
-        "mbv_executed_units_count", "Executed Units (CU) Count",
+        "executed_units_count", "Executed Units (CU) Count",
     ).unwrap();
 
     pub static ref FEE_COUNT: IntCounter = IntCounter::new(
-        "mbv_fee_count", "Fee Count",
+        "fee_count", "Fee Count",
     ).unwrap();
+
     pub static ref ACCOUNT_CLONE_VEC_COUNT: IntCounterVec = IntCounterVec::new(
-        Opts::new("mbv_account_clone_count", "Count clones performed for specific accounts"),
+        Opts::new("account_clone_count", "Count clones performed for specific accounts"),
         &["kind", "pubkey", "owner"],
     ).unwrap();
 }
