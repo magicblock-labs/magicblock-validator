@@ -107,7 +107,8 @@ fn test_local_dev_with_programs_toml() {
                 service: MetricsServiceConfig {
                     port: 9999,
                     ..Default::default()
-                }
+                },
+                ..Default::default()
             },
         }
     )

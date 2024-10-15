@@ -58,7 +58,8 @@ fn test_load_local_dev_with_programs_toml() {
                 service: MetricsServiceConfig {
                     port: 9999,
                     ..Default::default()
-                }
+                },
+                ..Default::default()
             },
         }
     )
@@ -130,7 +131,8 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
                 service: MetricsServiceConfig {
                     port: 1234,
                     ..Default::default()
-                }
+                },
+                ..Default::default()
             },
         }
     )
