@@ -1,3 +1,5 @@
+use std::path::Path;
+
 use log::*;
 use sleipnir_api::{
     magic_validator::{MagicValidator, MagicValidatorConfig},
@@ -72,9 +74,14 @@ async fn main() {
     let validator_keypair = validator_keypair();
 
     let ledger = {
-        let ledger_path = TempDir::new().unwrap();
-        Ledger::open(ledger_path.path())
-            .expect("Expected to be able to open database ledger")
+        let config_ledger_path = config.ledger.path.clone();
+        if let Some(config_ledger_path) = config_ledger_path {
+            Ledger::open(Path::new(&config_ledger_path))
+        } else {
+            let tmp_dir = TempDir::new().unwrap();
+            Ledger::open(tmp_dir.path())
+        }
+        .expect("Expected to be able to open database ledger")
     };
     let geyser_grpc_config = config.geyser_grpc.clone();
     let config = MagicValidatorConfig {

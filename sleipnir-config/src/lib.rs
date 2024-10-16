@@ -13,12 +13,14 @@ mod accounts;
 pub mod errors;
 mod geyser_grpc;
 mod helpers;
+mod ledger;
 mod metrics;
 mod program;
 mod rpc;
 mod validator;
 pub use accounts::*;
 pub use geyser_grpc::*;
+pub use ledger::*;
 pub use metrics::*;
 pub use program::*;
 pub use rpc::*;
@@ -35,6 +37,8 @@ pub struct SleipnirConfig {
     pub geyser_grpc: GeyserGrpcConfig,
     #[serde(default)]
     pub validator: ValidatorConfig,
+    #[serde(default)]
+    pub ledger: LedgerConfig,
     #[serde(default)]
     #[serde(rename = "program")]
     pub programs: Vec<ProgramConfig>,
@@ -155,7 +159,7 @@ impl SleipnirConfig {
                         "Failed to parse 'GEYSER_GRPC_PORT' as u16: {:?}",
                         err
                     )
-                })
+                });
         }
 
         // -----------------
@@ -163,7 +167,20 @@ impl SleipnirConfig {
         // -----------------
         if let Ok(millis_per_slot) = env::var("VALIDATOR_MILLIS_PER_SLOT") {
             config.validator.millis_per_slot = u64::from_str(&millis_per_slot)
-                .unwrap_or_else(|err| panic!("Failed to parse 'VALIDATOR_MILLIS_PER_SLOT' as u64: {:?}", err))
+                .unwrap_or_else(|err| panic!("Failed to parse 'VALIDATOR_MILLIS_PER_SLOT' as u64: {:?}", err));
+        }
+
+        // -----------------
+        // Ledger
+        // -----------------
+        if let Ok(ledger_reset) = env::var("LEDGER_RESET") {
+            config.ledger.reset =
+                bool::from_str(&ledger_reset).unwrap_or_else(|err| {
+                    panic!("Failed to parse 'LEDGER_RESET' as bool: {:?}", err)
+                });
+        }
+        if let Ok(ledger_path) = env::var("LEDGER_PATH") {
+            config.ledger.path = Some(ledger_path);
         }
 
         // -----------------

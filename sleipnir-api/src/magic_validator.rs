@@ -79,30 +79,6 @@ pub struct MagicValidatorConfig {
     pub init_geyser_service_config: InitGeyserServiceConfig,
 }
 
-impl MagicValidatorConfig {
-    pub fn try_from_config_path(config_path: &str) -> ApiResult<Self> {
-        Ok(SleipnirConfig::try_load_from_file(config_path).map(
-            |validator_config| Self {
-                validator_config,
-                ..Default::default()
-            },
-        )?)
-    }
-    pub fn try_from_config_toml(
-        config_toml: &str,
-        config_path: Option<&Path>,
-    ) -> ApiResult<Self> {
-        Ok(
-            SleipnirConfig::try_load_from_toml(config_toml, config_path).map(
-                |validator_config| Self {
-                    validator_config,
-                    ..Default::default()
-                },
-            )?,
-        )
-    }
-}
-
 impl std::fmt::Debug for MagicValidatorConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MagicValidatorConfig")
@@ -190,7 +166,7 @@ impl MagicValidator {
 
         let ledger = Self::init_ledger(
             config.ledger,
-            config.validator_config.validator.reset_ledger,
+            config.validator_config.ledger.reset,
         )?;
 
         fund_validator_identity(&bank, &validator_pubkey);
