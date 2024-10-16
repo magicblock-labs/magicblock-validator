@@ -1,5 +1,6 @@
 use log::*;
 use sleipnir_api::{
+    ledger,
     magic_validator::{MagicValidator, MagicValidatorConfig},
     InitGeyserServiceConfig,
 };
@@ -79,6 +80,14 @@ async fn main() {
     let api = &mut MagicValidator::try_from_config(config, validator_keypair)
         .unwrap();
     debug!("Created API .. starting things up");
+
+    // We need to create and hold on to the ledger lock here in order to keep the
+    // underlying file locked while the app is running.
+    // This prevents other processes from locking it until we exit.
+    let mut ledger_lock = ledger::ledger_lockfile(api.ledger().ledger_path());
+    let _ledger_write_guard =
+        ledger::lock_ledger(api.ledger().ledger_path(), &mut ledger_lock);
+
     api.start().await.expect("Failed to start validator");
     api.join();
 }

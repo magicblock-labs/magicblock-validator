@@ -41,9 +41,7 @@ use solana_sdk::{
 };
 use std::path::PathBuf;
 use std::{
-    fs,
     net::SocketAddr,
-    path::Path,
     process,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -63,6 +61,7 @@ use crate::{
     },
     geyser_transaction_notify_listener::GeyserTransactionNotifyListener,
     init_geyser_service::{init_geyser_service, InitGeyserServiceConfig},
+    ledger,
     tickers::{init_commit_accounts_ticker, init_slot_ticker},
 };
 
@@ -393,20 +392,7 @@ impl MagicValidator {
                 ledger_path.path().to_path_buf()
             }
         };
-        if reset {
-            remove_directory_contents_if_exists(ledger_path.as_path())
-                .map_err(|err| {
-                    error!(
-                        "Error: Unable to remove {}: {}",
-                        ledger_path.display(),
-                        err
-                    );
-                    ApiError::UnableToCleanLedgerDirectory(
-                        ledger_path.display().to_string(),
-                    )
-                })?;
-        }
-        let ledger = Ledger::open(ledger_path.as_path())?;
+        let ledger = ledger::init(ledger_path, reset)?;
         Ok(Arc::new(ledger))
     }
 
@@ -577,23 +563,6 @@ fn programs_to_load(programs: &[ProgramConfig]) -> Vec<(Pubkey, String)> {
         .iter()
         .map(|program| (program.id, program.path.clone()))
         .collect()
-}
-
-fn remove_directory_contents_if_exists(
-    dir: &Path,
-) -> Result<(), std::io::Error> {
-    if !dir.exists() {
-        return Ok(());
-    }
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        if entry.metadata()?.is_dir() {
-            fs::remove_dir_all(entry.path())?
-        } else {
-            fs::remove_file(entry.path())?
-        }
-    }
-    Ok(())
 }
 
 fn create_worker_runtime(thread_name: &str) -> tokio::runtime::Runtime {
