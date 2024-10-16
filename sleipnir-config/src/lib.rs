@@ -210,6 +210,17 @@ impl SleipnirConfig {
                     panic!("Failed to parse 'METRICS_PORT' as u16: {:?}", err)
                 });
         }
+        if let Ok(interval) =
+            env::var("METRICS_SYSTEM_METRICS_TICK_INTERVAL_SECS")
+        {
+            config.metrics.system_metrics_tick_interval_secs =
+                u64::from_str(&interval).unwrap_or_else(|err| {
+                    panic!(
+                        "Failed to parse 'METRICS_SYSTEM_METRICS_TICK_INTERVAL_SECS' as u64: {:?}",
+                        err
+                    )
+                });
+        }
         config
     }
 }
