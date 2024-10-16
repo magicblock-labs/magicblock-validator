@@ -143,7 +143,6 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
                     ..Default::default()
                 },
                 system_metrics_tick_interval_secs: 10,
-                ..Default::default()
             },
         }
     )
