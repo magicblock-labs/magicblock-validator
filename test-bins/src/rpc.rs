@@ -74,9 +74,9 @@ async fn main() {
     let validator_keypair = validator_keypair();
 
     let ledger = {
-        let config_path_ledger = config.validator.path_ledger.clone();
-        if let Some(config_path_ledger) = config_path_ledger {
-            Ledger::open(Path::new(&config_path_ledger))
+        let config_ledger_path = config.ledger.path.clone();
+        if let Some(config_ledger_path) = config_ledger_path {
+            Ledger::open(Path::new(&config_ledger_path))
         } else {
             let tmp_dir = TempDir::new().unwrap();
             Ledger::open(tmp_dir.path())

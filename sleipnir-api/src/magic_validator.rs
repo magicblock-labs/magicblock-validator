@@ -158,7 +158,7 @@ impl MagicValidator {
 
         let ledger = Self::init_ledger(
             config.ledger,
-            config.validator_config.validator.reset_ledger,
+            config.validator_config.ledger.reset,
         )?;
 
         fund_validator_identity(&bank, &validator_pubkey);
