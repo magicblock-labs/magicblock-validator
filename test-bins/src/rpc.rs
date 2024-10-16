@@ -1,14 +1,10 @@
-use std::path::Path;
-
 use log::*;
 use sleipnir_api::{
     magic_validator::{MagicValidator, MagicValidatorConfig},
     InitGeyserServiceConfig,
 };
 use sleipnir_config::{GeyserGrpcConfig, SleipnirConfig};
-use sleipnir_ledger::Ledger;
 use solana_sdk::signature::Keypair;
-use tempfile::TempDir;
 use test_tools::init_logger;
 
 // mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev
@@ -73,20 +69,9 @@ async fn main() {
 
     let validator_keypair = validator_keypair();
 
-    let ledger = {
-        let config_ledger_path = config.ledger.path.clone();
-        if let Some(config_ledger_path) = config_ledger_path {
-            Ledger::open(Path::new(&config_ledger_path))
-        } else {
-            let tmp_dir = TempDir::new().unwrap();
-            Ledger::open(tmp_dir.path())
-        }
-        .expect("Expected to be able to open database ledger")
-    };
     let geyser_grpc_config = config.geyser_grpc.clone();
     let config = MagicValidatorConfig {
         validator_config: config,
-        ledger: Some(ledger),
         init_geyser_service_config: init_geyser_config(geyser_grpc_config),
     };
 

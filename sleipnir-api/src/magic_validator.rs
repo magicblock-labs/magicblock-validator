@@ -1,16 +1,3 @@
-use std::{
-    fs,
-    net::SocketAddr,
-    path::Path,
-    process,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, RwLock,
-    },
-    thread,
-    time::Duration,
-};
-
 use conjunto_transwise::RpcProviderConfig;
 use log::*;
 use sleipnir_account_cloner::{
@@ -52,6 +39,19 @@ use solana_sdk::{
     commitment_config::CommitmentLevel, genesis_config::GenesisConfig,
     pubkey::Pubkey, signature::Keypair, signer::Signer,
 };
+use std::path::PathBuf;
+use std::{
+    fs,
+    net::SocketAddr,
+    path::Path,
+    process,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, RwLock,
+    },
+    thread,
+    time::Duration,
+};
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
 
@@ -72,7 +72,6 @@ use crate::{
 #[derive(Default)]
 pub struct MagicValidatorConfig {
     pub validator_config: SleipnirConfig,
-    pub ledger: Option<Ledger>,
     pub init_geyser_service_config: InitGeyserServiceConfig,
 }
 
@@ -80,14 +79,6 @@ impl std::fmt::Debug for MagicValidatorConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MagicValidatorConfig")
             .field("validator_config", &self.validator_config)
-            .field(
-                "ledger",
-                &self
-                    .ledger
-                    .as_ref()
-                    .map(|l| l.ledger_path().display().to_string())
-                    .unwrap_or("Not Provided".to_string()),
-            )
             .field(
                 "init_geyser_service_config",
                 &self.init_geyser_service_config,
@@ -162,7 +153,7 @@ impl MagicValidator {
         );
 
         let ledger = Self::init_ledger(
-            config.ledger,
+            config.validator_config.ledger.path.as_ref(),
             config.validator_config.ledger.reset,
         )?;
 
@@ -392,23 +383,19 @@ impl MagicValidator {
     }
 
     fn init_ledger(
-        ledger: Option<Ledger>,
+        ledger_path: Option<&String>,
         reset: bool,
     ) -> ApiResult<Arc<Ledger>> {
-        let ledger = match ledger {
-            Some(ledger) => Arc::new(ledger),
+        let ledger_path = match ledger_path {
+            Some(ledger_path) => PathBuf::from(ledger_path),
             None => {
-                let ledger_path = TempDir::new().unwrap();
-                Arc::new(
-                    Ledger::open(ledger_path.path())
-                        .expect("Expected to be able to open database ledger"),
-                )
+                let ledger_path = TempDir::new()?;
+                ledger_path.path().to_path_buf()
             }
         };
         if reset {
-            let ledger_path = ledger.ledger_path();
-            remove_directory_contents_if_exists(ledger_path).map_err(
-                |err| {
+            remove_directory_contents_if_exists(ledger_path.as_path())
+                .map_err(|err| {
                     error!(
                         "Error: Unable to remove {}: {}",
                         ledger_path.display(),
@@ -417,10 +404,10 @@ impl MagicValidator {
                     ApiError::UnableToCleanLedgerDirectory(
                         ledger_path.display().to_string(),
                     )
-                },
-            )?;
+                })?;
         }
-        Ok(ledger)
+        let ledger = Ledger::open(ledger_path.as_path())?;
+        Ok(Arc::new(ledger))
     }
 
     fn init_transaction_listener(

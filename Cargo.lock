@@ -6083,10 +6083,8 @@ dependencies = [
  "log",
  "sleipnir-api",
  "sleipnir-config",
- "sleipnir-ledger",
  "solana-geyser-plugin-manager",
  "solana-sdk",
- "tempfile",
  "test-tools",
  "tokio",
 ]
