@@ -89,7 +89,13 @@ impl Minimal for MinimalImpl {
         &self,
         meta: Self::Metadata,
     ) -> Result<RpcSnapshotSlotInfo> {
-        todo!("get_highest_snapshot_slot")
+        debug!("get_highest_snapshot_slot rpc request received");
+        // We always start the validator on slot 0 and never clear or snapshot the history
+        // There will be some related work here: https://github.com/magicblock-labs/magicblock-validator/issues/112
+        Ok(RpcSnapshotSlotInfo {
+            full: 0,
+            incremental: None,
+        })
     }
 
     fn get_transaction_count(

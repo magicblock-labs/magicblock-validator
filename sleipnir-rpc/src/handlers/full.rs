@@ -63,7 +63,12 @@ impl Full for FullImpl {
         address_strs: Vec<String>,
         config: Option<RpcEpochConfig>,
     ) -> BoxFuture<Result<Vec<Option<RpcInflationReward>>>> {
-        todo!("get_inflation_reward")
+        debug!("get_inflation_reward rpc request received");
+        Box::pin(async move {
+            Err(Error::invalid_params(
+                "MagicBlock validator does not support native staking",
+            ))
+        })
     }
 
     fn get_cluster_nodes(
@@ -131,11 +136,15 @@ impl Full for FullImpl {
     }
 
     fn get_max_retransmit_slot(&self, meta: Self::Metadata) -> Result<Slot> {
-        todo!("get_max_retransmit_slot")
+        debug!("get_max_retransmit_slot rpc request received");
+        Ok(meta.get_bank().slot()) // This doesn't really apply to our validator, but this value is best-effort
     }
 
     fn get_max_shred_insert_slot(&self, meta: Self::Metadata) -> Result<Slot> {
-        todo!("get_max_shred_insert_slot")
+        debug!("get_max_shred_insert_slot rpc request received");
+        Err(Error::invalid_params(
+            "MagicBlock validator does not support gossiping of shreds",
+        ))
     }
 
     fn request_airdrop(
@@ -217,7 +226,10 @@ impl Full for FullImpl {
     }
 
     fn minimum_ledger_slot(&self, meta: Self::Metadata) -> Result<Slot> {
-        todo!("minimum_ledger_slot")
+        debug!("minimum_ledger_slot rpc request received");
+        // We always start the validator on slot 0 and never clear or snapshot the history
+        // There will be some related work here: https://github.com/magicblock-labs/magicblock-validator/issues/112
+        Ok(0)
     }
 
     fn get_block(
@@ -226,8 +238,7 @@ impl Full for FullImpl {
         slot: Slot,
         config: Option<RpcEncodingConfigWrapper<RpcBlockConfig>>,
     ) -> BoxFuture<Result<Option<UiConfirmedBlock>>> {
-        debug!("get_block rpc request received");
-
+        debug!("get_block rpc request received: {}", slot);
         let config = config
             .map(|config| config.convert_to_current())
             .unwrap_or_default();
@@ -238,7 +249,6 @@ impl Full for FullImpl {
             max_supported_transaction_version: config
                 .max_supported_transaction_version,
         };
-
         Box::pin(async move {
             let block = meta.get_block(slot)?;
             let encoded = block
@@ -372,7 +382,10 @@ impl Full for FullImpl {
         &self,
         meta: Self::Metadata,
     ) -> BoxFuture<Result<Slot>> {
-        Box::pin(async move { Ok(meta.get_first_available_block().await) })
+        debug!("get_first_available_block rpc request received");
+        // In our case, minimum ledger slot is also the oldest slot we can query
+        let minimum_ledger_slot = self.minimum_ledger_slot(meta);
+        Box::pin(async move { minimum_ledger_slot })
     }
 
     fn get_latest_blockhash(
@@ -433,7 +446,10 @@ impl Full for FullImpl {
         meta: Self::Metadata,
         config: Option<RpcContextConfig>,
     ) -> Result<RpcResponse<u64>> {
-        todo!("get_stake_minimum_delegation")
+        debug!("get_stake_minimum_delegation rpc request received");
+        Err(Error::invalid_params(
+            "MagicBlock validator does not support native staking",
+        ))
     }
 
     fn get_recent_prioritization_fees(
@@ -441,7 +457,10 @@ impl Full for FullImpl {
         meta: Self::Metadata,
         pubkey_strs: Option<Vec<String>>,
     ) -> Result<Vec<RpcPrioritizationFee>> {
-        todo!("get_recent_prioritization_fees")
+        let pubkey_strs = pubkey_strs.unwrap_or_default();
+        Err(Error::invalid_params(
+            "MagicBlock validator does not support or require priority fees",
+        ))
     }
 }
 
@@ -455,10 +474,10 @@ async fn send_transaction_impl(
     max_retries: Option<usize>,
 ) -> Result<String> {
     let binary_encoding = tx_encoding.into_binary_encoding().ok_or_else(|| {
-                Error::invalid_params(format!(
-                    "unsupported encoding: {tx_encoding}. Supported encodings: base58, base64"
-                ))
-            })?;
+        Error::invalid_params(format!(
+            "unsupported encoding: {tx_encoding}. Supported encodings: base58, base64"
+        ))
+    })?;
 
     let (_wire_transaction, unsanitized_tx) =
         decode_and_deserialize::<VersionedTransaction>(data, binary_encoding)?;

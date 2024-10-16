@@ -355,11 +355,6 @@ impl JsonRpcRequestProcessor {
     // -----------------
     // Block
     // -----------------
-    pub async fn get_first_available_block(&self) -> Slot {
-        // We don't have a blockstore but need to support this request
-        0
-    }
-
     pub async fn get_block_time(
         &self,
         slot: Slot,
