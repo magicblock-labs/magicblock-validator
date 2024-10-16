@@ -1107,17 +1107,27 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "borsh 0.10.3",
+ "ephemeral-rollups-sdk-attribute-commit",
  "ephemeral-rollups-sdk-attribute-delegate",
  "paste",
  "solana-program 1.17.22",
 ]
 
 [[package]]
+name = "ephemeral-rollups-sdk-attribute-commit"
+version = "0.0.6"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "ephemeral-rollups-sdk-attribute-delegate"
-version = "0.0.5"
+version = "0.0.6"
 dependencies = [
  "proc-macro2",
  "quote",

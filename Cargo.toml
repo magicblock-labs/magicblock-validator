@@ -21,6 +21,7 @@ members = [
   "sleipnir-geyser-plugin",
   "sleipnir-ledger",
   "sleipnir-messaging",
+  "sleipnir-metrics",
   "sleipnir-mutator",
   "sleipnir-perf-service",
   "sleipnir-processor",
@@ -74,6 +75,9 @@ geyser-grpc-proto = { path = "./geyser-grpc-proto" }
 git-version = "0.3.9"
 histogram = "0.6.9"
 hostname = "0.4.0"
+http-body-util = "0.1.2"
+hyper = "1.4.1"
+hyper-util = "0.1.9"
 itertools = "0.10.5"
 json5 = "0.4.1"
 jsonrpc-core = "18.0.0"
@@ -93,10 +97,10 @@ num-derive = "0.4"
 num-traits = "0.2"
 percentage = "0.1.0"
 prio-graph = "0.2.1"
+prometheus = "0.13.4"
 prost = "0.12.3"
 rand = "0.8.5"
 rayon = "1.8.1"
-reqwest = { version = "0.11.23", default-features = false }
 rustc_version = "0.4"
 semver = "1.0.22"
 serde = "1.0.196"
@@ -116,6 +120,7 @@ sleipnir-core = { path = "./sleipnir-core" }
 sleipnir-geyser-plugin = { path = "./sleipnir-geyser-plugin" }
 sleipnir-ledger = { path = "./sleipnir-ledger" }
 sleipnir-messaging = { path = "./sleipnir-messaging" }
+sleipnir-metrics = { path = "./sleipnir-metrics" }
 sleipnir-mutator = { path = "./sleipnir-mutator" }
 sleipnir-perf-service = { path = "./sleipnir-perf-service" }
 sleipnir-processor = { path = "./sleipnir-processor" }

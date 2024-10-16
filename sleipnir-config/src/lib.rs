@@ -12,11 +12,14 @@ use url::Url;
 mod accounts;
 pub mod errors;
 mod geyser_grpc;
+mod helpers;
+mod metrics;
 mod program;
 mod rpc;
 mod validator;
 pub use accounts::*;
 pub use geyser_grpc::*;
+pub use metrics::*;
 pub use program::*;
 pub use rpc::*;
 pub use validator::*;
@@ -35,6 +38,8 @@ pub struct SleipnirConfig {
     #[serde(default)]
     #[serde(rename = "program")]
     pub programs: Vec<ProgramConfig>,
+    #[serde(default)]
+    pub metrics: MetricsConfig,
 }
 
 impl SleipnirConfig {
@@ -80,6 +85,9 @@ impl SleipnirConfig {
     pub fn override_from_envs(&self) -> SleipnirConfig {
         let mut config = self.clone();
 
+        // -----------------
+        // Accounts
+        // -----------------
         if let Ok(remote) = env::var("ACCOUNTS_REMOTE") {
             config.accounts.remote = RemoteConfig::Custom(
                 Url::parse(&remote)
@@ -111,6 +119,9 @@ impl SleipnirConfig {
                 .unwrap_or_else(|err| panic!("Failed to parse 'ACCOUNTS_COMMIT_COMPUTE_UNIT_PRICE' as u64: {:?}", err))
         }
 
+        // -----------------
+        // RPC
+        // -----------------
         if let Ok(addr) = env::var("RPC_ADDR") {
             config.rpc.addr =
                 IpAddr::V4(Ipv4Addr::from_str(&addr).unwrap_or_else(|err| {
@@ -124,6 +135,9 @@ impl SleipnirConfig {
             });
         }
 
+        // -----------------
+        // Geyser GRPC
+        // -----------------
         if let Ok(addr) = env::var("GEYSER_GRPC_ADDR") {
             config.geyser_grpc.addr =
                 IpAddr::V4(Ipv4Addr::from_str(&addr).unwrap_or_else(|err| {
@@ -144,9 +158,40 @@ impl SleipnirConfig {
                 })
         }
 
+        // -----------------
+        // Validator
+        // -----------------
         if let Ok(millis_per_slot) = env::var("VALIDATOR_MILLIS_PER_SLOT") {
             config.validator.millis_per_slot = u64::from_str(&millis_per_slot)
                 .unwrap_or_else(|err| panic!("Failed to parse 'VALIDATOR_MILLIS_PER_SLOT' as u64: {:?}", err))
+        }
+
+        // -----------------
+        // Metrics
+        // -----------------
+        if let Ok(enabled) = env::var("METRICS_ENABLED") {
+            config.metrics.enabled =
+                bool::from_str(&enabled).unwrap_or_else(|err| {
+                    panic!(
+                        "Failed to parse 'METRICS_ENABLED' as bool: {:?}",
+                        err
+                    )
+                });
+        }
+        if let Ok(addr) = env::var("METRICS_ADDR") {
+            config.metrics.service.addr =
+                IpAddr::V4(Ipv4Addr::from_str(&addr).unwrap_or_else(|err| {
+                    panic!(
+                        "Failed to parse 'METRICS_ADDR' as Ipv4Addr: {:?}",
+                        err
+                    )
+                }));
+        }
+        if let Ok(port) = env::var("METRICS_PORT") {
+            config.metrics.service.port =
+                u16::from_str(&port).unwrap_or_else(|err| {
+                    panic!("Failed to parse 'METRICS_PORT' as u16: {:?}", err)
+                });
         }
         config
     }
