@@ -24,3 +24,6 @@ port = 7799
 
 [geyser_grpc]
 port = 10001
+
+[metrics]
+enabled = false
