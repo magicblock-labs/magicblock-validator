@@ -5,6 +5,7 @@ use log::*;
 use sleipnir_accounts_api::InternalAccountProvider;
 use sleipnir_bank::bank::Bank;
 use sleipnir_core::debug_panic;
+use sleipnir_metrics::metrics;
 use sleipnir_mutator::Cluster;
 use sleipnir_processor::execute_transaction::execute_legacy_transaction;
 use sleipnir_program::{
@@ -203,7 +204,26 @@ impl RemoteScheduledCommitsProcessor {
         // point where we do allow validator shutdown
         let committer = committer.clone();
         tokio::task::spawn(async move {
-            let pending_commits = match committer
+            let (commit_only_accounts, commit_and_undelegate_accounts) =
+                sendable_payloads_queue.iter().fold(
+                    (HashSet::new(), HashSet::new()),
+                    |(mut commit_only, mut undelegated), commit| {
+                        for (pubkey, _) in &commit.committees {
+                            if commit
+                                .transaction
+                                .undelegated_accounts
+                                .contains(pubkey)
+                            {
+                                undelegated.insert(*pubkey);
+                            } else {
+                                commit_only.insert(*pubkey);
+                            }
+                        }
+                        (commit_only, undelegated)
+                    },
+                );
+
+            match committer
                 .send_commit_transactions(sendable_payloads_queue)
                 .await
             {
@@ -216,20 +236,31 @@ impl RemoteScheduledCommitsProcessor {
                     return;
                 }
             };
-            let undelegated_accounts = pending_commits
-                .into_iter()
-                .flat_map(|commit| commit.undelegated_accounts.into_iter())
-                .collect::<HashSet<Pubkey>>();
-            if !undelegated_accounts.is_empty()
-                && log::log_enabled!(log::Level::Debug)
+
+            if !commit_and_undelegate_accounts.is_empty()
+                && log_enabled!(log::Level::Debug)
             {
                 debug!(
                     "Requesting to undelegate: {}",
-                    undelegated_accounts
+                    commit_and_undelegate_accounts
                         .iter()
                         .map(|x| x.to_string())
                         .collect::<Vec<String>>()
                         .join(", ")
+                );
+            }
+            for pubkey in commit_and_undelegate_accounts {
+                metrics::inc_account_commit(
+                    metrics::AccountCommit::CommitAndUndelegate {
+                        pubkey: &pubkey.to_string(),
+                    },
+                );
+            }
+            for pubkey in commit_only_accounts {
+                metrics::inc_account_commit(
+                    metrics::AccountCommit::CommitOnly {
+                        pubkey: &pubkey.to_string(),
+                    },
                 );
             }
         });

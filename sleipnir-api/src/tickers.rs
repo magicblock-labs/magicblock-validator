@@ -11,6 +11,7 @@ use sleipnir_accounts::AccountsManager;
 use sleipnir_bank::bank::Bank;
 use sleipnir_core::magic_program;
 use sleipnir_ledger::Ledger;
+use sleipnir_metrics::metrics;
 use sleipnir_processor::execute_transaction::execute_legacy_transaction;
 use sleipnir_program::{
     sleipnir_instruction::accept_scheduled_commits, MagicContext,
@@ -79,6 +80,7 @@ pub fn init_slot_ticker(
             if log {
                 info!("Advanced to slot {}", next_slot);
             }
+            metrics::inc_slot();
         }
     })
 }

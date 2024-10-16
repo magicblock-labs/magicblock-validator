@@ -13,3 +13,7 @@ path = "../schedulecommit/elfs/schedulecommit_program.so"
 [[program]]
 id = "4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr"
 path = "../schedulecommit/elfs/schedulecommit_test_security.so"
+
+[metrics]
+enabled = true
+port = 9000

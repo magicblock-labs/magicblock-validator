@@ -5,6 +5,7 @@ use itertools::izip;
 use sleipnir_accounts_db::transaction_results::TransactionExecutionDetails;
 use sleipnir_bank::transaction_notifier_interface::TransactionNotifierArc;
 use sleipnir_ledger::Ledger;
+use sleipnir_metrics::metrics;
 use sleipnir_transaction_status::{
     extract_and_fmt_memos, map_inner_instructions, TransactionStatusBatch,
     TransactionStatusMessage, TransactionStatusMeta,
@@ -79,12 +80,25 @@ impl GeyserTransactionNotifyListener {
                                     executed_units,
                                     ..
                                 } = details;
+
                                 let lamports_per_signature =
                                     bank.get_lamports_per_signature();
                                 let fee = bank.get_fee_for_message_with_lamports_per_signature(
                                     transaction.message(),
                                     lamports_per_signature,
                                 );
+
+                                let fee_payer = transaction
+                                    .message()
+                                    .fee_payer()
+                                    .to_string();
+                                metrics::inc_transaction(
+                                    status.is_ok(),
+                                    &fee_payer,
+                                );
+                                metrics::inc_executed_units(executed_units);
+                                metrics::inc_fee(fee);
+
                                 let inner_instructions = inner_instructions
                                     .map(|inner_instructions| {
                                         map_inner_instructions(
@@ -140,7 +154,7 @@ impl GeyserTransactionNotifyListener {
                                         transaction_status_meta,
                                         transaction_slot_index,
                                     )
-                                    .expect("Expect database write to succeed: TransactionStatus");
+                                        .expect("Expect database write to succeed: TransactionStatus");
                                 }
                             }
                         }

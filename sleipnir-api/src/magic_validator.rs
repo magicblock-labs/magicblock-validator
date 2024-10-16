@@ -35,6 +35,7 @@ use sleipnir_bank::{
 use sleipnir_config::{ProgramConfig, SleipnirConfig};
 use sleipnir_geyser_plugin::rpc::GeyserRpcService;
 use sleipnir_ledger::Ledger;
+use sleipnir_metrics::MetricsService;
 use sleipnir_perf_service::SamplePerformanceService;
 use sleipnir_program::init_validator_authority;
 use sleipnir_pubsub::pubsub_service::{
@@ -125,6 +126,7 @@ pub struct MagicValidator {
     accounts_manager: Arc<AccountsManager>,
     transaction_listener: GeyserTransactionNotifyListener,
     rpc_service: JsonRpcService,
+    _metrics_service: Option<MetricsService>,
     geyser_rpc_service: Arc<GeyserRpcService>,
     pubsub_config: PubsubConfig,
     pub transaction_status_sender: TransactionStatusSender,
@@ -138,6 +140,9 @@ impl MagicValidator {
         config: MagicValidatorConfig,
         identity_keypair: Keypair,
     ) -> ApiResult<Self> {
+        // TODO(thlorenz): @@ this will need to be recreated on each start
+        let token = CancellationToken::new();
+
         let (geyser_service, geyser_rpc_service) =
             init_geyser_service(config.init_geyser_service_config)?;
 
@@ -178,6 +183,19 @@ impl MagicValidator {
                 &ledger,
                 geyser_service.get_transaction_notifier(),
             );
+
+        let metrics_config = &config.validator_config.metrics;
+        let metrics_service = if metrics_config.enabled {
+            Some(
+                sleipnir_metrics::try_start_metrics_service(
+                    metrics_config.service.socket_addr(),
+                    token.clone(),
+                )
+                .map_err(ApiError::FailedToStartMetricsService)?,
+            )
+        } else {
+            None
+        };
 
         let accounts_config =
             try_convert_accounts_config(&config.validator_config.accounts)
@@ -258,6 +276,7 @@ impl MagicValidator {
             config: config.validator_config,
             exit,
             rpc_service,
+            _metrics_service: metrics_service,
             geyser_rpc_service,
             slot_ticker: None,
             commit_accounts_ticker: None,
@@ -271,8 +290,7 @@ impl MagicValidator {
             pubsub_close_handle: Default::default(),
             sample_performance_service: None,
             pubsub_config,
-            // TODO(thlorenz): @@ this will need to be recreated on each start
-            token: CancellationToken::new(),
+            token,
             bank,
             ledger,
             accounts_manager,

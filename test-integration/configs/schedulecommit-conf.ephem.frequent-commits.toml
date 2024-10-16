@@ -7,3 +7,7 @@ commit = { frequency_millis = 60, compute_unit_price = 1_000_000 }
 
 [rpc]
 port = 8899
+
+[metrics]
+enabled = true
+port = 9000

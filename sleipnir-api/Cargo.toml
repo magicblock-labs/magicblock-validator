@@ -24,6 +24,7 @@ sleipnir-config = { workspace = true }
 sleipnir-core = { workspace = true }
 sleipnir-geyser-plugin = { workspace = true }
 sleipnir-ledger = { workspace = true }
+sleipnir-metrics = { workspace = true }
 sleipnir-perf-service = { workspace = true }
 sleipnir-processor = { workspace = true }
 sleipnir-program = { workspace = true }

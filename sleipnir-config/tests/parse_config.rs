@@ -2,8 +2,13 @@ use std::net::{IpAddr, Ipv4Addr};
 
 use sleipnir_config::{
     AccountsConfig, AllowedProgram, CommitStrategy, GeyserGrpcConfig,
+<<<<<<< HEAD
     LedgerConfig, LifecycleMode, Payer, ProgramConfig, RemoteConfig, RpcConfig,
     SleipnirConfig, ValidatorConfig,
+=======
+    LifecycleMode, MetricsConfig, MetricsServiceConfig, Payer, ProgramConfig,
+    RemoteConfig, RpcConfig, SleipnirConfig, ValidatorConfig,
+>>>>>>> master
 };
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey};
 use url::Url;
@@ -107,6 +112,13 @@ fn test_local_dev_with_programs_toml() {
             geyser_grpc: GeyserGrpcConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                 port: 11_000
+            },
+            metrics: MetricsConfig {
+                enabled: true,
+                service: MetricsServiceConfig {
+                    port: 9999,
+                    ..Default::default()
+                }
             },
         }
     )

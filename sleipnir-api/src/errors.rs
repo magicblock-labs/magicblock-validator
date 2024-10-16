@@ -27,4 +27,7 @@ pub enum ApiError {
 
     #[error("Unable to clean ledger directory at '{0}'")]
     UnableToCleanLedgerDirectory(String),
+
+    #[error("Failed to start metrics service: {0}")]
+    FailedToStartMetricsService(#[from] std::io::Error),
 }
