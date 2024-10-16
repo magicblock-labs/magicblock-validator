@@ -16,6 +16,9 @@ pub enum ApiError {
     #[error("Accounts error: {0}")]
     AccountsError(#[from] sleipnir_accounts::errors::AccountsError),
 
+    #[error("Ledger error: {0}")]
+    LedgerError(#[from] sleipnir_ledger::errors::LedgerError),
+
     #[error("Failed to load programs into bank: {0}")]
     FailedToLoadProgramsIntoBank(String),
 

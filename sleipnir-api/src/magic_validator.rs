@@ -1,16 +1,3 @@
-use std::{
-    fs,
-    net::SocketAddr,
-    path::Path,
-    process,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, RwLock,
-    },
-    thread,
-    time::Duration,
-};
-
 use conjunto_transwise::RpcProviderConfig;
 use log::*;
 use sleipnir_account_cloner::{
@@ -52,6 +39,17 @@ use solana_sdk::{
     commitment_config::CommitmentLevel, genesis_config::GenesisConfig,
     pubkey::Pubkey, signature::Keypair, signer::Signer,
 };
+use std::path::PathBuf;
+use std::{
+    net::SocketAddr,
+    process,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, RwLock,
+    },
+    thread,
+    time::Duration,
+};
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
 
@@ -63,6 +61,7 @@ use crate::{
     },
     geyser_transaction_notify_listener::GeyserTransactionNotifyListener,
     init_geyser_service::{init_geyser_service, InitGeyserServiceConfig},
+    ledger,
     tickers::{
         init_commit_accounts_ticker, init_slot_ticker,
         init_system_metrics_ticker,
@@ -75,7 +74,6 @@ use crate::{
 #[derive(Default)]
 pub struct MagicValidatorConfig {
     pub validator_config: SleipnirConfig,
-    pub ledger: Option<Ledger>,
     pub init_geyser_service_config: InitGeyserServiceConfig,
 }
 
@@ -83,14 +81,6 @@ impl std::fmt::Debug for MagicValidatorConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MagicValidatorConfig")
             .field("validator_config", &self.validator_config)
-            .field(
-                "ledger",
-                &self
-                    .ledger
-                    .as_ref()
-                    .map(|l| l.ledger_path().display().to_string())
-                    .unwrap_or("Not Provided".to_string()),
-            )
             .field(
                 "init_geyser_service_config",
                 &self.init_geyser_service_config,
@@ -165,7 +155,7 @@ impl MagicValidator {
         );
 
         let ledger = Self::init_ledger(
-            config.ledger,
+            config.validator_config.ledger.path.as_ref(),
             config.validator_config.ledger.reset,
         )?;
 
@@ -403,42 +393,18 @@ impl MagicValidator {
     }
 
     fn init_ledger(
-        ledger: Option<Ledger>,
+        ledger_path: Option<&String>,
         reset: bool,
     ) -> ApiResult<Arc<Ledger>> {
-        let ledger = match ledger {
-            Some(ledger) => {
-                if reset {
-                    return Err(
-                        ApiError::CannotResetLedgerThatWasAlreadyInitialized,
-                    );
-                }
-                Arc::new(ledger)
-            }
+        let ledger_path = match ledger_path {
+            Some(ledger_path) => PathBuf::from(ledger_path),
             None => {
-                let ledger_path = TempDir::new().unwrap();
-                let ledger_path = ledger_path.path();
-                if reset {
-                    remove_directory_contents_if_exists(ledger_path).map_err(
-                        |err| {
-                            error!(
-                                "Error: Unable to remove {}: {}",
-                                ledger_path.display(),
-                                err
-                            );
-                            ApiError::UnableToCleanLedgerDirectory(
-                                ledger_path.display().to_string(),
-                            )
-                        },
-                    )?;
-                }
-                Arc::new(
-                    Ledger::open(ledger_path)
-                        .expect("Expected to be able to open database ledger"),
-                )
+                let ledger_path = TempDir::new()?;
+                ledger_path.path().to_path_buf()
             }
         };
-        Ok(ledger)
+        let ledger = ledger::init(ledger_path, reset)?;
+        Ok(Arc::new(ledger))
     }
 
     fn init_transaction_listener(
@@ -608,23 +574,6 @@ fn programs_to_load(programs: &[ProgramConfig]) -> Vec<(Pubkey, String)> {
         .iter()
         .map(|program| (program.id, program.path.clone()))
         .collect()
-}
-
-fn remove_directory_contents_if_exists(
-    dir: &Path,
-) -> Result<(), std::io::Error> {
-    if !dir.exists() {
-        return Ok(());
-    }
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        if entry.metadata()?.is_dir() {
-            fs::remove_dir_all(entry.path())?
-        } else {
-            fs::remove_file(entry.path())?
-        }
-    }
-    Ok(())
 }
 
 fn create_worker_runtime(thread_name: &str) -> tokio::runtime::Runtime {

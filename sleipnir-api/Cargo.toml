@@ -10,6 +10,7 @@ edition.workspace = true
 [dependencies]
 conjunto-transwise = { workspace = true }
 crossbeam-channel = { workspace = true }
+fd-lock = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }
 sleipnir-account-cloner = { workspace = true }
