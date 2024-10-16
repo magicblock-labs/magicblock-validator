@@ -78,6 +78,10 @@ impl Ledger {
         self.ledger_path.join("banking_trace")
     }
 
+    pub fn storage_size(&self) -> std::result::Result<u64, LedgerError> {
+        self.db.storage_size()
+    }
+
     /// Opens a Ledger in directory, provides "infinite" window of shreds
     pub fn open(ledger_path: &Path) -> std::result::Result<Self, LedgerError> {
         Self::do_open(ledger_path, LedgerOptions::default())
