@@ -2,13 +2,8 @@ use std::net::{IpAddr, Ipv4Addr};
 
 use sleipnir_config::{
     AccountsConfig, AllowedProgram, CommitStrategy, GeyserGrpcConfig,
-<<<<<<< HEAD
-    LedgerConfig, LifecycleMode, Payer, ProgramConfig, RemoteConfig, RpcConfig,
-    SleipnirConfig, ValidatorConfig,
-=======
-    LifecycleMode, MetricsConfig, MetricsServiceConfig, Payer, ProgramConfig,
-    RemoteConfig, RpcConfig, SleipnirConfig, ValidatorConfig,
->>>>>>> master
+    LedgerConfig, LifecycleMode, MetricsConfig, MetricsServiceConfig, Payer,
+    ProgramConfig, RemoteConfig, RpcConfig, SleipnirConfig, ValidatorConfig,
 };
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey};
 use url::Url;
