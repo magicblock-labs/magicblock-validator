@@ -133,10 +133,7 @@ pub fn init_system_metrics_ticker(
         loop {
             tokio::select! {
                 _ = tokio::time::sleep(tick_duration) => {
-                        match ledger.storage_size() {
-                            Ok(byte_size) => metrics::set_ledger_size(byte_size),
-                            Err(err) => warn!("Failed to get ledger storage size: {:?}", err),
-                        }
+                    try_set_ledger_storage_size(&ledger);
                 },
                 _ = token.cancelled() => {
                     break;
