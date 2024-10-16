@@ -33,7 +33,4 @@ pub enum ApiError {
 
     #[error("Failed to start metrics service: {0}")]
     FailedToStartMetricsService(#[from] std::io::Error),
-
-    #[error("Cannot reset ledger that was already initialized")]
-    CannotResetLedgerThatWasAlreadyInitialized,
 }
