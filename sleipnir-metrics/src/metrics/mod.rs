@@ -84,6 +84,15 @@ lazy_static::lazy_static! {
                 SECONDS_1_9.iter()).cloned().collect()
             ),
     ).unwrap();
+
+    pub static ref TRANSACTION_EXECUTION_TIME_HISTORY: Histogram = Histogram::with_opts(
+        HistogramOpts::new("transaction_execution_time", "Time spent in transaction execution")
+            .buckets(
+                MICROS_10_90.iter().chain(
+                MICROS_100_900.iter()).chain(
+                MILLIS_1_9.iter()).cloned().collect()
+            ),
+    ).unwrap();
 }
 
 pub(crate) fn register() {
@@ -106,6 +115,7 @@ pub(crate) fn register() {
         register!(LEDGER_SIZE_GAUGE);
         register!(SIGVERIFY_TIME_HISTOGRAM);
         register!(ENSURE_ACCOUNTS_TIME_HISTOGRAM);
+        register!(TRANSACTION_EXECUTION_TIME_HISTORY);
     });
 }
 
@@ -188,4 +198,11 @@ pub fn ensure_accounts_start() -> HistogramTimer {
 
 pub fn ensure_accounts_end(timer: HistogramTimer) {
     timer.stop_and_record();
+}
+
+pub fn observe_transaction_execution_time<T, F>(f: F) -> T
+where
+    F: FnOnce() -> T,
+{
+    TRANSACTION_EXECUTION_TIME_HISTORY.observe_closure_duration(f)
 }
