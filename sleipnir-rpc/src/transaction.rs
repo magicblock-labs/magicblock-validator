@@ -168,13 +168,17 @@ pub(crate) async fn send_transaction(
 
     // It is very important that we ensure accounts before simulating transactions
     // since they could depend on specific accounts to be in our validator
-    ensure_accounts(&meta.accounts_manager, &sanitized_transaction)
-        .await
-        .map_err(|err| Error {
-            code: ErrorCode::InvalidRequest,
-            message: format!("{:?}", err),
-            data: None,
-        })?;
+    {
+        let timer = metrics::ensure_accounts_start();
+        ensure_accounts(&meta.accounts_manager, &sanitized_transaction)
+            .await
+            .map_err(|err| Error {
+                code: ErrorCode::InvalidRequest,
+                message: format!("{:?}", err),
+                data: None,
+            })?;
+        metrics::ensure_accounts_end(timer);
+    }
 
     if let Some(preflight_bank) = preflight_bank {
         meta.transaction_preflight(preflight_bank, &sanitized_transaction)?;

@@ -1,11 +1,31 @@
 use std::sync::Once;
 
 use prometheus::{
-    Histogram, HistogramOpts, IntCounter, IntCounterVec, IntGauge, Opts,
-    Registry,
+    Histogram, HistogramOpts, HistogramTimer, IntCounter, IntCounterVec,
+    IntGauge, Opts, Registry,
 };
 pub use types::{AccountClone, AccountCommit};
 mod types;
+
+// -----------------
+// Buckets
+// -----------------
+// Prometheus collects durations in seconds
+const MICROS_10_90: [f64; 9] = [
+    0.000_01, 0.000_02, 0.000_03, 0.000_04, 0.000_05, 0.000_06, 0.000_07,
+    0.000_08, 0.000_09,
+];
+const MICROS_100_900: [f64; 9] = [
+    0.000_1, 0.000_2, 0.000_3, 0.000_4, 0.000_5, 0.000_6, 0.000_7, 0.000_8,
+    0.000_9,
+];
+const MILLIS_1_9: [f64; 9] = [
+    0.001, 0.002, 0.003, 0.004, 0.005, 0.006, 0.007, 0.008, 0.009,
+];
+const MILLIS_10_90: [f64; 9] =
+    [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09];
+const MILLIS_100_900: [f64; 9] = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
+const SECONDS_1_9: [f64; 9] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
 
 lazy_static::lazy_static! {
     pub(crate) static ref REGISTRY: Registry = Registry::new_custom(Some("mbv".to_string()), None).unwrap();
@@ -48,17 +68,21 @@ lazy_static::lazy_static! {
 
     pub static ref SIGVERIFY_TIME_HISTOGRAM: Histogram = Histogram::with_opts(
         HistogramOpts::new("sigverify_time", "Time spent in sigverify")
-            .buckets(vec![
-                // 10µs - 90µs
-                0.000_01, 0.000_02, 0.000_03, 0.000_04, 0.000_05,
-                0.000_06, 0.000_07, 0.000_08, 0.000_09,
-                // 100µs - 900µs
-                0.000_1, 0.000_2, 0.000_3, 0.000_4, 0.000_5,
-                0.000_6, 0.000_7, 0.000_8, 0.000_9,
-                // 1ms - 9ms
-                0.001, 0.002, 0.003, 0.004, 0.005,
-                0.006, 0.007, 0.008, 0.009,
-            ]),
+            .buckets(
+                MICROS_10_90.iter().chain(
+                MICROS_100_900.iter()).chain(
+                MILLIS_1_9.iter()).cloned().collect()
+            ),
+    ).unwrap();
+
+    pub static ref ENSURE_ACCOUNTS_TIME_HISTOGRAM: Histogram = Histogram::with_opts(
+        HistogramOpts::new("ensure_accounts_time", "Time spent in ensure_accounts")
+            .buckets(
+                MILLIS_1_9.iter().chain(
+                MILLIS_10_90.iter()).chain(
+                MILLIS_100_900.iter()).chain(
+                SECONDS_1_9.iter()).cloned().collect()
+            ),
     ).unwrap();
 }
 
@@ -81,6 +105,7 @@ pub(crate) fn register() {
         register!(ACCOUNT_COMMIT_VEC_COUNT);
         register!(LEDGER_SIZE_GAUGE);
         register!(SIGVERIFY_TIME_HISTOGRAM);
+        register!(ENSURE_ACCOUNTS_TIME_HISTOGRAM);
     });
 }
 
@@ -155,4 +180,12 @@ where
     F: FnOnce() -> T,
 {
     SIGVERIFY_TIME_HISTOGRAM.observe_closure_duration(f)
+}
+
+pub fn ensure_accounts_start() -> HistogramTimer {
+    ENSURE_ACCOUNTS_TIME_HISTOGRAM.start_timer()
+}
+
+pub fn ensure_accounts_end(timer: HistogramTimer) {
+    timer.stop_and_record();
 }
