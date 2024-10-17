@@ -62,6 +62,16 @@ lazy_static::lazy_static! {
         &["kind", "pubkey", "outcome"],
     ).unwrap();
 
+    pub static ref ACCOUNT_COMMIT_TIME_HISTOGRAM: Histogram = Histogram::with_opts(
+        HistogramOpts::new("account_commit_time", "Time until each account commit transactoin is processed on chain")
+            .buckets(
+                MILLIS_1_9.iter().chain(
+                MILLIS_10_90.iter()).chain(
+                MILLIS_100_900.iter()).chain(
+                SECONDS_1_9.iter()).cloned().collect()
+            ),
+    ).unwrap();
+
     pub static ref LEDGER_SIZE_GAUGE: IntGauge = IntGauge::new(
         "ledger_size", "Ledger Size in Bytes",
     ).unwrap();
@@ -112,6 +122,7 @@ pub(crate) fn register() {
         register!(FEE_COUNT);
         register!(ACCOUNT_CLONE_VEC_COUNT);
         register!(ACCOUNT_COMMIT_VEC_COUNT);
+        register!(ACCOUNT_COMMIT_TIME_HISTOGRAM);
         register!(LEDGER_SIZE_GAUGE);
         register!(SIGVERIFY_TIME_HISTOGRAM);
         register!(ENSURE_ACCOUNTS_TIME_HISTOGRAM);
@@ -183,6 +194,14 @@ pub fn inc_account_commit(account_commit: AccountCommit) {
                 .inc();
         }
     }
+}
+
+pub fn account_commmit_start() -> HistogramTimer {
+    ACCOUNT_COMMIT_TIME_HISTOGRAM.start_timer()
+}
+
+pub fn account_commit_end(timer: HistogramTimer) {
+    timer.stop_and_record();
 }
 
 pub fn set_ledger_size(size: u64) {

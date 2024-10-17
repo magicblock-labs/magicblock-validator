@@ -204,6 +204,7 @@ impl RemoteScheduledCommitsProcessor {
         // point where we do allow validator shutdown
         let committer = committer.clone();
         tokio::task::spawn(async move {
+            let timer = metrics::account_commmit_start();
             let (commit_only_accounts, commit_and_undelegate_accounts) =
                 sendable_payloads_queue.iter().fold(
                     (HashSet::new(), HashSet::new()),
@@ -233,6 +234,7 @@ impl RemoteScheduledCommitsProcessor {
                         &commit_only_accounts,
                         metrics::Outcome::Success,
                     );
+                    metrics::account_commit_end(timer);
                 }
                 Err(err) => {
                     update_account_commit_metrics(
@@ -240,6 +242,7 @@ impl RemoteScheduledCommitsProcessor {
                         &commit_only_accounts,
                         metrics::Outcome::Error,
                     );
+                    metrics::account_commit_end(timer);
                     debug_panic!(
                         "Failed to send commit transactions: {:?}",
                         err
