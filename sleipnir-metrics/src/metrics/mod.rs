@@ -1,6 +1,9 @@
 use std::sync::Once;
 
-use prometheus::{IntCounter, IntCounterVec, IntGauge, Opts, Registry};
+use prometheus::{
+    Histogram, HistogramOpts, IntCounter, IntCounterVec, IntGauge, Opts,
+    Registry,
+};
 pub use types::{AccountClone, AccountCommit};
 mod types;
 
@@ -42,6 +45,21 @@ lazy_static::lazy_static! {
     pub static ref LEDGER_SIZE_GAUGE: IntGauge = IntGauge::new(
         "ledger_size", "Ledger Size in Bytes",
     ).unwrap();
+
+    pub static ref SIGVERIFY_TIME_HISTOGRAM: Histogram = Histogram::with_opts(
+        HistogramOpts::new("sigverify_time", "Time spent in sigverify")
+            .buckets(vec![
+                // 10µs - 90µs
+                0.000_01, 0.000_02, 0.000_03, 0.000_04, 0.000_05,
+                0.000_06, 0.000_07, 0.000_08, 0.000_09,
+                // 100µs - 900µs
+                0.000_1, 0.000_2, 0.000_3, 0.000_4, 0.000_5,
+                0.000_6, 0.000_7, 0.000_8, 0.000_9,
+                // 1ms - 9ms
+                0.001, 0.002, 0.003, 0.004, 0.005,
+                0.006, 0.007, 0.008, 0.009,
+            ]),
+    ).unwrap();
 }
 
 pub(crate) fn register() {
@@ -62,6 +80,7 @@ pub(crate) fn register() {
         register!(ACCOUNT_CLONE_VEC_COUNT);
         register!(ACCOUNT_COMMIT_VEC_COUNT);
         register!(LEDGER_SIZE_GAUGE);
+        register!(SIGVERIFY_TIME_HISTOGRAM);
     });
 }
 
@@ -129,4 +148,11 @@ pub fn inc_account_commit(account_commit: AccountCommit) {
 
 pub fn set_ledger_size(size: u64) {
     LEDGER_SIZE_GAUGE.set(size as i64);
+}
+
+pub fn observe_sigverify_time<T, F>(f: F) -> T
+where
+    F: FnOnce() -> T,
+{
+    SIGVERIFY_TIME_HISTOGRAM.observe_closure_duration(f)
 }
