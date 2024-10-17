@@ -4,7 +4,7 @@ use prometheus::{
     Histogram, HistogramOpts, HistogramTimer, IntCounter, IntCounterVec,
     IntGauge, Opts, Registry,
 };
-pub use types::{AccountClone, AccountCommit};
+pub use types::{AccountClone, AccountCommit, Outcome};
 mod types;
 
 // -----------------
@@ -59,7 +59,7 @@ lazy_static::lazy_static! {
 
     pub static ref ACCOUNT_COMMIT_VEC_COUNT: IntCounterVec = IntCounterVec::new(
         Opts::new("account_commit_count", "Count commits performed for specific accounts"),
-        &["kind", "pubkey"],
+        &["kind", "pubkey", "outcome"],
     ).unwrap();
 
     pub static ref LEDGER_SIZE_GAUGE: IntGauge = IntGauge::new(
@@ -168,14 +168,18 @@ pub fn inc_account_clone(account_clone: AccountClone) {
 pub fn inc_account_commit(account_commit: AccountCommit) {
     use AccountCommit::*;
     match account_commit {
-        CommitOnly { pubkey } => {
+        CommitOnly { pubkey, outcome } => {
             ACCOUNT_COMMIT_VEC_COUNT
-                .with_label_values(&["commit", pubkey])
+                .with_label_values(&["commit", pubkey, outcome.as_str()])
                 .inc();
         }
-        CommitAndUndelegate { pubkey } => {
+        CommitAndUndelegate { pubkey, outcome } => {
             ACCOUNT_COMMIT_VEC_COUNT
-                .with_label_values(&["commit_and_undelegate", pubkey])
+                .with_label_values(&[
+                    "commit_and_undelegate",
+                    pubkey,
+                    outcome.as_str(),
+                ])
                 .inc();
         }
     }

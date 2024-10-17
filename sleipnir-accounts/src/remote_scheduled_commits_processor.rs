@@ -227,8 +227,19 @@ impl RemoteScheduledCommitsProcessor {
                 .send_commit_transactions(sendable_payloads_queue)
                 .await
             {
-                Ok(commits) => commits,
+                Ok(_) => {
+                    update_account_commit_metrics(
+                        &commit_and_undelegate_accounts,
+                        &commit_only_accounts,
+                        metrics::Outcome::Success,
+                    );
+                }
                 Err(err) => {
+                    update_account_commit_metrics(
+                        &commit_and_undelegate_accounts,
+                        &commit_only_accounts,
+                        metrics::Outcome::Error,
+                    );
                     debug_panic!(
                         "Failed to send commit transactions: {:?}",
                         err
@@ -249,20 +260,27 @@ impl RemoteScheduledCommitsProcessor {
                         .join(", ")
                 );
             }
-            for pubkey in commit_and_undelegate_accounts {
-                metrics::inc_account_commit(
-                    metrics::AccountCommit::CommitAndUndelegate {
-                        pubkey: &pubkey.to_string(),
-                    },
-                );
-            }
-            for pubkey in commit_only_accounts {
-                metrics::inc_account_commit(
-                    metrics::AccountCommit::CommitOnly {
-                        pubkey: &pubkey.to_string(),
-                    },
-                );
-            }
+        });
+    }
+}
+
+fn update_account_commit_metrics(
+    commit_and_undelegate_accounts: &HashSet<Pubkey>,
+    commit_only_accounts: &HashSet<Pubkey>,
+    outcome: metrics::Outcome,
+) {
+    for pubkey in commit_and_undelegate_accounts {
+        metrics::inc_account_commit(
+            metrics::AccountCommit::CommitAndUndelegate {
+                pubkey: &pubkey.to_string(),
+                outcome,
+            },
+        );
+    }
+    for pubkey in commit_only_accounts {
+        metrics::inc_account_commit(metrics::AccountCommit::CommitOnly {
+            pubkey: &pubkey.to_string(),
+            outcome,
         });
     }
 }
