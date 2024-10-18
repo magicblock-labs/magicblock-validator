@@ -15,10 +15,10 @@ use sleipnir_transaction_status::TransactionStatusSender;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 
 use crate::{
-    errors::AccountsResult,
-    remote_account_committer::update_account_commit_metrics, AccountCommittee,
-    AccountCommitter, ScheduledCommitsProcessor, SendableCommitAccountsPayload,
-    UndelegationRequest,
+    errors::{AccountsError, AccountsResult},
+    remote_account_committer::update_account_commit_metrics,
+    AccountCommittee, AccountCommitter, ScheduledCommitsProcessor,
+    SendableCommitAccountsPayload, UndelegationRequest,
 };
 
 pub struct RemoteScheduledCommitsProcessor {
@@ -205,27 +205,16 @@ impl RemoteScheduledCommitsProcessor {
         // point where we do allow validator shutdown
         let committer = committer.clone();
         tokio::task::spawn(async move {
-            // TODO(thlorenz): @@@ include this info with the error so we
-            // don't have to do this here
-            let (commit_only_accounts, commit_and_undelegate_accounts) =
-                sendable_payloads_queue.iter().fold(
-                    (HashSet::new(), HashSet::new()),
-                    |(mut commit_only, mut undelegated), commit| {
-                        commit_only.extend(
-                            commit.transaction.committed_only_accounts.clone(),
-                        );
-                        undelegated.extend(
-                            commit.transaction.undelegated_accounts.clone(),
-                        );
-                        (commit_only, undelegated)
-                    },
-                );
             let pending_commits = match committer
                 .send_commit_transactions(sendable_payloads_queue)
                 .await
             {
                 Ok(pending) => pending,
-                Err(err) => {
+                Err(AccountsError::FailedToSendCommitTransaction(
+                    err,
+                    commit_and_undelegate_accounts,
+                    commit_only_accounts,
+                )) => {
                     update_account_commit_metrics(
                         &commit_and_undelegate_accounts,
                         &commit_only_accounts,
@@ -238,20 +227,14 @@ impl RemoteScheduledCommitsProcessor {
                     );
                     return;
                 }
+                Err(err) => {
+                    debug_panic!(
+                        "Failed to send commit transactions, received invalid err: {:?}",
+                        err
+                    );
+                    return;
+                }
             };
-
-            if log_enabled!(log::Level::Debug)
-                && !commit_and_undelegate_accounts.is_empty()
-            {
-                debug!(
-                    "Requesting to undelegate: {}",
-                    commit_and_undelegate_accounts
-                        .iter()
-                        .map(|x| x.to_string())
-                        .collect::<Vec<String>>()
-                        .join(", ")
-                );
-            }
 
             committer.confirm_pending_commits(pending_commits).await;
         });

@@ -183,7 +183,11 @@ impl AccountCommitter for RemoteAccountCommitter {
                 )
                 .await
                 .map_err(|err| {
-                    AccountsError::FailedToSendTransaction(err.to_string())
+                    AccountsError::FailedToSendCommitTransaction(
+                        err.to_string(),
+                        Box::new(undelegated_accounts.clone()),
+                        Box::new(committed_only_accounts.clone()),
+                    )
                 })?;
 
             if &signature != tx_sig {

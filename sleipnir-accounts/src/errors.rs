@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use sleipnir_account_cloner::{
     AccountClonerError, AccountClonerUnclonableReason,
 };
@@ -44,8 +46,12 @@ pub enum AccountsError {
     #[error("FailedToGetLatestBlockhash '{0}'")]
     FailedToGetLatestBlockhash(String),
 
-    #[error("FailedToSendTransaction '{0}'")]
-    FailedToSendTransaction(String),
+    #[error("FailedToSendCommitTransaction '{0}'")]
+    FailedToSendCommitTransaction(
+        String,
+        Box<HashSet<Pubkey>>,
+        Box<HashSet<Pubkey>>,
+    ),
 
     #[error("Too many committees: {0}")]
     TooManyCommittees(usize),
