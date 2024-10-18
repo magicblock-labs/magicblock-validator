@@ -1,16 +1,3 @@
-use std::{
-    fs,
-    net::SocketAddr,
-    path::Path,
-    process,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, RwLock,
-    },
-    thread,
-    time::Duration,
-};
-
 use conjunto_transwise::RpcProviderConfig;
 use log::*;
 use sleipnir_account_cloner::{
@@ -35,6 +22,7 @@ use sleipnir_bank::{
 use sleipnir_config::{ProgramConfig, SleipnirConfig};
 use sleipnir_geyser_plugin::rpc::GeyserRpcService;
 use sleipnir_ledger::Ledger;
+use sleipnir_metrics::MetricsService;
 use sleipnir_perf_service::SamplePerformanceService;
 use sleipnir_program::init_validator_authority;
 use sleipnir_pubsub::pubsub_service::{
@@ -51,6 +39,17 @@ use solana_sdk::{
     commitment_config::CommitmentLevel, genesis_config::GenesisConfig,
     pubkey::Pubkey, signature::Keypair, signer::Signer,
 };
+use std::path::PathBuf;
+use std::{
+    net::SocketAddr,
+    process,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, RwLock,
+    },
+    thread,
+    time::Duration,
+};
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
 
@@ -62,7 +61,11 @@ use crate::{
     },
     geyser_transaction_notify_listener::GeyserTransactionNotifyListener,
     init_geyser_service::{init_geyser_service, InitGeyserServiceConfig},
-    tickers::{init_commit_accounts_ticker, init_slot_ticker},
+    ledger,
+    tickers::{
+        init_commit_accounts_ticker, init_slot_ticker,
+        init_system_metrics_ticker,
+    },
 };
 
 // -----------------
@@ -71,46 +74,13 @@ use crate::{
 #[derive(Default)]
 pub struct MagicValidatorConfig {
     pub validator_config: SleipnirConfig,
-    pub ledger: Option<Ledger>,
     pub init_geyser_service_config: InitGeyserServiceConfig,
-}
-
-impl MagicValidatorConfig {
-    pub fn try_from_config_path(config_path: &str) -> ApiResult<Self> {
-        Ok(SleipnirConfig::try_load_from_file(config_path).map(
-            |validator_config| Self {
-                validator_config,
-                ..Default::default()
-            },
-        )?)
-    }
-    pub fn try_from_config_toml(
-        config_toml: &str,
-        config_path: Option<&Path>,
-    ) -> ApiResult<Self> {
-        Ok(
-            SleipnirConfig::try_load_from_toml(config_toml, config_path).map(
-                |validator_config| Self {
-                    validator_config,
-                    ..Default::default()
-                },
-            )?,
-        )
-    }
 }
 
 impl std::fmt::Debug for MagicValidatorConfig {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("MagicValidatorConfig")
             .field("validator_config", &self.validator_config)
-            .field(
-                "ledger",
-                &self
-                    .ledger
-                    .as_ref()
-                    .map(|l| l.ledger_path().display().to_string())
-                    .unwrap_or("Not Provided".to_string()),
-            )
             .field(
                 "init_geyser_service_config",
                 &self.init_geyser_service_config,
@@ -149,6 +119,7 @@ pub struct MagicValidator {
     accounts_manager: Arc<AccountsManager>,
     transaction_listener: GeyserTransactionNotifyListener,
     rpc_service: JsonRpcService,
+    _metrics: Option<(MetricsService, tokio::task::JoinHandle<()>)>,
     geyser_rpc_service: Arc<GeyserRpcService>,
     pubsub_config: PubsubConfig,
     pub transaction_status_sender: TransactionStatusSender,
@@ -162,6 +133,9 @@ impl MagicValidator {
         config: MagicValidatorConfig,
         identity_keypair: Keypair,
     ) -> ApiResult<Self> {
+        // TODO(thlorenz): @@ this will need to be recreated on each start
+        let token = CancellationToken::new();
+
         let (geyser_service, geyser_rpc_service) =
             init_geyser_service(config.init_geyser_service_config)?;
 
@@ -181,8 +155,8 @@ impl MagicValidator {
         );
 
         let ledger = Self::init_ledger(
-            config.ledger,
-            config.validator_config.validator.reset_ledger,
+            config.validator_config.ledger.path.as_ref(),
+            config.validator_config.ledger.reset,
         )?;
 
         fund_validator_identity(&bank, &validator_pubkey);
@@ -202,6 +176,27 @@ impl MagicValidator {
                 &ledger,
                 geyser_service.get_transaction_notifier(),
             );
+
+        let metrics_config = &config.validator_config.metrics;
+        let metrics = if metrics_config.enabled {
+            let metrics_service = sleipnir_metrics::try_start_metrics_service(
+                metrics_config.service.socket_addr(),
+                token.clone(),
+            )
+            .map_err(ApiError::FailedToStartMetricsService)?;
+
+            let system_metrics_ticker = init_system_metrics_ticker(
+                Duration::from_secs(
+                    metrics_config.system_metrics_tick_interval_secs,
+                ),
+                &ledger,
+                token.clone(),
+            );
+
+            Some((metrics_service, system_metrics_ticker))
+        } else {
+            None
+        };
 
         let accounts_config =
             try_convert_accounts_config(&config.validator_config.accounts)
@@ -282,6 +277,7 @@ impl MagicValidator {
             config: config.validator_config,
             exit,
             rpc_service,
+            _metrics: metrics,
             geyser_rpc_service,
             slot_ticker: None,
             commit_accounts_ticker: None,
@@ -295,8 +291,7 @@ impl MagicValidator {
             pubsub_close_handle: Default::default(),
             sample_performance_service: None,
             pubsub_config,
-            // TODO(thlorenz): @@ this will need to be recreated on each start
-            token: CancellationToken::new(),
+            token,
             bank,
             ledger,
             accounts_manager,
@@ -398,35 +393,18 @@ impl MagicValidator {
     }
 
     fn init_ledger(
-        ledger: Option<Ledger>,
+        ledger_path: Option<&String>,
         reset: bool,
     ) -> ApiResult<Arc<Ledger>> {
-        let ledger = match ledger {
-            Some(ledger) => Arc::new(ledger),
+        let ledger_path = match ledger_path {
+            Some(ledger_path) => PathBuf::from(ledger_path),
             None => {
-                let ledger_path = TempDir::new().unwrap();
-                Arc::new(
-                    Ledger::open(ledger_path.path())
-                        .expect("Expected to be able to open database ledger"),
-                )
+                let ledger_path = TempDir::new()?;
+                ledger_path.path().to_path_buf()
             }
         };
-        if reset {
-            let ledger_path = ledger.ledger_path();
-            remove_directory_contents_if_exists(ledger_path).map_err(
-                |err| {
-                    error!(
-                        "Error: Unable to remove {}: {}",
-                        ledger_path.display(),
-                        err
-                    );
-                    ApiError::UnableToCleanLedgerDirectory(
-                        ledger_path.display().to_string(),
-                    )
-                },
-            )?;
-        }
-        Ok(ledger)
+        let ledger = ledger::init(ledger_path, reset)?;
+        Ok(Arc::new(ledger))
     }
 
     fn init_transaction_listener(
@@ -596,23 +574,6 @@ fn programs_to_load(programs: &[ProgramConfig]) -> Vec<(Pubkey, String)> {
         .iter()
         .map(|program| (program.id, program.path.clone()))
         .collect()
-}
-
-fn remove_directory_contents_if_exists(
-    dir: &Path,
-) -> Result<(), std::io::Error> {
-    if !dir.exists() {
-        return Ok(());
-    }
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        if entry.metadata()?.is_dir() {
-            fs::remove_dir_all(entry.path())?
-        } else {
-            fs::remove_file(entry.path())?
-        }
-    }
-    Ok(())
 }
 
 fn create_worker_runtime(thread_name: &str) -> tokio::runtime::Runtime {

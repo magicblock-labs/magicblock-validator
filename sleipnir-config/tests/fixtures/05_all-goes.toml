@@ -8,4 +8,6 @@ lifecycle = "replica"
 # unlimited experimentation
 [validator]
 sigverify = false
-reset_ledger = false
+
+[ledger]
+reset = false

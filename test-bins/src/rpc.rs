@@ -1,12 +1,11 @@
 use log::*;
 use sleipnir_api::{
+    ledger,
     magic_validator::{MagicValidator, MagicValidatorConfig},
     InitGeyserServiceConfig,
 };
 use sleipnir_config::{GeyserGrpcConfig, SleipnirConfig};
-use sleipnir_ledger::Ledger;
 use solana_sdk::signature::Keypair;
-use tempfile::TempDir;
 use test_tools::init_logger;
 
 // mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev
@@ -71,15 +70,9 @@ async fn main() {
 
     let validator_keypair = validator_keypair();
 
-    let ledger = {
-        let ledger_path = TempDir::new().unwrap();
-        Ledger::open(ledger_path.path())
-            .expect("Expected to be able to open database ledger")
-    };
     let geyser_grpc_config = config.geyser_grpc.clone();
     let config = MagicValidatorConfig {
         validator_config: config,
-        ledger: Some(ledger),
         init_geyser_service_config: init_geyser_config(geyser_grpc_config),
     };
 
@@ -87,6 +80,14 @@ async fn main() {
     let api = &mut MagicValidator::try_from_config(config, validator_keypair)
         .unwrap();
     debug!("Created API .. starting things up");
+
+    // We need to create and hold on to the ledger lock here in order to keep the
+    // underlying file locked while the app is running.
+    // This prevents other processes from locking it until we exit.
+    let mut ledger_lock = ledger::ledger_lockfile(api.ledger().ledger_path());
+    let _ledger_write_guard =
+        ledger::lock_ledger(api.ledger().ledger_path(), &mut ledger_lock);
+
     api.start().await.expect("Failed to start validator");
     api.join();
 }

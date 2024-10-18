@@ -1,17 +1,19 @@
-use std::str::FromStr;
+use std::{cmp::min, str::FromStr};
 
 // NOTE: from rpc/src/rpc.rs :3432
 use jsonrpc_core::{futures::future, BoxFuture, Error, Result};
 use log::*;
 use solana_rpc_client_api::{
     config::{
-        RpcBlocksConfigWrapper, RpcContextConfig, RpcEncodingConfigWrapper,
-        RpcEpochConfig, RpcRequestAirdropConfig, RpcSendTransactionConfig,
-        RpcSignatureStatusConfig, RpcSignaturesForAddressConfig,
-        RpcSimulateTransactionAccountsConfig, RpcSimulateTransactionConfig,
-        RpcTransactionConfig,
+        RpcBlockConfig, RpcBlocksConfigWrapper, RpcContextConfig,
+        RpcEncodingConfigWrapper, RpcEpochConfig, RpcRequestAirdropConfig,
+        RpcSendTransactionConfig, RpcSignatureStatusConfig,
+        RpcSignaturesForAddressConfig, RpcSimulateTransactionAccountsConfig,
+        RpcSimulateTransactionConfig, RpcTransactionConfig,
     },
-    request::MAX_GET_SIGNATURE_STATUSES_QUERY_ITEMS,
+    request::{
+        MAX_GET_CONFIRMED_BLOCKS_RANGE, MAX_GET_SIGNATURE_STATUSES_QUERY_ITEMS,
+    },
     response::{
         Response as RpcResponse, RpcBlockhash,
         RpcConfirmedTransactionStatusWithSignature, RpcContactInfo,
@@ -28,8 +30,9 @@ use solana_sdk::{
     transaction::VersionedTransaction,
 };
 use solana_transaction_status::{
-    EncodedConfirmedTransactionWithStatusMeta, TransactionBinaryEncoding,
-    TransactionStatus, UiTransactionEncoding,
+    BlockEncodingOptions, EncodedConfirmedTransactionWithStatusMeta,
+    TransactionBinaryEncoding, TransactionStatus, UiConfirmedBlock,
+    UiTransactionEncoding,
 };
 
 use crate::{
@@ -60,7 +63,20 @@ impl Full for FullImpl {
         address_strs: Vec<String>,
         config: Option<RpcEpochConfig>,
     ) -> BoxFuture<Result<Vec<Option<RpcInflationReward>>>> {
-        todo!("get_inflation_reward")
+        debug!("get_inflation_reward rpc request received");
+        Box::pin(async move {
+            Err(Error::invalid_params(
+                "MagicBlock validator does not support native staking",
+            ))
+        })
+    }
+
+    fn get_cluster_nodes(
+        &self,
+        meta: Self::Metadata,
+    ) -> Result<Vec<RpcContactInfo>> {
+        debug!("get_cluster_nodes rpc request received");
+        Ok(meta.get_cluster_nodes())
     }
 
     fn get_recent_performance_samples(
@@ -87,14 +103,6 @@ impl Full for FullImpl {
             .into_iter()
             .map(|(slot, sample)| rpc_perf_sample_from((slot, sample)))
             .collect())
-    }
-
-    fn get_cluster_nodes(
-        &self,
-        meta: Self::Metadata,
-    ) -> Result<Vec<RpcContactInfo>> {
-        debug!("get_cluster_nodes rpc request received");
-        Ok(meta.get_cluster_nodes())
     }
 
     fn get_signature_statuses(
@@ -128,11 +136,15 @@ impl Full for FullImpl {
     }
 
     fn get_max_retransmit_slot(&self, meta: Self::Metadata) -> Result<Slot> {
-        todo!("get_max_retransmit_slot")
+        debug!("get_max_retransmit_slot rpc request received");
+        Ok(meta.get_bank().slot()) // This doesn't really apply to our validator, but this value is best-effort
     }
 
     fn get_max_shred_insert_slot(&self, meta: Self::Metadata) -> Result<Slot> {
-        todo!("get_max_shred_insert_slot")
+        debug!("get_max_shred_insert_slot rpc request received");
+        Err(Error::invalid_params(
+            "MagicBlock validator does not support gossiping of shreds",
+        ))
     }
 
     fn request_airdrop(
@@ -146,6 +158,37 @@ impl Full for FullImpl {
         Box::pin(
             async move { meta.request_airdrop(pubkey_str, lamports).await },
         )
+    }
+
+    fn simulate_transaction(
+        &self,
+        meta: Self::Metadata,
+        data: String,
+        config: Option<RpcSimulateTransactionConfig>,
+    ) -> BoxFuture<Result<RpcResponse<RpcSimulateTransactionResult>>> {
+        let RpcSimulateTransactionConfig {
+            sig_verify,
+            replace_recent_blockhash,
+            commitment,
+            encoding,
+            accounts: config_accounts,
+            min_context_slot,
+            inner_instructions: enable_cpi_recording,
+        } = config.unwrap_or_default();
+        let tx_encoding = encoding.unwrap_or(UiTransactionEncoding::Base58);
+
+        Box::pin(async move {
+            simulate_transaction_impl(
+                &meta,
+                data,
+                tx_encoding,
+                config_accounts,
+                replace_recent_blockhash,
+                sig_verify,
+                enable_cpi_recording,
+            )
+            .await
+        })
     }
 
     fn send_transaction(
@@ -182,38 +225,40 @@ impl Full for FullImpl {
         })
     }
 
-    fn simulate_transaction(
+    fn minimum_ledger_slot(&self, meta: Self::Metadata) -> Result<Slot> {
+        debug!("minimum_ledger_slot rpc request received");
+        // We always start the validator on slot 0 and never clear or snapshot the history
+        // There will be some related work here: https://github.com/magicblock-labs/magicblock-validator/issues/112
+        Ok(0)
+    }
+
+    fn get_block(
         &self,
         meta: Self::Metadata,
-        data: String,
-        config: Option<RpcSimulateTransactionConfig>,
-    ) -> BoxFuture<Result<RpcResponse<RpcSimulateTransactionResult>>> {
-        let RpcSimulateTransactionConfig {
-            sig_verify,
-            replace_recent_blockhash,
-            commitment,
-            encoding,
-            accounts: config_accounts,
-            min_context_slot,
-            inner_instructions: enable_cpi_recording,
-        } = config.unwrap_or_default();
-        let tx_encoding = encoding.unwrap_or(UiTransactionEncoding::Base58);
-
+        slot: Slot,
+        config: Option<RpcEncodingConfigWrapper<RpcBlockConfig>>,
+    ) -> BoxFuture<Result<Option<UiConfirmedBlock>>> {
+        debug!("get_block rpc request received: {}", slot);
+        let config = config
+            .map(|config| config.convert_to_current())
+            .unwrap_or_default();
+        let encoding = config.encoding.unwrap_or(UiTransactionEncoding::Json);
+        let encoding_options = BlockEncodingOptions {
+            transaction_details: config.transaction_details.unwrap_or_default(),
+            show_rewards: config.rewards.unwrap_or(true),
+            max_supported_transaction_version: config
+                .max_supported_transaction_version,
+        };
         Box::pin(async move {
-            simulate_transaction_impl(
-                &meta,
-                data,
-                tx_encoding,
-                config_accounts,
-                replace_recent_blockhash,
-                sig_verify,
-                enable_cpi_recording,
-            )
-            .await
+            let block = meta.get_block(slot)?;
+            let encoded = block
+                .map(|block| {
+                    block.encode_with_options(encoding, encoding_options)
+                })
+                .transpose()
+                .map_err(|e| Error::invalid_params(format!("{e:?}")))?;
+            Ok(encoded)
         })
-    }
-    fn minimum_ledger_slot(&self, meta: Self::Metadata) -> Result<Slot> {
-        todo!("minimum_ledger_slot")
     }
 
     fn get_block_time(
@@ -222,6 +267,63 @@ impl Full for FullImpl {
         slot: Slot,
     ) -> BoxFuture<Result<Option<UnixTimestamp>>> {
         Box::pin(async move { meta.get_block_time(slot).await })
+    }
+
+    fn get_blocks(
+        &self,
+        meta: Self::Metadata,
+        start_slot: Slot,
+        config: Option<RpcBlocksConfigWrapper>,
+        commitment: Option<CommitmentConfig>,
+    ) -> BoxFuture<Result<Vec<Slot>>> {
+        let (end_slot, _) =
+            config.map(|wrapper| wrapper.unzip()).unwrap_or_default();
+        debug!(
+            "get_blocks rpc request received: {} -> {:?}",
+            start_slot, end_slot
+        );
+        Box::pin(async move {
+            let end_slot = min(
+                meta.get_bank().slot().saturating_sub(1),
+                end_slot.unwrap_or(u64::MAX),
+            );
+            if end_slot.saturating_sub(start_slot)
+                > MAX_GET_CONFIRMED_BLOCKS_RANGE
+            {
+                return Err(Error::invalid_params(format!(
+                    "Slot range too large; max {MAX_GET_CONFIRMED_BLOCKS_RANGE}"
+                )));
+            }
+            Ok((start_slot..=end_slot).collect())
+        })
+    }
+
+    fn get_blocks_with_limit(
+        &self,
+        meta: Self::Metadata,
+        start_slot: Slot,
+        limit: usize,
+        commitment: Option<CommitmentConfig>,
+    ) -> BoxFuture<Result<Vec<Slot>>> {
+        let limit = u64::try_from(limit).unwrap_or(u64::MAX);
+        debug!(
+            "get_blocks_with_limit rpc request received: {} (x{:?})",
+            start_slot, limit
+        );
+        Box::pin(async move {
+            let end_slot = min(
+                meta.get_bank().slot().saturating_sub(1),
+                start_slot.saturating_add(limit).saturating_sub(1),
+            );
+            if end_slot.saturating_sub(start_slot)
+                > MAX_GET_CONFIRMED_BLOCKS_RANGE
+            {
+                return Err(Error::invalid_params(format!(
+                    "Slot range too large; max {MAX_GET_CONFIRMED_BLOCKS_RANGE}"
+                )));
+            }
+            Ok((start_slot..=end_slot).collect())
+        })
     }
 
     fn get_transaction(
@@ -239,26 +341,6 @@ impl Full for FullImpl {
         Box::pin(async move {
             meta.get_transaction(signature.unwrap(), config).await
         })
-    }
-
-    fn get_blocks(
-        &self,
-        meta: Self::Metadata,
-        start_slot: Slot,
-        config: Option<RpcBlocksConfigWrapper>,
-        commitment: Option<CommitmentConfig>,
-    ) -> BoxFuture<Result<Vec<Slot>>> {
-        todo!("get_blocks")
-    }
-
-    fn get_blocks_with_limit(
-        &self,
-        meta: Self::Metadata,
-        start_slot: Slot,
-        limit: usize,
-        commitment: Option<CommitmentConfig>,
-    ) -> BoxFuture<Result<Vec<Slot>>> {
-        todo!("get_blocks_with_limit")
     }
 
     fn get_signatures_for_address(
@@ -300,7 +382,10 @@ impl Full for FullImpl {
         &self,
         meta: Self::Metadata,
     ) -> BoxFuture<Result<Slot>> {
-        Box::pin(async move { Ok(meta.get_first_available_block().await) })
+        debug!("get_first_available_block rpc request received");
+        // In our case, minimum ledger slot is also the oldest slot we can query
+        let minimum_ledger_slot = self.minimum_ledger_slot(meta);
+        Box::pin(async move { minimum_ledger_slot })
     }
 
     fn get_latest_blockhash(
@@ -361,7 +446,10 @@ impl Full for FullImpl {
         meta: Self::Metadata,
         config: Option<RpcContextConfig>,
     ) -> Result<RpcResponse<u64>> {
-        todo!("get_stake_minimum_delegation")
+        debug!("get_stake_minimum_delegation rpc request received");
+        Err(Error::invalid_params(
+            "MagicBlock validator does not support native staking",
+        ))
     }
 
     fn get_recent_prioritization_fees(
@@ -369,7 +457,10 @@ impl Full for FullImpl {
         meta: Self::Metadata,
         pubkey_strs: Option<Vec<String>>,
     ) -> Result<Vec<RpcPrioritizationFee>> {
-        todo!("get_recent_prioritization_fees")
+        let pubkey_strs = pubkey_strs.unwrap_or_default();
+        Err(Error::invalid_params(
+            "MagicBlock validator does not support or require priority fees",
+        ))
     }
 }
 
@@ -383,10 +474,10 @@ async fn send_transaction_impl(
     max_retries: Option<usize>,
 ) -> Result<String> {
     let binary_encoding = tx_encoding.into_binary_encoding().ok_or_else(|| {
-                Error::invalid_params(format!(
-                    "unsupported encoding: {tx_encoding}. Supported encodings: base58, base64"
-                ))
-            })?;
+        Error::invalid_params(format!(
+            "unsupported encoding: {tx_encoding}. Supported encodings: base58, base64"
+        ))
+    })?;
 
     let (_wire_transaction, unsanitized_tx) =
         decode_and_deserialize::<VersionedTransaction>(data, binary_encoding)?;

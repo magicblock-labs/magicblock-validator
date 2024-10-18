@@ -4,8 +4,9 @@ use std::{
 };
 
 use sleipnir_config::{
-    AccountsConfig, CommitStrategy, GeyserGrpcConfig, LifecycleMode,
-    ProgramConfig, RemoteConfig, RpcConfig, SleipnirConfig, ValidatorConfig,
+    AccountsConfig, CommitStrategy, GeyserGrpcConfig, LedgerConfig,
+    LifecycleMode, MetricsConfig, MetricsServiceConfig, ProgramConfig,
+    RemoteConfig, RpcConfig, SleipnirConfig, ValidatorConfig,
 };
 use solana_sdk::pubkey;
 use test_tools_core::paths::cargo_workspace_dir;
@@ -52,6 +53,17 @@ fn test_load_local_dev_with_programs_toml() {
                 millis_per_slot: 14,
                 ..Default::default()
             },
+            ledger: LedgerConfig {
+                ..Default::default()
+            },
+            metrics: MetricsConfig {
+                enabled: true,
+                service: MetricsServiceConfig {
+                    port: 9999,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
         }
     )
 }
@@ -78,6 +90,11 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     env::set_var("GEYSER_GRPC_ADDR", "0.1.0.1");
     env::set_var("GEYSER_GRPC_PORT", "123");
     env::set_var("VALIDATOR_MILLIS_PER_SLOT", "100");
+    env::set_var("LEDGER_RESET", "false");
+    env::set_var("LEDGER_PATH", "/hello/world");
+    env::set_var("METRICS_ENABLED", "false");
+    env::set_var("METRICS_PORT", "1234");
+    env::set_var("METRICS_SYSTEM_METRICS_TICK_INTERVAL_SECS", "10");
 
     let config =
         SleipnirConfig::try_load_from_file(config_file_dir.to_str().unwrap())
@@ -114,6 +131,18 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
             validator: ValidatorConfig {
                 millis_per_slot: 100,
                 ..Default::default()
+            },
+            ledger: LedgerConfig {
+                reset: false,
+                path: Some("/hello/world".to_string()),
+            },
+            metrics: MetricsConfig {
+                enabled: false,
+                service: MetricsServiceConfig {
+                    port: 1234,
+                    ..Default::default()
+                },
+                system_metrics_tick_interval_secs: 10,
             },
         }
     )

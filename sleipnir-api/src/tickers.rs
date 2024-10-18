@@ -11,6 +11,7 @@ use sleipnir_accounts::AccountsManager;
 use sleipnir_bank::bank::Bank;
 use sleipnir_core::magic_program;
 use sleipnir_ledger::Ledger;
+use sleipnir_metrics::metrics;
 use sleipnir_processor::execute_transaction::execute_legacy_transaction;
 use sleipnir_program::{
     sleipnir_instruction::accept_scheduled_commits, MagicContext,
@@ -33,12 +34,19 @@ pub fn init_slot_ticker(
     tokio::task::spawn(async move {
         while !exit.load(Ordering::Relaxed) {
             tokio::time::sleep(tick_duration).await;
-            let slot = bank.advance_slot();
-            let _ = ledger
-                .cache_block_time(slot, timestamp_in_secs() as i64)
-                .map_err(|e| {
-                    error!("Failed to cache block time: {:?}", e);
-                });
+
+            // Slot cutoff, update the bank
+            let prev_slot = bank.slot();
+            let next_slot = bank.advance_slot();
+
+            // Update ledger with previous block's metas
+            if let Err(err) = ledger.write_block(
+                prev_slot,
+                timestamp_in_secs() as i64,
+                bank.last_blockhash(),
+            ) {
+                error!("Failed to write block: {:?}", err);
+            }
 
             // If accounts were scheduled to be committed, we accept them here
             // and processs the commits
@@ -70,8 +78,9 @@ pub fn init_slot_ticker(
                 }
             }
             if log {
-                info!("Advanced to slot {}", slot);
+                info!("Advanced to slot {}", next_slot);
             }
+            metrics::inc_slot();
         }
     })
 }
@@ -99,6 +108,33 @@ pub fn init_commit_accounts_ticker(
                         }
                     }
                 }
+                _ = token.cancelled() => {
+                    break;
+                }
+            }
+        }
+    })
+}
+
+pub fn init_system_metrics_ticker(
+    tick_duration: Duration,
+    ledger: &Arc<Ledger>,
+    token: CancellationToken,
+) -> tokio::task::JoinHandle<()> {
+    fn try_set_ledger_storage_size(ledger: &Ledger) {
+        match ledger.storage_size() {
+            Ok(byte_size) => metrics::set_ledger_size(byte_size),
+            Err(err) => warn!("Failed to get ledger storage size: {:?}", err),
+        }
+    }
+    let ledger = ledger.clone();
+    try_set_ledger_storage_size(&ledger);
+    tokio::task::spawn(async move {
+        loop {
+            tokio::select! {
+                _ = tokio::time::sleep(tick_duration) => {
+                    try_set_ledger_storage_size(&ledger);
+                },
                 _ = token.cancelled() => {
                     break;
                 }

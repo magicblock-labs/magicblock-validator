@@ -31,6 +31,7 @@ pub fn cf_descriptors(
         new_cf_descriptor::<AddressSignatures>(options),
         new_cf_descriptor::<SlotSignatures>(options),
         new_cf_descriptor::<Blocktime>(options),
+        new_cf_descriptor::<Blockhash>(options),
         new_cf_descriptor::<Transaction>(options),
         new_cf_descriptor::<TransactionMemos>(options),
         new_cf_descriptor::<PerfSamples>(options),
@@ -51,7 +52,7 @@ pub fn cf_descriptors(
     let detected_cfs = match DB::list_cf(&Options::default(), path) {
         Ok(detected_cfs) => detected_cfs,
         Err(err) => {
-            warn!("Unable to detect Rocks columns: {err:?}");
+            warn!("Unable to detect Rocks columns: {err:?}. This is expected for a new ledger.");
             vec![]
         }
     };

@@ -12,6 +12,7 @@ use sleipnir_account_dumper::AccountDumper;
 use sleipnir_account_fetcher::AccountFetcher;
 use sleipnir_account_updates::AccountUpdates;
 use sleipnir_accounts_api::InternalAccountProvider;
+use sleipnir_metrics::metrics;
 use sleipnir_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
 use solana_sdk::{
     account::{Account, ReadableAccount},
@@ -359,6 +360,11 @@ where
         self.account_dumper
             .dump_wallet_account(pubkey, lamports, owner)
             .map_err(AccountClonerError::AccountDumperError)
+            .inspect(|_| {
+                metrics::inc_account_clone(metrics::AccountClone::Wallet {
+                    pubkey: &pubkey.to_string(),
+                });
+            })
     }
 
     fn do_clone_undelegated_account(
@@ -369,6 +375,14 @@ where
         self.account_dumper
             .dump_undelegated_account(pubkey, account)
             .map_err(AccountClonerError::AccountDumperError)
+            .inspect(|_| {
+                metrics::inc_account_clone(
+                    metrics::AccountClone::Undelegated {
+                        pubkey: &pubkey.to_string(),
+                        owner: &account.owner().to_string(),
+                    },
+                );
+            })
     }
 
     fn do_clone_delegated_account(
@@ -398,6 +412,12 @@ where
         self.account_dumper
             .dump_delegated_account(pubkey, account, owner)
             .map_err(AccountClonerError::AccountDumperError)
+            .inspect(|_| {
+                metrics::inc_account_clone(metrics::AccountClone::Delegated {
+                    pubkey: &pubkey.to_string(),
+                    owner: &owner.to_string(),
+                });
+            })
     }
 
     async fn do_clone_program_accounts(
@@ -424,6 +444,11 @@ where
                 self.fetch_program_idl(program_id_pubkey).await?,
             )
             .map_err(AccountClonerError::AccountDumperError)
+            .inspect(|_| {
+                metrics::inc_account_clone(metrics::AccountClone::Program {
+                    pubkey: &pubkey.to_string(),
+                });
+            })
     }
 
     async fn fetch_program_idl(

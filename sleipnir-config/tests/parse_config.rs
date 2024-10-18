@@ -2,8 +2,8 @@ use std::net::{IpAddr, Ipv4Addr};
 
 use sleipnir_config::{
     AccountsConfig, AllowedProgram, CommitStrategy, GeyserGrpcConfig,
-    LifecycleMode, Payer, ProgramConfig, RemoteConfig, RpcConfig,
-    SleipnirConfig, ValidatorConfig,
+    LedgerConfig, LifecycleMode, MetricsConfig, MetricsServiceConfig, Payer,
+    ProgramConfig, RemoteConfig, RpcConfig, SleipnirConfig, ValidatorConfig,
 };
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey};
 use url::Url;
@@ -62,7 +62,10 @@ fn test_all_goes_toml() {
             },
             validator: ValidatorConfig {
                 sigverify: false,
-                reset_ledger: false,
+                ..Default::default()
+            },
+            ledger: LedgerConfig {
+                reset: false,
                 ..Default::default()
             },
             ..Default::default()
@@ -98,9 +101,20 @@ fn test_local_dev_with_programs_toml() {
                 millis_per_slot: 14,
                 ..Default::default()
             },
+            ledger: LedgerConfig {
+                ..Default::default()
+            },
             geyser_grpc: GeyserGrpcConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
                 port: 11_000
+            },
+            metrics: MetricsConfig {
+                enabled: true,
+                service: MetricsServiceConfig {
+                    port: 9999,
+                    ..Default::default()
+                },
+                ..Default::default()
             },
         }
     )

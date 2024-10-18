@@ -13,10 +13,8 @@ env_logger = { workspace = true }
 log = { workspace = true }
 sleipnir-api = { workspace = true }
 sleipnir-config = { workspace = true }
-sleipnir-ledger = { workspace = true }
 solana-geyser-plugin-manager = { workspace = true }
 solana-sdk = { workspace = true }
-tempfile = { workspace = true }
 test-tools = { workspace = true }
 tokio = { workspace = true }
 
