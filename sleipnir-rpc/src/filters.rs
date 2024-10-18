@@ -177,6 +177,8 @@ fn get_spl_token_mint_filter(
 }
 
 /// Use a set of filters to get an iterator of keyed program accounts from a bank
+// we don't control solana_rpc_client_api::custom_error::RpcCustomError
+#[allow(clippy::result_large_err)]
 pub(crate) fn get_filtered_program_accounts(
     bank: &Bank,
     program_id: &Pubkey,
