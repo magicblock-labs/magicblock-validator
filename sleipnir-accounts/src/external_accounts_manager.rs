@@ -106,7 +106,8 @@ where
         // Extract all acounts from the transaction
         let accounts_holder = self
             .transaction_accounts_extractor
-            .try_accounts_from_sanitized_transaction(tx)?;
+            .try_accounts_from_sanitized_transaction(tx)
+            .map_err(Box::new)?;
         // Make sure all accounts used by the transaction are cloned properly if needed
         self.ensure_accounts_from_holder(
             accounts_holder,
@@ -195,7 +196,8 @@ where
                         writable: writable_snapshots,
                         payer: accounts_holder.payer,
                     },
-                )?;
+                )
+                .map_err(Box::new)?;
         }
 
         // Done

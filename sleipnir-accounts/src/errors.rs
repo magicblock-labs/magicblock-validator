@@ -11,19 +11,13 @@ pub type AccountsResult<T> = std::result::Result<T, AccountsError>;
 #[derive(Error, Debug)]
 pub enum AccountsError {
     #[error("TranswiseError")]
-    TranswiseError(#[from] conjunto_transwise::errors::TranswiseError),
-
-    #[error("MutatorError")]
-    MutatorError(#[from] sleipnir_mutator::errors::MutatorError),
+    TranswiseError(#[from] Box<conjunto_transwise::errors::TranswiseError>),
 
     #[error("UrlParseError")]
-    UrlParseError(#[from] url::ParseError),
-
-    #[error("SanitizeError")]
-    SanitizeError(#[from] solana_sdk::sanitize::SanitizeError),
+    UrlParseError(#[from] Box<url::ParseError>),
 
     #[error("TransactionError")]
-    TransactionError(#[from] solana_sdk::transaction::TransactionError),
+    TransactionError(#[from] Box<solana_sdk::transaction::TransactionError>),
 
     #[error("AccountClonerError")]
     AccountClonerError(#[from] AccountClonerError),

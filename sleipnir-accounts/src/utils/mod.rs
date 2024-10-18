@@ -35,7 +35,7 @@ pub fn try_rpc_cluster_from_cluster(
 
 fn try_ws_url_from_rpc_url(url: &str) -> AccountsResult<String> {
     // Change http to ws scheme or https to wss
-    let mut url = Url::parse(url)?;
+    let mut url = Url::parse(url).map_err(Box::new)?;
     let scheme = match url.scheme() {
         "http" => "ws",
         "https" => "wss",

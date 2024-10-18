@@ -148,7 +148,8 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
                 commit.commit_sent_transaction,
                 &self.bank,
                 self.transaction_status_sender.as_ref(),
-            )?;
+            )
+            .map_err(Box::new)?;
 
             // In the case that no account needs to be committed we record that in
             // our ledger and are done
