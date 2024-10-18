@@ -31,41 +31,41 @@ const SECONDS_10_19: [f64; 10] =
     [10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0];
 
 lazy_static::lazy_static! {
-    pub(crate) static ref REGISTRY: Registry = Registry::new_custom(Some("mbv".to_string()), None).unwrap();
+    pub (crate) static ref REGISTRY: Registry = Registry::new_custom(Some("mbv".to_string()), None).unwrap();
 
-    pub static ref SLOT_COUNT: IntCounter = IntCounter::new(
+    static ref SLOT_COUNT: IntCounter = IntCounter::new(
         "slot_count", "Slot Count",
     ).unwrap();
 
-    pub static ref TRANSACTION_VEC_COUNT: IntCounterVec = IntCounterVec::new(
+    static ref TRANSACTION_VEC_COUNT: IntCounterVec = IntCounterVec::new(
         Opts::new("transaction_count", "Transaction Count"),
         &["outcome"],
     ).unwrap();
 
-    pub static ref FEE_PAYER_VEC_COUNT: IntCounterVec = IntCounterVec::new(
+    static ref FEE_PAYER_VEC_COUNT: IntCounterVec = IntCounterVec::new(
         Opts::new("fee_payer_count", "Count of transactions signed by specific fee payers"),
         &["fee_payer", "outcome"],
     ).unwrap();
 
-    pub static ref EXECUTED_UNITS_COUNT: IntCounter = IntCounter::new(
+    static ref EXECUTED_UNITS_COUNT: IntCounter = IntCounter::new(
         "executed_units_count", "Executed Units (CU) Count",
     ).unwrap();
 
-    pub static ref FEE_COUNT: IntCounter = IntCounter::new(
+    static ref FEE_COUNT: IntCounter = IntCounter::new(
         "fee_count", "Fee Count",
     ).unwrap();
 
-    pub static ref ACCOUNT_CLONE_VEC_COUNT: IntCounterVec = IntCounterVec::new(
+    static ref ACCOUNT_CLONE_VEC_COUNT: IntCounterVec = IntCounterVec::new(
         Opts::new("account_clone_count", "Count clones performed for specific accounts"),
         &["kind", "pubkey", "owner"],
     ).unwrap();
 
-    pub static ref ACCOUNT_COMMIT_VEC_COUNT: IntCounterVec = IntCounterVec::new(
+    static ref ACCOUNT_COMMIT_VEC_COUNT: IntCounterVec = IntCounterVec::new(
         Opts::new("account_commit_count", "Count commits performed for specific accounts"),
         &["kind", "pubkey", "outcome"],
     ).unwrap();
 
-    pub static ref ACCOUNT_COMMIT_TIME_HISTOGRAM: Histogram = Histogram::with_opts(
+    static ref ACCOUNT_COMMIT_TIME_HISTOGRAM: Histogram = Histogram::with_opts(
         HistogramOpts::new("account_commit_time", "Time until each account commit transaction is confirmed on chain")
             .buckets(
                 MILLIS_10_90.iter().chain(
@@ -75,11 +75,11 @@ lazy_static::lazy_static! {
             ),
     ).unwrap();
 
-    pub static ref LEDGER_SIZE_GAUGE: IntGauge = IntGauge::new(
+    static ref LEDGER_SIZE_GAUGE: IntGauge = IntGauge::new(
         "ledger_size", "Ledger Size in Bytes",
     ).unwrap();
 
-    pub static ref SIGVERIFY_TIME_HISTOGRAM: Histogram = Histogram::with_opts(
+    static ref SIGVERIFY_TIME_HISTOGRAM: Histogram = Histogram::with_opts(
         HistogramOpts::new("sigverify_time", "Time spent in sigverify")
             .buckets(
                 MICROS_10_90.iter().chain(
@@ -88,7 +88,7 @@ lazy_static::lazy_static! {
             ),
     ).unwrap();
 
-    pub static ref ENSURE_ACCOUNTS_TIME_HISTOGRAM: Histogram = Histogram::with_opts(
+    static ref ENSURE_ACCOUNTS_TIME_HISTOGRAM: Histogram = Histogram::with_opts(
         HistogramOpts::new("ensure_accounts_time", "Time spent in ensure_accounts")
             .buckets(
                 MILLIS_1_9.iter().chain(
@@ -98,7 +98,7 @@ lazy_static::lazy_static! {
             ),
     ).unwrap();
 
-    pub static ref TRANSACTION_EXECUTION_TIME_HISTORY: Histogram = Histogram::with_opts(
+    static ref TRANSACTION_EXECUTION_TIME_HISTORY: Histogram = Histogram::with_opts(
         HistogramOpts::new("transaction_execution_time", "Time spent in transaction execution")
             .buckets(
                 MICROS_10_90.iter().chain(
