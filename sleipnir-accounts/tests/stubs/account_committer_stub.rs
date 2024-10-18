@@ -18,7 +18,7 @@ use solana_sdk::{
 #[derive(Debug, Default, Clone)]
 pub struct AccountCommitterStub {
     committed_accounts: Arc<RwLock<HashMap<Pubkey, AccountSharedData>>>,
-    comfirmed_transactions: Arc<RwLock<HashSet<Signature>>>,
+    confirmed_transactions: Arc<RwLock<HashSet<Signature>>>,
 }
 
 #[allow(unused)] // used in tests
@@ -30,7 +30,7 @@ impl AccountCommitterStub {
         self.committed_accounts.read().unwrap().get(pubkey).cloned()
     }
     pub fn confirmed(&self, signature: &Signature) -> bool {
-        self.comfirmed_transactions
+        self.confirmed_transactions
             .read()
             .unwrap()
             .contains(signature)
@@ -87,7 +87,7 @@ impl AccountCommitter for AccountCommitterStub {
         pending_commits: Vec<PendingCommitTransaction>,
     ) {
         for commit in pending_commits {
-            self.comfirmed_transactions
+            self.confirmed_transactions
                 .write()
                 .unwrap()
                 .insert(commit.signature);

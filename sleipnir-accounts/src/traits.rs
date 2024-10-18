@@ -46,7 +46,7 @@ pub struct CommitAccountsTransaction {
     pub transaction: Transaction,
     /// Accounts that are undelegated as part of the transaction.
     pub undelegated_accounts: HashSet<Pubkey>,
-    /// Accounts that are only commmitted and not undelegated as part of the transaction.
+    /// Accounts that are only committed and not undelegated as part of the transaction.
     pub committed_only_accounts: HashSet<Pubkey>,
 }
 
@@ -87,7 +87,7 @@ pub struct PendingCommitTransaction {
     pub signature: Signature,
     /// The accounts that are undelegated on chain as part of this transaction.
     pub undelegated_accounts: HashSet<Pubkey>,
-    /// Accounts that are only commmitted and not undelegated as part of the transaction.
+    /// Accounts that are only committed and not undelegated as part of the transaction.
     pub committed_only_accounts: HashSet<Pubkey>,
     /// Timer that is started when we send the commit to chain and ends when
     /// the transaction is confirmed.
