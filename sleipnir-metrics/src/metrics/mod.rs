@@ -1,8 +1,9 @@
 use std::sync::Once;
 
+pub use prometheus::HistogramTimer;
 use prometheus::{
-    Histogram, HistogramOpts, HistogramTimer, IntCounter, IntCounterVec,
-    IntGauge, Opts, Registry,
+    Histogram, HistogramOpts, IntCounter, IntCounterVec, IntGauge, Opts,
+    Registry,
 };
 pub use types::{AccountClone, AccountCommit, Outcome};
 mod types;
@@ -26,6 +27,8 @@ const MILLIS_10_90: [f64; 9] =
     [0.01, 0.02, 0.03, 0.04, 0.05, 0.06, 0.07, 0.08, 0.09];
 const MILLIS_100_900: [f64; 9] = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9];
 const SECONDS_1_9: [f64; 9] = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0, 9.0];
+const SECONDS_10_19: [f64; 10] =
+    [10.0, 11.0, 12.0, 13.0, 14.0, 15.0, 16.0, 17.0, 18.0, 19.0];
 
 lazy_static::lazy_static! {
     pub(crate) static ref REGISTRY: Registry = Registry::new_custom(Some("mbv".to_string()), None).unwrap();
@@ -63,12 +66,12 @@ lazy_static::lazy_static! {
     ).unwrap();
 
     pub static ref ACCOUNT_COMMIT_TIME_HISTOGRAM: Histogram = Histogram::with_opts(
-        HistogramOpts::new("account_commit_time", "Time until each account commit transactoin is processed on chain")
+        HistogramOpts::new("account_commit_time", "Time until each account commit transaction is confirmed on chain")
             .buckets(
-                MILLIS_1_9.iter().chain(
-                MILLIS_10_90.iter()).chain(
+                MILLIS_10_90.iter().chain(
                 MILLIS_100_900.iter()).chain(
-                SECONDS_1_9.iter()).cloned().collect()
+                SECONDS_1_9.iter()).chain(
+                SECONDS_10_19.iter()).cloned().collect()
             ),
     ).unwrap();
 
@@ -196,7 +199,7 @@ pub fn inc_account_commit(account_commit: AccountCommit) {
     }
 }
 
-pub fn account_commmit_start() -> HistogramTimer {
+pub fn account_commit_start() -> HistogramTimer {
     ACCOUNT_COMMIT_TIME_HISTOGRAM.start_timer()
 }
 

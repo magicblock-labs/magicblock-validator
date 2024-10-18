@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{Arc, RwLock},
 };
 
@@ -9,6 +9,7 @@ use sleipnir_accounts::{
     CommitAccountsPayload, CommitAccountsTransaction, PendingCommitTransaction,
     SendableCommitAccountsPayload,
 };
+use sleipnir_metrics::metrics;
 use solana_sdk::{
     account::AccountSharedData, pubkey::Pubkey, signature::Signature,
     transaction::Transaction,
@@ -17,6 +18,7 @@ use solana_sdk::{
 #[derive(Debug, Default, Clone)]
 pub struct AccountCommitterStub {
     committed_accounts: Arc<RwLock<HashMap<Pubkey, AccountSharedData>>>,
+    comfirmed_transactions: Arc<RwLock<HashSet<Signature>>>,
 }
 
 #[allow(unused)] // used in tests
@@ -26,6 +28,12 @@ impl AccountCommitterStub {
     }
     pub fn committed(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
         self.committed_accounts.read().unwrap().get(pubkey).cloned()
+    }
+    pub fn confirmed(&self, signature: &Signature) -> bool {
+        self.comfirmed_transactions
+            .read()
+            .unwrap()
+            .contains(signature)
     }
 }
 
@@ -39,7 +47,8 @@ impl AccountCommitter for AccountCommitterStub {
         let payload = CommitAccountsPayload {
             transaction: Some(CommitAccountsTransaction {
                 transaction,
-                undelegated_accounts: Vec::new(),
+                undelegated_accounts: HashSet::new(),
+                committed_only_accounts: HashSet::new(),
             }),
             committees: committees
                 .iter()
@@ -57,7 +66,9 @@ impl AccountCommitter for AccountCommitterStub {
             .iter()
             .map(|_| PendingCommitTransaction {
                 signature: Signature::new_unique(),
-                undelegated_accounts: Vec::new(),
+                undelegated_accounts: HashSet::new(),
+                committed_only_accounts: HashSet::new(),
+                timer: metrics::account_commit_start(),
             })
             .collect();
         for payload in payloads {
@@ -69,5 +80,17 @@ impl AccountCommitter for AccountCommitterStub {
             }
         }
         Ok(signatures)
+    }
+
+    async fn confirm_pending_commits(
+        &self,
+        pending_commits: Vec<PendingCommitTransaction>,
+    ) {
+        for commit in pending_commits {
+            self.comfirmed_transactions
+                .write()
+                .unwrap()
+                .insert(commit.signature);
+        }
     }
 }

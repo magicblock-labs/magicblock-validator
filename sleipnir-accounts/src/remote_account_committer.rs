@@ -1,15 +1,20 @@
+use std::collections::HashSet;
+
 use async_trait::async_trait;
 use dlp::instruction::{commit_state, finalize, undelegate, CommitAccountArgs};
+use futures_util::future::join_all;
 use log::*;
-use sleipnir_program::validator_authority_id;
+use sleipnir_metrics::metrics;
+use sleipnir_program::{validator_authority_id, Pubkey};
 use solana_rpc_client::{
     nonblocking::rpc_client::RpcClient, rpc_client::SerializableTransaction,
 };
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{
-    account::ReadableAccount, compute_budget::ComputeBudgetInstruction,
-    instruction::Instruction, signature::Keypair, signer::Signer,
-    transaction::Transaction,
+    account::ReadableAccount, clock::MAX_HASH_AGE_IN_SECONDS,
+    commitment_config::CommitmentConfig,
+    compute_budget::ComputeBudgetInstruction, instruction::Instruction,
+    signature::Keypair, signer::Signer, transaction::Transaction,
 };
 
 use crate::{
@@ -18,6 +23,12 @@ use crate::{
     CommitAccountsTransaction, PendingCommitTransaction,
     SendableCommitAccountsPayload, UndelegationRequest,
 };
+
+// [solana_sdk::clock::MAX_HASH_AGE_IN_SECONDS] (120secs) is the max time window at which
+// a transaction could still land. For us that is excessive and waiting for 30secs
+// should be enough.
+const MAX_TRANSACTION_CONFIRMATION_SECS: u64 =
+    MAX_HASH_AGE_IN_SECONDS as u64 / 4;
 
 // -----------------
 // RemoteAccountCommitter
@@ -70,7 +81,8 @@ impl AccountCommitter for RemoteAccountCommitter {
         let (compute_budget_ix, compute_unit_price_ix) =
             self.compute_instructions(committee_count, undelegation_count);
 
-        let mut undelegated_accounts = Vec::new();
+        let mut undelegated_accounts = HashSet::new();
+        let mut committed_only_accounts = HashSet::new();
         let mut ixs = vec![compute_budget_ix, compute_unit_price_ix];
 
         for AccountCommittee {
@@ -98,7 +110,9 @@ impl AccountCommitter for RemoteAccountCommitter {
                     validator_authority_id(),
                 );
                 ixs.push(undelegate_ix);
-                undelegated_accounts.push(*pubkey);
+                undelegated_accounts.insert(*pubkey);
+            } else {
+                committed_only_accounts.insert(*pubkey);
             }
         }
 
@@ -120,6 +134,7 @@ impl AccountCommitter for RemoteAccountCommitter {
             transaction: Some(CommitAccountsTransaction {
                 transaction: tx,
                 undelegated_accounts,
+                committed_only_accounts,
             }),
             committees,
         })
@@ -135,6 +150,7 @@ impl AccountCommitter for RemoteAccountCommitter {
                 CommitAccountsTransaction {
                     transaction,
                     undelegated_accounts,
+                    committed_only_accounts,
                 },
             committees,
         } in payloads
@@ -155,6 +171,7 @@ impl AccountCommitter for RemoteAccountCommitter {
                 tx_sig,
                 self.rpc_client.url()
             );
+            let timer = metrics::account_commit_start();
             let signature = self
                 .rpc_client
                 .send_transaction_with_config(
@@ -182,9 +199,122 @@ impl AccountCommitter for RemoteAccountCommitter {
             pending_commits.push(PendingCommitTransaction {
                 signature,
                 undelegated_accounts,
+                committed_only_accounts,
+                timer,
             });
         }
         Ok(pending_commits)
+    }
+
+    async fn confirm_pending_commits(
+        &self,
+        pending_commits: Vec<PendingCommitTransaction>,
+    ) {
+        let mut futures = Vec::new();
+        for pc in pending_commits.into_iter() {
+            let fut = async move {
+                let now = std::time::Instant::now();
+                loop {
+                    match self
+                        .rpc_client
+                        .confirm_transaction_with_commitment(
+                            &pc.signature,
+                            CommitmentConfig::confirmed(),
+                        )
+                        .await
+                    {
+                        Ok(res) => {
+                            // The RPC `confirm_transaction_with_commitment` doesn't provide
+                            // the info to distinguish between a not yet confirmed or
+                            // failed transaction.
+                            // Failed transactions should be rare, so it's ok to check
+                            // them over and over until the timeout is reached.
+                            // If we see that happen a lot we can write our custom confirm method
+                            // that makes this more straightforward.
+                            let confirmed_and_succeeded = res.value;
+                            if confirmed_and_succeeded {
+                                update_account_commit_metrics(
+                                    &pc.undelegated_accounts,
+                                    &pc.committed_only_accounts,
+                                    metrics::Outcome::from_success(res.value),
+                                    Some(pc.timer),
+                                );
+                                break;
+                            } else if now.elapsed().as_secs()
+                                > MAX_TRANSACTION_CONFIRMATION_SECS
+                            {
+                                error!(
+                                    "Timed out confirming commit-transaction success '{:?}': {:?}. This means that the transaction failed or failed to confirm in time.",
+                                    pc.signature, res
+                                );
+                                update_account_commit_metrics(
+                                    &pc.undelegated_accounts,
+                                    &pc.committed_only_accounts,
+                                    metrics::Outcome::Error,
+                                    None,
+                                );
+                                break;
+                            } else {
+                                tokio::time::sleep(
+                                    std::time::Duration::from_millis(50),
+                                )
+                                .await;
+                            }
+                        }
+                        Err(err) => {
+                            error!(
+                                "Failed to confirm commit transaction '{:?}': {:?}",
+                                pc.signature, err
+                            );
+                            update_account_commit_metrics(
+                                &pc.undelegated_accounts,
+                                &pc.committed_only_accounts,
+                                metrics::Outcome::Error,
+                                None,
+                            );
+                            break;
+                        }
+                    }
+                }
+
+                if log_enabled!(log::Level::Trace) {
+                    trace!(
+                        "Confirmed commit for {:?} in {:?}",
+                        pc.signature,
+                        now.elapsed()
+                    );
+                }
+            };
+            futures.push(fut);
+        }
+        join_all(futures).await;
+    }
+}
+
+pub(crate) fn update_account_commit_metrics(
+    commit_and_undelegate_accounts: &HashSet<Pubkey>,
+    commit_only_accounts: &HashSet<Pubkey>,
+    outcome: metrics::Outcome,
+    timer: Option<metrics::HistogramTimer>,
+) {
+    for pubkey in commit_and_undelegate_accounts {
+        metrics::inc_account_commit(
+            metrics::AccountCommit::CommitAndUndelegate {
+                pubkey: &pubkey.to_string(),
+                outcome,
+            },
+        );
+    }
+    for pubkey in commit_only_accounts {
+        metrics::inc_account_commit(metrics::AccountCommit::CommitOnly {
+            pubkey: &pubkey.to_string(),
+            outcome,
+        });
+    }
+
+    // The timer is only present if a transaction's success was confirmed
+    if let Some(timer) = timer {
+        metrics::account_commit_end(timer);
     }
 }
 

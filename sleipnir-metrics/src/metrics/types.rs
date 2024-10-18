@@ -30,6 +30,14 @@ impl Outcome {
             Error => OUTCOME_ERROR,
         }
     }
+
+    pub fn from_success(success: bool) -> Self {
+        if success {
+            Outcome::Success
+        } else {
+            Outcome::Error
+        }
+    }
 }
 
 // -----------------
