@@ -159,18 +159,38 @@ impl AccountCommitter for RemoteAccountCommitter {
                 .iter()
                 .map(|(pubkey, _)| *pubkey)
                 .collect::<Vec<_>>();
-            let pubkeys_display = pubkeys
-                .iter()
-                .map(|p| p.to_string())
-                .collect::<Vec<_>>()
-                .join(", ");
             let tx_sig = transaction.get_signature();
-            debug!(
-                "Committing accounts [{}] sig: {:?} to {}",
-                pubkeys_display,
-                tx_sig,
-                self.rpc_client.url()
-            );
+
+            let pubkeys_display = if log_enabled!(log::Level::Debug) {
+                let pubkeys_display = pubkeys
+                    .iter()
+                    .map(|x| x.to_string())
+                    .collect::<Vec<String>>()
+                    .join(", ");
+                debug!(
+                    "Committing accounts [{}] sig: {:?} to {}",
+                    pubkeys_display,
+                    tx_sig,
+                    self.rpc_client.url()
+                );
+                Some(pubkeys_display)
+            } else {
+                None
+            };
+
+            if log_enabled!(log::Level::Debug)
+                && !undelegated_accounts.is_empty()
+            {
+                debug!(
+                    "Requesting to undelegate: {}",
+                    undelegated_accounts
+                        .iter()
+                        .map(|x| x.to_string())
+                        .collect::<Vec<String>>()
+                        .join(", ")
+                );
+            }
+
             let timer = metrics::account_commit_start();
             let signature = self
                 .rpc_client
@@ -198,7 +218,8 @@ impl AccountCommitter for RemoteAccountCommitter {
             }
             debug!(
                 "Sent commit for [{}] | signature: '{:?}'",
-                pubkeys_display, signature
+                pubkeys_display.unwrap_or_default(),
+                signature
             );
             pending_commits.push(PendingCommitTransaction {
                 signature,
