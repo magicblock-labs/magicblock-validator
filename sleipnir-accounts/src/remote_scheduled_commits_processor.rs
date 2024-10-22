@@ -15,9 +15,10 @@ use sleipnir_transaction_status::TransactionStatusSender;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 
 use crate::{
-    errors::AccountsResult, AccountCommittee, AccountCommitter,
-    ScheduledCommitsProcessor, SendableCommitAccountsPayload,
-    UndelegationRequest,
+    errors::{AccountsError, AccountsResult},
+    remote_account_committer::update_account_commit_metrics,
+    AccountCommittee, AccountCommitter, ScheduledCommitsProcessor,
+    SendableCommitAccountsPayload, UndelegationRequest,
 };
 
 pub struct RemoteScheduledCommitsProcessor {
@@ -147,7 +148,8 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
                 commit.commit_sent_transaction,
                 &self.bank,
                 self.transaction_status_sender.as_ref(),
-            )?;
+            )
+            .map_err(Box::new)?;
 
             // In the case that no account needs to be committed we record that in
             // our ledger and are done
@@ -204,65 +206,38 @@ impl RemoteScheduledCommitsProcessor {
         // point where we do allow validator shutdown
         let committer = committer.clone();
         tokio::task::spawn(async move {
-            let (commit_only_accounts, commit_and_undelegate_accounts) =
-                sendable_payloads_queue.iter().fold(
-                    (HashSet::new(), HashSet::new()),
-                    |(mut commit_only, mut undelegated), commit| {
-                        for (pubkey, _) in &commit.committees {
-                            if commit
-                                .transaction
-                                .undelegated_accounts
-                                .contains(pubkey)
-                            {
-                                undelegated.insert(*pubkey);
-                            } else {
-                                commit_only.insert(*pubkey);
-                            }
-                        }
-                        (commit_only, undelegated)
-                    },
-                );
-
-            match committer
+            let pending_commits = match committer
                 .send_commit_transactions(sendable_payloads_queue)
                 .await
             {
-                Ok(commits) => commits,
-                Err(err) => {
+                Ok(pending) => pending,
+                Err(AccountsError::FailedToSendCommitTransaction(
+                    err,
+                    commit_and_undelegate_accounts,
+                    commit_only_accounts,
+                )) => {
+                    update_account_commit_metrics(
+                        &commit_and_undelegate_accounts,
+                        &commit_only_accounts,
+                        metrics::Outcome::Error,
+                        None,
+                    );
                     debug_panic!(
                         "Failed to send commit transactions: {:?}",
                         err
                     );
                     return;
                 }
+                Err(err) => {
+                    debug_panic!(
+                        "Failed to send commit transactions, received invalid err: {:?}",
+                        err
+                    );
+                    return;
+                }
             };
 
-            if !commit_and_undelegate_accounts.is_empty()
-                && log_enabled!(log::Level::Debug)
-            {
-                debug!(
-                    "Requesting to undelegate: {}",
-                    commit_and_undelegate_accounts
-                        .iter()
-                        .map(|x| x.to_string())
-                        .collect::<Vec<String>>()
-                        .join(", ")
-                );
-            }
-            for pubkey in commit_and_undelegate_accounts {
-                metrics::inc_account_commit(
-                    metrics::AccountCommit::CommitAndUndelegate {
-                        pubkey: &pubkey.to_string(),
-                    },
-                );
-            }
-            for pubkey in commit_only_accounts {
-                metrics::inc_account_commit(
-                    metrics::AccountCommit::CommitOnly {
-                        pubkey: &pubkey.to_string(),
-                    },
-                );
-            }
+            committer.confirm_pending_commits(pending_commits).await;
         });
     }
 }

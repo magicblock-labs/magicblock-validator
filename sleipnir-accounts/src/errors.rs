@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use sleipnir_account_cloner::{
     AccountClonerError, AccountClonerUnclonableReason,
 };
@@ -9,19 +11,13 @@ pub type AccountsResult<T> = std::result::Result<T, AccountsError>;
 #[derive(Error, Debug)]
 pub enum AccountsError {
     #[error("TranswiseError")]
-    TranswiseError(#[from] conjunto_transwise::errors::TranswiseError),
-
-    #[error("MutatorError")]
-    MutatorError(#[from] sleipnir_mutator::errors::MutatorError),
+    TranswiseError(#[from] Box<conjunto_transwise::errors::TranswiseError>),
 
     #[error("UrlParseError")]
-    UrlParseError(#[from] url::ParseError),
-
-    #[error("SanitizeError")]
-    SanitizeError(#[from] solana_sdk::sanitize::SanitizeError),
+    UrlParseError(#[from] Box<url::ParseError>),
 
     #[error("TransactionError")]
-    TransactionError(#[from] solana_sdk::transaction::TransactionError),
+    TransactionError(#[from] Box<solana_sdk::transaction::TransactionError>),
 
     #[error("AccountClonerError")]
     AccountClonerError(#[from] AccountClonerError),
@@ -44,8 +40,8 @@ pub enum AccountsError {
     #[error("FailedToGetLatestBlockhash '{0}'")]
     FailedToGetLatestBlockhash(String),
 
-    #[error("FailedToSendTransaction '{0}'")]
-    FailedToSendTransaction(String),
+    #[error("FailedToSendCommitTransaction '{0}'")]
+    FailedToSendCommitTransaction(String, HashSet<Pubkey>, HashSet<Pubkey>),
 
     #[error("Too many committees: {0}")]
     TooManyCommittees(usize),

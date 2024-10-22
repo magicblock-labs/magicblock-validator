@@ -1,12 +1,14 @@
-use crate::errors::{ApiError, ApiResult};
-use fd_lock::{RwLock, RwLockWriteGuard};
-use log::*;
-use sleipnir_ledger::Ledger;
 use std::{
     fs::{self, File, OpenOptions},
     path::{Path, PathBuf},
     process::exit,
 };
+
+use fd_lock::{RwLock, RwLockWriteGuard};
+use log::*;
+use sleipnir_ledger::Ledger;
+
+use crate::errors::{ApiError, ApiResult};
 
 pub(crate) fn init(ledger_path: PathBuf, reset: bool) -> ApiResult<Ledger> {
     if reset {

@@ -23,6 +23,7 @@ sleipnir-accounts = { workspace = true }
 sleipnir-accounts-db = { workspace = true }
 sleipnir-bank = { workspace = true }
 sleipnir-ledger = { workspace = true }
+sleipnir-metrics = { workspace = true }
 sleipnir-processor = { workspace = true }
 sleipnir-tokens = { workspace = true }
 sleipnir-transaction-status = { workspace = true }

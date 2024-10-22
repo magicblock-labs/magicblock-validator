@@ -1,7 +1,8 @@
-use std::sync::Arc;
+use std::{collections::HashSet, sync::Arc};
 
 use async_trait::async_trait;
 use sleipnir_accounts_api::InternalAccountProvider;
+use sleipnir_metrics::metrics::HistogramTimer;
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_sdk::{
     account::AccountSharedData, pubkey::Pubkey, signature::Signature,
@@ -44,7 +45,9 @@ pub struct CommitAccountsTransaction {
     /// accounts.
     pub transaction: Transaction,
     /// Accounts that are undelegated as part of the transaction.
-    pub undelegated_accounts: Vec<Pubkey>,
+    pub undelegated_accounts: HashSet<Pubkey>,
+    /// Accounts that are only committed and not undelegated as part of the transaction.
+    pub committed_only_accounts: HashSet<Pubkey>,
 }
 
 impl CommitAccountsTransaction {
@@ -83,7 +86,12 @@ pub struct PendingCommitTransaction {
     /// The signature of the transaction that was sent to chain.
     pub signature: Signature,
     /// The accounts that are undelegated on chain as part of this transaction.
-    pub undelegated_accounts: Vec<Pubkey>,
+    pub undelegated_accounts: HashSet<Pubkey>,
+    /// Accounts that are only committed and not undelegated as part of the transaction.
+    pub committed_only_accounts: HashSet<Pubkey>,
+    /// Timer that is started when we send the commit to chain and ends when
+    /// the transaction is confirmed.
+    pub timer: HistogramTimer,
 }
 
 #[async_trait]
@@ -106,4 +114,13 @@ pub trait AccountCommitter: Send + Sync + 'static {
         &self,
         payloads: Vec<SendableCommitAccountsPayload>,
     ) -> AccountsResult<Vec<PendingCommitTransaction>>;
+
+    /// Confirms all transactions for the given [pending_commits] with 'confirmed'
+    /// commitment level.
+    /// Updates the metrics for each transaction in order to record the time it took
+    /// to fully confirm it on chain.
+    async fn confirm_pending_commits(
+        &self,
+        pending_commits: Vec<PendingCommitTransaction>,
+    );
 }

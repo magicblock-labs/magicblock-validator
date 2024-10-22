@@ -4782,6 +4782,7 @@ dependencies = [
  "sleipnir-accounts-db",
  "sleipnir-bank",
  "sleipnir-ledger",
+ "sleipnir-metrics",
  "sleipnir-processor",
  "sleipnir-tokens",
  "sleipnir-transaction-status",

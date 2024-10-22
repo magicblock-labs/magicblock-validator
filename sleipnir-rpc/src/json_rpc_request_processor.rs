@@ -450,6 +450,8 @@ impl JsonRpcRequestProcessor {
         Ok(bank.transaction_count())
     }
 
+    // we don't control solana_rpc_client_api::custom_error::RpcCustomError
+    #[allow(clippy::result_large_err)]
     pub fn get_supply(
         &self,
         config: Option<RpcSupplyConfig>,

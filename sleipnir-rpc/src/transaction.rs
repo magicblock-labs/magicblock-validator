@@ -6,6 +6,7 @@ use jsonrpc_core::{Error, ErrorCode, Result};
 use log::*;
 use sleipnir_accounts::{errors::AccountsResult, AccountsManager};
 use sleipnir_bank::bank::Bank;
+use sleipnir_metrics::metrics;
 use sleipnir_processor::execute_transaction::execute_sanitized_transaction;
 use solana_metrics::inc_new_counter_info;
 use solana_rpc_client_api::custom_error::RpcCustomError;
@@ -160,32 +161,40 @@ pub(crate) async fn send_transaction(
     let bank = &meta.get_bank();
 
     if sigverify {
-        sig_verify_transaction(&sanitized_transaction)?;
+        metrics::observe_sigverify_time(|| {
+            sig_verify_transaction(&sanitized_transaction)
+        })?;
     }
 
     // It is very important that we ensure accounts before simulating transactions
     // since they could depend on specific accounts to be in our validator
-    ensure_accounts(&meta.accounts_manager, &sanitized_transaction)
-        .await
-        .map_err(|err| Error {
-            code: ErrorCode::InvalidRequest,
-            message: format!("{:?}", err),
-            data: None,
-        })?;
+    {
+        let timer = metrics::ensure_accounts_start();
+        ensure_accounts(&meta.accounts_manager, &sanitized_transaction)
+            .await
+            .map_err(|err| Error {
+                code: ErrorCode::InvalidRequest,
+                message: format!("{:?}", err),
+                data: None,
+            })?;
+        metrics::ensure_accounts_end(timer);
+    }
 
     if let Some(preflight_bank) = preflight_bank {
         meta.transaction_preflight(preflight_bank, &sanitized_transaction)?;
     }
 
-    execute_sanitized_transaction(
-        sanitized_transaction,
-        bank,
-        meta.transaction_status_sender(),
-    )
-    .map_err(|err| jsonrpc_core::Error {
-        code: jsonrpc_core::ErrorCode::InternalError,
-        message: err.to_string(),
-        data: None,
+    metrics::observe_transaction_execution_time(|| {
+        execute_sanitized_transaction(
+            sanitized_transaction,
+            bank,
+            meta.transaction_status_sender(),
+        )
+        .map_err(|err| jsonrpc_core::Error {
+            code: jsonrpc_core::ErrorCode::InternalError,
+            message: err.to_string(),
+            data: None,
+        })
     })?;
 
     // debug!("{:#?}", tx_result);
