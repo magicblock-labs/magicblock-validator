@@ -41,11 +41,7 @@ pub enum AccountsError {
     FailedToGetLatestBlockhash(String),
 
     #[error("FailedToSendCommitTransaction '{0}'")]
-    FailedToSendCommitTransaction(
-        String,
-        Box<HashSet<Pubkey>>,
-        Box<HashSet<Pubkey>>,
-    ),
+    FailedToSendCommitTransaction(String, HashSet<Pubkey>, HashSet<Pubkey>),
 
     #[error("Too many committees: {0}")]
     TooManyCommittees(usize),

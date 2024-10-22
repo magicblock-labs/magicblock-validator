@@ -205,8 +205,8 @@ impl AccountCommitter for RemoteAccountCommitter {
                 .map_err(|err| {
                     AccountsError::FailedToSendCommitTransaction(
                         err.to_string(),
-                        Box::new(undelegated_accounts.clone()),
-                        Box::new(committed_only_accounts.clone()),
+                        undelegated_accounts.clone(),
+                        committed_only_accounts.clone(),
                     )
                 })?;
 
