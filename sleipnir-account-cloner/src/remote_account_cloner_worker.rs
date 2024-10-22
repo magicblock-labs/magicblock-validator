@@ -5,7 +5,6 @@ use std::{
 };
 
 use conjunto_transwise::{AccountChainSnapshotShared, AccountChainState};
-use dlp::consts::DELEGATION_PROGRAM_ID;
 use futures_util::future::join_all;
 use log::*;
 use sleipnir_account_dumper::AccountDumper;
@@ -173,25 +172,7 @@ where
                 } => {
                     // If the clone output is recent enough, that directly
                     if snapshot.at_slot >= last_known_update_slot {
-                        // Special case temporarily to unblock zeebit:
-                        // If the account is in a bork state after we somehow missed the undelegation/redelegation update
-                        // We can force a bypass of the cache to get that account out of the bork state exceptionally
-                        // Long-term fix tracked here: https://github.com/magicblock-labs/magicblock-validator/issues/186
-                        if snapshot.chain_state.is_delegated()
-                            && self
-                                .internal_account_provider
-                                .get_account(pubkey)
-                                .map(|account| {
-                                    *account.owner() == DELEGATION_PROGRAM_ID
-                                })
-                                .unwrap_or(false)
-                        {
-                            self.do_clone_and_update_cache(pubkey).await
-                        }
-                        // Otherwise no problem, we can use the cache
-                        else {
-                            Ok(last_clone_output)
-                        }
+                        Ok(last_clone_output)
                     }
                     // If the cloned account has been updated since clone, update the cache
                     else {
