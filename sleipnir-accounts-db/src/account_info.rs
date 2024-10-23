@@ -1,9 +1,12 @@
 use modular_bitfield::{bitfield, specifiers::B31};
 
+use crate::accounts_file::ALIGN_BOUNDARY_OFFSET;
 use crate::accounts_index::{IsCached, ZeroLamport};
+pub use solana_accounts_db::account_info::Offset;
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum StorageLocation {
+    AppendVec(AppendVecId, Offset),
     Cached,
 }
 
@@ -65,6 +68,23 @@ impl AccountInfo {
     pub fn new(storage_location: StorageLocation, lamports: u64) -> Self {
         let mut packed_offset_and_flags = PackedOffsetAndFlags::default();
         let store_id = match storage_location {
+            StorageLocation::AppendVec(store_id, offset) => {
+                let reduced_offset = Self::get_reduced_offset(offset);
+                assert_ne!(
+                    CACHED_OFFSET, reduced_offset,
+                    "illegal offset for non-cached item"
+                );
+                packed_offset_and_flags
+                    .set_offset_reduced(Self::get_reduced_offset(offset));
+                assert_eq!(
+                    Self::reduced_offset_to_offset(
+                        packed_offset_and_flags.offset_reduced()
+                    ),
+                    offset,
+                    "illegal offset"
+                );
+                store_id
+            }
             StorageLocation::Cached => {
                 packed_offset_and_flags.set_offset_reduced(CACHED_OFFSET);
                 CACHE_VIRTUAL_STORAGE_ID
@@ -79,6 +99,14 @@ impl AccountInfo {
             store_id,
             account_offset_and_flags,
         }
+    }
+
+    fn get_reduced_offset(offset: usize) -> OffsetReduced {
+        (offset / ALIGN_BOUNDARY_OFFSET) as OffsetReduced
+    }
+
+    fn reduced_offset_to_offset(reduced_offset: OffsetReduced) -> Offset {
+        (reduced_offset as Offset) * ALIGN_BOUNDARY_OFFSET
     }
 }
 

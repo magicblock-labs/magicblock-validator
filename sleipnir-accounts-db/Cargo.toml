@@ -8,10 +8,12 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
+blake3 = { workspace = true }
 dashmap = { workspace = true, features = ["rayon", "raw-api"] }
 log = { workspace = true }
 modular-bitfield = { workspace = true }
 rayon = { workspace = true }
+smallvec = { workspace = true }
 solana-frozen-abi-macro = { workspace = true }
 solana-measure = { workspace = true }
 solana-metrics = { workspace = true }

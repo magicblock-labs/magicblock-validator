@@ -5,6 +5,7 @@ pub mod accounts_cache;
 pub mod accounts_db;
 pub mod accounts_update_notifier_interface;
 pub mod errors;
+mod persist;
 pub mod verify_accounts_hash_in_background;
 
 // mod traits;
@@ -15,14 +16,21 @@ pub mod verify_accounts_hash_in_background;
 
 // We re-export solana_accounts_db traits until all crates use our replacement
 // of the accounts-db
-pub mod account_storage {
-    pub use solana_accounts_db::account_storage::*;
+pub mod accounts_file {
+    pub use solana_accounts_db::accounts_file::ALIGN_BOUNDARY_OFFSET;
+}
+pub mod accounts_hash {
+    pub use solana_accounts_db::accounts_hash::AccountHash;
 }
 pub mod accounts_index {
     pub use solana_accounts_db::accounts_index::{
         AccountIndex, AccountSecondaryIndexes, IsCached, ScanConfig,
         ZeroLamport,
     };
+}
+pub mod account_storage {
+    pub use solana_accounts_db::account_storage::*;
+    pub use solana_accounts_db::accounts_db::AccountStorageEntry;
 }
 pub mod blockhash_queue {
     pub use solana_accounts_db::blockhash_queue::*;

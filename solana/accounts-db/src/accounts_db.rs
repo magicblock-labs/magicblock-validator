@@ -6750,6 +6750,7 @@ impl AccountsDb {
     // `force_flush` flushes all the cached roots `<= requested_flush_root`. It also then
     // flushes:
     // 1) excess remaining roots or unrooted slots while 'should_aggressively_flush_cache' is true
+    // @@@ Accounts needs to be called by bank
     pub fn flush_accounts_cache(
         &self,
         force_flush: bool,

@@ -17,10 +17,11 @@ use solana_sdk::{
     transaction::SanitizedTransaction,
     transaction_context::TransactionAccount,
 };
+use stats::FlushStats;
 
 use crate::{
     account_info::{AccountInfo, StorageLocation},
-    accounts_cache::{AccountsCache, CachedAccount},
+    accounts_cache::{AccountsCache, CachedAccount, SlotCache},
     accounts_index::ZeroLamport,
     accounts_update_notifier_interface::AccountsUpdateNotifier,
     errors::MatchAccountOwnerError,
@@ -31,6 +32,7 @@ use crate::{
 mod consts;
 mod loaded_account;
 mod loaded_account_accessor;
+mod stats;
 pub use loaded_account_accessor::LoadedAccountAccessor;
 
 use self::{
@@ -465,6 +467,89 @@ impl AccountsDb {
         }
     }
 
+    // -----------------
+    // Persistence
+    // -----------------
+    // `force_flush` flushes all the cached roots `<= requested_flush_root`. It also then
+    // flushes:
+    // 1) excess remaining roots or unrooted slots while 'should_aggressively_flush_cache' is true
+    // @@@ Accounts needs to be called by bank
+    #[allow(unused)]
+    pub fn flush_accounts_cache(
+        &self,
+        force_flush: bool,
+        requested_flush_root: Option<Slot>,
+    ) {
+        let mut account_bytes_saved = 0;
+        let mut num_accounts_saved = 0;
+
+        let (
+            total_new_cleaned_roots,
+            num_cleaned_roots_flushed,
+            mut flush_stats,
+        ) = self.flush_rooted_accounts_cache(
+            requested_flush_root,
+            Some((&mut account_bytes_saved, &mut num_accounts_saved)),
+        );
+
+        todo!()
+    }
+
+    #[allow(unused)]
+    fn flush_rooted_accounts_cache(
+        &self,
+        requested_flush_root: Option<Slot>,
+        should_clean: Option<(&mut usize, &mut usize)>,
+    ) -> (usize, usize, FlushStats) {
+        //       let mut written_accounts = HashSet::new();
+        todo!()
+    }
+
+    fn do_flush_slot_cache(&self, _slot: Slot, slot_cache: SlotCache) {
+        let iter_items: Vec<_> = slot_cache.iter().collect();
+        let accounts: Vec<(&Pubkey, &AccountSharedData)> = iter_items
+            .iter()
+            .map(|iter_item| {
+                let key = iter_item.key();
+                let account = &iter_item.value().account;
+                // flush_stats.total_size +=
+                //     aligned_stored_size(account.data().len()) as u64;
+                // flush_stats.num_flushed += 1;
+
+                (key, account)
+            })
+            .collect();
+
+        let _is_dead_slot = accounts.is_empty();
+
+        // TODO: @@ self.purge_slot_cache_pubkeys
+
+        /*
+        if !is_dead_slot {
+            // This ensures that all updates are written to an AppendVec, before any
+            // updates to the index happen, so anybody that sees a real entry in the index,
+            // will be able to find the account in storage
+            let flushed_store = self.create_and_insert_store(
+                slot,
+                flush_stats.total_size.0,
+                "flush_slot_cache",
+            );
+            let (store_accounts_timing_inner, store_accounts_total_inner_us) =
+                measure_us!(self.store_accounts_frozen(
+                    (slot, &accounts[..]),
+                    &flushed_store,
+                ));
+            flush_stats.store_accounts_timing = store_accounts_timing_inner;
+            flush_stats.store_accounts_total_us =
+                Saturating(store_accounts_total_inner_us);
+
+            // If the above sizing function is correct, just one AppendVec is enough to hold
+            // all the data for the slot
+            assert!(self.storage.get_slot_storage_entry(slot).is_some());
+            self.reopen_storage_as_readonly_shrinking_in_progress_ok(slot);
+        }
+        */
+    }
     // -----------------
     // Geyser
     // -----------------

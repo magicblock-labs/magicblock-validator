@@ -724,7 +724,7 @@ impl Bank {
         //          in solana the blockhash is set to the hash of the slot that is finalized
         self.update_slot_hashes(prev_slot, current_hash);
 
-        // 9. Update slot history
+        // 10. Update slot history
         self.update_slot_history(prev_slot);
 
         next_slot
@@ -953,6 +953,13 @@ impl Bank {
             old_account_data_size,
             new_account.data().len(),
         );
+    }
+
+    pub fn force_flush_accounts_cache(&self) {
+        self.rc
+            .accounts
+            .accounts_db
+            .flush_accounts_cache(true, Some(self.slot()))
     }
 
     // -----------------
