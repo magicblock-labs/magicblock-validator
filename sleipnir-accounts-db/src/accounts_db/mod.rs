@@ -93,6 +93,8 @@ pub struct AccountsDb {
     /// multiple updates to the same account in the same slot
     pub write_version: AtomicU64,
 
+    persister: AccountsPersister,
+
     pub cluster_type: Option<ClusterType>,
 
     /// Thread pool used for par_iter
@@ -263,14 +265,15 @@ impl AccountsDb {
                     &mut write_version_producer,
                 )
             }
-            StoreTo::Storage(x) => {
-                let persister = AccountsPersister::new(x);
-                persister.store_accounts(
-                    accounts,
-                    None::<Vec<AccountHash>>,
-                    write_version_producer,
-                )
-            }
+            // TODO: @@@ Decide where this entry is actually created
+            // the persister know how to do it, but it seems like it should be provided
+            // here as input already.
+            StoreTo::Storage(entry) => self.persister.store_accounts(
+                accounts,
+                None::<Vec<AccountHash>>,
+                write_version_producer,
+                slot,
+            ),
         }
     }
 

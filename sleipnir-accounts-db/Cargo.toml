@@ -12,6 +12,7 @@ blake3 = { workspace = true }
 dashmap = { workspace = true, features = ["rayon", "raw-api"] }
 log = { workspace = true }
 modular-bitfield = { workspace = true }
+rand = { workspace = true }
 rayon = { workspace = true }
 smallvec = { workspace = true }
 solana-frozen-abi-macro = { workspace = true }

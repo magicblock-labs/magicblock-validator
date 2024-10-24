@@ -6093,8 +6093,8 @@ impl AccountsDb {
     ) -> Arc<AccountStorageEntry> {
         let store = self.create_store(slot, size, from, paths);
         let store_for_index = store.clone();
-
         self.insert_store(slot, store_for_index);
+
         store
     }
 

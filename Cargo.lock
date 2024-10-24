@@ -4493,6 +4493,7 @@ dependencies = [
  "dashmap",
  "log",
  "modular-bitfield",
+ "rand 0.8.5",
  "rayon",
  "smallvec",
  "solana-accounts-db",
