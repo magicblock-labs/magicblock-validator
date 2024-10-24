@@ -51,7 +51,7 @@ impl AccountFetcherStub {
                 at_slot: known_account.slot,
                 chain_state: match &known_account.state {
                     AccountFetcherStubState::Wallet => {
-                        AccountChainState::Wallet {
+                        AccountChainState::FeePayer {
                             lamports: 42,
                             owner: Pubkey::new_unique(),
                         }

@@ -273,7 +273,7 @@ where
         let signature = match &account_chain_snapshot.chain_state {
             // If the account has no data, we can use it for lamport transfers only
             // We'll use the escrowed lamport value rather than its actual on-chain info
-            AccountChainState::Wallet { lamports, owner } => {
+            AccountChainState::FeePayer { lamports, owner } => {
                 if !self.permissions.allow_cloning_wallet_accounts {
                     return Ok(AccountClonerOutput::Unclonable {
                         pubkey: *pubkey,
