@@ -13,22 +13,23 @@ use crate::{
 use solana_measure::measure::Measure;
 use solana_sdk::account::ReadableAccount;
 
-pub struct AccountsPersister {
-    storage: AccountStorageEntry,
+pub struct AccountsPersister<'a> {
+    storage: &'a AccountStorageEntry,
 }
 
-impl AccountsPersister {
-    pub(crate) fn new(storage: AccountStorageEntry) -> Self {
+impl<'a> AccountsPersister<'a> {
+    pub(crate) fn new(storage: &'a AccountStorageEntry) -> Self {
         Self { storage }
     }
 
-    pub(crate) fn store_accounts<'a, 'b, 'c, P, T>(
+    pub(crate) fn store_accounts<'b, 'c, P, T>(
         &self,
         accounts: &'c impl StorableAccounts<'b, T>,
         hashes: Option<Vec<impl Borrow<AccountHash>>>,
         mut write_version_producer: P,
     ) -> Vec<AccountInfo>
     where
+        'a: 'b,
         'a: 'c,
         P: Iterator<Item = u64>,
         T: ReadableAccount + Sync + ZeroLamport + 'b,
@@ -76,7 +77,7 @@ impl AccountsPersister {
         }
     }
 
-    fn write_accounts_to_storage<'a, 'b, T, U, V>(
+    fn write_accounts_to_storage<'b, T, U, V>(
         &self,
         accounts_and_meta_to_store: &StorableAccountsWithHashesAndWriteVersions<
             'a,

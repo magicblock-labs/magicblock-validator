@@ -1,11 +1,3 @@
-use std::{
-    borrow::Cow,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        RwLock,
-    },
-};
-
 use rayon::{prelude::*, ThreadPool};
 use solana_measure::measure::Measure;
 use solana_rayon_threadlimit::get_thread_count;
@@ -18,13 +10,23 @@ use solana_sdk::{
     transaction_context::TransactionAccount,
 };
 use stats::FlushStats;
+use std::sync::Arc;
+use std::{
+    borrow::Cow,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        RwLock,
+    },
+};
 
 use crate::{
     account_info::{AccountInfo, StorageLocation},
     accounts_cache::{AccountsCache, CachedAccount, SlotCache},
+    accounts_hash::AccountHash,
     accounts_index::ZeroLamport,
     accounts_update_notifier_interface::AccountsUpdateNotifier,
     errors::MatchAccountOwnerError,
+    persist::AccountsPersister,
     storable_accounts::StorableAccounts,
     verify_accounts_hash_in_background::VerifyAccountsHashInBackground,
 };
@@ -33,11 +35,11 @@ mod consts;
 mod loaded_account;
 mod loaded_account_accessor;
 mod stats;
-pub use loaded_account_accessor::LoadedAccountAccessor;
-
 use self::{
     consts::SCAN_SLOT_PAR_ITER_THRESHOLD, loaded_account::LoadedAccount,
 };
+use crate::account_storage::AccountStorageEntry;
+pub use loaded_account_accessor::LoadedAccountAccessor;
 
 pub type StoredMetaWriteVersion = u64;
 
@@ -45,10 +47,11 @@ pub type StoredMetaWriteVersion = u64;
 // StoreTo
 // -----------------
 #[derive(Debug)]
-enum StoreTo {
+enum StoreTo<'a> {
     /// write to cache
     Cache,
-    // NOTE: not yet supporting write to storage
+    /// write to storage
+    Storage(&'a Arc<AccountStorageEntry>),
 }
 
 // -----------------
@@ -152,7 +155,7 @@ impl AccountsDb {
     fn store<'a, T: ReadableAccount + Sync + ZeroLamport + 'a>(
         &self,
         accounts: impl StorableAccounts<'a, T>,
-        store_to: &StoreTo,
+        store_to: &'a StoreTo,
         transactions: Option<&'a [Option<&'a SanitizedTransaction>]>,
         // NOTE: we don't take an UpdateIndexThreadSelection strategy here since we
         // always store in the cache at this point
@@ -168,6 +171,7 @@ impl AccountsDb {
         // NOTE: skipping the store_accounts_unfrozen redirection since we
         // always store into unfrozen (current) slot
 
+        // TODO: @@@ Connect this to flush flow
         self.store_accounts_custom(
             accounts,
             None::<Box<dyn Iterator<Item = u64>>>,
@@ -184,7 +188,7 @@ impl AccountsDb {
         accounts: impl StorableAccounts<'a, T>,
         // This is `None` for cached accounts
         write_version_producer: Option<Box<dyn Iterator<Item = u64>>>,
-        store_to: &StoreTo,
+        store_to: &'a StoreTo,
         transactions: Option<&'a [Option<&'a SanitizedTransaction>]>,
     ) {
         let write_version_producer: Box<dyn Iterator<Item = u64>> =
@@ -230,7 +234,7 @@ impl AccountsDb {
         &self,
         accounts: &'c impl StorableAccounts<'b, T>,
         mut write_version_producer: P,
-        store_to: &StoreTo,
+        store_to: &'b StoreTo,
         transactions: Option<&[Option<&'a SanitizedTransaction>]>,
     ) -> Vec<AccountInfo> {
         // NOTE: left out 'calc_stored_meta' which removed accounts from readonly cache
@@ -257,6 +261,14 @@ impl AccountsDb {
                     accounts,
                     txn_iter,
                     &mut write_version_producer,
+                )
+            }
+            StoreTo::Storage(x) => {
+                let persister = AccountsPersister::new(x);
+                persister.store_accounts(
+                    accounts,
+                    None::<Vec<AccountHash>>,
+                    write_version_producer,
                 )
             }
         }
