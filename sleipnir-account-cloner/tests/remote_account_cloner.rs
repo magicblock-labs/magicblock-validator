@@ -78,7 +78,7 @@ fn setup_replica(
         standard_blacklisted_accounts(&Pubkey::new_unique()),
         AccountClonerPermissions {
             allow_cloning_refresh: false,
-            allow_cloning_wallet_accounts: true,
+            allow_cloning_feepayer_accounts: true,
             allow_cloning_undelegated_accounts: true,
             allow_cloning_delegated_accounts: true,
             allow_cloning_program_accounts: true,
@@ -106,7 +106,7 @@ fn setup_programs_replica(
         standard_blacklisted_accounts(&Pubkey::new_unique()),
         AccountClonerPermissions {
             allow_cloning_refresh: false,
-            allow_cloning_wallet_accounts: false,
+            allow_cloning_feepayer_accounts: false,
             allow_cloning_undelegated_accounts: false,
             allow_cloning_delegated_accounts: false,
             allow_cloning_program_accounts: true,
@@ -134,7 +134,7 @@ fn setup_ephemeral(
         standard_blacklisted_accounts(&Pubkey::new_unique()),
         AccountClonerPermissions {
             allow_cloning_refresh: true,
-            allow_cloning_wallet_accounts: true,
+            allow_cloning_feepayer_accounts: true,
             allow_cloning_undelegated_accounts: true,
             allow_cloning_delegated_accounts: true,
             allow_cloning_program_accounts: true,
@@ -162,7 +162,7 @@ fn setup_offline(
         standard_blacklisted_accounts(&Pubkey::new_unique()),
         AccountClonerPermissions {
             allow_cloning_refresh: false,
-            allow_cloning_wallet_accounts: false,
+            allow_cloning_feepayer_accounts: false,
             allow_cloning_undelegated_accounts: false,
             allow_cloning_delegated_accounts: false,
             allow_cloning_program_accounts: false,

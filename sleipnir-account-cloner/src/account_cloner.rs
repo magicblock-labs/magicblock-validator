@@ -50,7 +50,7 @@ pub enum AccountClonerUnclonableReason {
 #[derive(Debug, Clone)]
 pub struct AccountClonerPermissions {
     pub allow_cloning_refresh: bool,
-    pub allow_cloning_wallet_accounts: bool,
+    pub allow_cloning_feepayer_accounts: bool,
     pub allow_cloning_undelegated_accounts: bool,
     pub allow_cloning_delegated_accounts: bool,
     pub allow_cloning_program_accounts: bool,

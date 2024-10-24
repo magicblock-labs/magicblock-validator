@@ -146,7 +146,7 @@ where
         pubkey: &Pubkey,
     ) -> AccountClonerResult<AccountClonerOutput> {
         // If we don't allow any cloning, no need to do anything at all
-        if !self.permissions.allow_cloning_wallet_accounts
+        if !self.permissions.allow_cloning_feepayer_accounts
             && !self.permissions.allow_cloning_undelegated_accounts
             && !self.permissions.allow_cloning_delegated_accounts
             && !self.permissions.allow_cloning_program_accounts
@@ -274,7 +274,7 @@ where
             // If the account has no data, we can use it for lamport transfers only
             // We'll use the escrowed lamport value rather than its actual on-chain info
             AccountChainState::FeePayer { lamports, owner } => {
-                if !self.permissions.allow_cloning_wallet_accounts {
+                if !self.permissions.allow_cloning_feepayer_accounts {
                     return Ok(AccountClonerOutput::Unclonable {
                         pubkey: *pubkey,
                         reason:
