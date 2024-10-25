@@ -47,7 +47,7 @@ impl AccountDumperBank {
 }
 
 impl AccountDumper for AccountDumperBank {
-    fn dump_wallet_account(
+    fn dump_feepayer_account(
         &self,
         pubkey: &Pubkey,
         lamports: u64,

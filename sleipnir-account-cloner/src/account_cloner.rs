@@ -41,7 +41,7 @@ pub enum AccountClonerUnclonableReason {
     NoCloningAllowed,
     IsBlacklisted,
     IsNotAnAllowedProgram,
-    DoesNotAllowWalletAccount,
+    DoesNotAllowFeePayerAccount,
     DoesNotAllowUndelegatedAccount,
     DoesNotAllowDelegatedAccount,
     DoesNotAllowProgramAccount,

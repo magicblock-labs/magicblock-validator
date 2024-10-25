@@ -392,7 +392,7 @@ async fn test_ensure_readonly_account_in_our_validator_and_unseen_writable() {
 }
 
 #[tokio::test]
-async fn test_ensure_one_delegated_and_one_wallet_account_writable() {
+async fn test_ensure_one_delegated_and_one_feepayer_account_writable() {
     init_logger!();
 
     let internal_account_provider = InternalAccountProviderStub::default();
@@ -410,18 +410,18 @@ async fn test_ensure_one_delegated_and_one_wallet_account_writable() {
         LifecycleMode::Replica,
     );
 
-    // One writable delegated and one wallet account
+    // One writable delegated and one feepayer account
     let delegated_account = Pubkey::new_unique();
-    let wallet_account = Pubkey::new_unique();
+    let feepayer_account = Pubkey::new_unique();
     account_fetcher.set_delegated_account(delegated_account, 42, 11);
-    account_fetcher.set_wallet_account(wallet_account, 42);
+    account_fetcher.set_feepayer_account(feepayer_account, 42);
 
     // Ensure account
     let result = manager
         .ensure_accounts_from_holder(
             TransactionAccountsHolder {
                 readonly: vec![],
-                writable: vec![wallet_account, delegated_account],
+                writable: vec![feepayer_account, delegated_account],
                 payer: Pubkey::new_unique(),
             },
             "tx-sig".to_string(),
@@ -433,8 +433,8 @@ async fn test_ensure_one_delegated_and_one_wallet_account_writable() {
     assert!(account_dumper.was_dumped_as_delegated_account(&delegated_account));
     assert!(manager.last_commit(&delegated_account).is_some());
 
-    assert!(account_dumper.was_dumped_as_wallet_account(&wallet_account));
-    assert!(manager.last_commit(&wallet_account).is_none());
+    assert!(account_dumper.was_dumped_as_feepayer_account(&feepayer_account));
+    assert!(manager.last_commit(&feepayer_account).is_none());
 
     // Cleanup
     cancel.cancel();
