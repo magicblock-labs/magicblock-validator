@@ -13,6 +13,7 @@ inputs:
     required: true
   build_cache_key_name:
     description: "Build cache key"
+    description: "Build cache key"
     required: true
 
 runs:
@@ -25,7 +26,7 @@ runs:
       repository: magicblock-labs/conjunto
       token: ${{ inputs.github_access_token }}
       path: conjunto
-      ref: master
+      ref: picco/restrict-wallets-category
 
   - name: Checkout magicblock-labs/delegation-program
     uses: actions/checkout@v2
