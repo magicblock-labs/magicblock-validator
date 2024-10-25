@@ -30,7 +30,7 @@ use crate::{
         db::Database,
         iterator::IteratorMode,
         ledger_column::LedgerColumn,
-        meta::{AddressSignatureMeta, PerfSample, TransactionStatusIndexMeta},
+        meta::{AddressSignatureMeta, PerfSample},
         options::LedgerOptions,
     },
     errors::{LedgerError, LedgerResult},
@@ -52,14 +52,11 @@ pub struct Ledger {
     transaction_status_cf: LedgerColumn<cf::TransactionStatus>,
     address_signatures_cf: LedgerColumn<cf::AddressSignatures>,
     slot_signatures_cf: LedgerColumn<cf::SlotSignatures>,
-    transaction_status_index_cf: LedgerColumn<cf::TransactionStatusIndex>,
     blocktime_cf: LedgerColumn<cf::Blocktime>,
     blockhash_cf: LedgerColumn<cf::Blockhash>,
     transaction_cf: LedgerColumn<cf::Transaction>,
     transaction_memos_cf: LedgerColumn<cf::TransactionMemos>,
     perf_samples_cf: LedgerColumn<cf::PerfSamples>,
-
-    highest_primary_index_slot: RwLock<Option<Slot>>,
 
     pub lowest_cleanup_slot: RwLock<Slot>,
     rpc_api_metrics: LedgerRpcApiMetrics,
@@ -115,7 +112,6 @@ impl Ledger {
         let transaction_status_cf = db.column();
         let address_signatures_cf = db.column();
         let slot_signatures_cf = db.column();
-        let transaction_status_index_cf = db.column();
         let blocktime_cf = db.column();
         let blockhash_cf = db.column();
         let transaction_cf = db.column();
@@ -136,21 +132,15 @@ impl Ledger {
             transaction_status_cf,
             address_signatures_cf,
             slot_signatures_cf,
-            transaction_status_index_cf,
             blocktime_cf,
             blockhash_cf,
             transaction_cf,
             transaction_memos_cf,
             perf_samples_cf,
 
-            highest_primary_index_slot: RwLock::<Option<Slot>>::default(),
-
             lowest_cleanup_slot: RwLock::<Slot>::default(),
             rpc_api_metrics: LedgerRpcApiMetrics::default(),
         };
-
-        ledger.cleanup_old_entries()?;
-        ledger.update_highest_primary_index_slot()?;
 
         Ok(ledger)
     }
@@ -163,63 +153,11 @@ impl Ledger {
         self.transaction_status_cf.submit_rocksdb_cf_metrics();
         self.address_signatures_cf.submit_rocksdb_cf_metrics();
         self.slot_signatures_cf.submit_rocksdb_cf_metrics();
-        self.transaction_status_index_cf.submit_rocksdb_cf_metrics();
         self.blocktime_cf.submit_rocksdb_cf_metrics();
         self.blockhash_cf.submit_rocksdb_cf_metrics();
         self.transaction_cf.submit_rocksdb_cf_metrics();
         self.transaction_memos_cf.submit_rocksdb_cf_metrics();
         self.perf_samples_cf.submit_rocksdb_cf_metrics();
-    }
-
-    // -----------------
-    // Utility
-    // -----------------
-    fn cleanup_old_entries(&self) -> std::result::Result<(), LedgerError> {
-        if !self.is_primary_access() {
-            return Ok(());
-        }
-
-        // Initialize TransactionStatusIndexMeta if they are not present already
-        if self.transaction_status_index_cf.get(0)?.is_none() {
-            self.transaction_status_index_cf
-                .put(0, &TransactionStatusIndexMeta::default())?;
-        }
-        if self.transaction_status_index_cf.get(1)?.is_none() {
-            self.transaction_status_index_cf
-                .put(1, &TransactionStatusIndexMeta::default())?;
-        }
-        // Left out cleanup by "old software" since we won't encounter that
-        Ok(())
-    }
-
-    fn set_highest_primary_index_slot(&self, slot: Option<Slot>) {
-        *self.highest_primary_index_slot.write().unwrap() = slot;
-    }
-
-    fn update_highest_primary_index_slot(
-        &self,
-    ) -> std::result::Result<(), LedgerError> {
-        let iterator =
-            self.transaction_status_index_cf.iter(IteratorMode::Start)?;
-        let mut highest_primary_index_slot = None;
-        for (_, data) in iterator {
-            let meta: TransactionStatusIndexMeta = deserialize(&data).unwrap();
-            if highest_primary_index_slot.is_none()
-                || highest_primary_index_slot
-                    .is_some_and(|slot| slot < meta.max_slot)
-            {
-                highest_primary_index_slot = Some(meta.max_slot);
-            }
-        }
-        if highest_primary_index_slot.is_some_and(|slot| slot != 0) {
-            self.set_highest_primary_index_slot(highest_primary_index_slot);
-        }
-        Ok(())
-    }
-
-    /// Returns whether the blockstore has primary (read and write) access
-    pub fn is_primary_access(&self) -> bool {
-        self.db.is_primary_access()
     }
 
     // -----------------

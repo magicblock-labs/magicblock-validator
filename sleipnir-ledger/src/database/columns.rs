@@ -11,10 +11,6 @@ const TRANSACTION_STATUS_CF: &str = "transaction_status";
 const ADDRESS_SIGNATURES_CF: &str = "address_signatures";
 /// Column family for Slot Signatures
 const SLOT_SIGNATURES_CF: &str = "slot_signatures";
-/// Column family for the Transaction Status Index.
-/// This column family is used for tracking the active primary index for columns that for
-/// query performance reasons should not be indexed by Slot.
-const TRANSACTION_STATUS_INDEX_CF: &str = "transaction_status_index";
 /// Column family for Blocktime
 const BLOCKTIME_CF: &str = "blocktime";
 /// Column family for Blockhash
@@ -55,13 +51,6 @@ pub struct AddressSignatures;
 /// *                 slot,  tx index
 /// * value type: [`[`solana_sdk::signature::Signature`]`]
 pub struct SlotSignatures;
-
-#[derive(Debug)]
-/// The transaction status index column.
-///
-/// * index type: `u64` (see [`SlotColumn`])
-/// * value type: [`blockstore_meta::TransactionStatusIndexMeta`]
-pub struct TransactionStatusIndex;
 
 /// The block time column
 ///
@@ -110,7 +99,6 @@ pub fn columns() -> Vec<&'static str> {
         TransactionStatus::NAME,
         AddressSignatures::NAME,
         SlotSignatures::NAME,
-        TransactionStatusIndex::NAME,
         Blocktime::NAME,
         Blockhash::NAME,
         Transaction::NAME,
@@ -148,10 +136,6 @@ impl TypedColumn for AddressSignatures {
 
 impl TypedColumn for SlotSignatures {
     type Type = Signature;
-}
-
-impl TypedColumn for TransactionStatusIndex {
-    type Type = meta::TransactionStatusIndexMeta;
 }
 
 pub trait ProtobufColumn: Column {
@@ -465,34 +449,6 @@ impl ColumnIndexDeprecation for TransactionStatus {
         let (_primary_index, signature, slot) = deprecated_index;
         (signature, slot)
     }
-}
-
-// -----------------
-// TransactionStatusIndex
-// -----------------
-impl Column for TransactionStatusIndex {
-    type Index = u64;
-
-    fn key(index: u64) -> Vec<u8> {
-        let mut key = vec![0; 8];
-        BigEndian::write_u64(&mut key[..], index);
-        key
-    }
-
-    fn index(key: &[u8]) -> u64 {
-        BigEndian::read_u64(&key[..8])
-    }
-
-    fn slot(_index: Self::Index) -> Slot {
-        unimplemented!()
-    }
-
-    fn as_index(slot: u64) -> u64 {
-        slot
-    }
-}
-impl ColumnName for TransactionStatusIndex {
-    const NAME: &'static str = TRANSACTION_STATUS_INDEX_CF;
 }
 
 // -----------------
