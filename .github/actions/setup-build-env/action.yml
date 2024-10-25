@@ -13,7 +13,6 @@ inputs:
     required: true
   build_cache_key_name:
     description: "Build cache key"
-    description: "Build cache key"
     required: true
 
 runs:
