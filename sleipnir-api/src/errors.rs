@@ -35,5 +35,8 @@ pub enum ApiError {
     UnableToCleanLedgerDirectory(String),
 
     #[error("Failed to start metrics service: {0}")]
-    FailedToStartMetricsService(#[from] std::io::Error),
+    FailedToStartMetricsService(std::io::Error),
+
+    #[error("Ledger Path is missing a parent directory: {0}")]
+    LedgerPathIsMissingParent(String),
 }

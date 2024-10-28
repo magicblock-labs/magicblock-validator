@@ -5,6 +5,7 @@
 use std::{
     borrow::Cow,
     collections::HashSet,
+    path::PathBuf,
     slice,
     sync::{
         atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering},
@@ -957,11 +958,8 @@ impl Bank {
         );
     }
 
-    pub fn force_flush_accounts_cache(&self) {
-        self.rc
-            .accounts
-            .accounts_db
-            .flush_accounts_cache(true, Some(self.slot()))
+    pub fn flush_accounts_cache(&self) {
+        self.rc.accounts.accounts_db.flush_accounts_cache()
     }
 
     // -----------------

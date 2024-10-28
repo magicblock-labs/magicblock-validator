@@ -113,10 +113,8 @@ impl AccountsPersister {
         mut write_version_iterator: I,
         storage: &Arc<AccountStorageEntry>,
     ) -> Vec<AccountInfo> {
-        let slot = accounts.target_slot();
         if accounts.has_hash_and_write_version() {
             self.write_accounts_to_storage(
-                slot,
                 storage,
                 &StorableAccountsWithHashesAndWriteVersions::<
                     '_,
@@ -131,7 +129,6 @@ impl AccountsPersister {
                 .map(|_| write_version_iterator.next().unwrap())
                 .collect::<Vec<_>>();
             self.write_accounts_to_storage(
-                slot,
                 storage,
                 &StorableAccountsWithHashesAndWriteVersions::new_with_hashes_and_write_versions(
                     accounts,
@@ -144,7 +141,6 @@ impl AccountsPersister {
 
     fn write_accounts_to_storage<'a, 'b, T, U, V>(
         &self,
-        slot: Slot,
         storage: &AccountStorageEntry,
         accounts_and_meta_to_store: &StorableAccountsWithHashesAndWriteVersions<
             'a,
@@ -161,8 +157,8 @@ impl AccountsPersister {
     {
         let mut infos: Vec<AccountInfo> =
             Vec::with_capacity(accounts_and_meta_to_store.len());
-        let storage = self.create_and_insert_store(slot, size);
 
+        #[allow(unused)]
         let mut total_append_accounts_us = 0;
         while infos.len() < accounts_and_meta_to_store.len() {
             // Append accounts to storage entry

@@ -1,6 +1,6 @@
 use std::{
     net::SocketAddr,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -55,6 +55,7 @@ use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
+    accounts::create_accounts_run_and_snapshot_dirs,
     errors::{ApiError, ApiResult},
     external_config::try_convert_accounts_config,
     fund_account::{
@@ -412,10 +413,18 @@ impl MagicValidator {
         Ok(Arc::new(ledger))
     }
 
-    fn init_accounts_paths(ledger_path: &PathBuf) -> ApiResult<Vec<PathBuf>> {
-        let accounts_dir = ledger_path.join("accounts");
-        create_accounts_run_and_snapshot_dirs(&accounts_dir)?;
-        Ok(vec![accounts_dir])
+    fn init_accounts_paths(ledger_path: &Path) -> ApiResult<Vec<PathBuf>> {
+        let accounts_dir = ledger_path
+            .parent()
+            .ok_or_else(|| {
+                ApiError::LedgerPathIsMissingParent(
+                    ledger_path.to_path_buf().display().to_string(),
+                )
+            })?
+            .join("accounts");
+        let (run_path, _snapshot_path) =
+            create_accounts_run_and_snapshot_dirs(&accounts_dir)?;
+        Ok(vec![run_path])
     }
 
     fn init_transaction_listener(

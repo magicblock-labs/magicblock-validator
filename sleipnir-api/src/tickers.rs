@@ -48,6 +48,11 @@ pub fn init_slot_ticker(
                 error!("Failed to write block: {:?}", err);
             }
 
+            if next_slot % 100 == 0 {
+                trace!("Flushing accounts");
+                bank.flush_accounts_cache();
+            }
+
             // If accounts were scheduled to be committed, we accept them here
             // and processs the commits
             let magic_context_acc = bank.get_account(&magic_program::MAGIC_CONTEXT_PUBKEY)

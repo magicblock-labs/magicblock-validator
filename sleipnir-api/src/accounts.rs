@@ -1,4 +1,7 @@
-use std::fs;
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
 
 use crate::utils;
 
@@ -26,7 +29,7 @@ pub fn create_accounts_run_and_snapshot_dirs(
         // The run/ content cleanup will be done at a later point.
         // The snapshot/ content persists across the process boot, and will be purged
         // by the account_background_service.
-        utils::fs::remove_directory_contents_if_exists(&account_dir)?;
+        utils::fs::remove_directory_contents_if_exists(account_dir.as_ref())?;
 
         fs::create_dir_all(&run_path)?;
         fs::create_dir_all(&snapshot_path)?;

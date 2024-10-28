@@ -1,3 +1,6 @@
+// TODO(thlorenz): @@@ should we measure this or just remove these stats?
+#![allow(unused)]
+
 use std::num::Saturating;
 
 // -----------------
