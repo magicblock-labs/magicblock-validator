@@ -28,6 +28,9 @@ pub mod accounts_index {
         ZeroLamport,
     };
 }
+pub mod append_vec {
+    pub use solana_accounts_db::append_vec::aligned_stored_size;
+}
 pub mod account_storage {
     pub use solana_accounts_db::account_storage::*;
     pub use solana_accounts_db::accounts_db::AccountStorageEntry;

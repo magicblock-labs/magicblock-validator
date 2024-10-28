@@ -22,7 +22,6 @@ use std::{
 use crate::{
     account_info::{AccountInfo, StorageLocation},
     accounts_cache::{AccountsCache, CachedAccount, SlotCache},
-    accounts_hash::AccountHash,
     accounts_index::ZeroLamport,
     accounts_update_notifier_interface::AccountsUpdateNotifier,
     errors::MatchAccountOwnerError,
@@ -47,7 +46,7 @@ pub type StoredMetaWriteVersion = u64;
 // StoreTo
 // -----------------
 #[derive(Debug)]
-enum StoreTo<'a> {
+pub enum StoreTo<'a> {
     /// write to cache
     Cache,
     /// write to storage
@@ -105,19 +104,26 @@ pub struct AccountsDb {
 
 impl AccountsDb {
     pub fn default_for_tests() -> Self {
-        Self::new(None, None)
+        Self::new(None, None, AccountsPersister::default())
     }
 
     pub fn new_with_config(
         cluster_type: &ClusterType,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
     ) -> Self {
-        Self::new(Some(*cluster_type), accounts_update_notifier)
+        // TODO(thlorenz): @@@ provide paths
+        let accounts_persister = AccountsPersister::default();
+        Self::new(
+            Some(*cluster_type),
+            accounts_update_notifier,
+            accounts_persister,
+        )
     }
 
     pub fn new(
         cluster_type: Option<ClusterType>,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
+        persister: AccountsPersister,
     ) -> Self {
         let num_threads = get_thread_count();
         // rayon needs a lot of stack
@@ -128,6 +134,7 @@ impl AccountsDb {
             stats: AccountsStats::default(),
             accounts_update_notifier,
             write_version: AtomicU64::default(),
+            persister,
             thread_pool: rayon::ThreadPoolBuilder::new()
                 .num_threads(num_threads)
                 .thread_name(|i| format!("solAccounts{i:02}"))
@@ -268,12 +275,15 @@ impl AccountsDb {
             // TODO: @@@ Decide where this entry is actually created
             // the persister know how to do it, but it seems like it should be provided
             // here as input already.
-            StoreTo::Storage(entry) => self.persister.store_accounts(
-                accounts,
-                None::<Vec<AccountHash>>,
-                write_version_producer,
-                slot,
-            ),
+            StoreTo::Storage(_entry) => todo!("store to storage"),
+            /*
+                        self.persister.store_accounts(
+                            accounts,
+                            None::<Vec<AccountHash>>,
+                            write_version_producer,
+                            slot,
+                        ),
+            */
         }
     }
 
