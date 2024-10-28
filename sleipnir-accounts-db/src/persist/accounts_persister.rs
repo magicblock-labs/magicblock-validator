@@ -16,6 +16,7 @@ use crate::{
     account_storage::{
         AccountStorage, AccountStorageEntry, AccountStorageStatus,
     },
+    errors::AccountsDbError,
 };
 use rand::{thread_rng, Rng};
 use solana_measure::measure::Measure;
@@ -272,71 +273,16 @@ impl AccountsPersister {
     }
 
     // -----------------
-    // Abondoned
+    // Metrics
     // -----------------
-    /*
-    pub(crate) fn store_accounts<'a, 'b, 'c, P, T>(
+    pub(crate) fn storage_size(
         &self,
-        accounts: &'c impl StorableAccounts<'b, T>,
-        hashes: Option<Vec<impl Borrow<AccountHash>>>,
-        mut write_version_producer: P,
-        slot: Slot,
-    ) -> Vec<AccountInfo>
-    where
-        'a: 'b,
-        'a: 'c,
-        P: Iterator<Item = u64>,
-        T: ReadableAccount + Sync + ZeroLamport + 'b,
-    {
-        // TODO(thlorenz): @@ figure out how to calculate a meaningful size
-        let size = u64::MAX;
-        if accounts.has_hash_and_write_version() {
-            self.write_accounts_to_storage(
-                &StorableAccountsWithHashesAndWriteVersions::<
-                    '_,
-                    '_,
-                    _,
-                    _,
-                    &AccountHash,
-                >::new(accounts),
-                slot,
-                size,
-            )
-        } else {
-            let write_versions = (0..accounts.len())
-                .map(|_| write_version_producer.next().unwrap())
-                .collect::<Vec<_>>();
-            match hashes {
-                Some(hashes) => self.write_accounts_to_storage(
-                    &StorableAccountsWithHashesAndWriteVersions::new_with_hashes_and_write_versions(
-                        accounts,
-                        hashes,
-                        write_versions,
-                    ),
-                    slot,
-                    size,
-                ),
-                None => {
-                    // hash any accounts where we were lazy in calculating the hash
-                    let len = accounts.len();
-                    let mut hashes = Vec::with_capacity(len);
-                    for index in 0..accounts.len() {
-                        let (pubkey, account) = (accounts.pubkey(index), accounts.account(index));
-                        let hash = hash_account(
-                            account,
-                            pubkey,
-                        );
-                        hashes.push(hash);
-                    }
-
-                    self.write_accounts_to_storage(
-                        &StorableAccountsWithHashesAndWriteVersions::new_with_hashes_and_write_versions(accounts, hashes, write_versions),
-                        slot,
-                        size,
-                    )
-                }
-            }
+    ) -> std::result::Result<u64, AccountsDbError> {
+        // NOTE: at this point we assume that accounts are stored in only
+        // one directory
+        match self.paths.first() {
+            Some(path) => Ok(fs_extra::dir::get_size(&path)?),
+            None => Ok(0),
         }
     }
-    */
 }

@@ -23,7 +23,7 @@ use crate::{
     accounts_cache::{AccountsCache, CachedAccount},
     accounts_index::ZeroLamport,
     accounts_update_notifier_interface::AccountsUpdateNotifier,
-    errors::MatchAccountOwnerError,
+    errors::{AccountsDbError, MatchAccountOwnerError},
     persist::AccountsPersister,
     storable_accounts::StorableAccounts,
     verify_accounts_hash_in_background::VerifyAccountsHashInBackground,
@@ -498,6 +498,10 @@ impl AccountsDb {
         let slot = self.accounts_cache.current_slot();
         let slot_cache = self.accounts_cache.slot_cache();
         self.persister.flush_slot_cache(slot, &slot_cache);
+    }
+
+    pub fn storage_size(&self) -> std::result::Result<u64, AccountsDbError> {
+        self.persister.storage_size()
     }
 
     // -----------------

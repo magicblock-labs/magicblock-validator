@@ -10,6 +10,7 @@ edition.workspace = true
 [dependencies]
 blake3 = { workspace = true }
 dashmap = { workspace = true, features = ["rayon", "raw-api"] }
+fs_extra = { workspace = true }
 log = { workspace = true }
 modular-bitfield = { workspace = true }
 rand = { workspace = true }

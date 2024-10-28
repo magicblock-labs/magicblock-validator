@@ -7,3 +7,9 @@ pub enum MatchAccountOwnerError {
     #[error("Unable to load the account")]
     UnableToLoad,
 }
+
+#[derive(Error, Debug)]
+pub enum AccountsDbError {
+    #[error("fs extra error: {0}")]
+    FsExtraError(#[from] fs_extra::error::Error),
+}

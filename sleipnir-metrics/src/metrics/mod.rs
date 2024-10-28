@@ -79,6 +79,10 @@ lazy_static::lazy_static! {
         "ledger_size", "Ledger Size in Bytes",
     ).unwrap();
 
+    static ref ACCOUNTS_SIZE_GAUGE: IntGauge = IntGauge::new(
+        "accounts_size", "Size of persisted accounts currently on disk",
+    ).unwrap();
+
     static ref SIGVERIFY_TIME_HISTOGRAM: Histogram = Histogram::with_opts(
         HistogramOpts::new("sigverify_time", "Time spent in sigverify")
             .buckets(
@@ -137,6 +141,7 @@ pub(crate) fn register() {
         register!(ACCOUNT_COMMIT_VEC_COUNT);
         register!(ACCOUNT_COMMIT_TIME_HISTOGRAM);
         register!(LEDGER_SIZE_GAUGE);
+        register!(ACCOUNTS_SIZE_GAUGE);
         register!(SIGVERIFY_TIME_HISTOGRAM);
         register!(ENSURE_ACCOUNTS_TIME_HISTOGRAM);
         register!(TRANSACTION_EXECUTION_TIME_HISTORY);
@@ -220,6 +225,10 @@ pub fn account_commit_end(timer: HistogramTimer) {
 
 pub fn set_ledger_size(size: u64) {
     LEDGER_SIZE_GAUGE.set(size as i64);
+}
+
+pub fn set_accounts_size(size: u64) {
+    ACCOUNTS_SIZE_GAUGE.set(size as i64);
 }
 
 pub fn observe_sigverify_time<T, F>(f: F) -> T

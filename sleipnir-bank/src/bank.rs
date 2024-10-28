@@ -473,7 +473,7 @@ impl Bank {
                 RwLock<TransactionLogCollectorConfig>,
             >::default(),
             transaction_log_collector:
-                Arc::<RwLock<TransactionLogCollector>>::default(),
+            Arc::<RwLock<TransactionLogCollector>>::default(),
             fee_structure: FeeStructure::default(),
             loaded_programs_cache,
             transaction_processor: Default::default(),
@@ -578,7 +578,7 @@ impl Bank {
                     false, /* deployment */
                     false, /* debugging_features */
                 )
-                .unwrap(),
+                    .unwrap(),
             );
             loaded_programs_cache.environments.program_runtime_v2 =
                 Arc::new(create_program_runtime_environment_v2(
@@ -1054,7 +1054,7 @@ impl Bank {
         from_account(
             &self.get_account(&sysvar::clock::id()).unwrap_or_default(),
         )
-        .unwrap_or_default()
+            .unwrap_or_default()
     }
 
     fn update_clock(&self, epoch_start_timestamp: UnixTimestamp) {
@@ -1484,7 +1484,7 @@ impl Bank {
     pub fn prepare_sanitized_batch_with_results<'a, 'b>(
         &'a self,
         transactions: &'b [SanitizedTransaction],
-        transaction_results: impl Iterator<Item = Result<()>>,
+        transaction_results: impl Iterator<Item=Result<()>>,
     ) -> TransactionBatch<'a, 'b> {
         // this lock_results could be: Ok, AccountInUse, WouldExceedBlockMaxLimit or WouldExceedAccountMaxLimit
         let tx_account_lock_limit = self.get_transaction_account_lock_limit();
@@ -1599,7 +1599,7 @@ impl Bank {
                 let sanitized_tx = sanitized_tx.borrow();
                 if age_result.is_ok()
                     && self
-                        .is_transaction_already_processed(sanitized_tx, &rcache)
+                    .is_transaction_already_processed(sanitized_tx, &rcache)
                 {
                     error_counters.already_processed += 1;
                     return (
@@ -1761,10 +1761,10 @@ impl Bank {
 
                 if store {
                     if let Some(TransactionExecutionDetails {
-                        status,
-                        log_messages: Some(log_messages),
-                        ..
-                    }) = execution_result.details()
+                                    status,
+                                    log_messages: Some(log_messages),
+                                    ..
+                                }) = execution_result.details()
                     {
                         let mut transaction_log_collector =
                             self.transaction_log_collector.write().unwrap();
@@ -1884,7 +1884,7 @@ impl Bank {
                 committed_transactions_count: executed_transactions_count
                     as u64,
                 committed_non_vote_transactions_count:
-                    executed_non_vote_transactions_count as u64,
+                executed_non_vote_transactions_count as u64,
                 committed_with_failure_result_count: executed_transactions_count
                     .saturating_sub(executed_with_successful_result_count)
                     as u64,
@@ -1915,8 +1915,8 @@ impl Bank {
             &mut ExecuteTimings::default(),
             None,
         )
-        .0
-        .fee_collection_results
+            .0
+            .fee_collection_results
     }
 
     /// `committed_transactions_count` is the number of transactions out of `sanitized_txs`
@@ -2188,7 +2188,7 @@ impl Bank {
         if verification_mode
             == TransactionVerificationMode::HashAndVerifyPrecompiles
             || verification_mode
-                == TransactionVerificationMode::FullVerification
+            == TransactionVerificationMode::FullVerification
         {
             sanitized_tx.verify_precompiles(&self.feature_set)?;
         }
@@ -2250,13 +2250,13 @@ impl Bank {
             blockhash_queue
                 .get_lamports_per_signature(message.recent_blockhash())
         }
-        .or_else(|| {
-            self.check_message_for_nonce(message).and_then(
-                |(address, account)| {
-                    NoncePartial::new(address, account).lamports_per_signature()
-                },
-            )
-        })?;
+            .or_else(|| {
+                self.check_message_for_nonce(message).and_then(
+                    |(address, account)| {
+                        NoncePartial::new(address, account).lamports_per_signature()
+                    },
+                )
+            })?;
         Some(self.get_fee_for_message_with_lamports_per_signature(
             message,
             lamports_per_signature,
@@ -2274,8 +2274,8 @@ impl Bank {
             &process_compute_budget_instructions(
                 message.program_instructions_iter(),
             )
-            .unwrap_or_default()
-            .into(),
+                .unwrap_or_default()
+                .into(),
             self.feature_set.is_active(
                 &include_loaded_accounts_data_size_in_fee_calculation::id(),
             ),
@@ -2445,8 +2445,7 @@ impl Bank {
         _txs: &[SanitizedTransaction],
         _execution_results: &[TransactionExecutionResult],
         _loaded_txs: &[TransactionLoadResult],
-    ) {
-    }
+    ) {}
 
     pub fn is_frozen(&self) -> bool {
         false
@@ -2637,6 +2636,10 @@ impl Bank {
     /// Return the total capitalization of the Bank
     pub fn capitalization(&self) -> u64 {
         self.capitalization.load(Ordering::Relaxed)
+    }
+
+    pub fn accounts_db(&self) -> &AccountsDb {
+        self.rc.accounts.accounts_db.as_ref()
     }
 
     // -----------------
