@@ -106,6 +106,16 @@ lazy_static::lazy_static! {
                 MILLIS_1_9.iter()).cloned().collect()
             ),
     ).unwrap();
+
+    static ref FLUSH_ACCOUNTS_TIME_HISTOGRAM: Histogram = Histogram::with_opts(
+        HistogramOpts::new("flush_accounts_time", "Time spent flushing accounts to disk")
+            .buckets(
+                MILLIS_1_9.iter().chain(
+                MILLIS_10_90.iter()).chain(
+                MILLIS_100_900.iter()).chain(
+                SECONDS_1_9.iter()).cloned().collect()
+            ),
+    ).unwrap();
 }
 
 pub(crate) fn register() {
@@ -130,6 +140,7 @@ pub(crate) fn register() {
         register!(SIGVERIFY_TIME_HISTOGRAM);
         register!(ENSURE_ACCOUNTS_TIME_HISTOGRAM);
         register!(TRANSACTION_EXECUTION_TIME_HISTORY);
+        register!(FLUSH_ACCOUNTS_TIME_HISTOGRAM);
     });
 }
 
@@ -231,4 +242,11 @@ where
     F: FnOnce() -> T,
 {
     TRANSACTION_EXECUTION_TIME_HISTORY.observe_closure_duration(f)
+}
+
+pub fn observe_flush_accounts_time<T, F>(f: F) -> T
+where
+    F: FnOnce() -> T,
+{
+    FLUSH_ACCOUNTS_TIME_HISTOGRAM.observe_closure_duration(f)
 }

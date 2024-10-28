@@ -20,6 +20,8 @@ use sleipnir_transaction_status::TransactionStatusSender;
 use solana_sdk::account::ReadableAccount;
 use tokio_util::sync::CancellationToken;
 
+use crate::accounts::flush_accounts;
+
 pub fn init_slot_ticker(
     bank: &Arc<Bank>,
     accounts_manager: &Arc<AccountsManager>,
@@ -48,9 +50,8 @@ pub fn init_slot_ticker(
                 error!("Failed to write block: {:?}", err);
             }
 
-            if next_slot % 100 == 0 {
-                trace!("Flushing accounts");
-                bank.flush_accounts_cache();
+            if next_slot % 500 == 0 {
+                flush_accounts(&bank);
             }
 
             // If accounts were scheduled to be committed, we accept them here

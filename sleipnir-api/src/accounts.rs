@@ -1,3 +1,6 @@
+use log::*;
+use sleipnir_bank::bank::Bank;
+use sleipnir_metrics::metrics;
 use std::{
     fs,
     path::{Path, PathBuf},
@@ -36,4 +39,11 @@ pub fn create_accounts_run_and_snapshot_dirs(
     }
 
     Ok((run_path, snapshot_path))
+}
+
+pub fn flush_accounts(bank: &Bank) {
+    metrics::observe_flush_accounts_time(|| {
+        trace!("Flushing accounts");
+        bank.flush_accounts_cache();
+    });
 }
