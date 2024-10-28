@@ -4,6 +4,9 @@ pub type ApiResult<T> = std::result::Result<T, ApiError>;
 
 #[derive(Debug, Error)]
 pub enum ApiError {
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
+
     #[error("GeyserPluginServiceError error: {0}")]
     GeyserPluginServiceError(#[from] solana_geyser_plugin_manager::geyser_plugin_service::GeyserPluginServiceError),
 

@@ -56,7 +56,7 @@ impl AccountsPersister {
         }
     }
 
-    fn do_flush_slot_cache(&self, slot: Slot, slot_cache: &SlotCache) {
+    pub(crate) fn flush_slot_cache(&self, slot: Slot, slot_cache: &SlotCache) {
         let mut total_size = 0;
 
         let cached_accounts = slot_cache.iter().collect::<Vec<_>>();

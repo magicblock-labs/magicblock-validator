@@ -147,18 +147,20 @@ impl MagicValidator {
             ..
         } = create_genesis_config_with_leader(u64::MAX, &validator_pubkey);
 
+        let ledger = Self::init_ledger(
+            config.validator_config.ledger.path.as_ref(),
+            config.validator_config.ledger.reset,
+        )?;
+        let accounts_paths = Self::init_accounts_paths(ledger.ledger_path())?;
+
         let exit = Arc::<AtomicBool>::default();
         let bank = Self::init_bank(
             &geyser_service,
             &genesis_config,
             config.validator_config.validator.millis_per_slot,
             validator_pubkey,
+            accounts_paths,
         );
-
-        let ledger = Self::init_ledger(
-            config.validator_config.ledger.path.as_ref(),
-            config.validator_config.ledger.reset,
-        )?;
 
         fund_validator_identity(&bank, &validator_pubkey);
         fund_magic_context(&bank);
@@ -306,6 +308,7 @@ impl MagicValidator {
         genesis_config: &GenesisConfig,
         millis_per_slot: u64,
         validator_pubkey: Pubkey,
+        accounts_paths: Vec<PathBuf>,
     ) -> Arc<Bank> {
         let runtime_config = Default::default();
         let bank = Bank::new(
@@ -314,6 +317,7 @@ impl MagicValidator {
             None,
             None,
             false,
+            accounts_paths,
             geyser_service.get_accounts_update_notifier(),
             geyser_service.get_slot_status_notifier(),
             millis_per_slot,
@@ -406,6 +410,12 @@ impl MagicValidator {
         };
         let ledger = ledger::init(ledger_path, reset)?;
         Ok(Arc::new(ledger))
+    }
+
+    fn init_accounts_paths(ledger_path: &PathBuf) -> ApiResult<Vec<PathBuf>> {
+        let accounts_dir = ledger_path.join("accounts");
+        create_accounts_run_and_snapshot_dirs(&accounts_dir)?;
+        Ok(vec![accounts_dir])
     }
 
     fn init_transaction_listener(

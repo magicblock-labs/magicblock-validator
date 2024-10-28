@@ -9,8 +9,6 @@ use solana_sdk::{
     transaction::SanitizedTransaction,
     transaction_context::TransactionAccount,
 };
-use stats::FlushStats;
-use std::sync::Arc;
 use std::{
     borrow::Cow,
     sync::{
@@ -18,10 +16,11 @@ use std::{
         RwLock,
     },
 };
+use std::{path::PathBuf, sync::Arc};
 
 use crate::{
     account_info::{AccountInfo, StorageLocation},
-    accounts_cache::{AccountsCache, CachedAccount, SlotCache},
+    accounts_cache::{AccountsCache, CachedAccount},
     accounts_index::ZeroLamport,
     accounts_update_notifier_interface::AccountsUpdateNotifier,
     errors::MatchAccountOwnerError,
@@ -92,6 +91,8 @@ pub struct AccountsDb {
     /// multiple updates to the same account in the same slot
     pub write_version: AtomicU64,
 
+    // TODO: @@@ should be optional and only set if we were
+    // provided non-empty accounts paths
     persister: AccountsPersister,
 
     pub cluster_type: Option<ClusterType>,
@@ -110,9 +111,9 @@ impl AccountsDb {
     pub fn new_with_config(
         cluster_type: &ClusterType,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
+        paths: Vec<PathBuf>,
     ) -> Self {
-        // TODO(thlorenz): @@@ provide paths
-        let accounts_persister = AccountsPersister::default();
+        let accounts_persister = AccountsPersister::new_with_paths(paths);
         Self::new(
             Some(*cluster_type),
             accounts_update_notifier,
@@ -492,89 +493,13 @@ impl AccountsDb {
         }
     }
 
-    // -----------------
-    // Persistence
-    // -----------------
-    // `force_flush` flushes all the cached roots `<= requested_flush_root`. It also then
-    // flushes:
-    // 1) excess remaining roots or unrooted slots while 'should_aggressively_flush_cache' is true
-    // @@@ Accounts needs to be called by bank
-    #[allow(unused)]
-    pub fn flush_accounts_cache(
-        &self,
-        force_flush: bool,
-        requested_flush_root: Option<Slot>,
-    ) {
-        let mut account_bytes_saved = 0;
-        let mut num_accounts_saved = 0;
-
-        let (
-            total_new_cleaned_roots,
-            num_cleaned_roots_flushed,
-            mut flush_stats,
-        ) = self.flush_rooted_accounts_cache(
-            requested_flush_root,
-            Some((&mut account_bytes_saved, &mut num_accounts_saved)),
-        );
-
-        todo!()
+    /// Persists the current account cache to disk
+    pub fn flush_accounts_cache(&self) {
+        let slot = self.accounts_cache.current_slot();
+        let slot_cache = self.accounts_cache.slot_cache();
+        self.persister.flush_slot_cache(slot, &slot_cache);
     }
 
-    #[allow(unused)]
-    fn flush_rooted_accounts_cache(
-        &self,
-        requested_flush_root: Option<Slot>,
-        should_clean: Option<(&mut usize, &mut usize)>,
-    ) -> (usize, usize, FlushStats) {
-        //       let mut written_accounts = HashSet::new();
-        todo!()
-    }
-
-    fn do_flush_slot_cache(&self, _slot: Slot, slot_cache: SlotCache) {
-        let iter_items: Vec<_> = slot_cache.iter().collect();
-        let accounts: Vec<(&Pubkey, &AccountSharedData)> = iter_items
-            .iter()
-            .map(|iter_item| {
-                let key = iter_item.key();
-                let account = &iter_item.value().account;
-                // flush_stats.total_size +=
-                //     aligned_stored_size(account.data().len()) as u64;
-                // flush_stats.num_flushed += 1;
-
-                (key, account)
-            })
-            .collect();
-
-        let _is_dead_slot = accounts.is_empty();
-
-        // TODO: @@ self.purge_slot_cache_pubkeys
-
-        /*
-        if !is_dead_slot {
-            // This ensures that all updates are written to an AppendVec, before any
-            // updates to the index happen, so anybody that sees a real entry in the index,
-            // will be able to find the account in storage
-            let flushed_store = self.create_and_insert_store(
-                slot,
-                flush_stats.total_size.0,
-                "flush_slot_cache",
-            );
-            let (store_accounts_timing_inner, store_accounts_total_inner_us) =
-                measure_us!(self.store_accounts_frozen(
-                    (slot, &accounts[..]),
-                    &flushed_store,
-                ));
-            flush_stats.store_accounts_timing = store_accounts_timing_inner;
-            flush_stats.store_accounts_total_us =
-                Saturating(store_accounts_total_inner_us);
-
-            // If the above sizing function is correct, just one AppendVec is enough to hold
-            // all the data for the slot
-            assert!(self.storage.get_slot_storage_entry(slot).is_some());
-            self.reopen_storage_as_readonly_shrinking_in_progress_ok(slot);
-        }
-        */
-    }
     // -----------------
     // Geyser
     // -----------------

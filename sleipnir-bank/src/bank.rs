@@ -380,6 +380,7 @@ impl Bank {
         debug_keys: Option<Arc<HashSet<Pubkey>>>,
         additional_builtins: Option<&[BuiltinPrototype]>,
         debug_do_not_add_builtins: bool,
+        accounts_paths: Vec<PathBuf>,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
         slot_status_notifier: Option<SlotStatusNotifierArc>,
         millis_per_slot: u64,
@@ -388,6 +389,7 @@ impl Bank {
         let accounts_db = AccountsDb::new_with_config(
             &genesis_config.cluster_type,
             accounts_update_notifier,
+            accounts_paths,
         );
 
         let accounts = Accounts::new(Arc::new(accounts_db));
