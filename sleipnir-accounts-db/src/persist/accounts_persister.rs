@@ -122,7 +122,10 @@ impl AccountsPersister {
         {
             let keep_after =
                 slot.saturating_sub(self.storage_cleanup_slot_freq);
-            eprintln!("slot: {slot} keep_after: {keep_after}");
+            debug!(
+                "cleanup_freq: {} slot: {} keep_after: {}",
+                self.storage_cleanup_slot_freq, slot, keep_after
+            );
             self.last_storage_cleanup_slot
                 .store(slot, Ordering::Relaxed);
             Ok(self.delete_storage_entries_older_than(keep_after)?)
