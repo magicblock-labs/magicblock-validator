@@ -9,9 +9,6 @@ mod persist;
 pub mod verify_accounts_hash_in_background;
 pub use persist::FLUSH_ACCOUNTS_SLOT_FREQ;
 
-// mod traits;
-// pub use traits::*;
-
 // In order to be 100% compatible with the accounts_db API we export the traits
 // from the module it expects them to be in.
 
