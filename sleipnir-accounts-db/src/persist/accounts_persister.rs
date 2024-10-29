@@ -1,4 +1,6 @@
+use log::*;
 use std::borrow::Borrow;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU32, AtomicU64, Ordering};
 use std::sync::Arc;
@@ -10,6 +12,7 @@ use crate::accounts_db::StoredMetaWriteVersion;
 use crate::accounts_hash::AccountHash;
 use crate::accounts_index::ZeroLamport;
 use crate::append_vec::aligned_stored_size;
+use crate::errors::AccountsDbResult;
 use crate::storable_accounts::StorableAccounts;
 use crate::{
     account_info::AccountInfo,
@@ -36,8 +39,14 @@ pub struct AccountsPersister {
     /// Write version used to notify accounts in order to distinguish between
     /// multiple updates to the same account in the same slot
     write_version: AtomicU64,
+
+    storage_cleanup_slot_freq: u64,
+    last_storage_cleanup_slot: AtomicU64,
 }
 
+/// How many slots pass each time before we flush accounts to disk
+/// At 50ms per slot, this is every 25 seconds
+pub const FLUSH_ACCOUNTS_SLOT_FREQ: u64 = 500;
 impl Default for AccountsPersister {
     fn default() -> Self {
         Self {
@@ -45,6 +54,8 @@ impl Default for AccountsPersister {
             paths: Vec::new(),
             next_id: AtomicAppendVecId::new(0),
             write_version: AtomicU64::new(0),
+            storage_cleanup_slot_freq: 5 * FLUSH_ACCOUNTS_SLOT_FREQ,
+            last_storage_cleanup_slot: AtomicU64::new(0),
         }
     }
 }
@@ -57,7 +68,11 @@ impl AccountsPersister {
         }
     }
 
-    pub(crate) fn flush_slot_cache(&self, slot: Slot, slot_cache: &SlotCache) {
+    pub(crate) fn flush_slot_cache(
+        &self,
+        slot: Slot,
+        slot_cache: &SlotCache,
+    ) -> AccountsDbResult<u64> {
         let mut total_size = 0;
 
         let cached_accounts = slot_cache.iter().collect::<Vec<_>>();
@@ -98,6 +113,69 @@ impl AccountsPersister {
                 write_version_iterator,
                 &flushed_store,
             );
+        }
+
+        // Clean up older storage entries regularly in order keep disk usage small
+        if slot.saturating_sub(
+            self.last_storage_cleanup_slot.load(Ordering::Relaxed),
+        ) >= self.storage_cleanup_slot_freq
+        {
+            let keep_after =
+                slot.saturating_sub(self.storage_cleanup_slot_freq);
+            eprintln!("slot: {slot} keep_after: {keep_after}");
+            self.last_storage_cleanup_slot
+                .store(slot, Ordering::Relaxed);
+            Ok(self.delete_storage_entries_older_than(keep_after)?)
+        } else {
+            Ok(0)
+        }
+    }
+
+    fn delete_storage_entries_older_than(
+        &self,
+        keep_after: Slot,
+    ) -> Result<u64, std::io::Error> {
+        fn warn_invalid_storage_path(entry: &fs::DirEntry) {
+            warn!("Invalid storage file found at {:?}", entry.path());
+        }
+
+        if let Some(storage_path) = self.paths.first() {
+            if !storage_path.exists() {
+                warn!(
+                    "Storage path does not exist to delete storage entries older than {}",
+                    keep_after
+                );
+                return Ok(0);
+            }
+
+            let mut total_removed = 0;
+
+            // Given the accounts path exists we cycle through all files stored in it
+            // and clean out the ones that were saved before the given slot
+            for entry in fs::read_dir(storage_path)? {
+                let entry = entry?;
+                if entry.metadata()?.is_dir() {
+                    continue;
+                } else if let Some(filename) = entry.file_name().to_str() {
+                    // accounts are stored in a file with name `<slot>.<id>`
+                    if let Some(slot) = filename.split('.').next() {
+                        if let Ok(slot) = slot.parse::<Slot>() {
+                            if slot <= keep_after {
+                                fs::remove_file(entry.path())?;
+                                total_removed += 1;
+                            }
+                        } else {
+                            warn_invalid_storage_path(&entry);
+                        }
+                    } else {
+                        warn_invalid_storage_path(&entry);
+                    }
+                }
+            }
+            Ok(total_removed)
+        } else {
+            warn!("No storage paths found to delete storage entries older than {}", keep_after);
+            Ok(0)
         }
     }
 
@@ -281,7 +359,7 @@ impl AccountsPersister {
         // NOTE: at this point we assume that accounts are stored in only
         // one directory
         match self.paths.first() {
-            Some(path) => Ok(fs_extra::dir::get_size(&path)?),
+            Some(path) => Ok(fs_extra::dir::get_size(path)?),
             None => Ok(0),
         }
     }

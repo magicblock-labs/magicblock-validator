@@ -7,6 +7,7 @@ pub mod accounts_update_notifier_interface;
 pub mod errors;
 mod persist;
 pub mod verify_accounts_hash_in_background;
+pub use persist::FLUSH_ACCOUNTS_SLOT_FREQ;
 
 // mod traits;
 // pub use traits::*;

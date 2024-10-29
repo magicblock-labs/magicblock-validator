@@ -8,6 +8,7 @@ use std::{
 
 use log::*;
 use sleipnir_accounts::AccountsManager;
+use sleipnir_accounts_db::FLUSH_ACCOUNTS_SLOT_FREQ;
 use sleipnir_bank::bank::Bank;
 use sleipnir_core::magic_program;
 use sleipnir_ledger::Ledger;
@@ -41,7 +42,7 @@ pub fn init_slot_ticker(
 
             let prev_slot = bank.slot();
 
-            let next_slot = if prev_slot % 500 == 0 {
+            let next_slot = if prev_slot % FLUSH_ACCOUNTS_SLOT_FREQ == 0 {
                 // NOTE: at this point we flush the accounts blocking the slot from advancing as
                 // well as holding the transaction lock.
                 // This is done on purpose in order to avoid transactions writing to the accounts

@@ -44,6 +44,16 @@ pub fn create_accounts_run_and_snapshot_dirs(
 pub fn flush_accounts(bank: &Bank) {
     metrics::observe_flush_accounts_time(|| {
         trace!("Flushing accounts");
-        bank.flush_accounts_cache();
+        match bank.flush_accounts_cache() {
+            Ok(storage_entries_removed) => {
+                if storage_entries_removed > 0 {
+                    debug!("Flushed accounts cache and removed {} older storage entries from disk",
+                        storage_entries_removed);
+                }
+            }
+            Err(err) => {
+                error!("Encountered error when flushing accounts: {:?}", err)
+            }
+        }
     });
 }
