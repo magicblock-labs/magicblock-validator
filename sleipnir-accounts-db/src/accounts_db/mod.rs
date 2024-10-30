@@ -87,9 +87,10 @@ pub struct AccountsDb {
     /// multiple updates to the same account in the same slot
     pub write_version: AtomicU64,
 
-    // TODO: @@@ should be optional and only set if we were
-    // provided non-empty accounts paths
-    persister: AccountsPersister,
+    /// This perister is only set if we were provided non-empty account
+    /// paths. Otherwise we cannot persist accounts and thus will ignore
+    /// all calls to flush to storage.
+    persister: Option<AccountsPersister>,
 
     pub cluster_type: Option<ClusterType>,
 
@@ -101,7 +102,7 @@ pub struct AccountsDb {
 
 impl AccountsDb {
     pub fn default_for_tests() -> Self {
-        Self::new(None, None, AccountsPersister::default())
+        Self::new(None, None, None)
     }
 
     pub fn new_with_config(
@@ -109,7 +110,8 @@ impl AccountsDb {
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
         paths: Vec<PathBuf>,
     ) -> Self {
-        let accounts_persister = AccountsPersister::new_with_paths(paths);
+        let accounts_persister = (!paths.is_empty())
+            .then(|| AccountsPersister::new_with_paths(paths));
         Self::new(
             Some(*cluster_type),
             accounts_update_notifier,
@@ -117,10 +119,10 @@ impl AccountsDb {
         )
     }
 
-    pub fn new(
+    fn new(
         cluster_type: Option<ClusterType>,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
-        persister: AccountsPersister,
+        persister: Option<AccountsPersister>,
     ) -> Self {
         let num_threads = get_thread_count();
         // rayon needs a lot of stack
@@ -478,13 +480,20 @@ impl AccountsDb {
 
     /// Persists the current account cache to disk
     pub fn flush_accounts_cache(&self) -> AccountsDbResult<u64> {
-        let slot = self.accounts_cache.current_slot();
-        let slot_cache = self.accounts_cache.slot_cache();
-        self.persister.flush_slot_cache(slot, &slot_cache)
+        if let Some(persister) = &self.persister {
+            let slot = self.accounts_cache.current_slot();
+            let slot_cache = self.accounts_cache.slot_cache();
+            persister.flush_slot_cache(slot, &slot_cache)
+        } else {
+            Ok(0)
+        }
     }
 
     pub fn storage_size(&self) -> std::result::Result<u64, AccountsDbError> {
-        self.persister.storage_size()
+        match self.persister {
+            Some(ref persister) => Ok(persister.storage_size()?),
+            None => Ok(0),
+        }
     }
 
     // -----------------
