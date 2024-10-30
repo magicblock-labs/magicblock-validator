@@ -11,6 +11,7 @@ pub use persist::FLUSH_ACCOUNTS_SLOT_FREQ;
 
 // In order to be 100% compatible with the accounts_db API we export the traits
 // from the module it expects them to be in.
+use solana_accounts_db::accounts_db::DEFAULT_FILE_SIZE;
 
 // We re-export solana_accounts_db traits until all crates use our replacement
 // of the accounts-db
@@ -27,7 +28,9 @@ pub mod accounts_index {
     };
 }
 pub mod append_vec {
-    pub use solana_accounts_db::append_vec::aligned_stored_size;
+    pub use solana_accounts_db::append_vec::{
+        aligned_stored_size, STORE_META_OVERHEAD,
+    };
 }
 pub mod account_storage {
     pub use solana_accounts_db::account_storage::*;

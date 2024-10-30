@@ -181,7 +181,6 @@ impl AccountsDb {
         // NOTE: skipping the store_accounts_unfrozen redirection since we
         // always store into unfrozen (current) slot
 
-        // TODO: @@@ Connect this to flush flow
         self.store_accounts_custom(
             accounts,
             None::<Box<dyn Iterator<Item = u64>>>,
