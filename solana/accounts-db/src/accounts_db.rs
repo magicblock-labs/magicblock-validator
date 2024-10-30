@@ -1214,7 +1214,7 @@ impl AccountStorageEntry {
         Some(self.accounts.get_account(offset)?.0)
     }
 
-    fn add_account(&self, num_bytes: usize) {
+    pub fn add_account(&self, num_bytes: usize) {
         let mut count_and_status = self.count_and_status.lock_write();
         *count_and_status = (count_and_status.0 + 1, count_and_status.1);
         self.approx_store_count.fetch_add(1, Ordering::Relaxed);
