@@ -172,9 +172,9 @@ pub fn inc_fee(fee: u64) {
 pub fn inc_account_clone(account_clone: AccountClone) {
     use AccountClone::*;
     match account_clone {
-        Wallet { pubkey } => {
+        FeePayer { pubkey } => {
             ACCOUNT_CLONE_VEC_COUNT
-                .with_label_values(&["wallet", pubkey, ""])
+                .with_label_values(&["feepayer", pubkey, ""])
                 .inc();
         }
         Undelegated { pubkey, owner } => {

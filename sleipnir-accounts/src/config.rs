@@ -26,28 +26,28 @@ impl LifecycleMode {
         match self {
             LifecycleMode::Replica => AccountClonerPermissions {
                 allow_cloning_refresh: false,
-                allow_cloning_wallet_accounts: true,
+                allow_cloning_feepayer_accounts: true,
                 allow_cloning_undelegated_accounts: true,
                 allow_cloning_delegated_accounts: true,
                 allow_cloning_program_accounts: true,
             },
             LifecycleMode::ProgramsReplica => AccountClonerPermissions {
                 allow_cloning_refresh: false,
-                allow_cloning_wallet_accounts: false,
+                allow_cloning_feepayer_accounts: false,
                 allow_cloning_undelegated_accounts: false,
                 allow_cloning_delegated_accounts: false,
                 allow_cloning_program_accounts: true,
             },
             LifecycleMode::Ephemeral => AccountClonerPermissions {
                 allow_cloning_refresh: true,
-                allow_cloning_wallet_accounts: true,
+                allow_cloning_feepayer_accounts: true,
                 allow_cloning_undelegated_accounts: true,
                 allow_cloning_delegated_accounts: true,
                 allow_cloning_program_accounts: true,
             },
             LifecycleMode::Offline => AccountClonerPermissions {
                 allow_cloning_refresh: false,
-                allow_cloning_wallet_accounts: false,
+                allow_cloning_feepayer_accounts: false,
                 allow_cloning_undelegated_accounts: false,
                 allow_cloning_delegated_accounts: false,
                 allow_cloning_program_accounts: false,

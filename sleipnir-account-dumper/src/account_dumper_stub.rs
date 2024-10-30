@@ -9,7 +9,7 @@ use crate::{AccountDumper, AccountDumperResult};
 
 #[derive(Debug, Clone, Default)]
 pub struct AccountDumperStub {
-    wallet_accounts: Arc<RwLock<HashSet<Pubkey>>>,
+    feepayer_accounts: Arc<RwLock<HashSet<Pubkey>>>,
     undelegated_accounts: Arc<RwLock<HashSet<Pubkey>>>,
     delegated_accounts: Arc<RwLock<HashSet<Pubkey>>>,
     program_ids: Arc<RwLock<HashSet<Pubkey>>>,
@@ -18,13 +18,13 @@ pub struct AccountDumperStub {
 }
 
 impl AccountDumper for AccountDumperStub {
-    fn dump_wallet_account(
+    fn dump_feepayer_account(
         &self,
         pubkey: &Pubkey,
         _lamports: u64,
         _owner: &Pubkey,
     ) -> AccountDumperResult<Signature> {
-        self.wallet_accounts.write().unwrap().insert(*pubkey);
+        self.feepayer_accounts.write().unwrap().insert(*pubkey);
         Ok(Signature::new_unique())
     }
 
@@ -68,8 +68,8 @@ impl AccountDumper for AccountDumperStub {
 }
 
 impl AccountDumperStub {
-    pub fn was_dumped_as_wallet_account(&self, pubkey: &Pubkey) -> bool {
-        self.wallet_accounts.read().unwrap().contains(pubkey)
+    pub fn was_dumped_as_feepayer_account(&self, pubkey: &Pubkey) -> bool {
+        self.feepayer_accounts.read().unwrap().contains(pubkey)
     }
     pub fn was_dumped_as_undelegated_account(&self, pubkey: &Pubkey) -> bool {
         self.undelegated_accounts.read().unwrap().contains(pubkey)
@@ -89,7 +89,7 @@ impl AccountDumperStub {
     }
 
     pub fn was_untouched(&self, pubkey: &Pubkey) -> bool {
-        !self.was_dumped_as_wallet_account(pubkey)
+        !self.was_dumped_as_feepayer_account(pubkey)
             && !self.was_dumped_as_undelegated_account(pubkey)
             && !self.was_dumped_as_delegated_account(pubkey)
             && !self.was_dumped_as_program_id(pubkey)
@@ -98,7 +98,7 @@ impl AccountDumperStub {
     }
 
     pub fn clear_history(&self) {
-        self.wallet_accounts.write().unwrap().clear();
+        self.feepayer_accounts.write().unwrap().clear();
         self.undelegated_accounts.write().unwrap().clear();
         self.delegated_accounts.write().unwrap().clear();
         self.program_ids.write().unwrap().clear();
