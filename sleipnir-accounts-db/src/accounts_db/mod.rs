@@ -9,6 +9,7 @@ use solana_sdk::{
     transaction::SanitizedTransaction,
     transaction_context::TransactionAccount,
 };
+use std::path::PathBuf;
 use std::{
     borrow::Cow,
     sync::{
@@ -16,7 +17,6 @@ use std::{
         RwLock,
     },
 };
-use std::{path::PathBuf, sync::Arc};
 
 use crate::{
     account_info::{AccountInfo, StorageLocation},
@@ -32,11 +32,9 @@ use crate::{
 mod consts;
 mod loaded_account;
 mod loaded_account_accessor;
-mod stats;
 use self::{
     consts::SCAN_SLOT_PAR_ITER_THRESHOLD, loaded_account::LoadedAccount,
 };
-use crate::account_storage::AccountStorageEntry;
 pub use loaded_account_accessor::LoadedAccountAccessor;
 
 pub type StoredMetaWriteVersion = u64;
@@ -45,11 +43,9 @@ pub type StoredMetaWriteVersion = u64;
 // StoreTo
 // -----------------
 #[derive(Debug)]
-pub enum StoreTo<'a> {
+pub enum StoreTo {
     /// write to cache
     Cache,
-    /// write to storage
-    Storage(&'a Arc<AccountStorageEntry>),
 }
 
 // -----------------
@@ -272,18 +268,6 @@ impl AccountsDb {
                     &mut write_version_producer,
                 )
             }
-            // TODO: @@@ Decide where this entry is actually created
-            // the persister know how to do it, but it seems like it should be provided
-            // here as input already.
-            StoreTo::Storage(_entry) => todo!("store to storage"),
-            /*
-                        self.persister.store_accounts(
-                            accounts,
-                            None::<Vec<AccountHash>>,
-                            write_version_producer,
-                            slot,
-                        ),
-            */
         }
     }
 
