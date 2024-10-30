@@ -43,7 +43,7 @@ pub type StoredMetaWriteVersion = u64;
 // StoreTo
 // -----------------
 #[derive(Debug)]
-pub enum StoreTo {
+enum StoreTo {
     /// write to cache
     Cache,
 }

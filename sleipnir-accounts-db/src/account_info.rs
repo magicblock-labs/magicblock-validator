@@ -74,8 +74,7 @@ impl AccountInfo {
                     CACHED_OFFSET, reduced_offset,
                     "illegal offset for non-cached item"
                 );
-                packed_offset_and_flags
-                    .set_offset_reduced(Self::get_reduced_offset(offset));
+                packed_offset_and_flags.set_offset_reduced(reduced_offset);
                 assert_eq!(
                     Self::reduced_offset_to_offset(
                         packed_offset_and_flags.offset_reduced()

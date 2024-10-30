@@ -80,7 +80,7 @@ lazy_static::lazy_static! {
     ).unwrap();
 
     static ref ACCOUNTS_SIZE_GAUGE: IntGauge = IntGauge::new(
-        "accounts_size", "Size of persisted accounts currently on disk",
+        "accounts_size", "Size of persisted accounts (in bytes) currently on disk",
     ).unwrap();
 
     static ref SIGVERIFY_TIME_HISTOGRAM: Histogram = Histogram::with_opts(
