@@ -1,8 +1,10 @@
 use modular_bitfield::{bitfield, specifiers::B31};
-
-use crate::accounts_file::ALIGN_BOUNDARY_OFFSET;
-use crate::accounts_index::{IsCached, ZeroLamport};
 pub use solana_accounts_db::account_info::Offset;
+
+use crate::{
+    accounts_file::ALIGN_BOUNDARY_OFFSET,
+    accounts_index::{IsCached, ZeroLamport},
+};
 
 #[derive(Debug, PartialEq, Eq)]
 pub enum StorageLocation {

@@ -1,3 +1,12 @@
+use std::{
+    borrow::Cow,
+    path::PathBuf,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        RwLock,
+    },
+};
+
 use rayon::{prelude::*, ThreadPool};
 use solana_measure::measure::Measure;
 use solana_rayon_threadlimit::get_thread_count;
@@ -8,14 +17,6 @@ use solana_sdk::{
     pubkey::Pubkey,
     transaction::SanitizedTransaction,
     transaction_context::TransactionAccount,
-};
-use std::path::PathBuf;
-use std::{
-    borrow::Cow,
-    sync::{
-        atomic::{AtomicU64, Ordering},
-        RwLock,
-    },
 };
 
 use crate::{
@@ -32,10 +33,11 @@ use crate::{
 mod consts;
 mod loaded_account;
 mod loaded_account_accessor;
+pub use loaded_account_accessor::LoadedAccountAccessor;
+
 use self::{
     consts::SCAN_SLOT_PAR_ITER_THRESHOLD, loaded_account::LoadedAccount,
 };
-pub use loaded_account_accessor::LoadedAccountAccessor;
 
 pub type StoredMetaWriteVersion = u64;
 

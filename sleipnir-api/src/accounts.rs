@@ -1,10 +1,11 @@
-use log::*;
-use sleipnir_bank::bank::Bank;
-use sleipnir_metrics::metrics;
 use std::{
     fs,
     path::{Path, PathBuf},
 };
+
+use log::*;
+use sleipnir_bank::bank::Bank;
+use sleipnir_metrics::metrics;
 
 use crate::utils;
 

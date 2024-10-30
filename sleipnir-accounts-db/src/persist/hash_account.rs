@@ -1,8 +1,9 @@
-use crate::accounts_hash::AccountHash;
 use smallvec::SmallVec;
-use solana_sdk::account::ReadableAccount;
-use solana_sdk::hash::Hash;
-use solana_sdk::{clock::Epoch, pubkey::Pubkey};
+use solana_sdk::{
+    account::ReadableAccount, clock::Epoch, hash::Hash, pubkey::Pubkey,
+};
+
+use crate::accounts_hash::AccountHash;
 
 pub fn hash_account<T: ReadableAccount>(
     account: &T,

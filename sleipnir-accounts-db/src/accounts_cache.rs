@@ -14,8 +14,10 @@ use solana_sdk::{
     pubkey::Pubkey,
 };
 
-use crate::accounts_hash::AccountHash;
-use crate::{accounts_index::ZeroLamport, persist::hash_account};
+use crate::{
+    accounts_hash::AccountHash, accounts_index::ZeroLamport,
+    persist::hash_account,
+};
 
 // -----------------
 // CachedAccount

@@ -8,7 +8,6 @@ pub mod errors;
 mod persist;
 pub mod verify_accounts_hash_in_background;
 pub use persist::FLUSH_ACCOUNTS_SLOT_FREQ;
-
 // In order to be 100% compatible with the accounts_db API we export the traits
 // from the module it expects them to be in.
 use solana_accounts_db::accounts_db::DEFAULT_FILE_SIZE;
@@ -33,8 +32,9 @@ pub mod append_vec {
     };
 }
 pub mod account_storage {
-    pub use solana_accounts_db::account_storage::*;
-    pub use solana_accounts_db::accounts_db::AccountStorageEntry;
+    pub use solana_accounts_db::{
+        account_storage::*, accounts_db::AccountStorageEntry,
+    };
 }
 pub mod blockhash_queue {
     pub use solana_accounts_db::blockhash_queue::*;
