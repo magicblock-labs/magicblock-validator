@@ -339,6 +339,9 @@ impl AccountsPersister {
         infos
     }
 
+    // -----------------
+    // Create Store
+    // -----------------
     pub(crate) fn create_and_insert_store(
         &self,
         slot: Slot,
@@ -374,9 +377,6 @@ impl AccountsPersister {
         false
     }
 
-    // -----------------
-    // Create Store
-    // -----------------
     fn create_store(
         &self,
         slot: Slot,

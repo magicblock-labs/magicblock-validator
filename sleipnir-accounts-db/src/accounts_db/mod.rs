@@ -152,6 +152,25 @@ impl AccountsDb {
     // -----------------
     // Store Operations
     // -----------------
+
+    /// Persists the current account cache to disk
+    pub fn flush_accounts_cache(&self) -> AccountsDbResult<u64> {
+        if let Some(persister) = &self.persister {
+            let slot = self.accounts_cache.current_slot();
+            let slot_cache = self.accounts_cache.slot_cache();
+            persister.flush_slot_cache(slot, &slot_cache)
+        } else {
+            Ok(0)
+        }
+    }
+
+    pub fn storage_size(&self) -> std::result::Result<u64, AccountsDbError> {
+        match self.persister {
+            Some(ref persister) => Ok(persister.storage_size()?),
+            None => Ok(0),
+        }
+    }
+
     pub fn store_cached<'a, T: ReadableAccount + Sync + ZeroLamport + 'a>(
         &self,
         accounts: impl StorableAccounts<'a, T>,
@@ -475,24 +494,6 @@ impl AccountsDb {
         } else {
             accounts.sort_unstable_by(|a, b| a.0.cmp(&b.0));
             accounts
-        }
-    }
-
-    /// Persists the current account cache to disk
-    pub fn flush_accounts_cache(&self) -> AccountsDbResult<u64> {
-        if let Some(persister) = &self.persister {
-            let slot = self.accounts_cache.current_slot();
-            let slot_cache = self.accounts_cache.slot_cache();
-            persister.flush_slot_cache(slot, &slot_cache)
-        } else {
-            Ok(0)
-        }
-    }
-
-    pub fn storage_size(&self) -> std::result::Result<u64, AccountsDbError> {
-        match self.persister {
-            Some(ref persister) => Ok(persister.storage_size()?),
-            None => Ok(0),
         }
     }
 
