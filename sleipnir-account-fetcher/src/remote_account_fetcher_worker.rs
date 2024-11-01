@@ -91,6 +91,8 @@ impl RemoteAccountFetcherWorker {
                 Err(AccountFetcherError::FailedToFetch(error.to_string()))
             }
         };
+        // Log the result for debugging purposes
+        debug!("Account fetch: {:?}, snapshot: {:?}", pubkey, result);
         // Collect the listeners waiting for the result
         let listeners = match self
             .fetch_listeners
