@@ -1,0 +1,11 @@
+[package]
+name = "test-ledger-restore"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+integration-test-tools = { workspace = true }
+sleipnir-config = { workspace = true }
+solana-sdk = { workspace = true }
+tempfile = { workspace = true }

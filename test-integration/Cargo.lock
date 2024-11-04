@@ -1639,6 +1639,7 @@ dependencies = [
  "anyhow",
  "rayon",
  "serde",
+ "sleipnir-config",
  "sleipnir-core",
  "solana-rpc-client",
  "solana-rpc-client-api",
@@ -2913,6 +2914,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "sleipnir-config"
+version = "1.19.0"
+dependencies = [
+ "serde",
+ "solana-sdk 1.19.0",
+ "strum",
+ "strum_macros",
+ "test-tools-core",
+ "thiserror",
+ "toml 0.8.15",
+ "url",
+]
+
+[[package]]
 name = "sleipnir-core"
 version = "1.19.0"
 dependencies = [
@@ -4095,6 +4110,17 @@ dependencies = [
  "integration-test-tools",
  "log",
  "test-tools-core",
+]
+
+[[package]]
+name = "test-ledger-restore"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "integration-test-tools",
+ "sleipnir-config",
+ "solana-sdk 1.17.22",
+ "tempfile",
 ]
 
 [[package]]

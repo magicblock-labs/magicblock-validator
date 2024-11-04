@@ -8,6 +8,7 @@ anyhow = { workspace = true }
 rayon = { workspace = true }
 serde = { workspace = true }
 sleipnir-core = { workspace = true }
+sleipnir-config = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
