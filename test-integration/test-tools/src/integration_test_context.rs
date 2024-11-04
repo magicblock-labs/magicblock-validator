@@ -16,16 +16,34 @@ use solana_sdk::{
 
 pub struct IntegrationTestContext {
     pub commitment: CommitmentConfig,
-    pub chain_client: RpcClient,
+    pub chain_client: Option<RpcClient>,
     pub ephem_client: RpcClient,
     pub validator_identity: Pubkey,
-    pub chain_blockhash: Hash,
+    pub chain_blockhash: Option<Hash>,
     pub ephem_blockhash: Hash,
 }
 
 // Copy the impl of the ScheduleCommitTestContext here from test-integration/schedulecommit/client/src/schedule_commit_context.rs
 // Omit the ones that need committees or whichever else needs fields we don't have here
 impl IntegrationTestContext {
+    pub fn new_ephem_only() -> Self {
+        let commitment = CommitmentConfig::confirmed();
+        let ephem_client = RpcClient::new_with_commitment(
+            "http://localhost:8899".to_string(),
+            commitment,
+        );
+        let validator_identity = ephem_client.get_identity().unwrap();
+        let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
+        Self {
+            commitment,
+            chain_client: None,
+            ephem_client,
+            validator_identity,
+            chain_blockhash: None,
+            ephem_blockhash,
+        }
+    }
+
     pub fn new() -> Self {
         let commitment = CommitmentConfig::confirmed();
 
@@ -43,10 +61,10 @@ impl IntegrationTestContext {
 
         Self {
             commitment,
-            chain_client,
+            chain_client: Some(chain_client),
             ephem_client,
             validator_identity,
-            chain_blockhash,
+            chain_blockhash: Some(chain_blockhash),
             ephem_blockhash,
         }
     }
@@ -59,7 +77,7 @@ impl IntegrationTestContext {
     }
 
     pub fn fetch_chain_logs(&self, sig: Signature) -> Option<Vec<String>> {
-        self.fetch_logs(sig, Some(&self.chain_client))
+        self.fetch_logs(sig, self.chain_client.as_ref())
     }
 
     fn fetch_logs(
@@ -67,18 +85,18 @@ impl IntegrationTestContext {
         sig: Signature,
         rpc_client: Option<&RpcClient>,
     ) -> Option<Vec<String>> {
+        let rpc_client = rpc_client.or(self.chain_client.as_ref())?;
+
         // Try this up to 10 times since devnet here returns the version response instead of
         // the EncodedConfirmedTransactionWithStatusMeta at times
         for _ in 0..10 {
-            let status = match rpc_client
-                .unwrap_or(&self.chain_client)
-                .get_transaction_with_config(
-                    &sig,
-                    RpcTransactionConfig {
-                        commitment: Some(self.commitment),
-                        ..Default::default()
-                    },
-                ) {
+            let status = match rpc_client.get_transaction_with_config(
+                &sig,
+                RpcTransactionConfig {
+                    commitment: Some(self.commitment),
+                    ..Default::default()
+                },
+            ) {
                 Ok(status) => status,
                 Err(_) => {
                     sleep(Duration::from_millis(400));
@@ -153,11 +171,18 @@ impl IntegrationTestContext {
             })
     }
 
+    pub fn try_chain_client(&self) -> anyhow::Result<&RpcClient> {
+        let Some(chain_client) = self.chain_client.as_ref() else {
+            return Err(anyhow::anyhow!("Chain client not available"));
+        };
+        Ok(chain_client)
+    }
+
     pub fn fetch_chain_account_data(
         &self,
         pubkey: Pubkey,
     ) -> anyhow::Result<Vec<u8>> {
-        self.chain_client
+        self.try_chain_client()?
             .get_account_data(&pubkey)
             .with_context(|| {
                 format!("Failed to fetch chain account data for '{:?}'", pubkey)
@@ -183,7 +208,7 @@ impl IntegrationTestContext {
         &self,
         pubkey: Pubkey,
     ) -> anyhow::Result<u64> {
-        self.chain_client
+        self.try_chain_client()?
             .get_balance_with_commitment(&pubkey, self.commitment)
             .map(|balance| balance.value)
             .with_context(|| {
@@ -213,7 +238,7 @@ impl IntegrationTestContext {
         &self,
         pubkey: Pubkey,
     ) -> anyhow::Result<Pubkey> {
-        self.chain_client
+        self.try_chain_client()?
             .get_account(&pubkey)
             .map(|account| account.owner)
             .with_context(|| {
@@ -232,7 +257,12 @@ impl IntegrationTestContext {
         pubkey: &Pubkey,
         lamports: u64,
     ) -> anyhow::Result<()> {
-        Self::airdrop(&self.chain_client, pubkey, lamports, self.commitment)
+        Self::airdrop(
+            self.try_chain_client()?,
+            pubkey,
+            lamports,
+            self.commitment,
+        )
     }
 
     pub fn airdrop_ephem(
@@ -307,7 +337,14 @@ impl IntegrationTestContext {
         &self,
         sig: &Signature,
     ) -> Result<bool, client_error::Error> {
-        Self::confirm_transaction(sig, &self.chain_client, self.commitment)
+        Self::confirm_transaction(
+            sig,
+            self.try_chain_client().map_err(|err| client_error::Error {
+                request: None,
+                kind: client_error::ErrorKind::Custom(err.to_string()),
+            })?,
+            self.commitment,
+        )
     }
 
     pub fn confirm_transaction_ephem(

@@ -251,8 +251,8 @@ fn start_test_validator_with_config(
         workspace_dir,
     } = test_runner_paths;
 
-    let port = rpc_port_from_config(&config_path);
-    let mut args = config_to_args(&config_path);
+    let port = rpc_port_from_config(config_path);
+    let mut args = config_to_args(config_path);
 
     let accounts_dir = workspace_dir.join("configs").join("accounts");
     let accounts = [
