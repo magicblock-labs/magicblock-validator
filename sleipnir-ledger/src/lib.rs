@@ -1,3 +1,4 @@
+pub mod blockstore_processor;
 mod conversions;
 mod database;
 pub mod errors;

@@ -4634,6 +4634,7 @@ dependencies = [
  "rocksdb",
  "rustc_version",
  "serde",
+ "sleipnir-bank",
  "solana-account-decoder",
  "solana-measure",
  "solana-metrics",

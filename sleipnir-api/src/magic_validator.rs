@@ -33,7 +33,7 @@ use sleipnir_bank::{
 };
 use sleipnir_config::{ProgramConfig, SleipnirConfig};
 use sleipnir_geyser_plugin::rpc::GeyserRpcService;
-use sleipnir_ledger::Ledger;
+use sleipnir_ledger::{blockstore_processor::process_ledger, Ledger};
 use sleipnir_metrics::MetricsService;
 use sleipnir_perf_service::SamplePerformanceService;
 use sleipnir_program::init_validator_authority;
@@ -265,6 +265,12 @@ impl MagicValidator {
             config.validator_config.rpc.addr,
             config.validator_config.rpc.port,
         );
+        init_validator_authority(identity_keypair);
+
+        process_ledger(&ledger, &bank);
+
+        // Make sure we process the ledger before we're open to handle
+        // transactions via RPC
         let rpc_service = Self::init_json_rpc_service(
             bank.clone(),
             ledger.clone(),
@@ -275,8 +281,6 @@ impl MagicValidator {
             &pubsub_config,
             &config.validator_config,
         )?;
-
-        init_validator_authority(identity_keypair);
 
         Ok(Self {
             config: config.validator_config,

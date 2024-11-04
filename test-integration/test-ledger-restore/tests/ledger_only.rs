@@ -57,6 +57,9 @@ fn restore_ledger_with_airdropped_account() {
         assert_eq!(acc.lamports, 1_111_111);
         eprintln!("Account: {:?}", acc);
 
+        // Wait for a slot advance at least
+        std::thread::sleep(std::time::Duration::from_secs(1));
+
         validator.kill().unwrap();
     }
 
@@ -73,6 +76,9 @@ fn restore_ledger_with_airdropped_account() {
         let Some(mut validator) = start_validator_with_config(config) else {
             panic!("validator should set up correctly");
         };
+
+        // Wait for a slot advance at least
+        std::thread::sleep(std::time::Duration::from_secs(1));
 
         let ctx = IntegrationTestContext::new_ephem_only();
         let acc = expect!(ctx.ephem_client.get_account(&pubkey), validator);
