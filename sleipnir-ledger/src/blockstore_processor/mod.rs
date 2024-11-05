@@ -1,5 +1,6 @@
 use log::*;
-use sleipnir_bank::bank::Bank;
+use sleipnir_bank::bank::{Bank, TransactionExecutionRecordingOpts};
+use solana_program_runtime::timings::ExecuteTimings;
 use solana_sdk::transaction::{
     TransactionVerificationMode, VersionedTransaction,
 };
@@ -41,13 +42,30 @@ fn iter_blocks_with_transaction(
 pub fn process_ledger(ledger: &Ledger, bank: &Bank) {
     error!("-------------- PRocessing");
     iter_blocks_with_transaction(ledger, |block_with_tx| {
+        let mut block_txs = vec![];
         for tx in block_with_tx.transactions.into_iter() {
             error!("Processing transaction: {:?}", tx);
-            if let Err(err) = bank
+            match bank
                 .verify_transaction(tx, TransactionVerificationMode::HashOnly)
             {
-                error!("Error: {:?}", err);
-            }
+                Ok(tx) => block_txs.push(tx),
+                Err(err) => {
+                    error!("Error processing transaction: {:?}", err);
+                    // TODO: this is very bad we should probably shut things down
+                    continue;
+                }
+            };
         }
+        let batch = bank.prepare_sanitized_batch(&block_txs);
+
+        let mut timings = ExecuteTimings::default();
+        let (results, _) = bank.load_execute_and_commit_transactions(
+            &batch,
+            false,
+            TransactionExecutionRecordingOpts::recording_logs(),
+            &mut timings,
+            None,
+        );
+        info!("Results: {:#?}", results.execution_results);
     });
 }
