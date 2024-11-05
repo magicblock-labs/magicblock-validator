@@ -1,8 +1,8 @@
+use integration_test_tools::tmpdir::resolve_tmp_dir;
 use integration_test_tools::IntegrationTestContext;
 use sleipnir_config::{AccountsConfig, SleipnirConfig};
 use sleipnir_config::{LedgerConfig, LifecycleMode};
 use solana_sdk::pubkey::Pubkey;
-use tempfile::tempdir;
 use test_ledger_restore::start_validator_with_config;
 
 macro_rules! expect {
@@ -28,8 +28,8 @@ macro_rules! expect {
 
 #[test]
 fn restore_ledger_with_airdropped_account() {
-    let tmpdir = tempdir().unwrap();
-    let ledger_path = tmpdir.path();
+    let (_, ledger_path) = resolve_tmp_dir("TMP_DIR_LEDGER");
+
     let accounts_config = AccountsConfig {
         lifecycle: LifecycleMode::Offline,
         ..Default::default()
@@ -80,6 +80,7 @@ fn restore_ledger_with_airdropped_account() {
         // Wait for a slot advance at least
         std::thread::sleep(std::time::Duration::from_secs(1));
 
+        eprintln!("Ledger: {:?}", ledger_path);
         let ctx = IntegrationTestContext::new_ephem_only();
         let acc = expect!(ctx.ephem_client.get_account(&pubkey), validator);
         assert_eq!(acc.lamports, 1_111_111);

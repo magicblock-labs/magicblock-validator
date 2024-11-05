@@ -1644,6 +1644,7 @@ dependencies = [
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk 1.17.22",
+ "tempfile",
  "toml 0.8.15",
 ]
 
@@ -4120,7 +4121,6 @@ dependencies = [
  "integration-test-tools",
  "sleipnir-config",
  "solana-sdk 1.17.22",
- "tempfile",
 ]
 
 [[package]]

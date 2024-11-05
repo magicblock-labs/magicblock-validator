@@ -4638,6 +4638,7 @@ dependencies = [
  "solana-account-decoder",
  "solana-measure",
  "solana-metrics",
+ "solana-program-runtime",
  "solana-sdk",
  "solana-storage-proto",
  "solana-transaction-status",
