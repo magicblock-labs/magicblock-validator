@@ -413,7 +413,7 @@ impl Bank {
         // For more info about sysvars see ../../docs/sysvars.md
 
         // We don't really have epochs so we use the validator start time
-        bank.update_clock(genesis_config.creation_time);
+        bank.update_clock(genesis_config.creation_time, None);
         bank.update_rent();
         bank.update_fees();
         bank.update_epoch_schedule();
@@ -690,7 +690,7 @@ impl Bank {
             .add_root(prev_slot);
 
         // 4. Update sysvars
-        self.update_clock(self.genesis_creation_time);
+        self.update_clock(self.genesis_creation_time, None);
         self.fill_missing_sysvar_cache_entries();
 
         // 5. Determine next blockhash
@@ -1058,7 +1058,11 @@ impl Bank {
         .unwrap_or_default()
     }
 
-    fn update_clock(&self, epoch_start_timestamp: UnixTimestamp) {
+    fn update_clock(
+        &self,
+        epoch_start_timestamp: UnixTimestamp,
+        timestamp: Option<UnixTimestamp>,
+    ) {
         // NOTE: the Solana validator determines time with a much more complex logic
         // - slot == 0: genesis creation time + number of slots * ns_per_slot to seconds
         // - slot > 0 : epoch start time + number of slots to get a timestamp estimate with max
@@ -1069,8 +1073,9 @@ impl Bank {
         // calculations easier.
         // This makes sense since otherwise the hosting platform could manipulate the time assumed
         // by the validator.
-        let unix_timestamp =
-            i64::try_from(get_epoch_secs()).expect("get_epoch_secs overflow");
+        let unix_timestamp = timestamp.unwrap_or_else(|| {
+            i64::try_from(get_epoch_secs()).expect("get_epoch_secs overflow")
+        });
 
         // I checked this against crate::bank_helpers::get_sys_time_in_secs();
         // and confirmed that the timestamps match
@@ -1570,8 +1575,13 @@ impl Bank {
             let lamports_per_signature = nonce.lamports_per_signature();
             (Ok(()), Some(nonce), lamports_per_signature)
         } else {
-            error_counters.blockhash_not_found += 1;
-            (Err(TransactionError::BlockhashNotFound), None, None)
+            (
+                Ok(()),
+                None,
+                hash_queue.get_lamports_per_signature(recent_blockhash),
+            )
+            // error_counters.blockhash_not_found += 1;
+            // (Err(TransactionError::BlockhashNotFound), None, None)
         }
     }
 
@@ -2649,5 +2659,74 @@ impl Bank {
     // -----------------
     pub fn slots_for_duration(&self, duration: Duration) -> Slot {
         duration.as_millis() as u64 / self.millis_per_slot
+    }
+
+    // -----------------
+    // Ledger Replay
+    // -----------------
+    pub fn warp_slot(
+        &self,
+        next_slot: Slot,
+        current_hash: &Hash,
+        blockhash: &Hash,
+        timestamp: u64,
+    ) {
+        // 1.
+        self.set_slot(next_slot);
+        self.rc.accounts.set_slot(next_slot);
+
+        // 2.
+        *self.transaction_processor.write().unwrap() =
+            TransactionBatchProcessor::new(
+                next_slot,
+                self.epoch,
+                // Potentially expensive clone
+                self.epoch_schedule.clone(),
+                // Potentially expensive clone
+                self.fee_structure.clone(),
+                self.runtime_config.clone(),
+                self.loaded_programs_cache.clone(),
+            );
+
+        // 3.
+        if next_slot > 0 {
+            self.status_cache
+                .write()
+                .expect("RwLock of status cache poisoned")
+                .add_root(next_slot - 1);
+        }
+
+        // 4.
+        self.update_clock(
+            self.genesis_creation_time,
+            Some(timestamp as UnixTimestamp),
+        );
+        self.fill_missing_sysvar_cache_entries();
+
+        // 5. (blockhashes already known)
+
+        // 6. Register the new blockhash with the blockhash queue
+        self.register_hash_with_timestamp(blockhash, timestamp);
+
+        // 7. Not notifying Geyser Service
+
+        // 8.
+        self.sync_loaded_programs_cache_to_slot();
+
+        if next_slot > 0 {
+            // 9.
+            self.update_slot_hashes(next_slot - 1, *current_hash);
+            // 10.
+            self.update_slot_history(next_slot - 1);
+        }
+    }
+
+    fn register_hash_with_timestamp(&self, hash: &Hash, timestamp: u64) {
+        let mut blockhash_queue = self.blockhash_queue.write().unwrap();
+        blockhash_queue.register_hash_with_timestamp(
+            hash,
+            self.fee_rate_governor.lamports_per_signature,
+            timestamp,
+        );
     }
 }

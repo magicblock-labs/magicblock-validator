@@ -97,6 +97,19 @@ impl BlockhashQueue {
     }
 
     pub fn register_hash(&mut self, hash: &Hash, lamports_per_signature: u64) {
+        self.register_hash_with_timestamp(
+            hash,
+            lamports_per_signature,
+            timestamp(),
+        );
+    }
+
+    pub fn register_hash_with_timestamp(
+        &mut self,
+        hash: &Hash,
+        lamports_per_signature: u64,
+        timestamp: u64,
+    ) {
         self.last_hash_index += 1;
         if self.ages.len() as u64 >= self.max_age {
             self.ages.retain(|_, age| {
@@ -113,7 +126,7 @@ impl BlockhashQueue {
             HashAge {
                 fee_calculator: FeeCalculator::new(lamports_per_signature),
                 hash_index: self.last_hash_index,
-                timestamp: timestamp(),
+                timestamp,
             },
         );
 
