@@ -1575,13 +1575,8 @@ impl Bank {
             let lamports_per_signature = nonce.lamports_per_signature();
             (Ok(()), Some(nonce), lamports_per_signature)
         } else {
-            (
-                Ok(()),
-                None,
-                hash_queue.get_lamports_per_signature(recent_blockhash),
-            )
-            // error_counters.blockhash_not_found += 1;
-            // (Err(TransactionError::BlockhashNotFound), None, None)
+            error_counters.blockhash_not_found += 1;
+            (Err(TransactionError::BlockhashNotFound), None, None)
         }
     }
 
@@ -1690,6 +1685,16 @@ impl Bank {
             ExecuteTimingType::CheckUs,
             check_time.as_us(),
         );
+
+        for tx in sanitized_txs {
+            let accs = tx
+                .message()
+                .account_keys()
+                .iter()
+                .map(|k| format!("{} hex: {:?}", k, k.to_bytes()))
+                .collect::<Vec<String>>();
+            eprintln!("Accs: {:#?}", accs)
+        }
 
         // 2. Load and execute sanitized transactions
         let sanitized_output = self
