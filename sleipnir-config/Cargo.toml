@@ -13,6 +13,6 @@ solana-sdk = { workspace = true }
 test-tools-core = { workspace = true }
 thiserror = { workspace = true }
 toml = { workspace = true }
-url = { workspace = true }
+url = { workspace = true, features = ["serde"] }
 strum_macros = { workspace = true }
 strum = { workspace = true }

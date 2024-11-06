@@ -1,3 +1,4 @@
+use solana_rpc_client_api::client_error::reqwest::Url;
 use solana_sdk::genesis_config::ClusterType;
 
 pub const TESTNET_URL: &str = "https://api.testnet.solana.com";
@@ -12,7 +13,8 @@ pub const DEVELOPMENT_URL: &str = "http://127.0.0.1:8899";
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Cluster {
     Known(ClusterType),
-    Custom(String),
+    Custom(Url),
+    CustomWithWs(Url, Url),
 }
 
 impl From<ClusterType> for Cluster {
@@ -31,7 +33,8 @@ impl Cluster {
                 Devnet => DEVNET_URL,
                 Development => DEVELOPMENT_URL,
             },
-            Cluster::Custom(url) => url,
+            Cluster::Custom(url) => url.as_str(),
+            Cluster::CustomWithWs(url, _) => url.as_str(),
         }
     }
 }

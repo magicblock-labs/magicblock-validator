@@ -140,6 +140,26 @@ fn test_custom_remote_toml() {
 }
 
 #[test]
+fn test_custom_ws_remote_toml() {
+    let toml = include_str!("fixtures/09_custom-ws-remote.toml");
+    let config = toml::from_str::<SleipnirConfig>(toml).unwrap();
+
+    assert_eq!(
+        config,
+        SleipnirConfig {
+            accounts: AccountsConfig {
+                remote: RemoteConfig::CustomWithWs(
+                    Url::parse("http://localhost:8899").unwrap(),
+                    Url::parse("ws://localhost:9001").unwrap()
+                ),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    );
+}
+
+#[test]
 fn test_accounts_payer() {
     let toml = include_str!("fixtures/08_accounts-payer.toml");
     let config = toml::from_str::<SleipnirConfig>(toml).unwrap();

@@ -27,15 +27,17 @@ pub fn try_rpc_cluster_from_cluster(
             })
         }
         Cluster::Custom(url) => {
-            let ws_url = try_ws_url_from_rpc_url(url.as_str())?;
+            let ws_url = try_ws_url_from_rpc_url(url)?;
             Ok(RpcCluster::Custom(url.to_string(), ws_url))
+        }
+        Cluster::CustomWithWs(http, ws) => {
+            Ok(RpcCluster::Custom(http.to_string(), ws.to_string()))
         }
     }
 }
 
-fn try_ws_url_from_rpc_url(url: &str) -> AccountsResult<String> {
+fn try_ws_url_from_rpc_url(url: &Url) -> AccountsResult<String> {
     // Change http to ws scheme or https to wss
-    let mut url = Url::parse(url).map_err(Box::new)?;
     let scheme = match url.scheme() {
         "http" => "ws",
         "https" => "wss",
@@ -44,12 +46,14 @@ fn try_ws_url_from_rpc_url(url: &str) -> AccountsResult<String> {
     // Add one to the port if the rpc url has one
     let port = url.port().map(|port| port + 1);
 
+    let mut url = url.clone();
+
     url.set_scheme(scheme)
         .map_err(|_| AccountsError::FailedToUpdateUrlScheme)?;
     url.set_port(port)
         .map_err(|_| AccountsError::FailedToUpdateUrlPort)?;
 
-    Ok(url.to_string().trim_end_matches('/').to_string())
+    Ok(url.to_string())
 }
 
 #[cfg(test)]
@@ -80,17 +84,27 @@ mod tests {
             RpcCluster::Development,
         );
         convert_and_assert(
-            Cluster::Custom("http://localhost:8899".to_string()),
+            Cluster::Custom("http://localhost:8899".parse().unwrap()),
             RpcCluster::Custom(
-                "http://localhost:8899".to_string(),
-                "ws://localhost:8900".to_string(),
+                "http://localhost:8899/".to_string(),
+                "ws://localhost:8900/".to_string(),
             ),
         );
         convert_and_assert(
-            Cluster::Custom("https://some-url.org".to_string()),
+            Cluster::Custom("https://some-url.org".parse().unwrap()),
             RpcCluster::Custom(
-                "https://some-url.org".to_string(),
-                "wss://some-url.org".to_string(),
+                "https://some-url.org/".to_string(),
+                "wss://some-url.org/".to_string(),
+            ),
+        );
+        convert_and_assert(
+            Cluster::CustomWithWs(
+                "https://some-url.org/".parse().unwrap(),
+                "wss://some-url.org/".parse().unwrap(),
+            ),
+            RpcCluster::Custom(
+                "https://some-url.org/".to_string(),
+                "wss://some-url.org/".to_string(),
             ),
         );
     }
