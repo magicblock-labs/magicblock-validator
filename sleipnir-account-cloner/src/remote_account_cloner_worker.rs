@@ -70,6 +70,7 @@ where
         Self {
             internal_account_provider,
             account_fetcher,
+
             account_updates,
             account_dumper,
             allowed_program_ids,
@@ -118,8 +119,7 @@ where
         // Actually run the whole cloning process on the bank, yield until done
         let result = self.do_clone_or_use_cache(&pubkey).await;
         // Collecting the list of listeners awaiting for the clone to be done
-        let listeners = match self
-            .clone_listeners
+        let listeners = match self .clone_listeners
             .write()
             .expect(
                 "RwLock of RemoteAccountClonerWorker.clone_listeners is poisoned",
@@ -427,6 +427,24 @@ where
     ) -> AccountClonerResult<Signature> {
         let program_id_pubkey = pubkey;
         let program_id_account = account;
+
+        // NOTE: first versions of BPF loader didn't store program in a separate
+        // executable account, using program account instead and thus couldn't upgrade program.
+        // As such, only use executable account derivation and cloning for upgradable BPF loader
+        // https://github.com/magicblock-labs/magicblock-validator/issues/130
+        if account.owner == solana_sdk::bpf_loader_deprecated::ID {
+            // FIXME(bmuddha13): once deprecated loader becomes available in magic validator,
+            // clone such programs like normal accounts
+            return Err(AccountClonerError::ProgramDataDoesNotExist);
+        } else if account.owner == solana_sdk::bpf_loader::ID {
+            let signature =
+                self.account_dumper.dump_program_account_with_old_bpf(
+                    program_id_pubkey,
+                    program_id_account,
+                )?;
+            return Ok(signature);
+        }
+
         let program_data_pubkey = &get_program_data_address(program_id_pubkey);
         let program_data_snapshot = self
             .fetch_account_chain_snapshot(program_data_pubkey)

@@ -1107,7 +1107,7 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "borsh 0.10.3",
  "ephemeral-rollups-sdk-attribute-commit",
@@ -1118,7 +1118,7 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-commit"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1127,7 +1127,7 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-delegate"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -4110,6 +4110,14 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "06794f8f6c5c898b3275aebefa6b8a1cb24cd2c6c79397ab15774837a0bc5755"
 dependencies = [
  "winapi-util",
+]
+
+[[package]]
+name = "test-cloning"
+version = "0.0.0"
+dependencies = [
+ "integration-test-tools",
+ "solana-sdk 1.17.22",
 ]
 
 [[package]]
