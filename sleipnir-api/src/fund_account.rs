@@ -41,7 +41,11 @@ pub(crate) fn fund_validator_identity(bank: &Bank, validator_id: &Pubkey) {
 }
 
 pub(crate) fn funded_faucet(bank: &Bank) -> Keypair {
-    let faucet = Keypair::new();
+    // TODO @@@ we need to store the faucet keypair with the ledger such that we
+    // can properly replay airdrops
+    let faucet =
+        <Keypair as solana_sdk::signer::SeedDerivable>::from_seed(&[45; 32])
+            .unwrap();
     fund_account(bank, &faucet.pubkey(), u64::MAX / 2);
     faucet
 }
