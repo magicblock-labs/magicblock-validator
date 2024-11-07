@@ -208,6 +208,7 @@ impl MagicValidator {
             Some(CommitmentLevel::Confirmed),
         );
 
+        // TODO - need to expose this array of RPC as a perameter to the configuration file
         let combo_of_remote_rpc_config = vec![
             remote_rpc_config.clone(),
             remote_rpc_config.clone(),
