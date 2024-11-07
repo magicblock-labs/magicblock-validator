@@ -144,6 +144,7 @@ impl RemoteAccountUpdatesShard {
                 if current_update_data.is_none() {
                     return true;
                 }
+                // Verify that the account's data is exactly the same
                 if last_known_update_data != current_update_data {
                     return true;
                 }
@@ -173,7 +174,7 @@ impl RemoteAccountUpdatesShard {
                 {
                     return true;
                 }
-                // If everything match perfectly, we can safely ignore the current update
+                // If no change was detected, we can safely ignore the current update
                 false
             }
             None => true,
