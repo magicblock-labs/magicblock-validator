@@ -5,8 +5,9 @@ use std::{
 };
 
 use conjunto_transwise::{
-    AccountChainSnapshotProvider, AccountChainSnapshotShared,
-    DelegationRecordParserImpl, RpcAccountProvider, RpcProviderConfig,
+    AccountChainSnapshot, AccountChainSnapshotProvider,
+    AccountChainSnapshotShared, DelegationRecordParserImpl, RpcAccountProvider,
+    RpcProviderConfig,
 };
 use futures_util::future::join_all;
 use log::*;
@@ -19,9 +20,11 @@ use tokio_util::sync::CancellationToken;
 use crate::{AccountFetcherError, AccountFetcherListeners};
 
 pub struct RemoteAccountFetcherWorker {
-    account_chain_snapshot_provider: AccountChainSnapshotProvider<
-        RpcAccountProvider,
-        DelegationRecordParserImpl,
+    account_chain_snapshot_providers: Vec<
+        AccountChainSnapshotProvider<
+            RpcAccountProvider,
+            DelegationRecordParserImpl,
+        >,
     >,
     fetch_request_receiver: UnboundedReceiver<Pubkey>,
     fetch_request_sender: UnboundedSender<Pubkey>,
@@ -29,15 +32,20 @@ pub struct RemoteAccountFetcherWorker {
 }
 
 impl RemoteAccountFetcherWorker {
-    pub fn new(config: RpcProviderConfig) -> Self {
-        let account_chain_snapshot_provider = AccountChainSnapshotProvider::new(
-            RpcAccountProvider::new(config),
-            DelegationRecordParserImpl,
-        );
+    pub fn new(rpc_provider_configs: Vec<RpcProviderConfig>) -> Self {
+        let account_chain_snapshot_providers = rpc_provider_configs
+            .into_iter()
+            .map(|rpc_provider_config| {
+                AccountChainSnapshotProvider::new(
+                    RpcAccountProvider::new(rpc_provider_config),
+                    DelegationRecordParserImpl,
+                )
+            })
+            .collect();
         let (fetch_request_sender, fetch_request_receiver) =
             unbounded_channel();
         Self {
-            account_chain_snapshot_provider,
+            account_chain_snapshot_providers,
             fetch_request_receiver,
             fetch_request_sender,
             fetch_listeners: Default::default(),
@@ -76,21 +84,17 @@ impl RemoteAccountFetcherWorker {
     }
 
     async fn process_fetch_request(&self, pubkey: Pubkey) {
-        // Actually fetch the account asynchronously
-        let result = match self
-            .account_chain_snapshot_provider
-            .try_fetch_chain_snapshot_of_pubkey(&pubkey)
-            .await
-        {
-            Ok(snapshot) => Ok(AccountChainSnapshotShared::from(snapshot)),
-            // LockboxError is unclonable, so we have to downgrade it to a clonable error type
-            Err(error) => {
-                // Log the error now, since we're going to lose the stacktrace after string conversion
-                warn!("Failed to fetch account: {} :{:?}", pubkey, error);
-                // Lose the error full stack trace and create a simplified clonable string version
-                Err(AccountFetcherError::FailedToFetch(error.to_string()))
-            }
-        };
+        // Actually fetch the account asynchronously from all RPCs
+        let results =
+            join_all(self.account_chain_snapshot_providers.iter().map(
+                |account_chain_snapshot_provider| {
+                    account_chain_snapshot_provider
+                        .try_fetch_chain_snapshot_of_pubkey(&pubkey)
+                },
+            ))
+            .await;
+        // Select the best result from all the fetches
+        let result = self.pick_the_best_fetch_result(&pubkey, results);
         // Log the result for debugging purposes
         debug!("Account fetch: {:?}, snapshot: {:?}", pubkey, result);
         // Collect the listeners waiting for the result
@@ -115,5 +119,50 @@ impl RemoteAccountFetcherWorker {
                 error!("Could not send fetch result: {}: {:?}", pubkey, error);
             }
         }
+    }
+
+    fn pick_the_best_fetch_result(
+        &self,
+        pubkey: &Pubkey,
+        fetch_results: Vec<LockboxResult<AccountChainSnapshot>>,
+    ) -> LockboxResult<AccountChainSnapshotShared> {
+        // Picked the best result out of all fetch results from all RPCs
+        let mut best_result = Err(AccountFetcherError::FailedToFetch(
+            "No fetch was initiated".to_string(),
+        ));
+        // Check all fetch results one by one
+        for fetch_result in fetch_results {
+            match fetch_result {
+                // If the fetch has succeeded
+                Ok(fetch_snapshot) => match best_result {
+                    // If the best fetch has succeeded, only replace it if the slot is more recent
+                    Ok(best_snapshot) => {
+                        if fetch_snapshot.at_slot > best_snapshot.at_slot {
+                            best_result = Ok(AccountChainSnapshotShared::from(
+                                fetch_snapshot,
+                            ))
+                        }
+                    }
+                    // If the best fetch has failed, we replace it with the current success
+                    Err(error) => {
+                        best_result =
+                            Ok(AccountChainSnapshotShared::from(fetch_snapshot))
+                    }
+                },
+                Err(error) => {
+                    // Log the error now, since we're going to lose the stacktrace after string conversion
+                    warn!("Failed to fetch account: {} :{:?}", pubkey, error);
+                    // We ignore the error if another fetch already succeeded
+                    if best_result.is_err() {
+                        // LockboxError is unclonable, so we have to downgrade it to a clonable error type
+                        best_result = Err(AccountFetcherError::FailedToFetch(
+                            error.to_string(),
+                        ));
+                    }
+                }
+            }
+        }
+        // Use the best result and discard all other fetches
+        best_result
     }
 }

@@ -208,16 +208,18 @@ impl MagicValidator {
             Some(CommitmentLevel::Confirmed),
         );
 
+        let combo_of_remote_rpc_config = vec![
+            remote_rpc_config.clone(),
+            remote_rpc_config.clone(),
+            remote_rpc_config.clone(),
+        ];
+
         let remote_account_fetcher_worker =
-            RemoteAccountFetcherWorker::new(remote_rpc_config.clone());
+            RemoteAccountFetcherWorker::new(combo_of_remote_rpc_config.clone());
 
         let remote_account_updates_worker = RemoteAccountUpdatesWorker::new(
             // We'll maintain 3 connections constantly (those could be on different nodes if we wanted to)
-            vec![
-                remote_rpc_config.clone(),
-                remote_rpc_config.clone(),
-                remote_rpc_config.clone(),
-            ],
+            combo_of_remote_rpc_config.clone(),
             // We'll kill/refresh one connection every 5 minutes
             Duration::from_secs(60 * 5),
         );
