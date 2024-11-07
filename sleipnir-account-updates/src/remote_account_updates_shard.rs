@@ -65,11 +65,8 @@ impl RemoteAccountUpdatesShard {
                 .rpc_provider_config
                 .commitment()
                 .map(|commitment| CommitmentConfig { commitment }),
-            encoding: Some(UiAccountEncoding::Base64),
-            data_slice: Some(UiDataSliceConfig {
-                offset: 0,
-                length: 0,
-            }),
+            encoding: Some(UiAccountEncoding::Base58), // Use the inneficient encoding, so that the RPC doesn't try to send the big accounts
+            data_slice: None,
             min_context_slot: None,
         };
         // We'll keep a cache of all the account data that we last received, so we can check for changes and ignore duplicate updates
@@ -95,8 +92,7 @@ impl RemoteAccountUpdatesShard {
                 }
                 // When we receive an update from any account subscriptions
                 Some((pubkey, update)) = streams.next() => {
-                    if self.check_if_an_update_is_warranted(last_known_update_accounts.get(&pubkey), &update.value)
-                    {
+                    if self.check_if_an_update_is_warranted(last_known_update_accounts.get(&pubkey), &update.value) {
                         let current_update_slot = update.context.slot;
                         debug!(
                             "Shard {}: Account update: {:?}, at slot: {}, data: {:?}",
