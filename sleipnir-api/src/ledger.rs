@@ -111,6 +111,50 @@ pub(crate) fn write_faucet_keypair_to_ledger(
 }
 
 // -----------------
+// Validator Keypair
+// -----------------
+fn validator_keypair_path(ledger_path: &Path) -> ApiResult<PathBuf> {
+    let parent = ledger_parent_dir(ledger_path)?;
+    Ok(parent.join("validator-keypair.json"))
+}
+
+pub(crate) fn read_validator_keypair_from_ledger(
+    ledger_path: &Path,
+) -> ApiResult<Keypair> {
+    let keypair_path = validator_keypair_path(ledger_path)?;
+    if fs::exists(keypair_path.as_path()).unwrap_or(false) {
+        let keypair =
+            Keypair::read_from_file(keypair_path.as_path()).map_err(|err| {
+                ApiError::LedgerInvalidValidatorKeypair(
+                    keypair_path.display().to_string(),
+                    err.to_string(),
+                )
+            })?;
+        Ok(keypair)
+    } else {
+        Err(ApiError::LedgerIsMissingValidatorKeypair(
+            keypair_path.display().to_string(),
+        ))
+    }
+}
+
+pub(crate) fn write_validator_keypair_to_ledger(
+    ledger_path: &Path,
+    keypair: &Keypair,
+) -> ApiResult<()> {
+    let keypair_path = validator_keypair_path(ledger_path)?;
+    keypair
+        .write_to_file(keypair_path.as_path())
+        .map_err(|err| {
+            ApiError::LedgerCouldNotWriteValidatorKeypair(
+                keypair_path.display().to_string(),
+                err.to_string(),
+            )
+        })?;
+    Ok(())
+}
+
+// -----------------
 // Ledger Directories
 // -----------------
 pub(crate) fn ledger_parent_dir(ledger_path: &Path) -> ApiResult<PathBuf> {

@@ -63,7 +63,10 @@ use crate::{
     },
     geyser_transaction_notify_listener::GeyserTransactionNotifyListener,
     init_geyser_service::{init_geyser_service, InitGeyserServiceConfig},
-    ledger::{self, ledger_parent_dir},
+    ledger::{
+        self, ledger_parent_dir, read_validator_keypair_from_ledger,
+        write_validator_keypair_to_ledger,
+    },
     tickers::{
         init_commit_accounts_ticker, init_slot_ticker,
         init_system_metrics_ticker,
@@ -150,6 +153,11 @@ impl MagicValidator {
 
         let ledger = Self::init_ledger(
             config.validator_config.ledger.path.as_ref(),
+            config.validator_config.ledger.reset,
+        )?;
+        Self::sync_validator_keypair_with_ledger(
+            ledger.ledger_path(),
+            &identity_keypair,
             config.validator_config.ledger.reset,
         )?;
         let accounts_paths = Self::init_accounts_paths(ledger.ledger_path())?;
@@ -428,6 +436,28 @@ impl MagicValidator {
         let (run_path, _snapshot_path) =
             create_accounts_run_and_snapshot_dirs(&accounts_dir)?;
         Ok(vec![run_path])
+    }
+
+    fn sync_validator_keypair_with_ledger(
+        ledger_path: &Path,
+        validator_keypair: &Keypair,
+        reset_ledger: bool,
+    ) -> ApiResult<()> {
+        if reset_ledger {
+            write_validator_keypair_to_ledger(ledger_path, validator_keypair)?;
+        } else {
+            let ledger_validator_keypair =
+                read_validator_keypair_from_ledger(ledger_path)?;
+            if ledger_validator_keypair.ne(validator_keypair) {
+                return Err(
+                    ApiError::LedgerValidatorKeypairNotMatchingProvidedKeypair(
+                        ledger_path.display().to_string(),
+                        ledger_validator_keypair.pubkey().to_string(),
+                    ),
+                );
+            }
+        }
+        Ok(())
     }
 
     fn init_transaction_listener(
