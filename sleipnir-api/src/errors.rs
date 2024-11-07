@@ -39,4 +39,13 @@ pub enum ApiError {
 
     #[error("Ledger Path is missing a parent directory: {0}")]
     LedgerPathIsMissingParent(String),
+
+    #[error("Ledger Path has an invalid faucet keypair file: {0} ({1})")]
+    LedgerInvalidFaucetKeypair(String, String),
+
+    #[error("Ledger Path is missing a faucet keypair file: {0}")]
+    LedgerIsMissingFaucetKeypair(String),
+
+    #[error("Ledger could not write faucet keypair file: {0} ({1})")]
+    LedgerCouldNotWriteFaucetKeypair(String, String),
 }

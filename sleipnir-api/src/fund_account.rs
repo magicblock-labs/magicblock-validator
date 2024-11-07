@@ -1,8 +1,15 @@
+use std::path::Path;
+
 use sleipnir_bank::bank::Bank;
 use sleipnir_core::magic_program;
 use solana_sdk::{
     account::Account, clock::Epoch, pubkey::Pubkey, signature::Keypair,
     signer::Signer, system_program,
+};
+
+use crate::{
+    errors::ApiResult,
+    ledger::{read_faucet_keypair_from_ledger, write_faucet_keypair_to_ledger},
 };
 
 pub(crate) fn fund_account(bank: &Bank, pubkey: &Pubkey, lamports: u64) {
@@ -40,14 +47,25 @@ pub(crate) fn fund_validator_identity(bank: &Bank, validator_id: &Pubkey) {
     fund_account(bank, validator_id, u64::MAX / 2);
 }
 
-pub(crate) fn funded_faucet(bank: &Bank) -> Keypair {
-    // TODO @@@ we need to store the faucet keypair with the ledger such that we
-    // can properly replay airdrops
-    let faucet =
-        <Keypair as solana_sdk::signer::SeedDerivable>::from_seed(&[45; 32])
-            .unwrap();
-    fund_account(bank, &faucet.pubkey(), u64::MAX / 2);
-    faucet
+/// Funds the faucet account.
+/// If the [creaet_new] is `false` then the faucet keypair will be read from the
+/// existing ledger and an error is raised if it is not found.
+/// Otherwise, a new faucet keypair will be created and saved to the ledger.
+pub(crate) fn funded_faucet(
+    bank: &Bank,
+    ledger_path: &Path,
+    create_new: bool,
+) -> ApiResult<Keypair> {
+    let faucet_keypair = if create_new {
+        let faucet_keypair = Keypair::new();
+        write_faucet_keypair_to_ledger(ledger_path, &faucet_keypair)?;
+        faucet_keypair
+    } else {
+        read_faucet_keypair_from_ledger(ledger_path)?
+    };
+
+    fund_account(bank, &faucet_keypair.pubkey(), u64::MAX / 2);
+    Ok(faucet_keypair)
 }
 
 pub(crate) fn fund_magic_context(bank: &Bank) {

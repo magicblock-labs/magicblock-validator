@@ -63,7 +63,7 @@ use crate::{
     },
     geyser_transaction_notify_listener::GeyserTransactionNotifyListener,
     init_geyser_service::{init_geyser_service, InitGeyserServiceConfig},
-    ledger,
+    ledger::{self, ledger_parent_dir},
     tickers::{
         init_commit_accounts_ticker, init_slot_ticker,
         init_system_metrics_ticker,
@@ -165,7 +165,11 @@ impl MagicValidator {
 
         fund_validator_identity(&bank, &validator_pubkey);
         fund_magic_context(&bank);
-        let faucet_keypair = funded_faucet(&bank);
+        let faucet_keypair = funded_faucet(
+            &bank,
+            ledger.ledger_path().as_path(),
+            config.validator_config.ledger.reset,
+        )?;
 
         load_programs_into_bank(
             &bank,
@@ -419,14 +423,8 @@ impl MagicValidator {
     }
 
     fn init_accounts_paths(ledger_path: &Path) -> ApiResult<Vec<PathBuf>> {
-        let accounts_dir = ledger_path
-            .parent()
-            .ok_or_else(|| {
-                ApiError::LedgerPathIsMissingParent(
-                    ledger_path.to_path_buf().display().to_string(),
-                )
-            })?
-            .join("accounts");
+        let parent = ledger_parent_dir(ledger_path)?;
+        let accounts_dir = parent.join("accounts");
         let (run_path, _snapshot_path) =
             create_accounts_run_and_snapshot_dirs(&accounts_dir)?;
         Ok(vec![run_path])
