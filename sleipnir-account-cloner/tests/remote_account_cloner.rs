@@ -78,7 +78,7 @@ fn setup_replica(
         standard_blacklisted_accounts(&Pubkey::new_unique()),
         AccountClonerPermissions {
             allow_cloning_refresh: false,
-            allow_cloning_wallet_accounts: true,
+            allow_cloning_feepayer_accounts: true,
             allow_cloning_undelegated_accounts: true,
             allow_cloning_delegated_accounts: true,
             allow_cloning_program_accounts: true,
@@ -106,7 +106,7 @@ fn setup_programs_replica(
         standard_blacklisted_accounts(&Pubkey::new_unique()),
         AccountClonerPermissions {
             allow_cloning_refresh: false,
-            allow_cloning_wallet_accounts: false,
+            allow_cloning_feepayer_accounts: false,
             allow_cloning_undelegated_accounts: false,
             allow_cloning_delegated_accounts: false,
             allow_cloning_program_accounts: true,
@@ -134,7 +134,7 @@ fn setup_ephemeral(
         standard_blacklisted_accounts(&Pubkey::new_unique()),
         AccountClonerPermissions {
             allow_cloning_refresh: true,
-            allow_cloning_wallet_accounts: true,
+            allow_cloning_feepayer_accounts: true,
             allow_cloning_undelegated_accounts: true,
             allow_cloning_delegated_accounts: true,
             allow_cloning_program_accounts: true,
@@ -162,7 +162,7 @@ fn setup_offline(
         standard_blacklisted_accounts(&Pubkey::new_unique()),
         AccountClonerPermissions {
             allow_cloning_refresh: false,
-            allow_cloning_wallet_accounts: false,
+            allow_cloning_feepayer_accounts: false,
             allow_cloning_undelegated_accounts: false,
             allow_cloning_delegated_accounts: false,
             allow_cloning_program_accounts: false,
@@ -171,7 +171,7 @@ fn setup_offline(
 }
 
 #[tokio::test]
-async fn test_clone_allow_wallet_account_when_ephemeral() {
+async fn test_clone_allow_feepayer_account_when_ephemeral() {
     // Stubs
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
@@ -186,15 +186,15 @@ async fn test_clone_allow_wallet_account_when_ephemeral() {
         None,
     );
     // Account(s) involved
-    let wallet_account = Pubkey::new_unique();
-    account_fetcher.set_wallet_account(wallet_account, 42);
+    let feepayer_account = Pubkey::new_unique();
+    account_fetcher.set_feepayer_account(feepayer_account, 42);
     // Run test
-    let result = cloner.clone_account(&wallet_account).await;
+    let result = cloner.clone_account(&feepayer_account).await;
     // Check expected result
     assert!(matches!(result, Ok(AccountClonerOutput::Cloned { .. })));
-    assert_eq!(account_fetcher.get_fetch_count(&wallet_account), 1);
-    assert!(account_updates.has_account_monitoring(&wallet_account));
-    assert!(account_dumper.was_dumped_as_wallet_account(&wallet_account));
+    assert_eq!(account_fetcher.get_fetch_count(&feepayer_account), 1);
+    assert!(account_updates.has_account_monitoring(&feepayer_account));
+    assert!(account_dumper.was_dumped_as_feepayer_account(&feepayer_account));
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());
@@ -284,7 +284,7 @@ async fn test_clone_allow_program_accounts_when_ephemeral() {
     let program_shank = get_pubkey_shank_idl(&program_id).unwrap();
     account_fetcher.set_executable_account(program_id, 42);
     account_fetcher.set_undelegated_account(program_data, 42);
-    account_fetcher.set_wallet_account(program_anchor, 42); // The anchor IDL does not exist, so it should use shank
+    account_fetcher.set_feepayer_account(program_anchor, 42); // The anchor IDL does not exist, so it should use shank
     account_fetcher.set_undelegated_account(program_shank, 42);
     // Run test
     let result = cloner.clone_account(&program_id).await;
@@ -451,7 +451,7 @@ async fn test_clone_refuse_blacklisted_account() {
 }
 
 #[tokio::test]
-async fn test_clone_refuse_wallet_account_when_programs_replica() {
+async fn test_clone_refuse_feepayer_account_when_programs_replica() {
     // Stubs
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
@@ -466,21 +466,21 @@ async fn test_clone_refuse_wallet_account_when_programs_replica() {
         None,
     );
     // Account(s) involved
-    let wallet_account = Pubkey::new_unique();
-    account_fetcher.set_wallet_account(wallet_account, 42);
+    let feepayer_account = Pubkey::new_unique();
+    account_fetcher.set_feepayer_account(feepayer_account, 42);
     // Run test
-    let result = cloner.clone_account(&wallet_account).await;
+    let result = cloner.clone_account(&feepayer_account).await;
     // Check expected result
     assert!(matches!(
         result,
         Ok(AccountClonerOutput::Unclonable {
-            reason: AccountClonerUnclonableReason::DoesNotAllowWalletAccount,
+            reason: AccountClonerUnclonableReason::DoesNotAllowFeePayerAccount,
             ..
         })
     ));
-    assert_eq!(account_fetcher.get_fetch_count(&wallet_account), 1);
-    assert!(!account_updates.has_account_monitoring(&wallet_account));
-    assert!(account_dumper.was_untouched(&wallet_account));
+    assert_eq!(account_fetcher.get_fetch_count(&feepayer_account), 1);
+    assert!(!account_updates.has_account_monitoring(&feepayer_account));
+    assert!(account_dumper.was_untouched(&feepayer_account));
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());
@@ -581,7 +581,7 @@ async fn test_clone_allow_program_accounts_when_programs_replica() {
     let program_shank = get_pubkey_shank_idl(&program_id).unwrap();
     account_fetcher.set_executable_account(program_id, 42);
     account_fetcher.set_undelegated_account(program_data, 42);
-    account_fetcher.set_wallet_account(program_anchor, 42); // The anchor IDL does not exist, so it should use shank
+    account_fetcher.set_feepayer_account(program_anchor, 42); // The anchor IDL does not exist, so it should use shank
     account_fetcher.set_undelegated_account(program_shank, 42);
     // Run test
     let result = cloner.clone_account(&program_id).await;
@@ -637,7 +637,7 @@ async fn test_clone_allow_undelegated_account_when_replica() {
 }
 
 #[tokio::test]
-async fn test_clone_allow_wallet_account_when_replica() {
+async fn test_clone_allow_feepayer_account_when_replica() {
     // Stubs
     let internal_account_provider = InternalAccountProviderStub::default();
     let account_fetcher = AccountFetcherStub::default();
@@ -652,15 +652,15 @@ async fn test_clone_allow_wallet_account_when_replica() {
         None,
     );
     // Account(s) involved
-    let wallet_account = Pubkey::new_unique();
-    account_fetcher.set_wallet_account(wallet_account, 42);
+    let feepayer_account = Pubkey::new_unique();
+    account_fetcher.set_feepayer_account(feepayer_account, 42);
     // Run test
-    let result = cloner.clone_account(&wallet_account).await;
+    let result = cloner.clone_account(&feepayer_account).await;
     // Check expected result
     assert!(matches!(result, Ok(AccountClonerOutput::Cloned { .. })));
-    assert_eq!(account_fetcher.get_fetch_count(&wallet_account), 1);
-    assert!(!account_updates.has_account_monitoring(&wallet_account));
-    assert!(account_dumper.was_dumped_as_wallet_account(&wallet_account));
+    assert_eq!(account_fetcher.get_fetch_count(&feepayer_account), 1);
+    assert!(!account_updates.has_account_monitoring(&feepayer_account));
+    assert!(account_dumper.was_dumped_as_feepayer_account(&feepayer_account));
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());
@@ -682,18 +682,18 @@ async fn test_clone_refuse_any_account_when_offline() {
         None,
     );
     // Account(s) involved
-    let wallet_account = Pubkey::new_unique();
+    let feepayer_account = Pubkey::new_unique();
     let undelegated_account = Pubkey::new_unique();
     let program_id = Pubkey::new_unique();
     let program_data = get_program_data_address(&program_id);
     let program_idl = get_pubkey_anchor_idl(&program_id).unwrap();
-    account_fetcher.set_wallet_account(wallet_account, 42);
+    account_fetcher.set_feepayer_account(feepayer_account, 42);
     account_fetcher.set_undelegated_account(undelegated_account, 42);
     account_fetcher.set_executable_account(program_id, 42);
     account_fetcher.set_undelegated_account(program_data, 42);
     account_fetcher.set_undelegated_account(program_idl, 42);
     // Run test
-    let result1 = cloner.clone_account(&wallet_account).await;
+    let result1 = cloner.clone_account(&feepayer_account).await;
     // Check expected result1
     assert!(matches!(
         result1,
@@ -702,9 +702,9 @@ async fn test_clone_refuse_any_account_when_offline() {
             ..
         })
     ));
-    assert_eq!(account_fetcher.get_fetch_count(&wallet_account), 0);
-    assert!(!account_updates.has_account_monitoring(&wallet_account));
-    assert!(account_dumper.was_untouched(&wallet_account));
+    assert_eq!(account_fetcher.get_fetch_count(&feepayer_account), 0);
+    assert!(!account_updates.has_account_monitoring(&feepayer_account));
+    assert!(account_dumper.was_untouched(&feepayer_account));
     // Run test
     let result2 = cloner.clone_account(&undelegated_account).await;
     // Check expected result2
@@ -1019,14 +1019,14 @@ async fn test_clone_properly_upgrading_downgrading_when_created_and_deleted() {
     );
     // Account(s) involved
     let undelegated_account = Pubkey::new_unique();
-    account_fetcher.set_wallet_account(undelegated_account, 42);
+    account_fetcher.set_feepayer_account(undelegated_account, 42);
     // Run test (we clone the account for the first time)
     let result1 = cloner.clone_account(&undelegated_account).await;
     // Check expected result1
     assert!(matches!(result1, Ok(AccountClonerOutput::Cloned { .. })));
     assert_eq!(account_fetcher.get_fetch_count(&undelegated_account), 1);
     assert!(account_updates.has_account_monitoring(&undelegated_account));
-    assert!(account_dumper.was_dumped_as_wallet_account(&undelegated_account));
+    assert!(account_dumper.was_dumped_as_feepayer_account(&undelegated_account));
     // Clear dump history
     account_dumper.clear_history();
     // Run test (we re-clone the account and it should be in the cache)
@@ -1058,7 +1058,7 @@ async fn test_clone_properly_upgrading_downgrading_when_created_and_deleted() {
     assert!(account_updates.has_account_monitoring(&undelegated_account));
     assert!(account_dumper.was_untouched(&undelegated_account));
     // The account is now removed/closed remotely
-    account_fetcher.set_wallet_account(undelegated_account, 77);
+    account_fetcher.set_feepayer_account(undelegated_account, 77);
     account_updates.set_known_update_slot(undelegated_account, 77);
     // Run test (we re-clone the account and it should clear the cache and re-dump)
     let result5 = cloner.clone_account(&undelegated_account).await;
@@ -1066,7 +1066,7 @@ async fn test_clone_properly_upgrading_downgrading_when_created_and_deleted() {
     assert!(matches!(result5, Ok(AccountClonerOutput::Cloned { .. })));
     assert_eq!(account_fetcher.get_fetch_count(&undelegated_account), 3);
     assert!(account_updates.has_account_monitoring(&undelegated_account));
-    assert!(account_dumper.was_dumped_as_wallet_account(&undelegated_account));
+    assert!(account_dumper.was_dumped_as_feepayer_account(&undelegated_account));
     // Clear dump history
     account_dumper.clear_history();
     // Run test (we re-clone the account and it should be in the cache)

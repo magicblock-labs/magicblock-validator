@@ -145,7 +145,7 @@ where
         pubkey: &Pubkey,
     ) -> AccountClonerResult<AccountClonerOutput> {
         // If we don't allow any cloning, no need to do anything at all
-        if !self.permissions.allow_cloning_wallet_accounts
+        if !self.permissions.allow_cloning_feepayer_accounts
             && !self.permissions.allow_cloning_undelegated_accounts
             && !self.permissions.allow_cloning_delegated_accounts
             && !self.permissions.allow_cloning_program_accounts
@@ -254,16 +254,16 @@ where
         let signature = match &account_chain_snapshot.chain_state {
             // If the account has no data, we can use it for lamport transfers only
             // We'll use the escrowed lamport value rather than its actual on-chain info
-            AccountChainState::Wallet { lamports, owner } => {
-                if !self.permissions.allow_cloning_wallet_accounts {
+            AccountChainState::FeePayer { lamports, owner } => {
+                if !self.permissions.allow_cloning_feepayer_accounts {
                     return Ok(AccountClonerOutput::Unclonable {
                         pubkey: *pubkey,
                         reason:
-                            AccountClonerUnclonableReason::DoesNotAllowWalletAccount,
+                            AccountClonerUnclonableReason::DoesNotAllowFeePayerAccount,
                         at_slot: account_chain_snapshot.at_slot,
                     });
                 }
-                self.do_clone_wallet_account(pubkey, *lamports, owner)?
+                self.do_clone_feepayer_account(pubkey, *lamports, owner)?
             }
             // If the account is present on-chain, but not delegated, it's just readonly data
             // We need to differenciate between programs and other accounts
@@ -331,7 +331,7 @@ where
         })
     }
 
-    fn do_clone_wallet_account(
+    fn do_clone_feepayer_account(
         &self,
         pubkey: &Pubkey,
         lamports: u64,
@@ -339,10 +339,10 @@ where
     ) -> AccountClonerResult<Signature> {
         let lamports = self.payer_init_lamports.unwrap_or(lamports);
         self.account_dumper
-            .dump_wallet_account(pubkey, lamports, owner)
+            .dump_feepayer_account(pubkey, lamports, owner)
             .map_err(AccountClonerError::AccountDumperError)
             .inspect(|_| {
-                metrics::inc_account_clone(metrics::AccountClone::Wallet {
+                metrics::inc_account_clone(metrics::AccountClone::FeePayer {
                     pubkey: &pubkey.to_string(),
                 });
             })
