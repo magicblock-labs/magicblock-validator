@@ -92,14 +92,38 @@ impl SleipnirConfig {
         // -----------------
         // Accounts
         // -----------------
-        if let Ok(remote) = env::var("ACCOUNTS_REMOTE") {
-            config.accounts.remote = RemoteConfig::Custom(
-                Url::parse(&remote)
-                    .map_err(|err| {
-                        panic!("Invalid 'ACCOUNTS_REMOTE' env var ({:?})", err)
-                    })
-                    .unwrap(),
-            );
+        if let Ok(http) = env::var("ACCOUNTS_REMOTE") {
+            if let Ok(ws) = env::var("ACCOUNTS_REMOTE_WS") {
+                config.accounts.remote = RemoteConfig::CustomWithWs(
+                    Url::parse(&http)
+                        .map_err(|err| {
+                            panic!(
+                                "Invalid 'ACCOUNTS_REMOTE' env var ({:?})",
+                                err
+                            )
+                        })
+                        .unwrap(),
+                    Url::parse(&ws)
+                        .map_err(|err| {
+                            panic!(
+                                "Invalid 'ACCOUNTS_REMOTE_WS' env var ({:?})",
+                                err
+                            )
+                        })
+                        .unwrap(),
+                );
+            } else {
+                config.accounts.remote = RemoteConfig::Custom(
+                    Url::parse(&http)
+                        .map_err(|err| {
+                            panic!(
+                                "Invalid 'ACCOUNTS_REMOTE' env var ({:?})",
+                                err
+                            )
+                        })
+                        .unwrap(),
+                );
+            }
         }
 
         if let Ok(lifecycle) = env::var("ACCOUNTS_LIFECYCLE") {

@@ -1,5 +1,7 @@
+use std::fmt;
 use std::str::FromStr;
 
+use serde::de::{self, Deserializer, SeqAccess, Visitor};
 use serde::{Deserialize, Serialize};
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
 use strum_macros::EnumString;
@@ -39,34 +41,90 @@ pub enum RemoteConfig {
     #[serde(alias = "local")]
     #[serde(alias = "localhost")]
     Development,
-    #[serde(
-        untagged,
-        deserialize_with = "deserialize_url",
-        serialize_with = "serialize_url"
-    )]
+    #[serde(untagged, deserialize_with = "deserialize_url")]
     Custom(Url),
+    #[serde(untagged, deserialize_with = "deserialize_tuple_url")]
+    CustomWithWs(Url, Url),
 }
 
-fn deserialize_url<'de, D>(deserializer: D) -> Result<Url, D::Error>
+pub fn deserialize_url<'de, D>(deserializer: D) -> Result<Url, D::Error>
 where
-    D: serde::Deserializer<'de>,
+    D: Deserializer<'de>,
 {
-    let s = String::deserialize(deserializer)?;
-    Url::parse(&s).map_err(|err| {
-        // The error returned here by serde is a bit unhelpful so we help out
-        // by logging a bit more information.
-        eprintln!("RemoteConfig encountered invalid URL ({}).", err);
-        serde::de::Error::custom(err)
-    })
+    struct UrlVisitor;
+
+    impl<'de> Visitor<'de> for UrlVisitor {
+        type Value = Url;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a valid URL string")
+        }
+
+        fn visit_str<E>(self, value: &str) -> Result<Url, E>
+        where
+            E: de::Error,
+        {
+            Url::parse(value).map_err(|e| {
+                    // The error returned here by serde is a bit unhelpful so we help out
+                    // by logging a bit more information.
+                    eprintln!(
+                        "RemoteConfig encountered invalid URL '{value}', err: ({e}).",
+                    );
+                    de::Error::custom(e)
+                })
+        }
+    }
+
+    deserializer.deserialize_str(UrlVisitor)
 }
 
-fn serialize_url<S>(url: &Url, serializer: S) -> Result<S::Ok, S::Error>
+pub fn deserialize_tuple_url<'de, D>(
+    deserializer: D,
+) -> Result<(Url, Url), D::Error>
 where
-    S: serde::Serializer,
+    D: Deserializer<'de>,
 {
-    serializer.serialize_str(url.as_ref())
-}
+    struct UrlTupleVisitor;
 
+    impl<'de> Visitor<'de> for UrlTupleVisitor {
+        type Value = (Url, Url);
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("a sequence of two URL strings")
+        }
+
+        fn visit_seq<A>(self, mut seq: A) -> Result<(Url, Url), A::Error>
+        where
+            A: SeqAccess<'de>,
+        {
+            let first: String = seq.next_element()?.ok_or_else(|| {
+                eprintln!("expected a sequence of two URLs: http and ws");
+                de::Error::invalid_length(0, &self)
+            })?;
+            let second: String = seq.next_element()?.ok_or_else(|| {
+                eprintln!("expected a sequence of two URLs: http and ws");
+                de::Error::invalid_length(1, &self)
+            })?;
+
+            let http = Url::parse(&first).map_err(|e| {
+                eprintln!(
+                    "Invalid HTTP URL in RemoteConfig '{first}', err: ({e}).",
+                );
+                de::Error::custom(e)
+            })?;
+            let ws = Url::parse(&second).map_err(|e| {
+                eprintln!(
+                    "Invalid WS URL in RemoteConfig '{second}', err: ({e}).",
+                );
+                de::Error::custom(e)
+            })?;
+
+            Ok((http, ws))
+        }
+    }
+
+    deserializer.deserialize_seq(UrlTupleVisitor)
+}
 // -----------------
 // LifecycleMode
 // -----------------

@@ -6733,6 +6733,7 @@ dependencies = [
  "form_urlencoded",
  "idna 1.0.0",
  "percent-encoding 2.3.1",
+ "serde",
 ]
 
 [[package]]
