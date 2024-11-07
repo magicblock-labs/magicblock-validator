@@ -7,7 +7,7 @@ use std::{
 use conjunto_transwise::RpcProviderConfig;
 use futures_util::StreamExt;
 use log::*;
-use solana_account_decoder::{UiAccount, UiAccountEncoding, UiDataSliceConfig};
+use solana_account_decoder::{UiAccount, UiAccountEncoding};
 use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
 use solana_rpc_client_api::config::RpcAccountInfoConfig;
 use solana_sdk::{
@@ -59,14 +59,18 @@ impl RemoteAccountUpdatesShard {
             PubsubClient::new(self.rpc_provider_config.ws_url())
                 .await
                 .map_err(RemoteAccountUpdatesShardError::PubsubClientError)?;
-        // For every account, we only want the updates, not the actual content of the accounts
+        // Use the inneficient encoding, so that the RPC doesn't try to send the big accounts's data
+        let encoding = Some(UiAccountEncoding::Base58);
+        // Since we want to check for data duplicate, we need to listen to all the accounts's data
+        let data_slice = None;
+        // Generate the RPC config
         let rpc_account_info_config = RpcAccountInfoConfig {
             commitment: self
                 .rpc_provider_config
                 .commitment()
                 .map(|commitment| CommitmentConfig { commitment }),
-            encoding: Some(UiAccountEncoding::Base58), // Use the inneficient encoding, so that the RPC doesn't try to send the big accounts
-            data_slice: None,
+            encoding,
+            data_slice,
             min_context_slot: None,
         };
         // We'll keep a cache of all the account data that we last received, so we can check for changes and ignore duplicate updates
@@ -92,7 +96,7 @@ impl RemoteAccountUpdatesShard {
                 }
                 // When we receive an update from any account subscriptions
                 Some((pubkey, update)) = streams.next() => {
-                    if self.check_if_an_update_is_warranted(last_known_update_accounts.get(&pubkey), &update.value) {
+                    if self.check_if_the_account_may_have_changed(last_known_update_accounts.get(&pubkey), &update.value) {
                         let current_update_slot = update.context.slot;
                         debug!(
                             "Shard {}: Account update: {:?}, at slot: {}, data: {:?}",
@@ -123,7 +127,7 @@ impl RemoteAccountUpdatesShard {
         Ok(())
     }
 
-    fn check_if_an_update_is_warranted(
+    fn check_if_the_account_may_have_changed(
         &self,
         last_known_update_account: Option<&UiAccount>,
         current_update_account: &UiAccount,
