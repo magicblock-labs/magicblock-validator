@@ -9,7 +9,6 @@ edition.workspace = true
 
 [dependencies]
 async-trait = { workspace = true }
-conjunto-lockbox = { workspace = true }
 conjunto-transwise = { workspace = true }
 futures-util = { workspace = true }
 log = { workspace = true }

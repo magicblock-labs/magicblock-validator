@@ -20,8 +20,11 @@ fn setup() -> (
     tokio::task::JoinHandle<()>,
 ) {
     // Create account fetcher worker and client
-    let mut worker =
-        RemoteAccountFetcherWorker::new(RpcProviderConfig::devnet());
+    let mut worker = RemoteAccountFetcherWorker::new(vec![
+        RpcProviderConfig::devnet(),
+        RpcProviderConfig::devnet(),
+        RpcProviderConfig::devnet(),
+    ]);
     let client = RemoteAccountFetcherClient::new(&worker);
     // Run the worker in a separate task
     let cancellation_token = CancellationToken::new();
