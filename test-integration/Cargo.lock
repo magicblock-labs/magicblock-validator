@@ -4121,6 +4121,7 @@ dependencies = [
  "integration-test-tools",
  "sleipnir-config",
  "solana-sdk 1.17.22",
+ "solana-transaction-status",
 ]
 
 [[package]]

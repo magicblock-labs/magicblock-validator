@@ -256,7 +256,7 @@ impl IntegrationTestContext {
         &self,
         pubkey: &Pubkey,
         lamports: u64,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Signature> {
         Self::airdrop(
             self.try_chain_client()?,
             pubkey,
@@ -269,7 +269,7 @@ impl IntegrationTestContext {
         &self,
         pubkey: &Pubkey,
         lamports: u64,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Signature> {
         Self::airdrop(&self.ephem_client, pubkey, lamports, self.commitment)
     }
 
@@ -278,7 +278,7 @@ impl IntegrationTestContext {
         pubkey: &Pubkey,
         lamports: u64,
         commitment_config: CommitmentConfig,
-    ) -> anyhow::Result<()> {
+    ) -> anyhow::Result<Signature> {
         let sig = rpc_client.request_airdrop(pubkey, lamports).with_context(
             || format!("Failed to airdrop chain account '{:?}'", pubkey),
         )?;
@@ -297,7 +297,7 @@ impl IntegrationTestContext {
                 pubkey
             ));
         }
-        Ok(())
+        Ok(sig)
     }
 
     // -----------------

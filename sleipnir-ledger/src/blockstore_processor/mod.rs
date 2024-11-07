@@ -80,6 +80,8 @@ pub fn process_ledger(ledger: &Ledger, bank: &Bank) {
         );
         if !prepared_block.transactions.is_empty() {
             info!("Processing block: {:#?}", prepared_block);
+        } else {
+            info!("{}", prepared_block.blockhash);
         }
         for tx in prepared_block.transactions.into_iter() {
             error!("Processing transaction: {:?}", tx);

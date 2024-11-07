@@ -3,6 +3,7 @@ use integration_test_tools::IntegrationTestContext;
 use sleipnir_config::{AccountsConfig, SleipnirConfig};
 use sleipnir_config::{LedgerConfig, LifecycleMode};
 use solana_sdk::pubkey::Pubkey;
+use solana_transaction_status::UiTransactionEncoding;
 use test_ledger_restore::start_validator_with_config;
 
 macro_rules! expect {
@@ -37,7 +38,7 @@ fn restore_ledger_with_airdropped_account() {
     let pubkey = Pubkey::new_unique();
 
     // 1. Launch a validator and airdrop to an account
-    {
+    let airdrop_sig = {
         let config = SleipnirConfig {
             ledger: LedgerConfig {
                 reset: true,
@@ -51,17 +52,17 @@ fn restore_ledger_with_airdropped_account() {
         };
 
         let ctx = IntegrationTestContext::new_ephem_only();
-        expect!(ctx.airdrop_ephem(&pubkey, 1_111_111), validator);
+        let sig = expect!(ctx.airdrop_ephem(&pubkey, 1_111_111), validator);
 
         let acc = expect!(ctx.ephem_client.get_account(&pubkey), validator);
         assert_eq!(acc.lamports, 1_111_111);
-        eprintln!("Account: {:?}", acc);
 
         // Wait for a slot advance at least
         std::thread::sleep(std::time::Duration::from_secs(1));
 
         validator.kill().unwrap();
-    }
+        sig
+    };
 
     // 2. Launch another validator reusing ledger
     {
@@ -80,9 +81,24 @@ fn restore_ledger_with_airdropped_account() {
         // Wait for a slot advance at least
         std::thread::sleep(std::time::Duration::from_secs(1));
 
-        eprintln!("Ledger: {:?}", ledger_path);
         let ctx = IntegrationTestContext::new_ephem_only();
         let acc = expect!(ctx.ephem_client.get_account(&pubkey), validator);
         assert_eq!(acc.lamports, 1_111_111);
+
+        let status = ctx
+            .ephem_client
+            .get_signature_status(&airdrop_sig)
+            .unwrap()
+            .unwrap();
+        assert!(status.is_ok());
+
+        let tx = ctx
+            .ephem_client
+            .get_transaction(&airdrop_sig, UiTransactionEncoding::Base64)
+            .unwrap();
+
+
+        eprintln!("Transaction: {:?}", tx);
+        validator.kill().unwrap();
     }
 }

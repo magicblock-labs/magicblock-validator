@@ -8,3 +8,4 @@ anyhow = { workspace = true }
 integration-test-tools = { workspace = true }
 sleipnir-config = { workspace = true }
 solana-sdk = { workspace = true }
+solana-transaction-status = { workspace = true }
