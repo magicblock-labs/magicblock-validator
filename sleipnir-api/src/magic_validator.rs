@@ -214,6 +214,11 @@ impl MagicValidator {
             remote_rpc_config.clone(),
             remote_rpc_config.clone(),
         ];
+        if combo_of_remote_rpc_config.len() < 2 {
+            panic!(
+                "In order to run smoothly, please use 2 or more remote RPCs"
+            );
+        }
 
         let remote_account_fetcher_worker =
             RemoteAccountFetcherWorker::new(combo_of_remote_rpc_config.clone());
