@@ -79,6 +79,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
 
     // Values from the toml file should be overridden by the ENV variables
     let base_cluster = "http://remote-account-url";
+    let base_cluster_ws = "ws://remote-account-url";
 
     // Set the ENV variables
     env::set_var("ACCOUNTS_REMOTE", base_cluster);
@@ -145,5 +146,15 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
                 system_metrics_tick_interval_secs: 10,
             },
         }
-    )
+    );
+    env::set_var("ACCOUNTS_REMOTE_WS", base_cluster_ws);
+    let config = config.override_from_envs();
+
+    assert_eq!(
+        config.accounts.remote,
+        RemoteConfig::CustomWithWs(
+            base_cluster.parse().unwrap(),
+            base_cluster_ws.parse().unwrap()
+        )
+    );
 }

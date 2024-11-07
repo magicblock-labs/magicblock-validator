@@ -29,7 +29,10 @@ fn cluster_from_remote(remote: &sleipnir_config::RemoteConfig) -> Cluster {
         Mainnet => Cluster::Known(ClusterType::MainnetBeta),
         Testnet => Cluster::Known(ClusterType::Testnet),
         Development => Cluster::Known(ClusterType::Development),
-        Custom(url) => Cluster::Custom(url.to_string()),
+        Custom(url) => Cluster::Custom(url.clone()),
+        CustomWithWs(http, ws) => {
+            Cluster::CustomWithWs(http.clone(), ws.clone())
+        }
     }
 }
 
