@@ -34,7 +34,7 @@ async fn main() {
             transaction_to_clone_pubkey_from_cluster(
                 // We could also use Cluster::Development here which has the same URL
                 // but wanted to demonstrate using a custom URL
-                &Cluster::Custom("http://localhost:8899".to_string()),
+                &Cluster::Custom("http://localhost:8899".parse().unwrap()),
                 false,
                 &SOLX_PROG,
                 recent_blockhash,
