@@ -209,23 +209,27 @@ impl MagicValidator {
         );
 
         // TODO - need to expose this array of RPC as a perameter to the configuration file
-        let combo_of_remote_rpc_config = vec![
+        //      - We could either have a different set of RPC for fetching and WS or use the same
+        //      - We could also have arbitrary rules for validating that those RPCs are redundant enough
+        //      - Work tracked here: https://github.com/magicblock-labs/magicblock-validator/pull/237
+        let remote_provider_configs = vec![
             remote_rpc_config.clone(),
             remote_rpc_config.clone(),
             remote_rpc_config.clone(),
         ];
-        if combo_of_remote_rpc_config.len() < 2 {
+        // We must ensure that there are at least 2 connections to account subscriptions
+        if remote_provider_configs.len() < 2 {
             panic!(
                 "In order to run smoothly, please use 2 or more remote RPCs"
             );
         }
 
         let remote_account_fetcher_worker =
-            RemoteAccountFetcherWorker::new(combo_of_remote_rpc_config.clone());
+            RemoteAccountFetcherWorker::new(remote_provider_configs.clone());
 
         let remote_account_updates_worker = RemoteAccountUpdatesWorker::new(
             // We'll maintain 3 connections constantly (those could be on different nodes if we wanted to)
-            combo_of_remote_rpc_config.clone(),
+            remote_provider_configs.clone(),
             // We'll kill/refresh one connection every 5 minutes
             Duration::from_secs(60 * 5),
         );
