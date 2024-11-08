@@ -150,7 +150,7 @@ pub fn init_system_metrics_ticker(
         }
     }
     fn try_set_accounts_storage_size(bank: &Bank) {
-        match bank.accounts_db().storage_size() {
+        match bank.accounts_db_storage_size() {
             Ok(byte_size) => metrics::set_accounts_size(byte_size),
             Err(err) => warn!("Failed to get accounts storage size: {:?}", err),
         }

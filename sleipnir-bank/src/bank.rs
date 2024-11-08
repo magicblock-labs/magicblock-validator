@@ -14,6 +14,26 @@ use std::{
     time::Duration,
 };
 
+use crate::{
+    bank_helpers::{
+        calculate_data_size_delta, get_epoch_secs,
+        inherit_specially_retained_account_fields,
+    },
+    bank_rc::BankRc,
+    builtins::{BuiltinPrototype, BUILTINS},
+    slot_status_notifier_interface::SlotStatusNotifierArc,
+    status_cache::StatusCache,
+    transaction_batch::TransactionBatch,
+    transaction_logs::{
+        TransactionLogCollector, TransactionLogCollectorConfig,
+        TransactionLogCollectorFilter, TransactionLogInfo,
+    },
+    transaction_results::{
+        LoadAndExecuteTransactionsOutput, TransactionBalances,
+        TransactionBalancesSet,
+    },
+    transaction_simulation::TransactionSimulationResult,
+};
 use log::{debug, info, trace};
 use sleipnir_accounts_db::{
     accounts::{Accounts, TransactionLoadResult},
@@ -93,27 +113,6 @@ use solana_svm::{
     },
 };
 use solana_system_program::{get_system_account_kind, SystemAccountKind};
-
-use crate::{
-    bank_helpers::{
-        calculate_data_size_delta, get_epoch_secs,
-        inherit_specially_retained_account_fields,
-    },
-    bank_rc::BankRc,
-    builtins::{BuiltinPrototype, BUILTINS},
-    slot_status_notifier_interface::SlotStatusNotifierArc,
-    status_cache::StatusCache,
-    transaction_batch::TransactionBatch,
-    transaction_logs::{
-        TransactionLogCollector, TransactionLogCollectorConfig,
-        TransactionLogCollectorFilter, TransactionLogInfo,
-    },
-    transaction_results::{
-        LoadAndExecuteTransactionsOutput, TransactionBalances,
-        TransactionBalancesSet,
-    },
-    transaction_simulation::TransactionSimulationResult,
-};
 
 pub type BankStatusCache = StatusCache<Result<()>>;
 
@@ -2655,7 +2654,11 @@ impl Bank {
         self.capitalization.load(Ordering::Relaxed)
     }
 
-    pub fn accounts_db(&self) -> &AccountsDb {
+    pub fn accounts_db_storage_size(&self) -> AccountsDbResult<u64> {
+        self.accounts_db().storage_size()
+    }
+
+    fn accounts_db(&self) -> &AccountsDb {
         self.rc.accounts.accounts_db.as_ref()
     }
 
