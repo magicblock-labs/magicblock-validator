@@ -7,6 +7,7 @@ use solana_rpc_client_api::{
     client_error::ErrorKind as ClientErrorKind, config::RpcTransactionConfig,
 };
 
+use solana_sdk::clock::Slot;
 #[allow(unused_imports)]
 use solana_sdk::signer::SeedDerivable;
 use solana_sdk::{
@@ -394,6 +395,36 @@ impl IntegrationTestContext {
                 }
             }
         }
+    }
+
+    // -----------------
+    // Slot
+    // -----------------
+    pub fn wait_for_next_slot_ephem(&self) -> Result<Slot> {
+        Self::wait_for_next_slot(&self.ephem_client)
+    }
+
+    pub fn wait_for_slot_ephem(&self, target_slot: Slot) -> Result<Slot> {
+        Self::wait_until_slot(&self.ephem_client, target_slot)
+    }
+
+    fn wait_for_next_slot(rpc_client: &RpcClient) -> Result<Slot> {
+        let initial_slot = rpc_client.get_slot()?;
+        Self::wait_until_slot(rpc_client, initial_slot + 1)
+    }
+
+    fn wait_until_slot(
+        rpc_client: &RpcClient,
+        target_slot: Slot,
+    ) -> Result<Slot> {
+        let slot = loop {
+            let slot = rpc_client.get_slot()?;
+            if slot >= target_slot {
+                break slot;
+            }
+            sleep(Duration::from_millis(50));
+        };
+        Ok(slot)
     }
 }
 

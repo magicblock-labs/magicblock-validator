@@ -38,7 +38,7 @@ fn restore_ledger_with_airdropped_account() {
     let pubkey = Pubkey::new_unique();
 
     // 1. Launch a validator and airdrop to an account
-    let airdrop_sig = {
+    let (airdrop_sig, slot) = {
         let config = SleipnirConfig {
             ledger: LedgerConfig {
                 reset: true,
@@ -54,14 +54,14 @@ fn restore_ledger_with_airdropped_account() {
         let ctx = IntegrationTestContext::new_ephem_only();
         let sig = expect!(ctx.airdrop_ephem(&pubkey, 1_111_111), validator);
 
-        let acc = expect!(ctx.ephem_client.get_account(&pubkey), validator);
-        assert_eq!(acc.lamports, 1_111_111);
+        let lamports =
+            expect!(ctx.fetch_ephem_account_balance(pubkey), validator);
+        assert_eq!(lamports, 1_111_111);
 
-        // Wait for a slot advance at least
-        std::thread::sleep(std::time::Duration::from_secs(1));
+        let slot = ctx.wait_for_next_slot_ephem().unwrap();
 
         validator.kill().unwrap();
-        sig
+        (sig, slot)
     };
 
     // 2. Launch another validator reusing ledger
@@ -78,10 +78,9 @@ fn restore_ledger_with_airdropped_account() {
             panic!("validator should set up correctly");
         };
 
-        // Wait for a slot advance at least
-        std::thread::sleep(std::time::Duration::from_secs(1));
-
         let ctx = IntegrationTestContext::new_ephem_only();
+        assert!(ctx.wait_for_slot_ephem(slot).is_ok());
+
         let acc = expect!(ctx.ephem_client.get_account(&pubkey), validator);
         assert_eq!(acc.lamports, 1_111_111);
 
@@ -96,7 +95,6 @@ fn restore_ledger_with_airdropped_account() {
             .ephem_client
             .get_transaction(&airdrop_sig, UiTransactionEncoding::Base64)
             .unwrap();
-
 
         eprintln!("Transaction: {:?}", tx);
         validator.kill().unwrap();
