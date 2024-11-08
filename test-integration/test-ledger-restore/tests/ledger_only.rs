@@ -4,6 +4,8 @@ use sleipnir_config::{AccountsConfig, SleipnirConfig};
 use sleipnir_config::{LedgerConfig, LifecycleMode};
 use solana_sdk::pubkey::Pubkey;
 use solana_transaction_status::UiTransactionEncoding;
+use std::path::Path;
+use std::process::Child;
 use test_ledger_restore::start_validator_with_config;
 
 macro_rules! expect {
@@ -27,31 +29,41 @@ macro_rules! expect {
     };
 }
 
-#[test]
-fn restore_ledger_with_airdropped_account() {
-    let (_, ledger_path) = resolve_tmp_dir("TMP_DIR_LEDGER");
-
+fn setup_validator(
+    ledger_path: &Path,
+    reset: bool,
+) -> (Child, IntegrationTestContext) {
     let accounts_config = AccountsConfig {
         lifecycle: LifecycleMode::Offline,
         ..Default::default()
     };
+
+    let config = SleipnirConfig {
+        ledger: LedgerConfig {
+            reset,
+            path: Some(ledger_path.display().to_string()),
+        },
+        accounts: accounts_config.clone(),
+        ..Default::default()
+    };
+    let Some(validator) = start_validator_with_config(config) else {
+        panic!("validator should set up correctly");
+    };
+
+    let ctx = IntegrationTestContext::new_ephem_only();
+    (validator, ctx)
+}
+
+#[test]
+fn restore_ledger_with_airdropped_account() {
+    let (_, ledger_path) = resolve_tmp_dir("TMP_DIR_LEDGER");
+
     let pubkey = Pubkey::new_unique();
 
     // 1. Launch a validator and airdrop to an account
     let (airdrop_sig, slot) = {
-        let config = SleipnirConfig {
-            ledger: LedgerConfig {
-                reset: true,
-                path: Some(ledger_path.display().to_string()),
-            },
-            accounts: accounts_config.clone(),
-            ..Default::default()
-        };
-        let Some(mut validator) = start_validator_with_config(config) else {
-            panic!("validator should set up correctly");
-        };
+        let (mut validator, ctx) = setup_validator(&ledger_path, true);
 
-        let ctx = IntegrationTestContext::new_ephem_only();
         let sig = expect!(ctx.airdrop_ephem(&pubkey, 1_111_111), validator);
 
         let lamports =
@@ -66,19 +78,7 @@ fn restore_ledger_with_airdropped_account() {
 
     // 2. Launch another validator reusing ledger
     {
-        let config = SleipnirConfig {
-            ledger: LedgerConfig {
-                reset: false,
-                path: Some(ledger_path.display().to_string()),
-            },
-            accounts: accounts_config,
-            ..Default::default()
-        };
-        let Some(mut validator) = start_validator_with_config(config) else {
-            panic!("validator should set up correctly");
-        };
-
-        let ctx = IntegrationTestContext::new_ephem_only();
+        let (mut validator, ctx) = setup_validator(&ledger_path, false);
         assert!(ctx.wait_for_slot_ephem(slot).is_ok());
 
         let acc = expect!(ctx.ephem_client.get_account(&pubkey), validator);
@@ -91,12 +91,6 @@ fn restore_ledger_with_airdropped_account() {
             .unwrap();
         assert!(status.is_ok());
 
-        let tx = ctx
-            .ephem_client
-            .get_transaction(&airdrop_sig, UiTransactionEncoding::Base64)
-            .unwrap();
-
-        eprintln!("Transaction: {:?}", tx);
         validator.kill().unwrap();
     }
 }
