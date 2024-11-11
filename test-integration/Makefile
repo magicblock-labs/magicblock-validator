@@ -10,3 +10,7 @@ test-force-mb:
 	FORCE_MAGIC_BLOCK_VALIDATOR=1 \
 	cargo run --package test-runner --bin run-tests
 
+test-ledger-restore:
+	cargo test --package test-ledger-restore -- --test-threads=1 --nocapture
+
+.PHONY: test, test-force-mb, test-ledger-restore

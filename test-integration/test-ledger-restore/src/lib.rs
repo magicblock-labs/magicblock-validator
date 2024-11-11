@@ -6,6 +6,7 @@ use integration_test_tools::validator::{
 use integration_test_tools::IntegrationTestContext;
 use sleipnir_config::{AccountsConfig, SleipnirConfig};
 use sleipnir_config::{LedgerConfig, LifecycleMode};
+use solana_sdk::clock::Slot;
 use std::path::Path;
 use std::process::Child;
 use std::{fs, process};
@@ -13,6 +14,9 @@ use tempfile::TempDir;
 
 pub const TMP_DIR_LEDGER: &str = "TMP_DIR_LEDGER";
 pub const TMP_DIR_CONFIG: &str = "TMP_DIR_CONFIG";
+/// The minimum of slots we should wait for before shutting down a validator that
+/// was writing the ledger.
+pub const SLOT_WRITE_DELTA: Slot = 15;
 
 /// Stringifies the config and writes it to a temporary config file.
 /// Then uses that config to start the validator.

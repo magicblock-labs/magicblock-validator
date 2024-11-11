@@ -4,17 +4,41 @@ use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Signature;
 use std::path::Path;
 use std::process::Child;
-use test_ledger_restore::{setup_offline_validator, TMP_DIR_LEDGER};
+use test_ledger_restore::{
+    setup_offline_validator, SLOT_WRITE_DELTA, TMP_DIR_LEDGER,
+};
 
 #[test]
-fn restore_ledger_with_two_airdropped_accounts() {
+fn restore_ledger_with_two_airdropped_accounts_same_slot() {
     let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
     let pubkey1 = Pubkey::new_unique();
     let pubkey2 = Pubkey::new_unique();
 
     let (mut validator, airdrop_sig1, airdrop_sig2, slot) =
-        write(&ledger_path, &pubkey1, &pubkey2);
+        write(&ledger_path, &pubkey1, &pubkey2, false);
+    validator.kill().unwrap();
+
+    let mut validator = read(
+        &ledger_path,
+        &pubkey1,
+        &pubkey2,
+        Some(&airdrop_sig1),
+        Some(&airdrop_sig2),
+        slot,
+    );
+    validator.kill().unwrap();
+}
+
+#[test]
+fn restore_ledger_with_two_airdropped_accounts_separate_slot() {
+    let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
+
+    let pubkey1 = Pubkey::new_unique();
+    let pubkey2 = Pubkey::new_unique();
+
+    let (mut validator, airdrop_sig1, airdrop_sig2, slot) =
+        write(&ledger_path, &pubkey1, &pubkey2, true);
     validator.kill().unwrap();
 
     let mut validator = read(
@@ -32,13 +56,18 @@ fn write(
     ledger_path: &Path,
     pubkey1: &Pubkey,
     pubkey2: &Pubkey,
+    separate_slot: bool,
 ) -> (Child, Signature, Signature, u64) {
     let (_, mut validator, ctx) = setup_offline_validator(ledger_path, true);
 
-    ctx.wait_for_slot_ephem(5).unwrap();
+    let mut slot = 5;
+    ctx.wait_for_slot_ephem(slot).unwrap();
     let sig1 = expect!(ctx.airdrop_ephem(pubkey1, 1_111_111), validator);
 
-    ctx.wait_for_slot_ephem(10).unwrap();
+    if separate_slot {
+        slot += 5;
+        ctx.wait_for_slot_ephem(slot).unwrap();
+    }
     let sig2 = expect!(ctx.airdrop_ephem(pubkey2, 2_222_222), validator);
 
     let lamports1 =
@@ -49,7 +78,8 @@ fn write(
         expect!(ctx.fetch_ephem_account_balance(pubkey2), validator);
     assert_eq!(lamports2, 2_222_222);
 
-    let slot = ctx.wait_for_next_slot_ephem().unwrap();
+    slot += SLOT_WRITE_DELTA;
+    let slot = ctx.wait_for_slot_ephem(slot).unwrap();
 
     (validator, sig1, sig2, slot)
 }
@@ -99,7 +129,7 @@ fn _diagnose_write() {
     let pubkey2 = Pubkey::new_unique();
 
     let (mut validator, airdrop_sig1, airdrop_sig2, slot) =
-        write(&ledger_path, &pubkey1, &pubkey2);
+        write(&ledger_path, &pubkey1, &pubkey2, true);
 
     eprintln!("{}", ledger_path.display());
     eprintln!("{}: {:?}", pubkey1, airdrop_sig1);

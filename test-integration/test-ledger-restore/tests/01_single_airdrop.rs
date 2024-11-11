@@ -4,7 +4,9 @@ use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Signature;
 use std::path::Path;
 use std::process::Child;
-use test_ledger_restore::{setup_offline_validator, TMP_DIR_LEDGER};
+use test_ledger_restore::{
+    setup_offline_validator, SLOT_WRITE_DELTA, TMP_DIR_LEDGER,
+};
 
 #[test]
 fn restore_ledger_with_airdropped_account() {
@@ -33,7 +35,7 @@ fn write_ledger(
     let lamports = expect!(ctx.fetch_ephem_account_balance(pubkey1), validator);
     assert_eq!(lamports, 1_111_111);
 
-    let slot = ctx.wait_for_next_slot_ephem().unwrap();
+    let slot = ctx.wait_for_delta_slot_ephem(SLOT_WRITE_DELTA).unwrap();
 
     validator.kill().unwrap();
     (validator, sig, slot)

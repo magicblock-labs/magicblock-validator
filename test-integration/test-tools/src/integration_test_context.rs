@@ -404,6 +404,10 @@ impl IntegrationTestContext {
         Self::wait_for_next_slot(&self.ephem_client)
     }
 
+    pub fn wait_for_delta_slot_ephem(&self, delta: Slot) -> Result<Slot> {
+        Self::wait_for_delta_slot(&self.ephem_client, delta)
+    }
+
     pub fn wait_for_slot_ephem(&self, target_slot: Slot) -> Result<Slot> {
         Self::wait_until_slot(&self.ephem_client, target_slot)
     }
@@ -411,6 +415,14 @@ impl IntegrationTestContext {
     fn wait_for_next_slot(rpc_client: &RpcClient) -> Result<Slot> {
         let initial_slot = rpc_client.get_slot()?;
         Self::wait_until_slot(rpc_client, initial_slot + 1)
+    }
+
+    fn wait_for_delta_slot(
+        rpc_client: &RpcClient,
+        delta: Slot,
+    ) -> Result<Slot> {
+        let initial_slot = rpc_client.get_slot()?;
+        Self::wait_until_slot(rpc_client, initial_slot + delta)
     }
 
     fn wait_until_slot(
