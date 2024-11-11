@@ -4489,10 +4489,14 @@ dependencies = [
 name = "sleipnir-accounts-db"
 version = "1.19.0"
 dependencies = [
+ "blake3",
  "dashmap",
+ "fs_extra",
  "log",
  "modular-bitfield",
+ "rand 0.8.5",
  "rayon",
+ "smallvec",
  "solana-accounts-db",
  "solana-frozen-abi-macro",
  "solana-measure",

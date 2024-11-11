@@ -133,7 +133,7 @@ impl AccountStorage {
         AccountStorageIter::new(self)
     }
 
-    pub(crate) fn insert(&self, slot: Slot, store: Arc<AccountStorageEntry>) {
+    pub fn insert(&self, slot: Slot, store: Arc<AccountStorageEntry>) {
         assert!(
             self.no_shrink_in_progress(),
             "self.no_shrink_in_progress(): {slot}"

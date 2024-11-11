@@ -2,7 +2,7 @@ use std::{
     ops::Deref,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc,
+        Arc, RwLock,
     },
 };
 
@@ -14,7 +14,10 @@ use solana_sdk::{
     pubkey::Pubkey,
 };
 
-use crate::accounts_index::ZeroLamport;
+use crate::{
+    accounts_hash::AccountHash, accounts_index::ZeroLamport,
+    persist::hash_account,
+};
 
 // -----------------
 // CachedAccount
@@ -23,10 +26,24 @@ pub type CachedAccount = Arc<CachedAccountInner>;
 #[derive(Debug)]
 pub struct CachedAccountInner {
     pub account: AccountSharedData,
+    // NOTE: solana-accountsdb uses a seqlock::SeqLock here which claims some perf improvements
+    // over RwLock. See: https://github.com/Amanieu/seqlock
+    hash: RwLock<Option<AccountHash>>,
     pubkey: Pubkey,
 }
 
 impl CachedAccountInner {
+    pub fn hash(&self) -> AccountHash {
+        let hash = *self.hash.read().expect("hash lock poisoned");
+        match hash {
+            Some(hash) => hash,
+            None => {
+                let hash = hash_account(&self.account, &self.pubkey);
+                *self.hash.write().expect("hash lock poisoned") = Some(hash);
+                hash
+            }
+        }
+    }
     pub fn pubkey(&self) -> &Pubkey {
         &self.pubkey
     }
@@ -99,12 +116,11 @@ impl SlotCacheInner {
         account: AccountSharedData,
     ) -> CachedAccount {
         let data_len = account.data().len() as u64;
-        // NOTE: this Arc is only needed in order to return the `CachedAccount` so that
-        // its hash can be computed in the background, see: ./accounts_db.rs write_accounts_to_cache
-        // If we end up never doing that we can optimize this code a bit even though
-        // cloning an Arc is cheap.
+        // NOTE: this Arc is needed in order to return the `CachedAccount` so that
+        // its hash can be computed in the background once and then reused later
         let item = Arc::new(CachedAccountInner {
             account,
+            hash: RwLock::<Option<AccountHash>>::default(),
             pubkey: *pubkey,
         });
         if let Some(old) = self.cache.insert(*pubkey, item.clone()) {

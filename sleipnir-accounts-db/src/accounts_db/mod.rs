@@ -1,5 +1,6 @@
 use std::{
     borrow::Cow,
+    path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
         RwLock,
@@ -23,7 +24,8 @@ use crate::{
     accounts_cache::{AccountsCache, CachedAccount},
     accounts_index::ZeroLamport,
     accounts_update_notifier_interface::AccountsUpdateNotifier,
-    errors::MatchAccountOwnerError,
+    errors::{AccountsDbError, AccountsDbResult, MatchAccountOwnerError},
+    persist::AccountsPersister,
     storable_accounts::StorableAccounts,
     verify_accounts_hash_in_background::VerifyAccountsHashInBackground,
 };
@@ -46,7 +48,6 @@ pub type StoredMetaWriteVersion = u64;
 enum StoreTo {
     /// write to cache
     Cache,
-    // NOTE: not yet supporting write to storage
 }
 
 // -----------------
@@ -88,6 +89,11 @@ pub struct AccountsDb {
     /// multiple updates to the same account in the same slot
     pub write_version: AtomicU64,
 
+    /// This perister is only set if we were provided non-empty account
+    /// paths. Otherwise we cannot persist accounts and thus will ignore
+    /// all calls to flush to storage.
+    persister: Option<AccountsPersister>,
+
     pub cluster_type: Option<ClusterType>,
 
     /// Thread pool used for par_iter
@@ -98,19 +104,27 @@ pub struct AccountsDb {
 
 impl AccountsDb {
     pub fn default_for_tests() -> Self {
-        Self::new(None, None)
+        Self::new(None, None, None)
     }
 
     pub fn new_with_config(
         cluster_type: &ClusterType,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
+        paths: Vec<PathBuf>,
     ) -> Self {
-        Self::new(Some(*cluster_type), accounts_update_notifier)
+        let accounts_persister = (!paths.is_empty())
+            .then(|| AccountsPersister::new_with_paths(paths));
+        Self::new(
+            Some(*cluster_type),
+            accounts_update_notifier,
+            accounts_persister,
+        )
     }
 
-    pub fn new(
+    fn new(
         cluster_type: Option<ClusterType>,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
+        persister: Option<AccountsPersister>,
     ) -> Self {
         let num_threads = get_thread_count();
         // rayon needs a lot of stack
@@ -121,6 +135,7 @@ impl AccountsDb {
             stats: AccountsStats::default(),
             accounts_update_notifier,
             write_version: AtomicU64::default(),
+            persister,
             thread_pool: rayon::ThreadPoolBuilder::new()
                 .num_threads(num_threads)
                 .thread_name(|i| format!("solAccounts{i:02}"))
@@ -139,6 +154,25 @@ impl AccountsDb {
     // -----------------
     // Store Operations
     // -----------------
+
+    /// Persists the current account cache to disk
+    pub fn flush_accounts_cache(&self) -> AccountsDbResult<u64> {
+        if let Some(persister) = &self.persister {
+            let slot = self.accounts_cache.current_slot();
+            let slot_cache = self.accounts_cache.slot_cache();
+            persister.flush_slot_cache(slot, &slot_cache)
+        } else {
+            Ok(0)
+        }
+    }
+
+    pub fn storage_size(&self) -> std::result::Result<u64, AccountsDbError> {
+        match self.persister {
+            Some(ref persister) => Ok(persister.storage_size()?),
+            None => Ok(0),
+        }
+    }
+
     pub fn store_cached<'a, T: ReadableAccount + Sync + ZeroLamport + 'a>(
         &self,
         accounts: impl StorableAccounts<'a, T>,
@@ -150,7 +184,7 @@ impl AccountsDb {
     fn store<'a, T: ReadableAccount + Sync + ZeroLamport + 'a>(
         &self,
         accounts: impl StorableAccounts<'a, T>,
-        store_to: &StoreTo,
+        store_to: &'a StoreTo,
         transactions: Option<&'a [Option<&'a SanitizedTransaction>]>,
         // NOTE: we don't take an UpdateIndexThreadSelection strategy here since we
         // always store in the cache at this point
@@ -182,7 +216,7 @@ impl AccountsDb {
         accounts: impl StorableAccounts<'a, T>,
         // This is `None` for cached accounts
         write_version_producer: Option<Box<dyn Iterator<Item = u64>>>,
-        store_to: &StoreTo,
+        store_to: &'a StoreTo,
         transactions: Option<&'a [Option<&'a SanitizedTransaction>]>,
     ) {
         let write_version_producer: Box<dyn Iterator<Item = u64>> =
@@ -228,7 +262,7 @@ impl AccountsDb {
         &self,
         accounts: &'c impl StorableAccounts<'b, T>,
         mut write_version_producer: P,
-        store_to: &StoreTo,
+        store_to: &'b StoreTo,
         transactions: Option<&[Option<&'a SanitizedTransaction>]>,
     ) -> Vec<AccountInfo> {
         // NOTE: left out 'calc_stored_meta' which removed accounts from readonly cache
