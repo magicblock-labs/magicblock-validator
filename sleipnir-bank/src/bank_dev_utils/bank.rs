@@ -50,12 +50,14 @@ impl Bank {
         slot_status_notifier: Option<SlotStatusNotifierArc>,
         millis_per_slot: u64,
     ) -> Self {
+        let account_paths = vec![];
         let bank = Self::new(
             genesis_config,
             runtime_config,
             None,
             None,
             false,
+            account_paths,
             accounts_update_notifier,
             slot_status_notifier,
             millis_per_slot,

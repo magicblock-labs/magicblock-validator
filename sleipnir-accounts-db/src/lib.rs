@@ -5,23 +5,35 @@ pub mod accounts_cache;
 pub mod accounts_db;
 pub mod accounts_update_notifier_interface;
 pub mod errors;
+mod persist;
 pub mod verify_accounts_hash_in_background;
-
-// mod traits;
-// pub use traits::*;
-
+pub use persist::FLUSH_ACCOUNTS_SLOT_FREQ;
 // In order to be 100% compatible with the accounts_db API we export the traits
 // from the module it expects them to be in.
+use solana_accounts_db::accounts_db::DEFAULT_FILE_SIZE;
 
 // We re-export solana_accounts_db traits until all crates use our replacement
 // of the accounts-db
-pub mod account_storage {
-    pub use solana_accounts_db::account_storage::*;
+pub mod accounts_file {
+    pub use solana_accounts_db::accounts_file::ALIGN_BOUNDARY_OFFSET;
+}
+pub mod accounts_hash {
+    pub use solana_accounts_db::accounts_hash::AccountHash;
 }
 pub mod accounts_index {
     pub use solana_accounts_db::accounts_index::{
         AccountIndex, AccountSecondaryIndexes, IsCached, ScanConfig,
         ZeroLamport,
+    };
+}
+pub mod append_vec {
+    pub use solana_accounts_db::append_vec::{
+        aligned_stored_size, STORE_META_OVERHEAD,
+    };
+}
+pub mod account_storage {
+    pub use solana_accounts_db::{
+        account_storage::*, accounts_db::AccountStorageEntry,
     };
 }
 pub mod blockhash_queue {

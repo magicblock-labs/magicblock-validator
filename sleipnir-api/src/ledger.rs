@@ -8,7 +8,10 @@ use fd_lock::{RwLock, RwLockWriteGuard};
 use log::*;
 use sleipnir_ledger::Ledger;
 
-use crate::errors::{ApiError, ApiResult};
+use crate::{
+    errors::{ApiError, ApiResult},
+    utils::fs::remove_directory_contents_if_exists,
+};
 
 pub(crate) fn init(ledger_path: PathBuf, reset: bool) -> ApiResult<Ledger> {
     if reset {
@@ -29,23 +32,6 @@ pub(crate) fn init(ledger_path: PathBuf, reset: bool) -> ApiResult<Ledger> {
     fs::create_dir_all(&ledger_path)?;
 
     Ok(Ledger::open(ledger_path.as_path())?)
-}
-
-fn remove_directory_contents_if_exists(
-    dir: &Path,
-) -> Result<(), std::io::Error> {
-    if !dir.exists() {
-        return Ok(());
-    }
-    for entry in fs::read_dir(dir)? {
-        let entry = entry?;
-        if entry.metadata()?.is_dir() {
-            fs::remove_dir_all(entry.path())?
-        } else {
-            fs::remove_file(entry.path())?
-        }
-    }
-    Ok(())
 }
 
 pub fn ledger_lockfile(ledger_path: &Path) -> RwLock<File> {

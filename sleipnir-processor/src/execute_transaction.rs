@@ -1,4 +1,4 @@
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 use lazy_static::lazy_static;
 use sleipnir_bank::bank::Bank;
@@ -24,6 +24,10 @@ pub fn execute_legacy_transaction(
 
 lazy_static! {
     static ref TRANSACTION_INDEX_MUTEX: Mutex<usize> = Mutex::new(0);
+}
+
+pub fn lock_transactions() -> MutexGuard<'static, usize> {
+    TRANSACTION_INDEX_MUTEX.lock().unwrap()
 }
 
 pub fn execute_sanitized_transaction(

@@ -21,12 +21,14 @@ pub fn bank_for_tests_with_identity(
     identity_id: Pubkey,
 ) -> Bank {
     let runtime_config = Arc::new(RuntimeConfig::default());
+    let accounts_paths = vec![];
     let bank = Bank::new(
         genesis_config,
         runtime_config,
         None,
         None,
         false,
+        accounts_paths,
         accounts_update_notifier,
         slot_status_notifier,
         millis_per_slot,
