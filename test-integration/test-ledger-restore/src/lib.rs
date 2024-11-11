@@ -3,8 +3,9 @@ use integration_test_tools::validator::{
     resolve_workspace_dir, start_magic_block_validator_with_config,
     TestRunnerPaths,
 };
+use integration_test_tools::workspace_paths::path_relative_to_manifest;
 use integration_test_tools::IntegrationTestContext;
-use sleipnir_config::{AccountsConfig, SleipnirConfig};
+use sleipnir_config::{AccountsConfig, ProgramConfig, SleipnirConfig};
 use sleipnir_config::{LedgerConfig, LifecycleMode};
 use solana_sdk::clock::Slot;
 use std::path::Path;
@@ -17,6 +18,8 @@ pub const TMP_DIR_CONFIG: &str = "TMP_DIR_CONFIG";
 /// The minimum of slots we should wait for before shutting down a validator that
 /// was writing the ledger.
 pub const SLOT_WRITE_DELTA: Slot = 15;
+
+pub const SOLX_ID: &str = "SoLXmnP9JvL6vJ7TN1VqtTxqsc2izmPfF9CsMDEuRzJ";
 
 /// Stringifies the config and writes it to a temporary config file.
 /// Then uses that config to start the validator.
@@ -47,6 +50,7 @@ pub fn start_validator_with_config(
 
 pub fn setup_offline_validator(
     ledger_path: &Path,
+    programs: Option<Vec<ProgramConfig>>,
     reset: bool,
 ) -> (TempDir, Child, IntegrationTestContext) {
     let accounts_config = AccountsConfig {
@@ -54,12 +58,26 @@ pub fn setup_offline_validator(
         ..Default::default()
     };
 
+    let programs = programs
+        .map(|programs| {
+            let mut resolved_programs = vec![];
+            for program in programs.iter() {
+                let p = path_relative_to_manifest(&program.path);
+                resolved_programs.push(ProgramConfig {
+                    id: program.id,
+                    path: p,
+                });
+            }
+            resolved_programs
+        });
+
     let config = SleipnirConfig {
         ledger: LedgerConfig {
             reset,
             path: Some(ledger_path.display().to_string()),
         },
         accounts: accounts_config.clone(),
+        programs: programs.unwrap_or_default(),
         ..Default::default()
     };
     let (default_tmpdir_config, Some(validator)) =

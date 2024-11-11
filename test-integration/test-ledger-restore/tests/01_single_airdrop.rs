@@ -28,7 +28,7 @@ fn write_ledger(
     pubkey1: &Pubkey,
 ) -> (Child, Signature, u64) {
     // Launch a validator and airdrop to an account
-    let (_, mut validator, ctx) = setup_offline_validator(ledger_path, true);
+    let (_, mut validator, ctx) = setup_offline_validator(ledger_path, None, true);
 
     let sig = expect!(ctx.airdrop_ephem(pubkey1, 1_111_111), validator);
 
@@ -48,7 +48,7 @@ fn read_ledger(
     slot: u64,
 ) -> Child {
     // Launch another validator reusing ledger
-    let (_, mut validator, ctx) = setup_offline_validator(ledger_path, false);
+    let (_, mut validator, ctx) = setup_offline_validator(ledger_path, None, false);
     assert!(ctx.wait_for_slot_ephem(slot).is_ok());
 
     let acc = expect!(ctx.ephem_client.get_account(pubkey1), validator);
