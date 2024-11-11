@@ -7,9 +7,10 @@ use solana_rpc_client_api::{
     client_error::ErrorKind as ClientErrorKind, config::RpcTransactionConfig,
 };
 
-use solana_sdk::clock::Slot;
+use solana_sdk::signature::Keypair;
 #[allow(unused_imports)]
 use solana_sdk::signer::SeedDerivable;
+use solana_sdk::{clock::Slot, transaction::Transaction};
 use solana_sdk::{
     commitment_config::CommitmentConfig, hash::Hash, pubkey::Pubkey,
     signature::Signature,
@@ -395,6 +396,42 @@ impl IntegrationTestContext {
                 }
             }
         }
+    }
+
+    pub fn send_and_confirm_transaction_ephem(
+        &self,
+        tx: &mut Transaction,
+        signers: &[&Keypair],
+    ) -> Result<(Signature, bool), client_error::Error> {
+        Self::send_and_confirm_transaction(&self.ephem_client, tx, signers)
+    }
+
+    pub fn send_and_confirm_transaction_chain(
+        &self,
+        tx: &mut Transaction,
+        signers: &[&Keypair],
+    ) -> Result<(Signature, bool), client_error::Error> {
+        Self::send_and_confirm_transaction(
+            self.try_chain_client().unwrap(),
+            tx,
+            signers,
+        )
+    }
+
+    pub fn send_and_confirm_transaction(
+        rpc_client: &RpcClient,
+        tx: &mut Transaction,
+        signers: &[&Keypair],
+    ) -> Result<(Signature, bool), client_error::Error> {
+        let blockhash = rpc_client.get_latest_blockhash()?;
+        tx.sign(signers, blockhash);
+        let sig = rpc_client.send_transaction(tx)?;
+        Self::confirm_transaction(
+            &sig,
+            rpc_client,
+            CommitmentConfig::confirmed(),
+        )
+        .map(|confirmed| (sig, confirmed))
     }
 
     // -----------------

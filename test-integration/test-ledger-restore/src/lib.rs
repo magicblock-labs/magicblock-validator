@@ -8,6 +8,8 @@ use integration_test_tools::IntegrationTestContext;
 use sleipnir_config::{AccountsConfig, ProgramConfig, SleipnirConfig};
 use sleipnir_config::{LedgerConfig, LifecycleMode};
 use solana_sdk::clock::Slot;
+use solana_sdk::pubkey;
+use solana_sdk::pubkey::Pubkey;
 use std::path::Path;
 use std::process::Child;
 use std::{fs, process};
@@ -20,6 +22,8 @@ pub const TMP_DIR_CONFIG: &str = "TMP_DIR_CONFIG";
 pub const SLOT_WRITE_DELTA: Slot = 15;
 
 pub const SOLX_ID: &str = "SoLXmnP9JvL6vJ7TN1VqtTxqsc2izmPfF9CsMDEuRzJ";
+pub const SOLX_PUBKEY: Pubkey =
+    pubkey!("SoLXmnP9JvL6vJ7TN1VqtTxqsc2izmPfF9CsMDEuRzJ");
 
 /// Stringifies the config and writes it to a temporary config file.
 /// Then uses that config to start the validator.
@@ -58,18 +62,17 @@ pub fn setup_offline_validator(
         ..Default::default()
     };
 
-    let programs = programs
-        .map(|programs| {
-            let mut resolved_programs = vec![];
-            for program in programs.iter() {
-                let p = path_relative_to_manifest(&program.path);
-                resolved_programs.push(ProgramConfig {
-                    id: program.id,
-                    path: p,
-                });
-            }
-            resolved_programs
-        });
+    let programs = programs.map(|programs| {
+        let mut resolved_programs = vec![];
+        for program in programs.iter() {
+            let p = path_relative_to_manifest(&program.path);
+            resolved_programs.push(ProgramConfig {
+                id: program.id,
+                path: p,
+            });
+        }
+        resolved_programs
+    });
 
     let config = SleipnirConfig {
         ledger: LedgerConfig {
