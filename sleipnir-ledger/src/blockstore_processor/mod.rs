@@ -80,8 +80,6 @@ pub fn process_ledger(ledger: &Ledger, bank: &Bank) {
         );
         if !prepared_block.transactions.is_empty() {
             info!("Processing block: {:#?}", prepared_block);
-        } else {
-            info!("{}", prepared_block.blockhash);
         }
         for tx in prepared_block.transactions.into_iter() {
             error!("Processing transaction: {:?}", tx);
@@ -97,17 +95,23 @@ pub fn process_ledger(ledger: &Ledger, bank: &Bank) {
             };
         }
         if !block_txs.is_empty() {
-            let batch = bank.prepare_sanitized_batch(&block_txs);
-
-            let mut timings = ExecuteTimings::default();
-            let (results, _) = bank.load_execute_and_commit_transactions(
-                &batch,
-                false,
-                TransactionExecutionRecordingOpts::recording_logs(),
-                &mut timings,
-                None,
-            );
-            info!("Results: {:#?}", results.execution_results);
+            // NOTE: ideally we would run all transactions in a single batch, but the
+            // flawed account lock mechanism prevents this currently.
+            // Until we revamp this transaction execution we execute each transaction
+            // in its own batch.
+            for tx in block_txs {
+                let mut timings = ExecuteTimings::default();
+                let batch = [tx];
+                let batch = bank.prepare_sanitized_batch(&batch);
+                let (results, _) = bank.load_execute_and_commit_transactions(
+                    &batch,
+                    false,
+                    TransactionExecutionRecordingOpts::recording_logs(),
+                    &mut timings,
+                    None,
+                );
+                info!("Results: {:#?}", results.execution_results);
+            }
         }
     });
 }
