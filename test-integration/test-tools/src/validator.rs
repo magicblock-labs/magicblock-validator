@@ -77,3 +77,31 @@ pub fn resolve_workspace_dir() -> PathBuf {
         .unwrap()
         .to_path_buf()
 }
+
+// -----------------
+// Utilities
+// -----------------
+
+/// Unwraps the provided result and ensures to kill the validator before panicking
+/// if the result was an error
+#[macro_export]
+macro_rules! expect {
+    ($res:expr, $msg:expr, $validator:ident) => {
+        match $res {
+            Ok(val) => val,
+            Err(e) => {
+                $validator.kill().unwrap();
+                panic!("{}: {:?}", $msg, e);
+            }
+        }
+    };
+    ($res:expr, $validator:ident) => {
+        match $res {
+            Ok(val) => val,
+            Err(e) => {
+                $validator.kill().unwrap();
+                panic!("{:?}", e);
+            }
+        }
+    };
+}

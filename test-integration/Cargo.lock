@@ -4122,6 +4122,7 @@ dependencies = [
  "sleipnir-config",
  "solana-sdk 1.17.22",
  "solana-transaction-status",
+ "tempfile",
 ]
 
 [[package]]
