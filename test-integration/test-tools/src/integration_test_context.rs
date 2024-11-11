@@ -192,10 +192,10 @@ impl IntegrationTestContext {
 
     pub fn fetch_ephem_account_balance(
         &self,
-        pubkey: Pubkey,
+        pubkey: &Pubkey,
     ) -> anyhow::Result<u64> {
         self.ephem_client
-            .get_balance_with_commitment(&pubkey, self.commitment)
+            .get_balance_with_commitment(pubkey, self.commitment)
             .map(|balance| balance.value)
             .with_context(|| {
                 format!(
@@ -207,10 +207,10 @@ impl IntegrationTestContext {
 
     pub fn fetch_chain_account_balance(
         &self,
-        pubkey: Pubkey,
+        pubkey: &Pubkey,
     ) -> anyhow::Result<u64> {
         self.try_chain_client()?
-            .get_balance_with_commitment(&pubkey, self.commitment)
+            .get_balance_with_commitment(pubkey, self.commitment)
             .map(|balance| balance.value)
             .with_context(|| {
                 format!(
