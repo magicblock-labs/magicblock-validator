@@ -1,6 +1,6 @@
 use std::{
     net::SocketAddr,
-    path::PathBuf,
+    path::{Path, PathBuf},
     process,
     sync::{
         atomic::{AtomicBool, Ordering},
@@ -55,6 +55,7 @@ use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
+    accounts::create_accounts_run_and_snapshot_dirs,
     errors::{ApiError, ApiResult},
     external_config::try_convert_accounts_config,
     fund_account::{
@@ -147,18 +148,20 @@ impl MagicValidator {
             ..
         } = create_genesis_config_with_leader(u64::MAX, &validator_pubkey);
 
+        let ledger = Self::init_ledger(
+            config.validator_config.ledger.path.as_ref(),
+            config.validator_config.ledger.reset,
+        )?;
+        let accounts_paths = Self::init_accounts_paths(ledger.ledger_path())?;
+
         let exit = Arc::<AtomicBool>::default();
         let bank = Self::init_bank(
             &geyser_service,
             &genesis_config,
             config.validator_config.validator.millis_per_slot,
             validator_pubkey,
+            accounts_paths,
         );
-
-        let ledger = Self::init_ledger(
-            config.validator_config.ledger.path.as_ref(),
-            config.validator_config.ledger.reset,
-        )?;
 
         fund_validator_identity(&bank, &validator_pubkey);
         fund_magic_context(&bank);
@@ -191,6 +194,7 @@ impl MagicValidator {
                     metrics_config.system_metrics_tick_interval_secs,
                 ),
                 &ledger,
+                &bank,
                 token.clone(),
             );
 
@@ -318,6 +322,7 @@ impl MagicValidator {
         genesis_config: &GenesisConfig,
         millis_per_slot: u64,
         validator_pubkey: Pubkey,
+        accounts_paths: Vec<PathBuf>,
     ) -> Arc<Bank> {
         let runtime_config = Default::default();
         let bank = Bank::new(
@@ -326,6 +331,7 @@ impl MagicValidator {
             None,
             None,
             false,
+            accounts_paths,
             geyser_service.get_accounts_update_notifier(),
             geyser_service.get_slot_status_notifier(),
             millis_per_slot,
@@ -418,6 +424,20 @@ impl MagicValidator {
         };
         let ledger = ledger::init(ledger_path, reset)?;
         Ok(Arc::new(ledger))
+    }
+
+    fn init_accounts_paths(ledger_path: &Path) -> ApiResult<Vec<PathBuf>> {
+        let accounts_dir = ledger_path
+            .parent()
+            .ok_or_else(|| {
+                ApiError::LedgerPathIsMissingParent(
+                    ledger_path.to_path_buf().display().to_string(),
+                )
+            })?
+            .join("accounts");
+        let (run_path, _snapshot_path) =
+            create_accounts_run_and_snapshot_dirs(&accounts_dir)?;
+        Ok(vec![run_path])
     }
 
     fn init_transaction_listener(

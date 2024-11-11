@@ -5,6 +5,7 @@
 use std::{
     borrow::Cow,
     collections::HashSet,
+    path::PathBuf,
     slice,
     sync::{
         atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering},
@@ -13,6 +14,26 @@ use std::{
     time::Duration,
 };
 
+use crate::{
+    bank_helpers::{
+        calculate_data_size_delta, get_epoch_secs,
+        inherit_specially_retained_account_fields,
+    },
+    bank_rc::BankRc,
+    builtins::{BuiltinPrototype, BUILTINS},
+    slot_status_notifier_interface::SlotStatusNotifierArc,
+    status_cache::StatusCache,
+    transaction_batch::TransactionBatch,
+    transaction_logs::{
+        TransactionLogCollector, TransactionLogCollectorConfig,
+        TransactionLogCollectorFilter, TransactionLogInfo,
+    },
+    transaction_results::{
+        LoadAndExecuteTransactionsOutput, TransactionBalances,
+        TransactionBalancesSet,
+    },
+    transaction_simulation::TransactionSimulationResult,
+};
 use log::{debug, info, trace};
 use sleipnir_accounts_db::{
     accounts::{Accounts, TransactionLoadResult},
@@ -20,6 +41,7 @@ use sleipnir_accounts_db::{
     accounts_index::{ScanConfig, ZeroLamport},
     accounts_update_notifier_interface::AccountsUpdateNotifier,
     blockhash_queue::BlockhashQueue,
+    errors::AccountsDbResult,
     storable_accounts::StorableAccounts,
     transaction_results::{
         TransactionExecutionDetails, TransactionExecutionResult,
@@ -91,27 +113,6 @@ use solana_svm::{
     },
 };
 use solana_system_program::{get_system_account_kind, SystemAccountKind};
-
-use crate::{
-    bank_helpers::{
-        calculate_data_size_delta, get_epoch_secs,
-        inherit_specially_retained_account_fields,
-    },
-    bank_rc::BankRc,
-    builtins::{BuiltinPrototype, BUILTINS},
-    slot_status_notifier_interface::SlotStatusNotifierArc,
-    status_cache::StatusCache,
-    transaction_batch::TransactionBatch,
-    transaction_logs::{
-        TransactionLogCollector, TransactionLogCollectorConfig,
-        TransactionLogCollectorFilter, TransactionLogInfo,
-    },
-    transaction_results::{
-        LoadAndExecuteTransactionsOutput, TransactionBalances,
-        TransactionBalancesSet,
-    },
-    transaction_simulation::TransactionSimulationResult,
-};
 
 pub type BankStatusCache = StatusCache<Result<()>>;
 
@@ -380,6 +381,7 @@ impl Bank {
         debug_keys: Option<Arc<HashSet<Pubkey>>>,
         additional_builtins: Option<&[BuiltinPrototype]>,
         debug_do_not_add_builtins: bool,
+        accounts_paths: Vec<PathBuf>,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
         slot_status_notifier: Option<SlotStatusNotifierArc>,
         millis_per_slot: u64,
@@ -388,6 +390,7 @@ impl Bank {
         let accounts_db = AccountsDb::new_with_config(
             &genesis_config.cluster_type,
             accounts_update_notifier,
+            accounts_paths,
         );
 
         let accounts = Accounts::new(Arc::new(accounts_db));
@@ -724,7 +727,7 @@ impl Bank {
         //          in solana the blockhash is set to the hash of the slot that is finalized
         self.update_slot_hashes(prev_slot, current_hash);
 
-        // 9. Update slot history
+        // 10. Update slot history
         self.update_slot_history(prev_slot);
 
         next_slot
@@ -953,6 +956,10 @@ impl Bank {
             old_account_data_size,
             new_account.data().len(),
         );
+    }
+
+    pub fn flush_accounts_cache(&self) -> AccountsDbResult<u64> {
+        self.rc.accounts.accounts_db.flush_accounts_cache()
     }
 
     // -----------------
@@ -2630,6 +2637,14 @@ impl Bank {
     /// Return the total capitalization of the Bank
     pub fn capitalization(&self) -> u64 {
         self.capitalization.load(Ordering::Relaxed)
+    }
+
+    pub fn accounts_db_storage_size(&self) -> AccountsDbResult<u64> {
+        self.accounts_db().storage_size()
+    }
+
+    fn accounts_db(&self) -> &AccountsDb {
+        self.rc.accounts.accounts_db.as_ref()
     }
 
     // -----------------
