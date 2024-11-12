@@ -52,7 +52,7 @@ fn write(
         validator
     );
 
-    // 2. Create post transaction
+    // 2. Create and send post transaction
     let send_post_ix_args = [
         0x84, 0xf5, 0xee, 0x1d, 0xf3, 0x2a, 0xad, 0x36, 0x0b, 0x00, 0x00, 0x00,
         0x68, 0x65, 0x6c, 0x6c, 0x6f, 0x20, 0x77, 0x6f, 0x72, 0x6c, 0x64,
@@ -68,10 +68,12 @@ fn write(
     );
     let mut tx = Transaction::new_with_payer(&[ix], Some(&sender.pubkey()));
     let signers = &[post, sender];
-    let (sig, _confirmed) = expect!(
+    let (sig, confirmed) = expect!(
         ctx.send_and_confirm_transaction_ephem(&mut tx, signers),
         validator
     );
+
+    assert!(confirmed, "Should confirm transaction");
 
     let slot = ctx.wait_for_delta_slot_ephem(SLOT_WRITE_DELTA).unwrap();
 
@@ -96,4 +98,28 @@ fn read(
     eprintln!("Post: {:#?}", post_acc);
 
     validator
+}
+
+// -----------------
+// Diagnose
+// -----------------
+// Uncomment either of the below to run ledger write/read in isolation and
+// optionally keep the validator running after reading the ledger
+// 9r7Z9mZFP5GqVqjPg4z2s48Cxhr6tLtXMFfcqfAm5wSv -> 59SrSAKitdXcryYwPZB7FdPkoVH2XsY9SHgRTtYCpvcu
+// U9zkLd8g7MdPH7ToRCb1eyczjuktcvvBKMbujJrvBUXYnpSFTbuZCbePWrP4659ygWi3zwn7YMc6UUSo2VWM8Fo
+#[test]
+fn _solx_single_diagnose_write() {
+    let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
+
+    let sender = Keypair::new();
+    let post = Keypair::new();
+
+    let (mut validator, sig, slot) = write(&ledger_path, &sender, &post);
+
+    eprintln!("{}", ledger_path.display());
+    eprintln!("{} -> {}", sender.pubkey(), post.pubkey());
+    eprintln!("{:?}", sig);
+    eprintln!("slot: {}", slot);
+
+    validator.kill().unwrap();
 }
