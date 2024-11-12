@@ -6,7 +6,7 @@ use solana_sdk::native_token::LAMPORTS_PER_SOL;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Keypair;
 use solana_sdk::signature::Signature;
-use solana_sdk::signer::{SeedDerivable, Signer};
+use solana_sdk::signer::Signer;
 use solana_sdk::system_program;
 use solana_sdk::transaction::Transaction;
 use std::path::Path;
@@ -31,7 +31,7 @@ fn restore_ledger_with_solx_post() {
     let sender = sender_keypair();
     let post = post_keypair();
 
-    let (mut validator, sig, slot) = write(&ledger_path, &sender, &post);
+    let (mut validator, _sig, slot) = write(&ledger_path, &sender, &post);
     validator.kill().unwrap();
 
     let mut validator =
@@ -153,7 +153,7 @@ fn _solx_single_diagnose_read() {
     let sender = sender_keypair();
     let post = post_keypair();
 
-    let mut validator =
+    let mut _validator =
         read(&ledger_path, &sender.pubkey(), &post.pubkey(), 20);
 
     eprintln!("{}", ledger_path.display());
