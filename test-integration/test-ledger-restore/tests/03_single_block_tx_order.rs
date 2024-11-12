@@ -149,11 +149,9 @@ fn read(ledger_path: &Path, keypairs: &[Keypair], slot: u64) -> Child {
         setup_offline_validator(ledger_path, None, Some(SLOT_MS), false);
     assert!(ctx.wait_for_slot_ephem(slot).is_ok());
 
-    for i in 0..keypairs.len() {
-        let acc = expect!(
-            ctx.ephem_client.get_account(&keypairs[i].pubkey()),
-            validator
-        );
+    for keypair in keypairs {
+        let acc =
+            expect!(ctx.ephem_client.get_account(&keypair.pubkey()), validator);
         // Since we don't collect fees at this point each account ends up
         // with exactly 1 SOL.
         // In the future we need to adapt this to allow for a range, i.e.
