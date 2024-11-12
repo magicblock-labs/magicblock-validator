@@ -6,7 +6,6 @@ use sleipnir_bank::bank::{Bank, TransactionExecutionRecordingOpts};
 use solana_program_runtime::timings::ExecuteTimings;
 use solana_sdk::clock::UnixTimestamp;
 use solana_sdk::hash::Hash;
-use solana_sdk::timing::timestamp;
 use solana_sdk::transaction::{
     TransactionVerificationMode, VersionedTransaction,
 };
@@ -64,7 +63,6 @@ fn iter_blocks_with_transaction(
 }
 
 pub fn process_ledger(ledger: &Ledger, bank: &Bank) {
-    error!("-------------- Processing");
     iter_blocks_with_transaction(ledger, |prepared_block| {
         let mut block_txs = vec![];
         let Some(timestamp) = prepared_block.block_time else {
@@ -81,7 +79,7 @@ pub fn process_ledger(ledger: &Ledger, bank: &Bank) {
         if !prepared_block.transactions.is_empty() {
             info!("Processing block: {:#?}", prepared_block);
         }
-        for tx in prepared_block.transactions.into_iter() {
+        for tx in prepared_block.transactions.into_iter().rev() {
             error!("Processing transaction: {:?}", tx);
             match bank
                 .verify_transaction(tx, TransactionVerificationMode::HashOnly)
