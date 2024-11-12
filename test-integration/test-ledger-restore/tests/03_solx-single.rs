@@ -86,8 +86,9 @@ fn read(
     post: &Pubkey,
     slot: u64,
 ) -> Child {
+    let programs = get_programs();
     let (_, mut validator, ctx) =
-        setup_offline_validator(ledger_path, None, false);
+        setup_offline_validator(ledger_path, Some(programs), false);
 
     assert!(ctx.wait_for_slot_ephem(slot).is_ok());
 
