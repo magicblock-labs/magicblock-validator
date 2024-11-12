@@ -279,8 +279,6 @@ impl MagicValidator {
         );
         init_validator_authority(identity_keypair);
 
-        process_ledger(&ledger, &bank);
-
         // Make sure we process the ledger before we're open to handle
         // transactions via RPC
         let rpc_service = Self::init_json_rpc_service(
@@ -483,6 +481,8 @@ impl MagicValidator {
     // Start/Stop
     // -----------------
     pub async fn start(&mut self) -> ApiResult<()> {
+        process_ledger(&self.ledger, &self.bank);
+
         // NOE: this only run only once, i.e. at creation time
         self.transaction_listener.run(true);
 
