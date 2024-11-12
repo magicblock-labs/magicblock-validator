@@ -52,7 +52,7 @@ async fn test_devnet_fetch_clock_multiple_times() {
     let result_clock1 = future_clock1.await;
     let result_clock2 = future_clock2.await;
     // Wait for a few slots to happen on-chain (for the clock to change value)
-    sleep(Duration::from_millis(1000)).await;
+    sleep(Duration::from_millis(2000)).await;
     // Start to fetch the clock again, it should have changed on chain (and the first fetch should have finished)
     let future_clock3 = client.fetch_account_chain_snapshot(&key_sysvar_clock);
     let future_clock4 = client.fetch_account_chain_snapshot(&key_sysvar_clock);

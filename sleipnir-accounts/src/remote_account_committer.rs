@@ -97,10 +97,11 @@ impl AccountCommitter for RemoteAccountCommitter {
                 slot: *slot,
                 allow_undelegation: undelegation_request.is_some(),
                 data: account_data.data().to_vec(),
+                lamports: account_data.lamports(),
             };
             let commit_ix = commit_state(committer, *pubkey, commit_args);
 
-            let finalize_ix = finalize(committer, *pubkey, committer);
+            let finalize_ix = finalize(committer, *pubkey);
             ixs.extend(vec![commit_ix, finalize_ix]);
             if let Some(UndelegationRequest { owner }) = undelegation_request {
                 let undelegate_ix = undelegate(
