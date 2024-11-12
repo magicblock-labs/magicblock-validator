@@ -58,7 +58,8 @@ fn write(
     pubkey2: &Pubkey,
     separate_slot: bool,
 ) -> (Child, Signature, Signature, u64) {
-    let (_, mut validator, ctx) = setup_offline_validator(ledger_path, None, true);
+    let (_, mut validator, ctx) =
+        setup_offline_validator(ledger_path, None, None, true);
 
     let mut slot = 5;
     ctx.wait_for_slot_ephem(slot).unwrap();
@@ -92,7 +93,8 @@ fn read(
     airdrop_sig2: Option<&Signature>,
     slot: u64,
 ) -> Child {
-    let (_, mut validator, ctx) = setup_offline_validator(ledger_path, None, false);
+    let (_, mut validator, ctx) =
+        setup_offline_validator(ledger_path, None, None, false);
     assert!(ctx.wait_for_slot_ephem(slot).is_ok());
 
     let acc1 = expect!(ctx.ephem_client.get_account(pubkey1), validator);
@@ -151,5 +153,5 @@ fn _diagnose_read() {
     eprintln!("{}", pubkey2);
 
     let (_, mut _validator, _ctx) =
-        setup_offline_validator(&ledger_path, None, false);
+        setup_offline_validator(&ledger_path, None, None, false);
 }

@@ -5,7 +5,9 @@ use integration_test_tools::validator::{
 };
 use integration_test_tools::workspace_paths::path_relative_to_manifest;
 use integration_test_tools::IntegrationTestContext;
-use sleipnir_config::{AccountsConfig, ProgramConfig, SleipnirConfig};
+use sleipnir_config::{
+    AccountsConfig, ProgramConfig, SleipnirConfig, ValidatorConfig,
+};
 use sleipnir_config::{LedgerConfig, LifecycleMode};
 use solana_sdk::clock::Slot;
 use solana_sdk::pubkey;
@@ -55,12 +57,20 @@ pub fn start_validator_with_config(
 pub fn setup_offline_validator(
     ledger_path: &Path,
     programs: Option<Vec<ProgramConfig>>,
+    millis_per_slot: Option<u64>,
     reset: bool,
 ) -> (TempDir, Child, IntegrationTestContext) {
     let accounts_config = AccountsConfig {
         lifecycle: LifecycleMode::Offline,
         ..Default::default()
     };
+
+    let validator_config = millis_per_slot
+        .map(|ms| ValidatorConfig {
+            millis_per_slot: ms,
+            ..Default::default()
+        })
+        .unwrap_or_default();
 
     let programs = programs.map(|programs| {
         let mut resolved_programs = vec![];
@@ -81,6 +91,7 @@ pub fn setup_offline_validator(
         },
         accounts: accounts_config.clone(),
         programs: programs.unwrap_or_default(),
+        validator: validator_config,
         ..Default::default()
     };
     let (default_tmpdir_config, Some(validator)) =

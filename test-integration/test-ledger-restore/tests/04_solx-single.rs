@@ -6,7 +6,7 @@ use solana_sdk::native_token::LAMPORTS_PER_SOL;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Keypair;
 use solana_sdk::signature::Signature;
-use solana_sdk::signer::Signer;
+use solana_sdk::signer::{SeedDerivable, Signer};
 use solana_sdk::system_program;
 use solana_sdk::transaction::Transaction;
 use std::path::Path;
@@ -16,11 +16,20 @@ use test_ledger_restore::{
     TMP_DIR_LEDGER,
 };
 
+const SLOT_MS: u64 = 150;
+
+fn sender_keypair() -> Keypair {
+    Keypair::from_base58_string("M8CcAuQHVQj91sKW68prBjNzvhEVjTj1ADMDej4KJTuwF4ckmibCmX3U6XGTMfGX5g7Xd43EXSNcjPkUWWcJpWA")
+}
+fn post_keypair() -> Keypair {
+    Keypair::from_base58_string("j5cwGmb19aNqc1Mc1n2xUSvZkG6vxjsYPHhLJC6RYmQbS1ggWeEU57jCnh5QwbrTzaCnDLE4UaS2wTVBWYyq5KT")
+}
+
 #[test]
 fn restore_ledger_with_solx_post() {
     let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
-    let sender = Keypair::new();
-    let post = Keypair::new();
+    let sender = sender_keypair();
+    let post = post_keypair();
 
     let (mut validator, sig, slot) = write(&ledger_path, &sender, &post);
     validator.kill().unwrap();
@@ -43,8 +52,14 @@ fn write(
     post: &Keypair,
 ) -> (Child, Signature, u64) {
     let programs = get_programs();
-    let (_, mut validator, ctx) =
-        setup_offline_validator(ledger_path, Some(programs), true);
+    // Choosing slower slots in order to have the airdrop + transaction occur in the
+    // same slot and ensure that they are replayed in the correct order
+    let (_, mut validator, ctx) = setup_offline_validator(
+        ledger_path,
+        Some(programs),
+        Some(SLOT_MS),
+        true,
+    );
 
     // 1. Airdrop to sender
     expect!(
@@ -61,8 +76,8 @@ fn write(
         SOLX_PUBKEY,
         &send_post_ix_args,
         vec![
-            AccountMeta::new(sender.pubkey(), true),
             AccountMeta::new(post.pubkey(), true),
+            AccountMeta::new(sender.pubkey(), true),
             AccountMeta::new_readonly(system_program::id(), false),
         ],
     );
@@ -87,15 +102,19 @@ fn read(
     slot: u64,
 ) -> Child {
     let programs = get_programs();
-    let (_, mut validator, ctx) =
-        setup_offline_validator(ledger_path, Some(programs), false);
+    let (_, mut validator, ctx) = setup_offline_validator(
+        ledger_path,
+        Some(programs),
+        Some(SLOT_MS),
+        false,
+    );
 
     assert!(ctx.wait_for_slot_ephem(slot).is_ok());
 
     let sender_acc = expect!(ctx.ephem_client.get_account(sender), validator);
     let post_acc = expect!(ctx.ephem_client.get_account(post), validator);
 
-    eprintln!("Sender: {:?}", sender_acc);
+    eprintln!("Sender: {:#?}", sender_acc);
     eprintln!("Post: {:#?}", post_acc);
 
     validator
@@ -112,8 +131,10 @@ fn read(
 fn _solx_single_diagnose_write() {
     let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
-    let sender = Keypair::new();
-    let post = Keypair::new();
+    let sender = sender_keypair();
+    let post = post_keypair();
+    eprintln!("{}", sender.to_base58_string());
+    eprintln!("{}", post.to_base58_string());
 
     let (mut validator, sig, slot) = write(&ledger_path, &sender, &post);
 
@@ -123,4 +144,20 @@ fn _solx_single_diagnose_write() {
     eprintln!("slot: {}", slot);
 
     validator.kill().unwrap();
+}
+
+#[test]
+fn _solx_single_diagnose_read() {
+    let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
+
+    let sender = sender_keypair();
+    let post = post_keypair();
+
+    let mut validator =
+        read(&ledger_path, &sender.pubkey(), &post.pubkey(), 20);
+
+    eprintln!("{}", ledger_path.display());
+    eprintln!("{} -> {}", sender.pubkey(), post.pubkey());
+
+    // validator.kill().unwrap();
 }
