@@ -11,7 +11,7 @@ use test_ledger_restore::{setup_offline_validator, TMP_DIR_LEDGER};
 const SLOT_MS: u64 = 150;
 
 #[test]
-fn restore_ledger_with_multiple_dependent_transactions() {
+fn restore_ledger_with_multiple_dependent_transactions_same_slot() {
     let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
     let keypairs = vec![
@@ -22,14 +22,37 @@ fn restore_ledger_with_multiple_dependent_transactions() {
         Keypair::new(),
     ];
 
-    let (mut validator, slot) = write(&ledger_path, &keypairs);
+    let (mut validator, slot) = write(&ledger_path, &keypairs, false);
     validator.kill().unwrap();
 
     let mut validator = read(&ledger_path, &keypairs, slot);
     validator.kill().unwrap();
 }
 
-fn write(ledger_path: &Path, keypairs: &[Keypair]) -> (Child, u64) {
+#[test]
+fn restore_ledger_with_multiple_dependent_transactions_separate_slot() {
+    let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
+
+    let keypairs = vec![
+        Keypair::new(),
+        Keypair::new(),
+        Keypair::new(),
+        Keypair::new(),
+        Keypair::new(),
+    ];
+
+    let (mut validator, slot) = write(&ledger_path, &keypairs, true);
+    validator.kill().unwrap();
+
+    let mut validator = read(&ledger_path, &keypairs, slot);
+    validator.kill().unwrap();
+}
+
+fn write(
+    ledger_path: &Path,
+    keypairs: &[Keypair],
+    separate_slot: bool,
+) -> (Child, u64) {
     fn transfer(
         validator: &mut Child,
         ctx: &IntegrationTestContext,
@@ -51,9 +74,12 @@ fn write(ledger_path: &Path, keypairs: &[Keypair]) -> (Child, u64) {
     let (_, mut validator, ctx) =
         setup_offline_validator(ledger_path, None, Some(SLOT_MS), true);
 
-    expect!(ctx.wait_for_slot_ephem(1), validator);
+    let mut slot = 1;
+    expect!(ctx.wait_for_slot_ephem(slot), validator);
 
     // We are executing 5 transactions which fail if they execute in the wrong order
+    // since the sender account is always created in the transaction right before the
+    // transaction where it sends lamports
 
     // 1. Airdrop 5 SOL to first account
     expect!(
@@ -62,6 +88,10 @@ fn write(ledger_path: &Path, keypairs: &[Keypair]) -> (Child, u64) {
     );
 
     // 2. Transfer 4 SOL from first account to second account
+    if separate_slot {
+        slot += 1;
+        ctx.wait_for_slot_ephem(slot).unwrap();
+    }
     transfer(
         &mut validator,
         &ctx,
@@ -71,6 +101,10 @@ fn write(ledger_path: &Path, keypairs: &[Keypair]) -> (Child, u64) {
     );
 
     // 3. Transfer 3 SOL from second account to third account
+    if separate_slot {
+        slot += 1;
+        ctx.wait_for_slot_ephem(slot).unwrap();
+    }
     transfer(
         &mut validator,
         &ctx,
@@ -80,6 +114,10 @@ fn write(ledger_path: &Path, keypairs: &[Keypair]) -> (Child, u64) {
     );
 
     // 4. Transfer 2 SOL from third account to fourth account
+    if separate_slot {
+        slot += 1;
+        ctx.wait_for_slot_ephem(slot).unwrap();
+    }
     transfer(
         &mut validator,
         &ctx,
@@ -89,6 +127,10 @@ fn write(ledger_path: &Path, keypairs: &[Keypair]) -> (Child, u64) {
     );
 
     // 5. Transfer 1 SOL from fourth account to fifth account
+    if separate_slot {
+        slot += 1;
+        ctx.wait_for_slot_ephem(slot).unwrap();
+    }
     transfer(
         &mut validator,
         &ctx,
