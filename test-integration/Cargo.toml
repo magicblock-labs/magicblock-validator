@@ -9,6 +9,7 @@ members = [
   "test-tools",
   "test-runner",
   "test-ledger-restore",
+  "programs/flexi-counter",
 ]
 resolver = "2"
 
