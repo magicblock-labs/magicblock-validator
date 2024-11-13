@@ -3,7 +3,7 @@ use integration_test_tools::validator::{
     resolve_workspace_dir, start_magic_block_validator_with_config,
     TestRunnerPaths,
 };
-use integration_test_tools::workspace_paths::path_relative_to_manifest;
+use integration_test_tools::workspace_paths::path_relative_to_workspace;
 use integration_test_tools::IntegrationTestContext;
 use sleipnir_config::{
     AccountsConfig, ProgramConfig, SleipnirConfig, ValidatorConfig,
@@ -23,9 +23,9 @@ pub const TMP_DIR_CONFIG: &str = "TMP_DIR_CONFIG";
 /// was writing the ledger.
 pub const SLOT_WRITE_DELTA: Slot = 15;
 
-pub const SOLX_ID: &str = "SoLXmnP9JvL6vJ7TN1VqtTxqsc2izmPfF9CsMDEuRzJ";
-pub const SOLX_PUBKEY: Pubkey =
-    pubkey!("SoLXmnP9JvL6vJ7TN1VqtTxqsc2izmPfF9CsMDEuRzJ");
+pub const FLEXI_COUNTER_ID: &str = "f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4";
+pub const FLEXI_COUNTER_PUBKEY: Pubkey =
+    pubkey!("f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4");
 
 /// Stringifies the config and writes it to a temporary config file.
 /// Then uses that config to start the validator.
@@ -75,7 +75,7 @@ pub fn setup_offline_validator(
     let programs = programs.map(|programs| {
         let mut resolved_programs = vec![];
         for program in programs.iter() {
-            let p = path_relative_to_manifest(&program.path);
+            let p = path_relative_to_workspace(&format!("target/deploy/{}", &program.path));
             resolved_programs.push(ProgramConfig {
                 id: program.id,
                 path: p,

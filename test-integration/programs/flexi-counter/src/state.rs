@@ -33,4 +33,8 @@ impl FlexiCounter {
         let seeds = Self::seeds(payer);
         Pubkey::find_program_address(&seeds, &crate::id())
     }
+
+    pub fn try_decode(data: &[u8]) -> std::io::Result<Self> {
+        Self::try_from_slice(data)
+    }
 }

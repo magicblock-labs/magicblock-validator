@@ -1,4 +1,4 @@
-use solana_program::{declare_id, entrypoint};
+use solana_program::declare_id;
 
 pub mod instruction;
 mod processor;
@@ -9,4 +9,5 @@ pub use processor::process;
 
 declare_id!("f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4");
 
-entrypoint!(process);
+#[cfg(not(feature = "no-entrypoint"))]
+solana_program::entrypoint!(process);

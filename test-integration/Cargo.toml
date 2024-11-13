@@ -24,6 +24,7 @@ ephemeral-rollups-sdk = { path = "../../ephemeral-rollups-sdk/sdk" }
 log = "0.4.20"
 rayon = "1.10.0"
 serde = "1.0.196"
+program-flexi-counter = { path = "./programs/flexi-counter" }
 sleipnir-config = { path = "../sleipnir-config" }
 sleipnir-core = { path = "../sleipnir-core" }
 tempfile = "3.10.1"

@@ -13,4 +13,7 @@ test-force-mb:
 test-ledger-restore:
 	cargo test --package test-ledger-restore -- --test-threads=1 --nocapture
 
+build-flexi-counter:
+	cargo build-sbf --manifest-path $(DIR)/programs/flexi-counter/Cargo.toml
+
 .PHONY: test, test-force-mb, test-ledger-restore

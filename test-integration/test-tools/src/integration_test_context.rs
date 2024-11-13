@@ -2,6 +2,7 @@ use std::{thread::sleep, time::Duration};
 
 use anyhow::{Context, Result};
 use solana_rpc_client::rpc_client::RpcClient;
+use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_rpc_client_api::{
     client_error, client_error::Error as ClientError,
     client_error::ErrorKind as ClientErrorKind, config::RpcTransactionConfig,
@@ -425,7 +426,13 @@ impl IntegrationTestContext {
     ) -> Result<(Signature, bool), client_error::Error> {
         let blockhash = rpc_client.get_latest_blockhash()?;
         tx.sign(signers, blockhash);
-        let sig = rpc_client.send_transaction(tx)?;
+        let sig = rpc_client.send_transaction_with_config(
+            tx,
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        )?;
         Self::confirm_transaction(
             &sig,
             rpc_client,

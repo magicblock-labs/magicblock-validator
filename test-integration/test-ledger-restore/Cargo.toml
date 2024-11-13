@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 anyhow = { workspace = true }
 integration-test-tools = { workspace = true }
+program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
 sleipnir-config = { workspace = true }
 solana-sdk = { workspace = true }
 solana-transaction-status = { workspace = true }

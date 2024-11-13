@@ -4127,6 +4127,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "integration-test-tools",
+ "program-flexi-counter",
  "sleipnir-config",
  "solana-sdk 1.17.22",
  "solana-transaction-status",
