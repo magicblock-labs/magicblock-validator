@@ -28,6 +28,14 @@ fn payer2_keypair() -> Keypair {
     Keypair::from_base58_string("j5cwGmb19aNqc1Mc1n2xUSvZkG6vxjsYPHhLJC6RYmQbS1ggWeEU57jCnh5QwbrTzaCnDLE4UaS2wTVBWYyq5KT")
 }
 
+/*
+* This test uses flexi counter program which is loaded at validator startup.
+* It then executes math operations on the counter which only result in the same
+* outcome if they are executed in the correct order.
+* This way we ensure that during ledger replay the order of transactions is
+* the same as when it was recorded
+*/
+
 #[test]
 fn restore_ledger_with_flexi_counter_same_slot() {
     let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
@@ -35,11 +43,25 @@ fn restore_ledger_with_flexi_counter_same_slot() {
     let payer2 = payer2_keypair();
 
     let (mut validator, slot) = write(&ledger_path, &payer1, &payer2, false);
-    // validator.kill().unwrap();
+    validator.kill().unwrap();
 
-    // let mut validator =
-    //     read(&ledger_path, &payer.pubkey(), &counter.pubkey(), slot);
-    // validator.kill().unwrap();
+    let mut validator =
+        read(&ledger_path, &payer1.pubkey(), &payer2.pubkey(), slot);
+    validator.kill().unwrap();
+}
+
+#[test]
+fn restore_ledger_with_flexi_counter_separate_slot() {
+    let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
+    let payer1 = payer1_keypair();
+    let payer2 = payer2_keypair();
+
+    let (mut validator, slot) = write(&ledger_path, &payer1, &payer2, true);
+    validator.kill().unwrap();
+
+    let mut validator =
+        read(&ledger_path, &payer1.pubkey(), &payer2.pubkey(), slot);
+    validator.kill().unwrap();
 }
 
 fn get_programs() -> Vec<ProgramConfig> {
@@ -49,8 +71,7 @@ fn get_programs() -> Vec<ProgramConfig> {
     }]
 }
 
-#[allow(unused)]
-fn send_counter_tx(
+fn _send_counter_tx(
     ix: Instruction,
     payer: &Keypair,
     validator: &mut Child,
@@ -253,8 +274,8 @@ fn write(
 
 fn read(
     ledger_path: &Path,
-    payer: &Pubkey,
-    counter: &Pubkey,
+    payer1: &Pubkey,
+    payer2: &Pubkey,
     slot: u64,
 ) -> Child {
     let programs = get_programs();
@@ -267,11 +288,25 @@ fn read(
 
     assert!(ctx.wait_for_slot_ephem(slot).is_ok());
 
-    let payer_acc = expect!(ctx.ephem_client.get_account(payer), validator);
-    let counter_acc = expect!(ctx.ephem_client.get_account(counter), validator);
+    let counter1_decoded = fetch_counter(payer1, &mut validator);
+    assert_eq!(
+        counter1_decoded,
+        FlexiCounter {
+            count: 13,
+            updates: 3,
+            label: "Counter of Payer 1".to_string(),
+        }
+    );
 
-    eprintln!("payer: {:#?}", payer_acc);
-    eprintln!("counter: {:#?}", counter_acc);
+    let counter2_decoded = fetch_counter(payer2, &mut validator);
+    assert_eq!(
+        counter2_decoded,
+        FlexiCounter {
+            count: 27,
+            updates: 2,
+            label: "Counter of Payer 2".to_string(),
+        }
+    );
 
     validator
 }
@@ -281,7 +316,7 @@ fn read(
 // -----------------
 // Uncomment either of the below to run ledger write/read in isolation and
 // optionally keep the validator running after reading the ledger
-#[test]
+// #[test]
 fn _flexi_counter_diagnose_write() {
     let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
@@ -290,11 +325,7 @@ fn _flexi_counter_diagnose_write() {
 
     let (mut validator, slot) = write(&ledger_path, &payer1, &payer2, true);
 
-    let (counter1, _) = FlexiCounter::pda(&payer1.pubkey());
-    let (counter2, _) = FlexiCounter::pda(&payer2.pubkey());
     eprintln!("{}", ledger_path.display());
-    eprintln!("1: {} -> {}", payer1.pubkey(), counter1);
-    eprintln!("2: {} -> {}", payer2.pubkey(), counter2);
     eprintln!("slot: {}", slot);
 
     let counter1_decoded = fetch_counter(&payer1.pubkey(), &mut validator);
@@ -306,18 +337,23 @@ fn _flexi_counter_diagnose_write() {
     validator.kill().unwrap();
 }
 
-#[test]
+// #[test]
 fn _solx_single_diagnose_read() {
     let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
-    let payer = payer1_keypair();
-    let counter = payer2_keypair();
+    let payer1 = payer1_keypair();
+    let payer2 = payer2_keypair();
 
     let mut validator =
-        read(&ledger_path, &payer.pubkey(), &counter.pubkey(), 20);
+        read(&ledger_path, &payer1.pubkey(), &payer2.pubkey(), 20);
 
     eprintln!("{}", ledger_path.display());
-    eprintln!("{} -> {}", payer.pubkey(), counter.pubkey());
+
+    let counter1_decoded = fetch_counter(&payer1.pubkey(), &mut validator);
+    eprint!("1: {:#?}", counter1_decoded);
+
+    let counter2_decoded = fetch_counter(&payer2.pubkey(), &mut validator);
+    eprint!("2: {:#?}", counter2_decoded);
 
     validator.kill().unwrap();
 }
