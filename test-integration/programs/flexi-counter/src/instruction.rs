@@ -26,14 +26,14 @@ pub enum FlexiCounterInstruction {
     /// Accounts:
     /// 0. `[signer]` The payer that is creating the account.
     /// 1. `[write]` The counter PDA account that will be updated.
-    Add { count: u8, bump: u8 },
+    Add { count: u8 },
 
     /// Updates the FlexiCounter by multiplying  the count with the multiplier.
     ///
     /// Accounts:
     /// 0. `[signer]` The payer that is creating the account.
     /// 1. `[write]` The counter PDA account that will be updated.
-    Mul { multiplier: u8, bump: u8 },
+    Mul { multiplier: u8 },
 }
 
 pub fn create_init_ix(payer: Pubkey, label: String) -> Instruction {
@@ -53,24 +53,24 @@ pub fn create_init_ix(payer: Pubkey, label: String) -> Instruction {
 
 pub fn create_add_ix(payer: Pubkey, count: u8) -> Instruction {
     let program_id = &crate::id();
-    let (pda, bump) = FlexiCounter::pda(&payer);
+    let (pda, _) = FlexiCounter::pda(&payer);
     let accounts =
         vec![AccountMeta::new(payer, true), AccountMeta::new(pda, false)];
     Instruction::new_with_borsh(
         *program_id,
-        &FlexiCounterInstruction::Add { count, bump },
+        &FlexiCounterInstruction::Add { count },
         accounts,
     )
 }
 
 pub fn create_mul_ix(payer: Pubkey, multiplier: u8) -> Instruction {
     let program_id = &crate::id();
-    let (pda, bump) = FlexiCounter::pda(&payer);
+    let (pda, _) = FlexiCounter::pda(&payer);
     let accounts =
         vec![AccountMeta::new(payer, true), AccountMeta::new(pda, false)];
     Instruction::new_with_borsh(
         *program_id,
-        &FlexiCounterInstruction::Mul { multiplier, bump },
+        &FlexiCounterInstruction::Mul { multiplier },
         accounts,
     )
 }

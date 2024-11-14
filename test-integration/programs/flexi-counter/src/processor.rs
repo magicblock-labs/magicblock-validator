@@ -2,6 +2,7 @@ use borsh::{to_vec, BorshDeserialize};
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
     entrypoint::ProgramResult,
+    msg,
     program::invoke_signed,
     pubkey::Pubkey,
     rent::Rent,
@@ -23,8 +24,8 @@ pub fn process(
     use FlexiCounterInstruction::*;
     match ix {
         Init { label, bump } => process_init(program_id, accounts, label, bump),
-        Add { count, bump } => process_add(accounts, count, bump),
-        Mul { multiplier, bump } => process_mul(accounts, multiplier, bump),
+        Add { count } => process_add(accounts, count),
+        Mul { multiplier } => process_mul(accounts, multiplier),
     }?;
     Ok(())
 }
@@ -38,6 +39,19 @@ fn process_init(
     let account_info_iter = &mut accounts.iter();
     let payer_info = next_account_info(account_info_iter)?;
     let counter_pda_info = next_account_info(account_info_iter)?;
+
+    let (counter_pda, _) = FlexiCounter::pda(payer_info.key);
+    assert_keys_equal(counter_pda_info.key, &counter_pda, || {
+        format!(
+            "Invalid Counter PDA {}, should be {}",
+            counter_pda_info.key, counter_pda
+        )
+    })?;
+    msg!(
+        "PDA keys provided acc: {}, required PDA: {}",
+        counter_pda_info.key,
+        counter_pda
+    );
 
     let bump = &[bump];
     let seeds = FlexiCounter::seeds_with_bump(payer_info.key, bump);
@@ -64,13 +78,13 @@ fn process_init(
     Ok(())
 }
 
-fn process_add(accounts: &[AccountInfo], count: u8, bump: u8) -> ProgramResult {
+fn process_add(accounts: &[AccountInfo], count: u8) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
     let payer_info = next_account_info(account_info_iter)?;
     let counter_pda_info = next_account_info(account_info_iter)?;
 
-    let (counter_pda, _) = FlexiCounter::pda_with_bump(payer_info.key, bump);
-    assert_keys_equal(&counter_pda, counter_pda_info.key, || {
+    let (counter_pda, _) = FlexiCounter::pda(payer_info.key);
+    assert_keys_equal(counter_pda_info.key, &counter_pda, || {
         format!(
             "Invalid Counter PDA {}, should be {}",
             counter_pda_info.key, counter_pda
@@ -90,17 +104,13 @@ fn process_add(accounts: &[AccountInfo], count: u8, bump: u8) -> ProgramResult {
     Ok(())
 }
 
-fn process_mul(
-    accounts: &[AccountInfo],
-    multiplier: u8,
-    bump: u8,
-) -> ProgramResult {
+fn process_mul(accounts: &[AccountInfo], multiplier: u8) -> ProgramResult {
     let account_info_iter = &mut accounts.iter();
     let payer_info = next_account_info(account_info_iter)?;
     let counter_pda_info = next_account_info(account_info_iter)?;
 
-    let (counter_pda, _) = FlexiCounter::pda_with_bump(payer_info.key, bump);
-    assert_keys_equal(&counter_pda, counter_pda_info.key, || {
+    let (counter_pda, _) = FlexiCounter::pda(payer_info.key);
+    assert_keys_equal(counter_pda_info.key, &counter_pda, || {
         format!(
             "Invalid Counter PDA {}, should be {}",
             counter_pda_info.key, counter_pda

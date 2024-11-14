@@ -399,6 +399,22 @@ impl IntegrationTestContext {
         }
     }
 
+    pub fn send_transaction_ephem(
+        &self,
+        tx: &mut Transaction,
+        signers: &[&Keypair],
+    ) -> Result<Signature, client_error::Error> {
+        Self::send_transaction(&self.ephem_client, tx, signers)
+    }
+
+    pub fn send_transaction_chain(
+        &self,
+        tx: &mut Transaction,
+        signers: &[&Keypair],
+    ) -> Result<Signature, client_error::Error> {
+        Self::send_transaction(self.try_chain_client().unwrap(), tx, signers)
+    }
+
     pub fn send_and_confirm_transaction_ephem(
         &self,
         tx: &mut Transaction,
@@ -419,11 +435,11 @@ impl IntegrationTestContext {
         )
     }
 
-    pub fn send_and_confirm_transaction(
+    pub fn send_transaction(
         rpc_client: &RpcClient,
         tx: &mut Transaction,
         signers: &[&Keypair],
-    ) -> Result<(Signature, bool), client_error::Error> {
+    ) -> Result<Signature, client_error::Error> {
         let blockhash = rpc_client.get_latest_blockhash()?;
         tx.sign(signers, blockhash);
         let sig = rpc_client.send_transaction_with_config(
@@ -433,6 +449,15 @@ impl IntegrationTestContext {
                 ..Default::default()
             },
         )?;
+        Ok(sig)
+    }
+
+    pub fn send_and_confirm_transaction(
+        rpc_client: &RpcClient,
+        tx: &mut Transaction,
+        signers: &[&Keypair],
+    ) -> Result<(Signature, bool), client_error::Error> {
+        let sig = Self::send_transaction(rpc_client, tx, signers)?;
         Self::confirm_transaction(
             &sig,
             rpc_client,

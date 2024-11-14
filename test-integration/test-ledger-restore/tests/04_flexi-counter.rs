@@ -49,6 +49,21 @@ fn get_programs() -> Vec<ProgramConfig> {
     }]
 }
 
+#[allow(unused)]
+fn send_counter_tx(
+    ix: Instruction,
+    payer: &Keypair,
+    validator: &mut Child,
+) -> Signature {
+    let ctx = IntegrationTestContext::new_ephem_only();
+
+    let mut tx = Transaction::new_with_payer(&[ix], Some(&payer.pubkey()));
+    let signers = &[payer];
+
+    let sig = expect!(ctx.send_transaction_ephem(&mut tx, signers), validator);
+    sig
+}
+
 fn confirm_counter_tx(
     ix: Instruction,
     payer: &Keypair,
@@ -136,14 +151,15 @@ fn write(
         }
         let ix_add = create_add_ix(payer1.pubkey(), 5);
         let ix_mul = create_mul_ix(payer1.pubkey(), 2);
-
         confirm_counter_tx(ix_add, payer1, &mut validator);
+
         if separate_slot {
             expect!(ctx.wait_for_next_slot_ephem(), validator);
         }
         confirm_counter_tx(ix_mul, payer1, &mut validator);
 
         let counter = fetch_counter(&payer1.pubkey(), &mut validator);
+        eprintln!("{:#?}", counter);
         assert_eq!(
             counter,
             FlexiCounter {
@@ -282,9 +298,9 @@ fn _flexi_counter_diagnose_write() {
     eprintln!("slot: {}", slot);
 
     let counter1_decoded = fetch_counter(&payer1.pubkey(), &mut validator);
-    let counter2_decoded = fetch_counter(&payer2.pubkey(), &mut validator);
-
     eprint!("1: {:#?}", counter1_decoded);
+
+    let counter2_decoded = fetch_counter(&payer2.pubkey(), &mut validator);
     eprint!("2: {:#?}", counter2_decoded);
 
     validator.kill().unwrap();
