@@ -1,7 +1,9 @@
 use integration_test_tools::expect;
 use integration_test_tools::tmpdir::resolve_tmp_dir;
 use integration_test_tools::IntegrationTestContext;
+use program_flexi_counter::instruction::create_add_ix;
 use program_flexi_counter::instruction::create_init_ix;
+use program_flexi_counter::instruction::create_mul_ix;
 use program_flexi_counter::state::FlexiCounter;
 use sleipnir_config::ProgramConfig;
 use solana_sdk::instruction::Instruction;
@@ -127,7 +129,30 @@ fn write(
         )
     }
 
-    // TODO: in between update counter 1
+    {
+        // Execute ((0) + 5) * 2 on counter1
+        if separate_slot {
+            expect!(ctx.wait_for_next_slot_ephem(), validator);
+        }
+        let ix_add = create_add_ix(payer1.pubkey(), 5);
+        let ix_mul = create_mul_ix(payer1.pubkey(), 2);
+
+        confirm_counter_tx(ix_add, payer1, &mut validator);
+        if separate_slot {
+            expect!(ctx.wait_for_next_slot_ephem(), validator);
+        }
+        confirm_counter_tx(ix_mul, payer1, &mut validator);
+
+        let counter = fetch_counter(&payer1.pubkey(), &mut validator);
+        assert_eq!(
+            counter,
+            FlexiCounter {
+                count: 10,
+                updates: 2,
+                label: COUNTER1.to_string()
+            }
+        )
+    }
 
     {
         // Create and send init counter1 instruction
@@ -143,6 +168,63 @@ fn write(
             FlexiCounter {
                 count: 0,
                 updates: 0,
+                label: COUNTER2.to_string()
+            }
+        )
+    }
+
+    {
+        // Add 9 to counter 2
+        if separate_slot {
+            expect!(ctx.wait_for_next_slot_ephem(), validator);
+        }
+        let ix_add = create_add_ix(payer2.pubkey(), 9);
+        confirm_counter_tx(ix_add, payer2, &mut validator);
+
+        let counter = fetch_counter(&payer2.pubkey(), &mut validator);
+        assert_eq!(
+            counter,
+            FlexiCounter {
+                count: 9,
+                updates: 1,
+                label: COUNTER2.to_string()
+            }
+        )
+    }
+
+    {
+        // Add 3 to counter 1
+        if separate_slot {
+            expect!(ctx.wait_for_next_slot_ephem(), validator);
+        }
+        let ix_add = create_add_ix(payer1.pubkey(), 3);
+        confirm_counter_tx(ix_add, payer1, &mut validator);
+
+        let counter = fetch_counter(&payer1.pubkey(), &mut validator);
+        assert_eq!(
+            counter,
+            FlexiCounter {
+                count: 13,
+                updates: 3,
+                label: COUNTER1.to_string()
+            }
+        )
+    }
+
+    {
+        // Multiply counter 2 with 3
+        if separate_slot {
+            expect!(ctx.wait_for_next_slot_ephem(), validator);
+        }
+        let ix_add = create_mul_ix(payer2.pubkey(), 3);
+        confirm_counter_tx(ix_add, payer2, &mut validator);
+
+        let counter = fetch_counter(&payer2.pubkey(), &mut validator);
+        assert_eq!(
+            counter,
+            FlexiCounter {
+                count: 27,
+                updates: 2,
                 label: COUNTER2.to_string()
             }
         )
