@@ -1,10 +1,8 @@
 use borsh::{to_vec, BorshDeserialize};
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
-    entrypoint::ProgramResult
-    ,
-    program::invoke_signed
-    ,
+    entrypoint::ProgramResult,
+    program::invoke_signed,
     pubkey::Pubkey,
     rent::Rent,
     system_instruction,
@@ -12,9 +10,8 @@ use solana_program::{
 };
 
 use crate::{
-    instruction::FlexiCounterInstruction,
-    state::FlexiCounter
-    ,
+    instruction::FlexiCounterInstruction, state::FlexiCounter,
+    utils::assert_keys_equal,
 };
 
 pub fn process(
@@ -26,6 +23,8 @@ pub fn process(
     use FlexiCounterInstruction::*;
     match ix {
         Init { label, bump } => process_init(program_id, accounts, label, bump),
+        Add { count, bump } => process_add(accounts, count, bump),
+        Mul { multiplier, bump } => process_mul(accounts, multiplier, bump),
     }?;
     Ok(())
 }
@@ -60,6 +59,62 @@ fn process_init(
         &[&seeds],
     )?;
 
+    counter_pda_info.data.borrow_mut()[..size].copy_from_slice(&counter_data);
+
+    Ok(())
+}
+
+fn process_add(accounts: &[AccountInfo], count: u8, bump: u8) -> ProgramResult {
+    let account_info_iter = &mut accounts.iter();
+    let payer_info = next_account_info(account_info_iter)?;
+    let counter_pda_info = next_account_info(account_info_iter)?;
+
+    let (counter_pda, _) = FlexiCounter::pda_with_bump(payer_info.key, bump);
+    assert_keys_equal(&counter_pda, counter_pda_info.key, || {
+        format!(
+            "Invalid Counter PDA {}, should be {}",
+            counter_pda_info.key, counter_pda
+        )
+    })?;
+
+    let mut counter =
+        FlexiCounter::try_from_slice(&counter_pda_info.data.borrow())?;
+
+    counter.count += count as u64;
+    counter.updates += 1;
+
+    let size = counter_pda_info.data_len();
+    let counter_data = to_vec(&counter)?;
+    counter_pda_info.data.borrow_mut()[..size].copy_from_slice(&counter_data);
+
+    Ok(())
+}
+
+fn process_mul(
+    accounts: &[AccountInfo],
+    multiplier: u8,
+    bump: u8,
+) -> ProgramResult {
+    let account_info_iter = &mut accounts.iter();
+    let payer_info = next_account_info(account_info_iter)?;
+    let counter_pda_info = next_account_info(account_info_iter)?;
+
+    let (counter_pda, _) = FlexiCounter::pda_with_bump(payer_info.key, bump);
+    assert_keys_equal(&counter_pda, counter_pda_info.key, || {
+        format!(
+            "Invalid Counter PDA {}, should be {}",
+            counter_pda_info.key, counter_pda
+        )
+    })?;
+
+    let mut counter =
+        FlexiCounter::try_from_slice(&counter_pda_info.data.borrow())?;
+
+    counter.count *= multiplier as u64;
+    counter.updates += 1;
+
+    let size = counter_pda_info.data_len();
+    let counter_data = to_vec(&counter)?;
     counter_pda_info.data.borrow_mut()[..size].copy_from_slice(&counter_data);
 
     Ok(())

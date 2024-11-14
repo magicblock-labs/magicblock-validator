@@ -34,6 +34,12 @@ impl FlexiCounter {
         Pubkey::find_program_address(&seeds, &crate::id())
     }
 
+    pub fn pda_with_bump(payer: &Pubkey, bump: u8) -> (Pubkey, u8) {
+        let bumps = &[bump];
+        let seeds = Self::seeds_with_bump(payer, bumps);
+        Pubkey::find_program_address(&seeds, &crate::id())
+    }
+
     pub fn try_decode(data: &[u8]) -> std::io::Result<Self> {
         Self::try_from_slice(data)
     }
