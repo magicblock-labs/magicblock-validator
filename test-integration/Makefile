@@ -13,6 +13,9 @@ test-force-mb:
 test-ledger-restore: build-flexi-counter
 	cargo test --package test-ledger-restore -- --test-threads=1 --nocapture
 
+test-ledger-restore-release: build-flexi-counter
+	RELEASE=1 cargo test --package test-ledger-restore -- --test-threads=1 --nocapture
+
 build-flexi-counter:
 	cargo build-sbf --manifest-path $(DIR)/programs/flexi-counter/Cargo.toml
 

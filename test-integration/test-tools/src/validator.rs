@@ -11,6 +11,7 @@ use crate::toml_to_args::rpc_port_from_config;
 pub fn start_magic_block_validator_with_config(
     test_runner_paths: &TestRunnerPaths,
     log_suffix: &str,
+    release: bool,
 ) -> Option<process::Child> {
     let TestRunnerPaths {
         config_path,
@@ -33,8 +34,11 @@ pub fn start_magic_block_validator_with_config(
 
     // Start validator via `cargo run -- <path to config>`
     let mut command = process::Command::new("cargo");
+    command.arg("run");
+    if release {
+        command.arg("--release");
+    }
     command
-        .arg("run")
         .arg("--")
         .arg(config_path)
         .env("RUST_LOG_STYLE", log_suffix)

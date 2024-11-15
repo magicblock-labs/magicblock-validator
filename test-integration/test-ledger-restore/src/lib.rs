@@ -44,6 +44,7 @@ pub fn start_validator_with_config(
 ) -> (TempDir, Option<process::Child>) {
     let workspace_dir = resolve_workspace_dir();
     let (default_tmpdir, temp_dir) = resolve_tmp_dir(TMP_DIR_CONFIG);
+    let release = std::env::var("RELEASE").is_ok();
     let config_path = temp_dir.join("config.toml");
     let config_toml = config.to_string();
     fs::write(&config_path, config_toml).unwrap();
@@ -60,7 +61,7 @@ pub fn start_validator_with_config(
     };
     (
         default_tmpdir,
-        start_magic_block_validator_with_config(&paths, "TEST"),
+        start_magic_block_validator_with_config(&paths, "TEST", release),
     )
 }
 

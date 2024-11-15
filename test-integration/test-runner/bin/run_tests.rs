@@ -237,6 +237,7 @@ fn start_validator(
         _ => start_magic_block_validator_with_config(
             &test_runner_paths,
             log_suffix,
+            false,
         ),
     }
 }
