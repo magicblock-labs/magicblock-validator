@@ -1,20 +1,18 @@
 use integration_test_tools::expect;
 use integration_test_tools::tmpdir::resolve_tmp_dir;
-use integration_test_tools::IntegrationTestContext;
 use program_flexi_counter::instruction::create_add_ix;
 use program_flexi_counter::instruction::create_init_ix;
 use program_flexi_counter::instruction::create_mul_ix;
 use program_flexi_counter::state::FlexiCounter;
 use sleipnir_config::ProgramConfig;
-use solana_sdk::instruction::Instruction;
 use solana_sdk::native_token::LAMPORTS_PER_SOL;
 use solana_sdk::pubkey::Pubkey;
 use solana_sdk::signature::Keypair;
-use solana_sdk::signature::Signature;
 use solana_sdk::signer::Signer;
-use solana_sdk::transaction::Transaction;
 use std::path::Path;
 use std::process::Child;
+use test_ledger_restore::confirm_tx_with_payer;
+use test_ledger_restore::fetch_counter;
 use test_ledger_restore::{
     setup_offline_validator, FLEXI_COUNTER_ID, SLOT_WRITE_DELTA, TMP_DIR_LEDGER,
 };
@@ -71,46 +69,6 @@ fn get_programs() -> Vec<ProgramConfig> {
     }]
 }
 
-fn _send_counter_tx(
-    ix: Instruction,
-    payer: &Keypair,
-    validator: &mut Child,
-) -> Signature {
-    let ctx = IntegrationTestContext::new_ephem_only();
-
-    let mut tx = Transaction::new_with_payer(&[ix], Some(&payer.pubkey()));
-    let signers = &[payer];
-
-    let sig = expect!(ctx.send_transaction_ephem(&mut tx, signers), validator);
-    sig
-}
-
-fn confirm_counter_tx(
-    ix: Instruction,
-    payer: &Keypair,
-    validator: &mut Child,
-) -> Signature {
-    let ctx = IntegrationTestContext::new_ephem_only();
-
-    let mut tx = Transaction::new_with_payer(&[ix], Some(&payer.pubkey()));
-    let signers = &[payer];
-
-    let (sig, confirmed) = expect!(
-        ctx.send_and_confirm_transaction_ephem(&mut tx, signers),
-        validator
-    );
-    assert!(confirmed, "Should confirm transaction");
-    sig
-}
-
-fn fetch_counter(payer: &Pubkey, validator: &mut Child) -> FlexiCounter {
-    let ctx = IntegrationTestContext::new_ephem_only();
-    let (counter, _) = FlexiCounter::pda(payer);
-    let counter_acc =
-        expect!(ctx.ephem_client.get_account(&counter), validator);
-    expect!(FlexiCounter::try_decode(&counter_acc.data), validator)
-}
-
 fn write(
     ledger_path: &Path,
     payer1: &Keypair,
@@ -153,7 +111,7 @@ fn write(
         }
 
         let ix = create_init_ix(payer1.pubkey(), COUNTER1.to_string());
-        confirm_counter_tx(ix, payer1, &mut validator);
+        confirm_tx_with_payer(ix, payer1, &mut validator);
         let counter = fetch_counter(&payer1.pubkey(), &mut validator);
         assert_eq!(
             counter,
@@ -172,12 +130,12 @@ fn write(
         }
         let ix_add = create_add_ix(payer1.pubkey(), 5);
         let ix_mul = create_mul_ix(payer1.pubkey(), 2);
-        confirm_counter_tx(ix_add, payer1, &mut validator);
+        confirm_tx_with_payer(ix_add, payer1, &mut validator);
 
         if separate_slot {
             expect!(ctx.wait_for_next_slot_ephem(), validator);
         }
-        confirm_counter_tx(ix_mul, payer1, &mut validator);
+        confirm_tx_with_payer(ix_mul, payer1, &mut validator);
 
         let counter = fetch_counter(&payer1.pubkey(), &mut validator);
         eprintln!("{:#?}", counter);
@@ -198,7 +156,7 @@ fn write(
         }
 
         let ix = create_init_ix(payer2.pubkey(), COUNTER2.to_string());
-        confirm_counter_tx(ix, payer2, &mut validator);
+        confirm_tx_with_payer(ix, payer2, &mut validator);
         let counter = fetch_counter(&payer2.pubkey(), &mut validator);
         assert_eq!(
             counter,
@@ -216,7 +174,7 @@ fn write(
             expect!(ctx.wait_for_next_slot_ephem(), validator);
         }
         let ix_add = create_add_ix(payer2.pubkey(), 9);
-        confirm_counter_tx(ix_add, payer2, &mut validator);
+        confirm_tx_with_payer(ix_add, payer2, &mut validator);
 
         let counter = fetch_counter(&payer2.pubkey(), &mut validator);
         assert_eq!(
@@ -235,7 +193,7 @@ fn write(
             expect!(ctx.wait_for_next_slot_ephem(), validator);
         }
         let ix_add = create_add_ix(payer1.pubkey(), 3);
-        confirm_counter_tx(ix_add, payer1, &mut validator);
+        confirm_tx_with_payer(ix_add, payer1, &mut validator);
 
         let counter = fetch_counter(&payer1.pubkey(), &mut validator);
         assert_eq!(
@@ -254,7 +212,7 @@ fn write(
             expect!(ctx.wait_for_next_slot_ephem(), validator);
         }
         let ix_add = create_mul_ix(payer2.pubkey(), 3);
-        confirm_counter_tx(ix_add, payer2, &mut validator);
+        confirm_tx_with_payer(ix_add, payer2, &mut validator);
 
         let counter = fetch_counter(&payer2.pubkey(), &mut validator);
         assert_eq!(
@@ -338,7 +296,7 @@ fn _flexi_counter_diagnose_write() {
 }
 
 // #[test]
-fn _solx_single_diagnose_read() {
+fn _flexi_counter_diagnose_read() {
     let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
 
     let payer1 = payer1_keypair();

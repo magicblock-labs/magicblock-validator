@@ -4,14 +4,19 @@ use integration_test_tools::validator::{
     TestRunnerPaths,
 };
 use integration_test_tools::workspace_paths::path_relative_to_workspace;
-use integration_test_tools::IntegrationTestContext;
+use integration_test_tools::{expect, IntegrationTestContext};
+use program_flexi_counter::state::FlexiCounter;
 use sleipnir_config::{
     AccountsConfig, ProgramConfig, SleipnirConfig, ValidatorConfig,
 };
 use sleipnir_config::{LedgerConfig, LifecycleMode};
 use solana_sdk::clock::Slot;
+use solana_sdk::instruction::Instruction;
 use solana_sdk::pubkey;
 use solana_sdk::pubkey::Pubkey;
+use solana_sdk::signature::{Keypair, Signature};
+use solana_sdk::signer::Signer;
+use solana_sdk::transaction::Transaction;
 use std::path::Path;
 use std::process::Child;
 use std::{fs, process};
@@ -23,7 +28,8 @@ pub const TMP_DIR_CONFIG: &str = "TMP_DIR_CONFIG";
 /// was writing the ledger.
 pub const SLOT_WRITE_DELTA: Slot = 15;
 
-pub const FLEXI_COUNTER_ID: &str = "f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4";
+pub const FLEXI_COUNTER_ID: &str =
+    "f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4";
 pub const FLEXI_COUNTER_PUBKEY: Pubkey =
     pubkey!("f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4");
 
@@ -75,7 +81,10 @@ pub fn setup_offline_validator(
     let programs = programs.map(|programs| {
         let mut resolved_programs = vec![];
         for program in programs.iter() {
-            let p = path_relative_to_workspace(&format!("target/deploy/{}", &program.path));
+            let p = path_relative_to_workspace(&format!(
+                "target/deploy/{}",
+                &program.path
+            ));
             resolved_programs.push(ProgramConfig {
                 id: program.id,
                 path: p,
@@ -102,4 +111,47 @@ pub fn setup_offline_validator(
 
     let ctx = IntegrationTestContext::new_ephem_only();
     (default_tmpdir_config, validator, ctx)
+}
+
+// -----------------
+// Transactions and Account Updates
+// -----------------
+pub fn send_tx_with_payer(
+    ix: Instruction,
+    payer: &Keypair,
+    validator: &mut Child,
+) -> Signature {
+    let ctx = IntegrationTestContext::new_ephem_only();
+
+    let mut tx = Transaction::new_with_payer(&[ix], Some(&payer.pubkey()));
+    let signers = &[payer];
+
+    let sig = expect!(ctx.send_transaction_ephem(&mut tx, signers), validator);
+    sig
+}
+
+pub fn confirm_tx_with_payer(
+    ix: Instruction,
+    payer: &Keypair,
+    validator: &mut Child,
+) -> Signature {
+    let ctx = IntegrationTestContext::new_ephem_only();
+
+    let mut tx = Transaction::new_with_payer(&[ix], Some(&payer.pubkey()));
+    let signers = &[payer];
+
+    let (sig, confirmed) = expect!(
+        ctx.send_and_confirm_transaction_ephem(&mut tx, signers),
+        validator
+    );
+    assert!(confirmed, "Should confirm transaction");
+    sig
+}
+
+pub fn fetch_counter(payer: &Pubkey, validator: &mut Child) -> FlexiCounter {
+    let ctx = IntegrationTestContext::new_ephem_only();
+    let (counter, _) = FlexiCounter::pda(payer);
+    let counter_acc =
+        expect!(ctx.ephem_client.get_account(&counter), validator);
+    expect!(FlexiCounter::try_decode(&counter_acc.data), validator)
 }
