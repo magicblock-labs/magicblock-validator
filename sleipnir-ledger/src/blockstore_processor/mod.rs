@@ -1,5 +1,7 @@
 use std::str::FromStr;
 
+use crate::errors::{LedgerError, LedgerResult};
+use crate::Ledger;
 use log::*;
 use sleipnir_bank::bank::{Bank, TransactionExecutionRecordingOpts};
 use solana_program_runtime::timings::ExecuteTimings;
@@ -10,23 +12,19 @@ use solana_sdk::{
 };
 use solana_transaction_status::VersionedConfirmedBlock;
 
-use crate::Ledger;
-
 #[derive(Debug)]
 struct PreparedBlock {
-    parent_slot: u64,
     slot: u64,
     previous_blockhash: Hash,
     blockhash: Hash,
     block_time: Option<UnixTimestamp>,
-    block_height: Option<u64>,
     transactions: Vec<VersionedTransaction>,
 }
 
 fn iter_blocks_with_transaction(
     ledger: &Ledger,
-    mut prepared_block_handler: impl FnMut(PreparedBlock),
-) {
+    mut prepared_block_handler: impl FnMut(PreparedBlock) -> LedgerResult<()>,
+) -> LedgerResult<()> {
     let mut slot: u64 = 0;
     loop {
         let Ok(Some(block)) = ledger.get_block(slot) else {
@@ -35,61 +33,83 @@ fn iter_blocks_with_transaction(
         let VersionedConfirmedBlock {
             blockhash,
             previous_blockhash,
-            parent_slot,
             transactions,
             block_time,
             block_height,
             ..
         } = block;
+        if let Some(block_height) = block_height {
+            if slot != block_height {
+                return Err(LedgerError::BlockStoreProcessor(format!(
+                    "FATAL: block_height/slot mismatch: {} != {}",
+                    slot, block_height
+                )));
+            }
+        }
+
+        // We only re-run transactions that succeeded since errored transactions
+        // don't update any state
         let successfull_txs = transactions
             .into_iter()
             .filter(|tx| tx.meta.status.is_ok())
             .map(|tx| tx.transaction)
             .collect::<Vec<_>>();
-        // TODO: @@@ don't unwrap
-        let previous_blockhash = Hash::from_str(&previous_blockhash).unwrap();
-        let blockhash = Hash::from_str(&blockhash).unwrap();
+        let previous_blockhash =
+            Hash::from_str(&previous_blockhash).map_err(|err| {
+                LedgerError::BlockStoreProcessor(format!(
+                    "Failed to parse previous_blockhash: {:?}",
+                    err
+                ))
+            })?;
+        let blockhash = Hash::from_str(&blockhash).map_err(|err| {
+            LedgerError::BlockStoreProcessor(format!(
+                "Failed to parse blockhash: {:?}",
+                err
+            ))
+        })?;
 
         prepared_block_handler(PreparedBlock {
-            parent_slot,
             slot,
             previous_blockhash,
             blockhash,
             block_time,
-            block_height,
             transactions: successfull_txs,
-        });
+        })?;
+
         slot += 1;
     }
+    Ok(())
 }
 
-pub fn process_ledger(ledger: &Ledger, bank: &Bank) {
+pub fn process_ledger(ledger: &Ledger, bank: &Bank) -> LedgerResult<()> {
     iter_blocks_with_transaction(ledger, |prepared_block| {
         let mut block_txs = vec![];
         let Some(timestamp) = prepared_block.block_time else {
-            // TODO: @@@ most likely should bail here
-            error!("Block has no timestamp, {:?}", prepared_block);
-            return;
+            return Err(LedgerError::BlockStoreProcessor(format!(
+                "Block has no timestamp, {:?}",
+                prepared_block
+            )));
         };
-        bank.warp_slot(
+        bank.replay_slot(
             prepared_block.slot,
             &prepared_block.previous_blockhash,
             &prepared_block.blockhash,
             timestamp as u64,
         );
-        if !prepared_block.transactions.is_empty() {
-            info!("Processing block: {:#?}", prepared_block);
-        }
+
+        // Transactions are stored in the ledger ordered by most recent to latest
+        // such to replay them in the order they executed we need to reverse them
         for tx in prepared_block.transactions.into_iter().rev() {
-            error!("Processing transaction: {:?}", tx);
+            trace!("Processing transaction: {:?}", tx);
             match bank
                 .verify_transaction(tx, TransactionVerificationMode::HashOnly)
             {
                 Ok(tx) => block_txs.push(tx),
                 Err(err) => {
-                    error!("Error processing transaction: {:?}", err);
-                    // TODO: this is very bad we should probably shut things down
-                    continue;
+                    return Err(LedgerError::BlockStoreProcessor(format!(
+                        "Error processing transaction: {:?}",
+                        err
+                    )));
                 }
             };
         }
@@ -112,5 +132,6 @@ pub fn process_ledger(ledger: &Ledger, bank: &Bank) {
                 info!("Results: {:#?}", results.execution_results);
             }
         }
-    });
+        Ok(())
+    })
 }

@@ -662,38 +662,20 @@ impl Bank {
     }
 
     pub fn advance_slot(&self) -> Slot {
-        // 1. Determine next slot and set it
+        // Determine next slot and set it
         let prev_slot = self.slot();
         let next_slot = prev_slot + 1;
-        self.set_slot(next_slot);
-        self.rc.accounts.set_slot(next_slot);
+        self.set_next_slot(next_slot);
 
-        // 2. Update transaction processor with new slot
-        // We used to just set the slot here, but wanted to avoid having a local
-        // slightly modified copy of the solana-svm.
-        *self.transaction_processor.write().unwrap() =
-            TransactionBatchProcessor::new(
-                next_slot,
-                self.epoch,
-                // Potentially expensive clone
-                self.epoch_schedule.clone(),
-                // Potentially expensive clone
-                self.fee_structure.clone(),
-                self.runtime_config.clone(),
-                self.loaded_programs_cache.clone(),
-            );
-
-        // 3. Add a "root" to the status cache to trigger removing old items
+        // Add a "root" to the status cache to trigger removing old items
         self.status_cache
             .write()
             .expect("RwLock of status cache poisoned")
             .add_root(prev_slot);
 
-        // 4. Update sysvars
-        self.update_clock(self.genesis_creation_time, None);
-        self.fill_missing_sysvar_cache_entries();
+        self.update_sysvars(self.genesis_creation_time, None);
 
-        // 5. Determine next blockhash
+        // Determine next blockhash
         let current_hash = self.last_blockhash();
         let blockhash = {
             // In the Solana implementation there is a lot of logic going on to determine the next
@@ -705,7 +687,7 @@ impl Bank {
             hasher.result()
         };
 
-        // 6. Register the new blockhash with the blockhash queue
+        // Register the new blockhash with the blockhash queue
         {
             let mut blockhash_queue = self.blockhash_queue.write().unwrap();
             blockhash_queue.register_hash(
@@ -714,22 +696,16 @@ impl Bank {
             );
         }
 
-        // 7. Notify Geyser Service
+        // Notify Geyser Service
         if let Some(slot_status_notifier) = &self.slot_status_notifier {
             slot_status_notifier
                 .notify_slot_status(next_slot, Some(next_slot - 1));
         }
 
-        // 8. Update loaded programs cache as otherwise we cannot deploy new programs
+        // Update loaded programs cache as otherwise we cannot deploy new programs
         self.sync_loaded_programs_cache_to_slot();
 
-        // 9. Update slot hashes since they are needed to sanitize a transaction in some cases
-        //    NOTE: slothash and blockhash are the same for us
-        //          in solana the blockhash is set to the hash of the slot that is finalized
-        self.update_slot_hashes(prev_slot, current_hash);
-
-        // 10. Update slot history
-        self.update_slot_history(prev_slot);
+        self.update_slot_hashes_and_slot_history(prev_slot, current_hash);
 
         next_slot
     }
@@ -2673,18 +2649,62 @@ impl Bank {
     // -----------------
     // Ledger Replay
     // -----------------
-    pub fn warp_slot(
+    pub fn replay_slot(
         &self,
         next_slot: Slot,
         current_hash: &Hash,
         blockhash: &Hash,
         timestamp: u64,
     ) {
-        // 1.
+        self.set_next_slot(next_slot);
+
+        if next_slot > 0 {
+            self.status_cache
+                .write()
+                .expect("RwLock of status cache poisoned")
+                .add_root(next_slot - 1);
+        }
+
+        self.update_sysvars(
+            self.genesis_creation_time,
+            Some(timestamp as UnixTimestamp),
+        );
+
+        // Register the new blockhash with the blockhash queue
+        self.register_hash_with_timestamp(blockhash, timestamp);
+
+        // NOTE: Not notifying Geyser Service doing replay
+
+        // Update loaded programs cache as otherwise we cannot deploy new programs
+        self.sync_loaded_programs_cache_to_slot();
+
+        if next_slot > 0 {
+            self.update_slot_hashes_and_slot_history(
+                next_slot - 1,
+                *current_hash,
+            );
+        }
+    }
+
+    fn register_hash_with_timestamp(&self, hash: &Hash, timestamp: u64) {
+        let mut blockhash_queue = self.blockhash_queue.write().unwrap();
+        blockhash_queue.register_hash_with_timestamp(
+            hash,
+            self.fee_rate_governor.lamports_per_signature,
+            timestamp,
+        );
+    }
+
+    // -----------------
+    // Advance Slot/Replay Slot common methods
+    // -----------------
+    fn set_next_slot(&self, next_slot: Slot) {
         self.set_slot(next_slot);
         self.rc.accounts.set_slot(next_slot);
 
-        // 2.
+        // Update transaction processor with new slot
+        // We used to just set the slot here, but wanted to avoid having a local
+        // slightly modified copy of the solana-svm.
         *self.transaction_processor.write().unwrap() =
             TransactionBatchProcessor::new(
                 next_slot,
@@ -2696,46 +2716,28 @@ impl Bank {
                 self.runtime_config.clone(),
                 self.loaded_programs_cache.clone(),
             );
-
-        // 3.
-        if next_slot > 0 {
-            self.status_cache
-                .write()
-                .expect("RwLock of status cache poisoned")
-                .add_root(next_slot - 1);
-        }
-
-        // 4.
-        self.update_clock(
-            self.genesis_creation_time,
-            Some(timestamp as UnixTimestamp),
-        );
-        self.fill_missing_sysvar_cache_entries();
-
-        // 5. (blockhashes already known)
-
-        // 6. Register the new blockhash with the blockhash queue
-        self.register_hash_with_timestamp(blockhash, timestamp);
-
-        // 7. Not notifying Geyser Service
-
-        // 8.
-        self.sync_loaded_programs_cache_to_slot();
-
-        if next_slot > 0 {
-            // 9.
-            self.update_slot_hashes(next_slot - 1, *current_hash);
-            // 10.
-            self.update_slot_history(next_slot - 1);
-        }
     }
 
-    fn register_hash_with_timestamp(&self, hash: &Hash, timestamp: u64) {
-        let mut blockhash_queue = self.blockhash_queue.write().unwrap();
-        blockhash_queue.register_hash_with_timestamp(
-            hash,
-            self.fee_rate_governor.lamports_per_signature,
-            timestamp,
-        );
+    // timestamp is only provided when replaying the ledger and is otherwise
+    // obtained from the system clock
+    fn update_sysvars(
+        &self,
+        epoch_start_timestamp: UnixTimestamp,
+        timestamp: Option<UnixTimestamp>,
+    ) {
+        self.update_clock(self.genesis_creation_time, None);
+        self.fill_missing_sysvar_cache_entries();
+    }
+
+    fn update_slot_hashes_and_slot_history(
+        &self,
+        prev_slot: Slot,
+        current_hash: Hash,
+    ) {
+        // Update slot hashes that are needed to sanitize a transaction in some cases
+        // NOTE: slothash and blockhash are the same for us
+        //       in solana the blockhash is set to the hash of the slot that is finalized
+        self.update_slot_hashes(prev_slot, current_hash);
+        self.update_slot_history(prev_slot);
     }
 }

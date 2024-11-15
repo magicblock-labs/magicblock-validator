@@ -183,9 +183,9 @@ impl MagicValidator {
             &bank,
             &programs_to_load(&config.validator_config.programs),
         )
-        .map_err(|err| {
-            ApiError::FailedToLoadProgramsIntoBank(format!("{:?}", err))
-        })?;
+            .map_err(|err| {
+                ApiError::FailedToLoadProgramsIntoBank(format!("{:?}", err))
+            })?;
 
         let (transaction_sndr, transaction_listener) =
             Self::init_transaction_listener(
@@ -199,7 +199,7 @@ impl MagicValidator {
                 metrics_config.service.socket_addr(),
                 token.clone(),
             )
-            .map_err(ApiError::FailedToStartMetricsService)?;
+                .map_err(ApiError::FailedToStartMetricsService)?;
 
             let system_metrics_ticker = init_system_metrics_ticker(
                 Duration::from_secs(
@@ -355,8 +355,8 @@ impl MagicValidator {
     ) -> Arc<AccountsManager> {
         let accounts_config = try_convert_accounts_config(&config.accounts)
             .expect(
-            "Failed to derive accounts config from provided sleipnir config",
-        );
+                "Failed to derive accounts config from provided sleipnir config",
+            );
         let accounts_manager = AccountsManager::try_new(
             bank,
             remote_account_cloner_client,
@@ -369,7 +369,7 @@ impl MagicValidator {
             validator_keypair.insecure_clone(),
             accounts_config,
         )
-        .expect("Failed to create accounts manager");
+            .expect("Failed to create accounts manager");
 
         Arc::new(accounts_manager)
     }
@@ -408,9 +408,9 @@ impl MagicValidator {
             accounts_manager,
             rpc_json_config,
         )
-        .map_err(|err| {
-            ApiError::FailedToInitJsonRpcService(format!("{:?}", err))
-        })
+            .map_err(|err| {
+                ApiError::FailedToInitJsonRpcService(format!("{:?}", err))
+            })
     }
 
     fn init_ledger(
@@ -481,7 +481,7 @@ impl MagicValidator {
     // Start/Stop
     // -----------------
     pub async fn start(&mut self) -> ApiResult<()> {
-        process_ledger(&self.ledger, &self.bank);
+        process_ledger(&self.ledger, &self.bank)?;
 
         // NOE: this only run only once, i.e. at creation time
         self.transaction_listener.run(true);
