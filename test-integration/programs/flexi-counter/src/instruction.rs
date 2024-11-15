@@ -1,10 +1,11 @@
-use crate::state::FlexiCounter;
 use borsh::{BorshDeserialize, BorshSerialize};
 use solana_program::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
     system_program,
 };
+
+use crate::state::FlexiCounter;
 
 /// The counter has both mul and add instructions in order to facilitate tests where
 /// order matters. For example in the case of the following operations:

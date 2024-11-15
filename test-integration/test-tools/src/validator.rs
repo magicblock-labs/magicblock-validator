@@ -1,4 +1,3 @@
-use crate::toml_to_args::rpc_port_from_config;
 use std::{
     net::TcpStream,
     path::{Path, PathBuf},
@@ -6,6 +5,8 @@ use std::{
     thread::sleep,
     time::Duration,
 };
+
+use crate::toml_to_args::rpc_port_from_config;
 
 pub fn start_magic_block_validator_with_config(
     test_runner_paths: &TestRunnerPaths,

@@ -1,11 +1,14 @@
-use integration_test_tools::tmpdir::resolve_tmp_dir;
-use integration_test_tools::{expect, IntegrationTestContext};
-use solana_sdk::native_token::LAMPORTS_PER_SOL;
-use solana_sdk::signature::{Keypair, Signer};
-use solana_sdk::system_instruction;
-use solana_sdk::transaction::Transaction;
-use std::path::Path;
-use std::process::Child;
+use std::{path::Path, process::Child};
+
+use integration_test_tools::{
+    expect, tmpdir::resolve_tmp_dir, IntegrationTestContext,
+};
+use solana_sdk::{
+    native_token::LAMPORTS_PER_SOL,
+    signature::{Keypair, Signer},
+    system_instruction,
+    transaction::Transaction,
+};
 use test_ledger_restore::{setup_offline_validator, TMP_DIR_LEDGER};
 
 const SLOT_MS: u64 = 150;

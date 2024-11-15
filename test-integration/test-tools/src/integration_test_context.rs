@@ -2,19 +2,20 @@ use std::{thread::sleep, time::Duration};
 
 use anyhow::{Context, Result};
 use solana_rpc_client::rpc_client::RpcClient;
-use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_rpc_client_api::{
-    client_error, client_error::Error as ClientError,
-    client_error::ErrorKind as ClientErrorKind, config::RpcTransactionConfig,
+    client_error,
+    client_error::{Error as ClientError, ErrorKind as ClientErrorKind},
+    config::{RpcSendTransactionConfig, RpcTransactionConfig},
 };
-
-use solana_sdk::signature::Keypair;
 #[allow(unused_imports)]
 use solana_sdk::signer::SeedDerivable;
-use solana_sdk::{clock::Slot, transaction::Transaction};
 use solana_sdk::{
-    commitment_config::CommitmentConfig, hash::Hash, pubkey::Pubkey,
-    signature::Signature,
+    clock::Slot,
+    commitment_config::CommitmentConfig,
+    hash::Hash,
+    pubkey::Pubkey,
+    signature::{Keypair, Signature},
+    transaction::Transaction,
 };
 
 pub struct IntegrationTestContext {

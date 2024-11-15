@@ -1,23 +1,26 @@
-use integration_test_tools::expect;
-use integration_test_tools::tmpdir::resolve_tmp_dir;
-use integration_test_tools::workspace_paths::TestProgramPaths;
-use program_flexi_counter::instruction::create_add_ix;
-use program_flexi_counter::instruction::create_init_ix;
-use program_flexi_counter::instruction::create_mul_ix;
-use program_flexi_counter::state::FlexiCounter;
-use solana_sdk::native_token::LAMPORTS_PER_SOL;
-use solana_sdk::pubkey::Pubkey;
-use solana_sdk::signature::Keypair;
-use solana_sdk::signer::EncodableKey;
-use solana_sdk::signer::Signer;
-use std::io::{self, Write};
-use std::path::Path;
-use std::process;
-use std::process::Child;
-use test_ledger_restore::confirm_tx_with_payer;
-use test_ledger_restore::fetch_counter;
+use std::{
+    io::{self, Write},
+    path::Path,
+    process,
+    process::Child,
+};
+
+use integration_test_tools::{
+    expect, tmpdir::resolve_tmp_dir, workspace_paths::TestProgramPaths,
+};
+use program_flexi_counter::{
+    instruction::{create_add_ix, create_init_ix, create_mul_ix},
+    state::FlexiCounter,
+};
+use solana_sdk::{
+    native_token::LAMPORTS_PER_SOL,
+    pubkey::Pubkey,
+    signature::Keypair,
+    signer::{EncodableKey, Signer},
+};
 use test_ledger_restore::{
-    setup_offline_validator, FLEXI_COUNTER_ID, TMP_DIR_LEDGER,
+    confirm_tx_with_payer, fetch_counter, setup_offline_validator,
+    FLEXI_COUNTER_ID, TMP_DIR_LEDGER,
 };
 
 fn read_authority_pubkey(paths: &TestProgramPaths) -> Pubkey {

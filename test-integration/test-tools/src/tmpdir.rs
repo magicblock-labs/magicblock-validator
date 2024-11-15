@@ -1,5 +1,5 @@
-use std::path::PathBuf;
-use std::str::FromStr;
+use std::{path::PathBuf, str::FromStr};
+
 use tempfile::{tempdir, TempDir};
 
 /// Resolves a tmp dir by first considering the value defined in the [env_var_override].

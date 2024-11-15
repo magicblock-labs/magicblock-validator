@@ -1,25 +1,29 @@
-use integration_test_tools::tmpdir::resolve_tmp_dir;
-use integration_test_tools::validator::{
-    resolve_workspace_dir, start_magic_block_validator_with_config,
-    TestRunnerPaths,
+use std::{fs, path::Path, process, process::Child};
+
+use integration_test_tools::{
+    expect,
+    tmpdir::resolve_tmp_dir,
+    validator::{
+        resolve_workspace_dir, start_magic_block_validator_with_config,
+        TestRunnerPaths,
+    },
+    workspace_paths::path_relative_to_workspace,
+    IntegrationTestContext,
 };
-use integration_test_tools::workspace_paths::path_relative_to_workspace;
-use integration_test_tools::{expect, IntegrationTestContext};
 use program_flexi_counter::state::FlexiCounter;
 use sleipnir_config::{
-    AccountsConfig, ProgramConfig, SleipnirConfig, ValidatorConfig,
+    AccountsConfig, LedgerConfig, LifecycleMode, ProgramConfig, SleipnirConfig,
+    ValidatorConfig,
 };
-use sleipnir_config::{LedgerConfig, LifecycleMode};
-use solana_sdk::clock::Slot;
-use solana_sdk::instruction::Instruction;
-use solana_sdk::pubkey;
-use solana_sdk::pubkey::Pubkey;
-use solana_sdk::signature::{Keypair, Signature};
-use solana_sdk::signer::Signer;
-use solana_sdk::transaction::Transaction;
-use std::path::Path;
-use std::process::Child;
-use std::{fs, process};
+use solana_sdk::{
+    clock::Slot,
+    instruction::Instruction,
+    pubkey,
+    pubkey::Pubkey,
+    signature::{Keypair, Signature},
+    signer::Signer,
+    transaction::Transaction,
+};
 use tempfile::TempDir;
 
 pub const TMP_DIR_LEDGER: &str = "TMP_DIR_LEDGER";

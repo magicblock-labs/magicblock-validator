@@ -1,9 +1,7 @@
-use integration_test_tools::expect;
-use integration_test_tools::tmpdir::resolve_tmp_dir;
-use solana_sdk::pubkey::Pubkey;
-use solana_sdk::signature::Signature;
-use std::path::Path;
-use std::process::Child;
+use std::{path::Path, process::Child};
+
+use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};
+use solana_sdk::{pubkey::Pubkey, signature::Signature};
 use test_ledger_restore::{
     setup_offline_validator, SLOT_WRITE_DELTA, TMP_DIR_LEDGER,
 };

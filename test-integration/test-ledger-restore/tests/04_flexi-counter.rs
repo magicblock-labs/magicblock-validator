@@ -1,20 +1,18 @@
-use integration_test_tools::expect;
-use integration_test_tools::tmpdir::resolve_tmp_dir;
-use program_flexi_counter::instruction::create_add_ix;
-use program_flexi_counter::instruction::create_init_ix;
-use program_flexi_counter::instruction::create_mul_ix;
-use program_flexi_counter::state::FlexiCounter;
+use std::{path::Path, process::Child};
+
+use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};
+use program_flexi_counter::{
+    instruction::{create_add_ix, create_init_ix, create_mul_ix},
+    state::FlexiCounter,
+};
 use sleipnir_config::ProgramConfig;
-use solana_sdk::native_token::LAMPORTS_PER_SOL;
-use solana_sdk::pubkey::Pubkey;
-use solana_sdk::signature::Keypair;
-use solana_sdk::signer::Signer;
-use std::path::Path;
-use std::process::Child;
-use test_ledger_restore::confirm_tx_with_payer;
-use test_ledger_restore::fetch_counter;
+use solana_sdk::{
+    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
+    signer::Signer,
+};
 use test_ledger_restore::{
-    setup_offline_validator, FLEXI_COUNTER_ID, SLOT_WRITE_DELTA, TMP_DIR_LEDGER,
+    confirm_tx_with_payer, fetch_counter, setup_offline_validator,
+    FLEXI_COUNTER_ID, SLOT_WRITE_DELTA, TMP_DIR_LEDGER,
 };
 
 const SLOT_MS: u64 = 150;
