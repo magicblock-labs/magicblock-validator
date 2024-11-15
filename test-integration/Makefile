@@ -16,4 +16,12 @@ test-ledger-restore: build-flexi-counter
 build-flexi-counter:
 	cargo build-sbf --manifest-path $(DIR)/programs/flexi-counter/Cargo.toml
 
-.PHONY: test, test-force-mb, test-ledger-restore
+deploy-flexi-counter: build-flexi-counter
+	solana program deploy \
+		-u localhost \
+		--keypair $(DIR)/target/deploy/program_flexi_counter-keypair.json \
+		--program-id $(DIR)/programs/flexi-counter/keys/f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4.json \
+		$(DIR)/target/deploy/program_flexi_counter.so
+
+
+.PHONY: test, test-force-mb, test-ledger-restore, build-flexi-counter, deploy-flexi-counter
