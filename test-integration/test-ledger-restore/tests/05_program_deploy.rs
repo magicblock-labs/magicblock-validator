@@ -88,26 +88,26 @@ fn write(
 
     // Second we mainly test that the program was properly deployed by running
     // a few transactions
-    {
-        let ix_init = create_init_ix(payer.pubkey(), COUNTER.to_string());
-        confirm_tx_with_payer(ix_init, payer, &mut validator);
+    expect!(ctx.wait_for_next_slot_ephem(), validator);
 
-        let ix_add = create_add_ix(payer.pubkey(), 5);
-        confirm_tx_with_payer(ix_add, payer, &mut validator);
+    let ix_init = create_init_ix(payer.pubkey(), COUNTER.to_string());
+    confirm_tx_with_payer(ix_init, payer, &mut validator);
 
-        let ix_mul = create_mul_ix(payer.pubkey(), 2);
-        confirm_tx_with_payer(ix_mul, payer, &mut validator);
+    let ix_add = create_add_ix(payer.pubkey(), 5);
+    confirm_tx_with_payer(ix_add, payer, &mut validator);
 
-        let counter = fetch_counter(&payer.pubkey(), &mut validator);
-        assert_eq!(
-            counter,
-            FlexiCounter {
-                count: 10,
-                updates: 2,
-                label: COUNTER.to_string()
-            }
-        )
-    }
+    let ix_mul = create_mul_ix(payer.pubkey(), 2);
+    confirm_tx_with_payer(ix_mul, payer, &mut validator);
+
+    let counter = fetch_counter(&payer.pubkey(), &mut validator);
+    assert_eq!(
+        counter,
+        FlexiCounter {
+            count: 10,
+            updates: 2,
+            label: COUNTER.to_string()
+        }
+    );
 
     let slot = expect!(ctx.wait_for_next_slot_ephem(), validator);
     (validator, slot)

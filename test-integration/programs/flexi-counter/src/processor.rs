@@ -36,6 +36,8 @@ fn process_init(
     label: String,
     bump: u8,
 ) -> ProgramResult {
+    msg!("Init {}", label);
+
     let account_info_iter = &mut accounts.iter();
     let payer_info = next_account_info(account_info_iter)?;
     let counter_pda_info = next_account_info(account_info_iter)?;
@@ -47,11 +49,6 @@ fn process_init(
             counter_pda_info.key, counter_pda
         )
     })?;
-    msg!(
-        "PDA keys provided acc: {}, required PDA: {}",
-        counter_pda_info.key,
-        counter_pda
-    );
 
     let bump = &[bump];
     let seeds = FlexiCounter::seeds_with_bump(payer_info.key, bump);
@@ -79,6 +76,8 @@ fn process_init(
 }
 
 fn process_add(accounts: &[AccountInfo], count: u8) -> ProgramResult {
+    msg!("Add {}", count);
+
     let account_info_iter = &mut accounts.iter();
     let payer_info = next_account_info(account_info_iter)?;
     let counter_pda_info = next_account_info(account_info_iter)?;
@@ -105,6 +104,8 @@ fn process_add(accounts: &[AccountInfo], count: u8) -> ProgramResult {
 }
 
 fn process_mul(accounts: &[AccountInfo], multiplier: u8) -> ProgramResult {
+    msg!("Mul {}", multiplier);
+
     let account_info_iter = &mut accounts.iter();
     let payer_info = next_account_info(account_info_iter)?;
     let counter_pda_info = next_account_info(account_info_iter)?;
