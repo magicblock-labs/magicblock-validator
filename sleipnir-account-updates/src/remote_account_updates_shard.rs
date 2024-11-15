@@ -18,6 +18,9 @@ use tokio::sync::mpsc::UnboundedReceiver;
 use tokio_stream::StreamMap;
 use tokio_util::sync::CancellationToken;
 
+static DELEGATION_PROGRAM_STR: &str =
+    "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh";
+
 #[derive(Debug, Error)]
 pub enum RemoteAccountUpdatesShardError {
     #[error(transparent)]
@@ -134,7 +137,15 @@ impl RemoteAccountUpdatesShard {
     ) -> bool {
         match last_known_update_account {
             Some(last_known_update_account) => {
-                // For account we don't have access to the data, we assume we need a refresh, just in case
+                // Just in case, for extra safety, don't mess with the program updates, never discard related subscriptions
+                if current_update_account.executable {
+                    return true;
+                }
+                // Just in case, for extra safety, if it's a delegated account, never discard related subscriptions
+                if current_update_account.owner == DELEGATION_PROGRAM_STR {
+                    return true;
+                }
+                // For account we don't have access to the data, never discard its subscriptions
                 let last_known_update_data =
                     last_known_update_account.data.decode();
                 if last_known_update_data.is_none() {
