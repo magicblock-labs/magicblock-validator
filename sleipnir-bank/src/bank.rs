@@ -1872,22 +1872,6 @@ impl Bank {
         )
     }
 
-    #[must_use]
-    pub(super) fn process_transaction_batch(
-        &self,
-        batch: &TransactionBatch,
-    ) -> Vec<Result<()>> {
-        self.load_execute_and_commit_transactions(
-            batch,
-            false,
-            Default::default(),
-            &mut ExecuteTimings::default(),
-            None,
-        )
-        .0
-        .fee_collection_results
-    }
-
     /// `committed_transactions_count` is the number of transactions out of `sanitized_txs`
     /// that was executed. Of those, `committed_transactions_count`,
     /// `committed_with_failure_result_count` is the number of executed transactions that returned
