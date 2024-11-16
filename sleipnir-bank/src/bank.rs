@@ -1,7 +1,3 @@
-// FIXME: once we worked this out
-#![allow(dead_code)]
-#![allow(unused_variables)]
-
 use std::{
     borrow::Cow,
     collections::HashSet,
@@ -47,7 +43,7 @@ use solana_sdk::{
         ReadableAccount, WritableAccount,
     },
     clock::{
-        BankId, Epoch, Slot, SlotIndex, UnixTimestamp, DEFAULT_MS_PER_SLOT,
+        Epoch, Slot, SlotIndex, UnixTimestamp, DEFAULT_MS_PER_SLOT,
         MAX_RECENT_BLOCKHASHES,
     },
     epoch_info::EpochInfo,
@@ -132,7 +128,7 @@ pub struct SimpleForkGraph;
 
 impl ForkGraph for SimpleForkGraph {
     /// Returns the BlockRelation of A to B
-    fn relationship(&self, a: Slot, b: Slot) -> BlockRelation {
+    fn relationship(&self, _a: Slot, _b: Slot) -> BlockRelation {
         BlockRelation::Unrelated
     }
 
@@ -152,8 +148,6 @@ pub struct Bank {
 
     /// Bank slot (i.e. block)
     slot: AtomicU64,
-
-    bank_id: BankId,
 
     /// Bank epoch
     epoch: Epoch,
@@ -402,11 +396,7 @@ impl Bank {
 
         bank.process_genesis_config(genesis_config, identity_id);
 
-        bank.finish_init(
-            genesis_config,
-            additional_builtins,
-            debug_do_not_add_builtins,
-        );
+        bank.finish_init(additional_builtins, debug_do_not_add_builtins);
 
         // NOTE: leaving out stake history sysvar setup
 
@@ -441,7 +431,6 @@ impl Bank {
         millis_per_slot: u64,
     ) -> Self {
         // NOTE: this was not part of the original implementation
-        let simple_fork_graph = Arc::<RwLock<SimpleForkGraph>>::default();
         let loaded_programs_cache = {
             // TODO: not sure how this is setup more proper in the original implementation
             // since there we don't call `set_fork_graph` directly from the bank
@@ -463,7 +452,6 @@ impl Bank {
         let mut bank = Self {
             rc: BankRc::new(accounts),
             slot: AtomicU64::default(),
-            bank_id: BankId::default(),
             epoch: Epoch::default(),
             epoch_schedule: EpochSchedule::default(),
             is_delta: AtomicBool::default(),
@@ -537,13 +525,12 @@ impl Bank {
     // -----------------
     fn finish_init(
         &mut self,
-        genesis_config: &GenesisConfig,
         additional_builtins: Option<&[BuiltinPrototype]>,
         debug_do_not_add_builtins: bool,
     ) {
         // NOTE: leaving out `rewards_pool_pubkeys` initialization
 
-        self.apply_feature_activations(debug_do_not_add_builtins);
+        self.apply_feature_activations();
 
         if !debug_do_not_add_builtins {
             for builtin in BUILTINS
@@ -1244,7 +1231,7 @@ impl Bank {
     // In Solana this is called from snapshot restore AND for each epoch boundary
     // The entire code path herein must be idempotent
     // In our case only during finish_init when the bank is created
-    fn apply_feature_activations(&mut self, debug_do_not_add_builtins: bool) {
+    fn apply_feature_activations(&mut self) {
         let feature_set = self.compute_active_feature_set();
         // NOTE: at this point we have only inactive features
         self.feature_set = Arc::new(feature_set);
@@ -1661,15 +1648,6 @@ impl Bank {
             ExecuteTimingType::CheckUs,
             check_time.as_us(),
         );
-
-        for tx in sanitized_txs {
-            let accs = tx
-                .message()
-                .account_keys()
-                .iter()
-                .map(|k| format!("{} hex: {:?}", k, k.to_bytes()))
-                .collect::<Vec<String>>();
-        }
 
         // 2. Load and execute sanitized transactions
         let sanitized_output = self
@@ -2724,7 +2702,7 @@ impl Bank {
         epoch_start_timestamp: UnixTimestamp,
         timestamp: Option<UnixTimestamp>,
     ) {
-        self.update_clock(self.genesis_creation_time, timestamp);
+        self.update_clock(epoch_start_timestamp, timestamp);
         self.fill_missing_sysvar_cache_entries();
     }
 
