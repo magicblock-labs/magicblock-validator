@@ -1669,7 +1669,6 @@ impl Bank {
                 .iter()
                 .map(|k| format!("{} hex: {:?}", k, k.to_bytes()))
                 .collect::<Vec<String>>();
-            eprintln!("Accs: {:#?}", accs)
         }
 
         // 2. Load and execute sanitized transactions
