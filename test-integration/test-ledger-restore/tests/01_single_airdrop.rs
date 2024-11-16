@@ -12,12 +12,10 @@ fn restore_ledger_with_airdropped_account() {
 
     let pubkey = Pubkey::new_unique();
 
-    let (mut validator, airdrop_sig, slot) =
-        write_ledger(&ledger_path, &pubkey);
+    let (mut validator, airdrop_sig, _) = write_ledger(&ledger_path, &pubkey);
     validator.kill().unwrap();
 
-    let mut validator =
-        read_ledger(&ledger_path, &pubkey, Some(&airdrop_sig), slot);
+    let mut validator = read_ledger(&ledger_path, &pubkey, Some(&airdrop_sig));
     validator.kill().unwrap();
 }
 
@@ -44,12 +42,10 @@ fn read_ledger(
     ledger_path: &Path,
     pubkey1: &Pubkey,
     airdrop_sig1: Option<&Signature>,
-    slot: u64,
 ) -> Child {
     // Launch another validator reusing ledger
     let (_, mut validator, ctx) =
         setup_offline_validator(ledger_path, None, None, false);
-    // expect!(ctx.wait_for_slot_ephem(slot), validator);
 
     let acc = expect!(ctx.ephem_client.get_account(pubkey1), validator);
     assert_eq!(acc.lamports, 1_111_111);

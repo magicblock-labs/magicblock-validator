@@ -38,11 +38,10 @@ fn restore_ledger_with_flexi_counter_same_slot() {
     let payer1 = payer1_keypair();
     let payer2 = payer2_keypair();
 
-    let (mut validator, slot) = write(&ledger_path, &payer1, &payer2, false);
+    let (mut validator, _) = write(&ledger_path, &payer1, &payer2, false);
     validator.kill().unwrap();
 
-    let mut validator =
-        read(&ledger_path, &payer1.pubkey(), &payer2.pubkey(), slot);
+    let mut validator = read(&ledger_path, &payer1.pubkey(), &payer2.pubkey());
     validator.kill().unwrap();
 }
 
@@ -52,11 +51,10 @@ fn restore_ledger_with_flexi_counter_separate_slot() {
     let payer1 = payer1_keypair();
     let payer2 = payer2_keypair();
 
-    let (mut validator, slot) = write(&ledger_path, &payer1, &payer2, true);
+    let (mut validator, _) = write(&ledger_path, &payer1, &payer2, true);
     validator.kill().unwrap();
 
-    let mut validator =
-        read(&ledger_path, &payer1.pubkey(), &payer2.pubkey(), slot);
+    let mut validator = read(&ledger_path, &payer1.pubkey(), &payer2.pubkey());
     validator.kill().unwrap();
 }
 
@@ -228,21 +226,14 @@ fn write(
     (validator, slot)
 }
 
-fn read(
-    ledger_path: &Path,
-    payer1: &Pubkey,
-    payer2: &Pubkey,
-    slot: u64,
-) -> Child {
+fn read(ledger_path: &Path, payer1: &Pubkey, payer2: &Pubkey) -> Child {
     let programs = get_programs();
-    let (_, mut validator, ctx) = setup_offline_validator(
+    let (_, mut validator, _) = setup_offline_validator(
         ledger_path,
         Some(programs),
         Some(SLOT_MS),
         false,
     );
-
-    // expect!(ctx.wait_for_next_slot_ephem(slot), validator);
 
     let counter1_decoded = fetch_counter(payer1, &mut validator);
     assert_eq!(
@@ -300,8 +291,7 @@ fn _flexi_counter_diagnose_read() {
     let payer1 = payer1_keypair();
     let payer2 = payer2_keypair();
 
-    let mut validator =
-        read(&ledger_path, &payer1.pubkey(), &payer2.pubkey(), 20);
+    let mut validator = read(&ledger_path, &payer1.pubkey(), &payer2.pubkey());
 
     eprintln!("{}", ledger_path.display());
 

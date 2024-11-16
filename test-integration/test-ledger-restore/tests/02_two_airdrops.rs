@@ -13,7 +13,7 @@ fn restore_ledger_with_two_airdropped_accounts_same_slot() {
     let pubkey1 = Pubkey::new_unique();
     let pubkey2 = Pubkey::new_unique();
 
-    let (mut validator, airdrop_sig1, airdrop_sig2, slot) =
+    let (mut validator, airdrop_sig1, airdrop_sig2, _) =
         write(&ledger_path, &pubkey1, &pubkey2, false);
     validator.kill().unwrap();
 
@@ -23,7 +23,6 @@ fn restore_ledger_with_two_airdropped_accounts_same_slot() {
         &pubkey2,
         Some(&airdrop_sig1),
         Some(&airdrop_sig2),
-        slot,
     );
     validator.kill().unwrap();
 }
@@ -35,7 +34,7 @@ fn restore_ledger_with_two_airdropped_accounts_separate_slot() {
     let pubkey1 = Pubkey::new_unique();
     let pubkey2 = Pubkey::new_unique();
 
-    let (mut validator, airdrop_sig1, airdrop_sig2, slot) =
+    let (mut validator, airdrop_sig1, airdrop_sig2, _) =
         write(&ledger_path, &pubkey1, &pubkey2, true);
     validator.kill().unwrap();
 
@@ -45,7 +44,6 @@ fn restore_ledger_with_two_airdropped_accounts_separate_slot() {
         &pubkey2,
         Some(&airdrop_sig1),
         Some(&airdrop_sig2),
-        slot,
     );
     validator.kill().unwrap();
 }
@@ -88,11 +86,9 @@ fn read(
     pubkey2: &Pubkey,
     airdrop_sig1: Option<&Signature>,
     airdrop_sig2: Option<&Signature>,
-    slot: u64,
 ) -> Child {
     let (_, mut validator, ctx) =
         setup_offline_validator(ledger_path, None, None, false);
-    // expect!(ctx.wait_for_slot_ephem(slot), validator);
 
     let acc1 = expect!(ctx.ephem_client.get_account(pubkey1), validator);
     assert_eq!(acc1.lamports, 1_111_111);

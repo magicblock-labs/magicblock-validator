@@ -27,10 +27,10 @@ fn restore_ledger_with_multiple_dependent_transactions_same_slot() {
         Keypair::new(),
     ];
 
-    let (mut validator, slot) = write(&ledger_path, &keypairs, false);
+    let (mut validator, _) = write(&ledger_path, &keypairs, false);
     validator.kill().unwrap();
 
-    let mut validator = read(&ledger_path, &keypairs, slot);
+    let mut validator = read(&ledger_path, &keypairs);
     validator.kill().unwrap();
 }
 
@@ -46,10 +46,10 @@ fn restore_ledger_with_multiple_dependent_transactions_separate_slot() {
         Keypair::new(),
     ];
 
-    let (mut validator, slot) = write(&ledger_path, &keypairs, true);
+    let (mut validator, _) = write(&ledger_path, &keypairs, true);
     validator.kill().unwrap();
 
-    let mut validator = read(&ledger_path, &keypairs, slot);
+    let mut validator = read(&ledger_path, &keypairs);
     validator.kill().unwrap();
 }
 
@@ -149,10 +149,9 @@ fn write(
     (validator, slot)
 }
 
-fn read(ledger_path: &Path, keypairs: &[Keypair], slot: u64) -> Child {
+fn read(ledger_path: &Path, keypairs: &[Keypair]) -> Child {
     let (_, mut validator, ctx) =
         setup_offline_validator(ledger_path, None, Some(SLOT_MS), false);
-    // expect!(ctx.wait_for_slot_ephem(slot), validator);
 
     for keypair in keypairs {
         let acc =

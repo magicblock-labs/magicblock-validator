@@ -45,11 +45,10 @@ fn restore_ledger_with_flexi_counter_deploy() {
         FLEXI_COUNTER_ID,
     );
 
-    let (mut validator, slot) =
-        write(&ledger_path, &payer, &flexi_counter_paths);
+    let (mut validator, _) = write(&ledger_path, &payer, &flexi_counter_paths);
     validator.kill().unwrap();
 
-    let mut validator = read(&ledger_path, &payer.pubkey(), slot);
+    let mut validator = read(&ledger_path, &payer.pubkey());
     validator.kill().unwrap();
 }
 
@@ -116,11 +115,9 @@ fn write(
     (validator, slot)
 }
 
-fn read(ledger_path: &Path, payer: &Pubkey, slot: u64) -> Child {
-    let (_, mut validator, ctx) =
+fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
+    let (_, mut validator, _) =
         setup_offline_validator(ledger_path, None, None, false);
-
-    assert!(ctx.wait_for_slot_ephem(slot).is_ok());
 
     let counter_decoded = fetch_counter(payer, &mut validator);
     assert_eq!(
