@@ -2724,7 +2724,7 @@ impl Bank {
         epoch_start_timestamp: UnixTimestamp,
         timestamp: Option<UnixTimestamp>,
     ) {
-        self.update_clock(self.genesis_creation_time, None);
+        self.update_clock(self.genesis_creation_time, timestamp);
         self.fill_missing_sysvar_cache_entries();
     }
 
