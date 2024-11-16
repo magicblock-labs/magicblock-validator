@@ -1107,7 +1107,7 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "borsh 0.10.3",
  "ephemeral-rollups-sdk-attribute-commit",
@@ -1118,7 +1118,7 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-commit"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1127,7 +1127,7 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-delegate"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "proc-macro2",
  "quote",

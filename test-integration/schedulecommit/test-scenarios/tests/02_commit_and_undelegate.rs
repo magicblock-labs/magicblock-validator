@@ -359,7 +359,7 @@ fn test_committed_and_undelegated_accounts_redelegation() {
             ..
         } = ctx.fields();
 
-        // 1. Show we cannot use them in the ehpemeral anymore
+        // 1. Show we cannot use them in the ephemeral anymore
         {
             assert_cannot_increase_committee_count(
                 committees[0].1,

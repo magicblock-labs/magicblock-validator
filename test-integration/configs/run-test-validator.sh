@@ -6,6 +6,10 @@ solana-test-validator \
   -r \
   --account mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev \
   $DIR/accounts/validator-authority.json \
+  --account EpJnX7ueXk7fKojBymqmVuCuwyhDQsYcLVL1XMsBbvDX \
+  $DIR/accounts/validator-fees-vault.json \
+  --account 7JrkjmZPprHwtuvtuGTXp9hwfGYFAQLnLeFM52kqAgXg \
+  $DIR/accounts/protocol-fees-vault.json \
   --account LUzidNSiPNjYNkxZcUm5hYHwnWPwsUfh2US1cpWwaBm \
   $DIR/accounts/luzid-authority.json \
   --limit-ledger-size \

@@ -1,7 +1,10 @@
+use borsh::BorshDeserialize;
 use std::collections::HashSet;
 
 use async_trait::async_trait;
 use dlp::instruction::{commit_state, finalize, undelegate, CommitAccountArgs};
+use dlp::pda::delegation_metadata_pda_from_pubkey;
+use dlp::state::DelegationMetadata;
 use futures_util::future::join_all;
 use log::*;
 use sleipnir_metrics::metrics;
@@ -104,11 +107,27 @@ impl AccountCommitter for RemoteAccountCommitter {
             let finalize_ix = finalize(committer, *pubkey);
             ixs.extend(vec![commit_ix, finalize_ix]);
             if let Some(UndelegationRequest { owner }) = undelegation_request {
+                let metadata_account = self
+                    .rpc_client
+                    .get_account(&delegation_metadata_pda_from_pubkey(pubkey))
+                    .await
+                    .map_err(|err| {
+                        AccountsError::FailedToGetReimbursementAddress(
+                            err.to_string(),
+                        )
+                    })?;
+                let metadata =
+                    DelegationMetadata::try_from_slice(&metadata_account.data)
+                        .map_err(|err| {
+                            AccountsError::FailedToGetReimbursementAddress(
+                                err.to_string(),
+                            )
+                        })?;
                 let undelegate_ix = undelegate(
                     validator_authority_id(),
                     *pubkey,
                     *owner,
-                    validator_authority_id(),
+                    metadata.rent_payer,
                 );
                 ixs.push(undelegate_ix);
                 undelegated_accounts.insert(*pubkey);
@@ -150,8 +169,8 @@ impl AccountCommitter for RemoteAccountCommitter {
             transaction:
                 CommitAccountsTransaction {
                     transaction,
-                    undelegated_accounts,
                     committed_only_accounts,
+                    undelegated_accounts,
                 },
             committees,
         } in payloads
@@ -353,8 +372,8 @@ impl RemoteAccountCommitter {
         // TODO(thlorenz): We may need to consider account size as well since
         // the account is copied which could affect CUs
         const BASE_COMPUTE_BUDGET: u32 = 50_000;
-        const COMPUTE_BUDGET_PER_COMMITTEE: u32 = 30_000;
-        const COMPUTE_BUDGET_PER_UNDELEGATION: u32 = 30_000;
+        const COMPUTE_BUDGET_PER_COMMITTEE: u32 = 40_000;
+        const COMPUTE_BUDGET_PER_UNDELEGATION: u32 = 40_000;
 
         let compute_budget = BASE_COMPUTE_BUDGET
             + (COMPUTE_BUDGET_PER_COMMITTEE * committee_count)
