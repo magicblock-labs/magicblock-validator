@@ -48,7 +48,7 @@ pub(crate) fn fund_validator_identity(bank: &Bank, validator_id: &Pubkey) {
 }
 
 /// Funds the faucet account.
-/// If the [creaet_new] is `false` then the faucet keypair will be read from the
+/// If the [create_new] is `false` then the faucet keypair will be read from the
 /// existing ledger and an error is raised if it is not found.
 /// Otherwise, a new faucet keypair will be created and saved to the ledger.
 pub(crate) fn funded_faucet(

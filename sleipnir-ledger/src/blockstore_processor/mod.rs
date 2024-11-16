@@ -1,7 +1,5 @@
 use std::str::FromStr;
 
-use crate::errors::{LedgerError, LedgerResult};
-use crate::Ledger;
 use log::*;
 use sleipnir_bank::bank::{Bank, TransactionExecutionRecordingOpts};
 use solana_program_runtime::timings::ExecuteTimings;
@@ -12,6 +10,11 @@ use solana_sdk::{
 };
 use solana_transaction_status::VersionedConfirmedBlock;
 
+use crate::{
+    errors::{LedgerError, LedgerResult},
+    Ledger,
+};
+
 #[derive(Debug)]
 struct PreparedBlock {
     slot: u64,
@@ -21,7 +24,7 @@ struct PreparedBlock {
     transactions: Vec<VersionedTransaction>,
 }
 
-fn iter_blocks_with_transaction(
+fn iter_blocks(
     ledger: &Ledger,
     mut prepared_block_handler: impl FnMut(PreparedBlock) -> LedgerResult<()>,
 ) -> LedgerResult<()> {
@@ -82,7 +85,7 @@ fn iter_blocks_with_transaction(
 }
 
 pub fn process_ledger(ledger: &Ledger, bank: &Bank) -> LedgerResult<()> {
-    iter_blocks_with_transaction(ledger, |prepared_block| {
+    iter_blocks(ledger, |prepared_block| {
         let mut block_txs = vec![];
         let Some(timestamp) = prepared_block.block_time else {
             return Err(LedgerError::BlockStoreProcessor(format!(
