@@ -17,6 +17,7 @@ num_cpus = { workspace = true }
 prost = { workspace = true }
 serde = { workspace = true }
 sleipnir-bank = { workspace = true }
+sleipnir-accounts-db = { workspace = true }
 solana-account-decoder = { workspace = true }
 solana-measure = { workspace = true }
 solana-metrics = { workspace = true }

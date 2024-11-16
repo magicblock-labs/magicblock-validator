@@ -1,6 +1,7 @@
 use std::str::FromStr;
 
 use log::*;
+use sleipnir_accounts_db::transaction_results::TransactionExecutionResult;
 use sleipnir_bank::bank::{Bank, TransactionExecutionRecordingOpts};
 use solana_program_runtime::timings::ExecuteTimings;
 use solana_sdk::{
@@ -132,7 +133,17 @@ pub fn process_ledger(ledger: &Ledger, bank: &Bank) -> LedgerResult<()> {
                     &mut timings,
                     None,
                 );
-                info!("Results: {:#?}", results.execution_results);
+                trace!("Results: {:#?}", results.execution_results);
+                for result in results.execution_results {
+                    if let TransactionExecutionResult::NotExecuted(err) =
+                        &result
+                    {
+                        return Err(LedgerError::BlockStoreProcessor(format!(
+                            "Transaction {:?} could not be executed: {:?}",
+                            result, err
+                        )));
+                    }
+                }
             }
         }
         Ok(())
