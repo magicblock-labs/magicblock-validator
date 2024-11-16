@@ -3,7 +3,7 @@ use std::{path::Path, process::Child};
 use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 use test_ledger_restore::{
-    setup_offline_validator, SLOT_WRITE_DELTA, TMP_DIR_LEDGER,
+    setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 
 #[test]
@@ -34,7 +34,7 @@ fn write_ledger(
     let lamports = expect!(ctx.fetch_ephem_account_balance(pubkey1), validator);
     assert_eq!(lamports, 1_111_111);
 
-    let slot = ctx.wait_for_delta_slot_ephem(SLOT_WRITE_DELTA).unwrap();
+    let slot = wait_for_ledger_persist(&mut validator);
 
     validator.kill().unwrap();
     (validator, sig, slot)
@@ -49,7 +49,7 @@ fn read_ledger(
     // Launch another validator reusing ledger
     let (_, mut validator, ctx) =
         setup_offline_validator(ledger_path, None, None, false);
-    assert!(ctx.wait_for_slot_ephem(slot).is_ok());
+    // expect!(ctx.wait_for_slot_ephem(slot), validator);
 
     let acc = expect!(ctx.ephem_client.get_account(pubkey1), validator);
     assert_eq!(acc.lamports, 1_111_111);

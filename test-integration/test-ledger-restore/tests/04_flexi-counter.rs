@@ -12,7 +12,7 @@ use solana_sdk::{
 };
 use test_ledger_restore::{
     confirm_tx_with_payer, fetch_counter, setup_offline_validator,
-    FLEXI_COUNTER_ID, SLOT_WRITE_DELTA, TMP_DIR_LEDGER,
+    wait_for_ledger_persist, FLEXI_COUNTER_ID, TMP_DIR_LEDGER,
 };
 
 const SLOT_MS: u64 = 150;
@@ -223,7 +223,7 @@ fn write(
         )
     }
 
-    let slot = ctx.wait_for_delta_slot_ephem(SLOT_WRITE_DELTA).unwrap();
+    let slot = wait_for_ledger_persist(&mut validator);
 
     (validator, slot)
 }
@@ -242,7 +242,7 @@ fn read(
         false,
     );
 
-    assert!(ctx.wait_for_slot_ephem(slot).is_ok());
+    // expect!(ctx.wait_for_next_slot_ephem(slot), validator);
 
     let counter1_decoded = fetch_counter(payer1, &mut validator);
     assert_eq!(

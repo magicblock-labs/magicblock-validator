@@ -20,7 +20,7 @@ use solana_sdk::{
 };
 use test_ledger_restore::{
     confirm_tx_with_payer, fetch_counter, setup_offline_validator,
-    FLEXI_COUNTER_ID, TMP_DIR_LEDGER,
+    wait_for_ledger_persist, FLEXI_COUNTER_ID, TMP_DIR_LEDGER,
 };
 
 fn read_authority_pubkey(paths: &TestProgramPaths) -> Pubkey {
@@ -112,7 +112,7 @@ fn write(
         }
     );
 
-    let slot = expect!(ctx.wait_for_next_slot_ephem(), validator);
+    let slot = wait_for_ledger_persist(&mut validator);
     (validator, slot)
 }
 

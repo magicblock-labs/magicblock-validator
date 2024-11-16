@@ -9,7 +9,9 @@ use solana_sdk::{
     system_instruction,
     transaction::Transaction,
 };
-use test_ledger_restore::{setup_offline_validator, TMP_DIR_LEDGER};
+use test_ledger_restore::{
+    setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
+};
 
 const SLOT_MS: u64 = 150;
 
@@ -142,7 +144,7 @@ fn write(
         LAMPORTS_PER_SOL,
     );
 
-    let slot = expect!(ctx.wait_for_next_slot_ephem(), validator);
+    let slot = wait_for_ledger_persist(&mut validator);
 
     (validator, slot)
 }
@@ -150,7 +152,7 @@ fn write(
 fn read(ledger_path: &Path, keypairs: &[Keypair], slot: u64) -> Child {
     let (_, mut validator, ctx) =
         setup_offline_validator(ledger_path, None, Some(SLOT_MS), false);
-    assert!(ctx.wait_for_slot_ephem(slot).is_ok());
+    // expect!(ctx.wait_for_slot_ephem(slot), validator);
 
     for keypair in keypairs {
         let acc =

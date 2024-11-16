@@ -28,9 +28,6 @@ use tempfile::TempDir;
 
 pub const TMP_DIR_LEDGER: &str = "TMP_DIR_LEDGER";
 pub const TMP_DIR_CONFIG: &str = "TMP_DIR_CONFIG";
-/// The minimum of slots we should wait for before shutting down a validator that
-/// was writing the ledger.
-pub const SLOT_WRITE_DELTA: Slot = 15;
 
 pub const FLEXI_COUNTER_ID: &str =
     "f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4";
@@ -159,4 +156,23 @@ pub fn fetch_counter(payer: &Pubkey, validator: &mut Child) -> FlexiCounter {
     let counter_acc =
         expect!(ctx.ephem_client.get_account(&counter), validator);
     expect!(FlexiCounter::try_decode(&counter_acc.data), validator)
+}
+
+// -----------------
+// Slot Advances
+// -----------------
+/// Waits for sufficient slot advances to guarantee that the ledger for
+/// the current slot was persiste
+pub fn wait_for_ledger_persist(validator: &mut Child) -> Slot {
+    let ctx = IntegrationTestContext::new_ephem_only();
+
+    // I noticed test flakiness if we just advance to next slot once
+    // It seems then the ledger hasn't been fully written by the time
+    // we kill the validator and the most recent transactions + account
+    // updates are missing.
+    // Therefore we ensure to advance 3 slots instead of just one
+    expect!(ctx.wait_for_next_slot_ephem(), validator);
+    expect!(ctx.wait_for_next_slot_ephem(), validator);
+    let slot = expect!(ctx.wait_for_next_slot_ephem(), validator);
+    slot
 }
