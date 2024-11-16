@@ -27,4 +27,4 @@ deploy-flexi-counter: build-flexi-counter
 		$(DIR)/target/deploy/program_flexi_counter.so
 
 
-.PHONY: test, test-force-mb, test-ledger-restore, build-flexi-counter, deploy-flexi-counter
+.PHONY: test test-force-mb test-ledger-restore build-flexi-counter deploy-flexi-counter
