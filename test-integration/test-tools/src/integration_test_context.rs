@@ -9,10 +9,7 @@ use solana_rpc_client_api::{
 
 #[allow(unused_imports)]
 use solana_sdk::signer::SeedDerivable;
-use solana_sdk::{
-    commitment_config::CommitmentConfig, hash::Hash, pubkey::Pubkey,
-    signature::Signature,
-};
+use solana_sdk::{commitment_config::CommitmentConfig, hash::Hash, pubkey::Pubkey, signature::Signature};
 
 pub struct IntegrationTestContext {
     pub commitment: CommitmentConfig,

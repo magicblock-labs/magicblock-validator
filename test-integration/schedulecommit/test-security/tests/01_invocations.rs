@@ -4,10 +4,13 @@ use schedulecommit_client::{
 };
 use schedulecommit_program::api::schedule_commit_cpi_instruction;
 use sleipnir_core::magic_program;
-use solana_program::instruction::{AccountMeta, Instruction};
-use solana_program::pubkey::Pubkey;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
-use solana_sdk::{signer::Signer, transaction::Transaction};
+use solana_sdk::{
+    instruction::{AccountMeta, Instruction},
+    pubkey::Pubkey,
+    signer::Signer,
+    transaction::Transaction,
+};
 
 use crate::utils::{
     create_nested_schedule_cpis_instruction,
@@ -23,6 +26,18 @@ const PROGRAM_ID_NOT_FOUND: &str =
 const INVALID_ACCOUNT_OWNER: &str = "Invalid account owner";
 const NEEDS_TO_BE_OWNED_BY_INVOKING_PROGRAM: &str =
     "needs to be owned by the invoking program";
+
+fn prepare_ctx_with_account_to_commit() -> ScheduleCommitTestContext {
+    let ctx = if std::env::var("FIXED_KP").is_ok() {
+        ScheduleCommitTestContext::new(2)
+    } else {
+        ScheduleCommitTestContext::new_random_keys(2)
+    };
+    ctx.init_committees().unwrap();
+    ctx.delegate_committees(None).unwrap();
+
+    ctx
+}
 
 fn create_schedule_commit_ix(
     payer: Pubkey,
@@ -51,18 +66,6 @@ fn create_schedule_commit_ix(
     )
 }
 
-fn prepare_ctx_with_account_to_commit() -> ScheduleCommitTestContext {
-    let ctx = if std::env::var("FIXED_KP").is_ok() {
-        ScheduleCommitTestContext::new(2)
-    } else {
-        ScheduleCommitTestContext::new_random_keys(2)
-    };
-    ctx.init_committees().unwrap();
-    ctx.delegate_committees(None).unwrap();
-
-    ctx
-}
-
 #[test]
 fn test_schedule_commit_directly_with_single_ix() {
     // Attempts to directly commit PDAs via the MagicBlock program.
@@ -76,7 +79,6 @@ fn test_schedule_commit_directly_with_single_ix() {
         ephem_client,
         ..
     } = ctx.fields();
-
     let ix = create_schedule_commit_ix(
         payer.pubkey(),
         pubkey_from_magic_program(magic_program::id()),

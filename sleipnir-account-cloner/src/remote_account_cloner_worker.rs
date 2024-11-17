@@ -338,7 +338,10 @@ where
                 }
                 self.do_clone_delegated_account(
                     pubkey,
-                    account,
+                    &Account {
+                        lamports: delegation_record.lamports,
+                        ..account.clone()
+                    },
                     delegation_record,
                 )?
             }
@@ -389,7 +392,7 @@ where
         &self,
         pubkey: &Pubkey,
         account: &Account,
-        delegation: &DelegationRecord,
+        record: &DelegationRecord,
     ) -> AccountClonerResult<Signature> {
         // If we already cloned this account from the same delegation slot
         // Keep the local state as source of truth even if it changed on-chain
@@ -402,28 +405,19 @@ where
                 delegation_record, ..
             } = &account_chain_snapshot.chain_state
             {
-                if delegation_record.delegation_slot
-                    == delegation.delegation_slot
-                {
+                if delegation_record.delegation_slot == record.delegation_slot {
                     return Ok(signature);
                 }
             }
         };
         // If its the first time we're seeing this delegated account, dump it to the bank
         self.account_dumper
-            .dump_delegated_account(
-                pubkey,
-                &Account {
-                    lamports: delegation.lamports,
-                    ..account.clone()
-                },
-                &delegation.owner,
-            )
+            .dump_delegated_account(pubkey, account, &record.owner)
             .map_err(AccountClonerError::AccountDumperError)
             .inspect(|_| {
                 metrics::inc_account_clone(metrics::AccountClone::Delegated {
                     pubkey: &pubkey.to_string(),
-                    owner: &delegation.owner.to_string(),
+                    owner: &record.owner.to_string(),
                 });
             })
     }
