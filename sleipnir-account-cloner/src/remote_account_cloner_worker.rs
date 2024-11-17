@@ -4,7 +4,9 @@ use std::{
     vec,
 };
 
-use conjunto_transwise::{AccountChainSnapshotShared, AccountChainState};
+use conjunto_transwise::{
+    AccountChainSnapshotShared, AccountChainState, DelegationRecord,
+};
 use dlp::consts::DELEGATION_PROGRAM_ID;
 use futures_util::future::join_all;
 use log::*;
@@ -17,7 +19,6 @@ use sleipnir_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
 use solana_sdk::{
     account::{Account, ReadableAccount},
     bpf_loader_upgradeable::get_program_data_address,
-    clock::Slot,
     pubkey::Pubkey,
     signature::Signature,
 };
@@ -338,8 +339,7 @@ where
                 self.do_clone_delegated_account(
                     pubkey,
                     account,
-                    &delegation_record.owner,
-                    delegation_record.delegation_slot,
+                    delegation_record,
                 )?
             }
         };
@@ -389,8 +389,7 @@ where
         &self,
         pubkey: &Pubkey,
         account: &Account,
-        owner: &Pubkey,
-        delegation_slot: Slot,
+        delegation: &DelegationRecord,
     ) -> AccountClonerResult<Signature> {
         // If we already cloned this account from the same delegation slot
         // Keep the local state as source of truth even if it changed on-chain
@@ -403,19 +402,28 @@ where
                 delegation_record, ..
             } = &account_chain_snapshot.chain_state
             {
-                if delegation_record.delegation_slot == delegation_slot {
+                if delegation_record.delegation_slot
+                    == delegation.delegation_slot
+                {
                     return Ok(signature);
                 }
             }
         };
         // If its the first time we're seeing this delegated account, dump it to the bank
         self.account_dumper
-            .dump_delegated_account(pubkey, account, owner)
+            .dump_delegated_account(
+                pubkey,
+                &Account {
+                    lamports: delegation.lamports,
+                    ..account.clone()
+                },
+                &delegation.owner,
+            )
             .map_err(AccountClonerError::AccountDumperError)
             .inspect(|_| {
                 metrics::inc_account_clone(metrics::AccountClone::Delegated {
                     pubkey: &pubkey.to_string(),
-                    owner: &owner.to_string(),
+                    owner: &delegation.owner.to_string(),
                 });
             })
     }
