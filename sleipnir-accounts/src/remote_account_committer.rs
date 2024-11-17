@@ -371,9 +371,9 @@ impl RemoteAccountCommitter {
     ) -> (Instruction, Instruction) {
         // TODO(thlorenz): We may need to consider account size as well since
         // the account is copied which could affect CUs
-        const BASE_COMPUTE_BUDGET: u32 = 50_000;
+        const BASE_COMPUTE_BUDGET: u32 = 60_000;
         const COMPUTE_BUDGET_PER_COMMITTEE: u32 = 40_000;
-        const COMPUTE_BUDGET_PER_UNDELEGATION: u32 = 40_000;
+        const COMPUTE_BUDGET_PER_UNDELEGATION: u32 = 45_000;
 
         let compute_budget = BASE_COMPUTE_BUDGET
             + (COMPUTE_BUDGET_PER_COMMITTEE * committee_count)
