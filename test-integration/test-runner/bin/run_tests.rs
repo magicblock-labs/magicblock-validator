@@ -325,6 +325,14 @@ fn start_test_validator_with_config(
             "LUzidNSiPNjYNkxZcUm5hYHwnWPwsUfh2US1cpWwaBm",
             "luzid-authority.json",
         ),
+        (
+            "EpJnX7ueXk7fKojBymqmVuCuwyhDQsYcLVL1XMsBbvDX",
+            "validator-fees-vault.json",
+        ),
+        (
+            "7JrkjmZPprHwtuvtuGTXp9hwfGYFAQLnLeFM52kqAgXg",
+            "protocol-fees-vault.json",
+        ),
     ];
 
     let account_args = accounts
