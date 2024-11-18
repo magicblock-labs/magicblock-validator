@@ -41,6 +41,7 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU> {
     blacklisted_accounts: HashSet<Pubkey>,
     payer_init_lamports: Option<u64>,
     permissions: AccountClonerPermissions,
+    fetch_retries: u64,
     clone_request_receiver: UnboundedReceiver<Pubkey>,
     clone_request_sender: UnboundedSender<Pubkey>,
     clone_listeners: Arc<RwLock<HashMap<Pubkey, AccountClonerListeners>>>,
@@ -67,6 +68,7 @@ where
     ) -> Self {
         let (clone_request_sender, clone_request_receiver) =
             unbounded_channel();
+        let fetch_retries = 5;
         Self {
             internal_account_provider,
             account_fetcher,
@@ -76,6 +78,7 @@ where
             blacklisted_accounts,
             payer_init_lamports,
             permissions,
+            fetch_retries,
             clone_request_receiver,
             clone_request_sender,
             clone_listeners: Default::default(),
@@ -282,7 +285,7 @@ where
                 }
                 // If we failed too fetch too many time, temporarily give up to not clog the whole system
                 retries += 1;
-                if retries >= 10 {
+                if retries >= self.fetch_retries {
                     return Ok(AccountClonerOutput::Unclonable {
                         pubkey: *pubkey,
                         reason: AccountClonerUnclonableReason::FailedToFetchSatisfactorySlot,

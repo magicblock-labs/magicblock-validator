@@ -76,7 +76,7 @@ impl RemoteAccountUpdatesShard {
             min_context_slot: None,
         };
         // Subscribe to the slot counter from the RPC
-        let (mut slot_stream, slot_unsubscrbe) = pubsub_client
+        let (mut slot_stream, slot_unsubscribe) = pubsub_client
             .slot_subscribe()
             .await
             .map_err(RemoteAccountUpdatesShardError::PubsubClientError)?;
@@ -89,7 +89,7 @@ impl RemoteAccountUpdatesShard {
             tokio::select! {
                 // When we receive a new slot notification
                 Some(slot_info) = slot_stream.next() => {
-                    last_received_slot =slot_info.slot;
+                    last_received_slot = slot_info.slot;
                 }
                 // When we receive a message to start monitoring an account
                 Some(pubkey) = self.monitoring_request_receiver.recv() => {
@@ -128,7 +128,7 @@ impl RemoteAccountUpdatesShard {
             );
             account_unsubscribes().await;
         }
-        slot_unsubscrbe().await;
+        slot_unsubscribe().await;
         drop(account_streams);
         drop(slot_stream);
         pubsub_client.shutdown().await?;
