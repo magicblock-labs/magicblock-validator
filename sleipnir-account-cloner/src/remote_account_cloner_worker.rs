@@ -278,11 +278,11 @@ where
                 let account_chain_snapshot = self
                     .fetch_account_chain_snapshot(pubkey, min_context_slot)
                     .await?;
-                let fetched_at_slot = account_chain_snapshot.at_slot;
                 let first_subscribed_slot =
                     self.account_updates.get_first_subscribed_slot(pubkey);
                 // We consider it a satisfactory response if the slot at which the state is from
                 // is more recent than the first successful subscription to the account
+                let fetched_at_slot = account_chain_snapshot.at_slot;
                 if fetched_at_slot > first_subscribed_slot.unwrap_or(u64::MAX) {
                     break account_chain_snapshot;
                 }

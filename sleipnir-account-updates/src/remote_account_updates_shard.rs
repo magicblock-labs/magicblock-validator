@@ -77,7 +77,7 @@ impl RemoteAccountUpdatesShard {
         };
         // Subscribe to the slot counter from the RPC
         let (mut slot_stream, slot_unsubscribe) = pubsub_client
-            .slot_subscribe()
+            .root_subscribe()
             .await
             .map_err(RemoteAccountUpdatesShardError::PubsubClientError)?;
         let mut last_received_slot = 0;
