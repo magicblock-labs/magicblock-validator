@@ -275,9 +275,8 @@ where
             let mut min_context_slot = None;
             let mut retries = 0;
             loop {
-                let account_chain_snapshot = self
-                    .fetch_account_chain_snapshot(pubkey, min_context_slot)
-                    .await?;
+                let account_chain_snapshot =
+                    self.fetch_account_chain_snapshot(pubkey, None).await?;
                 let first_subscribed_slot =
                     self.account_updates.get_first_subscribed_slot(pubkey);
                 // We consider it a satisfactory response if the slot at which the state is from
