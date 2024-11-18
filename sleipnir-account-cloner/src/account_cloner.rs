@@ -45,6 +45,7 @@ pub enum AccountClonerUnclonableReason {
     DoesNotAllowUndelegatedAccount,
     DoesNotAllowDelegatedAccount,
     DoesNotAllowProgramAccount,
+    FailedToFetchSatisfactorySlot,
 }
 
 #[derive(Debug, Clone)]

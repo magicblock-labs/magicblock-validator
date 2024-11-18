@@ -255,9 +255,10 @@ where
                 at_slot: u64::MAX, // we should never try cloning again
             });
         }
-        // Mark the account for monitoring, we want to start to detect futures updates on it
-        // since we're cloning it now, it's now part of the validator monitored accounts
-        if self.permissions.allow_cloning_refresh {
+        // Get the latest state of the account
+        let account_chain_snapshot = if self.permissions.allow_cloning_refresh {
+            // Mark the account for monitoring, we want to start to detect futures updates on it
+            // since we're cloning it now, it's now part of the validator monitored accounts
             // TODO(vbrunet)
             //  - https://github.com/magicblock-labs/magicblock-validator/issues/95
             //  - handle the case of the lamports updates better
@@ -265,10 +266,33 @@ where
             self.account_updates
                 .ensure_account_monitoring(pubkey)
                 .map_err(AccountClonerError::AccountUpdatesError)?;
-        }
-        // Fetch the account
-        let account_chain_snapshot =
-            self.fetch_account_chain_snapshot(pubkey).await?;
+            // Fetch the account, repeat and retry until we have a satisfactory response
+            let mut retries = 0;
+            loop {
+                let account_chain_snapshot =
+                    self.fetch_account_chain_snapshot(pubkey).await?;
+                let first_subscribed_slot = self
+                    .account_updates
+                    .get_first_subscribed_slot(pubkey)
+                    .unwrap_or(u64::MAX);
+                // We consider it a satisfactory response if the slot at which the state is from
+                // is more recent than the first successful subscription to the account
+                if account_chain_snapshot.at_slot > first_subscribed_slot {
+                    break account_chain_snapshot;
+                }
+                // If we failed too fetch too many time, temporarily give up to not clog the whole system
+                retries += 1;
+                if retries >= 10 {
+                    return Ok(AccountClonerOutput::Unclonable {
+                        pubkey: *pubkey,
+                        reason: AccountClonerUnclonableReason::FailedToFetchSatisfactorySlot,
+                        at_slot: account_chain_snapshot.at_slot
+                    });
+                }
+            }
+        } else {
+            self.fetch_account_chain_snapshot(pubkey).await?
+        };
         // Generate cloning transactions
         let signature = match &account_chain_snapshot.chain_state {
             // If the account has no data, we can use it for lamport transfers only
