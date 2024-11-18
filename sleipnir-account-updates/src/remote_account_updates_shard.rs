@@ -89,7 +89,7 @@ impl RemoteAccountUpdatesShard {
             tokio::select! {
                 // When we receive a new slot notification
                 Some(slot_info) = slot_stream.next() => {
-                    info!("Shard {}: Slot info received: {:?}", self.shard_id, slot_info);
+                    info!("Shard {}: Slot received: {:?}", self.shard_id, slot_info.slot);
                     last_received_slot = slot_info.slot;
                 }
                 // When we receive a message to start monitoring an account
@@ -97,7 +97,12 @@ impl RemoteAccountUpdatesShard {
                     if account_unsubscribes.contains_key(&pubkey) {
                         continue;
                     }
-                    info!("Shard {}: Account monitoring started: {:?}", self.shard_id, pubkey);
+                    info!(
+                        "Shard {}: Account monitoring started: {:?}, last_received_slot: {:?}",
+                        self.shard_id,
+                        pubkey,
+                        last_received_slot
+                    );
                     let (stream, unsubscribe) = pubsub_client
                         .account_subscribe(&pubkey, Some(rpc_account_info_config.clone()))
                         .await
@@ -110,7 +115,7 @@ impl RemoteAccountUpdatesShard {
                 Some((pubkey, update)) = account_streams.next() => {
                     let current_update_slot = update.context.slot;
                     debug!(
-                        "Shard {}: Account update: {:?}, at slot: {}, data: {:?}",
+                        "Shard {}: Account update: {:?}, current_update_slot: {}, data: {:?}",
                         self.shard_id, pubkey, current_update_slot, update.value.data.decode(),
                     );
                     self.try_to_override_last_known_update_slot(pubkey, current_update_slot);
@@ -148,9 +153,8 @@ impl RemoteAccountUpdatesShard {
                 .read()
                 .expect("RwLock of RemoteAccountUpdatesShard.first_subscribed_slots poisoned")
                 .get(&pubkey)
-                .cloned()
-                .unwrap_or(u64::MAX);
-        if subscribed_slot < first_subscribed_slot {
+                .cloned();
+        if subscribed_slot < first_subscribed_slot.unwrap_or(u64::MAX) {
             // If the subscribe slot seems to be the oldest one, we need to acquire a write lock to update it
             match self.first_subscribed_slots
                     .write()
@@ -177,9 +181,8 @@ impl RemoteAccountUpdatesShard {
             .read()
             .expect("RwLock of RemoteAccountUpdatesShard.last_known_update_slots poisoned")
             .get(&pubkey)
-            .cloned()
-            .unwrap_or(u64::MIN);
-        if current_update_slot > last_known_update_slot {
+            .cloned();
+        if current_update_slot > last_known_update_slot.unwrap_or(u64::MIN) {
             // If the current update seems to be the most recent one, we need to acquire a write lock to update it
             match self.last_known_update_slots
                 .write()
