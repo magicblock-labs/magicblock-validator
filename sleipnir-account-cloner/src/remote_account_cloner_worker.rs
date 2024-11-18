@@ -1,6 +1,7 @@
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     sync::{Arc, RwLock},
+    time::Duration,
     vec,
 };
 
@@ -21,8 +22,9 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::Signature,
 };
-use tokio::sync::mpsc::{
-    unbounded_channel, UnboundedReceiver, UnboundedSender,
+use tokio::{
+    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    time::sleep,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -285,9 +287,11 @@ where
                 {
                     break account_chain_snapshot;
                 }
+                // If the result was not satisfactory, wait a bit and try again
                 desired_slot = first_subscribed_slot;
-                // If we failed too fetch too many time, temporarily give up to not clog the whole system
                 retries += 1;
+                sleep(Duration::from_millis(100)).await;
+                // If we failed too fetch too many time, temporarily give up to not clog the whole system
                 if retries >= self.fetch_retries {
                     return Ok(AccountClonerOutput::Unclonable {
                         pubkey: *pubkey,
