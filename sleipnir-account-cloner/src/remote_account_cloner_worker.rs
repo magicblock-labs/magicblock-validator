@@ -282,8 +282,9 @@ where
                     self.account_updates.get_first_subscribed_slot(pubkey);
                 // We consider it a satisfactory response if the slot at which the state is from
                 // is more recent than the first successful subscription to the account
-                let fetched_at_slot = account_chain_snapshot.at_slot;
-                if fetched_at_slot > first_subscribed_slot.unwrap_or(u64::MAX) {
+                if account_chain_snapshot.at_slot
+                    >= first_subscribed_slot.unwrap_or(u64::MAX)
+                {
                     break account_chain_snapshot;
                 }
                 // If the result was not satisfactory, wait a bit and try again

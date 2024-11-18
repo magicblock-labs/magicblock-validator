@@ -76,12 +76,12 @@ impl RemoteAccountUpdatesShard {
             }),
             min_context_slot: None,
         });
-        // Subscribe to the clock from the RPC (to figure out the latest slot counter)
+        // Subscribe to the clock from the RPC (to figure out the latest slot)
         let (mut clock_stream, clock_unsubscribe) = pubsub_client
             .account_subscribe(&clock::ID, rpc_account_info_config.clone())
             .await
             .map_err(RemoteAccountUpdatesShardError::PubsubClientError)?;
-        let mut last_received_slot = 0;
+        let mut clock_slot = 0;
         // We'll store useful maps for each of the account subscriptions
         let mut account_streams = StreamMap::new();
         let mut account_unsubscribes = HashMap::new();
@@ -96,7 +96,7 @@ impl RemoteAccountUpdatesShard {
                         let clock_value = bincode::deserialize::<Clock>(&clock_data);
                         info!("Shard {}: Clock value received: {:?}", self.shard_id, clock_value);
                         if let Ok(clock_value) = clock_value {
-                            last_received_slot = clock_value.slot;
+                            clock_slot = clock_value.slot;
                         }
                     }
                 }
@@ -106,10 +106,10 @@ impl RemoteAccountUpdatesShard {
                         continue;
                     }
                     info!(
-                        "Shard {}: Account monitoring started: {:?}, last_received_slot: {:?}",
+                        "Shard {}: Account monitoring started: {:?}, clock_slot: {:?}",
                         self.shard_id,
                         pubkey,
-                        last_received_slot
+                        clock_slot
                     );
                     let (stream, unsubscribe) = pubsub_client
                         .account_subscribe(&pubkey, rpc_account_info_config.clone())
@@ -117,7 +117,7 @@ impl RemoteAccountUpdatesShard {
                         .map_err(RemoteAccountUpdatesShardError::PubsubClientError)?;
                     account_streams.insert(pubkey, stream);
                     account_unsubscribes.insert(pubkey, unsubscribe);
-                    self.try_to_override_first_subscribed_slot(pubkey, last_received_slot);
+                    self.try_to_override_first_subscribed_slot(pubkey, clock_slot);
                 }
                 // When we receive an update from any account subscriptions
                 Some((pubkey, update)) = account_streams.next() => {
