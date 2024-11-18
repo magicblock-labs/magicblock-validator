@@ -1,8 +1,9 @@
-use std::fmt;
-use std::str::FromStr;
+use std::{fmt, str::FromStr};
 
-use serde::de::{self, Deserializer, SeqAccess, Visitor};
-use serde::{Deserialize, Serialize};
+use serde::{
+    de::{self, Deserializer, SeqAccess, Visitor},
+    Deserialize, Serialize,
+};
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
 use strum_macros::EnumString;
 use url::Url;

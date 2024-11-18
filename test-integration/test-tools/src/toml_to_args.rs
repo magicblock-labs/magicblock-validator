@@ -1,5 +1,9 @@
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+
 use serde::Deserialize;
-use std::{fs, path::Path, path::PathBuf};
 
 #[derive(Deserialize)]
 struct Config {
