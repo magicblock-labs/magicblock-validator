@@ -219,7 +219,7 @@ impl MagicValidator {
             // We'll maintain 3 connections constantly (those could be on different nodes if we wanted to)
             vec![
                 remote_rpc_config.clone(),
-                remote_rpc_config.clone(),
+                remote_rpc_config.clone(), // test
                 remote_rpc_config.clone(),
             ],
             // We'll kill/refresh one connection every 5 minutes
