@@ -8,7 +8,6 @@ use futures_util::{
     future::{ready, BoxFuture},
     FutureExt,
 };
-use solana_sdk::clock::Slot;
 use solana_sdk::pubkey::Pubkey;
 use tokio::sync::{mpsc::UnboundedSender, oneshot::channel};
 
@@ -18,7 +17,7 @@ use crate::{
 };
 
 pub struct RemoteAccountFetcherClient {
-    fetch_request_sender: UnboundedSender<(Pubkey, Option<Slot>)>,
+    fetch_request_sender: UnboundedSender<Pubkey>,
     fetch_listeners: Arc<RwLock<HashMap<Pubkey, AccountFetcherListeners>>>,
 }
 
@@ -35,7 +34,6 @@ impl AccountFetcher for RemoteAccountFetcherClient {
     fn fetch_account_chain_snapshot(
         &self,
         pubkey: &Pubkey,
-        min_context_slot: Option<Slot>,
     ) -> BoxFuture<AccountFetcherResult<AccountChainSnapshotShared>> {
         let (should_request_fetch, receiver) = match self
             .fetch_listeners
@@ -55,9 +53,7 @@ impl AccountFetcher for RemoteAccountFetcherClient {
             }
         };
         if should_request_fetch {
-            if let Err(error) =
-                self.fetch_request_sender.send((*pubkey, min_context_slot))
-            {
+            if let Err(error) = self.fetch_request_sender.send(*pubkey) {
                 return Box::pin(ready(Err(AccountFetcherError::SendError(
                     error,
                 ))));

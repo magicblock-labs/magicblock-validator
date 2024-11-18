@@ -10,7 +10,7 @@ use conjunto_transwise::{
 };
 use futures_util::future::join_all;
 use log::*;
-use solana_sdk::{clock::Slot, pubkey::Pubkey};
+use solana_sdk::pubkey::Pubkey;
 use tokio::sync::mpsc::{
     unbounded_channel, UnboundedReceiver, UnboundedSender,
 };
@@ -23,8 +23,8 @@ pub struct RemoteAccountFetcherWorker {
         RpcAccountProvider,
         DelegationRecordParserImpl,
     >,
-    fetch_request_receiver: UnboundedReceiver<(Pubkey, Option<Slot>)>,
-    fetch_request_sender: UnboundedSender<(Pubkey, Option<Slot>)>,
+    fetch_request_receiver: UnboundedReceiver<Pubkey>,
+    fetch_request_sender: UnboundedSender<Pubkey>,
     fetch_listeners: Arc<RwLock<HashMap<Pubkey, AccountFetcherListeners>>>,
 }
 
@@ -44,9 +44,7 @@ impl RemoteAccountFetcherWorker {
         }
     }
 
-    pub fn get_fetch_request_sender(
-        &self,
-    ) -> UnboundedSender<(Pubkey, Option<Slot>)> {
+    pub fn get_fetch_request_sender(&self) -> UnboundedSender<Pubkey> {
         self.fetch_request_sender.clone()
     }
 
@@ -77,13 +75,11 @@ impl RemoteAccountFetcherWorker {
         }
     }
 
-    async fn process_fetch_request(&self, request: (Pubkey, Option<Slot>)) {
-        let pubkey = request.0;
-        let min_context_slot = request.1;
+    async fn process_fetch_request(&self, pubkey: Pubkey) {
         // Actually fetch the account asynchronously
         let result = match self
             .account_chain_snapshot_provider
-            .try_fetch_chain_snapshot_of_pubkey(&pubkey, min_context_slot)
+            .try_fetch_chain_snapshot_of_pubkey(&pubkey)
             .await
         {
             Ok(snapshot) => Ok(AccountChainSnapshotShared::from(snapshot)),
@@ -96,10 +92,7 @@ impl RemoteAccountFetcherWorker {
             }
         };
         // Log the result for debugging purposes
-        debug!(
-            "Account fetch: {:?}, min_context_slot: {:?}, snapshot: {:?}",
-            pubkey, min_context_slot, result
-        );
+        debug!("Account fetch: {:?}, snapshot: {:?}", pubkey, result);
         // Collect the listeners waiting for the result
         let listeners = match self
             .fetch_listeners
