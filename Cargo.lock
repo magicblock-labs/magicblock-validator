@@ -4418,6 +4418,7 @@ dependencies = [
 name = "sleipnir-account-updates"
 version = "1.19.0"
 dependencies = [
+ "bincode",
  "conjunto-transwise",
  "futures-util",
  "log",

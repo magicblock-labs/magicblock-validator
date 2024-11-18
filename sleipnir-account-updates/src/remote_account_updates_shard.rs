@@ -11,7 +11,8 @@ use solana_account_decoder::{UiAccountEncoding, UiDataSliceConfig};
 use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
 use solana_rpc_client_api::config::RpcAccountInfoConfig;
 use solana_sdk::{
-    clock::Slot, commitment_config::CommitmentConfig, pubkey::Pubkey,
+    clock::Clock, clock::Slot, commitment_config::CommitmentConfig,
+    pubkey::Pubkey, sysvar::clock,
 };
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -63,7 +64,7 @@ impl RemoteAccountUpdatesShard {
                 .await
                 .map_err(RemoteAccountUpdatesShardError::PubsubClientError)?;
         // For every account, we only want the updates, not the actual content of the accounts
-        let rpc_account_info_config = RpcAccountInfoConfig {
+        let rpc_account_info_config = Some(RpcAccountInfoConfig {
             commitment: self
                 .rpc_provider_config
                 .commitment()
@@ -74,10 +75,10 @@ impl RemoteAccountUpdatesShard {
                 length: 0,
             }),
             min_context_slot: None,
-        };
-        // Subscribe to the slot counter from the RPC
-        let (mut slot_stream, slot_unsubscribe) = pubsub_client
-            .root_subscribe()
+        });
+        // Subscribe to the clock from the RPC (to figure out the latest slot counter)
+        let (mut clock_stream, clock_unsubscribe) = pubsub_client
+            .account_subscribe(&clock::ID, rpc_account_info_config.clone())
             .await
             .map_err(RemoteAccountUpdatesShardError::PubsubClientError)?;
         let mut last_received_slot = 0;
@@ -87,10 +88,17 @@ impl RemoteAccountUpdatesShard {
         // Loop forever until we stop the worker
         loop {
             tokio::select! {
-                // When we receive a new slot notification
-                Some(slot_info) = slot_stream.next() => {
-                    info!("Shard {}: Slot received: {:?}", self.shard_id, slot_info.slot);
-                    last_received_slot = slot_info.slot;
+                // When we receive a new clock notification
+                Some(clock_update) = clock_stream.next() => {
+                    let clock_data = clock_update.value.data.decode();
+                    info!("Shard {}: Clock data received: {:?}", self.shard_id, clock_data);
+                    if let Some(clock_data) = clock_data {
+                        let clock_value = bincode::deserialize::<Clock>(&clock_data);
+                        info!("Shard {}: Clock value received: {:?}", self.shard_id, clock_value);
+                        if let Ok(clock_value) = clock_value {
+                            last_received_slot = clock_value.slot;
+                        }
+                    }
                 }
                 // When we receive a message to start monitoring an account
                 Some(pubkey) = self.monitoring_request_receiver.recv() => {
@@ -104,7 +112,7 @@ impl RemoteAccountUpdatesShard {
                         last_received_slot
                     );
                     let (stream, unsubscribe) = pubsub_client
-                        .account_subscribe(&pubkey, Some(rpc_account_info_config.clone()))
+                        .account_subscribe(&pubkey, rpc_account_info_config.clone())
                         .await
                         .map_err(RemoteAccountUpdatesShardError::PubsubClientError)?;
                     account_streams.insert(pubkey, stream);
@@ -134,9 +142,9 @@ impl RemoteAccountUpdatesShard {
             );
             account_unsubscribes().await;
         }
-        slot_unsubscribe().await;
+        clock_unsubscribe().await;
         drop(account_streams);
-        drop(slot_stream);
+        drop(clock_stream);
         pubsub_client.shutdown().await?;
         info!("Shard {}: Stopped", self.shard_id);
         // Done
