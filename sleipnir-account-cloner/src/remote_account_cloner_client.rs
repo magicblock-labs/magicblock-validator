@@ -11,7 +11,7 @@ use sleipnir_account_dumper::AccountDumper;
 use sleipnir_account_fetcher::AccountFetcher;
 use sleipnir_account_updates::AccountUpdates;
 use sleipnir_accounts_api::InternalAccountProvider;
-use solana_sdk::{clock::Slot, pubkey::Pubkey};
+use solana_sdk::pubkey::Pubkey;
 use tokio::sync::{mpsc::UnboundedSender, oneshot::channel};
 
 use crate::{
