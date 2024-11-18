@@ -18,7 +18,7 @@ use crate::{
     errors::{AccountsError, AccountsResult},
     remote_account_committer::update_account_commit_metrics,
     AccountCommittee, AccountCommitter, ScheduledCommitsProcessor,
-    SendableCommitAccountsPayload, UndelegationRequest,
+    SendableCommitAccountsPayload,
 };
 
 pub struct RemoteScheduledCommitsProcessor {
@@ -58,19 +58,12 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
             for pubkey in commit.accounts {
                 match account_provider.get_account(&pubkey) {
                     Some(account_data) => {
-                        let undelegation_request =
-                            if commit.request_undelegation {
-                                Some(UndelegationRequest {
-                                    owner: commit.owner,
-                                })
-                            } else {
-                                None
-                            };
                         committees.push(AccountCommittee {
                             pubkey,
+                            owner: commit.owner,
                             account_data,
                             slot: commit.slot,
-                            undelegation_request,
+                            undelegation_request: commit.request_undelegation,
                         });
                     }
                     None => {

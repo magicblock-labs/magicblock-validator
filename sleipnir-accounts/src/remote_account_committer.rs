@@ -24,7 +24,7 @@ use crate::{
     errors::{AccountsError, AccountsResult},
     AccountCommittee, AccountCommitter, CommitAccountsPayload,
     CommitAccountsTransaction, PendingCommitTransaction,
-    SendableCommitAccountsPayload, UndelegationRequest,
+    SendableCommitAccountsPayload,
 };
 
 // [solana_sdk::clock::MAX_HASH_AGE_IN_SECONDS] (120secs) is the max time window at which
@@ -77,7 +77,7 @@ impl AccountCommitter for RemoteAccountCommitter {
             .map_err(|_| AccountsError::TooManyCommittees(committees.len()))?;
         let undelegation_count: u32 = committees
             .iter()
-            .filter(|c| c.undelegation_request.is_some())
+            .filter(|c| c.undelegation_request)
             .count()
             .try_into()
             .map_err(|_| AccountsError::TooManyCommittees(committees.len()))?;
@@ -90,6 +90,7 @@ impl AccountCommitter for RemoteAccountCommitter {
 
         for AccountCommittee {
             pubkey,
+            owner,
             account_data,
             slot,
             undelegation_request,
@@ -98,15 +99,16 @@ impl AccountCommitter for RemoteAccountCommitter {
             let committer = self.committer_authority.pubkey();
             let commit_args = CommitAccountArgs {
                 slot: *slot,
-                allow_undelegation: undelegation_request.is_some(),
+                allow_undelegation: *undelegation_request,
                 data: account_data.data().to_vec(),
                 lamports: account_data.lamports(),
             };
-            let commit_ix = commit_state(committer, *pubkey, commit_args);
+            let commit_ix =
+                commit_state(committer, *pubkey, *owner, commit_args);
 
             let finalize_ix = finalize(committer, *pubkey);
             ixs.extend(vec![commit_ix, finalize_ix]);
-            if let Some(UndelegationRequest { owner }) = undelegation_request {
+            if *undelegation_request {
                 let metadata_account = self
                     .rpc_client
                     .get_account(&delegation_metadata_pda_from_pubkey(pubkey))

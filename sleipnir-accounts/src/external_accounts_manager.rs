@@ -23,7 +23,7 @@ use solana_sdk::{
 
 use crate::{
     errors::{AccountsError, AccountsResult},
-    traits::{AccountCommitter, UndelegationRequest},
+    traits::AccountCommitter,
     utils::get_epoch,
     AccountCommittee, CommitAccountsPayload, LifecycleMode,
     PendingCommitTransaction, ScheduledCommitsProcessor,
@@ -33,6 +33,7 @@ use crate::{
 #[derive(Debug)]
 pub struct ExternalCommitableAccount {
     pubkey: Pubkey,
+    owner: Pubkey,
     commit_frequency: Duration,
     last_commit_at: Duration,
 }
@@ -40,6 +41,7 @@ pub struct ExternalCommitableAccount {
 impl ExternalCommitableAccount {
     pub fn new(
         pubkey: &Pubkey,
+        owner: &Pubkey,
         commit_frequency: &CommitFrequency,
         now: &Duration,
     ) -> Self {
@@ -50,6 +52,7 @@ impl ExternalCommitableAccount {
         let last_commit_at = *now;
         Self {
             pubkey: *pubkey,
+            owner: *owner,
             commit_frequency,
             last_commit_at,
         }
@@ -226,7 +229,7 @@ where
                 {
                     Entry::Occupied(mut _entry) => {},
                     Entry::Vacant(entry) => {
-                        entry.insert(ExternalCommitableAccount::new(&account_chain_snapshot.pubkey, &delegation_record.commit_frequency, &get_epoch()));
+                        entry.insert(ExternalCommitableAccount::new(&account_chain_snapshot.pubkey, &delegation_record.owner, &delegation_record.commit_frequency, &get_epoch()));
                     },
                 }
             }
@@ -247,7 +250,7 @@ where
             )
             .values()
             .filter(|x| x.needs_commit(&now))
-            .map(|x| x.get_pubkey())
+            .map(|x| (x.get_pubkey(), x.owner))
             .collect::<Vec<_>>();
         if accounts_to_be_committed.is_empty() {
             return Ok(vec![]);
@@ -264,7 +267,7 @@ where
             .create_transactions_to_commit_specific_accounts(
                 accounts_to_be_committed,
                 slot,
-                None,
+                false,
             )
             .await?;
         let sendables = commit_infos
@@ -286,21 +289,22 @@ where
 
     async fn create_transactions_to_commit_specific_accounts(
         &self,
-        accounts_to_be_committed: Vec<Pubkey>,
+        accounts_to_be_committed: Vec<(Pubkey, Pubkey)>,
         slot: u64,
-        undelegation_request: Option<UndelegationRequest>,
+        undelegation_request: bool,
     ) -> AccountsResult<Vec<CommitAccountsPayload>> {
         // Get current account states from internal account provider
         let mut committees = Vec::new();
-        for pubkey in &accounts_to_be_committed {
+        for (pubkey, owner) in &accounts_to_be_committed {
             let account_state =
                 self.internal_account_provider.get_account(pubkey);
             if let Some(acc) = account_state {
                 committees.push(AccountCommittee {
                     pubkey: *pubkey,
+                    owner: *owner,
                     account_data: acc,
                     slot,
-                    undelegation_request: undelegation_request.clone(),
+                    undelegation_request,
                 });
             } else {
                 error!(

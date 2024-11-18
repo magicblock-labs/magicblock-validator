@@ -20,15 +20,11 @@ pub trait ScheduledCommitsProcessor {
     ) -> AccountsResult<()>;
 }
 
-#[derive(Clone)]
-pub struct UndelegationRequest {
-    /// The original owner of the account before it was delegated.
-    pub owner: Pubkey,
-}
-
 pub struct AccountCommittee {
     /// The pubkey of the account to be committed.
     pub pubkey: Pubkey,
+    /// The pubkey of the owner of the account to be committed.
+    pub owner: Pubkey,
     /// The current account state.
     /// NOTE: if undelegation was requested the owner is set to the
     /// delegation program when accounts are committed.
@@ -36,7 +32,7 @@ pub struct AccountCommittee {
     /// Slot at which the commit was scheduled.
     pub slot: u64,
     /// Only present if undelegation was requested.
-    pub undelegation_request: Option<UndelegationRequest>,
+    pub undelegation_request: bool,
 }
 
 #[derive(Debug)]
