@@ -272,11 +272,11 @@ where
                 .ensure_account_monitoring(pubkey)
                 .map_err(AccountClonerError::AccountUpdatesError)?;
             // Fetch the account, repeat and retry until we have a satisfactory response
-            let mut desired_slot = None;
+            let mut min_context_slot = None;
             let mut retries = 0;
             loop {
                 let account_chain_snapshot = self
-                    .fetch_account_chain_snapshot(pubkey, desired_slot)
+                    .fetch_account_chain_snapshot(pubkey, min_context_slot)
                     .await?;
                 let first_subscribed_slot =
                     self.account_updates.get_first_subscribed_slot(pubkey);
@@ -288,7 +288,7 @@ where
                     break account_chain_snapshot;
                 }
                 // If the result was not satisfactory, wait a bit and try again
-                desired_slot = first_subscribed_slot;
+                min_context_slot = first_subscribed_slot;
                 retries += 1;
                 sleep(Duration::from_millis(100)).await;
                 // If we failed too fetch too many time, temporarily give up to not clog the whole system

@@ -97,7 +97,7 @@ impl RemoteAccountFetcherWorker {
         };
         // Log the result for debugging purposes
         debug!(
-            "Account fetch: {:?}, slot: {:?}, snapshot: {:?}",
+            "Account fetch: {:?}, min_context_slot: {:?}, snapshot: {:?}",
             pubkey, min_context_slot, result
         );
         // Collect the listeners waiting for the result

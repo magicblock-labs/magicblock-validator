@@ -89,6 +89,7 @@ impl RemoteAccountUpdatesShard {
             tokio::select! {
                 // When we receive a new slot notification
                 Some(slot_info) = slot_stream.next() => {
+                    info!("Shard {}: Slot info received: {:?}", self.shard_id, slot_info);
                     last_received_slot = slot_info.slot;
                 }
                 // When we receive a message to start monitoring an account
