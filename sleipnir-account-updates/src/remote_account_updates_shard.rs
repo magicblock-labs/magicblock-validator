@@ -149,7 +149,7 @@ impl RemoteAccountUpdatesShard {
                 .expect("RwLock of RemoteAccountUpdatesShard.first_subscribed_slots poisoned")
                 .get(&pubkey)
                 .cloned()
-                .unwrap_or(u64::MIN);
+                .unwrap_or(u64::MAX);
         if subscribed_slot < first_subscribed_slot {
             // If the subscribe slot seems to be the oldest one, we need to acquire a write lock to update it
             match self.first_subscribed_slots
