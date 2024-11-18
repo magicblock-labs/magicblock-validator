@@ -1050,6 +1050,7 @@ dependencies = [
  "async-trait",
  "conjunto-addresses",
  "conjunto-core",
+ "solana-account-decoder",
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk",
