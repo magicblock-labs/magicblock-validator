@@ -273,8 +273,9 @@ where
             let mut desired_slot = None;
             let mut retries = 0;
             loop {
-                let account_chain_snapshot =
-                    self.fetch_account_chain_snapshot(pubkey).await?;
+                let account_chain_snapshot = self
+                    .fetch_account_chain_snapshot(pubkey, desired_slot)
+                    .await?;
                 let first_subscribed_slot =
                     self.account_updates.get_first_subscribed_slot(pubkey);
                 // We consider it a satisfactory response if the slot at which the state is from
@@ -296,7 +297,7 @@ where
                 }
             }
         } else {
-            self.fetch_account_chain_snapshot(pubkey).await?
+            self.fetch_account_chain_snapshot(pubkey, None).await?
         };
         // Generate cloning transactions
         let signature = match &account_chain_snapshot.chain_state {
@@ -335,7 +336,12 @@ where
                             at_slot: account_chain_snapshot.at_slot,
                         });
                     }
-                    self.do_clone_program_accounts(pubkey, account).await?
+                    self.do_clone_program_accounts(
+                        pubkey,
+                        account,
+                        Some(account_chain_snapshot.at_slot),
+                    )
+                    .await?
                 }
                 // If it's not an executble, simpler rules apply
                 else {
@@ -453,12 +459,13 @@ where
         &self,
         pubkey: &Pubkey,
         account: &Account,
+        min_context_slot: Option<Slot>,
     ) -> AccountClonerResult<Signature> {
         let program_id_pubkey = pubkey;
         let program_id_account = account;
         let program_data_pubkey = &get_program_data_address(program_id_pubkey);
         let program_data_snapshot = self
-            .fetch_account_chain_snapshot(program_data_pubkey)
+            .fetch_account_chain_snapshot(program_data_pubkey, min_context_slot)
             .await?;
         let program_data_account = program_data_snapshot
             .chain_state
@@ -470,7 +477,8 @@ where
                 program_id_account,
                 program_data_pubkey,
                 program_data_account,
-                self.fetch_program_idl(program_id_pubkey).await?,
+                self.fetch_program_idl(program_id_pubkey, min_context_slot)
+                    .await?,
             )
             .map_err(AccountClonerError::AccountDumperError)
             .inspect(|_| {
@@ -483,21 +491,24 @@ where
     async fn fetch_program_idl(
         &self,
         program_id_pubkey: &Pubkey,
+        min_context_slot: Option<Slot>,
     ) -> AccountClonerResult<Option<(Pubkey, Account)>> {
         // First check if we can find an anchor IDL
         let program_idl_anchor = self
-            .try_fetch_program_idl_snapshot(get_pubkey_anchor_idl(
-                program_id_pubkey,
-            ))
+            .try_fetch_program_idl_snapshot(
+                get_pubkey_anchor_idl(program_id_pubkey),
+                min_context_slot,
+            )
             .await?;
         if program_idl_anchor.is_some() {
             return Ok(program_idl_anchor);
         }
         // If we couldn't find anchor, try to find shank IDL
         let program_idl_shank = self
-            .try_fetch_program_idl_snapshot(get_pubkey_shank_idl(
-                program_id_pubkey,
-            ))
+            .try_fetch_program_idl_snapshot(
+                get_pubkey_shank_idl(program_id_pubkey),
+                min_context_slot,
+            )
             .await?;
         if program_idl_shank.is_some() {
             return Ok(program_idl_shank);
@@ -509,10 +520,14 @@ where
     async fn try_fetch_program_idl_snapshot(
         &self,
         program_idl_pubkey: Option<Pubkey>,
+        min_context_slot: Option<Slot>,
     ) -> AccountClonerResult<Option<(Pubkey, Account)>> {
         if let Some(program_idl_pubkey) = program_idl_pubkey {
             let program_idl_snapshot = self
-                .fetch_account_chain_snapshot(&program_idl_pubkey)
+                .fetch_account_chain_snapshot(
+                    &program_idl_pubkey,
+                    min_context_slot,
+                )
                 .await?;
             let program_idl_account =
                 program_idl_snapshot.chain_state.account();
@@ -529,9 +544,10 @@ where
     async fn fetch_account_chain_snapshot(
         &self,
         pubkey: &Pubkey,
+        min_context_slot: Option<Slot>,
     ) -> AccountClonerResult<AccountChainSnapshotShared> {
         self.account_fetcher
-            .fetch_account_chain_snapshot(pubkey)
+            .fetch_account_chain_snapshot(pubkey, min_context_slot)
             .await
             .map_err(AccountClonerError::AccountFetcherError)
     }
