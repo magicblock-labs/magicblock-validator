@@ -18,5 +18,5 @@ solana-test-validator \
   $DIR/../target/deploy/program_schedulecommit.so \
   --bpf-program \
   4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr \
-  $DIR/../schedulecommit/elfs/schedulecommit_test_security.so
+  $DIR/../target/deploy/program_schedulecommit_security.so
 
