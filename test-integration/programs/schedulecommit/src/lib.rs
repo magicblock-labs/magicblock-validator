@@ -31,6 +31,9 @@ declare_id!("9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY");
 #[cfg(not(feature = "no-entrypoint"))]
 solana_program::entrypoint!(process_instruction);
 
+/*
+
+const UNDELEGATE_IX: u8 = EXTERNAL_UNDELEGATE_DISCRIMINATOR[0];
 pub const INIT_IX: u8 = 0;
 pub const DELEGATE_CPI_IX: u8 = 1;
 pub const SCHEDULECOMMIT_CPI_IX: u8 = 2;
@@ -38,9 +41,8 @@ pub const SCHEDULECOMMIT_AND_UNDELEGATE_CPI_IX: u8 = 3;
 pub const SCHEDULECOMMIT_AND_UNDELEGATE_CPI_MOD_AFTER_IX: u8 = 4;
 pub const INCREASE_COUNT_IX: u8 = 5;
 
-const UNDELEGATE_IX: u8 = EXTERNAL_UNDELEGATE_DISCRIMINATOR[0];
 
-pub fn process_instruction<'a>(
+pub fn process_instruction_old<'a>(
     program_id: &'a Pubkey,
     accounts: &'a [AccountInfo<'a>],
     instruction_data: &[u8],
@@ -154,6 +156,113 @@ pub fn process_instruction<'a>(
         }
     }
     Ok(())
+}*/
+
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
+pub struct DelegateCpiArgs {
+    valid_until: i64,
+    commit_frequency_ms: u32,
+    player: Pubkey,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
+pub struct ScheduleCommitCpiArgs {
+    /// Pubkeys of players from which PDAs were derived
+    pub players: Vec<Pubkey>,
+    /// If true, the accounts will be modified after the commit
+    pub modify_accounts: bool,
+    /// If true, the accounts will be undelegated after the commit
+    pub undelegate: bool,
+}
+
+#[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
+pub enum ScheduleCommitInstruction {
+    Init,
+
+    /// # Account references
+    /// - **0.**   `[WRITE, SIGNER]` Payer requesting delegation
+    /// - **1.**   `[WRITE]`         Account for which delegation is requested
+    /// - **2.**   `[]`              Delegate account owner program
+    /// - **3.**   `[WRITE]`         Buffer account
+    /// - **4.**   `[WRITE]`         Delegation record account
+    /// - **5.**   `[WRITE]`         Delegation metadata account
+    /// - **6.**   `[]`              Delegation program
+    /// - **7.**   `[]`              System program
+    DelegateCpi(DelegateCpiArgs),
+
+    /// # Account references
+    /// - **0.**   `[WRITE, SIGNER]` Payer requesting the commit to be scheduled
+    /// - **1**    `[]`              MagicContext (used to record scheduled commit)
+    /// - **2**    `[]`              MagicBlock Program (used to schedule commit)
+    /// - **3..n** `[]`              PDA accounts to be committed
+    ScheduleCommitCpi(ScheduleCommitCpiArgs),
+
+    /// Same instruction input like [ScheduleCommitInstruction::ScheduleCommitCpi].
+    /// Behavior differs that it will modify the accounts after it
+    /// requested commit + undelegation.
+    ///
+    /// # Account references:
+    /// - **0.**   `[WRITE]`         Delegated account
+    /// - **1.**   `[]`              Delegation program
+    /// - **2.**   `[WRITE]`         Buffer account
+    /// - **3.**   `[WRITE]`         Payer
+    /// - **4.**   `[]`              System program
+    ScheduleCommitAndUndelegateCpiModAfter(Vec<Pubkey>),
+
+    /// Increases the count of a PDA of this program by one.
+    /// This instruction can only run on the ephemeral after the account was
+    /// delegated or on chain while it is undelegated.
+    /// # Account references:
+    /// - **0.** `[WRITE]` Account to increase count
+    IncreaseCount,
+    // This is invoked by the delegation program when we request to undelegate
+    // accounts.
+    // # Account references:
+    // - **0.** `[WRITE]` Account to be undelegated
+    // - **1.** `[WRITE]` Buffer account
+    // - **2.** `[WRITE]` Payer
+    // - **3.** `[]` System program
+    //
+    // It is not part of this enum as it has a custom discriminator
+    // Undelegate,
+}
+
+pub fn process_instruction<'a>(
+    program_id: &'a Pubkey,
+    accounts: &'a [AccountInfo<'a>],
+    instruction_data: &[u8],
+) -> ProgramResult {
+    let (disc, seeds_data) =
+        instruction_data.split_at(EXTERNAL_UNDELEGATE_DISCRIMINATOR.len());
+
+    // Undelegate
+    if disc == EXTERNAL_UNDELEGATE_DISCRIMINATOR {
+        return process_undelegate_request(accounts, seeds_data);
+    }
+
+    // Other instructions
+    let ix = ScheduleCommitInstruction::try_from_slice(instruction_data)
+        .map_err(|err| {
+            msg!("ERROR: failed to parse instruction data {:?}", err);
+            ProgramError::InvalidArgument
+        })?;
+    use ScheduleCommitInstruction::*;
+    match ix {
+        Init => process_init(program_id, accounts),
+        DelegateCpi(args) => process_delegate_cpi(accounts, args),
+        ScheduleCommitCpi(args) => process_schedulecommit_cpi(
+            accounts,
+            &args.players,
+            args.modify_accounts,
+            args.undelegate,
+        ),
+        ScheduleCommitAndUndelegateCpiModAfter(players) => {
+            process_schedulecommit_and_undelegation_cpi_with_mod_after(
+                accounts, &players,
+            )
+        }
+        IncreaseCount => process_increase_count(accounts),
+    }
 }
 
 // -----------------
@@ -218,16 +327,9 @@ fn process_init<'a>(
 // -----------------
 // Delegate
 // -----------------
-#[derive(Debug, BorshSerialize, BorshDeserialize)]
-pub struct DelegateCpiArgs {
-    pub valid_until: i64,
-    pub commit_frequency_ms: u32,
-    pub player: Pubkey,
-}
-
 pub fn process_delegate_cpi(
     accounts: &[AccountInfo],
-    instruction_data: &[u8],
+    args: DelegateCpiArgs,
 ) -> Result<(), ProgramError> {
     msg!("Processing delegate_cpi instruction");
 
@@ -237,11 +339,6 @@ pub fn process_delegate_cpi(
         return Err(ProgramError::NotEnoughAccountKeys);
     };
 
-    let args =
-        DelegateCpiArgs::try_from_slice(instruction_data).map_err(|err| {
-            msg!("ERROR: failed to parse delegate account args {:?}", err);
-            ProgramError::InvalidArgument
-        })?;
     let seeds_no_bump = pda_seeds(&args.player);
 
     delegate_account(
@@ -265,7 +362,7 @@ pub fn process_delegate_cpi(
 // -----------------
 pub fn process_schedulecommit_cpi(
     accounts: &[AccountInfo],
-    instruction_data: &[u8],
+    player_pubkeys: &[Pubkey],
     modify_accounts: bool,
     undelegate: bool,
 ) -> Result<(), ProgramError> {
@@ -279,16 +376,6 @@ pub fn process_schedulecommit_cpi(
     for info in accounts_iter.by_ref() {
         remaining.push(info.clone());
     }
-
-    let args = instruction_data.chunks(32).collect::<Vec<_>>();
-    let player_pubkeys = args
-        .into_iter()
-        .map(Pubkey::try_from)
-        .collect::<Result<Vec<Pubkey>, _>>()
-        .map_err(|err| {
-            msg!("ERROR: failed to parse player pubkey {:?}", err);
-            ProgramError::InvalidArgument
-        })?;
 
     if remaining.len() != player_pubkeys.len() {
         msg!(
@@ -364,7 +451,7 @@ fn process_increase_count(accounts: &[AccountInfo]) -> ProgramResult {
 // -----------------
 fn process_schedulecommit_and_undelegation_cpi_with_mod_after(
     accounts: &[AccountInfo],
-    instruction_data: &[u8],
+    player_pubkeys: &[Pubkey],
 ) -> Result<(), ProgramError> {
     msg!("Processing schedulecommit_and_undelegation_cpi_with_mod_after instruction");
 
@@ -376,16 +463,6 @@ fn process_schedulecommit_and_undelegation_cpi_with_mod_after(
     for info in accounts_iter.by_ref() {
         remaining.push(info.clone());
     }
-
-    let args = instruction_data.chunks(32).collect::<Vec<_>>();
-    let player_pubkeys = args
-        .into_iter()
-        .map(Pubkey::try_from)
-        .collect::<Result<Vec<Pubkey>, _>>()
-        .map_err(|err| {
-            msg!("ERROR: failed to parse player pubkey {:?}", err);
-            ProgramError::InvalidArgument
-        })?;
 
     if remaining.len() != player_pubkeys.len() {
         msg!(

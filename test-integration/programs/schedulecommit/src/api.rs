@@ -1,4 +1,3 @@
-use borsh::BorshSerialize;
 use ephemeral_rollups_sdk::delegate_args::{
     DelegateAccountMetas, DelegateAccounts,
 };
@@ -9,9 +8,7 @@ use solana_program::{
 };
 
 use crate::{
-    DelegateCpiArgs, DELEGATE_CPI_IX, INCREASE_COUNT_IX, INIT_IX,
-    SCHEDULECOMMIT_AND_UNDELEGATE_CPI_IX,
-    SCHEDULECOMMIT_AND_UNDELEGATE_CPI_MOD_AFTER_IX, SCHEDULECOMMIT_CPI_IX,
+    DelegateCpiArgs, ScheduleCommitCpiArgs, ScheduleCommitInstruction,
 };
 
 pub fn init_account_instruction(
@@ -25,8 +22,11 @@ pub fn init_account_instruction(
         AccountMeta::new_readonly(system_program::id(), false),
     ];
 
-    let instruction_data = vec![INIT_IX];
-    Instruction::new_with_bytes(program_id, &instruction_data, account_metas)
+    Instruction::new_with_borsh(
+        program_id,
+        &ScheduleCommitInstruction::Init,
+        account_metas,
+    )
 }
 
 pub fn delegate_account_cpi_instruction(player: Pubkey) -> Instruction {
@@ -52,9 +52,11 @@ pub fn delegate_account_cpi_instruction(player: Pubkey) -> Instruction {
         delegate_metas.system_program,
     ];
 
-    let mut instruction_data = args.try_to_vec().unwrap();
-    instruction_data.insert(0, DELEGATE_CPI_IX);
-    Instruction::new_with_bytes(program_id, &instruction_data, account_metas)
+    Instruction::new_with_borsh(
+        program_id,
+        &ScheduleCommitInstruction::DelegateCpi(args),
+        account_metas,
+    )
 }
 
 /// Creates an instruction that calls the _legit_ program which owns
@@ -120,15 +122,16 @@ fn schedule_commit_cpi_instruction_impl(
         account_metas.push(AccountMeta::new(*committee, false));
     }
 
-    let mut instruction_data = if undelegate {
-        vec![SCHEDULECOMMIT_AND_UNDELEGATE_CPI_IX]
-    } else {
-        vec![SCHEDULECOMMIT_CPI_IX]
+    let args = ScheduleCommitCpiArgs {
+        players: players.to_vec(),
+        modify_accounts: true,
+        undelegate,
     };
-    for player in players {
-        instruction_data.extend_from_slice(player.as_ref());
-    }
-    Instruction::new_with_bytes(program_id, &instruction_data, account_metas)
+    Instruction::new_with_borsh(
+        program_id,
+        &ScheduleCommitInstruction::ScheduleCommitCpi(args),
+        account_metas,
+    )
 }
 
 pub fn schedule_commit_and_undelegate_cpi_with_mod_after_instruction(
@@ -148,20 +151,23 @@ pub fn schedule_commit_and_undelegate_cpi_with_mod_after_instruction(
         account_metas.push(AccountMeta::new(*committee, false));
     }
 
-    let mut instruction_data =
-        vec![SCHEDULECOMMIT_AND_UNDELEGATE_CPI_MOD_AFTER_IX];
-    for player in players {
-        instruction_data.extend_from_slice(player.as_ref());
-    }
-    Instruction::new_with_bytes(program_id, &instruction_data, account_metas)
+    Instruction::new_with_borsh(
+        program_id,
+        &ScheduleCommitInstruction::ScheduleCommitAndUndelegateCpiModAfter(
+            players.to_vec(),
+        ),
+        account_metas,
+    )
 }
 
 pub fn increase_count_instruction(committee: Pubkey) -> Instruction {
     let program_id = crate::id();
     let account_metas = vec![AccountMeta::new(committee, false)];
-
-    let instruction_data = vec![INCREASE_COUNT_IX];
-    Instruction::new_with_bytes(program_id, &instruction_data, account_metas)
+    Instruction::new_with_borsh(
+        program_id,
+        &ScheduleCommitInstruction::IncreaseCount,
+        account_metas,
+    )
 }
 
 // -----------------
