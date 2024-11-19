@@ -3,22 +3,13 @@ name = "schedulecommit-test-security"
 version.workspace = true
 edition.workspace = true
 
-[dependencies]
-program-schedulecommit = { workspace = true, features = ["no-entrypoint"] }
-solana-program = { workspace = true }
-ephemeral-rollups-sdk = { workspace = true }
-
 [dev-dependencies]
+program-schedulecommit = { workspace = true, features = ["no-entrypoint"] }
+program-schedulecommit-security = { workspace = true, features = [
+  "no-entrypoint",
+] }
 schedulecommit-client = { workspace = true }
 sleipnir-core = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
 integration-test-tools = { workspace = true }
-
-[lib]
-crate-type = ["cdylib", "lib"]
-
-[features]
-no-entrypoint = []
-cpi = ["no-entrypoint"]
-default = []

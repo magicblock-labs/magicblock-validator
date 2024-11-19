@@ -1,5 +1,5 @@
 use integration_test_tools::conversions::pubkey_from_magic_program;
-use schedulecommit_test_security::{
+use program_schedulecommit_security::{
     DIRECT_SCHEDULE_COMMIT_CPI, NON_CPI, SIBLING_SCHEDULE_COMMIT_CPIS,
 };
 use sleipnir_core::magic_program;

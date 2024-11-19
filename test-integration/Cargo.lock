@@ -2325,6 +2325,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "program-schedulecommit-security"
+version = "0.0.0"
+dependencies = [
+ "ephemeral-rollups-sdk",
+ "program-schedulecommit",
+ "solana-program 1.17.22",
+]
+
+[[package]]
 name = "qstring"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2671,12 +2680,11 @@ dependencies = [
 name = "schedulecommit-test-security"
 version = "0.0.0"
 dependencies = [
- "ephemeral-rollups-sdk",
  "integration-test-tools",
  "program-schedulecommit",
+ "program-schedulecommit-security",
  "schedulecommit-client",
  "sleipnir-core",
- "solana-program 1.17.22",
  "solana-rpc-client-api",
  "solana-sdk 1.17.22",
 ]
