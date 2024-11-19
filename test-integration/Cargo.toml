@@ -1,6 +1,5 @@
 [workspace]
 members = [
-  "sysvars",
   "test-issues",
   "schedulecommit/client",
   "schedulecommit/test-scenarios",
@@ -11,6 +10,7 @@ members = [
   "programs/flexi-counter",
   "programs/schedulecommit",
   "programs/schedulecommit-security",
+  "programs/sysvars",
 ]
 resolver = "2"
 
