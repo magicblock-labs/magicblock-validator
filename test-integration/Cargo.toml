@@ -2,7 +2,6 @@
 members = [
   "sysvars",
   "test-issues",
-  "schedulecommit/program",
   "schedulecommit/client",
   "schedulecommit/test-scenarios",
   "schedulecommit/test-security",
@@ -10,6 +9,7 @@ members = [
   "test-runner",
   "test-ledger-restore",
   "programs/flexi-counter",
+  "programs/schedulecommit",
 ]
 resolver = "2"
 
@@ -25,6 +25,7 @@ log = "0.4.20"
 rayon = "1.10.0"
 serde = "1.0.196"
 program-flexi-counter = { path = "./programs/flexi-counter" }
+program-schedulecommit = { path = "programs/schedulecommit" }
 sleipnir-config = { path = "../sleipnir-config" }
 sleipnir-core = { path = "../sleipnir-core" }
 tempfile = "3.10.1"
@@ -38,5 +39,4 @@ solana-rpc-client-api = "=1.17.22"
 solana-sdk = "=1.17.22"
 solana-transaction-status = "=1.17.22"
 schedulecommit-client = { path = "schedulecommit/client" }
-schedulecommit-program = { path = "schedulecommit/program" }
 integration-test-tools = { path = "test-tools" }

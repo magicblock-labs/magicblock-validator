@@ -11,7 +11,7 @@ port = 8899
 
 [[node.program]]
 id = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY"
-path = "../schedulecommit/elfs/schedulecommit_program.so"
+path = "../target/deploy/program_schedulecommit.so"
 
 [[node.program]]
 id = "4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr"

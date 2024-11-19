@@ -1,11 +1,11 @@
 DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 
-test: test-ledger-restore
+test: build-programs test-ledger-restore
 	RUST_LOG='warn,geyser_plugin=trace,sleipnir=trace,rpc=trace,bank=trace,banking_stage=trace,solana_geyser_plugin_manager=debug,solana_svm=debug,test_tools=trace,schedulecommit_test=trace,' \
 	RUST_BACKTRACE=1 \
 	cargo run --package test-runner --bin run-tests
 
-test-force-mb: test-ledger-restore
+test-force-mb: build-programs test-ledger-restore
 	RUST_LOG='warn,geyser_plugin=trace,sleipnir=trace,rpc=trace,bank=trace,banking_stage=trace,solana_geyser_plugin_manager=debug,solana_svm=debug,test_tools=trace,schedulecommit_test=trace,' \
 	FORCE_MAGIC_BLOCK_VALIDATOR=1 \
 	cargo run --package test-runner --bin run-tests
@@ -15,6 +15,9 @@ test-ledger-restore: build-flexi-counter
 
 test-ledger-restore-release: build-flexi-counter
 	RELEASE=1 cargo test --package test-ledger-restore -- --test-threads=1 --nocapture
+
+build-programs:
+	cargo build-sbf
 
 build-flexi-counter:
 	cargo build-sbf --manifest-path $(DIR)/programs/flexi-counter/Cargo.toml

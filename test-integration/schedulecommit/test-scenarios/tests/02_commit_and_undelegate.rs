@@ -2,12 +2,12 @@ use integration_test_tools::{
     conversions::pubkey_from_magic_program, run_test,
 };
 use log::*;
-use schedulecommit_client::{
-    verify, ScheduleCommitTestContext, ScheduleCommitTestContextFields,
-};
-use schedulecommit_program::api::{
+use program_schedulecommit::api::{
     increase_count_instruction, schedule_commit_and_undelegate_cpi_instruction,
     schedule_commit_and_undelegate_cpi_with_mod_after_instruction,
+};
+use schedulecommit_client::{
+    verify, ScheduleCommitTestContext, ScheduleCommitTestContextFields,
 };
 use sleipnir_core::magic_program;
 use solana_rpc_client::rpc_client::{RpcClient, SerializableTransaction};

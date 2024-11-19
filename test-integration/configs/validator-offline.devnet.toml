@@ -13,7 +13,7 @@ path = "../schedulecommit/elfs/dlp.so"
 
 [[program]]
 id = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY"
-path = "../schedulecommit/elfs/schedulecommit_program.so"
+path = "../target/deploy/program_schedulecommit.so"
 
 [[program]]
 id = "4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr"

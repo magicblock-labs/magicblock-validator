@@ -1,5 +1,5 @@
 use ephemeral_rollups_sdk::ephem::create_schedule_commit_ix;
-use schedulecommit_program::{
+use program_schedulecommit::{
     api::schedule_commit_cpi_instruction, process_schedulecommit_cpi,
 };
 use solana_program::{

@@ -23,7 +23,7 @@ pub fn create_sibling_schedule_cpis_instruction(
         AccountMeta::new(payer, true),
         AccountMeta::new(magic_context, false),
         AccountMeta::new_readonly(magic_program, false),
-        AccountMeta::new_readonly(schedulecommit_program::id(), false),
+        AccountMeta::new_readonly(program_schedulecommit::id(), false),
     ];
 
     let mut instruction_data = vec![SIBLING_SCHEDULE_COMMIT_CPIS];

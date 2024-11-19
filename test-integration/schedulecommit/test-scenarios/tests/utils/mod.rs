@@ -138,7 +138,7 @@ pub fn assert_one_committee_account_was_undelegated_on_chain(
     ctx: &ScheduleCommitTestContext,
 ) {
     let pda = ctx.committees[0].1;
-    let id = schedulecommit_program::id();
+    let id = program_schedulecommit::id();
     assert_account_was_undelegated_on_chain(ctx, pda, id);
 }
 
@@ -148,7 +148,7 @@ pub fn assert_two_committee_accounts_were_undelegated_on_chain(
 ) {
     let pda1 = ctx.committees[0].1;
     let pda2 = ctx.committees[1].1;
-    let id = schedulecommit_program::id();
+    let id = program_schedulecommit::id();
     assert_account_was_undelegated_on_chain(ctx, pda1, id);
     assert_account_was_undelegated_on_chain(ctx, pda2, id);
 }
