@@ -15,11 +15,3 @@ solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
 test-tools-core = { workspace = true }
-
-[lib]
-crate-type = ["cdylib", "lib"]
-
-[features]
-no-entrypoint = []
-cpi = ["no-entrypoint"]
-default = []
