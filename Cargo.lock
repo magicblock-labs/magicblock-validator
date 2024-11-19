@@ -4384,6 +4384,7 @@ name = "sleipnir-account-dumper"
 version = "1.19.0"
 dependencies = [
  "async-trait",
+ "bincode",
  "conjunto-transwise",
  "futures-util",
  "log",
@@ -4687,6 +4688,7 @@ dependencies = [
  "log",
  "sleipnir-bank",
  "sleipnir-program",
+ "solana-account-decoder",
  "solana-loader-v4-program",
  "solana-rpc-client",
  "solana-rpc-client-api",

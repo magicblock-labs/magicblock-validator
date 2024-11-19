@@ -4121,6 +4121,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "test-cloning"
+version = "0.0.0"
+dependencies = [
+ "integration-test-tools",
+ "solana-sdk 1.17.22",
+]
+
+[[package]]
 name = "test-issues"
 version = "0.0.0"
 dependencies = [

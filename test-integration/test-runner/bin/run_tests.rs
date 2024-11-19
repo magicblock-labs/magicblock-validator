@@ -141,9 +141,48 @@ pub fn main() {
         test_output
     };
 
+    let cloning_output = {
+        eprintln!("======== RUNNING CLONING TESTS ========");
+        let mut devnet_validator = match start_validator(
+            "cloning-conf.devnet.toml",
+            ValidatorCluster::Chain,
+        ) {
+            Some(validator) => validator,
+            None => {
+                panic!("Failed to start devnet validator properly");
+            }
+        };
+        let mut ephem_validator = match start_validator(
+            "cloning-conf.ephem.toml",
+            ValidatorCluster::Ephem,
+        ) {
+            Some(validator) => validator,
+            None => {
+                devnet_validator
+                    .kill()
+                    .expect("Failed to kill devnet validator");
+                panic!("Failed to start ephemeral validator properly");
+            }
+        };
+        let test_cloning_dir =
+            format!("{}/../{}", manifest_dir.clone(), "test-cloning");
+        eprintln!("Running cloning tests in {}", test_cloning_dir);
+        let output = match run_test(test_cloning_dir, Default::default()) {
+            Ok(output) => output,
+            Err(err) => {
+                eprintln!("Failed to run cloning tests: {:?}", err);
+                cleanup(&mut ephem_validator, &mut devnet_validator);
+                return;
+            }
+        };
+        cleanup(&mut ephem_validator, &mut devnet_validator);
+        output
+    };
+
     // Assert that all tests passed
     assert_cargo_tests_passed(security_output);
     assert_cargo_tests_passed(scenarios_output);
+    assert_cargo_tests_passed(cloning_output);
     assert_cargo_tests_passed(issues_frequent_commits_output);
 }
 

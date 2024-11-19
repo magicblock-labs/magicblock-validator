@@ -11,6 +11,7 @@ members = [
   "programs/schedulecommit",
   "programs/schedulecommit-security",
   "programs/sysvars",
+  "test-cloning",
 ]
 resolver = "2"
 
