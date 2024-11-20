@@ -44,7 +44,7 @@ $(SCHEDULECOMMIT_SO): $(SCHEDULECOMMIT_SRC)
 $(SCHEDULECOMMIT_SECURITY_SO): $(SCHEDULECOMMIT_SECURITY_SRC)
 	cargo build-sbf --manifest-path $(SCHEDULECOMMIT_SECURITY_DIR)/Cargo.toml
 
-deploy-flexi-counter: build-flexi-counter
+deploy-flexi-counter: $(FLEXI_COUNTER_SO)
 	solana program deploy \
 		-u localhost \
 		--keypair $(DIR)/target/deploy/program_flexi_counter-keypair.json \
