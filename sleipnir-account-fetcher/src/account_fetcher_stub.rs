@@ -156,6 +156,7 @@ impl AccountFetcher for AccountFetcherStub {
     fn fetch_account_chain_snapshot(
         &self,
         pubkey: &Pubkey,
+        _min_context_slot: Option<Slot>,
     ) -> BoxFuture<AccountFetcherResult<AccountChainSnapshotShared>> {
         match self.fetched_counters.write().unwrap().entry(*pubkey) {
             Entry::Occupied(mut entry) => {
