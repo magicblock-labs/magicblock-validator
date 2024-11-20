@@ -1,9 +1,11 @@
 use borsh::{to_vec, BorshDeserialize};
+use ephemeral_rollups_sdk::cpi::delegate_account;
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
     entrypoint::ProgramResult,
     msg,
     program::invoke_signed,
+    program_error::ProgramError,
     pubkey::Pubkey,
     rent::Rent,
     system_instruction,
@@ -11,7 +13,8 @@ use solana_program::{
 };
 
 use crate::{
-    instruction::FlexiCounterInstruction, state::FlexiCounter,
+    instruction::{DelegateArgs, FlexiCounterInstruction},
+    state::FlexiCounter,
     utils::assert_keys_equal,
 };
 
@@ -26,6 +29,7 @@ pub fn process(
         Init { label, bump } => process_init(program_id, accounts, label, bump),
         Add { count } => process_add(accounts, count),
         Mul { multiplier } => process_mul(accounts, multiplier),
+        Delegate(args) => process_delegate(accounts, &args),
     }?;
     Ok(())
 }
@@ -128,5 +132,34 @@ fn process_mul(accounts: &[AccountInfo], multiplier: u8) -> ProgramResult {
     let counter_data = to_vec(&counter)?;
     counter_pda_info.data.borrow_mut()[..size].copy_from_slice(&counter_data);
 
+    Ok(())
+}
+
+fn process_delegate(
+    accounts: &[AccountInfo],
+    args: &DelegateArgs,
+) -> ProgramResult {
+    msg!("Delegate");
+    let [payer, delegate_account_pda, owner_program, buffer, delegation_record, delegation_metadata, delegation_program, system_program] =
+        accounts
+    else {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    };
+
+    let seeds_no_bump = FlexiCounter::seeds(payer.key);
+
+    delegate_account(
+        payer,
+        delegate_account_pda,
+        owner_program,
+        buffer,
+        delegation_record,
+        delegation_metadata,
+        delegation_program,
+        system_program,
+        &seeds_no_bump,
+        args.valid_until,
+        args.commit_frequency_ms,
+    )?;
     Ok(())
 }
