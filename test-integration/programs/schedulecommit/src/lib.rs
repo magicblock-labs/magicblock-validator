@@ -232,12 +232,14 @@ pub fn process_instruction<'a>(
     accounts: &'a [AccountInfo<'a>],
     instruction_data: &[u8],
 ) -> ProgramResult {
-    let (disc, seeds_data) =
-        instruction_data.split_at(EXTERNAL_UNDELEGATE_DISCRIMINATOR.len());
+    // Undelegate Instruction
+    if instruction_data.len() >= EXTERNAL_UNDELEGATE_DISCRIMINATOR.len() {
+        let (disc, seeds_data) =
+            instruction_data.split_at(EXTERNAL_UNDELEGATE_DISCRIMINATOR.len());
 
-    // Undelegate
-    if disc == EXTERNAL_UNDELEGATE_DISCRIMINATOR {
-        return process_undelegate_request(accounts, seeds_data);
+        if disc == EXTERNAL_UNDELEGATE_DISCRIMINATOR {
+            return process_undelegate_request(accounts, seeds_data);
+        }
     }
 
     // Other instructions
