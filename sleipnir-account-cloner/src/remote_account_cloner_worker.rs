@@ -274,6 +274,7 @@ where
             // Fetch the account, repeat and retry until we have a satisfactory response
             let mut fetch_count = 0;
             loop {
+                fetch_count += 1;
                 let min_context_slot =
                     self.account_updates.get_first_subscribed_slot(pubkey);
                 match self
@@ -305,8 +306,6 @@ where
                         }
                     }
                 };
-                // If the result was not satisfactory, try again
-                fetch_count += 1;
                 // Wait a bit in the hopes of the min_context_slot becoming available
                 sleep(Duration::from_millis(100)).await;
             }
