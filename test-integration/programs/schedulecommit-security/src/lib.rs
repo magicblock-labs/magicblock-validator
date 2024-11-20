@@ -205,12 +205,13 @@ fn process_sibling_schedule_cpis(
 
     {
         // 2. CPI into the schedule commit directly
-        let mut account_infos = vec![];
+        let mut account_infos =
+            account_infos.clone().into_iter().collect::<Vec<_>>();
         account_infos.extend(pda_infos.iter());
 
         let direct_ix = create_schedule_commit_ix(
             payer,
-            &account_infos.to_vec(),
+            &account_infos,
             magic_context,
             magic_program,
             false,
