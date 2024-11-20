@@ -8,7 +8,7 @@ use integration_test_tools::{
 use std::{
     io,
     path::Path,
-    process::{self, Child, Stdio},
+    process::{self, Child},
 };
 use teepee::Teepee;
 
