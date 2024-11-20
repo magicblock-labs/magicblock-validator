@@ -10,6 +10,7 @@ use std::{
     path::Path,
     process::{self, Child, Stdio},
 };
+use teepee::Teepee;
 
 fn cleanup(ephem_validator: &mut Child, devnet_validator: &mut Child) {
     ephem_validator
@@ -225,31 +226,7 @@ fn run_test(
     }
     cmd.arg("--").arg("--test-threads=1").arg("--nocapture");
     cmd.current_dir(manifest_dir.clone());
-    cmd.stdout(Stdio::inherit())
-        .stderr(Stdio::inherit())
-        .output()
-}
-
-fn spawn_test(
-    manifest_dir: String,
-    config: RunTestConfig,
-) -> io::Result<process::Output> {
-    let mut cmd = process::Command::new("cargo");
-    cmd.env(
-        "RUST_LOG",
-        std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
-    )
-    .arg("test");
-    if let Some(package) = config.package {
-        cmd.arg("-p").arg(package);
-    }
-    if let Some(test) = config.test {
-        cmd.arg(format!("'{}'", test));
-    }
-    cmd.arg("--").arg("--test-threads=1").arg("--nocapture");
-    cmd.current_dir(manifest_dir.clone())
-        .spawn()?
-        .wait_with_output()
+    Teepee::new(cmd).output()
 }
 
 // -----------------

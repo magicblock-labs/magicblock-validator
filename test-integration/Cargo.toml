@@ -31,6 +31,7 @@ program-schedulecommit = { path = "programs/schedulecommit" }
 program-schedulecommit-security = { path = "programs/schedulecommit-security" }
 sleipnir-config = { path = "../sleipnir-config" }
 sleipnir-core = { path = "../sleipnir-core" }
+teepee = "0.0.1"
 tempfile = "3.10.1"
 test-tools-core = { path = "../test-tools-core" }
 toml = "0.8.13"

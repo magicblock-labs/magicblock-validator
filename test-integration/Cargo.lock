@@ -4100,6 +4100,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "teepee"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "28768569381ae187ca3e46026f5c0786c4120e146fc74bda02ab930dc1b94bd3"
+
+[[package]]
 name = "tempfile"
 version = "3.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4156,6 +4162,7 @@ name = "test-runner"
 version = "0.0.0"
 dependencies = [
  "integration-test-tools",
+ "teepee",
 ]
 
 [[package]]
