@@ -1,9 +1,10 @@
 use std::collections::HashSet;
 
 use sleipnir_account_cloner::{
-    standard_blacklisted_accounts, AccountCloner, AccountClonerOutput,
-    AccountClonerPermissions, AccountClonerUnclonableReason,
-    RemoteAccountClonerClient, RemoteAccountClonerWorker,
+    standard_blacklisted_accounts, AccountCloner, AccountClonerError,
+    AccountClonerOutput, AccountClonerPermissions,
+    AccountClonerUnclonableReason, RemoteAccountClonerClient,
+    RemoteAccountClonerWorker,
 };
 use sleipnir_account_dumper::AccountDumperStub;
 use sleipnir_account_fetcher::AccountFetcherStub;
@@ -258,11 +259,7 @@ async fn test_clone_fails_stale_undelegated_account_when_ephemeral() {
     // Check expected result
     assert!(matches!(
         result,
-        Ok(AccountClonerOutput::Unclonable {
-            reason:
-                AccountClonerUnclonableReason::FailedToFetchSatisfactorySlot,
-            ..
-        })
+        Err(AccountClonerError::FailedToFetchSatisfactorySlot)
     ));
     assert_eq!(account_fetcher.get_fetch_count(&undelegated_account), 5); // Must have retried
     assert!(account_updates.has_account_monitoring(&undelegated_account));
