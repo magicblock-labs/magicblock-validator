@@ -285,9 +285,9 @@ fn test_committed_and_undelegated_single_account_redelegation() {
             commitment,
             ephem_client,
             ephem_blockhash,
-            chain_client,
             ..
         } = ctx.fields();
+        let chain_client = ctx.try_chain_client().unwrap();
 
         // 1. Show we cannot use it in the ehpemeral anymore
         assert_cannot_increase_committee_count(
@@ -355,9 +355,9 @@ fn test_committed_and_undelegated_accounts_redelegation() {
             commitment,
             ephem_client,
             ephem_blockhash,
-            chain_client,
             ..
         } = ctx.fields();
+        let chain_client = ctx.try_chain_client().unwrap();
 
         // 1. Show we cannot use them in the ehpemeral anymore
         {

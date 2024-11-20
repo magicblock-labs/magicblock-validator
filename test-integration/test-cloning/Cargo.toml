@@ -1,0 +1,8 @@
+[package]
+name = "test-cloning"
+version.workspace = true
+edition.workspace = true
+
+[dev-dependencies]
+integration-test-tools = { workspace = true }
+solana-sdk = { workspace = true }

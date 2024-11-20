@@ -1,6 +1,7 @@
 use solana_sdk::{pubkey, pubkey::Pubkey};
 use test_tools::{account::fund_account, traits::TransactionsProcessor};
 
+#[allow(dead_code)] // used in tests
 pub const SOLX_PROG: Pubkey =
     pubkey!("SoLXmnP9JvL6vJ7TN1VqtTxqsc2izmPfF9CsMDEuRzJ");
 #[allow(dead_code)] // used in tests
