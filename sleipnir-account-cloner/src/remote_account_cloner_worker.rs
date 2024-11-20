@@ -272,32 +272,41 @@ where
                 .ensure_account_monitoring(pubkey)
                 .map_err(AccountClonerError::AccountUpdatesError)?;
             // Fetch the account, repeat and retry until we have a satisfactory response
-            let mut min_context_slot = None;
             let mut retries = 0;
             loop {
-                let account_chain_snapshot =
-                    self.fetch_account_chain_snapshot(pubkey, None).await?;
-                let first_subscribed_slot =
+                let min_context_slot =
                     self.account_updates.get_first_subscribed_slot(pubkey);
-                // We consider it a satisfactory response if the slot at which the state is from
-                // is more recent than the first successful subscription to the account
-                if account_chain_snapshot.at_slot
-                    >= first_subscribed_slot.unwrap_or(u64::MAX)
+                match self
+                    .fetch_account_chain_snapshot(pubkey, min_context_slot)
+                    .await
                 {
-                    break account_chain_snapshot;
-                }
-                // If the result was not satisfactory, wait a bit and try again
-                min_context_slot = first_subscribed_slot;
+                    // We consider it a satisfactory response if the slot at which the state is from
+                    // is more recent than the first successful subscription to the account
+                    Ok(account_chain_snapshot) => {
+                        if account_chain_snapshot.at_slot
+                            >= self
+                                .account_updates
+                                .get_first_subscribed_slot(pubkey)
+                                .unwrap_or(u64::MAX)
+                        {
+                            break account_chain_snapshot;
+                        }
+                    }
+                    // We unpack the error, we allow retyig only if it match the specific error of min_context_slot not found
+                    Err(error) => {
+                        return Err(error); // TODO - allow rety in some case
+                    }
+                };
+                // If the result was not satisfactory, try again
                 retries += 1;
-                sleep(Duration::from_millis(100)).await;
                 // If we failed too fetch too many time, temporarily give up to not clog the whole system
                 if retries >= self.fetch_retries {
-                    return Ok(AccountClonerOutput::Unclonable {
-                        pubkey: *pubkey,
-                        reason: AccountClonerUnclonableReason::FailedToFetchSatisfactorySlot,
-                        at_slot: account_chain_snapshot.at_slot
-                    });
+                    return Err(
+                        AccountClonerError::FailedToFetchSatisfactorySlot,
+                    );
                 }
+                // Wait a bit in the hopes of the min_context_slot becoming available
+                sleep(Duration::from_millis(100)).await;
             }
         } else {
             self.fetch_account_chain_snapshot(pubkey, None).await?
