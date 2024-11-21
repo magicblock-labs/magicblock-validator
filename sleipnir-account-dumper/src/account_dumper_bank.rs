@@ -2,7 +2,10 @@ use std::sync::Arc;
 
 use sleipnir_bank::bank::Bank;
 use sleipnir_mutator::{
-    program::{create_program_modifications, ProgramModifications},
+    program::{
+        create_program_buffer_modification, create_program_data_modification,
+        create_program_modifications, ProgramModifications,
+    },
     transactions::{
         transaction_to_clone_program, transaction_to_clone_regular_account,
     },
@@ -11,7 +14,12 @@ use sleipnir_mutator::{
 use sleipnir_processor::execute_transaction::execute_legacy_transaction;
 use sleipnir_transaction_status::TransactionStatusSender;
 use solana_sdk::{
-    account::Account, pubkey::Pubkey, signature::Signature,
+    account::Account,
+    bpf_loader_upgradeable::{
+        self, get_program_data_address, UpgradeableLoaderState,
+    },
+    pubkey::Pubkey,
+    signature::Signature,
     transaction::Transaction,
 };
 
@@ -135,6 +143,56 @@ impl AccountDumper for AccountDumperBank {
             program_data_modification,
             program_buffer_modification,
             program_idl_modification,
+            self.bank.last_blockhash(),
+        );
+        self.execute_transaction(transaction)
+    }
+
+    fn dump_program_account_with_old_bpf(
+        &self,
+        program_pubkey: &Pubkey,
+        program_account: &Account,
+    ) -> AccountDumperResult<Signature> {
+        eprintln!("instruction to clone account: {program_pubkey}");
+        // derive program data account address, as expected by upgradeable BPF loader
+        let programdata_address = get_program_data_address(program_pubkey);
+        let slot = self.bank.slot();
+
+        // we can use the whole data field of program, as it only contains the executable bytecode
+        let program_data_modification = create_program_data_modification(
+            &programdata_address,
+            &program_account.data,
+            slot,
+        );
+
+        let mut program_id_modification =
+            AccountModification::from((program_pubkey, program_account));
+
+        // point program account to the derived program data account address
+        let program_id_state =
+            bincode::serialize(&UpgradeableLoaderState::Program {
+                programdata_address,
+            })
+            .expect("infallible serialization of UpgradeableLoaderState ");
+        program_id_modification.executable.replace(true);
+        program_id_modification.data.replace(program_id_state);
+
+        // substitute the owner of the program with upgradable BPF loader
+        program_id_modification
+            .owner
+            .replace(bpf_loader_upgradeable::ID);
+
+        let program_buffer_modification =
+            create_program_buffer_modification(&program_account.data);
+
+        let needs_upgrade = self.bank.has_account(program_pubkey);
+
+        let transaction = transaction_to_clone_program(
+            needs_upgrade,
+            program_id_modification,
+            program_data_modification,
+            program_buffer_modification,
+            None,
             self.bank.last_blockhash(),
         );
         self.execute_transaction(transaction)

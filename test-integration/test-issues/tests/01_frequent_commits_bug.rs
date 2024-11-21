@@ -11,7 +11,7 @@ fn test_frequent_commits_do_not_run_when_no_accounts_need_to_be_committed() {
     info!("==== test_frequent_commits_do_not_run_when_no_accounts_need_to_be_committed ====");
 
     let ctx = IntegrationTestContext::new();
-    let IntegrationTestContext { chain_client, .. } = &ctx;
+    let chain_client = &ctx.try_chain_client().unwrap();
 
     // The commits happen frequently via the MagicBlock System program.
     // Thus here we ensure that after the frequency timeout we did not receive any transaction

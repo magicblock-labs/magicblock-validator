@@ -1,12 +1,22 @@
+use std::{
+    fs,
+    path::{Path, PathBuf},
+};
+
 use serde::Deserialize;
-use std::{fs, path::Path, path::PathBuf};
 
 #[derive(Deserialize)]
 struct Config {
+    accounts: RemoteConfig,
     #[serde(default)]
     rpc: Rpc,
     #[serde(default)]
     program: Vec<Program>,
+}
+
+#[derive(Deserialize)]
+struct RemoteConfig {
+    remote: String,
 }
 
 #[derive(Deserialize)]
@@ -49,13 +59,25 @@ pub fn config_to_args(config_path: &PathBuf) -> Vec<String> {
         .expect("Failed to get parent directory of config file");
 
     for program in config.program {
-        args.push("--bpf-program".to_string());
-        args.push(program.id);
+        match program.path.as_str() {
+            "<remote>" => {
+                args.push("--clone".into());
+                args.push(program.id);
+            }
+            path => {
+                args.push("--bpf-program".to_string());
+                args.push(program.id);
 
-        let resolved_full_config_path =
-            config_dir.join(program.path).canonicalize().unwrap();
-        args.push(resolved_full_config_path.to_str().unwrap().to_string());
+                let resolved_full_config_path =
+                    config_dir.join(path).canonicalize().unwrap();
+                args.push(
+                    resolved_full_config_path.to_str().unwrap().to_string(),
+                );
+            }
+        }
     }
+    args.push("--url".into());
+    args.push(config.accounts.remote);
 
     args
 }

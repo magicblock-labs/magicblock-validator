@@ -1107,7 +1107,7 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "borsh 0.10.3",
  "ephemeral-rollups-sdk-attribute-commit",
@@ -1118,7 +1118,7 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-commit"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1127,7 +1127,7 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-delegate"
-version = "0.0.6"
+version = "0.0.7"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1639,10 +1639,12 @@ dependencies = [
  "anyhow",
  "rayon",
  "serde",
+ "sleipnir-config",
  "sleipnir-core",
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk 1.17.22",
+ "tempfile",
  "toml 0.8.15",
 ]
 
@@ -2306,6 +2308,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "program-flexi-counter"
+version = "0.0.0"
+dependencies = [
+ "borsh 0.10.3",
+ "solana-program 1.17.22",
+]
+
+[[package]]
 name = "qstring"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2910,6 +2920,20 @@ dependencies = [
  "solana-rayon-threadlimit",
  "solana-sdk 1.19.0",
  "thiserror",
+]
+
+[[package]]
+name = "sleipnir-config"
+version = "1.19.0"
+dependencies = [
+ "serde",
+ "solana-sdk 1.19.0",
+ "strum",
+ "strum_macros",
+ "test-tools-core",
+ "thiserror",
+ "toml 0.8.15",
+ "url",
 ]
 
 [[package]]
@@ -4089,12 +4113,33 @@ dependencies = [
 ]
 
 [[package]]
+name = "test-cloning"
+version = "0.0.0"
+dependencies = [
+ "integration-test-tools",
+ "solana-sdk 1.17.22",
+]
+
+[[package]]
 name = "test-issues"
 version = "0.0.0"
 dependencies = [
  "integration-test-tools",
  "log",
  "test-tools-core",
+]
+
+[[package]]
+name = "test-ledger-restore"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "integration-test-tools",
+ "program-flexi-counter",
+ "sleipnir-config",
+ "solana-sdk 1.17.22",
+ "solana-transaction-status",
+ "tempfile",
 ]
 
 [[package]]
@@ -4393,6 +4438,7 @@ dependencies = [
  "form_urlencoded",
  "idna",
  "percent-encoding",
+ "serde",
 ]
 
 [[package]]

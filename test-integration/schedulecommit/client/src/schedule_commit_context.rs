@@ -48,10 +48,10 @@ pub struct ScheduleCommitTestContextFields<'a> {
     pub payer: &'a Keypair,
     pub committees: &'a Vec<(Keypair, Pubkey)>,
     pub commitment: &'a CommitmentConfig,
-    pub chain_client: &'a RpcClient,
+    pub chain_client: Option<&'a RpcClient>,
     pub ephem_client: &'a RpcClient,
     pub validator_identity: &'a Pubkey,
-    pub chain_blockhash: &'a Hash,
+    pub chain_blockhash: Option<&'a Hash>,
     pub ephem_blockhash: &'a Hash,
 }
 
@@ -118,9 +118,9 @@ impl ScheduleCommitTestContext {
             &ixs,
             Some(&payers[0].pubkey()),
             &payers,
-            self.chain_blockhash,
+            *self.try_chain_blockhash()?,
         );
-        self.chain_client
+        self.try_chain_client()?
             .send_and_confirm_transaction_with_spinner_and_config(
                 &tx,
                 self.commitment,
@@ -144,13 +144,18 @@ impl ScheduleCommitTestContext {
             payers.push(payer);
         }
 
+        let blockhash = match blockhash {
+            Some(blockhash) => blockhash,
+            None => *self.try_chain_blockhash()?,
+        };
+
         let tx = Transaction::new_signed_with_payer(
             &ixs,
             Some(&payers[0].pubkey()),
             &payers,
-            blockhash.unwrap_or(self.chain_blockhash),
+            blockhash,
         );
-        self.chain_client
+        self.try_chain_client()?
             .send_and_confirm_transaction_with_spinner_and_config(
                 &tx,
                 self.commitment,
@@ -251,12 +256,20 @@ impl ScheduleCommitTestContext {
     // -----------------
     // Integration Test Context Fields
     // -----------------
-    pub fn chain_client(&self) -> &RpcClient {
-        &self.common_ctx.chain_client
+    pub fn try_chain_client(&self) -> anyhow::Result<&RpcClient> {
+        let Some(chain_client) = self.chain_client.as_ref() else {
+            return Err(anyhow::anyhow!("Chain client not available"));
+        };
+        Ok(chain_client)
     }
-    pub fn chain_blockhash(&self) -> &Hash {
-        &self.common_ctx.chain_blockhash
+
+    pub fn try_chain_blockhash(&self) -> anyhow::Result<&Hash> {
+        let Some(chain_blockhash) = self.chain_blockhash.as_ref() else {
+            return Err(anyhow::anyhow!("Chain blockhash  not available"));
+        };
+        Ok(chain_blockhash)
     }
+
     pub fn ephem_client(&self) -> &RpcClient {
         &self.common_ctx.ephem_client
     }
@@ -269,10 +282,10 @@ impl ScheduleCommitTestContext {
             payer: &self.payer,
             committees: &self.committees,
             commitment: &self.commitment,
-            chain_client: &self.common_ctx.chain_client,
+            chain_client: self.common_ctx.chain_client.as_ref(),
             ephem_client: &self.common_ctx.ephem_client,
             validator_identity: &self.common_ctx.validator_identity,
-            chain_blockhash: &self.common_ctx.chain_blockhash,
+            chain_blockhash: self.common_ctx.chain_blockhash.as_ref(),
             ephem_blockhash: &self.common_ctx.ephem_blockhash,
         }
     }

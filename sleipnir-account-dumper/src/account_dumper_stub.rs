@@ -3,7 +3,10 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use solana_sdk::{account::Account, pubkey::Pubkey, signature::Signature};
+use solana_sdk::{
+    account::Account, bpf_loader_upgradeable::get_program_data_address,
+    pubkey::Pubkey, signature::Signature,
+};
 
 use crate::{AccountDumper, AccountDumperResult};
 
@@ -24,7 +27,10 @@ impl AccountDumper for AccountDumperStub {
         _lamports: u64,
         _owner: &Pubkey,
     ) -> AccountDumperResult<Signature> {
-        self.feepayer_accounts.write().unwrap().insert(*pubkey);
+        self.feepayer_accounts
+            .write()
+            .expect("RwLock for feepayer_accounts is poisoned")
+            .insert(*pubkey);
         Ok(Signature::new_unique())
     }
 
@@ -33,7 +39,10 @@ impl AccountDumper for AccountDumperStub {
         pubkey: &Pubkey,
         _account: &Account,
     ) -> AccountDumperResult<Signature> {
-        self.undelegated_accounts.write().unwrap().insert(*pubkey);
+        self.undelegated_accounts
+            .write()
+            .expect("RwLock for undelegated_accounts is poisoned")
+            .insert(*pubkey);
         Ok(Signature::new_unique())
     }
 
@@ -43,7 +52,10 @@ impl AccountDumper for AccountDumperStub {
         _account: &Account,
         _owner: &Pubkey,
     ) -> AccountDumperResult<Signature> {
-        self.delegated_accounts.write().unwrap().insert(*pubkey);
+        self.delegated_accounts
+            .write()
+            .expect("RwLock for delegated_accounts is poisoned")
+            .insert(*pubkey);
         Ok(Signature::new_unique())
     }
 
@@ -55,14 +67,38 @@ impl AccountDumper for AccountDumperStub {
         _program_data_account: &Account,
         program_idl: Option<(Pubkey, Account)>,
     ) -> AccountDumperResult<Signature> {
-        self.program_ids.write().unwrap().insert(*program_id_pubkey);
+        self.program_ids
+            .write()
+            .expect("RwLock for program_ids is poisoned")
+            .insert(*program_id_pubkey);
         self.program_datas
             .write()
             .unwrap()
             .insert(*program_data_pubkey);
         if let Some(program_idl) = program_idl {
-            self.program_idls.write().unwrap().insert(program_idl.0);
+            self.program_idls
+                .write()
+                .expect("RwLock for program_idls is poisoned")
+                .insert(program_idl.0);
         }
+        Ok(Signature::new_unique())
+    }
+
+    fn dump_program_account_with_old_bpf(
+        &self,
+        program_pubkey: &Pubkey,
+        _program_account: &Account,
+    ) -> AccountDumperResult<Signature> {
+        let programdata_address = get_program_data_address(program_pubkey);
+
+        self.program_ids
+            .write()
+            .expect("RwLock for program_ids is poisoned")
+            .insert(*program_pubkey);
+        self.program_datas
+            .write()
+            .expect("RwLock for program_datas is poisoned")
+            .insert(programdata_address);
         Ok(Signature::new_unique())
     }
 }

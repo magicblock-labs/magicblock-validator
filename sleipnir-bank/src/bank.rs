@@ -1,7 +1,3 @@
-// FIXME: once we worked this out
-#![allow(dead_code)]
-#![allow(unused_variables)]
-
 use std::{
     borrow::Cow,
     collections::HashSet,
@@ -14,26 +10,6 @@ use std::{
     time::Duration,
 };
 
-use crate::{
-    bank_helpers::{
-        calculate_data_size_delta, get_epoch_secs,
-        inherit_specially_retained_account_fields,
-    },
-    bank_rc::BankRc,
-    builtins::{BuiltinPrototype, BUILTINS},
-    slot_status_notifier_interface::SlotStatusNotifierArc,
-    status_cache::StatusCache,
-    transaction_batch::TransactionBatch,
-    transaction_logs::{
-        TransactionLogCollector, TransactionLogCollectorConfig,
-        TransactionLogCollectorFilter, TransactionLogInfo,
-    },
-    transaction_results::{
-        LoadAndExecuteTransactionsOutput, TransactionBalances,
-        TransactionBalancesSet,
-    },
-    transaction_simulation::TransactionSimulationResult,
-};
 use log::{debug, info, trace};
 use sleipnir_accounts_db::{
     accounts::{Accounts, TransactionLoadResult},
@@ -67,7 +43,7 @@ use solana_sdk::{
         ReadableAccount, WritableAccount,
     },
     clock::{
-        BankId, Epoch, Slot, SlotIndex, UnixTimestamp, DEFAULT_MS_PER_SLOT,
+        Epoch, Slot, SlotIndex, UnixTimestamp, DEFAULT_MS_PER_SLOT,
         MAX_RECENT_BLOCKHASHES,
     },
     epoch_info::EpochInfo,
@@ -114,6 +90,27 @@ use solana_svm::{
 };
 use solana_system_program::{get_system_account_kind, SystemAccountKind};
 
+use crate::{
+    bank_helpers::{
+        calculate_data_size_delta, get_epoch_secs,
+        inherit_specially_retained_account_fields,
+    },
+    bank_rc::BankRc,
+    builtins::{BuiltinPrototype, BUILTINS},
+    slot_status_notifier_interface::SlotStatusNotifierArc,
+    status_cache::StatusCache,
+    transaction_batch::TransactionBatch,
+    transaction_logs::{
+        TransactionLogCollector, TransactionLogCollectorConfig,
+        TransactionLogCollectorFilter, TransactionLogInfo,
+    },
+    transaction_results::{
+        LoadAndExecuteTransactionsOutput, TransactionBalances,
+        TransactionBalancesSet,
+    },
+    transaction_simulation::TransactionSimulationResult,
+};
+
 pub type BankStatusCache = StatusCache<Result<()>>;
 
 pub struct CommitTransactionCounts {
@@ -131,7 +128,7 @@ pub struct SimpleForkGraph;
 
 impl ForkGraph for SimpleForkGraph {
     /// Returns the BlockRelation of A to B
-    fn relationship(&self, a: Slot, b: Slot) -> BlockRelation {
+    fn relationship(&self, _a: Slot, _b: Slot) -> BlockRelation {
         BlockRelation::Unrelated
     }
 
@@ -151,8 +148,6 @@ pub struct Bank {
 
     /// Bank slot (i.e. block)
     slot: AtomicU64,
-
-    bank_id: BankId,
 
     /// Bank epoch
     epoch: Epoch,
@@ -401,18 +396,14 @@ impl Bank {
 
         bank.process_genesis_config(genesis_config, identity_id);
 
-        bank.finish_init(
-            genesis_config,
-            additional_builtins,
-            debug_do_not_add_builtins,
-        );
+        bank.finish_init(additional_builtins, debug_do_not_add_builtins);
 
         // NOTE: leaving out stake history sysvar setup
 
         // For more info about sysvars see ../../docs/sysvars.md
 
         // We don't really have epochs so we use the validator start time
-        bank.update_clock(genesis_config.creation_time);
+        bank.update_clock(genesis_config.creation_time, None);
         bank.update_rent();
         bank.update_fees();
         bank.update_epoch_schedule();
@@ -440,7 +431,6 @@ impl Bank {
         millis_per_slot: u64,
     ) -> Self {
         // NOTE: this was not part of the original implementation
-        let simple_fork_graph = Arc::<RwLock<SimpleForkGraph>>::default();
         let loaded_programs_cache = {
             // TODO: not sure how this is setup more proper in the original implementation
             // since there we don't call `set_fork_graph` directly from the bank
@@ -462,7 +452,6 @@ impl Bank {
         let mut bank = Self {
             rc: BankRc::new(accounts),
             slot: AtomicU64::default(),
-            bank_id: BankId::default(),
             epoch: Epoch::default(),
             epoch_schedule: EpochSchedule::default(),
             is_delta: AtomicBool::default(),
@@ -536,13 +525,12 @@ impl Bank {
     // -----------------
     fn finish_init(
         &mut self,
-        genesis_config: &GenesisConfig,
         additional_builtins: Option<&[BuiltinPrototype]>,
         debug_do_not_add_builtins: bool,
     ) {
         // NOTE: leaving out `rewards_pool_pubkeys` initialization
 
-        self.apply_feature_activations(debug_do_not_add_builtins);
+        self.apply_feature_activations();
 
         if !debug_do_not_add_builtins {
             for builtin in BUILTINS
@@ -661,38 +649,20 @@ impl Bank {
     }
 
     pub fn advance_slot(&self) -> Slot {
-        // 1. Determine next slot and set it
+        // Determine next slot and set it
         let prev_slot = self.slot();
         let next_slot = prev_slot + 1;
-        self.set_slot(next_slot);
-        self.rc.accounts.set_slot(next_slot);
+        self.set_next_slot(next_slot);
 
-        // 2. Update transaction processor with new slot
-        // We used to just set the slot here, but wanted to avoid having a local
-        // slightly modified copy of the solana-svm.
-        *self.transaction_processor.write().unwrap() =
-            TransactionBatchProcessor::new(
-                next_slot,
-                self.epoch,
-                // Potentially expensive clone
-                self.epoch_schedule.clone(),
-                // Potentially expensive clone
-                self.fee_structure.clone(),
-                self.runtime_config.clone(),
-                self.loaded_programs_cache.clone(),
-            );
-
-        // 3. Add a "root" to the status cache to trigger removing old items
+        // Add a "root" to the status cache to trigger removing old items
         self.status_cache
             .write()
             .expect("RwLock of status cache poisoned")
             .add_root(prev_slot);
 
-        // 4. Update sysvars
-        self.update_clock(self.genesis_creation_time);
-        self.fill_missing_sysvar_cache_entries();
+        self.update_sysvars(self.genesis_creation_time, None);
 
-        // 5. Determine next blockhash
+        // Determine next blockhash
         let current_hash = self.last_blockhash();
         let blockhash = {
             // In the Solana implementation there is a lot of logic going on to determine the next
@@ -704,7 +674,7 @@ impl Bank {
             hasher.result()
         };
 
-        // 6. Register the new blockhash with the blockhash queue
+        // Register the new blockhash with the blockhash queue
         {
             let mut blockhash_queue = self.blockhash_queue.write().unwrap();
             blockhash_queue.register_hash(
@@ -713,22 +683,16 @@ impl Bank {
             );
         }
 
-        // 7. Notify Geyser Service
+        // Notify Geyser Service
         if let Some(slot_status_notifier) = &self.slot_status_notifier {
             slot_status_notifier
                 .notify_slot_status(next_slot, Some(next_slot - 1));
         }
 
-        // 8. Update loaded programs cache as otherwise we cannot deploy new programs
+        // Update loaded programs cache as otherwise we cannot deploy new programs
         self.sync_loaded_programs_cache_to_slot();
 
-        // 9. Update slot hashes since they are needed to sanitize a transaction in some cases
-        //    NOTE: slothash and blockhash are the same for us
-        //          in solana the blockhash is set to the hash of the slot that is finalized
-        self.update_slot_hashes(prev_slot, current_hash);
-
-        // 10. Update slot history
-        self.update_slot_history(prev_slot);
+        self.update_slot_hashes_and_slot_history(prev_slot, current_hash);
 
         next_slot
     }
@@ -1057,7 +1021,11 @@ impl Bank {
         .unwrap_or_default()
     }
 
-    fn update_clock(&self, epoch_start_timestamp: UnixTimestamp) {
+    fn update_clock(
+        &self,
+        epoch_start_timestamp: UnixTimestamp,
+        timestamp: Option<UnixTimestamp>,
+    ) {
         // NOTE: the Solana validator determines time with a much more complex logic
         // - slot == 0: genesis creation time + number of slots * ns_per_slot to seconds
         // - slot > 0 : epoch start time + number of slots to get a timestamp estimate with max
@@ -1068,8 +1036,9 @@ impl Bank {
         // calculations easier.
         // This makes sense since otherwise the hosting platform could manipulate the time assumed
         // by the validator.
-        let unix_timestamp =
-            i64::try_from(get_epoch_secs()).expect("get_epoch_secs overflow");
+        let unix_timestamp = timestamp.unwrap_or_else(|| {
+            i64::try_from(get_epoch_secs()).expect("get_epoch_secs overflow")
+        });
 
         // I checked this against crate::bank_helpers::get_sys_time_in_secs();
         // and confirmed that the timestamps match
@@ -1262,7 +1231,7 @@ impl Bank {
     // In Solana this is called from snapshot restore AND for each epoch boundary
     // The entire code path herein must be idempotent
     // In our case only during finish_init when the bank is created
-    fn apply_feature_activations(&mut self, debug_do_not_add_builtins: bool) {
+    fn apply_feature_activations(&mut self) {
         let feature_set = self.compute_active_feature_set();
         // NOTE: at this point we have only inactive features
         self.feature_set = Arc::new(feature_set);
@@ -1901,22 +1870,6 @@ impl Bank {
             results,
             TransactionBalancesSet::new(pre_balances, post_balances),
         )
-    }
-
-    #[must_use]
-    pub(super) fn process_transaction_batch(
-        &self,
-        batch: &TransactionBatch,
-    ) -> Vec<Result<()>> {
-        self.load_execute_and_commit_transactions(
-            batch,
-            false,
-            Default::default(),
-            &mut ExecuteTimings::default(),
-            None,
-        )
-        .0
-        .fee_collection_results
     }
 
     /// `committed_transactions_count` is the number of transactions out of `sanitized_txs`
@@ -2652,5 +2605,100 @@ impl Bank {
     // -----------------
     pub fn slots_for_duration(&self, duration: Duration) -> Slot {
         duration.as_millis() as u64 / self.millis_per_slot
+    }
+
+    // -----------------
+    // Ledger Replay
+    // -----------------
+    pub fn replay_slot(
+        &self,
+        next_slot: Slot,
+        current_hash: &Hash,
+        blockhash: &Hash,
+        timestamp: u64,
+    ) {
+        self.set_next_slot(next_slot);
+
+        if next_slot > 0 {
+            self.status_cache
+                .write()
+                .expect("RwLock of status cache poisoned")
+                .add_root(next_slot - 1);
+        }
+
+        self.update_sysvars(
+            self.genesis_creation_time,
+            Some(timestamp as UnixTimestamp),
+        );
+
+        // Register the new blockhash with the blockhash queue
+        self.register_hash_with_timestamp(blockhash, timestamp);
+
+        // NOTE: Not notifying Geyser Service doing replay
+
+        // Update loaded programs cache as otherwise we cannot deploy new programs
+        self.sync_loaded_programs_cache_to_slot();
+
+        if next_slot > 0 {
+            self.update_slot_hashes_and_slot_history(
+                next_slot - 1,
+                *current_hash,
+            );
+        }
+    }
+
+    fn register_hash_with_timestamp(&self, hash: &Hash, timestamp: u64) {
+        let mut blockhash_queue = self.blockhash_queue.write().unwrap();
+        blockhash_queue.register_hash_with_timestamp(
+            hash,
+            self.fee_rate_governor.lamports_per_signature,
+            timestamp,
+        );
+    }
+
+    // -----------------
+    // Advance Slot/Replay Slot common methods
+    // -----------------
+    fn set_next_slot(&self, next_slot: Slot) {
+        self.set_slot(next_slot);
+        self.rc.accounts.set_slot(next_slot);
+
+        // Update transaction processor with new slot
+        // We used to just set the slot here, but wanted to avoid having a local
+        // slightly modified copy of the solana-svm.
+        *self.transaction_processor.write().unwrap() =
+            TransactionBatchProcessor::new(
+                next_slot,
+                self.epoch,
+                // Potentially expensive clone
+                self.epoch_schedule.clone(),
+                // Potentially expensive clone
+                self.fee_structure.clone(),
+                self.runtime_config.clone(),
+                self.loaded_programs_cache.clone(),
+            );
+    }
+
+    // timestamp is only provided when replaying the ledger and is otherwise
+    // obtained from the system clock
+    fn update_sysvars(
+        &self,
+        epoch_start_timestamp: UnixTimestamp,
+        timestamp: Option<UnixTimestamp>,
+    ) {
+        self.update_clock(epoch_start_timestamp, timestamp);
+        self.fill_missing_sysvar_cache_entries();
+    }
+
+    fn update_slot_hashes_and_slot_history(
+        &self,
+        prev_slot: Slot,
+        current_hash: Hash,
+    ) {
+        // Update slot hashes that are needed to sanitize a transaction in some cases
+        // NOTE: slothash and blockhash are the same for us
+        //       in solana the blockhash is set to the hash of the slot that is finalized
+        self.update_slot_hashes(prev_slot, current_hash);
+        self.update_slot_history(prev_slot);
     }
 }
