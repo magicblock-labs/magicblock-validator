@@ -32,4 +32,6 @@ pub enum LedgerError {
     SlotCleanedUp,
     #[error("try from slice error: {0}")]
     TryFromSliceError(#[from] std::array::TryFromSliceError),
+    #[error("BlockstoreProcessorError: {0}")]
+    BlockStoreProcessor(String),
 }

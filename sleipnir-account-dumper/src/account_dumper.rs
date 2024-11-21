@@ -54,4 +54,13 @@ pub trait AccountDumper {
         program_data_account: &Account,
         program_idl: Option<(Pubkey, Account)>,
     ) -> AccountDumperResult<Signature>;
+
+    /// Edge case handler, when we artificially manufacture 2 accounts for program, which is owned
+    /// by older version of BPF loader, and thus only had 1 program account on main chain. This is
+    /// necessary for uniformity of program loading pipeline by utilizing single loader (BPF upgradable).
+    fn dump_program_account_with_old_bpf(
+        &self,
+        program_pubkey: &Pubkey,
+        program_account: &Account,
+    ) -> AccountDumperResult<Signature>;
 }

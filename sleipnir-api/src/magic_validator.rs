@@ -33,7 +33,7 @@ use sleipnir_bank::{
 };
 use sleipnir_config::{ProgramConfig, SleipnirConfig};
 use sleipnir_geyser_plugin::rpc::GeyserRpcService;
-use sleipnir_ledger::Ledger;
+use sleipnir_ledger::{blockstore_processor::process_ledger, Ledger};
 use sleipnir_metrics::MetricsService;
 use sleipnir_perf_service::SamplePerformanceService;
 use sleipnir_program::init_validator_authority;
@@ -63,7 +63,10 @@ use crate::{
     },
     geyser_transaction_notify_listener::GeyserTransactionNotifyListener,
     init_geyser_service::{init_geyser_service, InitGeyserServiceConfig},
-    ledger,
+    ledger::{
+        self, ledger_parent_dir, read_validator_keypair_from_ledger,
+        write_validator_keypair_to_ledger,
+    },
     tickers::{
         init_commit_accounts_ticker, init_slot_ticker,
         init_system_metrics_ticker,
@@ -152,6 +155,11 @@ impl MagicValidator {
             config.validator_config.ledger.path.as_ref(),
             config.validator_config.ledger.reset,
         )?;
+        Self::sync_validator_keypair_with_ledger(
+            ledger.ledger_path(),
+            &identity_keypair,
+            config.validator_config.ledger.reset,
+        )?;
         let accounts_paths = Self::init_accounts_paths(ledger.ledger_path())?;
 
         let exit = Arc::<AtomicBool>::default();
@@ -165,7 +173,11 @@ impl MagicValidator {
 
         fund_validator_identity(&bank, &validator_pubkey);
         fund_magic_context(&bank);
-        let faucet_keypair = funded_faucet(&bank);
+        let faucet_keypair = funded_faucet(
+            &bank,
+            ledger.ledger_path().as_path(),
+            config.validator_config.ledger.reset,
+        )?;
 
         load_programs_into_bank(
             &bank,
@@ -265,6 +277,10 @@ impl MagicValidator {
             config.validator_config.rpc.addr,
             config.validator_config.rpc.port,
         );
+        init_validator_authority(identity_keypair);
+
+        // Make sure we process the ledger before we're open to handle
+        // transactions via RPC
         let rpc_service = Self::init_json_rpc_service(
             bank.clone(),
             ledger.clone(),
@@ -275,8 +291,6 @@ impl MagicValidator {
             &pubsub_config,
             &config.validator_config,
         )?;
-
-        init_validator_authority(identity_keypair);
 
         Ok(Self {
             config: config.validator_config,
@@ -415,17 +429,33 @@ impl MagicValidator {
     }
 
     fn init_accounts_paths(ledger_path: &Path) -> ApiResult<Vec<PathBuf>> {
-        let accounts_dir = ledger_path
-            .parent()
-            .ok_or_else(|| {
-                ApiError::LedgerPathIsMissingParent(
-                    ledger_path.to_path_buf().display().to_string(),
-                )
-            })?
-            .join("accounts");
+        let parent = ledger_parent_dir(ledger_path)?;
+        let accounts_dir = parent.join("accounts");
         let (run_path, _snapshot_path) =
             create_accounts_run_and_snapshot_dirs(&accounts_dir)?;
         Ok(vec![run_path])
+    }
+
+    fn sync_validator_keypair_with_ledger(
+        ledger_path: &Path,
+        validator_keypair: &Keypair,
+        reset_ledger: bool,
+    ) -> ApiResult<()> {
+        if reset_ledger {
+            write_validator_keypair_to_ledger(ledger_path, validator_keypair)?;
+        } else {
+            let ledger_validator_keypair =
+                read_validator_keypair_from_ledger(ledger_path)?;
+            if ledger_validator_keypair.ne(validator_keypair) {
+                return Err(
+                    ApiError::LedgerValidatorKeypairNotMatchingProvidedKeypair(
+                        ledger_path.display().to_string(),
+                        ledger_validator_keypair.pubkey().to_string(),
+                    ),
+                );
+            }
+        }
+        Ok(())
     }
 
     fn init_transaction_listener(
@@ -451,6 +481,8 @@ impl MagicValidator {
     // Start/Stop
     // -----------------
     pub async fn start(&mut self) -> ApiResult<()> {
+        process_ledger(&self.ledger, &self.bank)?;
+
         // NOE: this only run only once, i.e. at creation time
         self.transaction_listener.run(true);
 

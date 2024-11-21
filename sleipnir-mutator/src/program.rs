@@ -67,7 +67,7 @@ pub fn create_program_modifications(
     })
 }
 
-fn create_program_data_modification(
+pub fn create_program_data_modification(
     program_data_pubkey: &Pubkey,
     program_data_bytecode: &[u8],
     slot: Slot,
@@ -93,7 +93,7 @@ fn create_program_data_modification(
     ))
 }
 
-fn create_program_buffer_modification(
+pub fn create_program_buffer_modification(
     program_data_bytecode: &[u8],
 ) -> AccountModification {
     let mut program_buffer_data =

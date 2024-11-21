@@ -5,6 +5,7 @@ use sleipnir_accounts_db::{
     accounts::Accounts, accounts_db::AccountsDb,
     accounts_update_notifier_interface::AccountsUpdateNotifier,
 };
+use solana_program_runtime::timings::ExecuteTimings;
 use solana_sdk::{
     genesis_config::GenesisConfig,
     pubkey::Pubkey,
@@ -172,5 +173,21 @@ impl Bank {
             self,
             Cow::Owned(sanitized_txs),
         ))
+    }
+
+    #[must_use]
+    pub(super) fn process_transaction_batch(
+        &self,
+        batch: &TransactionBatch,
+    ) -> Vec<Result<()>> {
+        self.load_execute_and_commit_transactions(
+            batch,
+            false,
+            Default::default(),
+            &mut ExecuteTimings::default(),
+            None,
+        )
+        .0
+        .fee_collection_results
     }
 }
