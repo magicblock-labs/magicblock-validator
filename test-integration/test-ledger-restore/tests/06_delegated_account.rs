@@ -9,10 +9,17 @@ use program_flexi_counter::{
 };
 use sleipnir_config::ProgramConfig;
 use solana_sdk::{
-    native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
+    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
+    signer::Signer,
 };
-use test_ledger_restore::{confirm_tx_with_payer_chain, confirm_tx_with_payer_ephem, fetch_counter_chain, fetch_counter_ephem, fetch_counter_owner_chain, setup_validator_with_local_remote, wait_for_ledger_persist, FLEXI_COUNTER_ID, TMP_DIR_LEDGER};
+use test_ledger_restore::{
+    confirm_tx_with_payer_chain, confirm_tx_with_payer_ephem,
+    fetch_counter_chain, fetch_counter_ephem, fetch_counter_owner_chain,
+    setup_validator_with_local_remote, wait_for_ledger_persist,
+    FLEXI_COUNTER_ID, TMP_DIR_LEDGER,
+};
 
+const COUNTER: &str = "Counter of Payer";
 fn payer_keypair() -> Keypair {
     Keypair::new()
 }
@@ -31,11 +38,12 @@ fn restore_ledger_containing_delegated_account() {
 
     let (mut validator, _) = write(&ledger_path, &payer);
     validator.kill().unwrap();
+
+    let mut validator = read(&ledger_path, &payer.pubkey());
+    validator.kill().unwrap();
 }
 
 fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
-    const COUNTER: &str = "Counter of Payer";
-
     let programs = get_programs();
 
     // NOTE: in this test we preload the counter program in the ephemeral instead
@@ -89,4 +97,23 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
     let slot = wait_for_ledger_persist(&mut validator);
 
     (validator, slot)
+}
+
+fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
+    let programs = get_programs();
+
+    let (_, mut validator, _) =
+        setup_validator_with_local_remote(ledger_path, Some(programs), false);
+
+    let counter_decoded = fetch_counter_ephem(payer, &mut validator);
+    assert_eq!(
+        counter_decoded,
+        FlexiCounter {
+            count: 3,
+            updates: 1,
+            label: COUNTER.to_string()
+        }
+    );
+
+    validator
 }
