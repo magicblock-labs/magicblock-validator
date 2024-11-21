@@ -215,16 +215,37 @@ fn mutate_accounts(
             SleipnirError::AccountModificationMissing
         })?;
 
+        ic_msg!(
+            invoke_context,
+            "MutateAccounts: modifying '{}'.",
+            account_key,
+        );
+
         if let Some(lamports) = modification.lamports {
+            ic_msg!(
+                invoke_context,
+                "MutateAccounts: setting lamports to {}",
+                lamports
+            );
             let current_lamports = account.borrow().lamports();
             lamports_to_debit += lamports as i128 - current_lamports as i128;
 
             account.borrow_mut().set_lamports(lamports);
         }
         if let Some(owner) = modification.owner {
+            ic_msg!(
+                invoke_context,
+                "MutateAccounts: setting owner to {}",
+                owner
+            );
             account.borrow_mut().set_owner(owner);
         }
         if let Some(executable) = modification.executable {
+            ic_msg!(
+                invoke_context,
+                "MutateAccounts: setting executable to {}",
+                executable
+            );
             account.borrow_mut().set_executable(executable);
         }
         if let Some(data_key) = modification.data_key.take() {
@@ -237,9 +258,19 @@ fn mutate_accounts(
                         data_key
                     );
                 })?;
+            ic_msg!(
+                invoke_context,
+                "MutateAccounts: setting data to len {}",
+                data.len()
+            );
             account.borrow_mut().set_data_from_slice(data.as_slice());
         }
         if let Some(rent_epoch) = modification.rent_epoch {
+            ic_msg!(
+                invoke_context,
+                "MutateAccounts: setting rent_epoch to {}",
+                rent_epoch
+            );
             account.borrow_mut().set_rent_epoch(rent_epoch);
         }
     }
