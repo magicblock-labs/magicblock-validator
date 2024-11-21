@@ -18,6 +18,10 @@ use solana_sdk::{
     transaction::Transaction,
 };
 
+
+const URL_CHAIN: &str = "http://localhost:7799";
+const URL_EPHEM: &str = "http://localhost:8899";
+
 pub struct IntegrationTestContext {
     pub commitment: CommitmentConfig,
     pub chain_client: Option<RpcClient>,
@@ -33,7 +37,7 @@ impl IntegrationTestContext {
     pub fn new_ephem_only() -> Self {
         let commitment = CommitmentConfig::confirmed();
         let ephem_client = RpcClient::new_with_commitment(
-            "http://localhost:8899".to_string(),
+            Self::url_ephem().to_string(),
             commitment,
         );
         let validator_identity = ephem_client.get_identity().unwrap();
@@ -52,11 +56,11 @@ impl IntegrationTestContext {
         let commitment = CommitmentConfig::confirmed();
 
         let chain_client = RpcClient::new_with_commitment(
-            "http://localhost:7799".to_string(),
+            Self::url_chain().to_string(),
             commitment,
         );
         let ephem_client = RpcClient::new_with_commitment(
-            "http://localhost:8899".to_string(),
+            Self::url_ephem().to_string(),
             commitment,
         );
         let validator_identity = chain_client.get_identity().unwrap();
@@ -464,7 +468,7 @@ impl IntegrationTestContext {
             rpc_client,
             CommitmentConfig::confirmed(),
         )
-        .map(|confirmed| (sig, confirmed))
+            .map(|confirmed| (sig, confirmed))
     }
 
     // -----------------
@@ -507,6 +511,16 @@ impl IntegrationTestContext {
             sleep(Duration::from_millis(50));
         };
         Ok(slot)
+    }
+
+    // -----------------
+    // RPC Clients
+    // -----------------
+    pub fn url_ephem() -> &'static str {
+        URL_EPHEM
+    }
+    pub fn url_chain() -> &'static str {
+        URL_CHAIN
     }
 }
 

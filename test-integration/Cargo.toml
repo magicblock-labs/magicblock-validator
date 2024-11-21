@@ -23,6 +23,7 @@ edition = "2021"
 anyhow = "1.0.86"
 borsh = "0.10.3"
 ephemeral-rollups-sdk = { path = "../../ephemeral-rollups-sdk/sdk" }
+integration-test-tools = { path = "test-tools" }
 log = "0.4.20"
 rayon = "1.10.0"
 serde = "1.0.196"
@@ -43,4 +44,3 @@ solana-rpc-client-api = "=1.17.22"
 solana-sdk = "=1.17.22"
 solana-transaction-status = "=1.17.22"
 schedulecommit-client = { path = "schedulecommit/client" }
-integration-test-tools = { path = "test-tools" }

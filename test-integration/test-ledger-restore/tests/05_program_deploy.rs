@@ -19,7 +19,7 @@ use solana_sdk::{
     signer::{EncodableKey, Signer},
 };
 use test_ledger_restore::{
-    confirm_tx_with_payer, fetch_counter, setup_offline_validator,
+    confirm_tx_with_payer_ephem, fetch_counter_ephem, setup_offline_validator,
     wait_for_ledger_persist, FLEXI_COUNTER_ID, TMP_DIR_LEDGER,
 };
 
@@ -93,15 +93,15 @@ fn write(
     expect!(ctx.wait_for_next_slot_ephem(), validator);
 
     let ix_init = create_init_ix(payer.pubkey(), COUNTER.to_string());
-    confirm_tx_with_payer(ix_init, payer, &mut validator);
+    confirm_tx_with_payer_ephem(ix_init, payer, &mut validator);
 
     let ix_add = create_add_ix(payer.pubkey(), 5);
-    confirm_tx_with_payer(ix_add, payer, &mut validator);
+    confirm_tx_with_payer_ephem(ix_add, payer, &mut validator);
 
     let ix_mul = create_mul_ix(payer.pubkey(), 2);
-    confirm_tx_with_payer(ix_mul, payer, &mut validator);
+    confirm_tx_with_payer_ephem(ix_mul, payer, &mut validator);
 
-    let counter = fetch_counter(&payer.pubkey(), &mut validator);
+    let counter = fetch_counter_ephem(&payer.pubkey(), &mut validator);
     assert_eq!(
         counter,
         FlexiCounter {
@@ -119,7 +119,7 @@ fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
     let (_, mut validator, _) =
         setup_offline_validator(ledger_path, None, None, false);
 
-    let counter_decoded = fetch_counter(payer, &mut validator);
+    let counter_decoded = fetch_counter_ephem(payer, &mut validator);
     assert_eq!(
         counter_decoded,
         FlexiCounter {

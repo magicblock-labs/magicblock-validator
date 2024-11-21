@@ -1,3 +1,4 @@
+use solana_rpc_client::rpc_client::RpcClient;
 use std::{fs, path::Path, process, process::Child};
 
 use integration_test_tools::{
@@ -12,8 +13,8 @@ use integration_test_tools::{
 };
 use program_flexi_counter::state::FlexiCounter;
 use sleipnir_config::{
-    AccountsConfig, LedgerConfig, LifecycleMode, ProgramConfig, SleipnirConfig,
-    ValidatorConfig,
+    AccountsConfig, LedgerConfig, LifecycleMode, ProgramConfig, RemoteConfig,
+    SleipnirConfig, ValidatorConfig,
 };
 use solana_sdk::{
     clock::Slot,
@@ -62,6 +63,27 @@ pub fn start_validator_with_config(
     )
 }
 
+fn resolve_programs(
+    programs: Option<Vec<ProgramConfig>>,
+) -> Vec<ProgramConfig> {
+    programs
+        .map(|programs| {
+            let mut resolved_programs = vec![];
+            for program in programs.iter() {
+                let p = path_relative_to_workspace(&format!(
+                    "target/deploy/{}",
+                    &program.path
+                ));
+                resolved_programs.push(ProgramConfig {
+                    id: program.id,
+                    path: p,
+                });
+            }
+            resolved_programs
+        })
+        .unwrap_or_default()
+}
+
 pub fn setup_offline_validator(
     ledger_path: &Path,
     programs: Option<Vec<ProgramConfig>>,
@@ -80,20 +102,7 @@ pub fn setup_offline_validator(
         })
         .unwrap_or_default();
 
-    let programs = programs.map(|programs| {
-        let mut resolved_programs = vec![];
-        for program in programs.iter() {
-            let p = path_relative_to_workspace(&format!(
-                "target/deploy/{}",
-                &program.path
-            ));
-            resolved_programs.push(ProgramConfig {
-                id: program.id,
-                path: p,
-            });
-        }
-        resolved_programs
-    });
+    let programs = resolve_programs(programs);
 
     let config = SleipnirConfig {
         ledger: LedgerConfig {
@@ -101,7 +110,7 @@ pub fn setup_offline_validator(
             path: Some(ledger_path.display().to_string()),
         },
         accounts: accounts_config.clone(),
-        programs: programs.unwrap_or_default(),
+        programs,
         validator: validator_config,
         ..Default::default()
     };
@@ -115,10 +124,48 @@ pub fn setup_offline_validator(
     (default_tmpdir_config, validator, ctx)
 }
 
+/// This function sets up a validator that connects to a local remote.
+/// That local remote is expected to listen on port 7799.
+/// The [IntegrationTestContext] is setup to connect to both the ephemeral validator
+/// and the local remote.
+pub fn setup_validator_with_local_remote(
+    ledger_path: &Path,
+    programs: Option<Vec<ProgramConfig>>,
+    reset: bool,
+) -> (TempDir, Child, IntegrationTestContext) {
+    let accounts_config = AccountsConfig {
+        lifecycle: LifecycleMode::Ephemeral,
+        remote: RemoteConfig::Custom(
+            IntegrationTestContext::url_chain().try_into().unwrap(),
+        ),
+        ..Default::default()
+    };
+    let programs = resolve_programs(programs);
+
+    let config = SleipnirConfig {
+        ledger: LedgerConfig {
+            reset,
+            path: Some(ledger_path.display().to_string()),
+        },
+        accounts: accounts_config.clone(),
+        programs,
+        ..Default::default()
+    };
+
+    let (default_tmpdir_config, Some(validator)) =
+        start_validator_with_config(config)
+    else {
+        panic!("validator should set up correctly");
+    };
+
+    let ctx = IntegrationTestContext::new();
+    (default_tmpdir_config, validator, ctx)
+}
+
 // -----------------
 // Transactions and Account Updates
 // -----------------
-pub fn send_tx_with_payer(
+pub fn send_tx_with_payer_ephem(
     ix: Instruction,
     payer: &Keypair,
     validator: &mut Child,
@@ -132,7 +179,20 @@ pub fn send_tx_with_payer(
     sig
 }
 
-pub fn confirm_tx_with_payer(
+pub fn send_tx_with_payer_chain(
+    ix: Instruction,
+    payer: &Keypair,
+    validator: &mut Child,
+) -> Signature {
+    let ctx = IntegrationTestContext::new();
+    let mut tx = Transaction::new_with_payer(&[ix], Some(&payer.pubkey()));
+    let signers = &[payer];
+
+    let sig = expect!(ctx.send_transaction_chain(&mut tx, signers), validator);
+    sig
+}
+
+pub fn confirm_tx_with_payer_ephem(
     ix: Instruction,
     payer: &Keypair,
     validator: &mut Child,
@@ -150,11 +210,47 @@ pub fn confirm_tx_with_payer(
     sig
 }
 
-pub fn fetch_counter(payer: &Pubkey, validator: &mut Child) -> FlexiCounter {
+pub fn confirm_tx_with_payer_chain(
+    ix: Instruction,
+    payer: &Keypair,
+    validator: &mut Child,
+) -> Signature {
+    let ctx = IntegrationTestContext::new();
+
+    let mut tx = Transaction::new_with_payer(&[ix], Some(&payer.pubkey()));
+    let signers = &[payer];
+
+    let (sig, confirmed) = expect!(
+        ctx.send_and_confirm_transaction_chain(&mut tx, signers),
+        validator
+    );
+    assert!(confirmed, "Should confirm transaction");
+    sig
+}
+
+pub fn fetch_counter_ephem(
+    payer: &Pubkey,
+    validator: &mut Child,
+) -> FlexiCounter {
     let ctx = IntegrationTestContext::new_ephem_only();
+    fetch_counter(payer, &ctx.ephem_client, validator)
+}
+
+pub fn fetch_counter_chain(
+    payer: &Pubkey,
+    validator: &mut Child,
+) -> FlexiCounter {
+    let ctx = IntegrationTestContext::new();
+    fetch_counter(payer, ctx.try_chain_client().unwrap(), validator)
+}
+
+fn fetch_counter(
+    payer: &Pubkey,
+    rpc_client: &RpcClient,
+    validator: &mut Child,
+) -> FlexiCounter {
     let (counter, _) = FlexiCounter::pda(payer);
-    let counter_acc =
-        expect!(ctx.ephem_client.get_account(&counter), validator);
+    let counter_acc = expect!(rpc_client.get_account(&counter), validator);
     expect!(FlexiCounter::try_decode(&counter_acc.data), validator)
 }
 

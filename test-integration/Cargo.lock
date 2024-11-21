@@ -4153,6 +4153,7 @@ dependencies = [
  "integration-test-tools",
  "program-flexi-counter",
  "sleipnir-config",
+ "solana-rpc-client",
  "solana-sdk 1.17.22",
  "solana-transaction-status",
  "tempfile",
