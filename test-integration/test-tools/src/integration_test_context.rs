@@ -513,6 +513,27 @@ impl IntegrationTestContext {
     }
 
     // -----------------
+    // Blockhash
+    // -----------------
+    pub fn get_all_blockhashes_ephem(&self) -> Result<Vec<String>> {
+        Self::get_all_blockhashes(&self.ephem_client)
+    }
+
+    pub fn get_all_blockhashes_chain(&self) -> Result<Vec<String>> {
+        Self::get_all_blockhashes(self.try_chain_client().unwrap())
+    }
+
+    fn get_all_blockhashes(rpc_client: &RpcClient) -> Result<Vec<String>> {
+        let current_slot = rpc_client.get_slot()?;
+        let mut blockhashes = vec![];
+        for slot in 0..current_slot {
+            let blockhash = rpc_client.get_block(slot)?.blockhash;
+            blockhashes.push(blockhash);
+        }
+        Ok(blockhashes)
+    }
+
+    // -----------------
     // RPC Clients
     // -----------------
     pub fn url_ephem() -> &'static str {
