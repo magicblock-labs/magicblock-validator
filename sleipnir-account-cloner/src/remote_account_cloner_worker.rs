@@ -306,8 +306,8 @@ where
                         }
                     }
                 };
-                // Wait a bit in the hopes of the min_context_slot becoming available
-                sleep(Duration::from_millis(100)).await;
+                // Wait a bit in the hopes of the min_context_slot becoming available (about half a slot)
+                sleep(Duration::from_millis(200)).await;
             }
         } else {
             self.fetch_account_chain_snapshot(pubkey, None).await?
