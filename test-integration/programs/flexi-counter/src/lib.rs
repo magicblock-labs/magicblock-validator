@@ -11,3 +11,5 @@ declare_id!("f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4");
 
 #[cfg(not(feature = "no-entrypoint"))]
 solana_program::entrypoint!(process);
+
+pub use ephemeral_rollups_sdk::id as delegation_program_id;

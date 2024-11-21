@@ -18,7 +18,6 @@ use solana_sdk::{
     transaction::Transaction,
 };
 
-
 const URL_CHAIN: &str = "http://localhost:7799";
 const URL_EPHEM: &str = "http://localhost:8899";
 
@@ -468,7 +467,7 @@ impl IntegrationTestContext {
             rpc_client,
             CommitmentConfig::confirmed(),
         )
-            .map(|confirmed| (sig, confirmed))
+        .map(|confirmed| (sig, confirmed))
     }
 
     // -----------------

@@ -1,19 +1,20 @@
 use std::{path::Path, process::Child};
 
 use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};
-use program_flexi_counter::{instruction::create_init_ix, state::FlexiCounter};
+use program_flexi_counter::instruction::create_add_ix;
+use program_flexi_counter::{
+    delegation_program_id,
+    instruction::{create_delegate_ix, create_init_ix},
+    state::FlexiCounter,
+};
 use sleipnir_config::ProgramConfig;
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
 };
-use test_ledger_restore::{
-    confirm_tx_with_payer_chain, confirm_tx_with_payer_ephem,
-    fetch_counter_chain, setup_validator_with_local_remote,
-    wait_for_ledger_persist, FLEXI_COUNTER_ID, TMP_DIR_LEDGER,
-};
+use test_ledger_restore::{confirm_tx_with_payer_chain, confirm_tx_with_payer_ephem, fetch_counter_chain, fetch_counter_ephem, fetch_counter_owner_chain, setup_validator_with_local_remote, wait_for_ledger_persist, FLEXI_COUNTER_ID, TMP_DIR_LEDGER};
 
 fn payer_keypair() -> Keypair {
-    Keypair::from_base58_string("M8CcAuQHVQj91sKW68prBjNzvhEVjTj1ADMDej4KJTuwF4ckmibCmX3U6XGTMfGX5g7Xd43EXSNcjPkUWWcJpWA")
+    Keypair::new()
 }
 
 fn get_programs() -> Vec<ProgramConfig> {
@@ -58,6 +59,28 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
             FlexiCounter {
                 count: 0,
                 updates: 0,
+                label: COUNTER.to_string()
+            }
+        )
+    }
+    {
+        // Delegate counter to ephemeral
+        let ix = create_delegate_ix(payer.pubkey());
+        confirm_tx_with_payer_chain(ix, payer, &mut validator);
+        let owner = fetch_counter_owner_chain(&payer.pubkey(), &mut validator);
+        assert_eq!(owner, delegation_program_id());
+    }
+
+    {
+        // Increment counter in ephemeral
+        let ix = create_add_ix(payer.pubkey(), 3);
+        confirm_tx_with_payer_ephem(ix, payer, &mut validator);
+        let counter = fetch_counter_ephem(&payer.pubkey(), &mut validator);
+        assert_eq!(
+            counter,
+            FlexiCounter {
+                count: 3,
+                updates: 1,
                 label: COUNTER.to_string()
             }
         )

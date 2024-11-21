@@ -254,6 +254,15 @@ fn fetch_counter(
     expect!(FlexiCounter::try_decode(&counter_acc.data), validator)
 }
 
+pub fn fetch_counter_owner_chain(
+    payer: &Pubkey,
+    validator: &mut Child,
+) -> Pubkey {
+    let ctx = IntegrationTestContext::new();
+    let (counter, _) = FlexiCounter::pda(payer);
+    expect!(ctx.fetch_chain_account_owner(counter), validator)
+}
+
 // -----------------
 // Slot Advances
 // -----------------
