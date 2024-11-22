@@ -1,5 +1,6 @@
 pub mod errors;
 mod magic_context;
+mod mutate_accounts;
 mod schedule_transactions;
 pub use magic_context::{MagicContext, ScheduledCommit};
 pub mod sleipnir_instruction;

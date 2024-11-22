@@ -16,7 +16,7 @@ use solana_sdk::{
 use thiserror::Error;
 
 use crate::{
-    sleipnir_processor::set_account_mod_data, validator_authority,
+    mutate_accounts::set_account_mod_data, validator_authority,
     validator_authority_id,
 };
 
