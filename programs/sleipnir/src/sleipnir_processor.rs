@@ -6,19 +6,6 @@ use std::{
     },
 };
 
-use lazy_static::lazy_static;
-use solana_program_runtime::{
-    declare_process_instruction, ic_msg, invoke_context::InvokeContext,
-};
-use solana_sdk::{
-    account::{ReadableAccount, WritableAccount},
-    instruction::InstructionError,
-    program_utils::limited_deserialize,
-    pubkey::Pubkey,
-    system_program,
-    transaction_context::TransactionContext,
-};
-
 use crate::{
     process_scheduled_commit_sent,
     schedule_transactions::{
@@ -29,6 +16,19 @@ use crate::{
         AccountModificationForInstruction, SleipnirError, SleipnirInstruction,
     },
     validator_authority_id,
+};
+use lazy_static::lazy_static;
+use sleipnir_core::traits::PersistsAccountModData;
+use solana_program_runtime::{
+    declare_process_instruction, ic_msg, invoke_context::InvokeContext,
+};
+use solana_sdk::{
+    account::{ReadableAccount, WritableAccount},
+    instruction::InstructionError,
+    program_utils::limited_deserialize,
+    pubkey::Pubkey,
+    system_program,
+    transaction_context::TransactionContext,
 };
 
 pub const DEFAULT_COMPUTE_UNITS: u64 = 150;
@@ -93,6 +93,8 @@ lazy_static! {
     /// Instead we register data here _before_ invoking the actual instruction and when it is
     /// processed it resolved that data from the key that we provide in its place.
     static ref DATA_MODS: RwLock<HashMap<usize, Vec<u8>>> = RwLock::new(HashMap::new());
+
+    static ref PERSISTER: RwLock<Option<Box<dyn PersistsAccountModData>>> = RwLock::new(None);
 }
 
 pub fn get_account_mod_data_id() -> usize {
@@ -111,6 +113,34 @@ pub(crate) fn set_account_mod_data(data: Vec<u8>) -> usize {
 
 fn get_data(id: usize) -> Option<Vec<u8>> {
     DATA_MODS.write().expect("DATA_MODS poisoned").remove(&id)
+}
+
+pub fn init_persister<T: PersistsAccountModData>(persister: T) {
+    PERSISTER
+        .write()
+        .expect("PERSISTER poisoned")
+        .replace(Box::new(persister));
+}
+
+fn load_data(id: usize) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
+    PERSISTER
+        .read()
+        .expect("PERSISTER poisoned")
+        .as_ref()
+        .ok_or("AccounModPersister needs to be set on startup")?
+        .load(id)
+}
+
+fn persist_data(
+    id: usize,
+    data: &[u8],
+) -> Result<(), Box<dyn std::error::Error>> {
+    PERSISTER
+        .read()
+        .expect("PERSISTER poisoned")
+        .as_ref()
+        .ok_or("AccounModPersister needs to be set on startup")?
+        .persist(id, data)
 }
 
 fn mutate_accounts(
