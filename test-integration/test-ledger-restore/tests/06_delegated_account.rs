@@ -95,7 +95,6 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
     }
 
     let slot = wait_for_ledger_persist(&mut validator);
-
     (validator, slot)
 }
 

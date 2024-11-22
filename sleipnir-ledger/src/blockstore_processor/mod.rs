@@ -1,5 +1,6 @@
 use std::str::FromStr;
 
+use log::Level::Trace;
 use log::*;
 use sleipnir_accounts_db::transaction_results::TransactionExecutionResult;
 use sleipnir_bank::bank::{Bank, TransactionExecutionRecordingOpts};
@@ -94,6 +95,10 @@ pub fn process_ledger(ledger: &Ledger, bank: &Bank) -> LedgerResult<()> {
                 prepared_block
             )));
         };
+        trace!(
+            "Replaying slot with blockhash {}",
+            &prepared_block.blockhash
+        );
         bank.replay_slot(
             prepared_block.slot,
             &prepared_block.previous_blockhash,
@@ -104,7 +109,6 @@ pub fn process_ledger(ledger: &Ledger, bank: &Bank) -> LedgerResult<()> {
         // Transactions are stored in the ledger ordered by most recent to latest
         // such to replay them in the order they executed we need to reverse them
         for tx in prepared_block.transactions.into_iter().rev() {
-            trace!("Processing transaction: {:?}", tx);
             match bank
                 .verify_transaction(tx, TransactionVerificationMode::HashOnly)
             {
@@ -123,6 +127,8 @@ pub fn process_ledger(ledger: &Ledger, bank: &Bank) -> LedgerResult<()> {
             // Until we revamp this transaction execution we execute each transaction
             // in its own batch.
             for tx in block_txs {
+                trace!("Processing transaction: {:#?}", tx);
+
                 let mut timings = ExecuteTimings::default();
                 let batch = [tx];
                 let batch = bank.prepare_sanitized_batch(&batch);
@@ -133,11 +139,20 @@ pub fn process_ledger(ledger: &Ledger, bank: &Bank) -> LedgerResult<()> {
                     &mut timings,
                     None,
                 );
+
                 trace!("Results: {:#?}", results.execution_results);
                 for result in results.execution_results {
                     if let TransactionExecutionResult::NotExecuted(err) =
                         &result
                     {
+                        // If we're on trace log level then we already logged this above
+                        if !log_enabled!(Trace) {
+                            debug!(
+                                "Transactions: {:#?}",
+                                batch.sanitized_transactions()
+                            );
+                            debug!("Result: {:#?}", result);
+                        }
                         return Err(LedgerError::BlockStoreProcessor(format!(
                             "Transaction {:?} could not be executed: {:?}",
                             result, err
