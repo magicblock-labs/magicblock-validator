@@ -30,7 +30,7 @@ use crate::{
         db::Database,
         iterator::IteratorMode,
         ledger_column::LedgerColumn,
-        meta::{AddressSignatureMeta, PerfSample},
+        meta::{AccountModData, AddressSignatureMeta, PerfSample},
         options::LedgerOptions,
     },
     errors::{LedgerError, LedgerResult},
@@ -57,6 +57,8 @@ pub struct Ledger {
     transaction_cf: LedgerColumn<cf::Transaction>,
     transaction_memos_cf: LedgerColumn<cf::TransactionMemos>,
     perf_samples_cf: LedgerColumn<cf::PerfSamples>,
+
+    account_mod_datas_cf: LedgerColumn<cf::AccountModDatas>,
 
     pub lowest_cleanup_slot: RwLock<Slot>,
     rpc_api_metrics: LedgerRpcApiMetrics,
@@ -118,6 +120,8 @@ impl Ledger {
         let transaction_memos_cf = db.column();
         let perf_samples_cf = db.column();
 
+        let account_mod_datas_cf = db.column();
+
         let db = Arc::new(db);
 
         // NOTE: left out max root
@@ -137,6 +141,8 @@ impl Ledger {
             transaction_cf,
             transaction_memos_cf,
             perf_samples_cf,
+
+            account_mod_datas_cf,
 
             lowest_cleanup_slot: RwLock::<Slot>::default(),
             rpc_api_metrics: LedgerRpcApiMetrics::default(),
@@ -158,6 +164,7 @@ impl Ledger {
         self.transaction_cf.submit_rocksdb_cf_metrics();
         self.transaction_memos_cf.submit_rocksdb_cf_metrics();
         self.perf_samples_cf.submit_rocksdb_cf_metrics();
+        self.account_mod_datas_cf.submit_rocksdb_cf_metrics();
     }
 
     // -----------------
@@ -890,6 +897,24 @@ impl Ledger {
         let bytes = serialize(perf_sample)
             .expect("`PerfSample` can be serialized with `bincode`");
         self.perf_samples_cf.put_bytes(index, &bytes)
+    }
+
+    // -----------------
+    // AccountModDatas
+    // -----------------
+    pub fn write_account_mod_data(
+        &self,
+        id: u64,
+        data: &AccountModData,
+    ) -> LedgerResult<()> {
+        self.account_mod_datas_cf.put(id, data)
+    }
+
+    pub fn read_account_mod_data(
+        &self,
+        id: u64,
+    ) -> LedgerResult<Option<AccountModData>> {
+        self.account_mod_datas_cf.get(id)
     }
 }
 

@@ -13,3 +13,13 @@ pub struct PerfSample {
     pub sample_period_secs: u16,
     pub num_non_vote_transactions: u64,
 }
+
+#[derive(Debug, Default, Deserialize, Serialize, PartialEq, Eq)]
+pub struct AccountModData {
+    pub data: Vec<u8>,
+}
+impl From<Vec<u8>> for AccountModData {
+    fn from(data: Vec<u8>) -> Self {
+        Self { data }
+    }
+}
