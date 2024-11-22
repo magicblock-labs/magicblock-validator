@@ -18,6 +18,7 @@ prost = { workspace = true }
 serde = { workspace = true }
 sleipnir-bank = { workspace = true }
 sleipnir-accounts-db = { workspace = true }
+sleipnir-core = { workspace = true }
 solana-account-decoder = { workspace = true }
 solana-measure = { workspace = true }
 solana-metrics = { workspace = true }

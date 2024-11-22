@@ -36,7 +36,7 @@ use sleipnir_geyser_plugin::rpc::GeyserRpcService;
 use sleipnir_ledger::{blockstore_processor::process_ledger, Ledger};
 use sleipnir_metrics::MetricsService;
 use sleipnir_perf_service::SamplePerformanceService;
-use sleipnir_program::init_validator_authority;
+use sleipnir_program::{init_persister, init_validator_authority};
 use sleipnir_pubsub::pubsub_service::{
     PubsubConfig, PubsubService, PubsubServiceCloseHandle,
 };
@@ -425,7 +425,9 @@ impl MagicValidator {
             }
         };
         let ledger = ledger::init(ledger_path, reset)?;
-        Ok(Arc::new(ledger))
+        let ledger_shared = Arc::new(ledger);
+        init_persister(ledger_shared.clone());
+        Ok(ledger_shared)
     }
 
     fn init_accounts_paths(ledger_path: &Path) -> ApiResult<Vec<PathBuf>> {

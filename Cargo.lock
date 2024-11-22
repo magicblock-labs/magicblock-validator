@@ -4637,6 +4637,7 @@ dependencies = [
  "serde",
  "sleipnir-accounts-db",
  "sleipnir-bank",
+ "sleipnir-core",
  "solana-account-decoder",
  "solana-measure",
  "solana-metrics",

@@ -4,7 +4,7 @@ use std::{
     collections::HashMap,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        RwLock,
+        Arc, RwLock,
     },
 };
 
@@ -23,7 +23,7 @@ lazy_static! {
     /// loaded from the [DATA_MODS]
     /// During replay the [DATA_MODS] won't have the data for the particular id in which
     /// case it is loaded via the persister instead.
-    static ref PERSISTER: RwLock<Option<Box<dyn PersistsAccountModData>>> = RwLock::new(None);
+    static ref PERSISTER: RwLock<Option<Arc<dyn PersistsAccountModData>>> = RwLock::new(None);
 }
 
 pub fn get_account_mod_data_id() -> usize {
@@ -44,11 +44,11 @@ pub(super) fn get_data(id: usize) -> Option<Vec<u8>> {
     DATA_MODS.write().expect("DATA_MODS poisoned").remove(&id)
 }
 
-pub fn init_persister<T: PersistsAccountModData>(persister: T) {
+pub fn init_persister<T: PersistsAccountModData>(persister: Arc<T>) {
     PERSISTER
         .write()
         .expect("PERSISTER poisoned")
-        .replace(Box::new(persister));
+        .replace(persister);
 }
 
 fn load_data(id: usize) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
