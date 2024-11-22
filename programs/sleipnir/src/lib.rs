@@ -10,6 +10,7 @@ mod test_utils;
 mod utils;
 mod validator;
 
+pub use mutate_accounts::*;
 pub use schedule_transactions::{
     process_scheduled_commit_sent, register_scheduled_commit_sent,
     transaction_scheduler::TransactionScheduler, SentCommit,

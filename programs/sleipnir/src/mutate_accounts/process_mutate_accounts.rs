@@ -1,7 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::{
-    mutate_accounts::account_mod_data::get_data,
+    mutate_accounts::account_mod_data::resolve_account_mod_data,
     sleipnir_instruction::{AccountModificationForInstruction, SleipnirError},
     validator_authority_id,
 };
@@ -97,6 +97,7 @@ pub(crate) fn process_mutate_accounts(
     let mut lamports_to_debit: i128 = 0;
 
     // 2. Apply account modifications
+    let mut memory_data_mods = Vec::new();
     for idx in 0..account_mods_len {
         // NOTE: first account is the Sleipnir authority, account mods start at second account
         let account_idx = (idx + 1) as u16;
@@ -150,21 +151,40 @@ pub(crate) fn process_mutate_accounts(
             account.borrow_mut().set_executable(executable);
         }
         if let Some(data_key) = modification.data_key.take() {
-            let data = get_data(data_key)
-                .ok_or(SleipnirError::AccountDataMissing)
-                .inspect_err(|_| {
-                    ic_msg!(
+            let resolved_data = resolve_account_mod_data(
+                data_key,
+                invoke_context
+            ).inspect_err(|err| {
+                ic_msg!(
+                    invoke_context,
+                    "MutateAccounts: an error occurred when resolving account mod data for the provided key {}. Error: {:?}",
+                    data_key,
+                    err
+                );
+            })?;
+            if let Some(data) = resolved_data.data() {
+                ic_msg!(
+                    invoke_context,
+                    "MutateAccounts: setting data to len {}",
+                    data.len()
+                );
+                account.borrow_mut().set_data_from_slice(data);
+            } else {
+                ic_msg!(
                         invoke_context,
                         "MutateAccounts: account data for the provided key {} is missing",
                         data_key
                     );
-                })?;
-            ic_msg!(
-                invoke_context,
-                "MutateAccounts: setting data to len {}",
-                data.len()
-            );
-            account.borrow_mut().set_data_from_slice(data.as_slice());
+                return Err(SleipnirError::AccountDataMissing.into());
+            }
+
+            // We track resolved data mods in order to persist them at the end
+            // of the transaction.
+            // NOTE: that during ledger replay all mods came from storage, so we
+            // don't persist them again.
+            if resolved_data.is_from_memory() {
+                memory_data_mods.push(resolved_data);
+            }
         }
         if let Some(rent_epoch) = modification.rent_epoch {
             ic_msg!(
@@ -214,6 +234,22 @@ pub(crate) fn process_mutate_accounts(
                 InstructionError::ArithmeticOverflow
             })?,
         );
+    }
+
+    // Now it is super unlikely for the transaction to fail since all checks passed.
+    // The only option would be if another instruction runs after it which at this point
+    // is impossible since we create/send them from insider our validator.
+    // Thus we can persist the applied data mods to make them available for ledger replay.
+    for resolved_data in memory_data_mods {
+        resolved_data
+            .persist(invoke_context)
+            .inspect_err(|err| {
+                ic_msg!(
+                    invoke_context,
+                    "MutateAccounts: an error occurred when persisting account mod data. Error: {:?}",
+                    err
+                );
+            })?;
     }
 
     Ok(())

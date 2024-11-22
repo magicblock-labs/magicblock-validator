@@ -39,8 +39,20 @@ pub enum SleipnirError {
     #[error("Sleipnir authority needs to be owned by system program")]
     SleipnirAuthorityNeedsToBeOwnedBySystemProgram,
 
-    #[error("The account data for the provided key is missing.")]
+    #[error("The account resolution for the provided key failed.")]
+    AccountDataResolutionFailed,
+
+    #[error("The account data for the provided key is missing both from in-memory and ledger storage.")]
     AccountDataMissing,
+
+    #[error("Tried to persist data that could not be resolved.")]
+    AttemptedToPersistUnresolvedData,
+
+    #[error("Tried to persist data that was resolved from storage.")]
+    AttemptedToPersistDataFromStorage,
+
+    #[error("Encountered an error when persisting account modification data.")]
+    FailedToPersistAccountModData,
 }
 
 impl<T> DecodeError<T> for SleipnirError {
