@@ -91,7 +91,7 @@ pub(crate) struct AccountModificationForInstruction {
     pub lamports: Option<u64>,
     pub owner: Option<Pubkey>,
     pub executable: Option<bool>,
-    pub data_key: Option<usize>,
+    pub data_key: Option<u64>,
     pub rent_epoch: Option<u64>,
 }
 

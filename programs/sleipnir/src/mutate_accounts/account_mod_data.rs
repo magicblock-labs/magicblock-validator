@@ -3,7 +3,7 @@ use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicUsize, Ordering},
+        atomic::{AtomicU64, Ordering},
         Arc, RwLock,
     },
 };
@@ -17,7 +17,7 @@ lazy_static! {
     /// transaction.
     /// Instead we register data here _before_ invoking the actual instruction and when it is
     /// processed it resolved that data from the key that we provide in its place.
-    static ref DATA_MODS: RwLock<HashMap<usize, Vec<u8>>> = RwLock::new(HashMap::new());
+    static ref DATA_MODS: RwLock<HashMap<u64, Vec<u8>>> = RwLock::new(HashMap::new());
 
     /// In order to support replaying transactions we need to persist the data that is
     /// loaded from the [DATA_MODS]
@@ -26,12 +26,12 @@ lazy_static! {
     static ref PERSISTER: RwLock<Option<Arc<dyn PersistsAccountModData>>> = RwLock::new(None);
 }
 
-pub fn get_account_mod_data_id() -> usize {
-    static COUNTER: AtomicUsize = AtomicUsize::new(0);
+pub fn get_account_mod_data_id() -> u64 {
+    static COUNTER: AtomicU64 = AtomicU64::new(0);
     COUNTER.fetch_add(1, Ordering::Relaxed)
 }
 
-pub(crate) fn set_account_mod_data(data: Vec<u8>) -> usize {
+pub(crate) fn set_account_mod_data(data: Vec<u8>) -> u64 {
     let id = get_account_mod_data_id();
     DATA_MODS
         .write()
@@ -40,7 +40,7 @@ pub(crate) fn set_account_mod_data(data: Vec<u8>) -> usize {
     id
 }
 
-pub(super) fn get_data(id: usize) -> Option<Vec<u8>> {
+pub(super) fn get_data(id: u64) -> Option<Vec<u8>> {
     DATA_MODS.write().expect("DATA_MODS poisoned").remove(&id)
 }
 
@@ -51,7 +51,7 @@ pub fn init_persister<T: PersistsAccountModData>(persister: Arc<T>) {
         .replace(persister);
 }
 
-fn load_data(id: usize) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
+fn load_data(id: u64) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
     PERSISTER
         .read()
         .expect("PERSISTER poisoned")
@@ -61,8 +61,8 @@ fn load_data(id: usize) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
 }
 
 fn persist_data(
-    id: usize,
-    data: &[u8],
+    id: u64,
+    data: Vec<u8>,
 ) -> Result<(), Box<dyn std::error::Error>> {
     PERSISTER
         .read()
@@ -76,12 +76,12 @@ fn persist_data(
 pub(super) enum ResolvedAccountModData {
     /// The data was resolved from memory while the validator was processing
     /// mutation transactions.
-    FromMemory { id: usize, data: Vec<u8> },
+    FromMemory { id: u64, data: Vec<u8> },
     /// The data was resolved from the ledger while replaying transactions.
-    FromStorage { id: usize, data: Vec<u8> },
+    FromStorage { id: u64, data: Vec<u8> },
     /// The data was not found in either memory or storage which means the
     /// transaction is invalid.
-    NotFound { id: usize },
+    NotFound { id: u64 },
 }
 
 impl ResolvedAccountModData {
@@ -122,8 +122,7 @@ impl ResolvedAccountModData {
             }
         };
 
-        // TODO: @@@ if we end up copying the data anywhere we should just pass the vec here
-        persist_data(id, &data).map_err(|err| {
+        persist_data(id, data).map_err(|err| {
             ic_msg!(
                 invoke_context,
                 "MutateAccounts: failed to persist account mod data: {}",
@@ -141,7 +140,7 @@ impl ResolvedAccountModData {
 }
 
 pub(super) fn resolve_account_mod_data(
-    id: usize,
+    id: u64,
     invoke_context: &InvokeContext,
 ) -> Result<ResolvedAccountModData, SleipnirError> {
     if let Some(data) = get_data(id) {
