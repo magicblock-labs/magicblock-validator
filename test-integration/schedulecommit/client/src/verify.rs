@@ -1,4 +1,8 @@
 use borsh::BorshDeserialize;
+use integration_test_tools::scheduled_commits::{
+    extract_scheduled_commit_sent_signature_from_logs,
+    extract_sent_commit_info_from_logs,
+};
 use program_schedulecommit::MainAccount;
 
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
@@ -20,7 +24,7 @@ pub struct ScheduledCommitResult {
     pub sigs: Vec<Signature>,
 }
 
-pub fn fetch_commit_result_from_logs(
+pub fn fetch_and_verify_commit_result_from_logs(
     ctx: &ScheduleCommitTestContext,
     sig: Signature,
 ) -> ScheduledCommitResult {
@@ -29,14 +33,14 @@ pub fn fetch_commit_result_from_logs(
     let logs = ctx.fetch_ephemeral_logs(sig).unwrap_or_else(|| {
         panic!("Scheduled commit sent logs not found for sig {:?}", sig)
     });
-    let scheduled_commmit_sent_sig = ctx
-        .extract_scheduled_commit_sent_signature(&logs)
-        .unwrap_or_else(|| {
-            panic!(
+    let scheduled_commmit_sent_sig =
+        extract_scheduled_commit_sent_signature_from_logs(&logs)
+            .unwrap_or_else(|| {
+                panic!(
                 "ScheduledCommitSent signature not found in logs, {:#?}\n{}",
                 logs, ctx
             )
-        });
+            });
     // 2. Find chain commit signature via
     let logs = ctx
         .fetch_ephemeral_logs(scheduled_commmit_sent_sig)
@@ -51,7 +55,7 @@ pub fn fetch_commit_result_from_logs(
             )
         });
 
-    let (included, excluded, sigs) = ctx.extract_sent_commit_info(&logs);
+    let (included, excluded, sigs) = extract_sent_commit_info_from_logs(&logs);
 
     // 3. Ensure transactions landed on chain
     for sig in &sigs {
