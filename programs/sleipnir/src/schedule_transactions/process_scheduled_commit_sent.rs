@@ -150,7 +150,7 @@ pub fn process_scheduled_commit_sent(
                     commit_id
                 );
                 return Err(InstructionError::Custom(
-                    custom_error_codes::UNABLE_TO_UNLOCK_SENT_COMMITS,
+                    custom_error_codes::CANNOT_FIND_SCHEDULED_COMMIT,
                 ));
             }
         },
@@ -161,7 +161,7 @@ pub fn process_scheduled_commit_sent(
                 err
             );
             return Err(InstructionError::Custom(
-                custom_error_codes::CANNOT_FIND_SCHEDULED_COMMIT,
+                custom_error_codes::UNABLE_TO_UNLOCK_SENT_COMMITS,
             ));
         }
     };
