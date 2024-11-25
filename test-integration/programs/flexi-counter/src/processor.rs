@@ -1,5 +1,8 @@
 use borsh::{to_vec, BorshDeserialize};
-use ephemeral_rollups_sdk::cpi::delegate_account;
+use ephemeral_rollups_sdk::{
+    cpi::delegate_account,
+    ephem::{commit_accounts, commit_and_undelegate_accounts},
+};
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
     entrypoint::ProgramResult,
@@ -30,6 +33,9 @@ pub fn process(
         Add { count } => process_add(accounts, count),
         Mul { multiplier } => process_mul(accounts, multiplier),
         Delegate(args) => process_delegate(accounts, &args),
+        AddAndScheduleCommit { count, undelegate } => {
+            process_add_and_schedule_commit(accounts, count, undelegate)
+        }
     }?;
     Ok(())
 }
@@ -86,6 +92,14 @@ fn process_add(accounts: &[AccountInfo], count: u8) -> ProgramResult {
     let payer_info = next_account_info(account_info_iter)?;
     let counter_pda_info = next_account_info(account_info_iter)?;
 
+    add(payer_info, counter_pda_info, count)
+}
+
+fn add(
+    payer_info: &AccountInfo,
+    counter_pda_info: &AccountInfo,
+    count: u8,
+) -> ProgramResult {
     let (counter_pda, _) = FlexiCounter::pda(payer_info.key);
     assert_keys_equal(counter_pda_info.key, &counter_pda, || {
         format!(
@@ -161,5 +175,40 @@ fn process_delegate(
         args.valid_until,
         args.commit_frequency_ms,
     )?;
+    Ok(())
+}
+
+fn process_add_and_schedule_commit(
+    accounts: &[AccountInfo],
+    count: u8,
+    undelegate: bool,
+) -> ProgramResult {
+    msg!("Add {}", count);
+
+    let account_info_iter = &mut accounts.iter();
+    let payer_info = next_account_info(account_info_iter)?;
+    let counter_pda_info = next_account_info(account_info_iter)?;
+    let magic_context_info = next_account_info(account_info_iter)?;
+    let magic_program_info = next_account_info(account_info_iter)?;
+
+    // Perform the add operation
+    add(payer_info, counter_pda_info, count)?;
+
+    // Request the PDA counter account to be committed
+    if undelegate {
+        commit_and_undelegate_accounts(
+            payer_info,
+            vec![counter_pda_info],
+            magic_context_info,
+            magic_program_info,
+        )?;
+    } else {
+        commit_accounts(
+            payer_info,
+            vec![counter_pda_info],
+            magic_context_info,
+            magic_program_info,
+        )?;
+    }
     Ok(())
 }
