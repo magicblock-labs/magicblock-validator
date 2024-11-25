@@ -1,4 +1,4 @@
-use std::{thread::sleep, time::Duration};
+use std::{str::FromStr, thread::sleep, time::Duration};
 
 use anyhow::{Context, Result};
 use solana_rpc_client::rpc_client::RpcClient;
@@ -15,11 +15,28 @@ use solana_sdk::{
     hash::Hash,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
-    transaction::Transaction,
+    transaction::{Transaction, TransactionError},
 };
 
 const URL_CHAIN: &str = "http://localhost:7799";
 const URL_EPHEM: &str = "http://localhost:8899";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TransactionStatusWithSignature {
+    pub signature: String,
+    pub slot: Slot,
+    pub err: Option<TransactionError>,
+}
+
+impl TransactionStatusWithSignature {
+    pub fn signature(&self) -> Signature {
+        Signature::from_str(&self.signature).unwrap()
+    }
+
+    pub fn has_error(&self) -> bool {
+        self.err.is_some()
+    }
+}
 
 pub struct IntegrationTestContext {
     pub commitment: CommitmentConfig,
@@ -468,6 +485,46 @@ impl IntegrationTestContext {
             CommitmentConfig::confirmed(),
         )
         .map(|confirmed| (sig, confirmed))
+    }
+
+    // -----------------
+    // Transaction Queries
+    // -----------------
+    pub fn get_signaturestats_for_address_ephem(
+        &self,
+        address: &Pubkey,
+    ) -> Result<Vec<TransactionStatusWithSignature>> {
+        Self::get_signaturestats_for_address(&self.ephem_client, address)
+    }
+
+    pub fn get_signaturestats_for_address_chain(
+        &self,
+        address: &Pubkey,
+    ) -> Result<Vec<TransactionStatusWithSignature>> {
+        Self::get_signaturestats_for_address(
+            self.try_chain_client().unwrap(),
+            address,
+        )
+    }
+
+    fn get_signaturestats_for_address(
+        rpc_client: &RpcClient,
+        address: &Pubkey,
+    ) -> Result<Vec<TransactionStatusWithSignature>> {
+        let res =
+            rpc_client
+                .get_signatures_for_address(address)
+                .map(|status| {
+                    status
+                        .into_iter()
+                        .map(|x| TransactionStatusWithSignature {
+                            signature: x.signature,
+                            slot: x.slot,
+                            err: x.err,
+                        })
+                        .collect()
+                })?;
+        Ok(res)
     }
 
     // -----------------
