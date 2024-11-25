@@ -1050,6 +1050,7 @@ dependencies = [
  "async-trait",
  "conjunto-addresses",
  "conjunto-core",
+ "solana-account-decoder",
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk",
@@ -4418,6 +4419,7 @@ dependencies = [
 name = "sleipnir-account-updates"
 version = "1.19.0"
 dependencies = [
+ "bincode",
  "conjunto-transwise",
  "futures-util",
  "log",

@@ -115,6 +115,7 @@ async fn test_ensure_readonly_account_not_tracked_nor_in_our_validator() {
 
     // Account should be fetchable but not delegated
     let undelegated_account = Pubkey::new_unique();
+    account_updates.set_first_subscribed_slot(undelegated_account, 41);
     account_fetcher.set_undelegated_account(undelegated_account, 42);
 
     // Ensure accounts
@@ -200,6 +201,7 @@ async fn test_ensure_readonly_account_cloned_but_not_in_our_validator() {
 
     // Pre-clone the account
     let undelegated_account = Pubkey::new_unique();
+    account_updates.set_first_subscribed_slot(undelegated_account, 41);
     account_fetcher.set_undelegated_account(undelegated_account, 42);
     assert!(manager
         .account_cloner
@@ -251,6 +253,7 @@ async fn test_ensure_readonly_account_cloned_but_has_been_updated_on_chain() {
 
     // Pre-clone account
     let undelegated_account = Pubkey::new_unique();
+    account_updates.set_first_subscribed_slot(undelegated_account, 41);
     account_fetcher.set_undelegated_account(undelegated_account, 42);
     assert!(manager
         .account_cloner
@@ -263,7 +266,7 @@ async fn test_ensure_readonly_account_cloned_but_has_been_updated_on_chain() {
     account_dumper.clear_history();
 
     // Make the account re-fetchable at a later slot with a pending update
-    account_updates.set_known_update_slot(undelegated_account, 55);
+    account_updates.set_last_known_update_slot(undelegated_account, 55);
     account_fetcher.set_undelegated_account(undelegated_account, 55);
 
     // Ensure accounts
@@ -308,6 +311,7 @@ async fn test_ensure_readonly_account_cloned_and_no_recent_update_on_chain() {
 
     // Pre-clone the account
     let undelegated_account = Pubkey::new_unique();
+    account_updates.set_first_subscribed_slot(undelegated_account, 10);
     account_fetcher.set_undelegated_account(undelegated_account, 11);
     assert!(manager
         .account_cloner
@@ -320,7 +324,7 @@ async fn test_ensure_readonly_account_cloned_and_no_recent_update_on_chain() {
     account_dumper.clear_history();
 
     // Account was updated, but before the last clone's slot
-    account_updates.set_known_update_slot(undelegated_account, 5);
+    account_updates.set_last_known_update_slot(undelegated_account, 5);
 
     // Ensure accounts
     let result = manager
@@ -364,6 +368,7 @@ async fn test_ensure_readonly_account_in_our_validator_and_unseen_writable() {
     let already_loaded_account = Pubkey::new_unique();
     let delegated_account = Pubkey::new_unique();
     internal_account_provider.set(already_loaded_account, Default::default());
+    account_updates.set_first_subscribed_slot(delegated_account, 41);
     account_fetcher.set_delegated_account(delegated_account, 42, 11);
 
     // Ensure accounts
@@ -413,6 +418,8 @@ async fn test_ensure_one_delegated_and_one_feepayer_account_writable() {
     // One writable delegated and one feepayer account
     let delegated_account = Pubkey::new_unique();
     let feepayer_account = Pubkey::new_unique();
+    account_updates.set_first_subscribed_slot(delegated_account, 41);
+    account_updates.set_first_subscribed_slot(feepayer_account, 41);
     account_fetcher.set_delegated_account(delegated_account, 42, 11);
     account_fetcher.set_feepayer_account(feepayer_account, 42);
 
@@ -463,6 +470,12 @@ async fn test_ensure_multiple_accounts_coming_in_over_time() {
     let undelegated_account3 = Pubkey::new_unique();
     let delegated_account1 = Pubkey::new_unique();
     let delegated_account2 = Pubkey::new_unique();
+
+    account_updates.set_first_subscribed_slot(undelegated_account1, 41);
+    account_updates.set_first_subscribed_slot(undelegated_account2, 41);
+    account_updates.set_first_subscribed_slot(undelegated_account3, 41);
+    account_updates.set_first_subscribed_slot(delegated_account1, 41);
+    account_updates.set_first_subscribed_slot(delegated_account2, 41);
 
     account_fetcher.set_undelegated_account(undelegated_account1, 42);
     account_fetcher.set_undelegated_account(undelegated_account2, 42);
@@ -600,6 +613,7 @@ async fn test_ensure_accounts_seen_as_readonly_can_be_used_as_writable_later() {
 
     // A delegated account
     let delegated_account = Pubkey::new_unique();
+    account_updates.set_first_subscribed_slot(delegated_account, 41);
     account_fetcher.set_delegated_account(delegated_account, 42, 11);
 
     // First Transaction uses the account as a readable (it should still be detected as a delegated)
@@ -692,6 +706,7 @@ async fn test_ensure_accounts_already_known_can_be_reused_as_writable_later() {
     // Account already loaded in the bank, but is a delegated on-chain
     let delegated_account = Pubkey::new_unique();
     internal_account_provider.set(delegated_account, Default::default());
+    account_updates.set_first_subscribed_slot(delegated_account, 41);
     account_fetcher.set_delegated_account(delegated_account, 42, 11);
 
     // First Transaction should not clone the account and use it as readonly
@@ -762,6 +777,7 @@ async fn test_ensure_accounts_already_ensured_needs_reclone_after_updates() {
 
     // Pre-clone account
     let undelegated_account = Pubkey::new_unique();
+    account_updates.set_first_subscribed_slot(undelegated_account, 41);
     account_fetcher.set_undelegated_account(undelegated_account, 42);
     assert!(manager
         .account_cloner
@@ -774,7 +790,7 @@ async fn test_ensure_accounts_already_ensured_needs_reclone_after_updates() {
     account_dumper.clear_history();
 
     // We detect an update that's more recent
-    account_updates.set_known_update_slot(undelegated_account, 88);
+    account_updates.set_last_known_update_slot(undelegated_account, 88);
 
     // But for this case, the account fetcher is too slow and can only fetch an old version for some reason
     account_fetcher.set_undelegated_account(undelegated_account, 77);
@@ -846,6 +862,7 @@ async fn test_ensure_accounts_already_cloned_can_be_reused_without_updates() {
 
     // Pre-clone the account
     let undelegated_account = Pubkey::new_unique();
+    account_updates.set_first_subscribed_slot(undelegated_account, 41);
     account_fetcher.set_undelegated_account(undelegated_account, 42);
     assert!(manager
         .account_cloner
@@ -859,7 +876,7 @@ async fn test_ensure_accounts_already_cloned_can_be_reused_without_updates() {
 
     // The account has been updated on-chain since the last clone
     account_fetcher.set_undelegated_account(undelegated_account, 66);
-    account_updates.set_known_update_slot(undelegated_account, 66);
+    account_updates.set_last_known_update_slot(undelegated_account, 66);
 
     // The first transaction should need to clone since the account was updated on-chain since the last clone
     {

@@ -1,5 +1,5 @@
 use std::{
-    cmp::max,
+    cmp::{max, min},
     collections::{hash_map::Entry, HashMap},
     sync::{Arc, RwLock},
 };
@@ -11,7 +11,8 @@ use solana_account_decoder::{UiAccountEncoding, UiDataSliceConfig};
 use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
 use solana_rpc_client_api::config::RpcAccountInfoConfig;
 use solana_sdk::{
-    clock::Slot, commitment_config::CommitmentConfig, pubkey::Pubkey,
+    clock::Clock, clock::Slot, commitment_config::CommitmentConfig,
+    pubkey::Pubkey, sysvar::clock,
 };
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -31,6 +32,7 @@ pub struct RemoteAccountUpdatesShard {
     shard_id: String,
     rpc_provider_config: RpcProviderConfig,
     monitoring_request_receiver: UnboundedReceiver<Pubkey>,
+    first_subscribed_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
     last_known_update_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
 }
 
@@ -39,12 +41,14 @@ impl RemoteAccountUpdatesShard {
         shard_id: String,
         rpc_provider_config: RpcProviderConfig,
         monitoring_request_receiver: UnboundedReceiver<Pubkey>,
+        first_subscribed_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
         last_known_update_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
     ) -> Self {
         Self {
             shard_id,
             rpc_provider_config,
             monitoring_request_receiver,
+            first_subscribed_slots,
             last_known_update_slots,
         }
     }
@@ -60,7 +64,7 @@ impl RemoteAccountUpdatesShard {
                 .await
                 .map_err(RemoteAccountUpdatesShardError::PubsubClientError)?;
         // For every account, we only want the updates, not the actual content of the accounts
-        let rpc_account_info_config = RpcAccountInfoConfig {
+        let rpc_account_info_config = Some(RpcAccountInfoConfig {
             commitment: self
                 .rpc_provider_config
                 .commitment()
@@ -71,31 +75,55 @@ impl RemoteAccountUpdatesShard {
                 length: 0,
             }),
             min_context_slot: None,
-        };
-        // We'll store useful maps for each of the subscriptions
-        let mut streams = StreamMap::new();
-        let mut unsubscribes = HashMap::new();
+        });
+        // Subscribe to the clock from the RPC (to figure out the latest slot)
+        let (mut clock_stream, clock_unsubscribe) = pubsub_client
+            .account_subscribe(&clock::ID, rpc_account_info_config.clone())
+            .await
+            .map_err(RemoteAccountUpdatesShardError::PubsubClientError)?;
+        let mut clock_slot = 0;
+        // We'll store useful maps for each of the account subscriptions
+        let mut account_streams = StreamMap::new();
+        let mut account_unsubscribes = HashMap::new();
         // Loop forever until we stop the worker
         loop {
             tokio::select! {
+                // When we receive a new clock notification
+                Some(clock_update) = clock_stream.next() => {
+                    let clock_data = clock_update.value.data.decode();
+                    info!("Shard {}: Clock data received: {:?}", self.shard_id, clock_data);
+                    if let Some(clock_data) = clock_data {
+                        let clock_value = bincode::deserialize::<Clock>(&clock_data);
+                        info!("Shard {}: Clock value received: {:?}", self.shard_id, clock_value);
+                        if let Ok(clock_value) = clock_value {
+                            clock_slot = clock_value.slot;
+                        }
+                    }
+                }
                 // When we receive a message to start monitoring an account
                 Some(pubkey) = self.monitoring_request_receiver.recv() => {
-                    if unsubscribes.contains_key(&pubkey) {
+                    if account_unsubscribes.contains_key(&pubkey) {
                         continue;
                     }
-                    info!("Shard {}: Account monitoring started: {:?}", self.shard_id, pubkey);
+                    info!(
+                        "Shard {}: Account monitoring started: {:?}, clock_slot: {:?}",
+                        self.shard_id,
+                        pubkey,
+                        clock_slot
+                    );
                     let (stream, unsubscribe) = pubsub_client
-                        .account_subscribe(&pubkey, Some(rpc_account_info_config.clone()))
+                        .account_subscribe(&pubkey, rpc_account_info_config.clone())
                         .await
                         .map_err(RemoteAccountUpdatesShardError::PubsubClientError)?;
-                    streams.insert(pubkey, stream);
-                    unsubscribes.insert(pubkey, unsubscribe);
+                    account_streams.insert(pubkey, stream);
+                    account_unsubscribes.insert(pubkey, unsubscribe);
+                    self.try_to_override_first_subscribed_slot(pubkey, clock_slot);
                 }
                 // When we receive an update from any account subscriptions
-                Some((pubkey, update)) = streams.next() => {
+                Some((pubkey, update)) = account_streams.next() => {
                     let current_update_slot = update.context.slot;
                     debug!(
-                        "Shard {}: Account update: {:?}, at slot: {}, data: {:?}",
+                        "Shard {}: Account update: {:?}, current_update_slot: {}, data: {:?}",
                         self.shard_id, pubkey, current_update_slot, update.value.data.decode(),
                     );
                     self.try_to_override_last_known_update_slot(pubkey, current_update_slot);
@@ -107,18 +135,48 @@ impl RemoteAccountUpdatesShard {
             }
         }
         // Cleanup all subscriptions and wait for proper shutdown
-        for (pubkey, unsubscribe) in unsubscribes.into_iter() {
+        for (pubkey, account_unsubscribes) in account_unsubscribes.into_iter() {
             info!(
                 "Shard {}: Account monitoring killed: {:?}",
                 self.shard_id, pubkey
             );
-            unsubscribe().await;
+            account_unsubscribes().await;
         }
-        drop(streams);
+        clock_unsubscribe().await;
+        drop(account_streams);
+        drop(clock_stream);
         pubsub_client.shutdown().await?;
         info!("Shard {}: Stopped", self.shard_id);
         // Done
         Ok(())
+    }
+
+    fn try_to_override_first_subscribed_slot(
+        &self,
+        pubkey: Pubkey,
+        subscribed_slot: Slot,
+    ) {
+        // We don't need to acquire a write lock if we already know the slot is already recent enough
+        let first_subscribed_slot = self.first_subscribed_slots
+                .read()
+                .expect("RwLock of RemoteAccountUpdatesShard.first_subscribed_slots poisoned")
+                .get(&pubkey)
+                .cloned();
+        if subscribed_slot < first_subscribed_slot.unwrap_or(u64::MAX) {
+            // If the subscribe slot seems to be the oldest one, we need to acquire a write lock to update it
+            match self.first_subscribed_slots
+                    .write()
+                    .expect("RwLock of RemoteAccountUpdatesShard.first_subscribed_slots poisoned")
+                    .entry(pubkey)
+                {
+                    Entry::Vacant(entry) => {
+                        entry.insert(subscribed_slot);
+                    }
+                    Entry::Occupied(mut entry) => {
+                        *entry.get_mut() = min(*entry.get(), subscribed_slot);
+                    }
+                }
+        }
     }
 
     fn try_to_override_last_known_update_slot(
@@ -131,9 +189,8 @@ impl RemoteAccountUpdatesShard {
             .read()
             .expect("RwLock of RemoteAccountUpdatesShard.last_known_update_slots poisoned")
             .get(&pubkey)
-            .cloned()
-            .unwrap_or(u64::MIN);
-        if current_update_slot > last_known_update_slot {
+            .cloned();
+        if current_update_slot > last_known_update_slot.unwrap_or(u64::MIN) {
             // If the current update seems to be the most recent one, we need to acquire a write lock to update it
             match self.last_known_update_slots
                 .write()

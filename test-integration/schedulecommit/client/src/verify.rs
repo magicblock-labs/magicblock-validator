@@ -1,5 +1,5 @@
 use borsh::BorshDeserialize;
-use schedulecommit_program::MainAccount;
+use program_schedulecommit::MainAccount;
 
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 

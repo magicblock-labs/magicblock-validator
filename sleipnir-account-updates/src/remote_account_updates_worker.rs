@@ -44,6 +44,7 @@ pub struct RemoteAccountUpdatesWorker {
     refresh_interval: Duration,
     monitoring_request_receiver: UnboundedReceiver<Pubkey>,
     monitoring_request_sender: UnboundedSender<Pubkey>,
+    first_subscribed_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
     last_known_update_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
 }
 
@@ -59,12 +60,19 @@ impl RemoteAccountUpdatesWorker {
             refresh_interval,
             monitoring_request_receiver,
             monitoring_request_sender,
+            first_subscribed_slots: Default::default(),
             last_known_update_slots: Default::default(),
         }
     }
 
     pub fn get_monitoring_request_sender(&self) -> UnboundedSender<Pubkey> {
         self.monitoring_request_sender.clone()
+    }
+
+    pub fn get_first_subscribed_slots(
+        &self,
+    ) -> Arc<RwLock<HashMap<Pubkey, Slot>>> {
+        self.first_subscribed_slots.clone()
     }
 
     pub fn get_last_known_update_slots(
@@ -144,6 +152,7 @@ impl RemoteAccountUpdatesWorker {
     ) -> RemoteAccountUpdatesWorkerRunner {
         let (monitoring_request_sender, monitoring_request_receiver) =
             unbounded_channel();
+        let first_subscribed_slots = self.first_subscribed_slots.clone();
         let last_known_update_slots = self.last_known_update_slots.clone();
         let runner_id = format!("[{}:{:06}]", index, self.generate_runner_id());
         let cancellation_token = CancellationToken::new();
@@ -154,6 +163,7 @@ impl RemoteAccountUpdatesWorker {
                 shard_id.clone(),
                 rpc_provider_config,
                 monitoring_request_receiver,
+                first_subscribed_slots,
                 last_known_update_slots,
             );
             if let Err(error) = shard

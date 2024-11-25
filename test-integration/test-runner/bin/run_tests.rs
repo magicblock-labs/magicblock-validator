@@ -10,6 +10,7 @@ use std::{
     path::Path,
     process::{self, Child},
 };
+use teepee::Teepee;
 
 fn cleanup(ephem_validator: &mut Child, devnet_validator: &mut Child) {
     ephem_validator
@@ -224,7 +225,8 @@ fn run_test(
         cmd.arg(format!("'{}'", test));
     }
     cmd.arg("--").arg("--test-threads=1").arg("--nocapture");
-    cmd.current_dir(manifest_dir.clone()).output()
+    cmd.current_dir(manifest_dir.clone());
+    Teepee::new(cmd).output()
 }
 
 // -----------------

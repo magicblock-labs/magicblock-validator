@@ -11,6 +11,7 @@ edition.workspace = true
 conjunto-transwise = { workspace = true }
 futures-util = { workspace = true }
 log = { workspace = true }
+bincode = { workspace = true }
 solana-sdk = { workspace = true }
 solana-account-decoder = { workspace = true }
 solana-rpc-client-api = { workspace = true }

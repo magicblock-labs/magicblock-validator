@@ -9,3 +9,4 @@ path = "bin/run_tests.rs"
 
 [dependencies]
 integration-test-tools = { workspace = true }
+teepee = { workspace = true }

@@ -1,5 +1,5 @@
 [package]
-name = "schedulecommit-program"
+name = "program-schedulecommit"
 version.workspace = true
 edition.workspace = true
 

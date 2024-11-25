@@ -45,17 +45,21 @@ async fn test_devnet_fetch_clock_multiple_times() {
     // Sysvar clock should change every slot
     let key_sysvar_clock = clock::ID;
     // Start to fetch the clock now
-    let future_clock1 = client.fetch_account_chain_snapshot(&key_sysvar_clock);
+    let future_clock1 =
+        client.fetch_account_chain_snapshot(&key_sysvar_clock, None);
     // Start to fetch the clock immediately again, we should not have any reply yet from the first one
-    let future_clock2 = client.fetch_account_chain_snapshot(&key_sysvar_clock);
+    let future_clock2 =
+        client.fetch_account_chain_snapshot(&key_sysvar_clock, None);
     // Wait for the first fetch to finish
     let result_clock1 = future_clock1.await;
     let result_clock2 = future_clock2.await;
     // Wait for a few slots to happen on-chain (for the clock to change value)
     sleep(Duration::from_millis(1000)).await;
     // Start to fetch the clock again, it should have changed on chain (and the first fetch should have finished)
-    let future_clock3 = client.fetch_account_chain_snapshot(&key_sysvar_clock);
-    let future_clock4 = client.fetch_account_chain_snapshot(&key_sysvar_clock);
+    let future_clock3 =
+        client.fetch_account_chain_snapshot(&key_sysvar_clock, None);
+    let future_clock4 =
+        client.fetch_account_chain_snapshot(&key_sysvar_clock, None);
     // Wait for the second fetch to finish
     let result_clock3 = future_clock3.await;
     let result_clock4 = future_clock4.await;
@@ -90,15 +94,15 @@ async fn test_devnet_fetch_multiple_accounts_same_time() {
     let key_new_account = Keypair::new().pubkey();
     // Fetch all of them at the same time
     let future_system_program =
-        client.fetch_account_chain_snapshot(&key_system_program);
+        client.fetch_account_chain_snapshot(&key_system_program, None);
     let future_sysvar_blockhashes =
-        client.fetch_account_chain_snapshot(&key_sysvar_blockhashes);
+        client.fetch_account_chain_snapshot(&key_sysvar_blockhashes, None);
     let future_sysvar_clock =
-        client.fetch_account_chain_snapshot(&key_sysvar_clock);
+        client.fetch_account_chain_snapshot(&key_sysvar_clock, None);
     let future_sysvar_rent =
-        client.fetch_account_chain_snapshot(&key_sysvar_rent);
+        client.fetch_account_chain_snapshot(&key_sysvar_rent, None);
     let future_new_account =
-        client.fetch_account_chain_snapshot(&key_new_account);
+        client.fetch_account_chain_snapshot(&key_new_account, None);
     // Await all results
     let result_system_program = future_system_program.await;
     let result_sysvar_blockhashes = future_sysvar_blockhashes.await;

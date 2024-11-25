@@ -1107,7 +1107,7 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk"
-version = "0.0.7"
+version = "0.0.6"
 dependencies = [
  "borsh 0.10.3",
  "ephemeral-rollups-sdk-attribute-commit",
@@ -1118,7 +1118,7 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-commit"
-version = "0.0.7"
+version = "0.0.6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1127,7 +1127,7 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-delegate"
-version = "0.0.7"
+version = "0.0.6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -2316,6 +2316,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "program-schedulecommit"
+version = "0.0.0"
+dependencies = [
+ "borsh 0.10.3",
+ "ephemeral-rollups-sdk",
+ "solana-program 1.17.22",
+]
+
+[[package]]
+name = "program-schedulecommit-security"
+version = "0.0.0"
+dependencies = [
+ "borsh 0.10.3",
+ "ephemeral-rollups-sdk",
+ "program-schedulecommit",
+ "solana-program 1.17.22",
+]
+
+[[package]]
 name = "qstring"
 version = "0.7.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2633,21 +2652,12 @@ dependencies = [
  "anyhow",
  "borsh 0.10.3",
  "integration-test-tools",
- "schedulecommit-program",
+ "program-schedulecommit",
  "sleipnir-core",
  "solana-program 1.17.22",
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk 1.17.22",
-]
-
-[[package]]
-name = "schedulecommit-program"
-version = "0.0.0"
-dependencies = [
- "borsh 0.10.3",
- "ephemeral-rollups-sdk",
- "solana-program 1.17.22",
 ]
 
 [[package]]
@@ -2657,8 +2667,8 @@ dependencies = [
  "ephemeral-rollups-sdk",
  "integration-test-tools",
  "log",
+ "program-schedulecommit",
  "schedulecommit-client",
- "schedulecommit-program",
  "sleipnir-core",
  "solana-program 1.17.22",
  "solana-rpc-client",
@@ -2671,12 +2681,11 @@ dependencies = [
 name = "schedulecommit-test-security"
 version = "0.0.0"
 dependencies = [
- "ephemeral-rollups-sdk",
  "integration-test-tools",
+ "program-schedulecommit",
+ "program-schedulecommit-security",
  "schedulecommit-client",
- "schedulecommit-program",
  "sleipnir-core",
- "solana-program 1.17.22",
  "solana-rpc-client-api",
  "solana-sdk 1.17.22",
 ]
@@ -4091,6 +4100,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "teepee"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "28768569381ae187ca3e46026f5c0786c4120e146fc74bda02ab930dc1b94bd3"
+
+[[package]]
 name = "tempfile"
 version = "3.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4147,6 +4162,7 @@ name = "test-runner"
 version = "0.0.0"
 dependencies = [
  "integration-test-tools",
+ "teepee",
 ]
 
 [[package]]

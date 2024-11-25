@@ -2,7 +2,7 @@ use std::{fmt, ops::Deref, str::FromStr};
 
 use anyhow::{Context, Result};
 use integration_test_tools::IntegrationTestContext;
-use schedulecommit_program::api::{
+use program_schedulecommit::api::{
     delegate_account_cpi_instruction, init_account_instruction, pda_and_bump,
 };
 use solana_rpc_client::rpc_client::RpcClient;

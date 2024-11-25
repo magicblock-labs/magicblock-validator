@@ -3,8 +3,8 @@
 DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 
 NAME=sysvars
-CARGO_TOML=$DIR/../Cargo.toml
-BANK_TESTS_ELFS_DIR=$DIR/../../../sleipnir-bank/tests/utils/elfs/
+CARGO_TOML=$DIR/../../Cargo.toml
+BANK_TESTS_ELFS_DIR=$DIR/../../../../sleipnir-bank/tests/utils/elfs/
 
 cargo build-sbf --manifest-path=$CARGO_TOML --sbf-out-dir=$BANK_TESTS_ELFS_DIR
 rm -f $BANK_TESTS_ELFS_DIR/$NAME-keypair.json

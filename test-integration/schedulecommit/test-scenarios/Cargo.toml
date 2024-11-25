@@ -7,7 +7,7 @@ edition.workspace = true
 ephemeral-rollups-sdk = { workspace = true }
 integration-test-tools = { workspace = true }
 log = { workspace = true }
-schedulecommit-program = { workspace = true, features = ["no-entrypoint"] }
+program-schedulecommit = { workspace = true, features = ["no-entrypoint"] }
 schedulecommit-client = { workspace = true }
 sleipnir-core = { workspace = true }
 solana-program = { workspace = true }
@@ -15,11 +15,3 @@ solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
 test-tools-core = { workspace = true }
-
-[lib]
-crate-type = ["cdylib", "lib"]
-
-[features]
-no-entrypoint = []
-cpi = ["no-entrypoint"]
-default = []
