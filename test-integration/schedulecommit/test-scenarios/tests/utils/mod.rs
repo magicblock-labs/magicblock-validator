@@ -1,7 +1,7 @@
 use ephemeral_rollups_sdk::consts::DELEGATION_PROGRAM_ID;
-use schedulecommit_client::{
-    verify::ScheduledCommitResult, ScheduleCommitTestContext,
-};
+use integration_test_tools::scheduled_commits::ScheduledCommitResult;
+use program_schedulecommit::MainAccount;
+use schedulecommit_client::ScheduleCommitTestContext;
 use solana_sdk::{
     instruction::InstructionError, pubkey::Pubkey, signature::Signature,
     transaction::TransactionError,
@@ -30,7 +30,7 @@ pub fn get_context_with_delegated_committees(
 #[allow(dead_code)] // used in 02_commit_and_undelegate.rs
 pub fn assert_one_committee_was_committed(
     ctx: &ScheduleCommitTestContext,
-    res: &ScheduledCommitResult,
+    res: &ScheduledCommitResult<MainAccount>,
 ) {
     let pda = ctx.committees[0].1;
 
@@ -46,7 +46,7 @@ pub fn assert_one_committee_was_committed(
 #[allow(dead_code)] // used in 02_commit_and_undelegate.rs
 pub fn assert_two_committees_were_committed(
     ctx: &ScheduleCommitTestContext,
-    res: &ScheduledCommitResult,
+    res: &ScheduledCommitResult<MainAccount>,
 ) {
     let pda1 = ctx.committees[0].1;
     let pda2 = ctx.committees[1].1;
@@ -65,7 +65,7 @@ pub fn assert_two_committees_were_committed(
 #[allow(dead_code)] // used in 02_commit_and_undelegate.rs
 pub fn assert_one_committee_synchronized_count(
     ctx: &ScheduleCommitTestContext,
-    res: &ScheduledCommitResult,
+    res: &ScheduledCommitResult<MainAccount>,
     expected_count: u64,
 ) {
     let pda = ctx.committees[0].1;
@@ -94,7 +94,7 @@ pub fn assert_one_committee_synchronized_count(
 // used in 02_commit_and_undelegate.rs
 pub fn assert_two_committees_synchronized_count(
     ctx: &ScheduleCommitTestContext,
-    res: &ScheduledCommitResult,
+    res: &ScheduledCommitResult<MainAccount>,
     expected_count: u64,
 ) {
     let pda1 = ctx.committees[0].1;

@@ -1637,6 +1637,7 @@ name = "integration-test-tools"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "borsh 0.10.3",
  "rayon",
  "serde",
  "sleipnir-config",

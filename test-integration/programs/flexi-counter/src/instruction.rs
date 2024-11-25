@@ -148,7 +148,7 @@ pub fn create_add_and_schedule_commit_ix(
     let accounts = vec![
         AccountMeta::new(payer, true),
         AccountMeta::new(pda, false),
-        AccountMeta::new_readonly(MAGIC_CONTEXT_ID, false),
+        AccountMeta::new(MAGIC_CONTEXT_ID, false),
         AccountMeta::new_readonly(MAGIC_PROGRAM_ID, false),
     ];
     Instruction::new_with_borsh(

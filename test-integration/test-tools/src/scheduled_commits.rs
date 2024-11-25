@@ -1,6 +1,11 @@
+use anyhow::{bail, Context, Result};
 use std::str::FromStr;
+use std::{collections::HashMap, fmt};
 
+use borsh::BorshDeserialize;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
+
+use crate::IntegrationTestContext;
 
 // -----------------
 // Log Extractors
@@ -78,4 +83,128 @@ pub fn extract_chain_transaction_signature_from_logs(
         }
     }
     None
+}
+
+// -----------------
+// Fetch Commit Results
+// -----------------
+#[derive(Debug, PartialEq, Eq)]
+pub struct CommittedAccount<T>
+where
+    T: fmt::Debug + BorshDeserialize + PartialEq + Eq,
+{
+    pub ephem_account: Option<T>,
+    pub chain_account: Option<T>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+pub struct ScheduledCommitResult<T>
+where
+    T: fmt::Debug + BorshDeserialize + PartialEq + Eq,
+{
+    pub included: HashMap<Pubkey, CommittedAccount<T>>,
+    pub excluded: Vec<Pubkey>,
+    pub sigs: Vec<Signature>,
+}
+
+impl<T> ScheduledCommitResult<T>
+where
+    T: fmt::Debug + BorshDeserialize + PartialEq + Eq,
+{
+    pub fn confirm_commit_transactions_on_chain(
+        &self,
+        ctx: &IntegrationTestContext,
+    ) -> Result<()> {
+        for sig in &self.sigs {
+            let confirmed =
+                ctx.confirm_transaction_chain(sig).with_context(|| {
+                    format!(
+                        "Transaction with sig {:?} confirmation on chain failed",
+                        sig
+                    )
+                })?;
+            if !confirmed {
+                bail!(
+                    "Transaction {:?} not confirmed on chain within timeout",
+                    sig
+                );
+            }
+        }
+        Ok(())
+    }
+}
+
+impl IntegrationTestContext {
+    pub fn fetch_schedule_commit_result<T>(
+        &self,
+        sig: Signature,
+    ) -> Result<ScheduledCommitResult<T>>
+    where
+        T: fmt::Debug + BorshDeserialize + PartialEq + Eq,
+    {
+        // 1. Find scheduled commit sent signature via
+        // ScheduledCommitSent signature: <signature>
+        let (ephem_logs, scheduled_commmit_sent_sig) = {
+            let logs = self.fetch_ephemeral_logs(sig).with_context(|| {
+                format!(
+                    "Scheduled commit sent logs not found for sig {:?}",
+                    sig
+                )
+            })?;
+            let sig =
+                extract_scheduled_commit_sent_signature_from_logs(&logs)
+                    .with_context(|| {
+                        format!("ScheduledCommitSent signature not found in logs, {:#?}", logs)
+                    })?;
+
+            (logs, sig)
+        };
+
+        // 2. Find chain commit signatures
+        let chain_logs = self
+            .fetch_ephemeral_logs(scheduled_commmit_sent_sig)
+            .with_context(|| {
+                format!(
+                    "Logs {:#?}\nScheduled commit sent sig {:?}",
+                    ephem_logs, scheduled_commmit_sent_sig
+                )
+            })?;
+
+        let (included, excluded, sigs) =
+            extract_sent_commit_info_from_logs(&chain_logs);
+
+        let mut committed_accounts = HashMap::new();
+        for pubkey in included {
+            let ephem_data = self.fetch_ephem_account_data(pubkey).unwrap();
+            let ephem_account = if ephem_data.is_empty() {
+                None
+            } else {
+                Some(T::try_from_slice(&ephem_data).with_context(|| {
+                    format!(
+                        "Failed to deserialize ephemeral account data for {:?}",
+                        pubkey
+                    )
+                })?)
+            };
+            let chain_data = self.fetch_chain_account_data(pubkey).unwrap();
+            let chain_account = if chain_data.is_empty() {
+                None
+            } else {
+                Some(T::try_from_slice(&chain_data).unwrap())
+            };
+            committed_accounts.insert(
+                pubkey,
+                CommittedAccount {
+                    ephem_account,
+                    chain_account,
+                },
+            );
+        }
+
+        Ok(ScheduledCommitResult {
+            included: committed_accounts,
+            excluded,
+            sigs,
+        })
+    }
 }
