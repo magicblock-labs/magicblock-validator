@@ -10,7 +10,7 @@ use sleipnir_bank::{
     LAMPORTS_PER_SIGNATURE,
 };
 use sleipnir_mutator::fetch::transaction_to_clone_pubkey_from_cluster;
-use sleipnir_program::validator_authority_id;
+use sleipnir_program::validator;
 use solana_sdk::{
     account::{Account, ReadableAccount},
     bpf_loader_upgradeable,
@@ -49,7 +49,10 @@ async fn verified_tx_to_clone_executable_from_devnet_first_deploy(
 
     assert!(tx.is_signed());
     assert_eq!(tx.signatures.len(), 1);
-    assert_eq!(tx.signer_key(0, 0).unwrap(), &validator_authority_id());
+    assert_eq!(
+        tx.signer_key(0, 0).unwrap(),
+        &validator::validator_authority_id()
+    );
     assert!(tx.message().account_keys.len() >= 5);
     assert!(tx.message().account_keys.len() <= 6);
 
@@ -74,7 +77,10 @@ async fn verified_tx_to_clone_executable_from_devnet_as_upgrade(
 
     assert!(tx.is_signed());
     assert_eq!(tx.signatures.len(), 1);
-    assert_eq!(tx.signer_key(0, 0).unwrap(), &validator_authority_id());
+    assert_eq!(
+        tx.signer_key(0, 0).unwrap(),
+        &validator::validator_authority_id()
+    );
     assert!(tx.message().account_keys.len() >= 8);
     assert!(tx.message().account_keys.len() <= 9);
 

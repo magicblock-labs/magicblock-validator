@@ -8,7 +8,7 @@ pub mod sleipnir_processor;
 #[cfg(test)]
 mod test_utils;
 mod utils;
-mod validator;
+pub mod validator;
 
 pub use mutate_accounts::*;
 pub use schedule_transactions::{
@@ -16,4 +16,3 @@ pub use schedule_transactions::{
     transaction_scheduler::TransactionScheduler, SentCommit,
 };
 pub use sleipnir_core::magic_program::*;
-pub use validator::*;

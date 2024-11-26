@@ -1,7 +1,7 @@
 use assert_matches::assert_matches;
 use log::*;
 use sleipnir_mutator::fetch::transaction_to_clone_pubkey_from_cluster;
-use sleipnir_program::validator_authority_id;
+use sleipnir_program::validator;
 use solana_sdk::{
     account::Account, clock::Slot, genesis_config::ClusterType, hash::Hash,
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, system_program,
@@ -34,7 +34,10 @@ async fn verified_tx_to_clone_non_executable_from_devnet(
 
     assert!(tx.is_signed());
     assert_eq!(tx.signatures.len(), 1);
-    assert_eq!(tx.signer_key(0, 0).unwrap(), &validator_authority_id());
+    assert_eq!(
+        tx.signer_key(0, 0).unwrap(),
+        &validator::validator_authority_id()
+    );
     assert_eq!(tx.message().account_keys.len(), 3);
 
     tx

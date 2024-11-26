@@ -1,6 +1,4 @@
-use sleipnir_program::{
-    sleipnir_instruction::AccountModification, validator_authority_id,
-};
+use sleipnir_program::{sleipnir_instruction::AccountModification, validator};
 use solana_sdk::{
     account::Account,
     bpf_loader_upgradeable::{self, UpgradeableLoaderState},
@@ -75,7 +73,7 @@ pub fn create_program_data_modification(
     let mut program_data_data =
         bincode::serialize(&UpgradeableLoaderState::ProgramData {
             slot: slot.saturating_sub(1),
-            upgrade_authority_address: Some(validator_authority_id()),
+            upgrade_authority_address: Some(validator::validator_authority_id()),
         })
         .unwrap();
     program_data_data.extend_from_slice(program_data_bytecode);
@@ -98,7 +96,7 @@ pub fn create_program_buffer_modification(
 ) -> AccountModification {
     let mut program_buffer_data =
         bincode::serialize(&UpgradeableLoaderState::Buffer {
-            authority_address: Some(validator_authority_id()),
+            authority_address: Some(validator::validator_authority_id()),
         })
         .unwrap();
     program_buffer_data.extend_from_slice(program_data_bytecode);

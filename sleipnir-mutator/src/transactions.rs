@@ -2,7 +2,7 @@ use sleipnir_program::{
     sleipnir_instruction::{
         modify_accounts, modify_accounts_instruction, AccountModification,
     },
-    validator_authority, validator_authority_id,
+    validator,
 };
 use solana_sdk::{
     account::Account, bpf_loader_upgradeable, hash::Hash, pubkey::Pubkey,
@@ -66,7 +66,7 @@ pub fn transaction_to_clone_program(
     // First dump the necessary set of account to our bank/ledger
     let modify_ix = modify_accounts_instruction(account_modifications);
     // The validator is marked as the upgrade authority of all program accounts
-    let validator_pubkey = &validator_authority_id();
+    let validator_pubkey = &validator::validator_authority_id();
     // Then we run the official BPF upgrade IX to notify the system of the new program
     let upgrade_ix = bpf_loader_upgradeable::upgrade(
         &program_id_pubkey,
@@ -78,7 +78,7 @@ pub fn transaction_to_clone_program(
     Transaction::new_signed_with_payer(
         &[modify_ix, upgrade_ix],
         Some(validator_pubkey),
-        &[&validator_authority()],
+        &[&validator::validator_authority()],
         recent_blockhash,
     )
 }

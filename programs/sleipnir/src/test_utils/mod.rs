@@ -10,14 +10,14 @@ use solana_sdk::{
 
 use self::sleipnir_processor::Entrypoint;
 use super::*;
-use crate::generate_validator_authority_if_needed;
+use crate::validator;
 
 pub const AUTHORITY_BALANCE: u64 = u64::MAX / 2;
 pub fn ensure_funded_validator_authority(
     map: &mut HashMap<Pubkey, AccountSharedData>,
 ) {
-    generate_validator_authority_if_needed();
-    let validator_authority_id = validator_authority_id();
+    validator::generate_validator_authority_if_needed();
+    let validator_authority_id = validator::validator_authority_id();
     map.entry(validator_authority_id).or_insert_with(|| {
         AccountSharedData::new(AUTHORITY_BALANCE, 0, &system_program::id())
     });

@@ -36,7 +36,7 @@ use sleipnir_geyser_plugin::rpc::GeyserRpcService;
 use sleipnir_ledger::{blockstore_processor::process_ledger, Ledger};
 use sleipnir_metrics::MetricsService;
 use sleipnir_perf_service::SamplePerformanceService;
-use sleipnir_program::{init_persister, init_validator_authority};
+use sleipnir_program::{init_persister, validator};
 use sleipnir_pubsub::pubsub_service::{
     PubsubConfig, PubsubService, PubsubServiceCloseHandle,
 };
@@ -277,7 +277,7 @@ impl MagicValidator {
             config.validator_config.rpc.addr,
             config.validator_config.rpc.port,
         );
-        init_validator_authority(identity_keypair);
+        validator::init_validator_authority(identity_keypair);
 
         // Make sure we process the ledger before we're open to handle
         // transactions via RPC

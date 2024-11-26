@@ -3,7 +3,7 @@ use std::collections::{HashMap, HashSet};
 use crate::{
     mutate_accounts::account_mod_data::resolve_account_mod_data,
     sleipnir_instruction::{AccountModificationForInstruction, SleipnirError},
-    validator_authority_id,
+    validator::validator_authority_id,
 };
 use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 use solana_sdk::{

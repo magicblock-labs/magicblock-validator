@@ -12,7 +12,7 @@ use solana_sdk::{
 
 use crate::{
     errors::custom_error_codes,
-    utils::accounts::get_instruction_pubkey_with_idx,
+    utils::accounts::get_instruction_pubkey_with_idx, validator,
 };
 
 #[derive(Debug, Clone)]
@@ -118,7 +118,7 @@ pub fn process_scheduled_commit_sent(
     // Assert validator identity matches
     let validator_pubkey =
         get_instruction_pubkey_with_idx(transaction_context, VALIDATOR_IDX)?;
-    let validator_authority_id = crate::validator_authority_id();
+    let validator_authority_id = validator::validator_authority_id();
     if validator_pubkey != &validator_authority_id {
         ic_msg!(
             invoke_context,
@@ -225,7 +225,7 @@ mod tests {
     use crate::{
         sleipnir_instruction::scheduled_commit_sent_instruction,
         test_utils::{ensure_funded_validator_authority, process_instruction},
-        validator_authority_id,
+        validator,
     };
 
     fn single_acc_commit(commit_id: u64) -> SentCommit {
@@ -276,7 +276,7 @@ mod tests {
 
         let mut ix = scheduled_commit_sent_instruction(
             &crate::id(),
-            &validator_authority_id(),
+            &validator::validator_authority_id(),
             commit.commit_id,
         );
         ix.accounts[1].is_signer = false;
@@ -348,7 +348,7 @@ mod tests {
 
         let ix = scheduled_commit_sent_instruction(
             &fake_program.pubkey(),
-            &validator_authority_id(),
+            &validator::validator_authority_id(),
             commit.commit_id,
         );
         let transaction_accounts =
@@ -377,7 +377,7 @@ mod tests {
 
         let ix = scheduled_commit_sent_instruction(
             &crate::id(),
-            &validator_authority_id(),
+            &validator::validator_authority_id(),
             commit.commit_id,
         );
 
