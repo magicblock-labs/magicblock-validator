@@ -6152,8 +6152,10 @@ name = "test-tools"
 version = "1.19.0"
 dependencies = [
  "crossbeam-channel",
+ "log",
  "sleipnir-accounts-db",
  "sleipnir-bank",
+ "sleipnir-core",
  "sleipnir-messaging",
  "sleipnir-program",
  "sleipnir-transaction-status",

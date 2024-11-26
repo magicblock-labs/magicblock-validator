@@ -9,7 +9,7 @@ use solana_sdk::{
 };
 use test_tools::{
     diagnostics::log_exec_details, init_logger, skip_if_devnet_down,
-    transactions_processor, validator::ensure_funded_validator_authority,
+    transactions_processor, validator::init_started_validator,
 };
 
 use crate::utils::{fund_luzifer, SOLX_POST, SOLX_PROG, SOLX_TIPS};
@@ -29,8 +29,8 @@ async fn verified_tx_to_clone_non_executable_from_devnet(
         slot,
         None,
     )
-    .await
-    .expect("Failed to create clone transaction");
+        .await
+        .expect("Failed to create clone transaction");
 
     assert!(tx.is_signed());
     assert_eq!(tx.signatures.len(), 1);
@@ -49,7 +49,7 @@ async fn clone_non_executable_without_data() {
     skip_if_devnet_down!();
 
     let tx_processor = transactions_processor();
-    ensure_funded_validator_authority(tx_processor.bank());
+    init_started_validator(tx_processor.bank());
     fund_luzifer(&*tx_processor);
 
     let slot = tx_processor.bank().slot();
@@ -58,7 +58,7 @@ async fn clone_non_executable_without_data() {
         slot,
         tx_processor.bank().last_blockhash(),
     )
-    .await;
+        .await;
     let result = tx_processor.process(vec![tx]).unwrap();
 
     let (_, exec_details) = result.transactions.values().next().unwrap();
@@ -90,7 +90,7 @@ async fn clone_non_executable_with_data() {
     skip_if_devnet_down!();
 
     let tx_processor = transactions_processor();
-    ensure_funded_validator_authority(tx_processor.bank());
+    init_started_validator(tx_processor.bank());
     fund_luzifer(&*tx_processor);
 
     let slot = tx_processor.bank().slot();
@@ -99,7 +99,7 @@ async fn clone_non_executable_with_data() {
         slot,
         tx_processor.bank().last_blockhash(),
     )
-    .await;
+        .await;
     let result = tx_processor.process(vec![tx]).unwrap();
 
     let (_, exec_details) = result.transactions.values().next().unwrap();
