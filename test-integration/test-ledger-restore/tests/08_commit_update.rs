@@ -2,13 +2,12 @@ use std::{path::Path, process::Child};
 
 use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};
 use program_flexi_counter::instruction::{
-    create_add_and_schedule_commit_ix, create_mul_ix,
+    create_add_and_schedule_commit_ix, create_add_ix, create_mul_ix,
 };
 use program_flexi_counter::{
     instruction::{create_delegate_ix, create_init_ix},
     state::FlexiCounter,
 };
-use sleipnir_config::ProgramConfig;
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
     signer::Signer,
@@ -16,8 +15,8 @@ use solana_sdk::{
 use test_ledger_restore::{
     assert_counter_commits_on_chain, confirm_tx_with_payer_chain,
     confirm_tx_with_payer_ephem, fetch_counter_chain, fetch_counter_ephem,
-    setup_validator_with_local_remote, wait_for_ledger_persist,
-    FLEXI_COUNTER_ID, TMP_DIR_LEDGER,
+    get_programs_with_flexi_counter, setup_validator_with_local_remote,
+    wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 
 const COUNTER: &str = "Counter of Payer";
@@ -25,17 +24,12 @@ fn payer_keypair() -> Keypair {
     Keypair::new()
 }
 
-fn get_programs() -> Vec<ProgramConfig> {
-    vec![ProgramConfig {
-        id: FLEXI_COUNTER_ID.try_into().unwrap(),
-        path: "program_flexi_counter.so".to_string(),
-    }]
-}
-
 // In this test we update a delegated account in the ephemeral, commit it and
 // then update it again.
 // We then restore the ledger and verify that the committed account available
 // with the last update and that the commit was not run during ledger processing.
+// Finally after the ledger is restored we ensure that we can keep updating the
+// account.
 //
 // NOTE: that most of the setup is similar to 07_commit_delegated_account.rs
 // except that we removed the intermediate checks.
@@ -48,12 +42,12 @@ fn restore_ledger_committed_and_updated_account() {
     let (mut validator, _) = write(&ledger_path, &payer);
     validator.kill().unwrap();
 
-    let mut validator = read(&ledger_path, &payer.pubkey());
+    let mut validator = read(&ledger_path, &payer);
     validator.kill().unwrap();
 }
 
 fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
-    let programs = get_programs();
+    let programs = get_programs_with_flexi_counter();
 
     let (_, mut validator, ctx) =
         setup_validator_with_local_remote(ledger_path, Some(programs), true);
@@ -167,8 +161,9 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
     (validator, slot)
 }
 
-fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
-    let programs = get_programs();
+fn read(ledger_path: &Path, payer_kp: &Keypair) -> Child {
+    let payer = &payer_kp.pubkey();
+    let programs = get_programs_with_flexi_counter();
 
     let (_, mut validator, ctx) =
         setup_validator_with_local_remote(ledger_path, Some(programs), false);
@@ -193,6 +188,23 @@ fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
     );
 
     assert_counter_commits_on_chain(&ctx, &mut validator, payer, 3);
+
+    {
+        // Increment counter in ephemeral after ledger replay finished
+        // TODO: @@@ this currently fails with:
+        // UnclonableAccountUsedAsWritableInEphemeral(<pubkey>, AlreadyLocallyOverriden)
+        let ix = create_add_ix(payer_kp.pubkey(), 3);
+        confirm_tx_with_payer_ephem(ix, payer_kp, &mut validator);
+        let counter = fetch_counter_ephem(payer, &mut validator);
+        assert_eq!(
+            counter,
+            FlexiCounter {
+                count: 7,
+                updates: 2,
+                label: COUNTER.to_string()
+            }
+        )
+    }
 
     validator
 }
