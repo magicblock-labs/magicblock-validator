@@ -11,16 +11,19 @@ use solana_sdk::{
 use self::sleipnir_processor::Entrypoint;
 use super::*;
 use crate::validator;
+use test_tools::validator::init_persister_stub;
 
 pub const AUTHORITY_BALANCE: u64 = u64::MAX / 2;
-pub fn ensure_funded_validator_authority(
-    map: &mut HashMap<Pubkey, AccountSharedData>,
-) {
+pub fn ensure_started_validator(map: &mut HashMap<Pubkey, AccountSharedData>) {
     validator::generate_validator_authority_if_needed();
     let validator_authority_id = validator::validator_authority_id();
     map.entry(validator_authority_id).or_insert_with(|| {
         AccountSharedData::new(AUTHORITY_BALANCE, 0, &system_program::id())
     });
+    init_persister_stub();
+    if validator::is_starting_up() {
+        validator::finished_starting_up();
+    }
 }
 
 pub fn process_instruction(

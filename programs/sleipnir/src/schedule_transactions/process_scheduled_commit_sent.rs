@@ -232,7 +232,7 @@ mod tests {
     use super::*;
     use crate::{
         sleipnir_instruction::scheduled_commit_sent_instruction,
-        test_utils::{ensure_funded_validator_authority, process_instruction},
+        test_utils::{ensure_started_validator, process_instruction},
         validator,
     };
 
@@ -280,7 +280,7 @@ mod tests {
 
         let mut account_data = HashMap::new();
 
-        ensure_funded_validator_authority(&mut account_data);
+        ensure_started_validator(&mut account_data);
 
         let mut ix = scheduled_commit_sent_instruction(
             &crate::id(),
@@ -317,7 +317,7 @@ mod tests {
             );
             map
         };
-        ensure_funded_validator_authority(&mut account_data);
+        ensure_started_validator(&mut account_data);
 
         let ix = scheduled_commit_sent_instruction(
             &crate::id(),
@@ -352,7 +352,7 @@ mod tests {
             );
             map
         };
-        ensure_funded_validator_authority(&mut account_data);
+        ensure_started_validator(&mut account_data);
 
         let ix = scheduled_commit_sent_instruction(
             &fake_program.pubkey(),
@@ -381,7 +381,7 @@ mod tests {
 
         let mut account_data = HashMap::new();
 
-        ensure_funded_validator_authority(&mut account_data);
+        ensure_started_validator(&mut account_data);
 
         let ix = scheduled_commit_sent_instruction(
             &crate::id(),

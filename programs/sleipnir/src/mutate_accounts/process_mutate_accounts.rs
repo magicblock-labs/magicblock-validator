@@ -153,7 +153,7 @@ pub(crate) fn process_mutate_accounts(
         if let Some(data_key) = modification.data_key.take() {
             let resolved_data = resolve_account_mod_data(
                 data_key,
-                invoke_context
+                invoke_context,
             ).inspect_err(|err| {
                 ic_msg!(
                     invoke_context,
@@ -271,16 +271,19 @@ mod tests {
             modify_accounts_instruction, AccountModification,
         },
         test_utils::{
-            ensure_funded_validator_authority, process_instruction,
+            ensure_started_validator, process_instruction,
             AUTHORITY_BALANCE,
         },
     };
+    use test_tools_core::init_logger;
 
     // -----------------
     // ModifyAccounts
     // -----------------
     #[test]
     fn test_mod_all_fields_of_one_account() {
+        init_logger!();
+
         let owner_key = Pubkey::from([9; 32]);
         let mod_key = Pubkey::new_unique();
         let mut account_data = {
@@ -288,7 +291,7 @@ mod tests {
             map.insert(mod_key, AccountSharedData::new(100, 0, &mod_key));
             map
         };
-        ensure_funded_validator_authority(&mut account_data);
+        ensure_started_validator(&mut account_data);
 
         let modification = AccountModification {
             pubkey: mod_key,
@@ -353,6 +356,8 @@ mod tests {
 
     #[test]
     fn test_mod_lamports_of_two_accounts() {
+        init_logger!();
+
         let mod_key1 = Pubkey::new_unique();
         let mod_key2 = Pubkey::new_unique();
         let mut account_data = {
@@ -361,7 +366,7 @@ mod tests {
             map.insert(mod_key2, AccountSharedData::new(200, 0, &mod_key2));
             map
         };
-        ensure_funded_validator_authority(&mut account_data);
+        ensure_started_validator(&mut account_data);
 
         let ix = modify_accounts_instruction(vec![
             AccountModification {
@@ -442,6 +447,8 @@ mod tests {
 
     #[test]
     fn test_mod_different_properties_of_four_accounts() {
+        init_logger!();
+
         let mod_key1 = Pubkey::new_unique();
         let mod_key2 = Pubkey::new_unique();
         let mod_key3 = Pubkey::new_unique();
@@ -456,7 +463,7 @@ mod tests {
             map.insert(mod_key4, AccountSharedData::new(400, 0, &mod_key4));
             map
         };
-        ensure_funded_validator_authority(&mut account_data);
+        ensure_started_validator(&mut account_data);
 
         let ix = modify_accounts_instruction(vec![
             AccountModification {

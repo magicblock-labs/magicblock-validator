@@ -27,8 +27,13 @@ impl PersistsAccountModData for PersisterStub {
         Err("Loading from ledger not supported in tests".into())
     }
 }
+
+pub fn init_persister_stub() {
+    init_persister(Arc::new(PersisterStub));
+}
+
 pub fn init_started_validator(bank: &Bank) {
     ensure_funded_validator(bank);
-    init_persister(Arc::new(PersisterStub));
+    init_persister_stub();
     validator::finished_starting_up();
 }
