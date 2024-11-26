@@ -505,7 +505,6 @@ impl MagicValidator {
     pub async fn start(&mut self) -> ApiResult<()> {
         self.maybe_process_ledger()?;
 
-        // NOE: this only run only once, i.e. at creation time
         self.transaction_listener.run(true);
 
         self.slot_ticker = Some(init_slot_ticker(
@@ -557,6 +556,7 @@ impl MagicValidator {
                 self.exit.clone(),
             ));
 
+        validator::finished_starting_up();
         Ok(())
     }
 

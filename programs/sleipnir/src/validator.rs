@@ -1,10 +1,26 @@
-use std::sync::RwLock;
+use std::sync::{
+    atomic::{AtomicBool, Ordering},
+    RwLock,
+};
 
 use lazy_static::lazy_static;
 use solana_sdk::{pubkey::Pubkey, signature::Keypair, signer::Signer};
 
 lazy_static! {
     static ref VALIDATOR_AUTHORITY: RwLock<Option<Keypair>> = RwLock::new(None);
+
+    /// Flag to indicate if the validator is starting up which includes
+    /// processing the ledger.
+    /// Certain transactions behave slightly different during that phase
+    /// especially those that interact with main chain like account mutations
+    /// and scheduled commits.
+    static ref STARTING_UP: AtomicBool = AtomicBool::new(
+        #[cfg(not(test))]
+        true,
+        // our unit tests assume the validator is already running
+        #[cfg(test)]
+        false,
+    );
 }
 
 pub fn validator_authority() -> Keypair {
@@ -43,4 +59,21 @@ pub fn generate_validator_authority_if_needed() {
         return;
     }
     validator_authority_lock.replace(Keypair::new());
+}
+
+/// Returns `true` if the validator is starting up which is the initial
+/// state.
+pub fn is_starting_up() -> bool {
+    STARTING_UP.load(Ordering::Relaxed)
+}
+
+/// Needs to be called after the validator is done starting up, i.e.
+/// the ledger has been processed.
+pub fn finished_starting_up() {
+    let was_starting_up =
+        STARTING_UP.swap(false, std::sync::atomic::Ordering::Relaxed);
+    assert!(
+        was_starting_up,
+        "validator::finished_starting_up should only be called once"
+    );
 }
