@@ -100,6 +100,14 @@ pub fn process_scheduled_commit_sent(
     transaction_context: &TransactionContext,
     commit_id: u64,
 ) -> Result<(), InstructionError> {
+    if validator::is_starting_up() {
+        ic_msg!(
+            invoke_context,
+            "ScheduleCommitSent: validator is starting up, this instruction is skipped"
+        );
+        return Ok(());
+    }
+
     const PROGRAM_IDX: u16 = 0;
     const VALIDATOR_IDX: u16 = 1;
 
@@ -109,7 +117,7 @@ pub fn process_scheduled_commit_sent(
     if program_id.ne(&crate::id()) {
         ic_msg!(
             invoke_context,
-            "ScheduleCommit ERR: Invalid program id '{}'",
+            "ScheduleCommitSent ERR: Invalid program id '{}'",
             program_id
         );
         return Err(InstructionError::IncorrectProgramId);
@@ -122,7 +130,7 @@ pub fn process_scheduled_commit_sent(
     if validator_pubkey != &validator_authority_id {
         ic_msg!(
             invoke_context,
-            "ScheduleCommit ERR: provided validator account {} does not match validator identity {}",
+            "ScheduleCommitSent ERR: provided validator account {} does not match validator identity {}",
             validator_pubkey, validator_authority_id
         );
         return Err(InstructionError::IncorrectAuthority);
@@ -132,7 +140,7 @@ pub fn process_scheduled_commit_sent(
     if !signers.contains(&validator_authority_id) {
         ic_msg!(
             invoke_context,
-            "ScheduleCommit ERR: validator authority not found in signers"
+            "ScheduleCommitSent ERR: validator authority not found in signers"
         );
         return Err(InstructionError::MissingRequiredSignature);
     }
@@ -146,7 +154,7 @@ pub fn process_scheduled_commit_sent(
             None => {
                 ic_msg!(
                     invoke_context,
-                    "ScheduleCommit ERR: commit with id {} not found",
+                    "ScheduleCommitSent ERR: commit with id {} not found",
                     commit_id
                 );
                 return Err(InstructionError::Custom(
@@ -157,7 +165,7 @@ pub fn process_scheduled_commit_sent(
         Err(err) => {
             ic_msg!(
                 invoke_context,
-                "ScheduleCommit ERR: failed to lock SENT_COMMITS: {}",
+                "ScheduleCommitSent ERR: failed to lock SENT_COMMITS: {}",
                 err
             );
             return Err(InstructionError::Custom(
