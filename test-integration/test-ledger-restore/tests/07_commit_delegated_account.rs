@@ -9,7 +9,6 @@ use program_flexi_counter::{
     instruction::{create_delegate_ix, create_init_ix},
     state::FlexiCounter,
 };
-use sleipnir_config::ProgramConfig;
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
     signer::Signer,
@@ -17,20 +16,13 @@ use solana_sdk::{
 use test_ledger_restore::{
     assert_counter_commits_on_chain, confirm_tx_with_payer_chain,
     confirm_tx_with_payer_ephem, fetch_counter_chain, fetch_counter_ephem,
-    fetch_counter_owner_chain, setup_validator_with_local_remote,
-    wait_for_ledger_persist, FLEXI_COUNTER_ID, TMP_DIR_LEDGER,
+    fetch_counter_owner_chain, get_programs_with_flexi_counter,
+    setup_validator_with_local_remote, wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 
 const COUNTER: &str = "Counter of Payer";
 fn payer_keypair() -> Keypair {
     Keypair::new()
-}
-
-fn get_programs() -> Vec<ProgramConfig> {
-    vec![ProgramConfig {
-        id: FLEXI_COUNTER_ID.try_into().unwrap(),
-        path: "program_flexi_counter.so".to_string(),
-    }]
 }
 
 // In this test we update a delegated account in the ephemeral and then commit it.
@@ -50,7 +42,7 @@ fn restore_ledger_containing_delegated_and_committed_account() {
 }
 
 fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
-    let programs = get_programs();
+    let programs = get_programs_with_flexi_counter();
 
     let (_, mut validator, ctx) =
         setup_validator_with_local_remote(ledger_path, Some(programs), true);
@@ -175,7 +167,7 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
 }
 
 fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
-    let programs = get_programs();
+    let programs = get_programs_with_flexi_counter();
 
     let (_, mut validator, ctx) =
         setup_validator_with_local_remote(ledger_path, Some(programs), false);

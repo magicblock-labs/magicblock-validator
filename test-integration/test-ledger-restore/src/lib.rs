@@ -301,3 +301,14 @@ pub fn assert_counter_commits_on_chain(
         expect!(ctx.get_signaturestats_for_address_chain(&pda), validator);
     assert_eq!(stats.len(), expected_count);
 }
+
+// -----------------
+// Configs
+// -----------------
+
+pub fn get_programs_with_flexi_counter() -> Vec<ProgramConfig> {
+    vec![ProgramConfig {
+        id: FLEXI_COUNTER_ID.try_into().unwrap(),
+        path: "program_flexi_counter.so".to_string(),
+    }]
+}
