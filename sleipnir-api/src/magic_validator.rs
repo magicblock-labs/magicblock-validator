@@ -482,8 +482,28 @@ impl MagicValidator {
     // -----------------
     // Start/Stop
     // -----------------
-    pub async fn start(&mut self) -> ApiResult<()> {
+    fn maybe_process_ledger(&self) -> ApiResult<()> {
+        if self.config.ledger.reset {
+            return Ok(());
+        }
         process_ledger(&self.ledger, &self.bank)?;
+
+        // The transactions to schedule and accept account commits re-run when we
+        // process the ledger, however we do not want to re-commit them.
+        // Thus while the ledger is processed we don't yet run the machinery to handle
+        // scheduled commits and we clear all scheduled commits before fully starting the
+        // validator.
+        let scheduled_commits = self.accounts_manager.scheduled_commits_len();
+        debug!(
+            "Found {} scheduled commits while processing ledger, clearing them",
+            scheduled_commits
+        );
+        self.accounts_manager.clear_scheduled_commits();
+        Ok(())
+    }
+
+    pub async fn start(&mut self) -> ApiResult<()> {
+        self.maybe_process_ledger()?;
 
         // NOE: this only run only once, i.e. at creation time
         self.transaction_listener.run(true);

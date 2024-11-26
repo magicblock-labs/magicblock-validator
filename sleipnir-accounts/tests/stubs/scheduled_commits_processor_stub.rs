@@ -18,4 +18,8 @@ impl ScheduledCommitsProcessor for ScheduledCommitsProcessorStub {
     ) -> AccountsResult<()> {
         Ok(())
     }
+    fn scheduled_commits_len(&self) -> usize {
+        0
+    }
+    fn clear_scheduled_commits(&self) {}
 }
