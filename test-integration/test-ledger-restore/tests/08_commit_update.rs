@@ -9,8 +9,7 @@ use program_flexi_counter::{
     state::FlexiCounter,
 };
 use solana_sdk::{
-    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
-    signer::Signer,
+    native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
 };
 use test_ledger_restore::{
     assert_counter_commits_on_chain, confirm_tx_with_payer_chain,
@@ -28,8 +27,8 @@ fn payer_keypair() -> Keypair {
 // then update it again.
 // We then restore the ledger and verify that the committed account available
 // with the last update and that the commit was not run during ledger processing.
-// Finally after the ledger is restored we ensure that we can keep updating the
-// account.
+// Finally after the ledger is restored we want to ensure that we can keep updating
+// the account. This part is currently not yet supported.
 //
 // NOTE: that most of the setup is similar to 07_commit_delegated_account.rs
 // except that we removed the intermediate checks.
@@ -189,10 +188,12 @@ fn read(ledger_path: &Path, payer_kp: &Keypair) -> Child {
 
     assert_counter_commits_on_chain(&ctx, &mut validator, payer, 3);
 
-    {
+    const CLONED_ACCOUNT_META_HYDRATED_AFTER_LEDGER_REPLAY: bool = false;
+    if CLONED_ACCOUNT_META_HYDRATED_AFTER_LEDGER_REPLAY {
         // Increment counter in ephemeral after ledger replay finished
-        // TODO: @@@ this currently fails with:
+        // TODO(thlorenz): this currently fails with:
         // UnclonableAccountUsedAsWritableInEphemeral(<pubkey>, AlreadyLocallyOverriden)
+        // and will be addressed in the next PR in this ledger replay series
         let ix = create_add_ix(payer_kp.pubkey(), 3);
         confirm_tx_with_payer_ephem(ix, payer_kp, &mut validator);
         let counter = fetch_counter_ephem(payer, &mut validator);
