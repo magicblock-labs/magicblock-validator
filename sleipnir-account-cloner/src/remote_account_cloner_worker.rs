@@ -1,11 +1,11 @@
 use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     sync::{Arc, RwLock},
+    time::Duration,
     vec,
 };
 
 use conjunto_transwise::{AccountChainSnapshotShared, AccountChainState};
-use dlp::consts::DELEGATION_PROGRAM_ID;
 use futures_util::future::join_all;
 use log::*;
 use sleipnir_account_dumper::AccountDumper;
@@ -21,8 +21,9 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::Signature,
 };
-use tokio::sync::mpsc::{
-    unbounded_channel, UnboundedReceiver, UnboundedSender,
+use tokio::{
+    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    time::sleep,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -41,6 +42,7 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU> {
     blacklisted_accounts: HashSet<Pubkey>,
     payer_init_lamports: Option<u64>,
     permissions: AccountClonerPermissions,
+    fetch_retries: u64,
     clone_request_receiver: UnboundedReceiver<Pubkey>,
     clone_request_sender: UnboundedSender<Pubkey>,
     clone_listeners: Arc<RwLock<HashMap<Pubkey, AccountClonerListeners>>>,
@@ -67,6 +69,7 @@ where
     ) -> Self {
         let (clone_request_sender, clone_request_receiver) =
             unbounded_channel();
+        let fetch_retries = 5;
         Self {
             internal_account_provider,
             account_fetcher,
@@ -77,6 +80,7 @@ where
             blacklisted_accounts,
             payer_init_lamports,
             permissions,
+            fetch_retries,
             clone_request_receiver,
             clone_request_sender,
             clone_listeners: Default::default(),
@@ -173,25 +177,7 @@ where
                 } => {
                     // If the clone output is recent enough, that directly
                     if snapshot.at_slot >= last_known_update_slot {
-                        // Special case temporarily to unblock zeebit:
-                        // If the account is in a bork state after we somehow missed the undelegation/redelegation update
-                        // We can force a bypass of the cache to get that account out of the bork state exceptionally
-                        // Long-term fix tracked here: https://github.com/magicblock-labs/magicblock-validator/issues/186
-                        if snapshot.chain_state.is_delegated()
-                            && self
-                                .internal_account_provider
-                                .get_account(pubkey)
-                                .map(|account| {
-                                    *account.owner() == DELEGATION_PROGRAM_ID
-                                })
-                                .unwrap_or(false)
-                        {
-                            self.do_clone_and_update_cache(pubkey).await
-                        }
-                        // Otherwise no problem, we can use the cache
-                        else {
-                            Ok(last_clone_output)
-                        }
+                        Ok(last_clone_output)
                     }
                     // If the cloned account has been updated since clone, update the cache
                     else {
@@ -255,9 +241,10 @@ where
                 at_slot: u64::MAX, // we should never try cloning again
             });
         }
-        // Mark the account for monitoring, we want to start to detect futures updates on it
-        // since we're cloning it now, it's now part of the validator monitored accounts
-        if self.permissions.allow_cloning_refresh {
+        // Get the latest state of the account
+        let account_chain_snapshot = if self.permissions.allow_cloning_refresh {
+            // Mark the account for monitoring, we want to start to detect futures updates on it
+            // since we're cloning it now, it's now part of the validator monitored accounts
             // TODO(vbrunet)
             //  - https://github.com/magicblock-labs/magicblock-validator/issues/95
             //  - handle the case of the lamports updates better
@@ -265,10 +252,47 @@ where
             self.account_updates
                 .ensure_account_monitoring(pubkey)
                 .map_err(AccountClonerError::AccountUpdatesError)?;
-        }
-        // Fetch the account
-        let account_chain_snapshot =
-            self.fetch_account_chain_snapshot(pubkey).await?;
+            // Fetch the account, repeat and retry until we have a satisfactory response
+            let mut fetch_count = 0;
+            loop {
+                fetch_count += 1;
+                let min_context_slot =
+                    self.account_updates.get_first_subscribed_slot(pubkey);
+                match self
+                    .fetch_account_chain_snapshot(pubkey, min_context_slot)
+                    .await
+                {
+                    Ok(account_chain_snapshot) => {
+                        // We consider it a satisfactory response if the slot at which the state is from
+                        // is more recent than the first successful subscription to the account
+                        if account_chain_snapshot.at_slot
+                            >= self
+                                .account_updates
+                                .get_first_subscribed_slot(pubkey)
+                                .unwrap_or(u64::MAX)
+                        {
+                            break account_chain_snapshot;
+                        }
+                        // If we failed to fetch too many time, stop here
+                        if fetch_count >= self.fetch_retries {
+                            return Err(
+                                AccountClonerError::FailedToFetchSatisfactorySlot,
+                            );
+                        }
+                    }
+                    Err(error) => {
+                        // If we failed to fetch too many time, stop here
+                        if fetch_count >= self.fetch_retries {
+                            return Err(error);
+                        }
+                    }
+                };
+                // Wait a bit in the hopes of the min_context_slot becoming available (about half a slot)
+                sleep(Duration::from_millis(200)).await;
+            }
+        } else {
+            self.fetch_account_chain_snapshot(pubkey, None).await?
+        };
         // Generate cloning transactions
         let signature = match &account_chain_snapshot.chain_state {
             // If the account has no data, we can use it for lamport transfers only
@@ -306,7 +330,12 @@ where
                             at_slot: account_chain_snapshot.at_slot,
                         });
                     }
-                    self.do_clone_program_accounts(pubkey, account).await?
+                    self.do_clone_program_accounts(
+                        pubkey,
+                        account,
+                        Some(account_chain_snapshot.at_slot),
+                    )
+                    .await?
                 }
                 // If it's not an executble, simpler rules apply
                 else {
@@ -424,6 +453,7 @@ where
         &self,
         pubkey: &Pubkey,
         account: &Account,
+        min_context_slot: Option<Slot>,
     ) -> AccountClonerResult<Signature> {
         let program_id_pubkey = pubkey;
         let program_id_account = account;
@@ -447,7 +477,7 @@ where
 
         let program_data_pubkey = &get_program_data_address(program_id_pubkey);
         let program_data_snapshot = self
-            .fetch_account_chain_snapshot(program_data_pubkey)
+            .fetch_account_chain_snapshot(program_data_pubkey, min_context_slot)
             .await?;
         let program_data_account = program_data_snapshot
             .chain_state
@@ -459,7 +489,8 @@ where
                 program_id_account,
                 program_data_pubkey,
                 program_data_account,
-                self.fetch_program_idl(program_id_pubkey).await?,
+                self.fetch_program_idl(program_id_pubkey, min_context_slot)
+                    .await?,
             )
             .map_err(AccountClonerError::AccountDumperError)
             .inspect(|_| {
@@ -472,21 +503,24 @@ where
     async fn fetch_program_idl(
         &self,
         program_id_pubkey: &Pubkey,
+        min_context_slot: Option<Slot>,
     ) -> AccountClonerResult<Option<(Pubkey, Account)>> {
         // First check if we can find an anchor IDL
         let program_idl_anchor = self
-            .try_fetch_program_idl_snapshot(get_pubkey_anchor_idl(
-                program_id_pubkey,
-            ))
+            .try_fetch_program_idl_snapshot(
+                get_pubkey_anchor_idl(program_id_pubkey),
+                min_context_slot,
+            )
             .await?;
         if program_idl_anchor.is_some() {
             return Ok(program_idl_anchor);
         }
         // If we couldn't find anchor, try to find shank IDL
         let program_idl_shank = self
-            .try_fetch_program_idl_snapshot(get_pubkey_shank_idl(
-                program_id_pubkey,
-            ))
+            .try_fetch_program_idl_snapshot(
+                get_pubkey_shank_idl(program_id_pubkey),
+                min_context_slot,
+            )
             .await?;
         if program_idl_shank.is_some() {
             return Ok(program_idl_shank);
@@ -498,10 +532,14 @@ where
     async fn try_fetch_program_idl_snapshot(
         &self,
         program_idl_pubkey: Option<Pubkey>,
+        min_context_slot: Option<Slot>,
     ) -> AccountClonerResult<Option<(Pubkey, Account)>> {
         if let Some(program_idl_pubkey) = program_idl_pubkey {
             let program_idl_snapshot = self
-                .fetch_account_chain_snapshot(&program_idl_pubkey)
+                .fetch_account_chain_snapshot(
+                    &program_idl_pubkey,
+                    min_context_slot,
+                )
                 .await?;
             let program_idl_account =
                 program_idl_snapshot.chain_state.account();
@@ -518,9 +556,10 @@ where
     async fn fetch_account_chain_snapshot(
         &self,
         pubkey: &Pubkey,
+        min_context_slot: Option<Slot>,
     ) -> AccountClonerResult<AccountChainSnapshotShared> {
         self.account_fetcher
-            .fetch_account_chain_snapshot(pubkey)
+            .fetch_account_chain_snapshot(pubkey, min_context_slot)
             .await
             .map_err(AccountClonerError::AccountFetcherError)
     }

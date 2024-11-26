@@ -28,6 +28,9 @@ pub enum AccountClonerError {
 
     #[error("ProgramDataDoesNotExist")]
     ProgramDataDoesNotExist,
+
+    #[error("FailedToFetchSatisfactorySlot")]
+    FailedToFetchSatisfactorySlot,
 }
 
 pub type AccountClonerResult<T> = Result<T, AccountClonerError>;

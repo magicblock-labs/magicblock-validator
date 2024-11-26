@@ -14,5 +14,6 @@ pub trait AccountUpdates {
         &self,
         pubkey: &Pubkey,
     ) -> AccountUpdatesResult<()>;
+    fn get_first_subscribed_slot(&self, pubkey: &Pubkey) -> Option<Slot>;
     fn get_last_known_update_slot(&self, pubkey: &Pubkey) -> Option<Slot>;
 }

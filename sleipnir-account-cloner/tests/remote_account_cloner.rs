@@ -1,9 +1,10 @@
 use std::collections::HashSet;
 
 use sleipnir_account_cloner::{
-    standard_blacklisted_accounts, AccountCloner, AccountClonerOutput,
-    AccountClonerPermissions, AccountClonerUnclonableReason,
-    RemoteAccountClonerClient, RemoteAccountClonerWorker,
+    standard_blacklisted_accounts, AccountCloner, AccountClonerError,
+    AccountClonerOutput, AccountClonerPermissions,
+    AccountClonerUnclonableReason, RemoteAccountClonerClient,
+    RemoteAccountClonerWorker,
 };
 use sleipnir_account_dumper::AccountDumperStub;
 use sleipnir_account_fetcher::AccountFetcherStub;
@@ -187,6 +188,7 @@ async fn test_clone_allow_feepayer_account_when_ephemeral() {
     );
     // Account(s) involved
     let feepayer_account = Pubkey::new_unique();
+    account_updates.set_first_subscribed_slot(feepayer_account, 41);
     account_fetcher.set_feepayer_account(feepayer_account, 42);
     // Run test
     let result = cloner.clone_account(&feepayer_account).await;
@@ -217,6 +219,7 @@ async fn test_clone_allow_undelegated_account_when_ephemeral() {
     );
     // Account(s) involved
     let undelegated_account = Pubkey::new_unique();
+    account_updates.set_first_subscribed_slot(undelegated_account, 41);
     account_fetcher.set_undelegated_account(undelegated_account, 42);
     // Run test
     let result = cloner.clone_account(&undelegated_account).await;
@@ -227,6 +230,40 @@ async fn test_clone_allow_undelegated_account_when_ephemeral() {
     assert!(
         account_dumper.was_dumped_as_undelegated_account(&undelegated_account)
     );
+    // Cleanup everything correctly
+    cancellation_token.cancel();
+    assert!(worker_handle.await.is_ok());
+}
+
+#[tokio::test]
+async fn test_clone_fails_stale_undelegated_account_when_ephemeral() {
+    // Stubs
+    let internal_account_provider = InternalAccountProviderStub::default();
+    let account_fetcher = AccountFetcherStub::default();
+    let account_updates = AccountUpdatesStub::default();
+    let account_dumper = AccountDumperStub::default();
+    // Create account cloner worker and client
+    let (cloner, cancellation_token, worker_handle) = setup_ephemeral(
+        internal_account_provider.clone(),
+        account_fetcher.clone(),
+        account_updates.clone(),
+        account_dumper.clone(),
+        None,
+    );
+    // Account(s) involved
+    let undelegated_account = Pubkey::new_unique();
+    account_updates.set_first_subscribed_slot(undelegated_account, 50); // Accounts subscribe is more recent than fetchable state
+    account_fetcher.set_undelegated_account(undelegated_account, 42);
+    // Run test
+    let result = cloner.clone_account(&undelegated_account).await;
+    // Check expected result
+    assert!(matches!(
+        result,
+        Err(AccountClonerError::FailedToFetchSatisfactorySlot)
+    ));
+    assert_eq!(account_fetcher.get_fetch_count(&undelegated_account), 5); // Must have retried
+    assert!(account_updates.has_account_monitoring(&undelegated_account));
+    assert!(account_dumper.was_untouched(&undelegated_account));
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());
@@ -249,6 +286,7 @@ async fn test_clone_allow_delegated_account_when_ephemeral() {
     );
     // Account(s) involved
     let delegated_account = Pubkey::new_unique();
+    account_updates.set_first_subscribed_slot(delegated_account, 41);
     account_fetcher.set_delegated_account(delegated_account, 42, 11);
     // Run test
     let result = cloner.clone_account(&delegated_account).await;
@@ -282,6 +320,10 @@ async fn test_clone_allow_program_accounts_when_ephemeral() {
     let program_data = get_program_data_address(&program_id);
     let program_anchor = get_pubkey_anchor_idl(&program_id).unwrap();
     let program_shank = get_pubkey_shank_idl(&program_id).unwrap();
+    account_updates.set_first_subscribed_slot(program_id, 41);
+    account_updates.set_first_subscribed_slot(program_data, 41);
+    account_updates.set_first_subscribed_slot(program_anchor, 41);
+    account_updates.set_first_subscribed_slot(program_shank, 41);
     account_fetcher.set_executable_account(program_id, 42);
     account_fetcher.set_undelegated_account(program_data, 42);
     account_fetcher.set_feepayer_account(program_anchor, 42); // The anchor IDL does not exist, so it should use shank
@@ -332,6 +374,9 @@ async fn test_clone_program_accounts_when_ephemeral_with_whitelist() {
         get_program_data_address(&unallowed_program_id);
     let unallowed_program_idl =
         get_pubkey_anchor_idl(&unallowed_program_id).unwrap();
+    account_updates.set_first_subscribed_slot(unallowed_program_id, 41);
+    account_updates.set_first_subscribed_slot(unallowed_program_data, 41);
+    account_updates.set_first_subscribed_slot(unallowed_program_idl, 41);
     account_fetcher.set_executable_account(unallowed_program_id, 42);
     account_fetcher.set_undelegated_account(unallowed_program_data, 42);
     account_fetcher.set_undelegated_account(unallowed_program_idl, 42);
@@ -358,6 +403,9 @@ async fn test_clone_program_accounts_when_ephemeral_with_whitelist() {
     let allowed_program_data = get_program_data_address(&allowed_program_id);
     let allowed_program_idl =
         get_pubkey_anchor_idl(&allowed_program_id).unwrap();
+    account_updates.set_first_subscribed_slot(allowed_program_id, 51);
+    account_updates.set_first_subscribed_slot(allowed_program_data, 51);
+    account_updates.set_first_subscribed_slot(allowed_program_idl, 51);
     account_fetcher.set_executable_account(allowed_program_id, 52);
     account_fetcher.set_undelegated_account(allowed_program_data, 52);
     account_fetcher.set_undelegated_account(allowed_program_idl, 52);
@@ -467,6 +515,7 @@ async fn test_clone_refuse_feepayer_account_when_programs_replica() {
     );
     // Account(s) involved
     let feepayer_account = Pubkey::new_unique();
+    account_updates.set_first_subscribed_slot(feepayer_account, 41);
     account_fetcher.set_feepayer_account(feepayer_account, 42);
     // Run test
     let result = cloner.clone_account(&feepayer_account).await;
@@ -503,6 +552,7 @@ async fn test_clone_refuse_undelegated_account_when_programs_replica() {
     );
     // Account(s) involved
     let undelegated_account = Pubkey::new_unique();
+    account_updates.set_first_subscribed_slot(undelegated_account, 41);
     account_fetcher.set_undelegated_account(undelegated_account, 42);
     // Run test
     let result = cloner.clone_account(&undelegated_account).await;
@@ -540,6 +590,7 @@ async fn test_clone_refuse_delegated_account_when_programs_replica() {
     );
     // Account(s) involved
     let delegated_account = Pubkey::new_unique();
+    account_updates.set_first_subscribed_slot(delegated_account, 41);
     account_fetcher.set_delegated_account(delegated_account, 42, 11);
     // Run test
     let result = cloner.clone_account(&delegated_account).await;
@@ -579,6 +630,10 @@ async fn test_clone_allow_program_accounts_when_programs_replica() {
     let program_data = get_program_data_address(&program_id);
     let program_anchor = get_pubkey_anchor_idl(&program_id).unwrap();
     let program_shank = get_pubkey_shank_idl(&program_id).unwrap();
+    account_updates.set_first_subscribed_slot(program_id, 41);
+    account_updates.set_first_subscribed_slot(program_data, 41);
+    account_updates.set_first_subscribed_slot(program_anchor, 41);
+    account_updates.set_first_subscribed_slot(program_shank, 41);
     account_fetcher.set_executable_account(program_id, 42);
     account_fetcher.set_undelegated_account(program_data, 42);
     account_fetcher.set_feepayer_account(program_anchor, 42); // The anchor IDL does not exist, so it should use shank
@@ -621,6 +676,7 @@ async fn test_clone_allow_undelegated_account_when_replica() {
     );
     // Account(s) involved
     let undelegated_account = Pubkey::new_unique();
+    account_updates.set_first_subscribed_slot(undelegated_account, 41);
     account_fetcher.set_undelegated_account(undelegated_account, 42);
     // Run test
     let result = cloner.clone_account(&undelegated_account).await;
@@ -653,6 +709,7 @@ async fn test_clone_allow_feepayer_account_when_replica() {
     );
     // Account(s) involved
     let feepayer_account = Pubkey::new_unique();
+    account_updates.set_first_subscribed_slot(feepayer_account, 41);
     account_fetcher.set_feepayer_account(feepayer_account, 42);
     // Run test
     let result = cloner.clone_account(&feepayer_account).await;
@@ -687,6 +744,11 @@ async fn test_clone_refuse_any_account_when_offline() {
     let program_id = Pubkey::new_unique();
     let program_data = get_program_data_address(&program_id);
     let program_idl = get_pubkey_anchor_idl(&program_id).unwrap();
+    account_updates.set_first_subscribed_slot(feepayer_account, 41);
+    account_updates.set_first_subscribed_slot(undelegated_account, 41);
+    account_updates.set_first_subscribed_slot(program_id, 41);
+    account_updates.set_first_subscribed_slot(program_data, 41);
+    account_updates.set_first_subscribed_slot(program_idl, 41);
     account_fetcher.set_feepayer_account(feepayer_account, 42);
     account_fetcher.set_undelegated_account(undelegated_account, 42);
     account_fetcher.set_executable_account(program_id, 42);
@@ -761,6 +823,9 @@ async fn test_clone_will_not_fetch_the_same_thing_multiple_times() {
     let program_id = Pubkey::new_unique();
     let program_data = get_program_data_address(&program_id);
     let program_idl = get_pubkey_anchor_idl(&program_id).unwrap();
+    account_updates.set_first_subscribed_slot(program_id, 41);
+    account_updates.set_first_subscribed_slot(program_data, 41);
+    account_updates.set_first_subscribed_slot(program_idl, 41);
     account_fetcher.set_executable_account(program_id, 42);
     account_fetcher.set_undelegated_account(program_data, 42);
     account_fetcher.set_undelegated_account(program_idl, 42);
@@ -806,6 +871,7 @@ async fn test_clone_properly_cached_undelegated_account_when_ephemeral() {
     );
     // Account(s) involved
     let undelegated_account = Pubkey::new_unique();
+    account_updates.set_first_subscribed_slot(undelegated_account, 41);
     account_fetcher.set_undelegated_account(undelegated_account, 42);
     // Run test (we clone the account for the first time)
     let result1 = cloner.clone_account(&undelegated_account).await;
@@ -826,7 +892,7 @@ async fn test_clone_properly_cached_undelegated_account_when_ephemeral() {
     assert!(account_updates.has_account_monitoring(&undelegated_account));
     assert!(account_dumper.was_untouched(&undelegated_account));
     // The account is now updated remotely
-    account_updates.set_known_update_slot(undelegated_account, 66);
+    account_updates.set_last_known_update_slot(undelegated_account, 66);
     // Run test (we re-clone the account and it should clear the cache and re-dump)
     let result3 = cloner.clone_account(&undelegated_account).await;
     // Check expected result3
@@ -859,10 +925,13 @@ async fn test_clone_properly_cached_program() {
     // Account(s) involved
     let program_id = Pubkey::new_unique();
     let program_data = get_program_data_address(&program_id);
-    let program_idl_pubkey = get_pubkey_anchor_idl(&program_id).unwrap();
+    let program_idl = get_pubkey_anchor_idl(&program_id).unwrap();
+    account_updates.set_first_subscribed_slot(program_id, 41);
+    account_updates.set_first_subscribed_slot(program_data, 41);
+    account_updates.set_first_subscribed_slot(program_idl, 41);
     account_fetcher.set_executable_account(program_id, 42);
     account_fetcher.set_undelegated_account(program_data, 42);
-    account_fetcher.set_undelegated_account(program_idl_pubkey, 42);
+    account_fetcher.set_undelegated_account(program_idl, 42);
     // Run test (we clone the account for the first time)
     let result1 = cloner.clone_account(&program_id).await;
     // Check expected result1
@@ -874,9 +943,9 @@ async fn test_clone_properly_cached_program() {
     assert_eq!(account_fetcher.get_fetch_count(&program_data), 1);
     assert!(!account_updates.has_account_monitoring(&program_data));
     assert!(account_dumper.was_dumped_as_program_data(&program_data));
-    assert_eq!(account_fetcher.get_fetch_count(&program_idl_pubkey), 1);
-    assert!(!account_updates.has_account_monitoring(&program_idl_pubkey));
-    assert!(account_dumper.was_dumped_as_program_idl(&program_idl_pubkey));
+    assert_eq!(account_fetcher.get_fetch_count(&program_idl), 1);
+    assert!(!account_updates.has_account_monitoring(&program_idl));
+    assert!(account_dumper.was_dumped_as_program_idl(&program_idl));
     // Clear dump history
     account_dumper.clear_history();
     // Run test (we re-clone the account and it should be in the cache)
@@ -889,11 +958,11 @@ async fn test_clone_properly_cached_program() {
     assert_eq!(account_fetcher.get_fetch_count(&program_data), 1);
     assert!(!account_updates.has_account_monitoring(&program_data));
     assert!(account_dumper.was_untouched(&program_data));
-    assert_eq!(account_fetcher.get_fetch_count(&program_idl_pubkey), 1);
-    assert!(!account_updates.has_account_monitoring(&program_idl_pubkey));
-    assert!(account_dumper.was_untouched(&program_idl_pubkey));
+    assert_eq!(account_fetcher.get_fetch_count(&program_idl), 1);
+    assert!(!account_updates.has_account_monitoring(&program_idl));
+    assert!(account_dumper.was_untouched(&program_idl));
     // The account is now updated remotely
-    account_updates.set_known_update_slot(program_id, 66);
+    account_updates.set_last_known_update_slot(program_id, 66);
     // Run test (we re-clone the account and it should clear the cache and re-dump)
     let result3 = cloner.clone_account(&program_id).await;
     // Check expected result3
@@ -904,9 +973,9 @@ async fn test_clone_properly_cached_program() {
     assert_eq!(account_fetcher.get_fetch_count(&program_data), 2);
     assert!(!account_updates.has_account_monitoring(&program_data));
     assert!(account_dumper.was_dumped_as_program_data(&program_data));
-    assert_eq!(account_fetcher.get_fetch_count(&program_idl_pubkey), 2);
-    assert!(!account_updates.has_account_monitoring(&program_idl_pubkey));
-    assert!(account_dumper.was_dumped_as_program_idl(&program_idl_pubkey));
+    assert_eq!(account_fetcher.get_fetch_count(&program_idl), 2);
+    assert!(!account_updates.has_account_monitoring(&program_idl));
+    assert!(account_dumper.was_dumped_as_program_idl(&program_idl));
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());
@@ -929,6 +998,7 @@ async fn test_clone_properly_cached_delegated_account_that_changes_state() {
     );
     // Account(s) involved
     let undelegated_account = Pubkey::new_unique();
+    account_updates.set_first_subscribed_slot(undelegated_account, 41);
     account_fetcher.set_delegated_account(undelegated_account, 42, 11);
     // Run test (we clone the account for the first time as delegated)
     let result1 = cloner.clone_account(&undelegated_account).await;
@@ -949,7 +1019,7 @@ async fn test_clone_properly_cached_delegated_account_that_changes_state() {
     assert!(account_updates.has_account_monitoring(&undelegated_account));
     assert!(account_dumper.was_untouched(&undelegated_account));
     // The account is now updated remotely (but its delegation status didnt change)
-    account_updates.set_known_update_slot(undelegated_account, 66);
+    account_updates.set_last_known_update_slot(undelegated_account, 66);
     // Run test (we MUST NOT re-dump)
     let result3 = cloner.clone_account(&undelegated_account).await;
     // Check expected result3
@@ -958,7 +1028,7 @@ async fn test_clone_properly_cached_delegated_account_that_changes_state() {
     assert!(account_updates.has_account_monitoring(&undelegated_account));
     assert!(account_dumper.was_untouched(&undelegated_account));
     // The account is now updated remotely (AND IT BECOMES UNDELEGATED)
-    account_updates.set_known_update_slot(undelegated_account, 77);
+    account_updates.set_last_known_update_slot(undelegated_account, 77);
     account_fetcher.set_undelegated_account(undelegated_account, 77);
     // Run test (now we MUST RE-DUMP as an undelegated account)
     let result4 = cloner.clone_account(&undelegated_account).await;
@@ -972,7 +1042,7 @@ async fn test_clone_properly_cached_delegated_account_that_changes_state() {
     // Clear dump history
     account_dumper.clear_history();
     // The account is now updated remotely (AND IT BECOMES RE-DELEGATED)
-    account_updates.set_known_update_slot(undelegated_account, 88);
+    account_updates.set_last_known_update_slot(undelegated_account, 88);
     account_fetcher.set_delegated_account(undelegated_account, 88, 88);
     // Run test (now we MUST RE-DUMP as an delegated account)
     let result5 = cloner.clone_account(&undelegated_account).await;
@@ -986,7 +1056,7 @@ async fn test_clone_properly_cached_delegated_account_that_changes_state() {
     // Clear dump history
     account_dumper.clear_history();
     // The account is now re-delegated from a different slot
-    account_updates.set_known_update_slot(undelegated_account, 99);
+    account_updates.set_last_known_update_slot(undelegated_account, 99);
     account_fetcher.set_delegated_account(undelegated_account, 99, 99);
     // Run test (now we MUST RE-DUMP as an delegated account because the delegation_slot changed, even if delegation status DIDNT)
     let result6 = cloner.clone_account(&undelegated_account).await;
@@ -1019,6 +1089,7 @@ async fn test_clone_properly_upgrading_downgrading_when_created_and_deleted() {
     );
     // Account(s) involved
     let undelegated_account = Pubkey::new_unique();
+    account_updates.set_first_subscribed_slot(undelegated_account, 41);
     account_fetcher.set_feepayer_account(undelegated_account, 42);
     // Run test (we clone the account for the first time)
     let result1 = cloner.clone_account(&undelegated_account).await;
@@ -1038,7 +1109,7 @@ async fn test_clone_properly_upgrading_downgrading_when_created_and_deleted() {
     assert!(account_dumper.was_untouched(&undelegated_account));
     // The account is now updated remotely, as it becomes an undelegated account (not wallet anymore)
     account_fetcher.set_undelegated_account(undelegated_account, 66);
-    account_updates.set_known_update_slot(undelegated_account, 66);
+    account_updates.set_last_known_update_slot(undelegated_account, 66);
     // Run test (we re-clone the account and it should clear the cache and re-dump)
     let result3 = cloner.clone_account(&undelegated_account).await;
     // Check expected result3
@@ -1059,7 +1130,7 @@ async fn test_clone_properly_upgrading_downgrading_when_created_and_deleted() {
     assert!(account_dumper.was_untouched(&undelegated_account));
     // The account is now removed/closed remotely
     account_fetcher.set_feepayer_account(undelegated_account, 77);
-    account_updates.set_known_update_slot(undelegated_account, 77);
+    account_updates.set_last_known_update_slot(undelegated_account, 77);
     // Run test (we re-clone the account and it should clear the cache and re-dump)
     let result5 = cloner.clone_account(&undelegated_account).await;
     // Check expected result5
