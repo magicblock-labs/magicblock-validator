@@ -281,3 +281,23 @@ pub fn wait_for_ledger_persist(validator: &mut Child) -> Slot {
     let slot = expect!(ctx.wait_for_next_slot_ephem(), validator);
     slot
 }
+
+// -----------------
+// Scheduled Commits
+// -----------------
+pub fn assert_counter_commits_on_chain(
+    ctx: &IntegrationTestContext,
+    validator: &mut Child,
+    payer: &Pubkey,
+    expected_count: usize,
+) {
+    // Wait long enough for scheduled commits to have been handled
+    expect!(ctx.wait_for_next_slot_ephem(), validator);
+    expect!(ctx.wait_for_next_slot_ephem(), validator);
+    expect!(ctx.wait_for_next_slot_ephem(), validator);
+
+    let (pda, _) = FlexiCounter::pda(payer);
+    let stats =
+        expect!(ctx.get_signaturestats_for_address_chain(&pda), validator);
+    assert_eq!(stats.len(), expected_count);
+}

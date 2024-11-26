@@ -2,10 +2,9 @@ use std::{path::Path, process::Child};
 
 use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};
 use program_flexi_counter::instruction::{
-    create_add_and_schedule_commit_ix, create_add_ix, create_mul_ix,
+    create_add_and_schedule_commit_ix, create_mul_ix,
 };
 use program_flexi_counter::{
-    delegation_program_id,
     instruction::{create_delegate_ix, create_init_ix},
     state::FlexiCounter,
 };
@@ -17,8 +16,8 @@ use solana_sdk::{
 use test_ledger_restore::{
     assert_counter_commits_on_chain, confirm_tx_with_payer_chain,
     confirm_tx_with_payer_ephem, fetch_counter_chain, fetch_counter_ephem,
-    fetch_counter_owner_chain, setup_validator_with_local_remote,
-    wait_for_ledger_persist, FLEXI_COUNTER_ID, TMP_DIR_LEDGER,
+    setup_validator_with_local_remote, wait_for_ledger_persist,
+    FLEXI_COUNTER_ID, TMP_DIR_LEDGER,
 };
 
 const COUNTER: &str = "Counter of Payer";
@@ -33,12 +32,16 @@ fn get_programs() -> Vec<ProgramConfig> {
     }]
 }
 
-// In this test we update a delegated account in the ephemeral and then commit it.
+// In this test we update a delegated account in the ephemeral, commit it and
+// then update it again.
 // We then restore the ledger and verify that the committed account available
-// and that the commit was not run during ledger processing.
+// with the last update and that the commit was not run during ledger processing.
+//
+// NOTE: that most of the setup is similar to 07_commit_delegated_account.rs
+// except that we removed the intermediate checks.
 
 #[test]
-fn restore_ledger_containing_delegated_and_committed_account() {
+fn restore_ledger_committed_and_updated_account() {
     let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
     let payer = payer_keypair();
 
@@ -61,60 +64,22 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
         validator
     );
 
-    {
-        // Create and send init counter instruction on chain
-        let ix = create_init_ix(payer.pubkey(), COUNTER.to_string());
-        confirm_tx_with_payer_chain(ix, payer, &mut validator);
-        let counter = fetch_counter_chain(&payer.pubkey(), &mut validator);
-        assert_eq!(
-            counter,
-            FlexiCounter {
-                count: 0,
-                updates: 0,
-                label: COUNTER.to_string()
-            }
-        )
-    }
-    {
-        // Delegate counter to ephemeral
-        let ix = create_delegate_ix(payer.pubkey());
-        confirm_tx_with_payer_chain(ix, payer, &mut validator);
-        let owner = fetch_counter_owner_chain(&payer.pubkey(), &mut validator);
-        assert_eq!(owner, delegation_program_id());
-    }
+    // Create and send init counter instruction on chain
+    confirm_tx_with_payer_chain(
+        create_init_ix(payer.pubkey(), COUNTER.to_string()),
+        payer,
+        &mut validator,
+    );
 
-    {
-        // Increment counter in ephemeral
-        let ix = create_add_ix(payer.pubkey(), 3);
-        confirm_tx_with_payer_ephem(ix, payer, &mut validator);
-        let counter = fetch_counter_ephem(&payer.pubkey(), &mut validator);
-        assert_eq!(
-            counter,
-            FlexiCounter {
-                count: 3,
-                updates: 1,
-                label: COUNTER.to_string()
-            }
-        )
-    }
+    // Delegate counter to ephemeral
+    confirm_tx_with_payer_chain(
+        create_delegate_ix(payer.pubkey()),
+        payer,
+        &mut validator,
+    );
 
+    // Increment counter in ephemeral and commit it
     {
-        // Multiply counter in ephemeral
-        let ix = create_mul_ix(payer.pubkey(), 2);
-        confirm_tx_with_payer_ephem(ix, payer, &mut validator);
-        let counter = fetch_counter_ephem(&payer.pubkey(), &mut validator);
-        assert_eq!(
-            counter,
-            FlexiCounter {
-                count: 6,
-                updates: 2,
-                label: COUNTER.to_string()
-            }
-        )
-    }
-
-    {
-        // Increment counter in ephemeral again and commit it
         wait_for_ledger_persist(&mut validator);
 
         let ix = create_add_and_schedule_commit_ix(payer.pubkey(), 4, false);
@@ -147,8 +112,8 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
         assert_eq!(
             counter_ephem,
             &FlexiCounter {
-                count: 10,
-                updates: 3,
+                count: 4,
+                updates: 1,
                 label: COUNTER.to_string()
             }
         );
@@ -156,18 +121,46 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
         assert_eq!(
             counter_chain,
             &FlexiCounter {
-                count: 10,
-                updates: 3,
+                count: 4,
+                updates: 1,
                 label: COUNTER.to_string()
             }
         );
     }
 
-    // Ensure that at this point we only have three chain transactions
-    // for the counter, showing that the commits didn't get sent to chain again:
-    // - init
-    // - delegate
-    // - commit (original from while validator was running)
+    // Multiply counter in ephemeral (after we committed it) and verify
+    // it is updated in the ephemeral only
+    {
+        confirm_tx_with_payer_ephem(
+            create_mul_ix(payer.pubkey(), 2),
+            payer,
+            &mut validator,
+        );
+
+        let counter_ephem =
+            fetch_counter_ephem(&payer.pubkey(), &mut validator);
+        let counter_chain =
+            fetch_counter_chain(&payer.pubkey(), &mut validator);
+
+        assert_eq!(
+            counter_ephem,
+            FlexiCounter {
+                count: 8,
+                updates: 2,
+                label: COUNTER.to_string()
+            }
+        );
+
+        assert_eq!(
+            counter_chain,
+            FlexiCounter {
+                count: 4,
+                updates: 1,
+                label: COUNTER.to_string()
+            }
+        );
+    }
+
     assert_counter_commits_on_chain(&ctx, &mut validator, &payer.pubkey(), 3);
 
     let slot = wait_for_ledger_persist(&mut validator);
@@ -181,27 +174,24 @@ fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
         setup_validator_with_local_remote(ledger_path, Some(programs), false);
 
     let counter_ephem = fetch_counter_ephem(payer, &mut validator);
+    let counter_chain = fetch_counter_chain(payer, &mut validator);
     assert_eq!(
         counter_ephem,
         FlexiCounter {
-            count: 10,
-            updates: 3,
+            count: 8,
+            updates: 2,
             label: COUNTER.to_string()
         }
     );
-
-    let counter_chain = fetch_counter_chain(payer, &mut validator);
     assert_eq!(
         counter_chain,
         FlexiCounter {
-            count: 10,
-            updates: 3,
+            count: 4,
+            updates: 1,
             label: COUNTER.to_string()
         }
     );
 
-    // Ensure that at this point we still only have three chain transactions
-    // for the counter, showing that the commits didn't get sent to chain again.
     assert_counter_commits_on_chain(&ctx, &mut validator, payer, 3);
 
     validator
