@@ -6,9 +6,10 @@ use integration_test_tools::{
     },
 };
 use std::{
+    error::Error,
     io,
     path::Path,
-    process::{self, Child},
+    process::{self, Child, Output},
 };
 use teepee::Teepee;
 
@@ -26,193 +27,24 @@ fn cleanup(ephem_validator: &mut Child, devnet_validator: &mut Child) {
 pub fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
 
-    let restore_ledger_output = {
-        eprintln!("======== RUNNING RESTORE LEDGER TESTS ========");
-        // The ledger tests manage their own ephem validator so all we start up here
-        // is devnet
-        let mut devnet_validator = match start_validator(
-            "restore-ledger-conf.devnet.toml",
-            ValidatorCluster::Chain,
-        ) {
-            Some(validator) => validator,
-            None => {
-                panic!("Failed to start devnet validator properly");
-            }
-        };
-        let test_restore_ledger_dir =
-            format!("{}/../{}", manifest_dir.clone(), "test-ledger-restore");
-        eprintln!(
-            "Running restore ledger tests in {}",
-            test_restore_ledger_dir
-        );
-        let output = match run_test(test_restore_ledger_dir, Default::default())
-        {
-            Ok(output) => output,
-            Err(err) => {
-                eprintln!("Failed to run restore ledger tests: {:?}", err);
-                cleanup_validator(&mut devnet_validator, "devnet");
-                return;
-            }
-        };
-        cleanup_validator(&mut devnet_validator, "devnet");
-        output
+    let Ok((security_output, scenarios_output)) =
+        run_schedule_commit_tests(&manifest_dir)
+    else {
+        return;
     };
 
-    // -----------------
-    // Commons Scenarios and Security Tests
-    // -----------------
-    // These share a common config that includes the program to schedule commits
-    // Thus they can run against the same validator instances
-    let (security_output, scenarios_output) = {
-        eprintln!("======== Starting DEVNET Validator for Scenarios + Security ========");
-
-        // Start validators via `cargo run --release  -- <config>
-        let mut devnet_validator = match start_validator(
-            "schedulecommit-conf.devnet.toml",
-            ValidatorCluster::Chain,
-        ) {
-            Some(validator) => validator,
-            None => {
-                panic!("Failed to start devnet validator properly");
-            }
-        };
-
-        eprintln!("======== Starting EPHEM Validator for Scenarios + Security ========");
-        let mut ephem_validator = match start_validator(
-            "schedulecommit-conf.ephem.toml",
-            ValidatorCluster::Ephem,
-        ) {
-            Some(validator) => validator,
-            None => {
-                devnet_validator
-                    .kill()
-                    .expect("Failed to kill devnet validator");
-                panic!("Failed to start ephemeral validator properly");
-            }
-        };
-
-        eprintln!("======== RUNNING SECURITY TESTS ========");
-        let test_security_dir = format!(
-            "{}/../{}",
-            manifest_dir.clone(),
-            "schedulecommit/test-security"
-        );
-        eprintln!("Running security tests in {}", test_security_dir);
-        let test_security_output =
-            match run_test(test_security_dir, Default::default()) {
-                Ok(output) => output,
-                Err(err) => {
-                    eprintln!("Failed to run security: {:?}", err);
-                    cleanup(&mut ephem_validator, &mut devnet_validator);
-                    return;
-                }
-            };
-
-        eprintln!("======== RUNNING SCENARIOS TESTS ========");
-        let test_scenarios_dir = format!(
-            "{}/../{}",
-            manifest_dir.clone(),
-            "schedulecommit/test-scenarios"
-        );
-        let test_scenarios_output =
-            match run_test(test_scenarios_dir, Default::default()) {
-                Ok(output) => output,
-                Err(err) => {
-                    eprintln!("Failed to run scenarios: {:?}", err);
-                    cleanup(&mut ephem_validator, &mut devnet_validator);
-                    return;
-                }
-            };
-
-        cleanup(&mut ephem_validator, &mut devnet_validator);
-        (test_security_output, test_scenarios_output)
+    let Ok(issues_frequent_commits_output) =
+        run_issues_frequent_commmits_tests(&manifest_dir)
+    else {
+        return;
+    };
+    let Ok(cloning_output) = run_cloning_tests(&manifest_dir) else {
+        return;
     };
 
-    // The following tests need custom validator setups.
-    // Therefore, we start the validators again with custom configs for those tests.
-
-    // -----------------
-    // Issues: Frequent Commits
-    // -----------------
-    let issues_frequent_commits_output = {
-        eprintln!("======== RUNNING ISSUES TESTS - Frequent Commits ========");
-        let mut devnet_validator = match start_validator(
-            "schedulecommit-conf.devnet.toml",
-            ValidatorCluster::Chain,
-        ) {
-            Some(validator) => validator,
-            None => {
-                panic!("Failed to start devnet validator properly");
-            }
-        };
-        let mut ephem_validator = match start_validator(
-            "schedulecommit-conf.ephem.frequent-commits.toml",
-            ValidatorCluster::Ephem,
-        ) {
-            Some(validator) => validator,
-            None => {
-                devnet_validator
-                    .kill()
-                    .expect("Failed to kill devnet validator");
-                panic!("Failed to start ephemeral validator properly");
-            }
-        };
-        let test_issues_dir =
-            format!("{}/../{}", manifest_dir.clone(), "test-issues");
-        let test_output = match run_test(
-            test_issues_dir,
-            RunTestConfig {
-                package: Some("test-issues"),
-                test: Some("test_frequent_commits_do_not_run_when_no_accounts_need_to_be_committed"),
-            },
-        ) {
-            Ok(output) => output,
-            Err(err) => {
-                eprintln!("Failed to run issues: {:?}", err);
-                cleanup(&mut ephem_validator, &mut devnet_validator);
-                return;
-            }
-        };
-        cleanup(&mut ephem_validator, &mut devnet_validator);
-        test_output
-    };
-
-    let cloning_output = {
-        eprintln!("======== RUNNING CLONING TESTS ========");
-        let mut devnet_validator = match start_validator(
-            "cloning-conf.devnet.toml",
-            ValidatorCluster::Chain,
-        ) {
-            Some(validator) => validator,
-            None => {
-                panic!("Failed to start devnet validator properly");
-            }
-        };
-        let mut ephem_validator = match start_validator(
-            "cloning-conf.ephem.toml",
-            ValidatorCluster::Ephem,
-        ) {
-            Some(validator) => validator,
-            None => {
-                devnet_validator
-                    .kill()
-                    .expect("Failed to kill devnet validator");
-                panic!("Failed to start ephemeral validator properly");
-            }
-        };
-        let test_cloning_dir =
-            format!("{}/../{}", manifest_dir.clone(), "test-cloning");
-        eprintln!("Running cloning tests in {}", test_cloning_dir);
-        let output = match run_test(test_cloning_dir, Default::default()) {
-            Ok(output) => output,
-            Err(err) => {
-                eprintln!("Failed to run cloning tests: {:?}", err);
-                cleanup(&mut ephem_validator, &mut devnet_validator);
-                return;
-            }
-        };
-        cleanup(&mut ephem_validator, &mut devnet_validator);
-        output
+    let Ok(restore_ledger_output) = run_restore_ledger_tests(&manifest_dir)
+    else {
+        return;
     };
 
     // Assert that all tests passed
@@ -223,6 +55,193 @@ pub fn main() {
     assert_cargo_tests_passed(restore_ledger_output);
 }
 
+// -----------------
+// Tests
+// -----------------
+fn run_restore_ledger_tests(
+    manifest_dir: &str,
+) -> Result<Output, Box<dyn Error>> {
+    eprintln!("======== RUNNING RESTORE LEDGER TESTS ========");
+    // The ledger tests manage their own ephem validator so all we start up here
+    // is devnet
+    let mut devnet_validator = match start_validator(
+        "restore-ledger-conf.devnet.toml",
+        ValidatorCluster::Chain,
+    ) {
+        Some(validator) => validator,
+        None => {
+            panic!("Failed to start devnet validator properly");
+        }
+    };
+    let test_restore_ledger_dir =
+        format!("{}/../{}", manifest_dir, "test-ledger-restore");
+    eprintln!(
+        "Running restore ledger tests in {}",
+        test_restore_ledger_dir
+    );
+    let output = match run_test(test_restore_ledger_dir, Default::default()) {
+        Ok(output) => output,
+        Err(err) => {
+            eprintln!("Failed to run restore ledger tests: {:?}", err);
+            cleanup_validator(&mut devnet_validator, "devnet");
+            return Err(err.into());
+        }
+    };
+    cleanup_validator(&mut devnet_validator, "devnet");
+    Ok(output)
+}
+
+fn run_schedule_commit_tests(
+    manifest_dir: &str,
+) -> Result<(Output, Output), Box<dyn Error>> {
+    eprintln!(
+        "======== Starting DEVNET Validator for Scenarios + Security ========"
+    );
+
+    // Start validators via `cargo run --release  -- <config>
+    let mut devnet_validator = match start_validator(
+        "schedulecommit-conf.devnet.toml",
+        ValidatorCluster::Chain,
+    ) {
+        Some(validator) => validator,
+        None => {
+            panic!("Failed to start devnet validator properly");
+        }
+    };
+
+    // These share a common config that includes the program to schedule commits
+    // Thus they can run against the same validator instances
+    eprintln!(
+        "======== Starting EPHEM Validator for Scenarios + Security ========"
+    );
+    let mut ephem_validator = match start_validator(
+        "schedulecommit-conf.ephem.toml",
+        ValidatorCluster::Ephem,
+    ) {
+        Some(validator) => validator,
+        None => {
+            devnet_validator
+                .kill()
+                .expect("Failed to kill devnet validator");
+            panic!("Failed to start ephemeral validator properly");
+        }
+    };
+
+    eprintln!("======== RUNNING SECURITY TESTS ========");
+    let test_security_dir =
+        format!("{}/../{}", manifest_dir, "schedulecommit/test-security");
+    eprintln!("Running security tests in {}", test_security_dir);
+    let test_security_output =
+        match run_test(test_security_dir, Default::default()) {
+            Ok(output) => output,
+            Err(err) => {
+                eprintln!("Failed to run security: {:?}", err);
+                cleanup(&mut ephem_validator, &mut devnet_validator);
+                return Err(err.into());
+            }
+        };
+
+    eprintln!("======== RUNNING SCENARIOS TESTS ========");
+    let test_scenarios_dir =
+        format!("{}/../{}", manifest_dir, "schedulecommit/test-scenarios");
+    let test_scenarios_output =
+        match run_test(test_scenarios_dir, Default::default()) {
+            Ok(output) => output,
+            Err(err) => {
+                eprintln!("Failed to run scenarios: {:?}", err);
+                cleanup(&mut ephem_validator, &mut devnet_validator);
+                return Err(err.into());
+            }
+        };
+
+    cleanup(&mut ephem_validator, &mut devnet_validator);
+    Ok((test_security_output, test_scenarios_output))
+}
+
+fn run_issues_frequent_commmits_tests(
+    manifest_dir: &str,
+) -> Result<Output, Box<dyn Error>> {
+    eprintln!("======== RUNNING ISSUES TESTS - Frequent Commits ========");
+    let mut devnet_validator = match start_validator(
+        "schedulecommit-conf.devnet.toml",
+        ValidatorCluster::Chain,
+    ) {
+        Some(validator) => validator,
+        None => {
+            panic!("Failed to start devnet validator properly");
+        }
+    };
+    let mut ephem_validator = match start_validator(
+        "schedulecommit-conf.ephem.frequent-commits.toml",
+        ValidatorCluster::Ephem,
+    ) {
+        Some(validator) => validator,
+        None => {
+            devnet_validator
+                .kill()
+                .expect("Failed to kill devnet validator");
+            panic!("Failed to start ephemeral validator properly");
+        }
+    };
+    let test_issues_dir = format!("{}/../{}", manifest_dir, "test-issues");
+    let test_output = match run_test(
+            test_issues_dir,
+            RunTestConfig {
+                package: Some("test-issues"),
+                test: Some("test_frequent_commits_do_not_run_when_no_accounts_need_to_be_committed"),
+            },
+        ) {
+            Ok(output) => output,
+            Err(err) => {
+                eprintln!("Failed to run issues: {:?}", err);
+                cleanup(&mut ephem_validator, &mut devnet_validator);
+            return Err(err.into());
+            }
+        };
+    cleanup(&mut ephem_validator, &mut devnet_validator);
+    Ok(test_output)
+}
+
+fn run_cloning_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
+    eprintln!("======== RUNNING CLONING TESTS ========");
+    let mut devnet_validator = match start_validator(
+        "cloning-conf.devnet.toml",
+        ValidatorCluster::Chain,
+    ) {
+        Some(validator) => validator,
+        None => {
+            panic!("Failed to start devnet validator properly");
+        }
+    };
+    let mut ephem_validator = match start_validator(
+        "cloning-conf.ephem.toml",
+        ValidatorCluster::Ephem,
+    ) {
+        Some(validator) => validator,
+        None => {
+            devnet_validator
+                .kill()
+                .expect("Failed to kill devnet validator");
+            panic!("Failed to start ephemeral validator properly");
+        }
+    };
+    let test_cloning_dir = format!("{}/../{}", manifest_dir, "test-cloning");
+    eprintln!("Running cloning tests in {}", test_cloning_dir);
+    let output = match run_test(test_cloning_dir, Default::default()) {
+        Ok(output) => output,
+        Err(err) => {
+            eprintln!("Failed to run cloning tests: {:?}", err);
+            cleanup(&mut ephem_validator, &mut devnet_validator);
+            return Err(err.into());
+        }
+    };
+    cleanup(&mut ephem_validator, &mut devnet_validator);
+    Ok(output)
+}
+
+// -----------------
+// Configs/Checks
+// -----------------
 fn assert_cargo_tests_passed(output: process::Output) {
     if !output.status.success() {
         eprintln!("cargo test");
