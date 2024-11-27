@@ -1,3 +1,4 @@
+use cleanass::assert_eq;
 use std::{path::Path, process::Child};
 
 use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};
@@ -11,8 +12,9 @@ use solana_sdk::{
     signer::Signer,
 };
 use test_ledger_restore::{
-    confirm_tx_with_payer_ephem, fetch_counter_ephem, setup_offline_validator,
-    wait_for_ledger_persist, FLEXI_COUNTER_ID, TMP_DIR_LEDGER,
+    cleanup, confirm_tx_with_payer_ephem, fetch_counter_ephem,
+    setup_offline_validator, wait_for_ledger_persist, FLEXI_COUNTER_ID,
+    TMP_DIR_LEDGER,
 };
 
 const SLOT_MS: u64 = 150;
@@ -115,8 +117,9 @@ fn write(
                 count: 0,
                 updates: 0,
                 label: COUNTER1.to_string()
-            }
-        )
+            },
+            cleanup(&mut validator)
+        );
     }
 
     {
@@ -134,15 +137,15 @@ fn write(
         confirm_tx_with_payer_ephem(ix_mul, payer1, &mut validator);
 
         let counter = fetch_counter_ephem(&payer1.pubkey(), &mut validator);
-        eprintln!("{:#?}", counter);
         assert_eq!(
             counter,
             FlexiCounter {
                 count: 10,
                 updates: 2,
                 label: COUNTER1.to_string()
-            }
-        )
+            },
+            cleanup(&mut validator)
+        );
     }
 
     {
@@ -160,8 +163,9 @@ fn write(
                 count: 0,
                 updates: 0,
                 label: COUNTER2.to_string()
-            }
-        )
+            },
+            cleanup(&mut validator)
+        );
     }
 
     {
@@ -179,8 +183,9 @@ fn write(
                 count: 9,
                 updates: 1,
                 label: COUNTER2.to_string()
-            }
-        )
+            },
+            cleanup(&mut validator)
+        );
     }
 
     {
@@ -198,8 +203,9 @@ fn write(
                 count: 13,
                 updates: 3,
                 label: COUNTER1.to_string()
-            }
-        )
+            },
+            cleanup(&mut validator)
+        );
     }
 
     {
@@ -217,8 +223,9 @@ fn write(
                 count: 27,
                 updates: 2,
                 label: COUNTER2.to_string()
-            }
-        )
+            },
+            cleanup(&mut validator)
+        );
     }
 
     let slot = wait_for_ledger_persist(&mut validator);
@@ -242,7 +249,8 @@ fn read(ledger_path: &Path, payer1: &Pubkey, payer2: &Pubkey) -> Child {
             count: 13,
             updates: 3,
             label: "Counter of Payer 1".to_string(),
-        }
+        },
+        cleanup(&mut validator)
     );
 
     let counter2_decoded = fetch_counter_ephem(payer2, &mut validator);
@@ -252,7 +260,8 @@ fn read(ledger_path: &Path, payer1: &Pubkey, payer2: &Pubkey) -> Child {
             count: 27,
             updates: 2,
             label: "Counter of Payer 2".to_string(),
-        }
+        },
+        cleanup(&mut validator)
     );
 
     validator

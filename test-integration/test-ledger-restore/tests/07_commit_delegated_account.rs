@@ -1,3 +1,4 @@
+use cleanass::assert_eq;
 use std::{path::Path, process::Child};
 
 use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};
@@ -14,7 +15,7 @@ use solana_sdk::{
     signer::Signer,
 };
 use test_ledger_restore::{
-    assert_counter_commits_on_chain, confirm_tx_with_payer_chain,
+    assert_counter_commits_on_chain, cleanup, confirm_tx_with_payer_chain,
     confirm_tx_with_payer_ephem, fetch_counter_chain, fetch_counter_ephem,
     fetch_counter_owner_chain, get_programs_with_flexi_counter,
     setup_validator_with_local_remote, wait_for_ledger_persist, TMP_DIR_LEDGER,
@@ -64,15 +65,16 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
                 count: 0,
                 updates: 0,
                 label: COUNTER.to_string()
-            }
-        )
+            },
+            cleanup(&mut validator)
+        );
     }
     {
         // Delegate counter to ephemeral
         let ix = create_delegate_ix(payer.pubkey());
         confirm_tx_with_payer_chain(ix, payer, &mut validator);
         let owner = fetch_counter_owner_chain(&payer.pubkey(), &mut validator);
-        assert_eq!(owner, delegation_program_id());
+        assert_eq!(owner, delegation_program_id(), cleanup(&mut validator));
     }
 
     {
@@ -86,8 +88,9 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
                 count: 3,
                 updates: 1,
                 label: COUNTER.to_string()
-            }
-        )
+            },
+            cleanup(&mut validator)
+        );
     }
 
     {
@@ -101,8 +104,9 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
                 count: 6,
                 updates: 2,
                 label: COUNTER.to_string()
-            }
-        )
+            },
+            cleanup(&mut validator)
+        );
     }
 
     {
@@ -112,9 +116,10 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
         let ix = create_add_and_schedule_commit_ix(payer.pubkey(), 4, false);
         let sig = confirm_tx_with_payer_ephem(ix, payer, &mut validator);
 
-        let res = ctx
-            .fetch_schedule_commit_result::<FlexiCounter>(sig)
-            .unwrap();
+        let res = expect!(
+            ctx.fetch_schedule_commit_result::<FlexiCounter>(sig),
+            validator
+        );
         expect!(res.confirm_commit_transactions_on_chain(&ctx), validator);
 
         let counter = expect!(
@@ -142,7 +147,8 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
                 count: 10,
                 updates: 3,
                 label: COUNTER.to_string()
-            }
+            },
+            cleanup(&mut validator)
         );
 
         assert_eq!(
@@ -151,7 +157,8 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
                 count: 10,
                 updates: 3,
                 label: COUNTER.to_string()
-            }
+            },
+            cleanup(&mut validator)
         );
     }
 
@@ -179,7 +186,8 @@ fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
             count: 10,
             updates: 3,
             label: COUNTER.to_string()
-        }
+        },
+        cleanup(&mut validator)
     );
 
     let counter_chain = fetch_counter_chain(payer, &mut validator);
@@ -189,7 +197,8 @@ fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
             count: 10,
             updates: 3,
             label: COUNTER.to_string()
-        }
+        },
+        cleanup(&mut validator)
     );
 
     // Ensure that at this point we still only have three chain transactions

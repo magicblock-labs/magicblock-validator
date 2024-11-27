@@ -727,6 +727,10 @@ dependencies = [
 ]
 
 [[package]]
+name = "cleanass"
+version = "0.0.1"
+
+[[package]]
 name = "colorchoice"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4151,6 +4155,7 @@ name = "test-ledger-restore"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "cleanass",
  "integration-test-tools",
  "program-flexi-counter",
  "sleipnir-config",

@@ -1,3 +1,4 @@
+use cleanass::assert_eq;
 use std::{path::Path, process::Child};
 
 use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};
@@ -13,7 +14,7 @@ use solana_sdk::{
     signer::Signer,
 };
 use test_ledger_restore::{
-    confirm_tx_with_payer_chain, confirm_tx_with_payer_ephem,
+    cleanup, confirm_tx_with_payer_chain, confirm_tx_with_payer_ephem,
     fetch_counter_chain, fetch_counter_ephem, fetch_counter_owner_chain,
     setup_validator_with_local_remote, wait_for_ledger_persist,
     FLEXI_COUNTER_ID, TMP_DIR_LEDGER,
@@ -68,15 +69,16 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
                 count: 0,
                 updates: 0,
                 label: COUNTER.to_string()
-            }
-        )
+            },
+            cleanup(&mut validator)
+        );
     }
     {
         // Delegate counter to ephemeral
         let ix = create_delegate_ix(payer.pubkey());
         confirm_tx_with_payer_chain(ix, payer, &mut validator);
         let owner = fetch_counter_owner_chain(&payer.pubkey(), &mut validator);
-        assert_eq!(owner, delegation_program_id());
+        assert_eq!(owner, delegation_program_id(), cleanup(&mut validator));
     }
 
     {
@@ -90,8 +92,9 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
                 count: 3,
                 updates: 1,
                 label: COUNTER.to_string()
-            }
-        )
+            },
+            cleanup(&mut validator)
+        );
     }
 
     let slot = wait_for_ledger_persist(&mut validator);
@@ -111,7 +114,8 @@ fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
             count: 3,
             updates: 1,
             label: COUNTER.to_string()
-        }
+        },
+        cleanup(&mut validator)
     );
 
     validator

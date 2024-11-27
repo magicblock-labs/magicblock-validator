@@ -162,6 +162,12 @@ pub fn setup_validator_with_local_remote(
     (default_tmpdir_config, validator, ctx)
 }
 
+pub fn cleanup(validator: &mut Child) {
+    let _ = validator.kill().inspect_err(|e| {
+        eprintln!("ERR: Failed to kill validator: {:?}", e);
+    });
+}
+
 // -----------------
 // Transactions and Account Updates
 // -----------------

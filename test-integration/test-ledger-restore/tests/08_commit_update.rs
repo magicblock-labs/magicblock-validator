@@ -1,3 +1,4 @@
+use cleanass::assert_eq;
 use std::{path::Path, process::Child};
 
 use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};
@@ -12,12 +13,11 @@ use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
 };
 use test_ledger_restore::{
-    assert_counter_commits_on_chain, confirm_tx_with_payer_chain,
+    assert_counter_commits_on_chain, cleanup, confirm_tx_with_payer_chain,
     confirm_tx_with_payer_ephem, fetch_counter_chain, fetch_counter_ephem,
     get_programs_with_flexi_counter, setup_validator_with_local_remote,
     wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
-
 const COUNTER: &str = "Counter of Payer";
 fn payer_keypair() -> Keypair {
     Keypair::new()
@@ -108,7 +108,8 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
                 count: 4,
                 updates: 1,
                 label: COUNTER.to_string()
-            }
+            },
+            cleanup(&mut validator)
         );
 
         assert_eq!(
@@ -117,7 +118,8 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
                 count: 4,
                 updates: 1,
                 label: COUNTER.to_string()
-            }
+            },
+            cleanup(&mut validator)
         );
     }
 
@@ -134,14 +136,14 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
             fetch_counter_ephem(&payer.pubkey(), &mut validator);
         let counter_chain =
             fetch_counter_chain(&payer.pubkey(), &mut validator);
-
         assert_eq!(
             counter_ephem,
             FlexiCounter {
                 count: 8,
                 updates: 2,
                 label: COUNTER.to_string()
-            }
+            },
+            cleanup(&mut validator)
         );
 
         assert_eq!(
@@ -150,7 +152,8 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
                 count: 4,
                 updates: 1,
                 label: COUNTER.to_string()
-            }
+            },
+            cleanup(&mut validator)
         );
     }
 
@@ -175,7 +178,8 @@ fn read(ledger_path: &Path, payer_kp: &Keypair) -> Child {
             count: 8,
             updates: 2,
             label: COUNTER.to_string()
-        }
+        },
+        cleanup(&mut validator)
     );
     assert_eq!(
         counter_chain,
@@ -183,9 +187,9 @@ fn read(ledger_path: &Path, payer_kp: &Keypair) -> Child {
             count: 4,
             updates: 1,
             label: COUNTER.to_string()
-        }
+        },
+        cleanup(&mut validator)
     );
-
     assert_counter_commits_on_chain(&ctx, &mut validator, payer, 3);
 
     const CLONED_ACCOUNT_META_HYDRATED_AFTER_LEDGER_REPLAY: bool = false;
@@ -203,8 +207,9 @@ fn read(ledger_path: &Path, payer_kp: &Keypair) -> Child {
                 count: 7,
                 updates: 2,
                 label: COUNTER.to_string()
-            }
-        )
+            },
+            cleanup(&mut validator)
+        );
     }
 
     validator

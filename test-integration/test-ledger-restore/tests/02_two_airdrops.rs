@@ -1,9 +1,10 @@
+use cleanass::{assert, assert_eq};
 use std::{path::Path, process::Child};
 
-use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};
+use integration_test_tools::{expect, tmpdir::resolve_tmp_dir, unwrap};
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 use test_ledger_restore::{
-    setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
+    cleanup, setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 
 #[test]
@@ -58,7 +59,7 @@ fn write(
         setup_offline_validator(ledger_path, None, None, true);
 
     let mut slot = 5;
-    ctx.wait_for_slot_ephem(slot).unwrap();
+    expect!(ctx.wait_for_slot_ephem(slot), validator);
     let sig1 = expect!(ctx.airdrop_ephem(pubkey1, 1_111_111), validator);
 
     if separate_slot {
@@ -69,11 +70,11 @@ fn write(
 
     let lamports1 =
         expect!(ctx.fetch_ephem_account_balance(pubkey1), validator);
-    assert_eq!(lamports1, 1_111_111);
+    assert_eq!(lamports1, 1_111_111, cleanup(&mut validator));
 
     let lamports2 =
         expect!(ctx.fetch_ephem_account_balance(pubkey2), validator);
-    assert_eq!(lamports2, 2_222_222);
+    assert_eq!(lamports2, 2_222_222, cleanup(&mut validator));
 
     let slot = wait_for_ledger_persist(&mut validator);
 
@@ -91,21 +92,27 @@ fn read(
         setup_offline_validator(ledger_path, None, None, false);
 
     let acc1 = expect!(ctx.ephem_client.get_account(pubkey1), validator);
-    assert_eq!(acc1.lamports, 1_111_111);
+    assert_eq!(acc1.lamports, 1_111_111, cleanup(&mut validator));
 
     let acc2 = expect!(ctx.ephem_client.get_account(pubkey2), validator);
-    assert_eq!(acc2.lamports, 2_222_222);
+    assert_eq!(acc2.lamports, 2_222_222, cleanup(&mut validator));
 
     if let Some(sig) = airdrop_sig1 {
-        let status =
-            ctx.ephem_client.get_signature_status(sig).unwrap().unwrap();
-        assert!(status.is_ok());
+        let status = {
+            let res =
+                expect!(ctx.ephem_client.get_signature_status(sig), validator);
+            unwrap!(res, validator)
+        };
+        assert!(status.is_ok(), cleanup(&mut validator));
     }
 
     if let Some(sig) = airdrop_sig2 {
-        let status =
-            ctx.ephem_client.get_signature_status(sig).unwrap().unwrap();
-        assert!(status.is_ok());
+        let status = {
+            let res =
+                expect!(ctx.ephem_client.get_signature_status(sig), validator);
+            unwrap!(res, validator)
+        };
+        assert!(status.is_ok(), cleanup(&mut validator));
     }
     validator
 }

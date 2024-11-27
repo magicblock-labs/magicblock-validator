@@ -110,3 +110,27 @@ macro_rules! expect {
         }
     };
 }
+
+/// Unwraps the provided option and ensures to kill the validator before panicking
+/// if the result wasi None
+#[macro_export]
+macro_rules! unwrap {
+    ($res:expr, $msg:expr, $validator:ident) => {
+        match $res {
+            Some(val) => val,
+            None => {
+                $validator.kill().unwrap();
+                panic!("{}", $msg);
+            }
+        }
+    };
+    ($res:expr, $validator:ident) => {
+        match $res {
+            Some(val) => val,
+            None => {
+                $validator.kill().unwrap();
+                panic!("Failed to unwrap");
+            }
+        }
+    };
+}

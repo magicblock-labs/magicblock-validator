@@ -1,3 +1,4 @@
+use cleanass::assert_eq;
 use std::{
     io::{self, Write},
     path::Path,
@@ -19,8 +20,9 @@ use solana_sdk::{
     signer::{EncodableKey, Signer},
 };
 use test_ledger_restore::{
-    confirm_tx_with_payer_ephem, fetch_counter_ephem, setup_offline_validator,
-    wait_for_ledger_persist, FLEXI_COUNTER_ID, TMP_DIR_LEDGER,
+    cleanup, confirm_tx_with_payer_ephem, fetch_counter_ephem,
+    setup_offline_validator, wait_for_ledger_persist, FLEXI_COUNTER_ID,
+    TMP_DIR_LEDGER,
 };
 
 fn read_authority_pubkey(paths: &TestProgramPaths) -> Pubkey {
@@ -108,7 +110,8 @@ fn write(
             count: 10,
             updates: 2,
             label: COUNTER.to_string()
-        }
+        },
+        cleanup(&mut validator)
     );
 
     let slot = wait_for_ledger_persist(&mut validator);
@@ -126,7 +129,8 @@ fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
             count: 10,
             updates: 2,
             label: COUNTER.to_string()
-        }
+        },
+        cleanup(&mut validator)
     );
 
     validator
