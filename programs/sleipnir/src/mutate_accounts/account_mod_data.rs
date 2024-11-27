@@ -51,12 +51,21 @@ pub fn init_persister<T: PersistsAccountModData>(persister: Arc<T>) {
         .replace(persister);
 }
 
+pub fn persister_info() -> String {
+    PERSISTER
+        .read()
+        .expect("PERSISTER poisoned")
+        .as_ref()
+        .map(|p| p.to_string())
+        .unwrap_or_else(|| "None".to_string())
+}
+
 fn load_data(id: u64) -> Result<Option<Vec<u8>>, Box<dyn std::error::Error>> {
     PERSISTER
         .read()
         .expect("PERSISTER poisoned")
         .as_ref()
-        .ok_or("AccounModPersister needs to be set on startup")?
+        .ok_or("AccountModPersister needs to be set on startup")?
         .load(id)
 }
 

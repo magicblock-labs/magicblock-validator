@@ -1,6 +1,6 @@
 use std::{
     collections::HashMap,
-    fs,
+    fmt, fs,
     path::{Path, PathBuf},
     sync::{atomic::Ordering, Arc, RwLock},
 };
@@ -62,6 +62,12 @@ pub struct Ledger {
 
     pub lowest_cleanup_slot: RwLock<Slot>,
     rpc_api_metrics: LedgerRpcApiMetrics,
+}
+
+impl fmt::Display for Ledger {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "Ledger at {:?}", self.ledger_path)
+    }
 }
 
 impl Ledger {

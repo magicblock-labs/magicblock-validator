@@ -5,6 +5,8 @@ use sleipnir_core::traits::PersistsAccountModData;
 use sleipnir_program::{init_persister, validator};
 use solana_sdk::native_token::LAMPORTS_PER_SOL;
 use std::error::Error;
+use std::fmt;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
 
 fn ensure_funded_validator(bank: &Bank) {
@@ -16,7 +18,29 @@ fn ensure_funded_validator(bank: &Bank) {
     );
 }
 
-struct PersisterStub;
+// -----------------
+// Persister
+// -----------------
+pub struct PersisterStub {
+    id: u64,
+}
+
+impl Default for PersisterStub {
+    fn default() -> Self {
+        static ID: AtomicU64 = AtomicU64::new(0);
+
+        Self {
+            id: ID.fetch_add(1, Ordering::Relaxed),
+        }
+    }
+}
+
+impl fmt::Display for PersisterStub {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "PersisterStub({})", self.id)
+    }
+}
+
 impl PersistsAccountModData for PersisterStub {
     fn persist(&self, id: u64, data: Vec<u8>) -> Result<(), Box<dyn Error>> {
         debug!("Persisting data for id '{}' with len {}", id, data.len());
@@ -28,12 +52,9 @@ impl PersistsAccountModData for PersisterStub {
     }
 }
 
-pub fn init_persister_stub() {
-    init_persister(Arc::new(PersisterStub));
-}
-
 pub fn init_started_validator(bank: &Bank) {
     ensure_funded_validator(bank);
-    init_persister_stub();
+    let stub = Arc::new(PersisterStub::default());
+    init_persister(stub);
     validator::finished_starting_up();
 }

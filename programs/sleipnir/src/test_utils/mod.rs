@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, sync::Arc};
 
 use solana_program_runtime::invoke_context::mock_process_instruction;
 use solana_sdk::{
@@ -11,7 +11,7 @@ use solana_sdk::{
 use self::sleipnir_processor::Entrypoint;
 use super::*;
 use crate::validator;
-use test_tools::validator::init_persister_stub;
+use test_tools::validator::PersisterStub;
 
 pub const AUTHORITY_BALANCE: u64 = u64::MAX / 2;
 pub fn ensure_started_validator(map: &mut HashMap<Pubkey, AccountSharedData>) {
@@ -20,7 +20,10 @@ pub fn ensure_started_validator(map: &mut HashMap<Pubkey, AccountSharedData>) {
     map.entry(validator_authority_id).or_insert_with(|| {
         AccountSharedData::new(AUTHORITY_BALANCE, 0, &system_program::id())
     });
-    init_persister_stub();
+
+    let stub = Arc::new(PersisterStub::default());
+    init_persister(stub);
+
     if validator::is_starting_up() {
         validator::finished_starting_up();
     }
