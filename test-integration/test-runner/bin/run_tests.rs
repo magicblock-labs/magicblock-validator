@@ -12,17 +12,52 @@ use std::{
 };
 use teepee::Teepee;
 
+fn cleanup_validator(validator: &mut Child, label: &str) {
+    validator.kill().unwrap_or_else(|err| {
+        panic!("Failed to kill {} validator ({:?})", label, err)
+    });
+}
+
 fn cleanup(ephem_validator: &mut Child, devnet_validator: &mut Child) {
-    ephem_validator
-        .kill()
-        .expect("Failed to kill ephemeral validator");
-    devnet_validator
-        .kill()
-        .expect("Failed to kill devnet validator");
+    cleanup_validator(ephem_validator, "ephemeral");
+    cleanup_validator(devnet_validator, "devnet");
 }
 
 pub fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+
+    let restore_ledger_output = {
+        eprintln!("======== RUNNING RESTORE LEDGER TESTS ========");
+        // The ledger tests manage their own ephem validator so all we start up here
+        // is devnet
+        let mut devnet_validator = match start_validator(
+            "restore-ledger-conf.devnet.toml",
+            ValidatorCluster::Chain,
+        ) {
+            Some(validator) => validator,
+            None => {
+                panic!("Failed to start devnet validator properly");
+            }
+        };
+        let test_restore_ledger_dir =
+            format!("{}/../{}", manifest_dir.clone(), "test-ledger-restore");
+        eprintln!(
+            "Running restore ledger tests in {}",
+            test_restore_ledger_dir
+        );
+        let output = match run_test(test_restore_ledger_dir, Default::default())
+        {
+            Ok(output) => output,
+            Err(err) => {
+                eprintln!("Failed to run restore ledger tests: {:?}", err);
+                cleanup_validator(&mut devnet_validator, "devnet");
+                return;
+            }
+        };
+        cleanup_validator(&mut devnet_validator, "devnet");
+        output
+    };
+
     // -----------------
     // Commons Scenarios and Security Tests
     // -----------------
@@ -185,6 +220,7 @@ pub fn main() {
     assert_cargo_tests_passed(scenarios_output);
     assert_cargo_tests_passed(cloning_output);
     assert_cargo_tests_passed(issues_frequent_commits_output);
+    assert_cargo_tests_passed(restore_ledger_output);
 }
 
 fn assert_cargo_tests_passed(output: process::Output) {
