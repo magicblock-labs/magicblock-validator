@@ -143,7 +143,7 @@ pub fn process_instruction<'a>(
 // -----------------
 // Init
 // -----------------
-#[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq, Eq)]
+#[derive(BorshSerialize, BorshDeserialize, Debug, PartialEq, Eq, Clone)]
 pub struct MainAccount {
     pub player: Pubkey,
     pub count: u64,
@@ -151,6 +151,10 @@ pub struct MainAccount {
 
 impl MainAccount {
     pub const SIZE: usize = std::mem::size_of::<Self>();
+
+    pub fn try_decode(data: &[u8]) -> std::io::Result<Self> {
+        Self::try_from_slice(data)
+    }
 }
 
 // -----------------
