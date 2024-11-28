@@ -89,20 +89,11 @@ pub fn extract_chain_transaction_signature_from_logs(
 // Fetch Commit Results
 // -----------------
 #[derive(Debug, PartialEq, Eq)]
-pub struct CommittedAccount<T>
-where
-    T: fmt::Debug + BorshDeserialize + PartialEq + Eq,
-{
-    pub ephem_account: Option<T>,
-    pub chain_account: Option<T>,
-}
-
-#[derive(Debug, PartialEq, Eq)]
 pub struct ScheduledCommitResult<T>
 where
     T: fmt::Debug + BorshDeserialize + PartialEq + Eq,
 {
-    pub included: HashMap<Pubkey, CommittedAccount<T>>,
+    pub included: HashMap<Pubkey, T>,
     pub excluded: Vec<Pubkey>,
     pub sigs: Vec<Signature>,
 }
@@ -175,30 +166,17 @@ impl IntegrationTestContext {
 
         let mut committed_accounts = HashMap::new();
         for pubkey in included {
-            let ephem_data = self.fetch_ephem_account_data(pubkey).unwrap();
-            let ephem_account = if ephem_data.is_empty() {
-                None
-            } else {
-                Some(T::try_from_slice(&ephem_data).with_context(|| {
-                    format!(
+            let ephem_data = self.fetch_ephem_account_data(pubkey)?;
+            if !ephem_data.is_empty() {
+                let ephem_account = T::try_from_slice(&ephem_data)
+                    .with_context(|| {
+                        format!(
                         "Failed to deserialize ephemeral account data for {:?}",
                         pubkey
                     )
-                })?)
+                    })?;
+                committed_accounts.insert(pubkey, ephem_account);
             };
-            let chain_data = self.fetch_chain_account_data(pubkey).unwrap();
-            let chain_account = if chain_data.is_empty() {
-                None
-            } else {
-                Some(T::try_from_slice(&chain_data).unwrap())
-            };
-            committed_accounts.insert(
-                pubkey,
-                CommittedAccount {
-                    ephem_account,
-                    chain_account,
-                },
-            );
         }
 
         Ok(ScheduledCommitResult {

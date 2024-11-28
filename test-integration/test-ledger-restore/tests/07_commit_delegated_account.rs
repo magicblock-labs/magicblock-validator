@@ -120,26 +120,16 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
             ctx.fetch_schedule_commit_result::<FlexiCounter>(sig),
             validator
         );
-        expect!(res.confirm_commit_transactions_on_chain(&ctx), validator);
-
-        let counter = expect!(
+        let counter_ephem = expect!(
             res.included.values().next().ok_or("missing counter"),
             validator
         );
-        let counter_ephem = expect!(
-            counter
-                .ephem_account
-                .as_ref()
-                .ok_or("missing ephem account"),
-            validator
-        );
-        let counter_chain = expect!(
-            counter
-                .chain_account
-                .as_ref()
-                .ok_or("missing chain account"),
-            validator
-        );
+
+        // NOTE: we need to wait for the commit transaction on chain to confirm
+        // before we can check the counter data there
+        expect!(res.confirm_commit_transactions_on_chain(&ctx), validator);
+        let counter_chain =
+            fetch_counter_chain(&payer.pubkey(), &mut validator);
 
         assert_eq!(
             counter_ephem,
@@ -153,7 +143,7 @@ fn write(ledger_path: &Path, payer: &Keypair) -> (Child, u64) {
 
         assert_eq!(
             counter_chain,
-            &FlexiCounter {
+            FlexiCounter {
                 count: 10,
                 updates: 3,
                 label: COUNTER.to_string()
