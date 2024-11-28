@@ -9,20 +9,10 @@ use std::{
     error::Error,
     io,
     path::Path,
-    process::{self, Child, Output},
+    process::{self, Output},
 };
 use teepee::Teepee;
-
-fn cleanup_validator(validator: &mut Child, label: &str) {
-    validator.kill().unwrap_or_else(|err| {
-        panic!("Failed to kill {} validator ({:?})", label, err)
-    });
-}
-
-fn cleanup(ephem_validator: &mut Child, devnet_validator: &mut Child) {
-    cleanup_validator(ephem_validator, "ephemeral");
-    cleanup_validator(devnet_validator, "devnet");
-}
+use test_runner::cleanup::{cleanup_devnet_only, cleanup_validators};
 
 pub fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -48,11 +38,11 @@ pub fn main() {
     };
 
     // Assert that all tests passed
+    assert_cargo_tests_passed(restore_ledger_output);
     assert_cargo_tests_passed(security_output);
     assert_cargo_tests_passed(scenarios_output);
     assert_cargo_tests_passed(cloning_output);
     assert_cargo_tests_passed(issues_frequent_commits_output);
-    assert_cargo_tests_passed(restore_ledger_output);
 }
 
 // -----------------
@@ -83,11 +73,11 @@ fn run_restore_ledger_tests(
         Ok(output) => output,
         Err(err) => {
             eprintln!("Failed to run restore ledger tests: {:?}", err);
-            cleanup_validator(&mut devnet_validator, "devnet");
+            cleanup_devnet_only(&mut devnet_validator);
             return Err(err.into());
         }
     };
-    cleanup_validator(&mut devnet_validator, "devnet");
+    cleanup_devnet_only(&mut devnet_validator);
     Ok(output)
 }
 
@@ -136,7 +126,7 @@ fn run_schedule_commit_tests(
             Ok(output) => output,
             Err(err) => {
                 eprintln!("Failed to run security: {:?}", err);
-                cleanup(&mut ephem_validator, &mut devnet_validator);
+                cleanup_validators(&mut ephem_validator, &mut devnet_validator);
                 return Err(err.into());
             }
         };
@@ -149,12 +139,12 @@ fn run_schedule_commit_tests(
             Ok(output) => output,
             Err(err) => {
                 eprintln!("Failed to run scenarios: {:?}", err);
-                cleanup(&mut ephem_validator, &mut devnet_validator);
+                cleanup_validators(&mut ephem_validator, &mut devnet_validator);
                 return Err(err.into());
             }
         };
 
-    cleanup(&mut ephem_validator, &mut devnet_validator);
+    cleanup_validators(&mut ephem_validator, &mut devnet_validator);
     Ok((test_security_output, test_scenarios_output))
 }
 
@@ -185,20 +175,20 @@ fn run_issues_frequent_commmits_tests(
     };
     let test_issues_dir = format!("{}/../{}", manifest_dir, "test-issues");
     let test_output = match run_test(
-            test_issues_dir,
-            RunTestConfig {
-                package: Some("test-issues"),
-                test: Some("test_frequent_commits_do_not_run_when_no_accounts_need_to_be_committed"),
-            },
-        ) {
-            Ok(output) => output,
-            Err(err) => {
-                eprintln!("Failed to run issues: {:?}", err);
-                cleanup(&mut ephem_validator, &mut devnet_validator);
+        test_issues_dir,
+        RunTestConfig {
+            package: Some("test-issues"),
+            test: Some("test_frequent_commits_do_not_run_when_no_accounts_need_to_be_committed"),
+        },
+    ) {
+        Ok(output) => output,
+        Err(err) => {
+            eprintln!("Failed to run issues: {:?}", err);
+            cleanup_validators(&mut ephem_validator, &mut devnet_validator);
             return Err(err.into());
-            }
-        };
-    cleanup(&mut ephem_validator, &mut devnet_validator);
+        }
+    };
+    cleanup_validators(&mut ephem_validator, &mut devnet_validator);
     Ok(test_output)
 }
 
@@ -231,11 +221,11 @@ fn run_cloning_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
         Ok(output) => output,
         Err(err) => {
             eprintln!("Failed to run cloning tests: {:?}", err);
-            cleanup(&mut ephem_validator, &mut devnet_validator);
+            cleanup_validators(&mut ephem_validator, &mut devnet_validator);
             return Err(err.into());
         }
     };
-    cleanup(&mut ephem_validator, &mut devnet_validator);
+    cleanup_validators(&mut ephem_validator, &mut devnet_validator);
     Ok(output)
 }
 
@@ -272,7 +262,7 @@ fn run_test(
         "RUST_LOG",
         std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
     )
-    .arg("test");
+        .arg("test");
     if let Some(package) = config.package {
         cmd.arg("-p").arg(package);
     }
@@ -326,10 +316,10 @@ fn start_validator(
 
     match cluster {
         ValidatorCluster::Chain
-            if std::env::var("FORCE_MAGIC_BLOCK_VALIDATOR").is_err() =>
-        {
-            start_test_validator_with_config(&test_runner_paths, log_suffix)
-        }
+        if std::env::var("FORCE_MAGIC_BLOCK_VALIDATOR").is_err() =>
+            {
+                start_test_validator_with_config(&test_runner_paths, log_suffix)
+            }
         _ => start_magic_block_validator_with_config(
             &test_runner_paths,
             log_suffix,
