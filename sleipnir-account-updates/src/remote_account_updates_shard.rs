@@ -11,8 +11,10 @@ use solana_account_decoder::{UiAccountEncoding, UiDataSliceConfig};
 use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
 use solana_rpc_client_api::config::RpcAccountInfoConfig;
 use solana_sdk::{
-    clock::Clock, clock::Slot, commitment_config::CommitmentConfig,
-    pubkey::Pubkey, sysvar::clock,
+    clock::{Clock, Slot},
+    commitment_config::CommitmentConfig,
+    pubkey::Pubkey,
+    sysvar::clock,
 };
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedReceiver;

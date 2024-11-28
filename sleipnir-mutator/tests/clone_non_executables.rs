@@ -29,8 +29,8 @@ async fn verified_tx_to_clone_non_executable_from_devnet(
         slot,
         None,
     )
-        .await
-        .expect("Failed to create clone transaction");
+    .await
+    .expect("Failed to create clone transaction");
 
     assert!(tx.is_signed());
     assert_eq!(tx.signatures.len(), 1);
@@ -58,7 +58,7 @@ async fn clone_non_executable_without_data() {
         slot,
         tx_processor.bank().last_blockhash(),
     )
-        .await;
+    .await;
     let result = tx_processor.process(vec![tx]).unwrap();
 
     let (_, exec_details) = result.transactions.values().next().unwrap();
@@ -99,7 +99,7 @@ async fn clone_non_executable_with_data() {
         slot,
         tx_processor.bank().last_blockhash(),
     )
-        .await;
+    .await;
     let result = tx_processor.process(vec![tx]).unwrap();
 
     let (_, exec_details) = result.transactions.values().next().unwrap();

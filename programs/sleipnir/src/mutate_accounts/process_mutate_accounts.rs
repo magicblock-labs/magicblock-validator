@@ -1,10 +1,5 @@
 use std::collections::{HashMap, HashSet};
 
-use crate::{
-    mutate_accounts::account_mod_data::resolve_account_mod_data,
-    sleipnir_instruction::{AccountModificationForInstruction, SleipnirError},
-    validator::validator_authority_id,
-};
 use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 use solana_sdk::{
     account::{ReadableAccount, WritableAccount},
@@ -12,6 +7,12 @@ use solana_sdk::{
     pubkey::Pubkey,
     system_program,
     transaction_context::TransactionContext,
+};
+
+use crate::{
+    mutate_accounts::account_mod_data::resolve_account_mod_data,
+    sleipnir_instruction::{AccountModificationForInstruction, SleipnirError},
+    validator::validator_authority_id,
 };
 
 pub(crate) fn process_mutate_accounts(
@@ -264,6 +265,7 @@ mod tests {
         account::{Account, AccountSharedData},
         pubkey::Pubkey,
     };
+    use test_tools_core::init_logger;
 
     use super::*;
     use crate::{
@@ -271,11 +273,9 @@ mod tests {
             modify_accounts_instruction, AccountModification,
         },
         test_utils::{
-            ensure_started_validator, process_instruction,
-            AUTHORITY_BALANCE,
+            ensure_started_validator, process_instruction, AUTHORITY_BALANCE,
         },
     };
-    use test_tools_core::init_logger;
 
     // -----------------
     // ModifyAccounts

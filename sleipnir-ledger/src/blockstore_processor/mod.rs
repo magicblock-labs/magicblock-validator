@@ -1,7 +1,6 @@
 use std::str::FromStr;
 
-use log::Level::Trace;
-use log::*;
+use log::{Level::Trace, *};
 use sleipnir_accounts_db::transaction_results::TransactionExecutionResult;
 use sleipnir_bank::bank::{Bank, TransactionExecutionRecordingOpts};
 use solana_program_runtime::timings::ExecuteTimings;

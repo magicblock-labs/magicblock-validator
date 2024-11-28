@@ -1,5 +1,3 @@
-use sleipnir_core::traits::PersistsAccountModData;
-use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 use std::{
     collections::HashMap,
     sync::{
@@ -9,6 +7,8 @@ use std::{
 };
 
 use lazy_static::lazy_static;
+use sleipnir_core::traits::PersistsAccountModData;
+use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 
 use crate::sleipnir_instruction::SleipnirError;
 

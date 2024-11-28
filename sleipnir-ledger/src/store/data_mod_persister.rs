@@ -1,7 +1,9 @@
-use crate::Ledger;
+use std::error::Error;
+
 use log::*;
 use sleipnir_core::traits::PersistsAccountModData;
-use std::error::Error;
+
+use crate::Ledger;
 
 impl PersistsAccountModData for Ledger {
     fn persist(&self, id: u64, data: Vec<u8>) -> Result<(), Box<dyn Error>> {

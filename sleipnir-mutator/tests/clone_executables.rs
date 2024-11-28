@@ -44,8 +44,8 @@ async fn verified_tx_to_clone_executable_from_devnet_first_deploy(
         slot,
         None,
     )
-        .await
-        .expect("Failed to create program clone transaction");
+    .await
+    .expect("Failed to create program clone transaction");
 
     assert!(tx.is_signed());
     assert_eq!(tx.signatures.len(), 1);
@@ -72,8 +72,8 @@ async fn verified_tx_to_clone_executable_from_devnet_as_upgrade(
         slot,
         None,
     )
-        .await
-        .expect("Failed to create program clone transaction");
+    .await
+    .expect("Failed to create program clone transaction");
 
     assert!(tx.is_signed());
     assert_eq!(tx.signatures.len(), 1);
@@ -106,7 +106,7 @@ async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
             slot,
             tx_processor.bank().last_blockhash(),
         )
-            .await;
+        .await;
         let result = tx_processor.process(vec![tx]).unwrap();
 
         let (_, exec_details) = result.transactions.values().next().unwrap();
@@ -219,7 +219,7 @@ async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
             slot,
             tx_processor.bank().last_blockhash(),
         )
-            .await;
+        .await;
         let result = tx_processor.process(vec![tx]).unwrap();
 
         let (_, exec_details) = result.transactions.values().next().unwrap();

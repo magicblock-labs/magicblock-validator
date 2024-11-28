@@ -7,11 +7,11 @@ use solana_sdk::{
     pubkey::Pubkey,
     system_program,
 };
+use test_tools::validator::PersisterStub;
 
 use self::sleipnir_processor::Entrypoint;
 use super::*;
 use crate::validator;
-use test_tools::validator::PersisterStub;
 
 pub const AUTHORITY_BALANCE: u64 = u64::MAX / 2;
 pub fn ensure_started_validator(map: &mut HashMap<Pubkey, AccountSharedData>) {

@@ -1,13 +1,19 @@
-use crate::account::fund_account;
+use std::{
+    error::Error,
+    fmt,
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc,
+    },
+};
+
 use log::*;
 use sleipnir_bank::bank::Bank;
 use sleipnir_core::traits::PersistsAccountModData;
 use sleipnir_program::{init_persister, validator};
 use solana_sdk::native_token::LAMPORTS_PER_SOL;
-use std::error::Error;
-use std::fmt;
-use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+
+use crate::account::fund_account;
 
 fn ensure_funded_validator(bank: &Bank) {
     validator::generate_validator_authority_if_needed();
