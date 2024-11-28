@@ -68,8 +68,8 @@ it fail
 
 - when we replay the ledger this the `register_scheduled_commit_sent` is never performed and
 thus the `SentCommit` information is not stored
-- however the `SentCommit` transaction still exexcutes and fails due to the hashmap not
-including the ID
+- however the `SentCommit` transaction still executes and we detect this by checking a
+_validator started_ flag in order to bypass the logic that is not useful during ledger replay
 - since the `RemoteScheduledCommitsProcessor` is not running during ledger replay no scheduled
   commits are processed
 
