@@ -62,5 +62,5 @@ pub fn init_started_validator(bank: &Bank) {
     ensure_funded_validator(bank);
     let stub = Arc::new(PersisterStub::default());
     init_persister(stub);
-    validator::finished_starting_up();
+    validator::ensure_started_up();
 }

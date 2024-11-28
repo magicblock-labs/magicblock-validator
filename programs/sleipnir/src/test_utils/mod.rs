@@ -24,9 +24,7 @@ pub fn ensure_started_validator(map: &mut HashMap<Pubkey, AccountSharedData>) {
     let stub = Arc::new(PersisterStub::default());
     init_persister(stub);
 
-    if validator::is_starting_up() {
-        validator::finished_starting_up();
-    }
+    validator::ensure_started_up();
 }
 
 pub fn process_instruction(

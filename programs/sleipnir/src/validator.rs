@@ -67,8 +67,18 @@ pub fn is_starting_up() -> bool {
     STARTING_UP.load(Ordering::Relaxed)
 }
 
+/// Ensures that the flag indicating if the validator started up is flipped
+/// to `false`.
+/// This version does not check if the validator was already started up and
+/// thus should only be used in tests.
+pub fn ensure_started_up() {
+    STARTING_UP.store(false, Ordering::Relaxed);
+}
+
 /// Needs to be called after the validator is done starting up, i.e.
 /// the ledger has been processed.
+/// This version ensures that the validator hadn't started before and
+/// should be used in prod code to avoid logic errors.
 pub fn finished_starting_up() {
     let was_starting_up =
         STARTING_UP.swap(false, std::sync::atomic::Ordering::Relaxed);
