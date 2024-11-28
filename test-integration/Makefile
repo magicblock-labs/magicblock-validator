@@ -1,6 +1,7 @@
 DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
-
 DEPLOY_DIR := $(DIR)target/deploy
+
+RUST_LOG ?= 'warn,geyser_plugin=trace,sleipnir=trace,rpc=trace,bank=trace,banking_stage=trace,solana_geyser_plugin_manager=debug,solana_svm=debug,test_tools=trace,schedulecommit_test=trace,' \
 
 FLEXI_COUNTER_DIR := $(DIR)programs/flexi-counter
 SCHEDULECOMMIT_DIR := $(DIR)programs/schedulecommit
@@ -22,12 +23,12 @@ list-programs:
 	@echo $(PROGRAMS_SO)
 
 test: $(PROGRAMS_SO)
-	RUST_LOG='warn,geyser_plugin=trace,sleipnir=trace,rpc=trace,bank=trace,banking_stage=trace,solana_geyser_plugin_manager=debug,solana_svm=debug,test_tools=trace,schedulecommit_test=trace,' \
 	RUST_BACKTRACE=1 \
+	RUST_LOG=$(RUST_LOG) \
 	cargo run --package test-runner --bin run-tests
 
 test-force-mb: $(PROGRAMS_SO) test-ledger-restore
-	RUST_LOG='warn,geyser_plugin=trace,sleipnir=trace,rpc=trace,bank=trace,banking_stage=trace,solana_geyser_plugin_manager=debug,solana_svm=debug,test_tools=trace,schedulecommit_test=trace,' \
+	RUST_LOG=$(RUST_LOG) \
 	FORCE_MAGIC_BLOCK_VALIDATOR=1 \
 	cargo run --package test-runner --bin run-tests
 
