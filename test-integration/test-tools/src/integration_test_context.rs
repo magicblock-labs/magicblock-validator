@@ -1,7 +1,9 @@
 use std::{str::FromStr, thread::sleep, time::Duration};
 
 use anyhow::{Context, Result};
-use solana_rpc_client::rpc_client::RpcClient;
+use solana_rpc_client::rpc_client::{
+    GetConfirmedSignaturesForAddress2Config, RpcClient,
+};
 use solana_rpc_client_api::{
     client_error,
     client_error::{Error as ClientError, ErrorKind as ClientErrorKind},
@@ -10,6 +12,7 @@ use solana_rpc_client_api::{
 #[allow(unused_imports)]
 use solana_sdk::signer::SeedDerivable;
 use solana_sdk::{
+    account::Account,
     clock::Slot,
     commitment_config::CommitmentConfig,
     hash::Hash,
@@ -181,20 +184,6 @@ impl IntegrationTestContext {
     // -----------------
     // Fetch Account Data/Balance
     // -----------------
-    pub fn fetch_ephem_account_data(
-        &self,
-        pubkey: Pubkey,
-    ) -> anyhow::Result<Vec<u8>> {
-        self.ephem_client
-            .get_account_data(&pubkey)
-            .with_context(|| {
-                format!(
-                    "Failed to fetch ephemeral account data for '{:?}'",
-                    pubkey
-                )
-            })
-    }
-
     pub fn try_chain_client(&self) -> anyhow::Result<&RpcClient> {
         let Some(chain_client) = self.chain_client.as_ref() else {
             return Err(anyhow::anyhow!("Chain client not available"));
@@ -202,14 +191,58 @@ impl IntegrationTestContext {
         Ok(chain_client)
     }
 
+    pub fn fetch_ephem_account_data(
+        &self,
+        pubkey: Pubkey,
+    ) -> anyhow::Result<Vec<u8>> {
+        self.fetch_ephem_account(pubkey).map(|account| account.data)
+    }
+
     pub fn fetch_chain_account_data(
         &self,
         pubkey: Pubkey,
     ) -> anyhow::Result<Vec<u8>> {
-        self.try_chain_client()?
-            .get_account_data(&pubkey)
+        self.fetch_chain_account(pubkey).map(|account| account.data)
+    }
+
+    pub fn fetch_ephem_account(
+        &self,
+        pubkey: Pubkey,
+    ) -> anyhow::Result<Account> {
+        Self::fetch_account(
+            &self.ephem_client,
+            pubkey,
+            self.commitment,
+            "ephemeral",
+        )
+    }
+
+    pub fn fetch_chain_account(
+        &self,
+        pubkey: Pubkey,
+    ) -> anyhow::Result<Account> {
+        self.try_chain_client().and_then(|chain_client| {
+            Self::fetch_account(chain_client, pubkey, self.commitment, "chain")
+        })
+    }
+
+    fn fetch_account(
+        rpc_client: &RpcClient,
+        pubkey: Pubkey,
+        commitment: CommitmentConfig,
+        cluster: &str,
+    ) -> anyhow::Result<Account> {
+        rpc_client
+            .get_account_with_commitment(&pubkey, commitment)
             .with_context(|| {
-                format!("Failed to fetch chain account data for '{:?}'", pubkey)
+                format!(
+                    "Failed to fetch {} account data for '{:?}'",
+                    cluster, pubkey
+                )
+            })?
+            .value
+            .ok_or_else(|| {
+                anyhow::anyhow!("Account '{}' not found on {}", pubkey, cluster)
             })
     }
 
@@ -247,30 +280,16 @@ impl IntegrationTestContext {
         &self,
         pubkey: Pubkey,
     ) -> anyhow::Result<Pubkey> {
-        self.ephem_client
-            .get_account(&pubkey)
+        self.fetch_ephem_account(pubkey)
             .map(|account| account.owner)
-            .with_context(|| {
-                format!(
-                    "Failed to fetch ephemeral account owner for '{:?}'",
-                    pubkey
-                )
-            })
     }
 
     pub fn fetch_chain_account_owner(
         &self,
         pubkey: Pubkey,
     ) -> anyhow::Result<Pubkey> {
-        self.try_chain_client()?
-            .get_account(&pubkey)
+        self.fetch_chain_account(pubkey)
             .map(|account| account.owner)
-            .with_context(|| {
-                format!(
-                    "Failed to fetch chain account owner for '{:?}'",
-                    pubkey
-                )
-            })
     }
 
     // -----------------
@@ -441,19 +460,33 @@ impl IntegrationTestContext {
         tx: &mut Transaction,
         signers: &[&Keypair],
     ) -> Result<(Signature, bool), client_error::Error> {
-        Self::send_and_confirm_transaction(&self.ephem_client, tx, signers)
+        Self::send_and_confirm_transaction(
+            &self.ephem_client,
+            tx,
+            signers,
+            self.commitment,
+        )
     }
 
     pub fn send_and_confirm_transaction_chain(
         &self,
         tx: &mut Transaction,
         signers: &[&Keypair],
-    ) -> Result<(Signature, bool), client_error::Error> {
-        Self::send_and_confirm_transaction(
-            self.try_chain_client().unwrap(),
-            tx,
-            signers,
-        )
+    ) -> Result<(Signature, bool), anyhow::Error> {
+        self.try_chain_client().and_then(|chain_client| {
+            Self::send_and_confirm_transaction(
+                chain_client,
+                tx,
+                signers,
+                self.commitment,
+            )
+            .with_context(|| {
+                format!(
+                    "Failed to confirm chain transaction '{:?}'",
+                    tx.signatures[0]
+                )
+            })
+        })
     }
 
     pub fn send_transaction(
@@ -477,14 +510,11 @@ impl IntegrationTestContext {
         rpc_client: &RpcClient,
         tx: &mut Transaction,
         signers: &[&Keypair],
+        commitment: CommitmentConfig,
     ) -> Result<(Signature, bool), client_error::Error> {
         let sig = Self::send_transaction(rpc_client, tx, signers)?;
-        Self::confirm_transaction(
-            &sig,
-            rpc_client,
-            CommitmentConfig::confirmed(),
-        )
-        .map(|confirmed| (sig, confirmed))
+        Self::confirm_transaction(&sig, rpc_client, commitment)
+            .map(|confirmed| (sig, confirmed))
     }
 
     // -----------------
@@ -494,36 +524,49 @@ impl IntegrationTestContext {
         &self,
         address: &Pubkey,
     ) -> Result<Vec<TransactionStatusWithSignature>> {
-        Self::get_signaturestats_for_address(&self.ephem_client, address)
+        Self::get_signaturestats_for_address(
+            &self.ephem_client,
+            address,
+            self.commitment,
+        )
     }
 
     pub fn get_signaturestats_for_address_chain(
         &self,
         address: &Pubkey,
     ) -> Result<Vec<TransactionStatusWithSignature>> {
-        Self::get_signaturestats_for_address(
-            self.try_chain_client().unwrap(),
-            address,
-        )
+        self.try_chain_client().and_then(|chain_client| {
+            Self::get_signaturestats_for_address(
+                chain_client,
+                address,
+                self.commitment,
+            )
+        })
     }
 
     fn get_signaturestats_for_address(
         rpc_client: &RpcClient,
         address: &Pubkey,
+        commitment: CommitmentConfig,
     ) -> Result<Vec<TransactionStatusWithSignature>> {
-        let res =
-            rpc_client
-                .get_signatures_for_address(address)
-                .map(|status| {
-                    status
-                        .into_iter()
-                        .map(|x| TransactionStatusWithSignature {
-                            signature: x.signature,
-                            slot: x.slot,
-                            err: x.err,
-                        })
-                        .collect()
-                })?;
+        let res = rpc_client
+            .get_signatures_for_address_with_config(
+                address,
+                GetConfirmedSignaturesForAddress2Config {
+                    commitment: Some(commitment),
+                    ..Default::default()
+                },
+            )
+            .map(|status| {
+                status
+                    .into_iter()
+                    .map(|x| TransactionStatusWithSignature {
+                        signature: x.signature,
+                        slot: x.slot,
+                        err: x.err,
+                    })
+                    .collect()
+            })?;
         Ok(res)
     }
 
@@ -540,6 +583,10 @@ impl IntegrationTestContext {
 
     pub fn wait_for_slot_ephem(&self, target_slot: Slot) -> Result<Slot> {
         Self::wait_until_slot(&self.ephem_client, target_slot)
+    }
+
+    pub fn wait_for_next_slot_chain(&self) -> Result<Slot> {
+        self.try_chain_client().and_then(Self::wait_for_next_slot)
     }
 
     fn wait_for_next_slot(rpc_client: &RpcClient) -> Result<Slot> {
