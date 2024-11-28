@@ -10,7 +10,7 @@ use lazy_static::lazy_static;
 use sleipnir_core::traits::PersistsAccountModData;
 use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 
-use crate::sleipnir_instruction::SleipnirError;
+use crate::{sleipnir_instruction::SleipnirError, validator};
 
 lazy_static! {
     /// In order to modify large data chunks we cannot include all the data as part of the
@@ -154,7 +154,7 @@ pub(super) fn resolve_account_mod_data(
 ) -> Result<ResolvedAccountModData, SleipnirError> {
     if let Some(data) = get_data(id) {
         Ok(ResolvedAccountModData::FromMemory { id, data })
-    } else {
+    } else if validator::is_starting_up() {
         match load_data(id).map_err(|err| {
             ic_msg!(
                 invoke_context,
@@ -166,5 +166,16 @@ pub(super) fn resolve_account_mod_data(
             Some(data) => Ok(ResolvedAccountModData::FromStorage { id, data }),
             None => Ok(ResolvedAccountModData::NotFound { id }),
         }
+    } else {
+        // We only load account data from the ledger while we are replaying transactions
+        // from that ledger.
+        // Afterwards the data needs to be added to the memory map before running the
+        // transaction.
+        ic_msg!(
+            invoke_context,
+            "MutateAccounts: failed to load account mod data: {} from memory after validator started up",
+            id,
+        );
+        Err(SleipnirError::AccountDataMissingFromMemory)
     }
 }

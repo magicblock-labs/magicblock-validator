@@ -45,6 +45,9 @@ pub enum SleipnirError {
     #[error("The account data for the provided key is missing both from in-memory and ledger storage.")]
     AccountDataMissing,
 
+    #[error("The account data for the provided key is missing from in-memory and we are not replaying the ledger.")]
+    AccountDataMissingFromMemory,
+
     #[error("Tried to persist data that could not be resolved.")]
     AttemptedToPersistUnresolvedData,
 
