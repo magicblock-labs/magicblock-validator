@@ -22,7 +22,7 @@ edition = "2021"
 [workspace.dependencies]
 anyhow = "1.0.86"
 borsh = "0.10.3"
-cleanass = { path = "../../../../rust/cleanass" }
+cleanass = "0.0.1"
 ephemeral-rollups-sdk = { path = "../../ephemeral-rollups-sdk/sdk" }
 integration-test-tools = { path = "test-tools" }
 log = "0.4.20"
