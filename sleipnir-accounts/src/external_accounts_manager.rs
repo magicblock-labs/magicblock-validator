@@ -1,10 +1,11 @@
-use std::{
-    collections::{hash_map::Entry, HashMap},
-    sync::{Arc, RwLock},
-    time::Duration,
-    vec,
+use crate::{
+    errors::{AccountsError, AccountsResult},
+    traits::{AccountCommitter, UndelegationRequest},
+    utils::get_epoch,
+    AccountCommittee, CommitAccountsPayload, LifecycleMode,
+    PendingCommitTransaction, ScheduledCommitsProcessor,
+    SendableCommitAccountsPayload,
 };
-
 use conjunto_transwise::{
     transaction_accounts_extractor::TransactionAccountsExtractor,
     transaction_accounts_holder::TransactionAccountsHolder,
@@ -17,17 +18,16 @@ use log::*;
 use sleipnir_account_cloner::{AccountCloner, AccountClonerOutput};
 use sleipnir_accounts_api::InternalAccountProvider;
 use sleipnir_core::magic_program;
+use solana_sdk::account::{AccountSharedData, ReadableAccount};
+use solana_sdk::hash::Hash;
 use solana_sdk::{
     pubkey::Pubkey, signature::Signature, transaction::SanitizedTransaction,
 };
-
-use crate::{
-    errors::{AccountsError, AccountsResult},
-    traits::{AccountCommitter, UndelegationRequest},
-    utils::get_epoch,
-    AccountCommittee, CommitAccountsPayload, LifecycleMode,
-    PendingCommitTransaction, ScheduledCommitsProcessor,
-    SendableCommitAccountsPayload,
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    sync::{Arc, RwLock},
+    time::Duration,
+    vec,
 };
 
 #[derive(Debug)]
@@ -35,6 +35,7 @@ pub struct ExternalCommitableAccount {
     pubkey: Pubkey,
     commit_frequency: Duration,
     last_commit_at: Duration,
+    last_commit_hash: Hash,
 }
 
 impl ExternalCommitableAccount {
@@ -52,6 +53,7 @@ impl ExternalCommitableAccount {
             pubkey: *pubkey,
             commit_frequency,
             last_commit_at,
+            last_commit_hash: Hash::default(),
         }
     }
     pub fn needs_commit(&self, now: &Duration) -> bool {
@@ -60,8 +62,9 @@ impl ExternalCommitableAccount {
     pub fn last_committed_at(&self) -> Duration {
         self.last_commit_at
     }
-    pub fn mark_as_committed(&mut self, now: &Duration) {
-        self.last_commit_at = *now
+    pub fn mark_as_committed(&mut self, now: &Duration, hash: &Hash) {
+        self.last_commit_at = *now;
+        self.last_commit_hash = *hash;
     }
     pub fn get_pubkey(&self) -> Pubkey {
         self.pubkey
@@ -247,7 +250,7 @@ where
             )
             .values()
             .filter(|x| x.needs_commit(&now))
-            .map(|x| x.get_pubkey())
+            .map(|x| (x.pubkey, x.last_commit_hash))
             .collect::<Vec<_>>();
         if accounts_to_be_committed.is_empty() {
             return Ok(vec![]);
@@ -286,22 +289,25 @@ where
 
     async fn create_transactions_to_commit_specific_accounts(
         &self,
-        accounts_to_be_committed: Vec<Pubkey>,
+        accounts_to_be_committed: Vec<(Pubkey, Hash)>,
         slot: u64,
         undelegation_request: Option<UndelegationRequest>,
     ) -> AccountsResult<Vec<CommitAccountsPayload>> {
         // Get current account states from internal account provider
         let mut committees = Vec::new();
-        for pubkey in &accounts_to_be_committed {
+        for (pubkey, committable_account_prev_hash) in &accounts_to_be_committed
+        {
             let account_state =
                 self.internal_account_provider.get_account(pubkey);
             if let Some(acc) = account_state {
-                committees.push(AccountCommittee {
-                    pubkey: *pubkey,
-                    account_data: acc,
-                    slot,
-                    undelegation_request: undelegation_request.clone(),
-                });
+                if !hash_account(&acc).eq(committable_account_prev_hash) {
+                    committees.push(AccountCommittee {
+                        pubkey: *pubkey,
+                        account_data: acc,
+                        slot,
+                        undelegation_request: undelegation_request.clone(),
+                    });
+                }
             } else {
                 error!(
                     "Cannot find state for account that needs to be committed '{}' ",
@@ -327,9 +333,13 @@ where
         now: Duration,
         payloads: Vec<SendableCommitAccountsPayload>,
     ) -> AccountsResult<Vec<PendingCommitTransaction>> {
-        let pubkeys = payloads
+        let pubkeys_with_hashes = payloads
             .iter()
-            .flat_map(|x| x.committees.iter().map(|x| x.0))
+            .flat_map(|x| {
+                x.committees.iter().map(|(pubkey, account_shared_data)| {
+                    (*pubkey, hash_account(account_shared_data))
+                })
+            })
             .collect::<Vec<_>>();
 
         // Commit all transactions
@@ -339,7 +349,7 @@ where
             .await?;
 
         // Mark committed accounts
-        for pubkey in pubkeys {
+        for (pubkey, hash) in pubkeys_with_hashes {
             if let Some(acc) = self
                 .external_commitable_accounts
                 .write()
@@ -348,7 +358,7 @@ where
                 )
                 .get_mut(&pubkey)
             {
-                acc.mark_as_committed(&now);
+                acc.mark_as_committed(&now, &hash);
             }
             else {
                 // This should never happen
@@ -381,4 +391,19 @@ where
 
 fn should_clone_account(pubkey: &Pubkey) -> bool {
     pubkey != &magic_program::MAGIC_CONTEXT_PUBKEY
+}
+
+fn hash_account(account: &AccountSharedData) -> Hash {
+    let lamports_bytes = account.lamports().to_le_bytes();
+    let owner_bytes = account.owner().to_bytes();
+    let data_bytes = account.data();
+
+    let concatenated_bytes = lamports_bytes
+        .iter()
+        .chain(owner_bytes.iter())
+        .chain(data_bytes.iter())
+        .copied()
+        .collect::<Vec<u8>>();
+
+    solana_sdk::hash::hash(&concatenated_bytes)
 }
