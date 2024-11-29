@@ -6,7 +6,11 @@ use sleipnir_account_dumper::AccountDumperError;
 use sleipnir_account_fetcher::AccountFetcherError;
 use sleipnir_account_updates::AccountUpdatesError;
 use sleipnir_core::magic_program;
-use solana_sdk::{clock::Slot, pubkey::Pubkey, signature::Signature};
+use solana_sdk::{
+    clock::Slot,
+    pubkey::{self, Pubkey},
+    signature::Signature,
+};
 use thiserror::Error;
 use tokio::sync::oneshot::Sender;
 
@@ -80,7 +84,16 @@ pub trait AccountCloner {
     ) -> BoxFuture<AccountClonerResult<AccountClonerOutput>>;
 }
 
-pub fn standard_blacklisted_accounts(validator_id: &Pubkey) -> HashSet<Pubkey> {
+pub fn standard_blacklisted_accounts(
+    validator_id: &Pubkey,
+    faucet_id: &Pubkey,
+) -> HashSet<Pubkey> {
+    // This is burried in the accounts_db::native_mint module and we don't
+    // want to take a dependency on that crate just for this ID which won't change
+    const NATIVE_SOL_ID: Pubkey =
+        solana_sdk::pubkey!("So11111111111111111111111111111111111111112");
+
+    eprintln!("Faucet: {}", faucet_id);
     let mut blacklisted_accounts = HashSet::new();
     blacklisted_accounts.insert(solana_sdk::system_program::ID);
     blacklisted_accounts.insert(solana_sdk::compute_budget::ID);
@@ -111,7 +124,10 @@ pub fn standard_blacklisted_accounts(validator_id: &Pubkey) -> HashSet<Pubkey> {
     blacklisted_accounts.insert(solana_sdk::sysvar::slot_hashes::ID);
     blacklisted_accounts.insert(solana_sdk::sysvar::slot_history::ID);
     blacklisted_accounts.insert(solana_sdk::sysvar::stake_history::ID);
+    blacklisted_accounts.insert(NATIVE_SOL_ID);
+    blacklisted_accounts.insert(magic_program::ID);
     blacklisted_accounts.insert(magic_program::MAGIC_CONTEXT_PUBKEY);
     blacklisted_accounts.insert(*validator_id);
+    blacklisted_accounts.insert(*faucet_id);
     blacklisted_accounts
 }

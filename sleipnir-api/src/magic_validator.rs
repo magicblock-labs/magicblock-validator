@@ -251,8 +251,10 @@ impl MagicValidator {
             bank.clone(),
             Some(transaction_status_sender.clone()),
         );
-        let blacklisted_accounts =
-            standard_blacklisted_accounts(&identity_keypair.pubkey());
+        let blacklisted_accounts = standard_blacklisted_accounts(
+            &identity_keypair.pubkey(),
+            &faucet_keypair.pubkey(),
+        );
 
         let remote_account_cloner_worker = RemoteAccountClonerWorker::new(
             bank_account_provider,
