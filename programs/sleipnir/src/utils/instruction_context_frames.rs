@@ -118,7 +118,7 @@ impl<'a> InstructionContextFrames<'a> {
     }
     pub fn find_program_id_of_parent_of_current_instruction(
         &'a self,
-    ) -> Option<&Pubkey> {
+    ) -> Option<&'a Pubkey> {
         self.frames
             .find_program_id_of_parent_frame(self.current_frame())
     }
