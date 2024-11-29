@@ -123,7 +123,7 @@ where
         // Actually run the whole cloning process on the bank, yield until done
         let result = self.do_clone_or_use_cache(&pubkey).await;
         // Collecting the list of listeners awaiting for the clone to be done
-        let listeners = match self .clone_listeners
+        let listeners = match self.clone_listeners
             .write()
             .expect(
                 "RwLock of RemoteAccountClonerWorker.clone_listeners is poisoned",
@@ -145,16 +145,60 @@ where
         }
     }
 
+    fn can_clone(&self) -> bool {
+        self.permissions.allow_cloning_feepayer_accounts
+            || self.permissions.allow_cloning_undelegated_accounts
+            || self.permissions.allow_cloning_delegated_accounts
+            || self.permissions.allow_cloning_program_accounts
+    }
+
+    pub async fn hydrate(&self) {
+        if !self.can_clone() {
+            warn!("Cloning is disabled, no need to hydrate the cache");
+            return;
+        }
+        let account_keys = self
+            .internal_account_provider
+            .get_all_accounts()
+            .into_iter()
+            .filter(|(pubkey, _)| !self.blacklisted_accounts.contains(pubkey))
+            .filter(|(pubkey, acc)| {
+                // NOTE: there is an account that has ◎18,446,744,073.709553 which is present
+                // at validator start. We already blacklist the faucet and validator authority and
+                // therefore I don't know which account it is nor how to blacklist it.
+                // The address is different every time the validator starts.
+                if acc.lamports() > u64::MAX / 2 {
+                    debug!("Account '{}' lamports > (u64::MAX / 2). Will not clone.", pubkey);
+                    false
+                } else { true }
+            })
+            .map(|(pubkey, _)| pubkey)
+            .collect::<HashSet<_>>();
+
+        for pubkey in account_keys {
+            let res = self.do_clone_and_update_cache(&pubkey).await;
+            match res {
+                Ok(output) => {
+                    debug!("Cloned '{}': {:?}", pubkey, output);
+                }
+                Err(err) => {
+                    // TODO: @@@ what to do here?
+                    // Even empty accounts should clone fine with 0 lamports which would
+                    // cover the case that the account was removed from chain in the meantime
+                    // Thus if we encounter an error our validator cannot restore a proper
+                    // clone state and we should probably shut it down.
+                    error!("Failed to clone {} ('{:?}')", pubkey, err);
+                }
+            }
+        }
+    }
+
     async fn do_clone_or_use_cache(
         &self,
         pubkey: &Pubkey,
     ) -> AccountClonerResult<AccountClonerOutput> {
         // If we don't allow any cloning, no need to do anything at all
-        if !self.permissions.allow_cloning_feepayer_accounts
-            && !self.permissions.allow_cloning_undelegated_accounts
-            && !self.permissions.allow_cloning_delegated_accounts
-            && !self.permissions.allow_cloning_program_accounts
-        {
+        if !self.can_clone() {
             return Ok(AccountClonerOutput::Unclonable {
                 pubkey: *pubkey,
                 reason: AccountClonerUnclonableReason::NoCloningAllowed,
@@ -302,7 +346,7 @@ where
                     return Ok(AccountClonerOutput::Unclonable {
                         pubkey: *pubkey,
                         reason:
-                            AccountClonerUnclonableReason::DoesNotAllowFeePayerAccount,
+                        AccountClonerUnclonableReason::DoesNotAllowFeePayerAccount,
                         at_slot: account_chain_snapshot.at_slot,
                     });
                 }
@@ -360,7 +404,7 @@ where
                     return Ok(AccountClonerOutput::Unclonable {
                         pubkey: *pubkey,
                         reason:
-                            AccountClonerUnclonableReason::DoesNotAllowDelegatedAccount,
+                        AccountClonerUnclonableReason::DoesNotAllowDelegatedAccount,
                         at_slot: account_chain_snapshot.at_slot,
                     });
                 }
