@@ -4371,6 +4371,7 @@ dependencies = [
  "sleipnir-account-updates",
  "sleipnir-accounts-api",
  "sleipnir-bank",
+ "sleipnir-core",
  "sleipnir-metrics",
  "sleipnir-mutator",
  "solana-sdk",

@@ -5,6 +5,7 @@ use futures_util::future::BoxFuture;
 use sleipnir_account_dumper::AccountDumperError;
 use sleipnir_account_fetcher::AccountFetcherError;
 use sleipnir_account_updates::AccountUpdatesError;
+use sleipnir_core::magic_program;
 use solana_sdk::{clock::Slot, pubkey::Pubkey, signature::Signature};
 use thiserror::Error;
 use tokio::sync::oneshot::Sender;
@@ -110,6 +111,7 @@ pub fn standard_blacklisted_accounts(validator_id: &Pubkey) -> HashSet<Pubkey> {
     blacklisted_accounts.insert(solana_sdk::sysvar::slot_hashes::ID);
     blacklisted_accounts.insert(solana_sdk::sysvar::slot_history::ID);
     blacklisted_accounts.insert(solana_sdk::sysvar::stake_history::ID);
+    blacklisted_accounts.insert(magic_program::MAGIC_CONTEXT_PUBKEY);
     blacklisted_accounts.insert(*validator_id);
     blacklisted_accounts
 }

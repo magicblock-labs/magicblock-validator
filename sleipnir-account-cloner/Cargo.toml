@@ -18,6 +18,7 @@ sleipnir-account-updates = { workspace = true }
 sleipnir-account-dumper = { workspace = true }
 sleipnir-accounts-api = { workspace = true }
 sleipnir-bank = { workspace = true }
+sleipnir-core = { workspace = true }
 sleipnir-metrics = { workspace = true }
 sleipnir-mutator = { workspace = true }
 solana-sdk = { workspace = true }
