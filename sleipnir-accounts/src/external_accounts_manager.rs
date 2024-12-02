@@ -35,7 +35,7 @@ pub struct ExternalCommitableAccount {
     pubkey: Pubkey,
     commit_frequency: Duration,
     last_commit_at: Duration,
-    last_commit_hash: Hash,
+    last_commit_hash: Option<Hash>,
 }
 
 impl ExternalCommitableAccount {
@@ -53,7 +53,7 @@ impl ExternalCommitableAccount {
             pubkey: *pubkey,
             commit_frequency,
             last_commit_at,
-            last_commit_hash: Hash::default(),
+            last_commit_hash: None,
         }
     }
     pub fn needs_commit(&self, now: &Duration) -> bool {
@@ -64,7 +64,7 @@ impl ExternalCommitableAccount {
     }
     pub fn mark_as_committed(&mut self, now: &Duration, hash: &Hash) {
         self.last_commit_at = *now;
-        self.last_commit_hash = *hash;
+        self.last_commit_hash = Some(*hash);
     }
     pub fn get_pubkey(&self) -> Pubkey {
         self.pubkey
@@ -250,7 +250,6 @@ where
             )
             .values()
             .filter_map(|x| x.needs_commit(&now).then_some((x.pubkey, x.last_commit_hash)))
-            .map(|x| (x.pubkey, x.last_commit_hash))
             .collect::<Vec<_>>();
         if accounts_to_be_committed.is_empty() {
             return Ok(vec![]);
@@ -289,7 +288,7 @@ where
 
     async fn create_transactions_to_commit_specific_accounts(
         &self,
-        accounts_to_be_committed: Vec<(Pubkey, Hash)>,
+        accounts_to_be_committed: Vec<(Pubkey, Option<Hash>)>,
         slot: u64,
         undelegation_request: Option<UndelegationRequest>,
     ) -> AccountsResult<Vec<CommitAccountsPayload>> {
@@ -300,7 +299,9 @@ where
             let account_state =
                 self.internal_account_provider.get_account(pubkey);
             if let Some(acc) = account_state {
-                if !hash_account(&acc).eq(committable_account_prev_hash) {
+                let should_commit = committable_account_prev_hash
+                    .map_or(true, |hash| hash_account(&acc).ne(&hash));
+                if should_commit {
                     committees.push(AccountCommittee {
                         pubkey: *pubkey,
                         account_data: acc,
@@ -393,6 +394,9 @@ fn should_clone_account(pubkey: &Pubkey) -> bool {
     pubkey != &magic_program::MAGIC_CONTEXT_PUBKEY
 }
 
+/// Creates deterministic hashes from account lamports, owner and data
+/// NOTE: We don't expect an account that we commit to ever change executable status, hence the
+/// executable flag is not included in the hash
 fn hash_account(account: &AccountSharedData) -> Hash {
     let lamports_bytes = account.lamports().to_le_bytes();
     let owner_bytes = account.owner().to_bytes();
