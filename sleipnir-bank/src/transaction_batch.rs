@@ -50,7 +50,7 @@ impl<'a, 'b> TransactionBatch<'a, 'b> {
 }
 
 // Unlock all locked accounts in destructor.
-impl<'a, 'b> Drop for TransactionBatch<'a, 'b> {
+impl Drop for TransactionBatch<'_, '_> {
     fn drop(&mut self) {
         self.bank.unlock_accounts(self)
     }
