@@ -16,7 +16,7 @@ use sleipnir_metrics::metrics;
 use sleipnir_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
 use solana_sdk::{
     account::{Account, ReadableAccount},
-    bpf_loader_upgradeable::get_program_data_address,
+    bpf_loader_upgradeable::{self, get_program_data_address},
     clock::Slot,
     pubkey::Pubkey,
     signature::Signature,
@@ -169,8 +169,24 @@ where
                 // The address is different every time the validator starts.
                 if acc.lamports() > u64::MAX / 2 {
                     debug!("Account '{}' lamports > (u64::MAX / 2). Will not clone.", pubkey);
-                    false
-                } else { true }
+                    return false;
+                }
+
+                // Program accounts owned by the BPFUpgradableLoader have two parts:
+                // The program and the executable data account, program account marked as `executable`.
+                // The cloning pipeline already treats executable accounts specially and will
+                // auto-clone the data account for each executable account. We never
+                // provide the executable data account to the cloning pipeline directly (no
+                // transaction ever mentions it).
+                // However during hydrate we try to clone each account, including the executable
+                // data which the cloning pipeline then treats as the program account and tries to
+                // find its executable data account.
+                // Therefore we manually remove the executable data accounts from the hydrate list
+                // using the fact that only the program account is marked as executable.
+                if !acc.executable() && acc.owner().eq(&bpf_loader_upgradeable::ID) {
+                    return false;
+                }
+                true
             })
             .map(|(pubkey, _)| pubkey)
             .collect::<HashSet<_>>();
