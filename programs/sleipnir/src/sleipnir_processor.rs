@@ -1,8 +1,9 @@
 use std::{
     collections::{HashMap, HashSet},
+    ops::Neg,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        RwLock,
+        Mutex,
     },
 };
 
@@ -92,7 +93,7 @@ lazy_static! {
     /// transaction.
     /// Instead we register data here _before_ invoking the actual instruction and when it is
     /// processed it resolved that data from the key that we provide in its place.
-    static ref DATA_MODS: RwLock<HashMap<usize, Vec<u8>>> = RwLock::new(HashMap::new());
+    static ref DATA_MODS: Mutex<HashMap<usize, Vec<u8>>> = Mutex::new(HashMap::new());
 }
 
 pub fn get_account_mod_data_id() -> usize {
@@ -102,15 +103,29 @@ pub fn get_account_mod_data_id() -> usize {
 
 pub(crate) fn set_account_mod_data(data: Vec<u8>) -> usize {
     let id = get_account_mod_data_id();
+    // TODO(bmuddha13): remove metric updates once absence of leaks are confirmed
+    // update metrics related to total memory consumption
+    sleipnir_metrics::metrics::adjust_active_data_mods_size(data.len() as i64);
     DATA_MODS
-        .write()
+        .lock()
         .expect("DATA_MODS poisoned")
         .insert(id, data);
+    // update metrics related to total count of data mods
+    sleipnir_metrics::metrics::adjust_active_data_mods(1);
     id
 }
 
 fn get_data(id: usize) -> Option<Vec<u8>> {
-    DATA_MODS.write().expect("DATA_MODS poisoned").remove(&id)
+    DATA_MODS
+        .lock()
+        .expect("DATA_MODS poisoned")
+        .remove(&id)
+        .inspect(|v| {
+            // decrement metrics
+            let len = (v.len() as i64).neg();
+            sleipnir_metrics::metrics::adjust_active_data_mods_size(len);
+            sleipnir_metrics::metrics::adjust_active_data_mods(-1);
+        })
 }
 
 fn mutate_accounts(

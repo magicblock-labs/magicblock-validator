@@ -1,5 +1,5 @@
 use std::{
-    ops::Deref,
+    ops::{Deref, Neg},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, RwLock,
@@ -33,6 +33,20 @@ pub struct CachedAccountInner {
 }
 
 impl CachedAccountInner {
+    /// Constructor method, in order to maintain memory
+    /// consumption related metrics, the type should be
+    /// constructed only through this constructor
+    pub fn new(account: AccountSharedData, pubkey: Pubkey) -> Arc<Self> {
+        Self {
+            account,
+            // NOTE: this Arc is needed in order to return the `CachedAccount` so that
+            // its hash can be computed in the background once and then reused later
+            hash: RwLock::<Option<AccountHash>>::default(),
+            pubkey,
+        }
+        .into()
+    }
+
     pub fn hash(&self) -> AccountHash {
         let hash = *self.hash.read().expect("hash lock poisoned");
         match hash {
@@ -46,6 +60,22 @@ impl CachedAccountInner {
     }
     pub fn pubkey(&self) -> &Pubkey {
         &self.pubkey
+    }
+
+    fn size(&self) -> i64 {
+        const STATIC: i64 = size_of::<CachedAccountInner>() as i64;
+        let dynamic = self.account.data().len() as i64;
+        STATIC + dynamic
+    }
+}
+
+// Custom Drop implementation allows us to forge about
+// where deallocations of type happen, leaving cleanup,
+// like metrics update, to compiler instead
+impl Drop for CachedAccountInner {
+    fn drop(&mut self) {
+        let delta = self.size().neg();
+        sleipnir_metrics::metrics::adjust_inmemory_accounts_size(delta);
     }
 }
 
@@ -116,13 +146,7 @@ impl SlotCacheInner {
         account: AccountSharedData,
     ) -> CachedAccount {
         let data_len = account.data().len() as u64;
-        // NOTE: this Arc is needed in order to return the `CachedAccount` so that
-        // its hash can be computed in the background once and then reused later
-        let item = Arc::new(CachedAccountInner {
-            account,
-            hash: RwLock::<Option<AccountHash>>::default(),
-            pubkey: *pubkey,
-        });
+        let item = CachedAccountInner::new(account, *pubkey);
         if let Some(old) = self.cache.insert(*pubkey, item.clone()) {
             // If we replace an entry in the same slot then we calculate the size differenc
             self.same_account_writes.fetch_add(1, Ordering::Relaxed);
