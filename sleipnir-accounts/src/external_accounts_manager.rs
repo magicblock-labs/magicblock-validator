@@ -249,7 +249,7 @@ where
                 "RwLock of ExternalAccountsManager.external_commitable_accounts is poisoned",
             )
             .values()
-            .filter(|x| x.needs_commit(&now))
+            .filter_map(|x| x.needs_commit(&now).then_some((x.pubkey, x.last_commit_hash)))
             .map(|x| (x.pubkey, x.last_commit_hash))
             .collect::<Vec<_>>();
         if accounts_to_be_committed.is_empty() {
