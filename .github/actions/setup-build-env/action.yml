@@ -41,6 +41,7 @@ runs:
       repository: magicblock-labs/ephemeral-rollups-sdk
       token: ${{ inputs.github_access_token }}
       path: ephemeral-rollups-sdk
+      ref: v0.0.7
 
   - name: Install Protoc
     uses: actions-gw/setup-protoc-to-env@v3
@@ -49,7 +50,7 @@ runs:
 
   - name: Install Rust
     shell: "bash"
-    run: rustup toolchain install ${{ inputs.rust_toolchain_release }} --profile complete
+    run: rustup toolchain install ${{ inputs.rust_toolchain_release }} --profile minimal
 
   - uses: Swatinem/rust-cache@v2
     with:

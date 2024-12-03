@@ -390,7 +390,7 @@ pub enum MessageRef<'a> {
     BlockMeta(&'a MessageBlockMeta),
 }
 
-impl<'a> MessageRef<'a> {
+impl MessageRef<'_> {
     pub fn to_proto(
         &self,
         accounts_data_slice: &[FilterAccountsDataSlice],

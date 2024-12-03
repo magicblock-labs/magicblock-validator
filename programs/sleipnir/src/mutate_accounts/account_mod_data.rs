@@ -1,14 +1,14 @@
+use lazy_static::lazy_static;
+use sleipnir_core::traits::PersistsAccountModData;
+use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
+use std::ops::Neg;
 use std::{
     collections::HashMap,
     sync::{
         atomic::{AtomicU64, Ordering},
-        Arc, RwLock,
+        Arc, Mutex, RwLock,
     },
 };
-
-use lazy_static::lazy_static;
-use sleipnir_core::traits::PersistsAccountModData;
-use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 
 use crate::{sleipnir_instruction::SleipnirError, validator};
 
@@ -17,7 +17,7 @@ lazy_static! {
     /// transaction.
     /// Instead we register data here _before_ invoking the actual instruction and when it is
     /// processed it resolved that data from the key that we provide in its place.
-    static ref DATA_MODS: RwLock<HashMap<u64, Vec<u8>>> = RwLock::new(HashMap::new());
+    static ref DATA_MODS: Mutex<HashMap<u64, Vec<u8>>> = Mutex::new(HashMap::new());
 
     /// In order to support replaying transactions we need to persist the data that is
     /// loaded from the [DATA_MODS]
@@ -34,14 +34,25 @@ pub fn get_account_mod_data_id() -> u64 {
 pub(crate) fn set_account_mod_data(data: Vec<u8>) -> u64 {
     let id = get_account_mod_data_id();
     DATA_MODS
-        .write()
+        .lock()
         .expect("DATA_MODS poisoned")
         .insert(id, data);
+    // update metrics related to total count of data mods
+    sleipnir_metrics::metrics::adjust_active_data_mods(1);
     id
 }
 
 pub(super) fn get_data(id: u64) -> Option<Vec<u8>> {
-    DATA_MODS.write().expect("DATA_MODS poisoned").remove(&id)
+    DATA_MODS
+        .lock()
+        .expect("DATA_MODS poisoned")
+        .remove(&id)
+        .inspect(|v| {
+            // decrement metrics
+            let len = (v.len() as i64).neg();
+            sleipnir_metrics::metrics::adjust_active_data_mods_size(len);
+            sleipnir_metrics::metrics::adjust_active_data_mods(-1);
+        })
 }
 
 pub fn init_persister<T: PersistsAccountModData>(persister: Arc<T>) {
