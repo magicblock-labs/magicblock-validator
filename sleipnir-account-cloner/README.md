@@ -24,7 +24,7 @@ Different types of event will trigger cloning actions:
 
 ## Validator Transaction Received
 
-When a transaction is received by the validator, each account of the transaction is cloned separately in parralel.
+When a transaction is received by the validator, each account of the transaction is cloned separately in parrallel.
 
 The logic goes as follow:
 
@@ -32,13 +32,13 @@ The logic goes as follow:
   - 0) Validate that we actually want to clone that account (is it blacklisted?)
   - 1) Start subscribing to on-chain changes for this account (so we can detect change for future clones)
   - 2) Fetch the latest on-chain account state
-  - 3) Differenciate based on the account's flavor:
-    - Undelegated: Simply dump the latest up-to-date fetch'd data to the bank
+  - 3) Differentiate based on the account's flavor:
+    - Undelegated: Simply dump the latest up-to-date fetched data to the bank
     - FeePayer: Dump the account with the lamport value found in the DelegationRecord
     - Delegated: If the account's latest delegation_slot is NOT the same as the last clone's delegation_slot, dump the latest state, otherwise ignore the change and use the cache
   - 4) Save the result of the clone to the cache
 - B) If the account has already been cloned (and it has not changed on-chain since last clone)
-  - Do nothing, use the cache
+  - 0) Do nothing, use the cache of the latest clone's result
 
 When an on-chain account's subscription notices a change:
 
