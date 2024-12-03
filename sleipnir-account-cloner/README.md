@@ -16,29 +16,31 @@ Here are all possible cases:
 - `if properly_delegated && !has_data` -> `Delegated`
 - `if properly_delegated && has_data` -> `Delegated`
 
-# Details
+# Logic Overview
 
-For each transaction in the ephemeral we need to ensure a few things:
+Different types of event will trigger cloning actions:
+ - A) A transaction is received in the validator
+ - B) An on-chain account has changed
 
-- 1) An account must not be able to change its flavor inside of the ephemeral (on chain change is OK)
-- 2) Any ephemeral transaction must ensure that it is never modifying any `Undelegated` account
-- 3) Any `FeePayer` lamports must have been escrowed in and out on the base chain
+## Validator Transaction Received
 
-Assuming the above requirements are fullfilled, this means transactions in the ephemeral can:
+When a transaction is received by the validator, each account of the transaction is cloned separately in parralel.
 
-- Send lamports freely from/to `FeePayer` accounts and `Delegated` accounts
-- `FeePayer` can be used as payer for both transaction fee and rent
-- Modify state of `Delegated` accounts
-- Use `Undelegated` accounts as read-only
+The logic goes as follow:
 
-# Notes
+- A) If the account was never seen before or changes to the account were detected since last clone
+  - 0) Validate that we actually want to clone that account (is it blacklisted?)
+  - 1) Start subscribing to on-chain changes for this account (so we can detect change for future clones)
+  - 2) Fetch the latest on-chain account state
+  - 3) Differenciate based on the account's flavor:
+    - Undelegated: Simply dump the latest up-to-date fetch'd data to the bank
+    - FeePayer: Dump the account with the lamport value found in the DelegationRecord
+    - Delegated: If the account's latest delegation_slot is NOT the same as the last clone's delegation_slot, dump the latest state, otherwise ignore the change and use the cache
+  - 4) Save the result of the clone to the cache
+- B) If the account has already been cloned (and it has not changed on-chain since last clone)
+  - Do nothing, use the cache
 
-`FeePayer` account must not contain data, since their lamports balance is escrowed, it will not be an exact mirror of the base chain's lamport balance. Therefore the account must not need to pay rent in order to be able to exist in the ephemeral since its escrowed lamport value has no guarantee to cover rent.
+When an on-chain account's subscription notices a change:
 
-In order to achieve requirement (1) we need the following properties:
-
-- `Delegated` accounts cannot be undelegated locally (needs re-clone from the chain), OK
-- `Undelegated` accounts cannot be delegated locally (needs re-clone from the chain), OK
-- `FeePayer` accounts must remain wallets forever until otherwise re-cloned, NEEDS WORK
-  - we must protect against a transaction allocating data on a wallet
-  - TODO(vbrunet) - [HERE](https://github.com/magicblock-labs/magicblock-validator/issues/190)
+ - We update the `last_known_update_slot` for that account
+ - On the next clone for that account, it will force the logic (A) instead of (B)
