@@ -15,6 +15,7 @@ log = { workspace = true }
 modular-bitfield = { workspace = true }
 rand = { workspace = true }
 rayon = { workspace = true }
+sleipnir-metrics = { workspace = true }
 smallvec = { workspace = true }
 solana-frozen-abi-macro = { workspace = true }
 solana-measure = { workspace = true }

@@ -1,6 +1,6 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
-    sync::{Arc, RwLock},
+    sync::{Arc, Mutex},
 };
 
 use conjunto_transwise::AccountChainSnapshotShared;
@@ -19,7 +19,7 @@ use crate::{
 
 pub struct RemoteAccountFetcherClient {
     fetch_request_sender: UnboundedSender<(Pubkey, Option<Slot>)>,
-    fetch_listeners: Arc<RwLock<HashMap<Pubkey, AccountFetcherListeners>>>,
+    fetch_listeners: Arc<Mutex<HashMap<Pubkey, AccountFetcherListeners>>>,
 }
 
 impl RemoteAccountFetcherClient {
@@ -39,7 +39,7 @@ impl AccountFetcher for RemoteAccountFetcherClient {
     ) -> BoxFuture<AccountFetcherResult<AccountChainSnapshotShared>> {
         let (should_request_fetch, receiver) = match self
             .fetch_listeners
-            .write()
+            .lock()
             .expect("RwLock of RemoteAccountFetcherClient.fetch_listeners is poisoned")
             .entry(*pubkey)
         {
@@ -54,6 +54,8 @@ impl AccountFetcher for RemoteAccountFetcherClient {
                 (false, receiver)
             }
         };
+        // track the number of pending clones, might be helpful to detect memory leaks
+        sleipnir_metrics::metrics::inc_pending_clone_requests();
         if should_request_fetch {
             if let Err(error) =
                 self.fetch_request_sender.send((*pubkey, min_context_slot))
@@ -63,9 +65,12 @@ impl AccountFetcher for RemoteAccountFetcherClient {
                 ))));
             }
         }
-        Box::pin(receiver.map(|received| match received {
-            Ok(result) => result,
-            Err(error) => Err(AccountFetcherError::RecvError(error)),
+        Box::pin(receiver.map(|received| {
+            sleipnir_metrics::metrics::dec_pending_clone_requests();
+            match received {
+                Ok(result) => result,
+                Err(error) => Err(AccountFetcherError::RecvError(error)),
+            }
         }))
     }
 }
