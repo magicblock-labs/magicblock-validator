@@ -76,11 +76,27 @@ lazy_static::lazy_static! {
     ).unwrap();
 
     static ref LEDGER_SIZE_GAUGE: IntGauge = IntGauge::new(
-        "ledger_size", "Ledger Size in Bytes",
+        "ledger_size", "Ledger size in Bytes",
     ).unwrap();
 
     static ref ACCOUNTS_SIZE_GAUGE: IntGauge = IntGauge::new(
         "accounts_size", "Size of persisted accounts (in bytes) currently on disk",
+    ).unwrap();
+
+    static ref INMEM_ACCOUNTS_SIZE_GAUGE: IntGauge = IntGauge::new(
+        "inmemory_accounts_size", "Size of account states kept in RAM",
+    ).unwrap();
+
+    static ref PENDING_ACCOUNT_CLONES_GAUGE: IntGauge = IntGauge::new(
+        "pending_account_clones", "Total number of account clone requests still in memory",
+    ).unwrap();
+
+    static ref ACTIVE_DATA_MODS_GAUGE: IntGauge = IntGauge::new(
+        "active_data_mods", "Total number of account data modifications held in memory",
+    ).unwrap();
+
+    static ref ACTIVE_DATA_MODS_SIZE_GAUGE: IntGauge = IntGauge::new(
+        "active_data_mods_size", "Total memory consumption by account data modifications",
     ).unwrap();
 
     static ref SIGVERIFY_TIME_HISTOGRAM: Histogram = Histogram::with_opts(
@@ -142,6 +158,10 @@ pub(crate) fn register() {
         register!(ACCOUNT_COMMIT_TIME_HISTOGRAM);
         register!(LEDGER_SIZE_GAUGE);
         register!(ACCOUNTS_SIZE_GAUGE);
+        register!(INMEM_ACCOUNTS_SIZE_GAUGE);
+        register!(PENDING_ACCOUNT_CLONES_GAUGE);
+        register!(ACTIVE_DATA_MODS_GAUGE);
+        register!(ACTIVE_DATA_MODS_SIZE_GAUGE);
         register!(SIGVERIFY_TIME_HISTOGRAM);
         register!(ENSURE_ACCOUNTS_TIME_HISTOGRAM);
         register!(TRANSACTION_EXECUTION_TIME_HISTORY);
@@ -229,6 +249,26 @@ pub fn set_ledger_size(size: u64) {
 
 pub fn set_accounts_size(size: u64) {
     ACCOUNTS_SIZE_GAUGE.set(size as i64);
+}
+
+pub fn adjust_inmemory_accounts_size(delta: i64) {
+    INMEM_ACCOUNTS_SIZE_GAUGE.add(delta);
+}
+
+pub fn inc_pending_clone_requests() {
+    PENDING_ACCOUNT_CLONES_GAUGE.inc()
+}
+
+pub fn dec_pending_clone_requests() {
+    PENDING_ACCOUNT_CLONES_GAUGE.dec()
+}
+
+pub fn adjust_active_data_mods(delta: i64) {
+    ACTIVE_DATA_MODS_GAUGE.add(delta)
+}
+
+pub fn adjust_active_data_mods_size(delta: i64) {
+    ACTIVE_DATA_MODS_SIZE_GAUGE.add(delta);
 }
 
 pub fn observe_sigverify_time<T, F>(f: F) -> T
