@@ -19,26 +19,29 @@ Here are all possible cases:
 # Logic Overview
 
 Different types of event will trigger cloning actions:
- - A) A transaction is received in the validator
- - B) An on-chain account has changed
+ - A transaction is received in the validator
+ - An on-chain account has changed
 
-## Validator Transaction Received
+### Transaction received in the validator
 
 When a transaction is received by the validator, each account of the transaction is cloned separately in parrallel.
 
-The logic goes as follow:
+For each account, the logic goes as follow:
 
 - A) If the account was never seen before or changes to the account were detected since last clone
   - 0) Validate that we actually want to clone that account (is it blacklisted?)
   - 1) Start subscribing to on-chain changes for this account (so we can detect change for future clones)
   - 2) Fetch the latest on-chain account state
   - 3) Differentiate based on the account's flavor:
-    - Undelegated: Simply dump the latest up-to-date fetched data to the bank
-    - FeePayer: Dump the account with the lamport value found in the DelegationRecord
-    - Delegated: If the account's latest delegation_slot is NOT the same as the last clone's delegation_slot, dump the latest state, otherwise ignore the change and use the cache
+    - A) Undelegated: Simply dump the latest up-to-date fetched data to the bank (programs also fetched/updated)
+    - B) FeePayer: Dump the account with the lamport value found in the DelegationRecord
+    - C) Delegated: If the account's latest delegation_slot is NOT the same as the last clone's delegation_slot, dump the latest state, otherwise ignore the change and use the cache
   - 4) Save the result of the clone to the cache
+
 - B) If the account has already been cloned (and it has not changed on-chain since last clone)
   - 0) Do nothing, use the cache of the latest clone's result
+
+### On-chain change detected
 
 When an on-chain account's subscription notices a change:
 
