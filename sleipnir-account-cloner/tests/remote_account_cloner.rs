@@ -43,6 +43,7 @@ fn setup_custom(
         blacklisted_accounts,
         payer_init_lamports,
         permissions,
+        Pubkey::new_unique(),
     );
     let cloner_client = RemoteAccountClonerClient::new(&cloner_worker);
     // Run the worker in a separate task

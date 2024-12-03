@@ -6,11 +6,7 @@ use sleipnir_account_dumper::AccountDumperError;
 use sleipnir_account_fetcher::AccountFetcherError;
 use sleipnir_account_updates::AccountUpdatesError;
 use sleipnir_core::magic_program;
-use solana_sdk::{
-    clock::Slot,
-    pubkey::{self, Pubkey},
-    signature::Signature,
-};
+use solana_sdk::{clock::Slot, pubkey::Pubkey, signature::Signature};
 use thiserror::Error;
 use tokio::sync::oneshot::Sender;
 
@@ -53,6 +49,9 @@ pub enum AccountClonerUnclonableReason {
     DoesNotAllowUndelegatedAccount,
     DoesNotAllowDelegatedAccount,
     DoesNotAllowProgramAccount,
+    /// If an account is delegated to our validator then we we should use the latest
+    /// state in our own bank since that is more up to date than the on-chain state.
+    DelegatedAccountsNotClonedWhileHydrating,
 }
 
 #[derive(Debug, Clone)]

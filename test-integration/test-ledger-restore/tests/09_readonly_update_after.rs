@@ -58,7 +58,7 @@ fn restore_ledger_using_readonlyestore_ledger_using_readonly() {
     validator.kill().unwrap();
 
     let mut validator = read(&ledger_path, &payer_main, &payer_readonly);
-    // validator.kill().unwrap();
+    validator.kill().unwrap();
 }
 
 fn write(
@@ -171,7 +171,6 @@ fn read(
     let (_, mut validator, _) =
         setup_validator_with_local_remote(ledger_path, Some(programs), false);
 
-    // TODO: @@@ this gets cloned from chain again even though it shouldn't
     let counter_main_ephem = fetch_counter_ephem(payer_main, &mut validator);
     assert_eq!(
         counter_main_ephem,
@@ -196,12 +195,12 @@ fn read(
     );
 
     // Update readonly counter on chain and ensure it was cloned again
-    if false {
+    {
         let ix = create_add_ix(*payer_readonly, 1);
         confirm_tx_with_payer_chain(ix, payer_readonly_kp, &mut validator);
 
         let counter_readonly_chain =
-            fetch_counter_chain(payer_main, &mut validator);
+            fetch_counter_chain(payer_readonly, &mut validator);
         assert_eq!(
             counter_readonly_chain,
             FlexiCounter {
@@ -212,20 +211,24 @@ fn read(
             cleanup(&mut validator)
         );
 
+        // NOTE: for now the ephem validator keeps the old state of the readonly account
+        // since at this point we re-clone lazily. This will be fixed with the new
+        // cloning pipeline at which point we need to update this test.
         let counter_readonly_ephem =
             fetch_counter_ephem(payer_readonly, &mut validator);
         assert_eq!(
             counter_readonly_ephem,
             FlexiCounter {
-                count: 4,
-                updates: 2,
+                count: 3,
+                updates: 1,
                 label: COUNTER_READONLY.to_string()
             },
             cleanup(&mut validator)
         );
     }
 
-    // Then perform counter add again to ensure this new state is used
+    // TODO: @@@ Then perform counter add again to ensure that the state is updated in the ephemeral
+    // and this new state is used in the transaction
 
     validator
 }

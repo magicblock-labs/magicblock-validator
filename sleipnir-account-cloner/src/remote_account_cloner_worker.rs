@@ -5,7 +5,9 @@ use std::{
     vec,
 };
 
-use conjunto_transwise::{AccountChainSnapshotShared, AccountChainState};
+use conjunto_transwise::{
+    AccountChainSnapshotShared, AccountChainState, DelegationRecord,
+};
 use futures_util::future::join_all;
 use log::*;
 use sleipnir_account_dumper::AccountDumper;
@@ -33,6 +35,31 @@ use crate::{
     AccountClonerUnclonableReason,
 };
 
+pub enum ValidatorStage {
+    Hydrating(Pubkey),
+    Running,
+}
+
+impl ValidatorStage {
+    fn should_clone_delegated_account(
+        &self,
+        record: &DelegationRecord,
+    ) -> bool {
+        use ValidatorStage::*;
+        match self {
+            // If an account is delegated then one of the following is true:
+            // a) it is delegated to us and we made changes to it which we should not overwrite
+            //    no changes on chain were possible while it was delegated to us
+            // b) it is delegated to another validator and might have changed in the meantime in
+            //    which case we actually should clone it
+            Hydrating(validator_authority) => {
+                record.authority.ne(validator_authority)
+            }
+            Running => true,
+        }
+    }
+}
+
 pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU> {
     internal_account_provider: IAP,
     account_fetcher: AFE,
@@ -47,6 +74,7 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU> {
     clone_request_sender: UnboundedSender<Pubkey>,
     clone_listeners: Arc<RwLock<HashMap<Pubkey, AccountClonerListeners>>>,
     last_clone_output: Arc<RwLock<HashMap<Pubkey, AccountClonerOutput>>>,
+    validator_authority: Pubkey,
 }
 
 impl<IAP, AFE, AUP, ADU> RemoteAccountClonerWorker<IAP, AFE, AUP, ADU>
@@ -66,6 +94,7 @@ where
         blacklisted_accounts: HashSet<Pubkey>,
         payer_init_lamports: Option<u64>,
         permissions: AccountClonerPermissions,
+        validator_authority: Pubkey,
     ) -> Self {
         let (clone_request_sender, clone_request_receiver) =
             unbounded_channel();
@@ -85,6 +114,7 @@ where
             clone_request_sender,
             clone_listeners: Default::default(),
             last_clone_output: Default::default(),
+            validator_authority,
         }
     }
 
@@ -192,7 +222,12 @@ where
             .collect::<HashSet<_>>();
 
         for pubkey in account_keys {
-            let res = self.do_clone_and_update_cache(&pubkey).await;
+            let res = self
+                .do_clone_and_update_cache(
+                    &pubkey,
+                    ValidatorStage::Hydrating(self.validator_authority),
+                )
+                .await;
             match res {
                 Ok(output) => {
                     debug!("Cloned '{}': {:?}", pubkey, output);
@@ -241,7 +276,11 @@ where
                     }
                     // If the cloned account has been updated since clone, update the cache
                     else {
-                        self.do_clone_and_update_cache(pubkey).await
+                        self.do_clone_and_update_cache(
+                            pubkey,
+                            ValidatorStage::Running,
+                        )
+                        .await
                     }
                 }
                 // If the previous clone marked the account as unclonable, we may be able to re-use that output
@@ -255,7 +294,11 @@ where
                     }
                     // If the cloned account has been updated since clone, try to update the cache
                     else {
-                        self.do_clone_and_update_cache(pubkey).await
+                        self.do_clone_and_update_cache(
+                            pubkey,
+                            ValidatorStage::Running,
+                        )
+                        .await
                     }
                 }
             },
@@ -271,7 +314,11 @@ where
                 }
                 // If we need to clone it for the first time and update the cache
                 else {
-                    self.do_clone_and_update_cache(pubkey).await
+                    self.do_clone_and_update_cache(
+                        pubkey,
+                        ValidatorStage::Running,
+                    )
+                    .await
                 }
             }
         }
@@ -280,8 +327,9 @@ where
     async fn do_clone_and_update_cache(
         &self,
         pubkey: &Pubkey,
+        stage: ValidatorStage,
     ) -> AccountClonerResult<AccountClonerOutput> {
-        let updated_clone_output = self.do_clone(pubkey).await?;
+        let updated_clone_output = self.do_clone(pubkey, stage).await?;
         self.last_clone_output
             .write()
             .expect("RwLock of RemoteAccountClonerWorker.last_clone_output is poisoned")
@@ -292,6 +340,7 @@ where
     async fn do_clone(
         &self,
         pubkey: &Pubkey,
+        stage: ValidatorStage,
     ) -> AccountClonerResult<AccountClonerOutput> {
         // If the account is blacklisted against cloning, no need to do anything anytime
         if self.blacklisted_accounts.contains(pubkey) {
@@ -421,6 +470,14 @@ where
                         pubkey: *pubkey,
                         reason:
                         AccountClonerUnclonableReason::DoesNotAllowDelegatedAccount,
+                        at_slot: account_chain_snapshot.at_slot,
+                    });
+                }
+                if !stage.should_clone_delegated_account(delegation_record) {
+                    return Ok(AccountClonerOutput::Unclonable {
+                        pubkey: *pubkey,
+                        reason:
+                        AccountClonerUnclonableReason::DelegatedAccountsNotClonedWhileHydrating,
                         at_slot: account_chain_snapshot.at_slot,
                     });
                 }

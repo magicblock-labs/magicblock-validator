@@ -53,6 +53,7 @@ fn setup_with_lifecycle(
         HashSet::new(),
         Some(1_000_000_000),
         lifecycle.to_account_cloner_permissions(),
+        Pubkey::new_unique(),
     );
     let remote_account_cloner_client =
         RemoteAccountClonerClient::new(&remote_account_cloner_worker);

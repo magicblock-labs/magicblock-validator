@@ -265,6 +265,7 @@ impl MagicValidator {
             blacklisted_accounts,
             accounts_config.payer_init_lamports,
             accounts_config.lifecycle.to_account_cloner_permissions(),
+            identity_keypair.pubkey(),
         );
 
         let accounts_manager = Self::init_accounts_manager(
