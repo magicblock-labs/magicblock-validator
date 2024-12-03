@@ -1,6 +1,6 @@
 use std::{
     collections::{hash_map::Entry, HashMap},
-    sync::{Arc, RwLock},
+    sync::{Arc, Mutex},
     vec,
 };
 
@@ -25,7 +25,7 @@ pub struct RemoteAccountFetcherWorker {
     >,
     fetch_request_receiver: UnboundedReceiver<(Pubkey, Option<Slot>)>,
     fetch_request_sender: UnboundedSender<(Pubkey, Option<Slot>)>,
-    fetch_listeners: Arc<RwLock<HashMap<Pubkey, AccountFetcherListeners>>>,
+    fetch_listeners: Arc<Mutex<HashMap<Pubkey, AccountFetcherListeners>>>,
 }
 
 impl RemoteAccountFetcherWorker {
@@ -52,7 +52,7 @@ impl RemoteAccountFetcherWorker {
 
     pub fn get_fetch_listeners(
         &self,
-    ) -> Arc<RwLock<HashMap<Pubkey, AccountFetcherListeners>>> {
+    ) -> Arc<Mutex<HashMap<Pubkey, AccountFetcherListeners>>> {
         self.fetch_listeners.clone()
     }
 
@@ -103,9 +103,9 @@ impl RemoteAccountFetcherWorker {
         // Collect the listeners waiting for the result
         let listeners = match self
             .fetch_listeners
-            .write()
+            .lock()
             .expect(
-                "RwLock of RemoteAccountFetcherWorker.fetch_listeners is poisoned",
+                "Mutex of RemoteAccountFetcherWorker.fetch_listeners is poisoned",
             )
             .entry(pubkey)
         {

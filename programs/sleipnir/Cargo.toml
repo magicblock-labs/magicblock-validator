@@ -16,6 +16,7 @@ num-derive = { workspace = true }
 num-traits = { workspace = true }
 serde = { workspace = true, features = ["derive"] }
 sleipnir-core = { workspace = true }
+sleipnir-metrics = { workspace = true }
 solana-program-runtime = { workspace = true }
 solana-sdk = { workspace = true }
 tokio = { workspace = true }
