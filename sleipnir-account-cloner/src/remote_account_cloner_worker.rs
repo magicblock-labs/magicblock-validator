@@ -36,7 +36,16 @@ use crate::{
 };
 
 pub enum ValidatorStage {
-    Hydrating(Pubkey),
+    Hydrating {
+        /// The identity of our validator
+        validator_identity: Pubkey,
+        /// The owner of the account we consider cloning during the hydrating phase
+        /// This is not really part of the validator stage, but related to a particular
+        /// case of cloning an account during ledger replay.
+        /// NOTE: that this will not be needed once every delegation record contains
+        /// the validator authority.
+        account_owner: Pubkey,
+    },
     Running,
 }
 
@@ -52,8 +61,24 @@ impl ValidatorStage {
             //    no changes on chain were possible while it was delegated to us
             // b) it is delegated to another validator and might have changed in the meantime in
             //    which case we actually should clone it
-            Hydrating(validator_authority) => {
-                record.authority.ne(validator_authority)
+            Hydrating {
+                validator_identity,
+                account_owner,
+            } => {
+                // If the account is delegated to us, we should not clone it
+                // We can only determine this if the record.authority
+                // is set to a valid address
+                if record.authority.ne(&Pubkey::default()) {
+                    record.authority.ne(validator_identity)
+                } else {
+                    // At this point the record.authority is not always set.
+                    // As a workaround we check if on the account inside our validator
+                    // the owner was set to the original owner of the account on chain
+                    // which means it was delegated to us.
+                    // If it was cloned as a readable its owner would still be the delegation
+                    // program
+                    account_owner.ne(&record.owner)
+                }
             }
             Running => true,
         }
@@ -74,7 +99,7 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU> {
     clone_request_sender: UnboundedSender<Pubkey>,
     clone_listeners: Arc<RwLock<HashMap<Pubkey, AccountClonerListeners>>>,
     last_clone_output: Arc<RwLock<HashMap<Pubkey, AccountClonerOutput>>>,
-    validator_authority: Pubkey,
+    validator_identity: Pubkey,
 }
 
 impl<IAP, AFE, AUP, ADU> RemoteAccountClonerWorker<IAP, AFE, AUP, ADU>
@@ -114,7 +139,7 @@ where
             clone_request_sender,
             clone_listeners: Default::default(),
             last_clone_output: Default::default(),
-            validator_authority,
+            validator_identity: validator_authority,
         }
     }
 
@@ -218,14 +243,17 @@ where
                 }
                 true
             })
-            .map(|(pubkey, _)| pubkey)
+            .map(|(pubkey, acc)| (pubkey, *acc.owner()))
             .collect::<HashSet<_>>();
 
-        for pubkey in account_keys {
+        for (pubkey, owner) in account_keys {
             let res = self
                 .do_clone_and_update_cache(
                     &pubkey,
-                    ValidatorStage::Hydrating(self.validator_authority),
+                    ValidatorStage::Hydrating {
+                        validator_identity: self.validator_identity,
+                        account_owner: owner,
+                    },
                 )
                 .await;
             match res {
@@ -280,7 +308,7 @@ where
                             pubkey,
                             ValidatorStage::Running,
                         )
-                        .await
+                            .await
                     }
                 }
                 // If the previous clone marked the account as unclonable, we may be able to re-use that output
@@ -298,7 +326,7 @@ where
                             pubkey,
                             ValidatorStage::Running,
                         )
-                        .await
+                            .await
                     }
                 }
             },
@@ -318,7 +346,7 @@ where
                         pubkey,
                         ValidatorStage::Running,
                     )
-                    .await
+                        .await
                 }
             }
         }
@@ -376,9 +404,9 @@ where
                         // is more recent than the first successful subscription to the account
                         if account_chain_snapshot.at_slot
                             >= self
-                                .account_updates
-                                .get_first_subscribed_slot(pubkey)
-                                .unwrap_or(u64::MAX)
+                            .account_updates
+                            .get_first_subscribed_slot(pubkey)
+                            .unwrap_or(u64::MAX)
                         {
                             break account_chain_snapshot;
                         }
@@ -444,7 +472,7 @@ where
                         account,
                         Some(account_chain_snapshot.at_slot),
                     )
-                    .await?
+                        .await?
                 }
                 // If it's not an executble, simpler rules apply
                 else {
@@ -541,9 +569,9 @@ where
         // If we already cloned this account from the same delegation slot
         // Keep the local state as source of truth even if it changed on-chain
         if let Some(AccountClonerOutput::Cloned {
-            account_chain_snapshot,
-            signature,
-        }) = self.get_last_clone_output(pubkey)
+                        account_chain_snapshot,
+                        signature,
+                    }) = self.get_last_clone_output(pubkey)
         {
             if let AccountChainState::Delegated {
                 delegation_record, ..
