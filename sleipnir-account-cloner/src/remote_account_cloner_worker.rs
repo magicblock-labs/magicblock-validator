@@ -308,7 +308,7 @@ where
                             pubkey,
                             ValidatorStage::Running,
                         )
-                            .await
+                        .await
                     }
                 }
                 // If the previous clone marked the account as unclonable, we may be able to re-use that output
@@ -326,7 +326,7 @@ where
                             pubkey,
                             ValidatorStage::Running,
                         )
-                            .await
+                        .await
                     }
                 }
             },
@@ -346,7 +346,7 @@ where
                         pubkey,
                         ValidatorStage::Running,
                     )
-                        .await
+                    .await
                 }
             }
         }
@@ -404,9 +404,9 @@ where
                         // is more recent than the first successful subscription to the account
                         if account_chain_snapshot.at_slot
                             >= self
-                            .account_updates
-                            .get_first_subscribed_slot(pubkey)
-                            .unwrap_or(u64::MAX)
+                                .account_updates
+                                .get_first_subscribed_slot(pubkey)
+                                .unwrap_or(u64::MAX)
                         {
                             break account_chain_snapshot;
                         }
@@ -472,7 +472,7 @@ where
                         account,
                         Some(account_chain_snapshot.at_slot),
                     )
-                        .await?
+                    .await?
                 }
                 // If it's not an executble, simpler rules apply
                 else {
@@ -502,11 +502,15 @@ where
                     });
                 }
                 if !stage.should_clone_delegated_account(delegation_record) {
-                    return Ok(AccountClonerOutput::Unclonable {
-                        pubkey: *pubkey,
-                        reason:
-                        AccountClonerUnclonableReason::DelegatedAccountsNotClonedWhileHydrating,
-                        at_slot: account_chain_snapshot.at_slot,
+                    // NOTE: the account was already cloned when the initial instance of this
+                    // validator ran. We don't want to clone it again during ledger replay, however
+                    // we want to use it as a delegated + cloned account, thus we respond in the
+                    // same manner as we just cloned it.
+                    // Unfortunately we don't know the signature, but during ledger replay
+                    // this should not be too important.
+                    return Ok(AccountClonerOutput::Cloned {
+                        account_chain_snapshot,
+                        signature: Signature::new_unique(),
                     });
                 }
                 self.do_clone_delegated_account(
@@ -569,9 +573,9 @@ where
         // If we already cloned this account from the same delegation slot
         // Keep the local state as source of truth even if it changed on-chain
         if let Some(AccountClonerOutput::Cloned {
-                        account_chain_snapshot,
-                        signature,
-                    }) = self.get_last_clone_output(pubkey)
+            account_chain_snapshot,
+            signature,
+        }) = self.get_last_clone_output(pubkey)
         {
             if let AccountChainState::Delegated {
                 delegation_record, ..
