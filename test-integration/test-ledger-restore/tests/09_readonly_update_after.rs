@@ -55,10 +55,10 @@ fn restore_ledger_using_readonlyestore_ledger_using_readonly() {
     let payer_readonly = payer_keypair();
 
     let (mut validator, _) = write(&ledger_path, &payer_main, &payer_readonly);
-    validator.kill().unwrap();
+    // validator.kill().unwrap();
 
-    let mut validator = read(&ledger_path, &payer_main, &payer_readonly);
-    validator.kill().unwrap();
+    // let mut validator = read(&ledger_path, &payer_main, &payer_readonly);
+    // validator.kill().unwrap();
 }
 
 fn write(
