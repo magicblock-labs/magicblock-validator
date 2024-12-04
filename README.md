@@ -1,58 +1,148 @@
-## POC for MagicBlock Validator
+<div align="center">
 
-## Research
+  <img height="50x" src="https://www.magicblock.xyz/magicblock-band.png" />
 
-### Solana Validator
 
-- [crates](https://miro.com/app/board/uXjVNt95ws4=/) (`./sh/depgraph solana-runtime`)
+  <h1>Ephemeral Validator</h1>
 
-#### SVM
+  <p>
+    <strong>Blazing-Fast SVM Ephemeral Validator: Clones accounts and programs just-in-time and settles state to a reference cluster.</strong>
+  </p>
 
-- [docs](https://docs.rs/solana-program-runtime/latest/solana_svm/) (not yet published)
-- [recently separated](https://github.com/solana-labs/solana/pull/35119) from other parts
-  (mainly the solana-runtime crate)
+  <p>
+    <a href="https://docs.magicblock.gg/Accelerate/ephemeral_rollups"><img alt="Documentation" src="https://img.shields.io/badge/docs-tutorials-blueviolet" /></a>
+    <a href="https://github.com/magicblock-labs/bolt/issues"><img alt="Issues" src="https://img.shields.io/github/issues/magicblock-labs/ephemeral-validator?color=blueviolet" /></a>
+    <a href="https://discord.com/invite/MBkdC3gxcv"><img alt="Discord Chat" src="https://img.shields.io/discord/943797222162726962?color=blueviolet" /></a>
+  </p>
 
-#### Solana Program Runtime
+</div>
 
-- [docs](https://docs.rs/solana-program-runtime/latest/solana_program_runtime/)
+## Overview
 
-#### SDK
+The Ephemeral Validator is a Solana Virtual Machine Validator that clones accounts and programs just-in-time and settles state to a reference cluster. 
+It is designed to be used in a MagicBlock [Ephemeral Rollup](https://docs.magicblock.gg/introduction) instance to bring potentially anything on Solana, but can also be used as a super-charged [development](https://luzid.app/) environment.
 
-- includes C bindings as well, for programs written in in C
 
-**Sub Crates**
+## Ephemeral Rollups
 
-These crates just happen to be located below the `sdk` directory, but are not actually
-dependencies of the `sdk` crate.
-Example: `solana-program = { path = "sdk/program", version = "=1.18.0" }`
+The core intuition is that by harnessing the SVM’s account structure and its capacity for parallelization, we can split the app/game state into shards. Users can lock one or multiple accounts to temporarily transfer the state to an auxiliary layer, which we define as the “ephemeral rollup”, a configurable dedicated runtime.
 
-- **bpf** compiler-builtins for BPF
-- **sbpf** compiler-builtins for SBPF
+The Ephemeral Rollups instance always originate from a reference cluster, which is the source of truth for the state (programs and accounts). The session is eventually settled back to the reference cluster.
 
-- **gen-headers** binary to generate C headers
+For the full documentation, please refer to the [Ephemeral Rollups](https://docs.magicblock.gg/Accelerate/ephemeral_rollups) page.
 
-- **cargo-build-bpf** binary for building BPF programs
-- **cargo-build-sbf** binary for building SBF programs
-- **cargo-test-bpf** binary for testing BPF programs
-- **cargo-test-sbf** binary for testing SBF programs
+## Building
 
-- **macro** defines macros, i.e.`declare_id!`j
-- **program** various core features
-  - builtin programs, i.e. _system_, _bpf-loader_
-  - serialization tooling (borsh)
-  - vars, i.e. _sys-var_, _rent_
-  - data structs like _account-info_
-  - compute units
-  - syscalls
-  - instruction
-  - keccak hasher
-  - program_memory
-  - clock including constants to define things like _DEFAULT_SLOTS_PER_EPOCH_
-  - many more
+### **1. Install rustc, cargo and rustfmt.**
 
-**SDK Itself**
+```bash
+$ curl https://sh.rustup.rs -sSf | sh
+$ source $HOME/.cargo/env
+$ rustup component add rustfmt
+```
 
-- large collection of crates that need to be accessed by lots of other crates, thus it serves
-  not only as an SDK, but also as a core crate
-- `exit.rs` is a good example of a core feature which allows services to register to be called
-  back when the validator is shutting down
+
+### **2. Download the source code.**
+
+```bash
+$ git clone https://github.com/magicblock-labs/ephemeral-validator.git
+$ cd ephemeral-validator
+```
+
+### **3. Build.**
+
+```bash
+$ cargo build
+```
+
+## Running the Ephemeral Validator
+
+The validator supports configurations for the different use cases. The configuration files is a TOML file (some examples can be found in [configs](./configs)). Additionally, the configuration can be overridden by environment variables.
+
+For example, to run the ephemeral validator on the devnet cluster, run:
+
+```bash
+$ cargo run -- configs/ephem-devnet.toml
+```
+
+Additionally, the validator can also be run with docker: [magicblocklabs/validator](https://hub.docker.com/r/magicblocklabs/validator)
+
+## Testing
+
+**Run the test suite:**
+
+```bash
+$ make test
+```
+
+## Integration Tests
+
+**Running an integration test locally requires:**
+
+### **1. Start a localnet cluster:**
+
+```bash
+$ cd test-integration
+$ ./configs/run-test-validator.sh
+```
+
+### **2. Run the ephemeral validator:**
+
+```bash
+$ cargo run -- configs/ephem-localnet.toml
+```
+
+### **3. Run the integration test, e.g:**
+
+```bash
+$ cargo test --test 01_invocations test_schedule_commit_directly_with_single_ix --profile test
+```
+
+## Accessing the remote development cluster
+
+* `ephemeral devnet` - stable public cluster for development accessible via
+  https://devnet.magicblock.app. It uses solana devnet as base cluster for cloning and settling.
+
+## Solana Program Runtime
+
+- [Solana Program Runtime](https://docs.rs/solana-program-runtime/latest/solana_program_runtime/)
+
+## Disclaimer
+
+All claims, content, designs, algorithms, estimates, roadmaps,
+specifications, and performance measurements described in this project
+are done with the MagicBlock Labs, Pte. Ltd. (“ML”) good faith efforts. It is up to
+the reader to check and validate their accuracy and truthfulness.
+Furthermore, nothing in this project constitutes a solicitation for
+investment.
+
+Any content produced by ML or developer resources that ML provides are
+for educational and inspirational purposes only. ML does not encourage,
+induce or sanction the deployment, integration or use of any such
+applications (including the code comprising the MagicBlock blockchain
+protocol) in violation of applicable laws or regulations and hereby
+prohibits any such deployment, integration or use. This includes the use of
+any such applications by the reader (a) in violation of export control
+or sanctions laws of the United States or any other applicable
+jurisdiction, (b) if the reader is located in or ordinarily resident in
+a country or territory subject to comprehensive sanctions administered
+by the U.S. Office of Foreign Assets Control (OFAC), or (c) if the
+reader is or is working on behalf of a Specially Designated National
+(SDN) or a person subject to similar blocking or denied party
+prohibitions.
+
+The reader should be aware that U.S. export control and sanctions laws prohibit
+U.S. persons (and other persons that are subject to such laws) from transacting
+with persons in certain countries and territories or that are on the SDN list.
+Accordingly, there is a risk to individuals that other persons using any of the
+code contained in this repo, or a derivation thereof, may be sanctioned persons
+and that transactions with such persons would be a violation of U.S. export
+controls and sanctions law.
+
+## Under construction
+
+The Ephemeral Validator is in active development, so all APIs are subject to change. This code is unaudited. Use at your own risk.
+
+## Open Source
+
+Open Source is at the heart of what we do at Magicblock. We believe building software in the open, with thriving communities, helps leave the world a little better than we found it.
