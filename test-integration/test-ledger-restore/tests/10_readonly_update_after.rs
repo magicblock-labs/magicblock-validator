@@ -49,7 +49,7 @@ fn payer_keypair() -> Keypair {
 // 2. Verify that the Main PDA count is 6 and updates = 3
 
 #[test]
-fn restore_ledger_using_readonlyestore_ledger_using_readonly() {
+fn restore_ledger_using_readonly() {
     let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
     let payer_main = payer_keypair();
     let payer_readonly = payer_keypair();
