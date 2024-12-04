@@ -24,11 +24,33 @@ lazy_static! {
     /// During replay the [DATA_MODS] won't have the data for the particular id in which
     /// case it is loaded via the persister instead.
     static ref PERSISTER: RwLock<Option<Arc<dyn PersistsAccountModData>>> = RwLock::new(None);
+
+    static ref DATA_MOD_ID: AtomicU64 = AtomicU64::new(0);
 }
 
 pub fn get_account_mod_data_id() -> u64 {
-    static COUNTER: AtomicU64 = AtomicU64::new(0);
-    COUNTER.fetch_add(1, Ordering::Relaxed)
+    DATA_MOD_ID.fetch_add(1, Ordering::Relaxed)
+}
+
+/// This increases the data mod id and verifies that the expected
+/// next id is in sequence.
+/// We crash here since if not this is only used during ledger replay and
+/// if the sequence is broken this indidcates an invalid ledger and
+/// we don't want to keep running in this case
+/// As a result once the validator starts running after ledger replay
+/// the [DATA_MOD_ID] has the same value as it did when the initial validator
+/// instance stopped.
+fn set_data_mod_id_checking_sequence(next_id: u64) {
+    if next_id == 0 {
+        assert_eq!(
+            DATA_MOD_ID.load(Ordering::Relaxed),
+            0,
+            "Data mod id sequence is broken"
+        );
+        return;
+    }
+    let current_id = DATA_MOD_ID.fetch_add(1, Ordering::Relaxed);
+    assert_eq!(current_id + 1, next_id, "Data mod id sequence is broken");
 }
 
 pub(crate) fn set_account_mod_data(data: Vec<u8>) -> u64 {
@@ -183,7 +205,10 @@ pub(super) fn resolve_account_mod_data(
             );
             SleipnirError::AccountDataResolutionFailed
         })? {
-            Some(data) => Ok(ResolvedAccountModData::FromStorage { id, data }),
+            Some(data) => {
+                set_data_mod_id_checking_sequence(id);
+                Ok(ResolvedAccountModData::FromStorage { id, data })
+            }
             None => Ok(ResolvedAccountModData::NotFound { id }),
         }
     } else {
