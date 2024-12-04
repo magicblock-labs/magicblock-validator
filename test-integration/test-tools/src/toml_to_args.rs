@@ -65,7 +65,7 @@ pub fn config_to_args(config_path: &PathBuf) -> Vec<String> {
                 args.push(program.id);
             }
             path => {
-                args.push("--bpf-program".to_string());
+                args.push("--upgradeable-program".to_string());
                 args.push(program.id);
 
                 let resolved_full_config_path =
@@ -73,6 +73,7 @@ pub fn config_to_args(config_path: &PathBuf) -> Vec<String> {
                 args.push(
                     resolved_full_config_path.to_str().unwrap().to_string(),
                 );
+                args.push("none".to_string());
             }
         }
     }
