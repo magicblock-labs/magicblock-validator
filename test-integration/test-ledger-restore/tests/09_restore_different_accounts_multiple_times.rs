@@ -23,7 +23,7 @@ fn payer_keypair() -> Keypair {
     Keypair::new()
 }
 
-// In this test we work with several acocunts.
+// In this test we work with several accounts.
 //
 // - Wallet accounts
 // - Main PDA owned by main payer, delegated to the ephemeral

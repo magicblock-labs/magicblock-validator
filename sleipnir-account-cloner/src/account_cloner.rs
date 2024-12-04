@@ -49,7 +49,7 @@ pub enum AccountClonerUnclonableReason {
     DoesNotAllowUndelegatedAccount,
     DoesNotAllowDelegatedAccount,
     DoesNotAllowProgramAccount,
-    /// If an account is delegated to our validator then we we should use the latest
+    /// If an account is delegated to our validator then we should use the latest
     /// state in our own bank since that is more up to date than the on-chain state.
     DelegatedAccountsNotClonedWhileHydrating,
 }
@@ -87,12 +87,11 @@ pub fn standard_blacklisted_accounts(
     validator_id: &Pubkey,
     faucet_id: &Pubkey,
 ) -> HashSet<Pubkey> {
-    // This is burried in the accounts_db::native_mint module and we don't
+    // This is buried in the accounts_db::native_mint module and we don't
     // want to take a dependency on that crate just for this ID which won't change
     const NATIVE_SOL_ID: Pubkey =
         solana_sdk::pubkey!("So11111111111111111111111111111111111111112");
 
-    eprintln!("Faucet: {}", faucet_id);
     let mut blacklisted_accounts = HashSet::new();
     blacklisted_accounts.insert(solana_sdk::system_program::ID);
     blacklisted_accounts.insert(solana_sdk::compute_budget::ID);
