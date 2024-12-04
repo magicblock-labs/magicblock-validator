@@ -105,6 +105,15 @@ pub(super) enum ResolvedAccountModData {
 }
 
 impl ResolvedAccountModData {
+    pub fn id(&self) -> u64 {
+        use ResolvedAccountModData::*;
+        match self {
+            FromMemory { id, .. } => *id,
+            FromStorage { id, .. } => *id,
+            NotFound { id } => *id,
+        }
+    }
+
     pub fn data(&self) -> Option<&[u8]> {
         use ResolvedAccountModData::*;
         match self {
