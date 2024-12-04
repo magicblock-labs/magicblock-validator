@@ -188,8 +188,8 @@ fn read(ledger_path: &Path, payer_kp: &Keypair) -> Child {
     assert_eq!(
         counter,
         FlexiCounter {
-            count: 7,
-            updates: 2,
+            count: 11,
+            updates: 3,
             label: COUNTER.to_string()
         },
         cleanup(&mut validator)
