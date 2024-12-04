@@ -3,8 +3,7 @@ use std::{path::Path, process::Child};
 
 use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};
 use program_flexi_counter::instruction::{
-    create_add_and_schedule_commit_ix, create_add_counter_ix, create_add_ix,
-    create_mul_ix,
+    create_add_counter_ix, create_add_ix,
 };
 use program_flexi_counter::{
     instruction::{create_delegate_ix, create_init_ix},
@@ -14,10 +13,9 @@ use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
 };
 use test_ledger_restore::{
-    assert_counter_commits_on_chain, cleanup, confirm_tx_with_payer_chain,
-    confirm_tx_with_payer_ephem, fetch_counter_chain, fetch_counter_ephem,
-    get_programs_with_flexi_counter, setup_validator_with_local_remote,
-    wait_for_ledger_persist, TMP_DIR_LEDGER,
+    cleanup, confirm_tx_with_payer_chain, confirm_tx_with_payer_ephem,
+    fetch_counter_chain, fetch_counter_ephem, get_programs_with_flexi_counter,
+    setup_validator_with_local_remote, wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 const COUNTER_MAIN: &str = "Main Counter";
 const COUNTER_READONLY: &str = "Readonly Counter";
@@ -55,10 +53,10 @@ fn restore_ledger_using_readonly() {
     let payer_readonly = payer_keypair();
 
     let (mut validator, _) = write(&ledger_path, &payer_main, &payer_readonly);
-    // validator.kill().unwrap();
+    validator.kill().unwrap();
 
-    // let mut validator = read(&ledger_path, &payer_main, &payer_readonly);
-    // validator.kill().unwrap();
+    let mut validator = read(&ledger_path, &payer_main, &payer_readonly);
+    validator.kill().unwrap();
 }
 
 fn write(
@@ -227,8 +225,24 @@ fn read(
         );
     }
 
-    // TODO: @@@ Then perform counter add again to ensure that the state is updated in the ephemeral
-    // and this new state is used in the transaction
+    // NOTE: once we execute a transaction with the readonly account it is cloned
+    // Here we ensure that we can use the delegated counter to add the updated
+    // readonly count to it
+    {
+        let ix = create_add_counter_ix(*payer_main, *payer_readonly);
+        confirm_tx_with_payer_ephem(ix, payer_main_kp, &mut validator);
+        let counter_main_ephem =
+            fetch_counter_ephem(payer_main, &mut validator);
+        assert_eq!(
+            counter_main_ephem,
+            FlexiCounter {
+                count: 9,
+                updates: 3,
+                label: COUNTER_MAIN.to_string()
+            },
+            cleanup(&mut validator)
+        );
+    }
 
     validator
 }
