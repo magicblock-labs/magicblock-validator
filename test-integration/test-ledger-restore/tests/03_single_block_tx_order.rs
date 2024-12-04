@@ -1,3 +1,4 @@
+use cleanass::{assert, assert_eq};
 use std::{path::Path, process::Child};
 
 use integration_test_tools::{
@@ -10,7 +11,7 @@ use solana_sdk::{
     transaction::Transaction,
 };
 use test_ledger_restore::{
-    setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
+    cleanup, setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 
 const SLOT_MS: u64 = 150;
@@ -73,7 +74,7 @@ fn write(
             ctx.send_and_confirm_transaction_ephem(&mut tx, signers),
             validator
         );
-        assert!(confirmed);
+        assert!(confirmed, cleanup(validator));
     }
 
     let (_, mut validator, ctx) =
@@ -95,7 +96,7 @@ fn write(
     // 2. Transfer 4 SOL from first account to second account
     if separate_slot {
         slot += 1;
-        ctx.wait_for_slot_ephem(slot).unwrap();
+        expect!(ctx.wait_for_slot_ephem(slot), validator);
     }
     transfer(
         &mut validator,
@@ -108,7 +109,7 @@ fn write(
     // 3. Transfer 3 SOL from second account to third account
     if separate_slot {
         slot += 1;
-        ctx.wait_for_slot_ephem(slot).unwrap();
+        expect!(ctx.wait_for_slot_ephem(slot), validator);
     }
     transfer(
         &mut validator,
@@ -121,7 +122,7 @@ fn write(
     // 4. Transfer 2 SOL from third account to fourth account
     if separate_slot {
         slot += 1;
-        ctx.wait_for_slot_ephem(slot).unwrap();
+        expect!(ctx.wait_for_slot_ephem(slot), validator);
     }
     transfer(
         &mut validator,
@@ -134,7 +135,7 @@ fn write(
     // 5. Transfer 1 SOL from fourth account to fifth account
     if separate_slot {
         slot += 1;
-        ctx.wait_for_slot_ephem(slot).unwrap();
+        expect!(ctx.wait_for_slot_ephem(slot), validator);
     }
     transfer(
         &mut validator,
@@ -160,7 +161,7 @@ fn read(ledger_path: &Path, keypairs: &[Keypair]) -> Child {
         // with exactly 1 SOL.
         // In the future we need to adapt this to allow for a range, i.e.
         // 0.9 SOL <= lamports <= 1 SOL
-        assert_eq!(acc.lamports, LAMPORTS_PER_SOL);
+        assert_eq!(acc.lamports, LAMPORTS_PER_SOL, cleanup(&mut validator));
     }
     validator
 }

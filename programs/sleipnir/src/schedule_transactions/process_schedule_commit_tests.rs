@@ -25,7 +25,7 @@ use crate::{
         schedule_commit_and_undelegate_instruction,
         schedule_commit_instruction, SleipnirInstruction,
     },
-    test_utils::{ensure_funded_validator_authority, process_instruction},
+    test_utils::{ensure_started_validator, process_instruction},
     utils::DELEGATION_PROGRAM_ID,
     ScheduledCommit,
 };
@@ -66,7 +66,7 @@ fn prepare_transaction_with_single_committee(
         map.insert(committee, AccountSharedData::new(0, 0, &program));
         map
     };
-    ensure_funded_validator_authority(&mut account_data);
+    ensure_started_validator(&mut account_data);
 
     let transaction_accounts: Vec<(Pubkey, AccountSharedData)> = vec![(
         clock::Clock::id(),
@@ -112,7 +112,7 @@ fn prepare_transaction_with_three_committees(
         map.insert(committee_tres, AccountSharedData::new(0, 0, &program));
         map
     };
-    ensure_funded_validator_authority(&mut accounts_data);
+    ensure_started_validator(&mut accounts_data);
 
     let transaction_accounts: Vec<(Pubkey, AccountSharedData)> = vec![(
         clock::Clock::id(),

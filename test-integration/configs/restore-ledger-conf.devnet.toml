@@ -1,0 +1,25 @@
+[accounts]
+remote = "devnet"
+lifecycle = "offline"
+commit = { frequency_millis = 9_000_000_000_000, compute_unit_price = 1_000_000 }
+
+[validator]
+millis_per_slot = 50
+sigverify = true
+
+[[program]]
+id = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+path = "../schedulecommit/elfs/dlp.so"
+
+[[program]]
+id = "f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4"
+path = "../target/deploy/program_flexi_counter.so"
+
+[rpc]
+port = 7799
+
+[geyser_grpc]
+port = 10001
+
+[metrics]
+enabled = false

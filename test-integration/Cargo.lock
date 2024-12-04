@@ -727,6 +727,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "cleanass"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "009067b02b9284528f9f01e3b35ebcd6b545666d15fb74fd9fa30222de89da8e"
+
+[[package]]
 name = "colorchoice"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1107,7 +1113,7 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk"
-version = "0.0.7"
+version = "0.0.6"
 dependencies = [
  "borsh 0.10.3",
  "ephemeral-rollups-sdk-attribute-commit",
@@ -1118,7 +1124,7 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-commit"
-version = "0.0.7"
+version = "0.0.6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1127,7 +1133,7 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-delegate"
-version = "0.0.7"
+version = "0.0.6"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1705,6 +1711,7 @@ name = "integration-test-tools"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "borsh 0.10.3",
  "rayon",
  "serde",
  "sleipnir-config",
@@ -2380,6 +2387,7 @@ name = "program-flexi-counter"
 version = "0.0.0"
 dependencies = [
  "borsh 0.10.3",
+ "ephemeral-rollups-sdk",
  "solana-program 1.17.22",
 ]
 
@@ -4253,9 +4261,11 @@ name = "test-ledger-restore"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "cleanass",
  "integration-test-tools",
  "program-flexi-counter",
  "sleipnir-config",
+ "solana-rpc-client",
  "solana-sdk 1.17.22",
  "solana-transaction-status",
  "tempfile",

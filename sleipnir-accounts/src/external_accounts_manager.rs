@@ -388,6 +388,14 @@ where
             .process(&self.account_committer, &self.internal_account_provider)
             .await
     }
+
+    pub fn scheduled_commits_len(&self) -> usize {
+        self.scheduled_commits_processor.scheduled_commits_len()
+    }
+
+    pub fn clear_scheduled_commits(&self) {
+        self.scheduled_commits_processor.clear_scheduled_commits()
+    }
 }
 
 fn should_clone_account(pubkey: &Pubkey) -> bool {

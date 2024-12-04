@@ -36,7 +36,7 @@ use sleipnir_geyser_plugin::rpc::GeyserRpcService;
 use sleipnir_ledger::{blockstore_processor::process_ledger, Ledger};
 use sleipnir_metrics::MetricsService;
 use sleipnir_perf_service::SamplePerformanceService;
-use sleipnir_program::init_validator_authority;
+use sleipnir_program::{init_persister, validator};
 use sleipnir_pubsub::pubsub_service::{
     PubsubConfig, PubsubService, PubsubServiceCloseHandle,
 };
@@ -277,7 +277,7 @@ impl MagicValidator {
             config.validator_config.rpc.addr,
             config.validator_config.rpc.port,
         );
-        init_validator_authority(identity_keypair);
+        validator::init_validator_authority(identity_keypair);
 
         // Make sure we process the ledger before we're open to handle
         // transactions via RPC
@@ -425,7 +425,9 @@ impl MagicValidator {
             }
         };
         let ledger = ledger::init(ledger_path, reset)?;
-        Ok(Arc::new(ledger))
+        let ledger_shared = Arc::new(ledger);
+        init_persister(ledger_shared.clone());
+        Ok(ledger_shared)
     }
 
     fn init_accounts_paths(ledger_path: &Path) -> ApiResult<Vec<PathBuf>> {
@@ -480,10 +482,29 @@ impl MagicValidator {
     // -----------------
     // Start/Stop
     // -----------------
-    pub async fn start(&mut self) -> ApiResult<()> {
+    fn maybe_process_ledger(&self) -> ApiResult<()> {
+        if self.config.ledger.reset {
+            return Ok(());
+        }
         process_ledger(&self.ledger, &self.bank)?;
 
-        // NOE: this only run only once, i.e. at creation time
+        // The transactions to schedule and accept account commits re-run when we
+        // process the ledger, however we do not want to re-commit them.
+        // Thus while the ledger is processed we don't yet run the machinery to handle
+        // scheduled commits and we clear all scheduled commits before fully starting the
+        // validator.
+        let scheduled_commits = self.accounts_manager.scheduled_commits_len();
+        debug!(
+            "Found {} scheduled commits while processing ledger, clearing them",
+            scheduled_commits
+        );
+        self.accounts_manager.clear_scheduled_commits();
+        Ok(())
+    }
+
+    pub async fn start(&mut self) -> ApiResult<()> {
+        self.maybe_process_ledger()?;
+
         self.transaction_listener.run(true);
 
         self.slot_ticker = Some(init_slot_ticker(
@@ -535,6 +556,7 @@ impl MagicValidator {
                 self.exit.clone(),
             ));
 
+        validator::finished_starting_up();
         Ok(())
     }
 

@@ -20,7 +20,7 @@ jobs:
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
           build_cache_key_name: "magicblock-validator-ci-fmt-v001"
-          rust_toolchain_release: stable
+          rust_toolchain_release: "1.83.0"
           github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
 

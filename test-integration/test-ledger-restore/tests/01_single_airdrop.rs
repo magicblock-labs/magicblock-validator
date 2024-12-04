@@ -1,9 +1,10 @@
+use cleanass::{assert, assert_eq};
 use std::{path::Path, process::Child};
 
 use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 use test_ledger_restore::{
-    setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
+    cleanup, setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 
 #[test]
@@ -30,7 +31,7 @@ fn write_ledger(
     let sig = expect!(ctx.airdrop_ephem(pubkey1, 1_111_111), validator);
 
     let lamports = expect!(ctx.fetch_ephem_account_balance(pubkey1), validator);
-    assert_eq!(lamports, 1_111_111);
+    assert_eq!(lamports, 1_111_111, cleanup(&mut validator));
 
     let slot = wait_for_ledger_persist(&mut validator);
 
@@ -48,12 +49,12 @@ fn read_ledger(
         setup_offline_validator(ledger_path, None, None, false);
 
     let acc = expect!(ctx.ephem_client.get_account(pubkey1), validator);
-    assert_eq!(acc.lamports, 1_111_111);
+    assert_eq!(acc.lamports, 1_111_111, cleanup(&mut validator));
 
     if let Some(sig) = airdrop_sig1 {
         let status =
             ctx.ephem_client.get_signature_status(sig).unwrap().unwrap();
-        assert!(status.is_ok());
+        assert!(status.is_ok(), cleanup(&mut validator));
     }
 
     validator

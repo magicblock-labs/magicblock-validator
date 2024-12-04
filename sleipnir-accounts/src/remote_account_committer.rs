@@ -5,7 +5,7 @@ use dlp::instruction::{commit_state, finalize, undelegate, CommitAccountArgs};
 use futures_util::future::join_all;
 use log::*;
 use sleipnir_metrics::metrics;
-use sleipnir_program::{validator_authority_id, Pubkey};
+use sleipnir_program::{validator, Pubkey};
 use solana_rpc_client::{
     nonblocking::rpc_client::RpcClient, rpc_client::SerializableTransaction,
 };
@@ -104,10 +104,10 @@ impl AccountCommitter for RemoteAccountCommitter {
             ixs.extend(vec![commit_ix, finalize_ix]);
             if let Some(UndelegationRequest { owner }) = undelegation_request {
                 let undelegate_ix = undelegate(
-                    validator_authority_id(),
+                    validator::validator_authority_id(),
                     *pubkey,
                     *owner,
-                    validator_authority_id(),
+                    validator::validator_authority_id(),
                 );
                 ixs.push(undelegate_ix);
                 undelegated_accounts.insert(*pubkey);

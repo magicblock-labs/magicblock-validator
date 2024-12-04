@@ -1,6 +1,7 @@
 pub mod conversions;
 mod integration_test_context;
 mod run_test;
+pub mod scheduled_commits;
 pub mod tmpdir;
 pub mod workspace_paths;
 

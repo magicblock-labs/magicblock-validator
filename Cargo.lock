@@ -4641,6 +4641,7 @@ dependencies = [
  "serde",
  "sleipnir-accounts-db",
  "sleipnir-bank",
+ "sleipnir-core",
  "solana-account-decoder",
  "solana-measure",
  "solana-metrics",
@@ -4750,6 +4751,7 @@ dependencies = [
  "sleipnir-program",
  "solana-program-runtime",
  "solana-sdk",
+ "test-tools",
  "test-tools-core",
  "thiserror",
  "tokio",
@@ -6154,8 +6156,10 @@ name = "test-tools"
 version = "1.19.0"
 dependencies = [
  "crossbeam-channel",
+ "log",
  "sleipnir-accounts-db",
  "sleipnir-bank",
+ "sleipnir-core",
  "sleipnir-messaging",
  "sleipnir-program",
  "sleipnir-transaction-status",

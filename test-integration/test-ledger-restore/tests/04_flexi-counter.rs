@@ -1,3 +1,4 @@
+use cleanass::assert_eq;
 use std::{path::Path, process::Child};
 
 use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};
@@ -11,8 +12,9 @@ use solana_sdk::{
     signer::Signer,
 };
 use test_ledger_restore::{
-    confirm_tx_with_payer, fetch_counter, setup_offline_validator,
-    wait_for_ledger_persist, FLEXI_COUNTER_ID, TMP_DIR_LEDGER,
+    cleanup, confirm_tx_with_payer_ephem, fetch_counter_ephem,
+    setup_offline_validator, wait_for_ledger_persist, FLEXI_COUNTER_ID,
+    TMP_DIR_LEDGER,
 };
 
 const SLOT_MS: u64 = 150;
@@ -107,16 +109,17 @@ fn write(
         }
 
         let ix = create_init_ix(payer1.pubkey(), COUNTER1.to_string());
-        confirm_tx_with_payer(ix, payer1, &mut validator);
-        let counter = fetch_counter(&payer1.pubkey(), &mut validator);
+        confirm_tx_with_payer_ephem(ix, payer1, &mut validator);
+        let counter = fetch_counter_ephem(&payer1.pubkey(), &mut validator);
         assert_eq!(
             counter,
             FlexiCounter {
                 count: 0,
                 updates: 0,
                 label: COUNTER1.to_string()
-            }
-        )
+            },
+            cleanup(&mut validator)
+        );
     }
 
     {
@@ -126,23 +129,23 @@ fn write(
         }
         let ix_add = create_add_ix(payer1.pubkey(), 5);
         let ix_mul = create_mul_ix(payer1.pubkey(), 2);
-        confirm_tx_with_payer(ix_add, payer1, &mut validator);
+        confirm_tx_with_payer_ephem(ix_add, payer1, &mut validator);
 
         if separate_slot {
             expect!(ctx.wait_for_next_slot_ephem(), validator);
         }
-        confirm_tx_with_payer(ix_mul, payer1, &mut validator);
+        confirm_tx_with_payer_ephem(ix_mul, payer1, &mut validator);
 
-        let counter = fetch_counter(&payer1.pubkey(), &mut validator);
-        eprintln!("{:#?}", counter);
+        let counter = fetch_counter_ephem(&payer1.pubkey(), &mut validator);
         assert_eq!(
             counter,
             FlexiCounter {
                 count: 10,
                 updates: 2,
                 label: COUNTER1.to_string()
-            }
-        )
+            },
+            cleanup(&mut validator)
+        );
     }
 
     {
@@ -152,16 +155,17 @@ fn write(
         }
 
         let ix = create_init_ix(payer2.pubkey(), COUNTER2.to_string());
-        confirm_tx_with_payer(ix, payer2, &mut validator);
-        let counter = fetch_counter(&payer2.pubkey(), &mut validator);
+        confirm_tx_with_payer_ephem(ix, payer2, &mut validator);
+        let counter = fetch_counter_ephem(&payer2.pubkey(), &mut validator);
         assert_eq!(
             counter,
             FlexiCounter {
                 count: 0,
                 updates: 0,
                 label: COUNTER2.to_string()
-            }
-        )
+            },
+            cleanup(&mut validator)
+        );
     }
 
     {
@@ -170,17 +174,18 @@ fn write(
             expect!(ctx.wait_for_next_slot_ephem(), validator);
         }
         let ix_add = create_add_ix(payer2.pubkey(), 9);
-        confirm_tx_with_payer(ix_add, payer2, &mut validator);
+        confirm_tx_with_payer_ephem(ix_add, payer2, &mut validator);
 
-        let counter = fetch_counter(&payer2.pubkey(), &mut validator);
+        let counter = fetch_counter_ephem(&payer2.pubkey(), &mut validator);
         assert_eq!(
             counter,
             FlexiCounter {
                 count: 9,
                 updates: 1,
                 label: COUNTER2.to_string()
-            }
-        )
+            },
+            cleanup(&mut validator)
+        );
     }
 
     {
@@ -189,17 +194,18 @@ fn write(
             expect!(ctx.wait_for_next_slot_ephem(), validator);
         }
         let ix_add = create_add_ix(payer1.pubkey(), 3);
-        confirm_tx_with_payer(ix_add, payer1, &mut validator);
+        confirm_tx_with_payer_ephem(ix_add, payer1, &mut validator);
 
-        let counter = fetch_counter(&payer1.pubkey(), &mut validator);
+        let counter = fetch_counter_ephem(&payer1.pubkey(), &mut validator);
         assert_eq!(
             counter,
             FlexiCounter {
                 count: 13,
                 updates: 3,
                 label: COUNTER1.to_string()
-            }
-        )
+            },
+            cleanup(&mut validator)
+        );
     }
 
     {
@@ -208,17 +214,18 @@ fn write(
             expect!(ctx.wait_for_next_slot_ephem(), validator);
         }
         let ix_add = create_mul_ix(payer2.pubkey(), 3);
-        confirm_tx_with_payer(ix_add, payer2, &mut validator);
+        confirm_tx_with_payer_ephem(ix_add, payer2, &mut validator);
 
-        let counter = fetch_counter(&payer2.pubkey(), &mut validator);
+        let counter = fetch_counter_ephem(&payer2.pubkey(), &mut validator);
         assert_eq!(
             counter,
             FlexiCounter {
                 count: 27,
                 updates: 2,
                 label: COUNTER2.to_string()
-            }
-        )
+            },
+            cleanup(&mut validator)
+        );
     }
 
     let slot = wait_for_ledger_persist(&mut validator);
@@ -235,24 +242,26 @@ fn read(ledger_path: &Path, payer1: &Pubkey, payer2: &Pubkey) -> Child {
         false,
     );
 
-    let counter1_decoded = fetch_counter(payer1, &mut validator);
+    let counter1_decoded = fetch_counter_ephem(payer1, &mut validator);
     assert_eq!(
         counter1_decoded,
         FlexiCounter {
             count: 13,
             updates: 3,
             label: "Counter of Payer 1".to_string(),
-        }
+        },
+        cleanup(&mut validator)
     );
 
-    let counter2_decoded = fetch_counter(payer2, &mut validator);
+    let counter2_decoded = fetch_counter_ephem(payer2, &mut validator);
     assert_eq!(
         counter2_decoded,
         FlexiCounter {
             count: 27,
             updates: 2,
             label: "Counter of Payer 2".to_string(),
-        }
+        },
+        cleanup(&mut validator)
     );
 
     validator
@@ -275,10 +284,12 @@ fn _flexi_counter_diagnose_write() {
     eprintln!("{}", ledger_path.display());
     eprintln!("slot: {}", slot);
 
-    let counter1_decoded = fetch_counter(&payer1.pubkey(), &mut validator);
+    let counter1_decoded =
+        fetch_counter_ephem(&payer1.pubkey(), &mut validator);
     eprint!("1: {:#?}", counter1_decoded);
 
-    let counter2_decoded = fetch_counter(&payer2.pubkey(), &mut validator);
+    let counter2_decoded =
+        fetch_counter_ephem(&payer2.pubkey(), &mut validator);
     eprint!("2: {:#?}", counter2_decoded);
 
     validator.kill().unwrap();
@@ -295,10 +306,12 @@ fn _flexi_counter_diagnose_read() {
 
     eprintln!("{}", ledger_path.display());
 
-    let counter1_decoded = fetch_counter(&payer1.pubkey(), &mut validator);
+    let counter1_decoded =
+        fetch_counter_ephem(&payer1.pubkey(), &mut validator);
     eprint!("1: {:#?}", counter1_decoded);
 
-    let counter2_decoded = fetch_counter(&payer2.pubkey(), &mut validator);
+    let counter2_decoded =
+        fetch_counter_ephem(&payer2.pubkey(), &mut validator);
     eprint!("2: {:#?}", counter2_decoded);
 
     validator.kill().unwrap();

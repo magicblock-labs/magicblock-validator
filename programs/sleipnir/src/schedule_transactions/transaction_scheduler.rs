@@ -84,4 +84,21 @@ impl TransactionScheduler {
             .expect("scheduled_commits lock poisoned");
         mem::take(&mut *lock)
     }
+
+    pub fn scheduled_commits_len(&self) -> usize {
+        let lock = self
+            .scheduled_commits
+            .read()
+            .expect("scheduled_commits lock poisoned");
+
+        lock.len()
+    }
+
+    pub fn clear_scheduled_commits(&self) {
+        let mut lock = self
+            .scheduled_commits
+            .write()
+            .expect("scheduled_commits lock poisoned");
+        lock.clear();
+    }
 }

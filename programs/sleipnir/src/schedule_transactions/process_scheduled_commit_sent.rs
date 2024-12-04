@@ -12,7 +12,7 @@ use solana_sdk::{
 
 use crate::{
     errors::custom_error_codes,
-    utils::accounts::get_instruction_pubkey_with_idx,
+    utils::accounts::get_instruction_pubkey_with_idx, validator,
 };
 
 #[derive(Debug, Clone)]
@@ -100,6 +100,14 @@ pub fn process_scheduled_commit_sent(
     transaction_context: &TransactionContext,
     commit_id: u64,
 ) -> Result<(), InstructionError> {
+    if validator::is_starting_up() {
+        ic_msg!(
+            invoke_context,
+            "ScheduleCommitSent: validator is starting up, this instruction is skipped"
+        );
+        return Ok(());
+    }
+
     const PROGRAM_IDX: u16 = 0;
     const VALIDATOR_IDX: u16 = 1;
 
@@ -109,7 +117,7 @@ pub fn process_scheduled_commit_sent(
     if program_id.ne(&crate::id()) {
         ic_msg!(
             invoke_context,
-            "ScheduleCommit ERR: Invalid program id '{}'",
+            "ScheduleCommitSent ERR: Invalid program id '{}'",
             program_id
         );
         return Err(InstructionError::IncorrectProgramId);
@@ -118,11 +126,11 @@ pub fn process_scheduled_commit_sent(
     // Assert validator identity matches
     let validator_pubkey =
         get_instruction_pubkey_with_idx(transaction_context, VALIDATOR_IDX)?;
-    let validator_authority_id = crate::validator_authority_id();
+    let validator_authority_id = validator::validator_authority_id();
     if validator_pubkey != &validator_authority_id {
         ic_msg!(
             invoke_context,
-            "ScheduleCommit ERR: provided validator account {} does not match validator identity {}",
+            "ScheduleCommitSent ERR: provided validator account {} does not match validator identity {}",
             validator_pubkey, validator_authority_id
         );
         return Err(InstructionError::IncorrectAuthority);
@@ -132,7 +140,7 @@ pub fn process_scheduled_commit_sent(
     if !signers.contains(&validator_authority_id) {
         ic_msg!(
             invoke_context,
-            "ScheduleCommit ERR: validator authority not found in signers"
+            "ScheduleCommitSent ERR: validator authority not found in signers"
         );
         return Err(InstructionError::MissingRequiredSignature);
     }
@@ -146,22 +154,22 @@ pub fn process_scheduled_commit_sent(
             None => {
                 ic_msg!(
                     invoke_context,
-                    "ScheduleCommit ERR: commit with id {} not found",
+                    "ScheduleCommitSent ERR: commit with id {} not found",
                     commit_id
                 );
                 return Err(InstructionError::Custom(
-                    custom_error_codes::UNABLE_TO_UNLOCK_SENT_COMMITS,
+                    custom_error_codes::CANNOT_FIND_SCHEDULED_COMMIT,
                 ));
             }
         },
         Err(err) => {
             ic_msg!(
                 invoke_context,
-                "ScheduleCommit ERR: failed to lock SENT_COMMITS: {}",
+                "ScheduleCommitSent ERR: failed to lock SENT_COMMITS: {}",
                 err
             );
             return Err(InstructionError::Custom(
-                custom_error_codes::CANNOT_FIND_SCHEDULED_COMMIT,
+                custom_error_codes::UNABLE_TO_UNLOCK_SENT_COMMITS,
             ));
         }
     };
@@ -224,8 +232,8 @@ mod tests {
     use super::*;
     use crate::{
         sleipnir_instruction::scheduled_commit_sent_instruction,
-        test_utils::{ensure_funded_validator_authority, process_instruction},
-        validator_authority_id,
+        test_utils::{ensure_started_validator, process_instruction},
+        validator,
     };
 
     fn single_acc_commit(commit_id: u64) -> SentCommit {
@@ -272,11 +280,11 @@ mod tests {
 
         let mut account_data = HashMap::new();
 
-        ensure_funded_validator_authority(&mut account_data);
+        ensure_started_validator(&mut account_data);
 
         let mut ix = scheduled_commit_sent_instruction(
             &crate::id(),
-            &validator_authority_id(),
+            &validator::validator_authority_id(),
             commit.commit_id,
         );
         ix.accounts[1].is_signer = false;
@@ -309,7 +317,7 @@ mod tests {
             );
             map
         };
-        ensure_funded_validator_authority(&mut account_data);
+        ensure_started_validator(&mut account_data);
 
         let ix = scheduled_commit_sent_instruction(
             &crate::id(),
@@ -344,11 +352,11 @@ mod tests {
             );
             map
         };
-        ensure_funded_validator_authority(&mut account_data);
+        ensure_started_validator(&mut account_data);
 
         let ix = scheduled_commit_sent_instruction(
             &fake_program.pubkey(),
-            &validator_authority_id(),
+            &validator::validator_authority_id(),
             commit.commit_id,
         );
         let transaction_accounts =
@@ -373,11 +381,11 @@ mod tests {
 
         let mut account_data = HashMap::new();
 
-        ensure_funded_validator_authority(&mut account_data);
+        ensure_started_validator(&mut account_data);
 
         let ix = scheduled_commit_sent_instruction(
             &crate::id(),
-            &validator_authority_id(),
+            &validator::validator_authority_id(),
             commit.commit_id,
         );
 
