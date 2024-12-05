@@ -316,7 +316,7 @@ where
                         owner: *owner,
                         account_data: acc,
                         slot,
-                        undelegation_request: undelegation_request.clone(),
+                        undelegation_request,
                     });
                 }
             } else {
