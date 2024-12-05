@@ -247,7 +247,8 @@ pub fn fetch_counter_chain(
     validator: &mut Child,
 ) -> FlexiCounter {
     let ctx = expect!(IntegrationTestContext::try_new(), validator);
-    fetch_counter(payer, ctx.try_chain_client().unwrap(), validator)
+    let chain_client = expect!(ctx.try_chain_client(), validator);
+    fetch_counter(payer, chain_client, validator)
 }
 
 fn fetch_counter(
@@ -273,7 +274,7 @@ pub fn fetch_counter_owner_chain(
 // Slot Advances
 // -----------------
 /// Waits for sufficient slot advances to guarantee that the ledger for
-/// the current slot was persiste
+/// the current slot was persisted
 pub fn wait_for_ledger_persist(validator: &mut Child) -> Slot {
     let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
 
