@@ -49,6 +49,7 @@ pub enum AccountClonerUnclonableReason {
     DoesNotAllowUndelegatedAccount,
     DoesNotAllowDelegatedAccount,
     DoesNotAllowProgramAccount,
+    DoesNotHasEscrowedLamports,
     /// If an account is delegated to our validator then we should use the latest
     /// state in our own bank since that is more up to date than the on-chain state.
     DelegatedAccountsNotClonedWhileHydrating,

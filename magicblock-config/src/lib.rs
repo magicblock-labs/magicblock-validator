@@ -147,6 +147,20 @@ impl EphemeralConfig {
                 .unwrap_or_else(|err| panic!("Failed to parse 'ACCOUNTS_COMMIT_COMPUTE_UNIT_PRICE' as u64: {:?}", err))
         }
 
+        if let Ok(base_fees) = env::var("BASE_FEES") {
+            config.accounts.payer.base_fees =
+                Some(u64::from_str(&base_fees).unwrap_or_else(|err| {
+                    panic!("Failed to parse 'BASE_FEES' as u64: {:?}", err)
+                }));
+        }
+
+        if let Ok(init_lamports) = env::var("INIT_LAMPORTS") {
+            config.accounts.payer.init_lamports =
+                Some(u64::from_str(&init_lamports).unwrap_or_else(|err| {
+                    panic!("Failed to parse 'INIT_LAMPORTS' as u64: {:?}", err)
+                }));
+        }
+
         // -----------------
         // RPC
         // -----------------

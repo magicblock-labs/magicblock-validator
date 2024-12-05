@@ -7,21 +7,17 @@ use solana_sdk::{genesis_config::ClusterType, pubkey::Pubkey};
 pub(crate) fn try_convert_accounts_config(
     conf: &magicblock_config::AccountsConfig,
 ) -> ConfigResult<AccountsConfig> {
-    let remote_cluster = cluster_from_remote(&conf.remote);
-    let lifecycle = lifecycle_mode_from_lifecycle_mode(&conf.lifecycle);
-    let commit_compute_unit_price = conf.commit.compute_unit_price;
-    let payer_init_lamports = conf.payer.try_init_lamports()?;
-    let allowed_program_ids =
-        allowed_program_ids_from_allowed_programs(&conf.allowed_programs);
     Ok(AccountsConfig {
-        remote_cluster,
-        lifecycle,
-        commit_compute_unit_price,
-        payer_init_lamports,
-        allowed_program_ids,
+        remote_cluster: cluster_from_remote(&conf.remote),
+        lifecycle: lifecycle_mode_from_lifecycle_mode(&conf.lifecycle),
+        commit_compute_unit_price: conf.commit.compute_unit_price,
+        payer_init_lamports: conf.payer.try_init_lamports()?,
+        payer_base_fees: conf.payer.base_fees,
+        allowed_program_ids: allowed_program_ids_from_allowed_programs(
+            &conf.allowed_programs,
+        ),
     })
 }
-
 fn cluster_from_remote(remote: &magicblock_config::RemoteConfig) -> Cluster {
     use magicblock_config::RemoteConfig::*;
     match remote {

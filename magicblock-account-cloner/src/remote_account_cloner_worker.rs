@@ -8,6 +8,7 @@ use std::{
 use conjunto_transwise::{
     AccountChainSnapshotShared, AccountChainState, DelegationRecord,
 };
+use dlp::pda::ephemeral_balance_from_payer;
 use futures_util::future::join_all;
 use log::*;
 use magicblock_account_dumper::AccountDumper;
@@ -93,6 +94,7 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU> {
     allowed_program_ids: Option<HashSet<Pubkey>>,
     blacklisted_accounts: HashSet<Pubkey>,
     payer_init_lamports: Option<u64>,
+    is_gasless: bool,
     permissions: AccountClonerPermissions,
     fetch_retries: u64,
     clone_request_receiver: UnboundedReceiver<Pubkey>,
@@ -118,6 +120,7 @@ where
         allowed_program_ids: Option<HashSet<Pubkey>>,
         blacklisted_accounts: HashSet<Pubkey>,
         payer_init_lamports: Option<u64>,
+        is_gasless: bool,
         permissions: AccountClonerPermissions,
         validator_authority: Pubkey,
     ) -> Self {
@@ -133,6 +136,7 @@ where
             allowed_program_ids,
             blacklisted_accounts,
             payer_init_lamports,
+            is_gasless,
             permissions,
             fetch_retries,
             clone_request_receiver,
@@ -382,7 +386,7 @@ where
         let account_chain_snapshot = if self.permissions.allow_cloning_refresh {
             // Mark the account for monitoring, we want to start to detect futures updates on it
             // since we're cloning it now, it's now part of the validator monitored accounts
-            // TODO(vbrunet)
+            // TODO:
             //  - https://github.com/magicblock-labs/magicblock-validator/issues/95
             //  - handle the case of the lamports updates better
             //  - we may not want to track lamport changes, especially for payers
@@ -432,8 +436,7 @@ where
         };
         // Generate cloning transactions
         let signature = match &account_chain_snapshot.chain_state {
-            // If the account has no data, we can use it for lamport transfers only
-            // We'll use the escrowed lamport value rather than its actual on-chain info
+            // If the account is a fee payer, we clone it assigning the init lamports of the escrowed lamports (if we are not in the gasless mode)
             AccountChainState::FeePayer { lamports, owner } => {
                 if !self.permissions.allow_cloning_feepayer_accounts {
                     return Ok(AccountClonerOutput::Unclonable {
@@ -443,7 +446,30 @@ where
                         at_slot: account_chain_snapshot.at_slot,
                     });
                 }
-                self.do_clone_feepayer_account(pubkey, *lamports, owner)?
+                if self.is_gasless {
+                    self.do_clone_feepayer_account_gasless(
+                        pubkey, *lamports, owner,
+                    )?
+                } else {
+                    let escrowed_payer_chain_snapshot = self
+                        .try_fetch_feepayer_chain_snapshot(pubkey, None)
+                        .await?;
+                    if escrowed_payer_chain_snapshot.is_none() {
+                        return Ok(AccountClonerOutput::Unclonable {
+                            pubkey: *pubkey,
+                            reason: AccountClonerUnclonableReason::DoesNotHasEscrowedLamports,
+                            at_slot: account_chain_snapshot.at_slot,
+                        });
+                    }
+                    let escrowed_payer_chain_snapshot =
+                        escrowed_payer_chain_snapshot.unwrap();
+                    let escrowed_account = escrowed_payer_chain_snapshot.chain_state.account().expect("AccountChainState::FeePayer should have an account");
+                    self.do_clone_feepayer_account(
+                        pubkey,
+                        escrowed_account.lamports,
+                        owner,
+                    )?
+                }
             }
             // If the account is present on-chain, but not delegated, it's just readonly data
             // We need to differenciate between programs and other accounts
@@ -536,7 +562,6 @@ where
         lamports: u64,
         owner: &Pubkey,
     ) -> AccountClonerResult<Signature> {
-        let lamports = self.payer_init_lamports.unwrap_or(lamports);
         self.account_dumper
             .dump_feepayer_account(pubkey, lamports, owner)
             .map_err(AccountClonerError::AccountDumperError)
@@ -545,6 +570,16 @@ where
                     pubkey: &pubkey.to_string(),
                 });
             })
+    }
+
+    fn do_clone_feepayer_account_gasless(
+        &self,
+        pubkey: &Pubkey,
+        lamports: u64,
+        owner: &Pubkey,
+    ) -> AccountClonerResult<Signature> {
+        let lamports = self.payer_init_lamports.unwrap_or(lamports);
+        self.do_clone_feepayer_account(pubkey, lamports, owner)
     }
 
     fn do_clone_undelegated_account(
@@ -712,6 +747,39 @@ where
             .fetch_account_chain_snapshot(pubkey, min_context_slot)
             .await
             .map_err(AccountClonerError::AccountFetcherError)
+    }
+
+    async fn try_fetch_feepayer_chain_snapshot(
+        &self,
+        feepayer: &Pubkey,
+        min_context_slot: Option<Slot>,
+    ) -> AccountClonerResult<Option<AccountChainSnapshotShared>> {
+        // NOTE: Assumption is that the feepayer has always ~= 1 associated ephemeral balance,
+        // but if this becomes a bottleneck, we can switch to a parallel fetch
+        for index in 0..10 {
+            let account_snapshot = self
+                .account_fetcher
+                .fetch_account_chain_snapshot(
+                    &ephemeral_balance_from_payer(feepayer, index),
+                    min_context_slot,
+                )
+                .await
+                .map_err(AccountClonerError::AccountFetcherError)?;
+
+            if let AccountChainState::Delegated {
+                account: _,
+                delegation_record,
+                ..
+            } = &account_snapshot.chain_state
+            {
+                if delegation_record.authority == self.validator_identity
+                    || delegation_record.authority == Pubkey::default()
+                {
+                    return Ok(Some(account_snapshot));
+                }
+            }
+        }
+        Ok(None)
     }
 
     fn get_last_clone_output(

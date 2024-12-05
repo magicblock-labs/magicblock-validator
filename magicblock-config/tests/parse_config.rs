@@ -168,7 +168,7 @@ fn test_accounts_payer() {
         config,
         EphemeralConfig {
             accounts: AccountsConfig {
-                payer: Payer::new(None, Some(2_000)),
+                payer: Payer::new(None, Some(2_000), None),
                 ..Default::default()
             },
             ..Default::default()
@@ -178,6 +178,23 @@ fn test_accounts_payer() {
         config.accounts.payer.try_init_lamports().unwrap(),
         Some(2_000 * LAMPORTS_PER_SOL)
     );
+}
+
+#[test]
+fn test_accounts_payer_with_base_fees() {
+    let toml = include_str!("fixtures/10_accounts-payer-base-fees.toml");
+    let config = toml::from_str::<EphemeralConfig>(toml).unwrap();
+    assert_eq!(
+        config,
+        EphemeralConfig {
+            accounts: AccountsConfig {
+                payer: Payer::new(None, None, Some(1_000)),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    );
+    assert_eq!(config.accounts.payer.base_fees, Some(1_000u64));
 }
 
 #[test]

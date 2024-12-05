@@ -267,6 +267,7 @@ impl MagicValidator {
             accounts_config.allowed_program_ids,
             blacklisted_accounts,
             accounts_config.payer_init_lamports,
+            accounts_config.payer_base_fees.is_none(),
             accounts_config.lifecycle.to_account_cloner_permissions(),
             identity_keypair.pubkey(),
         );

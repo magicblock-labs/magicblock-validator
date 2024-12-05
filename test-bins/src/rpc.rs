@@ -5,7 +5,7 @@ use magicblock_api::{
     InitGeyserServiceConfig,
 };
 use magicblock_config::{EphemeralConfig, GeyserGrpcConfig};
-use solana_sdk::signature::Keypair;
+use solana_sdk::signature::{Keypair, Signer};
 use test_tools::init_logger;
 
 // mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev
@@ -69,6 +69,8 @@ async fn main() {
     info!("Starting validator with config:\n{}", config);
 
     let validator_keypair = validator_keypair();
+
+    info!("Validator identity: {:?}", validator_keypair.pubkey());
 
     let geyser_grpc_config = config.geyser_grpc.clone();
     let config = MagicValidatorConfig {
