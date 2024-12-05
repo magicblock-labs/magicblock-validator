@@ -451,18 +451,16 @@ where
                         pubkey, *lamports, owner,
                     )?
                 } else {
-                    let escrowed_payer_chain_snapshot = self
+                    let Some(escrowed_payer_chain_snapshot) = self
                         .try_fetch_feepayer_chain_snapshot(pubkey, None)
-                        .await?;
-                    if escrowed_payer_chain_snapshot.is_none() {
+                        .await?
+                    else {
                         return Ok(AccountClonerOutput::Unclonable {
                             pubkey: *pubkey,
                             reason: AccountClonerUnclonableReason::DoesNotHasEscrowedLamports,
                             at_slot: account_chain_snapshot.at_slot,
                         });
-                    }
-                    let escrowed_payer_chain_snapshot =
-                        escrowed_payer_chain_snapshot.unwrap();
+                    };
                     let escrowed_account = escrowed_payer_chain_snapshot.chain_state.account().expect("AccountChainState::FeePayer should have an account");
                     self.do_clone_feepayer_account(
                         pubkey,
