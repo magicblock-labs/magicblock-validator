@@ -1,5 +1,5 @@
 [package]
-name = "sleipnir-messaging"
+name = "magicblock-messaging"
 version.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -15,7 +15,7 @@ crossbeam-channel = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true }
 serde_derive = { workspace = true }
-sleipnir-bank = { workspace = true }
+magicblock-bank = { workspace = true }
 
 solana-frozen-abi-macro = { workspace = true }
 solana-perf = { workspace = true }

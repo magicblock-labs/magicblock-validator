@@ -1,5 +1,5 @@
 [package]
-name = "sleipnir-geyser-plugin"
+name = "magicblock-geyser-plugin"
 version.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -17,7 +17,7 @@ hostname = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-sleipnir-transaction-status = { workspace = true }
+magicblock-transaction-status = { workspace = true }
 solana-geyser-plugin-interface = { workspace = true }
 solana-sdk = { workspace = true }
 spl-token-2022 = { workspace = true, features = ["no-entrypoint"] }

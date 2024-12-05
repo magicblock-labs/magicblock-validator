@@ -2836,6 +2836,514 @@ dependencies = [
 ]
 
 [[package]]
+name = "magicblock-account-cloner"
+version = "1.19.0"
+dependencies = [
+ "async-trait",
+ "conjunto-transwise",
+ "delegation-program",
+ "futures-util",
+ "log",
+ "magicblock-account-dumper",
+ "magicblock-account-fetcher",
+ "magicblock-account-updates",
+ "magicblock-accounts-api",
+ "magicblock-bank",
+ "magicblock-core",
+ "magicblock-metrics",
+ "magicblock-mutator",
+ "solana-sdk",
+ "test-tools",
+ "thiserror",
+ "tokio",
+ "tokio-util 0.7.11",
+]
+
+[[package]]
+name = "magicblock-account-dumper"
+version = "1.19.0"
+dependencies = [
+ "async-trait",
+ "bincode",
+ "conjunto-transwise",
+ "futures-util",
+ "log",
+ "magicblock-bank",
+ "magicblock-mutator",
+ "magicblock-processor",
+ "magicblock-transaction-status",
+ "solana-sdk",
+ "test-tools",
+ "thiserror",
+ "tokio",
+ "tokio-util 0.7.11",
+]
+
+[[package]]
+name = "magicblock-account-fetcher"
+version = "1.19.0"
+dependencies = [
+ "async-trait",
+ "conjunto-transwise",
+ "futures-util",
+ "log",
+ "magicblock-metrics",
+ "solana-sdk",
+ "test-tools",
+ "thiserror",
+ "tokio",
+ "tokio-util 0.7.11",
+]
+
+[[package]]
+name = "magicblock-account-updates"
+version = "1.19.0"
+dependencies = [
+ "bincode",
+ "conjunto-transwise",
+ "futures-util",
+ "log",
+ "solana-account-decoder",
+ "solana-pubsub-client",
+ "solana-rpc-client-api",
+ "solana-sdk",
+ "test-tools",
+ "thiserror",
+ "tokio",
+ "tokio-stream",
+ "tokio-util 0.7.11",
+]
+
+[[package]]
+name = "magicblock-accounts"
+version = "1.19.0"
+dependencies = [
+ "async-trait",
+ "conjunto-transwise",
+ "delegation-program",
+ "futures-util",
+ "log",
+ "magicblock-account-cloner",
+ "magicblock-account-dumper",
+ "magicblock-account-fetcher",
+ "magicblock-account-updates",
+ "magicblock-accounts-api",
+ "magicblock-bank",
+ "magicblock-core",
+ "magicblock-metrics",
+ "magicblock-mutator",
+ "magicblock-processor",
+ "magicblock-program",
+ "magicblock-transaction-status",
+ "solana-rpc-client",
+ "solana-rpc-client-api",
+ "solana-sdk",
+ "test-tools-core",
+ "thiserror",
+ "tokio",
+ "tokio-util 0.7.11",
+ "url 2.5.1",
+]
+
+[[package]]
+name = "magicblock-accounts-api"
+version = "1.19.0"
+dependencies = [
+ "async-trait",
+ "conjunto-transwise",
+ "delegation-program",
+ "futures-util",
+ "log",
+ "magicblock-bank",
+ "magicblock-mutator",
+ "magicblock-processor",
+ "magicblock-program",
+ "magicblock-transaction-status",
+ "solana-rpc-client",
+ "solana-rpc-client-api",
+ "solana-sdk",
+ "test-tools-core",
+ "thiserror",
+ "tokio",
+ "url 2.5.1",
+]
+
+[[package]]
+name = "magicblock-accounts-db"
+version = "1.19.0"
+dependencies = [
+ "blake3",
+ "dashmap",
+ "fs_extra",
+ "log",
+ "magicblock-metrics",
+ "modular-bitfield",
+ "rand 0.8.5",
+ "rayon",
+ "smallvec",
+ "solana-accounts-db",
+ "solana-frozen-abi-macro",
+ "solana-measure",
+ "solana-metrics",
+ "solana-rayon-threadlimit",
+ "solana-sdk",
+ "thiserror",
+]
+
+[[package]]
+name = "magicblock-api"
+version = "1.19.0"
+dependencies = [
+ "conjunto-transwise",
+ "crossbeam-channel",
+ "fd-lock",
+ "itertools 0.10.5",
+ "log",
+ "magicblock-account-cloner",
+ "magicblock-account-dumper",
+ "magicblock-account-fetcher",
+ "magicblock-account-updates",
+ "magicblock-accounts",
+ "magicblock-accounts-api",
+ "magicblock-accounts-db",
+ "magicblock-bank",
+ "magicblock-config",
+ "magicblock-core",
+ "magicblock-geyser-plugin",
+ "magicblock-ledger",
+ "magicblock-metrics",
+ "magicblock-perf-service",
+ "magicblock-processor",
+ "magicblock-program",
+ "magicblock-pubsub",
+ "magicblock-rpc",
+ "magicblock-transaction-status",
+ "solana-geyser-plugin-interface",
+ "solana-geyser-plugin-manager",
+ "solana-sdk",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tokio-util 0.7.11",
+]
+
+[[package]]
+name = "magicblock-bank"
+version = "1.19.0"
+dependencies = [
+ "assert_matches",
+ "bincode",
+ "env_logger 0.11.3",
+ "log",
+ "magicblock-accounts-db",
+ "magicblock-bank",
+ "magicblock-program",
+ "rand 0.8.5",
+ "rayon",
+ "serde",
+ "solana-address-lookup-table-program",
+ "solana-bpf-loader-program",
+ "solana-compute-budget-program",
+ "solana-cost-model",
+ "solana-frozen-abi-macro",
+ "solana-loader-v4-program",
+ "solana-measure",
+ "solana-program-runtime",
+ "solana-sdk",
+ "solana-svm",
+ "solana-system-program",
+ "solana-transaction-status",
+ "test-tools-core",
+]
+
+[[package]]
+name = "magicblock-config"
+version = "1.19.0"
+dependencies = [
+ "serde",
+ "solana-sdk",
+ "strum",
+ "strum_macros",
+ "test-tools-core",
+ "thiserror",
+ "toml 0.8.14",
+ "url 2.5.1",
+]
+
+[[package]]
+name = "magicblock-core"
+version = "1.19.0"
+dependencies = [
+ "solana-sdk",
+]
+
+[[package]]
+name = "magicblock-geyser-plugin"
+version = "1.19.0"
+dependencies = [
+ "anyhow",
+ "base64 0.21.7",
+ "bs58 0.4.0",
+ "cargo-lock",
+ "expiring-hashmap",
+ "geyser-grpc-proto",
+ "git-version",
+ "hostname",
+ "log",
+ "magicblock-transaction-status",
+ "serde",
+ "serde_json",
+ "solana-geyser-plugin-interface",
+ "solana-sdk",
+ "spl-token-2022",
+ "tokio",
+ "tokio-stream",
+ "tokio-util 0.7.11",
+ "tonic",
+ "tonic-health",
+ "vergen",
+]
+
+[[package]]
+name = "magicblock-ledger"
+version = "1.19.0"
+dependencies = [
+ "bincode",
+ "byteorder",
+ "fs_extra",
+ "libc",
+ "log",
+ "magicblock-accounts-db",
+ "magicblock-bank",
+ "magicblock-core",
+ "num_cpus",
+ "prost",
+ "rocksdb",
+ "rustc_version",
+ "serde",
+ "solana-account-decoder",
+ "solana-measure",
+ "solana-metrics",
+ "solana-program-runtime",
+ "solana-sdk",
+ "solana-storage-proto",
+ "solana-transaction-status",
+ "tempfile",
+ "test-tools-core",
+ "thiserror",
+]
+
+[[package]]
+name = "magicblock-messaging"
+version = "1.19.0"
+dependencies = [
+ "bincode",
+ "crossbeam-channel",
+ "log",
+ "magicblock-bank",
+ "serde",
+ "serde_derive",
+ "solana-frozen-abi-macro",
+ "solana-perf",
+ "solana-sdk",
+ "thiserror",
+]
+
+[[package]]
+name = "magicblock-metrics"
+version = "1.19.0"
+dependencies = [
+ "http-body-util",
+ "hyper 1.4.1",
+ "hyper-util",
+ "lazy_static",
+ "log",
+ "prometheus",
+ "tokio",
+ "tokio-util 0.7.11",
+]
+
+[[package]]
+name = "magicblock-mutator"
+version = "1.19.0"
+dependencies = [
+ "assert_matches",
+ "bincode",
+ "log",
+ "magicblock-bank",
+ "magicblock-program",
+ "solana-account-decoder",
+ "solana-loader-v4-program",
+ "solana-rpc-client",
+ "solana-rpc-client-api",
+ "solana-sdk",
+ "test-tools",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "magicblock-perf-service"
+version = "1.19.0"
+dependencies = [
+ "log",
+ "magicblock-bank",
+ "magicblock-ledger",
+]
+
+[[package]]
+name = "magicblock-processor"
+version = "1.19.0"
+dependencies = [
+ "env_logger 0.11.3",
+ "lazy_static",
+ "log",
+ "magicblock-accounts-db",
+ "magicblock-bank",
+ "magicblock-transaction-status",
+ "rayon",
+ "solana-account-decoder",
+ "solana-measure",
+ "solana-metrics",
+ "solana-program-runtime",
+ "solana-rayon-threadlimit",
+ "solana-sdk",
+ "spl-token",
+ "spl-token-2022",
+]
+
+[[package]]
+name = "magicblock-program"
+version = "1.19.0"
+dependencies = [
+ "assert_matches",
+ "bincode",
+ "crossbeam-channel",
+ "lazy_static",
+ "log",
+ "magicblock-core",
+ "magicblock-metrics",
+ "magicblock-program",
+ "num-derive",
+ "num-traits",
+ "rand 0.8.5",
+ "serde",
+ "solana-program-runtime",
+ "solana-sdk",
+ "test-tools",
+ "test-tools-core",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "magicblock-pubsub"
+version = "1.19.0"
+dependencies = [
+ "bincode",
+ "geyser-grpc-proto",
+ "jsonrpc-core",
+ "jsonrpc-pubsub",
+ "jsonrpc-ws-server",
+ "log",
+ "magicblock-bank",
+ "magicblock-geyser-plugin",
+ "serde",
+ "serde_json",
+ "solana-account-decoder",
+ "solana-rpc-client-api",
+ "solana-sdk",
+ "thiserror",
+ "tokio",
+ "tokio-util 0.7.11",
+]
+
+[[package]]
+name = "magicblock-rpc"
+version = "1.19.0"
+dependencies = [
+ "base64 0.21.7",
+ "bincode",
+ "bs58 0.4.0",
+ "crossbeam-channel",
+ "jsonrpc-core",
+ "jsonrpc-core-client",
+ "jsonrpc-derive",
+ "jsonrpc-http-server",
+ "log",
+ "magicblock-accounts",
+ "magicblock-accounts-db",
+ "magicblock-bank",
+ "magicblock-ledger",
+ "magicblock-metrics",
+ "magicblock-processor",
+ "magicblock-tokens",
+ "magicblock-transaction-status",
+ "magicblock-version",
+ "serde",
+ "serde_derive",
+ "solana-account-decoder",
+ "solana-metrics",
+ "solana-perf",
+ "solana-program-runtime",
+ "solana-rpc-client-api",
+ "solana-sdk",
+ "solana-transaction-status",
+ "spl-token-2022",
+ "test-tools",
+ "thiserror",
+ "tokio",
+]
+
+[[package]]
+name = "magicblock-streamer"
+version = "1.19.0"
+dependencies = [
+ "solana-streamer",
+]
+
+[[package]]
+name = "magicblock-tokens"
+version = "1.19.0"
+dependencies = [
+ "log",
+ "magicblock-bank",
+ "magicblock-transaction-status",
+ "solana-account-decoder",
+ "solana-measure",
+ "solana-metrics",
+ "solana-sdk",
+ "spl-token",
+ "spl-token-2022",
+]
+
+[[package]]
+name = "magicblock-transaction-status"
+version = "1.19.0"
+dependencies = [
+ "crossbeam-channel",
+ "log",
+ "magicblock-accounts-db",
+ "magicblock-bank",
+ "solana-sdk",
+ "solana-transaction-status",
+]
+
+[[package]]
+name = "magicblock-version"
+version = "1.19.0"
+dependencies = [
+ "log",
+ "rustc_version",
+ "semver",
+ "serde",
+ "serde_derive",
+ "solana-frozen-abi",
+ "solana-frozen-abi-macro",
+ "solana-sdk",
+]
+
+[[package]]
 name = "matchers"
 version = "0.1.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4358,514 +4866,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "sleipnir-account-cloner"
-version = "1.19.0"
-dependencies = [
- "async-trait",
- "conjunto-transwise",
- "delegation-program",
- "futures-util",
- "log",
- "sleipnir-account-dumper",
- "sleipnir-account-fetcher",
- "sleipnir-account-updates",
- "sleipnir-accounts-api",
- "sleipnir-bank",
- "sleipnir-core",
- "sleipnir-metrics",
- "sleipnir-mutator",
- "solana-sdk",
- "test-tools",
- "thiserror",
- "tokio",
- "tokio-util 0.7.11",
-]
-
-[[package]]
-name = "sleipnir-account-dumper"
-version = "1.19.0"
-dependencies = [
- "async-trait",
- "bincode",
- "conjunto-transwise",
- "futures-util",
- "log",
- "sleipnir-bank",
- "sleipnir-mutator",
- "sleipnir-processor",
- "sleipnir-transaction-status",
- "solana-sdk",
- "test-tools",
- "thiserror",
- "tokio",
- "tokio-util 0.7.11",
-]
-
-[[package]]
-name = "sleipnir-account-fetcher"
-version = "1.19.0"
-dependencies = [
- "async-trait",
- "conjunto-transwise",
- "futures-util",
- "log",
- "sleipnir-metrics",
- "solana-sdk",
- "test-tools",
- "thiserror",
- "tokio",
- "tokio-util 0.7.11",
-]
-
-[[package]]
-name = "sleipnir-account-updates"
-version = "1.19.0"
-dependencies = [
- "bincode",
- "conjunto-transwise",
- "futures-util",
- "log",
- "solana-account-decoder",
- "solana-pubsub-client",
- "solana-rpc-client-api",
- "solana-sdk",
- "test-tools",
- "thiserror",
- "tokio",
- "tokio-stream",
- "tokio-util 0.7.11",
-]
-
-[[package]]
-name = "sleipnir-accounts"
-version = "1.19.0"
-dependencies = [
- "async-trait",
- "conjunto-transwise",
- "delegation-program",
- "futures-util",
- "log",
- "sleipnir-account-cloner",
- "sleipnir-account-dumper",
- "sleipnir-account-fetcher",
- "sleipnir-account-updates",
- "sleipnir-accounts-api",
- "sleipnir-bank",
- "sleipnir-core",
- "sleipnir-metrics",
- "sleipnir-mutator",
- "sleipnir-processor",
- "sleipnir-program",
- "sleipnir-transaction-status",
- "solana-rpc-client",
- "solana-rpc-client-api",
- "solana-sdk",
- "test-tools-core",
- "thiserror",
- "tokio",
- "tokio-util 0.7.11",
- "url 2.5.1",
-]
-
-[[package]]
-name = "sleipnir-accounts-api"
-version = "1.19.0"
-dependencies = [
- "async-trait",
- "conjunto-transwise",
- "delegation-program",
- "futures-util",
- "log",
- "sleipnir-bank",
- "sleipnir-mutator",
- "sleipnir-processor",
- "sleipnir-program",
- "sleipnir-transaction-status",
- "solana-rpc-client",
- "solana-rpc-client-api",
- "solana-sdk",
- "test-tools-core",
- "thiserror",
- "tokio",
- "url 2.5.1",
-]
-
-[[package]]
-name = "sleipnir-accounts-db"
-version = "1.19.0"
-dependencies = [
- "blake3",
- "dashmap",
- "fs_extra",
- "log",
- "modular-bitfield",
- "rand 0.8.5",
- "rayon",
- "sleipnir-metrics",
- "smallvec",
- "solana-accounts-db",
- "solana-frozen-abi-macro",
- "solana-measure",
- "solana-metrics",
- "solana-rayon-threadlimit",
- "solana-sdk",
- "thiserror",
-]
-
-[[package]]
-name = "sleipnir-api"
-version = "1.19.0"
-dependencies = [
- "conjunto-transwise",
- "crossbeam-channel",
- "fd-lock",
- "itertools 0.10.5",
- "log",
- "sleipnir-account-cloner",
- "sleipnir-account-dumper",
- "sleipnir-account-fetcher",
- "sleipnir-account-updates",
- "sleipnir-accounts",
- "sleipnir-accounts-api",
- "sleipnir-accounts-db",
- "sleipnir-bank",
- "sleipnir-config",
- "sleipnir-core",
- "sleipnir-geyser-plugin",
- "sleipnir-ledger",
- "sleipnir-metrics",
- "sleipnir-perf-service",
- "sleipnir-processor",
- "sleipnir-program",
- "sleipnir-pubsub",
- "sleipnir-rpc",
- "sleipnir-transaction-status",
- "solana-geyser-plugin-interface",
- "solana-geyser-plugin-manager",
- "solana-sdk",
- "tempfile",
- "thiserror",
- "tokio",
- "tokio-util 0.7.11",
-]
-
-[[package]]
-name = "sleipnir-bank"
-version = "1.19.0"
-dependencies = [
- "assert_matches",
- "bincode",
- "env_logger 0.11.3",
- "log",
- "rand 0.8.5",
- "rayon",
- "serde",
- "sleipnir-accounts-db",
- "sleipnir-bank",
- "sleipnir-program",
- "solana-address-lookup-table-program",
- "solana-bpf-loader-program",
- "solana-compute-budget-program",
- "solana-cost-model",
- "solana-frozen-abi-macro",
- "solana-loader-v4-program",
- "solana-measure",
- "solana-program-runtime",
- "solana-sdk",
- "solana-svm",
- "solana-system-program",
- "solana-transaction-status",
- "test-tools-core",
-]
-
-[[package]]
-name = "sleipnir-config"
-version = "1.19.0"
-dependencies = [
- "serde",
- "solana-sdk",
- "strum",
- "strum_macros",
- "test-tools-core",
- "thiserror",
- "toml 0.8.14",
- "url 2.5.1",
-]
-
-[[package]]
-name = "sleipnir-core"
-version = "1.19.0"
-dependencies = [
- "solana-sdk",
-]
-
-[[package]]
-name = "sleipnir-geyser-plugin"
-version = "1.19.0"
-dependencies = [
- "anyhow",
- "base64 0.21.7",
- "bs58 0.4.0",
- "cargo-lock",
- "expiring-hashmap",
- "geyser-grpc-proto",
- "git-version",
- "hostname",
- "log",
- "serde",
- "serde_json",
- "sleipnir-transaction-status",
- "solana-geyser-plugin-interface",
- "solana-sdk",
- "spl-token-2022",
- "tokio",
- "tokio-stream",
- "tokio-util 0.7.11",
- "tonic",
- "tonic-health",
- "vergen",
-]
-
-[[package]]
-name = "sleipnir-ledger"
-version = "1.19.0"
-dependencies = [
- "bincode",
- "byteorder",
- "fs_extra",
- "libc",
- "log",
- "num_cpus",
- "prost",
- "rocksdb",
- "rustc_version",
- "serde",
- "sleipnir-accounts-db",
- "sleipnir-bank",
- "sleipnir-core",
- "solana-account-decoder",
- "solana-measure",
- "solana-metrics",
- "solana-program-runtime",
- "solana-sdk",
- "solana-storage-proto",
- "solana-transaction-status",
- "tempfile",
- "test-tools-core",
- "thiserror",
-]
-
-[[package]]
-name = "sleipnir-messaging"
-version = "1.19.0"
-dependencies = [
- "bincode",
- "crossbeam-channel",
- "log",
- "serde",
- "serde_derive",
- "sleipnir-bank",
- "solana-frozen-abi-macro",
- "solana-perf",
- "solana-sdk",
- "thiserror",
-]
-
-[[package]]
-name = "sleipnir-metrics"
-version = "1.19.0"
-dependencies = [
- "http-body-util",
- "hyper 1.4.1",
- "hyper-util",
- "lazy_static",
- "log",
- "prometheus",
- "tokio",
- "tokio-util 0.7.11",
-]
-
-[[package]]
-name = "sleipnir-mutator"
-version = "1.19.0"
-dependencies = [
- "assert_matches",
- "bincode",
- "log",
- "sleipnir-bank",
- "sleipnir-program",
- "solana-account-decoder",
- "solana-loader-v4-program",
- "solana-rpc-client",
- "solana-rpc-client-api",
- "solana-sdk",
- "test-tools",
- "thiserror",
- "tokio",
-]
-
-[[package]]
-name = "sleipnir-perf-service"
-version = "1.19.0"
-dependencies = [
- "log",
- "sleipnir-bank",
- "sleipnir-ledger",
-]
-
-[[package]]
-name = "sleipnir-processor"
-version = "1.19.0"
-dependencies = [
- "env_logger 0.11.3",
- "lazy_static",
- "log",
- "rayon",
- "sleipnir-accounts-db",
- "sleipnir-bank",
- "sleipnir-transaction-status",
- "solana-account-decoder",
- "solana-measure",
- "solana-metrics",
- "solana-program-runtime",
- "solana-rayon-threadlimit",
- "solana-sdk",
- "spl-token",
- "spl-token-2022",
-]
-
-[[package]]
-name = "sleipnir-program"
-version = "1.19.0"
-dependencies = [
- "assert_matches",
- "bincode",
- "crossbeam-channel",
- "lazy_static",
- "log",
- "num-derive",
- "num-traits",
- "rand 0.8.5",
- "serde",
- "sleipnir-core",
- "sleipnir-metrics",
- "sleipnir-program",
- "solana-program-runtime",
- "solana-sdk",
- "test-tools",
- "test-tools-core",
- "thiserror",
- "tokio",
-]
-
-[[package]]
-name = "sleipnir-pubsub"
-version = "1.19.0"
-dependencies = [
- "bincode",
- "geyser-grpc-proto",
- "jsonrpc-core",
- "jsonrpc-pubsub",
- "jsonrpc-ws-server",
- "log",
- "serde",
- "serde_json",
- "sleipnir-bank",
- "sleipnir-geyser-plugin",
- "solana-account-decoder",
- "solana-rpc-client-api",
- "solana-sdk",
- "thiserror",
- "tokio",
- "tokio-util 0.7.11",
-]
-
-[[package]]
-name = "sleipnir-rpc"
-version = "1.19.0"
-dependencies = [
- "base64 0.21.7",
- "bincode",
- "bs58 0.4.0",
- "crossbeam-channel",
- "jsonrpc-core",
- "jsonrpc-core-client",
- "jsonrpc-derive",
- "jsonrpc-http-server",
- "log",
- "serde",
- "serde_derive",
- "sleipnir-accounts",
- "sleipnir-accounts-db",
- "sleipnir-bank",
- "sleipnir-ledger",
- "sleipnir-metrics",
- "sleipnir-processor",
- "sleipnir-tokens",
- "sleipnir-transaction-status",
- "sleipnir-version",
- "solana-account-decoder",
- "solana-metrics",
- "solana-perf",
- "solana-program-runtime",
- "solana-rpc-client-api",
- "solana-sdk",
- "solana-transaction-status",
- "spl-token-2022",
- "test-tools",
- "thiserror",
- "tokio",
-]
-
-[[package]]
-name = "sleipnir-streamer"
-version = "1.19.0"
-dependencies = [
- "solana-streamer",
-]
-
-[[package]]
-name = "sleipnir-tokens"
-version = "1.19.0"
-dependencies = [
- "log",
- "sleipnir-bank",
- "sleipnir-transaction-status",
- "solana-account-decoder",
- "solana-measure",
- "solana-metrics",
- "solana-sdk",
- "spl-token",
- "spl-token-2022",
-]
-
-[[package]]
-name = "sleipnir-transaction-status"
-version = "1.19.0"
-dependencies = [
- "crossbeam-channel",
- "log",
- "sleipnir-accounts-db",
- "sleipnir-bank",
- "solana-sdk",
- "solana-transaction-status",
-]
-
-[[package]]
-name = "sleipnir-version"
-version = "1.19.0"
-dependencies = [
- "log",
- "rustc_version",
- "semver",
- "serde",
- "serde_derive",
- "solana-frozen-abi",
- "solana-frozen-abi-macro",
- "solana-sdk",
-]
-
-[[package]]
 name = "smallvec"
 version = "1.13.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5142,9 +5142,9 @@ dependencies = [
  "jsonrpc-core",
  "libloading 0.7.4",
  "log",
+ "magicblock-accounts-db",
+ "magicblock-bank",
  "serde_json",
- "sleipnir-accounts-db",
- "sleipnir-bank",
  "solana-geyser-plugin-interface",
  "solana-measure",
  "solana-metrics",
@@ -6111,8 +6111,8 @@ dependencies = [
  "console-subscriber",
  "env_logger 0.11.3",
  "log",
- "sleipnir-api",
- "sleipnir-config",
+ "magicblock-api",
+ "magicblock-config",
  "solana-geyser-plugin-manager",
  "solana-sdk",
  "test-tools",
@@ -6158,12 +6158,12 @@ version = "1.19.0"
 dependencies = [
  "crossbeam-channel",
  "log",
- "sleipnir-accounts-db",
- "sleipnir-bank",
- "sleipnir-core",
- "sleipnir-messaging",
- "sleipnir-program",
- "sleipnir-transaction-status",
+ "magicblock-accounts-db",
+ "magicblock-bank",
+ "magicblock-core",
+ "magicblock-messaging",
+ "magicblock-program",
+ "magicblock-transaction-status",
  "solana-perf",
  "solana-program-runtime",
  "solana-rpc-client",
@@ -6179,7 +6179,7 @@ version = "1.19.0"
 dependencies = [
  "env_logger 0.11.3",
  "log",
- "sleipnir-accounts-db",
+ "magicblock-accounts-db",
 ]
 
 [[package]]

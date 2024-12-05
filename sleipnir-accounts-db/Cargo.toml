@@ -1,5 +1,5 @@
 [package]
-name = "sleipnir-accounts-db"
+name = "magicblock-accounts-db"
 version.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -15,7 +15,7 @@ log = { workspace = true }
 modular-bitfield = { workspace = true }
 rand = { workspace = true }
 rayon = { workspace = true }
-sleipnir-metrics = { workspace = true }
+magicblock-metrics = { workspace = true }
 smallvec = { workspace = true }
 solana-frozen-abi-macro = { workspace = true }
 solana-measure = { workspace = true }

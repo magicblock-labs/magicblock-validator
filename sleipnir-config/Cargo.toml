@@ -1,5 +1,5 @@
 [package]
-name = "sleipnir-config"
+name = "magicblock-config"
 version.workspace = true
 authors.workspace = true
 repository.workspace = true

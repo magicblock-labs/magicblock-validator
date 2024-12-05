@@ -1,5 +1,5 @@
 [package]
-name = "sleipnir-account-dumper"
+name = "magicblock-account-dumper"
 version.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -12,10 +12,10 @@ async-trait = { workspace = true }
 conjunto-transwise = { workspace = true }
 futures-util = { workspace = true }
 log = { workspace = true }
-sleipnir-bank = { workspace = true }
-sleipnir-mutator = { workspace = true }
-sleipnir-processor = { workspace = true }
-sleipnir-transaction-status = { workspace = true }
+magicblock-bank = { workspace = true }
+magicblock-mutator = { workspace = true }
+magicblock-processor = { workspace = true }
+magicblock-transaction-status = { workspace = true }
 solana-sdk = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }

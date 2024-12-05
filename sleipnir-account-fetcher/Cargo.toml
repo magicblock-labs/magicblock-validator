@@ -1,5 +1,5 @@
 [package]
-name = "sleipnir-account-fetcher"
+name = "magicblock-account-fetcher"
 version.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -12,7 +12,7 @@ async-trait = { workspace = true }
 conjunto-transwise = { workspace = true }
 futures-util = { workspace = true }
 log = { workspace = true }
-sleipnir-metrics = { workspace = true }
+magicblock-metrics = { workspace = true }
 solana-sdk = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }

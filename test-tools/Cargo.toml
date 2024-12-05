@@ -10,12 +10,12 @@ edition.workspace = true
 [dependencies]
 crossbeam-channel = { workspace = true }
 log = { workspace = true }
-sleipnir-accounts-db = { workspace = true }
-sleipnir-bank = { workspace = true }
-sleipnir-core = { workspace = true }
-sleipnir-messaging = { workspace = true }
-sleipnir-program = { workspace = true }
-sleipnir-transaction-status = { workspace = true }
+magicblock-accounts-db = { workspace = true }
+magicblock-bank = { workspace = true }
+magicblock-core = { workspace = true }
+magicblock-messaging = { workspace = true }
+magicblock-program = { workspace = true }
+magicblock-transaction-status = { workspace = true }
 solana-perf = { workspace = true }
 solana-program-runtime = { workspace = true }
 solana-rpc-client = { workspace = true }
@@ -26,4 +26,4 @@ test-tools-core = { workspace = true }
 [dev-dependencies]
 tokio = { workspace = true }
 
-sleipnir-bank = { workspace = true, features = ["dev-context-only-utils"] }
+magicblock-bank = { workspace = true, features = ["dev-context-only-utils"] }

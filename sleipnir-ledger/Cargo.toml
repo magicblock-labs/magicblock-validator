@@ -1,5 +1,5 @@
 [package]
-name = "sleipnir-ledger"
+name = "magicblock-ledger"
 version.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -16,9 +16,9 @@ libc = { workspace = true }
 num_cpus = { workspace = true }
 prost = { workspace = true }
 serde = { workspace = true }
-sleipnir-bank = { workspace = true }
-sleipnir-accounts-db = { workspace = true }
-sleipnir-core = { workspace = true }
+magicblock-bank = { workspace = true }
+magicblock-accounts-db = { workspace = true }
+magicblock-core = { workspace = true }
 solana-account-decoder = { workspace = true }
 solana-measure = { workspace = true }
 solana-metrics = { workspace = true }

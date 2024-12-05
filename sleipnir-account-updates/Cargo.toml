@@ -1,5 +1,5 @@
 [package]
-name = "sleipnir-account-updates"
+name = "magicblock-account-updates"
 version.workspace = true
 authors.workspace = true
 repository.workspace = true

@@ -1,5 +1,5 @@
 [package]
-name = "sleipnir-accounts"
+name = "magicblock-accounts"
 version.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -13,18 +13,18 @@ conjunto-transwise = { workspace = true }
 delegation-program = { workspace = true }
 futures-util = { workspace = true }
 log = { workspace = true }
-sleipnir-account-fetcher = { workspace = true }
-sleipnir-account-updates = { workspace = true }
-sleipnir-account-dumper = { workspace = true }
-sleipnir-account-cloner = { workspace = true }
-sleipnir-accounts-api = { workspace = true }
-sleipnir-bank = { workspace = true }
-sleipnir-core = { workspace = true }
-sleipnir-metrics = { workspace = true }
-sleipnir-mutator = { workspace = true }
-sleipnir-processor = { workspace = true }
-sleipnir-program = { workspace = true }
-sleipnir-transaction-status = { workspace = true }
+magicblock-account-fetcher = { workspace = true }
+magicblock-account-updates = { workspace = true }
+magicblock-account-dumper = { workspace = true }
+magicblock-account-cloner = { workspace = true }
+magicblock-accounts-api = { workspace = true }
+magicblock-bank = { workspace = true }
+magicblock-core = { workspace = true }
+magicblock-metrics = { workspace = true }
+magicblock-mutator = { workspace = true }
+magicblock-processor = { workspace = true }
+magicblock-program = { workspace = true }
+magicblock-transaction-status = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }

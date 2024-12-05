@@ -1,5 +1,5 @@
 [package]
-name = "sleipnir-processor"
+name = "magicblock-processor"
 version.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -11,9 +11,9 @@ edition.workspace = true
 lazy_static = { workspace = true }
 log = { workspace = true }
 rayon = { workspace = true }
-sleipnir-accounts-db = { workspace = true }
-sleipnir-bank = { workspace = true }
-sleipnir-transaction-status = { workspace = true }
+magicblock-accounts-db = { workspace = true }
+magicblock-bank = { workspace = true }
+magicblock-transaction-status = { workspace = true }
 solana-rayon-threadlimit = { workspace = true }
 solana-account-decoder = { workspace = true }
 solana-measure = { workspace = true }
@@ -25,5 +25,5 @@ spl-token-2022 = { workspace = true }
 
 [dev-dependencies]
 env_logger = { workspace = true }
-sleipnir-bank = { workspace = true, features = ["dev-context-only-utils"] }
+magicblock-bank = { workspace = true, features = ["dev-context-only-utils"] }
 solana-sdk = { workspace = true, features = ["dev-context-only-utils"] }

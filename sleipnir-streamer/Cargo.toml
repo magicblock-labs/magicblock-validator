@@ -1,5 +1,5 @@
 [package]
-name = "sleipnir-streamer"
+name = "magicblock-streamer"
 version.workspace = true
 authors.workspace = true
 repository.workspace = true

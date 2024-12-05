@@ -1,5 +1,5 @@
 [package]
-name = "sleipnir-tokens"
+name = "magicblock-tokens"
 version.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -9,8 +9,8 @@ edition.workspace = true
 
 [dependencies]
 log = { workspace = true }
-sleipnir-bank = { workspace = true }
-sleipnir-transaction-status = { workspace = true }
+magicblock-bank = { workspace = true }
+magicblock-transaction-status = { workspace = true }
 solana-account-decoder = { workspace = true }
 solana-measure = { workspace = true }
 solana-metrics = { workspace = true }

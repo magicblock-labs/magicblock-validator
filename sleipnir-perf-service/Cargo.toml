@@ -1,5 +1,5 @@
 [package]
-name = "sleipnir-perf-service"
+name = "magicblock-perf-service"
 version.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -9,5 +9,5 @@ edition.workspace = true
 
 [dependencies]
 log = { workspace = true }
-sleipnir-bank = { workspace = true }
-sleipnir-ledger = { workspace = true }
+magicblock-bank = { workspace = true }
+magicblock-ledger = { workspace = true }

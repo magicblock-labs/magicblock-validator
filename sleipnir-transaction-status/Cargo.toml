@@ -1,5 +1,5 @@
 [package]
-name = "sleipnir-transaction-status"
+name = "magicblock-transaction-status"
 version.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -10,7 +10,7 @@ edition.workspace = true
 [dependencies]
 crossbeam-channel = { workspace = true }
 log = { workspace = true }
-sleipnir-accounts-db = { workspace = true }
-sleipnir-bank = { workspace = true }
+magicblock-accounts-db = { workspace = true }
+magicblock-bank = { workspace = true }
 solana-sdk = { workspace = true }
 solana-transaction-status = { workspace = true }

@@ -1,5 +1,5 @@
 [package]
-name = "sleipnir-api"
+name = "magicblock-api"
 version.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -13,25 +13,25 @@ crossbeam-channel = { workspace = true }
 fd-lock = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }
-sleipnir-account-cloner = { workspace = true }
-sleipnir-account-dumper = { workspace = true }
-sleipnir-account-fetcher = { workspace = true }
-sleipnir-account-updates = { workspace = true }
-sleipnir-accounts = { workspace = true }
-sleipnir-accounts-api = { workspace = true }
-sleipnir-accounts-db = { workspace = true }
-sleipnir-bank = { workspace = true }
-sleipnir-config = { workspace = true }
-sleipnir-core = { workspace = true }
-sleipnir-geyser-plugin = { workspace = true }
-sleipnir-ledger = { workspace = true }
-sleipnir-metrics = { workspace = true }
-sleipnir-perf-service = { workspace = true }
-sleipnir-processor = { workspace = true }
-sleipnir-program = { workspace = true }
-sleipnir-pubsub = { workspace = true }
-sleipnir-rpc = { workspace = true }
-sleipnir-transaction-status = { workspace = true }
+magicblock-account-cloner = { workspace = true }
+magicblock-account-dumper = { workspace = true }
+magicblock-account-fetcher = { workspace = true }
+magicblock-account-updates = { workspace = true }
+magicblock-accounts = { workspace = true }
+magicblock-accounts-api = { workspace = true }
+magicblock-accounts-db = { workspace = true }
+magicblock-bank = { workspace = true }
+magicblock-config = { workspace = true }
+magicblock-core = { workspace = true }
+magicblock-geyser-plugin = { workspace = true }
+magicblock-ledger = { workspace = true }
+magicblock-metrics = { workspace = true }
+magicblock-perf-service = { workspace = true }
+magicblock-processor = { workspace = true }
+magicblock-program = { workspace = true }
+magicblock-pubsub = { workspace = true }
+magicblock-rpc = { workspace = true }
+magicblock-transaction-status = { workspace = true }
 solana-geyser-plugin-interface = { workspace = true }
 solana-geyser-plugin-manager = { workspace = true }
 solana-sdk = { workspace = true }

@@ -1,5 +1,5 @@
 [package]
-name = "sleipnir-rpc"
+name = "magicblock-rpc"
 version.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -19,15 +19,15 @@ jsonrpc-derive = { workspace = true }
 jsonrpc-http-server = { workspace = true }
 serde = { workspace = true }
 serde_derive = { workspace = true }
-sleipnir-accounts = { workspace = true }
-sleipnir-accounts-db = { workspace = true }
-sleipnir-bank = { workspace = true }
-sleipnir-ledger = { workspace = true }
-sleipnir-metrics = { workspace = true }
-sleipnir-processor = { workspace = true }
-sleipnir-tokens = { workspace = true }
-sleipnir-transaction-status = { workspace = true }
-sleipnir-version = { workspace = true }
+magicblock-accounts = { workspace = true }
+magicblock-accounts-db = { workspace = true }
+magicblock-bank = { workspace = true }
+magicblock-ledger = { workspace = true }
+magicblock-metrics = { workspace = true }
+magicblock-processor = { workspace = true }
+magicblock-tokens = { workspace = true }
+magicblock-transaction-status = { workspace = true }
+magicblock-version = { workspace = true }
 solana-account-decoder = { workspace = true }
 solana-metrics = { workspace = true }
 solana-perf = { workspace = true }

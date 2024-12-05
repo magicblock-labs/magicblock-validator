@@ -1,5 +1,5 @@
 [package]
-name = "sleipnir-pubsub"
+name = "magicblock-pubsub"
 version.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -16,8 +16,8 @@ jsonrpc-ws-server = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
-sleipnir-bank = { workspace = true }
-sleipnir-geyser-plugin = { workspace = true }
+magicblock-bank = { workspace = true }
+magicblock-geyser-plugin = { workspace = true }
 solana-account-decoder = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }

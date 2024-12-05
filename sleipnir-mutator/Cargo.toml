@@ -1,5 +1,5 @@
 [package]
-name = "sleipnir-mutator"
+name = "magicblock-mutator"
 version.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -13,7 +13,7 @@ doctest = false
 [dependencies]
 bincode = { workspace = true }
 log = { workspace = true }
-sleipnir-program = { workspace = true }
+magicblock-program = { workspace = true }
 solana-loader-v4-program = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
@@ -24,7 +24,7 @@ thiserror = { workspace = true }
 assert_matches = { workspace = true }
 bincode = { workspace = true }
 tokio = { workspace = true }
-sleipnir-bank = { workspace = true, features = ["dev-context-only-utils"] }
-sleipnir-program = { workspace = true }
+magicblock-bank = { workspace = true, features = ["dev-context-only-utils"] }
+magicblock-program = { workspace = true }
 solana-account-decoder = { workspace = true }
 test-tools = { workspace = true }

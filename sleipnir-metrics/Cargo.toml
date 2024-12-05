@@ -1,5 +1,5 @@
 [package]
-name = "sleipnir-metrics"
+name = "magicblock-metrics"
 version.workspace = true
 authors.workspace = true
 repository.workspace = true
@@ -14,5 +14,5 @@ hyper = { workspace = true, features = ["http1", "server"] }
 hyper-util = { workspace = true, features = ["tokio"] }
 lazy_static = { workspace = true }
 prometheus = { workspace = true }
-tokio = { workspace = true, features = [ "macros", "rt-multi-thread" ] }
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tokio-util = { workspace = true }
