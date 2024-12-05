@@ -10,4 +10,4 @@ mod tickers;
 mod utils;
 
 pub use init_geyser_service::InitGeyserServiceConfig;
-pub use magicblock_config::SleipnirConfig;
+pub use magicblock_config::MagicBlockConfig;

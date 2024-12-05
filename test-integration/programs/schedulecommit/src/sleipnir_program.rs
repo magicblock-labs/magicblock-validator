@@ -1,5 +1,5 @@
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum SleipnirInstruction {
+pub enum MagicBlockInstruction {
     ModifyAccounts,
     ScheduleCommit,
     ScheduleCommitAndUndelegate,
@@ -7,9 +7,9 @@ pub enum SleipnirInstruction {
 }
 
 #[allow(unused)]
-impl SleipnirInstruction {
+impl MagicBlockInstruction {
     pub(crate) fn index(&self) -> u8 {
-        use SleipnirInstruction::*;
+        use MagicBlockInstruction::*;
         match self {
             ModifyAccounts => 0,
             ScheduleCommit => 1,

@@ -2,13 +2,13 @@ use solana_program_runtime::declare_process_instruction;
 use solana_sdk::program_utils::limited_deserialize;
 
 use crate::{
+    magicblock_instruction::MagicBlockInstruction,
     mutate_accounts::process_mutate_accounts,
     process_scheduled_commit_sent,
     schedule_transactions::{
         process_accept_scheduled_commits, process_schedule_commit,
         ProcessScheduleCommitOptions,
     },
-    magicblock_instruction::SleipnirInstruction,
 };
 
 pub const DEFAULT_COMPUTE_UNITS: u64 = 150;
@@ -25,7 +25,7 @@ declare_process_instruction!(
         let signers = instruction_context.get_signers(transaction_context)?;
 
         match instruction {
-            SleipnirInstruction::ModifyAccounts(mut account_mods) => {
+            MagicBlockInstruction::ModifyAccounts(mut account_mods) => {
                 process_mutate_accounts(
                     signers,
                     invoke_context,
@@ -33,14 +33,14 @@ declare_process_instruction!(
                     &mut account_mods,
                 )
             }
-            SleipnirInstruction::ScheduleCommit => process_schedule_commit(
+            MagicBlockInstruction::ScheduleCommit => process_schedule_commit(
                 signers,
                 invoke_context,
                 ProcessScheduleCommitOptions {
                     request_undelegation: false,
                 },
             ),
-            SleipnirInstruction::ScheduleCommitAndUndelegate => {
+            MagicBlockInstruction::ScheduleCommitAndUndelegate => {
                 process_schedule_commit(
                     signers,
                     invoke_context,
@@ -49,10 +49,10 @@ declare_process_instruction!(
                     },
                 )
             }
-            SleipnirInstruction::AcceptScheduleCommits => {
+            MagicBlockInstruction::AcceptScheduleCommits => {
                 process_accept_scheduled_commits(signers, invoke_context)
             }
-            SleipnirInstruction::ScheduledCommitSent(id) => {
+            MagicBlockInstruction::ScheduledCommitSent(id) => {
                 process_scheduled_commit_sent(
                     signers,
                     invoke_context,

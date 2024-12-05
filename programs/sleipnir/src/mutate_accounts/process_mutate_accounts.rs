@@ -10,8 +10,10 @@ use solana_sdk::{
 };
 
 use crate::{
+    magicblock_instruction::{
+        AccountModificationForInstruction, MagicBlockError,
+    },
     mutate_accounts::account_mod_data::resolve_account_mod_data,
-    magicblock_instruction::{AccountModificationForInstruction, SleipnirError},
     validator::validator_authority_id,
 };
 
@@ -24,14 +26,14 @@ pub(crate) fn process_mutate_accounts(
     let instruction_context =
         transaction_context.get_current_instruction_context()?;
 
-    // First account is the Sleipnir authority
+    // First account is the MagicBlock authority
     let accounts_len = instruction_context.get_number_of_instruction_accounts();
     let accounts_to_mod_len = accounts_len - 1;
     let account_mods_len = account_mods.len() as u64;
 
     // 1. Checks
     let validator_authority_acc = {
-        // 1.1. Sleipnir authority must sign
+        // 1.1. MagicBlock authority must sign
         let validator_authority_id = validator_authority_id();
         if !signers.contains(&validator_authority_id) {
             ic_msg!(
@@ -45,7 +47,7 @@ pub(crate) fn process_mutate_accounts(
         // 1.2. Need to have some accounts to modify
         if accounts_to_mod_len == 0 {
             ic_msg!(invoke_context, "MutateAccounts: no accounts to modify");
-            return Err(SleipnirError::NoAccountsToModify.into());
+            return Err(MagicBlockError::NoAccountsToModify.into());
         }
 
         // 1.3. Number of accounts to modify must match number of account modifications
@@ -57,12 +59,12 @@ pub(crate) fn process_mutate_accounts(
                     account_mods_len
                 );
             return Err(
-                SleipnirError::AccountsToModifyNotMatchingAccountModifications
+                MagicBlockError::AccountsToModifyNotMatchingAccountModifications
                     .into(),
             );
         }
 
-        // 1.4. Check that first account is the Sleipnir authority
+        // 1.4. Check that first account is the MagicBlock authority
         let authority_transaction_index = instruction_context
             .get_index_of_instruction_account_in_transaction(0)?;
         let magicblock_authority_key = transaction_context
@@ -70,10 +72,11 @@ pub(crate) fn process_mutate_accounts(
         if magicblock_authority_key != &validator_authority_id {
             ic_msg!(
                 invoke_context,
-                "MutateAccounts: first account must be the Sleipnir authority"
+                "MutateAccounts: first account must be the MagicBlock authority"
             );
             return Err(
-                SleipnirError::FirstAccountNeedsToBeSleipnirAuthority.into()
+                MagicBlockError::FirstAccountNeedsToBeMagicBlockAuthority
+                    .into(),
             );
         }
         let magicblock_authority_acc = transaction_context
@@ -85,10 +88,10 @@ pub(crate) fn process_mutate_accounts(
         {
             ic_msg!(
                 invoke_context,
-                "MutateAccounts: Sleipnir authority needs to be owned by the system program"
+                "MutateAccounts: MagicBlock authority needs to be owned by the system program"
             );
             return Err(
-                SleipnirError::SleipnirAuthorityNeedsToBeOwnedBySystemProgram
+                MagicBlockError::MagicBlockAuthorityNeedsToBeOwnedBySystemProgram
                     .into(),
             );
         }
@@ -100,7 +103,7 @@ pub(crate) fn process_mutate_accounts(
     // 2. Apply account modifications
     let mut memory_data_mods = Vec::new();
     for idx in 0..account_mods_len {
-        // NOTE: first account is the Sleipnir authority, account mods start at second account
+        // NOTE: first account is the MagicBlock authority, account mods start at second account
         let account_idx = (idx + 1) as u16;
         let account_transaction_index = instruction_context
             .get_index_of_instruction_account_in_transaction(account_idx)?;
@@ -115,7 +118,7 @@ pub(crate) fn process_mutate_accounts(
                 "MutateAccounts: account modification for the provided key {} is missing",
                 account_key
             );
-            SleipnirError::AccountModificationMissing
+            MagicBlockError::AccountModificationMissing
         })?;
 
         ic_msg!(
@@ -181,7 +184,7 @@ pub(crate) fn process_mutate_accounts(
                         "MutateAccounts: account data for the provided key {} is missing",
                         data_key
                     );
-                return Err(SleipnirError::AccountDataMissing.into());
+                return Err(MagicBlockError::AccountDataMissing.into());
             }
 
             // We track resolved data mods in order to persist them at the end

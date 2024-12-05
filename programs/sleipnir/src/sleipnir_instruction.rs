@@ -1,8 +1,8 @@
 use std::collections::HashMap;
 
+use magicblock_core::magic_program::MAGIC_CONTEXT_PUBKEY;
 use num_derive::{FromPrimitive, ToPrimitive};
 use serde::{Deserialize, Serialize};
-use magicblock_core::magic_program::MAGIC_CONTEXT_PUBKEY;
 use solana_sdk::{
     account::Account,
     decode_error::DecodeError,
@@ -23,7 +23,7 @@ use crate::{
 #[derive(
     Error, Debug, Serialize, Clone, PartialEq, Eq, FromPrimitive, ToPrimitive,
 )]
-pub enum SleipnirError {
+pub enum MagicBlockError {
     #[error("need at least one account to modify")]
     NoAccountsToModify,
 
@@ -33,11 +33,11 @@ pub enum SleipnirError {
     #[error("The account modification for the provided key is missing.")]
     AccountModificationMissing,
 
-    #[error("first account needs to be Sleipnir authority")]
-    FirstAccountNeedsToBeSleipnirAuthority,
+    #[error("first account needs to be MagicBlock authority")]
+    FirstAccountNeedsToBeMagicBlockAuthority,
 
-    #[error("Sleipnir authority needs to be owned by system program")]
-    SleipnirAuthorityNeedsToBeOwnedBySystemProgram,
+    #[error("MagicBlock authority needs to be owned by system program")]
+    MagicBlockAuthorityNeedsToBeOwnedBySystemProgram,
 
     #[error("The account resolution for the provided key failed.")]
     AccountDataResolutionFailed,
@@ -58,9 +58,9 @@ pub enum SleipnirError {
     FailedToPersistAccountModData,
 }
 
-impl<T> DecodeError<T> for SleipnirError {
+impl<T> DecodeError<T> for MagicBlockError {
     fn type_of() -> &'static str {
-        "SleipnirError"
+        "MagicBlockError"
     }
 }
 
@@ -99,7 +99,7 @@ pub(crate) struct AccountModificationForInstruction {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
-pub(crate) enum SleipnirInstruction {
+pub(crate) enum MagicBlockInstruction {
     /// Modify one or more accounts
     ///
     /// # Account references
@@ -113,7 +113,7 @@ pub(crate) enum SleipnirInstruction {
     /// committed.
     ///
     /// This is the first part of scheduling a commit.
-    /// A second transaction [SleipnirInstruction::AcceptScheduleCommits] has to run in order
+    /// A second transaction [MagicBlockInstruction::AcceptScheduleCommits] has to run in order
     /// to finish scheduling the commit.
     ///
     /// # Account references
@@ -123,14 +123,14 @@ pub(crate) enum SleipnirInstruction {
     /// - **2..n** `[]`              Accounts to be committed
     ScheduleCommit,
 
-    /// This is the exact same instruction as [SleipnirInstruction::ScheduleCommit] except
+    /// This is the exact same instruction as [MagicBlockInstruction::ScheduleCommit] except
     /// that the [ScheduledCommit] is flagged such that when accounts are committed, a request
     /// to undelegate them is included with the same transaction.
     /// Additionally the validator will refuse anymore transactions for the specific account
     /// since they are no longer considered delegated to it.
     ///
     /// This is the first part of scheduling a commit.
-    /// A second transaction [SleipnirInstruction::AcceptScheduleCommits] has to run in order
+    /// A second transaction [MagicBlockInstruction::AcceptScheduleCommits] has to run in order
     /// to finish scheduling the commit.
     ///
     /// # Account references
@@ -158,14 +158,14 @@ pub(crate) enum SleipnirInstruction {
     /// stored hashmap.
     ///
     /// We implement it this way so we can log the signature of this transaction
-    /// as part of the [SleipnirInstruction::ScheduleCommit] instruction.
+    /// as part of the [MagicBlockInstruction::ScheduleCommit] instruction.
     ScheduledCommitSent(u64),
 }
 
 #[allow(unused)]
-impl SleipnirInstruction {
+impl MagicBlockInstruction {
     pub(crate) fn index(&self) -> u8 {
-        use SleipnirInstruction::*;
+        use MagicBlockInstruction::*;
         match self {
             ModifyAccounts(_) => 0,
             ScheduleCommit => 1,
@@ -218,7 +218,7 @@ pub fn modify_accounts_instruction(
     }
     Instruction::new_with_bincode(
         crate::id(),
-        &SleipnirInstruction::ModifyAccounts(account_mods),
+        &MagicBlockInstruction::ModifyAccounts(account_mods),
         account_metas,
     )
 }
@@ -248,7 +248,7 @@ pub(crate) fn schedule_commit_instruction(
     }
     Instruction::new_with_bincode(
         crate::id(),
-        &SleipnirInstruction::ScheduleCommit,
+        &MagicBlockInstruction::ScheduleCommit,
         account_metas,
     )
 }
@@ -279,7 +279,7 @@ pub(crate) fn schedule_commit_and_undelegate_instruction(
     }
     Instruction::new_with_bincode(
         crate::id(),
-        &SleipnirInstruction::ScheduleCommitAndUndelegate,
+        &MagicBlockInstruction::ScheduleCommitAndUndelegate,
         account_metas,
     )
 }
@@ -299,7 +299,7 @@ pub(crate) fn accept_scheduled_commits_instruction() -> Instruction {
     ];
     Instruction::new_with_bincode(
         crate::id(),
-        &SleipnirInstruction::AcceptScheduleCommits,
+        &MagicBlockInstruction::AcceptScheduleCommits,
         account_metas,
     )
 }
@@ -330,7 +330,7 @@ pub(crate) fn scheduled_commit_sent_instruction(
     ];
     Instruction::new_with_bincode(
         *magic_block_program,
-        &SleipnirInstruction::ScheduledCommitSent(scheduled_commit_id),
+        &MagicBlockInstruction::ScheduledCommitSent(scheduled_commit_id),
         account_metas,
     )
 }

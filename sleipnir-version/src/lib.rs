@@ -1,4 +1,4 @@
-// NOTE: from version/src/lib.rs with Sleipnir Validator added
+// NOTE: from version/src/lib.rs with MagicBlock Validator added
 #![cfg_attr(RUSTC_WITH_SPECIALIZATION, feature(min_specialization))]
 
 extern crate serde_derive;
@@ -14,7 +14,7 @@ enum ClientId {
     SolanaLabs,
     JitoLabs,
     Firedancer,
-    Sleipnir,
+    MagicBlock,
     // If new variants are added, update From<u16> and TryFrom<ClientId>.
     Unknown(u16),
 }
@@ -100,7 +100,7 @@ impl From<u16> for ClientId {
             0u16 => Self::SolanaLabs,
             1u16 => Self::JitoLabs,
             2u16 => Self::Firedancer,
-            3u16 => Self::Sleipnir,
+            3u16 => Self::MagicBlock,
             _ => Self::Unknown(client),
         }
     }
@@ -114,7 +114,7 @@ impl TryFrom<ClientId> for u16 {
             ClientId::SolanaLabs => Ok(0u16),
             ClientId::JitoLabs => Ok(1u16),
             ClientId::Firedancer => Ok(2u16),
-            ClientId::Sleipnir => Ok(3u16),
+            ClientId::MagicBlock => Ok(3u16),
             ClientId::Unknown(client @ 0u16..=3u16) => {
                 Err(format!("Invalid client: {client}"))
             }
@@ -154,14 +154,14 @@ mod test {
         assert_eq!(ClientId::from(0u16), ClientId::SolanaLabs);
         assert_eq!(ClientId::from(1u16), ClientId::JitoLabs);
         assert_eq!(ClientId::from(2u16), ClientId::Firedancer);
-        assert_eq!(ClientId::from(3u16), ClientId::Sleipnir);
+        assert_eq!(ClientId::from(3u16), ClientId::MagicBlock);
         for client in 4u16..=u16::MAX {
             assert_eq!(ClientId::from(client), ClientId::Unknown(client));
         }
         assert_eq!(u16::try_from(ClientId::SolanaLabs), Ok(0u16));
         assert_eq!(u16::try_from(ClientId::JitoLabs), Ok(1u16));
         assert_eq!(u16::try_from(ClientId::Firedancer), Ok(2u16));
-        assert_eq!(u16::try_from(ClientId::Sleipnir), Ok(3u16));
+        assert_eq!(u16::try_from(ClientId::MagicBlock), Ok(3u16));
         for client in 0..=3u16 {
             assert_eq!(
                 u16::try_from(ClientId::Unknown(client)),

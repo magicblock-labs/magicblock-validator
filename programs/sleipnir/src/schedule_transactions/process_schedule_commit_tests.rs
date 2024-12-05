@@ -19,12 +19,12 @@ use test_tools_core::init_logger;
 
 use crate::{
     magic_context::MagicContext,
-    schedule_transactions::transaction_scheduler::TransactionScheduler,
     magicblock_instruction::{
         accept_scheduled_commits_instruction,
         schedule_commit_and_undelegate_instruction,
-        schedule_commit_instruction, SleipnirInstruction,
+        schedule_commit_instruction, MagicBlockInstruction,
     },
+    schedule_transactions::transaction_scheduler::TransactionScheduler,
     test_utils::{ensure_started_validator, process_instruction},
     utils::DELEGATION_PROGRAM_ID,
     ScheduledCommit,
@@ -233,7 +233,7 @@ fn assert_first_commit(
             assert_eq!(p, payer);
             assert_eq!(o, owner);
             assert_eq!(accounts, committees);
-            let instruction = SleipnirInstruction::ScheduledCommitSent(*id);
+            let instruction = MagicBlockInstruction::ScheduledCommitSent(*id);
             assert_eq!(commit_sent_transaction.data(0), instruction.try_to_vec().unwrap());
             assert_eq!(*request_undelegation, expected_request_undelegation);
         }
@@ -643,7 +643,7 @@ fn instruction_from_account_metas(
 ) -> solana_sdk::instruction::Instruction {
     Instruction::new_with_bincode(
         crate::id(),
-        &SleipnirInstruction::ScheduleCommit,
+        &MagicBlockInstruction::ScheduleCommit,
         account_metas,
     )
 }

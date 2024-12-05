@@ -33,7 +33,7 @@ use magicblock_bank::{
     transaction_logs::TransactionLogCollectorFilter,
     transaction_notifier_interface::TransactionNotifierArc,
 };
-use magicblock_config::{ProgramConfig, SleipnirConfig};
+use magicblock_config::{MagicBlockConfig, ProgramConfig};
 use magicblock_geyser_plugin::rpc::GeyserRpcService;
 use magicblock_ledger::{blockstore_processor::process_ledger, Ledger};
 use magicblock_metrics::MetricsService;
@@ -80,7 +80,7 @@ use crate::{
 // -----------------
 #[derive(Default)]
 pub struct MagicValidatorConfig {
-    pub validator_config: SleipnirConfig,
+    pub validator_config: MagicBlockConfig,
     pub init_geyser_service_config: InitGeyserServiceConfig,
 }
 
@@ -100,7 +100,7 @@ impl std::fmt::Debug for MagicValidatorConfig {
 // MagicValidator
 // -----------------
 pub struct MagicValidator {
-    config: SleipnirConfig,
+    config: MagicBlockConfig,
     exit: Arc<AtomicBool>,
     token: CancellationToken,
     bank: Arc<Bank>,
@@ -357,7 +357,7 @@ impl MagicValidator {
         remote_account_cloner_client: RemoteAccountClonerClient,
         transaction_status_sender: TransactionStatusSender,
         validator_keypair: &Keypair,
-        config: &SleipnirConfig,
+        config: &MagicBlockConfig,
     ) -> Arc<AccountsManager> {
         let accounts_config = try_convert_accounts_config(&config.accounts)
             .expect(
@@ -389,7 +389,7 @@ impl MagicValidator {
         accounts_manager: Arc<AccountsManager>,
         transaction_status_sender: TransactionStatusSender,
         pubsub_config: &PubsubConfig,
-        config: &SleipnirConfig,
+        config: &MagicBlockConfig,
     ) -> ApiResult<JsonRpcService> {
         let rpc_socket_addr = SocketAddr::new(config.rpc.addr, config.rpc.port);
         let rpc_json_config = JsonRpcConfig {

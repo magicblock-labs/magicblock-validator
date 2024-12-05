@@ -2,8 +2,9 @@ use std::net::{IpAddr, Ipv4Addr};
 
 use magicblock_config::{
     AccountsConfig, AllowedProgram, CommitStrategy, GeyserGrpcConfig,
-    LedgerConfig, LifecycleMode, MetricsConfig, MetricsServiceConfig, Payer,
-    ProgramConfig, RemoteConfig, RpcConfig, SleipnirConfig, ValidatorConfig,
+    LedgerConfig, LifecycleMode, MagicBlockConfig, MetricsConfig,
+    MetricsServiceConfig, Payer, ProgramConfig, RemoteConfig, RpcConfig,
+    ValidatorConfig,
 };
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey};
 use url::Url;
@@ -11,32 +12,32 @@ use url::Url;
 #[test]
 fn test_empty_toml() {
     let toml = include_str!("fixtures/01_empty.toml");
-    let config = toml::from_str::<SleipnirConfig>(toml).unwrap();
+    let config = toml::from_str::<MagicBlockConfig>(toml).unwrap();
 
-    assert_eq!(config, SleipnirConfig::default());
+    assert_eq!(config, MagicBlockConfig::default());
 }
 
 #[test]
 fn test_defaults_toml() {
     let toml = include_str!("fixtures/02_defaults.toml");
-    let config = toml::from_str::<SleipnirConfig>(toml).unwrap();
-    assert_eq!(config, SleipnirConfig::default());
+    let config = toml::from_str::<MagicBlockConfig>(toml).unwrap();
+    assert_eq!(config, MagicBlockConfig::default());
 }
 
 #[test]
 fn test_local_dev_toml() {
     let toml = include_str!("fixtures/03_local-dev.toml");
-    let config = toml::from_str::<SleipnirConfig>(toml).unwrap();
-    assert_eq!(config, SleipnirConfig::default());
+    let config = toml::from_str::<MagicBlockConfig>(toml).unwrap();
+    assert_eq!(config, MagicBlockConfig::default());
 }
 
 #[test]
 fn test_ephemeral_toml() {
     let toml = include_str!("fixtures/04_ephemeral.toml");
-    let config = toml::from_str::<SleipnirConfig>(toml).unwrap();
+    let config = toml::from_str::<MagicBlockConfig>(toml).unwrap();
     assert_eq!(
         config,
-        SleipnirConfig {
+        MagicBlockConfig {
             accounts: AccountsConfig {
                 lifecycle: LifecycleMode::Ephemeral,
                 allowed_programs: vec![AllowedProgram {
@@ -52,10 +53,10 @@ fn test_ephemeral_toml() {
 #[test]
 fn test_all_goes_toml() {
     let toml = include_str!("fixtures/05_all-goes.toml");
-    let config = toml::from_str::<SleipnirConfig>(toml).unwrap();
+    let config = toml::from_str::<MagicBlockConfig>(toml).unwrap();
     assert_eq!(
         config,
-        SleipnirConfig {
+        MagicBlockConfig {
             accounts: AccountsConfig {
                 lifecycle: LifecycleMode::Replica,
                 ..Default::default()
@@ -76,11 +77,11 @@ fn test_all_goes_toml() {
 #[test]
 fn test_local_dev_with_programs_toml() {
     let toml = include_str!("fixtures/06_local-dev-with-programs.toml");
-    let config = toml::from_str::<SleipnirConfig>(toml).unwrap();
+    let config = toml::from_str::<MagicBlockConfig>(toml).unwrap();
 
     assert_eq!(
         config,
-        SleipnirConfig {
+        MagicBlockConfig {
             accounts: AccountsConfig {
                 commit: CommitStrategy {
                     frequency_millis: 600_000,
@@ -123,11 +124,11 @@ fn test_local_dev_with_programs_toml() {
 #[test]
 fn test_custom_remote_toml() {
     let toml = include_str!("fixtures/07_custom-remote.toml");
-    let config = toml::from_str::<SleipnirConfig>(toml).unwrap();
+    let config = toml::from_str::<MagicBlockConfig>(toml).unwrap();
 
     assert_eq!(
         config,
-        SleipnirConfig {
+        MagicBlockConfig {
             accounts: AccountsConfig {
                 remote: RemoteConfig::Custom(
                     Url::parse("http://localhost:8899").unwrap()
@@ -142,11 +143,11 @@ fn test_custom_remote_toml() {
 #[test]
 fn test_custom_ws_remote_toml() {
     let toml = include_str!("fixtures/09_custom-ws-remote.toml");
-    let config = toml::from_str::<SleipnirConfig>(toml).unwrap();
+    let config = toml::from_str::<MagicBlockConfig>(toml).unwrap();
 
     assert_eq!(
         config,
-        SleipnirConfig {
+        MagicBlockConfig {
             accounts: AccountsConfig {
                 remote: RemoteConfig::CustomWithWs(
                     Url::parse("http://localhost:8899").unwrap(),
@@ -162,10 +163,10 @@ fn test_custom_ws_remote_toml() {
 #[test]
 fn test_accounts_payer() {
     let toml = include_str!("fixtures/08_accounts-payer.toml");
-    let config = toml::from_str::<SleipnirConfig>(toml).unwrap();
+    let config = toml::from_str::<MagicBlockConfig>(toml).unwrap();
     assert_eq!(
         config,
-        SleipnirConfig {
+        MagicBlockConfig {
             accounts: AccountsConfig {
                 payer: Payer::new(None, Some(2_000)),
                 ..Default::default()
@@ -186,7 +187,7 @@ fn test_custom_invalid_remote() {
 remote = "http://localhost::8899"
 "#;
 
-    let res = toml::from_str::<SleipnirConfig>(toml);
+    let res = toml::from_str::<MagicBlockConfig>(toml);
     assert!(res.is_err());
 }
 
@@ -198,7 +199,7 @@ id = "not a pubkey"
 path = "/tmp/program.so"
 "#;
 
-    let res = toml::from_str::<SleipnirConfig>(toml);
+    let res = toml::from_str::<MagicBlockConfig>(toml);
     eprintln!("{:?}", res);
     assert!(res.is_err());
 }
@@ -210,6 +211,6 @@ fn test_accounts_payer_specifies_both_lamports_and_sol() {
 payer = { init_sol = 2000, init_lamports = 300_000 }
 "#;
 
-    let config = toml::from_str::<SleipnirConfig>(toml).unwrap();
+    let config = toml::from_str::<MagicBlockConfig>(toml).unwrap();
     assert!(config.accounts.payer.try_init_lamports().is_err());
 }
