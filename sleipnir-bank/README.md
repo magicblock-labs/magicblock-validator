@@ -30,7 +30,7 @@ We support and load the following builtin programs at startup:
 - `solana_bpf_loader_upgradeable_program`
 - `compute_budget_program`
 - `address_lookup_table_program`
-- `sleipnir_program` which supports account mutations, etc.
+- `magicblock_program` which supports account mutations, etc.
 
 We don't support the following builtin programs:
 
