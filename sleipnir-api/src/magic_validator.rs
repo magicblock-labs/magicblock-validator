@@ -361,7 +361,7 @@ impl MagicValidator {
     ) -> Arc<AccountsManager> {
         let accounts_config = try_convert_accounts_config(&config.accounts)
             .expect(
-            "Failed to derive accounts config from provided sleipnir config",
+            "Failed to derive accounts config from provided magicblock config",
         );
         let accounts_manager = AccountsManager::try_new(
             bank,
