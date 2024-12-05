@@ -6,7 +6,7 @@ split-debuginfo = "packed"
 [workspace]
 members = [
   "geyser-grpc-proto",
-  "programs/sleipnir",
+  "programs/magicblock",
   "magicblock-account-cloner",
   "magicblock-account-dumper",
   "magicblock-account-fetcher",
@@ -125,7 +125,7 @@ magicblock-metrics = { path = "./magicblock-metrics" }
 magicblock-mutator = { path = "./magicblock-mutator" }
 magicblock-perf-service = { path = "./magicblock-perf-service" }
 magicblock-processor = { path = "./magicblock-processor" }
-magicblock-program = { path = "./programs/sleipnir" }
+magicblock-program = { path = "./programs/magicblock" }
 magicblock-pubsub = { path = "./magicblock-pubsub" }
 magicblock-rpc = { path = "./magicblock-rpc" }
 magicblock-rpc-sender = { path = "./magicblock-rpc-sender" }
