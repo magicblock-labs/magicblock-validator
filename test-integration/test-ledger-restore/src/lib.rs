@@ -114,13 +114,13 @@ pub fn setup_offline_validator(
         validator: validator_config,
         ..Default::default()
     };
-    let (default_tmpdir_config, Some(validator)) =
+    let (default_tmpdir_config, Some(mut validator)) =
         start_validator_with_config(config)
     else {
         panic!("validator should set up correctly");
     };
 
-    let ctx = IntegrationTestContext::new_ephem_only();
+    let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
     (default_tmpdir_config, validator, ctx)
 }
 
@@ -152,13 +152,13 @@ pub fn setup_validator_with_local_remote(
         ..Default::default()
     };
 
-    let (default_tmpdir_config, Some(validator)) =
+    let (default_tmpdir_config, Some(mut validator)) =
         start_validator_with_config(config)
     else {
         panic!("validator should set up correctly");
     };
 
-    let ctx = IntegrationTestContext::new();
+    let ctx = expect!(IntegrationTestContext::try_new(), validator);
     (default_tmpdir_config, validator, ctx)
 }
 
@@ -176,7 +176,7 @@ pub fn send_tx_with_payer_ephem(
     payer: &Keypair,
     validator: &mut Child,
 ) -> Signature {
-    let ctx = IntegrationTestContext::new_ephem_only();
+    let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
 
     let mut tx = Transaction::new_with_payer(&[ix], Some(&payer.pubkey()));
     let signers = &[payer];
@@ -190,7 +190,7 @@ pub fn send_tx_with_payer_chain(
     payer: &Keypair,
     validator: &mut Child,
 ) -> Signature {
-    let ctx = IntegrationTestContext::new();
+    let ctx = expect!(IntegrationTestContext::try_new(), validator);
     let mut tx = Transaction::new_with_payer(&[ix], Some(&payer.pubkey()));
     let signers = &[payer];
 
@@ -203,7 +203,7 @@ pub fn confirm_tx_with_payer_ephem(
     payer: &Keypair,
     validator: &mut Child,
 ) -> Signature {
-    let ctx = IntegrationTestContext::new_ephem_only();
+    let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
 
     let mut tx = Transaction::new_with_payer(&[ix], Some(&payer.pubkey()));
     let signers = &[payer];
@@ -221,7 +221,7 @@ pub fn confirm_tx_with_payer_chain(
     payer: &Keypair,
     validator: &mut Child,
 ) -> Signature {
-    let ctx = IntegrationTestContext::new();
+    let ctx = expect!(IntegrationTestContext::try_new(), validator);
 
     let mut tx = Transaction::new_with_payer(&[ix], Some(&payer.pubkey()));
     let signers = &[payer];
@@ -238,7 +238,7 @@ pub fn fetch_counter_ephem(
     payer: &Pubkey,
     validator: &mut Child,
 ) -> FlexiCounter {
-    let ctx = IntegrationTestContext::new_ephem_only();
+    let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
     fetch_counter(payer, &ctx.ephem_client, validator)
 }
 
@@ -246,7 +246,7 @@ pub fn fetch_counter_chain(
     payer: &Pubkey,
     validator: &mut Child,
 ) -> FlexiCounter {
-    let ctx = IntegrationTestContext::new();
+    let ctx = expect!(IntegrationTestContext::try_new(), validator);
     fetch_counter(payer, ctx.try_chain_client().unwrap(), validator)
 }
 
@@ -264,7 +264,7 @@ pub fn fetch_counter_owner_chain(
     payer: &Pubkey,
     validator: &mut Child,
 ) -> Pubkey {
-    let ctx = IntegrationTestContext::new();
+    let ctx = expect!(IntegrationTestContext::try_new(), validator);
     let (counter, _) = FlexiCounter::pda(payer);
     expect!(ctx.fetch_chain_account_owner(counter), validator)
 }
@@ -275,7 +275,7 @@ pub fn fetch_counter_owner_chain(
 /// Waits for sufficient slot advances to guarantee that the ledger for
 /// the current slot was persiste
 pub fn wait_for_ledger_persist(validator: &mut Child) -> Slot {
-    let ctx = IntegrationTestContext::new_ephem_only();
+    let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
 
     // I noticed test flakiness if we just advance to next slot once
     // It seems then the ledger hasn't been fully written by the time

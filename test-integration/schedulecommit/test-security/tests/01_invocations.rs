@@ -29,10 +29,11 @@ const NEEDS_TO_BE_OWNED_BY_INVOKING_PROGRAM: &str =
 
 fn prepare_ctx_with_account_to_commit() -> ScheduleCommitTestContext {
     let ctx = if std::env::var("FIXED_KP").is_ok() {
-        ScheduleCommitTestContext::new(2)
+        ScheduleCommitTestContext::try_new(2)
     } else {
-        ScheduleCommitTestContext::new_random_keys(2)
-    };
+        ScheduleCommitTestContext::try_new_random_keys(2)
+    }
+    .unwrap();
     ctx.init_committees().unwrap();
     ctx.delegate_committees(None).unwrap();
 

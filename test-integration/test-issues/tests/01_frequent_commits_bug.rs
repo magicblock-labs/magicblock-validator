@@ -10,7 +10,7 @@ fn test_frequent_commits_do_not_run_when_no_accounts_need_to_be_committed() {
     init_logger!();
     info!("==== test_frequent_commits_do_not_run_when_no_accounts_need_to_be_committed ====");
 
-    let ctx = IntegrationTestContext::new();
+    let ctx = IntegrationTestContext::try_new().unwrap();
     let chain_client = &ctx.try_chain_client().unwrap();
 
     // The commits happen frequently via the MagicBlock System program.

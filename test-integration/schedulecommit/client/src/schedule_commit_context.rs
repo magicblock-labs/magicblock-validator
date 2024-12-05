@@ -28,12 +28,6 @@ pub struct ScheduleCommitTestContext {
     common_ctx: IntegrationTestContext,
 }
 
-impl Default for ScheduleCommitTestContext {
-    fn default() -> Self {
-        Self::new(1)
-    }
-}
-
 impl fmt::Display for ScheduleCommitTestContext {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         writeln!(f, "ScheduleCommitTestContext {{ committees: [")?;
@@ -59,15 +53,15 @@ impl ScheduleCommitTestContext {
     // -----------------
     // Init
     // -----------------
-    pub fn new_random_keys(ncommittees: usize) -> Self {
-        Self::new_internal(ncommittees, true)
+    pub fn try_new_random_keys(ncommittees: usize) -> Result<Self> {
+        Self::try_new_internal(ncommittees, true)
     }
-    pub fn new(ncommittees: usize) -> Self {
-        Self::new_internal(ncommittees, false)
+    pub fn try_new(ncommittees: usize) -> Result<Self> {
+        Self::try_new_internal(ncommittees, false)
     }
 
-    fn new_internal(ncommittees: usize, random_keys: bool) -> Self {
-        let ictx = IntegrationTestContext::new();
+    fn try_new_internal(ncommittees: usize, random_keys: bool) -> Result<Self> {
+        let ictx = IntegrationTestContext::try_new()?;
 
         // Each committee is the payer and the matching PDA
         // The payer has money airdropped in order to init its PDA.
@@ -88,11 +82,11 @@ impl ScheduleCommitTestContext {
             .collect::<Vec<(Keypair, Pubkey)>>();
 
         let payer = committees[0].0.insecure_clone();
-        Self {
+        Ok(Self {
             payer,
             committees,
             common_ctx: ictx,
-        }
+        })
     }
 
     // -----------------

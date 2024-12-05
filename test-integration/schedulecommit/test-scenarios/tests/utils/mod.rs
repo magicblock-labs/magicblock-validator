@@ -16,10 +16,11 @@ pub fn get_context_with_delegated_committees(
     ncommittees: usize,
 ) -> ScheduleCommitTestContext {
     let ctx = if std::env::var("FIXED_KP").is_ok() {
-        ScheduleCommitTestContext::new(ncommittees)
+        ScheduleCommitTestContext::try_new(ncommittees)
     } else {
-        ScheduleCommitTestContext::new_random_keys(ncommittees)
-    };
+        ScheduleCommitTestContext::try_new_random_keys(ncommittees)
+    }
+    .unwrap();
 
     ctx.init_committees().unwrap();
     ctx.delegate_committees(None).unwrap();

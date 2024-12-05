@@ -11,7 +11,7 @@ fn clone_old_bpf_and_run_transaction() {
         5, 74, 83, 90, 153, 41, 33, 6, 77, 36, 232, 113, 96, 218, 56, 124, 124,
         53, 181, 221, 188, 146, 187, 129, 228, 31, 168, 64, 65, 5, 68, 141,
     ]);
-    let ctx = IntegrationTestContext::new();
+    let ctx = IntegrationTestContext::try_new().unwrap();
     let payer = Keypair::new();
     ctx.airdrop_chain(&payer.pubkey(), LAMPORTS_PER_SOL)
         .expect("failed to airdrop to on-ER account");
