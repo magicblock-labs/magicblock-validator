@@ -20,7 +20,7 @@ fn main() -> anyhow::Result<()> {
         get_pkg_version(&lockfile, "solana-sdk")
     );
     println!(
-        "cargo:rustc-env=SLEIPNIR_GRPC_PROTO_VERSION={}",
+        "cargo:rustc-env=magicblock_GRPC_PROTO_VERSION={}",
         get_pkg_version(&lockfile, "sleipnir-grpc-proto")
     );
 

@@ -2,16 +2,16 @@ use std::{collections::HashSet, sync::Arc};
 
 use async_trait::async_trait;
 use log::*;
-use sleipnir_accounts_api::InternalAccountProvider;
-use sleipnir_bank::bank::Bank;
-use sleipnir_core::debug_panic;
-use sleipnir_metrics::metrics;
-use sleipnir_mutator::Cluster;
-use sleipnir_processor::execute_transaction::execute_legacy_transaction;
-use sleipnir_program::{
+use magicblock_accounts_api::InternalAccountProvider;
+use magicblock_bank::bank::Bank;
+use magicblock_core::debug_panic;
+use magicblock_metrics::metrics;
+use magicblock_mutator::Cluster;
+use magicblock_processor::execute_transaction::execute_legacy_transaction;
+use magicblock_program::{
     register_scheduled_commit_sent, SentCommit, TransactionScheduler,
 };
-use sleipnir_transaction_status::TransactionStatusSender;
+use magicblock_transaction_status::TransactionStatusSender;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 
 use crate::{

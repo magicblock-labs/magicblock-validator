@@ -1,8 +1,8 @@
 use std::sync::Arc;
 
 use log::*;
-use sleipnir_config::GeyserGrpcConfig;
-use sleipnir_geyser_plugin::{
+use magicblock_config::GeyserGrpcConfig;
+use magicblock_geyser_plugin::{
     config::{
         Config as GeyserPluginConfig, ConfigGrpc as GeyserPluginConfigGrpc,
     },

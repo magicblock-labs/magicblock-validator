@@ -1,4 +1,4 @@
-use sleipnir_ledger::PerfSample;
+use magicblock_ledger::PerfSample;
 use solana_rpc_client_api::response::RpcPerfSample;
 use solana_sdk::clock::Slot;
 

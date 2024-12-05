@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use assert_matches::assert_matches;
-use sleipnir_core::magic_program::MAGIC_CONTEXT_PUBKEY;
+use magicblock_core::magic_program::MAGIC_CONTEXT_PUBKEY;
 use solana_sdk::{
     account::{
         create_account_shared_data_for_test, AccountSharedData, ReadableAccount,
@@ -20,7 +20,7 @@ use test_tools_core::init_logger;
 use crate::{
     magic_context::MagicContext,
     schedule_transactions::transaction_scheduler::TransactionScheduler,
-    sleipnir_instruction::{
+    magicblock_instruction::{
         accept_scheduled_commits_instruction,
         schedule_commit_and_undelegate_instruction,
         schedule_commit_instruction, SleipnirInstruction,

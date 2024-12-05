@@ -1,5 +1,5 @@
-use sleipnir_program::{
-    sleipnir_instruction::{
+use magicblock_program::{
+    magicblock_instruction::{
         modify_accounts, modify_accounts_instruction, AccountModification,
     },
     validator,

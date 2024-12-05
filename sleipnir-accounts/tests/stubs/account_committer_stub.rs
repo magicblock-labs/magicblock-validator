@@ -4,12 +4,12 @@ use std::{
 };
 
 use async_trait::async_trait;
-use sleipnir_accounts::{
+use magicblock_accounts::{
     errors::AccountsResult, AccountCommittee, AccountCommitter,
     CommitAccountsPayload, CommitAccountsTransaction, PendingCommitTransaction,
     SendableCommitAccountsPayload,
 };
-use sleipnir_metrics::metrics;
+use magicblock_metrics::metrics;
 use solana_sdk::{
     account::AccountSharedData, pubkey::Pubkey, signature::Signature,
     transaction::Transaction,

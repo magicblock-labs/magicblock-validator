@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
-use sleipnir_accounts_db::transaction_results::TransactionResults;
-use sleipnir_bank::{
+use magicblock_accounts_db::transaction_results::TransactionResults;
+use magicblock_bank::{
     bank::{Bank, TransactionExecutionRecordingOpts},
     genesis_utils::create_genesis_config_with_leader_and_fees,
 };
@@ -103,7 +103,7 @@ impl TransactionsProcessor for BankTransactionsProcessor {
 
 #[cfg(test)]
 mod tests {
-    use sleipnir_bank::bank_dev_utils::transactions::create_funded_accounts;
+    use magicblock_bank::bank_dev_utils::transactions::create_funded_accounts;
     use solana_sdk::{
         native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, system_transaction,
     };

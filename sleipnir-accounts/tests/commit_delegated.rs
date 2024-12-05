@@ -7,9 +7,9 @@ use conjunto_transwise::{
     AccountChainSnapshot, AccountChainSnapshotShared, AccountChainState,
     CommitFrequency, DelegationRecord,
 };
-use sleipnir_account_cloner::{AccountClonerOutput, AccountClonerStub};
-use sleipnir_accounts::{ExternalAccountsManager, LifecycleMode};
-use sleipnir_accounts_api::InternalAccountProviderStub;
+use magicblock_account_cloner::{AccountClonerOutput, AccountClonerStub};
+use magicblock_accounts::{ExternalAccountsManager, LifecycleMode};
+use magicblock_accounts_api::InternalAccountProviderStub;
 use solana_sdk::{
     account::{Account, AccountSharedData},
     native_token::LAMPORTS_PER_SOL,

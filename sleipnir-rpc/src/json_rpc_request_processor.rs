@@ -5,13 +5,13 @@ use std::{
 
 use jsonrpc_core::{Error, ErrorCode, Metadata, Result, Value};
 use log::*;
-use sleipnir_accounts::AccountsManager;
-use sleipnir_accounts_db::accounts_index::AccountSecondaryIndexes;
-use sleipnir_bank::{
+use magicblock_accounts::AccountsManager;
+use magicblock_accounts_db::accounts_index::AccountSecondaryIndexes;
+use magicblock_bank::{
     bank::Bank, transaction_simulation::TransactionSimulationResult,
 };
-use sleipnir_ledger::{Ledger, SignatureInfosForAddress};
-use sleipnir_transaction_status::TransactionStatusSender;
+use magicblock_ledger::{Ledger, SignatureInfosForAddress};
+use magicblock_transaction_status::TransactionStatusSender;
 use solana_account_decoder::{UiAccount, UiAccountEncoding};
 use solana_rpc_client_api::{
     config::{
@@ -791,7 +791,7 @@ impl JsonRpcRequestProcessor {
             tpu_quic: None,
             rpc: self.config.rpc_socket_addr,
             pubsub: self.config.pubsub_socket_addr,
-            version: Some(sleipnir_version::version!().to_string()),
+            version: Some(magicblock_version::version!().to_string()),
             feature_set: Some(feature_set),
             shred_version: None,
         }]

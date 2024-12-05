@@ -10,12 +10,12 @@ use conjunto_transwise::{
 };
 use futures_util::future::join_all;
 use log::*;
-use sleipnir_account_dumper::AccountDumper;
-use sleipnir_account_fetcher::AccountFetcher;
-use sleipnir_account_updates::AccountUpdates;
-use sleipnir_accounts_api::InternalAccountProvider;
-use sleipnir_metrics::metrics;
-use sleipnir_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
+use magicblock_account_dumper::AccountDumper;
+use magicblock_account_fetcher::AccountFetcher;
+use magicblock_account_updates::AccountUpdates;
+use magicblock_accounts_api::InternalAccountProvider;
+use magicblock_metrics::metrics;
+use magicblock_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
 use solana_sdk::{
     account::{Account, ReadableAccount},
     bpf_loader_upgradeable::{self, get_program_data_address},

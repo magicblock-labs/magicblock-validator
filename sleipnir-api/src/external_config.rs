@@ -1,11 +1,11 @@
 use std::collections::HashSet;
 
-use sleipnir_accounts::{AccountsConfig, Cluster, LifecycleMode};
-use sleipnir_config::errors::ConfigResult;
+use magicblock_accounts::{AccountsConfig, Cluster, LifecycleMode};
+use magicblock_config::errors::ConfigResult;
 use solana_sdk::{genesis_config::ClusterType, pubkey::Pubkey};
 
 pub(crate) fn try_convert_accounts_config(
-    conf: &sleipnir_config::AccountsConfig,
+    conf: &magicblock_config::AccountsConfig,
 ) -> ConfigResult<AccountsConfig> {
     let remote_cluster = cluster_from_remote(&conf.remote);
     let lifecycle = lifecycle_mode_from_lifecycle_mode(&conf.lifecycle);
@@ -22,8 +22,8 @@ pub(crate) fn try_convert_accounts_config(
     })
 }
 
-fn cluster_from_remote(remote: &sleipnir_config::RemoteConfig) -> Cluster {
-    use sleipnir_config::RemoteConfig::*;
+fn cluster_from_remote(remote: &magicblock_config::RemoteConfig) -> Cluster {
+    use magicblock_config::RemoteConfig::*;
     match remote {
         Devnet => Cluster::Known(ClusterType::Devnet),
         Mainnet => Cluster::Known(ClusterType::MainnetBeta),
@@ -37,9 +37,9 @@ fn cluster_from_remote(remote: &sleipnir_config::RemoteConfig) -> Cluster {
 }
 
 fn lifecycle_mode_from_lifecycle_mode(
-    clone: &sleipnir_config::LifecycleMode,
+    clone: &magicblock_config::LifecycleMode,
 ) -> LifecycleMode {
-    use sleipnir_config::LifecycleMode::*;
+    use magicblock_config::LifecycleMode::*;
     match clone {
         ProgramsReplica => LifecycleMode::ProgramsReplica,
         Replica => LifecycleMode::Replica,
@@ -49,7 +49,7 @@ fn lifecycle_mode_from_lifecycle_mode(
 }
 
 fn allowed_program_ids_from_allowed_programs(
-    allowed_programs: &[sleipnir_config::AllowedProgram],
+    allowed_programs: &[magicblock_config::AllowedProgram],
 ) -> Option<HashSet<Pubkey>> {
     if !allowed_programs.is_empty() {
         Some(HashSet::from_iter(

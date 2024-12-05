@@ -23,7 +23,7 @@ use crate::{
     },
 };
 pub mod api;
-pub mod sleipnir_program;
+pub mod magicblock_program;
 mod utils;
 
 declare_id!("9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY");

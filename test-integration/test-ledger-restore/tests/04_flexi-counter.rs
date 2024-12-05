@@ -2,11 +2,11 @@ use cleanass::assert_eq;
 use std::{path::Path, process::Child};
 
 use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};
+use magicblock_config::ProgramConfig;
 use program_flexi_counter::{
     instruction::{create_add_ix, create_init_ix, create_mul_ix},
     state::FlexiCounter,
 };
-use sleipnir_config::ProgramConfig;
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
     signer::Signer,

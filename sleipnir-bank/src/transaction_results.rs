@@ -1,5 +1,5 @@
 // NOTE: copied from bank.rs:294
-use sleipnir_accounts_db::{
+use magicblock_accounts_db::{
     accounts::TransactionLoadResult,
     transaction_results::TransactionExecutionResult,
 };

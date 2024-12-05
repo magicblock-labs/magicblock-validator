@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use sleipnir_bank::bank::Bank;
+use magicblock_bank::bank::Bank;
 use solana_sdk::{account::AccountSharedData, clock::Slot, pubkey::Pubkey};
 
 use crate::InternalAccountProvider;

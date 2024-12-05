@@ -231,7 +231,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        sleipnir_instruction::scheduled_commit_sent_instruction,
+        magicblock_instruction::scheduled_commit_sent_instruction,
         test_utils::{ensure_started_validator, process_instruction},
         validator,
     };

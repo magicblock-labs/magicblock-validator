@@ -1,8 +1,8 @@
 use std::{collections::HashSet, sync::Arc};
 
 use async_trait::async_trait;
-use sleipnir_accounts_api::InternalAccountProvider;
-use sleipnir_metrics::metrics::HistogramTimer;
+use magicblock_accounts_api::InternalAccountProvider;
+use magicblock_metrics::metrics::HistogramTimer;
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_sdk::{
     account::AccountSharedData, pubkey::Pubkey, signature::Signature,

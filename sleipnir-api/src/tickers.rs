@@ -7,19 +7,19 @@ use std::{
 };
 
 use log::*;
-use sleipnir_accounts::AccountsManager;
-use sleipnir_accounts_db::FLUSH_ACCOUNTS_SLOT_FREQ;
-use sleipnir_bank::bank::Bank;
-use sleipnir_core::magic_program;
-use sleipnir_ledger::Ledger;
-use sleipnir_metrics::metrics;
-use sleipnir_processor::execute_transaction::{
+use magicblock_accounts::AccountsManager;
+use magicblock_accounts_db::FLUSH_ACCOUNTS_SLOT_FREQ;
+use magicblock_bank::bank::Bank;
+use magicblock_core::magic_program;
+use magicblock_ledger::Ledger;
+use magicblock_metrics::metrics;
+use magicblock_processor::execute_transaction::{
     execute_legacy_transaction, lock_transactions,
 };
-use sleipnir_program::{
-    sleipnir_instruction::accept_scheduled_commits, MagicContext,
+use magicblock_program::{
+    magicblock_instruction::accept_scheduled_commits, MagicContext,
 };
-use sleipnir_transaction_status::TransactionStatusSender;
+use magicblock_transaction_status::TransactionStatusSender;
 use solana_sdk::account::ReadableAccount;
 use tokio_util::sync::CancellationToken;
 

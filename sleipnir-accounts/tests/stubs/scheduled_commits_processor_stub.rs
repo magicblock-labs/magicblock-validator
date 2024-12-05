@@ -1,10 +1,10 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use sleipnir_accounts::{
+use magicblock_accounts::{
     errors::AccountsResult, AccountCommitter, ScheduledCommitsProcessor,
 };
-use sleipnir_accounts_api::InternalAccountProvider;
+use magicblock_accounts_api::InternalAccountProvider;
 
 #[derive(Default)]
 pub struct ScheduledCommitsProcessorStub {}

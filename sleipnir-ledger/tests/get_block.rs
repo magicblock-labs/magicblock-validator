@@ -1,6 +1,6 @@
 use std::fs;
 
-use sleipnir_ledger::Ledger;
+use magicblock_ledger::Ledger;
 use solana_sdk::{
     clock::Slot,
     hash::Hash,

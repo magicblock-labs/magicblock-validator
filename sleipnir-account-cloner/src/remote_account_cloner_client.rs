@@ -7,10 +7,10 @@ use futures_util::{
     future::{ready, BoxFuture},
     FutureExt,
 };
-use sleipnir_account_dumper::AccountDumper;
-use sleipnir_account_fetcher::AccountFetcher;
-use sleipnir_account_updates::AccountUpdates;
-use sleipnir_accounts_api::InternalAccountProvider;
+use magicblock_account_dumper::AccountDumper;
+use magicblock_account_fetcher::AccountFetcher;
+use magicblock_account_updates::AccountUpdates;
+use magicblock_accounts_api::InternalAccountProvider;
 use solana_sdk::pubkey::Pubkey;
 use tokio::sync::{mpsc::UnboundedSender, oneshot::channel};
 

@@ -49,7 +49,7 @@ impl solana_frozen_abi::abi_example::AbiExample for BuiltinPrototype {
 /// - `solana_bpf_loader_upgradeable_program`
 /// - `compute_budget_program"t`
 /// - `address_lookup_table_program`
-/// - `sleipnir_program` which supports account mutations, etc.
+/// - `magicblock_program` which supports account mutations, etc.
 ///
 /// We don't support the following builtin programs:
 ///
@@ -80,9 +80,9 @@ pub static BUILTINS: &[BuiltinPrototype] = &[
     },
     BuiltinPrototype {
         feature_id: None,
-        program_id: sleipnir_program::id(),
-        name: "sleipnir_program",
-        entrypoint: sleipnir_program::sleipnir_processor::Entrypoint::vm,
+        program_id: magicblock_program::id(),
+        name: "magicblock_program",
+        entrypoint: magicblock_program::magicblock_processor::Entrypoint::vm,
     },
     BuiltinPrototype {
         feature_id: None,

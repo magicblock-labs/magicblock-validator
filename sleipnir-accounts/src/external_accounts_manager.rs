@@ -14,9 +14,9 @@ use conjunto_transwise::{
 };
 use futures_util::future::{try_join, try_join_all};
 use log::*;
-use sleipnir_account_cloner::{AccountCloner, AccountClonerOutput};
-use sleipnir_accounts_api::InternalAccountProvider;
-use sleipnir_core::magic_program;
+use magicblock_account_cloner::{AccountCloner, AccountClonerOutput};
+use magicblock_accounts_api::InternalAccountProvider;
+use magicblock_core::magic_program;
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
     hash::Hash,

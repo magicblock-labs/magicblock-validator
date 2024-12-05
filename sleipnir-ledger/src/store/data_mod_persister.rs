@@ -1,7 +1,7 @@
 use std::error::Error;
 
 use log::*;
-use sleipnir_core::traits::PersistsAccountModData;
+use magicblock_core::traits::PersistsAccountModData;
 
 use crate::Ledger;
 

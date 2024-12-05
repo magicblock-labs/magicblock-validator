@@ -4,8 +4,8 @@ use async_trait::async_trait;
 use dlp::instruction::{commit_state, finalize, undelegate, CommitAccountArgs};
 use futures_util::future::join_all;
 use log::*;
-use sleipnir_metrics::metrics;
-use sleipnir_program::{validator, Pubkey};
+use magicblock_metrics::metrics;
+use magicblock_program::{validator, Pubkey};
 use solana_rpc_client::{
     nonblocking::rpc_client::RpcClient, rpc_client::SerializableTransaction,
 };

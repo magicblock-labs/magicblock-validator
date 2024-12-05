@@ -1,7 +1,7 @@
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use conjunto_transwise::RpcCluster;
-use sleipnir_mutator::Cluster;
+use magicblock_mutator::Cluster;
 use solana_sdk::genesis_config::ClusterType;
 use url::Url;
 

@@ -1,4 +1,6 @@
-use sleipnir_program::{sleipnir_instruction::AccountModification, validator};
+use magicblock_program::{
+    magicblock_instruction::AccountModification, validator,
+};
 use solana_sdk::{
     account::Account,
     bpf_loader_upgradeable::{self, UpgradeableLoaderState},

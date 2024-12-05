@@ -1,4 +1,4 @@
-use sleipnir_program::sleipnir_instruction::AccountModification;
+use magicblock_program::magicblock_instruction::AccountModification;
 use solana_sdk::pubkey::Pubkey;
 
 use crate::{fetch::fetch_account_from_cluster, Cluster};

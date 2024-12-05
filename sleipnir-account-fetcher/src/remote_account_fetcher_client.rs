@@ -54,7 +54,7 @@ impl AccountFetcher for RemoteAccountFetcherClient {
             }
         };
         // track the number of pending clones, might be helpful to detect memory leaks
-        sleipnir_metrics::metrics::inc_pending_clone_requests();
+        magicblock_metrics::metrics::inc_pending_clone_requests();
         if should_request_fetch {
             if let Err(error) =
                 self.fetch_request_sender.send((*pubkey, min_context_slot))
@@ -65,7 +65,7 @@ impl AccountFetcher for RemoteAccountFetcherClient {
             }
         }
         Box::pin(receiver.map(|received| {
-            sleipnir_metrics::metrics::dec_pending_clone_requests();
+            magicblock_metrics::metrics::dec_pending_clone_requests();
             match received {
                 Ok(result) => result,
                 Err(error) => Err(AccountFetcherError::RecvError(error)),

@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use jsonrpc_pubsub::{Sink, Subscriber, SubscriptionId};
 use log::*;
-use sleipnir_bank::bank::Bank;
-use sleipnir_geyser_plugin::rpc::GeyserRpcService;
+use magicblock_bank::bank::Bank;
+use magicblock_geyser_plugin::rpc::GeyserRpcService;
 
 use crate::types::{AccountParams, LogsParams, ProgramParams, SignatureParams};
 

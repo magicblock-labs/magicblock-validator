@@ -2,8 +2,8 @@ use std::sync::Arc;
 
 use jsonrpc_pubsub::Subscriber;
 use log::*;
-use sleipnir_bank::bank::Bank;
-use sleipnir_geyser_plugin::rpc::GeyserRpcService;
+use magicblock_bank::bank::Bank;
+use magicblock_geyser_plugin::rpc::GeyserRpcService;
 use tokio::{sync::mpsc, task::JoinSet};
 
 use crate::{

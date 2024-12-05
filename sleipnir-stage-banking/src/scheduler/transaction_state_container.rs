@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use itertools::MinMaxResult;
 use min_max_heap::MinMaxHeap;
-use sleipnir_messaging::scheduler_messages::TransactionId;
+use magicblock_messaging::scheduler_messages::TransactionId;
 
 use super::{
     transaction_priority_id::TransactionPriorityId,

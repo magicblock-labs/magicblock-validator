@@ -11,11 +11,11 @@ use integration_test_tools::{
     workspace_paths::path_relative_to_workspace,
     IntegrationTestContext,
 };
-use program_flexi_counter::state::FlexiCounter;
-use sleipnir_config::{
+use magicblock_config::{
     AccountsConfig, LedgerConfig, LifecycleMode, ProgramConfig, RemoteConfig,
     SleipnirConfig, ValidatorConfig,
 };
+use program_flexi_counter::state::FlexiCounter;
 use solana_sdk::{
     clock::Slot,
     instruction::Instruction,

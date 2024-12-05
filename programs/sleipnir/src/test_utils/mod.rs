@@ -9,7 +9,7 @@ use solana_sdk::{
 };
 use test_tools::validator::PersisterStub;
 
-use self::sleipnir_processor::Entrypoint;
+use self::magicblock_processor::Entrypoint;
 use super::*;
 use crate::validator;
 

@@ -3,8 +3,8 @@
 use std::collections::HashMap;
 
 use jsonrpc_core::{error, Result};
-use sleipnir_bank::bank::Bank;
-use sleipnir_tokens::token_balances::get_mint_decimals_from_data;
+use magicblock_bank::bank::Bank;
+use magicblock_tokens::token_balances::get_mint_decimals_from_data;
 use solana_account_decoder::{
     parse_account_data::AccountAdditionalData,
     parse_token::{get_token_account_mint, is_known_spl_token_id},

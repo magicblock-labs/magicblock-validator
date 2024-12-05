@@ -12,38 +12,40 @@ use std::{
 
 use conjunto_transwise::RpcProviderConfig;
 use log::*;
-use sleipnir_account_cloner::{
+use magicblock_account_cloner::{
     standard_blacklisted_accounts, RemoteAccountClonerClient,
     RemoteAccountClonerWorker,
 };
-use sleipnir_account_dumper::AccountDumperBank;
-use sleipnir_account_fetcher::{
+use magicblock_account_dumper::AccountDumperBank;
+use magicblock_account_fetcher::{
     RemoteAccountFetcherClient, RemoteAccountFetcherWorker,
 };
-use sleipnir_account_updates::{
+use magicblock_account_updates::{
     RemoteAccountUpdatesClient, RemoteAccountUpdatesWorker,
 };
-use sleipnir_accounts::{utils::try_rpc_cluster_from_cluster, AccountsManager};
-use sleipnir_accounts_api::BankAccountProvider;
-use sleipnir_bank::{
+use magicblock_accounts::{
+    utils::try_rpc_cluster_from_cluster, AccountsManager,
+};
+use magicblock_accounts_api::BankAccountProvider;
+use magicblock_bank::{
     bank::Bank, genesis_utils::create_genesis_config_with_leader,
     program_loader::load_programs_into_bank,
     transaction_logs::TransactionLogCollectorFilter,
     transaction_notifier_interface::TransactionNotifierArc,
 };
-use sleipnir_config::{ProgramConfig, SleipnirConfig};
-use sleipnir_geyser_plugin::rpc::GeyserRpcService;
-use sleipnir_ledger::{blockstore_processor::process_ledger, Ledger};
-use sleipnir_metrics::MetricsService;
-use sleipnir_perf_service::SamplePerformanceService;
-use sleipnir_program::{init_persister, validator};
-use sleipnir_pubsub::pubsub_service::{
+use magicblock_config::{ProgramConfig, SleipnirConfig};
+use magicblock_geyser_plugin::rpc::GeyserRpcService;
+use magicblock_ledger::{blockstore_processor::process_ledger, Ledger};
+use magicblock_metrics::MetricsService;
+use magicblock_perf_service::SamplePerformanceService;
+use magicblock_program::{init_persister, validator};
+use magicblock_pubsub::pubsub_service::{
     PubsubConfig, PubsubService, PubsubServiceCloseHandle,
 };
-use sleipnir_rpc::{
+use magicblock_rpc::{
     json_rpc_request_processor::JsonRpcConfig, json_rpc_service::JsonRpcService,
 };
-use sleipnir_transaction_status::{
+use magicblock_transaction_status::{
     TransactionStatusMessage, TransactionStatusSender,
 };
 use solana_geyser_plugin_manager::geyser_plugin_service::GeyserPluginService;
@@ -145,7 +147,7 @@ impl MagicValidator {
             init_geyser_service(config.init_geyser_service_config)?;
 
         let validator_pubkey = identity_keypair.pubkey();
-        let sleipnir_bank::genesis_utils::GenesisConfigInfo {
+        let magicblock_bank::genesis_utils::GenesisConfigInfo {
             genesis_config,
             validator_pubkey,
             ..
@@ -195,11 +197,12 @@ impl MagicValidator {
 
         let metrics_config = &config.validator_config.metrics;
         let metrics = if metrics_config.enabled {
-            let metrics_service = sleipnir_metrics::try_start_metrics_service(
-                metrics_config.service.socket_addr(),
-                token.clone(),
-            )
-            .map_err(ApiError::FailedToStartMetricsService)?;
+            let metrics_service =
+                magicblock_metrics::try_start_metrics_service(
+                    metrics_config.service.socket_addr(),
+                    token.clone(),
+                )
+                .map_err(ApiError::FailedToStartMetricsService)?;
 
             let system_metrics_ticker = init_system_metrics_ticker(
                 Duration::from_secs(
@@ -366,7 +369,7 @@ impl MagicValidator {
             Some(transaction_status_sender),
             // NOTE: we could avoid passing a copy of the keypair here if we instead pass
             // something akin to a ValidatorTransactionSigner that gets it via the [validator_authority]
-            // method from the [sleipnir_program] module, forgetting it immediately after.
+            // method from the [magicblock_program] module, forgetting it immediately after.
             // That way we would at least hold it in memory for a long time only in one place and in all other
             // places only temporarily
             validator_keypair.insecure_clone(),

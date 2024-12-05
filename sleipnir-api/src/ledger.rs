@@ -6,7 +6,7 @@ use std::{
 
 use fd_lock::{RwLock, RwLockWriteGuard};
 use log::*;
-use sleipnir_ledger::Ledger;
+use magicblock_ledger::Ledger;
 use solana_sdk::{signature::Keypair, signer::EncodableKey};
 
 use crate::{

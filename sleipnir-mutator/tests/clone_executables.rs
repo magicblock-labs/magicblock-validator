@@ -1,6 +1,6 @@
 use assert_matches::assert_matches;
 use log::*;
-use sleipnir_bank::{
+use magicblock_bank::{
     bank_dev_utils::{
         elfs,
         transactions::{
@@ -9,8 +9,8 @@ use sleipnir_bank::{
     },
     LAMPORTS_PER_SIGNATURE,
 };
-use sleipnir_mutator::fetch::transaction_to_clone_pubkey_from_cluster;
-use sleipnir_program::validator;
+use magicblock_mutator::fetch::transaction_to_clone_pubkey_from_cluster;
+use magicblock_program::validator;
 use solana_sdk::{
     account::{Account, ReadableAccount},
     bpf_loader_upgradeable,

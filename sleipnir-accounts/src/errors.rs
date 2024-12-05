@@ -1,6 +1,6 @@
 use std::collections::HashSet;
 
-use sleipnir_account_cloner::{
+use magicblock_account_cloner::{
     AccountClonerError, AccountClonerUnclonableReason,
 };
 use solana_sdk::pubkey::Pubkey;

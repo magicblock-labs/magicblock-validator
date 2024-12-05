@@ -1,7 +1,7 @@
-use sleipnir_bank::bank_dev_utils::transactions::{
+use magicblock_bank::bank_dev_utils::transactions::{
     create_solx_send_post_transaction, SolanaxPostAccounts,
 };
-use sleipnir_mutator::{
+use magicblock_mutator::{
     fetch::transaction_to_clone_pubkey_from_cluster, Cluster,
 };
 use solana_sdk::{pubkey, pubkey::Pubkey};

@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use sleipnir_bank::bank::Bank;
-use sleipnir_mutator::{
+use magicblock_bank::bank::Bank;
+use magicblock_mutator::{
     program::{
         create_program_buffer_modification, create_program_data_modification,
         create_program_modifications, ProgramModifications,
@@ -11,8 +11,8 @@ use sleipnir_mutator::{
     },
     AccountModification,
 };
-use sleipnir_processor::execute_transaction::execute_legacy_transaction;
-use sleipnir_transaction_status::TransactionStatusSender;
+use magicblock_processor::execute_transaction::execute_legacy_transaction;
+use magicblock_transaction_status::TransactionStatusSender;
 use solana_sdk::{
     account::Account,
     bpf_loader_upgradeable::{

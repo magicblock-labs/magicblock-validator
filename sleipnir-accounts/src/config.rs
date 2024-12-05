@@ -1,7 +1,7 @@
 use std::collections::HashSet;
 
-use sleipnir_account_cloner::AccountClonerPermissions;
-use sleipnir_mutator::Cluster;
+use magicblock_account_cloner::AccountClonerPermissions;
+use magicblock_mutator::Cluster;
 use solana_sdk::pubkey::Pubkey;
 
 #[derive(Debug, PartialEq, Eq)]

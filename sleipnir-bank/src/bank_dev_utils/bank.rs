@@ -1,7 +1,7 @@
 // NOTE: copied and slightly modified from bank.rs
 use std::{borrow::Cow, sync::Arc};
 
-use sleipnir_accounts_db::{
+use magicblock_accounts_db::{
     accounts::Accounts, accounts_db::AccountsDb,
     accounts_update_notifier_interface::AccountsUpdateNotifier,
 };

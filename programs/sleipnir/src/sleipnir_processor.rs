@@ -8,7 +8,7 @@ use crate::{
         process_accept_scheduled_commits, process_schedule_commit,
         ProcessScheduleCommitOptions,
     },
-    sleipnir_instruction::SleipnirInstruction,
+    magicblock_instruction::SleipnirInstruction,
 };
 
 pub const DEFAULT_COMPUTE_UNITS: u64 = 150;

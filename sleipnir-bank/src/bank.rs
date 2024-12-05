@@ -11,7 +11,7 @@ use std::{
 };
 
 use log::{debug, info, trace};
-use sleipnir_accounts_db::{
+use magicblock_accounts_db::{
     accounts::{Accounts, TransactionLoadResult},
     accounts_db::AccountsDb,
     accounts_index::{ScanConfig, ZeroLamport},

@@ -2,7 +2,7 @@ use std::collections::HashMap;
 
 use num_derive::{FromPrimitive, ToPrimitive};
 use serde::{Deserialize, Serialize};
-use sleipnir_core::magic_program::MAGIC_CONTEXT_PUBKEY;
+use magicblock_core::magic_program::MAGIC_CONTEXT_PUBKEY;
 use solana_sdk::{
     account::Account,
     decode_error::DecodeError,

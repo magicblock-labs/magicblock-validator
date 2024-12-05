@@ -4,7 +4,7 @@ use std::{
 };
 
 use futures_util::future::{ready, BoxFuture};
-use sleipnir_account_fetcher::AccountFetcherError;
+use magicblock_account_fetcher::AccountFetcherError;
 use solana_sdk::pubkey::Pubkey;
 
 use crate::{

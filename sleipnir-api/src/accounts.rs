@@ -4,8 +4,8 @@ use std::{
 };
 
 use log::*;
-use sleipnir_bank::bank::Bank;
-use sleipnir_metrics::metrics;
+use magicblock_bank::bank::Bank;
+use magicblock_metrics::metrics;
 
 use crate::utils;
 

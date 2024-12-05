@@ -2,8 +2,8 @@
 
 use lazy_static::lazy_static;
 use log::warn;
+use magicblock_bank::transaction_batch::TransactionBatch;
 use rayon::ThreadPool;
-use sleipnir_bank::transaction_batch::TransactionBatch;
 use solana_metrics::datapoint_error;
 use solana_rayon_threadlimit::get_max_thread_count;
 use solana_sdk::{signature::Signature, transaction::Result};

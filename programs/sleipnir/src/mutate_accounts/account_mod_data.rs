@@ -8,10 +8,10 @@ use std::{
 };
 
 use lazy_static::lazy_static;
-use sleipnir_core::traits::PersistsAccountModData;
+use magicblock_core::traits::PersistsAccountModData;
 use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 
-use crate::{sleipnir_instruction::SleipnirError, validator};
+use crate::{magicblock_instruction::SleipnirError, validator};
 
 lazy_static! {
     /// In order to modify large data chunks we cannot include all the data as part of the
@@ -61,7 +61,7 @@ pub(crate) fn set_account_mod_data(data: Vec<u8>) -> u64 {
         .expect("DATA_MODS poisoned")
         .insert(id, data);
     // update metrics related to total count of data mods
-    sleipnir_metrics::metrics::adjust_active_data_mods(1);
+    magicblock_metrics::metrics::adjust_active_data_mods(1);
     id
 }
 
@@ -73,8 +73,8 @@ pub(super) fn get_data(id: u64) -> Option<Vec<u8>> {
         .inspect(|v| {
             // decrement metrics
             let len = (v.len() as i64).neg();
-            sleipnir_metrics::metrics::adjust_active_data_mods_size(len);
-            sleipnir_metrics::metrics::adjust_active_data_mods(-1);
+            magicblock_metrics::metrics::adjust_active_data_mods_size(len);
+            magicblock_metrics::metrics::adjust_active_data_mods(-1);
         })
 }
 

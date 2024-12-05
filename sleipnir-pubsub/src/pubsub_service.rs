@@ -10,9 +10,9 @@ use jsonrpc_pubsub::{
 };
 use jsonrpc_ws_server::{CloseHandle, RequestContext, Server, ServerBuilder};
 use log::*;
+use magicblock_bank::bank::Bank;
+use magicblock_geyser_plugin::rpc::GeyserRpcService;
 use serde_json::Value;
-use sleipnir_bank::bank::Bank;
-use sleipnir_geyser_plugin::rpc::GeyserRpcService;
 use solana_sdk::rpc_port::DEFAULT_RPC_PUBSUB_PORT;
 
 use crate::{

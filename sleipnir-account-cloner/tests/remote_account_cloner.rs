@@ -1,16 +1,16 @@
 use std::collections::HashSet;
 
-use sleipnir_account_cloner::{
+use magicblock_account_cloner::{
     standard_blacklisted_accounts, AccountCloner, AccountClonerError,
     AccountClonerOutput, AccountClonerPermissions,
     AccountClonerUnclonableReason, RemoteAccountClonerClient,
     RemoteAccountClonerWorker,
 };
-use sleipnir_account_dumper::AccountDumperStub;
-use sleipnir_account_fetcher::AccountFetcherStub;
-use sleipnir_account_updates::AccountUpdatesStub;
-use sleipnir_accounts_api::InternalAccountProviderStub;
-use sleipnir_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
+use magicblock_account_dumper::AccountDumperStub;
+use magicblock_account_fetcher::AccountFetcherStub;
+use magicblock_account_updates::AccountUpdatesStub;
+use magicblock_accounts_api::InternalAccountProviderStub;
+use magicblock_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
 use solana_sdk::{
     bpf_loader_upgradeable::get_program_data_address,
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, sysvar::clock,

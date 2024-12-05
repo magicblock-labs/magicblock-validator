@@ -1,13 +1,13 @@
 use jsonrpc_core::{Error, Result};
 use log::*;
-use sleipnir_accounts_db::{
+use magicblock_accounts_db::{
     accounts_index::{AccountIndex, AccountSecondaryIndexes, ScanConfig},
     inline_spl_token::{
         SPL_TOKEN_ACCOUNT_MINT_OFFSET, SPL_TOKEN_ACCOUNT_OWNER_OFFSET,
     },
     inline_spl_token_2022::{self, ACCOUNTTYPE_ACCOUNT},
 };
-use sleipnir_bank::bank::Bank;
+use magicblock_bank::bank::Bank;
 use solana_account_decoder::parse_token::is_known_spl_token_id;
 use solana_rpc_client_api::{
     custom_error::RpcCustomError,

@@ -1,4 +1,4 @@
-use sleipnir_bank::bank::Bank;
+use magicblock_bank::bank::Bank;
 use solana_sdk::{
     account::Account, clock::Epoch, pubkey::Pubkey, system_program,
 };

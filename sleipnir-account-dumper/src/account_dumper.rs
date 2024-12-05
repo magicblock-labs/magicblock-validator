@@ -1,4 +1,4 @@
-use sleipnir_mutator::errors::MutatorModificationError;
+use magicblock_mutator::errors::MutatorModificationError;
 use solana_sdk::{account::Account, pubkey::Pubkey, signature::Signature};
 use thiserror::Error;
 

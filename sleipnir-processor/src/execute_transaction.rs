@@ -1,8 +1,8 @@
 use std::sync::{Arc, Mutex, MutexGuard};
 
 use lazy_static::lazy_static;
-use sleipnir_bank::bank::Bank;
-use sleipnir_transaction_status::TransactionStatusSender;
+use magicblock_bank::bank::Bank;
+use magicblock_transaction_status::TransactionStatusSender;
 use solana_sdk::{
     signature::Signature,
     transaction::{Result, SanitizedTransaction, Transaction},
@@ -12,7 +12,7 @@ use crate::batch_processor::{execute_batch, TransactionBatchWithIndexes};
 
 // NOTE: these don't exactly belong in the accounts crate
 //       they should go into a dedicated crate that also has access to
-//       sleipnir_bank, sleipnir_processor and sleipnir_transaction_status
+//       magicblock_bank, magicblock_processor and magicblock_transaction_status
 pub fn execute_legacy_transaction(
     tx: Transaction,
     bank: &Arc<Bank>,

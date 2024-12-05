@@ -2,10 +2,10 @@ use std::collections::HashSet;
 
 use conjunto_transwise::AccountChainSnapshotShared;
 use futures_util::future::BoxFuture;
-use sleipnir_account_dumper::AccountDumperError;
-use sleipnir_account_fetcher::AccountFetcherError;
-use sleipnir_account_updates::AccountUpdatesError;
-use sleipnir_core::magic_program;
+use magicblock_account_dumper::AccountDumperError;
+use magicblock_account_fetcher::AccountFetcherError;
+use magicblock_account_updates::AccountUpdatesError;
+use magicblock_core::magic_program;
 use solana_sdk::{clock::Slot, pubkey::Pubkey, signature::Signature};
 use thiserror::Error;
 use tokio::sync::oneshot::Sender;

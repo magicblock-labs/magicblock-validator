@@ -1,8 +1,8 @@
 // NOTE: from ledger/src/token_balances.rs with only imports adjusted
 use std::collections::HashMap;
 
-use sleipnir_bank::{bank::Bank, transaction_batch::TransactionBatch};
-use sleipnir_transaction_status::{
+use magicblock_bank::{bank::Bank, transaction_batch::TransactionBatch};
+use magicblock_transaction_status::{
     token_balances::TransactionTokenBalances, TransactionTokenBalance,
 };
 use solana_account_decoder::parse_token::{

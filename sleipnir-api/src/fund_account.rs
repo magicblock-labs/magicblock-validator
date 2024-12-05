@@ -1,7 +1,7 @@
 use std::path::Path;
 
-use sleipnir_bank::bank::Bank;
-use sleipnir_core::magic_program;
+use magicblock_bank::bank::Bank;
+use magicblock_core::magic_program;
 use solana_sdk::{
     account::Account, clock::Epoch, pubkey::Pubkey, signature::Keypair,
     signer::Signer, system_program,

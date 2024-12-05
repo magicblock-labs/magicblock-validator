@@ -1,7 +1,7 @@
 #![cfg(feature = "dev-context-only-utils")]
 
 use assert_matches::assert_matches;
-use sleipnir_bank::{
+use magicblock_bank::{
     bank::Bank,
     bank_dev_utils::{
         elfs::{self, add_elf_program},

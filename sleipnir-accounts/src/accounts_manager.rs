@@ -4,10 +4,10 @@ use conjunto_transwise::{
     transaction_accounts_extractor::TransactionAccountsExtractorImpl,
     transaction_accounts_validator::TransactionAccountsValidatorImpl,
 };
-use sleipnir_account_cloner::RemoteAccountClonerClient;
-use sleipnir_accounts_api::BankAccountProvider;
-use sleipnir_bank::bank::Bank;
-use sleipnir_transaction_status::TransactionStatusSender;
+use magicblock_account_cloner::RemoteAccountClonerClient;
+use magicblock_accounts_api::BankAccountProvider;
+use magicblock_bank::bank::Bank;
+use magicblock_transaction_status::TransactionStatusSender;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{commitment_config::CommitmentConfig, signature::Keypair};
 

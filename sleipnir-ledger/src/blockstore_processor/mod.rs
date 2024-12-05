@@ -1,8 +1,8 @@
 use std::str::FromStr;
 
 use log::{Level::Trace, *};
-use sleipnir_accounts_db::transaction_results::TransactionExecutionResult;
-use sleipnir_bank::bank::{Bank, TransactionExecutionRecordingOpts};
+use magicblock_accounts_db::transaction_results::TransactionExecutionResult;
+use magicblock_bank::bank::{Bank, TransactionExecutionRecordingOpts};
 use solana_program_runtime::timings::ExecuteTimings;
 use solana_sdk::{
     clock::UnixTimestamp,

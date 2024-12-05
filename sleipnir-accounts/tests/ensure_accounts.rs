@@ -5,16 +5,16 @@ use conjunto_transwise::{
     transaction_accounts_holder::TransactionAccountsHolder,
     transaction_accounts_validator::TransactionAccountsValidatorImpl,
 };
-use sleipnir_account_cloner::{
+use magicblock_account_cloner::{
     AccountCloner, RemoteAccountClonerClient, RemoteAccountClonerWorker,
 };
-use sleipnir_account_dumper::AccountDumperStub;
-use sleipnir_account_fetcher::AccountFetcherStub;
-use sleipnir_account_updates::AccountUpdatesStub;
-use sleipnir_accounts::{
+use magicblock_account_dumper::AccountDumperStub;
+use magicblock_account_fetcher::AccountFetcherStub;
+use magicblock_account_updates::AccountUpdatesStub;
+use magicblock_accounts::{
     errors::AccountsError, ExternalAccountsManager, LifecycleMode,
 };
-use sleipnir_accounts_api::InternalAccountProviderStub;
+use magicblock_accounts_api::InternalAccountProviderStub;
 use solana_sdk::pubkey::Pubkey;
 use stubs::{
     account_committer_stub::AccountCommitterStub,

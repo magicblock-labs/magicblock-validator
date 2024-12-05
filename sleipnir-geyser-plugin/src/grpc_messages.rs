@@ -12,7 +12,7 @@ use geyser_grpc_proto::{
     },
 };
 use log::error;
-use sleipnir_transaction_status::{Reward, TransactionStatusMeta};
+use magicblock_transaction_status::{Reward, TransactionStatusMeta};
 use solana_geyser_plugin_interface::geyser_plugin_interface::{
     ReplicaAccountInfoV3, ReplicaBlockInfoV3, ReplicaEntryInfoV2,
     ReplicaTransactionInfoV2, SlotStatus,

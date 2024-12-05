@@ -9,8 +9,8 @@ use std::{
 };
 
 use log::*;
-use sleipnir_bank::bank::Bank;
-use sleipnir_ledger::{Ledger, PerfSample};
+use magicblock_bank::bank::Bank;
+use magicblock_ledger::{Ledger, PerfSample};
 
 use crate::stats_snapshot::StatsSnapshot;
 

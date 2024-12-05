@@ -1,10 +1,10 @@
 use log::*;
-use sleipnir_api::{
+use magicblock_api::{
     ledger,
     magic_validator::{MagicValidator, MagicValidatorConfig},
     InitGeyserServiceConfig,
 };
-use sleipnir_config::{GeyserGrpcConfig, SleipnirConfig};
+use magicblock_config::{GeyserGrpcConfig, SleipnirConfig};
 use solana_sdk::signature::Keypair;
 use test_tools::init_logger;
 

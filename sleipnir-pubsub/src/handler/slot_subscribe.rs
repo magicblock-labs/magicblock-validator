@@ -1,7 +1,7 @@
 use geyser_grpc_proto::{geyser, tonic::Status};
 use jsonrpc_pubsub::{Sink, Subscriber};
 use log::*;
-use sleipnir_geyser_plugin::rpc::GeyserRpcService;
+use magicblock_geyser_plugin::rpc::GeyserRpcService;
 use tokio_util::sync::CancellationToken;
 
 use crate::{

@@ -1,7 +1,7 @@
 #![allow(dead_code)]
 use std::{cmp::Ordering, mem::size_of, sync::Arc};
 
-use sleipnir_bank::get_compute_budget_details::{
+use magicblock_bank::get_compute_budget_details::{
     ComputeBudgetDetails, GetComputeBudgetDetails,
 };
 use solana_sdk::{

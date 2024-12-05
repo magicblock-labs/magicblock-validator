@@ -1,6 +1,6 @@
 use integration_test_tools::conversions::pubkey_from_magic_program;
+use magicblock_core::magic_program;
 use program_schedulecommit_security::ScheduleCommitSecurityInstruction;
-use sleipnir_core::magic_program;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,

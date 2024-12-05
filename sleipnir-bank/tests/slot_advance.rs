@@ -2,7 +2,7 @@
 
 #[allow(unused_imports)]
 use log::*;
-use sleipnir_bank::bank::Bank;
+use magicblock_bank::bank::Bank;
 use solana_sdk::{
     account::Account, genesis_config::create_genesis_config, pubkey::Pubkey,
     system_program,

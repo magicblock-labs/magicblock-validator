@@ -3,7 +3,7 @@ use std::{
     net::{IpAddr, Ipv4Addr},
 };
 
-use sleipnir_config::{
+use magicblock_config::{
     AccountsConfig, CommitStrategy, GeyserGrpcConfig, LedgerConfig,
     LifecycleMode, MetricsConfig, MetricsServiceConfig, ProgramConfig,
     RemoteConfig, RpcConfig, SleipnirConfig, ValidatorConfig,

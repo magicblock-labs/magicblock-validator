@@ -11,7 +11,7 @@ use solana_sdk::{
 
 use crate::{
     mutate_accounts::account_mod_data::resolve_account_mod_data,
-    sleipnir_instruction::{AccountModificationForInstruction, SleipnirError},
+    magicblock_instruction::{AccountModificationForInstruction, SleipnirError},
     validator::validator_authority_id,
 };
 
@@ -65,9 +65,9 @@ pub(crate) fn process_mutate_accounts(
         // 1.4. Check that first account is the Sleipnir authority
         let authority_transaction_index = instruction_context
             .get_index_of_instruction_account_in_transaction(0)?;
-        let sleipnir_authority_key = transaction_context
+        let magicblock_authority_key = transaction_context
             .get_key_of_account_at_index(authority_transaction_index)?;
-        if sleipnir_authority_key != &validator_authority_id {
+        if magicblock_authority_key != &validator_authority_id {
             ic_msg!(
                 invoke_context,
                 "MutateAccounts: first account must be the Sleipnir authority"
@@ -76,9 +76,9 @@ pub(crate) fn process_mutate_accounts(
                 SleipnirError::FirstAccountNeedsToBeSleipnirAuthority.into()
             );
         }
-        let sleipnir_authority_acc = transaction_context
+        let magicblock_authority_acc = transaction_context
             .get_account_at_index(authority_transaction_index)?;
-        if sleipnir_authority_acc
+        if magicblock_authority_acc
             .borrow()
             .owner()
             .ne(&system_program::id())
@@ -92,7 +92,7 @@ pub(crate) fn process_mutate_accounts(
                     .into(),
             );
         }
-        sleipnir_authority_acc
+        magicblock_authority_acc
     };
 
     let mut lamports_to_debit: i128 = 0;
@@ -274,7 +274,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        sleipnir_instruction::{
+        magicblock_instruction::{
             modify_accounts_instruction, AccountModification,
         },
         test_utils::{

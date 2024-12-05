@@ -1,4 +1,4 @@
-use sleipnir_bank::bank::Bank;
+use magicblock_bank::bank::Bank;
 
 pub(crate) struct StatsSnapshot {
     pub num_transactions: u64,

@@ -3,7 +3,7 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use sleipnir_core::magic_program::MAGIC_CONTEXT_PUBKEY;
+use magicblock_core::magic_program::MAGIC_CONTEXT_PUBKEY;
 use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 use solana_sdk::{
     account::ReadableAccount, instruction::InstructionError, pubkey::Pubkey,
@@ -12,7 +12,7 @@ use solana_sdk::{
 use crate::{
     magic_context::{MagicContext, ScheduledCommit},
     schedule_transactions::transaction_scheduler::TransactionScheduler,
-    sleipnir_instruction::scheduled_commit_sent,
+    magicblock_instruction::scheduled_commit_sent,
     utils::{
         account_actions::set_account_owner_to_delegation_program,
         accounts::{

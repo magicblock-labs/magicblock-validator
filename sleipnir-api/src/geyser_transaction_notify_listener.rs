@@ -2,11 +2,11 @@ use std::sync::Arc;
 
 use crossbeam_channel::Receiver;
 use itertools::izip;
-use sleipnir_accounts_db::transaction_results::TransactionExecutionDetails;
-use sleipnir_bank::transaction_notifier_interface::TransactionNotifierArc;
-use sleipnir_ledger::Ledger;
-use sleipnir_metrics::metrics;
-use sleipnir_transaction_status::{
+use magicblock_accounts_db::transaction_results::TransactionExecutionDetails;
+use magicblock_bank::transaction_notifier_interface::TransactionNotifierArc;
+use magicblock_ledger::Ledger;
+use magicblock_metrics::metrics;
+use magicblock_transaction_status::{
     extract_and_fmt_memos, map_inner_instructions, TransactionStatusBatch,
     TransactionStatusMessage, TransactionStatusMeta,
 };

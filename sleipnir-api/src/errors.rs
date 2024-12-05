@@ -11,16 +11,16 @@ pub enum ApiError {
     GeyserPluginServiceError(#[from] solana_geyser_plugin_manager::geyser_plugin_service::GeyserPluginServiceError),
 
     #[error("Config error: {0}")]
-    ConfigError(#[from] sleipnir_config::errors::ConfigError),
+    ConfigError(#[from] magicblock_config::errors::ConfigError),
 
     #[error("Pubsub error: {0}")]
-    PubsubError(#[from] sleipnir_pubsub::errors::PubsubError),
+    PubsubError(#[from] magicblock_pubsub::errors::PubsubError),
 
     #[error("Accounts error: {0}")]
-    AccountsError(#[from] sleipnir_accounts::errors::AccountsError),
+    AccountsError(#[from] magicblock_accounts::errors::AccountsError),
 
     #[error("Ledger error: {0}")]
-    LedgerError(#[from] sleipnir_ledger::errors::LedgerError),
+    LedgerError(#[from] magicblock_ledger::errors::LedgerError),
 
     #[error("Failed to load programs into bank: {0}")]
     FailedToLoadProgramsIntoBank(String),

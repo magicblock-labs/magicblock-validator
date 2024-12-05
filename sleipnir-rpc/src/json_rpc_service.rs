@@ -11,9 +11,9 @@ use jsonrpc_http_server::{
 };
 // NOTE: from rpc/src/rpc_service.rs
 use log::*;
-use sleipnir_accounts::AccountsManager;
-use sleipnir_bank::bank::Bank;
-use sleipnir_ledger::Ledger;
+use magicblock_accounts::AccountsManager;
+use magicblock_bank::bank::Bank;
+use magicblock_ledger::Ledger;
 use solana_perf::thread::renice_this_thread;
 use solana_sdk::{hash::Hash, signature::Keypair};
 use tokio::runtime::Runtime;

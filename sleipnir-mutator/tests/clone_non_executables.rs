@@ -1,7 +1,7 @@
 use assert_matches::assert_matches;
 use log::*;
-use sleipnir_mutator::fetch::transaction_to_clone_pubkey_from_cluster;
-use sleipnir_program::validator;
+use magicblock_mutator::fetch::transaction_to_clone_pubkey_from_cluster;
+use magicblock_program::validator;
 use solana_sdk::{
     account::Account, clock::Slot, genesis_config::ClusterType, hash::Hash,
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, system_program,

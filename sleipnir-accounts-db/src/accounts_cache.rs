@@ -75,7 +75,7 @@ impl CachedAccountInner {
 impl Drop for CachedAccountInner {
     fn drop(&mut self) {
         let delta = self.size().neg();
-        sleipnir_metrics::metrics::adjust_inmemory_accounts_size(delta);
+        magicblock_metrics::metrics::adjust_inmemory_accounts_size(delta);
     }
 }
 

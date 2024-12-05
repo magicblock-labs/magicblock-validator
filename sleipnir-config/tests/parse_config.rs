@@ -1,6 +1,6 @@
 use std::net::{IpAddr, Ipv4Addr};
 
-use sleipnir_config::{
+use magicblock_config::{
     AccountsConfig, AllowedProgram, CommitStrategy, GeyserGrpcConfig,
     LedgerConfig, LifecycleMode, MetricsConfig, MetricsServiceConfig, Payer,
     ProgramConfig, RemoteConfig, RpcConfig, SleipnirConfig, ValidatorConfig,

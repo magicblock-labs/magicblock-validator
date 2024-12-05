@@ -120,7 +120,7 @@ impl Minimal for MinimalImpl {
 
     fn get_version(&self, _: Self::Metadata) -> Result<RpcVersionInfo> {
         debug!("get_version rpc request received");
-        let version = sleipnir_version::Version::default();
+        let version = magicblock_version::Version::default();
         Ok(RpcVersionInfo {
             solana_core: version.to_string(),
             feature_set: Some(version.feature_set),

@@ -2,7 +2,7 @@
 // heavily updated to remove vote + stake related code as well as cluster type (defaulting to mainnet)
 use std::{borrow::Borrow, time::UNIX_EPOCH};
 
-use sleipnir_accounts_db::inline_spl_token;
+use magicblock_accounts_db::inline_spl_token;
 use solana_sdk::{
     account::{Account, AccountSharedData},
     clock::UnixTimestamp,

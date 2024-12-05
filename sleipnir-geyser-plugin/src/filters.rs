@@ -909,7 +909,7 @@ mod tests {
         SubscribeRequest, SubscribeRequestFilterAccounts,
         SubscribeRequestFilterTransactions,
     };
-    use sleipnir_transaction_status::TransactionStatusMeta;
+    use magicblock_transaction_status::TransactionStatusMeta;
     use solana_sdk::{
         hash::Hash,
         message::{v0::LoadedAddresses, Message as SolMessage, MessageHeader},

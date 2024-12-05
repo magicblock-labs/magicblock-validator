@@ -3,8 +3,8 @@ use std::{str::FromStr, time::Duration};
 use geyser_grpc_proto::{geyser, tonic::Status};
 use jsonrpc_pubsub::{Sink, Subscriber};
 use log::*;
-use sleipnir_bank::bank::Bank;
-use sleipnir_geyser_plugin::rpc::GeyserRpcService;
+use magicblock_bank::bank::Bank;
+use magicblock_geyser_plugin::rpc::GeyserRpcService;
 use solana_rpc_client_api::response::{
     ProcessedSignatureResult, RpcSignatureResult,
 };

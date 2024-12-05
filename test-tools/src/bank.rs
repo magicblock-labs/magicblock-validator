@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use sleipnir_accounts_db::accounts_update_notifier_interface::AccountsUpdateNotifier;
-use sleipnir_bank::{
+use magicblock_accounts_db::accounts_update_notifier_interface::AccountsUpdateNotifier;
+use magicblock_bank::{
     bank::Bank, slot_status_notifier_interface::SlotStatusNotifierArc,
     transaction_logs::TransactionLogCollectorFilter,
     EPHEM_DEFAULT_MILLIS_PER_SLOT,

@@ -2,10 +2,12 @@ use std::sync::Arc;
 
 use crossbeam_channel::Sender;
 use log::trace;
-use sleipnir_accounts_db::transaction_results::{
+use magicblock_accounts_db::transaction_results::{
     TransactionExecutionDetails, TransactionExecutionResult,
 };
-use sleipnir_bank::{bank::Bank, transaction_results::TransactionBalancesSet};
+use magicblock_bank::{
+    bank::Bank, transaction_results::TransactionBalancesSet,
+};
 use solana_sdk::{
     clock::Slot, rent_debits::RentDebits, transaction::SanitizedTransaction,
 };

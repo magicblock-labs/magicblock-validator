@@ -4,10 +4,10 @@ use base64::{prelude::BASE64_STANDARD, Engine};
 use bincode::Options;
 use jsonrpc_core::{Error, ErrorCode, Result};
 use log::*;
-use sleipnir_accounts::{errors::AccountsResult, AccountsManager};
-use sleipnir_bank::bank::Bank;
-use sleipnir_metrics::metrics;
-use sleipnir_processor::execute_transaction::execute_sanitized_transaction;
+use magicblock_accounts::{errors::AccountsResult, AccountsManager};
+use magicblock_bank::bank::Bank;
+use magicblock_metrics::metrics;
+use magicblock_processor::execute_transaction::execute_sanitized_transaction;
 use solana_metrics::inc_new_counter_info;
 use solana_rpc_client_api::custom_error::RpcCustomError;
 use solana_sdk::{

@@ -1,6 +1,6 @@
 use jsonrpc_pubsub::Subscriber;
 use log::*;
-use sleipnir_geyser_plugin::rpc::GeyserRpcService;
+use magicblock_geyser_plugin::rpc::GeyserRpcService;
 use solana_sdk::pubkey::Pubkey;
 use tokio_util::sync::CancellationToken;
 

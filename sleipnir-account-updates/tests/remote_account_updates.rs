@@ -1,7 +1,7 @@
 use std::time::Duration;
 
 use conjunto_transwise::RpcProviderConfig;
-use sleipnir_account_updates::{
+use magicblock_account_updates::{
     AccountUpdates, RemoteAccountUpdatesClient, RemoteAccountUpdatesWorker,
 };
 use solana_sdk::{
