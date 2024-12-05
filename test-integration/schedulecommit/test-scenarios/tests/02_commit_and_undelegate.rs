@@ -25,6 +25,7 @@ use solana_sdk::{
     signer::Signer,
     transaction::Transaction,
 };
+use integration_test_tools::scheduled_commits::extract_scheduled_commit_sent_signature_from_logs;
 use test_tools_core::init_logger;
 use utils::{
     assert_is_instruction_error,
@@ -463,8 +464,7 @@ fn test_committing_and_undelegating_one_account_modifying_it_after() {
         let logs = ctx.fetch_ephemeral_logs(sig).unwrap_or_else(|| {
             panic!("Scheduled commit sent logs not found for sig {:?}", sig)
         });
-        let scheduled_commmit_sent_sig = ctx
-        .extract_scheduled_commit_sent_signature(&logs)
+        let scheduled_commmit_sent_sig = extract_scheduled_commit_sent_signature_from_logs(&logs)
         .unwrap_or_else(|| {
             panic!(
                 "ScheduledCommitSent signature not found in logs, {:#?}\n{}",
@@ -476,7 +476,6 @@ fn test_committing_and_undelegating_one_account_modifying_it_after() {
         assert!(!ctx.ephem_client.confirm_transaction(&scheduled_commmit_sent_sig).unwrap());
     });
 }
-
 #[test]
 fn test_committing_and_undelegating_two_accounts_modifying_them_after() {
     run_test!({
@@ -494,8 +493,7 @@ fn test_committing_and_undelegating_two_accounts_modifying_them_after() {
         let logs = ctx.fetch_ephemeral_logs(sig).unwrap_or_else(|| {
             panic!("Scheduled commit sent logs not found for sig {:?}", sig)
         });
-        let scheduled_commmit_sent_sig = ctx
-        .extract_scheduled_commit_sent_signature(&logs)
+        let scheduled_commmit_sent_sig = extract_scheduled_commit_sent_signature_from_logs(&logs)
         .unwrap_or_else(|| {
             panic!(
                 "ScheduledCommitSent signature not found in logs, {:#?}\n{}",

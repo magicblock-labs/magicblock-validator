@@ -2,10 +2,12 @@ use std::collections::HashSet;
 
 use async_trait::async_trait;
 use borsh::BorshDeserialize;
-use dlp::args::CommitStateArgs;
-use dlp::instruction_builder::{commit_state, finalize, undelegate};
-use dlp::pda::delegation_metadata_pda_from_pubkey;
-use dlp::state::DelegationMetadata;
+use dlp::{
+    args::CommitStateArgs,
+    instruction_builder::{commit_state, finalize, undelegate},
+    pda::delegation_metadata_pda_from_pubkey,
+    state::DelegationMetadata,
+};
 use futures_util::future::join_all;
 use log::*;
 use magicblock_metrics::metrics;

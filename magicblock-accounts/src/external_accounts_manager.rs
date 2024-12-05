@@ -4,6 +4,7 @@ use std::{
     time::Duration,
     vec,
 };
+
 use conjunto_transwise::{
     transaction_accounts_extractor::TransactionAccountsExtractor,
     transaction_accounts_holder::TransactionAccountsHolder,
@@ -301,7 +302,9 @@ where
     ) -> AccountsResult<Vec<CommitAccountsPayload>> {
         // Get current account states from internal account provider
         let mut committees = Vec::new();
-        for (pubkey, owner, committable_account_prev_hash) in &accounts_to_be_committed {
+        for (pubkey, owner, committable_account_prev_hash) in
+            &accounts_to_be_committed
+        {
             let account_state =
                 self.internal_account_provider.get_account(pubkey);
             if let Some(acc) = account_state {
