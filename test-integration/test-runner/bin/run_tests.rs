@@ -23,11 +23,11 @@ pub fn main() {
         return;
     };
 
-    // let Ok(issues_frequent_commits_output) =
-    //     run_issues_frequent_commmits_tests(&manifest_dir)
-    // else {
-    //     return;
-    // };
+    let Ok(issues_frequent_commits_output) =
+        run_issues_frequent_commmits_tests(&manifest_dir)
+    else {
+        return;
+    };
     let Ok(cloning_output) = run_cloning_tests(&manifest_dir) else {
         return;
     };
@@ -41,7 +41,7 @@ pub fn main() {
     assert_cargo_tests_passed(security_output);
     assert_cargo_tests_passed(scenarios_output);
     assert_cargo_tests_passed(cloning_output);
-    // assert_cargo_tests_passed(issues_frequent_commits_output);
+    assert_cargo_tests_passed(issues_frequent_commits_output);
     assert_cargo_tests_passed(restore_ledger_output);
 }
 
