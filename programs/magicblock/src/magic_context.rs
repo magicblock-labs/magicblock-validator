@@ -1,7 +1,7 @@
 use std::mem;
 
-use serde::{Deserialize, Serialize};
 use magicblock_core::magic_program;
+use serde::{Deserialize, Serialize};
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
     clock::Slot,

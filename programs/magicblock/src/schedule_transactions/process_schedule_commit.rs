@@ -11,8 +11,8 @@ use solana_sdk::{
 
 use crate::{
     magic_context::{MagicContext, ScheduledCommit},
-    schedule_transactions::transaction_scheduler::TransactionScheduler,
     magicblock_instruction::scheduled_commit_sent,
+    schedule_transactions::transaction_scheduler::TransactionScheduler,
     utils::{
         account_actions::set_account_owner_to_delegation_program,
         accounts::{

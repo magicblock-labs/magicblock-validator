@@ -10,9 +10,9 @@ mod test_utils;
 mod utils;
 pub mod validator;
 
+pub use magicblock_core::magic_program::*;
 pub use mutate_accounts::*;
 pub use schedule_transactions::{
     process_scheduled_commit_sent, register_scheduled_commit_sent,
     transaction_scheduler::TransactionScheduler, SentCommit,
 };
-pub use magicblock_core::magic_program::*;
