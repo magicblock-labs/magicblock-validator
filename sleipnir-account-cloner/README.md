@@ -4,13 +4,11 @@
 Implements logic for fetching remote accounts and dumping them into the local bank
 
 Accounts come in 3 different important flavors:
-
 - `FeePayer` accounts, which never contain data, can be used to move lamports around
 - `Undelegated` accounts, which do contain data and can never be written to in the ephemeral
 - `Delegated` accounts, which have a valid delegation record, therefore can be locally modified
 
 Here are all possible cases:
-
 - `if !properly_delegated && !has_data` -> `FeePayer`
 - `if !properly_delegated && has_data` -> `Undelegated`
 - `if properly_delegated && !has_data` -> `Delegated`
@@ -19,10 +17,10 @@ Here are all possible cases:
 # Logic Overview
 
 The cloning pipeline is made out of a few components:
-- The cloner (highest level)
-  - The fetcher (read on-chain latest account state)
-  - The updates (subscribe to on-chain account changes)
-  - The dumber (apply fetched state to the bank)
+- The cloner (highest level) -> crate `sleipnir-account-cloner`
+  - The fetcher (read on-chain latest account state) -> crate `sleipnir-account-fetcher`
+  - The updates (subscribe to on-chain account changes) -> crate `sleipnir-account-updates`
+  - The dumper (apply cloned state to the bank) -> crate `sleipnir-account-dumper`
 
 ## Cloning logic
 
@@ -31,8 +29,9 @@ Different types of event will trigger cloning actions:
 - `Update event`: An on-chain account has changed
 
 The important states stored for each account are:
-- `last_known_update_slot`, a map of which slot was the account was last updated at
-- `first_subscribed_slot`, a map of which slot was the account first subscribed at
+- RemoteAccountUpdatesWorker.`last_known_update_slot` -> a map of which slot was the account was last updated at
+- RemoteAccountUpdatesWorker.`first_subscribed_slot` -> a map of which slot was the account first subscribed at
+- RemoteAccountClonerWorker.`last_clone_output` -> a cache of the latest clone's result (contains the on-chain slot at which it happened)
 
 ### Transaction event: new transaction received
 
@@ -44,7 +43,7 @@ We can detect if an account needs to be cloned based on if the `last_known_updat
 
 For each account, the logic goes as follow:
 
-- A) If the account was never seen before or changes to the account were detected since last clone (checks `last_known_update_slot`)
+- A) If the account was never seen before or changes to the account were detected since last clone (checks `last_known_update_slot` and compares it to the `last_clone_output`)
   - 0) Validate that we actually want to clone that account (is it blacklisted?)
   - 1) Start subscribing to on-chain changes for this account (so we can detect change for future clones)
     - This will do nothing if we already subscribed to the account before
@@ -59,7 +58,7 @@ For each account, the logic goes as follow:
   - 4) Save the result of the clone to the cache
 
 - B) If the account has already been cloned (and it has not changed on-chain since last clone)
-  - 0) Do nothing, use the cache of the latest clone's result
+  - 0) Do nothing, use the cache of the latest clone's result into `last_clone_output`
 
 ### Update event: On-chain change detected
 
