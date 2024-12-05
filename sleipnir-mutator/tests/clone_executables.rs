@@ -10,7 +10,7 @@ use sleipnir_bank::{
     LAMPORTS_PER_SIGNATURE,
 };
 use sleipnir_mutator::fetch::transaction_to_clone_pubkey_from_cluster;
-use sleipnir_program::validator_authority_id;
+use sleipnir_program::validator;
 use solana_sdk::{
     account::{Account, ReadableAccount},
     bpf_loader_upgradeable,
@@ -24,7 +24,7 @@ use solana_sdk::{
 };
 use test_tools::{
     diagnostics::log_exec_details, init_logger, services::skip_if_devnet_down,
-    transactions_processor, validator::ensure_funded_validator_authority,
+    transactions_processor, validator::init_started_validator,
 };
 
 use crate::utils::{fund_luzifer, SOLX_EXEC, SOLX_IDL, SOLX_PROG};
@@ -49,7 +49,10 @@ async fn verified_tx_to_clone_executable_from_devnet_first_deploy(
 
     assert!(tx.is_signed());
     assert_eq!(tx.signatures.len(), 1);
-    assert_eq!(tx.signer_key(0, 0).unwrap(), &validator_authority_id());
+    assert_eq!(
+        tx.signer_key(0, 0).unwrap(),
+        &validator::validator_authority_id()
+    );
     assert!(tx.message().account_keys.len() >= 5);
     assert!(tx.message().account_keys.len() <= 6);
 
@@ -74,7 +77,10 @@ async fn verified_tx_to_clone_executable_from_devnet_as_upgrade(
 
     assert!(tx.is_signed());
     assert_eq!(tx.signatures.len(), 1);
-    assert_eq!(tx.signer_key(0, 0).unwrap(), &validator_authority_id());
+    assert_eq!(
+        tx.signer_key(0, 0).unwrap(),
+        &validator::validator_authority_id()
+    );
     assert!(tx.message().account_keys.len() >= 8);
     assert!(tx.message().account_keys.len() <= 9);
 
@@ -87,7 +93,7 @@ async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
     skip_if_devnet_down!();
 
     let tx_processor = transactions_processor();
-    ensure_funded_validator_authority(tx_processor.bank());
+    init_started_validator(tx_processor.bank());
     fund_luzifer(&*tx_processor);
 
     tx_processor.bank().advance_slot(); // We don't want to stay on slot 0

@@ -11,8 +11,10 @@ use solana_account_decoder::{UiAccountEncoding, UiDataSliceConfig};
 use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
 use solana_rpc_client_api::config::RpcAccountInfoConfig;
 use solana_sdk::{
-    clock::Clock, clock::Slot, commitment_config::CommitmentConfig,
-    pubkey::Pubkey, sysvar::clock,
+    clock::{Clock, Slot},
+    commitment_config::CommitmentConfig,
+    pubkey::Pubkey,
+    sysvar::clock,
 };
 use thiserror::Error;
 use tokio::sync::mpsc::UnboundedReceiver;
@@ -91,10 +93,10 @@ impl RemoteAccountUpdatesShard {
                 // When we receive a new clock notification
                 Some(clock_update) = clock_stream.next() => {
                     let clock_data = clock_update.value.data.decode();
-                    info!("Shard {}: Clock data received: {:?}", self.shard_id, clock_data);
+                    trace!("Shard {}: Clock data received: {:?}", self.shard_id, clock_data);
                     if let Some(clock_data) = clock_data {
                         let clock_value = bincode::deserialize::<Clock>(&clock_data);
-                        info!("Shard {}: Clock value received: {:?}", self.shard_id, clock_value);
+                        trace!("Shard {}: Clock value received: {:?}", self.shard_id, clock_value);
                         if let Ok(clock_value) = clock_value {
                             clock_slot = clock_value.slot;
                         }

@@ -19,7 +19,7 @@ use crate::{
             get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
         },
     },
-    validator_authority_id,
+    validator::validator_authority_id,
 };
 
 #[derive(Default)]

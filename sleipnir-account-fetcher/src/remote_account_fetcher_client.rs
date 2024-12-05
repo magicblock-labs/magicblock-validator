@@ -8,8 +8,7 @@ use futures_util::{
     future::{ready, BoxFuture},
     FutureExt,
 };
-use solana_sdk::clock::Slot;
-use solana_sdk::pubkey::Pubkey;
+use solana_sdk::{clock::Slot, pubkey::Pubkey};
 use tokio::sync::{mpsc::UnboundedSender, oneshot::channel};
 
 use crate::{

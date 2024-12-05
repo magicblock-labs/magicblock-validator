@@ -168,7 +168,7 @@ fn test_committing_and_undelegating_one_account() {
         let (ctx, sig, tx_res) = commit_and_undelegate_one_account(false);
         info!("'{}' {:?}", sig, tx_res);
 
-        let res = verify::fetch_commit_result_from_logs(&ctx, sig);
+        let res = verify::fetch_and_verify_commit_result_from_logs(&ctx, sig);
 
         assert_one_committee_was_committed(&ctx, &res);
         assert_one_committee_synchronized_count(&ctx, &res, 1);
@@ -183,7 +183,7 @@ fn test_committing_and_undelegating_two_accounts_success() {
         let (ctx, sig, tx_res) = commit_and_undelegate_two_accounts(false);
         info!("'{}' {:?}", sig, tx_res);
 
-        let res = verify::fetch_commit_result_from_logs(&ctx, sig);
+        let res = verify::fetch_and_verify_commit_result_from_logs(&ctx, sig);
 
         assert_two_committees_were_committed(&ctx, &res);
         assert_two_committees_synchronized_count(&ctx, &res, 1);
@@ -300,7 +300,7 @@ fn test_committed_and_undelegated_single_account_redelegation() {
 
         // 2. Wait for commit + undelegation to finish and try chain again
         {
-            verify::fetch_commit_result_from_logs(&ctx, sig);
+            verify::fetch_and_verify_commit_result_from_logs(&ctx, sig);
 
             let blockhash = chain_client.get_latest_blockhash().unwrap();
             assert_can_increase_committee_count(
@@ -379,7 +379,7 @@ fn test_committed_and_undelegated_accounts_redelegation() {
 
         // 2. Wait for commit + undelegation to finish and try chain again
         {
-            verify::fetch_commit_result_from_logs(&ctx, sig);
+            verify::fetch_and_verify_commit_result_from_logs(&ctx, sig);
 
             // we need a new blockhash otherwise the tx is identical to the above
             let blockhash = chain_client.get_latest_blockhash().unwrap();

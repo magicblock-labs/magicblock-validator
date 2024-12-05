@@ -36,7 +36,7 @@ use sleipnir_geyser_plugin::rpc::GeyserRpcService;
 use sleipnir_ledger::{blockstore_processor::process_ledger, Ledger};
 use sleipnir_metrics::MetricsService;
 use sleipnir_perf_service::SamplePerformanceService;
-use sleipnir_program::init_validator_authority;
+use sleipnir_program::{init_persister, validator};
 use sleipnir_pubsub::pubsub_service::{
     PubsubConfig, PubsubService, PubsubServiceCloseHandle,
 };
@@ -251,8 +251,10 @@ impl MagicValidator {
             bank.clone(),
             Some(transaction_status_sender.clone()),
         );
-        let blacklisted_accounts =
-            standard_blacklisted_accounts(&identity_keypair.pubkey());
+        let blacklisted_accounts = standard_blacklisted_accounts(
+            &identity_keypair.pubkey(),
+            &faucet_keypair.pubkey(),
+        );
 
         let remote_account_cloner_worker = RemoteAccountClonerWorker::new(
             bank_account_provider,
@@ -263,6 +265,7 @@ impl MagicValidator {
             blacklisted_accounts,
             accounts_config.payer_init_lamports,
             accounts_config.lifecycle.to_account_cloner_permissions(),
+            identity_keypair.pubkey(),
         );
 
         let accounts_manager = Self::init_accounts_manager(
@@ -277,7 +280,7 @@ impl MagicValidator {
             config.validator_config.rpc.addr,
             config.validator_config.rpc.port,
         );
-        init_validator_authority(identity_keypair);
+        validator::init_validator_authority(identity_keypair);
 
         // Make sure we process the ledger before we're open to handle
         // transactions via RPC
@@ -425,7 +428,9 @@ impl MagicValidator {
             }
         };
         let ledger = ledger::init(ledger_path, reset)?;
-        Ok(Arc::new(ledger))
+        let ledger_shared = Arc::new(ledger);
+        init_persister(ledger_shared.clone());
+        Ok(ledger_shared)
     }
 
     fn init_accounts_paths(ledger_path: &Path) -> ApiResult<Vec<PathBuf>> {
@@ -480,10 +485,29 @@ impl MagicValidator {
     // -----------------
     // Start/Stop
     // -----------------
-    pub async fn start(&mut self) -> ApiResult<()> {
+    fn maybe_process_ledger(&self) -> ApiResult<()> {
+        if self.config.ledger.reset {
+            return Ok(());
+        }
         process_ledger(&self.ledger, &self.bank)?;
 
-        // NOE: this only run only once, i.e. at creation time
+        // The transactions to schedule and accept account commits re-run when we
+        // process the ledger, however we do not want to re-commit them.
+        // Thus while the ledger is processed we don't yet run the machinery to handle
+        // scheduled commits and we clear all scheduled commits before fully starting the
+        // validator.
+        let scheduled_commits = self.accounts_manager.scheduled_commits_len();
+        debug!(
+            "Found {} scheduled commits while processing ledger, clearing them",
+            scheduled_commits
+        );
+        self.accounts_manager.clear_scheduled_commits();
+        Ok(())
+    }
+
+    pub async fn start(&mut self) -> ApiResult<()> {
+        self.maybe_process_ledger()?;
+
         self.transaction_listener.run(true);
 
         self.slot_ticker = Some(init_slot_ticker(
@@ -503,7 +527,7 @@ impl MagicValidator {
 
         self.start_remote_account_fetcher_worker();
         self.start_remote_account_updates_worker();
-        self.start_remote_account_cloner_worker();
+        self.start_remote_account_cloner_worker().await;
 
         self.rpc_service.start().map_err(|err| {
             ApiError::FailedToStartJsonRpcService(format!("{:?}", err))
@@ -535,6 +559,7 @@ impl MagicValidator {
                 self.exit.clone(),
             ));
 
+        validator::finished_starting_up();
         Ok(())
     }
 
@@ -576,10 +601,14 @@ impl MagicValidator {
         }
     }
 
-    fn start_remote_account_cloner_worker(&mut self) {
+    async fn start_remote_account_cloner_worker(&mut self) {
         if let Some(mut remote_account_cloner_worker) =
             self.remote_account_cloner_worker.take()
         {
+            if !self.config.ledger.reset {
+                remote_account_cloner_worker.hydrate().await;
+            }
+
             let cancellation_token = self.token.clone();
             self.remote_account_cloner_handle =
                 Some(thread::spawn(move || {

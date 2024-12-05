@@ -174,6 +174,14 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
 
         Ok(())
     }
+
+    fn scheduled_commits_len(&self) -> usize {
+        self.transaction_scheduler.scheduled_commits_len()
+    }
+
+    fn clear_scheduled_commits(&self) {
+        self.transaction_scheduler.clear_scheduled_commits();
+    }
 }
 
 impl RemoteScheduledCommitsProcessor {

@@ -13,11 +13,17 @@ use crate::errors::AccountsResult;
 
 #[async_trait]
 pub trait ScheduledCommitsProcessor {
+    /// Processes all commits that were scheduled and accepted
     async fn process<AC: AccountCommitter, IAP: InternalAccountProvider>(
         &self,
         committer: &Arc<AC>,
         account_provider: &IAP,
     ) -> AccountsResult<()>;
+
+    /// Returns the number of commits that were scheduled and accepted
+    fn scheduled_commits_len(&self) -> usize;
+    /// Clears all scheduled commits
+    fn clear_scheduled_commits(&self);
 }
 
 #[derive(Clone)]

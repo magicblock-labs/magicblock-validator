@@ -1,11 +1,10 @@
-use crate::{
-    errors::{AccountsError, AccountsResult},
-    traits::{AccountCommitter, UndelegationRequest},
-    utils::get_epoch,
-    AccountCommittee, CommitAccountsPayload, LifecycleMode,
-    PendingCommitTransaction, ScheduledCommitsProcessor,
-    SendableCommitAccountsPayload,
+use std::{
+    collections::{hash_map::Entry, HashMap},
+    sync::{Arc, RwLock},
+    time::Duration,
+    vec,
 };
+
 use conjunto_transwise::{
     transaction_accounts_extractor::TransactionAccountsExtractor,
     transaction_accounts_holder::TransactionAccountsHolder,
@@ -18,16 +17,21 @@ use log::*;
 use sleipnir_account_cloner::{AccountCloner, AccountClonerOutput};
 use sleipnir_accounts_api::InternalAccountProvider;
 use sleipnir_core::magic_program;
-use solana_sdk::account::{AccountSharedData, ReadableAccount};
-use solana_sdk::hash::Hash;
 use solana_sdk::{
-    pubkey::Pubkey, signature::Signature, transaction::SanitizedTransaction,
+    account::{AccountSharedData, ReadableAccount},
+    hash::Hash,
+    pubkey::Pubkey,
+    signature::Signature,
+    transaction::SanitizedTransaction,
 };
-use std::{
-    collections::{hash_map::Entry, HashMap},
-    sync::{Arc, RwLock},
-    time::Duration,
-    vec,
+
+use crate::{
+    errors::{AccountsError, AccountsResult},
+    traits::{AccountCommitter, UndelegationRequest},
+    utils::get_epoch,
+    AccountCommittee, CommitAccountsPayload, LifecycleMode,
+    PendingCommitTransaction, ScheduledCommitsProcessor,
+    SendableCommitAccountsPayload,
 };
 
 #[derive(Debug)]
@@ -387,6 +391,14 @@ where
         self.scheduled_commits_processor
             .process(&self.account_committer, &self.internal_account_provider)
             .await
+    }
+
+    pub fn scheduled_commits_len(&self) -> usize {
+        self.scheduled_commits_processor.scheduled_commits_len()
+    }
+
+    pub fn clear_scheduled_commits(&self) {
+        self.scheduled_commits_processor.clear_scheduled_commits()
     }
 }
 

@@ -1,3 +1,5 @@
+pub mod traits;
+
 pub mod magic_program {
     use solana_sdk::pubkey;
     pub use solana_sdk::pubkey::Pubkey;

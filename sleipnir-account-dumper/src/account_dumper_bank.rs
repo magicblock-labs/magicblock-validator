@@ -153,7 +153,6 @@ impl AccountDumper for AccountDumperBank {
         program_pubkey: &Pubkey,
         program_account: &Account,
     ) -> AccountDumperResult<Signature> {
-        eprintln!("instruction to clone account: {program_pubkey}");
         // derive program data account address, as expected by upgradeable BPF loader
         let programdata_address = get_program_data_address(program_pubkey);
         let slot = self.bank.slot();

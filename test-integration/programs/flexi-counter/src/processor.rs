@@ -1,9 +1,14 @@
 use borsh::{to_vec, BorshDeserialize};
+use ephemeral_rollups_sdk::{
+    cpi::delegate_account,
+    ephem::{commit_accounts, commit_and_undelegate_accounts},
+};
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
     entrypoint::ProgramResult,
     msg,
     program::invoke_signed,
+    program_error::ProgramError,
     pubkey::Pubkey,
     rent::Rent,
     system_instruction,
@@ -11,7 +16,8 @@ use solana_program::{
 };
 
 use crate::{
-    instruction::FlexiCounterInstruction, state::FlexiCounter,
+    instruction::{DelegateArgs, FlexiCounterInstruction},
+    state::FlexiCounter,
     utils::assert_keys_equal,
 };
 
@@ -26,6 +32,11 @@ pub fn process(
         Init { label, bump } => process_init(program_id, accounts, label, bump),
         Add { count } => process_add(accounts, count),
         Mul { multiplier } => process_mul(accounts, multiplier),
+        Delegate(args) => process_delegate(accounts, &args),
+        AddAndScheduleCommit { count, undelegate } => {
+            process_add_and_schedule_commit(accounts, count, undelegate)
+        }
+        AddCounter => process_add_counter(accounts),
     }?;
     Ok(())
 }
@@ -82,6 +93,14 @@ fn process_add(accounts: &[AccountInfo], count: u8) -> ProgramResult {
     let payer_info = next_account_info(account_info_iter)?;
     let counter_pda_info = next_account_info(account_info_iter)?;
 
+    add(payer_info, counter_pda_info, count)
+}
+
+fn add(
+    payer_info: &AccountInfo,
+    counter_pda_info: &AccountInfo,
+    count: u8,
+) -> ProgramResult {
     let (counter_pda, _) = FlexiCounter::pda(payer_info.key);
     assert_keys_equal(counter_pda_info.key, &counter_pda, || {
         format!(
@@ -129,4 +148,91 @@ fn process_mul(accounts: &[AccountInfo], multiplier: u8) -> ProgramResult {
     counter_pda_info.data.borrow_mut()[..size].copy_from_slice(&counter_data);
 
     Ok(())
+}
+
+fn process_delegate(
+    accounts: &[AccountInfo],
+    args: &DelegateArgs,
+) -> ProgramResult {
+    msg!("Delegate");
+    let [payer, delegate_account_pda, owner_program, buffer, delegation_record, delegation_metadata, delegation_program, system_program] =
+        accounts
+    else {
+        return Err(ProgramError::NotEnoughAccountKeys);
+    };
+
+    let seeds_no_bump = FlexiCounter::seeds(payer.key);
+
+    delegate_account(
+        payer,
+        delegate_account_pda,
+        owner_program,
+        buffer,
+        delegation_record,
+        delegation_metadata,
+        delegation_program,
+        system_program,
+        &seeds_no_bump,
+        args.valid_until,
+        args.commit_frequency_ms,
+    )?;
+    Ok(())
+}
+
+fn process_add_and_schedule_commit(
+    accounts: &[AccountInfo],
+    count: u8,
+    undelegate: bool,
+) -> ProgramResult {
+    msg!("Add {}", count);
+
+    let account_info_iter = &mut accounts.iter();
+    let payer_info = next_account_info(account_info_iter)?;
+    let counter_pda_info = next_account_info(account_info_iter)?;
+    let magic_context_info = next_account_info(account_info_iter)?;
+    let magic_program_info = next_account_info(account_info_iter)?;
+
+    // Perform the add operation
+    add(payer_info, counter_pda_info, count)?;
+
+    // Request the PDA counter account to be committed
+    if undelegate {
+        commit_and_undelegate_accounts(
+            payer_info,
+            vec![counter_pda_info],
+            magic_context_info,
+            magic_program_info,
+        )?;
+    } else {
+        commit_accounts(
+            payer_info,
+            vec![counter_pda_info],
+            magic_context_info,
+            magic_program_info,
+        )?;
+    }
+    Ok(())
+}
+
+fn process_add_counter(accounts: &[AccountInfo]) -> ProgramResult {
+    msg!("AddCounter");
+
+    let account_info_iter = &mut accounts.iter();
+    let payer_info = next_account_info(account_info_iter)?;
+    let target_pda_info = next_account_info(account_info_iter)?;
+    let source_pda_info = next_account_info(account_info_iter)?;
+
+    let (target_pda, _) = FlexiCounter::pda(payer_info.key);
+    assert_keys_equal(target_pda_info.key, &target_pda, || {
+        format!(
+            "Invalid target Counter PDA {}, should be {}",
+            target_pda_info.key, target_pda
+        )
+    })?;
+
+    let source_counter =
+        FlexiCounter::try_from_slice(&source_pda_info.data.borrow())?;
+    let count = source_counter.count as u8;
+
+    add(payer_info, target_pda_info, count)
 }

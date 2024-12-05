@@ -16,8 +16,8 @@ use solana_sdk::{
 use thiserror::Error;
 
 use crate::{
-    sleipnir_processor::set_account_mod_data, validator_authority,
-    validator_authority_id,
+    mutate_accounts::set_account_mod_data,
+    validator::{validator_authority, validator_authority_id},
 };
 
 #[derive(
@@ -39,8 +39,23 @@ pub enum SleipnirError {
     #[error("Sleipnir authority needs to be owned by system program")]
     SleipnirAuthorityNeedsToBeOwnedBySystemProgram,
 
-    #[error("The account data for the provided key is missing.")]
+    #[error("The account resolution for the provided key failed.")]
+    AccountDataResolutionFailed,
+
+    #[error("The account data for the provided key is missing both from in-memory and ledger storage.")]
     AccountDataMissing,
+
+    #[error("The account data for the provided key is missing from in-memory and we are not replaying the ledger.")]
+    AccountDataMissingFromMemory,
+
+    #[error("Tried to persist data that could not be resolved.")]
+    AttemptedToPersistUnresolvedData,
+
+    #[error("Tried to persist data that was resolved from storage.")]
+    AttemptedToPersistDataFromStorage,
+
+    #[error("Encountered an error when persisting account modification data.")]
+    FailedToPersistAccountModData,
 }
 
 impl<T> DecodeError<T> for SleipnirError {
@@ -79,7 +94,7 @@ pub(crate) struct AccountModificationForInstruction {
     pub lamports: Option<u64>,
     pub owner: Option<Pubkey>,
     pub executable: Option<bool>,
-    pub data_key: Option<usize>,
+    pub data_key: Option<u64>,
     pub rent_epoch: Option<u64>,
 }
 
