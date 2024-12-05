@@ -24,10 +24,12 @@ jobs:
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
-      - uses: ./magicblock-validator/.github/actions/setup-os
 
       - name: Run unit tests
         run: |
+          sudo prlimit --pid $$ --nofile=1048576:1048576
+          sudo sysctl fs.inotify.max_user_instances=1280
+          sudo sysctl fs.inotify.max_user_watches=655360
           make ci-test-unit
         shell: bash
         working-directory: magicblock-validator
