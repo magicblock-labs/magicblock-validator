@@ -28,7 +28,7 @@ pub use validator::*;
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
-pub struct MagicBlockConfig {
+pub struct EphemeralConfig {
     #[serde(default)]
     pub accounts: AccountsConfig,
     #[serde(default)]
@@ -46,7 +46,7 @@ pub struct MagicBlockConfig {
     pub metrics: MetricsConfig,
 }
 
-impl MagicBlockConfig {
+impl EphemeralConfig {
     pub fn try_load_from_file(path: &str) -> ConfigResult<Self> {
         let p = Path::new(path);
         let toml = fs::read_to_string(p)?;
@@ -86,7 +86,7 @@ impl MagicBlockConfig {
         Ok(config)
     }
 
-    pub fn override_from_envs(&self) -> MagicBlockConfig {
+    pub fn override_from_envs(&self) -> EphemeralConfig {
         let mut config = self.clone();
 
         // -----------------
@@ -249,7 +249,7 @@ impl MagicBlockConfig {
     }
 }
 
-impl fmt::Display for MagicBlockConfig {
+impl fmt::Display for EphemeralConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let toml = toml::to_string_pretty(self)
             .unwrap_or("Invalid Config".to_string());

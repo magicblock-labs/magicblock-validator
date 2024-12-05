@@ -4,8 +4,8 @@ use std::{
 };
 
 use magicblock_config::{
-    AccountsConfig, CommitStrategy, GeyserGrpcConfig, LedgerConfig,
-    LifecycleMode, MagicBlockConfig, MetricsConfig, MetricsServiceConfig,
+    AccountsConfig, CommitStrategy, EphemeralConfig, GeyserGrpcConfig,
+    LedgerConfig, LifecycleMode, MetricsConfig, MetricsServiceConfig,
     ProgramConfig, RemoteConfig, RpcConfig, ValidatorConfig,
 };
 use solana_sdk::pubkey;
@@ -21,12 +21,12 @@ fn test_load_local_dev_with_programs_toml() {
         .join("fixtures")
         .join("06_local-dev-with-programs.toml");
     let config =
-        MagicBlockConfig::try_load_from_file(config_file_dir.to_str().unwrap())
+        EphemeralConfig::try_load_from_file(config_file_dir.to_str().unwrap())
             .unwrap();
 
     assert_eq!(
         config,
-        MagicBlockConfig {
+        EphemeralConfig {
             accounts: AccountsConfig {
                 commit: CommitStrategy {
                     frequency_millis: 600_000,
@@ -98,13 +98,13 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     env::set_var("METRICS_SYSTEM_METRICS_TICK_INTERVAL_SECS", "10");
 
     let config =
-        MagicBlockConfig::try_load_from_file(config_file_dir.to_str().unwrap())
+        EphemeralConfig::try_load_from_file(config_file_dir.to_str().unwrap())
             .unwrap();
     let config = config.override_from_envs();
 
     assert_eq!(
         config,
-        MagicBlockConfig {
+        EphemeralConfig {
             accounts: AccountsConfig {
                 lifecycle: LifecycleMode::Ephemeral,
                 commit: CommitStrategy {

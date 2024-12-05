@@ -12,7 +12,7 @@ use integration_test_tools::{
     IntegrationTestContext,
 };
 use magicblock_config::{
-    AccountsConfig, LedgerConfig, LifecycleMode, MagicBlockConfig,
+    AccountsConfig, EphemeralConfig, LedgerConfig, LifecycleMode,
     ProgramConfig, RemoteConfig, ValidatorConfig,
 };
 use program_flexi_counter::state::FlexiCounter;
@@ -38,7 +38,7 @@ pub const FLEXI_COUNTER_PUBKEY: Pubkey =
 /// Stringifies the config and writes it to a temporary config file.
 /// Then uses that config to start the validator.
 pub fn start_validator_with_config(
-    config: MagicBlockConfig,
+    config: EphemeralConfig,
 ) -> (TempDir, Option<process::Child>) {
     let workspace_dir = resolve_workspace_dir();
     let (default_tmpdir, temp_dir) = resolve_tmp_dir(TMP_DIR_CONFIG);
@@ -104,7 +104,7 @@ pub fn setup_offline_validator(
 
     let programs = resolve_programs(programs);
 
-    let config = MagicBlockConfig {
+    let config = EphemeralConfig {
         ledger: LedgerConfig {
             reset,
             path: Some(ledger_path.display().to_string()),
@@ -142,7 +142,7 @@ pub fn setup_validator_with_local_remote(
     };
     let programs = resolve_programs(programs);
 
-    let config = MagicBlockConfig {
+    let config = EphemeralConfig {
         ledger: LedgerConfig {
             reset,
             path: Some(ledger_path.display().to_string()),
