@@ -1,0 +1,17 @@
+name: 'MagicBlock - Setup Solana'
+description: 'Install Solana Test Validator and ensure it works'
+
+runs:
+  using: "composite"
+  steps:
+      - name: Install Solana Test Validator
+        shell: "bash"
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/v1.18.22/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
+
+      - name: Ensure Solana Test Validator is Installed
+        shell: "bash"
+        run: |
+          solana-test-validator --version
+

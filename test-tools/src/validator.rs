@@ -8,9 +8,9 @@ use std::{
 };
 
 use log::*;
-use sleipnir_bank::bank::Bank;
-use sleipnir_core::traits::PersistsAccountModData;
-use sleipnir_program::{init_persister, validator};
+use magicblock_bank::bank::Bank;
+use magicblock_core::traits::PersistsAccountModData;
+use magicblock_program::{init_persister, validator};
 use solana_sdk::native_token::LAMPORTS_PER_SOL;
 
 use crate::account::fund_account;

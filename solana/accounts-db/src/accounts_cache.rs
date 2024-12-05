@@ -138,7 +138,7 @@ pub type CachedAccount = Arc<CachedAccountInner>;
 pub struct CachedAccountInner {
     pub account: AccountSharedData,
     hash: SeqLock<Option<AccountHash>>,
-    // NOTE: I made this public to interact with sleipnir-accounts-db
+    // NOTE: I made this public to interact with magicblock-accounts-db
     pub pubkey: Pubkey,
 }
 

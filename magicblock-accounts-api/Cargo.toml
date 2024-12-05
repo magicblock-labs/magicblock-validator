@@ -1,0 +1,29 @@
+[package]
+name = "magicblock-accounts-api"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+async-trait = { workspace = true }
+conjunto-transwise = { workspace = true }
+delegation-program = { workspace = true }
+futures-util = { workspace = true }
+log = { workspace = true }
+magicblock-bank = { workspace = true }
+magicblock-mutator = { workspace = true }
+magicblock-processor = { workspace = true }
+magicblock-program = { workspace = true }
+magicblock-transaction-status = { workspace = true }
+solana-rpc-client = { workspace = true }
+solana-rpc-client-api = { workspace = true }
+solana-sdk = { workspace = true }
+tokio = { workspace = true }
+thiserror = { workspace = true }
+url = { workspace = true }
+
+[dev-dependencies]
+test-tools-core = { workspace = true }

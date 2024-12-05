@@ -1,0 +1,36 @@
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master, dev]
+    types: [opened, reopened, synchronize, ready_for_review]
+
+name: Run CI - Unit Tests
+
+jobs:
+  run_make_ci_test:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest-m
+    steps:
+      - name: Checkout this magicblock-validator
+        uses: actions/checkout@v2
+        with:
+          path: magicblock-validator
+
+      - uses: ./magicblock-validator/.github/actions/setup-build-env
+        with:
+          build_cache_key_name: "magicblock-validator-ci-test-v006"
+          rust_toolchain_release: "1.83.0"
+          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: ./magicblock-validator/.github/actions/setup-solana
+
+      - name: Run unit tests
+        run: |
+          sudo prlimit --pid $$ --nofile=1048576:1048576
+          sudo sysctl fs.inotify.max_user_instances=1280
+          sudo sysctl fs.inotify.max_user_watches=655360
+          make ci-test-unit
+        shell: bash
+        working-directory: magicblock-validator

@@ -6,31 +6,31 @@ split-debuginfo = "packed"
 [workspace]
 members = [
   "geyser-grpc-proto",
-  "programs/sleipnir",
-  "sleipnir-account-cloner",
-  "sleipnir-account-dumper",
-  "sleipnir-account-fetcher",
-  "sleipnir-account-updates",
-  "sleipnir-accounts",
-  "sleipnir-accounts-api",
-  "sleipnir-accounts-db",
-  "sleipnir-api",
-  "sleipnir-bank",
-  "sleipnir-config",
-  "sleipnir-core",
-  "sleipnir-geyser-plugin",
-  "sleipnir-ledger",
-  "sleipnir-messaging",
-  "sleipnir-metrics",
-  "sleipnir-mutator",
-  "sleipnir-perf-service",
-  "sleipnir-processor",
-  "sleipnir-pubsub",
-  "sleipnir-rpc",
-  "sleipnir-streamer",
-  "sleipnir-tokens",
-  "sleipnir-transaction-status",
-  "sleipnir-version",
+  "programs/magicblock",
+  "magicblock-account-cloner",
+  "magicblock-account-dumper",
+  "magicblock-account-fetcher",
+  "magicblock-account-updates",
+  "magicblock-accounts",
+  "magicblock-accounts-api",
+  "magicblock-accounts-db",
+  "magicblock-api",
+  "magicblock-bank",
+  "magicblock-config",
+  "magicblock-core",
+  "magicblock-geyser-plugin",
+  "magicblock-ledger",
+  "magicblock-messaging",
+  "magicblock-metrics",
+  "magicblock-mutator",
+  "magicblock-perf-service",
+  "magicblock-processor",
+  "magicblock-pubsub",
+  "magicblock-rpc",
+  "magicblock-streamer",
+  "magicblock-tokens",
+  "magicblock-transaction-status",
+  "magicblock-version",
   "solana/accounts-db",
   "solana/storage-proto",
   "test-bins",
@@ -107,32 +107,32 @@ semver = "1.0.22"
 serde = "1.0.196"
 serde_derive = "1.0.103"
 serde_json = "1.0.113"
-sleipnir-account-cloner = { path = "./sleipnir-account-cloner" }
-sleipnir-account-dumper = { path = "./sleipnir-account-dumper" }
-sleipnir-account-fetcher = { path = "./sleipnir-account-fetcher" }
-sleipnir-account-updates = { path = "./sleipnir-account-updates" }
-sleipnir-accounts = { path = "./sleipnir-accounts" }
-sleipnir-accounts-api = { path = "./sleipnir-accounts-api" }
-sleipnir-accounts-db = { path = "./sleipnir-accounts-db" }
-sleipnir-api = { path = "./sleipnir-api" }
-sleipnir-bank = { path = "./sleipnir-bank" }
-sleipnir-config = { path = "./sleipnir-config" }
-sleipnir-core = { path = "./sleipnir-core" }
-sleipnir-geyser-plugin = { path = "./sleipnir-geyser-plugin" }
-sleipnir-ledger = { path = "./sleipnir-ledger" }
-sleipnir-messaging = { path = "./sleipnir-messaging" }
-sleipnir-metrics = { path = "./sleipnir-metrics" }
-sleipnir-mutator = { path = "./sleipnir-mutator" }
-sleipnir-perf-service = { path = "./sleipnir-perf-service" }
-sleipnir-processor = { path = "./sleipnir-processor" }
-sleipnir-program = { path = "./programs/sleipnir" }
-sleipnir-pubsub = { path = "./sleipnir-pubsub" }
-sleipnir-rpc = { path = "./sleipnir-rpc" }
-sleipnir-rpc-sender = { path = "./sleipnir-rpc-sender" }
-sleipnir-tokens = { path = "./sleipnir-tokens" }
-sleipnir-streamer = { path = "./sleipnir-streamer" }
-sleipnir-transaction-status = { path = "./sleipnir-transaction-status" }
-sleipnir-version = { path = "./sleipnir-version" }
+magicblock-account-cloner = { path = "./magicblock-account-cloner" }
+magicblock-account-dumper = { path = "./magicblock-account-dumper" }
+magicblock-account-fetcher = { path = "./magicblock-account-fetcher" }
+magicblock-account-updates = { path = "./magicblock-account-updates" }
+magicblock-accounts = { path = "./magicblock-accounts" }
+magicblock-accounts-api = { path = "./magicblock-accounts-api" }
+magicblock-accounts-db = { path = "./magicblock-accounts-db" }
+magicblock-api = { path = "./magicblock-api" }
+magicblock-bank = { path = "./magicblock-bank" }
+magicblock-config = { path = "./magicblock-config" }
+magicblock-core = { path = "./magicblock-core" }
+magicblock-geyser-plugin = { path = "./magicblock-geyser-plugin" }
+magicblock-ledger = { path = "./magicblock-ledger" }
+magicblock-messaging = { path = "./magicblock-messaging" }
+magicblock-metrics = { path = "./magicblock-metrics" }
+magicblock-mutator = { path = "./magicblock-mutator" }
+magicblock-perf-service = { path = "./magicblock-perf-service" }
+magicblock-processor = { path = "./magicblock-processor" }
+magicblock-program = { path = "./programs/magicblock" }
+magicblock-pubsub = { path = "./magicblock-pubsub" }
+magicblock-rpc = { path = "./magicblock-rpc" }
+magicblock-rpc-sender = { path = "./magicblock-rpc-sender" }
+magicblock-tokens = { path = "./magicblock-tokens" }
+magicblock-streamer = { path = "./magicblock-streamer" }
+magicblock-transaction-status = { path = "./magicblock-transaction-status" }
+magicblock-version = { path = "./magicblock-version" }
 solana-accounts-db = { path = "./solana/accounts-db", version = "1.19.0" }
 solana-account-decoder = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-account-decoder", version = "1.19.0" }
 solana-address-lookup-table-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-address-lookup-table-program", version = "1.19.0" }

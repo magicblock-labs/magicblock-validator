@@ -53,25 +53,25 @@ pub struct IntegrationTestContext {
 // Copy the impl of the ScheduleCommitTestContext here from test-integration/schedulecommit/client/src/schedule_commit_context.rs
 // Omit the ones that need committees or whichever else needs fields we don't have here
 impl IntegrationTestContext {
-    pub fn new_ephem_only() -> Self {
+    pub fn try_new_ephem_only() -> Result<Self> {
         let commitment = CommitmentConfig::confirmed();
         let ephem_client = RpcClient::new_with_commitment(
             Self::url_ephem().to_string(),
             commitment,
         );
-        let validator_identity = ephem_client.get_identity().unwrap();
-        let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
-        Self {
+        let validator_identity = ephem_client.get_identity()?;
+        let ephem_blockhash = ephem_client.get_latest_blockhash()?;
+        Ok(Self {
             commitment,
             chain_client: None,
             ephem_client,
             validator_identity,
             chain_blockhash: None,
             ephem_blockhash,
-        }
+        })
     }
 
-    pub fn new() -> Self {
+    pub fn try_new() -> Result<Self> {
         let commitment = CommitmentConfig::confirmed();
 
         let chain_client = RpcClient::new_with_commitment(
@@ -82,18 +82,18 @@ impl IntegrationTestContext {
             Self::url_ephem().to_string(),
             commitment,
         );
-        let validator_identity = chain_client.get_identity().unwrap();
-        let chain_blockhash = chain_client.get_latest_blockhash().unwrap();
-        let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
+        let validator_identity = chain_client.get_identity()?;
+        let chain_blockhash = chain_client.get_latest_blockhash()?;
+        let ephem_blockhash = ephem_client.get_latest_blockhash()?;
 
-        Self {
+        Ok(Self {
             commitment,
             chain_client: Some(chain_client),
             ephem_client,
             validator_identity,
             chain_blockhash: Some(chain_blockhash),
             ephem_blockhash,
-        }
+        })
     }
 
     // -----------------
@@ -645,11 +645,5 @@ impl IntegrationTestContext {
     }
     pub fn url_chain() -> &'static str {
         URL_CHAIN
-    }
-}
-
-impl Default for IntegrationTestContext {
-    fn default() -> Self {
-        Self::new()
     }
 }

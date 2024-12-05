@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
-use sleipnir_accounts_db::accounts_update_notifier_interface::AccountsUpdateNotifier;
-use sleipnir_bank::{
+use magicblock_accounts_db::accounts_update_notifier_interface::AccountsUpdateNotifier;
+use magicblock_bank::{
     bank::Bank, slot_status_notifier_interface::SlotStatusNotifierArc,
     transaction_logs::TransactionLogCollectorFilter,
     EPHEM_DEFAULT_MILLIS_PER_SLOT,
@@ -9,7 +9,7 @@ use sleipnir_bank::{
 use solana_sdk::{genesis_config::GenesisConfig, pubkey::Pubkey};
 use solana_svm::runtime_config::RuntimeConfig;
 
-// Lots is almost duplicate of /Volumes/d/dev/mb/validator/x-validator/sleipnir-bank/src/bank_dev_utils/bank.rs
+// Lots is almost duplicate of bank/src/bank_dev_utils/bank.rs
 // in order to make it accessible without needing the feature flag
 
 // Special case for test allowing to pass validator identity

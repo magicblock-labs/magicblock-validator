@@ -1,0 +1,41 @@
+[package]
+name = "magicblock-api"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+conjunto-transwise = { workspace = true }
+crossbeam-channel = { workspace = true }
+fd-lock = { workspace = true }
+itertools = { workspace = true }
+log = { workspace = true }
+magicblock-account-cloner = { workspace = true }
+magicblock-account-dumper = { workspace = true }
+magicblock-account-fetcher = { workspace = true }
+magicblock-account-updates = { workspace = true }
+magicblock-accounts = { workspace = true }
+magicblock-accounts-api = { workspace = true }
+magicblock-accounts-db = { workspace = true }
+magicblock-bank = { workspace = true }
+magicblock-config = { workspace = true }
+magicblock-core = { workspace = true }
+magicblock-geyser-plugin = { workspace = true }
+magicblock-ledger = { workspace = true }
+magicblock-metrics = { workspace = true }
+magicblock-perf-service = { workspace = true }
+magicblock-processor = { workspace = true }
+magicblock-program = { workspace = true }
+magicblock-pubsub = { workspace = true }
+magicblock-rpc = { workspace = true }
+magicblock-transaction-status = { workspace = true }
+solana-geyser-plugin-interface = { workspace = true }
+solana-geyser-plugin-manager = { workspace = true }
+solana-sdk = { workspace = true }
+tempfile = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+tokio-util = { workspace = true }

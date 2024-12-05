@@ -31,8 +31,8 @@ serde = "1.0.196"
 program-flexi-counter = { path = "./programs/flexi-counter" }
 program-schedulecommit = { path = "programs/schedulecommit" }
 program-schedulecommit-security = { path = "programs/schedulecommit-security" }
-sleipnir-config = { path = "../sleipnir-config" }
-sleipnir-core = { path = "../sleipnir-core" }
+magicblock-config = { path = "../magicblock-config" }
+magicblock-core = { path = "../magicblock-core" }
 teepee = "0.0.1"
 tempfile = "3.10.1"
 test-tools-core = { path = "../test-tools-core" }
