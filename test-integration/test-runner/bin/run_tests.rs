@@ -375,6 +375,7 @@ fn start_test_validator_with_config(
     let mut command = process::Command::new("solana-test-validator");
     command
         .args(args)
+        .env("RUST_LOG", "solana=warn")
         .env("RUST_LOG_STYLE", log_suffix)
         .current_dir(root_dir);
 
