@@ -15,5 +15,5 @@
 
 *Important dependencies:*
 
-- Provides `Bank`: [sleipnir-bank](../sleipnir-bank/README.md)
-- Provides `GeyserRpcService`: [sleipnir-geyser-plugin](../sleipnir-geyser-plugin/README.md)
+- Provides `Bank`: [magicblock-bank](../magicblock-bank/README.md)
+- Provides `GeyserRpcService`: [magicblock-geyser-plugin](../magicblock-geyser-plugin/README.md)

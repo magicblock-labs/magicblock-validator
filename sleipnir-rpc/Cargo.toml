@@ -34,7 +34,7 @@ solana-perf = { workspace = true }
 solana-program-runtime = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
-# TODO: decide if we want to use sleipnir-transaction-status instead
+# TODO: decide if we want to use magicblock-transaction-status instead
 # and possibly have that crate just be a wrapper around solana-transaction-status
 solana-transaction-status = { workspace = true }
 

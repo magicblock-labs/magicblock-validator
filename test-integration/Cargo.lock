@@ -1712,10 +1712,10 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "borsh 0.10.3",
+ "magicblock-config",
+ "magicblock-core",
  "rayon",
  "serde",
- "sleipnir-config",
- "sleipnir-core",
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk 1.17.22",
@@ -1915,6 +1915,63 @@ checksum = "109de74d5d2353660401699a4174a4ff23fcc649caf553df71933c7fb45ad868"
 dependencies = [
  "cc",
  "libc",
+]
+
+[[package]]
+name = "magicblock-accounts-db"
+version = "1.19.0"
+dependencies = [
+ "blake3",
+ "dashmap",
+ "fs_extra",
+ "log",
+ "magicblock-metrics",
+ "modular-bitfield",
+ "rand 0.8.5",
+ "rayon",
+ "smallvec",
+ "solana-accounts-db",
+ "solana-frozen-abi-macro 1.19.0",
+ "solana-measure 1.19.0",
+ "solana-metrics 1.19.0",
+ "solana-rayon-threadlimit",
+ "solana-sdk 1.19.0",
+ "thiserror",
+]
+
+[[package]]
+name = "magicblock-config"
+version = "1.19.0"
+dependencies = [
+ "serde",
+ "solana-sdk 1.19.0",
+ "strum",
+ "strum_macros",
+ "test-tools-core",
+ "thiserror",
+ "toml 0.8.15",
+ "url",
+]
+
+[[package]]
+name = "magicblock-core"
+version = "1.19.0"
+dependencies = [
+ "solana-sdk 1.19.0",
+]
+
+[[package]]
+name = "magicblock-metrics"
+version = "1.19.0"
+dependencies = [
+ "http-body-util",
+ "hyper 1.5.1",
+ "hyper-util",
+ "lazy_static",
+ "log",
+ "prometheus",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -2749,8 +2806,8 @@ dependencies = [
  "anyhow",
  "borsh 0.10.3",
  "integration-test-tools",
+ "magicblock-core",
  "program-schedulecommit",
- "sleipnir-core",
  "solana-program 1.17.22",
  "solana-rpc-client",
  "solana-rpc-client-api",
@@ -2764,9 +2821,9 @@ dependencies = [
  "ephemeral-rollups-sdk",
  "integration-test-tools",
  "log",
+ "magicblock-core",
  "program-schedulecommit",
  "schedulecommit-client",
- "sleipnir-core",
  "solana-program 1.17.22",
  "solana-rpc-client",
  "solana-rpc-client-api",
@@ -2779,10 +2836,10 @@ name = "schedulecommit-test-security"
 version = "0.0.0"
 dependencies = [
  "integration-test-tools",
+ "magicblock-core",
  "program-schedulecommit",
  "program-schedulecommit-security",
  "schedulecommit-client",
- "sleipnir-core",
  "solana-rpc-client-api",
  "solana-sdk 1.17.22",
 ]
@@ -3005,63 +3062,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f92a496fb766b417c996b9c5e57daf2f7ad3b0bebe1ccfca4856390e3d3bb67"
 dependencies = [
  "autocfg",
-]
-
-[[package]]
-name = "sleipnir-accounts-db"
-version = "1.19.0"
-dependencies = [
- "blake3",
- "dashmap",
- "fs_extra",
- "log",
- "modular-bitfield",
- "rand 0.8.5",
- "rayon",
- "sleipnir-metrics",
- "smallvec",
- "solana-accounts-db",
- "solana-frozen-abi-macro 1.19.0",
- "solana-measure 1.19.0",
- "solana-metrics 1.19.0",
- "solana-rayon-threadlimit",
- "solana-sdk 1.19.0",
- "thiserror",
-]
-
-[[package]]
-name = "sleipnir-config"
-version = "1.19.0"
-dependencies = [
- "serde",
- "solana-sdk 1.19.0",
- "strum",
- "strum_macros",
- "test-tools-core",
- "thiserror",
- "toml 0.8.15",
- "url",
-]
-
-[[package]]
-name = "sleipnir-core"
-version = "1.19.0"
-dependencies = [
- "solana-sdk 1.19.0",
-]
-
-[[package]]
-name = "sleipnir-metrics"
-version = "1.19.0"
-dependencies = [
- "http-body-util",
- "hyper 1.5.1",
- "hyper-util",
- "lazy_static",
- "log",
- "prometheus",
- "tokio",
- "tokio-util",
 ]
 
 [[package]]
@@ -4263,8 +4263,8 @@ dependencies = [
  "anyhow",
  "cleanass",
  "integration-test-tools",
+ "magicblock-config",
  "program-flexi-counter",
- "sleipnir-config",
  "solana-rpc-client",
  "solana-sdk 1.17.22",
  "solana-transaction-status",
@@ -4285,7 +4285,7 @@ version = "1.19.0"
 dependencies = [
  "env_logger 0.11.2",
  "log",
- "sleipnir-accounts-db",
+ "magicblock-accounts-db",
 ]
 
 [[package]]

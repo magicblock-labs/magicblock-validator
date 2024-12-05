@@ -45,7 +45,7 @@ iterative read, append write, and random access read to a persistent file-based 
 #### Bank Usage
 
 - `execute_batch` -> `batch.bank().load_execute_and_commit_transactions`
-- multi-threaded execution of transactions (we ported this partly to `sleipnir-processor`)
+- multi-threaded execution of transactions (we ported this partly to `magicblock-processor`)
 
 ### unified-scheduler-pool
 

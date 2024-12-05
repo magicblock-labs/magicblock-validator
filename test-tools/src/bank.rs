@@ -9,7 +9,7 @@ use magicblock_bank::{
 use solana_sdk::{genesis_config::GenesisConfig, pubkey::Pubkey};
 use solana_svm::runtime_config::RuntimeConfig;
 
-// Lots is almost duplicate of /Volumes/d/dev/mb/validator/x-validator/sleipnir-bank/src/bank_dev_utils/bank.rs
+// Lots is almost duplicate of bank/src/bank_dev_utils/bank.rs
 // in order to make it accessible without needing the feature flag
 
 // Special case for test allowing to pass validator identity

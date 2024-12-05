@@ -21,7 +21,7 @@ fn main() -> anyhow::Result<()> {
     );
     println!(
         "cargo:rustc-env=magicblock_GRPC_PROTO_VERSION={}",
-        get_pkg_version(&lockfile, "sleipnir-grpc-proto")
+        get_pkg_version(&lockfile, "magicblock-grpc-proto")
     );
 
     Ok(())

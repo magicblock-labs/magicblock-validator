@@ -85,7 +85,7 @@ transaction_log_collector.logs.push(
 );
 ```
 
-- inside `load_and_execute_transactions` `sleipnir-bank/src/bank.rs:1535`, but seems smallish
+- inside `load_and_execute_transactions` `magicblock-bank/src/bank.rs:1535`, but seems smallish
 
 ### Geyser
 
@@ -96,7 +96,7 @@ Message::Transaction(msg) => {
 }
 ```
 
-- inside `geyser_loop` `sleipnir-geyser-plugin/src/grpc.rs:133` cloned messages to send (maybe
+- inside `geyser_loop` `magicblock-geyser-plugin/src/grpc.rs:133` cloned messages to send (maybe
   channel is backed up?)
 - the receiver of msgs here is unbounded, so is the blocks_meta sender and the broadcast sender
   is only bounded to 250K
@@ -148,7 +148,7 @@ Unless otherwise noted geyser cache was on and each run did 100 iterations
 
 ### 1. Leak 1
 
-- `sleipnir-bank/src/bank.rs:1691`
+- `magicblock-bank/src/bank.rs:1691`
 - sizes: 32, 64, 92
 
 ```rs
@@ -172,9 +172,9 @@ Not storing transaction logs:
 
 ### 2. Leak 2
 
-- `sleipnir-geyser-plugin/src/plugin.rs:273` `fn notify_transaction` is cloning parts of the
+- `magicblock-geyser-plugin/src/plugin.rs:273` `fn notify_transaction` is cloning parts of the
 `ReplicaTransactionInfoVersions` which unavoidable since we only get passed a reference
-- see `sleipnir-geyser-plugin/src/grpc_messages.rs:157` clones both the sanitized transaction
+- see `magicblock-geyser-plugin/src/grpc_messages.rs:157` clones both the sanitized transaction
 and the transaction status meta
 
 ```rs
@@ -196,7 +196,7 @@ impl<'a> From<(&'a ReplicaTransactionInfoV2<'a>, u64)> for MessageTransaction {
 
 ### 3. Leak 3
 
-- `sleipnir-bank/src/bank.rs:1986`
+- `magicblock-bank/src/bank.rs:1986`
 - sizes: 64
 
 ```rs
@@ -229,7 +229,7 @@ Not storing at all:
 
 ### 4. Leak 4
 
-- `sleipnir-geyser-plugin/src/grpc.rs:137` `async fn geyser_loop`
+- `magicblock-geyser-plugin/src/grpc.rs:137` `async fn geyser_loop`
 - `_$LT$T$u20$as$u20$alloc..borrow..ToOwned$GT$::to_owned::h257611d42533d4cd`
 - sizes: 96
 
@@ -237,7 +237,7 @@ Not storing at all:
 
 Saw this when profiling without running the benchmark
 
-- `sleipnir-bank/src/bank.rs:900` `fn store_account_and_update_capitalization` due to
+- `magicblock-bank/src/bank.rs:900` `fn store_account_and_update_capitalization` due to
 `update_clock` when advancing slot
 -> `solana/accounts-db/src/accounts_cache.rs:216` `fn store`
 - sizes: 3.5KB

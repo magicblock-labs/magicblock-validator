@@ -41,7 +41,7 @@ However any transaction sent to this RPC is ran inside the custom SVM bank.
 
 *Important dependencies:*
 
-- Provides `Bank`: [sleipnir-bank](../sleipnir-bank/README.md)
-- Provides `Ledger`: [sleipnir-ledger](../sleipnir-ledger/README.md)
-- Provides `AccountsManager`: [sleipnir-accounts](../sleipnir-accounts/README.md)
-- Provides `execute_batch`: [sleipnir-processor](../sleipnir-processor/README.md)
+- Provides `Bank`: [magicblock-bank](../bank/README.md)
+- Provides `Ledger`: [magicblock-ledger](../ledger/README.md)
+- Provides `AccountsManager`: [magicblock-accounts](../accounts/README.md)
+- Provides `execute_batch`: [magicblock-processor](../processor/README.md)

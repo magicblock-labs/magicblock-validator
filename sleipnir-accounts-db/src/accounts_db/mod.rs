@@ -350,7 +350,7 @@ impl AccountsDb {
     /// Return Err(MatchAccountOwnerError::NoMatch) if the account has 0 lamports or the owner is not one of
     /// the pubkeys in `owners`.
     /// Return Err(MatchAccountOwnerError::UnableToLoad) if the account could not be accessed.
-    // NOTE: this is called from sleipnir-bank/src/bank.rs fn account_matches_owners and
+    // NOTE: this is called from magicblock-bank/src/bank.rs fn account_matches_owners and
     // it is confusing why the original implementation is so complex if we just return an
     // index into the already provided [owners] array
     pub fn account_matches_owners(

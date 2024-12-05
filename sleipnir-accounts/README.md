@@ -42,4 +42,4 @@ Implements a `AccountsManager`, which is reponsible for:
 *Important dependencies:*
 
 - Provides `Transwise`: the conjuncto repository
-- Provides `Bank`: [sleipnir-bank](../sleipnir-bank/README.md)
+- Provides `Bank`: [magicblock-bank](../magicblock-bank/README.md)
