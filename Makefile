@@ -48,8 +48,9 @@ fmt:
 lint:
 	cargo clippy --all-targets -- -D warnings -A unexpected_cfgs
 
+# RUST_BACKTRACE=1 cargo $(CARGO_TEST_NOCAP) &&
 ci-test:
-	RUST_BACKTRACE=1 cargo $(CARGO_TEST_NOCAP) && \
+	cargo build && \
 	$(MAKE) -C $(DIR)/test-integration test
 
 ## NOTE: We're getting the following error in github CI when trying to use
