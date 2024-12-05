@@ -53,7 +53,7 @@ For each account, the logic goes as follow:
     - After 5 failed retry and 200 ms sleep in between each, we fail the clone
   - 3) Differentiate based on the account's fetched flavor (we will use the "dumper"):
     - A) If Undelegated: Simply dump the latest up-to-date fetched data to the bank (programs also fetched/updated)
-    - B) If FeePayer: Dump the account with the lamport value found in the DelegationRecord
+    - B) If FeePayer: Dump the account as-is, but with special lamport value
     - C) If Delegated: If the account's latest delegation_slot is NOT the same as the last clone's delegation_slot, dump the latest state, otherwise ignore the change and use the cache
   - 4) Save the result of the clone to the cache
 
@@ -81,7 +81,7 @@ The worker maintains a list of "Shard", each shard manages a single RPC websocke
 On startup, we subscribe to the RPC's `Clock` changes, in order to know which slot is the latest confirmed slot for the RPC.
 
 For each account monitoring request, an "accountSubscribe" websocket subscription is created through an RPC call.
-For each account monitoring request, we set the `first_subscribed_slot` to the currently `Clock` slot at the time of subscription.
+For each account monitoring request, we set the `first_subscribed_slot` to the last `Clock`'s slot at the time of subscription.
 
 For each update received in the websocket subscription, we save the slot at which the update occured: This is what we call the `last_known_update_slot`.
 
