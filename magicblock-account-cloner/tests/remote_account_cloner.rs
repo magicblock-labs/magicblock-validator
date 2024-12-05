@@ -42,6 +42,7 @@ fn setup_custom(
         allowed_program_ids,
         blacklisted_accounts,
         payer_init_lamports,
+        true,
         permissions,
         Pubkey::new_unique(),
     );

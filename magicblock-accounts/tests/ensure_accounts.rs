@@ -52,6 +52,7 @@ fn setup_with_lifecycle(
         None,
         HashSet::new(),
         Some(1_000_000_000),
+        true,
         lifecycle.to_account_cloner_permissions(),
         Pubkey::new_unique(),
     );
