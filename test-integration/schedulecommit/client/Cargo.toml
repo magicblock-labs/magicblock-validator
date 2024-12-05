@@ -7,9 +7,9 @@ edition.workspace = true
 anyhow = { workspace = true }
 borsh = { workspace = true }
 integration-test-tools = { workspace = true }
-sleipnir-core = { workspace = true }
+program-schedulecommit = { workspace = true, features = ["no-entrypoint"] }
+magicblock-core = { workspace = true }
 solana-program = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
-schedulecommit-program = { workspace = true, features = ["no-entrypoint"] }

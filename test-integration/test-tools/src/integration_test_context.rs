@@ -1,7 +1,9 @@
-use std::{thread::sleep, time::Duration};
+use std::{str::FromStr, thread::sleep, time::Duration};
 
 use anyhow::{Context, Result};
-use solana_rpc_client::rpc_client::RpcClient;
+use solana_rpc_client::rpc_client::{
+    GetConfirmedSignaturesForAddress2Config, RpcClient,
+};
 use solana_rpc_client_api::{
     client_error,
     client_error::{Error as ClientError, ErrorKind as ClientErrorKind},
@@ -10,13 +12,34 @@ use solana_rpc_client_api::{
 #[allow(unused_imports)]
 use solana_sdk::signer::SeedDerivable;
 use solana_sdk::{
+    account::Account,
     clock::Slot,
     commitment_config::CommitmentConfig,
     hash::Hash,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
-    transaction::Transaction,
+    transaction::{Transaction, TransactionError},
 };
+
+const URL_CHAIN: &str = "http://localhost:7799";
+const URL_EPHEM: &str = "http://localhost:8899";
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct TransactionStatusWithSignature {
+    pub signature: String,
+    pub slot: Slot,
+    pub err: Option<TransactionError>,
+}
+
+impl TransactionStatusWithSignature {
+    pub fn signature(&self) -> Signature {
+        Signature::from_str(&self.signature).unwrap()
+    }
+
+    pub fn has_error(&self) -> bool {
+        self.err.is_some()
+    }
+}
 
 pub struct IntegrationTestContext {
     pub commitment: CommitmentConfig,
@@ -30,47 +53,47 @@ pub struct IntegrationTestContext {
 // Copy the impl of the ScheduleCommitTestContext here from test-integration/schedulecommit/client/src/schedule_commit_context.rs
 // Omit the ones that need committees or whichever else needs fields we don't have here
 impl IntegrationTestContext {
-    pub fn new_ephem_only() -> Self {
+    pub fn try_new_ephem_only() -> Result<Self> {
         let commitment = CommitmentConfig::confirmed();
         let ephem_client = RpcClient::new_with_commitment(
-            "http://localhost:8899".to_string(),
+            Self::url_ephem().to_string(),
             commitment,
         );
-        let validator_identity = ephem_client.get_identity().unwrap();
-        let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
-        Self {
+        let validator_identity = ephem_client.get_identity()?;
+        let ephem_blockhash = ephem_client.get_latest_blockhash()?;
+        Ok(Self {
             commitment,
             chain_client: None,
             ephem_client,
             validator_identity,
             chain_blockhash: None,
             ephem_blockhash,
-        }
+        })
     }
 
-    pub fn new() -> Self {
+    pub fn try_new() -> Result<Self> {
         let commitment = CommitmentConfig::confirmed();
 
         let chain_client = RpcClient::new_with_commitment(
-            "http://localhost:7799".to_string(),
+            Self::url_chain().to_string(),
             commitment,
         );
         let ephem_client = RpcClient::new_with_commitment(
-            "http://localhost:8899".to_string(),
+            Self::url_ephem().to_string(),
             commitment,
         );
-        let validator_identity = chain_client.get_identity().unwrap();
-        let chain_blockhash = chain_client.get_latest_blockhash().unwrap();
-        let ephem_blockhash = ephem_client.get_latest_blockhash().unwrap();
+        let validator_identity = chain_client.get_identity()?;
+        let chain_blockhash = chain_client.get_latest_blockhash()?;
+        let ephem_blockhash = ephem_client.get_latest_blockhash()?;
 
-        Self {
+        Ok(Self {
             commitment,
             chain_client: Some(chain_client),
             ephem_client,
             validator_identity,
             chain_blockhash: Some(chain_blockhash),
             ephem_blockhash,
-        }
+        })
     }
 
     // -----------------
@@ -161,20 +184,6 @@ impl IntegrationTestContext {
     // -----------------
     // Fetch Account Data/Balance
     // -----------------
-    pub fn fetch_ephem_account_data(
-        &self,
-        pubkey: Pubkey,
-    ) -> anyhow::Result<Vec<u8>> {
-        self.ephem_client
-            .get_account_data(&pubkey)
-            .with_context(|| {
-                format!(
-                    "Failed to fetch ephemeral account data for '{:?}'",
-                    pubkey
-                )
-            })
-    }
-
     pub fn try_chain_client(&self) -> anyhow::Result<&RpcClient> {
         let Some(chain_client) = self.chain_client.as_ref() else {
             return Err(anyhow::anyhow!("Chain client not available"));
@@ -182,14 +191,58 @@ impl IntegrationTestContext {
         Ok(chain_client)
     }
 
+    pub fn fetch_ephem_account_data(
+        &self,
+        pubkey: Pubkey,
+    ) -> anyhow::Result<Vec<u8>> {
+        self.fetch_ephem_account(pubkey).map(|account| account.data)
+    }
+
     pub fn fetch_chain_account_data(
         &self,
         pubkey: Pubkey,
     ) -> anyhow::Result<Vec<u8>> {
-        self.try_chain_client()?
-            .get_account_data(&pubkey)
+        self.fetch_chain_account(pubkey).map(|account| account.data)
+    }
+
+    pub fn fetch_ephem_account(
+        &self,
+        pubkey: Pubkey,
+    ) -> anyhow::Result<Account> {
+        Self::fetch_account(
+            &self.ephem_client,
+            pubkey,
+            self.commitment,
+            "ephemeral",
+        )
+    }
+
+    pub fn fetch_chain_account(
+        &self,
+        pubkey: Pubkey,
+    ) -> anyhow::Result<Account> {
+        self.try_chain_client().and_then(|chain_client| {
+            Self::fetch_account(chain_client, pubkey, self.commitment, "chain")
+        })
+    }
+
+    fn fetch_account(
+        rpc_client: &RpcClient,
+        pubkey: Pubkey,
+        commitment: CommitmentConfig,
+        cluster: &str,
+    ) -> anyhow::Result<Account> {
+        rpc_client
+            .get_account_with_commitment(&pubkey, commitment)
             .with_context(|| {
-                format!("Failed to fetch chain account data for '{:?}'", pubkey)
+                format!(
+                    "Failed to fetch {} account data for '{:?}'",
+                    cluster, pubkey
+                )
+            })?
+            .value
+            .ok_or_else(|| {
+                anyhow::anyhow!("Account '{}' not found on {}", pubkey, cluster)
             })
     }
 
@@ -227,30 +280,16 @@ impl IntegrationTestContext {
         &self,
         pubkey: Pubkey,
     ) -> anyhow::Result<Pubkey> {
-        self.ephem_client
-            .get_account(&pubkey)
+        self.fetch_ephem_account(pubkey)
             .map(|account| account.owner)
-            .with_context(|| {
-                format!(
-                    "Failed to fetch ephemeral account owner for '{:?}'",
-                    pubkey
-                )
-            })
     }
 
     pub fn fetch_chain_account_owner(
         &self,
         pubkey: Pubkey,
     ) -> anyhow::Result<Pubkey> {
-        self.try_chain_client()?
-            .get_account(&pubkey)
+        self.fetch_chain_account(pubkey)
             .map(|account| account.owner)
-            .with_context(|| {
-                format!(
-                    "Failed to fetch chain account owner for '{:?}'",
-                    pubkey
-                )
-            })
     }
 
     // -----------------
@@ -421,19 +460,33 @@ impl IntegrationTestContext {
         tx: &mut Transaction,
         signers: &[&Keypair],
     ) -> Result<(Signature, bool), client_error::Error> {
-        Self::send_and_confirm_transaction(&self.ephem_client, tx, signers)
+        Self::send_and_confirm_transaction(
+            &self.ephem_client,
+            tx,
+            signers,
+            self.commitment,
+        )
     }
 
     pub fn send_and_confirm_transaction_chain(
         &self,
         tx: &mut Transaction,
         signers: &[&Keypair],
-    ) -> Result<(Signature, bool), client_error::Error> {
-        Self::send_and_confirm_transaction(
-            self.try_chain_client().unwrap(),
-            tx,
-            signers,
-        )
+    ) -> Result<(Signature, bool), anyhow::Error> {
+        self.try_chain_client().and_then(|chain_client| {
+            Self::send_and_confirm_transaction(
+                chain_client,
+                tx,
+                signers,
+                self.commitment,
+            )
+            .with_context(|| {
+                format!(
+                    "Failed to confirm chain transaction '{:?}'",
+                    tx.signatures[0]
+                )
+            })
+        })
     }
 
     pub fn send_transaction(
@@ -457,14 +510,64 @@ impl IntegrationTestContext {
         rpc_client: &RpcClient,
         tx: &mut Transaction,
         signers: &[&Keypair],
+        commitment: CommitmentConfig,
     ) -> Result<(Signature, bool), client_error::Error> {
         let sig = Self::send_transaction(rpc_client, tx, signers)?;
-        Self::confirm_transaction(
-            &sig,
-            rpc_client,
-            CommitmentConfig::confirmed(),
+        Self::confirm_transaction(&sig, rpc_client, commitment)
+            .map(|confirmed| (sig, confirmed))
+    }
+
+    // -----------------
+    // Transaction Queries
+    // -----------------
+    pub fn get_signaturestats_for_address_ephem(
+        &self,
+        address: &Pubkey,
+    ) -> Result<Vec<TransactionStatusWithSignature>> {
+        Self::get_signaturestats_for_address(
+            &self.ephem_client,
+            address,
+            self.commitment,
         )
-        .map(|confirmed| (sig, confirmed))
+    }
+
+    pub fn get_signaturestats_for_address_chain(
+        &self,
+        address: &Pubkey,
+    ) -> Result<Vec<TransactionStatusWithSignature>> {
+        self.try_chain_client().and_then(|chain_client| {
+            Self::get_signaturestats_for_address(
+                chain_client,
+                address,
+                self.commitment,
+            )
+        })
+    }
+
+    fn get_signaturestats_for_address(
+        rpc_client: &RpcClient,
+        address: &Pubkey,
+        commitment: CommitmentConfig,
+    ) -> Result<Vec<TransactionStatusWithSignature>> {
+        let res = rpc_client
+            .get_signatures_for_address_with_config(
+                address,
+                GetConfirmedSignaturesForAddress2Config {
+                    commitment: Some(commitment),
+                    ..Default::default()
+                },
+            )
+            .map(|status| {
+                status
+                    .into_iter()
+                    .map(|x| TransactionStatusWithSignature {
+                        signature: x.signature,
+                        slot: x.slot,
+                        err: x.err,
+                    })
+                    .collect()
+            })?;
+        Ok(res)
     }
 
     // -----------------
@@ -480,6 +583,10 @@ impl IntegrationTestContext {
 
     pub fn wait_for_slot_ephem(&self, target_slot: Slot) -> Result<Slot> {
         Self::wait_until_slot(&self.ephem_client, target_slot)
+    }
+
+    pub fn wait_for_next_slot_chain(&self) -> Result<Slot> {
+        self.try_chain_client().and_then(Self::wait_for_next_slot)
     }
 
     fn wait_for_next_slot(rpc_client: &RpcClient) -> Result<Slot> {
@@ -508,10 +615,35 @@ impl IntegrationTestContext {
         };
         Ok(slot)
     }
-}
 
-impl Default for IntegrationTestContext {
-    fn default() -> Self {
-        Self::new()
+    // -----------------
+    // Blockhash
+    // -----------------
+    pub fn get_all_blockhashes_ephem(&self) -> Result<Vec<String>> {
+        Self::get_all_blockhashes(&self.ephem_client)
+    }
+
+    pub fn get_all_blockhashes_chain(&self) -> Result<Vec<String>> {
+        Self::get_all_blockhashes(self.try_chain_client().unwrap())
+    }
+
+    fn get_all_blockhashes(rpc_client: &RpcClient) -> Result<Vec<String>> {
+        let current_slot = rpc_client.get_slot()?;
+        let mut blockhashes = vec![];
+        for slot in 0..current_slot {
+            let blockhash = rpc_client.get_block(slot)?.blockhash;
+            blockhashes.push(blockhash);
+        }
+        Ok(blockhashes)
+    }
+
+    // -----------------
+    // RPC Clients
+    // -----------------
+    pub fn url_ephem() -> &'static str {
+        URL_EPHEM
+    }
+    pub fn url_chain() -> &'static str {
+        URL_CHAIN
     }
 }

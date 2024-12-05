@@ -10,8 +10,8 @@ use std::{
 
 use crossbeam_channel::Receiver;
 use log::*;
-use sleipnir_accounts_db::accounts_update_notifier_interface::AccountsUpdateNotifier;
-use sleipnir_bank::{
+use magicblock_accounts_db::accounts_update_notifier_interface::AccountsUpdateNotifier;
+use magicblock_bank::{
     slot_status_notifier_interface::SlotStatusNotifierArc,
     transaction_notifier_interface::TransactionNotifierArc,
 };

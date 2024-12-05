@@ -1,9 +1,11 @@
 use ephemeral_rollups_sdk::consts::DELEGATION_PROGRAM_ID;
-use schedulecommit_client::{
-    verify::ScheduledCommitResult, ScheduleCommitTestContext,
-};
+use integration_test_tools::scheduled_commits::ScheduledCommitResult;
+use program_schedulecommit::MainAccount;
+use schedulecommit_client::ScheduleCommitTestContext;
 use solana_sdk::{
-    instruction::InstructionError, pubkey::Pubkey, signature::Signature,
+    instruction::InstructionError,
+    pubkey::Pubkey,
+    signature::{Keypair, Signature},
     transaction::TransactionError,
 };
 
@@ -14,10 +16,11 @@ pub fn get_context_with_delegated_committees(
     ncommittees: usize,
 ) -> ScheduleCommitTestContext {
     let ctx = if std::env::var("FIXED_KP").is_ok() {
-        ScheduleCommitTestContext::new(ncommittees)
+        ScheduleCommitTestContext::try_new(ncommittees)
     } else {
-        ScheduleCommitTestContext::new_random_keys(ncommittees)
-    };
+        ScheduleCommitTestContext::try_new_random_keys(ncommittees)
+    }
+    .unwrap();
 
     ctx.init_committees().unwrap();
     ctx.delegate_committees(None).unwrap();
@@ -30,7 +33,7 @@ pub fn get_context_with_delegated_committees(
 #[allow(dead_code)] // used in 02_commit_and_undelegate.rs
 pub fn assert_one_committee_was_committed(
     ctx: &ScheduleCommitTestContext,
-    res: &ScheduledCommitResult,
+    res: &ScheduledCommitResult<MainAccount>,
 ) {
     let pda = ctx.committees[0].1;
 
@@ -46,7 +49,7 @@ pub fn assert_one_committee_was_committed(
 #[allow(dead_code)] // used in 02_commit_and_undelegate.rs
 pub fn assert_two_committees_were_committed(
     ctx: &ScheduleCommitTestContext,
-    res: &ScheduledCommitResult,
+    res: &ScheduledCommitResult<MainAccount>,
 ) {
     let pda1 = ctx.committees[0].1;
     let pda2 = ctx.committees[1].1;
@@ -65,27 +68,21 @@ pub fn assert_two_committees_were_committed(
 #[allow(dead_code)] // used in 02_commit_and_undelegate.rs
 pub fn assert_one_committee_synchronized_count(
     ctx: &ScheduleCommitTestContext,
-    res: &ScheduledCommitResult,
+    res: &ScheduledCommitResult<MainAccount>,
     expected_count: u64,
 ) {
-    let pda = ctx.committees[0].1;
-
-    let commit = res.included.get(&pda);
-    assert!(commit.is_some(), "should have committed pda");
+    let (ephem_account, chain_account, pda) =
+        get_main_accounts(ctx, res, &ctx.committees[0]);
 
     assert_eq!(
-        commit.unwrap().ephem_account.as_ref().unwrap().count,
-        expected_count,
+        ephem_account.count, expected_count,
         "pda ({}) count is {} on ephem",
-        pda,
-        expected_count
+        pda, expected_count
     );
     assert_eq!(
-        commit.unwrap().chain_account.as_ref().unwrap().count,
-        expected_count,
+        chain_account.count, expected_count,
         "pda ({}) count is {} on chain",
-        pda,
-        expected_count
+        pda, expected_count
     );
 }
 
@@ -94,43 +91,52 @@ pub fn assert_one_committee_synchronized_count(
 // used in 02_commit_and_undelegate.rs
 pub fn assert_two_committees_synchronized_count(
     ctx: &ScheduleCommitTestContext,
-    res: &ScheduledCommitResult,
+    res: &ScheduledCommitResult<MainAccount>,
     expected_count: u64,
 ) {
-    let pda1 = ctx.committees[0].1;
-    let pda2 = ctx.committees[1].1;
-
-    let commit1 = res.included.get(&pda1);
-    let commit2 = res.included.get(&pda2);
+    let (ephem_account1, chain_account1, pda1) =
+        get_main_accounts(ctx, res, &ctx.committees[0]);
+    let (ephem_account2, chain_account2, pda2) =
+        get_main_accounts(ctx, res, &ctx.committees[1]);
 
     assert_eq!(
-        commit1.unwrap().ephem_account.as_ref().unwrap().count,
-        expected_count,
+        ephem_account1.count, expected_count,
         "pda1 ({}) count is {} on ephem",
-        pda1,
-        expected_count
+        pda1, expected_count
     );
     assert_eq!(
-        commit1.unwrap().chain_account.as_ref().unwrap().count,
-        expected_count,
+        chain_account1.count, expected_count,
         "pda1 ({}) count is {} on chain",
-        pda1,
-        expected_count
+        pda1, expected_count
     );
     assert_eq!(
-        commit2.unwrap().ephem_account.as_ref().unwrap().count,
-        expected_count,
+        ephem_account2.count, expected_count,
         "pda2 ({}) count is {} on ephem",
-        pda2,
-        expected_count
+        pda2, expected_count
     );
     assert_eq!(
-        commit2.unwrap().chain_account.as_ref().unwrap().count,
-        expected_count,
+        chain_account2.count, expected_count,
         "pda2 ({}) count is {} on chain",
-        pda2,
-        expected_count
+        pda2, expected_count
     );
+}
+
+fn get_main_accounts(
+    ctx: &ScheduleCommitTestContext,
+    res: &ScheduledCommitResult<MainAccount>,
+    committee: &(Keypair, Pubkey),
+) -> (MainAccount, MainAccount, Pubkey) {
+    let (_, pda) = committee;
+
+    let ephem_account = res
+        .included
+        .get(pda)
+        .expect("should have committed pda")
+        .clone();
+    let chain_account_data = ctx.fetch_chain_account_data(*pda).unwrap();
+    let chain_account = MainAccount::try_decode(&chain_account_data).unwrap();
+
+    (ephem_account, chain_account, *pda)
 }
 
 #[allow(dead_code)] // used in 02_commit_and_undelegate.rs
@@ -138,7 +144,7 @@ pub fn assert_one_committee_account_was_undelegated_on_chain(
     ctx: &ScheduleCommitTestContext,
 ) {
     let pda = ctx.committees[0].1;
-    let id = schedulecommit_program::id();
+    let id = program_schedulecommit::id();
     assert_account_was_undelegated_on_chain(ctx, pda, id);
 }
 
@@ -148,7 +154,7 @@ pub fn assert_two_committee_accounts_were_undelegated_on_chain(
 ) {
     let pda1 = ctx.committees[0].1;
     let pda2 = ctx.committees[1].1;
-    let id = schedulecommit_program::id();
+    let id = program_schedulecommit::id();
     assert_account_was_undelegated_on_chain(ctx, pda1, id);
     assert_account_was_undelegated_on_chain(ctx, pda2, id);
 }

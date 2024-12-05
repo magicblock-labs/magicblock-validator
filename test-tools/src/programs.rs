@@ -1,6 +1,6 @@
 use std::error::Error;
 
-use sleipnir_bank::{
+use magicblock_bank::{
     bank::Bank,
     program_loader::{add_loadables, LoadableProgram},
 };

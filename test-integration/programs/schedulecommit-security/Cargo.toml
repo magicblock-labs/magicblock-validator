@@ -1,0 +1,18 @@
+[package]
+name = "program-schedulecommit-security"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+borsh = { workspace = true }
+program-schedulecommit = { workspace = true, features = ["no-entrypoint"] }
+solana-program = { workspace = true }
+ephemeral-rollups-sdk = { workspace = true }
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+no-entrypoint = []
+cpi = ["no-entrypoint"]
+default = []

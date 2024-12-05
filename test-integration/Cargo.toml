@@ -1,8 +1,6 @@
 [workspace]
 members = [
-  "sysvars",
   "test-issues",
-  "schedulecommit/program",
   "schedulecommit/client",
   "schedulecommit/test-scenarios",
   "schedulecommit/test-security",
@@ -10,6 +8,10 @@ members = [
   "test-runner",
   "test-ledger-restore",
   "programs/flexi-counter",
+  "programs/schedulecommit",
+  "programs/schedulecommit-security",
+  "programs/sysvars",
+  "test-cloning",
 ]
 resolver = "2"
 
@@ -20,13 +22,18 @@ edition = "2021"
 [workspace.dependencies]
 anyhow = "1.0.86"
 borsh = "0.10.3"
+cleanass = "0.0.1"
 ephemeral-rollups-sdk = { path = "../../ephemeral-rollups-sdk/sdk" }
+integration-test-tools = { path = "test-tools" }
 log = "0.4.20"
 rayon = "1.10.0"
 serde = "1.0.196"
 program-flexi-counter = { path = "./programs/flexi-counter" }
-sleipnir-config = { path = "../sleipnir-config" }
-sleipnir-core = { path = "../sleipnir-core" }
+program-schedulecommit = { path = "programs/schedulecommit" }
+program-schedulecommit-security = { path = "programs/schedulecommit-security" }
+magicblock-config = { path = "../magicblock-config" }
+magicblock-core = { path = "../magicblock-core" }
+teepee = "0.0.1"
 tempfile = "3.10.1"
 test-tools-core = { path = "../test-tools-core" }
 toml = "0.8.13"
@@ -38,5 +45,3 @@ solana-rpc-client-api = "=1.17.22"
 solana-sdk = "=1.17.22"
 solana-transaction-status = "=1.17.22"
 schedulecommit-client = { path = "schedulecommit/client" }
-schedulecommit-program = { path = "schedulecommit/program" }
-integration-test-tools = { path = "test-tools" }

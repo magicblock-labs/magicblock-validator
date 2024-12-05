@@ -2,7 +2,7 @@
 use {
     crate::geyser_plugin_manager::GeyserPluginManager,
     log::*,
-    sleipnir_accounts_db::accounts_update_notifier_interface::AccountsUpdateNotifierInterface,
+    magicblock_accounts_db::accounts_update_notifier_interface::AccountsUpdateNotifierInterface,
     solana_geyser_plugin_interface::geyser_plugin_interface::{
         ReplicaAccountInfoV3, ReplicaAccountInfoVersions,
     },

@@ -1,8 +1,6 @@
 use integration_test_tools::conversions::pubkey_from_magic_program;
-use schedulecommit_test_security::{
-    DIRECT_SCHEDULE_COMMIT_CPI, NON_CPI, SIBLING_SCHEDULE_COMMIT_CPIS,
-};
-use sleipnir_core::magic_program;
+use magicblock_core::magic_program;
+use program_schedulecommit_security::ScheduleCommitSecurityInstruction;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
@@ -23,10 +21,9 @@ pub fn create_sibling_schedule_cpis_instruction(
         AccountMeta::new(payer, true),
         AccountMeta::new(magic_context, false),
         AccountMeta::new_readonly(magic_program, false),
-        AccountMeta::new_readonly(schedulecommit_program::id(), false),
+        AccountMeta::new_readonly(program_schedulecommit::id(), false),
     ];
 
-    let mut instruction_data = vec![SIBLING_SCHEDULE_COMMIT_CPIS];
     for pubkey in pdas {
         account_metas.push(AccountMeta {
             pubkey: *pubkey,
@@ -35,12 +32,11 @@ pub fn create_sibling_schedule_cpis_instruction(
             is_writable: true,
         });
     }
-    for pubkey in player_pubkeys {
-        instruction_data.extend_from_slice(&pubkey.to_bytes());
-    }
-    Instruction::new_with_bytes(
-        schedulecommit_test_security::id(),
-        &instruction_data,
+    Instruction::new_with_borsh(
+        program_schedulecommit_security::id(),
+        &ScheduleCommitSecurityInstruction::SiblingScheduleCommitCpis(
+            player_pubkeys.to_vec(),
+        ),
         account_metas,
     )
 }
@@ -61,7 +57,6 @@ pub fn create_nested_schedule_cpis_instruction(
         AccountMeta::new_readonly(magic_program, false),
     ];
 
-    let mut instruction_data = vec![DIRECT_SCHEDULE_COMMIT_CPI];
     for pubkey in pdas {
         account_metas.push(AccountMeta {
             pubkey: *pubkey,
@@ -70,12 +65,11 @@ pub fn create_nested_schedule_cpis_instruction(
             is_writable: true,
         });
     }
-    for pubkey in player_pubkeys {
-        instruction_data.extend_from_slice(&pubkey.to_bytes());
-    }
-    Instruction::new_with_bytes(
-        schedulecommit_test_security::id(),
-        &instruction_data,
+    Instruction::new_with_borsh(
+        program_schedulecommit_security::id(),
+        &ScheduleCommitSecurityInstruction::DirectScheduleCommitCpi(
+            player_pubkeys.to_vec(),
+        ),
         account_metas,
     )
 }
@@ -84,10 +78,9 @@ pub fn create_nested_schedule_cpis_instruction(
 /// It could be added to confuse our algorithm to detect the invoking program.
 pub fn create_sibling_non_cpi_instruction(payer: Pubkey) -> Instruction {
     let account_metas = vec![AccountMeta::new(payer, true)];
-    let instruction_data = vec![NON_CPI];
-    Instruction::new_with_bytes(
-        schedulecommit_test_security::id(),
-        &instruction_data,
+    Instruction::new_with_borsh(
+        program_schedulecommit_security::id(),
+        &ScheduleCommitSecurityInstruction::NonCpi,
         account_metas,
     )
 }

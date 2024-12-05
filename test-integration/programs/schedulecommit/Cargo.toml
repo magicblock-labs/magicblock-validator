@@ -1,0 +1,17 @@
+[package]
+name = "program-schedulecommit"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+borsh = { workspace = true }
+ephemeral-rollups-sdk = { workspace = true }
+solana-program = { workspace = true }
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+no-entrypoint = []
+cpi = ["no-entrypoint"]
+default = []

@@ -2,9 +2,9 @@ use integration_test_tools::run_test;
 use log::*;
 
 use integration_test_tools::conversions::pubkey_from_magic_program;
+use magicblock_core::magic_program;
+use program_schedulecommit::api::schedule_commit_cpi_instruction;
 use schedulecommit_client::{verify, ScheduleCommitTestContextFields};
-use schedulecommit_program::api::schedule_commit_cpi_instruction;
-use sleipnir_core::magic_program;
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 use solana_sdk::{signer::Signer, transaction::Transaction};
@@ -60,7 +60,7 @@ fn test_committing_two_accounts() {
             );
         info!("{} '{:?}'", sig, res);
 
-        let res = verify::fetch_commit_result_from_logs(&ctx, *sig);
+        let res = verify::fetch_and_verify_commit_result_from_logs(&ctx, *sig);
         assert_two_committees_were_committed(&ctx, &res);
         assert_two_committees_synchronized_count(&ctx, &res, 1);
     });

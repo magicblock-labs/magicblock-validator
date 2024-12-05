@@ -654,9 +654,9 @@ checksum = "1fd0f2584146f6f2ef48085050886acf353beff7305ebd1ae69500e27c67f64b"
 
 [[package]]
 name = "bytes"
-version = "1.6.0"
+version = "1.9.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "514de17de45fdb8dc022b1a7975556c53c86f9f0aa5f534b98977b171857c2c9"
+checksum = "325918d6fe32f23b19878fe4b34794ae41fc19ddbe53b10571a4874d44ffd39b"
 
 [[package]]
 name = "bzip2"
@@ -725,6 +725,12 @@ checksum = "7ee52072ec15386f770805afd189a01c8841be8696bed250fa2f13c4c0d6dfb7"
 dependencies = [
  "generic-array",
 ]
+
+[[package]]
+name = "cleanass"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "009067b02b9284528f9f01e3b35ebcd6b545666d15fb74fd9fa30222de89da8e"
 
 [[package]]
 name = "colorchoice"
@@ -1369,7 +1375,7 @@ dependencies = [
  "futures-core",
  "futures-sink",
  "futures-util",
- "http",
+ "http 0.2.12",
  "indexmap",
  "slab",
  "tokio",
@@ -1473,13 +1479,47 @@ dependencies = [
 ]
 
 [[package]]
+name = "http"
+version = "1.1.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "21b9ddb458710bc376481b842f5da65cdf31522de232c1ca8146abce2a358258"
+dependencies = [
+ "bytes",
+ "fnv",
+ "itoa",
+]
+
+[[package]]
 name = "http-body"
 version = "0.4.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7ceab25649e9960c0311ea418d17bee82c0dcec1bd053b5f9a66e265a693bed2"
 dependencies = [
  "bytes",
- "http",
+ "http 0.2.12",
+ "pin-project-lite",
+]
+
+[[package]]
+name = "http-body"
+version = "1.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1efedce1fb8e6913f23e0c92de8e62cd5b772a67e7b3946df930a62566c93184"
+dependencies = [
+ "bytes",
+ "http 1.1.0",
+]
+
+[[package]]
+name = "http-body-util"
+version = "0.1.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "793429d76616a256bcb62c2a2ec2bed781c8307e797e2598c50010f2bee2544f"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "http 1.1.0",
+ "http-body 1.0.1",
  "pin-project-lite",
 ]
 
@@ -1512,8 +1552,8 @@ dependencies = [
  "futures-core",
  "futures-util",
  "h2",
- "http",
- "http-body",
+ "http 0.2.12",
+ "http-body 0.4.6",
  "httparse",
  "httpdate",
  "itoa",
@@ -1526,17 +1566,51 @@ dependencies = [
 ]
 
 [[package]]
+name = "hyper"
+version = "1.5.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "97818827ef4f364230e16705d4706e2897df2bb60617d6ca15d598025a3c481f"
+dependencies = [
+ "bytes",
+ "futures-channel",
+ "futures-util",
+ "http 1.1.0",
+ "http-body 1.0.1",
+ "httparse",
+ "httpdate",
+ "itoa",
+ "pin-project-lite",
+ "smallvec",
+ "tokio",
+]
+
+[[package]]
 name = "hyper-rustls"
 version = "0.24.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "ec3efd23720e2049821a693cbc7e65ea87c72f1c58ff2f9522ff332b1491e590"
 dependencies = [
  "futures-util",
- "http",
- "hyper",
+ "http 0.2.12",
+ "hyper 0.14.29",
  "rustls",
  "tokio",
  "tokio-rustls",
+]
+
+[[package]]
+name = "hyper-util"
+version = "0.1.10"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "df2dcfbe0677734ab2f3ffa7fa7bfd4706bfdc1ef393f2ee30184aed67e631b4"
+dependencies = [
+ "bytes",
+ "futures-util",
+ "http 1.1.0",
+ "http-body 1.0.1",
+ "hyper 1.5.1",
+ "pin-project-lite",
+ "tokio",
 ]
 
 [[package]]
@@ -1637,10 +1711,11 @@ name = "integration-test-tools"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "borsh 0.10.3",
+ "magicblock-config",
+ "magicblock-core",
  "rayon",
  "serde",
- "sleipnir-config",
- "sleipnir-core",
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk 1.17.22",
@@ -1840,6 +1915,63 @@ checksum = "109de74d5d2353660401699a4174a4ff23fcc649caf553df71933c7fb45ad868"
 dependencies = [
  "cc",
  "libc",
+]
+
+[[package]]
+name = "magicblock-accounts-db"
+version = "1.19.0"
+dependencies = [
+ "blake3",
+ "dashmap",
+ "fs_extra",
+ "log",
+ "magicblock-metrics",
+ "modular-bitfield",
+ "rand 0.8.5",
+ "rayon",
+ "smallvec",
+ "solana-accounts-db",
+ "solana-frozen-abi-macro 1.19.0",
+ "solana-measure 1.19.0",
+ "solana-metrics 1.19.0",
+ "solana-rayon-threadlimit",
+ "solana-sdk 1.19.0",
+ "thiserror",
+]
+
+[[package]]
+name = "magicblock-config"
+version = "1.19.0"
+dependencies = [
+ "serde",
+ "solana-sdk 1.19.0",
+ "strum",
+ "strum_macros",
+ "test-tools-core",
+ "thiserror",
+ "toml 0.8.15",
+ "url",
+]
+
+[[package]]
+name = "magicblock-core"
+version = "1.19.0"
+dependencies = [
+ "solana-sdk 1.19.0",
+]
+
+[[package]]
+name = "magicblock-metrics"
+version = "1.19.0"
+dependencies = [
+ "http-body-util",
+ "hyper 1.5.1",
+ "hyper-util",
+ "lazy_static",
+ "log",
+ "prometheus",
+ "tokio",
+ "tokio-util",
 ]
 
 [[package]]
@@ -2312,8 +2444,49 @@ name = "program-flexi-counter"
 version = "0.0.0"
 dependencies = [
  "borsh 0.10.3",
+ "ephemeral-rollups-sdk",
  "solana-program 1.17.22",
 ]
+
+[[package]]
+name = "program-schedulecommit"
+version = "0.0.0"
+dependencies = [
+ "borsh 0.10.3",
+ "ephemeral-rollups-sdk",
+ "solana-program 1.17.22",
+]
+
+[[package]]
+name = "program-schedulecommit-security"
+version = "0.0.0"
+dependencies = [
+ "borsh 0.10.3",
+ "ephemeral-rollups-sdk",
+ "program-schedulecommit",
+ "solana-program 1.17.22",
+]
+
+[[package]]
+name = "prometheus"
+version = "0.13.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "3d33c28a30771f7f96db69893f78b857f7450d7e0237e9c8fc6427a81bae7ed1"
+dependencies = [
+ "cfg-if",
+ "fnv",
+ "lazy_static",
+ "memchr",
+ "parking_lot",
+ "protobuf",
+ "thiserror",
+]
+
+[[package]]
+name = "protobuf"
+version = "2.28.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "106dd99e98437432fed6519dedecfade6a06a73bb7b2a1e019fdd2bee5778d94"
 
 [[package]]
 name = "qstring"
@@ -2504,9 +2677,9 @@ dependencies = [
  "futures-core",
  "futures-util",
  "h2",
- "http",
- "http-body",
- "hyper",
+ "http 0.2.12",
+ "http-body 0.4.6",
+ "hyper 0.14.29",
  "hyper-rustls",
  "ipnet",
  "js-sys",
@@ -2633,21 +2806,12 @@ dependencies = [
  "anyhow",
  "borsh 0.10.3",
  "integration-test-tools",
- "schedulecommit-program",
- "sleipnir-core",
+ "magicblock-core",
+ "program-schedulecommit",
  "solana-program 1.17.22",
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk 1.17.22",
-]
-
-[[package]]
-name = "schedulecommit-program"
-version = "0.0.0"
-dependencies = [
- "borsh 0.10.3",
- "ephemeral-rollups-sdk",
- "solana-program 1.17.22",
 ]
 
 [[package]]
@@ -2657,9 +2821,9 @@ dependencies = [
  "ephemeral-rollups-sdk",
  "integration-test-tools",
  "log",
+ "magicblock-core",
+ "program-schedulecommit",
  "schedulecommit-client",
- "schedulecommit-program",
- "sleipnir-core",
  "solana-program 1.17.22",
  "solana-rpc-client",
  "solana-rpc-client-api",
@@ -2671,12 +2835,11 @@ dependencies = [
 name = "schedulecommit-test-security"
 version = "0.0.0"
 dependencies = [
- "ephemeral-rollups-sdk",
  "integration-test-tools",
+ "magicblock-core",
+ "program-schedulecommit",
+ "program-schedulecommit-security",
  "schedulecommit-client",
- "schedulecommit-program",
- "sleipnir-core",
- "solana-program 1.17.22",
  "solana-rpc-client-api",
  "solana-sdk 1.17.22",
 ]
@@ -2899,48 +3062,6 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "8f92a496fb766b417c996b9c5e57daf2f7ad3b0bebe1ccfca4856390e3d3bb67"
 dependencies = [
  "autocfg",
-]
-
-[[package]]
-name = "sleipnir-accounts-db"
-version = "1.19.0"
-dependencies = [
- "blake3",
- "dashmap",
- "fs_extra",
- "log",
- "modular-bitfield",
- "rand 0.8.5",
- "rayon",
- "smallvec",
- "solana-accounts-db",
- "solana-frozen-abi-macro 1.19.0",
- "solana-measure 1.19.0",
- "solana-metrics 1.19.0",
- "solana-rayon-threadlimit",
- "solana-sdk 1.19.0",
- "thiserror",
-]
-
-[[package]]
-name = "sleipnir-config"
-version = "1.19.0"
-dependencies = [
- "serde",
- "solana-sdk 1.19.0",
- "strum",
- "strum_macros",
- "test-tools-core",
- "thiserror",
- "toml 0.8.15",
- "url",
-]
-
-[[package]]
-name = "sleipnir-core"
-version = "1.19.0"
-dependencies = [
- "solana-sdk 1.19.0",
 ]
 
 [[package]]
@@ -4091,6 +4212,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "teepee"
+version = "0.0.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "28768569381ae187ca3e46026f5c0786c4120e146fc74bda02ab930dc1b94bd3"
+
+[[package]]
 name = "tempfile"
 version = "3.12.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4113,6 +4240,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "test-cloning"
+version = "0.0.0"
+dependencies = [
+ "integration-test-tools",
+ "solana-sdk 1.17.22",
+]
+
+[[package]]
 name = "test-issues"
 version = "0.0.0"
 dependencies = [
@@ -4126,9 +4261,11 @@ name = "test-ledger-restore"
 version = "0.0.0"
 dependencies = [
  "anyhow",
+ "cleanass",
  "integration-test-tools",
+ "magicblock-config",
  "program-flexi-counter",
- "sleipnir-config",
+ "solana-rpc-client",
  "solana-sdk 1.17.22",
  "solana-transaction-status",
  "tempfile",
@@ -4139,6 +4276,7 @@ name = "test-runner"
 version = "0.0.0"
 dependencies = [
  "integration-test-tools",
+ "teepee",
 ]
 
 [[package]]
@@ -4147,7 +4285,7 @@ version = "1.19.0"
 dependencies = [
  "env_logger 0.11.2",
  "log",
- "sleipnir-accounts-db",
+ "magicblock-accounts-db",
 ]
 
 [[package]]
