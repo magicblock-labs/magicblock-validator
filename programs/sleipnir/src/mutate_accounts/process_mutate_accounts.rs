@@ -11,7 +11,7 @@ use solana_sdk::{
 
 use crate::{
     magicblock_instruction::{
-        AccountModificationForInstruction, EphemeralError,
+        AccountModificationForInstruction, MagicBlockProgramError,
     },
     mutate_accounts::account_mod_data::resolve_account_mod_data,
     validator::validator_authority_id,
@@ -47,7 +47,7 @@ pub(crate) fn process_mutate_accounts(
         // 1.2. Need to have some accounts to modify
         if accounts_to_mod_len == 0 {
             ic_msg!(invoke_context, "MutateAccounts: no accounts to modify");
-            return Err(EphemeralError::NoAccountsToModify.into());
+            return Err(MagicBlockProgramError::NoAccountsToModify.into());
         }
 
         // 1.3. Number of accounts to modify must match number of account modifications
@@ -59,7 +59,7 @@ pub(crate) fn process_mutate_accounts(
                     account_mods_len
                 );
             return Err(
-                EphemeralError::AccountsToModifyNotMatchingAccountModifications
+                MagicBlockProgramError::AccountsToModifyNotMatchingAccountModifications
                     .into(),
             );
         }
@@ -75,7 +75,7 @@ pub(crate) fn process_mutate_accounts(
                 "MutateAccounts: first account must be the MagicBlock authority"
             );
             return Err(
-                EphemeralError::FirstAccountNeedsToBeMagicBlockAuthority.into(),
+                MagicBlockProgramError::FirstAccountNeedsToBeMagicBlockAuthority.into(),
             );
         }
         let magicblock_authority_acc = transaction_context
@@ -90,7 +90,7 @@ pub(crate) fn process_mutate_accounts(
                 "MutateAccounts: MagicBlock authority needs to be owned by the system program"
             );
             return Err(
-                EphemeralError::MagicBlockAuthorityNeedsToBeOwnedBySystemProgram
+                MagicBlockProgramError::MagicBlockAuthorityNeedsToBeOwnedBySystemProgram
                     .into(),
             );
         }
@@ -117,7 +117,7 @@ pub(crate) fn process_mutate_accounts(
                 "MutateAccounts: account modification for the provided key {} is missing",
                 account_key
             );
-            EphemeralError::AccountModificationMissing
+            MagicBlockProgramError::AccountModificationMissing
         })?;
 
         ic_msg!(
@@ -183,7 +183,7 @@ pub(crate) fn process_mutate_accounts(
                         "MutateAccounts: account data for the provided key {} is missing",
                         data_key
                     );
-                return Err(EphemeralError::AccountDataMissing.into());
+                return Err(MagicBlockProgramError::AccountDataMissing.into());
             }
 
             // We track resolved data mods in order to persist them at the end

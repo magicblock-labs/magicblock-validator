@@ -23,7 +23,7 @@ use crate::{
 #[derive(
     Error, Debug, Serialize, Clone, PartialEq, Eq, FromPrimitive, ToPrimitive,
 )]
-pub enum EphemeralError {
+pub enum MagicBlockProgramError {
     #[error("need at least one account to modify")]
     NoAccountsToModify,
 
@@ -58,9 +58,9 @@ pub enum EphemeralError {
     FailedToPersistAccountModData,
 }
 
-impl<T> DecodeError<T> for EphemeralError {
+impl<T> DecodeError<T> for MagicBlockProgramError {
     fn type_of() -> &'static str {
-        "EphemeralError"
+        "MagicBlockProgramError"
     }
 }
 

@@ -11,7 +11,7 @@ use lazy_static::lazy_static;
 use magicblock_core::traits::PersistsAccountModData;
 use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 
-use crate::{magicblock_instruction::EphemeralError, validator};
+use crate::{magicblock_instruction::MagicBlockProgramError, validator};
 
 lazy_static! {
     /// In order to modify large data chunks we cannot include all the data as part of the
@@ -149,7 +149,7 @@ impl ResolvedAccountModData {
     pub fn persist(
         self,
         invoke_context: &InvokeContext,
-    ) -> Result<(), EphemeralError> {
+    ) -> Result<(), MagicBlockProgramError> {
         use ResolvedAccountModData::*;
         let (id, data) = match self {
             FromMemory { id, data } => (id, data),
@@ -159,7 +159,9 @@ impl ResolvedAccountModData {
                     "MutateAccounts: trying to persist data that came from storage with id: {}",
                     id
                 );
-                return Err(EphemeralError::AttemptedToPersistDataFromStorage);
+                return Err(
+                    MagicBlockProgramError::AttemptedToPersistDataFromStorage,
+                );
             }
             // Even though it is a developer error to call this method on NotFound
             // we don't panic here, but let the mutate transaction fail by returning
@@ -170,7 +172,9 @@ impl ResolvedAccountModData {
                     "MutateAccounts: trying to persist unresolved with id: {}",
                     id
                 );
-                return Err(EphemeralError::AttemptedToPersistUnresolvedData);
+                return Err(
+                    MagicBlockProgramError::AttemptedToPersistUnresolvedData,
+                );
             }
         };
 
@@ -180,7 +184,7 @@ impl ResolvedAccountModData {
                 "MutateAccounts: failed to persist account mod data: {}",
                 err.to_string()
             );
-            EphemeralError::FailedToPersistAccountModData
+            MagicBlockProgramError::FailedToPersistAccountModData
         })?;
 
         Ok(())
@@ -194,7 +198,7 @@ impl ResolvedAccountModData {
 pub(super) fn resolve_account_mod_data(
     id: u64,
     invoke_context: &InvokeContext,
-) -> Result<ResolvedAccountModData, EphemeralError> {
+) -> Result<ResolvedAccountModData, MagicBlockProgramError> {
     if let Some(data) = get_data(id) {
         Ok(ResolvedAccountModData::FromMemory { id, data })
     } else if validator::is_starting_up() {
@@ -204,7 +208,7 @@ pub(super) fn resolve_account_mod_data(
                 "MutateAccounts: failed to load account mod data: {}",
                 err.to_string()
             );
-            EphemeralError::AccountDataResolutionFailed
+            MagicBlockProgramError::AccountDataResolutionFailed
         })? {
             Some(data) => {
                 set_data_mod_id_checking_sequence(id);
@@ -222,6 +226,6 @@ pub(super) fn resolve_account_mod_data(
             "MutateAccounts: failed to load account mod data: {} from memory after validator started up",
             id,
         );
-        Err(EphemeralError::AccountDataMissingFromMemory)
+        Err(MagicBlockProgramError::AccountDataMissingFromMemory)
     }
 }
