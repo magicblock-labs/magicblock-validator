@@ -16,7 +16,7 @@ use url::Url;
 fn test_load_local_dev_with_programs_toml() {
     let workspace_dir = cargo_workspace_dir();
     let config_file_dir = workspace_dir
-        .join("sleipnir-config")
+        .join("magicblock-config")
         .join("tests")
         .join("fixtures")
         .join("06_local-dev-with-programs.toml");
@@ -72,7 +72,7 @@ fn test_load_local_dev_with_programs_toml() {
 fn test_load_local_dev_with_programs_toml_envs_override() {
     let workspace_dir = cargo_workspace_dir();
     let config_file_dir = workspace_dir
-        .join("sleipnir-config")
+        .join("magicblock-config")
         .join("tests")
         .join("fixtures")
         .join("06_local-dev-with-programs.toml");
