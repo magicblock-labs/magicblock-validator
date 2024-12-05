@@ -1,5 +1,5 @@
 #[derive(Clone, Debug, PartialEq, Eq)]
-pub enum EphemeralInstruction {
+pub enum MagicBlockInstruction {
     ModifyAccounts,
     ScheduleCommit,
     ScheduleCommitAndUndelegate,
@@ -7,9 +7,9 @@ pub enum EphemeralInstruction {
 }
 
 #[allow(unused)]
-impl EphemeralInstruction {
+impl MagicBlockInstruction {
     pub(crate) fn index(&self) -> u8 {
-        use EphemeralInstruction::*;
+        use MagicBlockInstruction::*;
         match self {
             ModifyAccounts => 0,
             ScheduleCommit => 1,

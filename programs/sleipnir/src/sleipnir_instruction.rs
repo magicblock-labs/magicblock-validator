@@ -99,7 +99,7 @@ pub(crate) struct AccountModificationForInstruction {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
-pub(crate) enum EphemeralInstruction {
+pub(crate) enum MagicBlockInstruction {
     /// Modify one or more accounts
     ///
     /// # Account references
@@ -113,7 +113,7 @@ pub(crate) enum EphemeralInstruction {
     /// committed.
     ///
     /// This is the first part of scheduling a commit.
-    /// A second transaction [EphemeralInstruction::AcceptScheduleCommits] has to run in order
+    /// A second transaction [MagicBlockInstruction::AcceptScheduleCommits] has to run in order
     /// to finish scheduling the commit.
     ///
     /// # Account references
@@ -123,14 +123,14 @@ pub(crate) enum EphemeralInstruction {
     /// - **2..n** `[]`              Accounts to be committed
     ScheduleCommit,
 
-    /// This is the exact same instruction as [EphemeralInstruction::ScheduleCommit] except
+    /// This is the exact same instruction as [MagicBlockInstruction::ScheduleCommit] except
     /// that the [ScheduledCommit] is flagged such that when accounts are committed, a request
     /// to undelegate them is included with the same transaction.
     /// Additionally the validator will refuse anymore transactions for the specific account
     /// since they are no longer considered delegated to it.
     ///
     /// This is the first part of scheduling a commit.
-    /// A second transaction [EphemeralInstruction::AcceptScheduleCommits] has to run in order
+    /// A second transaction [MagicBlockInstruction::AcceptScheduleCommits] has to run in order
     /// to finish scheduling the commit.
     ///
     /// # Account references
@@ -158,14 +158,14 @@ pub(crate) enum EphemeralInstruction {
     /// stored hashmap.
     ///
     /// We implement it this way so we can log the signature of this transaction
-    /// as part of the [EphemeralInstruction::ScheduleCommit] instruction.
+    /// as part of the [MagicBlockInstruction::ScheduleCommit] instruction.
     ScheduledCommitSent(u64),
 }
 
 #[allow(unused)]
-impl EphemeralInstruction {
+impl MagicBlockInstruction {
     pub(crate) fn index(&self) -> u8 {
-        use EphemeralInstruction::*;
+        use MagicBlockInstruction::*;
         match self {
             ModifyAccounts(_) => 0,
             ScheduleCommit => 1,
@@ -218,7 +218,7 @@ pub fn modify_accounts_instruction(
     }
     Instruction::new_with_bincode(
         crate::id(),
-        &EphemeralInstruction::ModifyAccounts(account_mods),
+        &MagicBlockInstruction::ModifyAccounts(account_mods),
         account_metas,
     )
 }
@@ -248,7 +248,7 @@ pub(crate) fn schedule_commit_instruction(
     }
     Instruction::new_with_bincode(
         crate::id(),
-        &EphemeralInstruction::ScheduleCommit,
+        &MagicBlockInstruction::ScheduleCommit,
         account_metas,
     )
 }
@@ -279,7 +279,7 @@ pub(crate) fn schedule_commit_and_undelegate_instruction(
     }
     Instruction::new_with_bincode(
         crate::id(),
-        &EphemeralInstruction::ScheduleCommitAndUndelegate,
+        &MagicBlockInstruction::ScheduleCommitAndUndelegate,
         account_metas,
     )
 }
@@ -299,7 +299,7 @@ pub(crate) fn accept_scheduled_commits_instruction() -> Instruction {
     ];
     Instruction::new_with_bincode(
         crate::id(),
-        &EphemeralInstruction::AcceptScheduleCommits,
+        &MagicBlockInstruction::AcceptScheduleCommits,
         account_metas,
     )
 }
@@ -330,7 +330,7 @@ pub(crate) fn scheduled_commit_sent_instruction(
     ];
     Instruction::new_with_bincode(
         *magic_block_program,
-        &EphemeralInstruction::ScheduledCommitSent(scheduled_commit_id),
+        &MagicBlockInstruction::ScheduledCommitSent(scheduled_commit_id),
         account_metas,
     )
 }
