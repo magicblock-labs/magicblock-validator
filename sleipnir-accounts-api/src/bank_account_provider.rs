@@ -22,6 +22,9 @@ impl InternalAccountProvider for BankAccountProvider {
     fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
         self.bank.get_account(pubkey)
     }
+    fn get_all_accounts(&self) -> Vec<(Pubkey, AccountSharedData)> {
+        self.bank.get_all_accounts(false)
+    }
     fn get_slot(&self) -> Slot {
         self.bank.slot()
     }

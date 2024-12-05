@@ -166,6 +166,11 @@ pub(crate) fn process_mutate_accounts(
             if let Some(data) = resolved_data.data() {
                 ic_msg!(
                     invoke_context,
+                    "MutateAccounts: resolved data from id {}",
+                    resolved_data.id()
+                );
+                ic_msg!(
+                    invoke_context,
                     "MutateAccounts: setting data to len {}",
                     data.len()
                 );

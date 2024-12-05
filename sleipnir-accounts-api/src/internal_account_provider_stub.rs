@@ -26,6 +26,14 @@ impl InternalAccountProvider for InternalAccountProviderStub {
     fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
         self.accounts.read().unwrap().get(pubkey).cloned()
     }
+    fn get_all_accounts(&self) -> Vec<(Pubkey, AccountSharedData)> {
+        self.accounts
+            .read()
+            .unwrap()
+            .iter()
+            .map(|(pubkey, account)| (*pubkey, account.clone()))
+            .collect()
+    }
     fn get_slot(&self) -> Slot {
         self.slot
     }

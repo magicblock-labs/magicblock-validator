@@ -180,27 +180,23 @@ fn read(ledger_path: &Path, payer_kp: &Keypair) -> Child {
         },
         cleanup(&mut validator)
     );
-    assert_counter_commits_on_chain(&ctx, &mut validator, payer, 3);
 
-    const CLONED_ACCOUNT_META_HYDRATED_AFTER_LEDGER_REPLAY: bool = false;
-    if CLONED_ACCOUNT_META_HYDRATED_AFTER_LEDGER_REPLAY {
-        // Increment counter in ephemeral after ledger replay finished
-        // TODO(thlorenz): this currently fails with:
-        // UnclonableAccountUsedAsWritableInEphemeral(<pubkey>, AlreadyLocallyOverriden)
-        // and will be addressed in the next PR in this ledger replay series
-        let ix = create_add_ix(payer_kp.pubkey(), 3);
-        confirm_tx_with_payer_ephem(ix, payer_kp, &mut validator);
-        let counter = fetch_counter_ephem(payer, &mut validator);
-        assert_eq!(
-            counter,
-            FlexiCounter {
-                count: 7,
-                updates: 2,
-                label: COUNTER.to_string()
-            },
-            cleanup(&mut validator)
-        );
-    }
+    // Ensure we can use the counter as before and increase its count
+    let ix = create_add_ix(payer_kp.pubkey(), 3);
+    confirm_tx_with_payer_ephem(ix, payer_kp, &mut validator);
+    let counter = fetch_counter_ephem(payer, &mut validator);
+    assert_eq!(
+        counter,
+        FlexiCounter {
+            count: 11,
+            updates: 3,
+            label: COUNTER.to_string()
+        },
+        cleanup(&mut validator)
+    );
+
+    // Ensure we did not commit during ledger replay
+    assert_counter_commits_on_chain(&ctx, &mut validator, payer, 3);
 
     validator
 }

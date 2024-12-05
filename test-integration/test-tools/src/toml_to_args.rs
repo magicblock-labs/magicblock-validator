@@ -42,8 +42,19 @@ fn parse_config(config_path: &PathBuf) -> Config {
     toml::from_str(&config_toml).expect("Failed to parse config file")
 }
 
-pub fn config_to_args(config_path: &PathBuf) -> Vec<String> {
+#[derive(Default, PartialEq, Eq)]
+pub enum ProgramLoader {
+    #[default]
+    UpgradeableProgram,
+    BpfProgram,
+}
+
+pub fn config_to_args(
+    config_path: &PathBuf,
+    program_loader: Option<ProgramLoader>,
+) -> Vec<String> {
     let config = parse_config(config_path);
+    let program_loader = program_loader.unwrap_or_default();
 
     let mut args = vec![
         "--log".to_string(),
@@ -65,7 +76,12 @@ pub fn config_to_args(config_path: &PathBuf) -> Vec<String> {
                 args.push(program.id);
             }
             path => {
-                args.push("--bpf-program".to_string());
+                if program_loader == ProgramLoader::UpgradeableProgram {
+                    args.push("--upgradeable-program".to_string());
+                } else {
+                    args.push("--bpf-program".to_string());
+                }
+
                 args.push(program.id);
 
                 let resolved_full_config_path =
@@ -73,6 +89,10 @@ pub fn config_to_args(config_path: &PathBuf) -> Vec<String> {
                 args.push(
                     resolved_full_config_path.to_str().unwrap().to_string(),
                 );
+
+                if program_loader == ProgramLoader::UpgradeableProgram {
+                    args.push("none".to_string());
+                }
             }
         }
     }

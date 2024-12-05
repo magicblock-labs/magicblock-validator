@@ -251,8 +251,10 @@ impl MagicValidator {
             bank.clone(),
             Some(transaction_status_sender.clone()),
         );
-        let blacklisted_accounts =
-            standard_blacklisted_accounts(&identity_keypair.pubkey());
+        let blacklisted_accounts = standard_blacklisted_accounts(
+            &identity_keypair.pubkey(),
+            &faucet_keypair.pubkey(),
+        );
 
         let remote_account_cloner_worker = RemoteAccountClonerWorker::new(
             bank_account_provider,
@@ -263,6 +265,7 @@ impl MagicValidator {
             blacklisted_accounts,
             accounts_config.payer_init_lamports,
             accounts_config.lifecycle.to_account_cloner_permissions(),
+            identity_keypair.pubkey(),
         );
 
         let accounts_manager = Self::init_accounts_manager(
@@ -524,7 +527,7 @@ impl MagicValidator {
 
         self.start_remote_account_fetcher_worker();
         self.start_remote_account_updates_worker();
-        self.start_remote_account_cloner_worker();
+        self.start_remote_account_cloner_worker().await;
 
         self.rpc_service.start().map_err(|err| {
             ApiError::FailedToStartJsonRpcService(format!("{:?}", err))
@@ -598,10 +601,14 @@ impl MagicValidator {
         }
     }
 
-    fn start_remote_account_cloner_worker(&mut self) {
+    async fn start_remote_account_cloner_worker(&mut self) {
         if let Some(mut remote_account_cloner_worker) =
             self.remote_account_cloner_worker.take()
         {
+            if !self.config.ledger.reset {
+                remote_account_cloner_worker.hydrate().await;
+            }
+
             let cancellation_token = self.token.clone();
             self.remote_account_cloner_handle =
                 Some(thread::spawn(move || {
