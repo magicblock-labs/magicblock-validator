@@ -2,7 +2,6 @@ on:
   push:
     branches: [master]
   pull_request:
-    branches: [master, dev,thlorenz/rename-content]
     types: [opened, reopened, synchronize, ready_for_review]
 
 name: Run CI - Format
