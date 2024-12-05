@@ -4,7 +4,7 @@ on:
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
 
-name: Run CI - Test
+name: Run CI - Unit Tests
 
 jobs:
   run_make_ci_test:
@@ -23,23 +23,11 @@ jobs:
           github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
+      - uses: ./magicblock-validator/.github/actions/setup-solana
+      - uses: ./magicblock-validator/.github/actions/setup-os
 
-      - name: Install Solana Test Validator
-        shell: "bash"
+      - name: Run unit tests
         run: |
-          sh -c "$(curl -sSfL https://release.anza.xyz/v1.18.22/install)"
-          echo "$HOME/.local/share/solana/install/active_release/bin" >> $GITHUB_PATH
-
-      - name: Ensure Solana Test Validator is Installed
-        shell: "bash"
-        run: |
-          solana-test-validator --version
-
-      - name: Run tests (also increase system limits for solana tests)
-        run: |
-          sudo prlimit --pid $$ --nofile=1048576:1048576
-          sudo sysctl fs.inotify.max_user_instances=1280
-          sudo sysctl fs.inotify.max_user_watches=655360
-          make ci-test
+          make ci-test-unit
         shell: bash
         working-directory: magicblock-validator

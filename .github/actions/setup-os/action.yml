@@ -1,0 +1,14 @@
+name: 'MagicBlock - Setup OS'
+description: 'Configures host to support CI actions'
+
+runs:
+  using: "composite"
+  steps:
+      - name: Increase system limits
+        run: |
+          sudo prlimit --pid $$ --nofile=1048576:1048576
+          sudo sysctl fs.inotify.max_user_instances=1280
+          sudo sysctl fs.inotify.max_user_watches=655360
+        shell: bash
+        working-directory: magicblock-validator
+

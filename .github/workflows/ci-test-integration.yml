@@ -1,0 +1,34 @@
+on:
+  push:
+    branches: [master]
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+name: Run CI - Integration Tests
+
+jobs:
+  run_make_ci_test:
+    if: github.event.pull_request.draft == false
+    runs-on: ubuntu-latest-m
+    steps:
+      - name: Checkout this magicblock-validator
+        uses: actions/checkout@v2
+        with:
+          path: magicblock-validator
+
+      - uses: ./magicblock-validator/.github/actions/setup-build-env
+        with:
+          build_cache_key_name: "magicblock-validator-ci-test-v006"
+          rust_toolchain_release: "1.83.0"
+          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+
+      - uses: ./magicblock-validator/.github/actions/setup-solana
+      - uses: ./magicblock-validator/.github/actions/setup-os
+
+      - name: Run integration tests
+        run: |
+          make ci-test-integration
+        shell: bash
+        working-directory: magicblock-validator
