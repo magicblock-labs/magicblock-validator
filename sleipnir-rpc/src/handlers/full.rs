@@ -66,7 +66,7 @@ impl Full for FullImpl {
         debug!("get_inflation_reward rpc request received");
         Box::pin(async move {
             Err(Error::invalid_params(
-                "MagicBlock validator does not support native staking",
+                "Ephemeral validator does not support native staking",
             ))
         })
     }
@@ -143,7 +143,7 @@ impl Full for FullImpl {
     fn get_max_shred_insert_slot(&self, meta: Self::Metadata) -> Result<Slot> {
         debug!("get_max_shred_insert_slot rpc request received");
         Err(Error::invalid_params(
-            "MagicBlock validator does not support gossiping of shreds",
+            "Ephemeral validator does not support gossiping of shreds",
         ))
     }
 
@@ -448,7 +448,7 @@ impl Full for FullImpl {
     ) -> Result<RpcResponse<u64>> {
         debug!("get_stake_minimum_delegation rpc request received");
         Err(Error::invalid_params(
-            "MagicBlock validator does not support native staking",
+            "Ephemeral validator does not support native staking",
         ))
     }
 
@@ -459,7 +459,7 @@ impl Full for FullImpl {
     ) -> Result<Vec<RpcPrioritizationFee>> {
         let pubkey_strs = pubkey_strs.unwrap_or_default();
         Err(Error::invalid_params(
-            "MagicBlock validator does not support or require priority fees",
+            "Ephemeral validator does not support or require priority fees",
         ))
     }
 }

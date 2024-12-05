@@ -2,7 +2,7 @@ use solana_program_runtime::declare_process_instruction;
 use solana_sdk::program_utils::limited_deserialize;
 
 use crate::{
-    magicblock_instruction::MagicBlockInstruction,
+    magicblock_instruction::EphemeralInstruction,
     mutate_accounts::process_mutate_accounts,
     process_scheduled_commit_sent,
     schedule_transactions::{
@@ -25,7 +25,7 @@ declare_process_instruction!(
         let signers = instruction_context.get_signers(transaction_context)?;
 
         match instruction {
-            MagicBlockInstruction::ModifyAccounts(mut account_mods) => {
+            EphemeralInstruction::ModifyAccounts(mut account_mods) => {
                 process_mutate_accounts(
                     signers,
                     invoke_context,
@@ -33,14 +33,14 @@ declare_process_instruction!(
                     &mut account_mods,
                 )
             }
-            MagicBlockInstruction::ScheduleCommit => process_schedule_commit(
+            EphemeralInstruction::ScheduleCommit => process_schedule_commit(
                 signers,
                 invoke_context,
                 ProcessScheduleCommitOptions {
                     request_undelegation: false,
                 },
             ),
-            MagicBlockInstruction::ScheduleCommitAndUndelegate => {
+            EphemeralInstruction::ScheduleCommitAndUndelegate => {
                 process_schedule_commit(
                     signers,
                     invoke_context,
@@ -49,10 +49,10 @@ declare_process_instruction!(
                     },
                 )
             }
-            MagicBlockInstruction::AcceptScheduleCommits => {
+            EphemeralInstruction::AcceptScheduleCommits => {
                 process_accept_scheduled_commits(signers, invoke_context)
             }
-            MagicBlockInstruction::ScheduledCommitSent(id) => {
+            EphemeralInstruction::ScheduledCommitSent(id) => {
                 process_scheduled_commit_sent(
                     signers,
                     invoke_context,
