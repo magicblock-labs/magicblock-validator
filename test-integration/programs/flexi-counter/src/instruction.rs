@@ -68,6 +68,15 @@ pub enum FlexiCounterInstruction {
     /// 2. `[]`       MagicContext (used to record scheduled commit)
     /// 3. `[]`       MagicBlock Program (used to schedule commit)
     AddAndScheduleCommit { count: u8, undelegate: bool },
+
+    /// Updates the first FlexiCounter by adding the count found in the
+    /// second FlexiCounter created by another payer
+    ///
+    /// Accounts:
+    /// 0. `[signer]` The payer that created the first account.
+    /// 1. `[write]`  The target PDA account of the payer that will be updated.
+    /// 2. `[]`  The source PDA account whose count will be added.
+    AddCounter,
 }
 
 pub fn create_init_ix(payer: Pubkey, label: String) -> Instruction {
@@ -154,6 +163,25 @@ pub fn create_add_and_schedule_commit_ix(
     Instruction::new_with_borsh(
         *program_id,
         &FlexiCounterInstruction::AddAndScheduleCommit { count, undelegate },
+        accounts,
+    )
+}
+
+pub fn create_add_counter_ix(
+    payer: Pubkey,
+    source_payer: Pubkey,
+) -> Instruction {
+    let program_id = &crate::id();
+    let (pda_main, _) = FlexiCounter::pda(&payer);
+    let (pda_source, _) = FlexiCounter::pda(&source_payer);
+    let accounts = vec![
+        AccountMeta::new(payer, true),
+        AccountMeta::new(pda_main, false),
+        AccountMeta::new_readonly(pda_source, false),
+    ];
+    Instruction::new_with_borsh(
+        *program_id,
+        &FlexiCounterInstruction::AddCounter,
         accounts,
     )
 }

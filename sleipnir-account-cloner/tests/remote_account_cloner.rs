@@ -43,6 +43,7 @@ fn setup_custom(
         blacklisted_accounts,
         payer_init_lamports,
         permissions,
+        Pubkey::new_unique(),
     );
     let cloner_client = RemoteAccountClonerClient::new(&cloner_worker);
     // Run the worker in a separate task
@@ -76,7 +77,10 @@ fn setup_replica(
         account_updates,
         account_dumper,
         allowed_program_ids,
-        standard_blacklisted_accounts(&Pubkey::new_unique()),
+        standard_blacklisted_accounts(
+            &Pubkey::new_unique(),
+            &Pubkey::new_unique(),
+        ),
         AccountClonerPermissions {
             allow_cloning_refresh: false,
             allow_cloning_feepayer_accounts: true,
@@ -104,7 +108,10 @@ fn setup_programs_replica(
         account_updates,
         account_dumper,
         allowed_program_ids,
-        standard_blacklisted_accounts(&Pubkey::new_unique()),
+        standard_blacklisted_accounts(
+            &Pubkey::new_unique(),
+            &Pubkey::new_unique(),
+        ),
         AccountClonerPermissions {
             allow_cloning_refresh: false,
             allow_cloning_feepayer_accounts: false,
@@ -132,7 +139,10 @@ fn setup_ephemeral(
         account_updates,
         account_dumper,
         allowed_program_ids,
-        standard_blacklisted_accounts(&Pubkey::new_unique()),
+        standard_blacklisted_accounts(
+            &Pubkey::new_unique(),
+            &Pubkey::new_unique(),
+        ),
         AccountClonerPermissions {
             allow_cloning_refresh: true,
             allow_cloning_feepayer_accounts: true,
@@ -160,7 +170,10 @@ fn setup_offline(
         account_updates,
         account_dumper,
         allowed_program_ids,
-        standard_blacklisted_accounts(&Pubkey::new_unique()),
+        standard_blacklisted_accounts(
+            &Pubkey::new_unique(),
+            &Pubkey::new_unique(),
+        ),
         AccountClonerPermissions {
             allow_cloning_refresh: false,
             allow_cloning_feepayer_accounts: false,

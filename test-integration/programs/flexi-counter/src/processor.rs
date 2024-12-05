@@ -36,6 +36,7 @@ pub fn process(
         AddAndScheduleCommit { count, undelegate } => {
             process_add_and_schedule_commit(accounts, count, undelegate)
         }
+        AddCounter => process_add_counter(accounts),
     }?;
     Ok(())
 }
@@ -211,4 +212,27 @@ fn process_add_and_schedule_commit(
         )?;
     }
     Ok(())
+}
+
+fn process_add_counter(accounts: &[AccountInfo]) -> ProgramResult {
+    msg!("AddCounter");
+
+    let account_info_iter = &mut accounts.iter();
+    let payer_info = next_account_info(account_info_iter)?;
+    let target_pda_info = next_account_info(account_info_iter)?;
+    let source_pda_info = next_account_info(account_info_iter)?;
+
+    let (target_pda, _) = FlexiCounter::pda(payer_info.key);
+    assert_keys_equal(target_pda_info.key, &target_pda, || {
+        format!(
+            "Invalid target Counter PDA {}, should be {}",
+            target_pda_info.key, target_pda
+        )
+    })?;
+
+    let source_counter =
+        FlexiCounter::try_from_slice(&source_pda_info.data.borrow())?;
+    let count = source_counter.count as u8;
+
+    add(payer_info, target_pda_info, count)
 }

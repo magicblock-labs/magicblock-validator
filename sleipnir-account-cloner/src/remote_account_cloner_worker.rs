@@ -5,7 +5,9 @@ use std::{
     vec,
 };
 
-use conjunto_transwise::{AccountChainSnapshotShared, AccountChainState};
+use conjunto_transwise::{
+    AccountChainSnapshotShared, AccountChainState, DelegationRecord,
+};
 use futures_util::future::join_all;
 use log::*;
 use sleipnir_account_dumper::AccountDumper;
@@ -16,7 +18,7 @@ use sleipnir_metrics::metrics;
 use sleipnir_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
 use solana_sdk::{
     account::{Account, ReadableAccount},
-    bpf_loader_upgradeable::get_program_data_address,
+    bpf_loader_upgradeable::{self, get_program_data_address},
     clock::Slot,
     pubkey::Pubkey,
     signature::Signature,
@@ -33,6 +35,56 @@ use crate::{
     AccountClonerUnclonableReason,
 };
 
+pub enum ValidatorStage {
+    Hydrating {
+        /// The identity of our validator
+        validator_identity: Pubkey,
+        /// The owner of the account we consider cloning during the hydrating phase
+        /// This is not really part of the validator stage, but related to a particular
+        /// case of cloning an account during ledger replay.
+        /// NOTE: that this will not be needed once every delegation record contains
+        /// the validator authority.
+        account_owner: Pubkey,
+    },
+    Running,
+}
+
+impl ValidatorStage {
+    fn should_clone_delegated_account(
+        &self,
+        record: &DelegationRecord,
+    ) -> bool {
+        use ValidatorStage::*;
+        match self {
+            // If an account is delegated then one of the following is true:
+            // a) it is delegated to us and we made changes to it which we should not overwrite
+            //    no changes on chain were possible while it was delegated to us
+            // b) it is delegated to another validator and might have changed in the meantime in
+            //    which case we actually should clone it
+            Hydrating {
+                validator_identity,
+                account_owner,
+            } => {
+                // If the account is delegated to us, we should not clone it
+                // We can only determine this if the record.authority
+                // is set to a valid address
+                if record.authority.ne(&Pubkey::default()) {
+                    record.authority.ne(validator_identity)
+                } else {
+                    // At this point the record.authority is not always set.
+                    // As a workaround we check if on the account inside our validator
+                    // the owner was set to the original owner of the account on chain
+                    // which means it was delegated to us.
+                    // If it was cloned as a readable its owner would still be the delegation
+                    // program
+                    account_owner.ne(&record.owner)
+                }
+            }
+            Running => true,
+        }
+    }
+}
+
 pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU> {
     internal_account_provider: IAP,
     account_fetcher: AFE,
@@ -47,6 +99,7 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU> {
     clone_request_sender: UnboundedSender<Pubkey>,
     clone_listeners: Arc<RwLock<HashMap<Pubkey, AccountClonerListeners>>>,
     last_clone_output: Arc<RwLock<HashMap<Pubkey, AccountClonerOutput>>>,
+    validator_identity: Pubkey,
 }
 
 impl<IAP, AFE, AUP, ADU> RemoteAccountClonerWorker<IAP, AFE, AUP, ADU>
@@ -66,6 +119,7 @@ where
         blacklisted_accounts: HashSet<Pubkey>,
         payer_init_lamports: Option<u64>,
         permissions: AccountClonerPermissions,
+        validator_authority: Pubkey,
     ) -> Self {
         let (clone_request_sender, clone_request_receiver) =
             unbounded_channel();
@@ -85,6 +139,7 @@ where
             clone_request_sender,
             clone_listeners: Default::default(),
             last_clone_output: Default::default(),
+            validator_identity: validator_authority,
         }
     }
 
@@ -123,7 +178,7 @@ where
         // Actually run the whole cloning process on the bank, yield until done
         let result = self.do_clone_or_use_cache(&pubkey).await;
         // Collecting the list of listeners awaiting for the clone to be done
-        let listeners = match self .clone_listeners
+        let listeners = match self.clone_listeners
             .write()
             .expect(
                 "RwLock of RemoteAccountClonerWorker.clone_listeners is poisoned",
@@ -145,16 +200,84 @@ where
         }
     }
 
+    fn can_clone(&self) -> bool {
+        self.permissions.allow_cloning_feepayer_accounts
+            || self.permissions.allow_cloning_undelegated_accounts
+            || self.permissions.allow_cloning_delegated_accounts
+            || self.permissions.allow_cloning_program_accounts
+    }
+
+    pub async fn hydrate(&self) {
+        if !self.can_clone() {
+            warn!("Cloning is disabled, no need to hydrate the cache");
+            return;
+        }
+        let account_keys = self
+            .internal_account_provider
+            .get_all_accounts()
+            .into_iter()
+            .filter(|(pubkey, _)| !self.blacklisted_accounts.contains(pubkey))
+            .filter(|(pubkey, acc)| {
+                // NOTE: there is an account that has ◎18,446,744,073.709553 which is present
+                // at validator start. We already blacklist the faucet and validator authority and
+                // therefore I don't know which account it is nor how to blacklist it.
+                // The address is different every time the validator starts.
+                if acc.lamports() > u64::MAX / 2 {
+                    debug!("Account '{}' lamports > (u64::MAX / 2). Will not clone.", pubkey);
+                    return false;
+                }
+
+                // Program accounts owned by the BPFUpgradableLoader have two parts:
+                // The program and the executable data account, program account marked as `executable`.
+                // The cloning pipeline already treats executable accounts specially and will
+                // auto-clone the data account for each executable account. We never
+                // provide the executable data account to the cloning pipeline directly (no
+                // transaction ever mentions it).
+                // However during hydrate we try to clone each account, including the executable
+                // data which the cloning pipeline then treats as the program account and tries to
+                // find its executable data account.
+                // Therefore we manually remove the executable data accounts from the hydrate list
+                // using the fact that only the program account is marked as executable.
+                if !acc.executable() && acc.owner().eq(&bpf_loader_upgradeable::ID) {
+                    return false;
+                }
+                true
+            })
+            .map(|(pubkey, acc)| (pubkey, *acc.owner()))
+            .collect::<HashSet<_>>();
+
+        for (pubkey, owner) in account_keys {
+            let res = self
+                .do_clone_and_update_cache(
+                    &pubkey,
+                    ValidatorStage::Hydrating {
+                        validator_identity: self.validator_identity,
+                        account_owner: owner,
+                    },
+                )
+                .await;
+            match res {
+                Ok(output) => {
+                    debug!("Cloned '{}': {:?}", pubkey, output);
+                }
+                Err(err) => {
+                    // TODO: @@@ what to do here?
+                    // Even empty accounts should clone fine with 0 lamports which would
+                    // cover the case that the account was removed from chain in the meantime
+                    // Thus if we encounter an error our validator cannot restore a proper
+                    // clone state and we should probably shut it down.
+                    error!("Failed to clone {} ('{:?}')", pubkey, err);
+                }
+            }
+        }
+    }
+
     async fn do_clone_or_use_cache(
         &self,
         pubkey: &Pubkey,
     ) -> AccountClonerResult<AccountClonerOutput> {
         // If we don't allow any cloning, no need to do anything at all
-        if !self.permissions.allow_cloning_feepayer_accounts
-            && !self.permissions.allow_cloning_undelegated_accounts
-            && !self.permissions.allow_cloning_delegated_accounts
-            && !self.permissions.allow_cloning_program_accounts
-        {
+        if !self.can_clone() {
             return Ok(AccountClonerOutput::Unclonable {
                 pubkey: *pubkey,
                 reason: AccountClonerUnclonableReason::NoCloningAllowed,
@@ -181,7 +304,11 @@ where
                     }
                     // If the cloned account has been updated since clone, update the cache
                     else {
-                        self.do_clone_and_update_cache(pubkey).await
+                        self.do_clone_and_update_cache(
+                            pubkey,
+                            ValidatorStage::Running,
+                        )
+                        .await
                     }
                 }
                 // If the previous clone marked the account as unclonable, we may be able to re-use that output
@@ -195,7 +322,11 @@ where
                     }
                     // If the cloned account has been updated since clone, try to update the cache
                     else {
-                        self.do_clone_and_update_cache(pubkey).await
+                        self.do_clone_and_update_cache(
+                            pubkey,
+                            ValidatorStage::Running,
+                        )
+                        .await
                     }
                 }
             },
@@ -211,7 +342,11 @@ where
                 }
                 // If we need to clone it for the first time and update the cache
                 else {
-                    self.do_clone_and_update_cache(pubkey).await
+                    self.do_clone_and_update_cache(
+                        pubkey,
+                        ValidatorStage::Running,
+                    )
+                    .await
                 }
             }
         }
@@ -220,8 +355,9 @@ where
     async fn do_clone_and_update_cache(
         &self,
         pubkey: &Pubkey,
+        stage: ValidatorStage,
     ) -> AccountClonerResult<AccountClonerOutput> {
-        let updated_clone_output = self.do_clone(pubkey).await?;
+        let updated_clone_output = self.do_clone(pubkey, stage).await?;
         self.last_clone_output
             .write()
             .expect("RwLock of RemoteAccountClonerWorker.last_clone_output is poisoned")
@@ -232,6 +368,7 @@ where
     async fn do_clone(
         &self,
         pubkey: &Pubkey,
+        stage: ValidatorStage,
     ) -> AccountClonerResult<AccountClonerOutput> {
         // If the account is blacklisted against cloning, no need to do anything anytime
         if self.blacklisted_accounts.contains(pubkey) {
@@ -302,7 +439,7 @@ where
                     return Ok(AccountClonerOutput::Unclonable {
                         pubkey: *pubkey,
                         reason:
-                            AccountClonerUnclonableReason::DoesNotAllowFeePayerAccount,
+                        AccountClonerUnclonableReason::DoesNotAllowFeePayerAccount,
                         at_slot: account_chain_snapshot.at_slot,
                     });
                 }
@@ -360,8 +497,20 @@ where
                     return Ok(AccountClonerOutput::Unclonable {
                         pubkey: *pubkey,
                         reason:
-                            AccountClonerUnclonableReason::DoesNotAllowDelegatedAccount,
+                        AccountClonerUnclonableReason::DoesNotAllowDelegatedAccount,
                         at_slot: account_chain_snapshot.at_slot,
+                    });
+                }
+                if !stage.should_clone_delegated_account(delegation_record) {
+                    // NOTE: the account was already cloned when the initial instance of this
+                    // validator ran. We don't want to clone it again during ledger replay, however
+                    // we want to use it as a delegated + cloned account, thus we respond in the
+                    // same manner as we just cloned it.
+                    // Unfortunately we don't know the signature, but during ledger replay
+                    // this should not be too important.
+                    return Ok(AccountClonerOutput::Cloned {
+                        account_chain_snapshot,
+                        signature: Signature::new_unique(),
                     });
                 }
                 self.do_clone_delegated_account(

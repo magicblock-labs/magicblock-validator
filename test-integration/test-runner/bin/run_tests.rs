@@ -1,5 +1,5 @@
 use integration_test_tools::{
-    toml_to_args::{config_to_args, rpc_port_from_config},
+    toml_to_args::{config_to_args, rpc_port_from_config, ProgramLoader},
     validator::{
         resolve_workspace_dir, start_magic_block_validator_with_config,
         wait_for_validator, TestRunnerPaths,
@@ -56,7 +56,7 @@ fn run_restore_ledger_tests(
     // is devnet
     let mut devnet_validator = match start_validator(
         "restore-ledger-conf.devnet.toml",
-        ValidatorCluster::Chain,
+        ValidatorCluster::Chain(None),
     ) {
         Some(validator) => validator,
         None => {
@@ -91,7 +91,7 @@ fn run_schedule_commit_tests(
     // Start validators via `cargo run --release  -- <config>
     let mut devnet_validator = match start_validator(
         "schedulecommit-conf.devnet.toml",
-        ValidatorCluster::Chain,
+        ValidatorCluster::Chain(None),
     ) {
         Some(validator) => validator,
         None => {
@@ -154,7 +154,7 @@ fn run_issues_frequent_commmits_tests(
     eprintln!("======== RUNNING ISSUES TESTS - Frequent Commits ========");
     let mut devnet_validator = match start_validator(
         "schedulecommit-conf.devnet.toml",
-        ValidatorCluster::Chain,
+        ValidatorCluster::Chain(None),
     ) {
         Some(validator) => validator,
         None => {
@@ -196,7 +196,7 @@ fn run_cloning_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
     eprintln!("======== RUNNING CLONING TESTS ========");
     let mut devnet_validator = match start_validator(
         "cloning-conf.devnet.toml",
-        ValidatorCluster::Chain,
+        ValidatorCluster::Chain(Some(ProgramLoader::BpfProgram)),
     ) {
         Some(validator) => validator,
         None => {
@@ -262,7 +262,7 @@ fn run_test(
         "RUST_LOG",
         std::env::var("RUST_LOG").unwrap_or_else(|_| "info".to_string()),
     )
-        .arg("test");
+    .arg("test");
     if let Some(package) = config.package {
         cmd.arg("-p").arg(package);
     }
@@ -294,14 +294,14 @@ fn resolve_paths(config_file: &str) -> TestRunnerPaths {
 }
 
 enum ValidatorCluster {
-    Chain,
+    Chain(Option<ProgramLoader>),
     Ephem,
 }
 
 impl ValidatorCluster {
     fn log_suffix(&self) -> &'static str {
         match self {
-            ValidatorCluster::Chain => "CHAIN",
+            ValidatorCluster::Chain(_) => "CHAIN",
             ValidatorCluster::Ephem => "EPHEM",
         }
     }
@@ -315,11 +315,15 @@ fn start_validator(
     let test_runner_paths = resolve_paths(config_file);
 
     match cluster {
-        ValidatorCluster::Chain
-        if std::env::var("FORCE_MAGIC_BLOCK_VALIDATOR").is_err() =>
-            {
-                start_test_validator_with_config(&test_runner_paths, log_suffix)
-            }
+        ValidatorCluster::Chain(program_loader)
+            if std::env::var("FORCE_MAGIC_BLOCK_VALIDATOR").is_err() =>
+        {
+            start_test_validator_with_config(
+                &test_runner_paths,
+                program_loader,
+                log_suffix,
+            )
+        }
         _ => start_magic_block_validator_with_config(
             &test_runner_paths,
             log_suffix,
@@ -330,6 +334,7 @@ fn start_validator(
 
 fn start_test_validator_with_config(
     test_runner_paths: &TestRunnerPaths,
+    program_loader: Option<ProgramLoader>,
     log_suffix: &str,
 ) -> Option<process::Child> {
     let TestRunnerPaths {
@@ -339,7 +344,7 @@ fn start_test_validator_with_config(
     } = test_runner_paths;
 
     let port = rpc_port_from_config(config_path);
-    let mut args = config_to_args(config_path);
+    let mut args = config_to_args(config_path, program_loader);
 
     let accounts_dir = workspace_dir.join("configs").join("accounts");
     let accounts = [
