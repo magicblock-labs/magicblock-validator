@@ -14,7 +14,7 @@ fn clone_old_bpf_and_run_transaction() {
     let ctx = IntegrationTestContext::try_new().unwrap();
     let payer = Keypair::new();
     ctx.airdrop_chain(&payer.pubkey(), LAMPORTS_PER_SOL)
-        .expect("failed to airdrop to on-ER account");
+        .expect("failed to airdrop to on-chain account");
 
     let memo_ix = Instruction::new_with_bytes(
         MEMO_PROGRAM_PK,

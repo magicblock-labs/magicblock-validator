@@ -41,7 +41,7 @@ However any transaction sent to this RPC is ran inside the custom SVM bank.
 
 *Important dependencies:*
 
-- Provides `Bank`: [magicblock-bank](../bank/README.md)
-- Provides `Ledger`: [magicblock-ledger](../ledger/README.md)
-- Provides `AccountsManager`: [magicblock-accounts](../accounts/README.md)
-- Provides `execute_batch`: [magicblock-processor](../processor/README.md)
+- Provides `Bank`: [magicblock-bank](../magicblock-bank/README.md)
+- Provides `Ledger`: [magicblock-ledger](../magicblock-ledger/README.md)
+- Provides `AccountsManager`: [magicblock-accounts](../magicblock-accounts/README.md)
+- Provides `execute_batch`: [magicblock-processor](../magicblock-processor/README.md)

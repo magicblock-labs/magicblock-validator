@@ -47,7 +47,7 @@ impl solana_frozen_abi::abi_example::AbiExample for BuiltinPrototype {
 ///
 /// - `system_program`
 /// - `solana_bpf_loader_upgradeable_program`
-/// - `compute_budget_program"t`
+/// - `compute_budget_program"
 /// - `address_lookup_table_program`
 /// - `magicblock_program` which supports account mutations, etc.
 ///

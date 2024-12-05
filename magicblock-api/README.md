@@ -4,9 +4,9 @@ Provides a highlevel API which allows to initialize and startup all pieces of th
 
 ## Usage
 
-Provide a `MagicBlockConfig` which includes the following:
+Provide a `EphemeralConfig` which includes the following:
 
-- `validator_config: MagicBlockConfig` which indicates how the validator should be configured,
+- `validator_config: EphemeralConfig` which indicates how the validator should be configured,
 see [this default config toml](../magicblock-config/tests/fixtures/02_defaults.toml) for more
 info
 - `ledger: Option<Ledger>` if you want to control the ledger location, otherwise it is placed
