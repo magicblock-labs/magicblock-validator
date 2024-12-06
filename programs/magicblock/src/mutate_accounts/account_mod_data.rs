@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     ops::Neg,
     sync::{
-        atomic::{AtomicU64, Ordering},
+        atomic::{AtomicBool, AtomicU64, Ordering},
         Arc, Mutex, RwLock,
     },
 };
@@ -27,23 +27,29 @@ lazy_static! {
     static ref PERSISTER: RwLock<Option<Arc<dyn PersistsAccountModData>>> = RwLock::new(None);
 
     static ref DATA_MOD_ID: AtomicU64 = AtomicU64::new(0);
+
+    static ref MAX_REPLAY_DATA_MOD_ID: AtomicU64 = AtomicU64::new(0);
+}
+
+/// We capture the max id we see during ledger replay and use it to assign
+/// it to the [DATA_MOD_ID] once the validator starts running.
+/// As a result once the [DATA_MOD_ID] has the same value as it did
+/// when the initial validator instance stopped.
+fn update_max_seen_data_id(next_id: u64) {
+    MAX_REPLAY_DATA_MOD_ID.fetch_max(next_id, Ordering::Relaxed);
 }
 
 pub fn get_account_mod_data_id() -> u64 {
-    DATA_MOD_ID.fetch_add(1, Ordering::Relaxed)
-}
+    static ASSIGNED_MAX_ID: AtomicBool = AtomicBool::new(false);
 
-/// This increases the data mod id and verifies that the expected
-/// next id is in sequence.
-/// We crash here since if not this is only used during ledger replay and
-/// if the sequence is broken this indidcates an invalid ledger and
-/// we don't want to keep running in this case
-/// As a result once the validator starts running after ledger replay
-/// the [DATA_MOD_ID] has the same value as it did when the initial validator
-/// instance stopped.
-fn set_data_mod_id_checking_sequence(next_id: u64) {
-    let current_id = DATA_MOD_ID.fetch_add(1, Ordering::Relaxed);
-    assert_eq!(current_id, next_id, "Data mod id sequence is broken");
+    if !ASSIGNED_MAX_ID.swap(true, Ordering::Relaxed) {
+        DATA_MOD_ID.store(
+            MAX_REPLAY_DATA_MOD_ID.load(Ordering::Relaxed) + 1,
+            Ordering::Relaxed,
+        );
+    }
+
+    DATA_MOD_ID.fetch_add(1, Ordering::Relaxed)
 }
 
 pub(crate) fn set_account_mod_data(data: Vec<u8>) -> u64 {
@@ -203,7 +209,7 @@ pub(super) fn resolve_account_mod_data(
             MagicBlockProgramError::AccountDataResolutionFailed
         })? {
             Some(data) => {
-                set_data_mod_id_checking_sequence(id);
+                update_max_seen_data_id(id);
                 Ok(ResolvedAccountModData::FromStorage { id, data })
             }
             None => Ok(ResolvedAccountModData::NotFound { id }),
