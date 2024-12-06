@@ -4,12 +4,12 @@
 Implements logic for fetching remote accounts and dumping them into the local bank
 
 Accounts come in 3 different important flavors:
-- `FeePayer` accounts, which never contain data, can be used to move lamports around
+- `FeePayer` accounts, which never contain data, are on-curve and owned by the system program. They can be used as wallet accounts to pay fees.
 - `Undelegated` accounts, which do contain data and can never be written to in the ephemeral
 - `Delegated` accounts, which have a valid delegation record, therefore can be locally modified
 
 Here are all possible cases:
-- `if !properly_delegated && !has_data` -> `FeePayer`
+- `if !properly_delegated && !has_data && is_on_curve && is_system_program_owned` -> `FeePayer`
 - `if !properly_delegated && has_data` -> `Undelegated`
 - `if properly_delegated && !has_data` -> `Delegated`
 - `if properly_delegated && has_data` -> `Delegated`
