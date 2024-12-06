@@ -41,6 +41,7 @@ pub fn init_slot_ticker(
             tokio::time::sleep(tick_duration).await;
 
             let prev_slot = bank.slot();
+            let prev_blockhash = bank.last_blockhash();
 
             let next_slot = if prev_slot % FLUSH_ACCOUNTS_SLOT_FREQ == 0 {
                 // NOTE: at this point we flush the accounts blocking the slot from advancing as
@@ -64,7 +65,7 @@ pub fn init_slot_ticker(
             if let Err(err) = ledger.write_block(
                 prev_slot,
                 timestamp_in_secs() as i64,
-                bank.last_blockhash(),
+                prev_blockhash,
             ) {
                 error!("Failed to write block: {:?}", err);
             }
