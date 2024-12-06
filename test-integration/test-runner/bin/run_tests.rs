@@ -38,11 +38,11 @@ pub fn main() {
     };
 
     // Assert that all tests passed
-    assert_cargo_tests_passed(restore_ledger_output);
     assert_cargo_tests_passed(security_output);
     assert_cargo_tests_passed(scenarios_output);
     assert_cargo_tests_passed(cloning_output);
     assert_cargo_tests_passed(issues_frequent_commits_output);
+    assert_cargo_tests_passed(restore_ledger_output);
 }
 
 // -----------------
@@ -375,6 +375,7 @@ fn start_test_validator_with_config(
     let mut command = process::Command::new("solana-test-validator");
     command
         .args(args)
+        .env("RUST_LOG", "solana=warn")
         .env("RUST_LOG_STYLE", log_suffix)
         .current_dir(root_dir);
 

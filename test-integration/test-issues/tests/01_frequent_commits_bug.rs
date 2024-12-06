@@ -10,13 +10,13 @@ fn test_frequent_commits_do_not_run_when_no_accounts_need_to_be_committed() {
     init_logger!();
     info!("==== test_frequent_commits_do_not_run_when_no_accounts_need_to_be_committed ====");
 
-    let ctx = IntegrationTestContext::new();
+    let ctx = IntegrationTestContext::try_new().unwrap();
     let chain_client = &ctx.try_chain_client().unwrap();
 
     // The commits happen frequently via the MagicBlock System program.
     // Thus here we ensure that after the frequency timeout we did not receive any transaction
     // on chain. This test did fail when I uncommented the fix,
-    // see (sleipnir-accounts/src/external_accounts_manager.rs:commit_delegated).
+    // see (magicblock-accounts/src/external_accounts_manager.rs:commit_delegated).
 
     // 1. Make sure we have no transaction yet on chain
     assert_eq!(chain_client.get_transaction_count().unwrap(), 0);

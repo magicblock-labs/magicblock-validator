@@ -2,7 +2,7 @@
 use {
     crate::geyser_plugin_manager::GeyserPluginManager,
     log::*,
-    sleipnir_bank::transaction_notifier_interface::TransactionNotifier,
+    magicblock_bank::transaction_notifier_interface::TransactionNotifier,
     solana_geyser_plugin_interface::geyser_plugin_interface::{
         ReplicaTransactionInfoV2, ReplicaTransactionInfoVersions,
     },

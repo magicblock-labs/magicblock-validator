@@ -1,7 +1,7 @@
 use std::sync::{Arc, RwLock};
 
 use log::*;
-use sleipnir_bank::slot_status_notifier_interface::SlotStatusNotifier;
+use magicblock_bank::slot_status_notifier_interface::SlotStatusNotifier;
 use solana_geyser_plugin_interface::geyser_plugin_interface::SlotStatus;
 use solana_measure::measure::Measure;
 use solana_metrics::*;

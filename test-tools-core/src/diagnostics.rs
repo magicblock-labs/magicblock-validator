@@ -1,7 +1,7 @@
 use std::{env, path::Path};
 
 use log::info;
-use sleipnir_accounts_db::transaction_results::TransactionExecutionDetails;
+use magicblock_accounts_db::transaction_results::TransactionExecutionDetails;
 
 // -----------------
 // init_logger

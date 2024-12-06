@@ -1,0 +1,30 @@
+[package]
+name = "magicblock-mutator"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+bincode = { workspace = true }
+log = { workspace = true }
+magicblock-program = { workspace = true }
+solana-loader-v4-program = { workspace = true }
+solana-rpc-client = { workspace = true }
+solana-rpc-client-api = { workspace = true }
+solana-sdk = { workspace = true }
+thiserror = { workspace = true }
+
+[dev-dependencies]
+assert_matches = { workspace = true }
+bincode = { workspace = true }
+tokio = { workspace = true }
+magicblock-bank = { workspace = true, features = ["dev-context-only-utils"] }
+magicblock-program = { workspace = true }
+solana-account-decoder = { workspace = true }
+test-tools = { workspace = true }

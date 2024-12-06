@@ -3,7 +3,7 @@
 TRACE_ARR=(
 	"warn,"
 	"geyser_plugin=trace,"
-	"sleipnir=trace,"
+	"magicblock=trace,"
   "rpc=trace,"
   "bank=trace,"
   "banking_stage=trace,"
@@ -15,7 +15,7 @@ TRACE_ARR=(
 DEBUG_ARR=(
 	"warn,"
 	"geyser_plugin=debug,"
-	"sleipnir=debug,"
+	"magicblock=debug,"
   "rpc=debug,"
   "bank=debug,"
   "banking_stage=debug,"
@@ -28,7 +28,7 @@ DEBUG_ARR=(
 INFO_ARR=(
 	"warn,"
 	"geyser_plugin=info,"
-	"sleipnir=info,"
+	"magicblock=info,"
   "rpc=info,"
   "bank=info,"
   "banking_stage=info,"

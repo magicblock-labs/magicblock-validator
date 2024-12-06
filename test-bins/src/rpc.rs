@@ -1,10 +1,10 @@
 use log::*;
-use sleipnir_api::{
+use magicblock_api::{
     ledger,
     magic_validator::{MagicValidator, MagicValidatorConfig},
     InitGeyserServiceConfig,
 };
-use sleipnir_config::{GeyserGrpcConfig, SleipnirConfig};
+use magicblock_config::{EphemeralConfig, GeyserGrpcConfig};
 use solana_sdk::signature::Keypair;
 use test_tools::init_logger;
 
@@ -104,11 +104,11 @@ fn validator_keypair() -> Keypair {
     }
 }
 
-fn load_config_from_arg() -> (Option<String>, SleipnirConfig) {
+fn load_config_from_arg() -> (Option<String>, EphemeralConfig) {
     let config_file = std::env::args().nth(1);
     match config_file {
         Some(config_file) => {
-            let config = SleipnirConfig::try_load_from_file(&config_file)
+            let config = EphemeralConfig::try_load_from_file(&config_file)
                 .unwrap_or_else(|err| {
                     panic!(
                         "Failed to load config file from '{}'. ({})",

@@ -1,0 +1,47 @@
+[package]
+name = "magicblock-rpc"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[dependencies]
+bs58 = { workspace = true }
+base64 = { workspace = true }
+bincode = { workspace = true }
+crossbeam-channel = { workspace = true }
+log = { workspace = true }
+jsonrpc-core = { workspace = true }
+jsonrpc-core-client = { workspace = true }
+jsonrpc-derive = { workspace = true }
+jsonrpc-http-server = { workspace = true }
+serde = { workspace = true }
+serde_derive = { workspace = true }
+magicblock-accounts = { workspace = true }
+magicblock-accounts-db = { workspace = true }
+magicblock-bank = { workspace = true }
+magicblock-ledger = { workspace = true }
+magicblock-metrics = { workspace = true }
+magicblock-processor = { workspace = true }
+magicblock-tokens = { workspace = true }
+magicblock-transaction-status = { workspace = true }
+magicblock-version = { workspace = true }
+solana-account-decoder = { workspace = true }
+solana-metrics = { workspace = true }
+solana-perf = { workspace = true }
+solana-program-runtime = { workspace = true }
+solana-rpc-client-api = { workspace = true }
+solana-sdk = { workspace = true }
+# TODO: decide if we want to use magicblock-transaction-status instead
+# and possibly have that crate just be a wrapper around solana-transaction-status
+solana-transaction-status = { workspace = true }
+
+spl-token-2022 = { workspace = true }
+
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["full"] }
+
+[dev-dependencies]
+test-tools = { workspace = true }

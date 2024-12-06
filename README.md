@@ -1,4 +1,4 @@
-## POC for MagicBlock Validator
+## MagicBlock's Ephemeral Validator
 
 ## Research
 

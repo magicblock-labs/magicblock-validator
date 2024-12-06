@@ -13,19 +13,19 @@ test-log:
 	cargo $(CARGO_TEST_NOCAP)
 
 test-bank:
-	cargo $(CARGO_TEST_NOCAP) --package sleipnir-bank
+	cargo $(CARGO_TEST_NOCAP) --package magicblock-bank
 
 list:
 	@LC_ALL=C $(MAKE) -pRrq -f $(firstword $(MAKEFILE_LIST)) : 2>/dev/null | awk -v RS= -F: '/(^|\n)# Files(\n|$$)/,/(^|\n)# Finished Make data base/ {if ($$1 !~ "^[#.]") {print $$1}}' | sort | egrep -v -e '^[^[:alnum:]]' -e '^$@$$'
 
 ex-clone-custom:
-	cargo run --package=sleipnir-mutator --example clone_solx_custom
+	cargo run --package=magicblock-mutator --example clone_solx_custom
 
 ex-rpc:
-	cargo run --package=sleipnir-rpc --example rpc
+	cargo run --package=magicblock-rpc --example rpc
 
 ex-rpc-release:
-	cargo run --release --package=sleipnir-rpc --example rpc
+	cargo run --release --package=magicblock-rpc --example rpc
 
 run-release:
 	cargo run --release
@@ -48,8 +48,11 @@ fmt:
 lint:
 	cargo clippy --all-targets -- -D warnings -A unexpected_cfgs
 
-ci-test:
-	RUST_BACKTRACE=1 cargo $(CARGO_TEST_NOCAP) && \
+ci-test-unit:
+	RUST_BACKTRACE=1 cargo $(CARGO_TEST_NOCAP)
+
+ci-test-integration:
+	cargo build && \
 	$(MAKE) -C $(DIR)/test-integration test
 
 ## NOTE: We're getting the following error in github CI when trying to use

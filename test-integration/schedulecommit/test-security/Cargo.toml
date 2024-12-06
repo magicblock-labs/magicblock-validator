@@ -9,7 +9,7 @@ program-schedulecommit-security = { workspace = true, features = [
   "no-entrypoint",
 ] }
 schedulecommit-client = { workspace = true }
-sleipnir-core = { workspace = true }
+magicblock-core = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
 integration-test-tools = { workspace = true }

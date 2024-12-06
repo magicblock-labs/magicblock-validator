@@ -11,11 +11,11 @@ use integration_test_tools::{
     workspace_paths::path_relative_to_workspace,
     IntegrationTestContext,
 };
-use program_flexi_counter::state::FlexiCounter;
-use sleipnir_config::{
-    AccountsConfig, LedgerConfig, LifecycleMode, ProgramConfig, RemoteConfig,
-    SleipnirConfig, ValidatorConfig,
+use magicblock_config::{
+    AccountsConfig, EphemeralConfig, LedgerConfig, LifecycleMode,
+    ProgramConfig, RemoteConfig, ValidatorConfig,
 };
+use program_flexi_counter::state::FlexiCounter;
 use solana_sdk::{
     clock::Slot,
     instruction::Instruction,
@@ -38,7 +38,7 @@ pub const FLEXI_COUNTER_PUBKEY: Pubkey =
 /// Stringifies the config and writes it to a temporary config file.
 /// Then uses that config to start the validator.
 pub fn start_validator_with_config(
-    config: SleipnirConfig,
+    config: EphemeralConfig,
 ) -> (TempDir, Option<process::Child>) {
     let workspace_dir = resolve_workspace_dir();
     let (default_tmpdir, temp_dir) = resolve_tmp_dir(TMP_DIR_CONFIG);
@@ -104,7 +104,7 @@ pub fn setup_offline_validator(
 
     let programs = resolve_programs(programs);
 
-    let config = SleipnirConfig {
+    let config = EphemeralConfig {
         ledger: LedgerConfig {
             reset,
             path: Some(ledger_path.display().to_string()),
@@ -114,13 +114,13 @@ pub fn setup_offline_validator(
         validator: validator_config,
         ..Default::default()
     };
-    let (default_tmpdir_config, Some(validator)) =
+    let (default_tmpdir_config, Some(mut validator)) =
         start_validator_with_config(config)
     else {
         panic!("validator should set up correctly");
     };
 
-    let ctx = IntegrationTestContext::new_ephem_only();
+    let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
     (default_tmpdir_config, validator, ctx)
 }
 
@@ -142,7 +142,7 @@ pub fn setup_validator_with_local_remote(
     };
     let programs = resolve_programs(programs);
 
-    let config = SleipnirConfig {
+    let config = EphemeralConfig {
         ledger: LedgerConfig {
             reset,
             path: Some(ledger_path.display().to_string()),
@@ -152,13 +152,13 @@ pub fn setup_validator_with_local_remote(
         ..Default::default()
     };
 
-    let (default_tmpdir_config, Some(validator)) =
+    let (default_tmpdir_config, Some(mut validator)) =
         start_validator_with_config(config)
     else {
         panic!("validator should set up correctly");
     };
 
-    let ctx = IntegrationTestContext::new();
+    let ctx = expect!(IntegrationTestContext::try_new(), validator);
     (default_tmpdir_config, validator, ctx)
 }
 
@@ -176,7 +176,7 @@ pub fn send_tx_with_payer_ephem(
     payer: &Keypair,
     validator: &mut Child,
 ) -> Signature {
-    let ctx = IntegrationTestContext::new_ephem_only();
+    let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
 
     let mut tx = Transaction::new_with_payer(&[ix], Some(&payer.pubkey()));
     let signers = &[payer];
@@ -190,7 +190,7 @@ pub fn send_tx_with_payer_chain(
     payer: &Keypair,
     validator: &mut Child,
 ) -> Signature {
-    let ctx = IntegrationTestContext::new();
+    let ctx = expect!(IntegrationTestContext::try_new(), validator);
     let mut tx = Transaction::new_with_payer(&[ix], Some(&payer.pubkey()));
     let signers = &[payer];
 
@@ -203,7 +203,7 @@ pub fn confirm_tx_with_payer_ephem(
     payer: &Keypair,
     validator: &mut Child,
 ) -> Signature {
-    let ctx = IntegrationTestContext::new_ephem_only();
+    let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
 
     let mut tx = Transaction::new_with_payer(&[ix], Some(&payer.pubkey()));
     let signers = &[payer];
@@ -221,7 +221,7 @@ pub fn confirm_tx_with_payer_chain(
     payer: &Keypair,
     validator: &mut Child,
 ) -> Signature {
-    let ctx = IntegrationTestContext::new();
+    let ctx = expect!(IntegrationTestContext::try_new(), validator);
 
     let mut tx = Transaction::new_with_payer(&[ix], Some(&payer.pubkey()));
     let signers = &[payer];
@@ -238,7 +238,7 @@ pub fn fetch_counter_ephem(
     payer: &Pubkey,
     validator: &mut Child,
 ) -> FlexiCounter {
-    let ctx = IntegrationTestContext::new_ephem_only();
+    let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
     fetch_counter(payer, &ctx.ephem_client, validator)
 }
 
@@ -246,8 +246,9 @@ pub fn fetch_counter_chain(
     payer: &Pubkey,
     validator: &mut Child,
 ) -> FlexiCounter {
-    let ctx = IntegrationTestContext::new();
-    fetch_counter(payer, ctx.try_chain_client().unwrap(), validator)
+    let ctx = expect!(IntegrationTestContext::try_new(), validator);
+    let chain_client = expect!(ctx.try_chain_client(), validator);
+    fetch_counter(payer, chain_client, validator)
 }
 
 fn fetch_counter(
@@ -264,7 +265,7 @@ pub fn fetch_counter_owner_chain(
     payer: &Pubkey,
     validator: &mut Child,
 ) -> Pubkey {
-    let ctx = IntegrationTestContext::new();
+    let ctx = expect!(IntegrationTestContext::try_new(), validator);
     let (counter, _) = FlexiCounter::pda(payer);
     expect!(ctx.fetch_chain_account_owner(counter), validator)
 }
@@ -273,9 +274,9 @@ pub fn fetch_counter_owner_chain(
 // Slot Advances
 // -----------------
 /// Waits for sufficient slot advances to guarantee that the ledger for
-/// the current slot was persiste
+/// the current slot was persisted
 pub fn wait_for_ledger_persist(validator: &mut Child) -> Slot {
-    let ctx = IntegrationTestContext::new_ephem_only();
+    let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
 
     // I noticed test flakiness if we just advance to next slot once
     // It seems then the ledger hasn't been fully written by the time
