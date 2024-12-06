@@ -184,7 +184,11 @@ fn process_add_and_schedule_commit(
     count: u8,
     undelegate: bool,
 ) -> ProgramResult {
-    msg!("Add {}", count);
+    msg!(
+        "Add {} and schedule commit undelegate: {}",
+        count,
+        undelegate
+    );
 
     let account_info_iter = &mut accounts.iter();
     let payer_info = next_account_info(account_info_iter)?;
@@ -221,6 +225,7 @@ fn process_add_counter(accounts: &[AccountInfo]) -> ProgramResult {
     let payer_info = next_account_info(account_info_iter)?;
     let target_pda_info = next_account_info(account_info_iter)?;
     let source_pda_info = next_account_info(account_info_iter)?;
+    msg!("{} += {}", target_pda_info.key, source_pda_info.key);
 
     let (target_pda, _) = FlexiCounter::pda(payer_info.key);
     assert_keys_equal(target_pda_info.key, &target_pda, || {
