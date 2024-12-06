@@ -42,16 +42,8 @@ pub fn get_account_mod_data_id() -> u64 {
 /// the [DATA_MOD_ID] has the same value as it did when the initial validator
 /// instance stopped.
 fn set_data_mod_id_checking_sequence(next_id: u64) {
-    if next_id == 0 {
-        assert_eq!(
-            DATA_MOD_ID.load(Ordering::Relaxed),
-            0,
-            "Data mod id sequence is broken"
-        );
-        return;
-    }
     let current_id = DATA_MOD_ID.fetch_add(1, Ordering::Relaxed);
-    assert_eq!(current_id + 1, next_id, "Data mod id sequence is broken");
+    assert_eq!(current_id, next_id, "Data mod id sequence is broken");
 }
 
 pub(crate) fn set_account_mod_data(data: Vec<u8>) -> u64 {
