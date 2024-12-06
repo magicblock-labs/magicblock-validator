@@ -239,7 +239,8 @@ pub fn fetch_counter_ephem(
     validator: &mut Child,
 ) -> FlexiCounter {
     let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
-    fetch_counter(payer, &ctx.ephem_client, validator)
+    let ephem_client = expect!(ctx.try_ephem_client(), validator);
+    fetch_counter(payer, ephem_client, validator)
 }
 
 pub fn fetch_counter_chain(

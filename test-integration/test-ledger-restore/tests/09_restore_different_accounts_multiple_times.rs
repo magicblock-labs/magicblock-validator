@@ -44,7 +44,7 @@ fn restore_ledger_different_accounts_multiple_times() {
         write(&ledger_path, &payer_main, &payer_readonly);
     validator.kill().unwrap();
 
-    for idx in 0..5 {
+    for _ in 0..5 {
         let mut validator = read(
             &ledger_path,
             &payer_main,

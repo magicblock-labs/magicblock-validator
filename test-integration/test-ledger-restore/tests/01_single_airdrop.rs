@@ -48,12 +48,17 @@ fn read_ledger(
     let (_, mut validator, ctx) =
         setup_offline_validator(ledger_path, None, None, false);
 
-    let acc = expect!(ctx.ephem_client.get_account(pubkey1), validator);
+    let acc = expect!(
+        expect!(ctx.try_ephem_client(), validator).get_account(pubkey1),
+        validator
+    );
     assert_eq!(acc.lamports, 1_111_111, cleanup(&mut validator));
 
     if let Some(sig) = airdrop_sig1 {
-        let status =
-            ctx.ephem_client.get_signature_status(sig).unwrap().unwrap();
+        let status = expect!(ctx.try_ephem_client(), validator)
+            .get_signature_status(sig)
+            .unwrap()
+            .unwrap();
         assert!(status.is_ok(), cleanup(&mut validator));
     }
 
