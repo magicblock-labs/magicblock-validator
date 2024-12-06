@@ -17,10 +17,10 @@ Here are all possible cases:
 # Logic Overview
 
 The cloning pipeline is made out of a few components:
-- The cloner (highest level) -> crate `sleipnir-account-cloner`
-  - The fetcher (read on-chain latest account state) -> crate `sleipnir-account-fetcher`
-  - The updates (subscribe to on-chain account changes) -> crate `sleipnir-account-updates`
-  - The dumper (apply cloned state to the bank) -> crate `sleipnir-account-dumper`
+- The cloner (highest level) -> crate `magicblock-account-cloner`
+  - The fetcher (read on-chain latest account state) -> crate `magicblock-account-fetcher`
+  - The updates (subscribe to on-chain account changes) -> crate `magicblock-account-updates`
+  - The dumper (apply cloned state to the bank) -> crate `magicblock-account-dumper`
 
 ## Cloning logic
 
