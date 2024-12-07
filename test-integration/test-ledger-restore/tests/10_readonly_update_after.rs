@@ -1,5 +1,4 @@
 use cleanass::assert_eq;
-use solana_sdk::pubkey::Pubkey;
 use std::{path::Path, process::Child};
 
 use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};
@@ -13,11 +12,7 @@ use program_flexi_counter::{
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL, signature::Keypair, signer::Signer,
 };
-use test_ledger_restore::{
-    cleanup, confirm_tx_with_payer_chain, confirm_tx_with_payer_ephem,
-    fetch_counter_chain, fetch_counter_ephem, get_programs_with_flexi_counter,
-    setup_validator_with_local_remote, wait_for_ledger_persist, TMP_DIR_LEDGER,
-};
+use test_ledger_restore::{assert_counter_state, cleanup, confirm_tx_with_payer_chain, confirm_tx_with_payer_ephem, fetch_counter_chain, fetch_counter_ephem, get_programs_with_flexi_counter, setup_validator_with_local_remote, wait_for_ledger_persist, Counter, State, TMP_DIR_LEDGER};
 const COUNTER_MAIN: &str = "Main Counter";
 const COUNTER_READONLY: &str = "Readonly Counter";
 fn payer_keypair() -> Keypair {
@@ -26,7 +21,7 @@ fn payer_keypair() -> Keypair {
 
 // In this test we work with two PDAs.
 // - Main PDA owned by main payer, delegated to the ephemeral
-// - Readonly PDA that is delegated
+// - Readonly PDA that is not delegated
 //
 // ## Writing Ledger
 //
@@ -68,15 +63,6 @@ fn payer_keypair() -> Keypair {
 // -----------------
 // Helpers
 // -----------------
-struct State {
-    count: u64,
-    updates: u64,
-}
-struct Counter<'a> {
-    payer: &'a Pubkey,
-    chain: State,
-    ephem: State,
-}
 struct ExpectedCounterStates<'a> {
     main: Counter<'a>,
     readonly: Counter<'a>,
@@ -105,32 +91,6 @@ macro_rules! add_readonly_to_main {
         let counter_main_ephem =
             fetch_counter_ephem(&$payer_main.pubkey(), $validator);
         assert_eq!(counter_main_ephem, $expected, cleanup($validator));
-    };
-}
-
-macro_rules! assert_counter_state {
-    ($validator:expr, $expected:expr, $label:ident) => {
-        let counter_chain = fetch_counter_chain($expected.payer, $validator);
-        assert_eq!(
-            counter_chain,
-            FlexiCounter {
-                count: $expected.chain.count,
-                updates: $expected.chain.updates,
-                label: $label.to_string()
-            },
-            cleanup($validator)
-        );
-
-        let counter_ephem = fetch_counter_ephem($expected.payer, $validator);
-        assert_eq!(
-            counter_ephem,
-            FlexiCounter {
-                count: $expected.ephem.count,
-                updates: $expected.ephem.updates,
-                label: $label.to_string()
-            },
-            cleanup($validator)
-        );
     };
 }
 
