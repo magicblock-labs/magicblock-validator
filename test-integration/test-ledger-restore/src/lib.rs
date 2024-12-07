@@ -221,7 +221,7 @@ pub fn confirm_tx_with_payer_chain(
     payer: &Keypair,
     validator: &mut Child,
 ) -> Signature {
-    let ctx = expect!(IntegrationTestContext::try_new(), validator);
+    let ctx = expect!(IntegrationTestContext::try_new_chain_only(), validator);
 
     let mut tx = Transaction::new_with_payer(&[ix], Some(&payer.pubkey()));
     let signers = &[payer];
@@ -247,7 +247,7 @@ pub fn fetch_counter_chain(
     payer: &Pubkey,
     validator: &mut Child,
 ) -> FlexiCounter {
-    let ctx = expect!(IntegrationTestContext::try_new(), validator);
+    let ctx = expect!(IntegrationTestContext::try_new_chain_only(), validator);
     let chain_client = expect!(ctx.try_chain_client(), validator);
     fetch_counter(payer, chain_client, validator)
 }
@@ -266,7 +266,7 @@ pub fn fetch_counter_owner_chain(
     payer: &Pubkey,
     validator: &mut Child,
 ) -> Pubkey {
-    let ctx = expect!(IntegrationTestContext::try_new(), validator);
+    let ctx = expect!(IntegrationTestContext::try_new_chain_only(), validator);
     let (counter, _) = FlexiCounter::pda(payer);
     expect!(ctx.fetch_chain_account_owner(counter), validator)
 }
