@@ -247,7 +247,7 @@ impl<T: Clone> StatusCache<T> {
                     .iter()
                     .map(|(_, m)| m.len())
                     .sum::<usize>();
-                log::debug!(
+                log::trace!(
                     "Purged roots up to {}. Cache {} -> {}, TX Status {} -> {}",
                     min,
                     cache_size_before,

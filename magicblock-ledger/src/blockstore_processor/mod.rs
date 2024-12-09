@@ -97,10 +97,7 @@ pub fn process_ledger(ledger: &Ledger, bank: &Bank) -> LedgerResult<()> {
                 prepared_block
             )));
         };
-        trace!(
-            "Replaying slot with blockhash {}",
-            &prepared_block.blockhash
-        );
+        blockhash_log::log_blockhash(&prepared_block.blockhash);
         bank.replay_slot(
             prepared_block.slot,
             &prepared_block.previous_blockhash,
@@ -207,5 +204,16 @@ fn log_execution_results(results: &[TransactionExecutionResult]) {
                 trace!("NotExecuted: {:#?}", err);
             }
         }
+    }
+}
+
+/// NOTE: a separate module for logging the blockhash is used
+/// to in order to allow turning this off specifically
+/// Example:
+/// RUST_LOG=warn,magicblock=debug,magicblock_ledger=trace,magicblock_ledger::blockstore_processor::blockhash_log=off
+mod blockhash_log {
+    use super::*;
+    pub(super) fn log_blockhash(blockhash: &Hash) {
+        trace!("Replaying slot with blockhash {}", &blockhash);
     }
 }
