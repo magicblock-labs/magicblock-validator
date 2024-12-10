@@ -1,6 +1,7 @@
 use borsh::{to_vec, BorshDeserialize};
 use ephemeral_rollups_sdk::{
-    cpi::delegate_account,
+    consts::EXTERNAL_UNDELEGATE_DISCRIMINATOR,
+    cpi::{delegate_account, undelegate_account},
     ephem::{commit_accounts, commit_and_undelegate_accounts},
 };
 use solana_program::{
@@ -26,7 +27,17 @@ pub fn process(
     accounts: &[AccountInfo],
     instruction_data: &[u8],
 ) -> ProgramResult {
+    if instruction_data.len() >= EXTERNAL_UNDELEGATE_DISCRIMINATOR.len() {
+        let (disc, seeds_data) =
+            instruction_data.split_at(EXTERNAL_UNDELEGATE_DISCRIMINATOR.len());
+
+        if disc == EXTERNAL_UNDELEGATE_DISCRIMINATOR {
+            return process_undelegate_request(accounts, seeds_data);
+        }
+    }
+
     let ix = FlexiCounterInstruction::try_from_slice(instruction_data)?;
+    msg!("Processing instruction {:?}", ix);
     use FlexiCounterInstruction::*;
     match ix {
         Init { label, bump } => process_init(program_id, accounts, label, bump),
@@ -240,4 +251,30 @@ fn process_add_counter(accounts: &[AccountInfo]) -> ProgramResult {
     let count = source_counter.count as u8;
 
     add(payer_info, target_pda_info, count)
+}
+
+fn process_undelegate_request(
+    accounts: &[AccountInfo],
+    seeds_data: &[u8],
+) -> ProgramResult {
+    msg!("Undelegate");
+    let accounts_iter = &mut accounts.iter();
+    let delegated_account = next_account_info(accounts_iter)?;
+    let buffer = next_account_info(accounts_iter)?;
+    let payer = next_account_info(accounts_iter)?;
+    let system_program = next_account_info(accounts_iter)?;
+    let account_seeds =
+        <Vec<Vec<u8>>>::try_from_slice(seeds_data).map_err(|err| {
+            msg!("ERROR: failed to parse account seeds {:?}", err);
+            ProgramError::InvalidArgument
+        })?;
+    undelegate_account(
+        delegated_account,
+        &crate::id(),
+        buffer,
+        payer,
+        system_program,
+        account_seeds,
+    )?;
+    Ok(())
 }
