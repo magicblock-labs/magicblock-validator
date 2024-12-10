@@ -111,6 +111,30 @@ macro_rules! expect {
     };
 }
 
+/// Unwraps the provided result and ensures to kill the validator before panicking
+/// if the result was not an error
+#[macro_export]
+macro_rules! expect_err {
+    ($res:expr, $msg:expr, $validator:ident) => {
+        match $res {
+            Ok(_) => {
+                $validator.kill().unwrap();
+                panic!("{}", $msg);
+            }
+            Err(e) => e,
+        }
+    };
+    ($res:expr, $validator:ident) => {
+        match $res {
+            Ok(_) => {
+                $validator.kill().unwrap();
+                panic!("Expected Error");
+            }
+            Err(e) => e,
+        }
+    };
+}
+
 /// Unwraps the provided option and ensures to kill the validator before panicking
 /// if the result wasi None
 #[macro_export]
