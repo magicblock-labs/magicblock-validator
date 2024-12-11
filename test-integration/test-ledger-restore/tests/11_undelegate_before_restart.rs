@@ -121,27 +121,26 @@ fn update_counter_between_restarts(payer: &Keypair) -> Child {
         ctx.fetch_schedule_commit_result::<FlexiCounter>(sig),
         validator
     );
-    if false {
-        expect!(res.confirm_commit_transactions_on_chain(&ctx), validator);
+    expect!(res.confirm_commit_transactions_on_chain(&ctx), validator);
 
-        // NOTE: that the account was never committed before the previous
-        // validator instance shut down, thus we start from 0:0 again
-        assert_counter_state!(
-            &mut validator,
-            Counter {
-                payer: &payer.pubkey(),
-                chain: State {
-                    count: 3,
-                    updates: 1,
-                },
-                ephem: State {
-                    count: 3,
-                    updates: 1,
-                },
+    // NOTE: that the account was never committed before the previous
+    // validator instance shut down, thus we start from 0:0 again when
+    // we add 3
+    assert_counter_state!(
+        &mut validator,
+        Counter {
+            payer: &payer.pubkey(),
+            chain: State {
+                count: 3,
+                updates: 1,
             },
-            COUNTER
-        );
-    }
+            ephem: State {
+                count: 3,
+                updates: 1,
+            },
+        },
+        COUNTER
+    );
 
     validator
 }
