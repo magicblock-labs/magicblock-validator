@@ -1,10 +1,12 @@
-use crate::accounts::flush_accounts;
+use std::time::{SystemTime, UNIX_EPOCH};
+
 use magicblock_accounts_db::FLUSH_ACCOUNTS_SLOT_FREQ;
 use magicblock_bank::bank::Bank;
 use magicblock_ledger::{errors::LedgerResult, Ledger};
 use magicblock_processor::execute_transaction::lock_transactions;
 use solana_sdk::clock::Slot;
-use std::time::{SystemTime, UNIX_EPOCH};
+
+use crate::accounts::flush_accounts;
 
 pub fn advance_slot_and_update_ledger(
     bank: &Bank,
