@@ -190,7 +190,7 @@ instructions: {:?}
                 msg.instructions
             );
         }
-        V0(msg) => trace!("Transction: {:#?}", msg),
+        V0(msg) => trace!("Transaction: {:#?}", msg),
     }
 }
 

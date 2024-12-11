@@ -281,7 +281,7 @@ where
                     Err(err) => {
                         error!("Failed to clone {} ('{:?}')", pubkey, err);
                         // NOTE: the account fetch already has retries built in, so
-                        // we don't to retry herek
+                        // we don't to retry here
                         Err(err)
                     }
                 }
