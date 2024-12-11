@@ -37,6 +37,7 @@ members = [
   "test-tools",
   "test-tools-core",
   "utils/expiring-hashmap",
+  "tools/ledger-stats",
 ]
 
 # This prevents a Travis CI error when building for Windows.
