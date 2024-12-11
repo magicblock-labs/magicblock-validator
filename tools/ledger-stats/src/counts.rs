@@ -15,6 +15,14 @@ pub(crate) fn print_counts(ledger: &Ledger) {
         .count_transaction_status()
         .expect("Failed to count transaction status")
         .to_formatted_string(&Locale::en);
+    let successfull_transaction_status_count = ledger
+        .count_transaction_succesful_status()
+        .expect("Failed to count successful transaction status")
+        .to_formatted_string(&Locale::en);
+    let failed_transaction_status_count = ledger
+        .count_transaction_failed_status()
+        .expect("Failed to count failed transaction status")
+        .to_formatted_string(&Locale::en);
     let address_signatures_count = ledger
         .count_address_signatures()
         .expect("Failed to count address signatures")
@@ -66,6 +74,16 @@ pub(crate) fn print_counts(ledger: &Ledger) {
             Row::new()
                 .with_cell("Transactions")
                 .with_cell(transaction_count),
+        )
+        .with_row(
+            Row::new()
+                .with_cell("Successful Transactions")
+                .with_cell(successfull_transaction_status_count),
+        )
+        .with_row(
+            Row::new()
+                .with_cell("Failed Transactions")
+                .with_cell(failed_transaction_status_count),
         )
         .with_row(
             Row::new()

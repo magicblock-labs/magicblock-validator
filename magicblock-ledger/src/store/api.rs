@@ -945,11 +945,60 @@ impl Ledger {
         Ok(())
     }
 
+    /// Returns an iterator over all transaction statuses.
+    /// The iterator item is an error if the status could not be decoded.
+    fn iter_transaction_statuses(
+        &self,
+        success: bool,
+    ) -> impl Iterator<Item = LedgerResult<(Slot, Signature)>> + '_ {
+        let (_lock, _) = self.ensure_lowest_cleanup_slot();
+        self.transaction_status_cf
+            .iter_protobuf(IteratorMode::Start)
+            .filter_map(move |res| {
+                let ((signature, slot), status) = match res {
+                    Ok(((signature, slot), status)) => {
+                        ((signature, slot), status)
+                    }
+                    Err(err) => return Some(Err(err)),
+                };
+                let include = status.err.is_none() == success;
+                if include {
+                    Some(Ok((slot, signature)))
+                } else {
+                    None
+                }
+            })
+    }
+
     pub fn count_transaction_status(&self) -> LedgerResult<usize> {
         count_column_using_cache(
             &self.transaction_status_cf,
             &self.transaction_status_count,
         )
+    }
+
+    fn count_outcome_transaction_status(
+        &self,
+        success: bool,
+    ) -> LedgerResult<usize> {
+        let mut count = 0;
+        for res in self.iter_transaction_statuses(success) {
+            match res {
+                Ok(_) => count += 1,
+                Err(err) => return Err(err),
+            }
+        }
+        Ok(count)
+    }
+
+    pub fn count_transaction_succesful_status(&self) -> LedgerResult<usize> {
+        // TODO: @@@ cache
+        self.count_outcome_transaction_status(true)
+    }
+
+    pub fn count_transaction_failed_status(&self) -> LedgerResult<usize> {
+        // TODO: @@@ cache
+        self.count_outcome_transaction_status(false)
     }
 
     // -----------------

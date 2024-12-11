@@ -143,6 +143,8 @@ pub fn init_system_metrics_ticker(
         try_set_ledger_count!(slot_signatures);
         try_set_ledger_count!(address_signatures);
         try_set_ledger_count!(transaction_status);
+        try_set_ledger_count!(transaction_succesful_status);
+        try_set_ledger_count!(transaction_failed_status);
         try_set_ledger_count!(transactions);
         try_set_ledger_count!(transaction_memos);
         try_set_ledger_count!(perf_samples);
@@ -165,6 +167,8 @@ pub fn init_system_metrics_ticker(
     let bank = bank.clone();
     try_set_ledger_storage_size(&ledger);
     try_set_accounts_storage_size(&bank);
+    try_set_ledger_counts(&ledger);
+
     tokio::task::spawn(async move {
         loop {
             tokio::select! {

@@ -434,6 +434,19 @@ where
 
         result
     }
+
+    pub fn iter_protobuf(
+        &self,
+        iterator_mode: IteratorMode<C::Index>,
+    ) -> impl Iterator<Item = LedgerResult<(C::Index, C::Type)>> + '_ {
+        let cf = self.handle();
+        let iter = self.backend.iterator_cf::<C>(cf, iterator_mode);
+        iter.map(|pair| {
+            let (key, value) = pair?;
+            let decoded = C::Type::decode(value.as_ref())?;
+            Ok((C::index(&key), decoded))
+        })
+    }
 }
 
 impl<C> LedgerColumn<C>

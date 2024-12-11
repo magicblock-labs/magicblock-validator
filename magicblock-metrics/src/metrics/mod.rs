@@ -96,6 +96,12 @@ lazy_static::lazy_static! {
     static ref LEDGER_TRANSACTION_STATUS_GAUGE: IntGauge = IntGauge::new(
         "ledger_transaction_status_gauge", "Ledger Transaction Status Gauge",
     ).unwrap();
+    static ref LEDGER_TRANSACTION_SUCCESSFUL_STATUS_GAUGE: IntGauge = IntGauge::new(
+        "ledger_transaction_successful_status_gauge", "Ledger Successful Transaction Status Gauge",
+    ).unwrap();
+    static ref LEDGER_TRANSACTION_FAILED_STATUS_GAUGE: IntGauge = IntGauge::new(
+        "ledger_transaction_failed_status_gauge", "Ledger Failed Transaction Status Gauge",
+    ).unwrap();
     static ref LEDGER_TRANSACTIONS_GAUGE: IntGauge = IntGauge::new(
         "ledger_transactions_gauge", "Ledger Transactions Gauge",
     ).unwrap();
@@ -195,6 +201,8 @@ pub(crate) fn register() {
         register!(LEDGER_SLOT_SIGNATURES_GAUGE);
         register!(LEDGER_ADDRESS_SIGNATURES_GAUGE);
         register!(LEDGER_TRANSACTION_STATUS_GAUGE);
+        register!(LEDGER_TRANSACTION_SUCCESSFUL_STATUS_GAUGE);
+        register!(LEDGER_TRANSACTION_FAILED_STATUS_GAUGE);
         register!(LEDGER_TRANSACTIONS_GAUGE);
         register!(LEDGER_TRANSACTION_MEMOS_GAUGE);
         register!(LEDGER_PERF_SAMPLES_GAUGE);
@@ -307,6 +315,14 @@ pub fn set_ledger_address_signatures_count(count: i64) {
 
 pub fn set_ledger_transaction_status_count(count: i64) {
     LEDGER_TRANSACTION_STATUS_GAUGE.set(count);
+}
+
+pub fn set_ledger_transaction_succesful_status_count(count: i64) {
+    LEDGER_TRANSACTION_SUCCESSFUL_STATUS_GAUGE.set(count);
+}
+
+pub fn set_ledger_transaction_failed_status_count(count: i64) {
+    LEDGER_TRANSACTION_FAILED_STATUS_GAUGE.set(count);
 }
 
 pub fn set_ledger_transactions_count(count: i64) {
