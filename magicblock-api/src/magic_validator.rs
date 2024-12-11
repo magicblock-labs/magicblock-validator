@@ -1,20 +1,8 @@
-use std::{
-    net::SocketAddr,
-    path::{Path, PathBuf},
-    process,
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc, RwLock,
-    },
-    thread,
-    time::Duration,
-};
-
 use conjunto_transwise::RpcProviderConfig;
 use log::*;
 use magicblock_account_cloner::{
-    standard_blacklisted_accounts, RemoteAccountClonerClient,
-    RemoteAccountClonerWorker,
+    standard_blacklisted_accounts, AccountClonerOutput,
+    RemoteAccountClonerClient, RemoteAccountClonerWorker,
 };
 use magicblock_account_dumper::AccountDumperBank;
 use magicblock_account_fetcher::{
@@ -52,6 +40,18 @@ use solana_geyser_plugin_manager::geyser_plugin_service::GeyserPluginService;
 use solana_sdk::{
     commitment_config::CommitmentLevel, genesis_config::GenesisConfig,
     pubkey::Pubkey, signature::Keypair, signer::Signer,
+};
+use std::collections::HashMap;
+use std::{
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    process,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, RwLock,
+    },
+    thread,
+    time::Duration,
 };
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
@@ -274,6 +274,7 @@ impl MagicValidator {
 
         let accounts_manager = Self::init_accounts_manager(
             &bank,
+            &remote_account_cloner_worker.get_last_clone_outputs(),
             RemoteAccountClonerClient::new(&remote_account_cloner_worker),
             transaction_status_sender.clone(),
             &identity_keypair,
@@ -355,6 +356,7 @@ impl MagicValidator {
 
     fn init_accounts_manager(
         bank: &Arc<Bank>,
+        cloned_accounts: &Arc<RwLock<HashMap<Pubkey, AccountClonerOutput>>>,
         remote_account_cloner_client: RemoteAccountClonerClient,
         transaction_status_sender: TransactionStatusSender,
         validator_keypair: &Keypair,
@@ -366,6 +368,7 @@ impl MagicValidator {
         );
         let accounts_manager = AccountsManager::try_new(
             bank,
+            cloned_accounts,
             remote_account_cloner_client,
             Some(transaction_status_sender),
             // NOTE: we could avoid passing a copy of the keypair here if we instead pass

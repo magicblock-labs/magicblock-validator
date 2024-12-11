@@ -1,15 +1,5 @@
-use std::sync::Arc;
-
-use conjunto_transwise::{
-    transaction_accounts_extractor::TransactionAccountsExtractorImpl,
-    transaction_accounts_validator::TransactionAccountsValidatorImpl,
-};
-use magicblock_account_cloner::RemoteAccountClonerClient;
-use magicblock_accounts_api::BankAccountProvider;
-use magicblock_bank::bank::Bank;
-use magicblock_transaction_status::TransactionStatusSender;
-use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_sdk::{commitment_config::CommitmentConfig, signature::Keypair};
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock};
 
 use crate::{
     config::AccountsConfig, errors::AccountsResult,
@@ -17,6 +7,19 @@ use crate::{
     remote_scheduled_commits_processor::RemoteScheduledCommitsProcessor,
     utils::try_rpc_cluster_from_cluster, ExternalAccountsManager,
 };
+use conjunto_transwise::{
+    transaction_accounts_extractor::TransactionAccountsExtractorImpl,
+    transaction_accounts_validator::TransactionAccountsValidatorImpl,
+};
+use magicblock_account_cloner::{
+    AccountClonerOutput, RemoteAccountClonerClient,
+};
+use magicblock_accounts_api::BankAccountProvider;
+use magicblock_bank::bank::Bank;
+use magicblock_core::magic_program::Pubkey;
+use magicblock_transaction_status::TransactionStatusSender;
+use solana_rpc_client::nonblocking::rpc_client::RpcClient;
+use solana_sdk::{commitment_config::CommitmentConfig, signature::Keypair};
 
 pub type AccountsManager = ExternalAccountsManager<
     BankAccountProvider,
@@ -30,6 +33,7 @@ pub type AccountsManager = ExternalAccountsManager<
 impl AccountsManager {
     pub fn try_new(
         bank: &Arc<Bank>,
+        cloned_accounts: &Arc<RwLock<HashMap<Pubkey, AccountClonerOutput>>>,
         remote_account_cloner_client: RemoteAccountClonerClient,
         transaction_status_sender: Option<TransactionStatusSender>,
         validator_keypair: Keypair,
@@ -51,6 +55,7 @@ impl AccountsManager {
         let scheduled_commits_processor = RemoteScheduledCommitsProcessor::new(
             remote_cluster,
             bank.clone(),
+            cloned_accounts.clone(),
             transaction_status_sender.clone(),
         );
 

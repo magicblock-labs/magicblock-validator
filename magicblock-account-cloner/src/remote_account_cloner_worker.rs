@@ -151,6 +151,12 @@ where
         self.clone_request_sender.clone()
     }
 
+    pub fn get_last_clone_outputs(
+        &self,
+    ) -> Arc<RwLock<HashMap<Pubkey, AccountClonerOutput>>> {
+        self.last_clone_output.clone()
+    }
+
     pub fn get_clone_listeners(
         &self,
     ) -> Arc<RwLock<HashMap<Pubkey, AccountClonerListeners>>> {
@@ -466,6 +472,7 @@ where
                         pubkey,
                         escrowed_account.lamports,
                         owner,
+                        Some(&escrowed_payer_chain_snapshot.pubkey),
                     )?
                 }
             }
@@ -559,6 +566,7 @@ where
         pubkey: &Pubkey,
         lamports: u64,
         owner: &Pubkey,
+        balance_pda: Option<&Pubkey>,
     ) -> AccountClonerResult<Signature> {
         self.account_dumper
             .dump_feepayer_account(pubkey, lamports, owner)
@@ -566,6 +574,7 @@ where
             .inspect(|_| {
                 metrics::inc_account_clone(metrics::AccountClone::FeePayer {
                     pubkey: &pubkey.to_string(),
+                    balance_pda: balance_pda.map(|p| p.to_string()).as_deref(),
                 });
             })
     }
@@ -577,7 +586,7 @@ where
         owner: &Pubkey,
     ) -> AccountClonerResult<Signature> {
         let lamports = self.payer_init_lamports.unwrap_or(lamports);
-        self.do_clone_feepayer_account(pubkey, lamports, owner)
+        self.do_clone_feepayer_account(pubkey, lamports, owner, None)
     }
 
     fn do_clone_undelegated_account(

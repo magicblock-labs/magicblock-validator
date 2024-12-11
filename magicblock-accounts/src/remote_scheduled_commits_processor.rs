@@ -1,7 +1,15 @@
-use std::{collections::HashSet, sync::Arc};
-
+use crate::{
+    errors::{AccountsError, AccountsResult},
+    remote_account_committer::update_account_commit_metrics,
+    AccountCommittee, AccountCommitter, ScheduledCommitsProcessor,
+    SendableCommitAccountsPayload,
+};
 use async_trait::async_trait;
 use log::*;
+use magicblock_account_cloner::AccountClonerOutput::Cloned;
+use magicblock_account_cloner::{
+    AccountClonerOutput, RemoteAccountClonerWorker,
+};
 use magicblock_accounts_api::InternalAccountProvider;
 use magicblock_bank::bank::Bank;
 use magicblock_core::debug_panic;
@@ -13,13 +21,10 @@ use magicblock_program::{
 };
 use magicblock_transaction_status::TransactionStatusSender;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
-
-use crate::{
-    errors::{AccountsError, AccountsResult},
-    remote_account_committer::update_account_commit_metrics,
-    AccountCommittee, AccountCommitter, ScheduledCommitsProcessor,
-    SendableCommitAccountsPayload,
-};
+use std::collections::HashMap;
+use std::sync::RwLock;
+use std::{collections::HashSet, sync::Arc};
+use magicblock_metrics::metrics::AccountClone::FeePayer;
 
 pub struct RemoteScheduledCommitsProcessor {
     #[allow(unused)]
@@ -27,6 +32,7 @@ pub struct RemoteScheduledCommitsProcessor {
     bank: Arc<Bank>,
     transaction_status_sender: Option<TransactionStatusSender>,
     transaction_scheduler: TransactionScheduler,
+    cloned_accounts: Arc<RwLock<HashMap<Pubkey, AccountClonerOutput>>>,
 }
 
 #[async_trait]
@@ -56,6 +62,34 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
                 HashSet::from_iter(commit.accounts.iter().cloned());
 
             for pubkey in commit.accounts {
+                // TODO: Refactor
+                let account = self.cloned_accounts
+                    .read()
+                    .expect("RwLock of RemoteAccountClonerWorker.last_clone_output is poisoned")
+                    .get(&pubkey)
+                    .cloned();
+                let account = account.unwrap();
+                if let Cloned {
+                    account_chain_snapshot,
+                    signature,
+                } = account
+                {
+                   match &account_chain_snapshot.chain_state {
+                        FeePayer  => {
+                            debug_panic!("FeePayer account found in scheduled commit");
+                        }
+                        Undelegated => {
+                            debug_panic!("Undelegated account found in scheduled commit");
+                        }
+                        Delegated => {
+                           debug_panic!("Delegated account found in scheduled commit");
+                       }
+                    }
+                }
+
+                // TODO: If FeePayer,  committed to the associated escrowed pda instead.
+                // RemoteAccountClonerWorker.last_clone_output
+                // TODO: If Undelegated, fails. Should be fail on scheduling so that tx fails?
                 match account_provider.get_account(&pubkey) {
                     Some(account_data) => {
                         committees.push(AccountCommittee {
@@ -111,7 +145,7 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
                 .filter(|pubkey| !included_pubkeys.contains(pubkey))
                 .collect::<Vec<Pubkey>>();
 
-            // Extract signatures of all transactions that we we will execute on
+            // Extract signatures of all transactions that we will execute on
             // chain in order to realize the commits needed
             let signatures = sendable_payloads
                 .iter()
@@ -181,12 +215,14 @@ impl RemoteScheduledCommitsProcessor {
     pub(crate) fn new(
         cluster: Cluster,
         bank: Arc<Bank>,
+        cloned_accounts: Arc<RwLock<HashMap<Pubkey, AccountClonerOutput>>>,
         transaction_status_sender: Option<TransactionStatusSender>,
     ) -> Self {
         Self {
             cluster,
             bank,
             transaction_status_sender,
+            cloned_accounts,
             transaction_scheduler: TransactionScheduler::default(),
         }
     }
