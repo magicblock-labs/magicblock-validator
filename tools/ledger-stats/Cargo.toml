@@ -8,6 +8,7 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
+magicblock-ledger = { workspace = true }
+num-format = "0.4.4"
 structopt = "0.3"
 tabular = "0.2"
-magicblock-ledger = { workspace = true }
