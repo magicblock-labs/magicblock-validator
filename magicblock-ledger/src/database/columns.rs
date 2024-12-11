@@ -1,7 +1,11 @@
+use crate::database::iterator::IteratorMode;
+use crate::database::ledger_column::LedgerColumn;
+use crate::errors::LedgerResult;
 use byteorder::{BigEndian, ByteOrder};
 use serde::{de::DeserializeOwned, Serialize};
 use solana_sdk::{clock::Slot, pubkey::Pubkey, signature::Signature};
 use solana_storage_proto::convert::generated;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 use super::meta;
 
@@ -664,4 +668,22 @@ impl TypedColumn for AccountModDatas {
 // Returns true if the column family enables compression.
 pub fn should_enable_compression<C: 'static + Column + ColumnName>() -> bool {
     C::NAME == TransactionStatus::NAME
+}
+
+// -----------------
+// Column Queries
+// -----------------
+pub fn count_column_using_cache<C: Column + ColumnName>(
+    column: &LedgerColumn<C>,
+    cached_value: &AtomicUsize,
+) -> LedgerResult<usize> {
+    let cached = cached_value.load(Ordering::Relaxed);
+    // NOTE: a value of 0 indicates that the cached value is dirty
+    if cached > 0 {
+        return Ok(cached);
+    }
+    column
+        .iter(IteratorMode::Start)
+        .map(Iterator::count)
+        .inspect(|updated| cached_value.store(*updated, Ordering::Relaxed))
 }

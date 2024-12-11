@@ -1,10 +1,3 @@
-use std::{
-    collections::HashMap,
-    fmt, fs,
-    path::{Path, PathBuf},
-    sync::{atomic::Ordering, Arc, RwLock},
-};
-
 use bincode::{deserialize, serialize};
 use log::*;
 use rocksdb::Direction as IteratorDirection;
@@ -22,7 +15,15 @@ use solana_transaction_status::{
     ConfirmedTransactionWithStatusMeta, TransactionStatusMeta,
     VersionedConfirmedBlock, VersionedTransactionWithStatusMeta,
 };
+use std::sync::atomic::AtomicUsize;
+use std::{
+    collections::HashMap,
+    fmt, fs,
+    path::{Path, PathBuf},
+    sync::{atomic::Ordering, Arc, RwLock},
+};
 
+use crate::database::columns::count_column_using_cache;
 use crate::{
     conversions::transaction,
     database::{
@@ -49,11 +50,11 @@ pub struct Ledger {
     ledger_path: PathBuf,
     db: Arc<Database>,
 
-    transaction_status_cf: LedgerColumn<cf::TransactionStatus>,
-    address_signatures_cf: LedgerColumn<cf::AddressSignatures>,
-    slot_signatures_cf: LedgerColumn<cf::SlotSignatures>,
     blocktime_cf: LedgerColumn<cf::Blocktime>,
     blockhash_cf: LedgerColumn<cf::Blockhash>,
+    slot_signatures_cf: LedgerColumn<cf::SlotSignatures>,
+    address_signatures_cf: LedgerColumn<cf::AddressSignatures>,
+    transaction_status_cf: LedgerColumn<cf::TransactionStatus>,
     transaction_cf: LedgerColumn<cf::Transaction>,
     transaction_memos_cf: LedgerColumn<cf::TransactionMemos>,
     perf_samples_cf: LedgerColumn<cf::PerfSamples>,
@@ -62,6 +63,20 @@ pub struct Ledger {
 
     pub lowest_cleanup_slot: RwLock<Slot>,
     rpc_api_metrics: LedgerRpcApiMetrics,
+
+    // We are caching the column item counts since they are expensive
+    // to obtain.
+    // `0` indicates that they are "dirty", in the worst case it is actually
+    // `0`, but then obtaining that again is cheap as we iterate over 0 items
+    blocktimes_count: AtomicUsize,
+    blockhashes_count: AtomicUsize,
+    slot_signatures_count: AtomicUsize,
+    address_signatures_count: AtomicUsize,
+    transaction_status_count: AtomicUsize,
+    transactions_count: AtomicUsize,
+    transaction_memos_count: AtomicUsize,
+    perf_samples_count: AtomicUsize,
+    account_mod_data_count: AtomicUsize,
 }
 
 impl fmt::Display for Ledger {
@@ -152,6 +167,16 @@ impl Ledger {
 
             lowest_cleanup_slot: RwLock::<Slot>::default(),
             rpc_api_metrics: LedgerRpcApiMetrics::default(),
+
+            blocktimes_count: AtomicUsize::default(),
+            blockhashes_count: AtomicUsize::default(),
+            slot_signatures_count: AtomicUsize::default(),
+            address_signatures_count: AtomicUsize::default(),
+            transaction_status_count: AtomicUsize::default(),
+            transactions_count: AtomicUsize::default(),
+            transaction_memos_count: AtomicUsize::default(),
+            perf_samples_count: AtomicUsize::default(),
+            account_mod_data_count: AtomicUsize::default(),
         };
 
         Ok(ledger)
@@ -229,9 +254,7 @@ impl Ledger {
     }
 
     pub fn count_block_times(&self) -> LedgerResult<usize> {
-        self.blocktime_cf
-            .iter(IteratorMode::Start)
-            .map(Iterator::count)
+        count_column_using_cache(&self.blocktime_cf, &self.blocktimes_count)
     }
 
     // -----------------
@@ -244,9 +267,7 @@ impl Ledger {
     }
 
     pub fn count_blockhashes(&self) -> LedgerResult<usize> {
-        self.blockhash_cf
-            .iter(IteratorMode::Start)
-            .map(Iterator::count)
+        count_column_using_cache(&self.blockhash_cf, &self.blockhashes_count)
     }
 
     // -----------------
@@ -263,7 +284,10 @@ impl Ledger {
         blockhash: Hash,
     ) -> LedgerResult<()> {
         self.blocktime_cf.put(slot, &timestamp)?;
+        self.blocktimes_count.store(0, Ordering::Relaxed);
+
         self.blockhash_cf.put(slot, &blockhash)?;
+        self.blockhashes_count.store(0, Ordering::Relaxed);
         Ok(())
     }
 
@@ -336,9 +360,10 @@ impl Ledger {
     }
 
     pub fn count_slot_signatures(&self) -> LedgerResult<usize> {
-        self.slot_signatures_cf
-            .iter(IteratorMode::Start)
-            .map(Iterator::count)
+        count_column_using_cache(
+            &self.slot_signatures_cf,
+            &self.slot_signatures_count,
+        )
     }
 
     // -----------------
@@ -650,9 +675,10 @@ impl Ledger {
     }
 
     pub fn count_address_signatures(&self) -> LedgerResult<usize> {
-        self.address_signatures_cf
-            .iter(IteratorMode::Start)
-            .map(Iterator::count)
+        count_column_using_cache(
+            &self.address_signatures_cf,
+            &self.address_signatures_count,
+        )
     }
 
     // -----------------
@@ -770,8 +796,11 @@ impl Ledger {
         // 2. Write Transaction
         let versioned = transaction.to_versioned_transaction();
         let transaction: generated::Transaction = versioned.into();
+
         self.transaction_cf
             .put_protobuf((signature, slot), &transaction)?;
+        self.transactions_count.store(0, Ordering::Relaxed);
+
         Ok(())
     }
 
@@ -787,9 +816,7 @@ impl Ledger {
     }
 
     pub fn count_transactions(&self) -> LedgerResult<usize> {
-        self.transaction_cf
-            .iter(IteratorMode::Start)
-            .map(Iterator::count)
+        count_column_using_cache(&self.transaction_cf, &self.transactions_count)
     }
 
     // -----------------
@@ -810,13 +837,16 @@ impl Ledger {
         slot: Slot,
         memos: String,
     ) -> LedgerResult<()> {
-        self.transaction_memos_cf.put((*signature, slot), &memos)
+        let res = self.transaction_memos_cf.put((*signature, slot), &memos);
+        self.transaction_memos_count.store(0, Ordering::Relaxed);
+        res
     }
 
     pub fn count_transaction_memos(&self) -> LedgerResult<usize> {
-        self.transaction_memos_cf
-            .iter(IteratorMode::Start)
-            .map(Iterator::count)
+        count_column_using_cache(
+            &self.transaction_memos_cf,
+            &self.transaction_memos_count,
+        )
     }
 
     // -----------------
@@ -901,19 +931,25 @@ impl Ledger {
                 &AddressSignatureMeta { writeable: false },
             )?;
         }
+        self.address_signatures_count.store(0, Ordering::Relaxed);
+
         self.slot_signatures_cf
             .put((slot, transaction_slot_index), &signature)?;
+        self.slot_signatures_count.store(0, Ordering::Relaxed);
 
         let status = status.into();
         self.transaction_status_cf
             .put_protobuf((signature, slot), &status)?;
+        self.transaction_status_count.store(0, Ordering::Relaxed);
+
         Ok(())
     }
 
     pub fn count_transaction_status(&self) -> LedgerResult<usize> {
-        self.transaction_status_cf
-            .iter(IteratorMode::Start)
-            .map(Iterator::count)
+        count_column_using_cache(
+            &self.transaction_status_cf,
+            &self.transaction_status_count,
+        )
     }
 
     // -----------------
@@ -944,13 +980,16 @@ impl Ledger {
         // Always write as the current version.
         let bytes = serialize(perf_sample)
             .expect("`PerfSample` can be serialized with `bincode`");
-        self.perf_samples_cf.put_bytes(index, &bytes)
+        let res = self.perf_samples_cf.put_bytes(index, &bytes);
+        self.perf_samples_count.store(0, Ordering::Relaxed);
+        res
     }
 
     pub fn count_perf_samples(&self) -> LedgerResult<usize> {
-        self.perf_samples_cf
-            .iter(IteratorMode::Start)
-            .map(Iterator::count)
+        count_column_using_cache(
+            &self.perf_samples_cf,
+            &self.perf_samples_count,
+        )
     }
 
     // -----------------
@@ -961,7 +1000,9 @@ impl Ledger {
         id: u64,
         data: &AccountModData,
     ) -> LedgerResult<()> {
-        self.account_mod_datas_cf.put(id, data)
+        let res = self.account_mod_datas_cf.put(id, data);
+        self.account_mod_data_count.store(0, Ordering::Relaxed);
+        res
     }
 
     pub fn read_account_mod_data(
@@ -972,9 +1013,10 @@ impl Ledger {
     }
 
     pub fn count_account_mod_data(&self) -> LedgerResult<usize> {
-        self.account_mod_datas_cf
-            .iter(IteratorMode::Start)
-            .map(Iterator::count)
+        count_column_using_cache(
+            &self.account_mod_datas_cf,
+            &self.account_mod_data_count,
+        )
     }
 }
 
