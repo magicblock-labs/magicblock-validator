@@ -97,7 +97,10 @@ pub fn process_ledger(ledger: &Ledger, bank: &Bank) -> LedgerResult<()> {
                 prepared_block
             )));
         };
-        blockhash_log::log_blockhash(&prepared_block.blockhash);
+        blockhash_log::log_blockhash(
+            prepared_block.slot,
+            &prepared_block.blockhash,
+        );
         bank.replay_slot(
             prepared_block.slot,
             &prepared_block.previous_blockhash,
@@ -213,7 +216,7 @@ fn log_execution_results(results: &[TransactionExecutionResult]) {
 /// RUST_LOG=warn,magicblock=debug,magicblock_ledger=trace,magicblock_ledger::blockstore_processor::blockhash_log=off
 mod blockhash_log {
     use super::*;
-    pub(super) fn log_blockhash(blockhash: &Hash) {
-        trace!("Replaying slot with blockhash {}", &blockhash);
+    pub(super) fn log_blockhash(slot: u64, blockhash: &Hash) {
+        trace!("Slot {} Blockhash {}", slot, &blockhash);
     }
 }
