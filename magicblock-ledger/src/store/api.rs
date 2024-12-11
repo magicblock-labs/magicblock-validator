@@ -228,6 +228,12 @@ impl Ledger {
         self.blocktime_cf.get(slot)
     }
 
+    pub fn count_block_times(&self) -> LedgerResult<usize> {
+        self.blocktime_cf
+            .iter(IteratorMode::Start)
+            .map(Iterator::count)
+    }
+
     // -----------------
     // Block hash
     // -----------------
@@ -235,6 +241,12 @@ impl Ledger {
     fn get_block_hash(&self, slot: Slot) -> LedgerResult<Option<Hash>> {
         let _lock = self.check_lowest_cleanup_slot(slot)?;
         self.blockhash_cf.get(slot)
+    }
+
+    pub fn count_blockhashes(&self) -> LedgerResult<usize> {
+        self.blockhash_cf
+            .iter(IteratorMode::Start)
+            .map(Iterator::count)
     }
 
     // -----------------
@@ -321,6 +333,12 @@ impl Ledger {
         };
 
         Ok(Some(block))
+    }
+
+    pub fn count_slot_signatures(&self) -> LedgerResult<usize> {
+        self.slot_signatures_cf
+            .iter(IteratorMode::Start)
+            .map(Iterator::count)
     }
 
     // -----------------
@@ -631,6 +649,12 @@ impl Ledger {
         })
     }
 
+    pub fn count_address_signatures(&self) -> LedgerResult<usize> {
+        self.address_signatures_cf
+            .iter(IteratorMode::Start)
+            .map(Iterator::count)
+    }
+
     // -----------------
     // Transaction
     // -----------------
@@ -762,6 +786,12 @@ impl Ledger {
         Ok(result)
     }
 
+    pub fn count_transactions(&self) -> LedgerResult<usize> {
+        self.transaction_cf
+            .iter(IteratorMode::Start)
+            .map(Iterator::count)
+    }
+
     // -----------------
     // TransactionMemos
     // -----------------
@@ -781,6 +811,12 @@ impl Ledger {
         memos: String,
     ) -> LedgerResult<()> {
         self.transaction_memos_cf.put((*signature, slot), &memos)
+    }
+
+    pub fn count_transaction_memos(&self) -> LedgerResult<usize> {
+        self.transaction_memos_cf
+            .iter(IteratorMode::Start)
+            .map(Iterator::count)
     }
 
     // -----------------
@@ -874,6 +910,12 @@ impl Ledger {
         Ok(())
     }
 
+    pub fn count_transaction_status(&self) -> LedgerResult<usize> {
+        self.transaction_status_cf
+            .iter(IteratorMode::Start)
+            .map(Iterator::count)
+    }
+
     // -----------------
     // Perf
     // -----------------
@@ -905,6 +947,12 @@ impl Ledger {
         self.perf_samples_cf.put_bytes(index, &bytes)
     }
 
+    pub fn count_perf_samples(&self) -> LedgerResult<usize> {
+        self.perf_samples_cf
+            .iter(IteratorMode::Start)
+            .map(Iterator::count)
+    }
+
     // -----------------
     // AccountModDatas
     // -----------------
@@ -921,6 +969,12 @@ impl Ledger {
         id: u64,
     ) -> LedgerResult<Option<AccountModData>> {
         self.account_mod_datas_cf.get(id)
+    }
+
+    pub fn count_account_mod_data(&self) -> LedgerResult<usize> {
+        self.account_mod_datas_cf
+            .iter(IteratorMode::Start)
+            .map(Iterator::count)
     }
 }
 
