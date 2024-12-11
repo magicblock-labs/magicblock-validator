@@ -19,6 +19,9 @@ pub enum ApiError {
     #[error("Accounts error: {0}")]
     AccountsError(#[from] magicblock_accounts::errors::AccountsError),
 
+    #[error("AccountCloner error: {0}")]
+    AccountClonerError(#[from] magicblock_account_cloner::AccountClonerError),
+
     #[error("Ledger error: {0}")]
     LedgerError(#[from] magicblock_ledger::errors::LedgerError),
 

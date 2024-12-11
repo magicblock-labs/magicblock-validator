@@ -210,10 +210,10 @@ where
             || self.permissions.allow_cloning_program_accounts
     }
 
-    pub async fn hydrate(&self) {
+    pub async fn hydrate(&self) -> AccountClonerResult<()> {
         if !self.can_clone() {
             warn!("Cloning is disabled, no need to hydrate the cache");
-            return;
+            return Ok(());
         }
         let account_keys = self
             .internal_account_provider
@@ -256,10 +256,13 @@ where
         // I confirmed the the following concurrency working fine:
         //   Solana Mainnet: 10
         //   Helius: 20
+        // If we go higher than this we hit 429s which causes the fetcher to have to
+        // retry resulting in overall slower hydration.
         // If the optimal rate here is desired we might make this configurable in the
         // future.
         stream
-            .for_each_concurrent(10, |(pubkey, owner)| async move {
+            .map(Ok::<_, AccountClonerError>)
+            .try_for_each_concurrent(10, |(pubkey, owner)| async move {
                 debug!("Hydrating '{}'", pubkey);
                 let res = self
                     .do_clone_and_update_cache(
@@ -273,18 +276,17 @@ where
                 match res {
                     Ok(output) => {
                         debug!("Cloned '{}': {:?}", pubkey, output);
+                        Ok(())
                     }
                     Err(err) => {
-                        // TODO: @@@ what to do here?
-                        // Even empty accounts should clone fine with 0 lamports which would
-                        // cover the case that the account was removed from chain in the meantime
-                        // Thus if we encounter an error our validator cannot restore a proper
-                        // clone state and we should probably shut it down.
                         error!("Failed to clone {} ('{:?}')", pubkey, err);
+                        // NOTE: the account fetch already has retries built in, so
+                        // we don't to retry herek
+                        Err(err)
                     }
                 }
             })
-            .await;
+            .await
     }
 
     async fn do_clone_or_use_cache(

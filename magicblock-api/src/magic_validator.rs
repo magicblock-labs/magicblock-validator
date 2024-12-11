@@ -493,6 +493,7 @@ impl MagicValidator {
         if self.config.ledger.reset {
             return Ok(());
         }
+        // let _ = process_ledger(&self.ledger, &self.bank);
         process_ledger(&self.ledger, &self.bank)?;
 
         // The transactions to schedule and accept account commits re-run when we
@@ -541,7 +542,7 @@ impl MagicValidator {
 
         self.start_remote_account_fetcher_worker();
         self.start_remote_account_updates_worker();
-        self.start_remote_account_cloner_worker().await;
+        self.start_remote_account_cloner_worker().await?;
 
         self.rpc_service.start().map_err(|err| {
             ApiError::FailedToStartJsonRpcService(format!("{:?}", err))
@@ -615,12 +616,12 @@ impl MagicValidator {
         }
     }
 
-    async fn start_remote_account_cloner_worker(&mut self) {
+    async fn start_remote_account_cloner_worker(&mut self) -> ApiResult<()> {
         if let Some(mut remote_account_cloner_worker) =
             self.remote_account_cloner_worker.take()
         {
             if !self.config.ledger.reset {
-                remote_account_cloner_worker.hydrate().await;
+                remote_account_cloner_worker.hydrate().await?;
             }
 
             let cancellation_token = self.token.clone();
@@ -636,6 +637,7 @@ impl MagicValidator {
                         });
                 }));
         }
+        Ok(())
     }
 
     pub fn stop(&self) {
