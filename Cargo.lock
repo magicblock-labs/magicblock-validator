@@ -3061,6 +3061,7 @@ dependencies = [
  "magicblock-pubsub",
  "magicblock-rpc",
  "magicblock-transaction-status",
+ "paste",
  "solana-geyser-plugin-interface",
  "solana-geyser-plugin-manager",
  "solana-sdk",
