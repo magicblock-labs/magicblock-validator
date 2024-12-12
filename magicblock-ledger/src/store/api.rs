@@ -78,6 +78,8 @@ pub struct Ledger {
     slot_signatures_count: AtomicI64,
     address_signatures_count: AtomicI64,
     transaction_status_count: AtomicI64,
+    transaction_successful_status_count: AtomicI64,
+    transaction_failed_status_count: AtomicI64,
     transactions_count: AtomicI64,
     transaction_memos_count: AtomicI64,
     perf_samples_count: AtomicI64,
@@ -178,6 +180,8 @@ impl Ledger {
             slot_signatures_count: AtomicI64::new(DIRTY_COUNT),
             address_signatures_count: AtomicI64::new(DIRTY_COUNT),
             transaction_status_count: AtomicI64::new(DIRTY_COUNT),
+            transaction_successful_status_count: AtomicI64::new(DIRTY_COUNT),
+            transaction_failed_status_count: AtomicI64::new(DIRTY_COUNT),
             transactions_count: AtomicI64::new(DIRTY_COUNT),
             transaction_memos_count: AtomicI64::new(DIRTY_COUNT),
             perf_samples_count: AtomicI64::new(DIRTY_COUNT),
@@ -951,6 +955,10 @@ impl Ledger {
             .put_protobuf((signature, slot), &status)?;
         self.transaction_status_count
             .store(DIRTY_COUNT, Ordering::Relaxed);
+        self.transaction_successful_status_count
+            .store(DIRTY_COUNT, Ordering::Relaxed);
+        self.transaction_failed_status_count
+            .store(DIRTY_COUNT, Ordering::Relaxed);
 
         Ok(())
     }
@@ -1002,13 +1010,33 @@ impl Ledger {
     }
 
     pub fn count_transaction_succesful_status(&self) -> LedgerResult<i64> {
-        // TODO: @@@ cache
-        self.count_outcome_transaction_status(true)
+        if self
+            .transaction_successful_status_count
+            .load(Ordering::Relaxed)
+            == DIRTY_COUNT
+        {
+            let count = self.count_outcome_transaction_status(true)?;
+            self.transaction_successful_status_count
+                .store(count, Ordering::Relaxed);
+            Ok(count)
+        } else {
+            Ok(self
+                .transaction_successful_status_count
+                .load(Ordering::Relaxed))
+        }
     }
 
     pub fn count_transaction_failed_status(&self) -> LedgerResult<i64> {
-        // TODO: @@@ cache
-        self.count_outcome_transaction_status(false)
+        if self.transaction_failed_status_count.load(Ordering::Relaxed)
+            == DIRTY_COUNT
+        {
+            let count = self.count_outcome_transaction_status(false)?;
+            self.transaction_failed_status_count
+                .store(count, Ordering::Relaxed);
+            Ok(count)
+        } else {
+            Ok(self.transaction_failed_status_count.load(Ordering::Relaxed))
+        }
     }
 
     // -----------------
