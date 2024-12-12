@@ -47,6 +47,7 @@ $ rustup component add rustfmt
 ### **2. Download the source code.**
 
 ```bash
+$ git clone https://github.com/magicblock-labs/ephemeral-conjunto.git
 $ git clone https://github.com/magicblock-labs/ephemeral-validator.git
 $ cd ephemeral-validator
 ```
