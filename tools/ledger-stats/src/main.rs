@@ -3,7 +3,8 @@ use std::path::{Path, PathBuf};
 use structopt::StructOpt;
 
 mod counts;
-mod transactions;
+mod transaction_details;
+mod transaction_logs;
 
 #[derive(Debug, StructOpt)]
 enum Command {
@@ -28,6 +29,20 @@ enum Command {
         #[structopt(long, short, help = "End slot")]
         end: Option<u64>,
     },
+    #[structopt(name = "sig", about = "Transaction details for signature")]
+    Sig {
+        #[structopt(parse(from_os_str))]
+        ledger_path: PathBuf,
+        #[structopt(help = "Signature")]
+        sig: String,
+        #[structopt(
+            long,
+            short,
+            help = "Show instruction ascii data",
+            parse(from_flag)
+        )]
+        ascii: bool,
+    },
 }
 
 #[derive(StructOpt)]
@@ -50,11 +65,21 @@ fn main() {
             start,
             end,
         } => {
-            transactions::print_transactions(
+            transaction_logs::print_transaction_logs(
                 &open_ledger(&ledger_path),
                 start,
                 end,
                 success,
+            );
+        }
+        Sig {
+            ledger_path,
+            sig,
+            ascii,
+        } => {
+            let ledger = open_ledger(&ledger_path);
+            transaction_details::print_transaction_details(
+                &ledger, &sig, ascii,
             );
         }
     }

@@ -10,5 +10,8 @@ edition.workspace = true
 [dependencies]
 magicblock-ledger = { workspace = true }
 num-format = "0.4.4"
+pretty-hex = "0.4.1"
+solana-sdk = { workspace = true }
+solana-transaction-status = { workspace = true }
 structopt = "0.3"
 tabular = "0.2"

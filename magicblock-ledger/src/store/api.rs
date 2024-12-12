@@ -965,11 +965,13 @@ impl Ledger {
 
     /// Returns an iterator over all transaction statuses.
     /// The iterator item is an error if the status could not be decoded.
+    ///
+    /// NOTE: since the key is `(signature, slot)` the iterator cannot be used to
+    ///       iterate in the order of slots
+    ///
     /// - `iterator_mode` - The iterator mode to use for the search, defaults to [`IteratorMode::Start`]
     /// - `success` - If true, only successful transactions are returned,
     ///               otherwise only failed ones
-    /// NOTE: since the key is `(signature, slot)` the iterator cannot be used to
-    ///       iterate in the order of slots
     pub fn iter_transaction_statuses(
         &self,
         iterator_mode: Option<IteratorMode<(Signature, Slot)>>,
