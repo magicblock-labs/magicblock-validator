@@ -1,11 +1,10 @@
+use std::str::FromStr;
+
 use magicblock_ledger::Ledger;
 use num_format::{Locale, ToFormattedString};
 use pretty_hex::*;
-use solana_sdk::signature::Signature;
-
-use solana_sdk::message::VersionedMessage;
+use solana_sdk::{message::VersionedMessage, signature::Signature};
 use solana_transaction_status::ConfirmedTransactionWithStatusMeta;
-use std::str::FromStr;
 use tabular::{Row, Table};
 
 use crate::utils::render_logs;
@@ -160,10 +159,10 @@ pub(crate) fn print_transaction_details(
         .expect("Failed to get transaction");
 
     if let Some(ConfirmedTransactionWithStatusMeta {
-                    tx_with_meta,
-                    block_time,
-                    ..
-                }) = tx
+        tx_with_meta,
+        block_time,
+        ..
+    }) = tx
     {
         if let VersionedMessage::V0(message) =
             tx_with_meta.get_transaction().message

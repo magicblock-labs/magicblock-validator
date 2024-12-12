@@ -1,5 +1,6 @@
-use magicblock_ledger::Ledger;
 use std::path::{Path, PathBuf};
+
+use magicblock_ledger::Ledger;
 use structopt::StructOpt;
 
 mod counts;

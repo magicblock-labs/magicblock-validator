@@ -1,5 +1,6 @@
-use crate::utils::render_logs;
 use magicblock_ledger::Ledger;
+
+use crate::utils::render_logs;
 
 pub(crate) fn print_transaction_logs(
     ledger: &Ledger,
@@ -14,10 +15,10 @@ pub(crate) fn print_transaction_logs(
             .iter_transaction_statuses(None, success)
             .filter_map(|res| match res {
                 Ok((slot, sig, status))
-                if start_slot <= slot && slot <= end_slot =>
-                    {
-                        Some((slot, sig, status))
-                    }
+                    if start_slot <= slot && slot <= end_slot =>
+                {
+                    Some((slot, sig, status))
+                }
                 Ok(_) => None,
                 Err(_) => None,
             })
