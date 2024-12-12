@@ -25,9 +25,11 @@ It is designed to be used in a MagicBlock [Ephemeral Rollup](https://docs.magicb
 
 ## Ephemeral Rollups
 
+Ephemeral Rollups extend Solana by enabling the Solana Virtual Machine (SVM) to replace centralized servers. They allow to use the SVM as a serverless, elastic compute for real-time use cases like gaming, finance, and DePIN, while keeping all smart contracts and state on Solana.
+
 The core intuition is that by harnessing the SVM’s account structure and its capacity for parallelization, we can split the app/game state into shards. Users can lock one or multiple accounts to temporarily transfer the state to an auxiliary layer, which we define as the “ephemeral rollup”, a configurable dedicated runtime.
 
-The Ephemeral Rollups instance always originate from a reference cluster, which is the source of truth for the state (programs and accounts). The session is eventually settled back to the reference cluster.
+The Ephemeral Rollups instances always originate from a reference cluster, which is the source of truth for the state (programs and accounts). The session is eventually settled back to the reference cluster.
 
 For the full documentation, please refer to the [Ephemeral Rollups](https://docs.magicblock.gg/Accelerate/ephemeral_rollups) page.
 
@@ -45,6 +47,7 @@ $ rustup component add rustfmt
 ### **2. Download the source code.**
 
 ```bash
+$ git clone https://github.com/magicblock-labs/ephemeral-conjunto.git
 $ git clone https://github.com/magicblock-labs/ephemeral-validator.git
 $ cd ephemeral-validator
 ```
