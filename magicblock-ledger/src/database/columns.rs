@@ -2,10 +2,11 @@ use crate::database::iterator::IteratorMode;
 use crate::database::ledger_column::LedgerColumn;
 use crate::errors::LedgerResult;
 use byteorder::{BigEndian, ByteOrder};
+use log::*;
 use serde::{de::DeserializeOwned, Serialize};
 use solana_sdk::{clock::Slot, pubkey::Pubkey, signature::Signature};
 use solana_storage_proto::convert::generated;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicI64, Ordering};
 
 use super::meta;
 
@@ -673,17 +674,25 @@ pub fn should_enable_compression<C: 'static + Column + ColumnName>() -> bool {
 // -----------------
 // Column Queries
 // -----------------
+pub(crate) const DIRTY_COUNT: i64 = -1;
 pub fn count_column_using_cache<C: Column + ColumnName>(
     column: &LedgerColumn<C>,
-    cached_value: &AtomicUsize,
-) -> LedgerResult<usize> {
+    cached_value: &AtomicI64,
+) -> LedgerResult<i64> {
     let cached = cached_value.load(Ordering::Relaxed);
-    // NOTE: a value of 0 indicates that the cached value is dirty
-    if cached > 0 {
+    // NOTE: a value of -1 indicates that the cached value is dirty
+    if cached != DIRTY_COUNT {
         return Ok(cached);
     }
     column
         .iter(IteratorMode::Start)
         .map(Iterator::count)
+        .map(|val| if val > i64::MAX as usize {
+            // NOTE: this value is only used for metrics/diagnostics and
+            // aside from the fact that we will never encounter this case,
+            // it is good enough to return i64::MAX
+            error!("Column {} count is too large: {} for metrics, returning max.", C::NAME, val);
+            i64::MAX
+        } else { val as i64 })
         .inspect(|updated| cached_value.store(*updated, Ordering::Relaxed))
 }

@@ -119,25 +119,21 @@ pub fn init_system_metrics_ticker(
 ) -> tokio::task::JoinHandle<()> {
     fn try_set_ledger_counts(ledger: &Ledger) {
         macro_rules! try_set_ledger_count {
-        ($name:ident) => {
-            paste::paste! {
-                match ledger.[< count_ $name >]() {
-                    Ok(count) => {
-                        if count > i64::MAX as usize {
-                            warn!("Ledger count {} is too large: {} for metrics", stringify!($name), count);
-                            return;
+            ($name:ident) => {
+                paste::paste! {
+                    match ledger.[< count_ $name >]() {
+                        Ok(count) => {
+                            metrics::[< set_ledger_ $name _count >](count);
                         }
-                        metrics::[< set_ledger_ $name _count >](count as i64);
+                        Err(err) => warn!(
+                            "Failed to get ledger {} count: {:?}",
+                            stringify!($name),
+                            err
+                        ),
                     }
-                    Err(err) => warn!(
-                        "Failed to get ledger {} count: {:?}",
-                        stringify!($name),
-                        err
-                    ),
                 }
-            }
-        };
-    }
+            };
+        }
         try_set_ledger_count!(block_times);
         try_set_ledger_count!(blockhashes);
         try_set_ledger_count!(slot_signatures);
