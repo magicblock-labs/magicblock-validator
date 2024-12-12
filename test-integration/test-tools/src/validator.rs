@@ -60,7 +60,11 @@ pub fn wait_for_validator(mut validator: Child, port: u16) -> Option<Child> {
         count += 1;
         // 30 seconds (6 mins in CI)
         if count >= max_retries {
-            eprintln!("Validator RPC on port {} failed to listen", port);
+            eprintln!(
+                "Validator RPC on port {} failed to listen after {}secs",
+                port,
+                count as f32 * 2.5
+            );
             validator.kill().expect("Failed to kill validator");
             break None;
         }
