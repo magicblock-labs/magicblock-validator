@@ -8,6 +8,8 @@ use solana_transaction_status::ConfirmedTransactionWithStatusMeta;
 use std::str::FromStr;
 use tabular::{Row, Table};
 
+use crate::utils::render_logs;
+
 pub(crate) fn print_transaction_details(
     ledger: &Ledger,
     sig: &str,
@@ -147,8 +149,8 @@ pub(crate) fn print_transaction_details(
         None => {}
         Some(logs) => {
             println!(
-                "\n++++ Transaction Logs ++++\n\n  • {}",
-                logs.join("\n  • ")
+                "\n++++ Transaction Logs ++++\n{}",
+                render_logs(&logs, "  ")
             );
         }
     }
@@ -158,10 +160,10 @@ pub(crate) fn print_transaction_details(
         .expect("Failed to get transaction");
 
     if let Some(ConfirmedTransactionWithStatusMeta {
-        tx_with_meta,
-        block_time,
-        ..
-    }) = tx
+                    tx_with_meta,
+                    block_time,
+                    ..
+                }) = tx
     {
         if let VersionedMessage::V0(message) =
             tx_with_meta.get_transaction().message
@@ -223,7 +225,6 @@ pub(crate) fn print_transaction_details(
                 );
                 let hex_indented = hex.lines().collect::<Vec<_>>().join("\n  ");
                 println!("{}", hex_indented);
-                println!();
             }
         }
     }

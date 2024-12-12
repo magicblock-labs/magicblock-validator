@@ -5,6 +5,7 @@ use structopt::StructOpt;
 mod counts;
 mod transaction_details;
 mod transaction_logs;
+mod utils;
 
 #[derive(Debug, StructOpt)]
 enum Command {

@@ -1,3 +1,4 @@
+use crate::utils::render_logs;
 use magicblock_ledger::Ledger;
 
 pub(crate) fn print_transaction_logs(
@@ -26,6 +27,6 @@ pub(crate) fn print_transaction_logs(
     };
     for (slot, sig, status) in sorted {
         println!("\nTransaction: {} ({})", sig, slot);
-        println!("  {}", status.log_messages.join("\n  "));
+        println!("{}", render_logs(&status.log_messages, "  "));
     }
 }
