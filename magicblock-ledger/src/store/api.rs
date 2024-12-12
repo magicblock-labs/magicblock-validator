@@ -965,10 +965,16 @@ impl Ledger {
 
     /// Returns an iterator over all transaction statuses.
     /// The iterator item is an error if the status could not be decoded.
-    fn iter_transaction_statuses(
+    pub fn iter_transaction_statuses(
         &self,
         success: bool,
-    ) -> impl Iterator<Item = LedgerResult<(Slot, Signature)>> + '_ {
+    ) -> impl Iterator<
+        Item = LedgerResult<(
+            Slot,
+            Signature,
+            generated::TransactionStatusMeta,
+        )>,
+    > + '_ {
         let (_lock, _) = self.ensure_lowest_cleanup_slot();
         self.transaction_status_cf
             .iter_protobuf(IteratorMode::Start)
@@ -981,7 +987,7 @@ impl Ledger {
                 };
                 let include = status.err.is_none() == success;
                 if include {
-                    Some(Ok((slot, signature)))
+                    Some(Ok((slot, signature, status)))
                 } else {
                     None
                 }

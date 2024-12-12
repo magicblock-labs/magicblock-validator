@@ -1,44 +1,52 @@
 use magicblock_ledger::Ledger;
-use std::path::PathBuf;
-use std::str::FromStr;
+use std::path::{Path, PathBuf};
 use structopt::StructOpt;
 
 mod counts;
+mod transactions;
 
-#[derive(Debug, Default, StructOpt)]
+#[derive(Debug, StructOpt)]
 enum Command {
-    #[default]
-    Counts,
-}
-
-impl FromStr for Command {
-    type Err = String;
-
-    fn from_str(s: &str) -> Result<Self, Self::Err> {
-        use Command::*;
-        match s.to_lowercase().as_str() {
-            "counts" => Ok(Counts),
-            _ => Err(format!("Unknown format: {}", s)),
-        }
-    }
+    #[structopt(name = "count", about = "Counts of items in ledger columns")]
+    Count {
+        #[structopt(parse(from_os_str))]
+        ledger_path: PathBuf,
+    },
+    #[structopt(name = "tx-fail", about = "Failed transaction detailss")]
+    TransactionsFail {
+        #[structopt(parse(from_os_str))]
+        ledger_path: PathBuf,
+    },
+    #[structopt(name = "tx-success", about = "Successful transaction details")]
+    TransactionsSuccess {
+        #[structopt(parse(from_os_str))]
+        ledger_path: PathBuf,
+    },
 }
 
 #[derive(StructOpt)]
 struct Cli {
     #[structopt(subcommand)]
-    command: Option<Command>,
-
-    #[structopt(parse(from_os_str))]
-    ledger_path: PathBuf,
+    command: Command,
 }
 
 fn main() {
     let args = Cli::from_args();
 
-    let ledger =
-        Ledger::open(&args.ledger_path).expect("Failed to open ledger");
-
-    match args.command.unwrap_or_default() {
-        Command::Counts => counts::print_counts(&ledger),
+    use Command::*;
+    match args.command {
+        Count { ledger_path } => {
+            counts::print_counts(&open_ledger(&ledger_path))
+        }
+        TransactionsFail { ledger_path } => {
+            transactions::print_transactions(&open_ledger(&ledger_path), false);
+        }
+        TransactionsSuccess { ledger_path } => {
+            transactions::print_transactions(&open_ledger(&ledger_path), true);
+        }
     }
+}
+
+fn open_ledger(ledger_path: &Path) -> Ledger {
+    Ledger::open(ledger_path).expect("Failed to open ledger")
 }
