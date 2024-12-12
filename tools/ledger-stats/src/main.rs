@@ -21,7 +21,7 @@ enum Command {
         ledger_path: PathBuf,
         #[structopt(
             long,
-            short = "l",
+            short = "s",
             parse(from_flag),
             help = "Show successful transactions, default: false"
         )]
