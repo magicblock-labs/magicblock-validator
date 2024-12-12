@@ -12,15 +12,21 @@ enum Command {
         #[structopt(parse(from_os_str))]
         ledger_path: PathBuf,
     },
-    #[structopt(name = "tx-fail", about = "Failed transaction detailss")]
-    TransactionsFail {
+    #[structopt(name = "log", about = "Transaction logs")]
+    Log {
         #[structopt(parse(from_os_str))]
         ledger_path: PathBuf,
-    },
-    #[structopt(name = "tx-success", about = "Successful transaction details")]
-    TransactionsSuccess {
-        #[structopt(parse(from_os_str))]
-        ledger_path: PathBuf,
+        #[structopt(
+            long,
+            short = "l",
+            parse(from_flag),
+            help = "Show successful transactions, default: false"
+        )]
+        success: bool,
+        #[structopt(long, short, help = "Start slot")]
+        start: Option<u64>,
+        #[structopt(long, short, help = "End slot")]
+        end: Option<u64>,
     },
 }
 
@@ -38,11 +44,18 @@ fn main() {
         Count { ledger_path } => {
             counts::print_counts(&open_ledger(&ledger_path))
         }
-        TransactionsFail { ledger_path } => {
-            transactions::print_transactions(&open_ledger(&ledger_path), false);
-        }
-        TransactionsSuccess { ledger_path } => {
-            transactions::print_transactions(&open_ledger(&ledger_path), true);
+        Log {
+            ledger_path,
+            success,
+            start,
+            end,
+        } => {
+            transactions::print_transactions(
+                &open_ledger(&ledger_path),
+                start,
+                end,
+                success,
+            );
         }
     }
 }

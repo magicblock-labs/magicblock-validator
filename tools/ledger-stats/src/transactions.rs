@@ -1,11 +1,23 @@
 use magicblock_ledger::Ledger;
 
-pub(crate) fn print_transactions(ledger: &Ledger, success: bool) {
+pub(crate) fn print_transactions(
+    ledger: &Ledger,
+    start_slot: Option<u64>,
+    end_slot: Option<u64>,
+    success: bool,
+) {
+    let start_slot = start_slot.unwrap_or(0);
+    let end_slot = end_slot.unwrap_or(u64::MAX);
     let sorted = {
         let mut vec = ledger
-            .iter_transaction_statuses(success)
+            .iter_transaction_statuses(None, success)
             .filter_map(|res| match res {
-                Ok(val) => Some(val),
+                Ok((slot, sig, status))
+                    if start_slot <= slot && slot <= end_slot =>
+                {
+                    Some((slot, sig, status))
+                }
+                Ok(_) => None,
                 Err(_) => None,
             })
             .collect::<Vec<_>>();
