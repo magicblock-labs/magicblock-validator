@@ -139,7 +139,7 @@ pub fn init_system_metrics_ticker(
         try_set_ledger_count!(slot_signatures);
         try_set_ledger_count!(address_signatures);
         try_set_ledger_count!(transaction_status);
-        try_set_ledger_count!(transaction_succesful_status);
+        try_set_ledger_count!(transaction_successful_status);
         try_set_ledger_count!(transaction_failed_status);
         try_set_ledger_count!(transactions);
         try_set_ledger_count!(transaction_memos);

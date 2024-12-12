@@ -1029,7 +1029,7 @@ impl Ledger {
         Ok(count)
     }
 
-    pub fn count_transaction_succesful_status(&self) -> LedgerResult<i64> {
+    pub fn count_transaction_successful_status(&self) -> LedgerResult<i64> {
         if self
             .transaction_successful_status_count
             .load(Ordering::Relaxed)

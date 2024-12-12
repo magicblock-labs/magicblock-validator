@@ -317,7 +317,7 @@ pub fn set_ledger_transaction_status_count(count: i64) {
     LEDGER_TRANSACTION_STATUS_GAUGE.set(count);
 }
 
-pub fn set_ledger_transaction_succesful_status_count(count: i64) {
+pub fn set_ledger_transaction_successful_status_count(count: i64) {
     LEDGER_TRANSACTION_SUCCESSFUL_STATUS_GAUGE.set(count);
 }
 

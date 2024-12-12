@@ -16,7 +16,7 @@ pub(crate) fn print_counts(ledger: &Ledger) {
         .expect("Failed to count transaction status")
         .to_formatted_string(&Locale::en);
     let successfull_transaction_status_count = ledger
-        .count_transaction_succesful_status()
+        .count_transaction_successful_status()
         .expect("Failed to count successful transaction status")
         .to_formatted_string(&Locale::en);
     let failed_transaction_status_count = ledger
