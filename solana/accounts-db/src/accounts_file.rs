@@ -67,7 +67,8 @@ impl AccountsFile {
         path: impl AsRef<Path>,
         current_len: usize,
     ) -> Result<(Self, usize)> {
-        let (av, num_accounts) = AppendVec::new_from_file(path, current_len)?;
+        let (av, num_accounts) =
+            AppendVec::new_from_file(path, current_len, false)?;
         Ok((Self::AppendVec(av), num_accounts))
     }
 

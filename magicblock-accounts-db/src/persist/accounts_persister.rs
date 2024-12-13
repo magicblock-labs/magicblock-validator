@@ -408,7 +408,7 @@ impl AccountsPersister {
         // Create a AccountStorageEntry from the file
         let file_size = fs::metadata(file)?.len() as usize;
         let (append_vec, num_accounts) =
-            AppendVec::new_from_file(file, file_size)?;
+            AppendVec::new_from_file(file, file_size, true)?;
         let accounts = AccountsFile::AppendVec(append_vec);
         let storage = AccountStorageEntry::new_existing(
             *slot,

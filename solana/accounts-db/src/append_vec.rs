@@ -224,6 +224,10 @@ pub struct AppendVec {
 
     /// The number of bytes available for storing items.
     file_size: u64,
+
+    /// If `true` then the underlying file will not be deleted
+    /// when the `AppendVec` is dropped.
+    keep_file: bool,
 }
 
 lazy_static! {
@@ -233,6 +237,9 @@ lazy_static! {
 
 impl Drop for AppendVec {
     fn drop(&mut self) {
+        if self.keep_file {
+            return;
+        }
         APPEND_VEC_MMAPPED_FILES_OPEN.fetch_sub(1, Ordering::Relaxed);
         if let Err(_err) = remove_file(&self.path) {
             // promote this to panic soon.
@@ -297,6 +304,7 @@ impl AppendVec {
             append_lock: Mutex::new(()),
             current_len: AtomicUsize::new(initial_len),
             file_size: size as u64,
+            keep_file: false,
         }
     }
 
@@ -361,8 +369,9 @@ impl AppendVec {
     pub fn new_from_file<P: AsRef<Path>>(
         path: P,
         current_len: usize,
+        keep_file: bool,
     ) -> Result<(Self, usize)> {
-        let new = Self::new_from_file_unchecked(&path, current_len)?;
+        let new = Self::new_from_file_unchecked(&path, current_len, keep_file)?;
 
         let (sanitized, num_accounts) = new.sanitize_layout_and_length();
         if !sanitized {
@@ -380,6 +389,7 @@ impl AppendVec {
     pub fn new_from_file_unchecked<P: AsRef<Path>>(
         path: P,
         current_len: usize,
+        keep_file: bool,
     ) -> Result<Self> {
         let file_size = std::fs::metadata(&path)?.len();
         Self::sanitize_len_and_size(current_len, file_size as usize)?;
@@ -406,6 +416,7 @@ impl AppendVec {
             append_lock: Mutex::new(()),
             current_len: AtomicUsize::new(current_len),
             file_size,
+            keep_file,
         })
     }
 
@@ -981,7 +992,7 @@ pub mod tests {
             .open(path)
             .expect("create a test file for mmap");
 
-        let result = AppendVec::new_from_file(path, 0);
+        let result = AppendVec::new_from_file(path, 0, false);
         assert_matches!(result, Err(ref message) if message.to_string().contains("too small file size 0 for AppendVec"));
     }
 
@@ -1245,7 +1256,7 @@ pub mod tests {
             writer.write_all(append_vec_data.as_slice()).unwrap();
         }
 
-        let result = AppendVec::new_from_file(path, accounts_len);
+        let result = AppendVec::new_from_file(path, accounts_len, false);
         assert_matches!(result, Err(ref message) if message.to_string().contains("incorrect layout/length/data"));
     }
 
@@ -1278,7 +1289,7 @@ pub mod tests {
             av.flush().unwrap();
             av.len()
         };
-        let result = AppendVec::new_from_file(path, accounts_len);
+        let result = AppendVec::new_from_file(path, accounts_len, false);
         assert_matches!(result, Err(ref message) if message.to_string().contains("incorrect layout/length/data"));
     }
 
@@ -1309,7 +1320,7 @@ pub mod tests {
             av.flush().unwrap();
             av.len()
         };
-        let result = AppendVec::new_from_file(path, accounts_len);
+        let result = AppendVec::new_from_file(path, accounts_len, false);
         assert_matches!(result, Err(ref message) if message.to_string().contains("incorrect layout/length/data"));
     }
 
@@ -1380,7 +1391,7 @@ pub mod tests {
             av.flush().unwrap();
             av.len()
         };
-        let result = AppendVec::new_from_file(path, accounts_len);
+        let result = AppendVec::new_from_file(path, accounts_len, false);
         assert_matches!(result, Err(ref message) if message.to_string().contains("incorrect layout/length/data"));
     }
 
