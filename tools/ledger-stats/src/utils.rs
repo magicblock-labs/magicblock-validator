@@ -28,5 +28,5 @@ pub(crate) fn accounts_storage_from_ledger(
         .join("accounts")
         .join("run");
     let persister = AccountsPersister::new_with_paths(vec![accounts_dir]);
-    persister.read_most_recent_store().unwrap()
+    persister.load_most_recent_store().unwrap()
 }

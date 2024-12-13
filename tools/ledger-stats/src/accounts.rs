@@ -2,9 +2,9 @@ use std::ffi::OsStr;
 
 use magicblock_ledger::Ledger;
 use num_format::{Locale, ToFormattedString};
+use solana_sdk::account::ReadableAccount;
 use solana_sdk::clock::Epoch;
 use solana_sdk::pubkey::Pubkey;
-use solana_sdk::{account::ReadableAccount, signer::Signer};
 use structopt::StructOpt;
 use tabular::{Row, Table};
 

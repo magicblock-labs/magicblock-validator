@@ -26,9 +26,7 @@ use crate::{
 use log::*;
 use rand::{thread_rng, Rng};
 use solana_accounts_db::accounts_file::AccountsFile;
-use solana_accounts_db::{
-    accounts_file::AccountsFileError, append_vec::AppendVec,
-};
+use solana_accounts_db::append_vec::AppendVec;
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
     clock::Slot,
@@ -113,7 +111,7 @@ impl AccountsPersister {
         let is_dead_slot = accounts.is_empty();
         if !is_dead_slot {
             let flushed_store = self.create_and_insert_store(slot, total_size);
-            let write_version_iterator: Box<dyn Iterator<Item=u64>> = {
+            let write_version_iterator: Box<dyn Iterator<Item = u64>> = {
                 let mut current_version =
                     self.bulk_assign_write_version(accounts.len());
                 Box::new(std::iter::from_fn(move || {
@@ -202,7 +200,7 @@ impl AccountsPersister {
         'a: 'c,
         'b,
         'c,
-        I: Iterator<Item=u64>,
+        I: Iterator<Item = u64>,
         T: ReadableAccount + Sync + ZeroLamport + 'b,
     >(
         &self,
@@ -350,16 +348,16 @@ impl AccountsPersister {
     // -----------------
     // Querying Storage
     // -----------------
-    // pub fn count(&self) -> usize {
-    //     self
-    // }
-
-    pub fn read_most_recent_store(
+    pub fn load_most_recent_store(
         &self,
-    ) -> Result<AccountStorageEntry, AccountsFileError> {
-        let path = self.paths.first().unwrap();
+    ) -> AccountsDbResult<AccountStorageEntry> {
+        let path = self
+            .paths
+            .first()
+            .ok_or(AccountsDbError::NoStoragePathProvided)?;
+
         // Read all files sorted slot/append_vec_id and return the last one
-        let files = fs::read_dir(&path)?;
+        let files = fs::read_dir(path)?;
         let mut files: Vec<_> = files
             .filter_map(|entry| {
                 entry.ok().and_then(|entry| {
@@ -400,16 +398,21 @@ impl AccountsPersister {
                 }
             },
         );
-        let (file, slot, id) = files.first().unwrap();
-        eprintln!("File {:?}", file);
+        let (file, slot, id) =
+            files
+                .first()
+                .ok_or(AccountsDbError::NoAccountsFileFoundInside(
+                    path.display().to_string(),
+                ))?;
 
-        let (append_vec, num_accounts) = AppendVec::new_from_file(
-            &file,
-            10949120,
-        )?;
+        // Create a AccountStorageEntry from the file
+        let file_size = fs::metadata(file)?.len() as usize;
+        let (append_vec, num_accounts) =
+            AppendVec::new_from_file(file, file_size)?;
         let accounts = AccountsFile::AppendVec(append_vec);
         let storage = AccountStorageEntry::new_existing(
-            *slot, *id,
+            *slot,
+            *id,
             accounts,
             num_accounts,
         );
