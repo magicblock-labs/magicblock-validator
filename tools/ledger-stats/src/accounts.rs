@@ -1,7 +1,5 @@
 use std::ffi::OsStr;
 
-use magicblock_accounts_db::account_storage::meta::StoredAccountMeta;
-use magicblock_accounts_db::AccountsPersister;
 use magicblock_ledger::Ledger;
 use num_format::{Locale, ToFormattedString};
 use solana_sdk::account::ReadableAccount;
@@ -9,6 +7,8 @@ use solana_sdk::clock::Epoch;
 use solana_sdk::pubkey::Pubkey;
 use structopt::StructOpt;
 use tabular::{Row, Table};
+
+use crate::utils::accounts_storage_from_ledger;
 
 // -----------------
 // SortAccounts
@@ -116,14 +116,7 @@ pub fn print_accounts(
     print_rent_epoch: bool,
     count: bool,
 ) {
-    let accounts_dir = ledger
-        .ledger_path()
-        .parent()
-        .expect("Ledger path has no parent")
-        .join("accounts")
-        .join("run");
-    let persister = AccountsPersister::new_with_paths(vec![accounts_dir]);
-    let storage = persister.read_most_recent_store().unwrap();
+    let storage = accounts_storage_from_ledger(ledger);
 
     let mut accounts = {
         let all = storage.all_accounts();

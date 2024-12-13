@@ -7,6 +7,7 @@ use magicblock_ledger::Ledger;
 use solana_sdk::pubkey::Pubkey;
 use structopt::StructOpt;
 
+mod account;
 mod accounts;
 mod counts;
 mod transaction_details;
@@ -83,6 +84,16 @@ enum Command {
         )]
         count: bool,
     },
+    #[structopt(
+        name = "account",
+        about = "Specific Account Details including Data"
+    )]
+    Account {
+        #[structopt(parse(from_os_str))]
+        ledger_path: PathBuf,
+        #[structopt(help = "Pubkey of the account")]
+        pubkey: String,
+    },
 }
 
 #[derive(StructOpt)]
@@ -142,6 +153,14 @@ fn main() {
                 rent_epoch,
                 count,
             );
+        }
+        Account {
+            ledger_path,
+            pubkey,
+        } => {
+            let ledger = open_ledger(&ledger_path);
+            let pubkey = Pubkey::from_str(&pubkey).expect("Invalid pubkey");
+            account::print_account(&ledger, &pubkey);
         }
     }
 }
