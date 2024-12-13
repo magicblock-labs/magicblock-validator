@@ -8,21 +8,11 @@ use crate::utils::accounts_storage_from_ledger;
 
 pub fn print_account(ledger: &Ledger, pubkey: &Pubkey) {
     let storage = accounts_storage_from_ledger(ledger);
-    let account = {
-        let mut account = None;
-        for acc in storage.all_accounts() {
-            if acc.pubkey() == pubkey {
-                account.replace(acc);
-                break;
-            }
-        }
-        if let Some(account) = account {
-            account
-        } else {
-            eprintln!("Account not found: {}", pubkey);
-            return;
-        }
-    };
+    let account = storage
+        .all_accounts()
+        .into_iter()
+        .find(|acc| acc.pubkey() == pubkey)
+        .expect("Account not found");
 
     let lamports = account.lamports();
     let owner = account.owner();
