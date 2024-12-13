@@ -174,7 +174,7 @@ pub fn print_accounts(
     let table_alignment = if print_rent_epoch {
         "{:<}  {:<}  {:>}  {:<}  {:>}  {:<}  {:>}"
     } else {
-        "{:<}  {:<}  {:>}  {:<}  {:<}  {:>}"
+        "{:<}  {:<}  {:>}  {:<}  {:>}  {:<}"
     };
     let mut table = Table::new(table_alignment);
     let mut row = Row::new()
@@ -182,7 +182,7 @@ pub fn print_accounts(
         .with_cell("Owner")
         .with_cell("Lamports")
         .with_cell("Executable")
-        .with_cell("Data (Bytes)")
+        .with_cell("Data(Bytes)")
         .with_cell("Curve");
     if print_rent_epoch {
         row.add_cell("Rent Epoch");
