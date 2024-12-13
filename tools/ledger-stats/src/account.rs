@@ -31,6 +31,7 @@ pub fn print_account(ledger: &Ledger, pubkey: &Pubkey) {
     let rent_epoch = account.rent_epoch();
     let data = account.data();
     let data_len = data.len();
+    let oncurve = pubkey.is_on_curve();
 
     let table = Table::new("{:<}  {:>}")
         .with_row(Row::new().with_cell("Column").with_cell("Value"))
@@ -56,6 +57,11 @@ pub fn print_account(ledger: &Ledger, pubkey: &Pubkey) {
                 .with_cell("Data (Bytes)")
                 .with_cell(data_len.to_formatted_string(&Locale::en)),
         )
+        .with_row(Row::new().with_cell("Curve").with_cell(if oncurve {
+            "On"
+        } else {
+            "Off"
+        }))
         .with_row(
             Row::new()
                 .with_cell("RentEpoch")

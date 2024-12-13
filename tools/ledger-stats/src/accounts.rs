@@ -2,9 +2,9 @@ use std::ffi::OsStr;
 
 use magicblock_ledger::Ledger;
 use num_format::{Locale, ToFormattedString};
-use solana_sdk::account::ReadableAccount;
 use solana_sdk::clock::Epoch;
 use solana_sdk::pubkey::Pubkey;
+use solana_sdk::{account::ReadableAccount, signer::Signer};
 use structopt::StructOpt;
 use tabular::{Row, Table};
 
@@ -62,8 +62,8 @@ impl From<&str> for FilterAccounts {
         match s {
             "executable" => Executable,
             "non-executable" => NonExecutable,
-            "curve" => OnCurve,
-            "pda" => OffCurve,
+            _ if s.starts_with("on") => OnCurve,
+            _ if s.starts_with("off") => OffCurve,
             _ => panic!("Invalid filter {}", s),
         }
     }
@@ -136,12 +136,12 @@ pub fn print_accounts(
                     return false;
                 }
                 if filters.contains(&FilterAccounts::OnCurve)
-                    && !acc.owner().is_on_curve()
+                    && !acc.pubkey().is_on_curve()
                 {
                     return false;
                 }
                 if filters.contains(&FilterAccounts::OffCurve)
-                    && acc.owner().is_on_curve()
+                    && acc.pubkey().is_on_curve()
                 {
                     return false;
                 }
@@ -172,9 +172,9 @@ pub fn print_accounts(
     }
 
     let table_alignment = if print_rent_epoch {
-        "{:<}  {:<}  {:>}  {:<}  {:>}  {:>}"
+        "{:<}  {:<}  {:>}  {:<}  {:>}  {:<}  {:>}"
     } else {
-        "{:<}  {:<}  {:>}  {:<}  {:>}"
+        "{:<}  {:<}  {:>}  {:<}  {:<}  {:>}"
     };
     let mut table = Table::new(table_alignment);
     let mut row = Row::new()
@@ -182,19 +182,22 @@ pub fn print_accounts(
         .with_cell("Owner")
         .with_cell("Lamports")
         .with_cell("Executable")
-        .with_cell("Data (Bytes)");
+        .with_cell("Data (Bytes)")
+        .with_cell("Curve");
     if print_rent_epoch {
         row.add_cell("Rent Epoch");
     }
     table.add_row(row);
 
     fn add_row(table: &mut Table, meta: AccountInfo, include_rent_epoch: bool) {
+        let oncurve = meta.pubkey.is_on_curve();
         let mut row = Row::new()
             .with_cell(meta.pubkey.to_string())
             .with_cell(meta.owner.to_string())
             .with_cell(meta.lamports.to_formatted_string(&Locale::en))
             .with_cell(meta.executable)
-            .with_cell(meta.data.len());
+            .with_cell(meta.data.len())
+            .with_cell(if oncurve { "On" } else { "Off" });
         if include_rent_epoch {
             row.add_cell(meta.rent_epoch.to_formatted_string(&Locale::en));
         }

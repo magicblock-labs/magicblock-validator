@@ -70,8 +70,8 @@ enum Command {
         #[structopt(
             long,
             short,
-            help = "Filter accounts by specified criteria (comma-separated). pda=off-curve",
-            possible_values = &["curve", "pda", "executable", "non-executable"],
+            help = "Filter accounts by specified criteria (comma-separated). PDAs are off-curve",
+            possible_values = &["on", "on-curve", "off", "off-curve", "executable", "non-executable"],
             multiple = true,
             use_delimiter = true
         )]
