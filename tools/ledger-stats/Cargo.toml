@@ -8,6 +8,7 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
+magicblock-accounts-db = { workspace = true }
 magicblock-ledger = { workspace = true }
 num-format = "0.4.4"
 pretty-hex = "0.4.1"

@@ -8,14 +8,6 @@ use std::{
     },
 };
 
-use log::*;
-use rand::{thread_rng, Rng};
-use solana_sdk::{
-    account::{AccountSharedData, ReadableAccount},
-    clock::Slot,
-    pubkey::Pubkey,
-};
-
 use crate::{
     account_info::{AccountInfo, AppendVecId, StorageLocation},
     account_storage::{
@@ -30,6 +22,17 @@ use crate::{
     errors::{AccountsDbError, AccountsDbResult},
     storable_accounts::StorableAccounts,
     DEFAULT_FILE_SIZE,
+};
+use log::*;
+use rand::{thread_rng, Rng};
+use solana_accounts_db::accounts_file::AccountsFile;
+use solana_accounts_db::{
+    accounts_file::AccountsFileError, append_vec::AppendVec,
+};
+use solana_sdk::{
+    account::{AccountSharedData, ReadableAccount},
+    clock::Slot,
+    pubkey::Pubkey,
 };
 
 pub type AtomicAppendVecId = AtomicU32;
@@ -74,7 +77,7 @@ impl Default for AccountsPersister {
 }
 
 impl AccountsPersister {
-    pub(crate) fn new_with_paths(paths: Vec<PathBuf>) -> Self {
+    pub fn new_with_paths(paths: Vec<PathBuf>) -> Self {
         Self {
             paths,
             ..Default::default()
@@ -110,7 +113,7 @@ impl AccountsPersister {
         let is_dead_slot = accounts.is_empty();
         if !is_dead_slot {
             let flushed_store = self.create_and_insert_store(slot, total_size);
-            let write_version_iterator: Box<dyn Iterator<Item = u64>> = {
+            let write_version_iterator: Box<dyn Iterator<Item=u64>> = {
                 let mut current_version =
                     self.bulk_assign_write_version(accounts.len());
                 Box::new(std::iter::from_fn(move || {
@@ -199,7 +202,7 @@ impl AccountsPersister {
         'a: 'c,
         'b,
         'c,
-        I: Iterator<Item = u64>,
+        I: Iterator<Item=u64>,
         T: ReadableAccount + Sync + ZeroLamport + 'b,
     >(
         &self,
@@ -342,6 +345,75 @@ impl AccountsPersister {
         }
 
         infos
+    }
+
+    // -----------------
+    // Querying Storage
+    // -----------------
+    // pub fn count(&self) -> usize {
+    //     self
+    // }
+
+    pub fn read_most_recent_store(
+        &self,
+    ) -> Result<AccountStorageEntry, AccountsFileError> {
+        let path = self.paths.first().unwrap();
+        // Read all files sorted slot/append_vec_id and return the last one
+        let files = fs::read_dir(&path)?;
+        let mut files: Vec<_> = files
+            .filter_map(|entry| {
+                entry.ok().and_then(|entry| {
+                    let path = entry.path();
+                    let slot_and_id = path
+                        .file_name()
+                        .and_then(|file_name| file_name.to_str())
+                        .and_then(|file_name| {
+                            let parts =
+                                file_name.split('.').collect::<Vec<_>>();
+                            (parts.len() == 2).then(|| (parts[0], parts[1]))
+                        })
+                        .and_then(|(slot_str, append_vec_id_str)| {
+                            let slot = slot_str.parse::<Slot>().ok();
+                            let append_vec_id =
+                                append_vec_id_str.parse::<AppendVecId>().ok();
+                            if let (Some(slot), Some(append_vec_id)) =
+                                (slot, append_vec_id)
+                            {
+                                Some((slot, append_vec_id))
+                            } else {
+                                None
+                            }
+                        });
+                    slot_and_id.map(|(slot, id)| (path, slot, id))
+                })
+            })
+            .collect();
+
+        files.sort_by(
+            |(_, slot_a, id_a): &(PathBuf, Slot, AppendVecId),
+             (_, slot_b, id_b): &(PathBuf, Slot, AppendVecId)| {
+                // Sorting in reverse order
+                if slot_a == slot_b {
+                    id_b.cmp(id_a)
+                } else {
+                    slot_b.cmp(slot_a)
+                }
+            },
+        );
+        let (file, slot, id) = files.first().unwrap();
+        eprintln!("File {:?}", file);
+
+        let (append_vec, num_accounts) = AppendVec::new_from_file(
+            &file,
+            10949120,
+        )?;
+        let accounts = AccountsFile::AppendVec(append_vec);
+        let storage = AccountStorageEntry::new_existing(
+            *slot, *id,
+            accounts,
+            num_accounts,
+        );
+        Ok(storage)
     }
 
     // -----------------

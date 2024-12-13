@@ -3,6 +3,7 @@ use std::path::{Path, PathBuf};
 use magicblock_ledger::Ledger;
 use structopt::StructOpt;
 
+mod accounts;
 mod counts;
 mod transaction_details;
 mod transaction_logs;
@@ -45,6 +46,13 @@ enum Command {
         )]
         ascii: bool,
     },
+    #[structopt(name = "accounts", about = "Persisted account details")]
+    Accounts {
+        #[structopt(parse(from_os_str))]
+        ledger_path: PathBuf,
+        #[structopt(long, short, help = "Show rent epoch", parse(from_flag))]
+        rent_epoch: bool,
+    },
 }
 
 #[derive(StructOpt)]
@@ -84,6 +92,10 @@ fn main() {
                 &ledger, &sig, ascii,
             );
         }
+        Accounts {
+            ledger_path,
+            rent_epoch,
+        } => accounts::print_accounts(&open_ledger(&ledger_path), rent_epoch),
     }
 }
 
