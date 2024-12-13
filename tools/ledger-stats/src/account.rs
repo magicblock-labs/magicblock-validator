@@ -53,7 +53,7 @@ pub fn print_account(ledger: &Ledger, pubkey: &Pubkey) {
         )
         .with_row(
             Row::new()
-                .with_cell("DataLen")
+                .with_cell("Data (Bytes)")
                 .with_cell(data_len.to_formatted_string(&Locale::en)),
         )
         .with_row(

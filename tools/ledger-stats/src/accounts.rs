@@ -182,7 +182,7 @@ pub fn print_accounts(
         .with_cell("Owner")
         .with_cell("Lamports")
         .with_cell("Executable")
-        .with_cell("Data Length");
+        .with_cell("Data (Bytes)");
     if print_rent_epoch {
         row.add_cell("Rent Epoch");
     }
