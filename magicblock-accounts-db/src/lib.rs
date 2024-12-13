@@ -7,7 +7,11 @@ pub mod accounts_update_notifier_interface;
 pub mod errors;
 mod persist;
 pub mod verify_accounts_hash_in_background;
-pub use persist::FLUSH_ACCOUNTS_SLOT_FREQ;
+pub use persist::{AccountsPersister, FLUSH_ACCOUNTS_SLOT_FREQ};
+
+pub const ACCOUNTS_RUN_DIR: &str = "run";
+pub const ACCOUNTS_SNAPSHOT_DIR: &str = "snapshot";
+
 // In order to be 100% compatible with the accounts_db API we export the traits
 // from the module it expects them to be in.
 use solana_accounts_db::accounts_db::DEFAULT_FILE_SIZE;
