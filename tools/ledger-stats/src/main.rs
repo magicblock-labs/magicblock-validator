@@ -1,6 +1,10 @@
-use std::path::{Path, PathBuf};
+use std::{
+    path::{Path, PathBuf},
+    str::FromStr,
+};
 
 use magicblock_ledger::Ledger;
+use solana_sdk::pubkey::Pubkey;
 use structopt::StructOpt;
 
 mod accounts;
@@ -46,12 +50,38 @@ enum Command {
         )]
         ascii: bool,
     },
-    #[structopt(name = "accounts", about = "Persisted account details")]
+    #[structopt(name = "accounts", about = "Account details")]
     Accounts {
         #[structopt(parse(from_os_str))]
         ledger_path: PathBuf,
+        #[structopt(
+            long,
+            short,
+            parse(from_os_str),
+            help = "Column by which to sort accounts",
+            default_value = "Pubkey"
+        )]
+        sort: accounts::SortAccounts,
+        #[structopt(long, short, help = "Filter by account owner")]
+        owner: Option<String>,
         #[structopt(long, short, help = "Show rent epoch", parse(from_flag))]
         rent_epoch: bool,
+        #[structopt(
+            long,
+            short,
+            help = "Filter accounts by specified criteria (comma-separated). pda=off-curve",
+            possible_values = &["curve", "pda", "executable", "non-executable"],
+            multiple = true,
+            use_delimiter = true
+        )]
+        filter: Vec<String>,
+        #[structopt(
+            long,
+            short,
+            help = "Print count instead of account details",
+            parse(from_flag)
+        )]
+        count: bool,
     },
 }
 
@@ -95,7 +125,24 @@ fn main() {
         Accounts {
             ledger_path,
             rent_epoch,
-        } => accounts::print_accounts(&open_ledger(&ledger_path), rent_epoch),
+            sort,
+            owner,
+            filter,
+            count,
+        } => {
+            let owner = owner.map(|owner| {
+                Pubkey::from_str(&owner).expect("Invalid owner filter pubkey")
+            });
+            let filters = accounts::FilterAccounts::from_strings(&filter);
+            accounts::print_accounts(
+                &open_ledger(&ledger_path),
+                sort,
+                owner,
+                &filters,
+                rent_epoch,
+                count,
+            );
+        }
     }
 }
 
