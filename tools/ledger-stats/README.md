@@ -151,3 +151,41 @@ block_time                      1733731769
   0060:   00 01 00 00  00 00 00 00  00 00
 ```
 </details>
+
+### accounts
+
+The accounts subcommand provides details about the accounts in the ledger. It supports the
+following options:
+
+- -c, --count: Print the count of accounts instead of the account details.
+- -r, --rent-epoch: Show the rent epoch for each account.
+- -f, --filter <filter>...: Filter accounts based on specified criteria. Multiple criteria can be provided as a comma-separated list. Possible values include:
+  - on or on-curve: Include on-curve accounts.
+  - off or off-curve: Include off-curve accounts (PDAs).
+  - executable: Include executable accounts.
+  - non-executable: Include non-executable accounts.
+- -o, --owner <owner>: Filter accounts by the specified owner.
+- -s, --sort <sort>: Sort accounts by the specified column. The default is to sort by the account's public key (Pubkey).
+The <ledger-path> argument specifies the path to the ledger directory.
+
+Example usage:
+
+```sh
+❯ ledger-stats accounts ledger -s d -f=off
+```
+
+This will sort by data size and only include off-curve accounts.
+
+### account
+
+The account subcommand provides detailed information about a specific account in the ledger,
+including its data. It requires two arguments:
+
+- ledger-path: The path to the ledger directory.
+- pubkey: The public key of the account to retrieve details for.
+
+Example usage:
+
+```sh
+❯ ledger-stats account ledger 8JSRCegc3J5RqMp8izAZAs23PrmCg6e9TpraVB668xxn
+```
