@@ -1,8 +1,7 @@
 use magicblock_ledger::Ledger;
 use num_format::{Locale, ToFormattedString};
 use pretty_hex::*;
-use solana_sdk::account::ReadableAccount;
-use solana_sdk::pubkey::Pubkey;
+use solana_sdk::{account::ReadableAccount, pubkey::Pubkey};
 use tabular::{Row, Table};
 
 use crate::utils::accounts_storage_from_ledger;
