@@ -8,6 +8,7 @@ anyhow = { workspace = true }
 cleanass = { workspace = true }
 integration-test-tools = { workspace = true }
 program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
+magicblock-accounts-db = { workspace = true }
 magicblock-config = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-sdk = { workspace = true }

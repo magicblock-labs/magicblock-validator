@@ -31,6 +31,7 @@ serde = "1.0.196"
 program-flexi-counter = { path = "./programs/flexi-counter" }
 program-schedulecommit = { path = "programs/schedulecommit" }
 program-schedulecommit-security = { path = "programs/schedulecommit-security" }
+magicblock-accounts-db = { path = "../magicblock-accounts-db" }
 magicblock-config = { path = "../magicblock-config" }
 magicblock-core = { path = "../magicblock-core" }
 teepee = "0.0.1"
