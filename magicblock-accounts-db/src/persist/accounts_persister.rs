@@ -350,7 +350,7 @@ impl AccountsPersister {
     // -----------------
     pub fn load_most_recent_store(
         &self,
-    ) -> AccountsDbResult<AccountStorageEntry> {
+    ) -> AccountsDbResult<(AccountStorageEntry, Slot)> {
         let path = self
             .paths
             .first()
@@ -416,7 +416,7 @@ impl AccountsPersister {
             accounts,
             num_accounts,
         );
-        Ok(storage)
+        Ok((storage, *slot))
     }
 
     // -----------------

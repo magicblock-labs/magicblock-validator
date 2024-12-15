@@ -2,6 +2,7 @@ use magicblock_accounts_db::{
     account_storage::AccountStorageEntry, AccountsPersister,
 };
 use magicblock_ledger::Ledger;
+use solana_sdk::clock::Slot;
 
 pub(crate) fn render_logs(logs: &[String], indent: &str) -> String {
     logs.iter()
@@ -20,7 +21,7 @@ pub(crate) fn render_logs(logs: &[String], indent: &str) -> String {
 
 pub(crate) fn accounts_storage_from_ledger(
     ledger: &Ledger,
-) -> AccountStorageEntry {
+) -> (AccountStorageEntry, Slot) {
     let accounts_dir = ledger
         .ledger_path()
         .parent()
