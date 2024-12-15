@@ -1,5 +1,5 @@
 // NOTE: copied and slightly modified from bank.rs
-use std::{borrow::Cow, sync::Arc};
+use std::{borrow::Cow, path::PathBuf, sync::Arc};
 
 use magicblock_accounts_db::{
     accounts::Accounts, accounts_db::AccountsDb,
@@ -27,7 +27,12 @@ impl Bank {
     pub fn default_for_tests() -> Self {
         let accounts_db = AccountsDb::default_for_tests();
         let accounts = Accounts::new(Arc::new(accounts_db));
-        Self::default_with_accounts(accounts, EPHEM_DEFAULT_MILLIS_PER_SLOT)
+        let accounts_path = PathBuf::default();
+        Self::default_with_accounts(
+            accounts,
+            accounts_path,
+            EPHEM_DEFAULT_MILLIS_PER_SLOT,
+        )
     }
 
     pub fn new_for_tests(
