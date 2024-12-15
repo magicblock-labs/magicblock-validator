@@ -1,11 +1,13 @@
 use std::str::FromStr;
 
 use log::{Level::Trace, *};
-use magicblock_accounts_db::transaction_results::TransactionExecutionResult;
+use magicblock_accounts_db::{
+    transaction_results::TransactionExecutionResult, AccountsPersister,
+};
 use magicblock_bank::bank::{Bank, TransactionExecutionRecordingOpts};
 use solana_program_runtime::timings::ExecuteTimings;
 use solana_sdk::{
-    clock::UnixTimestamp,
+    clock::{Slot, UnixTimestamp},
     hash::Hash,
     message::SanitizedMessage,
     transaction::{
@@ -30,9 +32,10 @@ struct PreparedBlock {
 
 fn iter_blocks(
     ledger: &Ledger,
+    starting_slot: Slot,
     mut prepared_block_handler: impl FnMut(PreparedBlock) -> LedgerResult<()>,
 ) -> LedgerResult<()> {
-    let mut slot: u64 = 0;
+    let mut slot: u64 = starting_slot;
     loop {
         let Ok(Some(block)) = ledger.get_block(slot) else {
             break;
@@ -88,8 +91,34 @@ fn iter_blocks(
     Ok(())
 }
 
+fn hydrate_bank(bank: &Bank) -> LedgerResult<Option<(Slot, usize)>> {
+    let persister =
+        AccountsPersister::new_with_paths(vec![bank.accounts_path.clone()]);
+    let (storage, slot) = persister.load_most_recent_store()?;
+    let all_accounts = storage.all_accounts();
+    let len = all_accounts.len();
+    let storable_accounts = all_accounts
+        .iter()
+        .map(|acc| (acc.pubkey(), acc))
+        .collect::<Vec<_>>();
+    bank.store_accounts((slot, &storable_accounts[..]));
+
+    Ok(Some((slot, len)))
+}
+
 pub fn process_ledger(ledger: &Ledger, bank: &Bank) -> LedgerResult<()> {
-    iter_blocks(ledger, |prepared_block| {
+    let hydrated_slot = hydrate_bank(bank)?;
+    // TODO: @@@ we need to add X slots back as well in order to get the
+    // blockhahses for the transactions that follow
+    let (starting_slot, len) = match hydrated_slot {
+        Some((slot, len)) => (slot + 1, len),
+        None => (0, 0),
+    };
+    debug!(
+        "Loaded {} accounts into bank from storage replaying from slot: {}",
+        len, starting_slot
+    );
+    iter_blocks(ledger, starting_slot, |prepared_block| {
         let mut block_txs = vec![];
         let Some(timestamp) = prepared_block.block_time else {
             return Err(LedgerError::BlockStoreProcessor(format!(

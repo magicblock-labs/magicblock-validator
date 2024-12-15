@@ -398,12 +398,12 @@ impl AccountsPersister {
                 }
             },
         );
-        let (file, slot, id) =
-            files
-                .first()
-                .ok_or(AccountsDbError::NoAccountsFileFoundInside(
-                    path.display().to_string(),
-                ))?;
+        let (file, slot, id) = files
+            .first()
+            // TODO: @@@ finding accounts should be optional
+            .ok_or(AccountsDbError::NoAccountsFileFoundInside(
+                path.display().to_string(),
+            ))?;
 
         // Create a AccountStorageEntry from the file
         let file_size = fs::metadata(file)?.len() as usize;
