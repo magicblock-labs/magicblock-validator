@@ -37,6 +37,7 @@ members = [
   "test-tools",
   "test-tools-core",
   "utils/expiring-hashmap",
+  "tools/genx",
   "tools/keypair-base58",
   "tools/ledger-stats",
 ]
@@ -215,6 +216,9 @@ solana-vote-program = { git = "https://github.com/solana-labs/solana", rev = "30
 static_assertions = "1.1.0"
 tar = "0.4.40"
 test-case = "3.3.1"
+
+# tools
+ledger-stats = { path = "./tools/ledger-stats" }
 
 [patch.'https://github.com/solana-labs/solana']
 solana-accounts-db = { path = "./solana/accounts-db" }

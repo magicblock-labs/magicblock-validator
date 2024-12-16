@@ -1,9 +1,6 @@
-use std::{
-    path::{Path, PathBuf},
-    str::FromStr,
-};
+use std::{path::PathBuf, str::FromStr};
 
-use magicblock_ledger::Ledger;
+use crate::utils::open_ledger;
 use solana_sdk::pubkey::Pubkey;
 use structopt::StructOpt;
 
@@ -163,8 +160,4 @@ fn main() {
             account::print_account(&ledger, &pubkey);
         }
     }
-}
-
-fn open_ledger(ledger_path: &Path) -> Ledger {
-    Ledger::open(ledger_path).expect("Failed to open ledger")
 }
