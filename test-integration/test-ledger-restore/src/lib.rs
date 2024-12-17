@@ -221,7 +221,7 @@ pub fn confirm_tx_with_payer_chain(
     payer: &Keypair,
     validator: &mut Child,
 ) -> Signature {
-    let ctx = expect!(IntegrationTestContext::try_new(), validator);
+    let ctx = expect!(IntegrationTestContext::try_new_chain_only(), validator);
 
     let mut tx = Transaction::new_with_payer(&[ix], Some(&payer.pubkey()));
     let signers = &[payer];
@@ -239,14 +239,15 @@ pub fn fetch_counter_ephem(
     validator: &mut Child,
 ) -> FlexiCounter {
     let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
-    fetch_counter(payer, &ctx.ephem_client, validator)
+    let ephem_client = expect!(ctx.try_ephem_client(), validator);
+    fetch_counter(payer, ephem_client, validator)
 }
 
 pub fn fetch_counter_chain(
     payer: &Pubkey,
     validator: &mut Child,
 ) -> FlexiCounter {
-    let ctx = expect!(IntegrationTestContext::try_new(), validator);
+    let ctx = expect!(IntegrationTestContext::try_new_chain_only(), validator);
     let chain_client = expect!(ctx.try_chain_client(), validator);
     fetch_counter(payer, chain_client, validator)
 }
@@ -265,7 +266,7 @@ pub fn fetch_counter_owner_chain(
     payer: &Pubkey,
     validator: &mut Child,
 ) -> Pubkey {
-    let ctx = expect!(IntegrationTestContext::try_new(), validator);
+    let ctx = expect!(IntegrationTestContext::try_new_chain_only(), validator);
     let (counter, _) = FlexiCounter::pda(payer);
     expect!(ctx.fetch_chain_account_owner(counter), validator)
 }
@@ -312,10 +313,51 @@ pub fn assert_counter_commits_on_chain(
 // -----------------
 // Configs
 // -----------------
-
 pub fn get_programs_with_flexi_counter() -> Vec<ProgramConfig> {
     vec![ProgramConfig {
         id: FLEXI_COUNTER_ID.try_into().unwrap(),
         path: "program_flexi_counter.so".to_string(),
     }]
+}
+
+// -----------------
+// Asserts
+// -----------------
+pub struct State {
+    pub count: u64,
+    pub updates: u64,
+}
+pub struct Counter<'a> {
+    pub payer: &'a Pubkey,
+    pub chain: State,
+    pub ephem: State,
+}
+
+#[macro_export]
+macro_rules! assert_counter_state {
+    ($validator:expr, $expected:expr, $label:ident) => {
+        let counter_chain =
+            $crate::fetch_counter_chain($expected.payer, $validator);
+        ::cleanass::assert_eq!(
+            counter_chain,
+            ::program_flexi_counter::state::FlexiCounter {
+                count: $expected.chain.count,
+                updates: $expected.chain.updates,
+                label: $label.to_string()
+            },
+            $crate::cleanup($validator)
+        );
+
+        let counter_ephem =
+            $crate::fetch_counter_ephem($expected.payer, $validator);
+        ::cleanass::assert_eq!(
+            counter_ephem,
+            ::program_flexi_counter::state::FlexiCounter {
+                count: $expected.ephem.count,
+                updates: $expected.ephem.updates,
+                label: $label.to_string()
+            },
+            $crate::cleanup($validator)
+        );
+    };
 }

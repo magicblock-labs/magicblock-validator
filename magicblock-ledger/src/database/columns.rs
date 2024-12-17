@@ -1,9 +1,16 @@
+use std::sync::atomic::{AtomicI64, Ordering};
+
 use byteorder::{BigEndian, ByteOrder};
+use log::*;
 use serde::{de::DeserializeOwned, Serialize};
 use solana_sdk::{clock::Slot, pubkey::Pubkey, signature::Signature};
 use solana_storage_proto::convert::generated;
 
 use super::meta;
+use crate::{
+    database::{iterator::IteratorMode, ledger_column::LedgerColumn},
+    errors::LedgerResult,
+};
 
 /// Column family for Transaction Status
 const TRANSACTION_STATUS_CF: &str = "transaction_status";
@@ -664,4 +671,30 @@ impl TypedColumn for AccountModDatas {
 // Returns true if the column family enables compression.
 pub fn should_enable_compression<C: 'static + Column + ColumnName>() -> bool {
     C::NAME == TransactionStatus::NAME
+}
+
+// -----------------
+// Column Queries
+// -----------------
+pub(crate) const DIRTY_COUNT: i64 = -1;
+pub fn count_column_using_cache<C: Column + ColumnName>(
+    column: &LedgerColumn<C>,
+    cached_value: &AtomicI64,
+) -> LedgerResult<i64> {
+    let cached = cached_value.load(Ordering::Relaxed);
+    // NOTE: a value of -1 indicates that the cached value is dirty
+    if cached != DIRTY_COUNT {
+        return Ok(cached);
+    }
+    column
+        .iter(IteratorMode::Start)
+        .map(Iterator::count)
+        .map(|val| if val > i64::MAX as usize {
+            // NOTE: this value is only used for metrics/diagnostics and
+            // aside from the fact that we will never encounter this case,
+            // it is good enough to return i64::MAX
+            error!("Column {} count is too large: {} for metrics, returning max.", C::NAME, val);
+            i64::MAX
+        } else { val as i64 })
+        .inspect(|updated| cached_value.store(*updated, Ordering::Relaxed))
 }

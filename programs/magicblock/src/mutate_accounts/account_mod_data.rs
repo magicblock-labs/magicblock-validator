@@ -18,7 +18,7 @@ lazy_static! {
     /// transaction.
     /// Instead we register data here _before_ invoking the actual instruction and when it is
     /// processed it resolved that data from the key that we provide in its place.
-    static ref DATA_MODS: Mutex<HashMap<u64, Vec<u8>>> = Mutex::new(HashMap::new());
+    static ref DATA_MODS: Mutex<HashMap<u64, Vec<u8>>> = Mutex::default();
 
     /// In order to support replaying transactions we need to persist the data that is
     /// loaded from the [DATA_MODS]
@@ -27,31 +27,39 @@ lazy_static! {
     static ref PERSISTER: RwLock<Option<Arc<dyn PersistsAccountModData>>> = RwLock::new(None);
 
     static ref DATA_MOD_ID: AtomicU64 = AtomicU64::new(0);
+
+    static ref MAX_REPLAY_DATA_MOD_ID: Mutex<Option<u64>> = Mutex::default();
+}
+
+/// We capture the max id we see during ledger replay and use it to assign
+/// it to the [DATA_MOD_ID] once the validator starts running.
+/// As a result once the [DATA_MOD_ID] has the same value as it did
+/// when the initial validator instance stopped.
+fn update_max_seen_data_id(next_id: u64) {
+    let mut max_id_lock = MAX_REPLAY_DATA_MOD_ID
+        .lock()
+        .expect("MAX_REPLAY_DATA_MOD_ID Mutex poisoned");
+    let max = match *max_id_lock {
+        None => next_id,
+        Some(current_max) => current_max.max(next_id),
+    };
+    max_id_lock.replace(max);
 }
 
 pub fn get_account_mod_data_id() -> u64 {
-    DATA_MOD_ID.fetch_add(1, Ordering::Relaxed)
-}
-
-/// This increases the data mod id and verifies that the expected
-/// next id is in sequence.
-/// We crash here since if not this is only used during ledger replay and
-/// if the sequence is broken this indidcates an invalid ledger and
-/// we don't want to keep running in this case
-/// As a result once the validator starts running after ledger replay
-/// the [DATA_MOD_ID] has the same value as it did when the initial validator
-/// instance stopped.
-fn set_data_mod_id_checking_sequence(next_id: u64) {
-    if next_id == 0 {
-        assert_eq!(
-            DATA_MOD_ID.load(Ordering::Relaxed),
-            0,
-            "Data mod id sequence is broken"
-        );
-        return;
+    {
+        // NOTE: we keep the lock while we update the DATA_MOD_ID in order to prevent another
+        // thread seeing `MAX_REPLAY_DATA_MOD_ID` as `None` and continuing to use the original
+        // `DATA_MOD_ID` value.
+        let mut max_id_lock = MAX_REPLAY_DATA_MOD_ID
+            .lock()
+            .expect("MAX_REPLAY_DATA_MOD_ID Mutex poisoned");
+        if let Some(max_mod_id) = max_id_lock.take() {
+            DATA_MOD_ID.store(max_mod_id + 1, Ordering::SeqCst);
+        }
     }
-    let current_id = DATA_MOD_ID.fetch_add(1, Ordering::Relaxed);
-    assert_eq!(current_id + 1, next_id, "Data mod id sequence is broken");
+
+    DATA_MOD_ID.fetch_add(1, Ordering::SeqCst)
 }
 
 pub(crate) fn set_account_mod_data(data: Vec<u8>) -> u64 {
@@ -211,7 +219,7 @@ pub(super) fn resolve_account_mod_data(
             MagicBlockProgramError::AccountDataResolutionFailed
         })? {
             Some(data) => {
-                set_data_mod_id_checking_sequence(id);
+                update_max_seen_data_id(id);
                 Ok(ResolvedAccountModData::FromStorage { id, data })
             }
             None => Ok(ResolvedAccountModData::NotFound { id }),

@@ -13,6 +13,7 @@ crossbeam-channel = { workspace = true }
 fd-lock = { workspace = true }
 itertools = { workspace = true }
 log = { workspace = true }
+paste = { workspace = true }
 magicblock-account-cloner = { workspace = true }
 magicblock-account-dumper = { workspace = true }
 magicblock-account-fetcher = { workspace = true }

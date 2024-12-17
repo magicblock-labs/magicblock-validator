@@ -184,10 +184,10 @@ impl ScheduleCommitTestContext {
     }
 
     pub fn ephem_client(&self) -> &RpcClient {
-        &self.common_ctx.ephem_client
+        self.common_ctx.try_ephem_client().unwrap()
     }
     pub fn ephem_blockhash(&self) -> &Hash {
-        &self.common_ctx.ephem_blockhash
+        self.common_ctx.ephem_blockhash.as_ref().unwrap()
     }
 
     pub fn fields(&self) -> ScheduleCommitTestContextFields {
@@ -196,10 +196,14 @@ impl ScheduleCommitTestContext {
             committees: &self.committees,
             commitment: &self.commitment,
             chain_client: self.common_ctx.chain_client.as_ref(),
-            ephem_client: &self.common_ctx.ephem_client,
-            validator_identity: &self.common_ctx.validator_identity,
+            ephem_client: self.common_ctx.try_ephem_client().unwrap(),
+            validator_identity: self
+                .common_ctx
+                .ephem_validator_identity
+                .as_ref()
+                .unwrap(),
             chain_blockhash: self.common_ctx.chain_blockhash.as_ref(),
-            ephem_blockhash: &self.common_ctx.ephem_blockhash,
+            ephem_blockhash: self.common_ctx.ephem_blockhash.as_ref().unwrap(),
         }
     }
 }

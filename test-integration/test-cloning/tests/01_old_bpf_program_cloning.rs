@@ -28,14 +28,19 @@ fn clone_old_bpf_and_run_transaction() {
         &[memo_ix],
         Some(&payer.pubkey()),
         &[&payer],
-        ctx.ephem_blockhash,
+        ctx.ephem_blockhash.unwrap(),
     );
     let signature = ctx
-        .ephem_client
+        .try_ephem_client()
+        .unwrap()
         .send_and_confirm_transaction_with_spinner(&tx)
         .unwrap();
     eprintln!("MEMO program cloning success: {}", signature);
-    let account = ctx.ephem_client.get_account(&MEMO_PROGRAM_PK).unwrap();
+    let account = ctx
+        .try_ephem_client()
+        .unwrap()
+        .get_account(&MEMO_PROGRAM_PK)
+        .unwrap();
     let Account {
         owner, executable, ..
     } = account;

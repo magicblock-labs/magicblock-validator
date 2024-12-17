@@ -8,8 +8,11 @@ use std::{
 use conjunto_transwise::{
     AccountChainSnapshotShared, AccountChainState, DelegationRecord,
 };
-use dlp::pda::ephemeral_balance_from_payer;
-use futures_util::future::join_all;
+use dlp::pda::ephemeral_balance_pda_from_payer;
+use futures_util::{
+    future::join_all,
+    stream::{self, StreamExt, TryStreamExt},
+};
 use log::*;
 use magicblock_account_dumper::AccountDumper;
 use magicblock_account_fetcher::AccountFetcher;
@@ -217,10 +220,10 @@ where
             || self.permissions.allow_cloning_program_accounts
     }
 
-    pub async fn hydrate(&self) {
+    pub async fn hydrate(&self) -> AccountClonerResult<()> {
         if !self.can_clone() {
             warn!("Cloning is disabled, no need to hydrate the cache");
-            return;
+            return Ok(());
         }
         let account_keys = self
             .internal_account_provider
@@ -256,30 +259,44 @@ where
             .map(|(pubkey, acc)| (pubkey, *acc.owner()))
             .collect::<HashSet<_>>();
 
-        for (pubkey, owner) in account_keys {
-            let res = self
-                .do_clone_and_update_cache(
-                    &pubkey,
-                    ValidatorStage::Hydrating {
-                        validator_identity: self.validator_identity,
-                        account_owner: owner,
-                    },
-                )
-                .await;
-            match res {
-                Ok(output) => {
-                    debug!("Cloned '{}': {:?}", pubkey, output);
+        debug!("Hydrating {} accounts", account_keys.len());
+        let stream = stream::iter(account_keys);
+        // NOTE: depending on the RPC provider we may get rate limited if we request
+        // account states at a too high rate.
+        // I confirmed the the following concurrency working fine:
+        //   Solana Mainnet: 10
+        //   Helius: 20
+        // If we go higher than this we hit 429s which causes the fetcher to have to
+        // retry resulting in overall slower hydration.
+        // If the optimal rate here is desired we might make this configurable in the
+        // future.
+        stream
+            .map(Ok::<_, AccountClonerError>)
+            .try_for_each_concurrent(10, |(pubkey, owner)| async move {
+                debug!("Hydrating '{}'", pubkey);
+                let res = self
+                    .do_clone_and_update_cache(
+                        &pubkey,
+                        ValidatorStage::Hydrating {
+                            validator_identity: self.validator_identity,
+                            account_owner: owner,
+                        },
+                    )
+                    .await;
+                match res {
+                    Ok(output) => {
+                        debug!("Cloned '{}': {:?}", pubkey, output);
+                        Ok(())
+                    }
+                    Err(err) => {
+                        error!("Failed to clone {} ('{:?}')", pubkey, err);
+                        // NOTE: the account fetch already has retries built in, so
+                        // we don't to retry here
+                        Err(err)
+                    }
                 }
-                Err(err) => {
-                    // TODO: @@@ what to do here?
-                    // Even empty accounts should clone fine with 0 lamports which would
-                    // cover the case that the account was removed from chain in the meantime
-                    // Thus if we encounter an error our validator cannot restore a proper
-                    // clone state and we should probably shut it down.
-                    error!("Failed to clone {} ('{:?}')", pubkey, err);
-                }
-            }
-        }
+            })
+            .await
     }
 
     async fn do_clone_or_use_cache(
@@ -767,7 +784,7 @@ where
             let account_snapshot = self
                 .account_fetcher
                 .fetch_account_chain_snapshot(
-                    &ephemeral_balance_from_payer(feepayer, index),
+                    &ephemeral_balance_pda_from_payer(feepayer, index),
                     min_context_slot,
                 )
                 .await

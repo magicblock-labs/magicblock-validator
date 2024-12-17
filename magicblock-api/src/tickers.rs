@@ -3,19 +3,16 @@ use std::{
         atomic::{AtomicBool, Ordering},
         Arc,
     },
-    time::{Duration, SystemTime, UNIX_EPOCH},
+    time::Duration,
 };
 
 use log::*;
 use magicblock_accounts::AccountsManager;
-use magicblock_accounts_db::FLUSH_ACCOUNTS_SLOT_FREQ;
 use magicblock_bank::bank::Bank;
 use magicblock_core::magic_program;
 use magicblock_ledger::Ledger;
 use magicblock_metrics::metrics;
-use magicblock_processor::execute_transaction::{
-    execute_legacy_transaction, lock_transactions,
-};
+use magicblock_processor::execute_transaction::execute_legacy_transaction;
 use magicblock_program::{
     magicblock_instruction::accept_scheduled_commits, MagicContext,
 };
@@ -23,7 +20,7 @@ use magicblock_transaction_status::TransactionStatusSender;
 use solana_sdk::account::ReadableAccount;
 use tokio_util::sync::CancellationToken;
 
-use crate::accounts::flush_accounts;
+use crate::slot::advance_slot_and_update_ledger;
 
 pub fn init_slot_ticker(
     bank: &Arc<Bank>,
@@ -40,32 +37,9 @@ pub fn init_slot_ticker(
         while !exit.load(Ordering::Relaxed) {
             tokio::time::sleep(tick_duration).await;
 
-            let prev_slot = bank.slot();
-
-            let next_slot = if prev_slot % FLUSH_ACCOUNTS_SLOT_FREQ == 0 {
-                // NOTE: at this point we flush the accounts blocking the slot from advancing as
-                // well as holding the transaction lock.
-                // This is done on purpose in order to avoid transactions writing to the accounts
-                // while we are persisting them.
-                // This is a very slow operation, i.e. in the 30ms+ range and we should consider
-                // making a copy of all accounts, including data and then performing the IO flush
-                // in a separate task.
-                // Also in this case we prevent the transactions from advancing before the bank
-                // slot advanced since only then can we be sure that the accounts did not change
-                // during the same slot after we flushed them.
-                let _lock = lock_transactions();
-                flush_accounts(&bank);
-                bank.advance_slot()
-            } else {
-                bank.advance_slot()
-            };
-
-            // Update ledger with previous block's metas
-            if let Err(err) = ledger.write_block(
-                prev_slot,
-                timestamp_in_secs() as i64,
-                bank.last_blockhash(),
-            ) {
+            let (update_ledger_result, next_slot) =
+                advance_slot_and_update_ledger(&bank, &ledger);
+            if let Err(err) = update_ledger_result {
                 error!("Failed to write block: {:?}", err);
             }
 
@@ -143,6 +117,36 @@ pub fn init_system_metrics_ticker(
     bank: &Arc<Bank>,
     token: CancellationToken,
 ) -> tokio::task::JoinHandle<()> {
+    fn try_set_ledger_counts(ledger: &Ledger) {
+        macro_rules! try_set_ledger_count {
+            ($name:ident) => {
+                paste::paste! {
+                    match ledger.[< count_ $name >]() {
+                        Ok(count) => {
+                            metrics::[< set_ledger_ $name _count >](count);
+                        }
+                        Err(err) => warn!(
+                            "Failed to get ledger {} count: {:?}",
+                            stringify!($name),
+                            err
+                        ),
+                    }
+                }
+            };
+        }
+        try_set_ledger_count!(block_times);
+        try_set_ledger_count!(blockhashes);
+        try_set_ledger_count!(slot_signatures);
+        try_set_ledger_count!(address_signatures);
+        try_set_ledger_count!(transaction_status);
+        try_set_ledger_count!(transaction_successful_status);
+        try_set_ledger_count!(transaction_failed_status);
+        try_set_ledger_count!(transactions);
+        try_set_ledger_count!(transaction_memos);
+        try_set_ledger_count!(perf_samples);
+        try_set_ledger_count!(account_mod_data);
+    }
+
     fn try_set_ledger_storage_size(ledger: &Ledger) {
         match ledger.storage_size() {
             Ok(byte_size) => metrics::set_ledger_size(byte_size),
@@ -159,12 +163,15 @@ pub fn init_system_metrics_ticker(
     let bank = bank.clone();
     try_set_ledger_storage_size(&ledger);
     try_set_accounts_storage_size(&bank);
+    try_set_ledger_counts(&ledger);
+
     tokio::task::spawn(async move {
         loop {
             tokio::select! {
                 _ = tokio::time::sleep(tick_duration) => {
                     try_set_ledger_storage_size(&ledger);
                     try_set_accounts_storage_size(&bank);
+                    try_set_ledger_counts(&ledger);
                 },
                 _ = token.cancelled() => {
                     break;
@@ -172,11 +179,4 @@ pub fn init_system_metrics_ticker(
             }
         }
     })
-}
-
-fn timestamp_in_secs() -> u64 {
-    let now = SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .expect("create timestamp in timing");
-    now.as_secs()
 }

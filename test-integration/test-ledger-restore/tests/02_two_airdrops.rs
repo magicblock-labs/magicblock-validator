@@ -91,16 +91,17 @@ fn read(
     let (_, mut validator, ctx) =
         setup_offline_validator(ledger_path, None, None, false);
 
-    let acc1 = expect!(ctx.ephem_client.get_account(pubkey1), validator);
+    let ephem_client = expect!(ctx.try_ephem_client(), validator);
+    let acc1 = expect!(ephem_client.get_account(pubkey1), validator);
     assert_eq!(acc1.lamports, 1_111_111, cleanup(&mut validator));
 
-    let acc2 = expect!(ctx.ephem_client.get_account(pubkey2), validator);
+    let acc2 = expect!(ephem_client.get_account(pubkey2), validator);
     assert_eq!(acc2.lamports, 2_222_222, cleanup(&mut validator));
 
     if let Some(sig) = airdrop_sig1 {
         let status = {
             let res =
-                expect!(ctx.ephem_client.get_signature_status(sig), validator);
+                expect!(ephem_client.get_signature_status(sig), validator);
             unwrap!(res, validator)
         };
         assert!(status.is_ok(), cleanup(&mut validator));
@@ -109,7 +110,7 @@ fn read(
     if let Some(sig) = airdrop_sig2 {
         let status = {
             let res =
-                expect!(ctx.ephem_client.get_signature_status(sig), validator);
+                expect!(ephem_client.get_signature_status(sig), validator);
             unwrap!(res, validator)
         };
         assert!(status.is_ok(), cleanup(&mut validator));

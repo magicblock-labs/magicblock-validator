@@ -52,14 +52,23 @@ pub fn start_magic_block_validator_with_config(
 
 pub fn wait_for_validator(mut validator: Child, port: u16) -> Option<Child> {
     let mut count = 0;
+    let max_retries = if std::env::var("CI").is_ok() {
+        1500
+    } else {
+        75
+    };
     loop {
         if TcpStream::connect(format!("0.0.0.0:{}", port)).is_ok() {
             break Some(validator);
         }
         count += 1;
-        // 30 seconds
-        if count >= 75 {
-            eprintln!("Validator RPC on port {} failed to listen", port);
+        // ~180 seconds (~12 mins in CI)
+        if count >= max_retries {
+            eprintln!(
+                "Validator RPC on port {} failed to listen after {}secs",
+                port,
+                count as f32 * 2.5
+            );
             validator.kill().expect("Failed to kill validator");
             break None;
         }
@@ -107,6 +116,30 @@ macro_rules! expect {
                 $validator.kill().unwrap();
                 panic!("{:?}", e);
             }
+        }
+    };
+}
+
+/// Unwraps the provided result and ensures to kill the validator before panicking
+/// if the result was not an error
+#[macro_export]
+macro_rules! expect_err {
+    ($res:expr, $msg:expr, $validator:ident) => {
+        match $res {
+            Ok(_) => {
+                $validator.kill().unwrap();
+                panic!("{}", $msg);
+            }
+            Err(e) => e,
+        }
+    };
+    ($res:expr, $validator:ident) => {
+        match $res {
+            Ok(_) => {
+                $validator.kill().unwrap();
+                panic!("Expected Error");
+            }
+            Err(e) => e,
         }
     };
 }

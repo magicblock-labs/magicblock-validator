@@ -7,7 +7,10 @@ use solana_program_runtime::timings::ExecuteTimings;
 use solana_sdk::{
     clock::UnixTimestamp,
     hash::Hash,
-    transaction::{TransactionVerificationMode, VersionedTransaction},
+    message::SanitizedMessage,
+    transaction::{
+        SanitizedTransaction, TransactionVerificationMode, VersionedTransaction,
+    },
 };
 use solana_transaction_status::VersionedConfirmedBlock;
 
@@ -94,9 +97,9 @@ pub fn process_ledger(ledger: &Ledger, bank: &Bank) -> LedgerResult<()> {
                 prepared_block
             )));
         };
-        trace!(
-            "Replaying slot with blockhash {}",
-            &prepared_block.blockhash
+        blockhash_log::log_blockhash(
+            prepared_block.slot,
+            &prepared_block.blockhash,
         );
         bank.replay_slot(
             prepared_block.slot,
@@ -126,7 +129,7 @@ pub fn process_ledger(ledger: &Ledger, bank: &Bank) -> LedgerResult<()> {
             // Until we revamp this transaction execution we execute each transaction
             // in its own batch.
             for tx in block_txs {
-                trace!("Processing transaction: {:#?}", tx);
+                log_sanitized_transaction(&tx);
 
                 let mut timings = ExecuteTimings::default();
                 let batch = [tx];
@@ -139,7 +142,7 @@ pub fn process_ledger(ledger: &Ledger, bank: &Bank) -> LedgerResult<()> {
                     None,
                 );
 
-                trace!("Results: {:#?}", results.execution_results);
+                log_execution_results(&results.execution_results);
                 for result in results.execution_results {
                     if let TransactionExecutionResult::NotExecuted(err) =
                         &result
@@ -162,4 +165,58 @@ pub fn process_ledger(ledger: &Ledger, bank: &Bank) -> LedgerResult<()> {
         }
         Ok(())
     })
+}
+
+fn log_sanitized_transaction(tx: &SanitizedTransaction) {
+    if !log_enabled!(Trace) {
+        return;
+    }
+    use SanitizedMessage::*;
+    match tx.message() {
+        Legacy(message) => {
+            let msg = &message.message;
+            trace!(
+                "Processing Transaction:
+header: {:#?}
+account_keys: {:#?}
+recent_blockhash: {}
+message_hash: {}
+instructions: {:?}
+",
+                msg.header,
+                msg.account_keys,
+                msg.recent_blockhash,
+                tx.message_hash(),
+                msg.instructions
+            );
+        }
+        V0(msg) => trace!("Transaction: {:#?}", msg),
+    }
+}
+
+fn log_execution_results(results: &[TransactionExecutionResult]) {
+    if !log_enabled!(Trace) {
+        return;
+    }
+    for result in results {
+        match result {
+            TransactionExecutionResult::Executed { details, .. } => {
+                trace!("Executed: {:#?}", details);
+            }
+            TransactionExecutionResult::NotExecuted(err) => {
+                trace!("NotExecuted: {:#?}", err);
+            }
+        }
+    }
+}
+
+/// NOTE: a separate module for logging the blockhash is used
+/// to in order to allow turning this off specifically
+/// Example:
+/// RUST_LOG=warn,magicblock=debug,magicblock_ledger=trace,magicblock_ledger::blockstore_processor::blockhash_log=off
+mod blockhash_log {
+    use super::*;
+    pub(super) fn log_blockhash(slot: u64, blockhash: &Hash) {
+        trace!("Slot {} Blockhash {}", slot, &blockhash);
+    }
 }

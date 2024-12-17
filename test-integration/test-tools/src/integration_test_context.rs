@@ -44,14 +44,12 @@ impl TransactionStatusWithSignature {
 pub struct IntegrationTestContext {
     pub commitment: CommitmentConfig,
     pub chain_client: Option<RpcClient>,
-    pub ephem_client: RpcClient,
-    pub validator_identity: Pubkey,
+    pub ephem_client: Option<RpcClient>,
+    pub ephem_validator_identity: Option<Pubkey>,
     pub chain_blockhash: Option<Hash>,
-    pub ephem_blockhash: Hash,
+    pub ephem_blockhash: Option<Hash>,
 }
 
-// Copy the impl of the ScheduleCommitTestContext here from test-integration/schedulecommit/client/src/schedule_commit_context.rs
-// Omit the ones that need committees or whichever else needs fields we don't have here
 impl IntegrationTestContext {
     pub fn try_new_ephem_only() -> Result<Self> {
         let commitment = CommitmentConfig::confirmed();
@@ -64,10 +62,27 @@ impl IntegrationTestContext {
         Ok(Self {
             commitment,
             chain_client: None,
-            ephem_client,
-            validator_identity,
+            ephem_client: Some(ephem_client),
+            ephem_validator_identity: Some(validator_identity),
             chain_blockhash: None,
-            ephem_blockhash,
+            ephem_blockhash: Some(ephem_blockhash),
+        })
+    }
+
+    pub fn try_new_chain_only() -> Result<Self> {
+        let commitment = CommitmentConfig::confirmed();
+        let chain_client = RpcClient::new_with_commitment(
+            Self::url_chain().to_string(),
+            commitment,
+        );
+        let chain_blockhash = chain_client.get_latest_blockhash()?;
+        Ok(Self {
+            commitment,
+            chain_client: Some(chain_client),
+            ephem_client: None,
+            ephem_validator_identity: None,
+            chain_blockhash: Some(chain_blockhash),
+            ephem_blockhash: None,
         })
     }
 
@@ -89,10 +104,10 @@ impl IntegrationTestContext {
         Ok(Self {
             commitment,
             chain_client: Some(chain_client),
-            ephem_client,
-            validator_identity,
+            ephem_client: Some(ephem_client),
+            ephem_validator_identity: Some(validator_identity),
             chain_blockhash: Some(chain_blockhash),
-            ephem_blockhash,
+            ephem_blockhash: Some(ephem_blockhash),
         })
     }
 
@@ -100,7 +115,7 @@ impl IntegrationTestContext {
     // Fetch Logs
     // -----------------
     pub fn fetch_ephemeral_logs(&self, sig: Signature) -> Option<Vec<String>> {
-        self.fetch_logs(sig, Some(&self.ephem_client))
+        self.fetch_logs(sig, self.ephem_client.as_ref())
     }
 
     pub fn fetch_chain_logs(&self, sig: Signature) -> Option<Vec<String>> {
@@ -191,6 +206,13 @@ impl IntegrationTestContext {
         Ok(chain_client)
     }
 
+    pub fn try_ephem_client(&self) -> anyhow::Result<&RpcClient> {
+        let Some(ephem_client) = self.ephem_client.as_ref() else {
+            return Err(anyhow::anyhow!("Ephem client not available"));
+        };
+        Ok(ephem_client)
+    }
+
     pub fn fetch_ephem_account_data(
         &self,
         pubkey: Pubkey,
@@ -209,12 +231,14 @@ impl IntegrationTestContext {
         &self,
         pubkey: Pubkey,
     ) -> anyhow::Result<Account> {
-        Self::fetch_account(
-            &self.ephem_client,
-            pubkey,
-            self.commitment,
-            "ephemeral",
-        )
+        self.try_ephem_client().and_then(|ephem_client| {
+            Self::fetch_account(
+                ephem_client,
+                pubkey,
+                self.commitment,
+                "ephemeral",
+            )
+        })
     }
 
     pub fn fetch_chain_account(
@@ -250,15 +274,17 @@ impl IntegrationTestContext {
         &self,
         pubkey: &Pubkey,
     ) -> anyhow::Result<u64> {
-        self.ephem_client
-            .get_balance_with_commitment(pubkey, self.commitment)
-            .map(|balance| balance.value)
-            .with_context(|| {
-                format!(
-                    "Failed to fetch ephemeral account balance for '{:?}'",
-                    pubkey
-                )
-            })
+        self.try_ephem_client().and_then(|ephem_client| {
+            ephem_client
+                .get_balance_with_commitment(pubkey, self.commitment)
+                .map(|balance| balance.value)
+                .with_context(|| {
+                    format!(
+                        "Failed to fetch ephemeral account balance for '{:?}'",
+                        pubkey
+                    )
+                })
+        })
     }
 
     pub fn fetch_chain_account_balance(
@@ -313,7 +339,9 @@ impl IntegrationTestContext {
         pubkey: &Pubkey,
         lamports: u64,
     ) -> anyhow::Result<Signature> {
-        Self::airdrop(&self.ephem_client, pubkey, lamports, self.commitment)
+        self.try_ephem_client().and_then(|ephem_client| {
+            Self::airdrop(ephem_client, pubkey, lamports, self.commitment)
+        })
     }
 
     pub fn airdrop(
@@ -394,7 +422,14 @@ impl IntegrationTestContext {
         &self,
         sig: &Signature,
     ) -> Result<bool, client_error::Error> {
-        Self::confirm_transaction(sig, &self.ephem_client, self.commitment)
+        Self::confirm_transaction(
+            sig,
+            self.try_ephem_client().map_err(|err| client_error::Error {
+                request: None,
+                kind: client_error::ErrorKind::Custom(err.to_string()),
+            })?,
+            self.commitment,
+        )
     }
 
     pub fn confirm_transaction(
@@ -444,7 +479,14 @@ impl IntegrationTestContext {
         tx: &mut Transaction,
         signers: &[&Keypair],
     ) -> Result<Signature, client_error::Error> {
-        Self::send_transaction(&self.ephem_client, tx, signers)
+        Self::send_transaction(
+            self.try_ephem_client().map_err(|err| client_error::Error {
+                request: None,
+                kind: client_error::ErrorKind::Custom(err.to_string()),
+            })?,
+            tx,
+            signers,
+        )
     }
 
     pub fn send_transaction_chain(
@@ -452,20 +494,35 @@ impl IntegrationTestContext {
         tx: &mut Transaction,
         signers: &[&Keypair],
     ) -> Result<Signature, client_error::Error> {
-        Self::send_transaction(self.try_chain_client().unwrap(), tx, signers)
+        Self::send_transaction(
+            self.try_chain_client().map_err(|err| client_error::Error {
+                request: None,
+                kind: client_error::ErrorKind::Custom(err.to_string()),
+            })?,
+            tx,
+            signers,
+        )
     }
 
     pub fn send_and_confirm_transaction_ephem(
         &self,
         tx: &mut Transaction,
         signers: &[&Keypair],
-    ) -> Result<(Signature, bool), client_error::Error> {
-        Self::send_and_confirm_transaction(
-            &self.ephem_client,
-            tx,
-            signers,
-            self.commitment,
-        )
+    ) -> Result<(Signature, bool), anyhow::Error> {
+        self.try_ephem_client().and_then(|ephem_client| {
+            Self::send_and_confirm_transaction(
+                ephem_client,
+                tx,
+                signers,
+                self.commitment,
+            )
+            .with_context(|| {
+                format!(
+                    "Failed to confirm ephem transaction '{:?}'",
+                    tx.signatures[0]
+                )
+            })
+        })
     }
 
     pub fn send_and_confirm_transaction_chain(
@@ -524,11 +581,13 @@ impl IntegrationTestContext {
         &self,
         address: &Pubkey,
     ) -> Result<Vec<TransactionStatusWithSignature>> {
-        Self::get_signaturestats_for_address(
-            &self.ephem_client,
-            address,
-            self.commitment,
-        )
+        self.try_ephem_client().and_then(|ephem_client| {
+            Self::get_signaturestats_for_address(
+                ephem_client,
+                address,
+                self.commitment,
+            )
+        })
     }
 
     pub fn get_signaturestats_for_address_chain(
@@ -574,15 +633,19 @@ impl IntegrationTestContext {
     // Slot
     // -----------------
     pub fn wait_for_next_slot_ephem(&self) -> Result<Slot> {
-        Self::wait_for_next_slot(&self.ephem_client)
+        self.try_ephem_client().and_then(Self::wait_for_next_slot)
     }
 
     pub fn wait_for_delta_slot_ephem(&self, delta: Slot) -> Result<Slot> {
-        Self::wait_for_delta_slot(&self.ephem_client, delta)
+        self.try_ephem_client().and_then(|ephem_client| {
+            Self::wait_for_delta_slot(ephem_client, delta)
+        })
     }
 
     pub fn wait_for_slot_ephem(&self, target_slot: Slot) -> Result<Slot> {
-        Self::wait_until_slot(&self.ephem_client, target_slot)
+        self.try_ephem_client().and_then(|ephem_client| {
+            Self::wait_until_slot(ephem_client, target_slot)
+        })
     }
 
     pub fn wait_for_next_slot_chain(&self) -> Result<Slot> {
@@ -620,7 +683,7 @@ impl IntegrationTestContext {
     // Blockhash
     // -----------------
     pub fn get_all_blockhashes_ephem(&self) -> Result<Vec<String>> {
-        Self::get_all_blockhashes(&self.ephem_client)
+        self.try_ephem_client().and_then(Self::get_all_blockhashes)
     }
 
     pub fn get_all_blockhashes_chain(&self) -> Result<Vec<String>> {

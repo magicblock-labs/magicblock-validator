@@ -1,0 +1,11 @@
+[package]
+name = "keypair-base58"
+authors = ["MagicBlock Maintainers <maintainers@magicblock.gg>"]
+repository = "https://github.com/magicblock-labs/x-validator"
+homepage = "https://www.magicblock.gg"
+license = "Apache-2.0"
+edition = "2021"
+
+[dependencies]
+bs58 = "0.5"
+serde_json = "1.0"
