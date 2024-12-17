@@ -1,8 +1,9 @@
-use std::{path::PathBuf, str::FromStr};
+use std::{collections::HashSet, path::PathBuf, str::FromStr};
 
-use crate::utils::open_ledger;
 use solana_sdk::pubkey::Pubkey;
 use structopt::StructOpt;
+
+use crate::utils::open_ledger;
 
 mod account;
 mod accounts;
@@ -33,6 +34,15 @@ enum Command {
         start: Option<u64>,
         #[structopt(long, short, help = "End slot")]
         end: Option<u64>,
+
+        #[structopt(
+            long,
+            short,
+            multiple = true,
+            use_delimiter = true,
+            help = "Accounts in transaction"
+        )]
+        accounts: Option<Vec<String>>,
     },
     #[structopt(name = "sig", about = "Transaction details for signature")]
     Sig {
@@ -112,11 +122,22 @@ fn main() {
             success,
             start,
             end,
+            accounts,
         } => {
+            let accounts = accounts.map(|accounts| {
+                accounts
+                    .iter()
+                    .map(|account| {
+                        Pubkey::from_str(account)
+                            .expect("Invalid account pubkey")
+                    })
+                    .collect::<HashSet<_>>()
+            });
             transaction_logs::print_transaction_logs(
                 &open_ledger(&ledger_path),
                 start,
                 end,
+                accounts,
                 success,
             );
         }

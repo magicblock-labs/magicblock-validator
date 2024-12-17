@@ -1,9 +1,10 @@
+use std::path::Path;
+
 use magicblock_accounts_db::{
     account_storage::AccountStorageEntry, AccountsPersister,
 };
 use magicblock_ledger::Ledger;
 use solana_sdk::clock::Slot;
-use std::path::Path;
 
 #[allow(dead_code)]
 pub fn render_logs(logs: &[String], indent: &str) -> String {
