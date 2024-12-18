@@ -25,4 +25,4 @@ path = "src/rpc.rs"
 
 [features]
 default = []
-tokio-console = ["console-subscriber"]
+tokio-console = ["console-subscriber", "tokio/tracing"]
