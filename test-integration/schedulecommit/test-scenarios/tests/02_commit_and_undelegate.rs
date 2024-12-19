@@ -47,7 +47,7 @@ fn commit_and_undelegate_one_account(
     Signature,
     Result<Signature, ClientError>,
 ) {
-    let ctx = get_context_with_delegated_committees(1);
+    let ctx = get_context_with_delegated_committees(1, true);
     let ScheduleCommitTestContextFields {
         payer,
         committees,
@@ -108,7 +108,7 @@ fn commit_and_undelegate_two_accounts(
     Signature,
     Result<Signature, ClientError>,
 ) {
-    let ctx = get_context_with_delegated_committees(2);
+    let ctx = get_context_with_delegated_committees(2, true);
     let ScheduleCommitTestContextFields {
         payer,
         committees,
@@ -476,6 +476,8 @@ fn test_committing_and_undelegating_one_account_modifying_it_after() {
         // 3. Assert that the commit was not scheduled -> the transaction is not confirmed
         assert!(!ctx
             .ephem_client
+            .as_ref()
+            .unwrap()
             .confirm_transaction(&scheduled_commmit_sent_sig)
             .unwrap());
     });
@@ -509,6 +511,8 @@ fn test_committing_and_undelegating_two_accounts_modifying_them_after() {
         // 3. Assert that the commit was not scheduled -> the transaction is not confirmed
         assert!(!ctx
             .ephem_client
+            .as_ref()
+            .unwrap()
             .confirm_transaction(&scheduled_commmit_sent_sig)
             .unwrap());
     });

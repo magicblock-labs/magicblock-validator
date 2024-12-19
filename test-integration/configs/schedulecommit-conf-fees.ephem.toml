@@ -1,0 +1,20 @@
+[accounts]
+remote = "http://0.0.0.0:7799"
+lifecycle = "ephemeral"
+commit = { frequency_millis = 500_000, compute_unit_price = 1_000_000 }
+payer = { base_fees = 1000 }
+
+[rpc]
+port = 8899
+
+[[program]]
+id = "9hgprgZiRWmy8KkfvUuaVkDGrqo9GzeXMohwq6BazgUY"
+path = "../target/deploy/program_schedulecommit.so"
+
+[[program]]
+id = "4RaQH3CUBMSMQsSHPVaww2ifeNEEuaDZjF9CUdFwr3xr"
+path = "../target/deploy/program_schedulecommit_security.so"
+
+[metrics]
+enabled = true
+port = 9000
