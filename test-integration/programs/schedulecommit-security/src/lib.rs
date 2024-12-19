@@ -1,5 +1,5 @@
 use borsh::{BorshDeserialize, BorshSerialize};
-use ephemeral_rollups_sdk::ephem::create_schedule_commit_ix;
+use ephemeral_rollups_sdk_v2::ephem::create_schedule_commit_ix;
 use program_schedulecommit::{
     api::schedule_commit_cpi_instruction, process_schedulecommit_cpi,
 };
@@ -77,7 +77,7 @@ pub fn process_instruction<'a>(
         }
         NonCpi => process_non_cpi(accounts),
         DirectScheduleCommitCpi(players) => {
-            process_schedulecommit_cpi(accounts, &players, false, false)
+            process_schedulecommit_cpi(accounts, &players, false, false, false)
         }
     }
 }

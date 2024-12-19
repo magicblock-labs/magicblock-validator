@@ -2,9 +2,7 @@ use std::{fmt, ops::Deref};
 
 use anyhow::{Context, Result};
 use integration_test_tools::IntegrationTestContext;
-use program_schedulecommit::api::{
-    delegate_account_cpi_instruction, init_account_instruction, pda_and_bump,
-};
+use program_schedulecommit::api::{delegate_account_cpi_instruction, init_account_instruction, init_payer_escrow, pda_and_bump};
 use solana_rpc_client::rpc_client::RpcClient;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 #[allow(unused_imports)]
@@ -124,6 +122,28 @@ impl ScheduleCommitTestContext {
                 },
             )
             .with_context(|| "Failed to initialize committees")
+    }
+
+    pub fn escrow_lamports_for_payer(&self) -> Result<Signature> {
+        let ixs = init_payer_escrow(self.payer.pubkey());
+
+        // The init tx for all payers is funded by the first payer for simplicity
+        let tx = Transaction::new_signed_with_payer(
+            &ixs,
+            Some(&self.payer.pubkey()),
+            &[&self.payer],
+            *self.try_chain_blockhash()?,
+        );
+        self.try_chain_client()?
+            .send_and_confirm_transaction_with_spinner_and_config(
+                &tx,
+                self.commitment,
+                RpcSendTransactionConfig {
+                    skip_preflight: true,
+                    ..Default::default()
+                },
+            )
+            .with_context(|| "Failed to escrow fund for payer")
     }
 
     pub fn delegate_committees(

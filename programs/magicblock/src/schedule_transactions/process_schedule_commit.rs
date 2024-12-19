@@ -120,8 +120,8 @@ pub(crate) fn process_schedule_commit(
     #[cfg(test)]
     let parent_program_id = &first_committee_owner;
 
-    // Assert all PDAs are owned by invoking program
-    // NOTE: we don't require them to be signers as in our case verifying that the
+    // Assert all accounts are owned by invoking program OR are signers
+    // NOTE: we don't require PDAs to be signers as in our case verifying that the
     // program owning the PDAs invoked us via CPI is sufficient
     // Thus we can be `invoke`d unsigned and no seeds need to be provided
     let mut pubkeys = Vec::new();
@@ -132,10 +132,12 @@ pub(crate) fn process_schedule_commit(
             get_instruction_account_with_idx(transaction_context, idx as u16)?;
 
         {
-            if parent_program_id != acc.borrow().owner() {
+            if parent_program_id != acc.borrow().owner()
+                && !signers.contains(acc_pubkey)
+            {
                 ic_msg!(
                 invoke_context,
-                "ScheduleCommit ERR: account {} needs to be owned by the invoking program {} to be committed, but is owned by {}",
+                "ScheduleCommit ERR: account {} needs to be owned by the invoking program {} or be a signer to be committed, but is owned by {}",
                 acc_pubkey, parent_program_id, acc.borrow().owner()
             );
                 return Err(InstructionError::InvalidAccountOwner);

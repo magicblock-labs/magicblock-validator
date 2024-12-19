@@ -24,6 +24,7 @@ pub struct SentCommit {
     pub chain_signatures: Vec<Signature>,
     pub included_pubkeys: Vec<Pubkey>,
     pub excluded_pubkeys: Vec<Pubkey>,
+    pub feepayers: HashSet<(Pubkey, Pubkey)>,
     pub requested_undelegation_to_owner: Option<Pubkey>,
 }
 
@@ -38,6 +39,7 @@ struct SentCommitPrintable {
     chain_signatures: Vec<String>,
     included_pubkeys: String,
     excluded_pubkeys: String,
+    feepayers: String,
     requested_undelegation_to_owner: Option<String>,
 }
 
@@ -63,6 +65,12 @@ impl From<SentCommit> for SentCommitPrintable {
                 .excluded_pubkeys
                 .iter()
                 .map(|x| x.to_string())
+                .collect::<Vec<_>>()
+                .join(", "),
+            feepayers: commit
+                .feepayers
+                .iter()
+                .map(|(p, m)| format!("{:?}:{:?}", p, m))
                 .collect::<Vec<_>>()
                 .join(", "),
             requested_undelegation_to_owner: commit
@@ -198,6 +206,11 @@ pub fn process_scheduled_commit_sent(
         "ScheduledCommitSent excluded: [{}]",
         commit.excluded_pubkeys
     );
+    ic_msg!(
+        invoke_context,
+        "ScheduledCommitSent fee payers: [{}]",
+        commit.feepayers,
+    );
     for (idx, sig) in commit.chain_signatures.iter().enumerate() {
         ic_msg!(
             invoke_context,
@@ -249,6 +262,7 @@ mod tests {
             chain_signatures: vec![sig],
             included_pubkeys: vec![acc],
             excluded_pubkeys: Default::default(),
+            feepayers: Default::default(),
             requested_undelegation_to_owner: None,
         }
     }

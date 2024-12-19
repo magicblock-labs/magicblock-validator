@@ -1,4 +1,4 @@
-use ephemeral_rollups_sdk::consts::DELEGATION_PROGRAM_ID;
+use ephemeral_rollups_sdk_v2::consts::DELEGATION_PROGRAM_ID;
 use integration_test_tools::scheduled_commits::ScheduledCommitResult;
 use program_schedulecommit::MainAccount;
 use schedulecommit_client::ScheduleCommitTestContext;
@@ -8,12 +8,14 @@ use solana_sdk::{
     signature::{Keypair, Signature},
     transaction::TransactionError,
 };
+use solana_sdk::signature::Signer;
 
 // -----------------
 // Setup
 // -----------------
 pub fn get_context_with_delegated_committees(
     ncommittees: usize,
+    payer_with_escrow: bool
 ) -> ScheduleCommitTestContext {
     let ctx = if std::env::var("FIXED_KP").is_ok() {
         ScheduleCommitTestContext::try_new(ncommittees)
@@ -24,6 +26,9 @@ pub fn get_context_with_delegated_committees(
 
     ctx.init_committees().unwrap();
     ctx.delegate_committees(None).unwrap();
+    if payer_with_escrow {
+        ctx.escrow_lamports_for_payer().unwrap();
+    }
     ctx
 }
 
@@ -61,6 +66,21 @@ pub fn assert_two_committees_were_committed(
     let commit2 = res.included.get(&pda2);
     assert!(commit1.is_some(), "should have committed pda1");
     assert!(commit2.is_some(), "should have committed pda2");
+
+    assert_eq!(res.sigs.len(), 1, "should have 1 on chain sig");
+}
+
+#[allow(dead_code)]
+pub fn assert_feepayer_was_committed(
+    ctx: &ScheduleCommitTestContext,
+    res: &ScheduledCommitResult<MainAccount>,
+) {
+    let payer = ctx.payer.pubkey();
+
+    assert_eq!(res.feepayers.len(), 1, "includes 1 payer");
+
+    let commit_payer = res.feepayers.iter().filter(|(p, _)| p == &payer).next();
+    assert!(commit_payer.is_some(), "should have committed payer");
 
     assert_eq!(res.sigs.len(), 1, "should have 1 on chain sig");
 }

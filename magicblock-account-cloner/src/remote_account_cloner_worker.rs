@@ -6,9 +6,9 @@ use std::{
 };
 
 use conjunto_transwise::{
-    AccountChainSnapshotShared, AccountChainState, DelegationRecord,
+    AccountChainSnapshot, AccountChainSnapshotShared, AccountChainState,
+    DelegationRecord,
 };
-use dlp::pda::ephemeral_balance_pda_from_payer;
 use futures_util::{
     future::join_all,
     stream::{self, StreamExt, TryStreamExt},
@@ -464,32 +464,68 @@ where
                 if !self.permissions.allow_cloning_feepayer_accounts {
                     return Ok(AccountClonerOutput::Unclonable {
                         pubkey: *pubkey,
-                        reason:
-                        AccountClonerUnclonableReason::DoesNotAllowFeePayerAccount,
+                        reason: AccountClonerUnclonableReason::DoesNotAllowFeePayerAccount,
                         at_slot: account_chain_snapshot.at_slot,
                     });
                 }
+
                 if self.is_gasless {
                     self.do_clone_feepayer_account_gasless(
                         pubkey, *lamports, owner,
                     )?
                 } else {
-                    let Some(escrowed_payer_chain_snapshot) = self
+                    // Fetch the associated escrowed account
+                    let escrowed_snapshot = match self
                         .try_fetch_feepayer_chain_snapshot(pubkey, None)
                         .await?
-                    else {
-                        return Ok(AccountClonerOutput::Unclonable {
-                            pubkey: *pubkey,
-                            reason: AccountClonerUnclonableReason::DoesNotHasEscrowedLamports,
-                            at_slot: account_chain_snapshot.at_slot,
-                        });
+                    {
+                        Some(snapshot) => snapshot,
+                        None => {
+                            return Ok(AccountClonerOutput::Unclonable {
+                                pubkey: *pubkey,
+                                reason: AccountClonerUnclonableReason::DoesNotHasEscrowedLamports,
+                                at_slot: account_chain_snapshot.at_slot,
+                            });
+                        }
                     };
-                    let escrowed_account = escrowed_payer_chain_snapshot.chain_state.account().expect("AccountChainState::FeePayer should have an account");
+
+                    let escrowed_account = escrowed_snapshot.chain_state.account().expect(
+                        "AccountChainState::FeePayer should have an account"
+                    );
+
+                    // Add the escrowed account as unclonable.
+                    // Fail cloning if the account is already present
+                    {
+                        let mut last_clone_output = self
+                            .last_clone_output
+                            .write()
+                            .expect("RwLock of RemoteAccountClonerWorker.last_clone_output is poisoned");
+
+                        if let Entry::Occupied(_) =
+                            last_clone_output.entry(escrowed_snapshot.pubkey)
+                        {
+                            return Ok(AccountClonerOutput::Unclonable {
+                                pubkey: *pubkey,
+                                reason: AccountClonerUnclonableReason::DoesNotAllowFeepayerWithEscrowedPda,
+                                at_slot: account_chain_snapshot.at_slot,
+                            });
+                        } else {
+                            last_clone_output.insert(
+                                escrowed_snapshot.pubkey,
+                                AccountClonerOutput::Unclonable {
+                                    pubkey: escrowed_snapshot.pubkey,
+                                    reason: AccountClonerUnclonableReason::DoesNotAllowEscrowedPda,
+                                    at_slot: Slot::MAX,
+                                },
+                            );
+                        }
+                    }
+
                     self.do_clone_feepayer_account(
                         pubkey,
                         escrowed_account.lamports,
                         owner,
-                        Some(&escrowed_payer_chain_snapshot.pubkey),
+                        Some(&escrowed_snapshot.pubkey),
                     )?
                 }
             }
@@ -522,7 +558,7 @@ where
                     )
                     .await?
                 }
-                // If it's not an executble, simpler rules apply
+                // If it's not an executable, simpler rules apply
                 else {
                     if !self.permissions.allow_cloning_undelegated_accounts {
                         return Ok(AccountClonerOutput::Unclonable {
@@ -596,6 +632,7 @@ where
             })
     }
 
+    /// Clone a fee payer account setting the initial lamports to payer_init_lamports
     fn do_clone_feepayer_account_gasless(
         &self,
         pubkey: &Pubkey,
@@ -778,29 +815,25 @@ where
         feepayer: &Pubkey,
         min_context_slot: Option<Slot>,
     ) -> AccountClonerResult<Option<AccountChainSnapshotShared>> {
-        // NOTE: Assumption is that the feepayer has always ~= 1 associated ephemeral balance,
-        // but if this becomes a bottleneck, we can switch to a parallel fetch
-        for index in 0..10 {
-            let account_snapshot = self
-                .account_fetcher
-                .fetch_account_chain_snapshot(
-                    &ephemeral_balance_pda_from_payer(feepayer, index),
-                    min_context_slot,
-                )
-                .await
-                .map_err(AccountClonerError::AccountFetcherError)?;
-
-            if let AccountChainState::Delegated {
-                account: _,
-                delegation_record,
-                ..
-            } = &account_snapshot.chain_state
+        let account_snapshot = self
+            .account_fetcher
+            .fetch_account_chain_snapshot(
+                &AccountChainSnapshot::ephemeral_balance_pda(feepayer),
+                min_context_slot,
+            )
+            .await
+            .map_err(AccountClonerError::AccountFetcherError)?;
+        if let AccountChainState::Delegated {
+            account: _,
+            delegation_record,
+            ..
+        } = &account_snapshot.chain_state
+        {
+            // TODO: remove the Pubkey::default() option once we enforce the authority to be always set
+            if delegation_record.authority == self.validator_identity
+                || delegation_record.authority == Pubkey::default()
             {
-                if delegation_record.authority == self.validator_identity
-                    || delegation_record.authority == Pubkey::default()
-                {
-                    return Ok(Some(account_snapshot));
-                }
+                return Ok(Some(account_snapshot));
             }
         }
         Ok(None)

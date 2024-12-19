@@ -5,11 +5,10 @@ use crate::{
     SendableCommitAccountsPayload,
 };
 use async_trait::async_trait;
+use conjunto_transwise::AccountChainSnapshot;
 use log::*;
+use magicblock_account_cloner::AccountClonerOutput;
 use magicblock_account_cloner::AccountClonerOutput::Cloned;
-use magicblock_account_cloner::{
-    AccountClonerOutput, RemoteAccountClonerWorker,
-};
 use magicblock_accounts_api::InternalAccountProvider;
 use magicblock_bank::bank::Bank;
 use magicblock_core::debug_panic;
@@ -24,7 +23,6 @@ use solana_sdk::{pubkey::Pubkey, signature::Signature};
 use std::collections::HashMap;
 use std::sync::RwLock;
 use std::{collections::HashSet, sync::Arc};
-use magicblock_metrics::metrics::AccountClone::FeePayer;
 
 pub struct RemoteScheduledCommitsProcessor {
     #[allow(unused)]
@@ -48,6 +46,7 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
     {
         let scheduled_commits =
             self.transaction_scheduler.take_scheduled_commits();
+
         if scheduled_commits.is_empty() {
             return Ok(());
         }
@@ -60,41 +59,39 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
             let mut committees = vec![];
             let all_pubkeys: HashSet<Pubkey> =
                 HashSet::from_iter(commit.accounts.iter().cloned());
+            let mut feepayers = HashSet::new();
 
             for pubkey in commit.accounts {
-                // TODO: Refactor
-                let account = self.cloned_accounts
-                    .read()
-                    .expect("RwLock of RemoteAccountClonerWorker.last_clone_output is poisoned")
-                    .get(&pubkey)
-                    .cloned();
-                let account = account.unwrap();
-                if let Cloned {
+                let mut commitment_pubkey = pubkey;
+                let mut commitment_pubkey_owner = commit.owner;
+                if let Some(Cloned {
                     account_chain_snapshot,
-                    signature,
-                } = account
+                    ..
+                }) =
+                    Self::fetch_cloned_account(&pubkey, &self.cloned_accounts)
                 {
-                   match &account_chain_snapshot.chain_state {
-                        FeePayer  => {
-                            debug_panic!("FeePayer account found in scheduled commit");
-                        }
-                        Undelegated => {
-                            debug_panic!("Undelegated account found in scheduled commit");
-                        }
-                        Delegated => {
-                           debug_panic!("Delegated account found in scheduled commit");
-                       }
+                    // If the account is a FeePayer, we committed the mapped delegated account
+                    if account_chain_snapshot.chain_state.is_feepayer() {
+                        commitment_pubkey =
+                            AccountChainSnapshot::ephemeral_balance_pda(
+                                &pubkey,
+                            );
+                        commitment_pubkey_owner =
+                            AccountChainSnapshot::ephemeral_balance_pda_owner();
+                        feepayers.insert((pubkey, commitment_pubkey));
+                    } else if account_chain_snapshot
+                        .chain_state
+                        .is_undelegated()
+                    {
+                        error!("Scheduled commit account '{}' is undelegated. This is not supported.", pubkey);
                     }
                 }
 
-                // TODO: If FeePayer,  committed to the associated escrowed pda instead.
-                // RemoteAccountClonerWorker.last_clone_output
-                // TODO: If Undelegated, fails. Should be fail on scheduling so that tx fails?
                 match account_provider.get_account(&pubkey) {
                     Some(account_data) => {
                         committees.push(AccountCommittee {
-                            pubkey,
-                            owner: commit.owner,
+                            pubkey: commitment_pubkey,
+                            owner: commitment_pubkey_owner,
                             account_data,
                             slot: commit.slot,
                             undelegation_request: commit.request_undelegation,
@@ -142,7 +139,14 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
             // was not available as determined when creating sendable payloads
             let excluded_pubkeys = all_pubkeys
                 .into_iter()
-                .filter(|pubkey| !included_pubkeys.contains(pubkey))
+                .filter(|pubkey| {
+                    !included_pubkeys.contains(pubkey)
+                        && !included_pubkeys.contains(
+                            &AccountChainSnapshot::ephemeral_balance_pda(
+                                pubkey,
+                            ),
+                        )
+                })
                 .collect::<Vec<Pubkey>>();
 
             // Extract signatures of all transactions that we will execute on
@@ -154,7 +158,6 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
 
             // Record that we are about to send the commit to chain including all
             // information (mainly signatures) needed to track its outcome on chain
-
             let sent_commit = SentCommit {
                 commit_id: commit.id,
                 slot: commit.slot,
@@ -163,6 +166,7 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
                 chain_signatures: signatures,
                 included_pubkeys: included_pubkeys.into_iter().collect(),
                 excluded_pubkeys,
+                feepayers,
                 requested_undelegation_to_owner: commit
                     .request_undelegation
                     .then_some(commit.owner),
@@ -273,5 +277,15 @@ impl RemoteScheduledCommitsProcessor {
 
             committer.confirm_pending_commits(pending_commits).await;
         });
+    }
+
+    fn fetch_cloned_account(
+        pubkey: &Pubkey,
+        cloned_accounts: &Arc<RwLock<HashMap<Pubkey, AccountClonerOutput>>>,
+    ) -> Option<AccountClonerOutput> {
+        cloned_accounts
+            .read()
+            .expect("RwLock of RemoteAccountClonerWorker.last_clone_output is poisoned")
+            .get(pubkey).cloned()
     }
 }

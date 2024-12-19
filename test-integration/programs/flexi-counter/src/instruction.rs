@@ -1,5 +1,5 @@
 use borsh::{BorshDeserialize, BorshSerialize};
-use ephemeral_rollups_sdk::{
+use ephemeral_rollups_sdk_v2::{
     consts::{MAGIC_CONTEXT_ID, MAGIC_PROGRAM_ID},
     delegate_args::{DelegateAccountMetas, DelegateAccounts},
 };

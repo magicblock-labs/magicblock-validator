@@ -1,7 +1,7 @@
 use anyhow::{bail, Context, Result};
 use std::str::FromStr;
 use std::{collections::HashMap, fmt};
-
+use std::collections::HashSet;
 use borsh::BorshDeserialize;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 
@@ -26,13 +26,15 @@ pub fn extract_scheduled_commit_sent_signature_from_logs(
 
 pub fn extract_sent_commit_info_from_logs(
     logs: &[String],
-) -> (Vec<Pubkey>, Vec<Pubkey>, Vec<Signature>) {
+) -> (Vec<Pubkey>, Vec<Pubkey>, HashSet<(Pubkey, Pubkey)>, Vec<Signature>) {
     // ScheduledCommitSent included: [6ZQpzi8X2jku3C2ERgZB8hzhQ55VHLm8yZZLwTpMzHw3, 3Q49KuvoEGzGWBsbh2xgrKog66be3UM1aDEsHq7Ym4pr]
     // ScheduledCommitSent excluded: []
+    // ScheduledCommitSent fee payers: [GGFXZZbScG1bVNfjgvAGwr3wSgKxNjL7t1AZSmZSnfyk : EJRyerukCkmNFxowv9ms3TugNkUS5Rgs3kMM7aqmQjQh]
     // ScheduledCommitSent signature[0]: g1E7PyWZ3UHFZMJW5KqQsgoZX9PzALh4eekzjg7oGqeDPxEDfipEmV8LtTbb8EbqZfDGEaA9xbd1fADrGDGZZyi
     let mut included = vec![];
     let mut excluded = vec![];
-    let mut signgatures = vec![];
+    let mut feepayers: HashSet<(Pubkey, Pubkey)> = HashSet::new();
+    let mut signatures = vec![];
 
     fn pubkeys_from_log_line(log: &str) -> Vec<Pubkey> {
         log.trim_end_matches(']')
@@ -53,11 +55,37 @@ pub fn extract_sent_commit_info_from_logs(
             .collect::<Vec<Pubkey>>()
     }
 
+    fn hashset_from_log_line(log: &str) -> HashSet<(Pubkey, Pubkey)> {
+        log.trim_end_matches(']')
+            .split_whitespace()
+            .skip(3)
+            .flat_map(|p| {
+                let parts: Vec<&str> = p
+                    .trim()
+                    .trim_matches(',')
+                    .trim_matches('[')
+                    .trim_matches(']')
+                    .split(':')
+                    .map(|s| s.trim())
+                    .collect();
+                if parts.len() == 2 {
+                    match (Pubkey::from_str(parts[0]), Pubkey::from_str(parts[1])) {
+                        (Ok(key1), Ok(key2)) => Some((key1, key2)),
+                        _ => None,
+                    }
+                } else {
+                    None
+                }
+            })
+            .collect::<HashSet<(Pubkey, Pubkey)>>()    }
+
     for log in logs {
         if log.starts_with("ScheduledCommitSent included: ") {
             included = pubkeys_from_log_line(log)
         } else if log.starts_with("ScheduledCommitSent excluded: ") {
             excluded = pubkeys_from_log_line(log)
+        } else if log.starts_with("ScheduledCommitSent fee payers: ") {
+            feepayers = hashset_from_log_line(log)
         } else if log.starts_with("ScheduledCommitSent signature[") {
             let commit_sig = log
                 .trim_end_matches(']')
@@ -65,11 +93,11 @@ pub fn extract_sent_commit_info_from_logs(
                 .last()
                 .and_then(|s| Signature::from_str(s).ok());
             if let Some(commit_sig) = commit_sig {
-                signgatures.push(commit_sig);
+                signatures.push(commit_sig);
             }
         }
     }
-    (included, excluded, signgatures)
+    (included, excluded, feepayers, signatures)
 }
 
 pub fn extract_chain_transaction_signature_from_logs(
@@ -95,6 +123,7 @@ where
 {
     pub included: HashMap<Pubkey, T>,
     pub excluded: Vec<Pubkey>,
+    pub feepayers: HashSet<(Pubkey, Pubkey)>,
     pub sigs: Vec<Signature>,
 }
 
@@ -161,11 +190,15 @@ impl IntegrationTestContext {
                 )
             })?;
 
-        let (included, excluded, sigs) =
+        let (included, excluded, feepayers, sigs) =
             extract_sent_commit_info_from_logs(&chain_logs);
+
 
         let mut committed_accounts = HashMap::new();
         for pubkey in included {
+            if feepayers.iter().map(|(_, p)| p).any(|p| p == &pubkey) {
+                continue;
+            }
             let ephem_data = self.fetch_ephem_account_data(pubkey)?;
             if !ephem_data.is_empty() {
                 let ephem_account = T::try_from_slice(&ephem_data)
@@ -182,6 +215,7 @@ impl IntegrationTestContext {
         Ok(ScheduledCommitResult {
             included: committed_accounts,
             excluded,
+            feepayers,
             sigs,
         })
     }

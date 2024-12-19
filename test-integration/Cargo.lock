@@ -1112,32 +1112,42 @@ dependencies = [
 ]
 
 [[package]]
-name = "ephemeral-rollups-sdk"
-version = "0.0.7"
+name = "ephemeral-rollups-sdk-attribute-commit-v2"
+version = "0.1.2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "ephemeral-rollups-sdk-attribute-delegate-v2"
+version = "0.1.2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "ephemeral-rollups-sdk-attribute-ephemeral-v2"
+version = "0.1.2"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "ephemeral-rollups-sdk-v2"
+version = "0.1.2"
 dependencies = [
  "borsh 0.10.3",
- "ephemeral-rollups-sdk-attribute-commit",
- "ephemeral-rollups-sdk-attribute-delegate",
+ "ephemeral-rollups-sdk-attribute-commit-v2",
+ "ephemeral-rollups-sdk-attribute-delegate-v2",
+ "ephemeral-rollups-sdk-attribute-ephemeral-v2",
  "paste",
  "solana-program 1.17.22",
-]
-
-[[package]]
-name = "ephemeral-rollups-sdk-attribute-commit"
-version = "0.0.7"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "ephemeral-rollups-sdk-attribute-delegate"
-version = "0.0.7"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
 ]
 
 [[package]]
@@ -2444,7 +2454,7 @@ name = "program-flexi-counter"
 version = "0.0.0"
 dependencies = [
  "borsh 0.10.3",
- "ephemeral-rollups-sdk",
+ "ephemeral-rollups-sdk-v2",
  "solana-program 1.17.22",
 ]
 
@@ -2453,7 +2463,7 @@ name = "program-schedulecommit"
 version = "0.0.0"
 dependencies = [
  "borsh 0.10.3",
- "ephemeral-rollups-sdk",
+ "ephemeral-rollups-sdk-v2",
  "solana-program 1.17.22",
 ]
 
@@ -2462,7 +2472,7 @@ name = "program-schedulecommit-security"
 version = "0.0.0"
 dependencies = [
  "borsh 0.10.3",
- "ephemeral-rollups-sdk",
+ "ephemeral-rollups-sdk-v2",
  "program-schedulecommit",
  "solana-program 1.17.22",
 ]
@@ -2818,7 +2828,7 @@ dependencies = [
 name = "schedulecommit-test-scenarios"
 version = "0.0.0"
 dependencies = [
- "ephemeral-rollups-sdk",
+ "ephemeral-rollups-sdk-v2",
  "integration-test-tools",
  "log",
  "magicblock-core",

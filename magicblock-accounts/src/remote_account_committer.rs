@@ -5,7 +5,7 @@ use borsh::BorshDeserialize;
 use dlp::{
     args::CommitStateArgs,
     instruction_builder::{commit_state, finalize, undelegate},
-    pda::delegation_metadata_pda_from_pubkey,
+    pda::delegation_metadata_pda_from_delegated_account,
     state::DelegationMetadata,
 };
 use futures_util::future::join_all;
@@ -114,7 +114,9 @@ impl AccountCommitter for RemoteAccountCommitter {
             if *undelegation_request {
                 let metadata_account = self
                     .rpc_client
-                    .get_account(&delegation_metadata_pda_from_pubkey(pubkey))
+                    .get_account(
+                        &delegation_metadata_pda_from_delegated_account(pubkey),
+                    )
                     .await
                     .map_err(|err| {
                         AccountsError::FailedToGetReimbursementAddress(
