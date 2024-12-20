@@ -165,7 +165,7 @@ impl IntegrationTestContext {
         // 1. Find scheduled commit sent signature via
         // ScheduledCommitSent signature: <signature>
         let (ephem_logs, scheduled_commmit_sent_sig) = {
-            let logs = self.fetch_ephemeral_logs(sig).with_context(|| {
+                let logs = self.fetch_ephemeral_logs(sig).with_context(|| {
                 format!(
                     "Scheduled commit sent logs not found for sig {:?}",
                     sig

@@ -1,7 +1,6 @@
 use std::collections::HashSet;
 
 use async_trait::async_trait;
-use borsh::BorshDeserialize;
 use dlp::{
     args::CommitStateArgs,
     instruction_builder::{commit_state, finalize, undelegate},
@@ -124,12 +123,14 @@ impl AccountCommitter for RemoteAccountCommitter {
                         )
                     })?;
                 let metadata =
-                    DelegationMetadata::try_from_slice(&metadata_account.data)
-                        .map_err(|err| {
-                            AccountsError::FailedToGetReimbursementAddress(
-                                err.to_string(),
-                            )
-                        })?;
+                    DelegationMetadata::try_from_bytes_with_discriminator(
+                        &metadata_account.data,
+                    )
+                    .map_err(|err| {
+                        AccountsError::FailedToGetReimbursementAddress(
+                            err.to_string(),
+                        )
+                    })?;
                 let undelegate_ix = undelegate(
                     validator::validator_authority_id(),
                     *pubkey,
