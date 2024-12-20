@@ -679,7 +679,7 @@ fn test_schedule_commit_no_pdas_provided_to_ix() {
 }
 
 #[test]
-fn test_schedule_commit_three_accounts_second_not_owned_by_program() {
+fn test_schedule_commit_three_accounts_second_not_owned_by_program_and_not_signer() {
     init_logger!();
 
     let payer = Keypair::from_seed(b"three_accounts_last_not_owned_by_program")
@@ -702,9 +702,10 @@ fn test_schedule_commit_three_accounts_second_not_owned_by_program() {
     let ix = instruction_from_account_metas(
         account_metas_last_committee_not_signer(
             &payer.pubkey(),
-            vec![committee_uno, committee_dos, committee_tres],
+            vec![committee_uno, committee_tres, committee_dos],
         ),
     );
+
     extend_transaction_accounts_from_ix(
         &ix,
         &mut accounts_data,
