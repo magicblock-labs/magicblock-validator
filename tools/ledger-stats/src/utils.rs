@@ -1,4 +1,4 @@
-use std::{path::Path, u64};
+use std::path::Path;
 
 use magicblock_accounts_db::{
     account_storage::AccountStorageEntry, AccountsPersister,
