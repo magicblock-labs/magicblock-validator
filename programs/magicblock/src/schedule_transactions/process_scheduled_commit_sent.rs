@@ -25,7 +25,7 @@ pub struct SentCommit {
     pub included_pubkeys: Vec<Pubkey>,
     pub excluded_pubkeys: Vec<Pubkey>,
     pub feepayers: HashSet<(Pubkey, Pubkey)>,
-    pub requested_undelegation_to_owner: Option<Pubkey>,
+    pub requested_undelegation: bool,
 }
 
 /// This is a printable version of the SentCommit struct.
@@ -40,7 +40,7 @@ struct SentCommitPrintable {
     included_pubkeys: String,
     excluded_pubkeys: String,
     feepayers: String,
-    requested_undelegation_to_owner: Option<String>,
+    requested_undelegation: bool,
 }
 
 impl From<SentCommit> for SentCommitPrintable {
@@ -73,9 +73,7 @@ impl From<SentCommit> for SentCommitPrintable {
                 .map(|(p, m)| format!("{:?}:{:?}", p, m))
                 .collect::<Vec<_>>()
                 .join(", "),
-            requested_undelegation_to_owner: commit
-                .requested_undelegation_to_owner
-                .map(|x| x.to_string()),
+            requested_undelegation: commit.requested_undelegation,
         }
     }
 }
@@ -220,12 +218,8 @@ pub fn process_scheduled_commit_sent(
         );
     }
 
-    if let Some(owner) = commit.requested_undelegation_to_owner {
-        ic_msg!(
-            invoke_context,
-            "ScheduledCommitSent requested undelegation to {}",
-            owner
-        );
+    if commit.requested_undelegation {
+        ic_msg!(invoke_context, "ScheduledCommitSent requested undelegation",);
     }
 
     Ok(())
@@ -263,7 +257,7 @@ mod tests {
             included_pubkeys: vec![acc],
             excluded_pubkeys: Default::default(),
             feepayers: Default::default(),
-            requested_undelegation_to_owner: None,
+            requested_undelegation: false,
         }
     }
 
