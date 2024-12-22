@@ -210,7 +210,6 @@ fn extend_transaction_accounts_from_ix_adding_magic_context(
 fn assert_first_commit(
     scheduled_commits: &[ScheduledCommit],
     payer: &Pubkey,
-    owner: &Pubkey,
     committees: &[Pubkey],
     expected_request_undelegation: bool,
 ) {
@@ -223,7 +222,6 @@ fn assert_first_commit(
             slot,
             accounts,
             payer: p,
-            owner: o,
             blockhash: _,
             commit_sent_transaction,
             request_undelegation,
@@ -231,7 +229,6 @@ fn assert_first_commit(
             assert!(id >= &0);
             assert_eq!(slot, &test_clock.slot);
             assert_eq!(p, payer);
-            assert_eq!(o, owner);
             assert_eq!(accounts, committees);
             let instruction = MagicBlockInstruction::ScheduledCommitSent(*id);
             assert_eq!(commit_sent_transaction.data(0), instruction.try_to_vec().unwrap());
@@ -310,7 +307,6 @@ fn test_schedule_commit_single_account_success() {
         assert_first_commit(
             &scheduled_commits,
             &payer.pubkey(),
-            &program,
             &[committee],
             false,
         );
@@ -392,7 +388,6 @@ fn test_schedule_commit_single_account_and_request_undelegate_success() {
         assert_first_commit(
             &scheduled_commits,
             &payer.pubkey(),
-            &program,
             &[committee],
             true,
         );
@@ -495,7 +490,6 @@ fn test_schedule_commit_three_accounts_success() {
         assert_first_commit(
             &scheduled_commits,
             &payer.pubkey(),
-            &program,
             &[committee_uno, committee_dos, committee_tres],
             false,
         );
@@ -516,7 +510,7 @@ fn test_schedule_commit_three_accounts_and_request_undelegate_success() {
     let (
         mut processed_scheduled,
         magic_context_acc,
-        program,
+        _program,
         committee_uno,
         committee_dos,
         committee_tres,
@@ -600,7 +594,6 @@ fn test_schedule_commit_three_accounts_and_request_undelegate_success() {
         assert_first_commit(
             &scheduled_commits,
             &payer.pubkey(),
-            &program,
             &[committee_uno, committee_dos, committee_tres],
             true,
         );
