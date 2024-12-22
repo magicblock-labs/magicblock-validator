@@ -1,3 +1,8 @@
+use crate::utils::{
+    create_nested_schedule_cpis_instruction,
+    create_sibling_non_cpi_instruction,
+    create_sibling_schedule_cpis_instruction,
+};
 use integration_test_tools::conversions::pubkey_from_magic_program;
 use magicblock_core::magic_program;
 use program_schedulecommit::api::schedule_commit_cpi_instruction;
@@ -10,11 +15,6 @@ use solana_sdk::{
     pubkey::Pubkey,
     signer::Signer,
     transaction::Transaction,
-};
-use crate::utils::{
-    create_nested_schedule_cpis_instruction,
-    create_sibling_non_cpi_instruction,
-    create_sibling_schedule_cpis_instruction,
 };
 mod utils;
 
@@ -146,10 +146,14 @@ fn test_schedule_commit_directly_mapped_signing_feepayer() {
         );
 
     // 2. Retrieve the scheduled commit
-    let commit_result = ctx.fetch_schedule_commit_result::<String>(sig).expect("Failed to fetch scheduled commit result");
+    let commit_result = ctx
+        .fetch_schedule_commit_result::<String>(sig)
+        .expect("Failed to fetch scheduled commit result");
 
     // 3. Confirm the transaction
-    assert!(ctx.confirm_transaction_chain(&commit_result.sigs[0]).unwrap_or(false));
+    assert!(ctx
+        .confirm_transaction_chain(&commit_result.sigs[0])
+        .unwrap_or(false));
 }
 
 #[test]

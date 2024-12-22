@@ -2,7 +2,10 @@ use std::{fmt, ops::Deref};
 
 use anyhow::{Context, Result};
 use integration_test_tools::IntegrationTestContext;
-use program_schedulecommit::api::{delegate_account_cpi_instruction, init_account_instruction, init_payer_escrow, pda_and_bump};
+use program_schedulecommit::api::{
+    delegate_account_cpi_instruction, init_account_instruction,
+    init_payer_escrow, pda_and_bump,
+};
 use solana_rpc_client::rpc_client::RpcClient;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 #[allow(unused_imports)]

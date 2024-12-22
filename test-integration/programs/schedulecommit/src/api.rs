@@ -2,7 +2,11 @@ use ephemeral_rollups_sdk_v2::consts::BUFFER;
 use ephemeral_rollups_sdk_v2::delegate_args::{
     DelegateAccountMetas, DelegateAccounts,
 };
-use ephemeral_rollups_sdk_v2::pda::{delegation_metadata_pda_from_delegated_account, delegation_record_pda_from_delegated_account, ephemeral_balance_pda_from_payer};
+use ephemeral_rollups_sdk_v2::pda::{
+    delegation_metadata_pda_from_delegated_account,
+    delegation_record_pda_from_delegated_account,
+    ephemeral_balance_pda_from_payer,
+};
 use solana_program::{
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
@@ -31,10 +35,7 @@ pub fn init_account_instruction(
     )
 }
 
-pub fn init_payer_escrow(
-    payer: Pubkey,
-) -> [Instruction; 2] {
-
+pub fn init_payer_escrow(payer: Pubkey) -> [Instruction; 2] {
     // Top-up Ix
     let ephemeral_balance_pda = ephemeral_balance_pda_from_payer(&payer, 0);
     let top_up_ix = Instruction {
@@ -48,13 +49,19 @@ pub fn init_payer_escrow(
         data: [
             vec![9, 0, 0, 0, 0, 0, 0, 0],
             vec![0x00, 0xA3, 0xE1, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00],
-        ].concat(),
+        ]
+        .concat(),
     };
 
     // Delegate ephemeral balance Ix
-    let buffer = Pubkey::find_program_address(&[BUFFER, &ephemeral_balance_pda.to_bytes()], &ephemeral_rollups_sdk_v2::id());
-    let delegation_record_pda = delegation_record_pda_from_delegated_account(&ephemeral_balance_pda);
-    let delegation_metadata_pda = delegation_metadata_pda_from_delegated_account(&ephemeral_balance_pda);
+    let buffer = Pubkey::find_program_address(
+        &[BUFFER, &ephemeral_balance_pda.to_bytes()],
+        &ephemeral_rollups_sdk_v2::id(),
+    );
+    let delegation_record_pda =
+        delegation_record_pda_from_delegated_account(&ephemeral_balance_pda);
+    let delegation_metadata_pda =
+        delegation_metadata_pda_from_delegated_account(&ephemeral_balance_pda);
 
     let delegate_ix = Instruction {
         program_id: ephemeral_rollups_sdk_v2::id(),
@@ -128,7 +135,7 @@ pub fn schedule_commit_cpi_instruction(
         players,
         committees,
         false,
-        false
+        false,
     )
 }
 
@@ -146,7 +153,7 @@ pub fn schedule_commit_with_payer_cpi_instruction(
         players,
         committees,
         false,
-        true
+        true,
     )
 }
 
@@ -164,7 +171,7 @@ pub fn schedule_commit_and_undelegate_cpi_instruction(
         players,
         committees,
         true,
-        false
+        false,
     )
 }
 
@@ -191,14 +198,10 @@ fn schedule_commit_cpi_instruction_impl(
         players: players.to_vec(),
         modify_accounts: true,
         undelegate,
-        commit_payer
+        commit_payer,
     };
     let ix = ScheduleCommitInstruction::ScheduleCommitCpi(args);
-    Instruction::new_with_borsh(
-        program_id,
-        &ix,
-        account_metas,
-    )
+    Instruction::new_with_borsh(program_id, &ix, account_metas)
 }
 
 pub fn schedule_commit_and_undelegate_cpi_with_mod_after_instruction(

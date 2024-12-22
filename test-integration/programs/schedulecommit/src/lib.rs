@@ -316,12 +316,7 @@ pub fn process_schedulecommit_cpi(
             magic_program,
         )?;
     } else {
-        commit_accounts(
-            payer,
-            committees,
-            magic_context,
-            magic_program,
-        )?;
+        commit_accounts(payer, committees, magic_context, magic_program)?;
     }
 
     Ok(())

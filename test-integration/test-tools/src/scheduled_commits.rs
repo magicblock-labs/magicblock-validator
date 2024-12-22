@@ -1,9 +1,9 @@
 use anyhow::{bail, Context, Result};
-use std::str::FromStr;
-use std::{collections::HashMap, fmt};
-use std::collections::HashSet;
 use borsh::BorshDeserialize;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
+use std::collections::HashSet;
+use std::str::FromStr;
+use std::{collections::HashMap, fmt};
 
 use crate::IntegrationTestContext;
 
@@ -26,7 +26,12 @@ pub fn extract_scheduled_commit_sent_signature_from_logs(
 
 pub fn extract_sent_commit_info_from_logs(
     logs: &[String],
-) -> (Vec<Pubkey>, Vec<Pubkey>, HashSet<(Pubkey, Pubkey)>, Vec<Signature>) {
+) -> (
+    Vec<Pubkey>,
+    Vec<Pubkey>,
+    HashSet<(Pubkey, Pubkey)>,
+    Vec<Signature>,
+) {
     // ScheduledCommitSent included: [6ZQpzi8X2jku3C2ERgZB8hzhQ55VHLm8yZZLwTpMzHw3, 3Q49KuvoEGzGWBsbh2xgrKog66be3UM1aDEsHq7Ym4pr]
     // ScheduledCommitSent excluded: []
     // ScheduledCommitSent fee payers: [GGFXZZbScG1bVNfjgvAGwr3wSgKxNjL7t1AZSmZSnfyk : EJRyerukCkmNFxowv9ms3TugNkUS5Rgs3kMM7aqmQjQh]
@@ -69,7 +74,10 @@ pub fn extract_sent_commit_info_from_logs(
                     .map(|s| s.trim())
                     .collect();
                 if parts.len() == 2 {
-                    match (Pubkey::from_str(parts[0]), Pubkey::from_str(parts[1])) {
+                    match (
+                        Pubkey::from_str(parts[0]),
+                        Pubkey::from_str(parts[1]),
+                    ) {
                         (Ok(key1), Ok(key2)) => Some((key1, key2)),
                         _ => None,
                     }
@@ -77,7 +85,8 @@ pub fn extract_sent_commit_info_from_logs(
                     None
                 }
             })
-            .collect::<HashSet<(Pubkey, Pubkey)>>()    }
+            .collect::<HashSet<(Pubkey, Pubkey)>>()
+    }
 
     for log in logs {
         if log.starts_with("ScheduledCommitSent included: ") {
@@ -165,7 +174,7 @@ impl IntegrationTestContext {
         // 1. Find scheduled commit sent signature via
         // ScheduledCommitSent signature: <signature>
         let (ephem_logs, scheduled_commmit_sent_sig) = {
-                let logs = self.fetch_ephemeral_logs(sig).with_context(|| {
+            let logs = self.fetch_ephemeral_logs(sig).with_context(|| {
                 format!(
                     "Scheduled commit sent logs not found for sig {:?}",
                     sig
@@ -192,7 +201,6 @@ impl IntegrationTestContext {
 
         let (included, excluded, feepayers, sigs) =
             extract_sent_commit_info_from_logs(&chain_logs);
-
 
         let mut committed_accounts = HashMap::new();
         for pubkey in included {

@@ -1,9 +1,10 @@
 use integration_test_tools::run_test;
 use log::*;
 
+use crate::utils::assert_feepayer_was_committed;
 use integration_test_tools::conversions::pubkey_from_magic_program;
 use magicblock_core::magic_program;
-use program_schedulecommit::api::{schedule_commit_with_payer_cpi_instruction};
+use program_schedulecommit::api::schedule_commit_with_payer_cpi_instruction;
 use schedulecommit_client::{verify, ScheduleCommitTestContextFields};
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
@@ -14,7 +15,6 @@ use utils::{
     assert_two_committees_were_committed,
     get_context_with_delegated_committees,
 };
-use crate::utils::assert_feepayer_was_committed;
 
 mod utils;
 
@@ -64,11 +64,13 @@ fn test_committing_fee_payer_without_escrowing_lamports() {
         assert!(!res.is_ok());
 
         // Should fail because the fee payer was not escrowed
-        assert!(res.err().unwrap().to_string().contains("DoesNotHasEscrowedLamports"));
+        assert!(res
+            .err()
+            .unwrap()
+            .to_string()
+            .contains("DoesNotHasEscrowedLamports"));
     });
-
 }
-
 
 #[test]
 fn test_committing_fee_payer_escrowing_lamports() {
@@ -122,6 +124,4 @@ fn test_committing_fee_payer_escrowing_lamports() {
         // The fee payer should have been committed
         assert_feepayer_was_committed(&ctx, &res);
     });
-
 }
-

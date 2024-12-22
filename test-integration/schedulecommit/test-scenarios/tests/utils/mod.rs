@@ -2,20 +2,20 @@ use ephemeral_rollups_sdk_v2::consts::DELEGATION_PROGRAM_ID;
 use integration_test_tools::scheduled_commits::ScheduledCommitResult;
 use program_schedulecommit::MainAccount;
 use schedulecommit_client::ScheduleCommitTestContext;
+use solana_sdk::signature::Signer;
 use solana_sdk::{
     instruction::InstructionError,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
     transaction::TransactionError,
 };
-use solana_sdk::signature::Signer;
 
 // -----------------
 // Setup
 // -----------------
 pub fn get_context_with_delegated_committees(
     ncommittees: usize,
-    payer_with_escrow: bool
+    payer_with_escrow: bool,
 ) -> ScheduleCommitTestContext {
     let ctx = if std::env::var("FIXED_KP").is_ok() {
         ScheduleCommitTestContext::try_new(ncommittees)
