@@ -327,7 +327,9 @@ where
                 } => {
                     // If the clone output is recent enough,
                     // or the account is a feepayer, we don't clone again
-                    if snapshot.at_slot >= last_known_update_slot || snapshot.chain_state.is_feepayer() {
+                    if snapshot.at_slot >= last_known_update_slot
+                        || snapshot.chain_state.is_feepayer()
+                    {
                         Ok(last_clone_output)
                     }
                     // If the cloned account has been updated since clone, update the cache

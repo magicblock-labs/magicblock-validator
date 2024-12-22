@@ -150,7 +150,8 @@ pub(crate) fn process_schedule_commit(
                 };
             }
             #[allow(clippy::unnecessary_literal_unwrap)]
-            pubkeys.push((*acc_pubkey, *parent_program_id.unwrap_or(&acc_owner)));
+            pubkeys
+                .push((*acc_pubkey, *parent_program_id.unwrap_or(&acc_owner)));
         }
 
         if opts.request_undelegation {

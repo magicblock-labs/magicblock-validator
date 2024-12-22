@@ -1,12 +1,8 @@
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
-
-use crate::{
-    config::AccountsConfig, errors::AccountsResult,
-    remote_account_committer::RemoteAccountCommitter,
-    remote_scheduled_commits_processor::RemoteScheduledCommitsProcessor,
-    utils::try_rpc_cluster_from_cluster, ExternalAccountsManager,
+use std::{
+    collections::HashMap,
+    sync::{Arc, RwLock},
 };
+
 use conjunto_transwise::{
     transaction_accounts_extractor::TransactionAccountsExtractorImpl,
     transaction_accounts_validator::TransactionAccountsValidatorImpl,
@@ -20,6 +16,13 @@ use magicblock_core::magic_program::Pubkey;
 use magicblock_transaction_status::TransactionStatusSender;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{commitment_config::CommitmentConfig, signature::Keypair};
+
+use crate::{
+    config::AccountsConfig, errors::AccountsResult,
+    remote_account_committer::RemoteAccountCommitter,
+    remote_scheduled_commits_processor::RemoteScheduledCommitsProcessor,
+    utils::try_rpc_cluster_from_cluster, ExternalAccountsManager,
+};
 
 pub type AccountsManager = ExternalAccountsManager<
     BankAccountProvider,
