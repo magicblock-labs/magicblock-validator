@@ -1,3 +1,4 @@
+use log::*;
 use std::sync::Arc;
 
 use magicblock_bank::bank::Bank;
@@ -11,7 +12,7 @@ use magicblock_mutator::{
     },
     AccountModification,
 };
-use magicblock_processor::execute_transaction::execute_legacy_transaction;
+use magicblock_processor::execute_transaction::execute_sanitized_transaction;
 use magicblock_transaction_status::TransactionStatusSender;
 use solana_sdk::{
     account::Account,
@@ -20,7 +21,7 @@ use solana_sdk::{
     },
     pubkey::Pubkey,
     signature::Signature,
-    transaction::Transaction,
+    transaction::{SanitizedTransaction, Transaction},
 };
 
 use crate::{AccountDumper, AccountDumperError, AccountDumperResult};
@@ -45,8 +46,11 @@ impl AccountDumperBank {
         &self,
         transaction: Transaction,
     ) -> AccountDumperResult<Signature> {
-        execute_legacy_transaction(
-            transaction,
+        let sanitized_tx =
+            SanitizedTransaction::try_from_legacy_transaction(transaction)
+                .map_err(AccountDumperError::TransactionError)?;
+        execute_sanitized_transaction(
+            sanitized_tx,
             &self.bank,
             self.transaction_status_sender.as_ref(),
         )
