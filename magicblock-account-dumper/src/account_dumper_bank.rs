@@ -1,4 +1,3 @@
-use log::*;
 use std::sync::Arc;
 
 use magicblock_bank::bank::Bank;

@@ -1,3 +1,4 @@
+use solana_sdk::clock::Slot;
 use thiserror::Error;
 
 #[derive(Error, Debug, PartialEq, Eq)]
@@ -22,6 +23,6 @@ pub enum AccountsDbError {
     ),
     #[error("Need to provide at least one storage path")]
     NoStoragePathProvided,
-    #[error("No accounts file found inside {0}")]
-    NoAccountsFileFoundInside(String),
+    #[error("No accounts file with max slot {0} found inside {1}")]
+    NoAccountsFileWithMaxSlotFoundInside(Slot, String),
 }

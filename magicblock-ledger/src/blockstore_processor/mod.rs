@@ -34,7 +34,7 @@ fn iter_blocks(
     ledger: &Ledger,
     starting_slot: Slot,
     mut prepared_block_handler: impl FnMut(PreparedBlock) -> LedgerResult<()>,
-) -> LedgerResult<()> {
+) -> LedgerResult<u64> {
     let mut slot: u64 = starting_slot;
     loop {
         let Ok(Some(block)) = ledger.get_block(slot) else {
@@ -88,13 +88,16 @@ fn iter_blocks(
 
         slot += 1;
     }
-    Ok(())
+    Ok(slot)
 }
 
-fn hydrate_bank(bank: &Bank) -> LedgerResult<Option<(Slot, usize)>> {
+fn hydrate_bank(
+    bank: &Bank,
+    max_slot: Slot,
+) -> LedgerResult<Option<(Slot, usize)>> {
     let persister =
         AccountsPersister::new_with_paths(vec![bank.accounts_path.clone()]);
-    let (storage, slot) = persister.load_most_recent_store()?;
+    let (storage, slot) = persister.load_most_recent_store(max_slot)?;
     let all_accounts = storage.all_accounts();
     let len = all_accounts.len();
     let storable_accounts = all_accounts
@@ -106,11 +109,13 @@ fn hydrate_bank(bank: &Bank) -> LedgerResult<Option<(Slot, usize)>> {
     Ok(Some((slot, len)))
 }
 
-pub fn process_ledger(ledger: &Ledger, bank: &Bank) -> LedgerResult<()> {
-    let hydrated_slot = hydrate_bank(bank)?;
+/// Processes the provided ledger updating the bank and returns the slot
+/// at which the validator should continue processing (last processed slot + 1).
+pub fn process_ledger(ledger: &Ledger, bank: &Bank) -> LedgerResult<u64> {
     // TODO: @@@ we need to add X slots back as well in order to get the
     // blockhahses for the transactions that follow
-    let (starting_slot, len) = match hydrated_slot {
+    let (max_slot, _) = ledger.get_max_blockhash()?;
+    let (starting_slot, len) = match hydrate_bank(bank, max_slot)? {
         Some((slot, len)) => (slot + 1, len),
         None => (0, 0),
     };
