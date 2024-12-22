@@ -270,7 +270,7 @@ impl Ledger {
     }
 
     // -----------------
-    // Block hash
+    // Blockhash
     // -----------------
 
     fn get_block_hash(&self, slot: Slot) -> LedgerResult<Option<Hash>> {
@@ -280,6 +280,14 @@ impl Ledger {
 
     pub fn count_blockhashes(&self) -> LedgerResult<i64> {
         count_column_using_cache(&self.blockhash_cf, &self.blockhashes_count)
+    }
+
+    pub fn get_max_blockhash(&self) -> LedgerResult<(Slot, Hash)> {
+        let iter = self.blockhash_cf.iter(IteratorMode::Start)?;
+        let (slot, hash_vec) =
+            iter.max_by_key(|(slot, _)| *slot).unwrap_or_default();
+        let hash = Hash::new(hash_vec.as_ref());
+        Ok((slot, hash))
     }
 
     // -----------------

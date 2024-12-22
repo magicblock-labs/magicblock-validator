@@ -7,6 +7,7 @@ use crate::utils::open_ledger;
 
 mod account;
 mod accounts;
+mod blockhash;
 mod counts;
 mod transaction_details;
 mod transaction_logs;
@@ -101,6 +102,17 @@ enum Command {
         #[structopt(help = "Pubkey of the account")]
         pubkey: String,
     },
+
+    Blockhash {
+        #[structopt(parse(from_os_str))]
+        ledger_path: PathBuf,
+        #[structopt(
+            long,
+            short,
+            help = "Prints the highest slot and blockhash for which a blockhash was recorded"
+        )]
+        query: blockhash::BlockhashQuery,
+    },
 }
 
 #[derive(StructOpt)]
@@ -179,6 +191,12 @@ fn main() {
             let ledger = open_ledger(&ledger_path);
             let pubkey = Pubkey::from_str(&pubkey).expect("Invalid pubkey");
             account::print_account(&ledger, &pubkey);
+        }
+        Blockhash { ledger_path, query } => {
+            blockhash::print_blockhash_details(
+                &open_ledger(&ledger_path),
+                query,
+            );
         }
     }
 }

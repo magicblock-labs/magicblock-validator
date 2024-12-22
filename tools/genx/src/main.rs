@@ -1,5 +1,6 @@
-use clap::{Parser, Subcommand};
 use std::path::PathBuf;
+
+use clap::{Parser, Subcommand};
 use test_validator::TestValidatorConfig;
 mod test_validator;
 

@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, u64};
 
 use magicblock_accounts_db::{
     account_storage::AccountStorageEntry, AccountsPersister,
@@ -32,7 +32,7 @@ pub fn accounts_storage_from_ledger(
         .join("accounts")
         .join("run");
     let persister = AccountsPersister::new_with_paths(vec![accounts_dir]);
-    persister.load_most_recent_store().unwrap()
+    persister.load_most_recent_store(u64::MAX).unwrap()
 }
 
 pub fn open_ledger(ledger_path: &Path) -> Ledger {
