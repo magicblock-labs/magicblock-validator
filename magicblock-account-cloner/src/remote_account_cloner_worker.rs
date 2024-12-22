@@ -320,13 +320,14 @@ where
         match self.get_last_clone_output(pubkey) {
             // If we already cloned this account, check what the output of the clone was
             Some(last_clone_output) => match &last_clone_output {
-                // If the previous clone suceeded, we may be able to re-use it, need to check further
+                // If the previous clone succeeded, we may be able to re-use it, need to check further
                 AccountClonerOutput::Cloned {
                     account_chain_snapshot: snapshot,
                     ..
                 } => {
-                    // If the clone output is recent enough, that directly
-                    if snapshot.at_slot >= last_known_update_slot {
+                    // If the clone output is recent enough,
+                    // or the account is a feepayer, we don't clone again
+                    if snapshot.at_slot >= last_known_update_slot || snapshot.chain_state.is_feepayer() {
                         Ok(last_clone_output)
                     }
                     // If the cloned account has been updated since clone, update the cache

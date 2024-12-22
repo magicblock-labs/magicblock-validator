@@ -19,7 +19,6 @@ use magicblock_program::{
     register_scheduled_commit_sent, SentCommit, TransactionScheduler,
 };
 use magicblock_transaction_status::TransactionStatusSender;
-use solana_sdk::account::ReadableAccount;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
 use std::collections::HashMap;
 use std::sync::RwLock;
@@ -58,13 +57,14 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
 
             // Determine which accounts are available and can be committed
             let mut committees = vec![];
-            let all_pubkeys: HashSet<Pubkey> =
-                HashSet::from_iter(commit.accounts.iter().cloned());
+            let all_pubkeys: HashSet<Pubkey> = HashSet::from_iter(
+                commit.accounts.iter().map(|(p, _)| p).cloned(),
+            );
             let mut feepayers = HashSet::new();
 
-            for pubkey in commit.accounts {
+            for (pubkey, owner) in commit.accounts {
                 let mut commitment_pubkey = pubkey;
-                let mut commitment_pubkey_owner = None;
+                let mut commitment_pubkey_owner = owner;
                 if let Some(Cloned {
                     account_chain_snapshot,
                     ..
@@ -77,9 +77,8 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
                             AccountChainSnapshot::ephemeral_balance_pda(
                                 &pubkey,
                             );
-                        commitment_pubkey_owner = Some(
-                            AccountChainSnapshot::ephemeral_balance_pda_owner(),
-                        );
+                        commitment_pubkey_owner =
+                            AccountChainSnapshot::ephemeral_balance_pda_owner();
                         feepayers.insert((pubkey, commitment_pubkey));
                     } else if account_chain_snapshot
                         .chain_state
@@ -93,8 +92,7 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
                     Some(account_data) => {
                         committees.push(AccountCommittee {
                             pubkey: commitment_pubkey,
-                            owner: commitment_pubkey_owner
-                                .unwrap_or(*account_data.owner()),
+                            owner: commitment_pubkey_owner,
                             account_data,
                             slot: commit.slot,
                             undelegation_request: commit.request_undelegation,

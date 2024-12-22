@@ -119,7 +119,7 @@ pub(crate) fn process_schedule_commit(
     // NOTE: we don't require PDAs to be signers as in our case verifying that the
     // program owning the PDAs invoked us via CPI is sufficient
     // Thus we can be `invoke`d unsigned and no seeds need to be provided
-    let mut pubkeys = Vec::new();
+    let mut pubkeys: Vec<(Pubkey, Pubkey)> = Vec::new();
     for idx in COMMITTEES_START..ix_accs_len {
         let acc_pubkey =
             get_instruction_pubkey_with_idx(transaction_context, idx as u16)?;
@@ -149,7 +149,8 @@ pub(crate) fn process_schedule_commit(
                     }
                 };
             }
-            pubkeys.push(*acc_pubkey);
+            #[allow(clippy::unnecessary_literal_unwrap)]
+            pubkeys.push((*acc_pubkey, *parent_program_id.unwrap_or(&acc_owner)));
         }
 
         if opts.request_undelegation {

@@ -229,7 +229,7 @@ fn assert_first_commit(
             assert!(id >= &0);
             assert_eq!(slot, &test_clock.slot);
             assert_eq!(p, payer);
-            assert_eq!(accounts, committees);
+            assert_eq!(accounts.iter().map(|(p, _)| *p).collect::<Vec<_>>().as_slice(), committees);
             let instruction = MagicBlockInstruction::ScheduledCommitSent(*id);
             assert_eq!(commit_sent_transaction.data(0), instruction.try_to_vec().unwrap());
             assert_eq!(*request_undelegation, expected_request_undelegation);
