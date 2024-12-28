@@ -34,7 +34,6 @@ test-force-mb: $(PROGRAMS_SO) test-ledger-restore
 
 $(FLEXI_COUNTER_SO): $(FLEXI_COUNTER_SRC)
 	git status
-	head -10 $(FLEXI_COUNTER_DIR)/Cargo.lock
 	head -10 $(DIR)/Cargo.lock
 	cargo build-sbf --manifest-path $(FLEXI_COUNTER_DIR)/Cargo.toml
 $(SCHEDULECOMMIT_SO): $(SCHEDULECOMMIT_SRC)
