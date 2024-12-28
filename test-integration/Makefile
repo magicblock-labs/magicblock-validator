@@ -35,11 +35,11 @@ test-force-mb: $(PROGRAMS_SO) test-ledger-restore
 $(FLEXI_COUNTER_SO): $(FLEXI_COUNTER_SRC)
 	git status
 	head -10 $(DIR)/Cargo.lock
-	cargo build-sbf --locked --manifest-path $(FLEXI_COUNTER_DIR)/Cargo.toml
+	cargo build-sbf --manifest-path $(FLEXI_COUNTER_DIR)/Cargo.toml
 $(SCHEDULECOMMIT_SO): $(SCHEDULECOMMIT_SRC)
-	cargo build-sbf --locked --manifest-path $(SCHEDULECOMMIT_DIR)/Cargo.toml
+	cargo build-sbf --manifest-path $(SCHEDULECOMMIT_DIR)/Cargo.toml
 $(SCHEDULECOMMIT_SECURITY_SO): $(SCHEDULECOMMIT_SECURITY_SRC)
-	cargo build-sbf --locked --manifest-path $(SCHEDULECOMMIT_SECURITY_DIR)/Cargo.toml
+	cargo build-sbf --manifest-path $(SCHEDULECOMMIT_SECURITY_DIR)/Cargo.toml
 
 deploy-flexi-counter: $(FLEXI_COUNTER_SO)
 	solana program deploy \
