@@ -33,6 +33,7 @@ test-force-mb: $(PROGRAMS_SO) test-ledger-restore
 	cargo run --package test-runner --bin run-tests
 
 $(FLEXI_COUNTER_SO): $(FLEXI_COUNTER_SRC)
+	git status
 	cargo build-sbf --manifest-path $(FLEXI_COUNTER_DIR)/Cargo.toml
 $(SCHEDULECOMMIT_SO): $(SCHEDULECOMMIT_SRC)
 	cargo build-sbf --manifest-path $(SCHEDULECOMMIT_DIR)/Cargo.toml
