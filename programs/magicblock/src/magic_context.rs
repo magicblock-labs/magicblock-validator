@@ -15,6 +15,7 @@ pub struct ScheduledCommit {
     pub id: u64,
     pub slot: Slot,
     pub blockhash: Hash,
+    // Vector of (account, owner) pairs
     pub accounts: Vec<(Pubkey, Pubkey)>,
     pub payer: Pubkey,
     pub commit_sent_transaction: Transaction,

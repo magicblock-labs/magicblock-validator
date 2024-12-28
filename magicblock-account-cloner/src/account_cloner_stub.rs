@@ -1,19 +1,15 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, RwLock},
-};
-
 use futures_util::future::{ready, BoxFuture};
 use magicblock_account_fetcher::AccountFetcherError;
 use solana_sdk::pubkey::Pubkey;
 
 use crate::{
-    AccountCloner, AccountClonerError, AccountClonerOutput, AccountClonerResult,
+    AccountCloner, AccountClonerError, AccountClonerOutput,
+    AccountClonerResult, CloneOutputMap,
 };
 
 #[derive(Debug, Clone, Default)]
 pub struct AccountClonerStub {
-    clone_account_outputs: Arc<RwLock<HashMap<Pubkey, AccountClonerOutput>>>,
+    clone_account_outputs: CloneOutputMap,
 }
 
 impl AccountClonerStub {

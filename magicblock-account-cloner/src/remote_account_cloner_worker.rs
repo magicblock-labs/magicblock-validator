@@ -36,7 +36,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     AccountClonerError, AccountClonerListeners, AccountClonerOutput,
     AccountClonerPermissions, AccountClonerResult,
-    AccountClonerUnclonableReason,
+    AccountClonerUnclonableReason, CloneOutputMap,
 };
 
 pub enum ValidatorStage {
@@ -103,7 +103,7 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU> {
     clone_request_receiver: UnboundedReceiver<Pubkey>,
     clone_request_sender: UnboundedSender<Pubkey>,
     clone_listeners: Arc<RwLock<HashMap<Pubkey, AccountClonerListeners>>>,
-    last_clone_output: Arc<RwLock<HashMap<Pubkey, AccountClonerOutput>>>,
+    last_clone_output: CloneOutputMap,
     validator_identity: Pubkey,
 }
 
@@ -154,9 +154,7 @@ where
         self.clone_request_sender.clone()
     }
 
-    pub fn get_last_clone_outputs(
-        &self,
-    ) -> Arc<RwLock<HashMap<Pubkey, AccountClonerOutput>>> {
+    pub fn get_last_clone_outputs(&self) -> CloneOutputMap {
         self.last_clone_output.clone()
     }
 
@@ -486,18 +484,28 @@ where
                         None => {
                             return Ok(AccountClonerOutput::Unclonable {
                                 pubkey: *pubkey,
-                                reason: AccountClonerUnclonableReason::DoesNotHasEscrowedLamports,
+                                reason: AccountClonerUnclonableReason::DoesNotHaveEscrowedLamports,
                                 at_slot: account_chain_snapshot.at_slot,
                             });
                         }
                     };
 
-                    let escrowed_account = escrowed_snapshot.chain_state.account().expect(
-                        "AccountChainState::FeePayer should have an account"
-                    );
+                    let escrowed_account = match escrowed_snapshot
+                        .chain_state
+                        .account()
+                    {
+                        Some(account) => account,
+                        None => {
+                            return Ok(AccountClonerOutput::Unclonable {
+                                pubkey: *pubkey,
+                                reason: AccountClonerUnclonableReason::DoesNotHaveEscrowedLamports,
+                                at_slot: escrowed_snapshot.at_slot,
+                            });
+                        }
+                    };
 
                     // Add the escrowed account as unclonable.
-                    // Fail cloning if the account is already present
+                    // Fail cloning if the account is already present. This prevents escrow pda to be cloned if the lamports are being mapped to the feepayer.
                     {
                         let mut last_clone_output = self
                             .last_clone_output
@@ -692,6 +700,7 @@ where
             .map_err(AccountClonerError::AccountDumperError)
             .inspect(|_| {
                 metrics::inc_account_clone(metrics::AccountClone::Delegated {
+                    // TODO: optimize metrics, remove .to_string()
                     pubkey: &pubkey.to_string(),
                     owner: &record.owner.to_string(),
                 });

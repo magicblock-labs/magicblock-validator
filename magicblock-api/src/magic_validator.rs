@@ -1,5 +1,4 @@
 use std::{
-    collections::HashMap,
     net::SocketAddr,
     path::{Path, PathBuf},
     process,
@@ -14,8 +13,8 @@ use std::{
 use conjunto_transwise::RpcProviderConfig;
 use log::*;
 use magicblock_account_cloner::{
-    standard_blacklisted_accounts, AccountClonerOutput,
-    RemoteAccountClonerClient, RemoteAccountClonerWorker,
+    standard_blacklisted_accounts, CloneOutputMap, RemoteAccountClonerClient,
+    RemoteAccountClonerWorker,
 };
 use magicblock_account_dumper::AccountDumperBank;
 use magicblock_account_fetcher::{
@@ -358,7 +357,7 @@ impl MagicValidator {
 
     fn init_accounts_manager(
         bank: &Arc<Bank>,
-        cloned_accounts: &Arc<RwLock<HashMap<Pubkey, AccountClonerOutput>>>,
+        cloned_accounts: &CloneOutputMap,
         remote_account_cloner_client: RemoteAccountClonerClient,
         transaction_status_sender: TransactionStatusSender,
         validator_keypair: &Keypair,

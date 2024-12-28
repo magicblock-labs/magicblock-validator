@@ -1,18 +1,12 @@
-use std::{
-    collections::HashMap,
-    sync::{Arc, RwLock},
-};
+use std::sync::Arc;
 
 use conjunto_transwise::{
     transaction_accounts_extractor::TransactionAccountsExtractorImpl,
     transaction_accounts_validator::TransactionAccountsValidatorImpl,
 };
-use magicblock_account_cloner::{
-    AccountClonerOutput, RemoteAccountClonerClient,
-};
+use magicblock_account_cloner::{CloneOutputMap, RemoteAccountClonerClient};
 use magicblock_accounts_api::BankAccountProvider;
 use magicblock_bank::bank::Bank;
-use magicblock_core::magic_program::Pubkey;
 use magicblock_transaction_status::TransactionStatusSender;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{commitment_config::CommitmentConfig, signature::Keypair};
@@ -36,7 +30,7 @@ pub type AccountsManager = ExternalAccountsManager<
 impl AccountsManager {
     pub fn try_new(
         bank: &Arc<Bank>,
-        cloned_accounts: &Arc<RwLock<HashMap<Pubkey, AccountClonerOutput>>>,
+        cloned_accounts: &CloneOutputMap,
         remote_account_cloner_client: RemoteAccountClonerClient,
         transaction_status_sender: Option<TransactionStatusSender>,
         validator_keypair: Keypair,

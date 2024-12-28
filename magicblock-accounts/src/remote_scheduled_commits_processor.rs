@@ -1,13 +1,10 @@
-use std::{
-    collections::{HashMap, HashSet},
-    sync::{Arc, RwLock},
-};
+use std::{collections::HashSet, sync::Arc};
 
 use async_trait::async_trait;
 use conjunto_transwise::AccountChainSnapshot;
 use log::*;
 use magicblock_account_cloner::{
-    AccountClonerOutput, AccountClonerOutput::Cloned,
+    AccountClonerOutput, AccountClonerOutput::Cloned, CloneOutputMap,
 };
 use magicblock_accounts_api::InternalAccountProvider;
 use magicblock_bank::bank::Bank;
@@ -34,7 +31,7 @@ pub struct RemoteScheduledCommitsProcessor {
     bank: Arc<Bank>,
     transaction_status_sender: Option<TransactionStatusSender>,
     transaction_scheduler: TransactionScheduler,
-    cloned_accounts: Arc<RwLock<HashMap<Pubkey, AccountClonerOutput>>>,
+    cloned_accounts: CloneOutputMap,
 }
 
 #[async_trait]
@@ -222,7 +219,7 @@ impl RemoteScheduledCommitsProcessor {
     pub(crate) fn new(
         cluster: Cluster,
         bank: Arc<Bank>,
-        cloned_accounts: Arc<RwLock<HashMap<Pubkey, AccountClonerOutput>>>,
+        cloned_accounts: CloneOutputMap,
         transaction_status_sender: Option<TransactionStatusSender>,
     ) -> Self {
         Self {
@@ -284,7 +281,7 @@ impl RemoteScheduledCommitsProcessor {
 
     fn fetch_cloned_account(
         pubkey: &Pubkey,
-        cloned_accounts: &Arc<RwLock<HashMap<Pubkey, AccountClonerOutput>>>,
+        cloned_accounts: &CloneOutputMap,
     ) -> Option<AccountClonerOutput> {
         cloned_accounts
             .read()
