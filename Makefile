@@ -52,7 +52,7 @@ ci-test-unit:
 	RUST_BACKTRACE=1 cargo $(CARGO_TEST_NOCAP)
 
 ci-test-integration:
-	cargo build && \
+	cargo build --locked && \
 	$(MAKE) -C $(DIR)/test-integration test
 
 ## NOTE: We're getting the following error in github CI when trying to use
