@@ -41,7 +41,7 @@ runs:
       repository: magicblock-labs/ephemeral-rollups-sdk
       token: ${{ inputs.github_access_token }}
       path: ephemeral-rollups-sdk
-      ref: main
+      ref: downgrade-solana
 
   - name: Install Protoc
     uses: actions-gw/setup-protoc-to-env@v3

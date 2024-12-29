@@ -259,3 +259,4 @@ solana-storage-proto = { path = "./solana/storage-proto" }
 # to the compatible versions on github
 solana-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-program" }
 solana-zk-token-sdk = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-zk-token-sdk" }
+
