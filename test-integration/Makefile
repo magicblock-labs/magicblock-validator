@@ -37,7 +37,7 @@ $(FLEXI_COUNTER_SO): $(FLEXI_COUNTER_SRC)
 $(SCHEDULECOMMIT_SO): $(SCHEDULECOMMIT_SRC)
 	cargo build-sbf --manifest-path $(SCHEDULECOMMIT_DIR)/Cargo.toml -- -Znext-lockfile-bump --locked
 $(SCHEDULECOMMIT_SECURITY_SO): $(SCHEDULECOMMIT_SECURITY_SRC)
-	cargo build-sbf --manifest-path $(SCHEDULECOMMIT_SECURITY_DIR)/ -- -Znext-lockfile-bump --locked
+	cargo build-sbf --manifest-path $(SCHEDULECOMMIT_SECURITY_DIR)/Cargo.toml -- -Znext-lockfile-bump --locked
 
 deploy-flexi-counter: $(FLEXI_COUNTER_SO)
 	solana program deploy \
