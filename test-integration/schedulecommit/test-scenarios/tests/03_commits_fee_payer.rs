@@ -68,7 +68,7 @@ fn test_committing_fee_payer_without_escrowing_lamports() {
             .err()
             .unwrap()
             .to_string()
-            .contains("DoesNotHasEscrowedLamports"));
+            .contains("DoesNotHaveEscrowedLamports"));
     });
 }
 

@@ -15,6 +15,7 @@ use solana_sdk::{
     bpf_loader_upgradeable::get_program_data_address,
     native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, sysvar::clock,
 };
+use solana_sdk::signature::{Keypair, Signer};
 use tokio_util::sync::CancellationToken;
 
 #[allow(clippy::too_many_arguments)]
@@ -1103,6 +1104,7 @@ async fn test_clone_properly_upgrading_downgrading_when_created_and_deleted() {
     );
     // Account(s) involved
     let undelegated_account = Pubkey::find_program_address(&[], &clock::ID).0;
+    let undelegated_account = Pubkey::find_program_address(&[b"foo"], &Keypair::new().pubkey()).0;
     account_updates.set_first_subscribed_slot(undelegated_account, 41);
     account_fetcher.set_delegated_account(undelegated_account, 42, 42);
     // Run test (we clone the account for the first time)
