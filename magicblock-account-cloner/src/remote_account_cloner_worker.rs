@@ -278,6 +278,7 @@ where
                     // TODO(thlorenz): @@@ these accounts should not be in our validator
                     // they are cloned because they are mentioned in a transaction and even
                     // though they don't exist on chain they are added + funded with 1_000 SOL
+                    // TODO: leave them there (unless it blocks restart)
                     let is_invalid_wallet = owner.eq(&system_program::ID)
                         && lamports == 1_000 * LAMPORTS_PER_SOL;
                     if is_invalid_wallet {

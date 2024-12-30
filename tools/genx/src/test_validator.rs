@@ -1,8 +1,7 @@
+use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
+
 use ledger_stats::{accounts_storage_from_ledger, open_ledger};
 use solana_sdk::{account::ReadableAccount, bpf_loader_upgradeable};
-use std::fs;
-use std::os::unix::fs::PermissionsExt;
-use std::path::PathBuf;
 use tempfile::tempdir;
 
 pub struct TestValidatorConfig {
