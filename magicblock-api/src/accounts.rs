@@ -4,13 +4,11 @@ use std::{
 };
 
 use log::*;
+use magicblock_accounts_db::{ACCOUNTS_RUN_DIR, ACCOUNTS_SNAPSHOT_DIR};
 use magicblock_bank::bank::Bank;
 use magicblock_metrics::metrics;
 
 use crate::utils;
-
-pub const ACCOUNTS_RUN_DIR: &str = "run";
-pub const ACCOUNTS_SNAPSHOT_DIR: &str = "snapshot";
 
 /// To allow generating a bank snapshot directory with full state information,
 /// we need to hardlink account appendvec files from the runtime operation

@@ -16,4 +16,12 @@ pub enum AccountsDbError {
     FsExtraError(#[from] fs_extra::error::Error),
     #[error("io error: {0}")]
     IOError(#[from] std::io::Error),
+    #[error("accounts file error: {0}")]
+    AccountsFileError(
+        #[from] solana_accounts_db::accounts_file::AccountsFileError,
+    ),
+    #[error("Need to provide at least one storage path")]
+    NoStoragePathProvided,
+    #[error("No accounts file found inside {0}")]
+    NoAccountsFileFoundInside(String),
 }

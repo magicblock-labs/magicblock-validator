@@ -10,6 +10,7 @@ use std::{
 
 use log::*;
 use rand::{thread_rng, Rng};
+use solana_accounts_db::{accounts_file::AccountsFile, append_vec::AppendVec};
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
     clock::Slot,
@@ -74,7 +75,7 @@ impl Default for AccountsPersister {
 }
 
 impl AccountsPersister {
-    pub(crate) fn new_with_paths(paths: Vec<PathBuf>) -> Self {
+    pub fn new_with_paths(paths: Vec<PathBuf>) -> Self {
         Self {
             paths,
             ..Default::default()
@@ -342,6 +343,80 @@ impl AccountsPersister {
         }
 
         infos
+    }
+
+    // -----------------
+    // Querying Storage
+    // -----------------
+    pub fn load_most_recent_store(
+        &self,
+    ) -> AccountsDbResult<AccountStorageEntry> {
+        let path = self
+            .paths
+            .first()
+            .ok_or(AccountsDbError::NoStoragePathProvided)?;
+
+        // Read all files sorted slot/append_vec_id and return the last one
+        let files = fs::read_dir(path)?;
+        let mut files: Vec<_> = files
+            .filter_map(|entry| {
+                entry.ok().and_then(|entry| {
+                    let path = entry.path();
+                    let slot_and_id = path
+                        .file_name()
+                        .and_then(|file_name| file_name.to_str())
+                        .and_then(|file_name| {
+                            let parts =
+                                file_name.split('.').collect::<Vec<_>>();
+                            (parts.len() == 2).then(|| (parts[0], parts[1]))
+                        })
+                        .and_then(|(slot_str, append_vec_id_str)| {
+                            let slot = slot_str.parse::<Slot>().ok();
+                            let append_vec_id =
+                                append_vec_id_str.parse::<AppendVecId>().ok();
+                            if let (Some(slot), Some(append_vec_id)) =
+                                (slot, append_vec_id)
+                            {
+                                Some((slot, append_vec_id))
+                            } else {
+                                None
+                            }
+                        });
+                    slot_and_id.map(|(slot, id)| (path, slot, id))
+                })
+            })
+            .collect();
+
+        files.sort_by(
+            |(_, slot_a, id_a): &(PathBuf, Slot, AppendVecId),
+             (_, slot_b, id_b): &(PathBuf, Slot, AppendVecId)| {
+                // Sorting in reverse order
+                if slot_a == slot_b {
+                    id_b.cmp(id_a)
+                } else {
+                    slot_b.cmp(slot_a)
+                }
+            },
+        );
+        let (file, slot, id) =
+            files
+                .first()
+                .ok_or(AccountsDbError::NoAccountsFileFoundInside(
+                    path.display().to_string(),
+                ))?;
+
+        // Create a AccountStorageEntry from the file
+        let file_size = fs::metadata(file)?.len() as usize;
+        let (append_vec, num_accounts) =
+            AppendVec::new_from_file(file, file_size, true)?;
+        let accounts = AccountsFile::AppendVec(append_vec);
+        let storage = AccountStorageEntry::new_existing(
+            *slot,
+            *id,
+            accounts,
+            num_accounts,
+        );
+        Ok(storage)
     }
 
     // -----------------
