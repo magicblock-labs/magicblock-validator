@@ -134,8 +134,10 @@ pub fn schedule_commit_cpi_instruction(
         magic_context_id,
         players,
         committees,
-        false,
-        false,
+        ScheduleCommitCpiInstructionImplArgs {
+            undelegate: false,
+            commit_payer: false,
+        },
     )
 }
 
@@ -152,8 +154,10 @@ pub fn schedule_commit_with_payer_cpi_instruction(
         magic_context_id,
         players,
         committees,
-        false,
-        true,
+        ScheduleCommitCpiInstructionImplArgs {
+            undelegate: false,
+            commit_payer: true,
+        },
     )
 }
 
@@ -170,9 +174,16 @@ pub fn schedule_commit_and_undelegate_cpi_instruction(
         magic_context_id,
         players,
         committees,
-        true,
-        false,
+        ScheduleCommitCpiInstructionImplArgs {
+            undelegate: true,
+            commit_payer: false,
+        },
     )
+}
+
+struct ScheduleCommitCpiInstructionImplArgs {
+    undelegate: bool,
+    commit_payer: bool,
 }
 
 fn schedule_commit_cpi_instruction_impl(
@@ -181,8 +192,7 @@ fn schedule_commit_cpi_instruction_impl(
     magic_context_id: Pubkey,
     players: &[Pubkey],
     committees: &[Pubkey],
-    undelegate: bool,
-    commit_payer: bool,
+    args: ScheduleCommitCpiInstructionImplArgs,
 ) -> Instruction {
     let program_id = crate::id();
     let mut account_metas = vec![
@@ -194,13 +204,13 @@ fn schedule_commit_cpi_instruction_impl(
         account_metas.push(AccountMeta::new(*committee, false));
     }
 
-    let args = ScheduleCommitCpiArgs {
+    let cpi_args = ScheduleCommitCpiArgs {
         players: players.to_vec(),
         modify_accounts: true,
-        undelegate,
-        commit_payer,
+        undelegate: args.undelegate,
+        commit_payer: args.commit_payer,
     };
-    let ix = ScheduleCommitInstruction::ScheduleCommitCpi(args);
+    let ix = ScheduleCommitInstruction::ScheduleCommitCpi(cpi_args);
     Instruction::new_with_borsh(program_id, &ix, account_metas)
 }
 

@@ -4,7 +4,7 @@ use magicblock_account_cloner::{
     standard_blacklisted_accounts, AccountCloner, AccountClonerError,
     AccountClonerOutput, AccountClonerPermissions,
     AccountClonerUnclonableReason, RemoteAccountClonerClient,
-    RemoteAccountClonerWorker,
+    RemoteAccountClonerWorker, ValidatorCollectionMode,
 };
 use magicblock_account_dumper::AccountDumperStub;
 use magicblock_account_fetcher::AccountFetcherStub;
@@ -45,7 +45,7 @@ fn setup_custom(
         allowed_program_ids,
         blacklisted_accounts,
         payer_init_lamports,
-        true,
+        ValidatorCollectionMode::NoFees,
         permissions,
         Pubkey::new_unique(),
     );

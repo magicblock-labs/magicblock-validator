@@ -54,7 +54,8 @@ pub enum AccountClonerUnclonableReason {
     DoesNotAllowUndelegatedAccount,
     DoesNotAllowDelegatedAccount,
     DoesNotAllowProgramAccount,
-    DoesNotHaveEscrowedLamports,
+    DoesNotHaveEscrowAccount,
+    DoesNotHaveDelegatedEscrowAccount,
     DoesNotAllowEscrowedPda,
     DoesNotAllowFeepayerWithEscrowedPda,
     /// If an account is delegated to our validator then we should use the latest

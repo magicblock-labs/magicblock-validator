@@ -70,7 +70,7 @@ async fn main() {
 
     let validator_keypair = validator_keypair();
 
-    info!("Validator identity: {:?}", validator_keypair.pubkey());
+    info!("Validator identity: {}", validator_keypair.pubkey());
 
     let geyser_grpc_config = config.geyser_grpc.clone();
     let config = MagicValidatorConfig {

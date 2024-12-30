@@ -60,7 +60,7 @@ pub fn extract_sent_commit_info_from_logs(
             .collect::<Vec<Pubkey>>()
     }
 
-    fn hashset_from_log_line(log: &str) -> HashSet<(Pubkey, Pubkey)> {
+    fn pubkey_owner_tuple_hashset_from_log_line(log: &str) -> HashSet<(Pubkey, Pubkey)> {
         log.trim_end_matches(']')
             .split_whitespace()
             .skip(3)
@@ -94,7 +94,7 @@ pub fn extract_sent_commit_info_from_logs(
         } else if log.starts_with("ScheduledCommitSent excluded: ") {
             excluded = pubkeys_from_log_line(log)
         } else if log.starts_with("ScheduledCommitSent fee payers: ") {
-            feepayers = hashset_from_log_line(log)
+            feepayers = pubkey_owner_tuple_hashset_from_log_line(log)
         } else if log.starts_with("ScheduledCommitSent signature[") {
             let commit_sig = log
                 .trim_end_matches(']')

@@ -13,6 +13,7 @@ use solana_sdk::{
 use crate::{
     errors::custom_error_codes,
     utils::accounts::get_instruction_pubkey_with_idx, validator,
+    FeePayerAccount,
 };
 
 #[derive(Debug, Clone)]
@@ -24,7 +25,7 @@ pub struct SentCommit {
     pub chain_signatures: Vec<Signature>,
     pub included_pubkeys: Vec<Pubkey>,
     pub excluded_pubkeys: Vec<Pubkey>,
-    pub feepayers: HashSet<(Pubkey, Pubkey)>,
+    pub feepayers: HashSet<FeePayerAccount>,
     pub requested_undelegation: bool,
 }
 
@@ -70,7 +71,7 @@ impl From<SentCommit> for SentCommitPrintable {
             feepayers: commit
                 .feepayers
                 .iter()
-                .map(|(p, m)| format!("{:?}:{:?}", p, m))
+                .map(|fp| format!("{}:{}", fp.pubkey, fp.delegated_pda))
                 .collect::<Vec<_>>()
                 .join(", "),
             requested_undelegation: commit.requested_undelegation,

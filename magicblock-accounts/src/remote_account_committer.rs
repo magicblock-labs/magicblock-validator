@@ -79,7 +79,7 @@ impl AccountCommitter for RemoteAccountCommitter {
             .map_err(|_| AccountsError::TooManyCommittees(committees.len()))?;
         let undelegation_count: u32 = committees
             .iter()
-            .filter(|c| c.undelegation_request)
+            .filter(|c| c.undelegation_requested)
             .count()
             .try_into()
             .map_err(|_| AccountsError::TooManyCommittees(committees.len()))?;
@@ -95,7 +95,7 @@ impl AccountCommitter for RemoteAccountCommitter {
             owner,
             account_data,
             slot,
-            undelegation_request,
+            undelegation_requested: undelegation_request,
         } in committees.iter()
         {
             let committer = self.committer_authority.pubkey();

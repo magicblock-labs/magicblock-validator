@@ -234,9 +234,14 @@ where
                     )
                     .entry(account_chain_snapshot.pubkey)
                 {
-                    Entry::Occupied(mut _entry) => {},
+                    Entry::Occupied(_entry) => {},
                     Entry::Vacant(entry) => {
-                        entry.insert(ExternalCommitableAccount::new(&account_chain_snapshot.pubkey, &delegation_record.owner, &delegation_record.commit_frequency, &get_epoch()));
+                        entry.insert(ExternalCommitableAccount::new(
+                            &account_chain_snapshot.pubkey,
+                            &delegation_record.owner,
+                            &delegation_record.commit_frequency,
+                            &get_epoch())
+                        );
                     },
                 }
             }
@@ -256,8 +261,13 @@ where
                 "RwLock of ExternalAccountsManager.external_commitable_accounts is poisoned",
             )
             .values()
-            .filter(|x| x.needs_commit(&now))
-            .map(|x| (x.get_pubkey(), x.owner, x.last_commit_hash))
+            .flat_map(|x| {
+                if x.needs_commit(&now) {
+                    Some((x.get_pubkey(), x.owner, x.last_commit_hash))
+                } else {
+                    None
+                }
+            })
             .collect::<Vec<_>>();
         if accounts_to_be_committed.is_empty() {
             return Ok(vec![]);
@@ -316,7 +326,7 @@ where
                         owner: *owner,
                         account_data: acc,
                         slot,
-                        undelegation_request,
+                        undelegation_requested: undelegation_request,
                     });
                 }
             } else {

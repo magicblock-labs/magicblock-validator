@@ -7,6 +7,7 @@ use conjunto_transwise::{
 };
 use magicblock_account_cloner::{
     AccountCloner, RemoteAccountClonerClient, RemoteAccountClonerWorker,
+    ValidatorCollectionMode,
 };
 use magicblock_account_dumper::AccountDumperStub;
 use magicblock_account_fetcher::AccountFetcherStub;
@@ -52,7 +53,7 @@ fn setup_with_lifecycle(
         None,
         HashSet::new(),
         Some(1_000_000_000),
-        true,
+        ValidatorCollectionMode::NoFees,
         lifecycle.to_account_cloner_permissions(),
         Pubkey::new_unique(),
     );

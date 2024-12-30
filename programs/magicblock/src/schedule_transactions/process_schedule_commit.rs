@@ -10,7 +10,7 @@ use solana_sdk::{
 };
 
 use crate::{
-    magic_context::{MagicContext, ScheduledCommit},
+    magic_context::{CommittedAccount, MagicContext, ScheduledCommit},
     magicblock_instruction::scheduled_commit_sent,
     schedule_transactions::transaction_scheduler::TransactionScheduler,
     utils::{
@@ -86,6 +86,18 @@ pub(crate) fn process_schedule_commit(
     // Instead the integration tests ensure that this works as expected
     #[cfg(not(test))]
     let frames = crate::utils::instruction_context_frames::InstructionContextFrames::try_from(transaction_context)?;
+
+    // During unit tests we assume the first committee has the correct program ID
+    #[cfg(test)]
+    let first_committee_owner = {
+        *get_instruction_account_with_idx(
+            transaction_context,
+            COMMITTEES_START as u16,
+        )?
+        .borrow()
+        .owner()
+    };
+
     #[cfg(not(test))]
     let parent_program_id = {
         let parent_program_id =
@@ -101,17 +113,6 @@ pub(crate) fn process_schedule_commit(
         parent_program_id
     };
 
-    // During unit tests we assume the first committee has the correct program ID
-    #[cfg(test)]
-    let first_committee_owner = {
-        *get_instruction_account_with_idx(
-            transaction_context,
-            COMMITTEES_START as u16,
-        )?
-        .borrow()
-        .owner()
-    };
-
     #[cfg(test)]
     let parent_program_id = Some(&first_committee_owner);
 
@@ -119,7 +120,7 @@ pub(crate) fn process_schedule_commit(
     // NOTE: we don't require PDAs to be signers as in our case verifying that the
     // program owning the PDAs invoked us via CPI is sufficient
     // Thus we can be `invoke`d unsigned and no seeds need to be provided
-    let mut pubkeys: Vec<(Pubkey, Pubkey)> = Vec::new();
+    let mut pubkeys: Vec<CommittedAccount> = Vec::new();
     for idx in COMMITTEES_START..ix_accs_len {
         let acc_pubkey =
             get_instruction_pubkey_with_idx(transaction_context, idx as u16)?;
@@ -150,8 +151,10 @@ pub(crate) fn process_schedule_commit(
                 };
             }
             #[allow(clippy::unnecessary_literal_unwrap)]
-            pubkeys
-                .push((*acc_pubkey, *parent_program_id.unwrap_or(&acc_owner)));
+            pubkeys.push(CommittedAccount {
+                pubkey: *acc_pubkey,
+                owner: *parent_program_id.unwrap_or(&acc_owner),
+            });
         }
 
         if opts.request_undelegation {

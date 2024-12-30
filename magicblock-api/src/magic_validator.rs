@@ -14,7 +14,7 @@ use conjunto_transwise::RpcProviderConfig;
 use log::*;
 use magicblock_account_cloner::{
     standard_blacklisted_accounts, CloneOutputMap, RemoteAccountClonerClient,
-    RemoteAccountClonerWorker,
+    RemoteAccountClonerWorker, ValidatorCollectionMode,
 };
 use magicblock_account_dumper::AccountDumperBank;
 use magicblock_account_fetcher::{
@@ -268,14 +268,18 @@ impl MagicValidator {
             accounts_config.allowed_program_ids,
             blacklisted_accounts,
             accounts_config.payer_init_lamports,
-            accounts_config.payer_base_fees.is_none(),
+            if accounts_config.payer_base_fees.is_none() {
+                ValidatorCollectionMode::NoFees
+            } else {
+                ValidatorCollectionMode::Fees
+            },
             accounts_config.lifecycle.to_account_cloner_permissions(),
             identity_keypair.pubkey(),
         );
 
         let accounts_manager = Self::init_accounts_manager(
             &bank,
-            &remote_account_cloner_worker.get_last_clone_outputs(),
+            &remote_account_cloner_worker.get_last_clone_output(),
             RemoteAccountClonerClient::new(&remote_account_cloner_worker),
             transaction_status_sender.clone(),
             &identity_keypair,

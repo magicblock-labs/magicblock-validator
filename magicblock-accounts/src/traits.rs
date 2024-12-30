@@ -38,7 +38,7 @@ pub struct AccountCommittee {
     /// Slot at which the commit was scheduled.
     pub slot: u64,
     /// Only present if undelegation was requested.
-    pub undelegation_request: bool,
+    pub undelegation_requested: bool,
 }
 
 #[derive(Debug)]

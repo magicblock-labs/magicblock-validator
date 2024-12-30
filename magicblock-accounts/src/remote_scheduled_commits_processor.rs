@@ -13,7 +13,8 @@ use magicblock_metrics::metrics;
 use magicblock_mutator::Cluster;
 use magicblock_processor::execute_transaction::execute_legacy_transaction;
 use magicblock_program::{
-    register_scheduled_commit_sent, SentCommit, TransactionScheduler,
+    register_scheduled_commit_sent, FeePayerAccount, SentCommit,
+    TransactionScheduler,
 };
 use magicblock_transaction_status::TransactionStatusSender;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
@@ -59,50 +60,58 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
             // Determine which accounts are available and can be committed
             let mut committees = vec![];
             let all_pubkeys: HashSet<Pubkey> = HashSet::from_iter(
-                commit.accounts.iter().map(|(p, _)| p).cloned(),
+                commit
+                    .accounts
+                    .iter()
+                    .map(|ca| ca.pubkey)
+                    .collect::<Vec<_>>(),
             );
             let mut feepayers = HashSet::new();
 
-            for (pubkey, owner) in commit.accounts {
-                let mut commitment_pubkey = pubkey;
-                let mut commitment_pubkey_owner = owner;
+            for committed_account in commit.accounts {
+                let mut commitment_pubkey = committed_account.pubkey;
+                let mut commitment_pubkey_owner = committed_account.owner;
                 if let Some(Cloned {
                     account_chain_snapshot,
                     ..
-                }) =
-                    Self::fetch_cloned_account(&pubkey, &self.cloned_accounts)
-                {
+                }) = Self::fetch_cloned_account(
+                    &committed_account.pubkey,
+                    &self.cloned_accounts,
+                ) {
                     // If the account is a FeePayer, we committed the mapped delegated account
                     if account_chain_snapshot.chain_state.is_feepayer() {
                         commitment_pubkey =
                             AccountChainSnapshot::ephemeral_balance_pda(
-                                &pubkey,
+                                &committed_account.pubkey,
                             );
                         commitment_pubkey_owner =
                             AccountChainSnapshot::ephemeral_balance_pda_owner();
-                        feepayers.insert((pubkey, commitment_pubkey));
+                        feepayers.insert(FeePayerAccount {
+                            pubkey: committed_account.pubkey,
+                            delegated_pda: commitment_pubkey,
+                        });
                     } else if account_chain_snapshot
                         .chain_state
                         .is_undelegated()
                     {
-                        error!("Scheduled commit account '{}' is undelegated. This is not supported.", pubkey);
+                        error!("Scheduled commit account '{}' is undelegated. This is not supported.", committed_account.pubkey);
                     }
                 }
 
-                match account_provider.get_account(&pubkey) {
+                match account_provider.get_account(&committed_account.pubkey) {
                     Some(account_data) => {
                         committees.push(AccountCommittee {
                             pubkey: commitment_pubkey,
                             owner: commitment_pubkey_owner,
                             account_data,
                             slot: commit.slot,
-                            undelegation_request: commit.request_undelegation,
+                            undelegation_requested: commit.request_undelegation,
                         });
                     }
                     None => {
                         error!(
                             "Scheduled commmit account '{}' not found. It must have gotten undelegated and removed since it was scheduled.",
-                            pubkey
+                            committed_account.pubkey
                         );
                     }
                 }

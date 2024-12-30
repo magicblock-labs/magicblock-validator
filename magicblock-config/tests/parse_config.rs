@@ -3,8 +3,8 @@ use std::net::{IpAddr, Ipv4Addr};
 use magicblock_config::{
     AccountsConfig, AllowedProgram, CommitStrategy, EphemeralConfig,
     GeyserGrpcConfig, LedgerConfig, LifecycleMode, MetricsConfig,
-    MetricsServiceConfig, Payer, ProgramConfig, RemoteConfig, RpcConfig,
-    ValidatorConfig,
+    MetricsServiceConfig, Payer, PayerParams, ProgramConfig, RemoteConfig,
+    RpcConfig, ValidatorConfig,
 };
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey};
 use url::Url;
@@ -168,7 +168,11 @@ fn test_accounts_payer() {
         config,
         EphemeralConfig {
             accounts: AccountsConfig {
-                payer: Payer::new(None, Some(2_000), None),
+                payer: Payer::new(PayerParams {
+                    init_lamports: None,
+                    init_sol: Some(2_000),
+                    base_fees: None,
+                }),
                 ..Default::default()
             },
             ..Default::default()
@@ -188,7 +192,11 @@ fn test_accounts_payer_with_base_fees() {
         config,
         EphemeralConfig {
             accounts: AccountsConfig {
-                payer: Payer::new(None, None, Some(1_000)),
+                payer: Payer::new(PayerParams {
+                    init_lamports: None,
+                    init_sol: None,
+                    base_fees: Some(1_000),
+                }),
                 ..Default::default()
             },
             ..Default::default()

@@ -131,9 +131,11 @@ pub fn process_instruction<'a>(
         ScheduleCommitCpi(args) => process_schedulecommit_cpi(
             accounts,
             &args.players,
-            args.modify_accounts,
-            args.undelegate,
-            args.commit_payer,
+            ProcessSchedulecommitCpiArgs {
+                modify_accounts: args.modify_accounts,
+                undelegate: args.undelegate,
+                commit_payer: args.commit_payer,
+            },
         ),
         ScheduleCommitAndUndelegateCpiModAfter(players) => {
             process_schedulecommit_and_undelegation_cpi_with_mod_after(
@@ -247,15 +249,19 @@ pub fn process_delegate_cpi(
     Ok(())
 }
 
+pub struct ProcessSchedulecommitCpiArgs {
+    pub modify_accounts: bool,
+    pub undelegate: bool,
+    pub commit_payer: bool,
+}
+
 // -----------------
 // Schedule Commit
 // -----------------
 pub fn process_schedulecommit_cpi(
     accounts: &[AccountInfo],
     player_pubkeys: &[Pubkey],
-    modify_accounts: bool,
-    undelegate: bool,
-    commit_payer: bool,
+    args: ProcessSchedulecommitCpiArgs,
 ) -> Result<(), ProgramError> {
     msg!("Processing schedulecommit_cpi instruction");
 
@@ -277,7 +283,7 @@ pub fn process_schedulecommit_cpi(
         return Err(ProgramError::InvalidArgument);
     }
 
-    if modify_accounts {
+    if args.modify_accounts {
         for committee in &remaining {
             // Increase count of the PDA account
             let main_account = {
@@ -298,7 +304,7 @@ pub fn process_schedulecommit_cpi(
     account_infos.extend(remaining.iter());
 
     let mut committees = remaining.iter().collect::<Vec<_>>();
-    if commit_payer {
+    if args.commit_payer {
         msg!("Commiting payer");
         committees.push(payer);
     }
@@ -308,7 +314,7 @@ pub fn process_schedulecommit_cpi(
         committees.iter().map(|x| x.key).collect::<Vec<_>>()
     );
 
-    if undelegate {
+    if args.undelegate {
         commit_and_undelegate_accounts(
             payer,
             committees,

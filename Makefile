@@ -46,7 +46,7 @@ fmt:
 
 # TODO - use "-W clippy::pedantic"
 lint:
-	cargo clippy --all-targets -- -D warnings -A unexpected_cfgs
+	cargo clippy --all-targets -- -D warnings
 
 ci-test-unit:
 	RUST_BACKTRACE=1 cargo $(CARGO_TEST_NOCAP)
