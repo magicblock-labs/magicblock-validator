@@ -457,8 +457,8 @@ impl Bank {
         };
 
         // Transaction expiration needs to be a fixed amount of time
-        // So we compute how many slot it takes for a transaction to expire
-        // Depending on how fast each slot is compute
+        // So we compute how many slots it takes for a transaction to expire
+        // Depending on how fast each slot is computed
         let max_age = DEFAULT_MS_PER_SLOT * MAX_RECENT_BLOCKHASHES as u64
             / millis_per_slot;
 
