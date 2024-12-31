@@ -218,7 +218,6 @@ where
             warn!("Cloning is disabled, no need to hydrate the cache");
             return Ok(());
         }
-        // let limit = std::env::var("LIMIT").unwrap().parse::<usize>().unwrap();
         let account_keys = self
             .internal_account_provider
             .get_all_accounts()
@@ -233,11 +232,6 @@ where
                     debug!("Account '{}' lamports > (u64::MAX / 2). Will not clone.", pubkey);
                     return false;
                 }
-                // FIXME: @@@ we need to throttle cloning accounts
-                // if pubkey.eq(&<Pubkey as std::str::FromStr>::from_str("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v").unwrap()) {
-                //     debug!("Account '{}' is the problematic. Will not clone.", pubkey);
-                //     return false;
-                // }
 
                 // Program accounts owned by the BPFUpgradableLoader have two parts:
                 // The program and the executable data account, program account marked as `executable`.
@@ -691,8 +685,9 @@ where
             .fetch_program_idl(program_id_pubkey, min_context_slot)
             .await?
         {
+            // TODO @@@ remove `if account.lamports > 0` or adapt tests
             // Only add the IDL account if it exists on chain
-            Some((pubkey, account)) if account.lamports > 0 => {
+            Some((pubkey, account)) /* if account.lamports > 0 */ => {
                 Some((pubkey, account))
             }
             _ => None,
