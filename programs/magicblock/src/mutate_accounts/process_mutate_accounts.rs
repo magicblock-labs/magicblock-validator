@@ -1,3 +1,5 @@
+use std::collections::{HashMap, HashSet};
+
 use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
 use solana_sdk::{
     account::{ReadableAccount, WritableAccount},
@@ -6,7 +8,6 @@ use solana_sdk::{
     system_program,
     transaction_context::TransactionContext,
 };
-use std::collections::{HashMap, HashSet};
 
 use crate::{
     magicblock_instruction::{
