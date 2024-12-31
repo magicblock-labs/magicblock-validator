@@ -7,7 +7,6 @@ mod test_validator;
 #[derive(Debug, Parser)]
 #[command(name = "genx")]
 #[command(about = "genx CLI tool")]
-
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -34,7 +33,6 @@ enum Commands {
 
 fn main() {
     let cli = Cli::parse();
-
     match cli.command {
         Commands::TestValidator {
             ledger_path,
