@@ -633,7 +633,7 @@ impl MagicValidator {
             self.remote_account_cloner_worker.take()
         {
             if !self.config.ledger.reset {
-                remote_account_cloner_worker.hydrate(self.bank()).await?;
+                remote_account_cloner_worker.hydrate().await?;
                 info!(" ======== Hydration complete =========");
             }
 

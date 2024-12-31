@@ -17,17 +17,14 @@ use magicblock_account_dumper::AccountDumper;
 use magicblock_account_fetcher::AccountFetcher;
 use magicblock_account_updates::AccountUpdates;
 use magicblock_accounts_api::InternalAccountProvider;
-use magicblock_bank::bank::Bank;
 use magicblock_metrics::metrics;
 use magicblock_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
 use solana_sdk::{
-    account::{Account, AccountSharedData, ReadableAccount},
+    account::{Account, ReadableAccount},
     bpf_loader_upgradeable::{self, get_program_data_address},
     clock::Slot,
-    native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
     signature::Signature,
-    system_program,
 };
 use tokio::{
     sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
@@ -213,7 +210,7 @@ where
             || self.permissions.allow_cloning_program_accounts
     }
 
-    pub async fn hydrate(&self, bank: &Bank) -> AccountClonerResult<()> {
+    pub async fn hydrate(&self) -> AccountClonerResult<()> {
         if !self.can_clone() {
             warn!("Cloning is disabled, no need to hydrate the cache");
             return Ok(());
@@ -249,7 +246,7 @@ where
                 }
                 true
             })
-            .map(|(pubkey, acc)| (pubkey, *acc.owner(), acc.lamports()))
+            .map(|(pubkey, acc)| (pubkey, *acc.owner()))
             .collect::<HashSet<_>>();
 
         debug!("Hydrating {} accounts", account_keys.len());
@@ -265,58 +262,30 @@ where
         // future.
         stream
             .map(Ok::<_, AccountClonerError>)
-            .try_for_each_concurrent(
-                10,
-                |(pubkey, owner, lamports)| async move {
-                    trace!("Hydrating '{}'", pubkey);
-                    // TODO(thlorenz): @@@ these accounts should not be in our validator
-                    // they are cloned because they are mentioned in a transaction and even
-                    // though they don't exist on chain they are added + funded with 1_000 SOL
-                    // TODO: leave them there (unless it blocks restart)
-                    let is_invalid_wallet = owner.eq(&system_program::ID)
-                        && lamports == 1_000 * LAMPORTS_PER_SOL;
-                    if is_invalid_wallet {
-                        trace!("Not cloning invalid wallet '{}'", pubkey);
-                        // Removing from bank by storing 0 lamport account at the address
-                        bank.store_account(
-                            &pubkey,
-                            &AccountSharedData::default(),
-                        );
+            .try_for_each_concurrent(10, |(pubkey, owner)| async move {
+                trace!("Hydrating '{}'", pubkey);
+                let res = self
+                    .do_clone_and_update_cache(
+                        &pubkey,
+                        ValidatorStage::Hydrating {
+                            validator_identity: self.validator_identity,
+                            account_owner: owner,
+                        },
+                    )
+                    .await;
+                match res {
+                    Ok(output) => {
+                        trace!("Cloned '{}': {:?}", pubkey, output);
                         Ok(())
-                    } else {
-                        let res = self
-                            .do_clone_and_update_cache(
-                                &pubkey,
-                                ValidatorStage::Hydrating {
-                                    validator_identity: self.validator_identity,
-                                    account_owner: owner,
-                                },
-                            )
-                            .await;
-                        match res {
-                            Ok(output) => {
-                                trace!("Cloned '{}': {:?}", pubkey, output);
-                                Ok(())
-                            }
-                            Err(err) => {
-                                error!(
-                                    "Failed to clone {} ('{:?}')",
-                                    pubkey, err
-                                );
-                                // NOTE: the account fetch already has retries built in, so
-                                // we don't to retry here
-                                // TODO: @@@ some accounts cannot be fetched for some reason as
-                                // they only exist in our validator, for now we ignore this
-                                // For now we prevent this from happening by ignoring _invalid
-                                // wallets_, but once we remove that workaround we need to handle
-                                // those non-existing accounts. It is actually a bug that they got
-                                // cloned and funded in our validator in the first place.
-                                Err(err)
-                            }
-                        }
                     }
-                },
-            )
+                    Err(err) => {
+                        error!("Failed to clone {} ('{:?}')", pubkey, err);
+                        // NOTE: the account fetch already has retries built in, so
+                        // we don't to retry here
+                        Err(err)
+                    }
+                }
+            })
             .await
     }
 
