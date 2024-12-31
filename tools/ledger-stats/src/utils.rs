@@ -32,7 +32,10 @@ pub fn accounts_storage_from_ledger(
         .join("accounts")
         .join("run");
     let persister = AccountsPersister::new_with_paths(vec![accounts_dir]);
-    persister.load_most_recent_store(u64::MAX).unwrap()
+    persister
+        .load_most_recent_store(u64::MAX)
+        .unwrap()
+        .expect("No recent store found")
 }
 
 pub fn open_ledger(ledger_path: &Path) -> Ledger {

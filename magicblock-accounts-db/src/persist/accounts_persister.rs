@@ -351,7 +351,7 @@ impl AccountsPersister {
     pub fn load_most_recent_store(
         &self,
         max_slot: Slot,
-    ) -> AccountsDbResult<(AccountStorageEntry, Slot)> {
+    ) -> AccountsDbResult<Option<(AccountStorageEntry, Slot)>> {
         let path = self
             .paths
             .first()
@@ -400,7 +400,7 @@ impl AccountsPersister {
             },
         );
 
-        let (file, slot, id) = {
+        let matching_file = {
             let mut matching_file = None;
             for (file, slot, id) in files {
                 if slot <= max_slot {
@@ -409,14 +409,15 @@ impl AccountsPersister {
                 }
             }
             matching_file
-        }
-        // TODO: @@@ finding accounts should be optional
-        .ok_or(
-            AccountsDbError::NoAccountsFileWithMaxSlotFoundInside(
+        };
+        let Some((file, slot, id)) = matching_file else {
+            warn!(
+                "No storage found with slot <= {} inside {}",
                 max_slot,
                 path.display().to_string(),
-            ),
-        )?;
+            );
+            return Ok(None);
+        };
 
         // Create a AccountStorageEntry from the file
         let file_size = fs::metadata(&file)?.len() as usize;
@@ -425,7 +426,7 @@ impl AccountsPersister {
         let accounts = AccountsFile::AppendVec(append_vec);
         let storage =
             AccountStorageEntry::new_existing(slot, id, accounts, num_accounts);
-        Ok((storage, slot))
+        Ok(Some((storage, slot)))
     }
 
     // -----------------

@@ -91,13 +91,13 @@ fn iter_blocks(
     Ok(slot)
 }
 
-fn hydrate_bank(
-    bank: &Bank,
-    max_slot: Slot,
-) -> LedgerResult<Option<(Slot, usize)>> {
+fn hydrate_bank(bank: &Bank, max_slot: Slot) -> LedgerResult<(Slot, usize)> {
     let persister =
         AccountsPersister::new_with_paths(vec![bank.accounts_path.clone()]);
-    let (storage, slot) = persister.load_most_recent_store(max_slot)?;
+    let Some((storage, slot)) = persister.load_most_recent_store(max_slot)?
+    else {
+        return Ok((0, 0));
+    };
     let all_accounts = storage.all_accounts();
     let len = all_accounts.len();
     let storable_accounts = all_accounts
@@ -106,7 +106,7 @@ fn hydrate_bank(
         .collect::<Vec<_>>();
     bank.store_accounts((slot, &storable_accounts[..]));
 
-    Ok(Some((slot, len)))
+    Ok((slot, len))
 }
 
 /// Processes the provided ledger updating the bank and returns the slot
@@ -115,10 +115,7 @@ pub fn process_ledger(ledger: &Ledger, bank: &Bank) -> LedgerResult<u64> {
     // TODO: @@@ we need to add X slots back as well in order to get the
     // blockhahses for the transactions that follow
     let (max_slot, _) = ledger.get_max_blockhash()?;
-    let (starting_slot, len) = match hydrate_bank(bank, max_slot)? {
-        Some((slot, len)) => (slot + 1, len),
-        None => (0, 0),
-    };
+    let (starting_slot, len) = hydrate_bank(bank, max_slot)?;
     debug!(
         "Loaded {} accounts into bank from storage replaying from slot: {}",
         len, starting_slot
