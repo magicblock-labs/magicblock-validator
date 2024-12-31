@@ -102,7 +102,6 @@ enum Command {
         #[structopt(help = "Pubkey of the account")]
         pubkey: String,
     },
-
     Blockhash {
         #[structopt(parse(from_os_str))]
         ledger_path: PathBuf,
