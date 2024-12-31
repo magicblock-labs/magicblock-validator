@@ -654,9 +654,8 @@ where
             .fetch_program_idl(program_id_pubkey, min_context_slot)
             .await?
         {
-            // TODO @@@ remove `if account.lamports > 0` or adapt tests
             // Only add the IDL account if it exists on chain
-            Some((pubkey, account)) /* if account.lamports > 0 */ => {
+            Some((pubkey, account)) if account.lamports > 0 => {
                 Some((pubkey, account))
             }
             _ => None,
