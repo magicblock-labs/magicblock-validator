@@ -13,6 +13,8 @@ use solana_sdk::{account::Account, clock::Slot, pubkey::Pubkey};
 
 use crate::{AccountFetcher, AccountFetcherResult};
 
+const MIN_ACCOUNT_RENT: u64 = 890880;
+
 #[derive(Debug)]
 enum AccountFetcherStubState {
     FeePayer,
@@ -60,6 +62,7 @@ impl AccountFetcherStub {
                         AccountChainState::Undelegated {
                             account: Account {
                                 owner: Pubkey::new_unique(),
+                                lamports: MIN_ACCOUNT_RENT,
                                 ..Default::default()
                             },
                             delegation_inconsistency: DelegationInconsistency::DelegationRecordNotFound,
@@ -68,13 +71,17 @@ impl AccountFetcherStub {
                     AccountFetcherStubState::Delegated {
                         delegation_record,
                     } => AccountChainState::Delegated {
-                        account: Default::default(),
+                        account: Account {
+                            lamports: MIN_ACCOUNT_RENT,
+                            ..Default::default()
+                        },
                         delegation_record: delegation_record.clone(),
                     },
                     AccountFetcherStubState::Executable => {
                         AccountChainState::Undelegated {
                             account: Account {
                                 executable: true,
+                                lamports: MIN_ACCOUNT_RENT,
                                 ..Default::default()
                             },
                             delegation_inconsistency: DelegationInconsistency::DelegationRecordNotFound,
