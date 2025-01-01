@@ -16,7 +16,11 @@ impl PersistsAccountModData for Ledger {
         let data = self.read_account_mod_data(id)?.map(|x| x.data);
         if Log::enabled(&log::Level::Trace) {
             if let Some(data) = &data {
-                trace!("Loading data with id: {}, data-len: {}", id, data.len());
+                trace!(
+                    "Loading data with id: {}, data-len: {}",
+                    id,
+                    data.len()
+                );
             } else {
                 trace!("Loading data with id: {} (not found)", id);
             }
