@@ -15,7 +15,6 @@ use solana_sdk::{
 // -----------------
 pub fn get_context_with_delegated_committees(
     ncommittees: usize,
-    payer_with_escrow: bool,
 ) -> ScheduleCommitTestContext {
     let ctx = if std::env::var("FIXED_KP").is_ok() {
         ScheduleCommitTestContext::try_new(ncommittees)
@@ -26,9 +25,7 @@ pub fn get_context_with_delegated_committees(
 
     ctx.init_committees().unwrap();
     ctx.delegate_committees(None).unwrap();
-    if payer_with_escrow {
-        ctx.escrow_lamports_for_payer().unwrap();
-    }
+    ctx.escrow_lamports_for_payer().unwrap();
     ctx
 }
 

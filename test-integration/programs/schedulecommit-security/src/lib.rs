@@ -1,6 +1,9 @@
 use borsh::{BorshDeserialize, BorshSerialize};
 use ephemeral_rollups_sdk_v2::ephem::create_schedule_commit_ix;
-use program_schedulecommit::{api::schedule_commit_cpi_instruction, process_schedulecommit_cpi, ProcessSchedulecommitCpiArgs};
+use program_schedulecommit::{
+    api::schedule_commit_cpi_instruction, process_schedulecommit_cpi,
+    ProcessSchedulecommitCpiArgs,
+};
 use solana_program::{
     account_info::{next_account_info, AccountInfo},
     declare_id,
@@ -74,13 +77,15 @@ pub fn process_instruction<'a>(
             process_sibling_schedule_cpis(accounts, &players)
         }
         NonCpi => process_non_cpi(accounts),
-        DirectScheduleCommitCpi(players) => {
-            process_schedulecommit_cpi(accounts, &players, ProcessSchedulecommitCpiArgs{
+        DirectScheduleCommitCpi(players) => process_schedulecommit_cpi(
+            accounts,
+            &players,
+            ProcessSchedulecommitCpiArgs {
                 modify_accounts: false,
                 undelegate: false,
                 commit_payer: false,
-            })
-        }
+            },
+        ),
     }
 }
 

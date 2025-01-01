@@ -45,10 +45,7 @@ solana-rpc-client = "1.18.26"
 solana-rpc-client-api = "1.18.26"
 solana-transaction-status = "1.18.26"
 solana-program-test = "1.18.26"
-solana-zk-token-sdk = "1.18.26"
-spl-associated-token-account = "2.3.0"
 schedulecommit-client = { path = "schedulecommit/client" }
-spl-token-2022 = "2.0.0"
 
 [patch.crates-io]
 spl-associated-token-account = { git = "https://github.com/solana-labs/solana-program-library", rev = "950efde", package = "spl-associated-token-account", version = "2.3.1" }

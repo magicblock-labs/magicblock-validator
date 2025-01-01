@@ -21,7 +21,7 @@ mod utils;
 #[test]
 fn test_committing_fee_payer_without_escrowing_lamports() {
     run_test!({
-        let ctx = get_context_with_delegated_committees(2, false);
+        let ctx = get_context_with_delegated_committees(2);
 
         let ScheduleCommitTestContextFields {
             payer,
@@ -75,7 +75,7 @@ fn test_committing_fee_payer_without_escrowing_lamports() {
 #[test]
 fn test_committing_fee_payer_escrowing_lamports() {
     run_test!({
-        let ctx = get_context_with_delegated_committees(2, true);
+        let ctx = get_context_with_delegated_committees(2);
 
         let ScheduleCommitTestContextFields {
             payer,

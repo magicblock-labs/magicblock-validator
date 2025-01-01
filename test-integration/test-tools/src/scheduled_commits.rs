@@ -60,7 +60,9 @@ pub fn extract_sent_commit_info_from_logs(
             .collect::<Vec<Pubkey>>()
     }
 
-    fn pubkey_owner_tuple_hashset_from_log_line(log: &str) -> HashSet<(Pubkey, Pubkey)> {
+    fn pubkey_owner_tuple_hashset_from_log_line(
+        log: &str,
+    ) -> HashSet<(Pubkey, Pubkey)> {
         log.trim_end_matches(']')
             .split_whitespace()
             .skip(3)

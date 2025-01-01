@@ -19,7 +19,7 @@ mod utils;
 #[test]
 fn test_committing_two_accounts() {
     run_test!({
-        let ctx = get_context_with_delegated_committees(2, true);
+        let ctx = get_context_with_delegated_committees(2);
 
         let ScheduleCommitTestContextFields {
             payer,

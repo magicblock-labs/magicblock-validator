@@ -47,7 +47,7 @@ fn commit_and_undelegate_one_account(
     Signature,
     Result<Signature, ClientError>,
 ) {
-    let ctx = get_context_with_delegated_committees(1, true);
+    let ctx = get_context_with_delegated_committees(1);
     let ScheduleCommitTestContextFields {
         payer,
         committees,
@@ -108,7 +108,7 @@ fn commit_and_undelegate_two_accounts(
     Signature,
     Result<Signature, ClientError>,
 ) {
-    let ctx = get_context_with_delegated_committees(2, true);
+    let ctx = get_context_with_delegated_committees(2);
     let ScheduleCommitTestContextFields {
         payer,
         committees,
@@ -461,24 +461,16 @@ fn test_committing_and_undelegating_one_account_modifying_it_after() {
         );
 
         // 2. Retrieve the signature of the scheduled commit sent
-        let logs = ctx.fetch_ephemeral_logs(sig).unwrap_or_else(|| {
-            panic!("Scheduled commit sent logs not found for sig {:?}", sig)
-        });
-        let scheduled_commmit_sent_sig =
-            extract_scheduled_commit_sent_signature_from_logs(&logs)
-                .unwrap_or_else(|| {
-                    panic!(
-                "ScheduledCommitSent signature not found in logs, {:#?}\n{}",
-                logs, ctx
-            )
-                });
+        let logs = ctx.fetch_ephemeral_logs(sig).unwrap();
+        let sig =
+            extract_scheduled_commit_sent_signature_from_logs(&logs).unwrap();
 
         // 3. Assert that the commit was not scheduled -> the transaction is not confirmed
         assert!(!ctx
             .ephem_client
             .as_ref()
             .unwrap()
-            .confirm_transaction(&scheduled_commmit_sent_sig)
+            .confirm_transaction(&sig)
             .unwrap());
     });
 }
@@ -496,17 +488,9 @@ fn test_committing_and_undelegating_two_accounts_modifying_them_after() {
         );
 
         // 2. Retrieve the signature of the scheduled commit sent
-        let logs = ctx.fetch_ephemeral_logs(sig).unwrap_or_else(|| {
-            panic!("Scheduled commit sent logs not found for sig {:?}", sig)
-        });
+        let logs = ctx.fetch_ephemeral_logs(sig).unwrap();
         let scheduled_commmit_sent_sig =
-            extract_scheduled_commit_sent_signature_from_logs(&logs)
-                .unwrap_or_else(|| {
-                    panic!(
-                "ScheduledCommitSent signature not found in logs, {:#?}\n{}",
-                logs, ctx
-            )
-                });
+            extract_scheduled_commit_sent_signature_from_logs(&logs).unwrap();
 
         // 3. Assert that the commit was not scheduled -> the transaction is not confirmed
         assert!(!ctx
