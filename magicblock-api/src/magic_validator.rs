@@ -634,7 +634,7 @@ impl MagicValidator {
         {
             if !self.config.ledger.reset {
                 remote_account_cloner_worker.hydrate().await?;
-                info!(" ======== Hydration complete =========");
+                info!("Validator hydration complete (bank hydrate, replay, account clone)");
             }
 
             let cancellation_token = self.token.clone();
