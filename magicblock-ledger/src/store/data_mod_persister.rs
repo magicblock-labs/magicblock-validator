@@ -13,8 +13,14 @@ impl PersistsAccountModData for Ledger {
     }
 
     fn load(&self, id: u64) -> Result<Option<Vec<u8>>, Box<dyn Error>> {
-        trace!("Loading data with id: {}", id);
         let data = self.read_account_mod_data(id)?.map(|x| x.data);
+        if Log::enabled(&log::Level::Trace) {
+            if let Some(data) = &data {
+                trace!("Loading data with id: {}, data-len: {}", id, data.len());
+            } else {
+                trace!("Loading data with id: {} (not found)", id);
+            }
+        }
         Ok(data)
     }
 }

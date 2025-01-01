@@ -22,7 +22,7 @@ pub fn print_account(ledger: &Ledger, pubkey: &Pubkey) {
     let data_len = data.len();
     let oncurve = pubkey.is_on_curve();
 
-    eprintln!("{} at slot: {}", pubkey, slot);
+    println!("{} at slot: {}", pubkey, slot);
     let table = Table::new("{:<}  {:>}")
         .with_row(Row::new().with_cell("Column").with_cell("Value"))
         .with_row(

@@ -1,7 +1,7 @@
 use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
 
 use ledger_stats::{accounts_storage_from_ledger, open_ledger};
-use solana_sdk::{account::ReadableAccount, bpf_loader_upgradeable};
+use solana_sdk::account::ReadableAccount;
 use tempfile::tempdir;
 
 pub struct TestValidatorConfig {
@@ -43,18 +43,12 @@ pub(crate) fn gen_test_validator_start_script(
     ];
 
     for (pubkey, executable, owner) in accounts {
-        // NOTE: do we need to treat executables differently or is cloning
-        // sufficient given we don't run those in the test valiator, but just
-        // want to make sure they can be cloned by the ephemeral
-        let _is_executable_data =
-            !executable && owner.eq(&bpf_loader_upgradeable::ID);
-        // if is_executable_data {
-        //     continue;
-        // }
-        // if executable {
-        //     args.push("--upgradeable-program".to_string());
-        // } else {
-        // }
+        // NOTE: we may need to treat executables differently if just cloning
+        // at startup is not sufficient even though we also will clone the
+        // executable data account.
+        // For now we don't run programs in the test validator, but just
+        // want to make sure they can be cloned by the ephemeral, so it is not
+        // yet important.
         args.push("--maybe-clone".to_string());
         args.push(pubkey.to_string());
     }
@@ -64,7 +58,7 @@ pub(crate) fn gen_test_validator_start_script(
 
     let script = format!(
         "
-#!/usr/env bash
+#!/usr/bin/env bash
 set -e
 solana-test-validator  \\\n  {}",
         args.join(" \\\n  ")

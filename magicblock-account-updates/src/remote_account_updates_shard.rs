@@ -87,10 +87,11 @@ impl RemoteAccountUpdatesShard {
         // We'll store useful maps for each of the account subscriptions
         let mut account_streams = StreamMap::new();
         let mut account_unsubscribes = HashMap::new();
+        const LOG_CLOCK_FREQ: u64 = 100;
+        let mut log_clock_count = 0;
+
         // Loop forever until we stop the worker
         loop {
-            const LOG_CLOCK_FREQ: u64 = 100;
-            let mut log_clock_count = 0;
             tokio::select! {
                 // When we receive a new clock notification
                 Some(clock_update) = clock_stream.next() => {
@@ -168,24 +169,24 @@ impl RemoteAccountUpdatesShard {
     ) {
         // We don't need to acquire a write lock if we already know the slot is already recent enough
         let first_subscribed_slot = self.first_subscribed_slots
-                .read()
-                .expect("RwLock of RemoteAccountUpdatesShard.first_subscribed_slots poisoned")
-                .get(&pubkey)
-                .cloned();
+            .read()
+            .expect("RwLock of RemoteAccountUpdatesShard.first_subscribed_slots poisoned")
+            .get(&pubkey)
+            .cloned();
         if subscribed_slot < first_subscribed_slot.unwrap_or(u64::MAX) {
             // If the subscribe slot seems to be the oldest one, we need to acquire a write lock to update it
             match self.first_subscribed_slots
-                    .write()
-                    .expect("RwLock of RemoteAccountUpdatesShard.first_subscribed_slots poisoned")
-                    .entry(pubkey)
-                {
-                    Entry::Vacant(entry) => {
-                        entry.insert(subscribed_slot);
-                    }
-                    Entry::Occupied(mut entry) => {
-                        *entry.get_mut() = min(*entry.get(), subscribed_slot);
-                    }
+                .write()
+                .expect("RwLock of RemoteAccountUpdatesShard.first_subscribed_slots poisoned")
+                .entry(pubkey)
+            {
+                Entry::Vacant(entry) => {
+                    entry.insert(subscribed_slot);
                 }
+                Entry::Occupied(mut entry) => {
+                    *entry.get_mut() = min(*entry.get(), subscribed_slot);
+                }
+            }
         }
     }
 

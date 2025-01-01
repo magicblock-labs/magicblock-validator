@@ -26,9 +26,8 @@ pub fn create_accounts_run_and_snapshot_dirs(
         utils::fs::remove_directory_contents_if_exists(account_dir.as_ref())?;
         fs::create_dir_all(&run_path)?;
     }
-    if snapshot_path.is_dir() {
+    if !snapshot_path.is_dir() {
         fs::create_dir_all(&snapshot_path)?;
-        fs::create_dir_all(&run_path)?;
     }
 
     Ok((run_path, snapshot_path))

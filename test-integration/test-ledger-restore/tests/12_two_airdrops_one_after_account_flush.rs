@@ -22,8 +22,10 @@ fn restore_ledger_with_two_airdrops_with_account_flush_in_between() {
 
     let pubkey = Pubkey::new_unique();
 
-    let (mut validator, _) = write(&ledger_path, &pubkey);
+    let (mut validator, slot) = write(&ledger_path, &pubkey);
     validator.kill().unwrap();
+
+    assert!(slot > FLUSH_ACCOUNTS_SLOT_FREQ);
 
     let mut validator = read(&ledger_path, &pubkey);
     validator.kill().unwrap();
