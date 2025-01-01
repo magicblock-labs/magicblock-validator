@@ -1,7 +1,6 @@
 use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
 
 use ledger_stats::{accounts_storage_from_ledger, open_ledger};
-use solana_sdk::account::ReadableAccount;
 use tempfile::tempdir;
 
 pub struct TestValidatorConfig {
@@ -26,7 +25,7 @@ pub(crate) fn gen_test_validator_start_script(
         storage
             .all_accounts()
             .into_iter()
-            .map(|x| (*x.pubkey(), x.executable(), *x.owner()))
+            .map(|x| *x.pubkey())
             .collect::<Vec<_>>()
     } else {
         eprintln!("Generating test validator script without accounts");
@@ -42,7 +41,7 @@ pub(crate) fn gen_test_validator_start_script(
         "10000".to_string(),
     ];
 
-    for (pubkey, executable, owner) in accounts {
+    for pubkey in accounts {
         // NOTE: we may need to treat executables differently if just cloning
         // at startup is not sufficient even though we also will clone the
         // executable data account.
