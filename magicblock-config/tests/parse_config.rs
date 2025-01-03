@@ -185,7 +185,7 @@ fn test_accounts_payer() {
 
 #[test]
 fn test_validator_with_base_fees() {
-    let toml = include_str!("fixtures/10_accounts-payer-base-fees.toml");
+    let toml = include_str!("fixtures/10_validator-base-fees.toml");
     let config = toml::from_str::<EphemeralConfig>(toml).unwrap();
     assert_eq!(
         config,
