@@ -4,7 +4,7 @@ version.workspace = true
 edition.workspace = true
 
 [dev-dependencies]
-ephemeral-rollups-sdk-v2 = { workspace = true }
+ephemeral-rollups-sdk = { workspace = true }
 integration-test-tools = { workspace = true }
 log = { workspace = true }
 program-schedulecommit = { workspace = true, features = ["no-entrypoint"] }

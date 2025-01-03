@@ -1,7 +1,10 @@
 use integration_test_tools::run_test;
 use log::*;
 
-use crate::utils::{assert_feepayer_was_committed, get_context_with_delegated_committees_without_payer_escrow};
+use crate::utils::{
+    assert_feepayer_was_committed,
+    get_context_with_delegated_committees_without_payer_escrow,
+};
 use integration_test_tools::conversions::pubkey_from_magic_program;
 use magicblock_core::magic_program;
 use program_schedulecommit::api::schedule_commit_with_payer_cpi_instruction;

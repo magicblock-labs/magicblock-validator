@@ -69,7 +69,7 @@ csv = "1.3.0"
 eager = "0.1.0"
 enum-iterator = "1.5.0"
 env_logger = "0.11.2"
-delegation-program = { path = "../delegation-program" }
+magicblock-delegation-program = { path = "../delegation-program" }
 fd-lock = "4.0.2"
 fs_extra = "1.3.0"
 futures-util = "0.3.30"

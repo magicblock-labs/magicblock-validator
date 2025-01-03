@@ -1,4 +1,4 @@
-use ephemeral_rollups_sdk_v2::consts::DELEGATION_PROGRAM_ID;
+use ephemeral_rollups_sdk::consts::DELEGATION_PROGRAM_ID;
 use integration_test_tools::scheduled_commits::ScheduledCommitResult;
 use program_schedulecommit::MainAccount;
 use schedulecommit_client::ScheduleCommitTestContext;
@@ -17,7 +17,6 @@ pub fn get_context_with_delegated_committees(
     ncommittees: usize,
 ) -> ScheduleCommitTestContext {
     get_context_with_delegated_committees_impl(ncommittees, true)
-
 }
 
 pub fn get_context_with_delegated_committees_without_payer_escrow(
@@ -29,13 +28,13 @@ pub fn get_context_with_delegated_committees_without_payer_escrow(
 fn get_context_with_delegated_committees_impl(
     ncommittees: usize,
     escrow_lamports_for_payer: bool,
-) -> ScheduleCommitTestContext{
+) -> ScheduleCommitTestContext {
     let ctx = if std::env::var("FIXED_KP").is_ok() {
         ScheduleCommitTestContext::try_new(ncommittees)
     } else {
         ScheduleCommitTestContext::try_new_random_keys(ncommittees)
     }
-        .unwrap();
+    .unwrap();
 
     ctx.init_committees().unwrap();
     ctx.delegate_committees(None).unwrap();

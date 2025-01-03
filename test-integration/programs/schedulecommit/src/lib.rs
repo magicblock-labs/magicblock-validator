@@ -1,9 +1,9 @@
 use borsh::{BorshDeserialize, BorshSerialize};
-use ephemeral_rollups_sdk_v2::cpi::{DelegateAccounts, DelegateConfig};
-use ephemeral_rollups_sdk_v2::ephem::{
+use ephemeral_rollups_sdk::cpi::{DelegateAccounts, DelegateConfig};
+use ephemeral_rollups_sdk::ephem::{
     commit_accounts, commit_and_undelegate_accounts,
 };
-use ephemeral_rollups_sdk_v2::{
+use ephemeral_rollups_sdk::{
     consts::EXTERNAL_UNDELEGATE_DISCRIMINATOR,
     cpi::{delegate_account, undelegate_account},
 };

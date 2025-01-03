@@ -1,6 +1,6 @@
 use borsh::{to_vec, BorshDeserialize};
-use ephemeral_rollups_sdk_v2::cpi::{DelegateAccounts, DelegateConfig};
-use ephemeral_rollups_sdk_v2::{
+use ephemeral_rollups_sdk::cpi::{DelegateAccounts, DelegateConfig};
+use ephemeral_rollups_sdk::{
     consts::EXTERNAL_UNDELEGATE_DISCRIMINATOR,
     cpi::{delegate_account, undelegate_account},
     ephem::{commit_accounts, commit_and_undelegate_accounts},

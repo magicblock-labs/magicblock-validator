@@ -7,7 +7,7 @@ edition.workspace = true
 borsh = { workspace = true }
 program-schedulecommit = { workspace = true, features = ["no-entrypoint"] }
 solana-program = { workspace = true }
-ephemeral-rollups-sdk-v2 = { workspace = true }
+ephemeral-rollups-sdk = { workspace = true }
 
 [lib]
 crate-type = ["cdylib", "lib"]

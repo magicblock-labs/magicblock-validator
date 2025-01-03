@@ -10,7 +10,7 @@ edition.workspace = true
 [dependencies]
 async-trait = { workspace = true }
 conjunto-transwise = { workspace = true }
-delegation-program = { workspace = true }
+magicblock-delegation-program = { workspace = true }
 futures-util = { workspace = true }
 log = { workspace = true }
 magicblock-bank = { workspace = true }

@@ -1,8 +1,8 @@
-use ephemeral_rollups_sdk_v2::consts::BUFFER;
-use ephemeral_rollups_sdk_v2::delegate_args::{
+use ephemeral_rollups_sdk::consts::BUFFER;
+use ephemeral_rollups_sdk::delegate_args::{
     DelegateAccountMetas, DelegateAccounts,
 };
-use ephemeral_rollups_sdk_v2::pda::{
+use ephemeral_rollups_sdk::pda::{
     delegation_metadata_pda_from_delegated_account,
     delegation_record_pda_from_delegated_account,
     ephemeral_balance_pda_from_payer,
@@ -39,16 +39,17 @@ pub fn init_payer_escrow(payer: Pubkey) -> [Instruction; 2] {
     // Top-up Ix
     let ephemeral_balance_pda = ephemeral_balance_pda_from_payer(&payer, 0);
     let top_up_ix = Instruction {
-        program_id: ephemeral_rollups_sdk_v2::id(),
+        program_id: ephemeral_rollups_sdk::id(),
         accounts: vec![
             AccountMeta::new(payer, true),
             AccountMeta::new_readonly(payer, false),
             AccountMeta::new(ephemeral_balance_pda, false),
             AccountMeta::new_readonly(system_program::id(), false),
         ],
+        // discriminator + TopUpEphemeralBalanceArgs from the magicblock-delegation-program
         data: [
             vec![9, 0, 0, 0, 0, 0, 0, 0],
-            vec![0x00, 0xA3, 0xE1, 0x11, 0x00, 0x00, 0x00, 0x00, 0x00],
+            vec![0, 163, 225, 17, 0, 0, 0, 0, 0],
         ]
         .concat(),
     };
@@ -56,7 +57,7 @@ pub fn init_payer_escrow(payer: Pubkey) -> [Instruction; 2] {
     // Delegate ephemeral balance Ix
     let buffer = Pubkey::find_program_address(
         &[BUFFER, &ephemeral_balance_pda.to_bytes()],
-        &ephemeral_rollups_sdk_v2::id(),
+        &ephemeral_rollups_sdk::id(),
     );
     let delegation_record_pda =
         delegation_record_pda_from_delegated_account(&ephemeral_balance_pda);
@@ -64,7 +65,7 @@ pub fn init_payer_escrow(payer: Pubkey) -> [Instruction; 2] {
         delegation_metadata_pda_from_delegated_account(&ephemeral_balance_pda);
 
     let delegate_ix = Instruction {
-        program_id: ephemeral_rollups_sdk_v2::id(),
+        program_id: ephemeral_rollups_sdk::id(),
         accounts: vec![
             AccountMeta::new(payer, true),
             AccountMeta::new_readonly(payer, true),
@@ -73,9 +74,14 @@ pub fn init_payer_escrow(payer: Pubkey) -> [Instruction; 2] {
             AccountMeta::new(delegation_record_pda, false),
             AccountMeta::new(delegation_metadata_pda, false),
             AccountMeta::new_readonly(system_program::id(), false),
-            AccountMeta::new_readonly(ephemeral_rollups_sdk_v2::id(), false),
+            AccountMeta::new_readonly(ephemeral_rollups_sdk::id(), false),
         ],
-        data: vec![10, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        // discriminator + DelegateEphemeralBalanceArgs from the magicblock-delegation-program
+        data: [
+            vec![10, 0, 0, 0, 0, 0, 0, 0],
+            vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        ]
+        .concat(),
     };
     [top_up_ix, delegate_ix]
 }
@@ -94,9 +100,9 @@ pub fn delegate_account_cpi_instruction(player: Pubkey) -> Instruction {
     let delegate_metas = DelegateAccountMetas::from(delegate_accounts);
     let account_metas = vec![
         AccountMeta::new(player, true),
-        delegate_metas.delegate_account,
+        delegate_metas.delegated_account,
         delegate_metas.owner_program,
-        delegate_metas.buffer,
+        delegate_metas.delegate_buffer,
         delegate_metas.delegation_record,
         delegate_metas.delegation_metadata,
         delegate_metas.delegation_program,

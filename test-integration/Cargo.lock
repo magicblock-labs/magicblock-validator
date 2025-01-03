@@ -1121,42 +1121,42 @@ dependencies = [
 ]
 
 [[package]]
-name = "ephemeral-rollups-sdk-attribute-commit-v2"
-version = "0.1.2"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "ephemeral-rollups-sdk-attribute-delegate-v2"
-version = "0.1.2"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "ephemeral-rollups-sdk-attribute-ephemeral-v2"
-version = "0.1.2"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 1.0.109",
-]
-
-[[package]]
-name = "ephemeral-rollups-sdk-v2"
-version = "0.1.2"
+name = "ephemeral-rollups-sdk"
+version = "0.2.0"
 dependencies = [
  "borsh 0.10.4",
- "ephemeral-rollups-sdk-attribute-commit-v2",
- "ephemeral-rollups-sdk-attribute-delegate-v2",
- "ephemeral-rollups-sdk-attribute-ephemeral-v2",
+ "ephemeral-rollups-sdk-attribute-commit",
+ "ephemeral-rollups-sdk-attribute-delegate",
+ "ephemeral-rollups-sdk-attribute-ephemeral",
  "paste",
  "solana-program",
+]
+
+[[package]]
+name = "ephemeral-rollups-sdk-attribute-commit"
+version = "0.2.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "ephemeral-rollups-sdk-attribute-delegate"
+version = "0.2.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "ephemeral-rollups-sdk-attribute-ephemeral"
+version = "0.2.0"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -2555,7 +2555,7 @@ name = "program-flexi-counter"
 version = "0.0.0"
 dependencies = [
  "borsh 1.5.3",
- "ephemeral-rollups-sdk-v2",
+ "ephemeral-rollups-sdk",
  "solana-program",
 ]
 
@@ -2564,7 +2564,7 @@ name = "program-schedulecommit"
 version = "0.0.0"
 dependencies = [
  "borsh 1.5.3",
- "ephemeral-rollups-sdk-v2",
+ "ephemeral-rollups-sdk",
  "solana-program",
 ]
 
@@ -2573,7 +2573,7 @@ name = "program-schedulecommit-security"
 version = "0.0.0"
 dependencies = [
  "borsh 1.5.3",
- "ephemeral-rollups-sdk-v2",
+ "ephemeral-rollups-sdk",
  "program-schedulecommit",
  "solana-program",
 ]
@@ -2920,7 +2920,7 @@ dependencies = [
 name = "schedulecommit-test-scenarios"
 version = "0.0.0"
 dependencies = [
- "ephemeral-rollups-sdk-v2",
+ "ephemeral-rollups-sdk",
  "integration-test-tools",
  "log",
  "magicblock-core",
