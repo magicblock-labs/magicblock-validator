@@ -268,7 +268,7 @@ impl MagicValidator {
             accounts_config.allowed_program_ids,
             blacklisted_accounts,
             accounts_config.payer_init_lamports,
-            if accounts_config.payer_base_fees.is_none() {
+            if config.validator_config.validator.base_fees.is_none() {
                 ValidatorCollectionMode::NoFees
             } else {
                 ValidatorCollectionMode::Fees

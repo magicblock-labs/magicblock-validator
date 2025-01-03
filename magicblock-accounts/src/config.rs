@@ -10,7 +10,6 @@ pub struct AccountsConfig {
     pub lifecycle: LifecycleMode,
     pub commit_compute_unit_price: u64,
     pub payer_init_lamports: Option<u64>,
-    pub payer_base_fees: Option<u64>,
     pub allowed_program_ids: Option<HashSet<Pubkey>>,
 }
 

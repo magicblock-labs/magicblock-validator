@@ -171,7 +171,6 @@ fn test_accounts_payer() {
                 payer: Payer::new(PayerParams {
                     init_lamports: None,
                     init_sol: Some(2_000),
-                    base_fees: None,
                 }),
                 ..Default::default()
             },
@@ -185,7 +184,7 @@ fn test_accounts_payer() {
 }
 
 #[test]
-fn test_accounts_payer_with_base_fees() {
+fn test_validator_with_base_fees() {
     let toml = include_str!("fixtures/10_accounts-payer-base-fees.toml");
     let config = toml::from_str::<EphemeralConfig>(toml).unwrap();
     assert_eq!(
@@ -195,14 +194,17 @@ fn test_accounts_payer_with_base_fees() {
                 payer: Payer::new(PayerParams {
                     init_lamports: None,
                     init_sol: None,
-                    base_fees: Some(1_000),
                 }),
+                ..Default::default()
+            },
+            validator: ValidatorConfig {
+                base_fees: Some(1_000),
                 ..Default::default()
             },
             ..Default::default()
         }
     );
-    assert_eq!(config.accounts.payer.base_fees, Some(1_000u64));
+    assert_eq!(config.validator.base_fees, Some(1_000u64));
 }
 
 #[test]
