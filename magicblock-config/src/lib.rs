@@ -201,17 +201,17 @@ impl EphemeralConfig {
                 .unwrap_or_else(|err| panic!("Failed to parse 'VALIDATOR_MILLIS_PER_SLOT' as u64: {:?}", err));
         }
 
-        if let Ok(base_fees) = env::var("BASE_FEES") {
+        if let Ok(base_fees) = env::var("VALIDATOR_BASE_FEES") {
             config.validator.base_fees =
                 Some(u64::from_str(&base_fees).unwrap_or_else(|err| {
-                    panic!("Failed to parse 'BASE_FEES' as u64: {:?}", err)
+                    panic!("Failed to parse 'VALIDATOR_BASE_FEES' as u64: {:?}", err)
                 }));
         }
 
-        if let Ok(sig_verify) = env::var("SIG_VERIFY") {
+        if let Ok(sig_verify) = env::var("VALIDATOR_SIG_VERIFY") {
             config.validator.sigverify = bool::from_str(&sig_verify)
                 .unwrap_or_else(|err| {
-                    panic!("Failed to parse 'SIG_VERIFY' as bool: {:?}", err)
+                    panic!("Failed to parse 'VALIDATOR_SIG_VERIFY' as bool: {:?}", err)
                 });
         }
 
