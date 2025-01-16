@@ -6,7 +6,8 @@ use std::{
 };
 
 use conjunto_transwise::{
-    AccountChainSnapshotShared, AccountChainState, DelegationRecord,
+    AccountChainSnapshot, AccountChainSnapshotShared, AccountChainState,
+    DelegationRecord,
 };
 use futures_util::{
     future::join_all,
@@ -35,7 +36,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     AccountClonerError, AccountClonerListeners, AccountClonerOutput,
     AccountClonerPermissions, AccountClonerResult,
-    AccountClonerUnclonableReason,
+    AccountClonerUnclonableReason, CloneOutputMap,
 };
 
 pub enum ValidatorStage {
@@ -50,6 +51,11 @@ pub enum ValidatorStage {
         account_owner: Pubkey,
     },
     Running,
+}
+
+pub enum ValidatorCollectionMode {
+    Fees,
+    NoFees,
 }
 
 impl ValidatorStage {
@@ -96,12 +102,13 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU> {
     allowed_program_ids: Option<HashSet<Pubkey>>,
     blacklisted_accounts: HashSet<Pubkey>,
     payer_init_lamports: Option<u64>,
+    validator_charges_fees: ValidatorCollectionMode,
     permissions: AccountClonerPermissions,
     fetch_retries: u64,
     clone_request_receiver: UnboundedReceiver<Pubkey>,
     clone_request_sender: UnboundedSender<Pubkey>,
     clone_listeners: Arc<RwLock<HashMap<Pubkey, AccountClonerListeners>>>,
-    last_clone_output: Arc<RwLock<HashMap<Pubkey, AccountClonerOutput>>>,
+    last_clone_output: CloneOutputMap,
     validator_identity: Pubkey,
 }
 
@@ -121,6 +128,7 @@ where
         allowed_program_ids: Option<HashSet<Pubkey>>,
         blacklisted_accounts: HashSet<Pubkey>,
         payer_init_lamports: Option<u64>,
+        validator_charges_fees: ValidatorCollectionMode,
         permissions: AccountClonerPermissions,
         validator_authority: Pubkey,
     ) -> Self {
@@ -136,6 +144,7 @@ where
             allowed_program_ids,
             blacklisted_accounts,
             payer_init_lamports,
+            validator_charges_fees,
             permissions,
             fetch_retries,
             clone_request_receiver,
@@ -148,6 +157,10 @@ where
 
     pub fn get_clone_request_sender(&self) -> UnboundedSender<Pubkey> {
         self.clone_request_sender.clone()
+    }
+
+    pub fn get_last_clone_output(&self) -> CloneOutputMap {
+        self.last_clone_output.clone()
     }
 
     pub fn get_clone_listeners(
@@ -307,16 +320,19 @@ where
             .get_last_known_update_slot(pubkey)
             .unwrap_or(u64::MIN);
         // Check for the happy/fast path, we may already have cloned this account before
-        match self.get_last_clone_output(pubkey) {
+        match self.get_last_clone_output_from_pubkey(pubkey) {
             // If we already cloned this account, check what the output of the clone was
             Some(last_clone_output) => match &last_clone_output {
-                // If the previous clone suceeded, we may be able to re-use it, need to check further
+                // If the previous clone succeeded, we may be able to re-use it, need to check further
                 AccountClonerOutput::Cloned {
                     account_chain_snapshot: snapshot,
                     ..
                 } => {
-                    // If the clone output is recent enough, that directly
-                    if snapshot.at_slot >= last_known_update_slot {
+                    // If the clone output is recent enough,
+                    // or the account is a feepayer, we don't clone again
+                    if snapshot.at_slot >= last_known_update_slot
+                        || snapshot.chain_state.is_feepayer()
+                    {
                         Ok(last_clone_output)
                     }
                     // If the cloned account has been updated since clone, update the cache
@@ -399,7 +415,7 @@ where
         let account_chain_snapshot = if self.permissions.allow_cloning_refresh {
             // Mark the account for monitoring, we want to start to detect futures updates on it
             // since we're cloning it now, it's now part of the validator monitored accounts
-            // TODO(vbrunet)
+            // TODO(thlorenz):
             //  - https://github.com/magicblock-labs/magicblock-validator/issues/95
             //  - handle the case of the lamports updates better
             //  - we may not want to track lamport changes, especially for payers
@@ -450,18 +466,89 @@ where
         };
         // Generate cloning transactions
         let signature = match &account_chain_snapshot.chain_state {
-            // If the account has no data, we can use it for lamport transfers only
-            // We'll use the escrowed lamport value rather than its actual on-chain info
+            // If the account is a fee payer, we clone it assigning the init lamports of
+            // the escrowed lamports (if the validator is in the charging fees mode)
             AccountChainState::FeePayer { lamports, owner } => {
                 if !self.permissions.allow_cloning_feepayer_accounts {
                     return Ok(AccountClonerOutput::Unclonable {
                         pubkey: *pubkey,
-                        reason:
-                        AccountClonerUnclonableReason::DoesNotAllowFeePayerAccount,
+                        reason: AccountClonerUnclonableReason::DoesNotAllowFeePayerAccount,
                         at_slot: account_chain_snapshot.at_slot,
                     });
                 }
-                self.do_clone_feepayer_account(pubkey, *lamports, owner)?
+
+                match self.validator_charges_fees {
+                    ValidatorCollectionMode::NoFees => self
+                        .do_clone_feepayer_account_for_non_charging_validator(
+                            pubkey, *lamports, owner,
+                        )?,
+                    ValidatorCollectionMode::Fees => {
+                        // Fetch the associated escrowed account
+                        let escrowed_snapshot = match self
+                            .try_fetch_feepayer_chain_snapshot(pubkey, None)
+                            .await?
+                        {
+                            Some(snapshot) => snapshot,
+                            None => {
+                                return Ok(AccountClonerOutput::Unclonable {
+                                    pubkey: *pubkey,
+                                    reason: AccountClonerUnclonableReason::DoesNotHaveEscrowAccount,
+                                    at_slot: account_chain_snapshot.at_slot,
+                                });
+                            }
+                        };
+
+                        let escrowed_account = match escrowed_snapshot
+                            .chain_state
+                            .account()
+                        {
+                            Some(account) => account,
+                            None => {
+                                return Ok(AccountClonerOutput::Unclonable {
+                                    pubkey: *pubkey,
+                                    reason: AccountClonerUnclonableReason::DoesNotHaveDelegatedEscrowAccount,
+                                    at_slot: escrowed_snapshot.at_slot,
+                                });
+                            }
+                        };
+
+                        // Add the escrowed account as unclonable.
+                        // Fail cloning if the account is already present.
+                        // This prevents escrow PDA from being cloned if the lamports are mapped to the feepayer.
+                        {
+                            let mut last_clone_output = self
+                                .last_clone_output
+                                .write()
+                                .expect("RwLock of RemoteAccountClonerWorker.last_clone_output is poisoned");
+
+                            match last_clone_output
+                                .entry(escrowed_snapshot.pubkey)
+                            {
+                                Entry::Occupied(_) => {
+                                    return Ok(AccountClonerOutput::Unclonable {
+                                        pubkey: *pubkey,
+                                        reason: AccountClonerUnclonableReason::DoesNotAllowFeepayerWithEscrowedPda,
+                                        at_slot: account_chain_snapshot.at_slot,
+                                    });
+                                }
+                                Entry::Vacant(entry) => {
+                                    entry.insert(AccountClonerOutput::Unclonable {
+                                        pubkey: escrowed_snapshot.pubkey,
+                                        reason: AccountClonerUnclonableReason::DoesNotAllowEscrowedPda,
+                                        at_slot: Slot::MAX,
+                                    });
+                                }
+                            }
+                        }
+
+                        self.do_clone_feepayer_account(
+                            pubkey,
+                            escrowed_account.lamports,
+                            owner,
+                            Some(&escrowed_snapshot.pubkey),
+                        )?
+                    }
+                }
             }
             // If the account is present on-chain, but not delegated, it's just readonly data
             // We need to differenciate between programs and other accounts
@@ -492,7 +579,7 @@ where
                     )
                     .await?
                 }
-                // If it's not an executble, simpler rules apply
+                // If it's not an executable, simpler rules apply
                 else {
                     if !self.permissions.allow_cloning_undelegated_accounts {
                         return Ok(AccountClonerOutput::Unclonable {
@@ -533,9 +620,12 @@ where
                 }
                 self.do_clone_delegated_account(
                     pubkey,
-                    account,
-                    &delegation_record.owner,
-                    delegation_record.delegation_slot,
+                    // TODO(GabrielePicco): Avoid cloning
+                    &Account {
+                        lamports: delegation_record.lamports,
+                        ..account.clone()
+                    },
+                    delegation_record,
                 )?
             }
         };
@@ -551,16 +641,28 @@ where
         pubkey: &Pubkey,
         lamports: u64,
         owner: &Pubkey,
+        balance_pda: Option<&Pubkey>,
     ) -> AccountClonerResult<Signature> {
-        let lamports = self.payer_init_lamports.unwrap_or(lamports);
         self.account_dumper
             .dump_feepayer_account(pubkey, lamports, owner)
             .map_err(AccountClonerError::AccountDumperError)
             .inspect(|_| {
                 metrics::inc_account_clone(metrics::AccountClone::FeePayer {
                     pubkey: &pubkey.to_string(),
+                    balance_pda: balance_pda.map(|p| p.to_string()).as_deref(),
                 });
             })
+    }
+
+    /// Clone a fee payer account setting the initial lamports to payer_init_lamports
+    fn do_clone_feepayer_account_for_non_charging_validator(
+        &self,
+        pubkey: &Pubkey,
+        lamports: u64,
+        owner: &Pubkey,
+    ) -> AccountClonerResult<Signature> {
+        let lamports = self.payer_init_lamports.unwrap_or(lamports);
+        self.do_clone_feepayer_account(pubkey, lamports, owner, None)
     }
 
     fn do_clone_undelegated_account(
@@ -585,33 +687,33 @@ where
         &self,
         pubkey: &Pubkey,
         account: &Account,
-        owner: &Pubkey,
-        delegation_slot: Slot,
+        record: &DelegationRecord,
     ) -> AccountClonerResult<Signature> {
         // If we already cloned this account from the same delegation slot
         // Keep the local state as source of truth even if it changed on-chain
         if let Some(AccountClonerOutput::Cloned {
             account_chain_snapshot,
             signature,
-        }) = self.get_last_clone_output(pubkey)
+        }) = self.get_last_clone_output_from_pubkey(pubkey)
         {
             if let AccountChainState::Delegated {
                 delegation_record, ..
             } = &account_chain_snapshot.chain_state
             {
-                if delegation_record.delegation_slot == delegation_slot {
+                if delegation_record.delegation_slot == record.delegation_slot {
                     return Ok(signature);
                 }
             }
         };
         // If its the first time we're seeing this delegated account, dump it to the bank
         self.account_dumper
-            .dump_delegated_account(pubkey, account, owner)
+            .dump_delegated_account(pubkey, account, &record.owner)
             .map_err(AccountClonerError::AccountDumperError)
             .inspect(|_| {
                 metrics::inc_account_clone(metrics::AccountClone::Delegated {
+                    // TODO(bmuddha): optimize metrics, remove .to_string()
                     pubkey: &pubkey.to_string(),
-                    owner: &owner.to_string(),
+                    owner: &record.owner.to_string(),
                 });
             })
     }
@@ -740,7 +842,36 @@ where
             .map_err(AccountClonerError::AccountFetcherError)
     }
 
-    fn get_last_clone_output(
+    async fn try_fetch_feepayer_chain_snapshot(
+        &self,
+        feepayer: &Pubkey,
+        min_context_slot: Option<Slot>,
+    ) -> AccountClonerResult<Option<AccountChainSnapshotShared>> {
+        let account_snapshot = self
+            .account_fetcher
+            .fetch_account_chain_snapshot(
+                &AccountChainSnapshot::ephemeral_balance_pda(feepayer),
+                min_context_slot,
+            )
+            .await
+            .map_err(AccountClonerError::AccountFetcherError)?;
+        if let AccountChainState::Delegated {
+            account: _,
+            delegation_record,
+            ..
+        } = &account_snapshot.chain_state
+        {
+            // TODO(GabrielePicco): remove the Pubkey::default() option once we enforce the authority to be always set
+            if delegation_record.authority == self.validator_identity
+                || delegation_record.authority == Pubkey::default()
+            {
+                return Ok(Some(account_snapshot));
+            }
+        }
+        Ok(None)
+    }
+
+    fn get_last_clone_output_from_pubkey(
         &self,
         pubkey: &Pubkey,
     ) -> Option<AccountClonerOutput> {

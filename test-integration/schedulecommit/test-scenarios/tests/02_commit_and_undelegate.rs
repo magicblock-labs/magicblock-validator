@@ -1,3 +1,4 @@
+use integration_test_tools::scheduled_commits::extract_scheduled_commit_sent_signature_from_logs;
 use integration_test_tools::{
     conversions::pubkey_from_magic_program, run_test,
 };
@@ -359,7 +360,7 @@ fn test_committed_and_undelegated_accounts_redelegation() {
         } = ctx.fields();
         let chain_client = ctx.try_chain_client().unwrap();
 
-        // 1. Show we cannot use them in the ehpemeral anymore
+        // 1. Show we cannot use them in the ephemeral anymore
         {
             assert_cannot_increase_committee_count(
                 committees[0].1,
@@ -452,28 +453,51 @@ fn test_committing_and_undelegating_one_account_modifying_it_after() {
         let (ctx, sig, res) = commit_and_undelegate_one_account(true);
         info!("{} '{:?}'", sig, res);
 
+        // 1. Show we cannot use them in the ephemeral anymore
         ctx.assert_ephemeral_transaction_error(
             sig,
             &res,
             "instruction modified data of an account it does not own",
         );
 
-        // TODO(thlorenz): even though the transaction fails the account is still committed and undelegated
-        // this should be fixed ASAP and this test extended to verify that
-        // Same for test_committing_and_undelegating_two_accounts_modifying_them_after
+        // 2. Retrieve the signature of the scheduled commit sent
+        let logs = ctx.fetch_ephemeral_logs(sig).unwrap();
+        let sig =
+            extract_scheduled_commit_sent_signature_from_logs(&logs).unwrap();
+
+        // 3. Assert that the commit was not scheduled -> the transaction is not confirmed
+        assert!(!ctx
+            .ephem_client
+            .as_ref()
+            .unwrap()
+            .confirm_transaction(&sig)
+            .unwrap());
     });
 }
-
 #[test]
 fn test_committing_and_undelegating_two_accounts_modifying_them_after() {
     run_test!({
         let (ctx, sig, res) = commit_and_undelegate_two_accounts(true);
         info!("{} '{:?}'", sig, res);
 
+        // 1. Show we cannot use them in the ephemeral anymore
         ctx.assert_ephemeral_transaction_error(
             sig,
             &res,
             "instruction modified data of an account it does not own",
         );
+
+        // 2. Retrieve the signature of the scheduled commit sent
+        let logs = ctx.fetch_ephemeral_logs(sig).unwrap();
+        let scheduled_commmit_sent_sig =
+            extract_scheduled_commit_sent_signature_from_logs(&logs).unwrap();
+
+        // 3. Assert that the commit was not scheduled -> the transaction is not confirmed
+        assert!(!ctx
+            .ephem_client
+            .as_ref()
+            .unwrap()
+            .confirm_transaction(&scheduled_commmit_sent_sig)
+            .unwrap());
     });
 }

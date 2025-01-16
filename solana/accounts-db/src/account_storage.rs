@@ -23,7 +23,7 @@ pub type AccountStorageMap = DashMap<Slot, AccountStorageReference>;
 #[derive(Default, Debug)]
 pub struct AccountStorage {
     /// map from Slot -> the single append vec for the slot
-    map: AccountStorageMap,
+    pub map: AccountStorageMap,
     /// while shrink is operating on a slot, there can be 2 append vecs active for that slot
     /// Once the index has been updated to only refer to the new append vec, the single entry for the slot in 'map' can be updated.
     /// Entries in 'shrink_in_progress_map' can be found by 'get_account_storage_entry'

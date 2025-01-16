@@ -178,7 +178,7 @@ impl AccountsPersister {
                     if let Some(slot) = filename.split('.').next() {
                         if let Ok(slot) = slot.parse::<Slot>() {
                             if slot <= keep_after {
-                                fs::remove_file(entry.path())?;
+                                self.storage.map.remove(&slot);
                                 total_removed += 1;
                             }
                         } else {

@@ -210,7 +210,6 @@ fn extend_transaction_accounts_from_ix_adding_magic_context(
 fn assert_first_commit(
     scheduled_commits: &[ScheduledCommit],
     payer: &Pubkey,
-    owner: &Pubkey,
     committees: &[Pubkey],
     expected_request_undelegation: bool,
 ) {
@@ -223,7 +222,6 @@ fn assert_first_commit(
             slot,
             accounts,
             payer: p,
-            owner: o,
             blockhash: _,
             commit_sent_transaction,
             request_undelegation,
@@ -231,8 +229,7 @@ fn assert_first_commit(
             assert!(id >= &0);
             assert_eq!(slot, &test_clock.slot);
             assert_eq!(p, payer);
-            assert_eq!(o, owner);
-            assert_eq!(accounts, committees);
+            assert_eq!(accounts.iter().map(|ca| ca.pubkey).collect::<Vec<_>>().as_slice(), committees);
             let instruction = MagicBlockInstruction::ScheduledCommitSent(*id);
             assert_eq!(commit_sent_transaction.data(0), instruction.try_to_vec().unwrap());
             assert_eq!(*request_undelegation, expected_request_undelegation);
@@ -310,7 +307,6 @@ fn test_schedule_commit_single_account_success() {
         assert_first_commit(
             &scheduled_commits,
             &payer.pubkey(),
-            &program,
             &[committee],
             false,
         );
@@ -392,7 +388,6 @@ fn test_schedule_commit_single_account_and_request_undelegate_success() {
         assert_first_commit(
             &scheduled_commits,
             &payer.pubkey(),
-            &program,
             &[committee],
             true,
         );
@@ -495,7 +490,6 @@ fn test_schedule_commit_three_accounts_success() {
         assert_first_commit(
             &scheduled_commits,
             &payer.pubkey(),
-            &program,
             &[committee_uno, committee_dos, committee_tres],
             false,
         );
@@ -516,7 +510,7 @@ fn test_schedule_commit_three_accounts_and_request_undelegate_success() {
     let (
         mut processed_scheduled,
         magic_context_acc,
-        program,
+        _program,
         committee_uno,
         committee_dos,
         committee_tres,
@@ -600,7 +594,6 @@ fn test_schedule_commit_three_accounts_and_request_undelegate_success() {
         assert_first_commit(
             &scheduled_commits,
             &payer.pubkey(),
-            &program,
             &[committee_uno, committee_dos, committee_tres],
             true,
         );
@@ -679,7 +672,8 @@ fn test_schedule_commit_no_pdas_provided_to_ix() {
 }
 
 #[test]
-fn test_schedule_commit_three_accounts_second_not_owned_by_program() {
+fn test_schedule_commit_three_accounts_second_not_owned_by_program_and_not_signer(
+) {
     init_logger!();
 
     let payer = Keypair::from_seed(b"three_accounts_last_not_owned_by_program")
@@ -702,9 +696,10 @@ fn test_schedule_commit_three_accounts_second_not_owned_by_program() {
     let ix = instruction_from_account_metas(
         account_metas_last_committee_not_signer(
             &payer.pubkey(),
-            vec![committee_uno, committee_dos, committee_tres],
+            vec![committee_uno, committee_tres, committee_dos],
         ),
     );
+
     extend_transaction_accounts_from_ix(
         &ix,
         &mut accounts_data,

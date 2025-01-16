@@ -21,9 +21,9 @@ edition = "2021"
 
 [workspace.dependencies]
 anyhow = "1.0.86"
-borsh = "0.10.3"
+borsh = { version = "1.2.1", features = ["derive", "unstable__schema"] }
 cleanass = "0.0.1"
-ephemeral-rollups-sdk = { path = "../../ephemeral-rollups-sdk/sdk" }
+ephemeral-rollups-sdk = { path = "../../ephemeral-rollups-sdk/rust/sdk" }
 integration-test-tools = { path = "test-tools" }
 log = "0.4.20"
 rayon = "1.10.0"
@@ -40,9 +40,26 @@ test-tools-core = { path = "../test-tools-core" }
 toml = "0.8.13"
 # Need to pin solana version here as newer ones require a rust version that conficts with
 # the one used by cargo build-sbf
-solana-program = "=1.17.22"
-solana-rpc-client = "=1.17.22"
-solana-rpc-client-api = "=1.17.22"
-solana-sdk = "=1.17.22"
-solana-transaction-status = "=1.17.22"
+solana-program = "1.18.26"
+solana-sdk = "1.18.26"
+solana-rpc-client = "1.18.26"
+solana-rpc-client-api = "1.18.26"
+solana-transaction-status = "1.18.26"
+solana-program-test = "1.18.26"
 schedulecommit-client = { path = "schedulecommit/client" }
+
+[patch.crates-io]
+spl-associated-token-account = { git = "https://github.com/solana-labs/solana-program-library", rev = "950efde", package = "spl-associated-token-account", version = "2.3.1" }
+spl-token-group-interface = { git = "https://github.com/solana-labs/solana-program-library", rev = "950efde" }
+spl-token-metadata-interface = { git = "https://github.com/solana-labs/solana-program-library", rev = "950efde" }
+spl-pod = { git = "https://github.com/solana-labs/solana-program-library", rev = "950efde" }
+spl-transfer-hook-interface = { git = "https://github.com/solana-labs/solana-program-library", rev = "950efde" }
+spl-type-length-value = { git = "https://github.com/solana-labs/solana-program-library", rev = "950efde" }
+spl-token-2022 = { git = "https://github.com/solana-labs/solana-program-library", rev = "950efde" }
+solana_rbpf = { git = "https://github.com/solana-labs/rbpf", rev = "v0.8.0" }
+solana-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-program", version = "1.19.0" }
+solana-sdk = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-sdk", version = "1.19.0" }
+solana-rpc-client = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-rpc-client", version = "1.19.0" }
+solana-rpc-client-api = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-rpc-client-api", version = "1.19.0" }
+solana-transaction-status = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-transaction-status", version = "1.19.0" }
+solana-zk-token-sdk = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-zk-token-sdk", version = "1.19.0" }

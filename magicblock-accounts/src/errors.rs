@@ -40,6 +40,9 @@ pub enum AccountsError {
     #[error("FailedToGetLatestBlockhash '{0}'")]
     FailedToGetLatestBlockhash(String),
 
+    #[error("FailedToGetReimbursementAddress '{0}'")]
+    FailedToGetReimbursementAddress(String),
+
     #[error("FailedToSendCommitTransaction '{0}'")]
     FailedToSendCommitTransaction(String, HashSet<Pubkey>, HashSet<Pubkey>),
 

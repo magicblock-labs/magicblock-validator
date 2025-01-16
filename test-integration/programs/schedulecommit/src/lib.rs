@@ -1,4 +1,5 @@
 use borsh::{BorshDeserialize, BorshSerialize};
+use ephemeral_rollups_sdk::cpi::{DelegateAccounts, DelegateConfig};
 use ephemeral_rollups_sdk::ephem::{
     commit_accounts, commit_and_undelegate_accounts,
 };
@@ -46,6 +47,8 @@ pub struct ScheduleCommitCpiArgs {
     pub modify_accounts: bool,
     /// If true, the accounts will be undelegated after the commit
     pub undelegate: bool,
+    /// If true, also commit the payer account
+    pub commit_payer: bool,
 }
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]
@@ -128,8 +131,11 @@ pub fn process_instruction<'a>(
         ScheduleCommitCpi(args) => process_schedulecommit_cpi(
             accounts,
             &args.players,
-            args.modify_accounts,
-            args.undelegate,
+            ProcessSchedulecommitCpiArgs {
+                modify_accounts: args.modify_accounts,
+                undelegate: args.undelegate,
+                commit_payer: args.commit_payer,
+            },
         ),
         ScheduleCommitAndUndelegateCpiModAfter(players) => {
             process_schedulecommit_and_undelegation_cpi_with_mod_after(
@@ -220,20 +226,33 @@ pub fn process_delegate_cpi(
 
     let seeds_no_bump = pda_seeds(&args.player);
 
+    msg!("seeds:  {:?}", seeds_no_bump);
+
     delegate_account(
-        payer,
-        delegate_account_pda,
-        owner_program,
-        buffer,
-        delegation_record,
-        delegation_metadata,
-        delegation_program,
-        system_program,
+        DelegateAccounts {
+            payer,
+            pda: delegate_account_pda,
+            buffer,
+            delegation_record,
+            delegation_metadata,
+            owner_program,
+            delegation_program,
+            system_program,
+        },
         &seeds_no_bump,
-        args.valid_until,
-        args.commit_frequency_ms,
+        DelegateConfig {
+            commit_frequency_ms: args.commit_frequency_ms,
+            ..DelegateConfig::default()
+        },
     )?;
+
     Ok(())
+}
+
+pub struct ProcessSchedulecommitCpiArgs {
+    pub modify_accounts: bool,
+    pub undelegate: bool,
+    pub commit_payer: bool,
 }
 
 // -----------------
@@ -242,8 +261,7 @@ pub fn process_delegate_cpi(
 pub fn process_schedulecommit_cpi(
     accounts: &[AccountInfo],
     player_pubkeys: &[Pubkey],
-    modify_accounts: bool,
-    undelegate: bool,
+    args: ProcessSchedulecommitCpiArgs,
 ) -> Result<(), ProgramError> {
     msg!("Processing schedulecommit_cpi instruction");
 
@@ -265,7 +283,7 @@ pub fn process_schedulecommit_cpi(
         return Err(ProgramError::InvalidArgument);
     }
 
-    if modify_accounts {
+    if args.modify_accounts {
         for committee in &remaining {
             // Increase count of the PDA account
             let main_account = {
@@ -285,26 +303,26 @@ pub fn process_schedulecommit_cpi(
     let mut account_infos = vec![payer, magic_context];
     account_infos.extend(remaining.iter());
 
-    // NOTE: logging this increases CPUs by 70K, so in order to show about how
-    // many CPUs scheduling a commit actually takes we removed this log
-    // msg!(
-    //     "Committees are {:?}",
-    //     remaining.iter().map(|x| x.key).collect::<Vec<_>>()
-    // );
-    if undelegate {
+    let mut committees = remaining.iter().collect::<Vec<_>>();
+    if args.commit_payer {
+        msg!("Commiting payer");
+        committees.push(payer);
+    }
+
+    msg!(
+        "Committees are {:?}",
+        committees.iter().map(|x| x.key).collect::<Vec<_>>()
+    );
+
+    if args.undelegate {
         commit_and_undelegate_accounts(
             payer,
-            remaining.iter().collect::<Vec<_>>(),
+            committees,
             magic_context,
             magic_program,
         )?;
     } else {
-        commit_accounts(
-            payer,
-            remaining.iter().collect::<Vec<_>>(),
-            magic_context,
-            magic_program,
-        )?;
+        commit_accounts(payer, committees, magic_context, magic_program)?;
     }
 
     Ok(())

@@ -13,6 +13,7 @@ use solana_sdk::{
 use crate::{
     errors::custom_error_codes,
     utils::accounts::get_instruction_pubkey_with_idx, validator,
+    FeePayerAccount,
 };
 
 #[derive(Debug, Clone)]
@@ -24,7 +25,8 @@ pub struct SentCommit {
     pub chain_signatures: Vec<Signature>,
     pub included_pubkeys: Vec<Pubkey>,
     pub excluded_pubkeys: Vec<Pubkey>,
-    pub requested_undelegation_to_owner: Option<Pubkey>,
+    pub feepayers: HashSet<FeePayerAccount>,
+    pub requested_undelegation: bool,
 }
 
 /// This is a printable version of the SentCommit struct.
@@ -38,7 +40,8 @@ struct SentCommitPrintable {
     chain_signatures: Vec<String>,
     included_pubkeys: String,
     excluded_pubkeys: String,
-    requested_undelegation_to_owner: Option<String>,
+    feepayers: String,
+    requested_undelegation: bool,
 }
 
 impl From<SentCommit> for SentCommitPrintable {
@@ -65,9 +68,13 @@ impl From<SentCommit> for SentCommitPrintable {
                 .map(|x| x.to_string())
                 .collect::<Vec<_>>()
                 .join(", "),
-            requested_undelegation_to_owner: commit
-                .requested_undelegation_to_owner
-                .map(|x| x.to_string()),
+            feepayers: commit
+                .feepayers
+                .iter()
+                .map(|fp| format!("{}:{}", fp.pubkey, fp.delegated_pda))
+                .collect::<Vec<_>>()
+                .join(", "),
+            requested_undelegation: commit.requested_undelegation,
         }
     }
 }
@@ -198,6 +205,11 @@ pub fn process_scheduled_commit_sent(
         "ScheduledCommitSent excluded: [{}]",
         commit.excluded_pubkeys
     );
+    ic_msg!(
+        invoke_context,
+        "ScheduledCommitSent fee payers: [{}]",
+        commit.feepayers,
+    );
     for (idx, sig) in commit.chain_signatures.iter().enumerate() {
         ic_msg!(
             invoke_context,
@@ -207,12 +219,8 @@ pub fn process_scheduled_commit_sent(
         );
     }
 
-    if let Some(owner) = commit.requested_undelegation_to_owner {
-        ic_msg!(
-            invoke_context,
-            "ScheduledCommitSent requested undelegation to {}",
-            owner
-        );
+    if commit.requested_undelegation {
+        ic_msg!(invoke_context, "ScheduledCommitSent requested undelegation",);
     }
 
     Ok(())
@@ -249,7 +257,8 @@ mod tests {
             chain_signatures: vec![sig],
             included_pubkeys: vec![acc],
             excluded_pubkeys: Default::default(),
-            requested_undelegation_to_owner: None,
+            feepayers: Default::default(),
+            requested_undelegation: false,
         }
     }
 

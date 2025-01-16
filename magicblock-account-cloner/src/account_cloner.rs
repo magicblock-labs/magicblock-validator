@@ -1,4 +1,7 @@
-use std::collections::HashSet;
+use std::{
+    collections::{HashMap, HashSet},
+    sync::{Arc, RwLock},
+};
 
 use conjunto_transwise::AccountChainSnapshotShared;
 use futures_util::future::BoxFuture;
@@ -36,6 +39,8 @@ pub enum AccountClonerError {
 
 pub type AccountClonerResult<T> = Result<T, AccountClonerError>;
 
+pub type CloneOutputMap = Arc<RwLock<HashMap<Pubkey, AccountClonerOutput>>>;
+
 pub type AccountClonerListeners =
     Vec<Sender<AccountClonerResult<AccountClonerOutput>>>;
 
@@ -49,6 +54,10 @@ pub enum AccountClonerUnclonableReason {
     DoesNotAllowUndelegatedAccount,
     DoesNotAllowDelegatedAccount,
     DoesNotAllowProgramAccount,
+    DoesNotHaveEscrowAccount,
+    DoesNotHaveDelegatedEscrowAccount,
+    DoesNotAllowEscrowedPda,
+    DoesNotAllowFeepayerWithEscrowedPda,
     /// If an account is delegated to our validator then we should use the latest
     /// state in our own bank since that is more up to date than the on-chain state.
     DelegatedAccountsNotClonedWhileHydrating,

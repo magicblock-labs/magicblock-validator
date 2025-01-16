@@ -126,9 +126,9 @@ pub fn create_delegate_ix(payer: Pubkey) -> Instruction {
     let delegate_metas = DelegateAccountMetas::from(delegate_accounts);
     let account_metas = vec![
         AccountMeta::new(payer, true),
-        delegate_metas.delegate_account,
+        delegate_metas.delegated_account,
         delegate_metas.owner_program,
-        delegate_metas.buffer,
+        delegate_metas.delegate_buffer,
         delegate_metas.delegation_record,
         delegate_metas.delegation_metadata,
         delegate_metas.delegation_program,

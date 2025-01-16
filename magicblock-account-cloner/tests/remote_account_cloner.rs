@@ -4,7 +4,7 @@ use magicblock_account_cloner::{
     standard_blacklisted_accounts, AccountCloner, AccountClonerError,
     AccountClonerOutput, AccountClonerPermissions,
     AccountClonerUnclonableReason, RemoteAccountClonerClient,
-    RemoteAccountClonerWorker,
+    RemoteAccountClonerWorker, ValidatorCollectionMode,
 };
 use magicblock_account_dumper::AccountDumperStub;
 use magicblock_account_fetcher::AccountFetcherStub;
@@ -13,7 +13,10 @@ use magicblock_accounts_api::InternalAccountProviderStub;
 use magicblock_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
 use solana_sdk::{
     bpf_loader_upgradeable::get_program_data_address,
-    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, sysvar::clock,
+    native_token::LAMPORTS_PER_SOL,
+    pubkey::Pubkey,
+    signature::{Keypair, Signer},
+    sysvar::clock,
 };
 use tokio_util::sync::CancellationToken;
 
@@ -42,6 +45,7 @@ fn setup_custom(
         allowed_program_ids,
         blacklisted_accounts,
         payer_init_lamports,
+        ValidatorCollectionMode::NoFees,
         permissions,
         Pubkey::new_unique(),
     );
@@ -1101,16 +1105,19 @@ async fn test_clone_properly_upgrading_downgrading_when_created_and_deleted() {
         None,
     );
     // Account(s) involved
-    let undelegated_account = Pubkey::new_unique();
+    let undelegated_account =
+        Pubkey::find_program_address(&[b"foo"], &Keypair::new().pubkey()).0;
     account_updates.set_first_subscribed_slot(undelegated_account, 41);
-    account_fetcher.set_feepayer_account(undelegated_account, 42);
+    account_fetcher.set_delegated_account(undelegated_account, 42, 42);
     // Run test (we clone the account for the first time)
     let result1 = cloner.clone_account(&undelegated_account).await;
     // Check expected result1
     assert!(matches!(result1, Ok(AccountClonerOutput::Cloned { .. })));
     assert_eq!(account_fetcher.get_fetch_count(&undelegated_account), 1);
     assert!(account_updates.has_account_monitoring(&undelegated_account));
-    assert!(account_dumper.was_dumped_as_feepayer_account(&undelegated_account));
+    assert!(
+        account_dumper.was_dumped_as_delegated_account(&undelegated_account)
+    );
     // Clear dump history
     account_dumper.clear_history();
     // Run test (we re-clone the account and it should be in the cache)
@@ -1120,7 +1127,7 @@ async fn test_clone_properly_upgrading_downgrading_when_created_and_deleted() {
     assert_eq!(account_fetcher.get_fetch_count(&undelegated_account), 1);
     assert!(account_updates.has_account_monitoring(&undelegated_account));
     assert!(account_dumper.was_untouched(&undelegated_account));
-    // The account is now updated remotely, as it becomes an undelegated account (not wallet anymore)
+    // The account is now updated remotely, as it becomes an undelegated account
     account_fetcher.set_undelegated_account(undelegated_account, 66);
     account_updates.set_last_known_update_slot(undelegated_account, 66);
     // Run test (we re-clone the account and it should clear the cache and re-dump)
@@ -1142,7 +1149,7 @@ async fn test_clone_properly_upgrading_downgrading_when_created_and_deleted() {
     assert!(account_updates.has_account_monitoring(&undelegated_account));
     assert!(account_dumper.was_untouched(&undelegated_account));
     // The account is now removed/closed remotely
-    account_fetcher.set_feepayer_account(undelegated_account, 77);
+    account_fetcher.set_delegated_account(undelegated_account, 77, 77);
     account_updates.set_last_known_update_slot(undelegated_account, 77);
     // Run test (we re-clone the account and it should clear the cache and re-dump)
     let result5 = cloner.clone_account(&undelegated_account).await;
@@ -1150,7 +1157,9 @@ async fn test_clone_properly_upgrading_downgrading_when_created_and_deleted() {
     assert!(matches!(result5, Ok(AccountClonerOutput::Cloned { .. })));
     assert_eq!(account_fetcher.get_fetch_count(&undelegated_account), 3);
     assert!(account_updates.has_account_monitoring(&undelegated_account));
-    assert!(account_dumper.was_dumped_as_feepayer_account(&undelegated_account));
+    assert!(
+        account_dumper.was_dumped_as_delegated_account(&undelegated_account)
+    );
     // Clear dump history
     account_dumper.clear_history();
     // Run test (we re-clone the account and it should be in the cache)

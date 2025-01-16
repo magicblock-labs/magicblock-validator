@@ -3,8 +3,8 @@ use std::net::{IpAddr, Ipv4Addr};
 use magicblock_config::{
     AccountsConfig, AllowedProgram, CommitStrategy, EphemeralConfig,
     GeyserGrpcConfig, LedgerConfig, LifecycleMode, MetricsConfig,
-    MetricsServiceConfig, Payer, ProgramConfig, RemoteConfig, RpcConfig,
-    ValidatorConfig,
+    MetricsServiceConfig, Payer, PayerParams, ProgramConfig, RemoteConfig,
+    RpcConfig, ValidatorConfig,
 };
 use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey};
 use url::Url;
@@ -168,7 +168,10 @@ fn test_accounts_payer() {
         config,
         EphemeralConfig {
             accounts: AccountsConfig {
-                payer: Payer::new(None, Some(2_000)),
+                payer: Payer::new(PayerParams {
+                    init_lamports: None,
+                    init_sol: Some(2_000),
+                }),
                 ..Default::default()
             },
             ..Default::default()
@@ -178,6 +181,30 @@ fn test_accounts_payer() {
         config.accounts.payer.try_init_lamports().unwrap(),
         Some(2_000 * LAMPORTS_PER_SOL)
     );
+}
+
+#[test]
+fn test_validator_with_base_fees() {
+    let toml = include_str!("fixtures/10_validator-base-fees.toml");
+    let config = toml::from_str::<EphemeralConfig>(toml).unwrap();
+    assert_eq!(
+        config,
+        EphemeralConfig {
+            accounts: AccountsConfig {
+                payer: Payer::new(PayerParams {
+                    init_lamports: None,
+                    init_sol: None,
+                }),
+                ..Default::default()
+            },
+            validator: ValidatorConfig {
+                base_fees: Some(1_000),
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    );
+    assert_eq!(config.validator.base_fees, Some(1_000u64));
 }
 
 #[test]

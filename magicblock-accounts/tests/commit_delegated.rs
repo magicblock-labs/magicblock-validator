@@ -75,6 +75,7 @@ fn generate_delegated_account_chain_snapshot(
                 authority: Pubkey::new_unique(),
                 owner: account.owner,
                 delegation_slot: 42,
+                lamports: 100,
                 commit_frequency,
             },
         },

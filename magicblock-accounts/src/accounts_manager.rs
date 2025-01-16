@@ -4,7 +4,7 @@ use conjunto_transwise::{
     transaction_accounts_extractor::TransactionAccountsExtractorImpl,
     transaction_accounts_validator::TransactionAccountsValidatorImpl,
 };
-use magicblock_account_cloner::RemoteAccountClonerClient;
+use magicblock_account_cloner::{CloneOutputMap, RemoteAccountClonerClient};
 use magicblock_accounts_api::BankAccountProvider;
 use magicblock_bank::bank::Bank;
 use magicblock_transaction_status::TransactionStatusSender;
@@ -30,6 +30,7 @@ pub type AccountsManager = ExternalAccountsManager<
 impl AccountsManager {
     pub fn try_new(
         bank: &Arc<Bank>,
+        cloned_accounts: &CloneOutputMap,
         remote_account_cloner_client: RemoteAccountClonerClient,
         transaction_status_sender: Option<TransactionStatusSender>,
         validator_keypair: Keypair,
@@ -51,6 +52,7 @@ impl AccountsManager {
         let scheduled_commits_processor = RemoteScheduledCommitsProcessor::new(
             remote_cluster,
             bank.clone(),
+            cloned_accounts.clone(),
             transaction_status_sender.clone(),
         );
 

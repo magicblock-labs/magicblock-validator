@@ -132,6 +132,7 @@ impl AccountFetcherStub {
                         authority: Pubkey::new_unique(),
                         owner: Pubkey::new_unique(),
                         delegation_slot,
+                        lamports: 1000,
                         commit_frequency: CommitFrequency::default(),
                     },
                 },

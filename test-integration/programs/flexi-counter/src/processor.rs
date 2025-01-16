@@ -1,4 +1,5 @@
 use borsh::{to_vec, BorshDeserialize};
+use ephemeral_rollups_sdk::cpi::{DelegateAccounts, DelegateConfig};
 use ephemeral_rollups_sdk::{
     consts::EXTERNAL_UNDELEGATE_DISCRIMINATOR,
     cpi::{delegate_account, undelegate_account},
@@ -175,18 +176,23 @@ fn process_delegate(
     let seeds_no_bump = FlexiCounter::seeds(payer.key);
 
     delegate_account(
-        payer,
-        delegate_account_pda,
-        owner_program,
-        buffer,
-        delegation_record,
-        delegation_metadata,
-        delegation_program,
-        system_program,
+        DelegateAccounts {
+            payer,
+            pda: delegate_account_pda,
+            buffer,
+            delegation_record,
+            delegation_metadata,
+            owner_program,
+            delegation_program,
+            system_program,
+        },
         &seeds_no_bump,
-        args.valid_until,
-        args.commit_frequency_ms,
+        DelegateConfig {
+            commit_frequency_ms: args.commit_frequency_ms,
+            validator: None,
+        },
     )?;
+
     Ok(())
 }
 

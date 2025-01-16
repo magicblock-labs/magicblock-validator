@@ -11,13 +11,26 @@ use solana_sdk::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommittedAccount {
+    pub pubkey: Pubkey,
+    // TODO(GabrielePicco): We should read the owner from the delegation record rather
+    // than deriving/storing it. To remove once the cloning pipeline allow us to easily access the owner.
+    pub owner: Pubkey,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct FeePayerAccount {
+    pub pubkey: Pubkey,
+    pub delegated_pda: Pubkey,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ScheduledCommit {
     pub id: u64,
     pub slot: Slot,
     pub blockhash: Hash,
-    pub accounts: Vec<Pubkey>,
+    pub accounts: Vec<CommittedAccount>,
     pub payer: Pubkey,
-    pub owner: Pubkey,
     pub commit_sent_transaction: Transaction,
     pub request_undelegation: bool,
 }

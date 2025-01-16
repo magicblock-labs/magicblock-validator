@@ -10,7 +10,7 @@ use solana_sdk::{
 };
 
 use crate::{
-    magic_context::{MagicContext, ScheduledCommit},
+    magic_context::{CommittedAccount, MagicContext, ScheduledCommit},
     magicblock_instruction::scheduled_commit_sent,
     schedule_transactions::transaction_scheduler::TransactionScheduler,
     utils::{
@@ -86,25 +86,6 @@ pub(crate) fn process_schedule_commit(
     // Instead the integration tests ensure that this works as expected
     #[cfg(not(test))]
     let frames = crate::utils::instruction_context_frames::InstructionContextFrames::try_from(transaction_context)?;
-    #[cfg(not(test))]
-    let parent_program_id = {
-        let parent_program_id = frames
-            .find_program_id_of_parent_of_current_instruction()
-            .ok_or_else(|| {
-                ic_msg!(
-                    invoke_context,
-                    "ScheduleCommit ERR: failed to find parent program id"
-                );
-                InstructionError::InvalidInstructionData
-            })?;
-
-        ic_msg!(
-            invoke_context,
-            "ScheduleCommit: parent program id: {}",
-            parent_program_id
-        );
-        parent_program_id
-    };
 
     // During unit tests we assume the first committee has the correct program ID
     #[cfg(test)]
@@ -117,14 +98,29 @@ pub(crate) fn process_schedule_commit(
         .owner()
     };
 
-    #[cfg(test)]
-    let parent_program_id = &first_committee_owner;
+    #[cfg(not(test))]
+    let parent_program_id = {
+        let parent_program_id =
+            frames.find_program_id_of_parent_of_current_instruction();
 
-    // Assert all PDAs are owned by invoking program
-    // NOTE: we don't require them to be signers as in our case verifying that the
+        ic_msg!(
+            invoke_context,
+            "ScheduleCommit: parent program id: {}",
+            parent_program_id
+                .map_or_else(|| "None".to_string(), |id| id.to_string())
+        );
+
+        parent_program_id
+    };
+
+    #[cfg(test)]
+    let parent_program_id = Some(&first_committee_owner);
+
+    // Assert all accounts are owned by invoking program OR are signers
+    // NOTE: we don't require PDAs to be signers as in our case verifying that the
     // program owning the PDAs invoked us via CPI is sufficient
     // Thus we can be `invoke`d unsigned and no seeds need to be provided
-    let mut pubkeys = Vec::new();
+    let mut pubkeys: Vec<CommittedAccount> = Vec::new();
     for idx in COMMITTEES_START..ix_accs_len {
         let acc_pubkey =
             get_instruction_pubkey_with_idx(transaction_context, idx as u16)?;
@@ -132,15 +128,33 @@ pub(crate) fn process_schedule_commit(
             get_instruction_account_with_idx(transaction_context, idx as u16)?;
 
         {
-            if parent_program_id != acc.borrow().owner() {
-                ic_msg!(
-                invoke_context,
-                "ScheduleCommit ERR: account {} needs to be owned by the invoking program {} to be committed, but is owned by {}",
-                acc_pubkey, parent_program_id, acc.borrow().owner()
-            );
-                return Err(InstructionError::InvalidAccountOwner);
+            let acc_owner = *acc.borrow().owner();
+            if parent_program_id != Some(&acc_owner)
+                && !signers.contains(acc_pubkey)
+            {
+                return match parent_program_id {
+                    None => {
+                        ic_msg!(
+                            invoke_context,
+                            "ScheduleCommit ERR: failed to find parent program id"
+                        );
+                        Err(InstructionError::InvalidInstructionData)
+                    }
+                    Some(parent_id) => {
+                        ic_msg!(
+                            invoke_context,
+                                "ScheduleCommit ERR: account {} needs to be owned by the invoking program {} or be a signer to be committed, but is owned by {}",
+                                acc_pubkey, parent_id, acc_owner
+                            );
+                        Err(InstructionError::InvalidAccountOwner)
+                    }
+                };
             }
-            pubkeys.push(*acc_pubkey);
+            #[allow(clippy::unnecessary_literal_unwrap)]
+            pubkeys.push(CommittedAccount {
+                pubkey: *acc_pubkey,
+                owner: *parent_program_id.unwrap_or(&acc_owner),
+            });
         }
 
         if opts.request_undelegation {
@@ -181,13 +195,13 @@ pub(crate) fn process_schedule_commit(
     let commit_sent_transaction = scheduled_commit_sent(commit_id, blockhash);
 
     let commit_sent_sig = commit_sent_transaction.signatures[0];
+
     let scheduled_commit = ScheduledCommit {
         id: commit_id,
         slot: clock.slot,
         blockhash,
         accounts: pubkeys,
         payer: *payer_pubkey,
-        owner: *parent_program_id,
         commit_sent_transaction,
         request_undelegation: opts.request_undelegation,
     };

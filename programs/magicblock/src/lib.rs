@@ -2,7 +2,7 @@ pub mod errors;
 mod magic_context;
 mod mutate_accounts;
 mod schedule_transactions;
-pub use magic_context::{MagicContext, ScheduledCommit};
+pub use magic_context::{FeePayerAccount, MagicContext, ScheduledCommit};
 pub mod magicblock_instruction;
 pub mod magicblock_processor;
 #[cfg(test)]

@@ -1,3 +1,8 @@
+use crate::utils::{
+    create_nested_schedule_cpis_instruction,
+    create_sibling_non_cpi_instruction,
+    create_sibling_schedule_cpis_instruction,
+};
 use integration_test_tools::conversions::pubkey_from_magic_program;
 use magicblock_core::magic_program;
 use program_schedulecommit::api::schedule_commit_cpi_instruction;
@@ -10,12 +15,6 @@ use solana_sdk::{
     pubkey::Pubkey,
     signer::Signer,
     transaction::Transaction,
-};
-
-use crate::utils::{
-    create_nested_schedule_cpis_instruction,
-    create_sibling_non_cpi_instruction,
-    create_sibling_schedule_cpis_instruction,
 };
 mod utils;
 
@@ -34,6 +33,7 @@ fn prepare_ctx_with_account_to_commit() -> ScheduleCommitTestContext {
         ScheduleCommitTestContext::try_new_random_keys(2)
     }
     .unwrap();
+    ctx.escrow_lamports_for_payer().unwrap();
     ctx.init_committees().unwrap();
     ctx.delegate_committees(None).unwrap();
 
@@ -105,6 +105,55 @@ fn test_schedule_commit_directly_with_single_ix() {
             },
         );
     ctx.assert_ephemeral_transaction_error(sig, &res, PROGRAM_ID_NOT_FOUND);
+}
+
+#[test]
+fn test_schedule_commit_directly_mapped_signing_feepayer() {
+    // Attempts to directly commit PDAs via the MagicBlock program.
+    // This fails since a CPI program id cannot be found.
+    let ctx = prepare_ctx_with_account_to_commit();
+    let ScheduleCommitTestContextFields {
+        payer,
+        commitment,
+        ephem_blockhash,
+        ephem_client,
+        ..
+    } = ctx.fields();
+
+    let ix = create_schedule_commit_ix(
+        payer.pubkey(),
+        pubkey_from_magic_program(magic_program::id()),
+        pubkey_from_magic_program(magic_program::MAGIC_CONTEXT_PUBKEY),
+        &vec![payer.pubkey()],
+    );
+
+    let tx = Transaction::new_signed_with_payer(
+        &[ix],
+        Some(&payer.pubkey()),
+        &[&payer],
+        *ephem_blockhash,
+    );
+
+    let sig = tx.signatures[0];
+    let _res = ephem_client
+        .send_and_confirm_transaction_with_spinner_and_config(
+            &tx,
+            *commitment,
+            RpcSendTransactionConfig {
+                skip_preflight: true,
+                ..Default::default()
+            },
+        );
+
+    // 2. Retrieve the scheduled commit
+    let commit_result = ctx
+        .fetch_schedule_commit_result::<String>(sig)
+        .expect("Failed to fetch scheduled commit result");
+
+    // 3. Confirm the transaction
+    assert!(ctx
+        .confirm_transaction_chain(&commit_result.sigs[0])
+        .unwrap_or(false));
 }
 
 #[test]

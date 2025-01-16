@@ -105,7 +105,7 @@ fn run_schedule_commit_tests(
         "======== Starting EPHEM Validator for Scenarios + Security ========"
     );
     let mut ephem_validator = match start_validator(
-        "schedulecommit-conf.ephem.toml",
+        "schedulecommit-conf-fees.ephem.toml",
         ValidatorCluster::Ephem,
     ) {
         Some(validator) => validator,
@@ -355,6 +355,14 @@ fn start_test_validator_with_config(
         (
             "LUzidNSiPNjYNkxZcUm5hYHwnWPwsUfh2US1cpWwaBm",
             "luzid-authority.json",
+        ),
+        (
+            "EpJnX7ueXk7fKojBymqmVuCuwyhDQsYcLVL1XMsBbvDX",
+            "validator-fees-vault.json",
+        ),
+        (
+            "7JrkjmZPprHwtuvtuGTXp9hwfGYFAQLnLeFM52kqAgXg",
+            "protocol-fees-vault.json",
         ),
     ];
 

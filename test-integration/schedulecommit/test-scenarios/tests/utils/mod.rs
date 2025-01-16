@@ -2,6 +2,7 @@ use ephemeral_rollups_sdk::consts::DELEGATION_PROGRAM_ID;
 use integration_test_tools::scheduled_commits::ScheduledCommitResult;
 use program_schedulecommit::MainAccount;
 use schedulecommit_client::ScheduleCommitTestContext;
+use solana_sdk::signature::Signer;
 use solana_sdk::{
     instruction::InstructionError,
     pubkey::Pubkey,
@@ -15,6 +16,19 @@ use solana_sdk::{
 pub fn get_context_with_delegated_committees(
     ncommittees: usize,
 ) -> ScheduleCommitTestContext {
+    get_context_with_delegated_committees_impl(ncommittees, true)
+}
+
+pub fn get_context_with_delegated_committees_without_payer_escrow(
+    ncommittees: usize,
+) -> ScheduleCommitTestContext {
+    get_context_with_delegated_committees_impl(ncommittees, false)
+}
+
+fn get_context_with_delegated_committees_impl(
+    ncommittees: usize,
+    escrow_lamports_for_payer: bool,
+) -> ScheduleCommitTestContext {
     let ctx = if std::env::var("FIXED_KP").is_ok() {
         ScheduleCommitTestContext::try_new(ncommittees)
     } else {
@@ -24,6 +38,9 @@ pub fn get_context_with_delegated_committees(
 
     ctx.init_committees().unwrap();
     ctx.delegate_committees(None).unwrap();
+    if escrow_lamports_for_payer {
+        ctx.escrow_lamports_for_payer().unwrap();
+    }
     ctx
 }
 
@@ -61,6 +78,21 @@ pub fn assert_two_committees_were_committed(
     let commit2 = res.included.get(&pda2);
     assert!(commit1.is_some(), "should have committed pda1");
     assert!(commit2.is_some(), "should have committed pda2");
+
+    assert_eq!(res.sigs.len(), 1, "should have 1 on chain sig");
+}
+
+#[allow(dead_code)]
+pub fn assert_feepayer_was_committed(
+    ctx: &ScheduleCommitTestContext,
+    res: &ScheduledCommitResult<MainAccount>,
+) {
+    let payer = ctx.payer.pubkey();
+
+    assert_eq!(res.feepayers.len(), 1, "includes 1 payer");
+
+    let commit_payer = res.feepayers.iter().filter(|(p, _)| p == &payer).next();
+    assert!(commit_payer.is_some(), "should have committed payer");
 
     assert_eq!(res.sigs.len(), 1, "should have 1 on chain sig");
 }

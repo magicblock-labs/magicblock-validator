@@ -13,8 +13,8 @@ use std::{
 use conjunto_transwise::RpcProviderConfig;
 use log::*;
 use magicblock_account_cloner::{
-    standard_blacklisted_accounts, RemoteAccountClonerClient,
-    RemoteAccountClonerWorker,
+    standard_blacklisted_accounts, CloneOutputMap, RemoteAccountClonerClient,
+    RemoteAccountClonerWorker, ValidatorCollectionMode,
 };
 use magicblock_account_dumper::AccountDumperBank;
 use magicblock_account_fetcher::{
@@ -268,12 +268,18 @@ impl MagicValidator {
             accounts_config.allowed_program_ids,
             blacklisted_accounts,
             accounts_config.payer_init_lamports,
+            if config.validator_config.validator.base_fees.is_none() {
+                ValidatorCollectionMode::NoFees
+            } else {
+                ValidatorCollectionMode::Fees
+            },
             accounts_config.lifecycle.to_account_cloner_permissions(),
             identity_keypair.pubkey(),
         );
 
         let accounts_manager = Self::init_accounts_manager(
             &bank,
+            &remote_account_cloner_worker.get_last_clone_output(),
             RemoteAccountClonerClient::new(&remote_account_cloner_worker),
             transaction_status_sender.clone(),
             &identity_keypair,
@@ -355,6 +361,7 @@ impl MagicValidator {
 
     fn init_accounts_manager(
         bank: &Arc<Bank>,
+        cloned_accounts: &CloneOutputMap,
         remote_account_cloner_client: RemoteAccountClonerClient,
         transaction_status_sender: TransactionStatusSender,
         validator_keypair: &Keypair,
@@ -366,6 +373,7 @@ impl MagicValidator {
         );
         let accounts_manager = AccountsManager::try_new(
             bank,
+            cloned_accounts,
             remote_account_cloner_client,
             Some(transaction_status_sender),
             // NOTE: we could avoid passing a copy of the keypair here if we instead pass

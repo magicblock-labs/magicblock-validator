@@ -1,5 +1,11 @@
+use ephemeral_rollups_sdk::consts::BUFFER;
 use ephemeral_rollups_sdk::delegate_args::{
     DelegateAccountMetas, DelegateAccounts,
+};
+use ephemeral_rollups_sdk::pda::{
+    delegation_metadata_pda_from_delegated_account,
+    delegation_record_pda_from_delegated_account,
+    ephemeral_balance_pda_from_payer,
 };
 use solana_program::{
     instruction::{AccountMeta, Instruction},
@@ -29,6 +35,57 @@ pub fn init_account_instruction(
     )
 }
 
+pub fn init_payer_escrow(payer: Pubkey) -> [Instruction; 2] {
+    // Top-up Ix
+    let ephemeral_balance_pda = ephemeral_balance_pda_from_payer(&payer, 0);
+    let top_up_ix = Instruction {
+        program_id: ephemeral_rollups_sdk::id(),
+        accounts: vec![
+            AccountMeta::new(payer, true),
+            AccountMeta::new_readonly(payer, false),
+            AccountMeta::new(ephemeral_balance_pda, false),
+            AccountMeta::new_readonly(system_program::id(), false),
+        ],
+        // discriminator + TopUpEphemeralBalanceArgs from the magicblock-delegation-program
+        data: [
+            vec![9, 0, 0, 0, 0, 0, 0, 0],
+            vec![0, 163, 225, 17, 0, 0, 0, 0, 0],
+        ]
+        .concat(),
+    };
+
+    // Delegate ephemeral balance Ix
+    let buffer = Pubkey::find_program_address(
+        &[BUFFER, &ephemeral_balance_pda.to_bytes()],
+        &ephemeral_rollups_sdk::id(),
+    );
+    let delegation_record_pda =
+        delegation_record_pda_from_delegated_account(&ephemeral_balance_pda);
+    let delegation_metadata_pda =
+        delegation_metadata_pda_from_delegated_account(&ephemeral_balance_pda);
+
+    let delegate_ix = Instruction {
+        program_id: ephemeral_rollups_sdk::id(),
+        accounts: vec![
+            AccountMeta::new(payer, true),
+            AccountMeta::new_readonly(payer, true),
+            AccountMeta::new(ephemeral_balance_pda, false),
+            AccountMeta::new(buffer.0, false),
+            AccountMeta::new(delegation_record_pda, false),
+            AccountMeta::new(delegation_metadata_pda, false),
+            AccountMeta::new_readonly(system_program::id(), false),
+            AccountMeta::new_readonly(ephemeral_rollups_sdk::id(), false),
+        ],
+        // discriminator + DelegateEphemeralBalanceArgs from the magicblock-delegation-program
+        data: [
+            vec![10, 0, 0, 0, 0, 0, 0, 0],
+            vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+        ]
+        .concat(),
+    };
+    [top_up_ix, delegate_ix]
+}
+
 pub fn delegate_account_cpi_instruction(player: Pubkey) -> Instruction {
     let program_id = crate::id();
     let (pda, _) = pda_and_bump(&player);
@@ -43,9 +100,9 @@ pub fn delegate_account_cpi_instruction(player: Pubkey) -> Instruction {
     let delegate_metas = DelegateAccountMetas::from(delegate_accounts);
     let account_metas = vec![
         AccountMeta::new(player, true),
-        delegate_metas.delegate_account,
+        delegate_metas.delegated_account,
         delegate_metas.owner_program,
-        delegate_metas.buffer,
+        delegate_metas.delegate_buffer,
         delegate_metas.delegation_record,
         delegate_metas.delegation_metadata,
         delegate_metas.delegation_program,
@@ -83,7 +140,30 @@ pub fn schedule_commit_cpi_instruction(
         magic_context_id,
         players,
         committees,
-        false,
+        ScheduleCommitCpiInstructionImplArgs {
+            undelegate: false,
+            commit_payer: false,
+        },
+    )
+}
+
+pub fn schedule_commit_with_payer_cpi_instruction(
+    payer: Pubkey,
+    magic_program_id: Pubkey,
+    magic_context_id: Pubkey,
+    players: &[Pubkey],
+    committees: &[Pubkey],
+) -> Instruction {
+    schedule_commit_cpi_instruction_impl(
+        payer,
+        magic_program_id,
+        magic_context_id,
+        players,
+        committees,
+        ScheduleCommitCpiInstructionImplArgs {
+            undelegate: false,
+            commit_payer: true,
+        },
     )
 }
 
@@ -100,8 +180,16 @@ pub fn schedule_commit_and_undelegate_cpi_instruction(
         magic_context_id,
         players,
         committees,
-        true,
+        ScheduleCommitCpiInstructionImplArgs {
+            undelegate: true,
+            commit_payer: false,
+        },
     )
+}
+
+struct ScheduleCommitCpiInstructionImplArgs {
+    undelegate: bool,
+    commit_payer: bool,
 }
 
 fn schedule_commit_cpi_instruction_impl(
@@ -110,7 +198,7 @@ fn schedule_commit_cpi_instruction_impl(
     magic_context_id: Pubkey,
     players: &[Pubkey],
     committees: &[Pubkey],
-    undelegate: bool,
+    args: ScheduleCommitCpiInstructionImplArgs,
 ) -> Instruction {
     let program_id = crate::id();
     let mut account_metas = vec![
@@ -122,16 +210,14 @@ fn schedule_commit_cpi_instruction_impl(
         account_metas.push(AccountMeta::new(*committee, false));
     }
 
-    let args = ScheduleCommitCpiArgs {
+    let cpi_args = ScheduleCommitCpiArgs {
         players: players.to_vec(),
         modify_accounts: true,
-        undelegate,
+        undelegate: args.undelegate,
+        commit_payer: args.commit_payer,
     };
-    Instruction::new_with_borsh(
-        program_id,
-        &ScheduleCommitInstruction::ScheduleCommitCpi(args),
-        account_metas,
-    )
+    let ix = ScheduleCommitInstruction::ScheduleCommitCpi(cpi_args);
+    Instruction::new_with_borsh(program_id, &ix, account_metas)
 }
 
 pub fn schedule_commit_and_undelegate_cpi_with_mod_after_instruction(
