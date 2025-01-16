@@ -2680,17 +2680,26 @@ impl Bank {
         // Update transaction processor with new slot
         // We used to just set the slot here, but wanted to avoid having a local
         // slightly modified copy of the solana-svm.
-        *self.transaction_processor.write().unwrap() =
-            TransactionBatchProcessor::new(
-                next_slot,
-                self.epoch,
-                // Potentially expensive clone
-                self.epoch_schedule.clone(),
-                // Potentially expensive clone
-                self.fee_structure.clone(),
-                self.runtime_config.clone(),
-                self.loaded_programs_cache.clone(),
-            );
+        let tx_processor = TransactionBatchProcessor::new(
+            next_slot,
+            self.epoch,
+            // Potentially expensive clone
+            self.epoch_schedule.clone(),
+            // Potentially expensive clone
+            self.fee_structure.clone(),
+            self.runtime_config.clone(),
+            self.loaded_programs_cache.clone(),
+        );
+        {
+            let mut sysvar_cache = tx_processor.sysvar_cache.write().unwrap();
+            sysvar_cache.fill_missing_entries(|pubkey, callback| {
+                if let Some(account) = self.get_account_with_fixed_root(pubkey)
+                {
+                    callback(account.data());
+                }
+            });
+        }
+        *self.transaction_processor.write().unwrap() = tx_processor;
     }
 
     // timestamp is only provided when replaying the ledger and is otherwise
