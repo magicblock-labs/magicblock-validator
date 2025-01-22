@@ -278,7 +278,7 @@ async fn test_clone_fails_stale_undelegated_account_when_ephemeral() {
         result,
         Err(AccountClonerError::FailedToFetchSatisfactorySlot)
     ));
-    assert_eq!(account_fetcher.get_fetch_count(&undelegated_account), 5); // Must have retried
+    assert_eq!(account_fetcher.get_fetch_count(&undelegated_account), 10); // Must have retried
     assert!(account_updates.has_account_monitoring(&undelegated_account));
     assert!(account_dumper.was_untouched(&undelegated_account));
     // Cleanup everything correctly
