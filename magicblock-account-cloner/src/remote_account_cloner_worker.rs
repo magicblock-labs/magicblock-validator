@@ -134,7 +134,7 @@ where
     ) -> Self {
         let (clone_request_sender, clone_request_receiver) =
             unbounded_channel();
-        let fetch_retries = 5;
+        let fetch_retries = 10;
         Self {
             internal_account_provider,
             account_fetcher,
@@ -458,7 +458,7 @@ where
                     }
                 };
                 // Wait a bit in the hopes of the min_context_slot becoming available (about half a slot)
-                sleep(Duration::from_millis(200)).await;
+                sleep(Duration::from_millis(300)).await;
             }
         } else {
             self.fetch_account_chain_snapshot(pubkey, None).await?
