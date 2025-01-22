@@ -29,8 +29,9 @@ log = "0.4.20"
 rayon = "1.10.0"
 serde = "1.0.196"
 program-flexi-counter = { path = "./programs/flexi-counter" }
-program-schedulecommit = { path = "./programs/schedulecommit" }
-program-schedulecommit-security = { path = "./programs/schedulecommit-security" }
+program-schedulecommit = { path = "programs/schedulecommit" }
+program-schedulecommit-security = { path = "programs/schedulecommit-security" }
+magicblock-accounts-db = { path = "../magicblock-accounts-db" }
 magicblock-config = { path = "../magicblock-config" }
 magicblock-core = { path = "../magicblock-core" }
 teepee = "0.0.1"
@@ -52,9 +53,9 @@ spl-associated-token-account = { git = "https://github.com/solana-labs/solana-pr
 spl-token-group-interface = { git = "https://github.com/solana-labs/solana-program-library", rev = "950efde" }
 spl-token-metadata-interface = { git = "https://github.com/solana-labs/solana-program-library", rev = "950efde" }
 spl-pod = { git = "https://github.com/solana-labs/solana-program-library", rev = "950efde" }
-spl-transfer-hook-interface  = { git = "https://github.com/solana-labs/solana-program-library", rev = "950efde" }
-spl-type-length-value  = { git = "https://github.com/solana-labs/solana-program-library", rev = "950efde" }
-spl-token-2022  = { git = "https://github.com/solana-labs/solana-program-library", rev = "950efde" }
+spl-transfer-hook-interface = { git = "https://github.com/solana-labs/solana-program-library", rev = "950efde" }
+spl-type-length-value = { git = "https://github.com/solana-labs/solana-program-library", rev = "950efde" }
+spl-token-2022 = { git = "https://github.com/solana-labs/solana-program-library", rev = "950efde" }
 solana_rbpf = { git = "https://github.com/solana-labs/rbpf", rev = "v0.8.0" }
 solana-program = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-program", version = "1.19.0" }
 solana-sdk = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-sdk", version = "1.19.0" }
@@ -62,4 +63,3 @@ solana-rpc-client = { git = "https://github.com/solana-labs/solana", rev = "30ad
 solana-rpc-client-api = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-rpc-client-api", version = "1.19.0" }
 solana-transaction-status = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-transaction-status", version = "1.19.0" }
 solana-zk-token-sdk = { git = "https://github.com/solana-labs/solana", rev = "30adda4a71", package = "solana-zk-token-sdk", version = "1.19.0" }
-

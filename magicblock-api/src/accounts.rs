@@ -22,18 +22,11 @@ pub fn create_accounts_run_and_snapshot_dirs(
 ) -> std::io::Result<(PathBuf, PathBuf)> {
     let run_path = account_dir.as_ref().join(ACCOUNTS_RUN_DIR);
     let snapshot_path = account_dir.as_ref().join(ACCOUNTS_SNAPSHOT_DIR);
-    if (!run_path.is_dir()) || (!snapshot_path.is_dir()) {
-        // If the "run/" or "snapshot" sub directories do not exist, the directory
-        // may be from an older version for which the appendvec files are at
-        // this directory. Clean up them first.
-        // This will be done only once when transitioning from an old image
-        // without run directory to this new version using run and snapshot directories.
-        // The run/ content cleanup will be done at a later point.
-        // The snapshot/ content persists across the process boot, and will be purged
-        // by the account_background_service.
+    if !run_path.is_dir() {
         utils::fs::remove_directory_contents_if_exists(account_dir.as_ref())?;
-
         fs::create_dir_all(&run_path)?;
+    }
+    if !snapshot_path.is_dir() {
         fs::create_dir_all(&snapshot_path)?;
     }
 

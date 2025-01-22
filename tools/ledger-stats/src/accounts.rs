@@ -114,7 +114,7 @@ pub fn print_accounts(
     print_rent_epoch: bool,
     count: bool,
 ) {
-    let storage = accounts_storage_from_ledger(ledger);
+    let (storage, slot) = accounts_storage_from_ledger(ledger);
 
     let mut accounts = {
         let all = storage.all_accounts();
@@ -162,9 +162,14 @@ pub fn print_accounts(
 
     if count {
         if let Some(owner) = owner {
-            println!("Total accounts owned by '{}': {}", owner, accounts.len());
+            println!(
+                "Total accounts at slot {} owned by '{}': {}",
+                slot,
+                owner,
+                accounts.len()
+            );
         } else {
-            println!("Total accounts: {}", accounts.len());
+            println!("Total accounts at slot {}: {}", slot, accounts.len());
         }
         return;
     }
@@ -217,5 +222,6 @@ pub fn print_accounts(
         );
     }
 
+    println!("Accounts at slot {}", slot);
     println!("{}", table);
 }

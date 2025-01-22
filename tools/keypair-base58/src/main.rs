@@ -1,6 +1,4 @@
-use std::env;
-use std::fs::File;
-use std::io::Read;
+use std::{env, fs::File, io::Read};
 
 fn main() {
     // Get command line argument
@@ -17,7 +15,8 @@ fn main() {
         .expect("Failed to read keypair file");
 
     // Parse the JSON array
-    let keypair: Vec<u8> = serde_json::from_str(&contents).expect("Failed to parse keypair JSON");
+    let keypair: Vec<u8> =
+        serde_json::from_str(&contents).expect("Failed to parse keypair JSON");
 
     // Convert to base58
     let base58_string = bs58::encode(&keypair).into_string();

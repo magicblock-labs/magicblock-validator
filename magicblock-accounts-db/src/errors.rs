@@ -22,6 +22,4 @@ pub enum AccountsDbError {
     ),
     #[error("Need to provide at least one storage path")]
     NoStoragePathProvided,
-    #[error("No accounts file found inside {0}")]
-    NoAccountsFileFoundInside(String),
 }

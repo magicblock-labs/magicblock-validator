@@ -2,7 +2,9 @@
 remote = "http://0.0.0.0:7799"
 lifecycle = "ephemeral"
 commit = { frequency_millis = 500_000, compute_unit_price = 1_000_000 }
-payer = { base_fees = 1000 }
+
+[validator]
+base_fees = 1000
 
 [rpc]
 port = 8899

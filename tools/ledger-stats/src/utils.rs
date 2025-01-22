@@ -1,9 +1,13 @@
+use std::path::Path;
+
 use magicblock_accounts_db::{
     account_storage::AccountStorageEntry, AccountsPersister,
 };
 use magicblock_ledger::Ledger;
+use solana_sdk::clock::Slot;
 
-pub(crate) fn render_logs(logs: &[String], indent: &str) -> String {
+#[allow(dead_code)]
+pub fn render_logs(logs: &[String], indent: &str) -> String {
     logs.iter()
         .map(|line| {
             let prefix =
@@ -18,9 +22,9 @@ pub(crate) fn render_logs(logs: &[String], indent: &str) -> String {
         .join("\n")
 }
 
-pub(crate) fn accounts_storage_from_ledger(
+pub fn accounts_storage_from_ledger(
     ledger: &Ledger,
-) -> AccountStorageEntry {
+) -> (AccountStorageEntry, Slot) {
     let accounts_dir = ledger
         .ledger_path()
         .parent()
@@ -28,5 +32,12 @@ pub(crate) fn accounts_storage_from_ledger(
         .join("accounts")
         .join("run");
     let persister = AccountsPersister::new_with_paths(vec![accounts_dir]);
-    persister.load_most_recent_store().unwrap()
+    persister
+        .load_most_recent_store(u64::MAX)
+        .unwrap()
+        .expect("No recent store found")
+}
+
+pub fn open_ledger(ledger_path: &Path) -> Ledger {
+    Ledger::open(ledger_path).expect("Failed to open ledger")
 }

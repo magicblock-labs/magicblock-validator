@@ -1,6 +1,7 @@
 use std::{
     borrow::Cow,
     collections::HashSet,
+    mem,
     path::PathBuf,
     slice,
     sync::{
@@ -187,6 +188,9 @@ pub struct Bank {
 
     /// A cache of signature statuses
     pub status_cache: Arc<RwLock<BankStatusCache>>,
+
+    // First path provided to accounts db (in our case it is always one)
+    pub accounts_path: PathBuf,
 
     // -----------------
     // Counters
@@ -382,6 +386,11 @@ impl Bank {
         millis_per_slot: u64,
         identity_id: Pubkey,
     ) -> Self {
+        let accounts_path = accounts_paths
+            .first()
+            .expect("At least one accounts path is required")
+            .to_path_buf();
+
         let accounts_db = AccountsDb::new_with_config(
             &genesis_config.cluster_type,
             accounts_update_notifier,
@@ -389,7 +398,11 @@ impl Bank {
         );
 
         let accounts = Accounts::new(Arc::new(accounts_db));
-        let mut bank = Self::default_with_accounts(accounts, millis_per_slot);
+        let mut bank = Self::default_with_accounts(
+            accounts,
+            accounts_path,
+            millis_per_slot,
+        );
         bank.transaction_debug_keys = debug_keys;
         bank.runtime_config = runtime_config;
         bank.slot_status_notifier = slot_status_notifier;
@@ -428,6 +441,7 @@ impl Bank {
 
     pub(super) fn default_with_accounts(
         accounts: Accounts,
+        accounts_path: PathBuf,
         millis_per_slot: u64,
     ) -> Self {
         // NOTE: this was not part of the original implementation
@@ -444,8 +458,8 @@ impl Bank {
         };
 
         // Transaction expiration needs to be a fixed amount of time
-        // So we compute how many slot it takes for a transaction to expire
-        // Depending on how fast each slot is compute
+        // So we compute how many slots it takes for a transaction to expire
+        // Depending on how fast each slot is computed
         let max_age = DEFAULT_MS_PER_SLOT * MAX_RECENT_BLOCKHASHES as u64
             / millis_per_slot;
 
@@ -470,6 +484,7 @@ impl Bank {
             millis_per_slot,
             max_age,
             identity_id: Pubkey::default(),
+            accounts_path,
 
             // Counters
             transaction_count: AtomicU64::default(),
@@ -653,14 +668,13 @@ impl Bank {
         let prev_slot = self.slot();
         let next_slot = prev_slot + 1;
         self.set_next_slot(next_slot);
+        self.update_sysvars(self.genesis_creation_time, None);
 
         // Add a "root" to the status cache to trigger removing old items
         self.status_cache
             .write()
             .expect("RwLock of status cache poisoned")
             .add_root(prev_slot);
-
-        self.update_sysvars(self.genesis_creation_time, None);
 
         // Determine next blockhash
         let current_hash = self.last_blockhash();
@@ -2664,19 +2678,35 @@ impl Bank {
         self.rc.accounts.set_slot(next_slot);
 
         // Update transaction processor with new slot
-        // We used to just set the slot here, but wanted to avoid having a local
-        // slightly modified copy of the solana-svm.
-        *self.transaction_processor.write().unwrap() =
-            TransactionBatchProcessor::new(
-                next_slot,
-                self.epoch,
-                // Potentially expensive clone
-                self.epoch_schedule.clone(),
-                // Potentially expensive clone
-                self.fee_structure.clone(),
-                self.runtime_config.clone(),
-                self.loaded_programs_cache.clone(),
-            );
+        // First create a new transaction processor
+        let next_tx_processor = TransactionBatchProcessor::new(
+            next_slot,
+            self.epoch,
+            // Potentially expensive clone
+            self.epoch_schedule.clone(),
+            // Potentially expensive clone
+            self.fee_structure.clone(),
+            self.runtime_config.clone(),
+            self.loaded_programs_cache.clone(),
+        );
+        // Then assign the previous sysvar cache to the new transaction processor
+        // in order to avoid it containing uninitialized sysvars
+        {
+            let tx_processor = self.transaction_processor.read().unwrap();
+            let mut old_sysvar_cache =
+                tx_processor.sysvar_cache.write().unwrap();
+
+            let mut new_sysvar_cache = next_tx_processor
+                .sysvar_cache
+                .write()
+                .expect("New sysvar_cache poisoned");
+
+            mem::swap(&mut new_sysvar_cache, &mut old_sysvar_cache);
+        }
+        *self
+            .transaction_processor
+            .write()
+            .expect("Transaction processor poisoned") = next_tx_processor;
     }
 
     // timestamp is only provided when replaying the ledger and is otherwise

@@ -1,7 +1,6 @@
 [accounts]
 remote = "devnet"
 lifecycle = "programs-replica"
-payer = { base_fees = 1000 }
 
 [rpc]
 addr = "0.0.0.0"
@@ -9,3 +8,4 @@ port = 8899
 
 [validator]
 millis_per_slot = 50
+base_fees = 1000

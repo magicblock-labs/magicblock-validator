@@ -7,7 +7,7 @@ use tabular::{Row, Table};
 use crate::utils::accounts_storage_from_ledger;
 
 pub fn print_account(ledger: &Ledger, pubkey: &Pubkey) {
-    let storage = accounts_storage_from_ledger(ledger);
+    let (storage, slot) = accounts_storage_from_ledger(ledger);
     let account = storage
         .all_accounts()
         .into_iter()
@@ -22,6 +22,7 @@ pub fn print_account(ledger: &Ledger, pubkey: &Pubkey) {
     let data_len = data.len();
     let oncurve = pubkey.is_on_curve();
 
+    println!("{} at slot: {}", pubkey, slot);
     let table = Table::new("{:<}  {:>}")
         .with_row(Row::new().with_cell("Column").with_cell("Value"))
         .with_row(

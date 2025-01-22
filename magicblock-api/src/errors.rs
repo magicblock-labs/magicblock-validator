@@ -63,4 +63,8 @@ pub enum ApiError {
 
     #[error("Ledger validator keypair '{0}' needs to match the provided one '{1}'")]
     LedgerValidatorKeypairNotMatchingProvidedKeypair(String, String),
+
+    #[error("The slot at which we should continue after processing the ledger ({0}) does not match the bank slot ({1})"
+    )]
+    NextSlotAfterLedgerProcessingNotMatchingBankSlot(u64, u64),
 }

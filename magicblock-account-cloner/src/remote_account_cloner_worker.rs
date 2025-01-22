@@ -276,7 +276,7 @@ where
         stream
             .map(Ok::<_, AccountClonerError>)
             .try_for_each_concurrent(10, |(pubkey, owner)| async move {
-                debug!("Hydrating '{}'", pubkey);
+                trace!("Hydrating '{}'", pubkey);
                 let res = self
                     .do_clone_and_update_cache(
                         &pubkey,
@@ -288,7 +288,7 @@ where
                     .await;
                 match res {
                     Ok(output) => {
-                        debug!("Cloned '{}': {:?}", pubkey, output);
+                        trace!("Cloned '{}': {:?}", pubkey, output);
                         Ok(())
                     }
                     Err(err) => {
@@ -422,6 +422,7 @@ where
             self.account_updates
                 .ensure_account_monitoring(pubkey)
                 .map_err(AccountClonerError::AccountUpdatesError)?;
+
             // Fetch the account, repeat and retry until we have a satisfactory response
             let mut fetch_count = 0;
             loop {
@@ -751,14 +752,23 @@ where
             .chain_state
             .account()
             .ok_or(AccountClonerError::ProgramDataDoesNotExist)?;
+        let idl_account = match self
+            .fetch_program_idl(program_id_pubkey, min_context_slot)
+            .await?
+        {
+            // Only add the IDL account if it exists on chain
+            Some((pubkey, account)) if account.lamports > 0 => {
+                Some((pubkey, account))
+            }
+            _ => None,
+        };
         self.account_dumper
             .dump_program_accounts(
                 program_id_pubkey,
                 program_id_account,
                 program_data_pubkey,
                 program_data_account,
-                self.fetch_program_idl(program_id_pubkey, min_context_slot)
-                    .await?,
+                idl_account,
             )
             .map_err(AccountClonerError::AccountDumperError)
             .inspect(|_| {

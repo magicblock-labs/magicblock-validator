@@ -268,7 +268,7 @@ impl MagicValidator {
             accounts_config.allowed_program_ids,
             blacklisted_accounts,
             accounts_config.payer_init_lamports,
-            if accounts_config.payer_base_fees.is_none() {
+            if config.validator_config.validator.base_fees.is_none() {
                 ValidatorCollectionMode::NoFees
             } else {
                 ValidatorCollectionMode::Fees
@@ -501,8 +501,7 @@ impl MagicValidator {
         if self.config.ledger.reset {
             return Ok(());
         }
-        // let _ = process_ledger(&self.ledger, &self.bank);
-        process_ledger(&self.ledger, &self.bank)?;
+        let slot_to_continue_at = process_ledger(&self.ledger, &self.bank)?;
 
         // The transactions to schedule and accept account commits re-run when we
         // process the ledger, however we do not want to re-commit them.
@@ -524,6 +523,19 @@ impl MagicValidator {
         if let Err(err) = update_ledger_result {
             return Err(err.into());
         }
+        if self.bank.slot() != slot_to_continue_at {
+            return Err(
+                ApiError::NextSlotAfterLedgerProcessingNotMatchingBankSlot(
+                    slot_to_continue_at,
+                    self.bank.slot(),
+                ),
+            );
+        }
+
+        info!(
+            "Processed ledger, validator continues at slot {}",
+            slot_to_continue_at
+        );
 
         Ok(())
     }
@@ -630,6 +642,7 @@ impl MagicValidator {
         {
             if !self.config.ledger.reset {
                 remote_account_cloner_worker.hydrate().await?;
+                info!("Validator hydration complete (bank hydrate, replay, account clone)");
             }
 
             let cancellation_token = self.token.clone();

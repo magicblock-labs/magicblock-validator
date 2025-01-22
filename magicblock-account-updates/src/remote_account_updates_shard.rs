@@ -87,19 +87,28 @@ impl RemoteAccountUpdatesShard {
         // We'll store useful maps for each of the account subscriptions
         let mut account_streams = StreamMap::new();
         let mut account_unsubscribes = HashMap::new();
+        const LOG_CLOCK_FREQ: u64 = 100;
+        let mut log_clock_count = 0;
+
         // Loop forever until we stop the worker
         loop {
             tokio::select! {
                 // When we receive a new clock notification
                 Some(clock_update) = clock_stream.next() => {
+                    log_clock_count += 1;
                     let clock_data = clock_update.value.data.decode();
-                    trace!("Shard {}: Clock data received: {:?}", self.shard_id, clock_data);
                     if let Some(clock_data) = clock_data {
                         let clock_value = bincode::deserialize::<Clock>(&clock_data);
-                        trace!("Shard {}: Clock value received: {:?}", self.shard_id, clock_value);
+                        if log_clock_count % LOG_CLOCK_FREQ == 0 {
+                            trace!("Shard {}: received: {}th clock value {:?}", log_clock_count, self.shard_id, clock_value);
+                        }
                         if let Ok(clock_value) = clock_value {
                             clock_slot = clock_value.slot;
+                        } else {
+                            warn!("Shard {}: Failed to deserialize clock data: {:?}", self.shard_id, clock_data);
                         }
+                    } else {
+                        warn!("Shard {}: Received empty clock data", self.shard_id);
                     }
                 }
                 // When we receive a message to start monitoring an account
@@ -107,7 +116,7 @@ impl RemoteAccountUpdatesShard {
                     if account_unsubscribes.contains_key(&pubkey) {
                         continue;
                     }
-                    info!(
+                    debug!(
                         "Shard {}: Account monitoring started: {:?}, clock_slot: {:?}",
                         self.shard_id,
                         pubkey,
@@ -160,24 +169,24 @@ impl RemoteAccountUpdatesShard {
     ) {
         // We don't need to acquire a write lock if we already know the slot is already recent enough
         let first_subscribed_slot = self.first_subscribed_slots
-                .read()
-                .expect("RwLock of RemoteAccountUpdatesShard.first_subscribed_slots poisoned")
-                .get(&pubkey)
-                .cloned();
+            .read()
+            .expect("RwLock of RemoteAccountUpdatesShard.first_subscribed_slots poisoned")
+            .get(&pubkey)
+            .cloned();
         if subscribed_slot < first_subscribed_slot.unwrap_or(u64::MAX) {
             // If the subscribe slot seems to be the oldest one, we need to acquire a write lock to update it
             match self.first_subscribed_slots
-                    .write()
-                    .expect("RwLock of RemoteAccountUpdatesShard.first_subscribed_slots poisoned")
-                    .entry(pubkey)
-                {
-                    Entry::Vacant(entry) => {
-                        entry.insert(subscribed_slot);
-                    }
-                    Entry::Occupied(mut entry) => {
-                        *entry.get_mut() = min(*entry.get(), subscribed_slot);
-                    }
+                .write()
+                .expect("RwLock of RemoteAccountUpdatesShard.first_subscribed_slots poisoned")
+                .entry(pubkey)
+            {
+                Entry::Vacant(entry) => {
+                    entry.insert(subscribed_slot);
                 }
+                Entry::Occupied(mut entry) => {
+                    *entry.get_mut() = min(*entry.get(), subscribed_slot);
+                }
+            }
         }
     }
 

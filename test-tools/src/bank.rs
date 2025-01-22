@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use magicblock_accounts_db::accounts_update_notifier_interface::AccountsUpdateNotifier;
 use magicblock_bank::{
@@ -21,7 +21,7 @@ pub fn bank_for_tests_with_identity(
     identity_id: Pubkey,
 ) -> Bank {
     let runtime_config = Arc::new(RuntimeConfig::default());
-    let accounts_paths = vec![];
+    let accounts_paths = vec![PathBuf::default()];
     let bank = Bank::new(
         genesis_config,
         runtime_config,
