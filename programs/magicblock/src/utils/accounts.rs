@@ -1,7 +1,8 @@
 #![allow(unused)] // most of these utilities will come in useful later
 use std::cell::RefCell;
 
-use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
+use solana_log_collector::ic_msg;
+use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{
     account::{Account, AccountSharedData, ReadableAccount, WritableAccount},
     account_info::{AccountInfo, IntoAccountInfo},

@@ -4,7 +4,8 @@ use std::{
 };
 
 use magicblock_core::magic_program::MAGIC_CONTEXT_PUBKEY;
-use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
+use solana_log_collector::ic_msg;
+use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{
     account::ReadableAccount, instruction::InstructionError, pubkey::Pubkey,
 };
@@ -191,7 +192,7 @@ pub(crate) fn process_schedule_commit(
                 InstructionError::UnsupportedSysvar
             })?;
 
-    let blockhash = invoke_context.blockhash;
+    let blockhash = invoke_context.environment_config.blockhash;
     let commit_sent_transaction = scheduled_commit_sent(commit_id, blockhash);
 
     let commit_sent_sig = commit_sent_transaction.signatures[0];

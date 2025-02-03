@@ -5,13 +5,14 @@ use solana_sdk::{
 
 pub fn fund_account(bank: &Bank, pubkey: &Pubkey, lamports: u64) {
     bank.store_account(
-        pubkey,
-        &Account {
+        *pubkey,
+        Account {
             lamports,
             data: vec![],
             owner: system_program::id(),
             executable: false,
             rent_epoch: Epoch::MAX,
-        },
+        }
+        .into(),
     );
 }

@@ -122,10 +122,10 @@ fn add_programs(bank: &Bank, progs: &[ElfProgramAccount]) {
             program_data,
         } = elf_program_account;
         let (id, data) = program_exec;
-        bank.store_account(id, data);
+        bank.store_account(*id, data.clone());
 
         if let Some((id, data)) = program_data {
-            bank.store_account(id, data);
+            bank.store_account(*id, data.clone());
         }
     }
 }

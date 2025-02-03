@@ -1,14 +1,9 @@
-use std::collections::HashSet;
-
-use log::{debug, error, info, trace, warn};
-use magicblock_accounts_db::transaction_results::TransactionResults;
 use rayon::{
     iter::IndexedParallelIterator,
     prelude::{
         IntoParallelIterator, IntoParallelRefIterator, ParallelIterator,
     },
 };
-use solana_program_runtime::timings::ExecuteTimings;
 use solana_sdk::{
     account::Account,
     hash::Hash,
@@ -20,20 +15,16 @@ use solana_sdk::{
     signature::Keypair,
     signer::Signer,
     stake_history::Epoch,
-    system_instruction, system_program, system_transaction, sysvar,
+    system_instruction, system_program, system_transaction,
     sysvar::{
-        clock, epoch_schedule, fees, last_restart_slot, recent_blockhashes,
-        rent,
+        self, clock, epoch_schedule, fees, last_restart_slot,
+        recent_blockhashes, rent,
     },
     transaction::{SanitizedTransaction, Transaction},
 };
 
 use super::elfs;
-use crate::{
-    bank::{Bank, TransactionExecutionRecordingOpts},
-    transaction_results::TransactionBalancesSet,
-    LAMPORTS_PER_SIGNATURE,
-};
+use crate::{bank::Bank, LAMPORTS_PER_SIGNATURE};
 
 // -----------------
 // Account Initialization
@@ -50,14 +41,15 @@ pub fn create_funded_account(bank: &Bank, lamports: Option<u64>) -> Keypair {
     });
 
     bank.store_account(
-        &account.pubkey(),
-        &Account {
+        account.pubkey(),
+        Account {
             lamports,
             data: vec![],
             owner: system_program::id(),
             executable: false,
             rent_epoch: Epoch::MAX,
-        },
+        }
+        .into(),
     );
 
     account
@@ -76,14 +68,15 @@ pub fn create_funded_accounts(
 
     accounts.par_iter().for_each(|account| {
         bank.store_account(
-            &account.pubkey(),
-            &Account {
+            account.pubkey(),
+            Account {
                 lamports,
                 data: vec![],
                 owner: system_program::id(),
                 executable: false,
                 rent_epoch: Epoch::MAX,
-            },
+            }
+            .into(),
         );
     });
 
@@ -167,7 +160,11 @@ pub fn create_noop_transaction(
     let message = Message::new(&[instruction], None);
     let transaction =
         Transaction::new(&[&funded_accounts[0]], message, recent_blockhash);
-    SanitizedTransaction::try_from_legacy_transaction(transaction).unwrap()
+    SanitizedTransaction::try_from_legacy_transaction(
+        transaction,
+        &Default::default(),
+    )
+    .unwrap()
 }
 
 fn create_noop_instruction(
@@ -205,7 +202,11 @@ pub fn create_solx_send_post_transaction(
     let transaction =
         Transaction::new(&[author, post], message, bank.last_blockhash());
     (
-        SanitizedTransaction::try_from_legacy_transaction(transaction).unwrap(),
+        SanitizedTransaction::try_from_legacy_transaction(
+            transaction,
+            &Default::default(),
+        )
+        .unwrap(),
         SolanaxPostAccounts {
             post: post.pubkey(),
             author: author.pubkey(),
@@ -248,7 +249,11 @@ pub fn create_sysvars_get_transaction(bank: &Bank) -> SanitizedTransaction {
         message,
         bank.last_blockhash(),
     );
-    SanitizedTransaction::try_from_legacy_transaction(transaction).unwrap()
+    SanitizedTransaction::try_from_legacy_transaction(
+        transaction,
+        &Default::default(),
+    )
+    .unwrap()
 }
 
 fn create_sysvars_get_instruction(
@@ -299,7 +304,11 @@ pub fn create_sysvars_from_account_transaction(
         message,
         bank.last_blockhash(),
     );
-    SanitizedTransaction::try_from_legacy_transaction(transaction).unwrap()
+    SanitizedTransaction::try_from_legacy_transaction(
+        transaction,
+        &Default::default(),
+    )
+    .unwrap()
 }
 
 fn create_sysvars_from_account_instruction(
@@ -330,79 +339,92 @@ fn create_sysvars_from_account_instruction(
 // -----------------
 // Transactions
 // -----------------
-pub fn execute_transactions(
-    bank: &Bank,
-    txs: Vec<SanitizedTransaction>,
-) -> (TransactionResults, TransactionBalancesSet) {
-    let batch = bank.prepare_sanitized_batch(&txs);
-
-    let mut timings = ExecuteTimings::default();
-    let (transaction_results, transaction_balances) = bank
-        .load_execute_and_commit_transactions(
-            &batch,
-            true,
-            TransactionExecutionRecordingOpts::recording_logs(),
-            &mut timings,
-            None,
-        );
-
-    trace!("{:#?}", txs);
-    trace!("{:#?}", transaction_results.execution_results);
-    trace!("{:#?}", transaction_balances);
-
-    for res in transaction_results.execution_results.iter() {
-        if let Err(err) = res.flattened_result() {
-            error!(
-                "Error: {:?}, ({}) 😈",
-                err,
-                if res.was_executed() {
-                    "executed"
-                } else {
-                    "not executed"
-                },
-            );
-        } else if res.was_executed_successfully() {
-            info!(
-                "Executed {}",
-                if res.was_executed_successfully() {
-                    "successfully. 😀"
-                } else {
-                    "but failed! 😈"
-                }
-            );
-        } else {
-            warn!("Failed to execute 😈",);
-        }
-    }
-
-    for key in txs
-        .iter()
-        .flat_map(|tx| tx.message().account_keys().iter())
-        .collect::<HashSet<_>>()
-    {
-        if key.eq(&system_program::id()) {
-            continue;
-        }
-
-        if let Some(account) = bank.get_account(key) {
-            trace!("{:?}: {:#?}", key, account);
-        } else {
-            debug!("{:?}: missing", key);
-        }
-    }
-
-    info!("");
-    info!("=============== Logs ===============");
-    for res in transaction_results.execution_results.iter() {
-        if let Some(logs) =
-            res.details().as_ref().and_then(|x| x.log_messages.as_ref())
-        {
-            for log in logs {
-                info!("> {log}");
-            }
-        }
-    }
-    info!("");
-
-    (transaction_results, transaction_balances)
-}
+//fn execute_transactions(
+//    bank: &Bank,
+//    txs: Vec<Transaction>,
+//) -> Vec<Result<ConfirmedTransactionWithStatusMeta, TransactionError>> {
+//    let batch = bank.prepare_batch_for_tests(txs.clone());
+//    let mut timings = ExecuteTimings::default();
+//    let mut mint_decimals = HashMap::new();
+//    let tx_pre_token_balances =
+//        collect_token_balances(&bank, &batch, &mut mint_decimals);
+//    let (
+//        commit_results,
+//        TransactionBalancesSet {
+//            pre_balances,
+//            post_balances,
+//            ..
+//        },
+//    ) = bank.load_execute_and_commit_transactions(
+//        &batch,
+//        true,
+//        ExecutionRecordingConfig::new_single_setting(true),
+//        &mut timings,
+//        None,
+//    );
+//    let tx_post_token_balances =
+//        collect_token_balances(&bank, &batch, &mut mint_decimals);
+//
+//    izip!(
+//        txs.iter(),
+//        commit_results.into_iter(),
+//        pre_balances.into_iter(),
+//        post_balances.into_iter(),
+//        tx_pre_token_balances.into_iter(),
+//        tx_post_token_balances.into_iter(),
+//    )
+//    .map(
+//        |(
+//            tx,
+//            commit_result,
+//            pre_balances,
+//            post_balances,
+//            pre_token_balances,
+//            post_token_balances,
+//        )| {
+//            commit_result.map(|committed_tx| {
+//                let CommittedTransaction {
+//                    status,
+//                    log_messages,
+//                    inner_instructions,
+//                    return_data,
+//                    executed_units,
+//                    fee_details,
+//                    ..
+//                } = committed_tx;
+//
+//                let inner_instructions =
+//                    inner_instructions.map(|inner_instructions| {
+//                        map_inner_instructions(inner_instructions).collect()
+//                    });
+//
+//                let tx_status_meta = TransactionStatusMeta {
+//                    status,
+//                    fee: fee_details.total_fee(),
+//                    pre_balances,
+//                    post_balances,
+//                    pre_token_balances: Some(pre_token_balances),
+//                    post_token_balances: Some(post_token_balances),
+//                    inner_instructions,
+//                    log_messages,
+//                    rewards: None,
+//                    loaded_addresses: LoadedAddresses::default(),
+//                    return_data,
+//                    compute_units_consumed: Some(executed_units),
+//                };
+//
+//                ConfirmedTransactionWithStatusMeta {
+//                    slot: bank.slot(),
+//                    tx_with_meta: TransactionWithStatusMeta::Complete(
+//                        VersionedTransactionWithStatusMeta {
+//                            transaction: VersionedTransaction::from(tx.clone()),
+//                            meta: tx_status_meta,
+//                        },
+//                    ),
+//                    block_time: None,
+//                }
+//            })
+//        },
+//    )
+//    .collect()
+//}

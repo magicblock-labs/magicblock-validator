@@ -71,9 +71,10 @@ pub(crate) fn encode_account<T: ReadableAccount>(
             data: None,
         })
     } else {
-        Ok(UiAccount::encode(
-            pubkey, account, encoding, None, data_slice,
-        ))
+        //Ok(UiAccount::encode(
+        //    pubkey, account, encoding, None, data_slice,
+        //))
+        todo!()
     }
 }
 
@@ -103,11 +104,12 @@ pub(crate) fn get_parsed_token_account(
             .ok(),
         });
 
-    UiAccount::encode(
-        pubkey,
-        &account,
-        UiAccountEncoding::JsonParsed,
-        additional_data,
-        None,
-    )
+    todo!()
+    //UiAccount::encode(
+    //    pubkey,
+    //    &account,
+    //    UiAccountEncoding::JsonParsed,
+    //    additional_data,
+    //    None,
+    //)
 }

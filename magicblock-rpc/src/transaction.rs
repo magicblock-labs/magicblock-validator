@@ -98,6 +98,7 @@ pub(crate) fn sanitize_transaction(
         MessageHash::Compute,
         None,
         address_loader,
+        &Default::default(),
     )
     .map_err(|err| Error::invalid_params(format!("invalid transaction: {err}")))
 }
@@ -118,11 +119,13 @@ pub(crate) async fn airdrop_transaction(
         blockhash,
     );
 
-    let transaction =
-        SanitizedTransaction::try_from_legacy_transaction(transaction)
-            .map_err(|err| {
-                Error::invalid_params(format!("invalid transaction: {err}"))
-            })?;
+    let transaction = SanitizedTransaction::try_from_legacy_transaction(
+        transaction,
+        &Default::default(),
+    )
+    .map_err(|err| {
+        Error::invalid_params(format!("invalid transaction: {err}"))
+    })?;
     let signature = *transaction.signature();
     send_transaction(
         meta,

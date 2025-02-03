@@ -1,4 +1,7 @@
-use std::time::{Duration, Instant};
+use std::{
+    iter::empty,
+    time::{Duration, Instant},
+};
 
 use crossbeam_channel::RecvTimeoutError;
 use log::trace;
@@ -157,13 +160,15 @@ impl PacketDeserializer {
         packet_indexes: &'a [usize],
         round_compute_unit_price_enabled: bool,
     ) -> impl Iterator<Item = ImmutableDeserializedPacket> + 'a {
-        packet_indexes.iter().filter_map(move |packet_index| {
-            let mut packet_clone = packet_batch[*packet_index].clone();
-            packet_clone
-                .meta_mut()
-                .set_round_compute_unit_price(round_compute_unit_price_enabled);
-            ImmutableDeserializedPacket::new(packet_clone).ok()
-        })
+        todo!();
+        empty()
+        //packet_indexes.iter().filter_map(move |packet_index| {
+        //    let mut packet_clone = packet_batch[*packet_index].clone();
+        //    packet_clone
+        //        .meta_mut()
+        //        .set_round_compute_unit_price(round_compute_unit_price_enabled);
+        //    ImmutableDeserializedPacket::new(packet_clone).ok()
+        //})
     }
 }
 

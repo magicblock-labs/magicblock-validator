@@ -18,6 +18,7 @@ serde = { workspace = true, features = ["derive"] }
 magicblock-core = { workspace = true }
 magicblock-metrics = { workspace = true }
 solana-program-runtime = { workspace = true }
+solana-log-collector = { workspace = true }
 solana-sdk = { workspace = true }
 tokio = { workspace = true }
 thiserror = { workspace = true }
@@ -25,11 +26,11 @@ thiserror = { workspace = true }
 [dev-dependencies]
 assert_matches = { workspace = true }
 rand = { workspace = true }
-test-tools-core = { workspace = true }
-test-tools = { workspace = true }
+# test-tools-core = { workspace = true }
+# test-tools = { workspace = true }
 tokio = { workspace = true, features = ["macros"] }
 
-magicblock-program = { workspace = true, features = ["dev-context-only-utils"] }
+# magicblock-program = { workspace = true, features = ["dev-context-only-utils"] }
 
 [lib]
 crate-type = ["lib"]

@@ -35,6 +35,7 @@ magicblock-rpc = { workspace = true }
 magicblock-transaction-status = { workspace = true }
 solana-geyser-plugin-interface = { workspace = true }
 solana-geyser-plugin-manager = { workspace = true }
+solana-rpc = { workspace = true }
 solana-sdk = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }

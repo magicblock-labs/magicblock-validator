@@ -22,6 +22,8 @@ solana-measure = { workspace = true }
 solana-metrics = { workspace = true }
 solana-rayon-threadlimit = { workspace = true }
 solana-sdk = { workspace = true }
+solana-svm = { workspace = true }
+solana-svm-transaction = { workspace = true }
 thiserror = { workspace = true }
 
 # For now we need to re-export + use some types and traits directly from solana_accounts_db

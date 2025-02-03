@@ -31,7 +31,6 @@ use magicblock_bank::{
     bank::Bank, genesis_utils::create_genesis_config_with_leader,
     program_loader::load_programs_into_bank,
     transaction_logs::TransactionLogCollectorFilter,
-    transaction_notifier_interface::TransactionNotifierArc,
 };
 use magicblock_config::{EphemeralConfig, ProgramConfig};
 use magicblock_geyser_plugin::rpc::GeyserRpcService;
@@ -49,6 +48,7 @@ use magicblock_transaction_status::{
     TransactionStatusMessage, TransactionStatusSender,
 };
 use solana_geyser_plugin_manager::geyser_plugin_service::GeyserPluginService;
+use solana_rpc::transaction_notifier_interface::TransactionNotifierArc;
 use solana_sdk::{
     commitment_config::CommitmentLevel, genesis_config::GenesisConfig,
     pubkey::Pubkey, signature::Keypair, signer::Signer,

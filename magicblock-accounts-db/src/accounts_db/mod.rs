@@ -1,5 +1,6 @@
 use std::{
     borrow::Cow,
+    iter::repeat,
     path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -8,6 +9,10 @@ use std::{
 };
 
 use rayon::{prelude::*, ThreadPool};
+use solana_accounts_db::{
+    accounts_index::ZeroLamport,
+    accounts_update_notifier_interface::AccountsUpdateNotifier,
+};
 use solana_measure::measure::Measure;
 use solana_rayon_threadlimit::get_thread_count;
 use solana_sdk::{
@@ -20,13 +25,11 @@ use solana_sdk::{
 };
 
 use crate::{
-    account_info::{AccountInfo, StorageLocation},
+    account_info::StorageLocation,
     accounts_cache::{AccountsCache, CachedAccount},
-    accounts_index::ZeroLamport,
-    accounts_update_notifier_interface::AccountsUpdateNotifier,
+    //accounts_update_notifier_interface::AccountsUpdateNotifier,
     errors::{AccountsDbError, AccountsDbResult, MatchAccountOwnerError},
     persist::AccountsPersister,
-    storable_accounts::StorableAccounts,
     verify_accounts_hash_in_background::VerifyAccountsHashInBackground,
 };
 
@@ -173,76 +176,31 @@ impl AccountsDb {
         }
     }
 
-    pub fn store_cached<'a, T: ReadableAccount + Sync + ZeroLamport + 'a>(
+    pub fn store_cached(
         &self,
-        accounts: impl StorableAccounts<'a, T>,
-        transactions: Option<&'a [Option<&'a SanitizedTransaction>]>,
+        slot: Slot,
+        accounts: Vec<(Pubkey, AccountSharedData)>,
     ) {
-        self.store(accounts, &StoreTo::Cache, transactions);
-    }
-
-    fn store<'a, T: ReadableAccount + Sync + ZeroLamport + 'a>(
-        &self,
-        accounts: impl StorableAccounts<'a, T>,
-        store_to: &'a StoreTo,
-        transactions: Option<&'a [Option<&'a SanitizedTransaction>]>,
-        // NOTE: we don't take an UpdateIndexThreadSelection strategy here since we
-        // always store in the cache at this point
-    ) {
-        // If all transactions in a batch are errored,
-        // it's possible to get a store with no accounts.
         if accounts.is_empty() {
             return;
         }
-
-        // NOTE: not hashing, so we don't record bank_hash_stats either
-
-        // NOTE: skipping the store_accounts_unfrozen redirection since we
-        // always store into unfrozen (current) slot
-
-        self.store_accounts_custom(
-            accounts,
-            None::<Box<dyn Iterator<Item = u64>>>,
-            store_to,
-            transactions,
-        );
-    }
-
-    fn store_accounts_custom<
-        'a,
-        T: ReadableAccount + Sync + ZeroLamport + 'a,
-    >(
-        &self,
-        accounts: impl StorableAccounts<'a, T>,
-        // This is `None` for cached accounts
-        write_version_producer: Option<Box<dyn Iterator<Item = u64>>>,
-        store_to: &'a StoreTo,
-        transactions: Option<&'a [Option<&'a SanitizedTransaction>]>,
-    ) {
-        let write_version_producer: Box<dyn Iterator<Item = u64>> =
-            write_version_producer.unwrap_or_else(|| {
-                let mut current_version =
-                    self.bulk_assign_write_version(accounts.len());
-                Box::new(std::iter::from_fn(move || {
-                    let ret = current_version;
-                    current_version += 1;
-                    Some(ret)
-                }))
-            });
-        // NOTE: non-frozen stores don't have a write_version_producer so we skip
-        // related logic entirely
 
         self.stats
             .store_num_accounts
             .fetch_add(accounts.len() as u64, Ordering::Relaxed);
 
         let mut store_accounts_time = Measure::start("store_accounts");
-        let _infos = self.store_accounts_to(
-            &accounts,
-            write_version_producer,
-            store_to,
-            transactions,
-        );
+        for (pk, acc) in accounts {
+            self.notify_account_at_accounts_update(
+                slot,
+                &acc,
+                &None,
+                &pk,
+                &mut repeat(0),
+            );
+
+            self.accounts_cache.store(pk, acc);
+        }
         store_accounts_time.stop();
         self.stats
             .store_accounts
@@ -250,97 +208,6 @@ impl AccountsDb {
 
         // NOTE: left out reclaim logic that removes no longer needed accounts
         // since we only keep one copy of each account
-    }
-
-    fn store_accounts_to<
-        'a: 'c,
-        'b,
-        'c,
-        P: Iterator<Item = u64>,
-        T: ReadableAccount + Sync + ZeroLamport + 'b,
-    >(
-        &self,
-        accounts: &'c impl StorableAccounts<'b, T>,
-        mut write_version_producer: P,
-        store_to: &'b StoreTo,
-        transactions: Option<&[Option<&'a SanitizedTransaction>]>,
-    ) -> Vec<AccountInfo> {
-        // NOTE: left out 'calc_stored_meta' which removed accounts from readonly cache
-
-        let slot = accounts.target_slot();
-        match store_to {
-            StoreTo::Cache => {
-                let txn_iter: Box<
-                    dyn std::iter::Iterator<
-                        Item = &Option<&SanitizedTransaction>,
-                    >,
-                > = match transactions {
-                    Some(transactions) => {
-                        assert_eq!(transactions.len(), accounts.len());
-                        Box::new(transactions.iter())
-                    }
-                    None => {
-                        Box::new(std::iter::repeat(&None).take(accounts.len()))
-                    }
-                };
-
-                self.write_accounts_to_cache(
-                    slot,
-                    accounts,
-                    txn_iter,
-                    &mut write_version_producer,
-                )
-            }
-        }
-    }
-
-    fn write_accounts_to_cache<'a, 'b, T: ReadableAccount + Sync, P>(
-        &self,
-        slot: Slot,
-        accounts_and_meta_to_store: &impl StorableAccounts<'b, T>,
-        txn_iter: Box<
-            dyn std::iter::Iterator<Item = &Option<&SanitizedTransaction>> + 'a,
-        >,
-        write_version_producer: &mut P,
-    ) -> Vec<AccountInfo>
-    where
-        P: Iterator<Item = u64>,
-    {
-        txn_iter
-            .enumerate()
-            .map(|(i, txn)| {
-                let account = accounts_and_meta_to_store
-                    .account_default_if_zero_lamport(i)
-                    .map(|account| account.to_account_shared_data())
-                    .unwrap_or_default();
-                let account_info = AccountInfo::new(
-                    StorageLocation::Cached,
-                    account.lamports(),
-                );
-
-                self.notify_account_at_accounts_update(
-                    slot,
-                    &account,
-                    txn,
-                    accounts_and_meta_to_store.pubkey(i),
-                    write_version_producer,
-                );
-
-                self.accounts_cache
-                    .store(accounts_and_meta_to_store.pubkey(i), account);
-                // NOTE: not sending hash request to sender_bg_hasher
-                account_info
-            })
-            .collect()
-    }
-
-    /// Increases [Self::write_version] by `count` and returns the previous value
-    fn bulk_assign_write_version(
-        &self,
-        count: usize,
-    ) -> StoredMetaWriteVersion {
-        self.write_version
-            .fetch_add(count as StoredMetaWriteVersion, Ordering::AcqRel)
     }
 
     // -----------------

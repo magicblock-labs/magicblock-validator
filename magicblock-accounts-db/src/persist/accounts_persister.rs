@@ -1,5 +1,4 @@
 use std::{
-    borrow::Borrow,
     fs,
     path::{Path, PathBuf},
     sync::{
@@ -10,7 +9,12 @@ use std::{
 
 use log::*;
 use rand::{thread_rng, Rng};
-use solana_accounts_db::{accounts_file::AccountsFile, append_vec::AppendVec};
+use solana_accounts_db::{
+    accounts_db::AccountStorageEntry,
+    accounts_file::{AccountsFile, AccountsFileProvider, StorageAccess},
+    append_vec::AppendVec,
+};
+use solana_measure::measure::Measure;
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
     clock::Slot,
@@ -19,21 +23,18 @@ use solana_sdk::{
 
 use crate::{
     account_info::{AccountInfo, AppendVecId, StorageLocation},
-    account_storage::{
-        meta::StorableAccountsWithHashesAndWriteVersions, AccountStorage,
-        AccountStorageEntry, AccountStorageStatus,
-    },
     accounts_cache::SlotCache,
     accounts_db::StoredMetaWriteVersion,
-    accounts_hash::AccountHash,
-    accounts_index::ZeroLamport,
-    append_vec::{aligned_stored_size, STORE_META_OVERHEAD},
     errors::{AccountsDbError, AccountsDbResult},
+};
+use solana_accounts_db::{
+    account_storage::{AccountStorage, AccountStorageStatus},
+    append_vec::{aligned_stored_size, STORE_META_OVERHEAD},
     storable_accounts::StorableAccounts,
-    DEFAULT_FILE_SIZE,
 };
 
 pub type AtomicAppendVecId = AtomicU32;
+const DEFAULT_FILE_SIZE: u64 = 4 * 1024 * 1024;
 
 /// The Accounts Persister is responsible for flushing accounts to disk
 /// frequently. The flushed accounts remain in the cache, i.e. they
@@ -91,42 +92,24 @@ impl AccountsPersister {
 
         let cached_accounts = slot_cache.iter().collect::<Vec<_>>();
 
-        let (accounts, hashes): (
-            Vec<(&Pubkey, &AccountSharedData)>,
-            Vec<AccountHash>,
-        ) = cached_accounts
+        let accounts: Vec<(&Pubkey, &AccountSharedData)> = cached_accounts
             .iter()
             .map(|x| {
                 let key = x.key();
                 let account = &x.value().account;
                 total_size += aligned_stored_size(account.data().len()) as u64;
-                let hash = x.value().hash();
 
-                ((key, account), hash)
+                (key, account)
             })
-            .unzip();
+            .collect();
 
         // Omitted purge_slot_cache_pubkey
 
         let is_dead_slot = accounts.is_empty();
         if !is_dead_slot {
             let flushed_store = self.create_and_insert_store(slot, total_size);
-            let write_version_iterator: Box<dyn Iterator<Item = u64>> = {
-                let mut current_version =
-                    self.bulk_assign_write_version(accounts.len());
-                Box::new(std::iter::from_fn(move || {
-                    let ret = current_version;
-                    current_version += 1;
-                    Some(ret)
-                }))
-            };
 
-            self.store_accounts_to(
-                &(slot, &accounts[..]),
-                hashes,
-                write_version_iterator,
-                &flushed_store,
-            );
+            self.store_accounts_to((slot, &accounts), &flushed_store);
         }
 
         // Clean up older storage entries regularly in order keep disk usage small
@@ -178,7 +161,7 @@ impl AccountsPersister {
                     if let Some(slot) = filename.split('.').next() {
                         if let Ok(slot) = slot.parse::<Slot>() {
                             if slot <= keep_after {
-                                self.storage.map.remove(&slot);
+                                //self.storage.map.remove(&slot);
                                 total_removed += 1;
                             }
                         } else {
@@ -196,149 +179,72 @@ impl AccountsPersister {
         }
     }
 
-    fn store_accounts_to<
-        'a: 'c,
-        'b,
-        'c,
-        I: Iterator<Item = u64>,
-        T: ReadableAccount + Sync + ZeroLamport + 'b,
-    >(
+    fn store_accounts_to(
         &self,
-        accounts: &'c impl StorableAccounts<'b, T>,
-        hashes: Vec<impl Borrow<AccountHash>>,
-        mut write_version_iterator: I,
+        accounts: (Slot, &[(&Pubkey, &AccountSharedData)]),
         storage: &Arc<AccountStorageEntry>,
     ) -> Vec<AccountInfo> {
-        let slot = accounts.target_slot();
-        if accounts.has_hash_and_write_version() {
-            self.write_accounts_to_storage(
-                slot,
-                storage,
-                &StorableAccountsWithHashesAndWriteVersions::<
-                    '_,
-                    '_,
-                    _,
-                    _,
-                    &AccountHash,
-                >::new(accounts),
-            )
-        } else {
-            let write_versions = (0..accounts.len())
-                .map(|_| write_version_iterator.next().unwrap())
-                .collect::<Vec<_>>();
-            self.write_accounts_to_storage(
-                slot,
-                storage,
-                &StorableAccountsWithHashesAndWriteVersions::new_with_hashes_and_write_versions(
-                    accounts,
-                    hashes,
-                    write_versions,
-                ),
-            )
-        }
+        self.write_accounts_to_storage(storage, accounts)
     }
 
-    fn write_accounts_to_storage<'a, 'b, T, U, V>(
+    fn write_accounts_to_storage(
         &self,
-        slot: Slot,
         storage: &AccountStorageEntry,
-        accounts_and_meta_to_store: &StorableAccountsWithHashesAndWriteVersions<
-            'a,
-            'b,
-            T,
-            U,
-            V,
-        >,
-    ) -> Vec<AccountInfo>
-    where
-        T: ReadableAccount + Sync,
-        U: StorableAccounts<'a, T>,
-        V: Borrow<AccountHash>,
-    {
+        accounts_and_meta_to_store: (Slot, &[(&Pubkey, &AccountSharedData)]),
+    ) -> Vec<AccountInfo> {
+        let slot = accounts_and_meta_to_store.0;
         let mut infos: Vec<AccountInfo> =
-            Vec::with_capacity(accounts_and_meta_to_store.len());
-
-        // This loop will continue until all accounts were appended to the `infos`
-        // at which point their lengths will equal
+            Vec::with_capacity(accounts_and_meta_to_store.1.len());
+        let mut total_append_accounts_us = 0;
         while infos.len() < accounts_and_meta_to_store.len() {
-            // Append accounts to storage entry
-            let stored_account_infos = storage
+            let mut append_accounts = Measure::start("append_accounts");
+            let stored_accounts_info = storage
                 .accounts
-                .append_accounts(accounts_and_meta_to_store, infos.len());
-
-            let Some(stored_account_infos) = stored_account_infos else {
-                // An account could not be stored due to storage being full
+                .append_accounts(&accounts_and_meta_to_store, infos.len());
+            append_accounts.stop();
+            total_append_accounts_us += append_accounts.as_us();
+            let Some(stored_accounts_info) = stored_accounts_info else {
                 storage.set_status(AccountStorageStatus::Full);
 
                 // See if an account overflows the append vecs in the slot.
-                // This should not happen since we pass the total size of the accounts
-                // we want to store when we create the storage entry.
-                // See: flush_slot_cache
-                // MAXIMUM_APPEND_VEC_FILE_SIZE is 16GB
-
-                // Solana/Agave take the following steps:
-                //
-                // 1.  Verifies that an account is overflowing the available space of the
-                //     appenc vecs in the slot
-                // 2.  Calculates needed extra store size
-                // 3a. attempts to reuse a recycled store (RecycleStore) and inserts that
-                //     into storage
-                // 3b. if that fails it creates a new store and inserts that into storage
-                // 4.  after a new storage entry was inserted it continues at the top of the
-                //     loop which will try this first step again
-                //
-                // In our implementation we left out 3.a and just always create a new store.
-                //
-                // NOTE: the part that I don't fully understand is that we don't change the
-                //       `storage` variable at all, i.e. instead of reassigning it to the one
-                //       returned from `create_and_insert_store`.
-                //       I'm not sure if the storage entry is somehow able to expand into the
-                //       new store we created, otherwise this implementation would be flawed.
-
-                // Calculate needed size
-                let account = accounts_and_meta_to_store.account(infos.len());
-                let data_len = account
-                    .map(|account| account.data().len())
-                    .unwrap_or_default();
-                let data_len = (data_len + STORE_META_OVERHEAD) as u64;
-                // NOTE: I'm not sure how this would ever not be the case + this would lead
-                // to looping endlessly if I'm not mistaken
-                if !self.has_space_available(slot, data_len) {
-                    info!(
-                        "write_accounts_to_storage, no space: {}, {}, {}, {}, {}",
-                        storage.accounts.capacity(),
-                        storage.accounts.remaining_bytes(),
-                        data_len,
-                        infos.len(),
-                        accounts_and_meta_to_store.len()
-                    );
-                    let special_store_size =
-                        std::cmp::max(data_len * 2, self.file_size);
-                    self.create_and_insert_store(slot, special_store_size);
-                }
+                accounts_and_meta_to_store.account_default_if_zero_lamport(
+                    infos.len(),
+                    |account| {
+                        let data_len = account.data().len();
+                        let data_len = (data_len + STORE_META_OVERHEAD) as u64;
+                        if !self.has_space_available(slot, data_len) {
+                            info!(
+                                "write_accounts_to_storage, no space: {}, {}, {}, {}, {}",
+                                storage.accounts.capacity(),
+                                storage.accounts.remaining_bytes(),
+                                data_len,
+                                infos.len(),
+                                accounts_and_meta_to_store.len()
+                            );
+                            let special_store_size = std::cmp::max(data_len * 2, self.file_size);
+                            self.create_and_insert_store(slot, special_store_size);
+                        }
+                    },
+                );
                 continue;
             };
 
-            // Once we ensured space for the accounts in the storage entry we push them
-            // onto the infos
-            let store_id = storage.append_vec_id();
-            for (i, stored_account_info) in
-                stored_account_infos.into_iter().enumerate()
-            {
-                storage.add_account(stored_account_info.size);
-
+            let store_id = storage.id();
+            for (i, offset) in stored_accounts_info.offsets.iter().enumerate() {
                 infos.push(AccountInfo::new(
-                    StorageLocation::AppendVec(
-                        store_id,
-                        stored_account_info.offset,
-                    ),
+                    StorageLocation::AppendVec(store_id, *offset),
                     accounts_and_meta_to_store
-                        .account(i)
-                        .map(|account| account.lamports())
-                        .unwrap_or_default(),
+                        .account_default_if_zero_lamport(i, |account| {
+                            account.lamports()
+                        }),
                 ));
             }
+            //storage.add_accounts(
+            //    stored_accounts_info.offsets.len(),
+            //    stored_accounts_info.size,
+            //);
 
+            // restore the state to available
             storage.set_status(AccountStorageStatus::Available);
         }
 
@@ -422,7 +328,7 @@ impl AccountsPersister {
         // Create a AccountStorageEntry from the file
         let file_size = fs::metadata(&file)?.len() as usize;
         let (append_vec, num_accounts) =
-            AppendVec::new_from_file(&file, file_size, true)?;
+            AppendVec::new_from_file(&file, file_size, StorageAccess::Mmap)?;
         let accounts = AccountsFile::AppendVec(append_vec);
         let storage =
             AccountStorageEntry::new_existing(slot, id, accounts, num_accounts);
@@ -454,7 +360,7 @@ impl AccountsPersister {
     }
 
     fn insert_store(&self, slot: Slot, store: Arc<AccountStorageEntry>) {
-        self.storage.insert(slot, store)
+        //self.storage.insert(slot, store)
     }
 
     fn has_space_available(&self, slot: Slot, size: u64) -> bool {
@@ -487,7 +393,14 @@ impl AccountsPersister {
         path: &Path,
         size: u64,
     ) -> AccountStorageEntry {
-        AccountStorageEntry::new(path, slot, self.next_id(), size)
+        let file_provider = AccountsFileProvider::AppendVec;
+        AccountStorageEntry::new(
+            path,
+            slot,
+            self.next_id(),
+            size,
+            file_provider,
+        )
     }
 
     fn next_id(&self) -> AppendVecId {

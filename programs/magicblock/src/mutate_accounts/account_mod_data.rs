@@ -9,7 +9,8 @@ use std::{
 
 use lazy_static::lazy_static;
 use magicblock_core::traits::PersistsAccountModData;
-use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
+use solana_log_collector::ic_msg;
+use solana_program_runtime::invoke_context::InvokeContext;
 
 use crate::{magicblock_instruction::MagicBlockProgramError, validator};
 

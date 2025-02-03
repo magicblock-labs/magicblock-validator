@@ -125,7 +125,7 @@ fn try_rpc_filter_into_geyser_account_filter(
     match rpc_filter {
         RpcFilterType::Memcmp(memcmp) => {
             #[allow(deprecated)]
-            let offset = memcmp.offset.try_into().map_err(|e| {
+            let offset = memcmp.offset().try_into().map_err(|e| {
                 PubsubError::InvalidParam(
                     "Program Account memcmp offset needs to be a u64."
                         .to_string(),
@@ -133,25 +133,7 @@ fn try_rpc_filter_into_geyser_account_filter(
                 )
             })?;
 
-            let has_data = memcmp
-                .bytes()
-                .as_ref()
-                .map(|bytes| bytes.is_empty())
-                .unwrap_or_default();
-
-            let data = if has_data {
-                use MemcmpEncodedBytes::*;
-                #[allow(deprecated)]
-                Some(match &memcmp.bytes {
-                    Bytes(bytes) => Data::Bytes(bytes.to_vec()),
-                    Binary(bytes) | Base58(bytes) => {
-                        Data::Base58(bytes.to_string())
-                    }
-                    Base64(base64) => Data::Base64(base64.to_string()),
-                })
-            } else {
-                None
-            };
+            let data = memcmp.bytes().map(|d| Data::Bytes(d.to_vec()));
             let filter =
                 SubscribeRequestFilterAccountsFilterMemcmp { offset, data };
             Ok(SubscribeRequestFilterAccountsFilter {
@@ -278,9 +260,10 @@ fn ui_account_from_subscribe_account_info(
         executable: inner_acc.executable,
         rent_epoch: inner_acc.rent_epoch,
     };
-    let ui_account =
-        UiAccount::encode(&pubkey, &account, encoding, None, data_slice_config);
-    Ok(Some((pubkey, ui_account)))
+    //let ui_account =
+    //    UiAccount::encode(&pubkey, &account, encoding, None, data_slice_config);
+    //Ok(Some((pubkey, ui_account)))
+    todo!()
 }
 
 // -----------------

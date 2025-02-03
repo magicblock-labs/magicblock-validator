@@ -1,7 +1,7 @@
 use modular_bitfield::{bitfield, specifiers::B31};
 pub use solana_accounts_db::account_info::Offset;
 
-use crate::{
+use solana_accounts_db::{
     accounts_file::ALIGN_BOUNDARY_OFFSET,
     accounts_index::{IsCached, ZeroLamport},
 };

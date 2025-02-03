@@ -7,6 +7,9 @@ use std::{
 };
 
 use dashmap::DashMap;
+use solana_accounts_db::{
+    accounts_hash::AccountHash, accounts_index::ZeroLamport,
+};
 use solana_metrics::datapoint_info;
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
@@ -14,10 +17,7 @@ use solana_sdk::{
     pubkey::Pubkey,
 };
 
-use crate::{
-    accounts_hash::AccountHash, accounts_index::ZeroLamport,
-    persist::hash_account,
-};
+use crate::persist::hash_account;
 
 // -----------------
 // CachedAccount
@@ -142,12 +142,12 @@ impl SlotCacheInner {
 
     pub fn insert(
         &self,
-        pubkey: &Pubkey,
+        pubkey: Pubkey,
         account: AccountSharedData,
     ) -> CachedAccount {
         let data_len = account.data().len() as u64;
-        let item = CachedAccountInner::new(account, *pubkey);
-        if let Some(old) = self.cache.insert(*pubkey, item.clone()) {
+        let item = CachedAccountInner::new(account, pubkey);
+        if let Some(old) = self.cache.insert(pubkey, item.clone()) {
             // If we replace an entry in the same slot then we calculate the size differenc
             self.same_account_writes.fetch_add(1, Ordering::Relaxed);
             self.same_account_writes_size
@@ -241,7 +241,7 @@ impl AccountsCache {
 
     pub fn store(
         &self,
-        pubkey: &Pubkey,
+        pubkey: Pubkey,
         account: AccountSharedData,
     ) -> CachedAccount {
         self.slot_cache.insert(pubkey, account)

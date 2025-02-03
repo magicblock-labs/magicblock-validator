@@ -45,9 +45,11 @@ impl AccountDumperBank {
         &self,
         transaction: Transaction,
     ) -> AccountDumperResult<Signature> {
-        let sanitized_tx =
-            SanitizedTransaction::try_from_legacy_transaction(transaction)
-                .map_err(AccountDumperError::TransactionError)?;
+        let sanitized_tx = SanitizedTransaction::try_from_legacy_transaction(
+            transaction,
+            &Default::default(),
+        )
+        .map_err(AccountDumperError::TransactionError)?;
         execute_sanitized_transaction(
             sanitized_tx,
             &self.bank,

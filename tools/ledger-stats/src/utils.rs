@@ -1,9 +1,8 @@
 use std::path::Path;
 
-use magicblock_accounts_db::{
-    account_storage::AccountStorageEntry, AccountsPersister,
-};
+use magicblock_accounts_db::AccountsPersister;
 use magicblock_ledger::Ledger;
+use solana_accounts_db::accounts_db::AccountStorageEntry;
 use solana_sdk::clock::Slot;
 
 #[allow(dead_code)]

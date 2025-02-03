@@ -342,6 +342,8 @@ pub mod convert_from {
         TransactionWithStatusMeta, VersionedTransactionWithStatusMeta,
     };
 
+    use crate::geyser::CommitmentLevel;
+
     use super::prelude as proto;
 
     fn ensure_some<T>(
@@ -383,6 +385,7 @@ pub mod convert_from {
                 block.block_height.map(|wrapper| wrapper.block_height),
                 "failed to get block_height",
             )?),
+            num_partitions: None,
         })
     }
 
@@ -601,29 +604,30 @@ pub mod convert_from {
     }
 
     pub fn create_reward(reward: proto::Reward) -> Result<Reward, String> {
-        Ok(Reward {
-            pubkey: reward.pubkey,
-            lamports: reward.lamports,
-            post_balance: reward.post_balance,
-            reward_type: match ensure_some(
-                proto::RewardType::try_from(reward.reward_type).ok(),
-                "failed to parse reward_type",
-            )? {
-                proto::RewardType::Unspecified => None,
-                proto::RewardType::Fee => Some(RewardType::Fee),
-                proto::RewardType::Rent => Some(RewardType::Rent),
-                proto::RewardType::Staking => Some(RewardType::Staking),
-                proto::RewardType::Voting => Some(RewardType::Voting),
-            },
-            commission: if reward.commission.is_empty() {
-                None
-            } else {
-                Some(ensure_some(
-                    reward.commission.parse().ok(),
-                    "failed to parse reward commission",
-                )?)
-            },
-        })
+        todo!()
+        //Ok(Reward {
+        //    pubkey: reward.pubkey,
+        //    lamports: reward.lamports,
+        //    post_balance: reward.post_balance,
+        //    reward_type: match ensure_some(
+        //        proto::RewardType::try_from(reward.reward_type).ok(),
+        //        "failed to parse reward_type",
+        //    )? {
+        //        proto::RewardType::Unspecified => None,
+        //        proto::RewardType::Fee => Some(RewardType::Fee),
+        //        proto::RewardType::Rent => Some(RewardType::Rent),
+        //        proto::RewardType::Staking => Some(RewardType::Staking),
+        //        proto::RewardType::Voting => Some(RewardType::Voting),
+        //    },
+        //    commission: if reward.commission.is_empty() {
+        //        None
+        //    } else {
+        //        Some(ensure_some(
+        //            reward.commission.parse().ok(),
+        //            "failed to parse reward commission",
+        //        )?)
+        //    },
+        //})
     }
 
     pub fn create_token_balances(
@@ -692,5 +696,11 @@ pub mod convert_from {
             rent_epoch: account.rent_epoch,
         };
         Ok((pubkey, account))
+    }
+    impl From<i32> for CommitmentLevel {
+        fn from(value: i32) -> Self {
+            Self::from_i32(value)
+                .expect("failed to convert i32 to CommitmentLevel")
+        }
     }
 }

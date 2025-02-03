@@ -374,6 +374,7 @@ impl Ledger {
 
             block_time,
             block_height,
+            num_partitions: None,
         };
 
         Ok(Some(block))
@@ -1299,6 +1300,7 @@ mod tests {
             Default::default(),
             false,
             SimpleAddressLoader::Enabled(meta.loaded_addresses.clone()),
+            &Default::default(),
         )
         .map_err(|e| error!("SanitizedTransaction::try_new failed: {:?}", e))
         .unwrap();

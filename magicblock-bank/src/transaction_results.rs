@@ -1,26 +1,22 @@
 // NOTE: copied from bank.rs:294
-use magicblock_accounts_db::{
-    accounts::TransactionLoadResult,
-    transaction_results::TransactionExecutionResult,
-};
-use solana_svm::transaction_error_metrics::TransactionErrorMetrics;
+use solana_svm::transaction_processing_result::TransactionProcessingResult;
 
 #[derive(Debug)]
 pub struct LoadAndExecuteTransactionsOutput {
-    pub loaded_transactions: Vec<TransactionLoadResult>,
-    // Vector of results indicating whether a transaction was executed or could not
-    // be executed. Note executed transactions can still have failed!
-    pub execution_results: Vec<TransactionExecutionResult>,
-    pub retryable_transaction_indexes: Vec<usize>,
-    // Total number of transactions that were executed
-    pub executed_transactions_count: usize,
-    // Number of non-vote transactions that were executed
-    pub executed_non_vote_transactions_count: usize,
-    // Total number of the executed transactions that returned success/not
-    // an error.
-    pub executed_with_successful_result_count: usize,
+    // Vector of results indicating whether a transaction was processed or could not
+    // be processed. Note processed transactions can still have failed!
+    pub processing_results: Vec<TransactionProcessingResult>,
+    // Processed transaction counts used to update bank transaction counts and
+    // for metrics reporting.
+    pub processed_counts: ProcessedTransactionCounts,
+}
+
+#[derive(Debug, Default, PartialEq)]
+pub struct ProcessedTransactionCounts {
+    pub processed_transactions_count: u64,
+    pub processed_non_vote_transactions_count: u64,
+    pub processed_with_successful_result_count: u64,
     pub signature_count: u64,
-    pub error_counters: TransactionErrorMetrics,
 }
 
 #[derive(Debug)]

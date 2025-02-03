@@ -125,6 +125,7 @@ impl ImmutableDeserializedPacket {
             *self.message_hash(),
             is_simple_vote,
             address_loader,
+            &Default::default(),
         )
         .ok()?;
         tx.verify_precompiles(feature_set).ok()?;

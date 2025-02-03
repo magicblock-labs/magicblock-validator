@@ -21,16 +21,14 @@ use tokio::runtime::Runtime;
 use crate::{
     handlers::{
         accounts::AccountsDataImpl, accounts_scan::AccountsScanImpl,
-        bank_data::BankDataImpl, deprecated::DeprecatedImpl, full::FullImpl,
-        minimal::MinimalImpl,
+        bank_data::BankDataImpl, full::FullImpl, minimal::MinimalImpl,
     },
     json_rpc_request_processor::{JsonRpcConfig, JsonRpcRequestProcessor},
     rpc_health::RpcHealth,
     rpc_request_middleware::RpcRequestMiddleware,
     traits::{
         rpc_accounts::AccountsData, rpc_accounts_scan::AccountsScan,
-        rpc_bank_data::BankData, rpc_deprecated::Deprecated, rpc_full::Full,
-        rpc_minimal::Minimal,
+        rpc_bank_data::BankData, rpc_full::Full, rpc_minimal::Minimal,
     },
     utils::MAX_REQUEST_BODY_SIZE,
 };
@@ -118,7 +116,7 @@ impl JsonRpcService {
                 io.extend_with(FullImpl.to_delegate());
                 io.extend_with(BankDataImpl.to_delegate());
                 io.extend_with(MinimalImpl.to_delegate());
-                io.extend_with(DeprecatedImpl.to_delegate());
+                //io.extend_with(DeprecatedImpl.to_delegate());
 
                 let health = RpcHealth::new(startup_verification_complete);
                 let request_middleware = RpcRequestMiddleware::new(health);

@@ -6,13 +6,13 @@ use std::{
 use jsonrpc_core::{Error, ErrorCode, Metadata, Result, Value};
 use log::*;
 use magicblock_accounts::AccountsManager;
-use magicblock_accounts_db::accounts_index::AccountSecondaryIndexes;
 use magicblock_bank::{
     bank::Bank, transaction_simulation::TransactionSimulationResult,
 };
 use magicblock_ledger::{Ledger, SignatureInfosForAddress};
 use magicblock_transaction_status::TransactionStatusSender;
 use solana_account_decoder::{UiAccount, UiAccountEncoding};
+use solana_accounts_db::accounts_index::AccountSecondaryIndexes;
 use solana_rpc_client_api::{
     config::{
         RpcAccountInfoConfig, RpcContextConfig, RpcEncodingConfigWrapper,
@@ -356,8 +356,8 @@ impl JsonRpcRequestProcessor {
             None => None,
         };
         let is_valid = match age {
-            Some(age) => bank.is_blockhash_valid_for_age(blockhash, age),
-            None => bank.is_blockhash_valid(blockhash),
+            Some(age) => bank.is_blockhash_valid_for_age(blockhash), // TODO forward age?
+            None => bank.is_blockhash_valid_for_age(blockhash),
         };
 
         Ok(new_response(&bank, is_valid))
@@ -631,6 +631,7 @@ impl JsonRpcRequestProcessor {
                     return_data: return_data
                         .map(|return_data| return_data.into()),
                     inner_instructions: None,
+                    replacement_blockhash: None,
                 },
             }
             .into());
@@ -688,6 +689,7 @@ impl JsonRpcRequestProcessor {
                     units_consumed: Some(0),
                     return_data: None,
                     inner_instructions: None,
+                    replacement_blockhash: None,
                 },
             ));
         }
@@ -757,9 +759,7 @@ impl JsonRpcRequestProcessor {
 
         let inner_instructions = inner_instructions.map(|info| {
             map_inner_instructions(info)
-                .map(|converted| {
-                    UiInnerInstructions::parse(converted, &account_keys)
-                })
+                .map(|converted| UiInnerInstructions::from(converted))
                 .collect()
         });
 
@@ -772,6 +772,7 @@ impl JsonRpcRequestProcessor {
                 units_consumed: Some(units_consumed),
                 return_data: return_data.map(|return_data| return_data.into()),
                 inner_instructions,
+                replacement_blockhash: None,
             },
         ))
     }
@@ -794,6 +795,11 @@ impl JsonRpcRequestProcessor {
             version: Some(magicblock_version::version!().to_string()),
             feature_set: Some(feature_set),
             shred_version: None,
+            tvu: None,
+            tpu_vote: None,
+            tpu_forwards: None,
+            tpu_forwards_quic: None,
+            serve_repair: None,
         }]
     }
 

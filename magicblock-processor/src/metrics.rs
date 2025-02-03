@@ -1,10 +1,26 @@
 #![allow(dead_code)]
 use std::collections::HashMap;
 
-use solana_program_runtime::timings::{
-    ExecuteTimingType, ExecuteTimings, ThreadExecuteTimings,
-};
-use solana_sdk::saturating_add_assign;
+use solana_metrics::datapoint_info;
+use solana_sdk::{clock::Slot, saturating_add_assign};
+use solana_timings::{ExecuteTimingType, ExecuteTimings};
+#[derive(Debug, Default)]
+pub struct ThreadExecuteTimings {
+    pub total_thread_us: u64,
+    pub total_transactions_executed: u64,
+    pub execute_timings: ExecuteTimings,
+}
+
+impl ThreadExecuteTimings {
+    pub fn accumulate(&mut self, other: &ThreadExecuteTimings) {
+        self.execute_timings.accumulate(&other.execute_timings);
+        saturating_add_assign!(self.total_thread_us, other.total_thread_us);
+        saturating_add_assign!(
+            self.total_transactions_executed,
+            other.total_transactions_executed
+        );
+    }
+}
 
 // NOTE: copied from ledger/src/blockstore_processor.rs :218
 #[derive(Default)]

@@ -18,7 +18,10 @@ pub fn execute_legacy_transaction(
     bank: &Arc<Bank>,
     transaction_status_sender: Option<&TransactionStatusSender>,
 ) -> Result<Signature> {
-    let sanitized_tx = SanitizedTransaction::try_from_legacy_transaction(tx)?;
+    let sanitized_tx = SanitizedTransaction::try_from_legacy_transaction(
+        tx,
+        &Default::default(),
+    )?;
     execute_sanitized_transaction(sanitized_tx, bank, transaction_status_sender)
 }
 

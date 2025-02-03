@@ -43,7 +43,8 @@ impl Default for InitGeyserServiceConfig {
 
 impl InitGeyserServiceConfig {
     pub fn add_plugin(&mut self, name: String, plugin: Box<dyn GeyserPlugin>) {
-        self.add_loaded_plugin(LoadedGeyserPlugin::new(plugin, Some(name)));
+        // TODO fix
+        //self.add_loaded_plugin(LoadedGeyserPlugin::new(plugin, Some(name)));
     }
 
     pub fn add_loaded_plugin(&mut self, plugin: LoadedGeyserPlugin) {
@@ -81,7 +82,7 @@ pub fn init_geyser_service(
         ),
         ..Default::default()
     };
-    let (grpc_plugin, rpc_service) = {
+    let (grpc_plugin, rpc_service): (_, Arc<GeyserRpcService>) = {
         let plugin = GrpcGeyserPlugin::create(config)
             .map_err(|err| {
                 error!("Failed to load geyser plugin: {:?}", err);
@@ -98,7 +99,8 @@ pub fn init_geyser_service(
             geyser_grpc.socket_addr()
         );
         let rpc_service = plugin.rpc();
-        (LoadedGeyserPlugin::new(Box::new(plugin), None), rpc_service)
+        todo!() // WTF is Library?
+                //(LoadedGeyserPlugin::new(Box::new(plugin), None), rpc_service)
     };
 
     // vec combined with grpc_plubin
@@ -109,6 +111,7 @@ pub fn init_geyser_service(
         }
         None => vec![grpc_plugin],
     };
-    let geyser_service = GeyserPluginService::new(&[], plugins)?;
-    Ok((geyser_service, rpc_service))
+    todo!() // so much pain...
+            //let geyser_service = GeyserPluginService::new(&[], plugins)?;
+            //Ok((geyser_service, rpc_service))
 }

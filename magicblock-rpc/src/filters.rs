@@ -1,14 +1,13 @@
 use jsonrpc_core::{Error, Result};
 use log::*;
-use magicblock_accounts_db::{
-    accounts_index::{AccountIndex, AccountSecondaryIndexes, ScanConfig},
-    inline_spl_token::{
-        SPL_TOKEN_ACCOUNT_MINT_OFFSET, SPL_TOKEN_ACCOUNT_OWNER_OFFSET,
-    },
-    inline_spl_token_2022::{self, ACCOUNTTYPE_ACCOUNT},
-};
 use magicblock_bank::bank::Bank;
 use solana_account_decoder::parse_token::is_known_spl_token_id;
+use solana_accounts_db::accounts_index::{
+    AccountIndex, AccountSecondaryIndexes, ScanConfig,
+};
+use solana_inline_spl::{
+    token::SPL_TOKEN_ACCOUNT_OWNER_OFFSET, token_2022::ACCOUNTTYPE_ACCOUNT,
+};
 use solana_rpc_client_api::{
     custom_error::RpcCustomError,
     filter::{Memcmp, MemcmpEncodedBytes, RpcFilterType},
@@ -53,7 +52,7 @@ pub(crate) fn get_spl_token_owner_filter(
         return None;
     }
     let mut data_size_filter: Option<u64> = None;
-    let mut memcmp_filter: Option<&[u8]> = None;
+    let mut memcmp_filter: Option<Vec<u8>> = None; // TODO optimize
     let mut owner_key: Option<Pubkey> = None;
     let mut incorrect_owner_len: Option<usize> = None;
     let mut token_account_state_filter = false;
@@ -62,21 +61,19 @@ pub(crate) fn get_spl_token_owner_filter(
         match filter {
             RpcFilterType::DataSize(size) => data_size_filter = Some(*size),
             #[allow(deprecated)]
-            RpcFilterType::Memcmp(Memcmp {
-                offset,
-                bytes: MemcmpEncodedBytes::Bytes(bytes),
-                ..
-            }) if *offset == account_packed_len
-                && *program_id == inline_spl_token_2022::id() =>
+            RpcFilterType::Memcmp(mmcmp)
+                if mmcmp.offset() == account_packed_len
+                    && *program_id == solana_inline_spl::token_2022::id() =>
             {
-                memcmp_filter = Some(bytes)
+                memcmp_filter =
+                    Some(mmcmp.bytes().map(|b| b.to_vec()).unwrap_or_default())
             }
             #[allow(deprecated)]
-            RpcFilterType::Memcmp(Memcmp {
-                offset,
-                bytes: MemcmpEncodedBytes::Bytes(bytes),
-                ..
-            }) if *offset == SPL_TOKEN_ACCOUNT_OWNER_OFFSET => {
+            RpcFilterType::Memcmp(mmcmp)
+                if mmcmp.offset() == SPL_TOKEN_ACCOUNT_OWNER_OFFSET =>
+            {
+                let bytes =
+                    mmcmp.bytes().map(|b| b.to_vec()).unwrap_or_default();
                 if bytes.len() == PUBKEY_BYTES {
                     owner_key = Pubkey::try_from(&bytes[..]).ok();
                 } else {
@@ -90,7 +87,7 @@ pub(crate) fn get_spl_token_owner_filter(
         }
     }
     if data_size_filter == Some(account_packed_len as u64)
-        || memcmp_filter == Some(&[ACCOUNTTYPE_ACCOUNT])
+        || memcmp_filter == Some([ACCOUNTTYPE_ACCOUNT].to_vec())
         || token_account_state_filter
     {
         if let Some(incorrect_owner_len) = incorrect_owner_len {
@@ -103,74 +100,6 @@ pub(crate) fn get_spl_token_owner_filter(
     } else {
         debug!(
             "spl_token program filters do not match by-owner index requisites"
-        );
-        None
-    }
-}
-
-/// Analyze custom filters to determine if the result will be a subset of spl-token accounts by
-/// mint.
-/// NOTE: `optimize_filters()` should almost always be called before using this method because of
-/// the strict match on `MemcmpEncodedBytes::Bytes`.
-#[allow(unused)]
-fn get_spl_token_mint_filter(
-    program_id: &Pubkey,
-    filters: &[RpcFilterType],
-) -> Option<Pubkey> {
-    if !is_known_spl_token_id(program_id) {
-        return None;
-    }
-    let mut data_size_filter: Option<u64> = None;
-    let mut memcmp_filter: Option<&[u8]> = None;
-    let mut mint: Option<Pubkey> = None;
-    let mut incorrect_mint_len: Option<usize> = None;
-    let mut token_account_state_filter = false;
-    let account_packed_len = TokenAccount::get_packed_len();
-    for filter in filters {
-        match filter {
-            RpcFilterType::DataSize(size) => data_size_filter = Some(*size),
-            #[allow(deprecated)]
-            RpcFilterType::Memcmp(Memcmp {
-                offset,
-                bytes: MemcmpEncodedBytes::Bytes(bytes),
-                ..
-            }) if *offset == account_packed_len
-                && *program_id == inline_spl_token_2022::id() =>
-            {
-                memcmp_filter = Some(bytes)
-            }
-            #[allow(deprecated)]
-            RpcFilterType::Memcmp(Memcmp {
-                offset,
-                bytes: MemcmpEncodedBytes::Bytes(bytes),
-                ..
-            }) if *offset == SPL_TOKEN_ACCOUNT_MINT_OFFSET => {
-                if bytes.len() == PUBKEY_BYTES {
-                    mint = Pubkey::try_from(&bytes[..]).ok();
-                } else {
-                    incorrect_mint_len = Some(bytes.len());
-                }
-            }
-            RpcFilterType::TokenAccountState => {
-                token_account_state_filter = true
-            }
-            _ => {}
-        }
-    }
-    if data_size_filter == Some(account_packed_len as u64)
-        || memcmp_filter == Some(&[ACCOUNTTYPE_ACCOUNT])
-        || token_account_state_filter
-    {
-        if let Some(incorrect_mint_len) = incorrect_mint_len {
-            info!(
-                "Incorrect num bytes ({:?}) provided for spl_token_mint_filter",
-                incorrect_mint_len
-            );
-        }
-        mint
-    } else {
-        debug!(
-            "spl_token program filters do not match by-mint index requisites"
         );
         None
     }

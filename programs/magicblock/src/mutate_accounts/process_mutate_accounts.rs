@@ -1,6 +1,7 @@
 use std::collections::{HashMap, HashSet};
 
-use solana_program_runtime::{ic_msg, invoke_context::InvokeContext};
+use solana_log_collector::ic_msg;
+use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{
     account::{ReadableAccount, WritableAccount},
     instruction::InstructionError,

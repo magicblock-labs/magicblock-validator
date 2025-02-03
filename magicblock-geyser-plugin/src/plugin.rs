@@ -230,11 +230,11 @@ impl GeyserPlugin for GrpcGeyserPlugin {
         &self,
         slot: Slot,
         parent: Option<u64>,
-        status: SlotStatus,
+        status: &SlotStatus,
     ) -> PluginResult<()> {
         self.with_inner(|inner| {
             let message =
-                Arc::new(Message::Slot((slot, parent, status).into()));
+                Arc::new(Message::Slot((slot, parent, status.clone()).into()));
             inner.send_message(&message);
             Ok(())
         })

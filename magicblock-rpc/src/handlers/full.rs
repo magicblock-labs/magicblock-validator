@@ -430,13 +430,14 @@ impl Full for FullImpl {
                     "invalid transaction message: {err}"
                 ))
             })?;
-        let sanitized_message =
-            SanitizedMessage::try_new(sanitized_versioned_message, bank)
-                .map_err(|err| {
-                    Error::invalid_params(format!(
-                        "invalid transaction message: {err}"
-                    ))
-                })?;
+        let sanitized_message = SanitizedMessage::try_new(
+            sanitized_versioned_message,
+            bank,
+            &Default::default(),
+        )
+        .map_err(|err| {
+            Error::invalid_params(format!("invalid transaction message: {err}"))
+        })?;
         let fee = bank.get_fee_for_message(&sanitized_message);
         Ok(new_response(bank, fee))
     }

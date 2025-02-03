@@ -14,14 +14,15 @@ use crate::{
 
 pub(crate) fn fund_account(bank: &Bank, pubkey: &Pubkey, lamports: u64) {
     bank.store_account(
-        pubkey,
-        &Account {
+        *pubkey,
+        Account {
             lamports,
             data: vec![],
             owner: system_program::id(),
             executable: false,
             rent_epoch: Epoch::MAX,
-        },
+        }
+        .into(),
     );
 }
 
@@ -32,14 +33,15 @@ pub(crate) fn fund_account_with_data(
     data: Vec<u8>,
 ) {
     bank.store_account(
-        pubkey,
-        &Account {
+        *pubkey,
+        Account {
             lamports,
             data,
             owner: system_program::id(),
             executable: false,
             rent_epoch: Epoch::MAX,
-        },
+        }
+        .into(),
     );
 }
 

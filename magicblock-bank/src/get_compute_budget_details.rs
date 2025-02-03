@@ -1,5 +1,6 @@
-use solana_program_runtime::compute_budget_processor::process_compute_budget_instructions;
+use solana_runtime_transaction::instructions_processor::process_compute_budget_instructions;
 use solana_sdk::{
+    feature_set::FeatureSet,
     instruction::CompiledInstruction,
     pubkey::Pubkey,
     transaction::{SanitizedTransaction, SanitizedVersionedTransaction},
@@ -18,11 +19,15 @@ pub trait GetComputeBudgetDetails {
     ) -> Option<ComputeBudgetDetails>;
 
     fn process_compute_budget_instruction<'a>(
-        instructions: impl Iterator<Item = (&'a Pubkey, &'a CompiledInstruction)>,
+        instructions: impl Iterator<Item = (&'a Pubkey, &'a CompiledInstruction)>
+            + Clone,
         _round_compute_unit_price_enabled: bool,
     ) -> Option<ComputeBudgetDetails> {
-        let compute_budget_limits =
-            process_compute_budget_instructions(instructions).ok()?;
+        let compute_budget_limits = process_compute_budget_instructions(
+            instructions.map(|(p, i)| (p, i.into())),
+            &FeatureSet::default(),
+        )
+        .ok()?;
         Some(ComputeBudgetDetails {
             compute_unit_price: compute_budget_limits.compute_unit_price,
             compute_unit_limit: u64::from(
@@ -58,6 +63,7 @@ impl GetComputeBudgetDetails for SanitizedTransaction {
 
 #[cfg(test)]
 mod tests {
+    use solana_compute_budget::compute_budget_limits::DEFAULT_INSTRUCTION_COMPUTE_UNIT_LIMIT;
     use solana_sdk::{
         compute_budget::ComputeBudgetInstruction,
         message::Message,
@@ -94,22 +100,23 @@ mod tests {
             sanitized_versioned_transaction.get_compute_budget_details(false),
             Some(ComputeBudgetDetails {
                 compute_unit_price: 0,
-                compute_unit_limit:
-                    solana_program_runtime::compute_budget_processor::DEFAULT_INSTRUCTION_COMPUTE_UNIT_LIMIT
+                compute_unit_limit: DEFAULT_INSTRUCTION_COMPUTE_UNIT_LIMIT
                     as u64,
             })
         );
 
         // assert for SanitizedTransaction
         let sanitized_transaction =
-            SanitizedTransaction::try_from_legacy_transaction(transaction)
-                .unwrap();
+            SanitizedTransaction::try_from_legacy_transaction(
+                transaction,
+                &Default::default(),
+            )
+            .unwrap();
         assert_eq!(
             sanitized_transaction.get_compute_budget_details(false),
             Some(ComputeBudgetDetails {
                 compute_unit_price: 0,
-                compute_unit_limit:
-                    solana_program_runtime::compute_budget_processor::DEFAULT_INSTRUCTION_COMPUTE_UNIT_LIMIT
+                compute_unit_limit: DEFAULT_INSTRUCTION_COMPUTE_UNIT_LIMIT
                     as u64,
             })
         );
@@ -147,8 +154,11 @@ mod tests {
 
         // assert for SanitizedTransaction
         let sanitized_transaction =
-            SanitizedTransaction::try_from_legacy_transaction(transaction)
-                .unwrap();
+            SanitizedTransaction::try_from_legacy_transaction(
+                transaction,
+                &Default::default(),
+            )
+            .unwrap();
         assert_eq!(
             sanitized_transaction.get_compute_budget_details(false),
             Some(ComputeBudgetDetails {
@@ -186,22 +196,23 @@ mod tests {
             sanitized_versioned_transaction.get_compute_budget_details(false),
             Some(ComputeBudgetDetails {
                 compute_unit_price: requested_price,
-                compute_unit_limit:
-                    solana_program_runtime::compute_budget_processor::DEFAULT_INSTRUCTION_COMPUTE_UNIT_LIMIT
+                compute_unit_limit: DEFAULT_INSTRUCTION_COMPUTE_UNIT_LIMIT
                     as u64,
             })
         );
 
         // assert for SanitizedTransaction
         let sanitized_transaction =
-            SanitizedTransaction::try_from_legacy_transaction(transaction)
-                .unwrap();
+            SanitizedTransaction::try_from_legacy_transaction(
+                transaction,
+                &Default::default(),
+            )
+            .unwrap();
         assert_eq!(
             sanitized_transaction.get_compute_budget_details(false),
             Some(ComputeBudgetDetails {
                 compute_unit_price: requested_price,
-                compute_unit_limit:
-                    solana_program_runtime::compute_budget_processor::DEFAULT_INSTRUCTION_COMPUTE_UNIT_LIMIT
+                compute_unit_limit: DEFAULT_INSTRUCTION_COMPUTE_UNIT_LIMIT
                     as u64,
             })
         );
