@@ -126,11 +126,11 @@ impl AccountCommitter for RemoteAccountCommitter {
                     DelegationMetadata::try_from_bytes_with_discriminator(
                         &metadata_account.data,
                     )
-                    .map_err(|err| {
-                        AccountsError::FailedToGetReimbursementAddress(
-                            err.to_string(),
-                        )
-                    })?;
+                        .map_err(|err| {
+                            AccountsError::FailedToGetReimbursementAddress(
+                                err.to_string(),
+                            )
+                        })?;
                 let undelegate_ix = undelegate(
                     validator::validator_authority_id(),
                     *pubkey,
@@ -175,11 +175,11 @@ impl AccountCommitter for RemoteAccountCommitter {
         let mut pending_commits = Vec::new();
         for SendableCommitAccountsPayload {
             transaction:
-                CommitAccountsTransaction {
-                    transaction,
-                    committed_only_accounts,
-                    undelegated_accounts,
-                },
+            CommitAccountsTransaction {
+                transaction,
+                committed_only_accounts,
+                undelegated_accounts,
+            },
             committees,
         } in payloads
         {
@@ -311,7 +311,7 @@ impl AccountCommitter for RemoteAccountCommitter {
                                 tokio::time::sleep(
                                     std::time::Duration::from_millis(50),
                                 )
-                                .await;
+                                    .await;
                             }
                         }
                         Err(err) => {
@@ -379,9 +379,9 @@ impl RemoteAccountCommitter {
     ) -> (Instruction, Instruction) {
         // TODO(thlorenz): We may need to consider account size as well since
         // the account is copied which could affect CUs
-        const BASE_COMPUTE_BUDGET: u32 = 60_000;
+        const BASE_COMPUTE_BUDGET: u32 = 80_000;
         const COMPUTE_BUDGET_PER_COMMITTEE: u32 = 45_000;
-        const COMPUTE_BUDGET_PER_UNDELEGATION: u32 = 45_000;
+        const COMPUTE_BUDGET_PER_UNDELEGATION: u32 = 70_000;
 
         let compute_budget = BASE_COMPUTE_BUDGET
             + (COMPUTE_BUDGET_PER_COMMITTEE * committee_count)
