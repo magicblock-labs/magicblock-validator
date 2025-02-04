@@ -136,6 +136,7 @@ magicblock-tokens = { path = "./magicblock-tokens" }
 magicblock-streamer = { path = "./magicblock-streamer" }
 magicblock-transaction-status = { path = "./magicblock-transaction-status" }
 magicblock-version = { path = "./magicblock-version" }
+protobuf-src = "2.1.1+27.1"
 solana-accounts-db = { version = "2.1.11" }
 solana-account-decoder = { version = "2.1.11" }
 solana-address-lookup-table-program = { version = "2.1.11" }
@@ -268,4 +269,3 @@ solana-storage-proto = { path = "./storage-proto" }
 # to the compatible versions on github
 # solana-program = { version = "2.1.11" }
 # solana-zk-token-sdk = { version = "2.1.11" }
-

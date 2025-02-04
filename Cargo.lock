@@ -2170,6 +2170,7 @@ dependencies = [
  "anyhow",
  "bincode",
  "prost 0.11.9",
+ "protobuf-src",
  "solana-account-decoder",
  "solana-sdk",
  "solana-transaction-status",
