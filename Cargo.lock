@@ -3710,22 +3710,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "magicblock-messaging"
-version = "1.19.0"
-dependencies = [
- "bincode",
- "crossbeam-channel",
- "log",
- "magicblock-bank",
- "serde",
- "serde_derive",
- "solana-frozen-abi-macro",
- "solana-perf",
- "solana-sdk",
- "thiserror 1.0.69",
-]
-
-[[package]]
 name = "magicblock-metrics"
 version = "1.19.0"
 dependencies = [
@@ -3874,13 +3858,6 @@ dependencies = [
  "test-tools",
  "thiserror 1.0.69",
  "tokio",
-]
-
-[[package]]
-name = "magicblock-streamer"
-version = "1.19.0"
-dependencies = [
- "solana-streamer",
 ]
 
 [[package]]

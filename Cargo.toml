@@ -19,14 +19,12 @@ members = [
   "magicblock-core",
   "magicblock-geyser-plugin",
   "magicblock-ledger",
-  "magicblock-messaging",
   "magicblock-metrics",
   "magicblock-mutator",
   "magicblock-perf-service",
   "magicblock-processor",
   "magicblock-pubsub",
   "magicblock-rpc",
-  "magicblock-streamer",
   "magicblock-tokens",
   "magicblock-transaction-status",
   "magicblock-version",
@@ -123,7 +121,6 @@ magicblock-config = { path = "./magicblock-config" }
 magicblock-core = { path = "./magicblock-core" }
 magicblock-geyser-plugin = { path = "./magicblock-geyser-plugin" }
 magicblock-ledger = { path = "./magicblock-ledger" }
-magicblock-messaging = { path = "./magicblock-messaging" }
 magicblock-metrics = { path = "./magicblock-metrics" }
 magicblock-mutator = { path = "./magicblock-mutator" }
 magicblock-perf-service = { path = "./magicblock-perf-service" }
@@ -133,7 +130,6 @@ magicblock-pubsub = { path = "./magicblock-pubsub" }
 magicblock-rpc = { path = "./magicblock-rpc" }
 magicblock-rpc-sender = { path = "./magicblock-rpc-sender" }
 magicblock-tokens = { path = "./magicblock-tokens" }
-magicblock-streamer = { path = "./magicblock-streamer" }
 magicblock-transaction-status = { path = "./magicblock-transaction-status" }
 magicblock-version = { path = "./magicblock-version" }
 protobuf-src = "2.1.1+27.1"
