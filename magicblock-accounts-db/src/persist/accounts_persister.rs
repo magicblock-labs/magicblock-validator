@@ -7,9 +7,11 @@ use std::{
     },
 };
 
+use dashmap::DashMap;
 use log::*;
 use rand::{thread_rng, Rng};
 use solana_accounts_db::{
+    account_storage::AccountStorageReference,
     accounts_db::AccountStorageEntry,
     accounts_file::{AccountsFile, AccountsFileProvider, StorageAccess},
     append_vec::AppendVec,
@@ -28,7 +30,7 @@ use crate::{
     errors::{AccountsDbError, AccountsDbResult},
 };
 use solana_accounts_db::{
-    account_storage::{AccountStorage, AccountStorageStatus},
+    account_storage::AccountStorageStatus,
     append_vec::{aligned_stored_size, STORE_META_OVERHEAD},
     storable_accounts::StorableAccounts,
 };
@@ -42,7 +44,7 @@ const DEFAULT_FILE_SIZE: u64 = 4 * 1024 * 1024;
 /// The disk usage is kept small by cleaning up older storage entries regularly.
 #[derive(Debug)]
 pub struct AccountsPersister {
-    storage: AccountStorage,
+    storage: DashMap<Slot, AccountStorageReference>,
     paths: Vec<PathBuf>,
     /// distribute the accounts across storage lists
     next_id: AtomicAppendVecId,
@@ -64,7 +66,7 @@ pub const FLUSH_ACCOUNTS_SLOT_FREQ: u64 = 500;
 impl Default for AccountsPersister {
     fn default() -> Self {
         Self {
-            storage: AccountStorage::default(),
+            storage: Default::default(),
             paths: Vec::new(),
             next_id: AtomicAppendVecId::new(0),
             write_version: AtomicU64::new(0),
@@ -161,7 +163,7 @@ impl AccountsPersister {
                     if let Some(slot) = filename.split('.').next() {
                         if let Ok(slot) = slot.parse::<Slot>() {
                             if slot <= keep_after {
-                                //self.storage.map.remove(&slot);
+                                self.storage.remove(&slot);
                                 total_removed += 1;
                             }
                         } else {
@@ -239,6 +241,7 @@ impl AccountsPersister {
                         }),
                 ));
             }
+            // TODO: do we really need this?
             //storage.add_accounts(
             //    stored_accounts_info.offsets.len(),
             //    stored_accounts_info.size,
@@ -360,13 +363,19 @@ impl AccountsPersister {
     }
 
     fn insert_store(&self, slot: Slot, store: Arc<AccountStorageEntry>) {
-        //self.storage.insert(slot, store)
+        let store = AccountStorageReference {
+            id: store.id(),
+            storage: store,
+        };
+        self.storage.insert(slot, store);
     }
 
     fn has_space_available(&self, slot: Slot, size: u64) -> bool {
-        let store = self.storage.get_slot_storage_entry(slot).unwrap();
-        if store.status() == AccountStorageStatus::Available
-            && store.accounts.remaining_bytes() >= size
+        let Some(store) = self.storage.get(&slot) else {
+            return false;
+        };
+        if store.storage.status() == AccountStorageStatus::Available
+            && store.storage.accounts.remaining_bytes() >= size
         {
             return true;
         }
