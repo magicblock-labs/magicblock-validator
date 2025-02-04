@@ -2,14 +2,13 @@ use std::str::FromStr;
 
 use log::{Level::Trace, *};
 use magicblock_accounts_db::AccountsPersister;
-use magicblock_bank::bank::{Bank, TransactionExecutionRecordingOpts};
+use magicblock_bank::bank::Bank;
 use solana_sdk::{
     account::AccountSharedData,
     clock::{Slot, UnixTimestamp},
     hash::Hash,
     message::SanitizedMessage,
     pubkey::Pubkey,
-    signer::Signer,
     transaction::{
         SanitizedTransaction, TransactionVerificationMode, VersionedTransaction,
     },
@@ -119,6 +118,8 @@ fn hydrate_bank(bank: &Bank, max_slot: Slot) -> LedgerResult<(Slot, usize)> {
     let all_accounts = Vec::<(Pubkey, AccountSharedData)>::new(); // storage.all_accounts();
     let len = all_accounts.len();
     let storable_accounts = all_accounts;
+    // TODO use something like all_accounts method from tools/ledger-stats/src/utils.rs
+    //
     //let storable_accounts = all_accounts
     //    .iter()
     //    .map(|acc| (acc.0, acc.1))
@@ -206,6 +207,7 @@ pub fn process_ledger(ledger: &Ledger, bank: &Bank) -> LedgerResult<u64> {
                             &mut timings,
                             None,
                         );
+                    // TODO fix logging for TransactionCommitResult returned by load_execute_and_commit_transactions
 
                     //log_execution_results(&results.execution_results);
                     //for result in results.execution_results {
@@ -262,6 +264,8 @@ instructions: {:?}
     }
 }
 
+// TODO fix logging for TransactionCommitResult returned by load_execute_and_commit_transactions
+//
 //fn log_execution_results(results: &[TransactionExecutionResult]) {
 //    if !log_enabled!(Trace) {
 //        return;

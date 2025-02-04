@@ -173,6 +173,7 @@ pub struct Bank {
     /// stream for the slot == self.slot
     is_delta: AtomicBool,
 
+    // TODO ??? no idea how to use that, it's kind of mirrored to transaction_processor
     builtin_programs: HashSet<Pubkey>,
 
     pub(crate) transaction_processor:
@@ -578,7 +579,7 @@ impl Bank {
         }
 
         {
-            let txp = self.transaction_processor.write().unwrap();
+            let txp = self.transaction_processor.read().unwrap();
             let mut loaded_programs_cache = txp.program_cache.write().unwrap();
             loaded_programs_cache.environments.program_runtime_v1 = Arc::new(
                 create_program_runtime_environment_v1(
@@ -600,7 +601,7 @@ impl Bank {
     }
 
     fn sync_loaded_programs_cache_to_slot(&self) {
-        let txp = self.transaction_processor.write().unwrap();
+        let txp = self.transaction_processor.read().unwrap();
         let mut loaded_programs_cache = txp.program_cache.write().unwrap();
         loaded_programs_cache.latest_root_slot = self.slot();
         loaded_programs_cache.latest_root_epoch = self.epoch();
@@ -1366,20 +1367,6 @@ impl Bank {
         self.check_status_cache(sanitized_txs, age_results, error_counters)
     }
 
-    fn check_transaction_for_nonce(
-        &self,
-        tx: &SanitizedTransaction,
-        next_durable_nonce: &DurableNonce,
-    ) -> Option<TransactionAccount> {
-        let nonce_is_advanceable =
-            tx.message().recent_blockhash() != next_durable_nonce.as_hash();
-        if nonce_is_advanceable {
-            self.check_message_for_nonce(tx.message())
-        } else {
-            None
-        }
-    }
-
     fn check_age(
         &self,
         sanitized_txs: &[impl core::borrow::Borrow<SanitizedTransaction>],
@@ -1957,37 +1944,6 @@ impl Bank {
         )
     }
 
-    // -----------------
-    // Fees
-    // -----------------
-    fn withdraw(&self, pubkey: &Pubkey, lamports: u64) -> Result<()> {
-        match self.get_account_with_fixed_root(pubkey) {
-            Some(mut account) => {
-                let min_balance = match get_system_account_kind(&account) {
-                    Some(SystemAccountKind::Nonce) => self
-                        .rent_collector
-                        .rent
-                        .minimum_balance(nonce::State::size()),
-                    _ => 0,
-                };
-
-                lamports
-                    .checked_add(min_balance)
-                    .filter(|required_balance| {
-                        *required_balance <= account.lamports()
-                    })
-                    .ok_or(TransactionError::InsufficientFundsForFee)?;
-                account
-                    .checked_sub_lamports(lamports)
-                    .map_err(|_| TransactionError::InsufficientFundsForFee)?;
-                self.store_account(*pubkey, account);
-
-                Ok(())
-            }
-            None => Err(TransactionError::AccountNotFound),
-        }
-    }
-
     pub fn get_lamports_per_signature(&self) -> u64 {
         self.fee_rate_governor.lamports_per_signature
     }
@@ -2033,30 +1989,6 @@ impl Bank {
             fee_budget_limits.prioritization_fee,
             false,
         )
-    }
-
-    // -----------------
-    // Nonces
-    // -----------------
-    fn check_message_for_nonce(
-        &self,
-        message: &SanitizedMessage,
-    ) -> Option<TransactionAccount> {
-        let nonce_address = message.get_durable_nonce()?;
-        let nonce_account = self.get_account_with_fixed_root(nonce_address)?;
-        let nonce_data = nonce_account::verify_nonce_account(
-            &nonce_account,
-            message.recent_blockhash(),
-        )?;
-
-        let nonce_is_authorized = message
-            .get_ix_signers(NONCED_TX_MARKER_IX_INDEX as usize)
-            .any(|signer| signer == &nonce_data.authority);
-        if !nonce_is_authorized {
-            return None;
-        }
-
-        Some((*nonce_address, nonce_account))
     }
 
     // -----------------

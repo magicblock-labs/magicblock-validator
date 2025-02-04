@@ -33,6 +33,7 @@ solana-accounts-db = { workspace = true }
 solana-metrics = { workspace = true }
 solana-perf = { workspace = true }
 solana-program-runtime = { workspace = true }
+solana-rpc = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
 solana-inline-spl = { workspace = true }

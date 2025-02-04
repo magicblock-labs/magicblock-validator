@@ -10,6 +10,7 @@ edition.workspace = true
 [dependencies]
 bincode = { workspace = true }
 env_logger = { workspace = true, optional = true }
+itertools = { workspace = true }
 log = { workspace = true }
 rand = { workspace = true }
 rayon = { workspace = true, optional = true }
@@ -43,10 +44,10 @@ assert_matches = { workspace = true }
 env_logger = { workspace = true }
 rayon = { workspace = true }
 
-# magicblock-bank = { path = ".", features = ["dev-context-only-utils"] }
+magicblock-bank = { path = ".", features = ["dev-context-only-utils"] }
 solana-sdk = { workspace = true, features = ["dev-context-only-utils"] }
 
-# test-tools-core = { workspace = true }
+test-tools-core = { workspace = true }
 
 [features]
 dev-context-only-utils = ["rayon", "env_logger"]

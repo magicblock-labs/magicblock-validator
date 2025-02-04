@@ -1,7 +1,7 @@
 use std::{env, path::Path};
 
 use log::{error, info};
-use solana_svm::transaction_processing_result::TransactionProcessingResult;
+use solana_svm::transaction_commit_result::CommittedTransaction;
 
 // -----------------
 // init_logger
@@ -41,21 +41,18 @@ macro_rules! init_logger {
 // -----------------
 // Solana Logs
 // -----------------
-pub fn log_exec_details(transaction_results: &TransactionProcessingResult) {
+pub fn log_exec_details(transaction_results: &CommittedTransaction) {
     info!("");
     info!("=============== Logs ===============");
-    let results = match transaction_results {
-        Ok(r) => r,
+    let logs = match &transaction_results.status {
+        Ok(_) => &transaction_results.log_messages,
         Err(error) => {
             error!("error executing transaction: {error}");
             return;
         }
     };
 
-    if let Some(logs) = results
-        .execution_details()
-        .and_then(|d| d.log_messages.as_ref())
-    {
+    if let Some(logs) = logs {
         for log in logs {
             info!("> {log}");
         }

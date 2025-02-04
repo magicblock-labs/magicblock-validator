@@ -26,7 +26,6 @@ use solana_sdk::{
 use crate::{
     account_info::{AccountInfo, AppendVecId, StorageLocation},
     accounts_cache::SlotCache,
-    accounts_db::StoredMetaWriteVersion,
     errors::{AccountsDbError, AccountsDbResult},
 };
 use solana_accounts_db::{
@@ -51,6 +50,7 @@ pub struct AccountsPersister {
 
     /// Write version used to notify accounts in order to distinguish between
     /// multiple updates to the same account in the same slot
+    #[allow(unused)] // TODO use? maybe?
     write_version: AtomicU64,
 
     storage_cleanup_slot_freq: u64,
@@ -197,14 +197,14 @@ impl AccountsPersister {
         let slot = accounts_and_meta_to_store.0;
         let mut infos: Vec<AccountInfo> =
             Vec::with_capacity(accounts_and_meta_to_store.1.len());
-        let mut total_append_accounts_us = 0;
+        //let mut total_append_accounts_us = 0;
         while infos.len() < accounts_and_meta_to_store.len() {
             let mut append_accounts = Measure::start("append_accounts");
             let stored_accounts_info = storage
                 .accounts
                 .append_accounts(&accounts_and_meta_to_store, infos.len());
             append_accounts.stop();
-            total_append_accounts_us += append_accounts.as_us();
+            //total_append_accounts_us += append_accounts.as_us();
             let Some(stored_accounts_info) = stored_accounts_info else {
                 storage.set_status(AccountStorageStatus::Full);
 
@@ -418,14 +418,15 @@ impl AccountsPersister {
         next_id
     }
 
-    /// Increases [Self::write_version] by `count` and returns the previous value
-    fn bulk_assign_write_version(
-        &self,
-        count: usize,
-    ) -> StoredMetaWriteVersion {
-        self.write_version
-            .fetch_add(count as StoredMetaWriteVersion, Ordering::AcqRel)
-    }
+    // TODO: do we really support write versions?
+    // /// Increases [Self::write_version] by `count` and returns the previous value
+    //fn bulk_assign_write_version(
+    //    &self,
+    //    count: usize,
+    //) -> StoredMetaWriteVersion {
+    //    self.write_version
+    //        .fetch_add(count as StoredMetaWriteVersion, Ordering::AcqRel)
+    //}
 
     // -----------------
     // Metrics

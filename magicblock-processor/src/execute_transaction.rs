@@ -57,7 +57,7 @@ pub fn execute_sanitized_transaction(
         // TODO: figure out how to properly derive transaction_indexes (index within the slot)
         // - This is important for the ledger history of each slot
         // - tracked: https://github.com/magicblock-labs/magicblock-validator/issues/201
-        transaction_slot_indexes: txs
+        transaction_indexes: txs
             .iter()
             .map(|_| {
                 *transaction_index_locked += 1;

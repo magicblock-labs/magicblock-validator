@@ -115,6 +115,7 @@ pub fn print_accounts(
     count: bool,
 ) {
     let (storage, slot) = accounts_storage_from_ledger(ledger);
+    //storage.accounts
 
     todo!()
     //let mut accounts = {

@@ -1,17 +1,14 @@
 use std::sync::{Arc, Mutex};
 
 use log::debug;
-use solana_accounts_db::accounts_index::ZeroLamport;
 use solana_frozen_abi_macro::AbiExample;
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
-    address_lookup_table::{
-        self, error::AddressLookupError, state::AddressLookupTable,
-    },
+    address_lookup_table::{self, state::AddressLookupTable},
     clock::Slot,
     message::{
         v0::{LoadedAddresses, MessageAddressTableLookup},
-        AddressLoader, AddressLoaderError,
+        AddressLoaderError,
     },
     pubkey::Pubkey,
     slot_hashes::SlotHashes,

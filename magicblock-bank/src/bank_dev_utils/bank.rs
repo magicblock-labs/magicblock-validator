@@ -1,10 +1,9 @@
 // NOTE: copied and slightly modified from bank.rs
 use std::{borrow::Cow, path::PathBuf, sync::Arc};
 
-use magicblock_accounts_db::{
-    accounts::Accounts, accounts_db::AccountsDb,
-    accounts_update_notifier_interface::AccountsUpdateNotifier,
-};
+use magicblock_accounts_db::{accounts::Accounts, accounts_db::AccountsDb};
+use solana_accounts_db::accounts_update_notifier_interface::AccountsUpdateNotifier;
+use solana_rpc::slot_status_notifier::SlotStatusNotifier;
 use solana_sdk::{
     genesis_config::GenesisConfig,
     pubkey::Pubkey,
@@ -20,8 +19,7 @@ use solana_svm::{
 use solana_timings::ExecuteTimings;
 
 use crate::{
-    bank::Bank, slot_status_notifier_interface::SlotStatusNotifierArc,
-    transaction_batch::TransactionBatch,
+    bank::Bank, transaction_batch::TransactionBatch,
     transaction_logs::TransactionLogCollectorFilter,
     EPHEM_DEFAULT_MILLIS_PER_SLOT,
 };
@@ -41,7 +39,7 @@ impl Bank {
     pub fn new_for_tests(
         genesis_config: &GenesisConfig,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
-        slot_status_notifier: Option<SlotStatusNotifierArc>,
+        slot_status_notifier: Option<SlotStatusNotifier>,
     ) -> Self {
         Self::new_with_config_for_tests(
             genesis_config,
@@ -56,7 +54,7 @@ impl Bank {
         genesis_config: &GenesisConfig,
         runtime_config: Arc<RuntimeConfig>,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
-        slot_status_notifier: Option<SlotStatusNotifierArc>,
+        slot_status_notifier: Option<SlotStatusNotifier>,
         millis_per_slot: u64,
     ) -> Self {
         let account_paths = vec![PathBuf::default()];

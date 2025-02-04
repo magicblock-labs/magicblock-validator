@@ -5,8 +5,11 @@ use magicblock_bank::{bank::Bank, transaction_batch::TransactionBatch};
 use magicblock_transaction_status::{
     token_balances::TransactionTokenBalances, TransactionTokenBalance,
 };
-use solana_account_decoder::parse_token::{
-    is_known_spl_token_id, token_amount_to_ui_amount, UiTokenAmount,
+use solana_account_decoder::{
+    parse_account_data::SplTokenAdditionalData,
+    parse_token::{
+        is_known_spl_token_id, token_amount_to_ui_amount_v2, UiTokenAmount,
+    },
 };
 use solana_measure::measure::Measure;
 use solana_metrics::datapoint_debug;
@@ -117,9 +120,9 @@ fn collect_token_balance_from_account(
     Some(TokenBalanceData {
         mint: token_account.base.mint.to_string(),
         owner: token_account.base.owner.to_string(),
-        ui_token_amount: token_amount_to_ui_amount(
+        ui_token_amount: token_amount_to_ui_amount_v2(
             token_account.base.amount,
-            decimals,
+            &SplTokenAdditionalData::with_decimals(decimals),
         ),
         program_id: account.owner().to_string(),
     })

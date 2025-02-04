@@ -37,6 +37,7 @@ impl GeyserTransactionNotifyListener {
         let transaction_recvr = self.transaction_recvr.clone();
         let ledger = self.ledger.clone();
         // TODO(thlorenz): need to be able to cancel this
+        // extra TODO: fix this code
         std::thread::spawn(move || {
             //while let Ok(message) = transaction_recvr.recv() {
             //    // Mostly from: rpc/src/transaction_status_service.rs

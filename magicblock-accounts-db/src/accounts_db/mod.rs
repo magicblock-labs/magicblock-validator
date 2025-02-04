@@ -1,6 +1,5 @@
 use std::{
     borrow::Cow,
-    iter::repeat,
     path::PathBuf,
     sync::{
         atomic::{AtomicU64, Ordering},
@@ -43,15 +42,6 @@ use self::{
 };
 
 pub type StoredMetaWriteVersion = u64;
-
-// -----------------
-// StoreTo
-// -----------------
-#[derive(Debug)]
-enum StoreTo {
-    /// write to cache
-    Cache,
-}
 
 // -----------------
 // ScanStorageResult
@@ -196,7 +186,10 @@ impl AccountsDb {
                 &acc,
                 &None,
                 &pk,
-                &mut repeat(0),
+                // dubious, do we really need write versions?
+                &mut std::iter::from_fn(|| {
+                    Some(self.write_version.fetch_add(1, Ordering::Relaxed))
+                }),
             );
 
             self.accounts_cache.store(pk, acc);

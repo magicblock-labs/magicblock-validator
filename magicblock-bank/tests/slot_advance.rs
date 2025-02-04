@@ -62,7 +62,7 @@ fn test_bank_store_get_accounts_across_slots() {
 
     // Slot 0
     {
-        bank.store_account(&acc0.pubkey, &acc0.account);
+        bank.store_account(acc0.pubkey, acc0.account.clone().into());
         assert_account_stored!(acc0);
         assert_account_not_stored!(acc1);
         assert_account_not_stored!(acc2);
@@ -71,7 +71,7 @@ fn test_bank_store_get_accounts_across_slots() {
     // Slot 1
     {
         bank.advance_slot();
-        bank.store_account(&acc1.pubkey, &acc1.account);
+        bank.store_account(acc1.pubkey, acc1.account.clone().into());
 
         assert_account_stored!(acc0);
         assert_account_stored!(acc1);
@@ -81,7 +81,7 @@ fn test_bank_store_get_accounts_across_slots() {
     // Slot 2
     {
         bank.advance_slot();
-        bank.store_account(&acc2.pubkey, &acc2.account);
+        bank.store_account(acc2.pubkey, acc2.account.clone().into());
         assert_account_stored!(acc0);
         assert_account_stored!(acc1);
         assert_account_stored!(acc2);

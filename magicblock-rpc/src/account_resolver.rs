@@ -6,7 +6,8 @@ use jsonrpc_core::{error, Result};
 use magicblock_bank::bank::Bank;
 use magicblock_tokens::token_balances::get_mint_decimals_from_data;
 use solana_account_decoder::{
-    parse_account_data::AccountAdditionalData,
+    encode_ui_account,
+    parse_account_data::{AccountAdditionalDataV2, SplTokenAdditionalData},
     parse_token::{get_token_account_mint, is_known_spl_token_id},
     UiAccount, UiAccountEncoding, UiDataSliceConfig, MAX_BASE58_BYTES,
 };
@@ -71,10 +72,9 @@ pub(crate) fn encode_account<T: ReadableAccount>(
             data: None,
         })
     } else {
-        //Ok(UiAccount::encode(
-        //    pubkey, account, encoding, None, data_slice,
-        //))
-        todo!()
+        Ok(encode_ui_account(
+            pubkey, account, encoding, None, data_slice,
+        ))
     }
 }
 
@@ -97,19 +97,19 @@ pub(crate) fn get_parsed_token_account(
                 overwrite_accounts,
             )
         })
-        .map(|mint_account| AccountAdditionalData {
-            spl_token_decimals: get_mint_decimals_from_data(
+        .map(|mint_account| AccountAdditionalDataV2 {
+            spl_token_additional_data: get_mint_decimals_from_data(
                 mint_account.data(),
             )
+            .map(SplTokenAdditionalData::with_decimals)
             .ok(),
         });
 
-    todo!()
-    //UiAccount::encode(
-    //    pubkey,
-    //    &account,
-    //    UiAccountEncoding::JsonParsed,
-    //    additional_data,
-    //    None,
-    //)
+    encode_ui_account(
+        pubkey,
+        &account,
+        UiAccountEncoding::JsonParsed,
+        additional_data,
+        None,
+    )
 }

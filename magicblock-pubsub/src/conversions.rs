@@ -9,10 +9,12 @@ use geyser_grpc_proto::geyser::{
     SubscribeRequestFilterTransactions, SubscribeUpdate,
     SubscribeUpdateAccount,
 };
-use solana_account_decoder::{UiAccount, UiAccountEncoding, UiDataSliceConfig};
+use solana_account_decoder::{
+    encode_ui_account, UiAccount, UiAccountEncoding, UiDataSliceConfig,
+};
 use solana_rpc_client_api::{
     config::{RpcProgramAccountsConfig, RpcTransactionLogsFilter},
-    filter::{MemcmpEncodedBytes, RpcFilterType},
+    filter::RpcFilterType,
     response::RpcLogsResponse,
 };
 use solana_sdk::{account::Account, pubkey::Pubkey, signature::Signature};
@@ -260,10 +262,9 @@ fn ui_account_from_subscribe_account_info(
         executable: inner_acc.executable,
         rent_epoch: inner_acc.rent_epoch,
     };
-    //let ui_account =
-    //    UiAccount::encode(&pubkey, &account, encoding, None, data_slice_config);
-    //Ok(Some((pubkey, ui_account)))
-    todo!()
+    let ui_account =
+        encode_ui_account(&pubkey, &account, encoding, None, data_slice_config);
+    Ok(Some((pubkey, ui_account)))
 }
 
 // -----------------

@@ -7,12 +7,10 @@ mod consts;
 pub mod genesis_utils;
 pub mod get_compute_budget_details;
 pub mod program_loader;
-pub mod slot_status_notifier_interface;
 mod status_cache;
 mod sysvar_cache;
 pub mod transaction_batch;
 pub mod transaction_logs;
-pub mod transaction_notifier_interface;
 pub mod transaction_results;
 pub mod transaction_simulation;
 

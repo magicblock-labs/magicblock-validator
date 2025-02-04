@@ -7,20 +7,20 @@ use rayon::ThreadPool;
 use solana_metrics::datapoint_error;
 use solana_rayon_threadlimit::get_max_thread_count;
 use solana_sdk::{signature::Signature, transaction::Result};
+use solana_svm::transaction_commit_result::TransactionCommitResult;
 
 // Includes transaction signature for unit-testing
-pub(super) fn get_first_error(
+pub fn get_first_error(
     batch: &TransactionBatch,
-    fee_collection_results: Vec<Result<()>>,
+    commit_results: &[TransactionCommitResult],
 ) -> Option<(Result<()>, Signature)> {
     let mut first_err = None;
-    for (result, transaction) in fee_collection_results
-        .iter()
-        .zip(batch.sanitized_transactions())
+    for (commit_result, transaction) in
+        commit_results.iter().zip(batch.sanitized_transactions())
     {
-        if let Err(ref err) = result {
+        if let Err(err) = commit_result {
             if first_err.is_none() {
-                first_err = Some((result.clone(), *transaction.signature()));
+                first_err = Some((Err(err.clone()), *transaction.signature()));
             }
             warn!(
                 "Unexpected validator error: {:?}, transaction: {:?}",

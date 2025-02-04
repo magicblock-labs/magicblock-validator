@@ -110,7 +110,7 @@ pub fn elf_accounts_for(
 #[allow(dead_code)]
 pub fn add_elf_programs(bank: &Bank) {
     for (program_id, account) in elf_accounts() {
-        bank.store_account(&program_id, &account);
+        bank.store_account(program_id, account);
     }
 }
 
@@ -122,6 +122,6 @@ pub fn add_elf_program(bank: &Bank, program_id: &Pubkey) {
 
     for (acc_id, account) in program_accs {
         debug!("Adding ELF program: '{}'", acc_id);
-        bank.store_account(&acc_id, &account);
+        bank.store_account(acc_id, account);
     }
 }

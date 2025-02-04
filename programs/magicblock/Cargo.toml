@@ -26,11 +26,11 @@ thiserror = { workspace = true }
 [dev-dependencies]
 assert_matches = { workspace = true }
 rand = { workspace = true }
-# test-tools-core = { workspace = true }
-# test-tools = { workspace = true }
+test-tools-core = { workspace = true }
+test-tools = { workspace = true }
 tokio = { workspace = true, features = ["macros"] }
 
-# magicblock-program = { workspace = true, features = ["dev-context-only-utils"] }
+magicblock-program = { workspace = true, features = ["dev-context-only-utils"] }
 
 [lib]
 crate-type = ["lib"]

@@ -2959,6 +2959,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "itertools"
+version = "0.14.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2b192c782037fadd9cfa75548310488aabdbf3d2da73885b31bd0abd03351285"
+dependencies = [
+ "either",
+]
+
+[[package]]
 name = "itoa"
 version = "1.0.14"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3544,7 +3553,7 @@ dependencies = [
  "conjunto-transwise",
  "crossbeam-channel",
  "fd-lock",
- "itertools 0.10.5",
+ "itertools 0.14.0",
  "log",
  "magicblock-account-cloner",
  "magicblock-account-dumper",
@@ -3582,8 +3591,10 @@ dependencies = [
  "assert_matches",
  "bincode",
  "env_logger 0.11.6",
+ "itertools 0.14.0",
  "log",
  "magicblock-accounts-db",
+ "magicblock-bank",
  "magicblock-program",
  "rand 0.8.5",
  "rayon",
@@ -3608,6 +3619,7 @@ dependencies = [
  "solana-system-program",
  "solana-timings",
  "solana-transaction-status",
+ "test-tools-core",
 ]
 
 [[package]]
@@ -3796,6 +3808,7 @@ dependencies = [
  "log",
  "magicblock-core",
  "magicblock-metrics",
+ "magicblock-program",
  "num-derive",
  "num-traits",
  "rand 0.8.5",
@@ -3803,6 +3816,8 @@ dependencies = [
  "solana-log-collector",
  "solana-program-runtime",
  "solana-sdk",
+ "test-tools",
+ "test-tools-core",
  "thiserror 1.0.69",
  "tokio",
 ]
@@ -3859,6 +3874,7 @@ dependencies = [
  "solana-metrics",
  "solana-perf",
  "solana-program-runtime",
+ "solana-rpc",
  "solana-rpc-client-api",
  "solana-sdk",
  "solana-transaction-status",

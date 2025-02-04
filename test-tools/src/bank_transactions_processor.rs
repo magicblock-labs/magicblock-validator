@@ -1,8 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use magicblock_bank::{
-    bank::{Bank, TransactionExecutionRecordingOpts},
-    genesis_utils::create_genesis_config_with_leader_and_fees,
+    bank::Bank, genesis_utils::create_genesis_config_with_leader_and_fees,
 };
 use solana_sdk::{
     pubkey::Pubkey,
@@ -57,39 +56,35 @@ impl TransactionsProcessor for BankTransactionsProcessor {
     ) -> Result<TransactionsProcessorProcessResult, String> {
         let mut transaction_outcomes = HashMap::new();
 
-        //for transaction in transactions {
-        //    let signature = *transaction.signature();
-        //
-        //    let txs = vec![transaction.clone()];
-        //    let batch = self.bank.prepare_sanitized_batch(&txs);
-        //    let mut timings = ExecuteTimings::default();
-        //    let (
-        //        TransactionResults {
-        //            execution_results, ..
-        //        },
-        //        _,
-        //    ) = self.bank.load_execute_and_commit_transactions(
-        //        &batch,
-        //        true,
-        //        ExecutionRecordingConfig::new_single_setting(true),
-        //        &mut timings,
-        //        None,
-        //    );
-        //
-        //    let execution_result = execution_results
-        //        .first()
-        //        .expect("Could not find the transaction result");
-        //    let execution_details = match execution_result.details() {
-        //        Some(details) => details.clone(),
-        //        None => panic!(
-        //            "Error resolving transaction results details: {:?}, tx: {:?}",
-        //            execution_result, transaction
-        //        ),
-        //    };
-        //
-        //    transaction_outcomes
-        //        .insert(signature, (transaction, execution_details));
-        //}
+        for transaction in transactions {
+            let signature = *transaction.signature();
+
+            let txs = vec![transaction.clone()];
+            let batch = self.bank.prepare_sanitized_batch(&txs);
+            let mut timings = ExecuteTimings::default();
+            let (commit_results, _) =
+                self.bank.load_execute_and_commit_transactions(
+                    &batch,
+                    true,
+                    ExecutionRecordingConfig::new_single_setting(true),
+                    &mut timings,
+                    None,
+                );
+
+            let execution_result = commit_results
+                .first()
+                .expect("Could not find the transaction result");
+            let execution_details = match execution_result {
+                Ok(details) => details.clone(),
+                Err(err) => panic!(
+                    "Error resolving transaction results details: {:?}, tx: {:?}",
+                    err, transaction
+                ),
+            };
+
+            transaction_outcomes
+                .insert(signature, (transaction, execution_details));
+        }
 
         Ok(TransactionsProcessorProcessResult {
             transactions: transaction_outcomes,

@@ -3,7 +3,6 @@ mod account_locks;
 pub mod accounts;
 pub mod accounts_cache;
 pub mod accounts_db;
-pub mod accounts_update_notifier_interface;
 pub mod errors;
 mod persist;
 pub mod verify_accounts_hash_in_background;

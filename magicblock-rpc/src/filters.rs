@@ -8,9 +8,9 @@ use solana_accounts_db::accounts_index::{
 use solana_inline_spl::{
     token::SPL_TOKEN_ACCOUNT_OWNER_OFFSET, token_2022::ACCOUNTTYPE_ACCOUNT,
 };
+use solana_rpc::filter::filter_allows;
 use solana_rpc_client_api::{
-    custom_error::RpcCustomError,
-    filter::{Memcmp, MemcmpEncodedBytes, RpcFilterType},
+    custom_error::RpcCustomError, filter::RpcFilterType,
 };
 use solana_sdk::{
     account::AccountSharedData,
@@ -118,7 +118,7 @@ pub(crate) fn get_filtered_program_accounts(
     let filter_closure = |account: &AccountSharedData| {
         filters
             .iter()
-            .all(|filter_type| filter_type.allows(account))
+            .all(|filter_type| filter_allows(filter_type, account))
     };
     if account_indexes.contains(&AccountIndex::ProgramId) {
         if !account_indexes.include_key(program_id) {

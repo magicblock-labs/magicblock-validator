@@ -1,3 +1,4 @@
+use itertools::izip;
 use rayon::{
     iter::IndexedParallelIterator,
     prelude::{
@@ -8,7 +9,7 @@ use solana_sdk::{
     account::Account,
     hash::Hash,
     instruction::{AccountMeta, Instruction},
-    message::Message,
+    message::{v0::LoadedAddresses, Message},
     native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
     rent::Rent,
@@ -20,11 +21,27 @@ use solana_sdk::{
         self, clock, epoch_schedule, fees, last_restart_slot,
         recent_blockhashes, rent,
     },
-    transaction::{SanitizedTransaction, Transaction},
+    transaction::{
+        SanitizedTransaction, Transaction, TransactionError,
+        VersionedTransaction,
+    },
+};
+use solana_svm::{
+    transaction_commit_result::CommittedTransaction,
+    transaction_processor::ExecutionRecordingConfig,
+};
+use solana_timings::ExecuteTimings;
+use solana_transaction_status::{
+    map_inner_instructions, ConfirmedTransactionWithStatusMeta,
+    TransactionStatusMeta, TransactionWithStatusMeta,
+    VersionedTransactionWithStatusMeta,
 };
 
 use super::elfs;
-use crate::{bank::Bank, LAMPORTS_PER_SIGNATURE};
+use crate::{
+    bank::Bank, transaction_results::TransactionBalancesSet,
+    LAMPORTS_PER_SIGNATURE,
+};
 
 // -----------------
 // Account Initialization
@@ -339,92 +356,76 @@ fn create_sysvars_from_account_instruction(
 // -----------------
 // Transactions
 // -----------------
-//fn execute_transactions(
-//    bank: &Bank,
-//    txs: Vec<Transaction>,
-//) -> Vec<Result<ConfirmedTransactionWithStatusMeta, TransactionError>> {
-//    let batch = bank.prepare_batch_for_tests(txs.clone());
-//    let mut timings = ExecuteTimings::default();
-//    let mut mint_decimals = HashMap::new();
-//    let tx_pre_token_balances =
-//        collect_token_balances(&bank, &batch, &mut mint_decimals);
-//    let (
-//        commit_results,
-//        TransactionBalancesSet {
-//            pre_balances,
-//            post_balances,
-//            ..
-//        },
-//    ) = bank.load_execute_and_commit_transactions(
-//        &batch,
-//        true,
-//        ExecutionRecordingConfig::new_single_setting(true),
-//        &mut timings,
-//        None,
-//    );
-//    let tx_post_token_balances =
-//        collect_token_balances(&bank, &batch, &mut mint_decimals);
-//
-//    izip!(
-//        txs.iter(),
-//        commit_results.into_iter(),
-//        pre_balances.into_iter(),
-//        post_balances.into_iter(),
-//        tx_pre_token_balances.into_iter(),
-//        tx_post_token_balances.into_iter(),
-//    )
-//    .map(
-//        |(
-//            tx,
-//            commit_result,
-//            pre_balances,
-//            post_balances,
-//            pre_token_balances,
-//            post_token_balances,
-//        )| {
-//            commit_result.map(|committed_tx| {
-//                let CommittedTransaction {
-//                    status,
-//                    log_messages,
-//                    inner_instructions,
-//                    return_data,
-//                    executed_units,
-//                    fee_details,
-//                    ..
-//                } = committed_tx;
-//
-//                let inner_instructions =
-//                    inner_instructions.map(|inner_instructions| {
-//                        map_inner_instructions(inner_instructions).collect()
-//                    });
-//
-//                let tx_status_meta = TransactionStatusMeta {
-//                    status,
-//                    fee: fee_details.total_fee(),
-//                    pre_balances,
-//                    post_balances,
-//                    pre_token_balances: Some(pre_token_balances),
-//                    post_token_balances: Some(post_token_balances),
-//                    inner_instructions,
-//                    log_messages,
-//                    rewards: None,
-//                    loaded_addresses: LoadedAddresses::default(),
-//                    return_data,
-//                    compute_units_consumed: Some(executed_units),
-//                };
-//
-//                ConfirmedTransactionWithStatusMeta {
-//                    slot: bank.slot(),
-//                    tx_with_meta: TransactionWithStatusMeta::Complete(
-//                        VersionedTransactionWithStatusMeta {
-//                            transaction: VersionedTransaction::from(tx.clone()),
-//                            meta: tx_status_meta,
-//                        },
-//                    ),
-//                    block_time: None,
-//                }
-//            })
-//        },
-//    )
-//    .collect()
-//}
+pub fn execute_transactions(
+    bank: &Bank,
+    txs: Vec<Transaction>,
+) -> Vec<Result<ConfirmedTransactionWithStatusMeta, TransactionError>> {
+    let batch = bank.prepare_batch_for_tests(txs.clone());
+    let mut timings = ExecuteTimings::default();
+    let (
+        commit_results,
+        TransactionBalancesSet {
+            pre_balances,
+            post_balances,
+            ..
+        },
+    ) = bank.load_execute_and_commit_transactions(
+        &batch,
+        true,
+        ExecutionRecordingConfig::new_single_setting(true),
+        &mut timings,
+        None,
+    );
+
+    izip!(
+        txs.iter(),
+        commit_results.into_iter(),
+        pre_balances.into_iter(),
+        post_balances.into_iter(),
+    )
+    .map(|(tx, commit_result, pre_balances, post_balances)| {
+        commit_result.map(|committed_tx| {
+            let CommittedTransaction {
+                status,
+                log_messages,
+                inner_instructions,
+                return_data,
+                executed_units,
+                fee_details,
+                ..
+            } = committed_tx;
+
+            let inner_instructions =
+                inner_instructions.map(|inner_instructions| {
+                    map_inner_instructions(inner_instructions).collect()
+                });
+
+            let tx_status_meta = TransactionStatusMeta {
+                status,
+                fee: fee_details.total_fee(),
+                pre_balances,
+                post_balances,
+                pre_token_balances: None,
+                post_token_balances: None,
+                inner_instructions,
+                log_messages,
+                rewards: None,
+                loaded_addresses: LoadedAddresses::default(),
+                return_data,
+                compute_units_consumed: Some(executed_units),
+            };
+
+            ConfirmedTransactionWithStatusMeta {
+                slot: bank.slot(),
+                tx_with_meta: TransactionWithStatusMeta::Complete(
+                    VersionedTransactionWithStatusMeta {
+                        transaction: VersionedTransaction::from(tx.clone()),
+                        meta: tx_status_meta,
+                    },
+                ),
+                block_time: None,
+            }
+        })
+    })
+    .collect()
+}

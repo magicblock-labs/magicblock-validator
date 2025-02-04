@@ -5,12 +5,12 @@ use solana_sdk::{
     signature::Signature,
     transaction::{SanitizedTransaction, Transaction},
 };
-use solana_svm::transaction_execution_result::TransactionExecutionDetails;
+use solana_svm::transaction_commit_result::CommittedTransaction;
 
 #[derive(Default, Debug)]
 pub struct TransactionsProcessorProcessResult {
     pub transactions:
-        HashMap<Signature, (SanitizedTransaction, TransactionExecutionDetails)>,
+        HashMap<Signature, (SanitizedTransaction, CommittedTransaction)>,
 }
 
 impl TransactionsProcessorProcessResult {

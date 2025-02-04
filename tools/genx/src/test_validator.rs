@@ -1,6 +1,6 @@
 use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
 
-use ledger_stats::{accounts_storage_from_ledger, open_ledger};
+use ledger_stats::{accounts_storage_from_ledger, all_accounts, open_ledger};
 use solana_sdk::pubkey::Pubkey;
 use tempfile::tempdir;
 
@@ -23,13 +23,7 @@ pub(crate) fn gen_test_validator_start_script(
             ledger_path
         );
         let (storage, _) = accounts_storage_from_ledger(&ledger);
-        vec![]
-        // TODO impl all_accounts
-        //storage
-        //    .all_accounts()
-        //    .into_iter()
-        //    .map(|x| *x.pubkey())
-        //    .collect::<Vec<_>>()
+        all_accounts(&storage, |x| *x.pubkey())
     } else {
         eprintln!("Generating test validator script without accounts");
         vec![]

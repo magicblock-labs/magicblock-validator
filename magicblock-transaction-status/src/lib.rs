@@ -1,13 +1,7 @@
-use std::sync::Arc;
-
 use crossbeam_channel::Sender;
 use log::trace;
-use magicblock_bank::{
-    bank::Bank, transaction_results::TransactionBalancesSet,
-};
-use solana_sdk::{
-    clock::Slot, rent_debits::RentDebits, transaction::SanitizedTransaction,
-};
+use magicblock_bank::transaction_results::TransactionBalancesSet;
+use solana_sdk::{clock::Slot, transaction::SanitizedTransaction};
 use solana_svm::transaction_commit_result::TransactionCommitResult;
 use solana_transaction_status::token_balances::TransactionTokenBalancesSet;
 pub use solana_transaction_status::*;

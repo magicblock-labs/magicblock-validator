@@ -6,17 +6,17 @@ use std::{
 };
 
 use log::debug;
-use magicblock_bank::{
-    bank::{Bank, TransactionExecutionRecordingOpts},
-    transaction_batch::TransactionBatch,
-};
+use magicblock_bank::{bank::Bank, transaction_batch::TransactionBatch};
 use magicblock_transaction_status::{
     token_balances::TransactionTokenBalancesSet, TransactionStatusSender,
 };
 use rayon::prelude::*;
 use solana_measure::{measure::Measure, measure_us};
 use solana_sdk::{pubkey::Pubkey, transaction::Result};
-use solana_svm::transaction_processor::ExecutionRecordingConfig;
+use solana_svm::{
+    transaction_commit_result::TransactionCommitResultExtensions,
+    transaction_processor::ExecutionRecordingConfig,
+};
 use solana_timings::{ExecuteTimingType, ExecuteTimings};
 
 use crate::{
@@ -30,7 +30,7 @@ use crate::{
 
 pub struct TransactionBatchWithIndexes<'a, 'b> {
     pub batch: TransactionBatch<'a, 'b>,
-    pub transaction_slot_indexes: Vec<usize>,
+    pub transaction_indexes: Vec<usize>,
 }
 
 // -----------------
@@ -92,8 +92,6 @@ fn execute_batches_internal(
     transaction_status_sender: Option<&TransactionStatusSender>,
     log_messages_bytes_limit: Option<usize>,
 ) -> Result<ExecuteBatchesInternalMetrics> {
-    use solana_measure::measure;
-
     assert!(!batches.is_empty());
     let execution_timings_per_thread: Mutex<
         HashMap<usize, ThreadExecuteTimings>,
@@ -108,14 +106,13 @@ fn execute_batches_internal(
                     transaction_batch.batch.sanitized_transactions().len()
                         as u64;
                 let mut timings = ExecuteTimings::default();
-                let (result, execute_batches_time): (Result<()>, u64) =
-                    measure_us!(execute_batch(
-                        transaction_batch,
-                        bank,
-                        transaction_status_sender,
-                        &mut timings,
-                        log_messages_bytes_limit,
-                    ));
+                let (result, execute_batches_us) = measure_us!(execute_batch(
+                    transaction_batch,
+                    bank,
+                    transaction_status_sender,
+                    &mut timings,
+                    log_messages_bytes_limit,
+                ));
 
                 let thread_index =
                     PAR_THREAD_POOL.current_thread_index().unwrap();
@@ -129,7 +126,7 @@ fn execute_batches_internal(
                             total_transactions_executed,
                             execute_timings: total_thread_execute_timings,
                         } = thread_execution_time;
-                        *total_thread_us += execute_batches_time;
+                        *total_thread_us += execute_batches_us;
                         *total_transactions_executed += transaction_count;
                         total_thread_execute_timings.saturating_add_in_place(
                             ExecuteTimingType::TotalBatchesLen,
@@ -138,7 +135,7 @@ fn execute_batches_internal(
                         total_thread_execute_timings.accumulate(&timings);
                     })
                     .or_insert(ThreadExecuteTimings {
-                        total_thread_us: execute_batches_time,
+                        total_thread_us: execute_batches_us,
                         total_transactions_executed: transaction_count,
                         execute_timings: timings,
                     });
@@ -146,7 +143,6 @@ fn execute_batches_internal(
             })
             .collect()
     });
-
     execute_batches_elapsed.stop();
 
     first_err(&results)?;
@@ -167,10 +163,9 @@ pub fn execute_batch(
     timings: &mut ExecuteTimings,
     log_messages_bytes_limit: Option<usize>,
 ) -> Result<()> {
-    // 1. Record current balances
     let TransactionBatchWithIndexes {
         batch,
-        transaction_slot_indexes,
+        transaction_indexes,
     } = batch;
     let record_token_balances = transaction_status_sender.is_some();
 
@@ -182,56 +177,50 @@ pub fn execute_batch(
         vec![]
     };
 
-    // 2. Execute transactions in batch
-    let recording_opts = ExecutionRecordingConfig::new_single_setting(
-        transaction_status_sender.is_some(),
-    );
-    let collect_balances = transaction_status_sender.is_some();
-    let (tx_results, balances) =
+    let (commit_results, balances) =
         batch.bank().load_execute_and_commit_transactions(
             batch,
-            collect_balances,
-            recording_opts,
+            transaction_status_sender.is_some(),
+            ExecutionRecordingConfig::new_single_setting(
+                transaction_status_sender.is_some(),
+            ),
             timings,
             log_messages_bytes_limit,
         );
 
-    // NOTE: left out find_and_send_votes
+    // TODO ... ? I don't really remember what we did with this
+    let committed_transactions: Vec<_> = commit_results
+        .iter()
+        .zip(batch.sanitized_transactions())
+        .filter_map(|(commit_result, tx)| {
+            commit_result.was_committed().then_some(tx)
+        })
+        .collect();
 
-    // 3. Send results if sender is provided
-    //let TransactionResults {
-    //    fee_collection_results,
-    //    execution_results,
-    //    rent_debits,
-    //} = tx_results;
+    let first_err = get_first_error(batch, &commit_results);
 
-    //if let Some(transaction_status_sender) = transaction_status_sender {
-    //    let transactions = batch.sanitized_transactions().to_vec();
-    //    let post_token_balances = if record_token_balances {
-    //        collect_token_balances(bank, batch, &mut mint_decimals)
-    //    } else {
-    //        vec![]
-    //    };
-    //
-    //    let token_balances = TransactionTokenBalancesSet::new(
-    //        pre_token_balances,
-    //        post_token_balances,
-    //    );
-    //
-    //    transaction_status_sender.send_transaction_status_batch(
-    //        bank.slot(),
-    //        transactions,
-    //        execution_results,
-    //        balances,
-    //        token_balances,
-    //        transaction_slot_indexes.to_vec(),
-    //    );
-    //}
+    if let Some(transaction_status_sender) = transaction_status_sender {
+        let transactions = batch.sanitized_transactions().to_vec();
+        let post_token_balances = if record_token_balances {
+            collect_token_balances(bank, batch, &mut mint_decimals)
+        } else {
+            vec![]
+        };
 
-    // NOTE: left out prioritization_fee_cache.update and related executed_transactions aggregation
+        let token_balances = TransactionTokenBalancesSet::new(
+            pre_token_balances,
+            post_token_balances,
+        );
 
-    // 4. Return first error
-    //let first_err = get_first_error(batch, fee_collection_results);
-    //first_err.map(|(result, _)| result).unwrap_or(Ok(()))
-    todo!()
+        transaction_status_sender.send_transaction_status_batch(
+            bank.slot(),
+            transactions,
+            commit_results,
+            balances,
+            token_balances,
+            transaction_indexes.to_vec(),
+        );
+    }
+
+    first_err.map(|(result, _)| result).unwrap_or(Ok(()))
 }

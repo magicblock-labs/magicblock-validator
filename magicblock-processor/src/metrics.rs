@@ -1,8 +1,7 @@
 #![allow(dead_code)]
 use std::collections::HashMap;
 
-use solana_metrics::datapoint_info;
-use solana_sdk::{clock::Slot, saturating_add_assign};
+use solana_sdk::saturating_add_assign;
 use solana_timings::{ExecuteTimingType, ExecuteTimings};
 #[derive(Debug, Default)]
 pub struct ThreadExecuteTimings {

@@ -93,6 +93,7 @@ fn test_bank_system_allocate_instruction() {
 
     let (tx, payer, account) =
         create_system_allocate_transaction(&bank, LAMPORTS_PER_SOL, SPACE);
+    // TODO FIX balances
     let (results, balances) = execute_transactions(&bank, vec![tx]);
 
     // Result
@@ -210,7 +211,9 @@ fn test_bank_solx_instructions() {
 }
 
 fn execute_and_check_results(bank: &Bank, tx: SanitizedTransaction) {
-    let results = execute_transactions(bank, vec![tx]).0.execution_results;
+    // TODO convert SanitizedTransaction into plain transaction
+    let results = execute_transactions(bank, vec![tx]);
+    // TODO fix execution check
     let failures = results
         .iter()
         .filter(|r| !r.was_executed_successfully())
