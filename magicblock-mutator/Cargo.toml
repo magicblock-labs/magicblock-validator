@@ -14,7 +14,6 @@ doctest = false
 bincode = { workspace = true }
 log = { workspace = true }
 magicblock-program = { workspace = true }
-solana-loader-v4-program = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }

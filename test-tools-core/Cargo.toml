@@ -13,5 +13,4 @@ edition.workspace = true
 [dependencies]
 env_logger = { workspace = true }
 log = { workspace = true }
-magicblock-accounts-db = { workspace = true }
 solana-svm = { workspace = true }

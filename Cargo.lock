@@ -3419,7 +3419,6 @@ version = "1.19.0"
 dependencies = [
  "async-trait",
  "bincode",
- "conjunto-transwise",
  "futures-util",
  "log",
  "magicblock-bank",
@@ -3504,15 +3503,10 @@ name = "magicblock-accounts-api"
 version = "1.19.0"
 dependencies = [
  "async-trait",
- "conjunto-transwise",
  "futures-util",
  "log",
  "magicblock-bank",
- "magicblock-delegation-program",
- "magicblock-mutator",
- "magicblock-processor",
  "magicblock-program",
- "magicblock-transaction-status",
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk",
@@ -3592,7 +3586,6 @@ dependencies = [
  "assert_matches",
  "bincode",
  "env_logger 0.11.6",
- "itertools 0.14.0",
  "log",
  "magicblock-accounts-db",
  "magicblock-bank",
@@ -3631,7 +3624,6 @@ dependencies = [
  "solana-sdk",
  "strum",
  "strum_macros",
- "test-tools-core",
  "thiserror 1.0.69",
  "toml 0.8.19",
  "url 2.5.4",
@@ -3757,7 +3749,6 @@ dependencies = [
  "magicblock-bank",
  "magicblock-program",
  "solana-account-decoder",
- "solana-loader-v4-program",
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk",
@@ -3929,7 +3920,6 @@ dependencies = [
  "semver",
  "serde",
  "serde_derive",
- "solana-frozen-abi",
  "solana-frozen-abi-macro",
  "solana-sdk",
 ]
@@ -6475,26 +6465,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "solana-frozen-abi"
-version = "2.1.12"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "582d404a3029f342fcbedb86ec089f55500f82879e4ee6f77d85a832c0797d4a"
-dependencies = [
- "bs58 0.5.1",
- "bv",
- "generic-array 0.14.7",
- "im",
- "log",
- "memmap2",
- "serde",
- "serde_derive",
- "serde_with",
- "sha2 0.10.8",
- "solana-frozen-abi-macro",
- "thiserror 1.0.69",
-]
-
-[[package]]
 name = "solana-frozen-abi-macro"
 version = "2.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -8864,9 +8834,7 @@ dependencies = [
  "magicblock-accounts-db",
  "magicblock-bank",
  "magicblock-core",
- "magicblock-messaging",
  "magicblock-program",
- "magicblock-transaction-status",
  "solana-accounts-db",
  "solana-perf",
  "solana-program-runtime",
@@ -8885,7 +8853,6 @@ version = "1.19.0"
 dependencies = [
  "env_logger 0.11.6",
  "log",
- "magicblock-accounts-db",
  "solana-svm",
 ]
 

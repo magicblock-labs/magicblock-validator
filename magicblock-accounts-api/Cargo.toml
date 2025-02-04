@@ -9,15 +9,10 @@ edition.workspace = true
 
 [dependencies]
 async-trait = { workspace = true }
-conjunto-transwise = { workspace = true }
-magicblock-delegation-program = { workspace = true }
 futures-util = { workspace = true }
 log = { workspace = true }
 magicblock-bank = { workspace = true }
-magicblock-mutator = { workspace = true }
-magicblock-processor = { workspace = true }
 magicblock-program = { workspace = true }
-magicblock-transaction-status = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }

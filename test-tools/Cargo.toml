@@ -13,9 +13,7 @@ log = { workspace = true }
 magicblock-accounts-db = { workspace = true }
 magicblock-bank = { workspace = true }
 magicblock-core = { workspace = true }
-magicblock-messaging = { workspace = true }
 magicblock-program = { workspace = true }
-magicblock-transaction-status = { workspace = true }
 solana-accounts-db = { workspace = true }
 solana-perf = { workspace = true }
 solana-program-runtime = { workspace = true }
