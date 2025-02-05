@@ -359,73 +359,84 @@ fn create_sysvars_from_account_instruction(
 pub fn execute_transactions(
     bank: &Bank,
     txs: Vec<SanitizedTransaction>,
-) -> Vec<Result<ConfirmedTransactionWithStatusMeta, TransactionError>> {
+) -> (
+    Vec<Result<ConfirmedTransactionWithStatusMeta, TransactionError>>,
+    TransactionBalancesSet,
+) {
     let batch = bank.prepare_sanitized_batch(&txs);
     let mut timings = ExecuteTimings::default();
-    let (
-        commit_results,
-        TransactionBalancesSet {
-            pre_balances,
-            post_balances,
-            ..
-        },
-    ) = bank.load_execute_and_commit_transactions(
-        &batch,
-        true,
-        ExecutionRecordingConfig::new_single_setting(true),
-        &mut timings,
-        None,
-    );
+    let (transaction_results, transaction_balances) = bank
+        .load_execute_and_commit_transactions(
+            &batch,
+            true,
+            ExecutionRecordingConfig::new_single_setting(true),
+            &mut timings,
+            None,
+        );
 
-    izip!(
+    let TransactionBalancesSet {
+        pre_balances,
+        post_balances,
+    } = transaction_balances.clone();
+
+    let transaction_results = izip!(
         txs.iter(),
-        commit_results.into_iter(),
+        transaction_results.into_iter(),
         pre_balances.into_iter(),
         post_balances.into_iter(),
     )
-    .map(|(tx, commit_result, pre_balances, post_balances)| {
-        commit_result.map(|committed_tx| {
-            let CommittedTransaction {
-                status,
-                log_messages,
-                inner_instructions,
-                return_data,
-                executed_units,
-                fee_details,
-                ..
-            } = committed_tx;
+    .map(
+        |(tx, commit_result, pre_balances, post_balances): (
+            &SanitizedTransaction,
+            Result<CommittedTransaction, TransactionError>,
+            Vec<u64>,
+            Vec<u64>,
+        )| {
+            commit_result.map(|committed_tx| {
+                let CommittedTransaction {
+                    status,
+                    log_messages,
+                    inner_instructions,
+                    return_data,
+                    executed_units,
+                    fee_details,
+                    ..
+                } = committed_tx;
 
-            let inner_instructions =
-                inner_instructions.map(|inner_instructions| {
-                    map_inner_instructions(inner_instructions).collect()
-                });
+                let inner_instructions =
+                    inner_instructions.map(|inner_instructions| {
+                        map_inner_instructions(inner_instructions).collect()
+                    });
 
-            let tx_status_meta = TransactionStatusMeta {
-                status,
-                fee: fee_details.total_fee(),
-                pre_balances,
-                post_balances,
-                pre_token_balances: None,
-                post_token_balances: None,
-                inner_instructions,
-                log_messages,
-                rewards: None,
-                loaded_addresses: LoadedAddresses::default(),
-                return_data,
-                compute_units_consumed: Some(executed_units),
-            };
+                let tx_status_meta = TransactionStatusMeta {
+                    status,
+                    fee: fee_details.total_fee(),
+                    pre_balances,
+                    post_balances,
+                    pre_token_balances: None,
+                    post_token_balances: None,
+                    inner_instructions,
+                    log_messages,
+                    rewards: None,
+                    loaded_addresses: LoadedAddresses::default(),
+                    return_data,
+                    compute_units_consumed: Some(executed_units),
+                };
 
-            ConfirmedTransactionWithStatusMeta {
-                slot: bank.slot(),
-                tx_with_meta: TransactionWithStatusMeta::Complete(
-                    VersionedTransactionWithStatusMeta {
-                        transaction: VersionedTransaction::from(tx.clone()),
-                        meta: tx_status_meta,
-                    },
-                ),
-                block_time: None,
-            }
-        })
-    })
-    .collect()
+                ConfirmedTransactionWithStatusMeta {
+                    slot: bank.slot(),
+                    tx_with_meta: TransactionWithStatusMeta::Complete(
+                        VersionedTransactionWithStatusMeta {
+                            transaction: tx.to_versioned_transaction(),
+                            meta: tx_status_meta,
+                        },
+                    ),
+                    block_time: None,
+                }
+            })
+        },
+    )
+    .collect();
+
+    (transaction_results, transaction_balances)
 }

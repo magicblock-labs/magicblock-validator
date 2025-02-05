@@ -19,7 +19,7 @@ pub struct ProcessedTransactionCounts {
     pub signature_count: u64,
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct TransactionBalancesSet {
     pub pre_balances: TransactionBalances,
     pub post_balances: TransactionBalances,
