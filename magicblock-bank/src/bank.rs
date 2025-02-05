@@ -1884,6 +1884,13 @@ impl Bank {
                     self.slot(),
                     processed_tx.status(),
                 );
+                // Additionally update the transaction status cache by slot to allow quickly
+                // finding transactions by going backward in time until a specific slot
+                status_cache.insert_transaction_status(
+                    self.slot(),
+                    tx.signature(),
+                    processed_tx.status(),
+                );
             }
         }
     }
