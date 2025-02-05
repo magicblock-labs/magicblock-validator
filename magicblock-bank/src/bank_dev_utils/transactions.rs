@@ -358,9 +358,9 @@ fn create_sysvars_from_account_instruction(
 // -----------------
 pub fn execute_transactions(
     bank: &Bank,
-    txs: Vec<Transaction>,
+    txs: Vec<SanitizedTransaction>,
 ) -> Vec<Result<ConfirmedTransactionWithStatusMeta, TransactionError>> {
-    let batch = bank.prepare_batch_for_tests(txs.clone());
+    let batch = bank.prepare_sanitized_batch(&txs);
     let mut timings = ExecuteTimings::default();
     let (
         commit_results,
