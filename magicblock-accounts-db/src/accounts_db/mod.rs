@@ -10,7 +10,7 @@ use std::{
 use rayon::{prelude::*, ThreadPool};
 use solana_accounts_db::{
     accounts_index::ZeroLamport,
-    accounts_update_notifier_interface::AccountsUpdateNotifier,
+    accounts_update_notifier_interface::AccountsUpdateNotifierInterface,
 };
 use solana_measure::measure::Measure;
 use solana_rayon_threadlimit::get_thread_count;
@@ -26,8 +26,8 @@ use solana_sdk::{
 use crate::{
     account_info::StorageLocation,
     accounts_cache::{AccountsCache, CachedAccount},
-    //accounts_update_notifier_interface::AccountsUpdateNotifier,
     errors::{AccountsDbError, AccountsDbResult, MatchAccountOwnerError},
+    geyser::AccountsUpdateNotifierImpl,
     persist::AccountsPersister,
     verify_accounts_hash_in_background::VerifyAccountsHashInBackground,
 };
@@ -76,7 +76,7 @@ pub struct AccountsDb {
     pub stats: AccountsStats,
 
     /// GeyserPlugin accounts update notifier
-    accounts_update_notifier: Option<AccountsUpdateNotifier>,
+    accounts_update_notifier: Option<AccountsUpdateNotifierImpl>,
 
     /// Write version used to notify accounts in order to distinguish between
     /// multiple updates to the same account in the same slot
@@ -102,7 +102,7 @@ impl AccountsDb {
 
     pub fn new_with_config(
         cluster_type: &ClusterType,
-        accounts_update_notifier: Option<AccountsUpdateNotifier>,
+        accounts_update_notifier: Option<AccountsUpdateNotifierImpl>,
         paths: Vec<PathBuf>,
     ) -> Self {
         let accounts_persister = (!paths.is_empty())
@@ -116,7 +116,7 @@ impl AccountsDb {
 
     fn new(
         cluster_type: Option<ClusterType>,
-        accounts_update_notifier: Option<AccountsUpdateNotifier>,
+        accounts_update_notifier: Option<AccountsUpdateNotifierImpl>,
         persister: Option<AccountsPersister>,
     ) -> Self {
         let num_threads = get_thread_count();

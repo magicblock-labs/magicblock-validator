@@ -4,22 +4,22 @@ use magicblock_accounts_db::{
     accounts_db::AccountsDb,
     //accounts_update_notifier_interface::AccountsUpdateNotifier,
     errors::AccountsDbResult,
+    geyser::AccountsUpdateNotifierImpl,
 };
 use solana_accounts_db::{
-    accounts_index::ScanConfig,
-    accounts_update_notifier_interface::AccountsUpdateNotifier,
-    blockhash_queue::BlockhashQueue,
+    accounts_index::ScanConfig, blockhash_queue::BlockhashQueue,
 };
 use solana_bpf_loader_program::syscalls::{
     create_program_runtime_environment_v1,
     create_program_runtime_environment_v2,
 };
 use solana_cost_model::cost_tracker::CostTracker;
+use solana_geyser_plugin_manager::slot_status_notifier::SlotStatusNotifierImpl;
 use solana_measure::{measure::Measure, measure_us};
 use solana_program_runtime::loaded_programs::{
     BlockRelation, ForkGraph, ProgramCacheEntry,
 };
-use solana_rpc::slot_status_notifier::SlotStatusNotifier;
+use solana_rpc::slot_status_notifier::SlotStatusNotifierInterface;
 use solana_runtime_transaction::instructions_processor::process_compute_budget_instructions;
 use solana_sdk::{
     account::{
@@ -108,7 +108,6 @@ use crate::{
     },
     bank_rc::BankRc,
     builtins::{BuiltinPrototype, BUILTINS},
-    //slot_status_notifier_interface::SlotStatusNotifierArc,
     status_cache::StatusCache,
     transaction_batch::TransactionBatch,
     transaction_logs::{
@@ -291,7 +290,7 @@ pub struct Bank {
     // -----------------
     // Geyser
     // -----------------
-    slot_status_notifier: Option<SlotStatusNotifier>,
+    slot_status_notifier: Option<SlotStatusNotifierImpl>,
 }
 
 // -----------------
@@ -411,8 +410,8 @@ impl Bank {
         additional_builtins: Option<&[BuiltinPrototype]>,
         debug_do_not_add_builtins: bool,
         accounts_paths: Vec<PathBuf>,
-        accounts_update_notifier: Option<AccountsUpdateNotifier>,
-        slot_status_notifier: Option<SlotStatusNotifier>,
+        accounts_update_notifier: Option<AccountsUpdateNotifierImpl>,
+        slot_status_notifier: Option<SlotStatusNotifierImpl>,
         millis_per_slot: u64,
         identity_id: Pubkey,
     ) -> Self {
@@ -532,7 +531,7 @@ impl Bank {
             hash: RwLock::<Hash>::default(),
 
             // Geyser
-            slot_status_notifier: Option::<SlotStatusNotifier>::default(),
+            slot_status_notifier: Option::<SlotStatusNotifierImpl>::default(),
         };
 
         bank.transaction_processor = {
@@ -716,8 +715,6 @@ impl Bank {
         // Notify Geyser Service
         if let Some(slot_status_notifier) = &self.slot_status_notifier {
             slot_status_notifier
-                .read()
-                .unwrap()
                 .notify_slot_rooted(next_slot, Some(next_slot - 1));
         }
 

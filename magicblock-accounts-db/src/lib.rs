@@ -7,6 +7,7 @@ pub mod errors;
 mod persist;
 pub mod verify_accounts_hash_in_background;
 pub use persist::{AccountsPersister, FLUSH_ACCOUNTS_SLOT_FREQ};
+pub mod geyser;
 
 pub const ACCOUNTS_RUN_DIR: &str = "run";
 pub const ACCOUNTS_SNAPSHOT_DIR: &str = "snapshot";

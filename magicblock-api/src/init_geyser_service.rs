@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use libloading::Library;
 use log::*;
 use magicblock_config::GeyserGrpcConfig;
 use magicblock_geyser_plugin::{
@@ -9,10 +10,9 @@ use magicblock_geyser_plugin::{
     plugin::GrpcGeyserPlugin,
     rpc::GeyserRpcService,
 };
-use solana_geyser_plugin_interface::geyser_plugin_interface::GeyserPlugin;
 use solana_geyser_plugin_manager::{
-    geyser_plugin_manager::LoadedGeyserPlugin,
-    geyser_plugin_service::{GeyserPluginService, GeyserPluginServiceError},
+    geyser_plugin_manager::{GeyserPluginManager, LoadedGeyserPlugin},
+    geyser_plugin_service::GeyserPluginServiceError,
 };
 
 // -----------------
@@ -24,7 +24,6 @@ pub struct InitGeyserServiceConfig {
     pub cache_transactions: bool,
     pub enable_account_notifications: bool,
     pub enable_transaction_notifications: bool,
-    pub geyser_plugins: Option<Vec<LoadedGeyserPlugin>>,
     pub geyser_grpc: GeyserGrpcConfig,
 }
 
@@ -35,22 +34,8 @@ impl Default for InitGeyserServiceConfig {
             cache_transactions: true,
             enable_account_notifications: true,
             enable_transaction_notifications: true,
-            geyser_plugins: None,
             geyser_grpc: Default::default(),
         }
-    }
-}
-
-impl InitGeyserServiceConfig {
-    pub fn add_plugin(&mut self, name: String, plugin: Box<dyn GeyserPlugin>) {
-        // TODO fix
-        //self.add_loaded_plugin(LoadedGeyserPlugin::new(plugin, Some(name)));
-    }
-
-    pub fn add_loaded_plugin(&mut self, plugin: LoadedGeyserPlugin) {
-        self.geyser_plugins
-            .get_or_insert_with(Vec::new)
-            .push(plugin);
     }
 }
 
@@ -60,7 +45,7 @@ impl InitGeyserServiceConfig {
 pub fn init_geyser_service(
     config: InitGeyserServiceConfig,
 ) -> Result<
-    (GeyserPluginService, Arc<GeyserRpcService>),
+    (GeyserPluginManager, Arc<GeyserRpcService>),
     GeyserPluginServiceError,
 > {
     let InitGeyserServiceConfig {
@@ -68,7 +53,6 @@ pub fn init_geyser_service(
         cache_transactions,
         enable_account_notifications,
         enable_transaction_notifications,
-        geyser_plugins,
         geyser_grpc,
     } = config;
 
@@ -82,6 +66,7 @@ pub fn init_geyser_service(
         ),
         ..Default::default()
     };
+    let mut manager = GeyserPluginManager::new();
     let (grpc_plugin, rpc_service): (_, Arc<GeyserRpcService>) = {
         let plugin = GrpcGeyserPlugin::create(config)
             .map_err(|err| {
@@ -99,19 +84,16 @@ pub fn init_geyser_service(
             geyser_grpc.socket_addr()
         );
         let rpc_service = plugin.rpc();
-        todo!() // WTF is Library?
-                //(LoadedGeyserPlugin::new(Box::new(plugin), None), rpc_service)
+        // hack: we don't load the geyser plugin from .so file, as such we don't own a handle to Library,
+        // to bypass this, we just make up one from null pointer and forget about it, this should work as long
+        // as geyser plugin manager doesn't try to do anything fancy with that handle
+        let lib = unsafe { std::mem::transmute::<usize, Library>(0_usize) };
+        (
+            LoadedGeyserPlugin::new(lib, Box::new(plugin), None),
+            rpc_service,
+        )
     };
+    manager.plugins.push(grpc_plugin);
 
-    // vec combined with grpc_plubin
-    let plugins = match geyser_plugins {
-        Some(mut plugins) => {
-            plugins.push(grpc_plugin);
-            plugins
-        }
-        None => vec![grpc_plugin],
-    };
-    todo!() // so much pain...
-            //let geyser_service = GeyserPluginService::new(&[], plugins)?;
-            //Ok((geyser_service, rpc_service))
+    Ok((manager, rpc_service))
 }

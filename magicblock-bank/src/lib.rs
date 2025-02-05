@@ -6,6 +6,7 @@ mod builtins;
 mod consts;
 pub mod genesis_utils;
 pub mod get_compute_budget_details;
+pub mod geyser;
 pub mod program_loader;
 mod status_cache;
 mod sysvar_cache;

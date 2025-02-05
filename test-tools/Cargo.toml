@@ -15,6 +15,7 @@ magicblock-bank = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-program = { workspace = true }
 solana-accounts-db = { workspace = true }
+solana-geyser-plugin-manager = { workspace = true }
 solana-perf = { workspace = true }
 solana-program-runtime = { workspace = true }
 solana-rpc = { workspace = true }

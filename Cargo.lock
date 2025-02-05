@@ -3520,6 +3520,7 @@ dependencies = [
 name = "magicblock-accounts-db"
 version = "1.19.0"
 dependencies = [
+ "agave-geyser-plugin-interface",
  "blake3",
  "dashmap",
  "fs_extra",
@@ -3531,6 +3532,7 @@ dependencies = [
  "smallvec",
  "solana-accounts-db",
  "solana-frozen-abi-macro",
+ "solana-geyser-plugin-manager",
  "solana-measure",
  "solana-metrics",
  "solana-rayon-threadlimit",
@@ -3549,6 +3551,7 @@ dependencies = [
  "crossbeam-channel",
  "fd-lock",
  "itertools 0.14.0",
+ "libloading 0.7.4",
  "log",
  "magicblock-account-cloner",
  "magicblock-account-dumper",
@@ -3573,6 +3576,7 @@ dependencies = [
  "solana-geyser-plugin-manager",
  "solana-rpc",
  "solana-sdk",
+ "solana-svm",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
@@ -3583,6 +3587,7 @@ dependencies = [
 name = "magicblock-bank"
 version = "1.19.0"
 dependencies = [
+ "agave-geyser-plugin-interface",
  "assert_matches",
  "bincode",
  "env_logger 0.11.6",
@@ -3602,6 +3607,7 @@ dependencies = [
  "solana-cost-model",
  "solana-fee",
  "solana-frozen-abi-macro",
+ "solana-geyser-plugin-manager",
  "solana-inline-spl",
  "solana-loader-v4-program",
  "solana-measure",
@@ -8815,6 +8821,7 @@ dependencies = [
  "magicblock-core",
  "magicblock-program",
  "solana-accounts-db",
+ "solana-geyser-plugin-manager",
  "solana-perf",
  "solana-program-runtime",
  "solana-rpc",

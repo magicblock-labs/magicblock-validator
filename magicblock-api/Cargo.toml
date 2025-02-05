@@ -37,7 +37,9 @@ solana-geyser-plugin-interface = { workspace = true }
 solana-geyser-plugin-manager = { workspace = true }
 solana-rpc = { workspace = true }
 solana-sdk = { workspace = true }
+solana-svm = { workspace = true }
 tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+libloading = "0.7.4"

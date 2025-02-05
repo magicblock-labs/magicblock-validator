@@ -23,6 +23,8 @@ solana-bpf-loader-program = { workspace = true }
 solana-compute-budget = { version = "2.1.11" }
 solana-compute-budget-program = { workspace = true }
 solana-cost-model = { workspace = true }
+solana-geyser-plugin-interface = { workspace = true }
+solana-geyser-plugin-manager = { workspace = true }
 solana-fee = "2.1.11"
 solana-frozen-abi-macro = { workspace = true }
 solana-loader-v4-program = { workspace = true }
