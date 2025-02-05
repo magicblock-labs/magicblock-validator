@@ -2415,6 +2415,8 @@ impl Bank {
 
             mem::swap(&mut new_sysvar_cache, &mut old_sysvar_cache);
         }
+        // prevent deadlocking
+        drop(tx_processor);
         *self
             .transaction_processor
             .write()
