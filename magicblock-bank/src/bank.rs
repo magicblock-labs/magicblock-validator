@@ -1,16 +1,3 @@
-use std::{
-    borrow::Cow,
-    collections::HashSet,
-    mem,
-    path::PathBuf,
-    slice,
-    sync::{
-        atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering},
-        Arc, LockResult, RwLock, RwLockReadGuard, RwLockWriteGuard,
-    },
-    time::Duration,
-};
-
 use log::{debug, info, trace};
 use magicblock_accounts_db::{
     accounts::Accounts,
@@ -100,6 +87,19 @@ use solana_svm::{
 use solana_svm_transaction::svm_message::SVMMessage;
 use solana_system_program::{get_system_account_kind, SystemAccountKind};
 use solana_timings::{ExecuteTimingType, ExecuteTimings};
+use std::sync::Weak;
+use std::{
+    borrow::Cow,
+    collections::HashSet,
+    mem,
+    path::PathBuf,
+    slice,
+    sync::{
+        atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering},
+        Arc, LockResult, RwLock, RwLockReadGuard, RwLockWriteGuard,
+    },
+    time::Duration,
+};
 
 use crate::{
     bank_helpers::{
@@ -532,11 +532,22 @@ impl Bank {
             slot_status_notifier: Option::<SlotStatusNotifier>::default(),
         };
 
-        bank.transaction_processor =
-            RwLock::new(TransactionBatchProcessor::new_uninitialized(
+        bank.transaction_processor = {
+            let tx_processor = TransactionBatchProcessor::new_uninitialized(
                 bank.slot(),
                 bank.epoch,
-            ));
+            );
+            // TODO(thlorenz) @@@: new anza impl requires this fork graph to be set so we do that
+            // however when `upgrade` is called on the `Weak` to upgrade it to an `Arc` we also
+            // need to return `Some` .. most likely we need to create something else here and
+            // then pass _as_ `Weak`.
+            tx_processor
+                .program_cache
+                .write()
+                .unwrap()
+                .set_fork_graph(Weak::<RwLock<SimpleForkGraph>>::new());
+            RwLock::new(tx_processor)
+        };
 
         bank
     }
@@ -2395,7 +2406,8 @@ impl Bank {
         let tx_processor = self.transaction_processor.read().unwrap();
         // Update transaction processor with new slot
         // First create a new transaction processor
-        let next_tx_processor = tx_processor.new_from(next_slot, self.epoch);
+        let next_tx_processor: TransactionBatchProcessor<_> =
+            tx_processor.new_from(next_slot, self.epoch);
         // Then assign the previous sysvar cache to the new transaction processor
         // in order to avoid it containing uninitialized sysvars
         {
