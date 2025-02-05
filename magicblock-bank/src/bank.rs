@@ -179,6 +179,8 @@ pub struct Bank {
     pub(crate) transaction_processor:
         RwLock<TransactionBatchProcessor<SimpleForkGraph>>,
 
+    fork_graph: Arc<RwLock<SimpleForkGraph>>,
+
     // Global configuration for how transaction logs should be collected across all banks
     pub transaction_log_collector_config:
         Arc<RwLock<TransactionLogCollectorConfig>>,
@@ -490,6 +492,7 @@ impl Bank {
                 Arc::<RwLock<TransactionLogCollector>>::default(),
             fee_structure: FeeStructure::default(),
             transaction_processor: Default::default(),
+            fork_graph: Arc::<RwLock<SimpleForkGraph>>::default(),
             status_cache: Arc::new(RwLock::new(BankStatusCache::new(max_age))),
             millis_per_slot,
             max_age,
@@ -537,15 +540,10 @@ impl Bank {
                 bank.slot(),
                 bank.epoch,
             );
-            // TODO(thlorenz) @@@: new anza impl requires this fork graph to be set so we do that
-            // however when `upgrade` is called on the `Weak` to upgrade it to an `Arc` we also
-            // need to return `Some` .. most likely we need to create something else here and
-            // then pass _as_ `Weak`.
-            tx_processor
-                .program_cache
-                .write()
-                .unwrap()
-                .set_fork_graph(Weak::<RwLock<SimpleForkGraph>>::new());
+            // NOTE: new anza impl requires this fork graph to be set
+            tx_processor.program_cache.write().unwrap().set_fork_graph(
+                Arc::<RwLock<SimpleForkGraph>>::downgrade(&bank.fork_graph),
+            );
             RwLock::new(tx_processor)
         };
 
