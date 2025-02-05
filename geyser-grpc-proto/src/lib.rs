@@ -342,9 +342,8 @@ pub mod convert_from {
         TransactionWithStatusMeta, VersionedTransactionWithStatusMeta,
     };
 
-    use crate::geyser::CommitmentLevel;
-
     use super::prelude as proto;
+    use crate::geyser::CommitmentLevel;
 
     fn ensure_some<T>(
         maybe_value: Option<T>,
