@@ -356,7 +356,7 @@ impl JsonRpcRequestProcessor {
             None => None,
         };
         let is_valid = match age {
-            Some(age) => bank.is_blockhash_valid_for_age(blockhash), // TODO forward age?
+            Some(_age) => bank.is_blockhash_valid_for_age(blockhash), // TODO forward age?
             None => bank.is_blockhash_valid_for_age(blockhash),
         };
 

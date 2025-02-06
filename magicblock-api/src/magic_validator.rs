@@ -27,10 +27,10 @@ use magicblock_accounts::{
     utils::try_rpc_cluster_from_cluster, AccountsManager,
 };
 use magicblock_accounts_api::BankAccountProvider;
-use magicblock_accounts_db::geyser::AccountsUpdateNotifierImpl;
+use magicblock_accounts_db::geyser::AccountsUpdateNotifier;
 use magicblock_bank::{
     bank::Bank, genesis_utils::create_genesis_config_with_leader,
-    geyser::TransactionNotifierImpl, program_loader::load_programs_into_bank,
+    geyser::TransactionNotifier, program_loader::load_programs_into_bank,
     transaction_logs::TransactionLogCollectorFilter,
 };
 use magicblock_config::{EphemeralConfig, ProgramConfig};
@@ -50,10 +50,8 @@ use magicblock_transaction_status::{
 };
 use solana_geyser_plugin_manager::{
     geyser_plugin_manager::GeyserPluginManager,
-    geyser_plugin_service::GeyserPluginService,
     slot_status_notifier::SlotStatusNotifierImpl,
 };
-use solana_rpc::transaction_notifier_interface::TransactionNotifierArc;
 use solana_sdk::{
     commitment_config::CommitmentLevel, genesis_config::GenesisConfig,
     pubkey::Pubkey, signature::Keypair, signer::Signer,
@@ -199,7 +197,7 @@ impl MagicValidator {
         let (transaction_sndr, transaction_listener) =
             Self::init_transaction_listener(
                 &ledger,
-                Some(TransactionNotifierImpl::new(geyser_manager)),
+                Some(TransactionNotifier::new(geyser_manager)),
             );
 
         let metrics_config = &config.validator_config.metrics;
@@ -353,7 +351,7 @@ impl MagicValidator {
             None,
             false,
             accounts_paths,
-            geyser_manager.clone().map(AccountsUpdateNotifierImpl::new),
+            geyser_manager.clone().map(AccountsUpdateNotifier::new),
             geyser_manager.map(SlotStatusNotifierImpl::new),
             millis_per_slot,
             validator_pubkey,
@@ -483,7 +481,7 @@ impl MagicValidator {
 
     fn init_transaction_listener(
         ledger: &Arc<Ledger>,
-        transaction_notifier: Option<TransactionNotifierImpl>,
+        transaction_notifier: Option<TransactionNotifier>,
     ) -> (
         crossbeam_channel::Sender<TransactionStatusMessage>,
         GeyserTransactionNotifyListener,

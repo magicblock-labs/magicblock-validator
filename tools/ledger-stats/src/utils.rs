@@ -5,7 +5,7 @@ use magicblock_ledger::Ledger;
 use solana_accounts_db::{
     account_storage::meta::StoredAccountMeta, accounts_db::AccountStorageEntry,
 };
-use solana_sdk::{account::AccountSharedData, clock::Slot};
+use solana_sdk::clock::Slot;
 
 #[allow(dead_code)] // this is actually used from `print_transaction_logs` ./transaction_logs.rs
 pub(crate) fn render_logs(logs: &[String], indent: &str) -> String {
@@ -45,15 +45,15 @@ pub fn open_ledger(ledger_path: &Path) -> Ledger {
 
 // TODO just a placeholder function to make the project compile
 pub fn all_accounts<R>(
-    storage: &AccountStorageEntry,
-    cb: impl Fn(StoredAccountMeta) -> R,
+    _storage: &AccountStorageEntry,
+    _cb: impl Fn(StoredAccountMeta) -> R,
 ) -> Vec<R> {
     unimplemented!()
 }
 // TODO just a placeholder function to make the project compile
 pub fn find_account<R>(
-    storage: &AccountStorageEntry,
-    cb: impl Fn(StoredAccountMeta) -> R,
+    _storage: &AccountStorageEntry,
+    _cb: impl Fn(StoredAccountMeta) -> R,
 ) -> R {
     unimplemented!()
 }

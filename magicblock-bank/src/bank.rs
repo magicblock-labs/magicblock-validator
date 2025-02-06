@@ -14,7 +14,7 @@ use std::{
 use log::{debug, info, trace};
 use magicblock_accounts_db::{
     accounts::Accounts, accounts_db::AccountsDb, errors::AccountsDbResult,
-    geyser::AccountsUpdateNotifierImpl,
+    geyser::AccountsUpdateNotifier,
 };
 use solana_accounts_db::{
     accounts_index::ScanConfig, blockhash_queue::BlockhashQueue,
@@ -403,7 +403,7 @@ impl Bank {
         additional_builtins: Option<&[BuiltinPrototype]>,
         debug_do_not_add_builtins: bool,
         accounts_paths: Vec<PathBuf>,
-        accounts_update_notifier: Option<AccountsUpdateNotifierImpl>,
+        accounts_update_notifier: Option<AccountsUpdateNotifier>,
         slot_status_notifier: Option<SlotStatusNotifierImpl>,
         millis_per_slot: u64,
         identity_id: Pubkey,

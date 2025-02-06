@@ -13,10 +13,7 @@ use magicblock_transaction_status::{
 use rayon::prelude::*;
 use solana_measure::{measure::Measure, measure_us};
 use solana_sdk::{pubkey::Pubkey, transaction::Result};
-use solana_svm::{
-    transaction_commit_result::TransactionCommitResultExtensions,
-    transaction_processor::ExecutionRecordingConfig,
-};
+use solana_svm::transaction_processor::ExecutionRecordingConfig;
 use solana_timings::{ExecuteTimingType, ExecuteTimings};
 
 use crate::{

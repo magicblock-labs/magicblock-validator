@@ -7,7 +7,7 @@ use {
         ReplicaTransactionInfoV2, ReplicaTransactionInfoVersions,
     },
     solana_geyser_plugin_manager::geyser_plugin_manager::GeyserPluginManager,
-    solana_rpc::transaction_notifier_interface::TransactionNotifier,
+    solana_rpc::transaction_notifier_interface::TransactionNotifier as TransactionNotifierInterface,
     solana_sdk::{
         clock::Slot, signature::Signature, transaction::SanitizedTransaction,
     },
@@ -19,11 +19,11 @@ use {
 /// at the validator startup. TransactionStatusService invokes the notify_transaction method
 /// for new transactions. The implementation in turn invokes the notify_transaction of each
 /// plugin enabled with transaction notification managed by the GeyserPluginManager.
-pub struct TransactionNotifierImpl {
+pub struct TransactionNotifier {
     plugin_manager: Arc<RwLock<GeyserPluginManager>>,
 }
 
-impl TransactionNotifier for TransactionNotifierImpl {
+impl TransactionNotifierInterface for TransactionNotifier {
     fn notify_transaction(
         &self,
         slot: Slot,
@@ -57,7 +57,7 @@ impl TransactionNotifier for TransactionNotifierImpl {
     }
 }
 
-impl TransactionNotifierImpl {
+impl TransactionNotifier {
     pub fn new(plugin_manager: Arc<RwLock<GeyserPluginManager>>) -> Self {
         Self { plugin_manager }
     }
