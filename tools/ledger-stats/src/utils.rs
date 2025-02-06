@@ -8,7 +8,6 @@ use solana_accounts_db::{
 };
 use solana_sdk::clock::Slot;
 
-#[allow(dead_code)]
 pub fn render_logs(logs: &[String], indent: &str) -> String {
     logs.iter()
         .map(|line| {
@@ -22,55 +21,6 @@ pub fn render_logs(logs: &[String], indent: &str) -> String {
         })
         .collect::<Vec<_>>()
         .join("\n")
-}
-
-pub fn all_accounts<R>(
-    storage: &AccountStorageEntry,
-    cb: impl Fn(StoredAccountMeta) -> R,
-) -> Vec<R> {
-    let av = match &storage.accounts {
-        AccountsFile::AppendVec(av) => av,
-        AccountsFile::TieredStorage(_) => {
-            unreachable!("we never use tiered accounts storage")
-        }
-    };
-    let mut offset = 0;
-    let mut accounts = vec![];
-    while let Some((account, next)) =
-        av.get_stored_account_meta_callback(offset, |a| {
-            let offset = a.offset() + a.stored_size();
-            (cb(a), offset)
-        })
-    {
-        accounts.push(account);
-        offset = next;
-    }
-    accounts
-}
-
-// TODO use when we need a single account from ledger
-pub fn find_account<R>(
-    storage: &AccountStorageEntry,
-    cb: impl Fn(StoredAccountMeta) -> Option<R>,
-) -> Option<R> {
-    let av = match &storage.accounts {
-        AccountsFile::AppendVec(av) => av,
-        AccountsFile::TieredStorage(_) => {
-            unreachable!("we never use tiered accounts storage")
-        }
-    };
-    let mut offset = 0;
-    let mut account = None;
-    while let Some(false) = av.get_stored_account_meta_callback(offset, |a| {
-        offset = a.offset() + a.stored_size();
-        if let Some(a) = cb(a) {
-            account.replace(a);
-            true
-        } else {
-            false
-        }
-    }) {} // ugly?
-    account
 }
 
 pub fn accounts_storage_from_ledger(

@@ -1,12 +1,13 @@
 use std::ffi::OsStr;
 
+use magicblock_accounts_db::utils::all_accounts;
 use magicblock_ledger::Ledger;
 use num_format::{Locale, ToFormattedString};
 use solana_sdk::{account::ReadableAccount, clock::Epoch, pubkey::Pubkey};
 use structopt::StructOpt;
 use tabular::{Row, Table};
 
-use crate::utils::{accounts_storage_from_ledger, all_accounts};
+use crate::utils::accounts_storage_from_ledger;
 
 // -----------------
 // SortAccounts
