@@ -1,9 +1,19 @@
+use std::{
+    borrow::Cow,
+    collections::HashSet,
+    mem,
+    path::PathBuf,
+    slice,
+    sync::{
+        atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering},
+        Arc, LockResult, RwLock, RwLockReadGuard, RwLockWriteGuard,
+    },
+    time::Duration,
+};
+
 use log::{debug, info, trace};
 use magicblock_accounts_db::{
-    accounts::Accounts,
-    accounts_db::AccountsDb,
-    //accounts_update_notifier_interface::AccountsUpdateNotifier,
-    errors::AccountsDbResult,
+    accounts::Accounts, accounts_db::AccountsDb, errors::AccountsDbResult,
     geyser::AccountsUpdateNotifierImpl,
 };
 use solana_accounts_db::{
@@ -85,21 +95,7 @@ use solana_svm::{
     },
 };
 use solana_svm_transaction::svm_message::SVMMessage;
-use solana_system_program::{get_system_account_kind, SystemAccountKind};
 use solana_timings::{ExecuteTimingType, ExecuteTimings};
-use std::sync::Weak;
-use std::{
-    borrow::Cow,
-    collections::HashSet,
-    mem,
-    path::PathBuf,
-    slice,
-    sync::{
-        atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering},
-        Arc, LockResult, RwLock, RwLockReadGuard, RwLockWriteGuard,
-    },
-    time::Duration,
-};
 
 use crate::{
     bank_helpers::{
