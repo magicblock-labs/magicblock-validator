@@ -188,15 +188,6 @@ pub fn execute_batch(
             log_messages_bytes_limit,
         );
 
-    // TODO ... ? I don't really remember what we did with this
-    let committed_transactions: Vec<_> = commit_results
-        .iter()
-        .zip(batch.sanitized_transactions())
-        .filter_map(|(commit_result, tx)| {
-            commit_result.was_committed().then_some(tx)
-        })
-        .collect();
-
     let first_err = get_first_error(batch, &commit_results);
 
     if let Some(transaction_status_sender) = transaction_status_sender {
