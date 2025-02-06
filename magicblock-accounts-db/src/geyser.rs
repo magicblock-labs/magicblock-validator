@@ -19,11 +19,11 @@ use solana_sdk::{
 };
 
 #[derive(Debug)]
-pub struct AccountsUpdateNotifierImpl {
+pub struct AccountsUpdateNotifier {
     plugin_manager: Arc<RwLock<GeyserPluginManager>>,
 }
 
-impl AccountsUpdateNotifierInterface for AccountsUpdateNotifierImpl {
+impl AccountsUpdateNotifierInterface for AccountsUpdateNotifier {
     fn notify_account_update(
         &self,
         slot: Slot,
@@ -62,9 +62,9 @@ impl AccountsUpdateNotifierInterface for AccountsUpdateNotifierImpl {
     }
 }
 
-impl AccountsUpdateNotifierImpl {
+impl AccountsUpdateNotifier {
     pub fn new(plugin_manager: Arc<RwLock<GeyserPluginManager>>) -> Self {
-        AccountsUpdateNotifierImpl { plugin_manager }
+        Self { plugin_manager }
     }
 
     fn accountinfo_from_shared_account_data<'a>(

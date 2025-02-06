@@ -14,7 +14,7 @@ use std::{
 use log::{debug, info, trace};
 use magicblock_accounts_db::{
     accounts::Accounts, accounts_db::AccountsDb, errors::AccountsDbResult,
-    geyser::AccountsUpdateNotifierImpl,
+    geyser::AccountsUpdateNotifier,
 };
 use solana_accounts_db::{
     accounts_index::ScanConfig, blockhash_queue::BlockhashQueue,
@@ -167,9 +167,6 @@ pub struct Bank {
     /// A boolean reflecting whether any entries were recorded into the PoH
     /// stream for the slot == self.slot
     is_delta: AtomicBool,
-
-    // TODO ??? no idea how to use that, it's kind of mirrored to transaction_processor
-    builtin_programs: HashSet<Pubkey>,
 
     pub(crate) transaction_processor:
         RwLock<TransactionBatchProcessor<SimpleForkGraph>>,
@@ -406,7 +403,7 @@ impl Bank {
         additional_builtins: Option<&[BuiltinPrototype]>,
         debug_do_not_add_builtins: bool,
         accounts_paths: Vec<PathBuf>,
-        accounts_update_notifier: Option<AccountsUpdateNotifierImpl>,
+        accounts_update_notifier: Option<AccountsUpdateNotifier>,
         slot_status_notifier: Option<SlotStatusNotifierImpl>,
         millis_per_slot: u64,
         identity_id: Pubkey,
@@ -477,7 +474,6 @@ impl Bank {
             epoch: Epoch::default(),
             epoch_schedule: EpochSchedule::default(),
             is_delta: AtomicBool::default(),
-            builtin_programs: HashSet::<Pubkey>::default(),
             runtime_config: Arc::<RuntimeConfig>::default(),
             transaction_debug_keys: Option::<Arc<HashSet<Pubkey>>>::default(),
             transaction_log_collector_config: Arc::<

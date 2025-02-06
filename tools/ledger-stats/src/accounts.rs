@@ -1,6 +1,6 @@
 use std::ffi::OsStr;
 
-use magicblock_accounts_db::utils::all_accounts;
+use ledger_stats::all_accounts;
 use magicblock_ledger::Ledger;
 use num_format::{Locale, ToFormattedString};
 use solana_sdk::{account::ReadableAccount, clock::Epoch, pubkey::Pubkey};

@@ -2,25 +2,25 @@ use std::sync::Arc;
 
 use crossbeam_channel::Receiver;
 use itertools::izip;
-use magicblock_bank::{bank::Bank, geyser::TransactionNotifierImpl};
+use magicblock_bank::{bank::Bank, geyser::TransactionNotifier};
 use magicblock_ledger::Ledger;
 use magicblock_metrics::metrics;
 use magicblock_transaction_status::{
     extract_and_fmt_memos, map_inner_instructions, TransactionStatusBatch,
     TransactionStatusMessage, TransactionStatusMeta,
 };
-use solana_rpc::transaction_notifier_interface::TransactionNotifier;
+use solana_rpc::transaction_notifier_interface::TransactionNotifier as _;
 use solana_svm::transaction_commit_result::CommittedTransaction;
 
 pub struct GeyserTransactionNotifyListener {
-    transaction_notifier: Option<TransactionNotifierImpl>,
+    transaction_notifier: Option<TransactionNotifier>,
     transaction_recvr: Receiver<TransactionStatusMessage>,
     ledger: Arc<Ledger>,
 }
 
 impl GeyserTransactionNotifyListener {
     pub fn new(
-        transaction_notifier: Option<TransactionNotifierImpl>,
+        transaction_notifier: Option<TransactionNotifier>,
         transaction_recvr: Receiver<TransactionStatusMessage>,
         ledger: Arc<Ledger>,
     ) -> Self {

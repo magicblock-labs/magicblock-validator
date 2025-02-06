@@ -13,10 +13,7 @@ use magicblock_transaction_status::{
 use rayon::prelude::*;
 use solana_measure::{measure::Measure, measure_us};
 use solana_sdk::{pubkey::Pubkey, transaction::Result};
-use solana_svm::{
-    transaction_commit_result::TransactionCommitResultExtensions,
-    transaction_processor::ExecutionRecordingConfig,
-};
+use solana_svm::transaction_processor::ExecutionRecordingConfig;
 use solana_timings::{ExecuteTimingType, ExecuteTimings};
 
 use crate::{
@@ -187,15 +184,6 @@ pub fn execute_batch(
             timings,
             log_messages_bytes_limit,
         );
-
-    // TODO ... ? I don't really remember what we did with this
-    let committed_transactions: Vec<_> = commit_results
-        .iter()
-        .zip(batch.sanitized_transactions())
-        .filter_map(|(commit_result, tx)| {
-            commit_result.was_committed().then_some(tx)
-        })
-        .collect();
 
     let first_err = get_first_error(batch, &commit_results);
 

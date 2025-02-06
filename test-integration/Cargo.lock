@@ -3069,7 +3069,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts-db"
-version = "1.19.0"
+version = "2.1.11"
 dependencies = [
  "agave-geyser-plugin-interface",
  "blake3",
@@ -3095,7 +3095,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-config"
-version = "1.19.0"
+version = "2.1.11"
 dependencies = [
  "serde",
  "solana-sdk",
@@ -3108,14 +3108,14 @@ dependencies = [
 
 [[package]]
 name = "magicblock-core"
-version = "1.19.0"
+version = "2.1.11"
 dependencies = [
  "solana-sdk",
 ]
 
 [[package]]
 name = "magicblock-metrics"
-version = "1.19.0"
+version = "2.1.11"
 dependencies = [
  "http-body-util",
  "hyper 1.5.2",
@@ -7667,7 +7667,7 @@ dependencies = [
 
 [[package]]
 name = "test-tools-core"
-version = "1.19.0"
+version = "2.1.11"
 dependencies = [
  "env_logger 0.11.6",
  "log",

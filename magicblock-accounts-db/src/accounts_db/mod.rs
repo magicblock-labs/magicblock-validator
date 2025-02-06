@@ -27,7 +27,7 @@ use crate::{
     account_info::StorageLocation,
     accounts_cache::{AccountsCache, CachedAccount},
     errors::{AccountsDbError, AccountsDbResult, MatchAccountOwnerError},
-    geyser::AccountsUpdateNotifierImpl,
+    geyser::AccountsUpdateNotifier,
     persist::AccountsPersister,
     verify_accounts_hash_in_background::VerifyAccountsHashInBackground,
 };
@@ -76,7 +76,7 @@ pub struct AccountsDb {
     pub stats: AccountsStats,
 
     /// GeyserPlugin accounts update notifier
-    accounts_update_notifier: Option<AccountsUpdateNotifierImpl>,
+    accounts_update_notifier: Option<AccountsUpdateNotifier>,
 
     /// Write version used to notify accounts in order to distinguish between
     /// multiple updates to the same account in the same slot
@@ -102,7 +102,7 @@ impl AccountsDb {
 
     pub fn new_with_config(
         cluster_type: &ClusterType,
-        accounts_update_notifier: Option<AccountsUpdateNotifierImpl>,
+        accounts_update_notifier: Option<AccountsUpdateNotifier>,
         paths: Vec<PathBuf>,
     ) -> Self {
         let accounts_persister = (!paths.is_empty())
@@ -116,7 +116,7 @@ impl AccountsDb {
 
     fn new(
         cluster_type: Option<ClusterType>,
-        accounts_update_notifier: Option<AccountsUpdateNotifierImpl>,
+        accounts_update_notifier: Option<AccountsUpdateNotifier>,
         persister: Option<AccountsPersister>,
     ) -> Self {
         let num_threads = get_thread_count();
