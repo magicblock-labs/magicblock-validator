@@ -44,11 +44,6 @@ pub struct AccountsPersister {
     /// distribute the accounts across storage lists
     next_id: AtomicAppendVecId,
 
-    /// Write version used to notify accounts in order to distinguish between
-    /// multiple updates to the same account in the same slot
-    #[allow(unused)] // TODO use? maybe?
-    write_version: AtomicU64,
-
     storage_cleanup_slot_freq: u64,
     last_storage_cleanup_slot: AtomicU64,
 
@@ -65,7 +60,6 @@ impl Default for AccountsPersister {
             storage: Default::default(),
             paths: Vec::new(),
             next_id: AtomicAppendVecId::new(0),
-            write_version: AtomicU64::new(0),
             storage_cleanup_slot_freq: 5 * FLUSH_ACCOUNTS_SLOT_FREQ,
             last_storage_cleanup_slot: AtomicU64::new(0),
             file_size: DEFAULT_FILE_SIZE,
