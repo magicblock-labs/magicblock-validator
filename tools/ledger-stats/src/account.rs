@@ -1,4 +1,3 @@
-use magicblock_accounts_db::utils::find_account;
 use magicblock_ledger::Ledger;
 use num_format::{Locale, ToFormattedString};
 use pretty_hex::*;
@@ -8,7 +7,7 @@ use solana_sdk::{
 };
 use tabular::{Row, Table};
 
-use crate::utils::accounts_storage_from_ledger;
+use crate::utils::{accounts_storage_from_ledger, find_account};
 
 pub fn print_account(ledger: &Ledger, pubkey: &Pubkey) {
     let (storage, slot) = accounts_storage_from_ledger(ledger);
