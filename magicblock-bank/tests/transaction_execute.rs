@@ -148,7 +148,7 @@ fn test_bank_expired_noop_instruction() {
     let bank = Bank::new_for_tests(&genesis_config, None, None);
     add_elf_program(&bank, &elfs::noop::ID);
 
-    let tx = create_noop_transaction(&bank, Hash::new_unique());
+    let tx = create_noop_transaction(&bank, bank.last_blockhash());
     bank.advance_slot();
 
     let (results, _) = execute_transactions(&bank, vec![tx]);
