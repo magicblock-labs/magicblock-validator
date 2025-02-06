@@ -2,13 +2,11 @@ use std::path::Path;
 
 use magicblock_accounts_db::AccountsPersister;
 use magicblock_ledger::Ledger;
-use solana_accounts_db::{
-    account_storage::meta::StoredAccountMeta, accounts_db::AccountStorageEntry,
-    accounts_file::AccountsFile,
-};
+use solana_accounts_db::accounts_db::AccountStorageEntry;
 use solana_sdk::clock::Slot;
 
-pub fn render_logs(logs: &[String], indent: &str) -> String {
+#[allow(dead_code)] // this is actually used from `print_transaction_logs` ./transaction_logs.rs
+pub(crate) fn render_logs(logs: &[String], indent: &str) -> String {
     logs.iter()
         .map(|line| {
             let prefix =
