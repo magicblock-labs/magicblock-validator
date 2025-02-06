@@ -168,9 +168,6 @@ pub struct Bank {
     /// stream for the slot == self.slot
     is_delta: AtomicBool,
 
-    // TODO ??? no idea how to use that, it's kind of mirrored to transaction_processor
-    builtin_programs: HashSet<Pubkey>,
-
     pub(crate) transaction_processor:
         RwLock<TransactionBatchProcessor<SimpleForkGraph>>,
 
@@ -477,7 +474,6 @@ impl Bank {
             epoch: Epoch::default(),
             epoch_schedule: EpochSchedule::default(),
             is_delta: AtomicBool::default(),
-            builtin_programs: HashSet::<Pubkey>::default(),
             runtime_config: Arc::<RuntimeConfig>::default(),
             transaction_debug_keys: Option::<Arc<HashSet<Pubkey>>>::default(),
             transaction_log_collector_config: Arc::<
