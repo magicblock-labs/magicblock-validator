@@ -2,8 +2,7 @@
 use std::{borrow::Cow, path::PathBuf, sync::Arc};
 
 use magicblock_accounts_db::{
-    accounts::Accounts, accounts_db::AccountsDb,
-    geyser::AccountsUpdateNotifierImpl,
+    accounts::Accounts, accounts_db::AccountsDb, geyser::AccountsUpdateNotifier,
 };
 use solana_geyser_plugin_manager::slot_status_notifier::SlotStatusNotifierImpl;
 use solana_sdk::{
@@ -40,7 +39,7 @@ impl Bank {
 
     pub fn new_for_tests(
         genesis_config: &GenesisConfig,
-        accounts_update_notifier: Option<AccountsUpdateNotifierImpl>,
+        accounts_update_notifier: Option<AccountsUpdateNotifier>,
         slot_status_notifier: Option<SlotStatusNotifierImpl>,
     ) -> Self {
         Self::new_with_config_for_tests(
@@ -55,7 +54,7 @@ impl Bank {
     pub fn new_with_config_for_tests(
         genesis_config: &GenesisConfig,
         runtime_config: Arc<RuntimeConfig>,
-        accounts_update_notifier: Option<AccountsUpdateNotifierImpl>,
+        accounts_update_notifier: Option<AccountsUpdateNotifier>,
         slot_status_notifier: Option<SlotStatusNotifierImpl>,
         millis_per_slot: u64,
     ) -> Self {
