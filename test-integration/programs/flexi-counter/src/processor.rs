@@ -1,5 +1,7 @@
 use borsh::{to_vec, BorshDeserialize};
-use ephemeral_rollups_sdk::cpi::{DelegateAccounts, DelegateConfig};
+use ephemeral_rollups_sdk::cpi::{
+    DelegateAccounts, DelegateConfig, UndelegateAccounts,
+};
 use ephemeral_rollups_sdk::{
     consts::EXTERNAL_UNDELEGATE_DISCRIMINATOR,
     cpi::{delegate_account, undelegate_account},
@@ -274,12 +276,15 @@ fn process_undelegate_request(
             msg!("ERROR: failed to parse account seeds {:?}", err);
             ProgramError::InvalidArgument
         })?;
+
     undelegate_account(
-        delegated_account,
-        &crate::id(),
-        buffer,
-        payer,
-        system_program,
+        UndelegateAccounts {
+            delegated_account,
+            owner_program: &crate::id(),
+            buffer,
+            payer,
+            system_program,
+        },
         account_seeds,
     )?;
     Ok(())
