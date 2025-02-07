@@ -21,10 +21,7 @@ use solana_sdk::{
         self, clock, epoch_schedule, fees, last_restart_slot,
         recent_blockhashes, rent,
     },
-    transaction::{
-        SanitizedTransaction, Transaction, TransactionError,
-        VersionedTransaction,
-    },
+    transaction::{SanitizedTransaction, Transaction, TransactionError},
 };
 use solana_svm::{
     transaction_commit_result::CommittedTransaction,

@@ -20,7 +20,7 @@ use magicblock_bank::{
 };
 use solana_sdk::{
     account::ReadableAccount, genesis_config::create_genesis_config,
-    hash::Hash, native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, rent::Rent,
+    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, rent::Rent,
     transaction::SanitizedTransaction,
 };
 use test_tools_core::init_logger;

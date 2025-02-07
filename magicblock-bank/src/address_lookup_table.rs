@@ -22,7 +22,7 @@ impl AddressLoader for &Bank {
             .get_slot_hashes()
             .map_err(|_| AddressLoaderError::SlotHashesSysvarNotFound)?;
 
-        Ok(address_table_lookups
+        address_table_lookups
             .iter()
             .map(|address_table_lookup| {
                 self.rc.accounts.load_lookup_table_addresses(
@@ -31,6 +31,6 @@ impl AddressLoader for &Bank {
                     &slot_hashes,
                 )
             })
-            .collect::<Result<_, AddressLoaderError>>()?)
+            .collect::<Result<_, AddressLoaderError>>()
     }
 }
