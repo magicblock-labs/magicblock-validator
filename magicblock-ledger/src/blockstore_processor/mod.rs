@@ -1,14 +1,16 @@
 use std::str::FromStr;
 
 use log::{Level::Trace, *};
-use magicblock_accounts_db::AccountsPersister;
+use magicblock_accounts_db::{
+    utils::{all_accounts, StoredAccountMeta},
+    AccountsPersister,
+};
 use magicblock_bank::bank::Bank;
 use solana_sdk::{
-    account::AccountSharedData,
+    account::{Account, AccountSharedData, ReadableAccount},
     clock::{Slot, UnixTimestamp},
     hash::Hash,
     message::SanitizedMessage,
-    pubkey::Pubkey,
     transaction::{
         SanitizedTransaction, TransactionVerificationMode, VersionedTransaction,
     },
@@ -115,17 +117,19 @@ fn hydrate_bank(bank: &Bank, max_slot: Slot) -> LedgerResult<(Slot, usize)> {
     else {
         return Ok((0, 0));
     };
-    let all_accounts = Vec::<(Pubkey, AccountSharedData)>::new(); // storage.all_accounts();
-    let len = all_accounts.len();
-    let storable_accounts = all_accounts;
-    // TODO use something like all_accounts method from tools/ledger-stats/src/utils.rs
-    //
-    //let storable_accounts = all_accounts
-    //    .iter()
-    //    .map(|acc| (acc.0, acc.1))
-    //    .collect::<Vec<_>>();
+    let storable_accounts =
+        all_accounts(&storage, |acc_meta: StoredAccountMeta| {
+            let acc = Account {
+                lamports: acc_meta.lamports(),
+                rent_epoch: acc_meta.rent_epoch(),
+                owner: *acc_meta.owner(),
+                executable: acc_meta.executable(),
+                data: acc_meta.data().to_vec(),
+            };
+            (*acc_meta.pubkey(), AccountSharedData::from(acc))
+        });
+    let len = storable_accounts.len();
     bank.store_accounts(storable_accounts);
-
     Ok((slot, len))
 }
 
