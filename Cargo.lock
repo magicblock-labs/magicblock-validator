@@ -7664,6 +7664,7 @@ version = "2.1.11"
 dependencies = [
  "bincode",
  "bs58 0.4.0",
+ "enum-iterator",
  "prost 0.11.9",
  "protobuf-src",
  "serde",

@@ -160,7 +160,7 @@ solana-streamer = { version = "2.1.11" }
 solana-sdk = { version = "2.1.11" }
 solana-svm = { version = "2.1.11" }
 solana-svm-transaction = { version = "2.1.11" }
-solana-storage-proto = { version = "2.1.11" }
+solana-storage-proto = { path = "storage-proto" }
 solana-system-program = { version = "2.1.11" }
 solana-timings = "2.1.11"
 solana-transaction-status = { version = "2.1.11" }
