@@ -151,6 +151,5 @@ fn init_geyser_config(
         enable_account_notifications,
         enable_transaction_notifications,
         geyser_grpc: grpc_config,
-        ..Default::default()
     }
 }

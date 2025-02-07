@@ -87,6 +87,8 @@ impl Filter {
     ) -> anyhow::Result<CommitmentLevel> {
         let commitment =
             commitment.unwrap_or(CommitmentLevel::Processed as i32);
+        // the `from` verion potentially panics
+        #[allow(clippy::unnecessary_fallible_conversions)]
         CommitmentLevel::try_from(commitment).map_err(|_error| {
             anyhow::anyhow!(
                 "failed to create CommitmentLevel from {commitment:?}"
@@ -985,7 +987,6 @@ mod tests {
             commitment: None,
             accounts_data_slice: Vec::new(),
             ping: None,
-            ..Default::default()
         };
         let limit = ConfigGrpcFilters::default();
         let filter = Filter::new(&config, &limit, NORMALIZE_COMMITMENT);
@@ -1015,7 +1016,6 @@ mod tests {
             commitment: None,
             accounts_data_slice: Vec::new(),
             ping: None,
-            ..Default::default()
         };
         let mut limit = ConfigGrpcFilters::default();
         limit.accounts.any = false;
@@ -1050,7 +1050,6 @@ mod tests {
             commitment: None,
             accounts_data_slice: Vec::new(),
             ping: None,
-            ..Default::default()
         };
         let mut limit = ConfigGrpcFilters::default();
         limit.transactions.any = false;
@@ -1084,7 +1083,6 @@ mod tests {
             commitment: None,
             accounts_data_slice: Vec::new(),
             ping: None,
-            ..Default::default()
         };
         let mut limit = ConfigGrpcFilters::default();
         limit.transactions.any = false;
@@ -1125,7 +1123,6 @@ mod tests {
             commitment: None,
             accounts_data_slice: Vec::new(),
             ping: None,
-            ..Default::default()
         };
         let limit = ConfigGrpcFilters::default();
         let filter =
@@ -1173,7 +1170,6 @@ mod tests {
             commitment: None,
             accounts_data_slice: Vec::new(),
             ping: None,
-            ..Default::default()
         };
         let limit = ConfigGrpcFilters::default();
         let filter =
@@ -1221,7 +1217,6 @@ mod tests {
             commitment: None,
             accounts_data_slice: Vec::new(),
             ping: None,
-            ..Default::default()
         };
         let limit = ConfigGrpcFilters::default();
         let filter =
@@ -1275,7 +1270,6 @@ mod tests {
             commitment: None,
             accounts_data_slice: Vec::new(),
             ping: None,
-            ..Default::default()
         };
         let limit = ConfigGrpcFilters::default();
         let filter =
@@ -1329,7 +1323,6 @@ mod tests {
             commitment: None,
             accounts_data_slice: Vec::new(),
             ping: None,
-            ..Default::default()
         };
         let limit = ConfigGrpcFilters::default();
         let filter =

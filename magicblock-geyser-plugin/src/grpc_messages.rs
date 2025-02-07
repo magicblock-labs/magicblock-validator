@@ -615,6 +615,8 @@ impl BlockMetaStorage {
     ) -> Result<CommitmentLevel, Status> {
         let commitment =
             commitment.unwrap_or(CommitmentLevel::Processed as i32);
+        // the `from` verion potentially panics
+        #[allow(clippy::unnecessary_fallible_conversions)]
         CommitmentLevel::try_from(commitment).map_err(|_error| {
             let msg =
                 format!("failed to create CommitmentLevel from {commitment:?}");

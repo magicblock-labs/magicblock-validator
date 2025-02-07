@@ -135,7 +135,6 @@ impl GeyserRpcService {
                 commitment: None,
                 accounts_data_slice: Vec::new(),
                 ping: None,
-                ..Default::default()
             },
             &self.config.filters,
             self.config.normalize_commitment_level,
@@ -175,7 +174,6 @@ impl GeyserRpcService {
                 commitment: None,
                 accounts_data_slice: Vec::new(),
                 ping: None,
-                ..Default::default()
             },
             &self.config.filters,
             self.config.normalize_commitment_level,

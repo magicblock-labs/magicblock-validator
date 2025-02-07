@@ -759,7 +759,7 @@ impl JsonRpcRequestProcessor {
 
         let inner_instructions = inner_instructions.map(|info| {
             map_inner_instructions(info)
-                .map(|converted| UiInnerInstructions::from(converted))
+                .map(UiInnerInstructions::from)
                 .collect()
         });
 
