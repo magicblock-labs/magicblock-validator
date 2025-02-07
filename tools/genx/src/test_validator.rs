@@ -1,6 +1,7 @@
 use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
 
-use ledger_stats::{accounts_storage_from_ledger, all_accounts, open_ledger};
+use ledger_stats::{accounts_storage_from_ledger, open_ledger};
+use magicblock_accounts_db::utils::all_accounts;
 use solana_sdk::pubkey::Pubkey;
 use tempfile::tempdir;
 

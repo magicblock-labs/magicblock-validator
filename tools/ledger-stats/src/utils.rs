@@ -2,9 +2,7 @@ use std::path::Path;
 
 use magicblock_accounts_db::AccountsPersister;
 use magicblock_ledger::Ledger;
-use solana_accounts_db::{
-    account_storage::meta::StoredAccountMeta, accounts_db::AccountStorageEntry,
-};
+use solana_accounts_db::accounts_db::AccountStorageEntry;
 use solana_sdk::clock::Slot;
 
 #[allow(dead_code)] // this is actually used from `print_transaction_logs` ./transaction_logs.rs
@@ -41,19 +39,4 @@ pub fn accounts_storage_from_ledger(
 
 pub fn open_ledger(ledger_path: &Path) -> Ledger {
     Ledger::open(ledger_path).expect("Failed to open ledger")
-}
-
-// TODO just a placeholder function to make the project compile
-pub fn all_accounts<R>(
-    _storage: &AccountStorageEntry,
-    _cb: impl Fn(StoredAccountMeta) -> R,
-) -> Vec<R> {
-    unimplemented!()
-}
-// TODO just a placeholder function to make the project compile
-pub fn find_account<R>(
-    _storage: &AccountStorageEntry,
-    _cb: impl Fn(StoredAccountMeta) -> R,
-) -> R {
-    unimplemented!()
 }

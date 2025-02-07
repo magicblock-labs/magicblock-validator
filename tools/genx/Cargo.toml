@@ -10,5 +10,6 @@ edition.workspace = true
 [dependencies]
 clap = { version = "4.5.23", features = ["derive"] }
 ledger-stats = { workspace = true }
+magicblock-accounts-db = { workspace = true }
 solana-sdk = { workspace = true }
 tempfile = { workspace = true }
