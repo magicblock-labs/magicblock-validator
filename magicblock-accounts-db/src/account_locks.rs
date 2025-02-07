@@ -11,9 +11,7 @@ pub struct AccountLocks {
 
 impl AccountLocks {
     pub(crate) fn is_locked_readonly(&self, key: &Pubkey) -> bool {
-        self.readonly_locks
-            .get(key)
-            .map_or(false, |count| *count > 0)
+        self.readonly_locks.get(key).is_some_and(|count| *count > 0)
     }
 
     pub(crate) fn is_locked_write(&self, key: &Pubkey) -> bool {
@@ -25,7 +23,7 @@ impl AccountLocks {
     }
 
     pub(crate) fn lock_readonly(&mut self, key: &Pubkey) -> bool {
-        self.readonly_locks.get_mut(key).map_or(false, |count| {
+        self.readonly_locks.get_mut(key).is_some_and(|count| {
             *count += 1;
             true
         })
