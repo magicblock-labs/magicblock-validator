@@ -15,7 +15,12 @@ use solana_sdk::{
         SanitizedTransaction, TransactionVerificationMode, VersionedTransaction,
     },
 };
-use solana_svm::transaction_processor::ExecutionRecordingConfig;
+use solana_svm::{
+    transaction_commit_result::{
+        TransactionCommitResult, TransactionCommitResultExtensions,
+    },
+    transaction_processor::ExecutionRecordingConfig,
+};
 use solana_timings::ExecuteTimings;
 use solana_transaction_status::VersionedConfirmedBlock;
 
@@ -211,29 +216,33 @@ pub fn process_ledger(ledger: &Ledger, bank: &Bank) -> LedgerResult<u64> {
                             &mut timings,
                             None,
                         );
-                    // TODO fix logging for TransactionCommitResult returned by load_execute_and_commit_transactions
 
-                    //log_execution_results(&results.execution_results);
-                    //for result in results.execution_results {
-                    //    if let TransactionExecutionResult::NotExecuted(err) =
-                    //        &result
-                    //    {
-                    //        // If we're on trace log level then we already logged this above
-                    //        if !log_enabled!(Trace) {
-                    //            debug!(
-                    //                "Transactions: {:#?}",
-                    //                batch.sanitized_transactions()
-                    //            );
-                    //            debug!("Result: {:#?}", result);
-                    //        }
-                    //        return Err(LedgerError::BlockStoreProcessor(
-                    //            format!(
-                    //        "Transaction {:?} could not be executed: {:?}",
-                    //        result, err
-                    //    ),
-                    //        ));
-                    //    }
-                    //}
+                    log_execution_results(&results);
+                    for result in results {
+                        if !result.was_executed_successfully() {
+                            // If we're on trace log level then we already logged this above
+                            if !log_enabled!(Trace) {
+                                debug!(
+                                    "Transactions: {:#?}",
+                                    batch.sanitized_transactions()
+                                );
+                                debug!("Result: {:#?}", result);
+                            }
+                            let err = match &result {
+                                Ok(tx) => match &tx.status {
+                                    Ok(_) => None,
+                                    Err(err) => Some(err),
+                                },
+                                Err(err) => Some(err),
+                            };
+                            return Err(LedgerError::BlockStoreProcessor(
+                                format!(
+                                    "Transaction {:?} could not be executed: {:?}",
+                                    result, err
+                                ),
+                            ));
+                        }
+                    }
                 }
             }
             Ok(())
@@ -268,23 +277,29 @@ instructions: {:?}
     }
 }
 
-// TODO fix logging for TransactionCommitResult returned by load_execute_and_commit_transactions
-//
-//fn log_execution_results(results: &[TransactionExecutionResult]) {
-//    if !log_enabled!(Trace) {
-//        return;
-//    }
-//    for result in results {
-//        match result {
-//            TransactionExecutionResult::Executed { details, .. } => {
-//                trace!("Executed: {:#?}", details);
-//            }
-//            TransactionExecutionResult::NotExecuted(err) => {
-//                trace!("NotExecuted: {:#?}", err);
-//            }
-//        }
-//    }
-//}
+fn log_execution_results(results: &[TransactionCommitResult]) {
+    if !log_enabled!(Trace) {
+        return;
+    }
+    for result in results {
+        match result {
+            Ok(tx) => {
+                if result.was_executed_successfully() {
+                    trace!(
+                        "Executed: (fees: {:#?}, loaded accounts; {:#?})",
+                        tx.fee_details,
+                        tx.loaded_account_stats
+                    );
+                } else {
+                    trace!("NotExecuted: {:#?}", tx.status);
+                }
+            }
+            Err(err) => {
+                trace!("Failed: {:#?}", err);
+            }
+        }
+    }
+}
 
 /// NOTE: a separate module for logging the blockhash is used
 /// to in order to allow turning this off specifically
