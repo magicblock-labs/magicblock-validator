@@ -1723,10 +1723,6 @@ impl Bank {
                 &processing_results,
             );
         });
-
-        // TODO: @@@@ This potentially breaks deploying programs into our validator
-        //       which makes us incompatible with solana and will break a lot of devtool
-        //       use cases
         let ((), update_executors_us) = measure_us!({
             let txp = self.transaction_processor.read().unwrap();
             let mut cache = txp.program_cache.write().unwrap();
