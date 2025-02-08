@@ -1724,6 +1724,9 @@ impl Bank {
             );
         });
 
+        // TODO: @@@@ This potentially breaks deploying programs into our validator
+        //       which makes us incompatible with solana and will break a lot of devtool
+        //       use cases
         let ((), update_executors_us) = measure_us!({
             //let mut cache = None;
             for processing_result in &processing_results {
