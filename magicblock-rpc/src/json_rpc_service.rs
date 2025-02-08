@@ -116,7 +116,6 @@ impl JsonRpcService {
                 io.extend_with(FullImpl.to_delegate());
                 io.extend_with(BankDataImpl.to_delegate());
                 io.extend_with(MinimalImpl.to_delegate());
-                //io.extend_with(DeprecatedImpl.to_delegate());
 
                 let health = RpcHealth::new(startup_verification_complete);
                 let request_middleware = RpcRequestMiddleware::new(health);
