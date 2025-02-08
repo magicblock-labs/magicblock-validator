@@ -1728,7 +1728,8 @@ impl Bank {
         //       which makes us incompatible with solana and will break a lot of devtool
         //       use cases
         let ((), update_executors_us) = measure_us!({
-            //let mut cache = None;
+            let txp = self.transaction_processor.read().unwrap();
+            let mut cache = txp.program_cache.write().unwrap();
             for processing_result in &processing_results {
                 if let Some(ProcessedTransaction::Executed(executed_tx)) =
                     processing_result.processed_transaction()
@@ -1738,13 +1739,7 @@ impl Bank {
                     if executed_tx.was_successful()
                         && !programs_modified_by_tx.is_empty()
                     {
-                        //cache
-                        //    .get_or_insert_with(|| {
-                        //        let txp =
-                        //            self.transaction_processor.write().unwrap();
-                        //        txp.program_cache.write().unwrap()
-                        //    })
-                        //    .merge(programs_modified_by_tx);
+                        cache.merge(programs_modified_by_tx);
                     }
                 }
             }
