@@ -19,12 +19,6 @@ pub fn get_context_with_delegated_committees(
     get_context_with_delegated_committees_impl(ncommittees, true)
 }
 
-pub fn get_context_with_delegated_committees_without_payer_escrow(
-    ncommittees: usize,
-) -> ScheduleCommitTestContext {
-    get_context_with_delegated_committees_impl(ncommittees, false)
-}
-
 fn get_context_with_delegated_committees_impl(
     ncommittees: usize,
     escrow_lamports_for_payer: bool,
