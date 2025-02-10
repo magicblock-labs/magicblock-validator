@@ -17,7 +17,6 @@ use solana_accounts_db::{
     append_vec::{aligned_stored_size, AppendVec, STORE_META_OVERHEAD},
     storable_accounts::StorableAccounts,
 };
-use solana_measure::measure::Measure;
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
     clock::Slot,
@@ -187,14 +186,10 @@ impl AccountsPersister {
         let slot = accounts_and_meta_to_store.0;
         let mut infos: Vec<AccountInfo> =
             Vec::with_capacity(accounts_and_meta_to_store.1.len());
-        //let mut total_append_accounts_us = 0;
         while infos.len() < accounts_and_meta_to_store.len() {
-            let mut append_accounts = Measure::start("append_accounts");
             let stored_accounts_info = storage
                 .accounts
                 .append_accounts(&accounts_and_meta_to_store, infos.len());
-            append_accounts.stop();
-            //total_append_accounts_us += append_accounts.as_us();
             let Some(stored_accounts_info) = stored_accounts_info else {
                 storage.set_status(AccountStorageStatus::Full);
 
@@ -231,14 +226,17 @@ impl AccountsPersister {
                         }),
                 ));
             }
-            // TODO: do we really need this?
+
+            // NOTE(bmuddha): it's unlikely (in near future) that we will have a use case when appendvec can be
+            // used to store 10GB worth of accounts. When we do, this whole accountsdb crate should be gone by then
             //storage.add_accounts(
             //    stored_accounts_info.offsets.len(),
             //    stored_accounts_info.size,
             //);
 
             // restore the state to available
-            storage.set_status(AccountStorageStatus::Available);
+            // NOTE: as we don't call add_accounts, the state always be available
+            //storage.set_status(AccountStorageStatus::Available);
         }
 
         infos
