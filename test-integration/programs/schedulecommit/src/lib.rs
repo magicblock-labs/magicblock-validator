@@ -1,7 +1,5 @@
 use borsh::{BorshDeserialize, BorshSerialize};
-use ephemeral_rollups_sdk::cpi::{
-    DelegateAccounts, DelegateConfig, UndelegateAccounts,
-};
+use ephemeral_rollups_sdk::cpi::{DelegateAccounts, DelegateConfig};
 use ephemeral_rollups_sdk::ephem::{
     commit_accounts, commit_and_undelegate_accounts,
 };
@@ -421,13 +419,11 @@ fn process_undelegate_request(
             ProgramError::InvalidArgument
         })?;
     undelegate_account(
-        UndelegateAccounts {
-            delegated_account,
-            owner_program: &crate::id(),
-            buffer,
-            payer,
-            system_program,
-        },
+        delegated_account,
+        &id(),
+        buffer,
+        payer,
+        system_program,
         account_seeds,
     )?;
     Ok(())
