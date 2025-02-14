@@ -316,6 +316,17 @@ impl AccountsPersister {
             return Ok(None);
         };
 
+        // When we drop the AppendVec the underlying file is removed from the
+        // filesystem. There is no way to configure this via public methods.
+        // Thus we copy the file before using it for the AppendVec. This way
+        // we prevent account files being removed when we point a tool at the ledger
+        // or replay it.
+        let file = {
+            let copy = file.with_extension("copy");
+            fs::copy(&file, &copy)?;
+            copy
+        };
+
         // Create a AccountStorageEntry from the file
         let file_size = fs::metadata(&file)?.len() as usize;
         let (append_vec, num_accounts) =
