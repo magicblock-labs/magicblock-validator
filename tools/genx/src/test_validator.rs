@@ -90,7 +90,7 @@ fn download_accounts_into_from_url_into_dir(
         RpcClient::new_with_commitment(url, CommitmentConfig::confirmed());
     let total_len = pubkeys.len();
     for (idx, pubkeys) in pubkeys.chunks(MAX_ACCOUNTS).enumerate() {
-        let start = idx * pubkeys.len();
+        let start = idx * MAX_ACCOUNTS;
         let end = start + pubkeys.len();
         eprintln!("Downloading {}..{}/{} accounts", start, end, total_len);
         match rpc_client.get_multiple_accounts(pubkeys) {
@@ -102,8 +102,11 @@ fn download_accounts_into_from_url_into_dir(
                     let path = dir.join(format!("{pubkey}.json"));
                     let pk = pubkey.to_string();
                     let lamports = acc.lamports;
-                    let data =
-                        [base64::encode(&acc.data), "base64".to_string()];
+                    let data = [
+                        #[allow(deprecated)] // this is just a dev tool
+                        base64::encode(&acc.data),
+                        "base64".to_string(),
+                    ];
                     let owner = acc.owner.to_string();
                     let executable = acc.executable;
                     let rent_epoch = acc.rent_epoch;
