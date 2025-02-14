@@ -206,6 +206,7 @@ pub fn process_ledger(ledger: &Ledger, bank: &Bank) -> LedgerResult<u64> {
                     log_sanitized_transaction(&tx);
 
                     let mut timings = ExecuteTimings::default();
+                    let signature = *tx.signature();
                     let batch = [tx];
                     let batch = bank.prepare_sanitized_batch(&batch);
                     let (results, _) = bank
@@ -237,8 +238,8 @@ pub fn process_ledger(ledger: &Ledger, bank: &Bank) -> LedgerResult<u64> {
                             };
                             return Err(LedgerError::BlockStoreProcessor(
                                 format!(
-                                    "Transaction {:?} could not be executed: {:?}",
-                                    result, err
+                                    "Transaction '{}', {:?} could not be executed: {:?}",
+                                    signature, result, err
                                 ),
                             ));
                         }
