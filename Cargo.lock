@@ -2121,9 +2121,12 @@ dependencies = [
 name = "genx"
 version = "0.0.0"
 dependencies = [
+ "base64 0.21.7",
  "clap 4.5.23",
  "ledger-stats",
  "magicblock-accounts-db",
+ "serde_json",
+ "solana-rpc-client",
  "solana-sdk",
  "tempfile",
 ]

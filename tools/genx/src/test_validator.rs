@@ -1,8 +1,14 @@
-use std::{fs, os::unix::fs::PermissionsExt, path::PathBuf};
+use serde_json::{json, Value};
+use solana_rpc_client::rpc_client::RpcClient;
+use std::{
+    fs,
+    os::unix::fs::PermissionsExt,
+    path::{Path, PathBuf},
+};
 
 use ledger_stats::{accounts_storage_from_ledger, open_ledger};
 use magicblock_accounts_db::utils::all_accounts;
-use solana_sdk::pubkey::Pubkey;
+use solana_sdk::{commitment_config::CommitmentConfig, pubkey::Pubkey};
 use tempfile::tempdir;
 
 pub struct TestValidatorConfig {
@@ -16,6 +22,9 @@ pub(crate) fn gen_test_validator_start_script(
 ) {
     let temp_dir = tempdir().expect("Failed to create temporary directory");
     let temp_dir_path = temp_dir.into_path();
+    let accounts_dir = temp_dir_path.join("accounts");
+    fs::create_dir(&accounts_dir).expect("Failed to create accounts directory");
+
     let file_path = temp_dir_path.join("run-validator.sh");
     let accounts: Vec<Pubkey> = if let Some(ledger_path) = ledger_path {
         let ledger = open_ledger(ledger_path);
@@ -39,16 +48,14 @@ pub(crate) fn gen_test_validator_start_script(
         "10000".to_string(),
     ];
 
-    for pubkey in accounts {
-        // NOTE: we may need to treat executables differently if just cloning
-        // at startup is not sufficient even though we also will clone the
-        // executable data account.
-        // For now we don't run programs in the test validator, but just
-        // want to make sure they can be cloned by the ephemeral, so it is not
-        // yet important.
-        args.push("--maybe-clone".to_string());
-        args.push(pubkey.to_string());
-    }
+    download_accounts_into_from_url_into_dir(
+        &accounts,
+        config.url.clone(),
+        &accounts_dir,
+    );
+
+    args.push("--account-dir".into());
+    args.push(accounts_dir.to_string_lossy().to_string());
 
     args.push("--url".into());
     args.push(config.url);
@@ -70,4 +77,52 @@ solana-test-validator  \\\n  {}",
         "Run this script to start the test validator: \n\n{}",
         file_path.display()
     );
+}
+
+fn download_accounts_into_from_url_into_dir(
+    pubkeys: &[Pubkey],
+    url: String,
+    dir: &Path,
+) {
+    // Derived from error from helius RPC: Failed to download accounts: Error { request: Some(GetMultipleAccounts), kind: RpcError(RpcResponseError { code: -32602, message: "Too many inputs provided; max 100", data: Empty }) }
+    const MAX_ACCOUNTS: usize = 100;
+    let rpc_client =
+        RpcClient::new_with_commitment(url, CommitmentConfig::confirmed());
+    let total_len = pubkeys.len();
+    for (idx, pubkeys) in pubkeys.chunks(MAX_ACCOUNTS).enumerate() {
+        let start = idx * pubkeys.len();
+        let end = start + pubkeys.len();
+        eprintln!("Downloading {}..{}/{} accounts", start, end, total_len);
+        match rpc_client.get_multiple_accounts(pubkeys) {
+            Ok(accs) => accs
+                .into_iter()
+                .zip(pubkeys)
+                .filter_map(|(acc, pubkey)| acc.map(|x| (x, pubkey)))
+                .for_each(|(acc, pubkey)| {
+                    let path = dir.join(format!("{pubkey}.json"));
+                    let pk = pubkey.to_string();
+                    let lamports = acc.lamports;
+                    let data =
+                        [base64::encode(&acc.data), "base64".to_string()];
+                    let owner = acc.owner.to_string();
+                    let executable = acc.executable;
+                    let rent_epoch = acc.rent_epoch;
+                    let space = acc.data.len();
+                    let json: Value = json! {{
+                        "pubkey": pk,
+                        "account": {
+                            "lamports": lamports,
+                            "data": data,
+                            "owner": owner,
+                            "executable": executable,
+                            "space": space,
+                            "rentEpoch": rent_epoch
+                        },
+                    }};
+                    fs::write(&path, format!("{:#}", json))
+                        .expect("Failed to write account");
+                }),
+            Err(err) => eprintln!("Failed to download accounts: {:?}", err),
+        }
+    }
 }
