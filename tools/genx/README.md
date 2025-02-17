@@ -48,7 +48,7 @@ path = "./ledger"
 Prepares a ledger for replay in a diagnostics/test scenario. At this point it ensures that the
 original keypair of the validator operator is not used. Instead it is overwritten with a random
 keypair. That keypair is then printed to the terminal so that the `VALIDATOR_KEYPAIR` env var
-can be set to it when running the epehemeral validator to replay the ledger.
+can be set to it when running the ephemeral validator to replay the ledger.
 
 One can auto-set that env var using the output of this command as follows:
 

@@ -22,7 +22,7 @@ pub(crate) fn ledger_replay_test(ledger_path: &PathBuf) {
     let keypair_file = ledger_path.join("validator-keypair.json");
 
     if let Ok(true) = fs::exists(&keypair_file) {
-        if let Ok(kp) = Keypair::read_from_file("validator-keypair.json") {
+        if let Ok(kp) = Keypair::read_from_file(&keypair_file) {
             eprintln!("Overwriting existing keypair: {}", kp.pubkey());
         }
     }
