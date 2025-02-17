@@ -15,7 +15,6 @@ DEBUG_ARR=(
 	"geyser_plugin=debug,"
 	"magicblock=debug,"
   "rpc=debug,"
-  "bank=debug,"
   "solana_geyser_plugin_manager=debug,"
   "solana_svm=debug,"
   "test_tools=debug,"
