@@ -1,5 +1,7 @@
 use std::str::FromStr;
 
+use num_format::{Locale, ToFormattedString};
+
 use log::{Level::Trace, *};
 use magicblock_accounts_db::{
     utils::{all_accounts, StoredAccountMeta},
@@ -54,10 +56,30 @@ fn iter_blocks(
         blockhashes_only_starting_slot,
     } = params;
     let mut slot: u64 = blockhashes_only_starting_slot;
+
+    let max_slot = if log::log_enabled!(Level::Info) {
+        ledger
+            .get_max_blockhash()?
+            .0
+            .to_formatted_string(&Locale::en)
+    } else {
+        "N/A".to_string()
+    };
+    const PROGRESS_REPORT_INTERVAL: u64 = 100;
     loop {
         let Ok(Some(block)) = ledger.get_block(slot) else {
             break;
         };
+        if log::log_enabled!(Level::Info)
+            && slot % PROGRESS_REPORT_INTERVAL == 0
+        {
+            info!(
+                "Processing block: {}/{}",
+                slot.to_formatted_string(&Locale::en),
+                max_slot
+            );
+        }
+
         let VersionedConfirmedBlock {
             blockhash,
             previous_blockhash,
@@ -116,6 +138,8 @@ fn iter_blocks(
 }
 
 fn hydrate_bank(bank: &Bank, max_slot: Slot) -> LedgerResult<(Slot, usize)> {
+    info!("Hydrating bank");
+
     let persister =
         AccountsPersister::new_with_paths(vec![bank.accounts_path.clone()]);
     let Some((storage, slot)) = persister.load_most_recent_store(max_slot)?
@@ -134,6 +158,10 @@ fn hydrate_bank(bank: &Bank, max_slot: Slot) -> LedgerResult<(Slot, usize)> {
             (*acc_meta.pubkey(), AccountSharedData::from(acc))
         });
     let len = storable_accounts.len();
+    info!(
+        "Storing {} accounts into bank",
+        len.to_formatted_string(&Locale::en)
+    );
     bank.store_accounts(storable_accounts);
     Ok((slot, len))
 }
