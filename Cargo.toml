@@ -136,36 +136,38 @@ magicblock-tokens = { path = "./magicblock-tokens" }
 magicblock-transaction-status = { path = "./magicblock-transaction-status" }
 magicblock-version = { path = "./magicblock-version" }
 protobuf-src = "2.1.1"
-solana-accounts-db = { version = "2.1.11" }
-solana-account-decoder = { version = "2.1.11" }
-solana-address-lookup-table-program = { version = "2.1.11" }
-solana-bpf-loader-program = { version = "2.1.11" }
-solana-compute-budget-program = { version = "2.1.11" }
-solana-cost-model = { version = "2.1.11" }
-solana-frozen-abi-macro = { version = "2.1.11" }
-solana-geyser-plugin-interface = { version = "2.1.11", package = "agave-geyser-plugin-interface" }
-solana-geyser-plugin-manager = { version = "2.1.11" }
-solana-inline-spl = { version = "2.1.11" }
-solana-loader-v4-program = { version = "2.1.11" }
-solana-logger = { version = "2.1.11" }
-solana-log-collector = { version = "2.1.11" }
-solana-measure = { version = "2.1.11" }
-solana-metrics = { version = "2.1.11" }
-solana-perf = { version = "2.1.11" }
-solana-program-runtime = { version = "2.1.11" }
-solana-rayon-threadlimit = { version = "2.1.11" }
-solana-pubsub-client = { version = "2.1.11" }
-solana-rpc = "2.1.11"
-solana-rpc-client = { version = "2.1.11" }
-solana-rpc-client-api = { version = "2.1.11" }
-solana-streamer = { version = "2.1.11" }
-solana-sdk = { version = "2.1.11" }
-solana-svm = { version = "2.1.11" }
-solana-svm-transaction = { version = "2.1.11" }
+solana-account = { path = "../solana-account" }
+solana-accounts-db = { version = "2.2" }
+solana-account-decoder = { version = "2.2" }
+solana-address-lookup-table-program = { version = "2.2" }
+solana-bpf-loader-program = { version = "2.2" }
+solana-compute-budget-program = { version = "2.2" }
+solana-compute-budget-instruction = { version = "2.2" }
+solana-cost-model = { version = "2.2" }
+solana-frozen-abi-macro = { version = "2.2" }
+solana-geyser-plugin-interface = { version = "2.2", package = "agave-geyser-plugin-interface" }
+solana-geyser-plugin-manager = { version = "2.2" }
+solana-inline-spl = { version = "2.2" }
+solana-loader-v4-program = { version = "2.2" }
+solana-logger = { version = "2.2" }
+solana-log-collector = { version = "2.2" }
+solana-measure = { version = "2.2" }
+solana-metrics = { version = "2.2" }
+solana-perf = { version = "2.2" }
+solana-program-runtime = { version = "2.2" }
+solana-rayon-threadlimit = { version = "2.2" }
+solana-pubsub-client = { version = "2.2" }
+solana-rpc = "2.2"
+solana-rpc-client = { version = "2.2" }
+solana-rpc-client-api = { version = "2.2" }
+solana-streamer = { version = "2.2" }
+solana-sdk = { version = "2.2" }
+solana-svm = { version = "2.2", features = [ "dev-context-only-utils" ] }
+solana-svm-transaction = { version = "2.2" }
 solana-storage-proto = { path = "storage-proto" }
-solana-system-program = { version = "2.1.11" }
-solana-timings = "2.1.11"
-solana-transaction-status = { version = "2.1.11" }
+solana-system-program = { version = "2.2" }
+solana-timings = "2.2"
+solana-transaction-status = { version = "2.2" }
 solana_rbpf = "=0.8.0"
 spl-token = "=7.0"
 spl-token-2022 = "=6.0"
@@ -189,82 +191,38 @@ url = "2.5.0"
 vergen = "8.3.1"
 zstd = "0.11.2"
 
-## Needed when using accounts-db copy
-blake3 = "1.5.0"
-bv = "0.11.1"
-bytemuck = "1.14.3"
-bzip2 = "0.4.4"
-dashmap = "5.5.3"
-ed25519-dalek = "=1.0.1"
-flate2 = "1.0.28"
-fnv = "1.0.7"
-im = "15.1.0"
-index_list = "0.2.11"
-indexmap = "2.2.3"
-lz4 = "1.24.0"
-memmap2 = "0.5.10"
-memoffset = "0.9"
+# ## Needed when using accounts-db copy
+blake3 = "1.5"
+# bv = "0.11.1"
+# bytemuck = "1.14.3"
+# bzip2 = "0.4.4"
+dashmap = "6.1"
+# ed25519-dalek = "=1.0.1"
+# flate2 = "1.0.28"
+# fnv = "1.0.7"
+# im = "15.1.0"
+# index_list = "0.2.11"
+# indexmap = "2.2.3"
+# lz4 = "1.24.0"
+# memmap2 = "0.5.10"
+# memoffset = "0.9"
 modular-bitfield = "0.11.2"
-num_enum = "0.7.2"
-ouroboros = "0.15.6"
-qualifier_attr = { version = "0.2.2", default-features = false }
-rand_chacha = "0.3.1"
-regex = "1.10.3"
-seqlock = "0.2.0"
+# num_enum = "0.7.2"
+# ouroboros = "0.15.6"
+# qualifier_attr = { version = "0.2.2", default-features = false }
+# rand_chacha = "0.3.1"
+# regex = "1.10.3"
+# seqlock = "0.2.0"
 smallvec = "1.13.1"
-solana-bucket-map = { version = "2.1.11" }
-solana-config-program = { version = "2.1.11" }
-solana-nohash-hasher = "0.2.1"
-solana-stake-program = { version = "2.1.11" }
-solana-vote-program = { version = "2.1.11" }
-static_assertions = "1.1.0"
-tar = "0.4.40"
-test-case = "3.3.1"
+# solana-bucket-map = { version = "2.1.11" }
+# solana-config-program = { version = "2.1.11" }
+# solana-nohash-hasher = "0.2.1"
+# solana-stake-program = { version = "2.1.11" }
+# solana-vote-program = { version = "2.1.11" }
+# static_assertions = "1.1.0"
+# tar = "0.4.40"
+# test-case = "3.3.1"
 
 [patch.crates-io]
 solana-storage-proto = { path = "./storage-proto" }
-# prost = { git = "https://github.com/tokio-rs/prost.git", rev = "e617832" }
-
-# [patch.crates-io]
-# solana-accounts-db = { path = "../agave/accounts-db" }
-# # This one we just copied in order to match the prost version
-# solana-storage-proto = { path = "./solana/storage-proto" }
-
-# [patch.crates-io]
-# We include the following crates as our dependencies above from crates.io:
-#
-#  * spl-associated-token-account
-#  * spl-instruction-padding
-#  * spl-memo
-#  * spl-pod
-#  * spl-token
-#  * spl-token-2022
-#  * spl-token-metadata-interface
-#
-# They, in turn, depend on a number of crates that we also include directly
-# using `path` specifications.  For example, `spl-token` depends on
-# `solana-program`.  And we explicitly specify `solana-program` above as a local
-# path dependency:
-#
-#     solana-program = { path = "../../sdk/program", version = "=1.16.0" }
-#
-# Unfortunately, Cargo will try to resolve the `spl-token` `solana-program`
-# dependency only using what is available on crates.io.  Crates.io normally
-# contains a previous version of these crates, and we end up with two versions
-# of `solana-program` and `solana-zk-token-sdk` and all of their dependencies in
-# our build tree.
-#
-# If you are developing downstream using non-crates-io solana-program (local or
-# forked repo, or from github rev, eg), duplicate the following patch statements
-# in your Cargo.toml. If you still hit duplicate-type errors with the patch
-# statements in place, run `cargo update -p solana-program` and/or `cargo update
-# -p solana-zk-token-sdk` to remove extraneous versions from your Cargo.lock
-# file.
-#
-# There is a similar override in `programs/sbf/Cargo.toml`.  Please keep both
-# comments and the overrides in sync.
-
-# NOTE: in our case we don't have these crates locally, but need to ensure to point
-# to the compatible versions on github
-# solana-program = { version = "2.1.11" }
-# solana-zk-token-sdk = { version = "2.1.11" }
+solana-account = { path = "../solana-account" }

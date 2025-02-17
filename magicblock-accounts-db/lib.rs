@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use geyser::AccountsUpdateNotifier;
 use parking_lot::RwLock;
 use solana_account::{
     cow::AccountBorrowed, AccountSharedData, ReadableAccount,
@@ -251,7 +250,6 @@ impl AccountsDb {
 
 pub mod config;
 pub mod error;
-pub mod geyser;
 mod index;
 mod snapshot;
 mod storage;

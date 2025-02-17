@@ -2,6 +2,8 @@ use std::{
     borrow::Cow,
     collections::HashSet,
     mem,
+    num::Saturating,
+    ops::Add,
     path::PathBuf,
     slice,
     sync::{
@@ -9,12 +11,12 @@ use std::{
         Arc, LockResult, RwLock, RwLockReadGuard, RwLockWriteGuard,
     },
     time::Duration,
+    u64,
 };
 
 use log::{debug, info, trace};
 use magicblock_accounts_db::{
-    accounts::Accounts, accounts_db::AccountsDb, errors::AccountsDbResult,
-    geyser::AccountsUpdateNotifier,
+    geyser::AccountsUpdateNotifier, AccountsDb, AdbResult, AdbShared,
 };
 use solana_accounts_db::{
     accounts_index::ScanConfig, blockhash_queue::BlockhashQueue,
@@ -23,14 +25,15 @@ use solana_bpf_loader_program::syscalls::{
     create_program_runtime_environment_v1,
     create_program_runtime_environment_v2,
 };
+use solana_compute_budget_instruction::instructions_processor::process_compute_budget_instructions;
 use solana_cost_model::cost_tracker::CostTracker;
+use solana_fee::FeeFeatures;
 use solana_geyser_plugin_manager::slot_status_notifier::SlotStatusNotifierImpl;
 use solana_measure::{measure::Measure, measure_us};
 use solana_program_runtime::loaded_programs::{
     BlockRelation, ForkGraph, ProgramCacheEntry,
 };
 use solana_rpc::slot_status_notifier::SlotStatusNotifierInterface;
-use solana_runtime_transaction::instructions_processor::process_compute_budget_instructions;
 use solana_sdk::{
     account::{
         create_account_shared_data_with_fields as create_account, from_account,
@@ -399,6 +402,7 @@ impl Bank {
     pub fn new(
         genesis_config: &GenesisConfig,
         runtime_config: Arc<RuntimeConfig>,
+        accountsdb_config: magicblock_accounts_db::config::Config,
         debug_keys: Option<Arc<HashSet<Pubkey>>>,
         additional_builtins: Option<&[BuiltinPrototype]>,
         debug_do_not_add_builtins: bool,
@@ -456,7 +460,7 @@ impl Bank {
     }
 
     pub(super) fn default_with_accounts(
-        accounts: Accounts,
+        accounts: AdbShared,
         accounts_path: PathBuf,
         millis_per_slot: u64,
     ) -> Self {
@@ -1226,7 +1230,7 @@ impl Bank {
         // NOTE: took out the `pending` features since we don't support new feature activations
         // which in Solana only are used when we create a bank from a parent bank
         let mut active = self.feature_set.active.clone();
-        let mut inactive = HashSet::new();
+        let mut inactive = HashSet::default();
         let slot = self.slot();
 
         for feature_id in &self.feature_set.inactive {
@@ -1250,7 +1254,10 @@ impl Bank {
             }
         }
 
-        FeatureSet { active, inactive }
+        FeatureSet {
+            active,
+            inactive: inactive.into(),
+        }
     }
 
     // Looks like this is only used in tests since add_precompiled_account_with_owner is as well
@@ -1408,10 +1415,10 @@ impl Bank {
         if let Some(hash_info) =
             hash_queue.get_hash_info_if_valid(recent_blockhash, max_age)
         {
-            Ok(CheckedTransactionDetails {
-                nonce: None,
-                lamports_per_signature: hash_info.lamports_per_signature(),
-            })
+            Ok(CheckedTransactionDetails::new(
+                None,
+                hash_info.lamports_per_signature(),
+            ))
         } else if let Some((nonce, previous_lamports_per_signature)) = self
             .check_load_and_advance_message_nonce_account(
                 tx.message(),
@@ -1419,10 +1426,10 @@ impl Bank {
                 next_lamports_per_signature,
             )
         {
-            Ok(CheckedTransactionDetails {
-                nonce: Some(nonce),
-                lamports_per_signature: previous_lamports_per_signature,
-            })
+            Ok(CheckedTransactionDetails::new(
+                Some(nonce),
+                previous_lamports_per_signature,
+            ))
         } else {
             error_counters.blockhash_not_found += 1;
             Err(TransactionError::BlockhashNotFound)
@@ -1536,15 +1543,16 @@ impl Bank {
         ));
         timings.saturating_add_in_place(ExecuteTimingType::CheckUs, check_us);
 
-        let (blockhash, lamports_per_signature) =
+        let (blockhash, fee_lamports_per_signature) =
             self.last_blockhash_and_lamports_per_signature();
         let processing_environment = TransactionProcessingEnvironment {
             blockhash,
-            epoch_total_stake: None,
-            epoch_vote_accounts: None,
+            epoch_total_stake: u64::MIN, // we don't have stake
             feature_set: Arc::clone(&self.feature_set),
-            fee_structure: Some(&self.fee_structure),
-            lamports_per_signature,
+            fee_lamports_per_signature,
+            // TODO(bmuddha)/NOTE: it's unclear whether we should set this value to non-zero
+            // value as it's only used by nonce accounts, might need more research
+            blockhash_lamports_per_signature: u64::MIN,
             rent_collector: None,
         };
 
@@ -1608,7 +1616,7 @@ impl Bank {
                         1;
                 }
                 Err(err) => {
-                    if *err_count == 0 {
+                    if err_count.0 == 0 {
                         debug!("tx error: {:?} {:?}", err, tx);
                     }
                     *err_count += 1;
@@ -1986,7 +1994,9 @@ impl Bank {
             lamports_per_signature == 0,
             self.fee_structure.lamports_per_signature,
             fee_budget_limits.prioritization_fee,
-            false,
+            FeeFeatures {
+                enable_secp256r1_precompile: false,
+            },
         )
     }
 
@@ -2035,10 +2045,10 @@ impl Bank {
         );
 
         let units_consumed = timings.details.per_program_timings.iter().fold(
-            0,
-            |acc: u64, (_, program_timing)| {
-                acc.saturating_add(program_timing.accumulated_units)
-                    .saturating_add(program_timing.total_errored_units)
+            Saturating(0_u64),
+            |acc: Saturating<u64>, (_, program_timing)| {
+                acc.add(program_timing.accumulated_units)
+                    .add(program_timing.total_errored_units)
             },
         );
 
@@ -2083,7 +2093,7 @@ impl Bank {
             result,
             logs,
             post_simulation_accounts,
-            units_consumed,
+            units_consumed: units_consumed.0,
             return_data,
             inner_instructions,
         }

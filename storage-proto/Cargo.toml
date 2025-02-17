@@ -3,7 +3,7 @@ name = "solana-storage-proto"
 description = "Solana Storage Protobuf Definitions"
 documentation = "https://docs.rs/solana-storage-proto"
 edition = { workspace = true }
-version = "2.1.11"
+version = { workspace = true } 
 
 [dependencies]
 bincode = { workspace = true }

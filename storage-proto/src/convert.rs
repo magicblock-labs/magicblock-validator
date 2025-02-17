@@ -1028,6 +1028,9 @@ impl From<TransactionError> for tx_by_addr::TransactionError {
                 TransactionError::UnbalancedTransaction => {
                     tx_by_addr::TransactionErrorType::UnbalancedTransaction
                 }
+                TransactionError::CommitCancelled => {
+                    todo!()
+                }
                 TransactionError::ProgramCacheHitMaxLimit => {
                     tx_by_addr::TransactionErrorType::ProgramCacheHitMaxLimit
                 }

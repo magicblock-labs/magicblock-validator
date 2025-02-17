@@ -20,19 +20,20 @@ magicblock-program = { workspace = true }
 solana-accounts-db = { workspace = true }
 solana-address-lookup-table-program = { workspace = true }
 solana-bpf-loader-program = { workspace = true }
-solana-compute-budget = { version = "2.1.11" }
+solana-compute-budget = { version = "2.2" }
 solana-compute-budget-program = { workspace = true }
+solana-compute-budget-instruction = { workspace = true }
 solana-cost-model = { workspace = true }
 solana-geyser-plugin-interface = { workspace = true }
 solana-geyser-plugin-manager = { workspace = true }
-solana-fee = "2.1.11"
+solana-fee = "2.2"
 solana-frozen-abi-macro = { workspace = true }
 solana-loader-v4-program = { workspace = true }
-solana-inline-spl = "2.1.11"
+solana-inline-spl = "2.2"
 solana-measure = { workspace = true }
 solana-program-runtime = { workspace = true }
 solana-rpc = { workspace = true }
-solana-runtime-transaction = "2.1.11"
+solana-runtime-transaction = "2.2"
 solana-sdk = { workspace = true }
 solana-svm = { workspace = true }
 solana-svm-transaction = { workspace = true }

@@ -1,37 +1,36 @@
 [package]
 name = "magicblock-accounts-db"
-version.workspace = true
-authors.workspace = true
-repository.workspace = true
-homepage.workspace = true
-license.workspace = true
-edition.workspace = true
+version = "0.1.0"
+edition = "2021"
 
 [dependencies]
-blake3 = { workspace = true }
-dashmap = { workspace = true, features = ["rayon", "raw-api"] }
-fs_extra = { workspace = true }
-log = { workspace = true }
-modular-bitfield = { workspace = true }
-rand = { workspace = true }
-rayon = { workspace = true }
-magicblock-metrics = { workspace = true }
-smallvec = { workspace = true }
+# sys
+libc = "0.2"
+nix = { version = "0.29", features = [ "zerocopy" ] }
+
+# storage
+memmap2 = "0.9"
+# more up to date fork of lmdb bindings by mozilla, still ancient though :(
+lmdb = { package = "lmdb-rkv", git = "https://github.com/mozilla/lmdb-rs.git", rev = "9461676" }
+# lmdb = "0.8"
+reflink = { package = "reflink-copy", version = "0.1" }
+
+# solana
+solana-pubkey = "2.2"
+solana-account = { workspace = true }
+solana-accounts-db = { workspace = true }
 solana-geyser-plugin-interface = { workspace = true }
 solana-geyser-plugin-manager = { workspace = true }
-solana-frozen-abi-macro = { workspace = true }
-solana-measure = { workspace = true }
-solana-metrics = { workspace = true }
-solana-rayon-threadlimit = { workspace = true }
 solana-sdk = { workspace = true }
-solana-svm = { workspace = true }
-solana-svm-transaction = { workspace = true }
-# magicblock-geyser-plugin = { workspace = true }
-thiserror = { workspace = true }
 
-# For now we need to re-export + use some types and traits directly from solana_accounts_db
-# since they need to match exactly. For example ZeroLamports which the solana-sdk implements
-# for the `Account` struct.
-# Once we implement the accounts db fully and will redirect imports of all pieces
-# including the solana crates to use it, we can remove this dependency.
-solana-accounts-db = { workspace = true }
+# synchronization
+parking_lot = "0.12"
+
+# misc
+serde = { version = "1.0", features = [ "derive" ] }
+thiserror = "1.0"
+log = "0.4"
+
+
+[dev-dependencies]
+env_logger = "0.11"

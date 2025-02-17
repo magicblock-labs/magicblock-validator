@@ -1,4 +1,4 @@
-use solana_runtime_transaction::instructions_processor::process_compute_budget_instructions;
+use solana_compute_budget_instruction::instructions_processor::process_compute_budget_instructions;
 use solana_sdk::{
     feature_set::FeatureSet,
     instruction::CompiledInstruction,
