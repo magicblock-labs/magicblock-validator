@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use geyser::AccountsUpdateNotifier;
 use parking_lot::RwLock;
 use solana_account::{
     cow::AccountBorrowed, AccountSharedData, ReadableAccount,
@@ -23,8 +22,16 @@ static mut SNAPSHOT_FREQUENCY: u64 = 0;
 
 macro_rules! inspecterr {
     ($result: expr, $msg: expr) => {
-        $result
-            .inspect_err(|err| log::warn!("adb - {} error: {}", $msg, err))?
+        $result.inspect_err(|err| log::warn!("adb - {} error: {err}", $msg))?
+    };
+    ($result: expr, $msg: expr, @silent) => {
+        match $result {
+            Ok(v) => v,
+            Err(error) => {
+                log::warn!("adb - {} error: {error}", $msg);
+                return;
+            }
+        }
     };
 }
 
@@ -72,11 +79,7 @@ impl AccountsDb {
         Ok(account)
     }
 
-    pub fn insert_account(
-        &self,
-        pubkey: &Pubkey,
-        account: &AccountSharedData,
-    ) -> AdbResult<()> {
+    pub fn insert_account(&self, pubkey: &Pubkey, account: &AccountSharedData) {
         match account {
             AccountSharedData::Borrowed(acc) => {
                 // this is the beauty of this AccountsDB implementation: when we have Borrowed
@@ -107,7 +110,11 @@ impl AccountsDb {
                     }
                     // otherwise allocate from the end of memory map
                     Err(AdbError::NotFound) => self.storage.alloc(size),
-                    Err(other) => return Err(other),
+                    Err(other) => {
+                        // This can only happen if we have catastrophic system mulfunction
+                        log::error!("failed to insert account, index allocation check error: {other}");
+                        return;
+                    }
                 };
                 unsafe {
                     AccountSharedData::serialize_to_mmap(
@@ -122,7 +129,8 @@ impl AccountsDb {
                         account.owner(),
                         allocation
                     ),
-                    "account index insertion"
+                    "account index insertion",
+                    @silent
                 );
                 if let Some(dealloc) = dealloc {
                     println!("deallocated {dealloc} blocks");
@@ -131,8 +139,8 @@ impl AccountsDb {
                 }
             }
         }
-        Ok(())
     }
+
     pub fn account_matches_owners(
         &self,
         account: &Pubkey,
@@ -183,6 +191,17 @@ impl AccountsDb {
         Ok(accounts)
     }
 
+    pub fn contains_account(&self, pubkey: &Pubkey) -> bool {
+        match self.index.get_account_offset(pubkey) {
+            Ok(_) => true,
+            Err(AdbError::NotFound) => false,
+            Err(other) => {
+                log::warn!("failed to check {pubkey} existence: {other}");
+                false
+            }
+        }
+    }
+
     #[inline(always)]
     pub fn slot(&self) -> u64 {
         self.storage.get_slot()
@@ -229,6 +248,11 @@ impl AccountsDb {
         Ok(())
     }
 
+    /// Get number total number of bytes in storage
+    pub fn storage_size(&self) -> u64 {
+        self.storage.size()
+    }
+
     fn flush(&self, sync: bool) {
         self.storage.flush(sync);
         // index is usually so small, that it takes a few ms at
@@ -251,7 +275,6 @@ impl AccountsDb {
 
 pub mod config;
 pub mod error;
-pub mod geyser;
 mod index;
 mod snapshot;
 mod storage;

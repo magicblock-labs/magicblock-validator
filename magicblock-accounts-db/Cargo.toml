@@ -18,10 +18,6 @@ reflink = { package = "reflink-copy", version = "0.1" }
 # solana
 solana-pubkey = "2.2"
 solana-account = { workspace = true }
-solana-accounts-db = { workspace = true }
-solana-geyser-plugin-interface = { workspace = true }
-solana-geyser-plugin-manager = { workspace = true }
-solana-sdk = { workspace = true }
 
 # synchronization
 parking_lot = "0.12"

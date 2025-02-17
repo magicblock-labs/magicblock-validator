@@ -156,7 +156,10 @@ impl AccountsStorage {
         }
     }
 
-    pub(crate) fn restore_from_snapshot(&mut self, dbpath: &Path) -> AdbResult<()> {
+    pub(crate) fn restore_from_snapshot(
+        &mut self,
+        dbpath: &Path,
+    ) -> AdbResult<()> {
         let file = inspecterr!(
             File::options()
                 .write(true)
@@ -172,6 +175,12 @@ impl AccountsStorage {
         self.meta = meta;
         self.store = store;
         Ok(())
+    }
+
+    /// total number of bytes occupied by storage
+    pub(crate) fn size(&self) -> u64 {
+        (self.meta.total_blocks * self.meta.block_size) as u64
+            + METADATA_STORAGE_SIZE as u64
     }
 
     fn block_size(&self) -> usize {
@@ -194,7 +203,8 @@ impl StorageMeta {
         let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
         // make the database size a multiple of OS page size (rounding up),
         // and add one more block worth of space for metadata storage
-        let page_num = (config.db_size / page_size) + (config.db_size % page_size != 0) as usize;
+        let page_num = (config.db_size / page_size)
+            + (config.db_size % page_size != 0) as usize;
         let db_size = page_num * page_size + METADATA_STORAGE_SIZE;
         let total_blocks = db_size as u32 / config.block_size as u32;
         // set the length of file and zero out the space, might take a while on huge files
@@ -232,11 +242,14 @@ impl StorageMeta {
         // second element is slot
         let slot = unsafe { ptr.add(SLOT_OFFSET) as *const AtomicU64 };
         // third is blocks size
-        let block_size = unsafe { (ptr.add(BLOCKSIZE_OFFSET) as *const u32).read() };
+        let block_size =
+            unsafe { (ptr.add(BLOCKSIZE_OFFSET) as *const u32).read() };
         // fourth is total blocks count
-        let total_blocks = unsafe { (ptr.add(TOTALBLOCKS_OFFSET) as *const u32).read() };
+        let total_blocks =
+            unsafe { (ptr.add(TOTALBLOCKS_OFFSET) as *const u32).read() };
         // fifth is the number of deallocated blocks so far
-        let deallocated = unsafe { ptr.add(DEALLOCATED_OFFSET) as *const AtomicU32 };
+        let deallocated =
+            unsafe { ptr.add(DEALLOCATED_OFFSET) as *const AtomicU32 };
 
         Self {
             head,

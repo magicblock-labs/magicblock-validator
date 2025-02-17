@@ -1,8 +1,9 @@
 use std::{path::PathBuf, sync::Arc};
 
-use magicblock_accounts_db::geyser::AccountsUpdateNotifier;
+use magicblock_accounts_db::config::Config as AdbConfig;
 use magicblock_bank::{
-    bank::Bank, transaction_logs::TransactionLogCollectorFilter,
+    bank::Bank, geyser::AccountsUpdateNotifier,
+    transaction_logs::TransactionLogCollectorFilter,
     EPHEM_DEFAULT_MILLIS_PER_SLOT,
 };
 use solana_geyser_plugin_manager::slot_status_notifier::SlotStatusNotifierImpl;
@@ -15,6 +16,7 @@ use solana_svm::runtime_config::RuntimeConfig;
 // Special case for test allowing to pass validator identity
 pub fn bank_for_tests_with_identity(
     genesis_config: &GenesisConfig,
+    accountsdb_config: AdbConfig,
     accounts_update_notifier: Option<AccountsUpdateNotifier>,
     slot_status_notifier: Option<SlotStatusNotifierImpl>,
     millis_per_slot: u64,
@@ -25,6 +27,7 @@ pub fn bank_for_tests_with_identity(
     let bank = Bank::new(
         genesis_config,
         runtime_config,
+        accountsdb_config,
         None,
         None,
         false,
@@ -43,11 +46,13 @@ pub fn bank_for_tests_with_identity(
 
 pub fn bank_for_tests(
     genesis_config: &GenesisConfig,
+    accountsdb_config: AdbConfig,
     accounts_update_notifier: Option<AccountsUpdateNotifier>,
     slot_status_notifier: Option<SlotStatusNotifierImpl>,
 ) -> Bank {
     bank_for_tests_with_identity(
         genesis_config,
+        accountsdb_config,
         accounts_update_notifier,
         slot_status_notifier,
         EPHEM_DEFAULT_MILLIS_PER_SLOT,

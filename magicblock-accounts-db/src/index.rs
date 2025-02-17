@@ -1,8 +1,8 @@
 use std::{fs, path::Path};
 
 use lmdb::{
-    Cursor, Database, DatabaseFlags, Environment, EnvironmentFlags, RoCursor, RoTransaction,
-    RwTransaction, Transaction, WriteFlags,
+    Cursor, Database, DatabaseFlags, Environment, EnvironmentFlags, RoCursor,
+    RoTransaction, RwTransaction, Transaction, WriteFlags,
 };
 use solana_pubkey::Pubkey;
 
@@ -83,7 +83,9 @@ impl AdbIndex {
             DEALLOCATIONS_PATH,
             &config.directory,
             config.index_map_size,
-            DatabaseFlags::INTEGER_KEY | DatabaseFlags::DUP_SORT | DatabaseFlags::DUP_FIXED,
+            DatabaseFlags::INTEGER_KEY
+                | DatabaseFlags::DUP_SORT
+                | DatabaseFlags::DUP_FIXED,
         )?;
         Ok(Self {
             accounts,
@@ -97,18 +99,23 @@ impl AdbIndex {
     pub(crate) fn get_account_offset(&self, pubkey: &Pubkey) -> AdbResult<u32> {
         let txn = self.env.begin_ro_txn()?;
         let offset = txn.get(self.accounts, pubkey)?;
-        println!("account offset: {offset:?}");
-        let offset = unsafe { (offset.as_ptr() as *const u32).read_unaligned() };
-        println!("account offset: {offset}");
+        let offset =
+            unsafe { (offset.as_ptr() as *const u32).read_unaligned() };
         Ok(offset)
     }
 
     /// Retrieve the offset and the size (number of blocks) given account occupies
-    fn get_offset_and_blocks(&self, txn: &RwTransaction, pubkey: &Pubkey) -> AdbResult<(u32, u32)> {
+    fn get_offset_and_blocks(
+        &self,
+        txn: &RwTransaction,
+        pubkey: &Pubkey,
+    ) -> AdbResult<(u32, u32)> {
         let slice = txn.get(self.accounts, pubkey)?;
         let ptr = slice.as_ptr();
         let offset = unsafe { (ptr as *const u32).read_unaligned() };
-        let blocks = unsafe { (ptr.add(size_of::<u32>()) as *const u32).read_unaligned() };
+        let blocks = unsafe {
+            (ptr.add(size_of::<u32>()) as *const u32).read_unaligned()
+        };
         Ok((offset, blocks))
     }
 
@@ -129,18 +136,27 @@ impl AdbIndex {
         let offset_and_pubkey = bitpack!(offset, u32, *pubkey, Pubkey);
         'insert: {
             // optimisitically try to insert account to index, assuming that it doesn't exist
-            let result = txn.put(self.accounts, pubkey, &index, WriteFlags::NO_OVERWRITE);
+            let result = txn.put(
+                self.accounts,
+                pubkey,
+                &index,
+                WriteFlags::NO_OVERWRITE,
+            );
             // if the account does exist, then it already occupies space in main storage
             let (offset, blocks) = match result {
                 Ok(_) => break 'insert,
                 // retrieve the size and offset for allocation
-                Err(lmdb::Error::KeyExist) => self.get_offset_and_blocks(&txn, pubkey)?,
+                Err(lmdb::Error::KeyExist) => {
+                    self.get_offset_and_blocks(&txn, pubkey)?
+                }
                 Err(other) => return Err(other.into()),
             };
 
             // and put it into deallocation index, so the space can be recycled later
-            self.deallocations
-                .put(blocks.to_le_bytes(), bitpack!(offset, u32, blocks, u32))?;
+            self.deallocations.put(
+                blocks.to_le_bytes(),
+                bitpack!(offset, u32, blocks, u32),
+            )?;
             dealloc.replace(blocks);
             // we also need to delete old entry from programs index
             let mut cursor = txn.open_rw_cursor(self.programs)?;
@@ -166,20 +182,27 @@ impl AdbIndex {
 
     /// Returns an iterator over offsets and pubkeys of accounts for given
     /// program offsets can be used to retrieve the account from storage
-    pub(crate) fn get_program_accounts_iter(&self, program: &Pubkey) -> AdbResult<OffsetIterator> {
+    pub(crate) fn get_program_accounts_iter(
+        &self,
+        program: &Pubkey,
+    ) -> AdbResult<OffsetIterator> {
         let txn = self.env.begin_ro_txn()?;
         OffsetIterator::new(self.programs, txn, program)
     }
 
     /// Check whether allocation of given size (in blocks) exists those
     /// allocations are leftovers from account movements due to resizing
-    pub(crate) fn allocation_exists(&self, blocks: u32) -> AdbResult<RecycledAllocation> {
+    pub(crate) fn allocation_exists(
+        &self,
+        blocks: u32,
+    ) -> AdbResult<RecycledAllocation> {
         let mut txn = self.deallocations.rwtxn()?;
         let mut cursor = txn.open_rw_cursor(self.deallocations.db)?;
         // this is a neat lmdb trick where we can search for entry with matching
         // or greater key since we are interested in any allocation of at least
         // `blocks` size or greater, this works perfectly well for this case
-        let (_, val) = cursor.get(Some(&blocks.to_le_bytes()), None, MDB_SET_RANGE_OP)?;
+        let (_, val) =
+            cursor.get(Some(&blocks.to_le_bytes()), None, MDB_SET_RANGE_OP)?;
 
         let (offset, blocks) = bitpack!(val, u32, u32);
         // delete the allocation record from recyclable list
@@ -197,7 +220,10 @@ impl AdbIndex {
     }
 
     /// Switch the storage and index datbases to snapshot at provided path
-    pub(crate) fn restore_from_snapshot(&mut self, dbpath: &Path) -> AdbResult<()> {
+    pub(crate) fn restore_from_snapshot(
+        &mut self,
+        dbpath: &Path,
+    ) -> AdbResult<()> {
         // set it default lmdb map size, it will be
         // ignored if smaller than currently occupied
         let size = 1024 * 1024;
@@ -214,7 +240,9 @@ impl AdbIndex {
             DEALLOCATIONS_PATH,
             dbpath,
             size,
-            DatabaseFlags::INTEGER_KEY | DatabaseFlags::DUP_SORT | DatabaseFlags::DUP_FIXED,
+            DatabaseFlags::INTEGER_KEY
+                | DatabaseFlags::DUP_SORT
+                | DatabaseFlags::DUP_FIXED,
         )?;
         self.env = env;
         self.accounts = accounts;
@@ -230,13 +258,25 @@ struct StandaloneIndex {
 }
 
 impl StandaloneIndex {
-    fn new(name: &str, dbpath: &Path, size: usize, flags: DatabaseFlags) -> AdbResult<Self> {
-        let env = inspecterr!(env(name, dbpath, size, 1), "deallocation index creation");
+    fn new(
+        name: &str,
+        dbpath: &Path,
+        size: usize,
+        flags: DatabaseFlags,
+    ) -> AdbResult<Self> {
+        let env = inspecterr!(
+            env(name, dbpath, size, 1),
+            "deallocation index creation"
+        );
         let db = env.create_db(None, flags)?;
         Ok(Self { env, db })
     }
 
-    fn put(&self, key: impl AsRef<[u8]>, val: impl AsRef<[u8]>) -> lmdb::Result<()> {
+    fn put(
+        &self,
+        key: impl AsRef<[u8]>,
+        val: impl AsRef<[u8]>,
+    ) -> lmdb::Result<()> {
         let mut txn = self.env.begin_rw_txn()?;
         txn.put(self.db, &key, &val, WEMPTY)?;
         txn.commit()
@@ -254,7 +294,11 @@ pub(crate) struct OffsetIterator<'env> {
 }
 
 impl<'a> OffsetIterator<'a> {
-    fn new(db: Database, txn: RoTransaction<'a>, pubkey: &Pubkey) -> AdbResult<Self> {
+    fn new(
+        db: Database,
+        txn: RoTransaction<'a>,
+        pubkey: &Pubkey,
+    ) -> AdbResult<Self> {
         let cursor = txn.open_ro_cursor(db)?;
         // nasty/neat trick for lifetime erasure, but we are upholding
         // the rust's  ownership contracts by keeping txn around
@@ -292,7 +336,12 @@ impl Iterator for OffsetIterator<'_> {
     }
 }
 
-fn env(name: &str, dir: &Path, size: usize, maxdb: u32) -> lmdb::Result<Environment> {
+fn env(
+    name: &str,
+    dir: &Path,
+    size: usize,
+    maxdb: u32,
+) -> lmdb::Result<Environment> {
     let lmdb_env_flags: EnvironmentFlags =
         // allows to manually trigger flush syncs, but OS initiated flushes are somewhat beyond our control
         EnvironmentFlags::NO_SYNC
