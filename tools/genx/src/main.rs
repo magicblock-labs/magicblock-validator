@@ -2,6 +2,7 @@ use std::path::PathBuf;
 
 use clap::{Parser, Subcommand};
 use test_validator::TestValidatorConfig;
+mod ledger_replay_test;
 mod test_validator;
 
 #[derive(Debug, Parser)]
@@ -29,6 +30,13 @@ enum Commands {
         #[arg(long)]
         url: String,
     },
+    /// Prepares the ledger for testing
+    #[command(name = "test-ledger")]
+    #[command(
+        about = "Prepares the ledger for testing",
+        long_about = "(Over)writes the validator keypair"
+    )]
+    LedgerReplayTest { ledger_path: PathBuf },
 }
 
 fn main() {
@@ -44,6 +52,9 @@ fn main() {
                 ledger_path.as_ref(),
                 config,
             )
+        }
+        Commands::LedgerReplayTest { ledger_path } => {
+            ledger_replay_test::ledger_replay_test(&ledger_path)
         }
     }
 }
