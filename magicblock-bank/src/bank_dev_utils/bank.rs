@@ -1,9 +1,7 @@
 // NOTE: copied and slightly modified from bank.rs
-use std::{borrow::Cow, path::PathBuf, sync::Arc};
+use std::{borrow::Cow, sync::Arc};
 
-use magicblock_accounts_db::{
-    accounts::Accounts, accounts_db::AccountsDb, geyser::AccountsUpdateNotifier,
-};
+use magicblock_accounts_db::config::Config as AdbConfig;
 use solana_geyser_plugin_manager::slot_status_notifier::SlotStatusNotifierImpl;
 use solana_sdk::{
     genesis_config::GenesisConfig,
@@ -20,31 +18,23 @@ use solana_svm::{
 use solana_timings::ExecuteTimings;
 
 use crate::{
-    bank::Bank, transaction_batch::TransactionBatch,
+    bank::Bank, geyser::AccountsUpdateNotifier,
+    transaction_batch::TransactionBatch,
     transaction_logs::TransactionLogCollectorFilter,
     EPHEM_DEFAULT_MILLIS_PER_SLOT,
 };
 
 impl Bank {
-    pub fn default_for_tests() -> Self {
-        let accounts_db = AccountsDb::default_for_tests();
-        let accounts = Accounts::new(Arc::new(accounts_db));
-        let accounts_path = PathBuf::default();
-        Self::default_with_accounts(
-            accounts,
-            accounts_path,
-            EPHEM_DEFAULT_MILLIS_PER_SLOT,
-        )
-    }
-
     pub fn new_for_tests(
         genesis_config: &GenesisConfig,
+        accountsdb_config: AdbConfig,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
         slot_status_notifier: Option<SlotStatusNotifierImpl>,
     ) -> Self {
         Self::new_with_config_for_tests(
             genesis_config,
             Arc::new(RuntimeConfig::default()),
+            accountsdb_config,
             accounts_update_notifier,
             slot_status_notifier,
             EPHEM_DEFAULT_MILLIS_PER_SLOT,
@@ -54,18 +44,18 @@ impl Bank {
     pub fn new_with_config_for_tests(
         genesis_config: &GenesisConfig,
         runtime_config: Arc<RuntimeConfig>,
+        accountsdb_config: AdbConfig,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
         slot_status_notifier: Option<SlotStatusNotifierImpl>,
         millis_per_slot: u64,
     ) -> Self {
-        let account_paths = vec![PathBuf::default()];
         let bank = Self::new(
             genesis_config,
             runtime_config,
+            accountsdb_config,
             None,
             None,
             false,
-            account_paths,
             accounts_update_notifier,
             slot_status_notifier,
             millis_per_slot,
@@ -83,16 +73,15 @@ impl Bank {
         &self,
         txs: Vec<Transaction>,
     ) -> TransactionBatch {
-        let transaction_account_lock_limit =
-            self.get_transaction_account_lock_limit();
+        //let transaction_account_lock_limit =
+        //    self.get_transaction_account_lock_limit();
         let sanitized_txs = txs
             .into_iter()
             .map(SanitizedTransaction::from_transaction_for_tests)
             .collect::<Vec<_>>();
-        let lock_results = self.rc.accounts.lock_accounts(
-            sanitized_txs.iter(),
-            transaction_account_lock_limit,
-        );
+        // TODO(bmuddha): we don't have locks for now, add locking
+        // back once we switch to multithreaded scheduler
+        let lock_results = vec![Ok(()); sanitized_txs.len()];
         TransactionBatch::new(lock_results, self, Cow::Owned(sanitized_txs))
     }
 
@@ -171,11 +160,14 @@ impl Bank {
                 )
             })
             .collect::<Result<Vec<_>>>()?;
-        let tx_account_lock_limit = self.get_transaction_account_lock_limit();
-        let lock_results = self
-            .rc
-            .accounts
-            .lock_accounts(sanitized_txs.iter(), tx_account_lock_limit);
+        //let tx_account_lock_limit = self.get_transaction_account_lock_limit();
+        //let lock_results = self
+        //    .rc
+        //    .accounts
+        //    .lock_accounts(sanitized_txs.iter(), tx_account_lock_limit);
+        // TODO(bmuddha): we don't have locks for now, add locking
+        // back once we switch to multithreaded scheduler
+        let lock_results = vec![Ok(()); sanitized_txs.len()];
         Ok(TransactionBatch::new(
             lock_results,
             self,

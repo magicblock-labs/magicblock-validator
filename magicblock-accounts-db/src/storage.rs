@@ -156,10 +156,10 @@ impl AccountsStorage {
         }
     }
 
-    pub(crate) fn restore_from_snapshot(
-        &mut self,
-        dbpath: &Path,
-    ) -> AdbResult<()> {
+    /// Reopen database from a different directory
+    ///
+    /// NOTE: this is a very cheap operation, as fast as opening a file
+    pub(crate) fn reload(&mut self, dbpath: &Path) -> AdbResult<()> {
         let file = inspecterr!(
             File::options()
                 .write(true)

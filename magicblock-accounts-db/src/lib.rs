@@ -233,19 +233,29 @@ impl AccountsDb {
         }
     }
 
-    /// Rollback to snapshot at given slot if it exists, primary database will be flushed and
-    /// remain unchanged
-    pub fn rollback_to_snapshot_at(&mut self, slot: u64) -> AdbResult<()> {
-        let _locked = self.lock.write();
-        self.flush(true);
-        let dbpath = self
-            .snap
-            .path_to_snapshot_at(slot)
-            .ok_or(AdbError::SnapshotMissing(slot))?;
-        self.storage.restore_from_snapshot(&dbpath)?;
-        self.index.restore_from_snapshot(&dbpath)?;
-        self.snap.switch_to_snapshot(dbpath);
-        Ok(())
+    /// Check whether AccountsDB has "freshness" not exceeding given slot
+    /// Returns current slot if true, otherwise tries to rollback to the
+    /// most recent snapshot, which is older than provided slot
+    ///
+    /// Note: this will delete current database state upon rollback, use with care!
+    pub fn ensure_at_most(self: &Arc<Self>, slot: u64) -> AdbResult<u64> {
+        let current_slot = self.slot();
+        if current_slot <= slot {
+            return Ok(current_slot);
+        }
+        assert!(
+            Arc::strong_count(self) == 1,
+            "accountsdb cannot be rolled back when not exclusively owned"
+        );
+        let rb_slot = inspecterr!(
+            self.snap.try_switch_to_snapshot(slot),
+            "switching to recent snapshot"
+        );
+        let path = self.snap.database_path();
+
+        self.storage.reload(path)?;
+        self.index.reload(path)?;
+        Ok(rb_slot)
     }
 
     /// Get number total number of bytes in storage
@@ -269,7 +279,7 @@ unsafe impl Send for AccountsDb {}
 #[cfg(test)]
 impl AccountsDb {
     pub fn snapshot_exists(&self, slot: u64) -> bool {
-        self.snap.path_to_snapshot_at(slot).is_some()
+        self.snap.snapshot_exists(slot)
     }
 }
 

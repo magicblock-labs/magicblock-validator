@@ -22,20 +22,10 @@ const ACCOUNT_DATA: &[u8] = b"hello world?";
 const INIT_DATA_LEN: usize = ACCOUNT_DATA.len();
 
 #[test]
-fn test_insert_account() {
-    let (adb, _guard) = init_db();
-    let (pubkey, account) = account();
-    assert!(
-        adb.insert_account(&pubkey, &account).is_ok(),
-        "adb insertion failed"
-    );
-}
-
-#[test]
 fn test_get_account() {
     let (adb, _guard) = init_db();
     let (pubkey, account) = account();
-    let _ = adb.insert_account(&pubkey, &account);
+    adb.insert_account(&pubkey, &account);
     let acc = adb.get_account(&pubkey);
     assert!(
         acc.is_ok(),
@@ -67,10 +57,7 @@ fn test_modify_account() {
         LAMPORTS,
         "account from the main buffer should not be affected"
     );
-    assert!(
-        adb.insert_account(&acc.pubkey, &acc_uncommitted).is_ok(),
-        "account insertion failed"
-    );
+    adb.insert_account(&acc.pubkey, &acc_uncommitted);
 
     let acc_committed = AccountSharedData::Borrowed(
         adb.get_account(&acc.pubkey)
@@ -109,10 +96,7 @@ fn test_account_resize() {
         "unccomitted account data len should not have changed"
     );
 
-    assert!(
-        adb.insert_account(&acc.pubkey, &acc.account).is_ok(),
-        "resized account insertion failed"
-    );
+    adb.insert_account(&acc.pubkey, &acc.account);
 
     let acc_committed = AccountSharedData::Borrowed(
         adb.get_account(&acc.pubkey)
@@ -194,10 +178,7 @@ fn test_take_snapshot() {
     );
     acc.account.set_data(ACCOUNT_DATA.to_vec());
 
-    assert!(
-        adb.insert_account(&acc.pubkey, &acc.account).is_ok(),
-        "account insertion failed"
-    );
+    adb.insert_account(&acc.pubkey, &acc.account);
 
     adb.set_slot(2 * SNAPSHOT_FREQUENCY);
     assert!(
@@ -218,10 +199,7 @@ fn test_restore_from_snapshot() {
     adb.set_slot(SNAPSHOT_FREQUENCY); // trigger snapshot
     adb.set_slot(SNAPSHOT_FREQUENCY + 1);
     acc.account.set_lamports(new_lamports);
-    assert!(
-        adb.insert_account(&acc.pubkey, &acc.account).is_ok(),
-        "account insertion failed"
-    );
+    adb.insert_account(&acc.pubkey, &acc.account);
 
     let acc_committed = AccountSharedData::Borrowed(
         adb.get_account(&acc.pubkey)
@@ -232,10 +210,17 @@ fn test_restore_from_snapshot() {
         new_lamports,
         "account's lamports should have been updated after commit"
     );
-    let mut adb_mut = Arc::into_inner(adb).expect("we are the only ones with reference");
+    let mut adb_mut =
+        Arc::into_inner(adb).expect("we are the only ones with reference");
 
     assert!(
-        adb_mut.rollback_to_snapshot_at(SNAPSHOT_FREQUENCY).is_ok(),
+        matches!(
+            adb_mut
+                .ensure_at_most(SNAPSHOT_FREQUENCY)
+                .inspect(|d| println!("S: {d}"))
+                .inspect_err(|e| println!("E: {e}")),
+            Ok(SNAPSHOT_FREQUENCY)
+        ),
         "failed to rollback to snapshot"
     );
     adb = Arc::new(adb_mut);
@@ -277,7 +262,8 @@ fn init_db() -> (AdbShared, ResourceGuard) {
         index_map_size: INDEX_MAP_SIZE,
     };
     let lock = StWLock::default();
-    let adb = AccountsDb::new(config, lock).expect("expected to initialize ADB");
+    let adb =
+        AccountsDb::new(config, lock).expect("expected to initialize ADB");
     (adb, guard)
 }
 
@@ -312,9 +298,11 @@ impl ResourceGuard {
         static COUNTER: AtomicUsize = AtomicUsize::new(0);
         let i = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // indexing, so that each test will run with its own adb
-        let directory: PathBuf = format!("/tmp/adb-test{i}/adb").parse().unwrap();
+        let directory: PathBuf =
+            format!("/tmp/adb-test{i}/adb").parse().unwrap();
         let _ = fs::remove_dir_all(&directory);
-        fs::create_dir_all(&directory).expect("expected to create temporary adb directory");
+        fs::create_dir_all(&directory)
+            .expect("expected to create temporary adb directory");
         Self { directory }
     }
 }

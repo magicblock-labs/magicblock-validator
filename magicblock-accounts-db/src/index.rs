@@ -219,11 +219,10 @@ impl AdbIndex {
         let _ = self.deallocations.env.sync(true);
     }
 
-    /// Switch the storage and index datbases to snapshot at provided path
-    pub(crate) fn restore_from_snapshot(
-        &mut self,
-        dbpath: &Path,
-    ) -> AdbResult<()> {
+    /// Reopen the index datbases from a different directory at provided path
+    ///
+    /// NOTE: this is a very cheap operation, as fast as opening a few files
+    pub(crate) fn reload(&mut self, dbpath: &Path) -> AdbResult<()> {
         // set it default lmdb map size, it will be
         // ignored if smaller than currently occupied
         let size = 1024 * 1024;

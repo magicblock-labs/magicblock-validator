@@ -3,10 +3,6 @@ use std::str::FromStr;
 use num_format::{Locale, ToFormattedString};
 
 use log::{Level::Trace, *};
-use magicblock_accounts_db::{
-    utils::{all_accounts, StoredAccountMeta},
-    AccountsPersister,
-};
 use magicblock_bank::bank::Bank;
 use solana_sdk::{
     account::{Account, AccountSharedData, ReadableAccount},
@@ -137,40 +133,11 @@ fn iter_blocks(
     Ok(slot)
 }
 
-fn hydrate_bank(bank: &Bank, max_slot: Slot) -> LedgerResult<(Slot, usize)> {
-    info!("Hydrating bank");
-
-    let persister =
-        AccountsPersister::new_with_paths(vec![bank.accounts_path.clone()]);
-    let Some((storage, slot)) = persister.load_most_recent_store(max_slot)?
-    else {
-        return Ok((0, 0));
-    };
-    let storable_accounts =
-        all_accounts(&storage, |acc_meta: StoredAccountMeta| {
-            let acc = Account {
-                lamports: acc_meta.lamports(),
-                rent_epoch: acc_meta.rent_epoch(),
-                owner: *acc_meta.owner(),
-                executable: acc_meta.executable(),
-                data: acc_meta.data().to_vec(),
-            };
-            (*acc_meta.pubkey(), AccountSharedData::from(acc))
-        });
-    let len = storable_accounts.len();
-    info!(
-        "Storing {} accounts into bank",
-        len.to_formatted_string(&Locale::en)
-    );
-    bank.store_accounts(storable_accounts);
-    Ok((slot, len))
-}
-
 /// Processes the provided ledger updating the bank and returns the slot
 /// at which the validator should continue processing (last processed slot + 1).
 pub fn process_ledger(ledger: &Ledger, bank: &Bank) -> LedgerResult<u64> {
     let (max_slot, _) = ledger.get_max_blockhash()?;
-    let (full_process_starting_slot, len) = hydrate_bank(bank, max_slot)?;
+    let (full_process_starting_slot, len) = bank.adb.ensure_at_most(max_slot);
 
     // Since transactions may refer to blockhashes that were present when they
     // ran initially we ensure that they are present during replay as well

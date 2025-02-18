@@ -4,7 +4,6 @@ use std::{
     mem,
     num::Saturating,
     ops::Add,
-    path::PathBuf,
     slice,
     sync::{
         atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering},
@@ -15,7 +14,7 @@ use std::{
 };
 
 use log::{debug, info, trace};
-use magicblock_accounts_db::{AccountsDb, AdbResult, AdbShared, StWLock};
+use magicblock_accounts_db::{AccountsDb, AdbShared, StWLock};
 use solana_accounts_db::{
     accounts_index::ScanConfig,
     accounts_update_notifier_interface::AccountsUpdateNotifierInterface,
@@ -29,7 +28,7 @@ use solana_compute_budget_instruction::instructions_processor::process_compute_b
 use solana_cost_model::cost_tracker::CostTracker;
 use solana_fee::FeeFeatures;
 use solana_geyser_plugin_manager::slot_status_notifier::SlotStatusNotifierImpl;
-use solana_measure::{measure::Measure, measure_us};
+use solana_measure::measure_us;
 use solana_program_runtime::loaded_programs::{
     BlockRelation, ForkGraph, ProgramCacheEntry,
 };
@@ -64,7 +63,7 @@ use solana_sdk::{
     rent_debits::RentDebits,
     signature::Signature,
     slot_hashes::SlotHashes,
-    slot_history::{Check, SlotHistory},
+    slot_history::SlotHistory,
     sysvar::{self, last_restart_slot::LastRestartSlot},
     transaction::{
         Result, SanitizedTransaction, TransactionError,
@@ -186,9 +185,6 @@ pub struct Bank {
 
     /// A cache of signature statuses
     pub status_cache: Arc<RwLock<BankStatusCache>>,
-
-    // First path provided to accounts db (in our case it is always one)
-    pub accounts_path: PathBuf,
 
     // -----------------
     // Counters
@@ -403,17 +399,11 @@ impl Bank {
         debug_keys: Option<Arc<HashSet<Pubkey>>>,
         additional_builtins: Option<&[BuiltinPrototype]>,
         debug_do_not_add_builtins: bool,
-        accounts_paths: Vec<PathBuf>,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
         slot_status_notifier: Option<SlotStatusNotifierImpl>,
         millis_per_slot: u64,
         identity_id: Pubkey,
     ) -> Self {
-        let accounts_path = accounts_paths
-            .first()
-            .expect("At least one accounts path is required")
-            .to_path_buf();
-
         // TODO(bmuddha): for now this lock is doing nothing, as we are running in a single
         // threaded mode, we don't need to worry about locks. But when we transition to
         // multi-threaded mode with multiple SVM workers, every transaction should acquire the read
@@ -431,7 +421,6 @@ impl Bank {
         let mut bank = Self::default_with_accounts(
             accounts_db,
             accounts_update_notifier,
-            accounts_path,
             millis_per_slot,
         );
         bank.transaction_debug_keys = debug_keys;
@@ -467,7 +456,6 @@ impl Bank {
     pub(super) fn default_with_accounts(
         adb: AdbShared,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
-        accounts_path: PathBuf,
         millis_per_slot: u64,
     ) -> Self {
         // NOTE: this was not part of the original implementation
@@ -497,7 +485,6 @@ impl Bank {
             millis_per_slot,
             max_age,
             identity_id: Pubkey::default(),
-            accounts_path,
 
             // Counters
             transaction_count: AtomicU64::default(),

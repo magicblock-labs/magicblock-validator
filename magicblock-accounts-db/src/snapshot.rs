@@ -7,6 +7,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::{fs, io};
 
+use crate::error::AdbError;
 use crate::AdbResult;
 
 pub struct SnapshotEngine {
@@ -26,7 +27,8 @@ pub struct SnapshotEngine {
 impl SnapshotEngine {
     pub(crate) fn new(dbpath: PathBuf, maxcount: u16) -> AdbResult<Box<Self>> {
         let snapshots = Mutex::new(VecDeque::with_capacity(maxcount as usize));
-        let is_cow_supported = inspecterr!(Self::supports_cow(&dbpath), "cow support check");
+        let is_cow_supported =
+            inspecterr!(Self::supports_cow(&dbpath), "cow support check");
         let snapfn = if is_cow_supported {
             reflink_dir
         } else {
@@ -60,22 +62,40 @@ impl SnapshotEngine {
         Ok(())
     }
 
-    /// Retrieves the path to snapshot at given slot if it exists
-    pub(crate) fn path_to_snapshot_at(&self, slot: u64) -> Option<PathBuf> {
-        let slot = SnapSlot(slot).as_path(self.snapshots_dir());
-        let snapshots = self.snapshots.lock();
-        let index = snapshots.binary_search(&slot).ok()?;
-        snapshots.get(index).cloned()
+    /// Try to rollback to snapshot which is the most recent one before given slot
+    /// NOTE: In case of success, this deletes the primary database, careful!
+    pub(crate) fn try_switch_to_snapshot(
+        &self,
+        mut slot: u64,
+    ) -> AdbResult<u64> {
+        let mut spath = SnapSlot(slot).as_path(self.snapshots_dir());
+        let mut snapshots = self.snapshots.lock(); // free lock
+
+        // paths to snapshots are strictly ordered, so we can b-search
+        let index = match snapshots.binary_search(&spath) {
+            Ok(i) => i,
+            // if we have snapshot older than slot, use it
+            Err(i) if i != 0 => i - 1,
+            // otherwise we don't have any snapshot before the given slot
+            Err(_) => return Err(AdbError::SnapshotMissing(slot)),
+        };
+
+        spath = snapshots.remove(index).unwrap(); // infallible
+
+        // infallible, all entries in snapshots are created with SnapSlot naming conventions
+        slot = SnapSlot::try_from_path(&spath).unwrap().0;
+
+        // we perform database swap, thus removing
+        // latest state and rolling back to snapshot
+        fs::remove_dir_all(&self.dbpath)?;
+        fs::rename(&spath, &self.dbpath)?;
+
+        Ok(slot)
     }
 
-    /// Makes given snapshot primary, effectively rebasing onto it
-    pub(crate) fn switch_to_snapshot(&mut self, dbpath: PathBuf) {
-        let mut snapshots = self.snapshots.lock();
-        let Some(i) = snapshots.iter().position(|p| p == &dbpath) else {
-            return;
-        };
-        snapshots.remove(i);
-        self.dbpath = dbpath;
+    #[inline]
+    pub(crate) fn database_path(&self) -> &Path {
+        &self.dbpath
     }
 
     /// Perform test to find out whether file system
@@ -104,7 +124,7 @@ impl SnapshotEngine {
         for entry in fs::read_dir(snapdir)? {
             let entry = entry?;
             let snap = entry.path();
-            if snap.is_dir() {
+            if snap.is_dir() && SnapSlot::try_from_path(&snap).is_some() {
                 snapshots.push_back(snap);
             }
         }
@@ -140,7 +160,18 @@ fn rcopy_dir(src: &Path, dst: &Path) -> io::Result<()> {
             sendfile(dst, src, 0, None, None, None).0?;
         }
     }
-    todo!()
+    Ok(())
+}
+
+#[cfg(test)]
+impl SnapshotEngine {
+    pub fn snapshot_exists(&self, slot: u64) -> bool {
+        let spath = SnapSlot(slot).as_path(self.snapshots_dir());
+        let snapshots = self.snapshots.lock(); // free lock
+
+        // paths to snapshots are strictly ordered, so we can b-search
+        snapshots.binary_search(&spath).is_ok()
+    }
 }
 
 #[derive(Eq, PartialEq, PartialOrd, Ord)]
@@ -148,10 +179,13 @@ struct SnapSlot(u64);
 
 impl SnapSlot {
     /// parse snapshot path to extract slot number
-    #[allow(unused)]
     fn try_from_path(path: &Path) -> Option<Self> {
-        path.to_str()
-            .and_then(|s| s.split('-').nth(1))
+        path.file_name()
+            .and_then(|s| s.to_str())
+            .and_then(|s| {
+                println!("DIR: {s}");
+                s.split('-').nth(1)
+            })
             .and_then(|s| s.parse::<u64>().ok())
             .map(Self)
     }

@@ -17,7 +17,7 @@ pub enum LedgerError {
     #[error("protobuf decode error: {0}")]
     ProtobufDecodeError(#[from] prost::DecodeError),
     #[error("AccountsDb error: {0}")]
-    AccountsDbError(#[from] magicblock_accounts_db::errors::AccountsDbError),
+    AccountsDbError(#[from] magicblock_accounts_db::error::AdbError),
     #[error("unable to set open file descriptor limit")]
     UnableToSetOpenFileDescriptorLimit,
     #[error("transaction not found")]
