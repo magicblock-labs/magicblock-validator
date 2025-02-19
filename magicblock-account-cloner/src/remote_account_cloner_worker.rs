@@ -459,7 +459,7 @@ where
                                 Err(
                                     AccountClonerError::FailedToFetchSatisfactorySlot,
                                 )
-                            }
+                            };
                         }
                     }
                     Err(error) => {
