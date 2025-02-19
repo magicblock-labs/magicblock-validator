@@ -99,7 +99,7 @@ impl SnapshotEngine {
     }
 
     /// Perform test to find out whether file system
-    /// supports COW operations (btrfs, xfs, zfs, apfs)
+    /// supports CoW operations (btrfs, xfs, zfs, apfs)
     fn supports_cow(dir: &Path) -> io::Result<bool> {
         let tmp = dir.join("__tempfile.fs");
         let mut file = File::create(&tmp)?;
@@ -107,6 +107,7 @@ impl SnapshotEngine {
         file.write_all(&[42; 64])?;
         file.flush()?;
         let tmpsnap = dir.join("__tempfile_snap.fs");
+        // reflink will fail if CoW is not supported by FS
         let result = reflink(&tmp, &tmpsnap).is_ok();
         fs::remove_file(tmp)?;
         let _ = fs::remove_file(tmpsnap);
@@ -128,6 +129,9 @@ impl SnapshotEngine {
                 snapshots.push_back(snap);
             }
         }
+        // sorting is required for correct ordering (slot-wise) of snapshots
+        snapshots.make_contiguous().sort();
+
         while snapshots.len() > self.maxcount as usize {
             snapshots.pop_front();
         }
