@@ -13,7 +13,7 @@ path = "src/lib.rs"
 [dependencies]
 magicblock-accounts-db = { workspace = true }
 magicblock-ledger = { workspace = true }
-num-format = "0.4.4"
+num-format = { workspace = true }
 pretty-hex = "0.4.1"
 solana-sdk = { workspace = true }
 solana-transaction-status = { workspace = true }
