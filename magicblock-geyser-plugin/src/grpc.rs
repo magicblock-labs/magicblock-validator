@@ -168,9 +168,9 @@ impl GrpcService {
                         Message::Slot(msg) if processed_first_slot.is_none() && msg.status == CommitmentLevel::Processed => {
                             processed_first_slot = Some(msg.slot);
                         }
-                        // NOTE: this used to guard to `CommitmentLevel::Finalized`, but we never
-                        // send that
-                        Message::Slot(msg) if msg.status == CommitmentLevel::Processed => {
+                        // Note: all slots received by plugin are Finalized, as
+                        // we don't have forks or the notion of slot trees
+                        Message::Slot(msg) if msg.status == CommitmentLevel::Finalized => {
                             // NOTE: originally 10 slots were kept here, but we about 80x as many
                             // slots/sec
                             if let Some(msg_slot) = msg.slot.checked_sub(80) {
@@ -220,7 +220,7 @@ impl GrpcService {
                                 }
                             }
                         }
-                        _ => {}
+                        _ => ()
                     }
 
                     // Update block reconstruction info
