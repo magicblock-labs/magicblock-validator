@@ -242,8 +242,8 @@ impl MagicValidator {
                 remote_rpc_config.clone(),
                 remote_rpc_config.clone(),
             ],
-            // We'll kill/refresh one connection every 5 minutes
-            Duration::from_secs(60 * 5),
+            // We'll kill/refresh one connection every 50 minutes
+            Duration::from_secs(60 * 50),
         );
 
         let transaction_status_sender = TransactionStatusSender {

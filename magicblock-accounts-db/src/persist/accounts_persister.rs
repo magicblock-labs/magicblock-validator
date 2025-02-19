@@ -318,14 +318,12 @@ impl AccountsPersister {
 
         // When we drop the AppendVec the underlying file is removed from the
         // filesystem. There is no way to configure this via public methods.
-        // Thus we copy the file before using it for the AppendVec. This way
+        // Thus we create a hard link before using it for the AppendVec. This way
         // we prevent account files being removed when we point a tool at the ledger
         // or replay it.
-        let file = {
-            let copy = file.with_extension("copy");
-            fs::copy(&file, &copy)?;
-            copy
-        };
+        let link = file.with_extension("link");
+        fs::hard_link(&file, &link)?;
+        let file = link;
 
         // Create a AccountStorageEntry from the file
         let file_size = fs::metadata(&file)?.len() as usize;
@@ -334,6 +332,7 @@ impl AccountsPersister {
         let accounts = AccountsFile::AppendVec(append_vec);
         let storage =
             AccountStorageEntry::new_existing(slot, id, accounts, num_accounts);
+
         Ok(Some((storage, slot)))
     }
 

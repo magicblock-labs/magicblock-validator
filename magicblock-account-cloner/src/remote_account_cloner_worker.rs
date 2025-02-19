@@ -134,7 +134,7 @@ where
     ) -> Self {
         let (clone_request_sender, clone_request_receiver) =
             unbounded_channel();
-        let fetch_retries = 10;
+        let fetch_retries = 50;
         Self {
             internal_account_provider,
             account_fetcher,
@@ -259,6 +259,10 @@ where
                 }
                 true
             })
+            .filter(|(_, acc)| {
+                // TODO(GabrielePicco): Temporary. We should subscribe or clean-up these accounts.
+                acc.lamports() == 0 && acc.owner().eq(&solana_sdk::system_program::id())
+            })
             .map(|(pubkey, acc)| (pubkey, *acc.owner()))
             .collect::<HashSet<_>>();
 
@@ -273,9 +277,10 @@ where
         // retry resulting in overall slower hydration.
         // If the optimal rate here is desired we might make this configurable in the
         // future.
+        // TODO(GabrielePicco): Make the concurrency configurable
         stream
             .map(Ok::<_, AccountClonerError>)
-            .try_for_each_concurrent(10, |(pubkey, owner)| async move {
+            .try_for_each_concurrent(30, |(pubkey, owner)| async move {
                 trace!("Hydrating '{}'", pubkey);
                 let res = self
                     .do_clone_and_update_cache(
@@ -446,9 +451,15 @@ where
                         }
                         // If we failed to fetch too many time, stop here
                         if fetch_count >= self.fetch_retries {
-                            return Err(
-                                AccountClonerError::FailedToFetchSatisfactorySlot,
-                            );
+                            return if min_context_slot.is_none() {
+                                Err(
+                                    AccountClonerError::FailedToGetSubscriptionSlot,
+                                )
+                            } else {
+                                Err(
+                                    AccountClonerError::FailedToFetchSatisfactorySlot,
+                                )
+                            }
                         }
                     }
                     Err(error) => {
@@ -459,7 +470,7 @@ where
                     }
                 };
                 // Wait a bit in the hopes of the min_context_slot becoming available (about half a slot)
-                sleep(Duration::from_millis(300)).await;
+                sleep(Duration::from_millis(400)).await;
             }
         } else {
             self.fetch_account_chain_snapshot(pubkey, None).await?
