@@ -254,7 +254,6 @@ impl AccountsPersister {
             .first()
             .ok_or(AccountsDbError::NoStoragePathProvided)?;
 
-        // Read all files sorted slot/append_vec_id and return the last one
         let files = fs::read_dir(path)?;
         let mut files: Vec<_> = files
             .filter_map(|entry| {
@@ -285,55 +284,61 @@ impl AccountsPersister {
             })
             .collect();
 
-        files.sort_by(
-            |(_, slot_a, id_a): &(PathBuf, Slot, AppendVecId),
-             (_, slot_b, id_b): &(PathBuf, Slot, AppendVecId)| {
-                // Sorting in reverse order
-                if slot_a == slot_b {
-                    id_b.cmp(id_a)
-                } else {
-                    slot_b.cmp(slot_a)
-                }
-            },
-        );
+        files.sort_by(|(_, slot_a, id_a), (_, slot_b, id_b)| {
+            if slot_a == slot_b {
+                id_b.cmp(id_a)
+            } else {
+                slot_b.cmp(slot_a)
+            }
+        });
 
-        let matching_file = {
-            let mut matching_file = None;
-            for (file, slot, id) in files {
-                if slot <= max_slot {
-                    matching_file.replace((file, slot, id));
-                    break;
+        for (file, slot, id) in files {
+            if slot <= max_slot {
+                let link = file.with_extension("link");
+                if let Err(err) = fs::hard_link(&file, &link) {
+                    warn!("Failed to create hard link for {:?}: {}", file, err);
+                    continue;
+                }
+                let file = link;
+
+                let file_size = match fs::metadata(&file) {
+                    Ok(metadata) => metadata.len() as usize,
+                    Err(err) => {
+                        warn!("Failed to get metadata for {:?}: {}", file, err);
+                        let _ = fs::remove_file(&file);
+                        continue;
+                    }
+                };
+
+                match AppendVec::new_from_file(
+                    &file,
+                    file_size,
+                    StorageAccess::Mmap,
+                ) {
+                    Ok((append_vec, num_accounts)) => {
+                        let accounts = AccountsFile::AppendVec(append_vec);
+                        let storage = AccountStorageEntry::new_existing(
+                            slot,
+                            id,
+                            accounts,
+                            num_accounts,
+                        );
+                        return Ok(Some((storage, slot)));
+                    }
+                    Err(err) => {
+                        warn!("Failed to load append vec from {:?}: {}. Deleting corrupted file.", file, err);
+                        let _ = fs::remove_file(&file);
+                    }
                 }
             }
-            matching_file
-        };
-        let Some((file, slot, id)) = matching_file else {
-            warn!(
-                "No storage found with slot <= {} inside {}",
-                max_slot,
-                path.display().to_string(),
-            );
-            return Ok(None);
-        };
+        }
 
-        // When we drop the AppendVec the underlying file is removed from the
-        // filesystem. There is no way to configure this via public methods.
-        // Thus we create a hard link before using it for the AppendVec. This way
-        // we prevent account files being removed when we point a tool at the ledger
-        // or replay it.
-        let link = file.with_extension("link");
-        fs::hard_link(&file, &link)?;
-        let file = link;
-
-        // Create a AccountStorageEntry from the file
-        let file_size = fs::metadata(&file)?.len() as usize;
-        let (append_vec, num_accounts) =
-            AppendVec::new_from_file(&file, file_size, StorageAccess::Mmap)?;
-        let accounts = AccountsFile::AppendVec(append_vec);
-        let storage =
-            AccountStorageEntry::new_existing(slot, id, accounts, num_accounts);
-
-        Ok(Some((storage, slot)))
+        warn!(
+            "No valid storage found with slot <= {} inside {}",
+            max_slot,
+            path.display().to_string(),
+        );
+        Ok(None)
     }
 
     // -----------------

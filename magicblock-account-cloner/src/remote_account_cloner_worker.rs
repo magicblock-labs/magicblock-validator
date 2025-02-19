@@ -259,10 +259,6 @@ where
                 }
                 true
             })
-            .filter(|(_, acc)| {
-                // TODO(GabrielePicco): Temporary. We should subscribe or clean-up these accounts.
-                acc.lamports() == 0 && acc.owner().eq(&solana_sdk::system_program::id())
-            })
             .map(|(pubkey, acc)| (pubkey, *acc.owner()))
             .collect::<HashSet<_>>();
 
