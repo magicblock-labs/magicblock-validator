@@ -6,13 +6,11 @@ use solana_account::{
 };
 use solana_pubkey::Pubkey;
 
-use config::Config;
+use config::AdbConfig;
 use error::AdbError;
 use index::AdbIndex;
 use snapshot::SnapshotEngine;
 use storage::AccountsStorage;
-
-pub type AdbShared = Arc<AccountsDb>;
 pub type AdbResult<T> = Result<T, AdbError>;
 /// Stop the World Lock, used to halt all writes to adb while
 /// some critical operation is in action, e.g. snapshotting
@@ -48,12 +46,12 @@ pub struct AccountsDb {
 }
 
 impl AccountsDb {
-    pub fn new(config: Config, lock: StWLock) -> AdbResult<AdbShared> {
+    pub fn new(config: &AdbConfig, lock: StWLock) -> AdbResult<Self> {
         let storage =
-            inspecterr!(AccountsStorage::new(&config), "storage creation");
-        let index = inspecterr!(AdbIndex::new(&config), "index creation");
+            inspecterr!(AccountsStorage::new(config), "storage creation");
+        let index = inspecterr!(AdbIndex::new(config), "index creation");
         let snap = inspecterr!(
-            SnapshotEngine::new(config.directory, config.max_snapshots),
+            SnapshotEngine::new(config.directory.clone(), config.max_snapshots),
             "snapshot engine creation"
         );
         // no need to store global constants in type, this
@@ -64,8 +62,7 @@ impl AccountsDb {
             index,
             snap,
             lock,
-        }
-        .into())
+        })
     }
 
     pub fn get_account(&self, pubkey: &Pubkey) -> AdbResult<AccountBorrowed> {
@@ -237,24 +234,32 @@ impl AccountsDb {
     /// Returns current slot if true, otherwise tries to rollback to the
     /// most recent snapshot, which is older than provided slot
     ///
+    /// # Safety
+    /// this is quite a dangerous method, which assumes that
+    /// it runs only in the begining of startup, and only one reference
+    /// to AccountsDb exists, making it exclusive one.
+    ///
     /// Note: this will delete current database state upon rollback, use with care!
-    pub fn ensure_at_most(self: &Arc<Self>, slot: u64) -> AdbResult<u64> {
+    pub unsafe fn ensure_at_most(&self, slot: u64) -> AdbResult<u64> {
+        // TODO(bmuddha): redesign snapshot rollback in validator
+        // so that this method can be called with proper &mut self
         let current_slot = self.slot();
         if current_slot <= slot {
             return Ok(current_slot);
         }
-        assert!(
-            Arc::strong_count(self) == 1,
-            "accountsdb cannot be rolled back when not exclusively owned"
-        );
         let rb_slot = inspecterr!(
             self.snap.try_switch_to_snapshot(slot),
             "switching to recent snapshot"
         );
         let path = self.snap.database_path();
 
-        self.storage.reload(path)?;
-        self.index.reload(path)?;
+        // SAFETY: if assumption that the &self is exclusive is violated,
+        // we have a UB with all sorts of terrible consequences
+        #[allow(invalid_reference_casting)]
+        let this = &mut *(self as *const Self as *mut Self);
+
+        this.storage.reload(path)?;
+        this.index.reload(path)?;
         Ok(rb_slot)
     }
 

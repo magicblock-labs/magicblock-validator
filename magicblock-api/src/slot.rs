@@ -1,12 +1,9 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use magicblock_accounts_db::FLUSH_ACCOUNTS_SLOT_FREQ;
 use magicblock_bank::bank::Bank;
 use magicblock_ledger::{errors::LedgerResult, Ledger};
 use magicblock_processor::execute_transaction::lock_transactions;
 use solana_sdk::clock::Slot;
-
-use crate::accounts::flush_accounts;
 
 pub fn advance_slot_and_update_ledger(
     bank: &Bank,
@@ -27,7 +24,6 @@ pub fn advance_slot_and_update_ledger(
         // slot advanced since only then can we be sure that the accounts did not change
         // during the same slot after we flushed them.
         let _lock = lock_transactions();
-        flush_accounts(bank);
         bank.advance_slot()
     } else {
         bank.advance_slot()

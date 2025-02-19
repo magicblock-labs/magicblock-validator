@@ -10,11 +10,10 @@ use std::{
         Arc, LockResult, RwLock, RwLockReadGuard, RwLockWriteGuard,
     },
     time::Duration,
-    u64,
 };
 
 use log::{debug, info, trace};
-use magicblock_accounts_db::{AccountsDb, AdbShared, StWLock};
+use magicblock_accounts_db::{config::AdbConfig, AccountsDb, StWLock};
 use solana_accounts_db::{
     accounts_index::ScanConfig,
     accounts_update_notifier_interface::AccountsUpdateNotifierInterface,
@@ -147,7 +146,7 @@ impl ForkGraph for SimpleForkGraph {
 //#[derive(Debug)]
 pub struct Bank {
     /// Shared reference to accounts database
-    pub adb: AdbShared,
+    pub adb: AccountsDb,
 
     /// Bank epoch
     epoch: Epoch,
@@ -395,7 +394,7 @@ impl Bank {
     pub fn new(
         genesis_config: &GenesisConfig,
         runtime_config: Arc<RuntimeConfig>,
-        accountsdb_config: magicblock_accounts_db::config::Config,
+        accountsdb_config: &AdbConfig,
         debug_keys: Option<Arc<HashSet<Pubkey>>>,
         additional_builtins: Option<&[BuiltinPrototype]>,
         debug_do_not_add_builtins: bool,
@@ -454,7 +453,7 @@ impl Bank {
     }
 
     pub(super) fn default_with_accounts(
-        adb: AdbShared,
+        adb: AccountsDb,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
         millis_per_slot: u64,
     ) -> Self {

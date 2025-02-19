@@ -7,7 +7,7 @@ use magicblock_bank::bank::Bank;
 use magicblock_tokens::token_balances::get_mint_decimals_from_data;
 use solana_account_decoder::{
     encode_ui_account,
-    parse_account_data::{AccountAdditionalDataV2, SplTokenAdditionalData},
+    parse_account_data::{AccountAdditionalDataV3, SplTokenAdditionalDataV2},
     parse_token::{get_token_account_mint, is_known_spl_token_id},
     UiAccount, UiAccountEncoding, UiDataSliceConfig, MAX_BASE58_BYTES,
 };
@@ -97,11 +97,11 @@ pub(crate) fn get_parsed_token_account(
                 overwrite_accounts,
             )
         })
-        .map(|mint_account| AccountAdditionalDataV2 {
+        .map(|mint_account| AccountAdditionalDataV3 {
             spl_token_additional_data: get_mint_decimals_from_data(
                 mint_account.data(),
             )
-            .map(SplTokenAdditionalData::with_decimals)
+            .map(SplTokenAdditionalDataV2::with_decimals)
             .ok(),
         });
 

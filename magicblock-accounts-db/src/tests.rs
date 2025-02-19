@@ -1,19 +1,7 @@
-use std::{
-    fs,
-    path::PathBuf,
-    sync::{atomic::AtomicUsize, Arc},
-};
-
 use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
 use solana_pubkey::Pubkey;
 
-use crate::{config::BlockSize, AccountsDb, AdbShared, Config, StWLock};
-
-const DB_SIZE: usize = 10 * 1024 * 1024;
-const BLOCK_SIZE: BlockSize = BlockSize::Block256;
-const INDEX_MAP_SIZE: usize = 1024 * 1024;
-const MAX_SNAPSHOTS: u16 = 4;
-const SNAPSHOT_FREQUENCY: u64 = 16;
+use crate::{config::AdbConfig, AccountsDb, StWLock};
 
 const LAMPORTS: u64 = 4425;
 const SPACE: usize = 73;
@@ -21,9 +9,11 @@ const OWNER: Pubkey = Pubkey::new_from_array([23; 32]);
 const ACCOUNT_DATA: &[u8] = b"hello world?";
 const INIT_DATA_LEN: usize = ACCOUNT_DATA.len();
 
+const SNAPSHOT_FREQUENCY: u64 = 16;
+
 #[test]
 fn test_get_account() {
-    let (adb, _guard) = init_db();
+    let adb = init_db();
     let (pubkey, account) = account();
     adb.insert_account(&pubkey, &account);
     let acc = adb.get_account(&pubkey);
@@ -40,7 +30,7 @@ fn test_get_account() {
 
 #[test]
 fn test_modify_account() {
-    let DbWithAcc { adb, acc, _guard } = init_db_with_acc();
+    let DbWithAcc { adb, acc } = init_db_with_acc();
     let mut acc_uncommitted = acc.account;
     let new_lamports = 42;
 
@@ -72,11 +62,7 @@ fn test_modify_account() {
 
 #[test]
 fn test_account_resize() {
-    let DbWithAcc {
-        adb,
-        mut acc,
-        _guard,
-    } = init_db_with_acc();
+    let DbWithAcc { adb, mut acc } = init_db_with_acc();
     let huge_date = [42; SPACE * 2];
 
     acc.account.set_data_from_slice(&huge_date);
@@ -112,11 +98,7 @@ fn test_account_resize() {
 
 #[test]
 fn test_alloc_reuse() {
-    let DbWithAcc {
-        adb,
-        mut acc,
-        _guard,
-    } = init_db_with_acc();
+    let DbWithAcc { adb, mut acc } = init_db_with_acc();
     let huge_date = [42; SPACE * 2];
 
     acc.account.set_data_from_slice(&huge_date);
@@ -127,9 +109,9 @@ fn test_alloc_reuse() {
     );
     let old_addr = acc_committed.data().as_ptr();
 
-    let _ = adb.insert_account(&acc.pubkey, &acc.account);
+    adb.insert_account(&acc.pubkey, &acc.account);
     let (pk2, acc2) = account();
-    let _ = adb.insert_account(&pk2, &acc2);
+    adb.insert_account(&pk2, &acc2);
 
     let acc_alloc_reused = AccountSharedData::Borrowed(
         adb.get_account(&pk2)
@@ -145,7 +127,7 @@ fn test_alloc_reuse() {
 
 #[test]
 fn test_get_program_accounts() {
-    let DbWithAcc { adb, acc, _guard } = init_db_with_acc();
+    let DbWithAcc { adb, acc } = init_db_with_acc();
     let accounts = adb.get_program_accounts(&OWNER, |_| true);
     assert!(accounts.is_ok(), "program account should be in database");
     let mut accounts = accounts.unwrap();
@@ -159,11 +141,7 @@ fn test_get_program_accounts() {
 
 #[test]
 fn test_take_snapshot() {
-    let DbWithAcc {
-        adb,
-        mut acc,
-        _guard,
-    } = init_db_with_acc();
+    let DbWithAcc { adb, mut acc } = init_db_with_acc();
 
     assert_eq!(adb.slot(), 0, "fresh accountsdb should have 0 slot");
     adb.set_slot(SNAPSHOT_FREQUENCY);
@@ -189,11 +167,7 @@ fn test_take_snapshot() {
 
 #[test]
 fn test_restore_from_snapshot() {
-    let DbWithAcc {
-        mut adb,
-        mut acc,
-        _guard,
-    } = init_db_with_acc();
+    let DbWithAcc { adb, mut acc } = init_db_with_acc();
     let new_lamports = 42;
 
     adb.set_slot(SNAPSHOT_FREQUENCY); // trigger snapshot
@@ -210,20 +184,16 @@ fn test_restore_from_snapshot() {
         new_lamports,
         "account's lamports should have been updated after commit"
     );
-    let mut adb_mut =
-        Arc::into_inner(adb).expect("we are the only ones with reference");
 
     assert!(
         matches!(
-            adb_mut
-                .ensure_at_most(SNAPSHOT_FREQUENCY)
+            unsafe { adb.ensure_at_most(SNAPSHOT_FREQUENCY) }
                 .inspect(|d| println!("S: {d}"))
                 .inspect_err(|e| println!("E: {e}")),
             Ok(SNAPSHOT_FREQUENCY)
         ),
         "failed to rollback to snapshot"
     );
-    adb = Arc::new(adb_mut);
 
     let acc_rolledback = AccountSharedData::Borrowed(
         adb.get_account(&acc.pubkey)
@@ -245,32 +215,22 @@ struct AccountWithPubkey {
 }
 
 struct DbWithAcc {
-    adb: AdbShared,
+    adb: AccountsDb,
     acc: AccountWithPubkey,
-    _guard: ResourceGuard,
 }
 
-fn init_db() -> (AdbShared, ResourceGuard) {
+pub fn init_db() -> AccountsDb {
     let _ = env_logger::builder().is_test(true).try_init();
-    let guard = ResourceGuard::new();
-    let config = Config {
-        directory: guard.directory.clone(),
-        block_size: BLOCK_SIZE,
-        db_size: DB_SIZE,
-        max_snapshots: MAX_SNAPSHOTS,
-        snapshot_frequency: SNAPSHOT_FREQUENCY,
-        index_map_size: INDEX_MAP_SIZE,
-    };
+    let config = AdbConfig::temp_for_tests(SNAPSHOT_FREQUENCY);
     let lock = StWLock::default();
-    let adb =
-        AccountsDb::new(config, lock).expect("expected to initialize ADB");
-    (adb, guard)
+
+    AccountsDb::new(&config, lock).expect("expected to initialize ADB")
 }
 
 fn init_db_with_acc() -> DbWithAcc {
-    let (adb, _guard) = init_db();
+    let adb = init_db();
     let (pubkey, account) = account();
-    let _ = adb.insert_account(&pubkey, &account);
+    adb.insert_account(&pubkey, &account);
     let acc = adb
         .get_account(&pubkey)
         .expect("account retrieval should be successful");
@@ -279,7 +239,7 @@ fn init_db_with_acc() -> DbWithAcc {
         pubkey,
     };
 
-    DbWithAcc { adb, _guard, acc }
+    DbWithAcc { adb, acc }
 }
 
 fn account() -> (Pubkey, AccountSharedData) {
@@ -287,30 +247,4 @@ fn account() -> (Pubkey, AccountSharedData) {
     let mut account = AccountSharedData::new(LAMPORTS, SPACE, &OWNER);
     account.data_as_mut_slice()[..INIT_DATA_LEN].copy_from_slice(ACCOUNT_DATA);
     (pubkey, account)
-}
-
-struct ResourceGuard {
-    directory: PathBuf,
-}
-
-impl ResourceGuard {
-    fn new() -> Self {
-        static COUNTER: AtomicUsize = AtomicUsize::new(0);
-        let i = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-        // indexing, so that each test will run with its own adb
-        let directory: PathBuf =
-            format!("/tmp/adb-test{i}/adb").parse().unwrap();
-        let _ = fs::remove_dir_all(&directory);
-        fs::create_dir_all(&directory)
-            .expect("expected to create temporary adb directory");
-        Self { directory }
-    }
-}
-
-impl Drop for ResourceGuard {
-    /// Cleanup up temporary test resources
-    fn drop(&mut self) {
-        self.directory.pop();
-        let _ = fs::remove_dir_all(&self.directory);
-    }
 }

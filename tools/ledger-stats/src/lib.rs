@@ -1,3 +1,3 @@
 mod utils;
 
-pub use utils::{accounts_storage_from_ledger, open_ledger};
+pub use utils::open_ledger;

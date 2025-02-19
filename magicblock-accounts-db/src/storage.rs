@@ -7,7 +7,7 @@ use std::{
 
 use memmap2::MmapMut;
 
-use crate::{index::RecycledAllocation, AdbResult, Config};
+use crate::{index::RecycledAllocation, AdbConfig, AdbResult};
 
 pub(crate) struct Allocation {
     pub(crate) storage: *mut u8,
@@ -57,7 +57,7 @@ impl AccountsStorage {
     ///
     /// _Note_: passed config is ignored if the database
     /// file already exists at supplied path
-    pub(crate) fn new(config: &Config) -> AdbResult<Self> {
+    pub(crate) fn new(config: &AdbConfig) -> AdbResult<Self> {
         let mut file = inspecterr!(
             File::options()
                 .create(true)
@@ -198,7 +198,7 @@ impl AccountsStorage {
 
 /// NOTE!: any change in metadata format should be reflected here
 impl StorageMeta {
-    fn init_adb_file(file: &mut File, config: &Config) -> io::Result<()> {
+    fn init_adb_file(file: &mut File, config: &AdbConfig) -> io::Result<()> {
         // query page size of host OS
         let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
         // make the database size a multiple of OS page size (rounding up),

@@ -1,11 +1,10 @@
-use std::str::FromStr;
+use std::{str::FromStr, sync::Arc};
 
 use num_format::{Locale, ToFormattedString};
 
 use log::{Level::Trace, *};
 use magicblock_bank::bank::Bank;
 use solana_sdk::{
-    account::{Account, AccountSharedData, ReadableAccount},
     clock::{Slot, UnixTimestamp},
     hash::Hash,
     message::SanitizedMessage,
@@ -135,9 +134,17 @@ fn iter_blocks(
 
 /// Processes the provided ledger updating the bank and returns the slot
 /// at which the validator should continue processing (last processed slot + 1).
-pub fn process_ledger(ledger: &Ledger, bank: &Bank) -> LedgerResult<u64> {
+pub fn process_ledger(ledger: &Ledger, bank: &Arc<Bank>) -> LedgerResult<u64> {
     let (max_slot, _) = ledger.get_max_blockhash()?;
-    let (full_process_starting_slot, len) = bank.adb.ensure_at_most(max_slot);
+    // TODO(bmuddha): currently a lot of rewrite is required to
+    // obtain a mut reference to adb field, and using interior
+    // mutability is waaaay too much for code which only runs
+    // once, so instead we use (temporarily) ugly pointer hack
+    // (see ensure_at_most implementation)
+    assert!(Arc::strong_count(bank) == 1, "precess ledger cannot be invoked on running validator, ensure it's called during init phase when there's only one reference to Bank in existence");
+
+    let full_process_starting_slot =
+        unsafe { bank.adb.ensure_at_most(max_slot) }?;
 
     // Since transactions may refer to blockhashes that were present when they
     // ran initially we ensure that they are present during replay as well
@@ -148,8 +155,8 @@ pub fn process_ledger(ledger: &Ledger, bank: &Bank) -> LedgerResult<u64> {
             0
         };
     debug!(
-        "Loaded {} accounts into bank from storage replaying blockhashes from {} and transactions from {}",
-        len, blockhashes_only_starting_slot, full_process_starting_slot
+        "Loaded accounts into bank from storage replaying blockhashes from {} and transactions from {}",
+        blockhashes_only_starting_slot, full_process_starting_slot
     );
     iter_blocks(
         IterBlocksParams {

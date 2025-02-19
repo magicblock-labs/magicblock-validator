@@ -6,7 +6,7 @@ use lmdb::{
 };
 use solana_pubkey::Pubkey;
 
-use crate::{storage::Allocation, AdbResult, Config};
+use crate::{storage::Allocation, AdbConfig, AdbResult};
 
 const WEMPTY: WriteFlags = WriteFlags::empty();
 // LMDB cursor operations, have to copy paste them, as they are not exposed in pubic API
@@ -68,7 +68,7 @@ macro_rules! bitpack {
 }
 
 impl AdbIndex {
-    pub(crate) fn new(config: &Config) -> AdbResult<Self> {
+    pub(crate) fn new(config: &AdbConfig) -> AdbResult<Self> {
         // create an environment for 2 databases: accounts and programs index
         let env = inspecterr!(
             env(ACCOUNTS_PATH, &config.directory, config.index_map_size, 2),

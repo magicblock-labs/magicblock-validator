@@ -79,8 +79,8 @@ async fn main() {
     };
 
     debug!("{:#?}", config);
-    let api = &mut MagicValidator::try_from_config(config, validator_keypair)
-        .unwrap();
+    let api =
+        MagicValidator::try_from_config(config, validator_keypair).unwrap();
     debug!("Created API .. starting things up");
 
     // We need to create and hold on to the ledger lock here in order to keep the

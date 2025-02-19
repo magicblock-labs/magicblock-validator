@@ -1,4 +1,3 @@
-pub mod accounts;
 pub mod errors;
 pub mod external_config;
 mod fund_account;

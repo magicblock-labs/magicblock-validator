@@ -10,7 +10,7 @@ edition.workspace = true
 [dependencies]
 crossbeam-channel = { workspace = true }
 log = { workspace = true }
-magicblock-accounts-db = { workspace = true }
+magicblock-accounts-db = { workspace = true, features = [ "dev-tools" ] }
 magicblock-bank = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-program = { workspace = true }

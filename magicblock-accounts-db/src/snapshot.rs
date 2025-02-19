@@ -199,3 +199,12 @@ impl SnapSlot {
         ppath.join(format!("snapshot-{:0>9}", self.0))
     }
 }
+
+#[cfg(any(feature = "dev-tools", test))]
+/// Convenience Drop impl for autocleanup during tests
+impl Drop for SnapshotEngine {
+    fn drop(&mut self) {
+        self.dbpath.pop();
+        let _ = fs::remove_dir_all(&self.dbpath);
+    }
+}

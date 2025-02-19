@@ -8,10 +8,7 @@ use solana_sdk::{
 };
 use tabular::{Row, Table};
 
-use crate::utils::accounts_storage_from_ledger;
-
 pub fn print_account(ledger: &Ledger, pubkey: &Pubkey) {
-    let (storage, slot) = accounts_storage_from_ledger(ledger);
     let account = find_account(&storage, |account| {
         (account.pubkey() == pubkey).then_some(Account {
             lamports: account.lamports(),

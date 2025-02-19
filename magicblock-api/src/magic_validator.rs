@@ -46,10 +46,12 @@ use magicblock_accounts::{
     utils::try_rpc_cluster_from_cluster, AccountsManager,
 };
 use magicblock_accounts_api::BankAccountProvider;
-use magicblock_accounts_db::geyser::AccountsUpdateNotifier;
+use magicblock_accounts_db::config::AdbConfig;
 use magicblock_bank::{
-    bank::Bank, genesis_utils::create_genesis_config_with_leader,
-    geyser::TransactionNotifier, program_loader::load_programs_into_bank,
+    bank::Bank,
+    genesis_utils::create_genesis_config_with_leader,
+    geyser::{AccountsUpdateNotifier, TransactionNotifier},
+    program_loader::load_programs_into_bank,
     transaction_logs::TransactionLogCollectorFilter,
 };
 use magicblock_config::{EphemeralConfig, ProgramConfig};
@@ -166,15 +168,14 @@ impl MagicValidator {
             &identity_keypair,
             config.validator_config.ledger.reset,
         )?;
-        let accounts_paths = Self::init_accounts_paths(ledger.ledger_path())?;
 
         let exit = Arc::<AtomicBool>::default();
         let bank = Self::init_bank(
             Some(geyser_manager.clone()),
             &genesis_config,
+            &config.validator_config.accounts.db,
             config.validator_config.validator.millis_per_slot,
             validator_pubkey,
-            accounts_paths,
         );
 
         fund_validator_identity(&bank, &validator_pubkey);
@@ -338,18 +339,18 @@ impl MagicValidator {
     fn init_bank(
         geyser_manager: Option<Arc<RwLock<GeyserPluginManager>>>,
         genesis_config: &GenesisConfig,
+        accountsdb_config: &AdbConfig,
         millis_per_slot: u64,
         validator_pubkey: Pubkey,
-        accounts_paths: Vec<PathBuf>,
     ) -> Arc<Bank> {
         let runtime_config = Default::default();
         let bank = Bank::new(
             genesis_config,
             runtime_config,
+            accountsdb_config,
             None,
             None,
             false,
-            accounts_paths,
             geyser_manager.clone().map(AccountsUpdateNotifier::new),
             geyser_manager.map(SlotStatusNotifierImpl::new),
             millis_per_slot,
@@ -446,14 +447,6 @@ impl MagicValidator {
         let ledger_shared = Arc::new(ledger);
         init_persister(ledger_shared.clone());
         Ok(ledger_shared)
-    }
-
-    fn init_accounts_paths(ledger_path: &Path) -> ApiResult<Vec<PathBuf>> {
-        let parent = ledger_parent_dir(ledger_path)?;
-        let accounts_dir = parent.join("accounts");
-        let (run_path, _snapshot_path) =
-            create_accounts_run_and_snapshot_dirs(&accounts_dir)?;
-        Ok(vec![run_path])
     }
 
     fn sync_validator_keypair_with_ledger(

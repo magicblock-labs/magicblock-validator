@@ -1,7 +1,7 @@
 // NOTE: copied and slightly modified from bank.rs
 use std::{borrow::Cow, sync::Arc};
 
-use magicblock_accounts_db::config::Config as AdbConfig;
+use magicblock_accounts_db::config::AdbConfig;
 use solana_geyser_plugin_manager::slot_status_notifier::SlotStatusNotifierImpl;
 use solana_sdk::{
     genesis_config::GenesisConfig,
@@ -27,14 +27,12 @@ use crate::{
 impl Bank {
     pub fn new_for_tests(
         genesis_config: &GenesisConfig,
-        accountsdb_config: AdbConfig,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
         slot_status_notifier: Option<SlotStatusNotifierImpl>,
     ) -> Self {
         Self::new_with_config_for_tests(
             genesis_config,
             Arc::new(RuntimeConfig::default()),
-            accountsdb_config,
             accounts_update_notifier,
             slot_status_notifier,
             EPHEM_DEFAULT_MILLIS_PER_SLOT,
@@ -44,15 +42,15 @@ impl Bank {
     pub fn new_with_config_for_tests(
         genesis_config: &GenesisConfig,
         runtime_config: Arc<RuntimeConfig>,
-        accountsdb_config: AdbConfig,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
         slot_status_notifier: Option<SlotStatusNotifierImpl>,
         millis_per_slot: u64,
     ) -> Self {
+        let accountsdb_config = AdbConfig::temp_for_tests(500);
         let bank = Self::new(
             genesis_config,
             runtime_config,
-            accountsdb_config,
+            &accountsdb_config,
             None,
             None,
             false,
