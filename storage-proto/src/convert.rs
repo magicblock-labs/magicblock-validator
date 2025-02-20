@@ -4,7 +4,7 @@ use {
         real_number_string_trimmed, UiTokenAmount,
     },
     solana_sdk::{
-        hash::Hash,
+        hash::{Hash, HASH_BYTES},
         instruction::{CompiledInstruction, InstructionError},
         message::{
             legacy::Message as LegacyMessage,
@@ -372,7 +372,10 @@ impl From<generated::Message> for VersionedMessage {
             .into_iter()
             .map(|key| Pubkey::try_from(key).unwrap())
             .collect();
-        let recent_blockhash = Hash::new(&value.recent_blockhash);
+        let recent_blockhash = Hash::new_from_array(
+            <[u8; HASH_BYTES]>::try_from(value.recent_blockhash.as_slice())
+                .expect("failed to construct hash from slice"),
+        );
         let instructions =
             value.instructions.into_iter().map(|ix| ix.into()).collect();
         let address_table_lookups = value
@@ -1310,9 +1313,12 @@ impl From<(usize, EntrySummary)> for entries::Entry {
 
 impl From<entries::Entry> for EntrySummary {
     fn from(entry: entries::Entry) -> Self {
+        let hash = <[u8; HASH_BYTES]>::try_from(entry.hash.as_slice())
+            .map(Hash::new_from_array)
+            .expect("failed to construct hash from slice");
         EntrySummary {
             num_hashes: entry.num_hashes,
-            hash: Hash::new(&entry.hash),
+            hash,
             num_transactions: entry.num_transactions,
             starting_transaction_index: entry.starting_transaction_index
                 as usize,

@@ -1,5 +1,4 @@
-use magicblock_accounts_db::utils::find_account;
-use magicblock_ledger::Ledger;
+use magicblock_accounts_db::AccountsDb;
 use num_format::{Locale, ToFormattedString};
 use pretty_hex::*;
 use solana_sdk::{
@@ -8,20 +7,22 @@ use solana_sdk::{
 };
 use tabular::{Row, Table};
 
-pub fn print_account(ledger: &Ledger, pubkey: &Pubkey) {
-    let account = find_account(&storage, |account| {
-        (account.pubkey() == pubkey).then_some(Account {
-            lamports: account.lamports(),
-            owner: *account.owner(),
-            executable: account.executable(),
-            rent_epoch: account.rent_epoch(),
-            data: account.data().to_vec(), // it pains me a lot to call to_vec
+pub fn print_account(db: &AccountsDb, pubkey: &Pubkey) {
+    let account = db
+        .get_account(pubkey)
+        .map(|account| {
+            Account {
+                lamports: account.lamports(),
+                owner: *account.owner(),
+                executable: account.executable(),
+                rent_epoch: account.rent_epoch(),
+                data: account.data().to_vec(), // it pains me a lot to call to_vec
+            }
         })
-    })
-    .expect("Account not found");
+        .expect("Account not found");
     let oncurve = pubkey.is_on_curve();
 
-    println!("{} at slot: {}", pubkey, slot);
+    println!("{} at slot: {}", pubkey, db.slot());
     let table =
         Table::new("{:<}  {:>}")
             .with_row(Row::new().with_cell("Column").with_cell("Value"))

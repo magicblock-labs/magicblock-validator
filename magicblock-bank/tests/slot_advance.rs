@@ -4,7 +4,9 @@
 use log::*;
 use magicblock_bank::bank::Bank;
 use solana_sdk::{
-    account::Account, genesis_config::create_genesis_config, pubkey::Pubkey,
+    account::{accounts_equal, Account},
+    genesis_config::create_genesis_config,
+    pubkey::Pubkey,
     system_program,
 };
 use test_tools_core::init_logger;
@@ -39,10 +41,10 @@ fn test_bank_store_get_accounts_across_slots() {
 
     macro_rules! assert_account_stored {
         ($acc: expr) => {
-            assert_eq!(
-                bank.get_account(&$acc.pubkey).unwrap(),
-                $acc.account.clone().into()
-            )
+            assert!(accounts_equal(
+                &bank.get_account(&$acc.pubkey).unwrap(),
+                &$acc.account,
+            ))
         };
     }
 

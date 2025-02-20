@@ -6,9 +6,9 @@ use magicblock_transaction_status::{
     token_balances::TransactionTokenBalances, TransactionTokenBalance,
 };
 use solana_account_decoder::{
-    parse_account_data::SplTokenAdditionalData,
+    parse_account_data::SplTokenAdditionalDataV2,
     parse_token::{
-        is_known_spl_token_id, token_amount_to_ui_amount_v2, UiTokenAmount,
+        is_known_spl_token_id, token_amount_to_ui_amount_v3, UiTokenAmount,
     },
 };
 use solana_measure::measure::Measure;
@@ -120,9 +120,9 @@ fn collect_token_balance_from_account(
     Some(TokenBalanceData {
         mint: token_account.base.mint.to_string(),
         owner: token_account.base.owner.to_string(),
-        ui_token_amount: token_amount_to_ui_amount_v2(
+        ui_token_amount: token_amount_to_ui_amount_v3(
             token_account.base.amount,
-            &SplTokenAdditionalData::with_decimals(decimals),
+            &SplTokenAdditionalDataV2::with_decimals(decimals),
         ),
         program_id: account.owner().to_string(),
     })

@@ -21,7 +21,7 @@ fn test_get_account() {
         acc.is_ok(),
         "account was just inserted and should be in database"
     );
-    let acc = AccountSharedData::Borrowed(acc.unwrap());
+    let acc = acc.unwrap();
     assert_eq!(acc.lamports(), LAMPORTS);
     assert_eq!(acc.owner(), &OWNER);
     assert_eq!(&acc.data()[..INIT_DATA_LEN], ACCOUNT_DATA);
@@ -38,10 +38,10 @@ fn test_modify_account() {
     acc_uncommitted.set_lamports(new_lamports);
     assert_eq!(acc_uncommitted.lamports(), new_lamports);
 
-    let acc_committed = AccountSharedData::Borrowed(
-        adb.get_account(&acc.pubkey)
-            .expect("account should be in database"),
-    );
+    let acc_committed = adb
+        .get_account(&acc.pubkey)
+        .expect("account should be in database");
+
     assert_eq!(
         acc_committed.lamports(),
         LAMPORTS,
@@ -49,10 +49,10 @@ fn test_modify_account() {
     );
     adb.insert_account(&acc.pubkey, &acc_uncommitted);
 
-    let acc_committed = AccountSharedData::Borrowed(
-        adb.get_account(&acc.pubkey)
-            .expect("account should be in database"),
-    );
+    let acc_committed = adb
+        .get_account(&acc.pubkey)
+        .expect("account should be in database");
+
     assert_eq!(
         acc_committed.lamports(),
         new_lamports,
@@ -71,10 +71,9 @@ fn test_account_resize() {
         "account should have been promoted to Owned after resize"
     );
 
-    let acc_committed = AccountSharedData::Borrowed(
-        adb.get_account(&acc.pubkey)
-            .expect("account should be in database"),
-    );
+    let acc_committed = adb
+        .get_account(&acc.pubkey)
+        .expect("account should be in database");
 
     assert_eq!(
         acc_committed.data().len(),
@@ -84,10 +83,9 @@ fn test_account_resize() {
 
     adb.insert_account(&acc.pubkey, &acc.account);
 
-    let acc_committed = AccountSharedData::Borrowed(
-        adb.get_account(&acc.pubkey)
-            .expect("account should be in database"),
-    );
+    let acc_committed = adb
+        .get_account(&acc.pubkey)
+        .expect("account should be in database");
 
     assert_eq!(
         acc_committed.data(),
@@ -103,20 +101,18 @@ fn test_alloc_reuse() {
 
     acc.account.set_data_from_slice(&huge_date);
 
-    let acc_committed = AccountSharedData::Borrowed(
-        adb.get_account(&acc.pubkey)
-            .expect("account should be in database"),
-    );
+    let acc_committed = adb
+        .get_account(&acc.pubkey)
+        .expect("account should be in database");
     let old_addr = acc_committed.data().as_ptr();
 
     adb.insert_account(&acc.pubkey, &acc.account);
     let (pk2, acc2) = account();
     adb.insert_account(&pk2, &acc2);
 
-    let acc_alloc_reused = AccountSharedData::Borrowed(
-        adb.get_account(&pk2)
-            .expect("second account should be in database"),
-    );
+    let acc_alloc_reused = adb
+        .get_account(&pk2)
+        .expect("second account should be in database");
 
     assert_eq!(
         acc_alloc_reused.data().as_ptr(),
@@ -137,6 +133,25 @@ fn test_get_program_accounts() {
         acc.account,
         "returned program account should match inserted one"
     );
+}
+
+#[test]
+fn test_get_all_accounts() {
+    let DbWithAcc { adb, acc } = init_db_with_acc();
+    let (pk2, acc2) = account();
+    adb.insert_account(&pk2, &acc2);
+    let (pk3, acc3) = account();
+    adb.insert_account(&pk3, &acc3);
+
+    let iter = adb.iter_all();
+    assert!(
+        iter.is_some(),
+        "iterator over pubkeys should have been created"
+    );
+    let mut pubkeys = iter.unwrap();
+    assert_eq!(pubkeys.next(), Some(acc.pubkey));
+    assert_eq!(pubkeys.next(), Some(pk2));
+    assert_eq!(pubkeys.next(), Some(pk3));
 }
 
 #[test]
@@ -175,10 +190,9 @@ fn test_restore_from_snapshot() {
     acc.account.set_lamports(new_lamports);
     adb.insert_account(&acc.pubkey, &acc.account);
 
-    let acc_committed = AccountSharedData::Borrowed(
-        adb.get_account(&acc.pubkey)
-            .expect("account should be in database"),
-    );
+    let acc_committed = adb
+        .get_account(&acc.pubkey)
+        .expect("account should be in database");
     assert_eq!(
         acc_committed.lamports(),
         new_lamports,
@@ -195,10 +209,9 @@ fn test_restore_from_snapshot() {
         "failed to rollback to snapshot"
     );
 
-    let acc_rolledback = AccountSharedData::Borrowed(
-        adb.get_account(&acc.pubkey)
-            .expect("account should be in database"),
-    );
+    let acc_rolledback = adb
+        .get_account(&acc.pubkey)
+        .expect("account should be in database");
     assert_eq!(
         acc_rolledback.lamports(),
         LAMPORTS,
@@ -231,13 +244,10 @@ fn init_db_with_acc() -> DbWithAcc {
     let adb = init_db();
     let (pubkey, account) = account();
     adb.insert_account(&pubkey, &account);
-    let acc = adb
+    let account = adb
         .get_account(&pubkey)
         .expect("account retrieval should be successful");
-    let acc = AccountWithPubkey {
-        account: AccountSharedData::Borrowed(acc),
-        pubkey,
-    };
+    let acc = AccountWithPubkey { account, pubkey };
 
     DbWithAcc { adb, acc }
 }

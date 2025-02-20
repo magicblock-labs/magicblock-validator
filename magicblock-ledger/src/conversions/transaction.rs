@@ -2,7 +2,7 @@ use log::*;
 use solana_account_decoder::parse_token::UiTokenAmount;
 use solana_sdk::{
     clock::{Slot, UnixTimestamp},
-    hash::Hash,
+    hash::{Hash, HASH_BYTES},
     instruction::CompiledInstruction,
     message::{
         v0::{self, LoadedAddresses},
@@ -67,7 +67,11 @@ fn tx_from_generated(tx: generated::Transaction) -> Transaction {
 }
 fn message_from_generated(msg: generated::Message) -> Message {
     let account_keys = pubkeys_from_slices(msg.account_keys);
-    let recent_blockhash = Hash::new(&msg.recent_blockhash);
+
+    let recent_blockhash =
+        <[u8; HASH_BYTES]>::try_from(msg.recent_blockhash.as_slice())
+            .map(Hash::new_from_array)
+            .expect("failed to construct hash from slice");
     Message {
         account_keys,
         recent_blockhash,
@@ -98,7 +102,10 @@ fn versioned_message_from_generated(
     msg: generated::Message,
 ) -> VersionedMessage {
     let account_keys = pubkeys_from_slices(msg.account_keys);
-    let recent_blockhash = Hash::new(&msg.recent_blockhash);
+    let recent_blockhash =
+        <[u8; HASH_BYTES]>::try_from(msg.recent_blockhash.as_slice())
+            .map(Hash::new_from_array)
+            .expect("failed to construct hash from slice");
     let message = v0::Message {
         header: msg.header.map(header_from_generated).unwrap_or_default(),
         recent_blockhash,

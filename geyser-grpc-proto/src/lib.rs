@@ -457,25 +457,31 @@ pub mod convert_from {
                     readonly_indexes: table.readonly_indexes,
                 });
             }
+            let recent_blockhash = <[u8; HASH_BYTES]>::try_from(
+                message.recent_blockhash.as_slice(),
+            )
+            .map(Hash::new_from_array)
+            .expect("failed to construct hash from slice");
 
             VersionedMessage::V0(MessageV0 {
                 header,
                 account_keys: create_pubkey_vec(message.account_keys)?,
-                recent_blockhash: Hash::new(
-                    message.recent_blockhash.as_slice(),
-                ),
+                recent_blockhash,
                 instructions: create_message_instructions(
                     message.instructions,
                 )?,
                 address_table_lookups,
             })
         } else {
+            let recent_blockhash = <[u8; HASH_BYTES]>::try_from(
+                message.recent_blockhash.as_slice(),
+            )
+            .map(Hash::new_from_array)
+            .expect("failed to construct hash from slice");
             VersionedMessage::Legacy(Message {
                 header,
                 account_keys: create_pubkey_vec(message.account_keys)?,
-                recent_blockhash: Hash::new(
-                    message.recent_blockhash.as_slice(),
-                ),
+                recent_blockhash,
                 instructions: create_message_instructions(
                     message.instructions,
                 )?,

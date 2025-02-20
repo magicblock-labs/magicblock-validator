@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use magicblock_accounts_db::config::AdbConfig;
+use magicblock_accounts_db::{config::AdbConfig, StWLock};
 use magicblock_bank::{
     bank::Bank, geyser::AccountsUpdateNotifier,
     transaction_logs::TransactionLogCollectorFilter,
@@ -34,6 +34,9 @@ pub fn bank_for_tests_with_identity(
         slot_status_notifier,
         millis_per_slot,
         identity_id,
+        // TODO(bmuddha): when we switch to multithreaded mode,
+        // switch to actaul lock held by scheduler
+        StWLock::default(),
     );
     bank.transaction_log_collector_config
         .write()

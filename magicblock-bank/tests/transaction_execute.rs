@@ -186,6 +186,7 @@ fn test_bank_solx_instructions() {
     // Accounts
     let post_acc = bank.get_account(&post).unwrap();
 
+    println!("{post_acc:?}");
     assert_eq!(post_acc.data().len(), 1180);
     assert_eq!(post_acc.owner(), &elfs::solanax::ID);
 

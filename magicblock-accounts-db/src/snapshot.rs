@@ -186,10 +186,7 @@ impl SnapSlot {
     fn try_from_path(path: &Path) -> Option<Self> {
         path.file_name()
             .and_then(|s| s.to_str())
-            .and_then(|s| {
-                println!("DIR: {s}");
-                s.split('-').nth(1)
-            })
+            .and_then(|s| s.split('-').nth(1))
             .and_then(|s| s.parse::<u64>().ok())
             .map(Self)
     }

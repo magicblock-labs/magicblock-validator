@@ -1,4 +1,4 @@
-use std::sync::Arc;
+use std::{path::PathBuf, sync::Arc};
 
 use parking_lot::RwLock;
 use solana_account::{
@@ -21,6 +21,11 @@ static mut SNAPSHOT_FREQUENCY: u64 = 0;
 macro_rules! inspecterr {
     ($result: expr, $msg: expr) => {
         $result.inspect_err(|err| log::warn!("adb - {} error: {err}", $msg))?
+    };
+    ($result: expr, $msg: expr, @option) => {
+        $result
+            .inspect_err(|err| log::warn!("adb - {} error: {err}", $msg))
+            .ok()?
     };
     ($result: expr, $msg: expr, @silent) => {
         match $result {
@@ -46,6 +51,7 @@ pub struct AccountsDb {
 }
 
 impl AccountsDb {
+    /// Open or create accounts database
     pub fn new(config: &AdbConfig, lock: StWLock) -> AdbResult<Self> {
         let storage =
             inspecterr!(AccountsStorage::new(config), "storage creation");
@@ -65,7 +71,18 @@ impl AccountsDb {
         })
     }
 
-    pub fn get_account(&self, pubkey: &Pubkey) -> AdbResult<AccountBorrowed> {
+    /// Opens existing database with given snapshot_frequency, used for tests and tools
+    /// most likely you want to use [new](AccountsDb::new) method
+    pub fn open(directory: PathBuf) -> AdbResult<Self> {
+        let config = AdbConfig {
+            directory,
+            snapshot_frequency: u64::MAX,
+            ..Default::default()
+        };
+        Self::new(&config, StWLock::default())
+    }
+
+    pub fn get_account(&self, pubkey: &Pubkey) -> AdbResult<AccountSharedData> {
         let offset = inspecterr!(
             self.index.get_account_offset(pubkey),
             "account offset retrieval from index"
@@ -73,7 +90,7 @@ impl AccountsDb {
         let memptr = self.storage.offset(offset);
         let account =
             unsafe { AccountSharedData::deserialize_from_mmap(memptr) };
-        Ok(account)
+        Ok(account.into())
     }
 
     pub fn insert_account(&self, pubkey: &Pubkey, account: &AccountSharedData) {
@@ -266,6 +283,16 @@ impl AccountsDb {
     /// Get number total number of bytes in storage
     pub fn storage_size(&self) -> u64 {
         self.storage.size()
+    }
+
+    pub fn iter_all(&self) -> Option<impl Iterator<Item = Pubkey> + '_> {
+        inspecterr!(
+            self.index.get_all_accounts(),
+            "iterating all over all account keys",
+            @option
+        )
+        .map(|(_, pk)| pk)
+        .into()
     }
 
     fn flush(&self, sync: bool) {

@@ -1,7 +1,7 @@
 // NOTE: copied and slightly modified from bank.rs
 use std::{borrow::Cow, sync::Arc};
 
-use magicblock_accounts_db::config::AdbConfig;
+use magicblock_accounts_db::{config::AdbConfig, StWLock};
 use solana_geyser_plugin_manager::slot_status_notifier::SlotStatusNotifierImpl;
 use solana_sdk::{
     genesis_config::GenesisConfig,
@@ -58,6 +58,9 @@ impl Bank {
             slot_status_notifier,
             millis_per_slot,
             Pubkey::new_unique(),
+            // TODO(bmuddha): when we switch to multithreaded mode,
+            // switch to actaul lock held by scheduler
+            StWLock::default(),
         );
         bank.transaction_log_collector_config
             .write()

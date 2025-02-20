@@ -79,7 +79,7 @@ async fn main() {
     };
 
     debug!("{:#?}", config);
-    let api =
+    let mut api =
         MagicValidator::try_from_config(config, validator_keypair).unwrap();
     debug!("Created API .. starting things up");
 

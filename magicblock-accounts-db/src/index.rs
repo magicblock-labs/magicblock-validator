@@ -15,7 +15,11 @@ const WEMPTY: WriteFlags = WriteFlags::empty();
 const MDB_SET_RANGE_OP: u32 = 17;
 // Used for positioning at the provided key
 const MDB_SET_OP: u32 = 15;
-// Used for stepping forward to the next key
+// Used for positioning at first element in database (B-Tree sorted)
+const MDB_FIRST_OP: u32 = 0;
+// Used for stepping on to the next key
+const MDB_NEXT_OP: u32 = 8;
+// Used for stepping forward to the next duplicate key
 const MDB_NEXT_DUP_OP: u32 = 9;
 // Used for retrieving the entry at current cursor position
 const MDB_GET_CURRENT_OP: u32 = 4;
@@ -46,7 +50,7 @@ pub(crate) struct AdbIndex {
 
 /// Helper macro to pack(merge) two types into single buffer of similar
 /// combined length or to unpack(unmerge) them back into original types
-macro_rules! bitpack {
+macro_rules! bytepack {
     ($hi: expr, $t1: ty, $low: expr, $t2: ty) => {{
         const S1: usize = size_of::<$t1>();
         const S2: usize = size_of::<$t2>();
@@ -132,8 +136,8 @@ impl AdbIndex {
         let mut txn = self.env.begin_rw_txn()?;
         let mut dealloc = None;
         // merge offset and block count into one single u64 and cast it to [u8; 8]
-        let index = bitpack!(offset, u32, blocks, u32);
-        let offset_and_pubkey = bitpack!(offset, u32, *pubkey, Pubkey);
+        let index = bytepack!(offset, u32, blocks, u32);
+        let offset_and_pubkey = bytepack!(offset, u32, *pubkey, Pubkey);
         'insert: {
             // optimisitically try to insert account to index, assuming that it doesn't exist
             let result = txn.put(
@@ -155,7 +159,7 @@ impl AdbIndex {
             // and put it into deallocation index, so the space can be recycled later
             self.deallocations.put(
                 blocks.to_le_bytes(),
-                bitpack!(offset, u32, blocks, u32),
+                bytepack!(offset, u32, blocks, u32),
             )?;
             dealloc.replace(blocks);
             // we also need to delete old entry from programs index
@@ -164,7 +168,7 @@ impl AdbIndex {
             // it just segfaults, reason is unclear
             cursor.get(
                 Some(owner.as_ref()),
-                Some(&bitpack!(offset, u32, *pubkey, Pubkey)),
+                Some(&bytepack!(offset, u32, *pubkey, Pubkey)),
                 MDB_GET_BOTH_OP,
             )?;
             cursor.del(WriteFlags::empty()).unwrap();
@@ -185,9 +189,18 @@ impl AdbIndex {
     pub(crate) fn get_program_accounts_iter(
         &self,
         program: &Pubkey,
-    ) -> AdbResult<OffsetIterator> {
+    ) -> AdbResult<OffsetPubkeyIter<'_, MDB_SET_OP, MDB_NEXT_DUP_OP>> {
         let txn = self.env.begin_ro_txn()?;
-        OffsetIterator::new(self.programs, txn, program)
+        OffsetPubkeyIter::new(self.programs, txn, program)
+    }
+
+    /// Returns an iterator over offsets and pubkeys of all accounts in database
+    /// offsets can be used further to retrieve the account from storage
+    pub(crate) fn get_all_accounts(
+        &self,
+    ) -> AdbResult<OffsetPubkeyIter<'_, MDB_FIRST_OP, MDB_NEXT_OP>> {
+        let txn = self.env.begin_ro_txn()?;
+        OffsetPubkeyIter::new(self.programs, txn, &Pubkey::default()) // we don't care about pubkey
     }
 
     /// Check whether allocation of given size (in blocks) exists those
@@ -204,7 +217,7 @@ impl AdbIndex {
         let (_, val) =
             cursor.get(Some(&blocks.to_le_bytes()), None, MDB_SET_RANGE_OP)?;
 
-        let (offset, blocks) = bitpack!(val, u32, u32);
+        let (offset, blocks) = bytepack!(val, u32, u32);
         // delete the allocation record from recyclable list
         cursor.del(WEMPTY)?;
 
@@ -286,13 +299,13 @@ impl StandaloneIndex {
     }
 }
 
-pub(crate) struct OffsetIterator<'env> {
+pub(crate) struct OffsetPubkeyIter<'env, const S: u32, const N: u32> {
     _txn: RoTransaction<'env>,
     cursor: RoCursor<'env>,
     terminated: bool,
 }
 
-impl<'a> OffsetIterator<'a> {
+impl<'a, const S: u32, const N: u32> OffsetPubkeyIter<'a, S, N> {
     fn new(
         db: Database,
         txn: RoTransaction<'a>,
@@ -302,8 +315,8 @@ impl<'a> OffsetIterator<'a> {
         // nasty/neat trick for lifetime erasure, but we are upholding
         // the rust's  ownership contracts by keeping txn around
         let cursor: RoCursor = unsafe { std::mem::transmute(cursor) };
-        // jump to the first entry of given program's accounts list
-        cursor.get(Some(pubkey.as_ref()), None, MDB_SET_OP)?;
+        // jump to the first entry, key might be ignored depending on OP
+        cursor.get(Some(pubkey.as_ref()), None, S)?;
         Ok(Self {
             _txn: txn,
             cursor,
@@ -312,20 +325,20 @@ impl<'a> OffsetIterator<'a> {
     }
 }
 
-impl Iterator for OffsetIterator<'_> {
+impl<const S: u32, const N: u32> Iterator for OffsetPubkeyIter<'_, S, N> {
     type Item = (u32, Pubkey);
     fn next(&mut self) -> Option<Self::Item> {
         (!self.terminated).then_some(())?;
         match self.cursor.get(None, None, MDB_GET_CURRENT_OP) {
             Ok(entry) => {
                 // advance the cursor,
-                let advance = self.cursor.get(None, None, MDB_NEXT_DUP_OP);
-                // if we move past the current key, NotFound will be triggered
-                // by MDB_NEXT_DUP_OP, and we can terminate the iteration
+                let advance = self.cursor.get(None, None, N);
+                // if we move past the iterable range, NotFound will be
+                // triggered by OP, and we can terminate the iteration
                 if let Err(lmdb::Error::NotFound) = advance {
                     self.terminated = true;
                 }
-                Some(bitpack!(entry.1, u32, Pubkey))
+                Some(bytepack!(entry.1, u32, Pubkey))
             }
             Err(error) => {
                 log::warn!("error advancing offset iterator cursor: {error}");

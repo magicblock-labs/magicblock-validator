@@ -402,12 +402,10 @@ impl Bank {
         slot_status_notifier: Option<SlotStatusNotifierImpl>,
         millis_per_slot: u64,
         identity_id: Pubkey,
+        lock: StWLock,
     ) -> Self {
-        // TODO(bmuddha): for now this lock is doing nothing, as we are running in a single
-        // threaded mode, we don't need to worry about locks. But when we transition to
-        // multi-threaded mode with multiple SVM workers, every transaction should acquire the read
-        // guard on this lock before executing.
-        let lock = StWLock::default();
+        // TODO(bmuddha): When we transition to multi-threaded mode with multiple SVM workers,
+        // every transaction should acquire the read guard on this lock before executing.
         let accounts_db = match AccountsDb::new(accountsdb_config, lock) {
             Ok(adb) => adb,
             Err(error) => {

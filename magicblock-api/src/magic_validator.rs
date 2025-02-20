@@ -59,6 +59,7 @@ use magicblock_geyser_plugin::rpc::GeyserRpcService;
 use magicblock_ledger::{blockstore_processor::process_ledger, Ledger};
 use magicblock_metrics::MetricsService;
 use magicblock_perf_service::SamplePerformanceService;
+use magicblock_processor::execute_transaction::TRANSACTION_INDEX_LOCK;
 use magicblock_program::{init_persister, validator};
 use magicblock_pubsub::pubsub_service::{
     PubsubConfig, PubsubService, PubsubServiceCloseHandle,
@@ -344,6 +345,7 @@ impl MagicValidator {
         validator_pubkey: Pubkey,
     ) -> Arc<Bank> {
         let runtime_config = Default::default();
+        let lock = TRANSACTION_INDEX_LOCK.clone();
         let bank = Bank::new(
             genesis_config,
             runtime_config,
@@ -355,6 +357,7 @@ impl MagicValidator {
             geyser_manager.map(SlotStatusNotifierImpl::new),
             millis_per_slot,
             validator_pubkey,
+            lock,
         );
         bank.transaction_log_collector_config
             .write()

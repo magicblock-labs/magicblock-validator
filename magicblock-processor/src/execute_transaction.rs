@@ -1,6 +1,7 @@
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::Arc;
 
 use lazy_static::lazy_static;
+use magicblock_accounts_db::StWLock;
 use magicblock_bank::bank::Bank;
 use magicblock_transaction_status::TransactionStatusSender;
 use solana_sdk::{
@@ -26,11 +27,7 @@ pub fn execute_legacy_transaction(
 }
 
 lazy_static! {
-    static ref TRANSACTION_INDEX_MUTEX: Mutex<usize> = Mutex::new(0);
-}
-
-pub fn lock_transactions() -> MutexGuard<'static, usize> {
-    TRANSACTION_INDEX_MUTEX.lock().unwrap()
+    pub static ref TRANSACTION_INDEX_LOCK: StWLock = StWLock::default();
 }
 
 pub fn execute_sanitized_transaction(
@@ -48,7 +45,11 @@ pub fn execute_sanitized_transaction(
     // If we choose this as a long term solution we need to lock simulations/preflight with the
     // same mutex once we enable them again
     // Work tracked here: https://github.com/magicblock-labs/magicblock-validator/issues/181
-    let mut transaction_index_locked = TRANSACTION_INDEX_MUTEX.lock().unwrap();
+    //
+    // NOTE(bmuddha): this lock is also held in AccountsDB and
+    // during snapshotting it will acquire write guard, effectively
+    // halting all txn executions for the duration of lock
+    let _execution_guard = TRANSACTION_INDEX_LOCK.read();
 
     let batch = bank.prepare_sanitized_batch(txs);
 
@@ -57,13 +58,9 @@ pub fn execute_sanitized_transaction(
         // TODO: figure out how to properly derive transaction_indexes (index within the slot)
         // - This is important for the ledger history of each slot
         // - tracked: https://github.com/magicblock-labs/magicblock-validator/issues/201
-        transaction_indexes: txs
-            .iter()
-            .map(|_| {
-                *transaction_index_locked += 1;
-                *transaction_index_locked
-            })
-            .collect(),
+        //
+        // copied from agave/ledger/benches/blockstore_processor.rs:147
+        transaction_indexes: (0..txs.len()).collect(),
     };
     let mut timings = Default::default();
     execute_batch(
