@@ -24,6 +24,7 @@ use solana_sdk::{
     account::{Account, ReadableAccount},
     bpf_loader_upgradeable::{self, get_program_data_address},
     clock::Slot,
+    pubkey,
     pubkey::Pubkey,
     signature::Signature,
 };
@@ -276,7 +277,7 @@ where
         // TODO(GabrielePicco): Make the concurrency configurable
         stream
             .map(Ok::<_, AccountClonerError>)
-            .try_for_each_concurrent(30, |(pubkey, owner)| async move {
+            .try_for_each_concurrent(100, |(pubkey, owner)| async move {
                 trace!("Hydrating '{}'", pubkey);
                 let res = self
                     .do_clone_and_update_cache(
@@ -613,7 +614,20 @@ where
                         at_slot: account_chain_snapshot.at_slot,
                     });
                 }
-                if !stage.should_clone_delegated_account(delegation_record) {
+                println!("Delegated account: {}", pubkey);
+                println!("Delegated record owned: {}", delegation_record.owner);
+                println!(
+                    "Account: {:?}",
+                    self.internal_account_provider.get_account(pubkey).unwrap()
+                );
+                if !stage.should_clone_delegated_account(delegation_record)
+                    && self
+                        .internal_account_provider
+                        .get_account(pubkey)
+                        .is_some_and(|acc| {
+                            acc.owner().eq(&delegation_record.owner)
+                        })
+                {
                     // NOTE: the account was already cloned when the initial instance of this
                     // validator ran. We don't want to clone it again during ledger replay, however
                     // we want to use it as a delegated + cloned account, thus we respond in the
@@ -625,6 +639,7 @@ where
                         signature: Signature::new_unique(),
                     });
                 }
+
                 self.do_clone_delegated_account(
                     pubkey,
                     // TODO(GabrielePicco): Avoid cloning

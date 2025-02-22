@@ -316,6 +316,7 @@ impl AccountsPersister {
                     StorageAccess::Mmap,
                 ) {
                     Ok((append_vec, num_accounts)) => {
+                        debug!("Loading storage from {:?}", file);
                         let accounts = AccountsFile::AppendVec(append_vec);
                         let storage = AccountStorageEntry::new_existing(
                             slot,
