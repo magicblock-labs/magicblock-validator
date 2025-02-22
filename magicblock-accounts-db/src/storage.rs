@@ -7,7 +7,7 @@ use std::{
 
 use memmap2::MmapMut;
 
-use crate::{index::RecycledAllocation, AdbConfig, AdbResult};
+use crate::{index::ExistingAllocation, AdbConfig, AdbResult};
 
 pub(crate) struct Allocation {
     pub(crate) storage: *mut u8,
@@ -103,7 +103,7 @@ impl AccountsStorage {
         }
     }
 
-    pub(crate) fn recycle(&self, recycled: RecycledAllocation) -> Allocation {
+    pub(crate) fn recycle(&self, recycled: ExistingAllocation) -> Allocation {
         let offset = recycled.offset as usize * self.block_size();
         let storage = unsafe { self.store.add(offset) };
         Allocation {

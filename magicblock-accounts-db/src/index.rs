@@ -109,18 +109,18 @@ impl AdbIndex {
     }
 
     /// Retrieve the offset and the size (number of blocks) given account occupies
-    fn get_offset_and_blocks(
+    fn get_allocation(
         &self,
         txn: &RwTransaction,
         pubkey: &Pubkey,
-    ) -> AdbResult<(u32, u32)> {
+    ) -> AdbResult<ExistingAllocation> {
         let slice = txn.get(self.accounts, pubkey)?;
         let ptr = slice.as_ptr();
         let offset = unsafe { (ptr as *const u32).read_unaligned() };
         let blocks = unsafe {
             (ptr.add(size_of::<u32>()) as *const u32).read_unaligned()
         };
-        Ok((offset, blocks))
+        Ok(ExistingAllocation { offset, blocks })
     }
 
     /// Insert account's allocation information into various indices, if
@@ -130,7 +130,7 @@ impl AdbIndex {
         pubkey: &Pubkey,
         owner: &Pubkey,
         allocation: Allocation,
-    ) -> AdbResult<Option<u32>> {
+    ) -> AdbResult<Option<ExistingAllocation>> {
         let Allocation { offset, blocks, .. } = allocation;
 
         let mut txn = self.env.begin_rw_txn()?;
@@ -147,11 +147,11 @@ impl AdbIndex {
                 WriteFlags::NO_OVERWRITE,
             );
             // if the account does exist, then it already occupies space in main storage
-            let (offset, blocks) = match result {
+            let allocation = match result {
                 Ok(_) => break 'insert,
                 // retrieve the size and offset for allocation
                 Err(lmdb::Error::KeyExist) => {
-                    self.get_offset_and_blocks(&txn, pubkey)?
+                    self.get_allocation(&txn, pubkey)?
                 }
                 Err(other) => return Err(other.into()),
             };
@@ -159,23 +159,27 @@ impl AdbIndex {
             // and put it into deallocation index, so the space can be recycled later
             self.deallocations.put(
                 blocks.to_le_bytes(),
-                bytepack!(offset, u32, blocks, u32),
+                bytepack!(allocation.offset, u32, allocation.blocks, u32),
             )?;
-            dealloc.replace(blocks);
             // we also need to delete old entry from programs index
             let mut cursor = txn.open_rw_cursor(self.programs)?;
             // NOTE: we don't use txn.del here because
             // it just segfaults, reason is unclear
-            cursor.get(
-                Some(owner.as_ref()),
-                Some(&bytepack!(offset, u32, *pubkey, Pubkey)),
-                MDB_GET_BOTH_OP,
-            )?;
-            cursor.del(WriteFlags::empty()).unwrap();
+            let found = cursor
+                .get(
+                    Some(owner.as_ref()),
+                    Some(&bytepack!(allocation.offset, u32, *pubkey, Pubkey)),
+                    MDB_GET_BOTH_OP,
+                )
+                .is_ok();
+            if found {
+                cursor.del(WriteFlags::empty())?;
+            }
             drop(cursor);
 
             // and finally overwrite the index record
             txn.put(self.accounts, pubkey, &index, WEMPTY)?;
+            dealloc.replace(allocation);
         }
         // track the account via programs' index as well
         txn.put(self.programs, owner, &offset_and_pubkey, WEMPTY)?;
@@ -208,7 +212,7 @@ impl AdbIndex {
     pub(crate) fn allocation_exists(
         &self,
         blocks: u32,
-    ) -> AdbResult<RecycledAllocation> {
+    ) -> AdbResult<ExistingAllocation> {
         let mut txn = self.deallocations.rwtxn()?;
         let mut cursor = txn.open_rw_cursor(self.deallocations.db)?;
         // this is a neat lmdb trick where we can search for entry with matching
@@ -224,7 +228,7 @@ impl AdbIndex {
         drop(cursor);
         txn.commit()?;
 
-        Ok(RecycledAllocation { offset, blocks })
+        Ok(ExistingAllocation { offset, blocks })
     }
 
     pub(crate) fn flush(&self) {
@@ -299,6 +303,11 @@ impl StandaloneIndex {
     }
 }
 
+/// Iterator over pubkeys and offsets, where accounts
+/// for those pubkeys can be found in database
+///
+/// S: Starting position operation, determines where to place cursor initially
+/// N: Next position operation, determines where to move cursor next
 pub(crate) struct OffsetPubkeyIter<'env, const S: u32, const N: u32> {
     _txn: RoTransaction<'env>,
     cursor: RoCursor<'env>,
@@ -372,7 +381,7 @@ fn env(
         .open_with_permissions(&path, 0o644)
 }
 
-pub(crate) struct RecycledAllocation {
+pub(crate) struct ExistingAllocation {
     pub(crate) offset: u32,
     pub(crate) blocks: u32,
 }

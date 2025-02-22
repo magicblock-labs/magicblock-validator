@@ -47,7 +47,7 @@ use solana_sdk::{
     epoch_schedule::EpochSchedule,
     feature,
     feature_set::{self, FeatureSet},
-    fee::{FeeBudgetLimits, FeeStructure},
+    fee::{FeeBudgetLimits, FeeDetails, FeeStructure},
     fee_calculator::FeeRateGovernor,
     genesis_config::GenesisConfig,
     hash::{Hash, Hasher},
@@ -116,6 +116,7 @@ use crate::{
         TransactionBalances, TransactionBalancesSet,
     },
     transaction_simulation::TransactionSimulationResult,
+    LAMPORTS_PER_SIGNATURE,
 };
 
 pub type BankStatusCache = StatusCache<Result<()>>;
@@ -354,6 +355,22 @@ impl TransactionProcessingCallback for Bank {
     ) {
         // we don't need inspections
     }
+
+    fn calculate_fee(
+        &self,
+        message: &impl SVMMessage,
+        lamports_per_signature: u64,
+        prioritization_fee: u64,
+        feature_set: &FeatureSet,
+    ) -> FeeDetails {
+        solana_fee::calculate_fee_details(
+            message,
+            false, /* zero_fees_for_test */
+            lamports_per_signature,
+            prioritization_fee,
+            FeeFeatures::from(feature_set),
+        )
+    }
 }
 
 #[derive(Default)]
@@ -475,7 +492,10 @@ impl Bank {
             >::default(),
             transaction_log_collector:
                 Arc::<RwLock<TransactionLogCollector>>::default(),
-            fee_structure: FeeStructure::default(),
+            fee_structure: FeeStructure {
+                lamports_per_signature: LAMPORTS_PER_SIGNATURE,
+                ..Default::default()
+            },
             transaction_processor: Default::default(),
             fork_graph: Arc::<RwLock<SimpleForkGraph>>::default(),
             status_cache: Arc::new(RwLock::new(BankStatusCache::new(max_age))),
@@ -496,7 +516,10 @@ impl Bank {
             // Genesis related
             accounts_data_size_initial: 0,
             capitalization: AtomicU64::default(),
-            fee_rate_governor: FeeRateGovernor::default(),
+            fee_rate_governor: FeeRateGovernor {
+                lamports_per_signature: LAMPORTS_PER_SIGNATURE,
+                ..Default::default()
+            },
             max_tick_height: u64::default(),
             hashes_per_tick: Option::<u64>::default(),
             ticks_per_slot: u64::default(),
@@ -1121,7 +1144,7 @@ impl Bank {
     where
         F: Fn(&Option<AccountSharedData>) -> AccountSharedData,
     {
-        // TODO(bmuddha) @@@: this code creates new account, while we could just tweak the account
+        // TODO(bmuddha) @@@: this code creates a new account, while we could just tweak the account
         // in place, rewrite the entire call chain to leverage that feature
         let old_account = self.get_account(pubkey);
         let mut new_account = updater(&old_account);

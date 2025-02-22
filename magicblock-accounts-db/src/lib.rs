@@ -20,18 +20,18 @@ static mut SNAPSHOT_FREQUENCY: u64 = 0;
 
 macro_rules! inspecterr {
     ($result: expr, $msg: expr) => {
-        $result.inspect_err(|err| log::warn!("adb - {} error: {err}", $msg))?
+        $result.inspect_err(|err| eprintln!("adb - {} error: {err}", $msg))?
     };
     ($result: expr, $msg: expr, @option) => {
         $result
-            .inspect_err(|err| log::warn!("adb - {} error: {err}", $msg))
+            .inspect_err(|err| eprintln!("adb - {} error: {err}", $msg))
             .ok()?
     };
     ($result: expr, $msg: expr, @silent) => {
         match $result {
             Ok(v) => v,
             Err(error) => {
-                log::warn!("adb - {} error: {error}", $msg);
+                eprintln!("adb - {} error: {error}", $msg);
                 return;
             }
         }
@@ -117,7 +117,6 @@ impl AccountsDb {
                 let allocation = match self.index.allocation_exists(blocks) {
                     // if we could recycle some "hole" in database, use it
                     Ok(recycled) => {
-                        println!("recycled the storage");
                         // bookkeeping for deallocated(free hole) space
                         self.storage.decrement_deallocations(recycled.blocks);
                         self.storage.recycle(recycled)
@@ -147,9 +146,8 @@ impl AccountsDb {
                     @silent
                 );
                 if let Some(dealloc) = dealloc {
-                    println!("deallocated {dealloc} blocks");
                     // bookkeeping for deallocated (free hole) space
-                    self.storage.increment_deallocations(dealloc);
+                    self.storage.increment_deallocations(dealloc.blocks);
                 }
             }
         }
