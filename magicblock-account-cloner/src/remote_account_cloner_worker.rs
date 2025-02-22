@@ -24,7 +24,6 @@ use solana_sdk::{
     account::{Account, ReadableAccount},
     bpf_loader_upgradeable::{self, get_program_data_address},
     clock::Slot,
-    pubkey,
     pubkey::Pubkey,
     signature::Signature,
 };
@@ -614,12 +613,6 @@ where
                         at_slot: account_chain_snapshot.at_slot,
                     });
                 }
-                println!("Delegated account: {}", pubkey);
-                println!("Delegated record owned: {}", delegation_record.owner);
-                println!(
-                    "Account: {:?}",
-                    self.internal_account_provider.get_account(pubkey).unwrap()
-                );
                 if !stage.should_clone_delegated_account(delegation_record)
                     && self
                         .internal_account_provider
