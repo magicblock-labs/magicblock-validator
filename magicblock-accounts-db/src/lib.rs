@@ -53,6 +53,10 @@ pub struct AccountsDb {
 impl AccountsDb {
     /// Open or create accounts database
     pub fn new(config: &AdbConfig, lock: StWLock) -> AdbResult<Self> {
+        inspecterr!(
+            std::fs::create_dir_all(&config.directory),
+            "ensuring existence of accountsdb directory"
+        );
         let storage =
             inspecterr!(AccountsStorage::new(config), "storage creation");
         let index = inspecterr!(AdbIndex::new(config), "index creation");
@@ -83,10 +87,7 @@ impl AccountsDb {
     }
 
     pub fn get_account(&self, pubkey: &Pubkey) -> AdbResult<AccountSharedData> {
-        let offset = inspecterr!(
-            self.index.get_account_offset(pubkey),
-            "account offset retrieval from index"
-        );
+        let offset = self.index.get_account_offset(pubkey)?;
         let memptr = self.storage.offset(offset);
         let account =
             unsafe { AccountSharedData::deserialize_from_mmap(memptr) };
@@ -158,10 +159,7 @@ impl AccountsDb {
         account: &Pubkey,
         owners: &[Pubkey],
     ) -> AdbResult<usize> {
-        let offset = inspecterr!(
-            self.index.get_account_offset(account),
-            "account offset retrieval from index"
-        );
+        let offset = self.index.get_account_offset(account)?;
         let memptr = self.storage.offset(offset);
         // safety: memptr is obtained from storage directly,
         // which maintains the integrety of account records

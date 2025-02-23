@@ -26,7 +26,7 @@ cleanass = "0.0.1"
 ephemeral-rollups-sdk = { path = "../../ephemeral-rollups-sdk/rust/sdk" }
 integration-test-tools = { path = "test-tools" }
 log = "0.4.20"
-magicblock-accounts-db = { path = "../magicblock-accounts-db" }
+magicblock-accounts-db = { path = "../magicblock-accounts-db", features = [ "dev-tools" ] }
 magicblock-config = { path = "../magicblock-config" }
 magicblock-core = { path = "../magicblock-core" }
 program-flexi-counter = { path = "./programs/flexi-counter" }

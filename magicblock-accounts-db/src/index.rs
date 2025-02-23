@@ -163,8 +163,8 @@ impl AdbIndex {
             )?;
             // we also need to delete old entry from programs index
             let mut cursor = txn.open_rw_cursor(self.programs)?;
-            // NOTE: we don't use txn.del here because
-            // it just segfaults, reason is unclear
+            // if we cannot locate owner/offset:pubkey combo,
+            // that means that owner have changed
             let found = cursor
                 .get(
                     Some(owner.as_ref()),
@@ -173,6 +173,8 @@ impl AdbIndex {
                 )
                 .is_ok();
             if found {
+                // NOTE: we don't use txn.del here because
+                // it just segfaults, reason is unclear
                 cursor.del(WriteFlags::empty())?;
             }
             drop(cursor);

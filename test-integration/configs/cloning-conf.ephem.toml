@@ -3,6 +3,25 @@ remote = "http://0.0.0.0:7799"
 lifecycle = "ephemeral"
 commit = { frequency_millis = 500_000, compute_unit_price = 1_000_000 }
 
+[accounts.db]
+# path to root directory where database files are stored
+directory = "/tmp/accounts-db"
+# size of the main storage, we have to preallocate in advance
+# it's advised to set this value based on formula 1KB * N * 3, 
+# where N is the number of accounts expected to be stored in 
+# database, e.g. for million accounts this would be 3GB
+db-size = 104857600 # 100 MB
+# minimal indivisible unit of addressing in main storage
+# offsets are calculated in terms of blocks
+block-size = "block256" # possible values block128 | block256 | block512
+# size of index file, we have to preallocate, 
+# can be as low as 1% of main storage size, but setting it to higher values won't hurt
+index-map-size = 2048576
+# max number of snapshots to keep around
+max-snapshots = 7
+# how frequently (slot-wise) we should take snapshots
+snapshot-frequency = 1024
+
 [rpc]
 port = 8899
 
