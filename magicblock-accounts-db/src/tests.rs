@@ -97,9 +97,9 @@ fn test_account_resize() {
 #[test]
 fn test_alloc_reuse() {
     let DbWithAcc { adb, mut acc } = init_db_with_acc();
-    let huge_date = [42; SPACE * 2];
+    let huge_data = [42; SPACE * 2];
 
-    acc.account.set_data_from_slice(&huge_date);
+    acc.account.set_data_from_slice(&huge_data);
 
     let acc_committed = adb
         .get_account(&acc.pubkey)
@@ -118,6 +118,18 @@ fn test_alloc_reuse() {
         acc_alloc_reused.data().as_ptr(),
         old_addr,
         "new account insertion should have reused the allocation"
+    );
+
+    let (pk3, acc3) = account();
+    adb.insert_account(&pk3, &acc3);
+
+    let new_alloc = adb
+        .get_account(&pk3)
+        .expect("second account should be in database");
+
+    assert!(
+        new_alloc.data().as_ptr() > acc_alloc_reused.data().as_ptr(),
+        "last account insertion should have been freshly allocated"
     );
 }
 

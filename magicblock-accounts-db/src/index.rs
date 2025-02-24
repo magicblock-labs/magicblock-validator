@@ -149,6 +149,8 @@ impl AdbIndex {
             };
 
             // and put it into deallocation index, so the space can be recycled later
+            //
+            // NOTE: we use Big Endian here to enforce alphabetical ordering of keys
             self.deallocations.put(
                 allocation.blocks.to_be_bytes(),
                 bytepack!(allocation.offset, u32, allocation.blocks, u32),
@@ -212,16 +214,12 @@ impl AdbIndex {
         // this is a neat lmdb trick where we can search for entry with matching
         // or greater key since we are interested in any allocation of at least
         // `blocks` size or greater, this works perfectly well for this case
-        let (key, val) =
+        //
+        // NOTE: we use Big Endian here to enforce alphabetical ordering of keys
+        let (_, val) =
             cursor.get(Some(&b.to_be_bytes()), None, MDB_SET_RANGE_OP)?;
 
         let (offset, blocks) = bytepack!(val, u32, u32);
-        println!(
-            "requested {:?} - {:?}/{:?} - {offset}:{blocks}",
-            b.to_be_bytes(),
-            key,
-            val
-        );
         // delete the allocation record from recycleable list
         cursor.del(WEMPTY)?;
 
