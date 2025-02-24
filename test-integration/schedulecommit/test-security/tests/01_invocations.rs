@@ -124,7 +124,7 @@ fn test_schedule_commit_directly_mapped_signing_feepayer() {
         payer.pubkey(),
         pubkey_from_magic_program(magic_program::id()),
         pubkey_from_magic_program(magic_program::MAGIC_CONTEXT_PUBKEY),
-        &vec![payer.pubkey()],
+        &[payer.pubkey()],
     );
 
     let tx = Transaction::new_signed_with_payer(

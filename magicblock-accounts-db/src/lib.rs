@@ -91,6 +91,19 @@ impl AccountsDb {
         let memptr = self.storage.offset(offset);
         let account =
             unsafe { AccountSharedData::deserialize_from_mmap(memptr) };
+        let account = AccountSharedData::from(account);
+        //if *pubkey
+        //    == Pubkey::from_str_const(
+        //        "MagicContext1111111111111111111111111111111",
+        //    )
+        //{
+        println!(
+            "retrieving {pubkey} from {} -> {:?}. SIZE: {}",
+            offset,
+            memptr,
+            account.data().len()
+        );
+        //}
         Ok(account.into())
     }
 
@@ -130,6 +143,17 @@ impl AccountsDb {
                         return;
                     }
                 };
+                //if *pubkey
+                //    == Pubkey::from_str_const(
+                //        "MagicContext1111111111111111111111111111111",
+                //    )
+                //{
+                println!(
+                    "inserting {pubkey} with {size}/{blocks}/{} at {} -> {:?}",
+                    allocation.blocks, allocation.offset, allocation.storage
+                );
+                //}
+
                 unsafe {
                     AccountSharedData::serialize_to_mmap(
                         acc,

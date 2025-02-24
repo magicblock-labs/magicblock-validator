@@ -12,7 +12,7 @@ directory = "/tmp/accounts-db"
 # it's advised to set this value based on formula 1KB * N * 3, 
 # where N is the number of accounts expected to be stored in 
 # database, e.g. for million accounts this would be 3GB
-db-size = 104857600 # 100 MB
+db-size = 1048576000 # 1GB
 # minimal indivisible unit of addressing in main storage
 # offsets are calculated in terms of blocks
 block-size = "block256" # possible values block128 | block256 | block512

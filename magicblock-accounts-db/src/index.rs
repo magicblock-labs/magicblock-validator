@@ -9,23 +9,23 @@ use solana_pubkey::Pubkey;
 use crate::{storage::Allocation, AdbConfig, AdbResult};
 
 const WEMPTY: WriteFlags = WriteFlags::empty();
-// LMDB cursor operations, have to copy paste them, as they are not exposed in pubic API
-// https://github.com/mozilla/lmdb-rs/blob/946167603dd6806f3733e18f01a89cee21888468/lmdb-sys/src/bindings.rs#L158
-// Used for prefix search
+/// LMDB cursor operations, have to copy paste them, as they are not exposed in pubic API
+/// https://github.com/mozilla/lmdb-rs/blob/946167603dd6806f3733e18f01a89cee21888468/lmdb-sys/src/bindings.rs#L158
+/// Used for prefix search
 const MDB_SET_RANGE_OP: u32 = 17;
-// Used for positioning at the provided key
+/// Used for positioning at the provided key
 const MDB_SET_OP: u32 = 15;
-// Used for positioning at first element in database (B-Tree sorted)
+/// Used for positioning at first element in database (B-Tree sorted)
 const MDB_FIRST_OP: u32 = 0;
-// Used for stepping on to the next key
+/// Used for stepping on to the next key
 const MDB_NEXT_OP: u32 = 8;
-// Used for stepping forward to the next duplicate key
+/// Used for stepping forward to the next duplicate key
 const MDB_NEXT_DUP_OP: u32 = 9;
-// Used for retrieving the entry at current cursor position
+/// Used for retrieving the entry at current cursor position
 const MDB_GET_CURRENT_OP: u32 = 4;
-// Used for positioning the cursor at key/value entry (DUP_SORT)
+/// Used for positioning the cursor at key/value entry (DUP_SORT)
 const MDB_GET_BOTH_OP: u32 = 2;
-// Used for stepping back to the previous key
+// /// Used for stepping back to the previous key
 //const MDB_PREV_OP: u32 = 12;
 
 const ACCOUNTS_PATH: &str = "accounts";
@@ -56,10 +56,8 @@ macro_rules! bytepack {
         const S2: usize = size_of::<$t2>();
         let mut buffer = [0; S1 + S2];
         let ptr = buffer.as_mut_ptr();
-        let p1 = &$hi as *const $t1 as *const u8;
-        let p2 = &$low as *const $t2 as *const u8;
-        unsafe { ptr.copy_from_nonoverlapping(p1, S1) };
-        unsafe { ptr.add(S1).copy_from_nonoverlapping(p2, S2) };
+        unsafe { (ptr as *mut $t1).write_unaligned($hi) };
+        unsafe { (ptr.add(S1) as *mut $t2).write_unaligned($low) };
         buffer
     }};
     ($packed: expr,  $t1: ty, $t2: ty) => {{
@@ -87,9 +85,7 @@ impl AdbIndex {
             DEALLOCATIONS_PATH,
             &config.directory,
             config.index_map_size,
-            DatabaseFlags::INTEGER_KEY
-                | DatabaseFlags::DUP_SORT
-                | DatabaseFlags::DUP_FIXED,
+            DatabaseFlags::DUP_SORT | DatabaseFlags::DUP_FIXED,
         )?;
         Ok(Self {
             accounts,
@@ -115,11 +111,7 @@ impl AdbIndex {
         pubkey: &Pubkey,
     ) -> AdbResult<ExistingAllocation> {
         let slice = txn.get(self.accounts, pubkey)?;
-        let ptr = slice.as_ptr();
-        let offset = unsafe { (ptr as *const u32).read_unaligned() };
-        let blocks = unsafe {
-            (ptr.add(size_of::<u32>()) as *const u32).read_unaligned()
-        };
+        let (offset, blocks) = bytepack!(slice, u32, u32);
         Ok(ExistingAllocation { offset, blocks })
     }
 
@@ -158,7 +150,7 @@ impl AdbIndex {
 
             // and put it into deallocation index, so the space can be recycled later
             self.deallocations.put(
-                blocks.to_le_bytes(),
+                allocation.blocks.to_be_bytes(),
                 bytepack!(allocation.offset, u32, allocation.blocks, u32),
             )?;
             // we also need to delete old entry from programs index
@@ -213,18 +205,24 @@ impl AdbIndex {
     /// allocations are leftovers from account movements due to resizing
     pub(crate) fn allocation_exists(
         &self,
-        blocks: u32,
+        b: u32,
     ) -> AdbResult<ExistingAllocation> {
         let mut txn = self.deallocations.rwtxn()?;
         let mut cursor = txn.open_rw_cursor(self.deallocations.db)?;
         // this is a neat lmdb trick where we can search for entry with matching
         // or greater key since we are interested in any allocation of at least
         // `blocks` size or greater, this works perfectly well for this case
-        let (_, val) =
-            cursor.get(Some(&blocks.to_le_bytes()), None, MDB_SET_RANGE_OP)?;
+        let (key, val) =
+            cursor.get(Some(&b.to_be_bytes()), None, MDB_SET_RANGE_OP)?;
 
         let (offset, blocks) = bytepack!(val, u32, u32);
-        // delete the allocation record from recyclable list
+        println!(
+            "requested {:?} - {:?}/{:?} - {offset}:{blocks}",
+            b.to_be_bytes(),
+            key,
+            val
+        );
+        // delete the allocation record from recycleable list
         cursor.del(WEMPTY)?;
 
         drop(cursor);
@@ -258,9 +256,7 @@ impl AdbIndex {
             DEALLOCATIONS_PATH,
             dbpath,
             size,
-            DatabaseFlags::INTEGER_KEY
-                | DatabaseFlags::DUP_SORT
-                | DatabaseFlags::DUP_FIXED,
+            DatabaseFlags::DUP_SORT | DatabaseFlags::DUP_FIXED,
         )?;
         self.env = env;
         self.accounts = accounts;
