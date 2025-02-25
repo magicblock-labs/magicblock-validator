@@ -134,6 +134,46 @@ fn test_alloc_reuse() {
 }
 
 #[test]
+fn test_larger_alloc_reuse() {
+    let DbWithAcc { adb, mut acc } = init_db_with_acc();
+
+    let mut huge_data = vec![42; SPACE * 2];
+    acc.account.set_data_from_slice(&huge_data);
+    adb.insert_account(&acc.pubkey, &acc.account);
+
+    let (pk2, mut acc2) = account();
+    adb.insert_account(&pk2, &acc2);
+    acc2.set_data_from_slice(&huge_data);
+    adb.insert_account(&pk2, &acc2);
+
+    let (pk3, mut acc3) = account();
+    huge_data = vec![42; SPACE * 4];
+    acc3.set_data_from_slice(&huge_data);
+    adb.insert_account(&pk3, &acc3);
+    acc3 = adb
+        .get_account(&pk3)
+        .expect("third account should be in database");
+    let alloc_addr = acc3.data().as_ptr();
+    huge_data = vec![42; SPACE * 5];
+    acc3.set_data_from_slice(&huge_data);
+    adb.insert_account(&pk3, &acc3);
+
+    let (pk4, mut acc4) = account();
+    huge_data = vec![42; SPACE * 3];
+    acc4.set_data_from_slice(&huge_data);
+    adb.insert_account(&pk4, &acc4);
+    acc4 = adb
+        .get_account(&pk4)
+        .expect("fourth account should be in database");
+
+    assert_eq!(
+        acc4.data().as_ptr(),
+        alloc_addr,
+        "fourth account should have reused the allocation from third one"
+    );
+}
+
+#[test]
 fn test_get_program_accounts() {
     let DbWithAcc { adb, acc } = init_db_with_acc();
     let accounts = adb.get_program_accounts(&OWNER, |_| true);
