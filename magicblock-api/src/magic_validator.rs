@@ -665,9 +665,13 @@ impl MagicValidator {
         self.rpc_service.close();
         PubsubService::close(&self.pubsub_close_handle);
         self.token.cancel();
+
+        // we have two memory mapped databases, flush them to disk before exitting
+        self.bank.flush();
+        self.ledger.flush();
     }
 
-    pub fn join(&self) {
+    pub fn join(self) {
         self.rpc_service.join().unwrap();
         if let Some(x) = self.pubsub_handle.write().unwrap().take() {
             x.join().unwrap()

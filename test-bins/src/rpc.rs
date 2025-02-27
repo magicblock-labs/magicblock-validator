@@ -91,7 +91,18 @@ async fn main() {
         ledger::lock_ledger(api.ledger().ledger_path(), &mut ledger_lock);
 
     api.start().await.expect("Failed to start validator");
-    api.join();
+    // validator is supposed to run forever, so we wait for
+    // termination signal to initiate a graceful shutdown
+    let _ = tokio::signal::ctrl_c().await;
+
+    info!("SIGTERM has been received, initiating graceful shutdown");
+    // weird panic behavior in json rpc http server, which panics when stopped from
+    // within async context, so we just move it to a different thread for shutdown
+    let _ = std::thread::spawn(move || {
+        api.stop();
+        api.join();
+    })
+    .join();
 }
 
 fn validator_keypair() -> Keypair {

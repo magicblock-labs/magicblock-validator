@@ -1139,6 +1139,12 @@ impl Ledger {
             &self.account_mod_data_count,
         )
     }
+
+    pub fn flush(&self) {
+        let _ = self.db.backend.db.flush().inspect_err(|err| {
+            log::error!("failed to flush ledger (rocksdb): {err}")
+        });
+    }
 }
 
 // -----------------

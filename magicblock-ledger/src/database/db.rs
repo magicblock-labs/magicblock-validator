@@ -16,7 +16,7 @@ use crate::{errors::LedgerError, metrics::PerfSamplingStatus};
 
 #[derive(Debug)]
 pub struct Database {
-    backend: Arc<Rocks>,
+    pub(crate) backend: Arc<Rocks>,
     path: Arc<Path>,
     column_options: Arc<LedgerColumnOptions>,
 }

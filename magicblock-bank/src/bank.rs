@@ -974,7 +974,7 @@ impl Bank {
         _config: &ScanConfig,
     ) -> Vec<TransactionAccount> {
         // TODO(bmuddha): maybe handle failure (should only happen when something catastrophic took place)
-        // TODO @@@ (bmuddha): figure out how sorting works
+        // TODO(bmuddha): figure out how sorting works, if we need one
         self.adb
             .get_program_accounts(program_id, |_| true)
             .unwrap_or_default()
@@ -990,7 +990,7 @@ impl Bank {
         F: Fn(&AccountSharedData) -> bool + Send + Sync,
     {
         // TODO(bmuddha): maybe handle failure (should only happen when something catastrophic took place)
-        // TODO @@@ (bmuddha): figure out how sorting works
+        // TODO(bmuddha): figure out how sorting works, if we need one
         self.adb
             .get_program_accounts(program_id, filter)
             .unwrap_or_default()
@@ -2127,7 +2127,7 @@ impl Bank {
         &self,
         _account_keys: &AccountKeys,
     ) -> AccountOverrides {
-        // TODO(bmuddha) @@@ WTF? why bother?
+        // TODO(bmuddha) @@@ WTF? why bother if doesn't work anyway
         //
         //let mut account_overrides = AccountOverrides::default();
         //let slot_history_id = sysvar::slot_history::id();
@@ -2470,6 +2470,10 @@ impl Bank {
                 .map(|a| a.rent_epoch())
                 .unwrap_or(INITIAL_RENT_EPOCH),
         )
+    }
+
+    pub fn flush(&self) {
+        self.adb.flush(true);
     }
 }
 

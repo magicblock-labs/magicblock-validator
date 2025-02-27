@@ -300,7 +300,7 @@ impl AccountsDb {
         iter.into_iter().flatten().map(|(_, pk)| pk)
     }
 
-    fn flush(&self, sync: bool) {
+    pub fn flush(&self, sync: bool) {
         self.storage.flush(sync);
         // index is usually so small, that it takes a few ms at
         // most to flush it, so no need to schedule async flush
