@@ -2,7 +2,9 @@ use cleanass::{assert, assert_eq};
 use std::{path::Path, process::Child};
 
 use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};
-use solana_sdk::{pubkey::Pubkey, signature::Signature};
+use solana_sdk::{
+    commitment_config::CommitmentConfig, pubkey::Pubkey, signature::Signature,
+};
 use test_ledger_restore::{
     cleanup, setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
@@ -56,7 +58,11 @@ fn read_ledger(
 
     if let Some(sig) = airdrop_sig1 {
         let status = expect!(ctx.try_ephem_client(), validator)
-            .get_signature_status(sig)
+            .get_signature_status_with_commitment_and_history(
+                sig,
+                CommitmentConfig::confirmed(),
+                true,
+            )
             .unwrap()
             .unwrap();
         assert!(status.is_ok(), cleanup(&mut validator));

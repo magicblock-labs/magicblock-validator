@@ -23,7 +23,6 @@ magicblock-core = { workspace = true }
 solana-account-decoder = { workspace = true }
 solana-measure = { workspace = true }
 solana-metrics = { workspace = true }
-solana-program-runtime = { workspace = true }
 solana-sdk = { workspace = true }
 solana-svm = { workspace = true }
 solana-timings = { workspace = true }
@@ -43,7 +42,6 @@ tempfile = { workspace = true }
 test-tools-core = { workspace = true }
 
 [build-dependencies]
-rustc_version = { workspace = true }
 
 [lib]
 doctest = false

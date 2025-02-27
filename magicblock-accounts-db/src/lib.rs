@@ -25,7 +25,7 @@ macro_rules! inspecterr {
     ($result: expr, $msg: expr, @option) => {
         $result
             .inspect_err(|err| eprintln!("adb - {} error: {err}", $msg))
-            .ok()?
+            .ok()
     };
     ($result: expr, $msg: expr, @silent) => {
         match $result {
@@ -242,7 +242,10 @@ impl AccountsDb {
             // TODO: unclear what to do in such a situation, it's not like we can force snapshot at
             // this point (something must be terribly wrong, e.g. we run out of disk space), but at
             // the same time we can keep running the validator, should we just crash instead?
-            log::error!("error taking snapshot: {err}");
+            log::error!(
+                "error taking snapshot at {}-{slot}: {err}",
+                self.snap.database_path().display()
+            );
         }
     }
 
@@ -259,10 +262,14 @@ impl AccountsDb {
     pub unsafe fn ensure_at_most(&self, slot: u64) -> AdbResult<u64> {
         // TODO(bmuddha): redesign snapshot rollback in validator
         // so that this method can be called with proper &mut self
-        let current_slot = self.slot();
-        if current_slot <= slot {
-            return Ok(current_slot);
+
+        // if this is a fresh start or we just match, then there's nothing to ensure
+        if slot >= self.slot() {
+            return Ok(self.slot());
         }
+        // make sure that no one is reading the database
+        let _locked = self.lock.write();
+
         let rb_slot = inspecterr!(
             self.snap.try_switch_to_snapshot(slot),
             "switching to recent snapshot"
@@ -284,14 +291,13 @@ impl AccountsDb {
         self.storage.size()
     }
 
-    pub fn iter_all(&self) -> Option<impl Iterator<Item = Pubkey> + '_> {
-        inspecterr!(
+    pub fn iter_all(&self) -> impl Iterator<Item = Pubkey> + '_ {
+        let iter = inspecterr!(
             self.index.get_all_accounts(),
             "iterating all over all account keys",
             @option
-        )
-        .map(|(_, pk)| pk)
-        .into()
+        );
+        iter.into_iter().flatten().map(|(_, pk)| pk)
     }
 
     fn flush(&self, sync: bool) {

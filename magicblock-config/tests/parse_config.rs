@@ -1,5 +1,6 @@
 use std::net::{IpAddr, Ipv4Addr};
 
+use magicblock_accounts_db::config::AdbConfig;
 use magicblock_config::{
     AccountsConfig, AllowedProgram, CommitStrategy, EphemeralConfig,
     GeyserGrpcConfig, LedgerConfig, LifecycleMode, MetricsConfig,
@@ -14,21 +15,27 @@ fn test_empty_toml() {
     let toml = include_str!("fixtures/01_empty.toml");
     let config = toml::from_str::<EphemeralConfig>(toml).unwrap();
 
-    assert_eq!(config, EphemeralConfig::default());
+    let mut expected = EphemeralConfig::default();
+    expected.accounts.db.directory = config.accounts.db.directory.clone();
+    assert_eq!(config, expected);
 }
 
 #[test]
 fn test_defaults_toml() {
     let toml = include_str!("fixtures/02_defaults.toml");
     let config = toml::from_str::<EphemeralConfig>(toml).unwrap();
-    assert_eq!(config, EphemeralConfig::default());
+    let mut expected = EphemeralConfig::default();
+    expected.accounts.db.directory = config.accounts.db.directory.clone();
+    assert_eq!(config, expected);
 }
 
 #[test]
 fn test_local_dev_toml() {
     let toml = include_str!("fixtures/03_local-dev.toml");
     let config = toml::from_str::<EphemeralConfig>(toml).unwrap();
-    assert_eq!(config, EphemeralConfig::default());
+    let mut expected = EphemeralConfig::default();
+    expected.accounts.db.directory = config.accounts.db.directory.clone();
+    assert_eq!(config, expected);
 }
 
 #[test]
@@ -43,6 +50,10 @@ fn test_ephemeral_toml() {
                 allowed_programs: vec![AllowedProgram {
                     id: pubkey!("wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4")
                 }],
+                db: AdbConfig {
+                    directory: config.accounts.db.directory.clone(),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             ..Default::default()
@@ -59,6 +70,10 @@ fn test_all_goes_toml() {
         EphemeralConfig {
             accounts: AccountsConfig {
                 lifecycle: LifecycleMode::Replica,
+                db: AdbConfig {
+                    directory: config.accounts.db.directory.clone(),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             validator: ValidatorConfig {
@@ -86,6 +101,10 @@ fn test_local_dev_with_programs_toml() {
                 commit: CommitStrategy {
                     frequency_millis: 600_000,
                     compute_unit_price: 0,
+                },
+                db: AdbConfig {
+                    directory: config.accounts.db.directory.clone(),
+                    ..Default::default()
                 },
                 ..Default::default()
             },
@@ -133,6 +152,10 @@ fn test_custom_remote_toml() {
                 remote: RemoteConfig::Custom(
                     Url::parse("http://localhost:8899").unwrap()
                 ),
+                db: AdbConfig {
+                    directory: config.accounts.db.directory.clone(),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             ..Default::default()
@@ -153,6 +176,10 @@ fn test_custom_ws_remote_toml() {
                     Url::parse("http://localhost:8899").unwrap(),
                     Url::parse("ws://localhost:9001").unwrap()
                 ),
+                db: AdbConfig {
+                    directory: config.accounts.db.directory.clone(),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             ..Default::default()
@@ -172,6 +199,10 @@ fn test_accounts_payer() {
                     init_lamports: None,
                     init_sol: Some(2_000),
                 }),
+                db: AdbConfig {
+                    directory: config.accounts.db.directory.clone(),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             ..Default::default()
@@ -195,6 +226,10 @@ fn test_validator_with_base_fees() {
                     init_lamports: None,
                     init_sol: None,
                 }),
+                db: AdbConfig {
+                    directory: config.accounts.db.directory.clone(),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             validator: ValidatorConfig {

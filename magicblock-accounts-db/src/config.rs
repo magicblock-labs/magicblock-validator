@@ -2,7 +2,7 @@ use std::{path::PathBuf, sync::atomic::AtomicUsize};
 
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct AdbConfig {
     /// path to root directory where database files are stored
@@ -20,6 +20,13 @@ pub struct AdbConfig {
     pub snapshot_frequency: u64,
 }
 
+pub const TEST_SNAPSHOT_FREQUENCY: u64 = 50;
+impl Default for AdbConfig {
+    fn default() -> Self {
+        Self::temp_for_tests(TEST_SNAPSHOT_FREQUENCY)
+    }
+}
+
 #[derive(
     Debug, Default, Clone, Copy, PartialEq, Eq, Deserialize, Serialize,
 )]
@@ -35,10 +42,10 @@ pub enum BlockSize {
 impl AdbConfig {
     pub fn temp_for_tests(snapshot_frequency: u64) -> Self {
         use std::fs;
-        const DB_SIZE: usize = 10 * 1024 * 1024;
+        const DB_SIZE: usize = 100 * 1024 * 1024;
         const BLOCK_SIZE: BlockSize = BlockSize::Block256;
-        const INDEX_MAP_SIZE: usize = 1024 * 1024;
-        const MAX_SNAPSHOTS: u16 = 4;
+        const INDEX_MAP_SIZE: usize = 1024 * 1024 * 10;
+        const MAX_SNAPSHOTS: u16 = 32;
 
         static COUNTER: AtomicUsize = AtomicUsize::new(0);
         let i = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);

@@ -3,6 +3,7 @@ use std::{
     net::{IpAddr, Ipv4Addr},
 };
 
+use magicblock_accounts_db::config::AdbConfig;
 use magicblock_config::{
     AccountsConfig, CommitStrategy, EphemeralConfig, GeyserGrpcConfig,
     LedgerConfig, LifecycleMode, MetricsConfig, MetricsServiceConfig,
@@ -31,6 +32,10 @@ fn test_load_local_dev_with_programs_toml() {
                 commit: CommitStrategy {
                     frequency_millis: 600_000,
                     compute_unit_price: 0,
+                },
+                db: AdbConfig {
+                    directory: config.accounts.db.directory.clone(),
+                    ..Default::default()
                 },
                 ..Default::default()
             },
@@ -110,6 +115,10 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
                 commit: CommitStrategy {
                     frequency_millis: 123,
                     compute_unit_price: 1,
+                },
+                db: AdbConfig {
+                    directory: config.accounts.db.directory.clone(),
+                    ..Default::default()
                 },
                 remote: RemoteConfig::Custom(Url::parse(base_cluster).unwrap()),
                 ..Default::default()

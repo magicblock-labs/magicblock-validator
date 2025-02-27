@@ -10,7 +10,6 @@ edition.workspace = true
 [dependencies]
 crossbeam-channel = { workspace = true }
 log = { workspace = true }
-magicblock-accounts-db = { workspace = true }
 magicblock-bank = { workspace = true }
 solana-sdk = { workspace = true }
 solana-svm = { workspace = true }

@@ -28,6 +28,7 @@ pub struct AccountsConfig {
     #[serde(default)]
     pub allowed_programs: Vec<AllowedProgram>,
 
+    #[serde(default)]
     pub db: AdbConfig,
 }
 

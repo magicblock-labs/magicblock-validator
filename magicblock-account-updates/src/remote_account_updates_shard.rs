@@ -61,10 +61,10 @@ impl RemoteAccountUpdatesShard {
     ) -> Result<(), RemoteAccountUpdatesShardError> {
         // Create a pubsub client
         info!("Shard {}: Starting", self.shard_id);
-        let pubsub_client =
-            PubsubClient::new(self.rpc_provider_config.ws_url())
-                .await
-                .map_err(RemoteAccountUpdatesShardError::PubsubClientError)?;
+        let ws_url = self.rpc_provider_config.ws_url();
+        let pubsub_client = PubsubClient::new(ws_url)
+            .await
+            .map_err(RemoteAccountUpdatesShardError::PubsubClientError)?;
         // For every account, we only want the updates, not the actual content of the accounts
         let rpc_account_info_config = Some(RpcAccountInfoConfig {
             commitment: self

@@ -8,16 +8,13 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-async-trait = { workspace = true }
 conjunto-transwise = { workspace = true }
-magicblock-delegation-program = { workspace = true }
 futures-util = { workspace = true }
 log = { workspace = true }
 magicblock-account-fetcher = { workspace = true }
 magicblock-account-updates = { workspace = true }
 magicblock-account-dumper = { workspace = true }
 magicblock-accounts-api = { workspace = true }
-magicblock-bank = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-metrics = { workspace = true }
 magicblock-mutator = { workspace = true }
@@ -27,4 +24,3 @@ tokio-util = { workspace = true }
 thiserror = { workspace = true }
 
 [dev-dependencies]
-test-tools = { workspace = true }

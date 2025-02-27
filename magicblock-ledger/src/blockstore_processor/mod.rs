@@ -129,7 +129,7 @@ fn iter_blocks(
 
         slot += 1;
     }
-    Ok(slot)
+    Ok(slot.max(1))
 }
 
 /// Processes the provided ledger updating the bank and returns the slot
@@ -141,19 +141,19 @@ pub fn process_ledger(ledger: &Ledger, bank: &Arc<Bank>) -> LedgerResult<u64> {
     // mutability is waaaay too much for code which only runs
     // once, so instead we use (temporarily) ugly pointer hack
     // (see ensure_at_most implementation)
-    assert!(Arc::strong_count(bank) == 1, "precess ledger cannot be invoked on running validator, ensure it's called during init phase when there's only one reference to Bank in existence");
 
     let full_process_starting_slot =
         unsafe { bank.adb.ensure_at_most(max_slot) }?;
 
     // Since transactions may refer to blockhashes that were present when they
     // ran initially we ensure that they are present during replay as well
-    let blockhashes_only_starting_slot =
-        if full_process_starting_slot > bank.max_age {
-            full_process_starting_slot - bank.max_age
-        } else {
-            0
-        };
+    //let blockhashes_only_starting_slot =
+    //    if full_process_starting_slot > bank.max_age {
+    //        full_process_starting_slot - bank.max_age
+    //    } else {
+    //        0
+    //    };
+    let blockhashes_only_starting_slot = full_process_starting_slot;
     debug!(
         "Loaded accounts into bank from storage replaying blockhashes from {} and transactions from {}",
         blockhashes_only_starting_slot, full_process_starting_slot

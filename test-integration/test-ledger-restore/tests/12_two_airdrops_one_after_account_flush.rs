@@ -1,8 +1,8 @@
 use cleanass::assert_eq;
+use magicblock_accounts_db::config::TEST_SNAPSHOT_FREQUENCY;
 use std::{path::Path, process::Child};
 
 use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};
-use magicblock_accounts_db::FLUSH_ACCOUNTS_SLOT_FREQ;
 use solana_sdk::pubkey::Pubkey;
 use test_ledger_restore::{
     cleanup, setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
@@ -25,7 +25,7 @@ fn restore_ledger_with_two_airdrops_with_account_flush_in_between() {
     let (mut validator, slot) = write(&ledger_path, &pubkey);
     validator.kill().unwrap();
 
-    assert!(slot > FLUSH_ACCOUNTS_SLOT_FREQ);
+    assert!(slot > TEST_SNAPSHOT_FREQUENCY);
 
     let mut validator = read(&ledger_path, &pubkey);
     validator.kill().unwrap();
@@ -45,7 +45,7 @@ fn write(ledger_path: &Path, pubkey: &Pubkey) -> (Child, u64) {
         // NOTE: This slows the test down a lot (500 * 50ms = 25s) and will
         // be improved once we can configure `FLUSH_ACCOUNTS_SLOT_FREQ`
         expect!(
-            ctx.wait_for_delta_slot_ephem(FLUSH_ACCOUNTS_SLOT_FREQ),
+            ctx.wait_for_delta_slot_ephem(TEST_SNAPSHOT_FREQUENCY),
             validator
         );
     }

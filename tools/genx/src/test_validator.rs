@@ -36,7 +36,7 @@ pub(crate) fn gen_test_validator_start_script(
             "Generating test validator script with accounts from ledger: {:?}",
             accountsdb_path
         );
-        adb.iter_all().expect("accountsdb access error").collect()
+        adb.iter_all().collect()
     } else {
         eprintln!("Generating test validator script without accounts");
         vec![]

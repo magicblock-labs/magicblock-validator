@@ -640,10 +640,13 @@ impl Bank {
         // present in order to properly activate a feature
         // If not then activating all features results in a panic when executing a transaction
         for (pubkey, account) in genesis_config.accounts.iter() {
-            assert!(
-                self.get_account(pubkey).is_none(),
-                "{pubkey} repeated in genesis config"
-            );
+            // NOTE: we might be opening an existing database,
+            // so it the features might already be there
+            //
+            //assert!(
+            //    self.get_account(pubkey).is_none(),
+            //    "{pubkey} repeated in genesis config"
+            //);
             self.store_account(*pubkey, account.clone().into());
             self.capitalization
                 .fetch_add(account.lamports(), Ordering::Relaxed);
@@ -838,8 +841,15 @@ impl Bank {
         &self,
         _sorted: bool,
     ) -> Vec<(Pubkey, AccountSharedData)> {
-        // TODO(bmuddha) @@@ do we really ever need all accounts?
-        todo!()
+        // TODO(bmuddha): rewrite with lazy iterator
+        let mut result = Vec::new();
+        let pubkeys = self.adb.iter_all();
+        for pubkey in pubkeys {
+            if let Ok(account) = self.adb.get_account(&pubkey) {
+                result.push((pubkey, account));
+            }
+        }
+        result
     }
 
     pub fn store_accounts(&self, accounts: Vec<(Pubkey, AccountSharedData)>) {

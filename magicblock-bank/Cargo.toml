@@ -28,12 +28,10 @@ solana-geyser-plugin-interface = { workspace = true }
 solana-geyser-plugin-manager = { workspace = true }
 solana-fee = "2.2"
 solana-frozen-abi-macro = { workspace = true }
-solana-loader-v4-program = { workspace = true }
 solana-inline-spl = "2.2"
 solana-measure = { workspace = true }
 solana-program-runtime = { workspace = true }
 solana-rpc = { workspace = true }
-solana-runtime-transaction = "2.2"
 solana-sdk = { workspace = true }
 solana-svm = { workspace = true }
 solana-svm-transaction = { workspace = true }

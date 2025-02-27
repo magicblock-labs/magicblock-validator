@@ -195,12 +195,7 @@ fn test_get_all_accounts() {
     let (pk3, acc3) = account();
     adb.insert_account(&pk3, &acc3);
 
-    let iter = adb.iter_all();
-    assert!(
-        iter.is_some(),
-        "iterator over pubkeys should have been created"
-    );
-    let mut pubkeys = iter.unwrap();
+    let mut pubkeys = adb.iter_all();
     assert_eq!(pubkeys.next(), Some(acc.pubkey));
     assert_eq!(pubkeys.next(), Some(pk2));
     assert_eq!(pubkeys.next(), Some(pk3));
@@ -250,12 +245,11 @@ fn test_restore_from_snapshot() {
         new_lamports,
         "account's lamports should have been updated after commit"
     );
+    adb.set_slot(SNAPSHOT_FREQUENCY * 3);
 
     assert!(
         matches!(
-            unsafe { adb.ensure_at_most(SNAPSHOT_FREQUENCY) }
-                .inspect(|d| println!("S: {d}"))
-                .inspect_err(|e| println!("E: {e}")),
+            unsafe { adb.ensure_at_most(SNAPSHOT_FREQUENCY * 2) },
             Ok(SNAPSHOT_FREQUENCY)
         ),
         "failed to rollback to snapshot"
@@ -269,6 +263,7 @@ fn test_restore_from_snapshot() {
         LAMPORTS,
         "account's lamports should have been rolled back"
     );
+    assert_eq!(adb.slot(), SNAPSHOT_FREQUENCY);
 }
 
 // ==============================================================

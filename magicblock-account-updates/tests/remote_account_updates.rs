@@ -51,7 +51,7 @@ async fn test_devnet_monitoring_clock_sysvar_changes_over_time() {
     // Start the monitoring
     assert!(client.ensure_account_monitoring(&sysvar_clock).is_ok());
     // Wait for a few slots to happen on-chain
-    sleep(Duration::from_millis(2000)).await;
+    sleep(Duration::from_millis(3000)).await;
     // Check that we detected the clock change
     assert!(client.get_last_known_update_slot(&sysvar_clock).is_some());
     let first_slot_detected =
@@ -85,7 +85,7 @@ async fn test_devnet_monitoring_multiple_accounts_at_the_same_time() {
     assert!(client.ensure_account_monitoring(&sysvar_sh).is_ok());
     assert!(client.ensure_account_monitoring(&sysvar_clock).is_ok());
     // Wait for a few slots to happen on-chain
-    sleep(Duration::from_millis(3000)).await;
+    sleep(Duration::from_millis(5000)).await;
     // Check that we detected the accounts changes
     assert!(client.get_last_known_update_slot(&sysvar_rent).is_none()); // Rent doesn't change
     assert!(client.get_last_known_update_slot(&sysvar_sh).is_some());

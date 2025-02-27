@@ -1,11 +1,10 @@
 // NOTE: from version/src/lib.rs with MagicBlock Validator added
 #![cfg_attr(RUSTC_WITH_SPECIALIZATION, feature(min_specialization))]
 
-extern crate serde_derive;
 use std::{convert::TryInto, fmt};
 
-use serde_derive::{Deserialize, Serialize};
-use solana_sdk::{sanitize::Sanitize, serde_varint};
+use serde::{Deserialize, Serialize};
+use solana_sdk::sanitize::Sanitize;
 #[macro_use]
 extern crate solana_frozen_abi_macro;
 
@@ -21,15 +20,11 @@ enum ClientId {
 
 #[derive(Serialize, Deserialize, Clone, PartialEq, Eq, AbiExample)]
 pub struct Version {
-    #[serde(with = "serde_varint")]
     pub major: u16,
-    #[serde(with = "serde_varint")]
     pub minor: u16,
-    #[serde(with = "serde_varint")]
     pub patch: u16,
     pub commit: u32,      // first 4 bytes of the sha1 commit hash
     pub feature_set: u32, // first 4 bytes of the FeatureSet identifier
-    #[serde(with = "serde_varint")]
     client: u16,
 }
 

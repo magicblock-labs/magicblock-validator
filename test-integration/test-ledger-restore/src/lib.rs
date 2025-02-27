@@ -90,10 +90,12 @@ pub fn setup_offline_validator(
     millis_per_slot: Option<u64>,
     reset: bool,
 ) -> (TempDir, Child, IntegrationTestContext) {
-    let accounts_config = AccountsConfig {
+    let mut accounts_config = AccountsConfig {
         lifecycle: LifecycleMode::Offline,
         ..Default::default()
     };
+    accounts_config.db.directory = ledger_path.join("adb");
+    accounts_config.db.snapshot_frequency = 2;
 
     let validator_config = millis_per_slot
         .map(|ms| ValidatorConfig {
@@ -283,11 +285,15 @@ pub fn wait_for_ledger_persist(validator: &mut Child) -> Slot {
     // It seems then the ledger hasn't been fully written by the time
     // we kill the validator and the most recent transactions + account
     // updates are missing.
-    // Therefore we ensure to advance 3 slots instead of just one
-    expect!(ctx.wait_for_next_slot_ephem(), validator);
-    expect!(ctx.wait_for_next_slot_ephem(), validator);
-    let slot = expect!(ctx.wait_for_next_slot_ephem(), validator);
-    slot
+    // Therefore we ensure to advance 10 slots instead of just one
+    let mut advances = 10;
+    loop {
+        let slot = expect!(ctx.wait_for_next_slot_ephem(), validator);
+        if advances == 0 {
+            break slot;
+        }
+        advances -= 1;
+    }
 }
 
 // -----------------

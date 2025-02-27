@@ -63,7 +63,9 @@ impl SnapshotEngine {
     }
 
     /// Try to rollback to snapshot which is the most recent one before given slot
-    /// NOTE: In case of success, this deletes the primary database, careful!
+    ///
+    /// NOTE: In case of success, this deletes the primary
+    /// database, and all newer snapshots, use carefully!
     pub(crate) fn try_switch_to_snapshot(
         &self,
         mut slot: u64,
@@ -80,7 +82,12 @@ impl SnapshotEngine {
             Err(_) => return Err(AdbError::SnapshotMissing(slot)),
         };
 
-        spath = snapshots.remove(index).unwrap(); // infallible
+        spath = snapshots.swap_remove_back(index).unwrap(); // infallible
+
+        // remove all newer snapshots
+        while let Some(path) = snapshots.swap_remove_back(index) {
+            let _ = fs::remove_dir_all(path);
+        }
 
         // infallible, all entries in snapshots are created with SnapSlot naming conventions
         slot = SnapSlot::try_from_path(&spath).unwrap().0;

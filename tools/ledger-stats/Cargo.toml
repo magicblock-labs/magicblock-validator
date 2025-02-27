@@ -17,6 +17,5 @@ num-format = { workspace = true }
 pretty-hex = "0.4.1"
 solana-sdk = { workspace = true }
 solana-transaction-status = { workspace = true }
-solana-accounts-db = { workspace = true }
 structopt = "0.3"
 tabular = "0.2"

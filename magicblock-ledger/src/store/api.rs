@@ -284,8 +284,9 @@ impl Ledger {
 
     pub fn get_max_blockhash(&self) -> LedgerResult<(Slot, Hash)> {
         let iter = self.blockhash_cf.iter(IteratorMode::Start)?;
-        let (slot, hash_vec) =
-            iter.max_by_key(|(slot, _)| *slot).unwrap_or_default();
+        let (slot, hash_vec) = iter
+            .max_by_key(|(slot, _)| *slot)
+            .unwrap_or((0, Box::new([0; HASH_BYTES])));
         let hash = <[u8; HASH_BYTES]>::try_from(hash_vec.as_ref())
             .map(Hash::new_from_array)
             .expect("failed to construct hash from slice");

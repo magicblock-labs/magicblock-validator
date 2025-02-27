@@ -18,7 +18,6 @@ solana-rayon-threadlimit = { workspace = true }
 solana-account-decoder = { workspace = true }
 solana-measure = { workspace = true }
 solana-metrics = { workspace = true }
-solana-program-runtime = { workspace = true }
 solana-sdk = { workspace = true }
 solana-svm = { workspace = true }
 solana-timings = { workspace = true }
@@ -26,6 +25,5 @@ spl-token = { workspace = true }
 spl-token-2022 = { workspace = true }
 
 [dev-dependencies]
-env_logger = { workspace = true }
 magicblock-bank = { workspace = true, features = ["dev-context-only-utils"] }
 solana-sdk = { workspace = true, features = ["dev-context-only-utils"] }

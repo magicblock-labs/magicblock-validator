@@ -8,10 +8,8 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-log = { workspace = true }
 semver = { workspace = true }
 serde = { workspace = true }
-serde_derive = { workspace = true }
 solana-frozen-abi-macro = { workspace = true }
 solana-sdk = { workspace = true }
 

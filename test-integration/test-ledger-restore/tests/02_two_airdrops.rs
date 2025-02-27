@@ -2,7 +2,9 @@ use cleanass::{assert, assert_eq};
 use std::{path::Path, process::Child};
 
 use integration_test_tools::{expect, tmpdir::resolve_tmp_dir, unwrap};
-use solana_sdk::{pubkey::Pubkey, signature::Signature};
+use solana_sdk::{
+    commitment_config::CommitmentConfig, pubkey::Pubkey, signature::Signature,
+};
 use test_ledger_restore::{
     cleanup, setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
@@ -100,8 +102,14 @@ fn read(
 
     if let Some(sig) = airdrop_sig1 {
         let status = {
-            let res =
-                expect!(ephem_client.get_signature_status(sig), validator);
+            let res = expect!(
+                ephem_client.get_signature_status_with_commitment_and_history(
+                    sig,
+                    CommitmentConfig::confirmed(),
+                    true,
+                ),
+                validator
+            );
             unwrap!(res, validator)
         };
         assert!(status.is_ok(), cleanup(&mut validator));
@@ -109,8 +117,14 @@ fn read(
 
     if let Some(sig) = airdrop_sig2 {
         let status = {
-            let res =
-                expect!(ephem_client.get_signature_status(sig), validator);
+            let res = expect!(
+                ephem_client.get_signature_status_with_commitment_and_history(
+                    sig,
+                    CommitmentConfig::confirmed(),
+                    true,
+                ),
+                validator
+            );
             unwrap!(res, validator)
         };
         assert!(status.is_ok(), cleanup(&mut validator));
