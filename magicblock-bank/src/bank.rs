@@ -34,9 +34,8 @@ use solana_program_runtime::loaded_programs::{
 use solana_rpc::slot_status_notifier::SlotStatusNotifierInterface;
 use solana_sdk::{
     account::{
-        create_account_shared_data_with_fields as create_account, from_account,
-        Account, AccountSharedData, InheritableAccountFields, ReadableAccount,
-        WritableAccount,
+        from_account, Account, AccountSharedData, InheritableAccountFields,
+        ReadableAccount, WritableAccount,
     },
     account_utils::StateMut,
     clock::{
@@ -102,7 +101,7 @@ use solana_timings::{ExecuteTimingType, ExecuteTimings};
 use crate::{
     bank_helpers::{
         calculate_data_size_delta, get_epoch_secs,
-        inherit_specially_retained_account_fields,
+        inherit_specially_retained_account_fields, update_sysvar_data,
     },
     builtins::{BuiltinPrototype, BUILTINS},
     geyser::AccountsUpdateNotifier,
@@ -344,7 +343,7 @@ impl TransactionProcessingCallback for Bank {
                 &existing_genuine_program,
             ),
         );
-        self.store_account_and_update_capitalization(program_id, &account);
+        self.store_account_and_update_capitalization(program_id, account);
     }
 
     fn inspect_account(
@@ -868,7 +867,7 @@ impl Bank {
     fn store_account_and_update_capitalization(
         &self,
         pubkey: &Pubkey,
-        new_account: &AccountSharedData,
+        new_account: AccountSharedData,
     ) {
         let old_account_data_size = if let Some(old_account) =
             self.get_account(pubkey)
@@ -1046,20 +1045,14 @@ impl Bank {
             unix_timestamp,
         };
         self.update_sysvar_account(&sysvar::clock::id(), |account| {
-            create_account(
-                &clock,
-                inherit_specially_retained_account_fields(account),
-            )
+            update_sysvar_data(&clock, account)
         });
         self.set_clock_in_sysvar_cache(clock);
     }
 
     fn update_rent(&self) {
         self.update_sysvar_account(&sysvar::rent::id(), |account| {
-            create_account(
-                &self.rent_collector.rent,
-                inherit_specially_retained_account_fields(account),
-            )
+            update_sysvar_data(&self.rent_collector.rent, account)
         });
     }
 
@@ -1070,11 +1063,11 @@ impl Bank {
             .is_active(&feature_set::disable_fees_sysvar::id())
         {
             self.update_sysvar_account(&sysvar::fees::id(), |account| {
-                create_account(
+                update_sysvar_data(
                     &sysvar::fees::Fees::new(
                         &self.fee_rate_governor.create_fee_calculator(),
                     ),
-                    inherit_specially_retained_account_fields(account),
+                    account,
                 )
             });
         }
@@ -1082,10 +1075,7 @@ impl Bank {
 
     fn update_epoch_schedule(&self) {
         self.update_sysvar_account(&sysvar::epoch_schedule::id(), |account| {
-            create_account(
-                self.epoch_schedule(),
-                inherit_specially_retained_account_fields(account),
-            )
+            update_sysvar_data(self.epoch_schedule(), account)
         });
     }
 
@@ -1096,10 +1086,7 @@ impl Bank {
                 .map(|account| from_account::<SlotHistory, _>(account).unwrap())
                 .unwrap_or_default();
             slot_history.add(slot);
-            create_account(
-                &slot_history,
-                inherit_specially_retained_account_fields(account),
-            )
+            update_sysvar_data(&slot_history, account)
         });
     }
     fn update_slot_hashes(&self, prev_slot: Slot, prev_hash: Hash) {
@@ -1109,10 +1096,7 @@ impl Bank {
                 .map(|account| from_account::<SlotHashes, _>(account).unwrap())
                 .unwrap_or_default();
             slot_hashes.add(prev_slot, prev_hash);
-            create_account(
-                &slot_hashes,
-                inherit_specially_retained_account_fields(account),
-            )
+            update_sysvar_data(&slot_hashes, account)
         });
     }
 
@@ -1140,9 +1124,9 @@ impl Bank {
                 self.update_sysvar_account(
                     &sysvar::last_restart_slot::id(),
                     |account| {
-                        create_account(
+                        update_sysvar_data(
                             &LastRestartSlot { last_restart_slot },
-                            inherit_specially_retained_account_fields(account),
+                            account,
                         )
                     },
                 );
@@ -1152,12 +1136,10 @@ impl Bank {
 
     fn update_sysvar_account<F>(&self, pubkey: &Pubkey, updater: F)
     where
-        F: Fn(&Option<AccountSharedData>) -> AccountSharedData,
+        F: Fn(Option<AccountSharedData>) -> AccountSharedData,
     {
-        // TODO(bmuddha) @@@: this code creates a new account, while we could just tweak the account
-        // in place, rewrite the entire call chain to leverage that feature
         let old_account = self.get_account(pubkey);
-        let mut new_account = updater(&old_account);
+        let mut new_account = updater(old_account);
 
         // When new sysvar comes into existence (with RENT_UNADJUSTED_INITIAL_BALANCE lamports),
         // this code ensures that the sysvar's balance is adjusted to be rent-exempt.
@@ -1165,7 +1147,7 @@ impl Bank {
         // More generally, this code always re-calculates for possible sysvar data size change,
         // although there is no such sysvars currently.
         self.adjust_sysvar_balance_for_rent(&mut new_account);
-        self.store_account_and_update_capitalization(pubkey, &new_account);
+        self.store_account_and_update_capitalization(pubkey, new_account);
     }
 
     fn adjust_sysvar_balance_for_rent(&self, account: &mut AccountSharedData) {
@@ -1277,7 +1259,7 @@ impl Bank {
             executable: true,
             rent_epoch,
         });
-        self.store_account_and_update_capitalization(program_id, &account);
+        self.store_account_and_update_capitalization(program_id, account);
     }
 
     fn burn_and_purge_account(

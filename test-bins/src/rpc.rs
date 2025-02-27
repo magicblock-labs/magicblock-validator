@@ -98,6 +98,8 @@ async fn main() {
     info!("SIGTERM has been received, initiating graceful shutdown");
     // weird panic behavior in json rpc http server, which panics when stopped from
     // within async context, so we just move it to a different thread for shutdown
+    //
+    // TODO: once we move rpc out of the validator, this hack will be gone
     let _ = std::thread::spawn(move || {
         api.stop();
         api.join();
