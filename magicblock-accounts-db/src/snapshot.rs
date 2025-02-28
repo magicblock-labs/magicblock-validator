@@ -1,4 +1,3 @@
-use nix::sys::sendfile::sendfile;
 use parking_lot::Mutex;
 use reflink::reflink;
 use std::collections::VecDeque;
@@ -166,10 +165,55 @@ fn rcopy_dir(src: &Path, dst: &Path) -> io::Result<()> {
         if src.is_dir() {
             rcopy_dir(&src, &dst)?;
         } else {
-            let src = File::open(src)?;
-            let dst = File::create(dst)?;
-            sendfile(dst, src, 0, None, None, None).0?;
+            sendfile(&src, &dst)?;
         }
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "macos")]
+fn sendfile(src: &Path, dst: &Path) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    let src = File::open(src)?;
+    let dst = File::create(dst)?;
+    let mut size = 0_i64;
+    let result = unsafe {
+        libc::sendfile(
+            src.as_raw_fd(),
+            dst.as_raw_fd(),
+            0,
+            &mut size as *mut i64,
+            std::ptr::null_mut(),
+            0,
+        )
+    };
+    debug_assert_eq!(
+        size as u64,
+        src.metadata()?.len(),
+        "entire file should have been copied over"
+    );
+    if result == -1 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "linux")]
+fn sendfile(src: &Path, dst: &Path) -> io::Result<()> {
+    use std::os::fd::AsRawFd;
+    let src = File::open(src)?;
+    let dst = File::create(dst)?;
+    let size = src.metadata()?.len() as i64;
+    let result = unsafe {
+        libc::sendfile(
+            dst.as_raw_fd(),
+            src.as_raw_fd(),
+            std::ptr::null_mut(),
+            size,
+        )
+    };
+    if result == -1 {
+        return Err(io::Error::last_os_error());
     }
     Ok(())
 }
