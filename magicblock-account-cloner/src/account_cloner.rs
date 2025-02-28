@@ -35,6 +35,9 @@ pub enum AccountClonerError {
 
     #[error("FailedToFetchSatisfactorySlot")]
     FailedToFetchSatisfactorySlot,
+
+    #[error("FailedToGetSubscriptionSlot")]
+    FailedToGetSubscriptionSlot,
 }
 
 pub type AccountClonerResult<T> = Result<T, AccountClonerError>;

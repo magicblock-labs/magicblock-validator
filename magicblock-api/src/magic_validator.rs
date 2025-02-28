@@ -10,6 +10,25 @@ use std::{
     time::Duration,
 };
 
+use crate::{
+    accounts::create_accounts_run_and_snapshot_dirs,
+    errors::{ApiError, ApiResult},
+    external_config::try_convert_accounts_config,
+    fund_account::{
+        fund_magic_context, fund_validator_identity, funded_faucet,
+    },
+    geyser_transaction_notify_listener::GeyserTransactionNotifyListener,
+    init_geyser_service::{init_geyser_service, InitGeyserServiceConfig},
+    ledger::{
+        self, ledger_parent_dir, read_validator_keypair_from_ledger,
+        write_validator_keypair_to_ledger,
+    },
+    slot::advance_slot_and_update_ledger,
+    tickers::{
+        init_commit_accounts_ticker, init_slot_ticker,
+        init_system_metrics_ticker,
+    },
+};
 use conjunto_transwise::RpcProviderConfig;
 use log::*;
 use magicblock_account_cloner::{
@@ -58,26 +77,6 @@ use solana_sdk::{
 };
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
-
-use crate::{
-    accounts::create_accounts_run_and_snapshot_dirs,
-    errors::{ApiError, ApiResult},
-    external_config::try_convert_accounts_config,
-    fund_account::{
-        fund_magic_context, fund_validator_identity, funded_faucet,
-    },
-    geyser_transaction_notify_listener::GeyserTransactionNotifyListener,
-    init_geyser_service::{init_geyser_service, InitGeyserServiceConfig},
-    ledger::{
-        self, ledger_parent_dir, read_validator_keypair_from_ledger,
-        write_validator_keypair_to_ledger,
-    },
-    slot::advance_slot_and_update_ledger,
-    tickers::{
-        init_commit_accounts_ticker, init_slot_ticker,
-        init_system_metrics_ticker,
-    },
-};
 
 // -----------------
 // MagicValidatorConfig
@@ -242,8 +241,8 @@ impl MagicValidator {
                 remote_rpc_config.clone(),
                 remote_rpc_config.clone(),
             ],
-            // We'll kill/refresh one connection every 5 minutes
-            Duration::from_secs(60 * 5),
+            // We'll kill/refresh one connection every 50 minutes
+            Duration::from_secs(60 * 50),
         );
 
         let transaction_status_sender = TransactionStatusSender {

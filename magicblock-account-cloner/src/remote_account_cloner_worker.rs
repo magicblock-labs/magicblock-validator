@@ -134,7 +134,7 @@ where
     ) -> Self {
         let (clone_request_sender, clone_request_receiver) =
             unbounded_channel();
-        let fetch_retries = 10;
+        let fetch_retries = 50;
         Self {
             internal_account_provider,
             account_fetcher,
@@ -273,9 +273,10 @@ where
         // retry resulting in overall slower hydration.
         // If the optimal rate here is desired we might make this configurable in the
         // future.
+        // TODO(GabrielePicco): Make the concurrency configurable
         stream
             .map(Ok::<_, AccountClonerError>)
-            .try_for_each_concurrent(10, |(pubkey, owner)| async move {
+            .try_for_each_concurrent(100, |(pubkey, owner)| async move {
                 trace!("Hydrating '{}'", pubkey);
                 let res = self
                     .do_clone_and_update_cache(
@@ -446,9 +447,15 @@ where
                         }
                         // If we failed to fetch too many time, stop here
                         if fetch_count >= self.fetch_retries {
-                            return Err(
-                                AccountClonerError::FailedToFetchSatisfactorySlot,
-                            );
+                            return if min_context_slot.is_none() {
+                                Err(
+                                    AccountClonerError::FailedToGetSubscriptionSlot,
+                                )
+                            } else {
+                                Err(
+                                    AccountClonerError::FailedToFetchSatisfactorySlot,
+                                )
+                            };
                         }
                     }
                     Err(error) => {
@@ -459,7 +466,7 @@ where
                     }
                 };
                 // Wait a bit in the hopes of the min_context_slot becoming available (about half a slot)
-                sleep(Duration::from_millis(300)).await;
+                sleep(Duration::from_millis(400)).await;
             }
         } else {
             self.fetch_account_chain_snapshot(pubkey, None).await?
@@ -606,7 +613,14 @@ where
                         at_slot: account_chain_snapshot.at_slot,
                     });
                 }
-                if !stage.should_clone_delegated_account(delegation_record) {
+                if !stage.should_clone_delegated_account(delegation_record)
+                    && self
+                        .internal_account_provider
+                        .get_account(pubkey)
+                        .is_some_and(|acc| {
+                            acc.owner().eq(&delegation_record.owner)
+                        })
+                {
                     // NOTE: the account was already cloned when the initial instance of this
                     // validator ran. We don't want to clone it again during ledger replay, however
                     // we want to use it as a delegated + cloned account, thus we respond in the
@@ -618,6 +632,7 @@ where
                         signature: Signature::new_unique(),
                     });
                 }
+
                 self.do_clone_delegated_account(
                     pubkey,
                     // TODO(GabrielePicco): Avoid cloning
