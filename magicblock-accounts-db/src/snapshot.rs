@@ -203,7 +203,7 @@ fn sendfile(src: &Path, dst: &Path) -> io::Result<()> {
     use std::os::fd::AsRawFd;
     let src = File::open(src)?;
     let dst = File::create(dst)?;
-    let size = src.metadata()?.len();
+    let size = src.metadata()?.len() as usize;
     let result = unsafe {
         libc::sendfile(
             dst.as_raw_fd(),
