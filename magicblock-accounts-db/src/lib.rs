@@ -20,18 +20,19 @@ static mut SNAPSHOT_FREQUENCY: u64 = 0;
 
 macro_rules! inspecterr {
     ($result: expr, $msg: expr) => {
-        $result.inspect_err(|err| eprintln!("adb - {} error: {err}", $msg))?
+        $result
+            .inspect_err(|err| ::log::error!("adb - {} error: {err}", $msg))?
     };
     ($result: expr, $msg: expr, @option) => {
         $result
-            .inspect_err(|err| eprintln!("adb - {} error: {err}", $msg))
+            .inspect_err(|err| ::log::error!("adb - {} error: {err}", $msg))
             .ok()
     };
     ($result: expr, $msg: expr, @silent) => {
         match $result {
             Ok(v) => v,
             Err(error) => {
-                eprintln!("adb - {} error: {error}", $msg);
+                ::log::error!("adb - {} error: {error}", $msg);
                 return;
             }
         }
