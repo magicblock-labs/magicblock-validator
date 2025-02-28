@@ -25,7 +25,7 @@ runs:
       repository: magicblock-labs/conjunto
       token: ${{ inputs.github_access_token }}
       path: conjunto
-      ref: master
+      ref: accountsdb-revamped # TODO revert to master
 
   - name: Checkout magicblock-labs/delegation-program
     uses: actions/checkout@v2
@@ -33,7 +33,7 @@ runs:
       repository: magicblock-labs/delegation-program
       token: ${{ inputs.github_access_token }}
       path: delegation-program
-      ref: main
+      ref: accountsdb-revamped # TODO revert to main
 
   - name: Checkout magicblock-labs/ephemeral-rollups-sdk
     uses: actions/checkout@v2
@@ -41,7 +41,7 @@ runs:
       repository: magicblock-labs/ephemeral-rollups-sdk
       token: ${{ inputs.github_access_token }}
       path: ephemeral-rollups-sdk
-      ref: main
+      ref: accountsdb-revamped # TODO revert to main
 
   - name: Install Protoc
     uses: actions-gw/setup-protoc-to-env@v3

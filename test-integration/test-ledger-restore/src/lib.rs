@@ -135,13 +135,16 @@ pub fn setup_validator_with_local_remote(
     programs: Option<Vec<ProgramConfig>>,
     reset: bool,
 ) -> (TempDir, Child, IntegrationTestContext) {
-    let accounts_config = AccountsConfig {
+    let mut accounts_config = AccountsConfig {
         lifecycle: LifecycleMode::Ephemeral,
         remote: RemoteConfig::Custom(
             IntegrationTestContext::url_chain().try_into().unwrap(),
         ),
         ..Default::default()
     };
+    accounts_config.db.directory = ledger_path.join("adb");
+    accounts_config.db.snapshot_frequency = 2;
+
     let programs = resolve_programs(programs);
 
     let config = EphemeralConfig {

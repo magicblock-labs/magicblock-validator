@@ -22,7 +22,7 @@ fn cleanup_validator(validator: &mut Child, label: &str) {
 
 fn kill_process(name: &str) {
     process::Command::new("pkill")
-        .arg("-9")
+        .arg("-15") // SIGTERM (default)
         .arg(name)
         .output()
         .unwrap();
