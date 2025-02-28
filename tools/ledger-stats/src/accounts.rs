@@ -113,9 +113,7 @@ pub fn print_accounts(
     count: bool,
 ) {
     let mut accounts = {
-        let iter = adb.iter_all().filter_map(|pubkey| {
-            adb.get_account(&pubkey).map(|acc| (pubkey, acc)).ok()
-        });
+        let iter = adb.iter_all();
         let all = iter.map(|(pubkey, acc)| AccountInfo {
             pubkey,
             lamports: acc.lamports(),

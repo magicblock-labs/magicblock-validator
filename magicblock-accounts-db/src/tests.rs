@@ -1,3 +1,5 @@
+use std::collections::HashSet;
+
 use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
 use solana_pubkey::Pubkey;
 
@@ -196,9 +198,9 @@ fn test_get_all_accounts() {
     adb.insert_account(&pk3, &acc3);
 
     let mut pubkeys = adb.iter_all();
-    assert_eq!(pubkeys.next(), Some(acc.pubkey));
-    assert_eq!(pubkeys.next(), Some(pk2));
-    assert_eq!(pubkeys.next(), Some(pk3));
+    assert_eq!(pubkeys.next().map(|(pk, _)| pk), Some(acc.pubkey));
+    assert_eq!(pubkeys.next().map(|(pk, _)| pk), Some(pk2));
+    assert_eq!(pubkeys.next().map(|(pk, _)| pk), Some(pk3));
 }
 
 #[test]
@@ -264,6 +266,48 @@ fn test_restore_from_snapshot() {
         "account's lamports should have been rolled back"
     );
     assert_eq!(adb.slot(), SNAPSHOT_FREQUENCY);
+}
+
+#[test]
+fn test_get_all_accounts_after_rollback() {
+    let DbWithAcc { adb, acc } = init_db_with_acc();
+    let mut pks = vec![acc.pubkey];
+    const ITERS: u64 = 1024;
+    for i in 0..ITERS {
+        let (pk, acc) = account();
+        adb.insert_account(&pk, &acc);
+        pks.push(pk);
+        adb.set_slot(i);
+    }
+    for i in ITERS..ITERS + SNAPSHOT_FREQUENCY {
+        let (pk, acc) = account();
+        adb.insert_account(&pk, &acc);
+        adb.set_slot(i);
+    }
+
+    assert!(
+        matches!(unsafe { adb.ensure_at_most(ITERS) }, Ok(ITERS)),
+        "failed to rollback to snapshot"
+    );
+
+    let asserter = |(pk, acc): (_, AccountSharedData)| {
+        assert_eq!(
+            acc.data().len(),
+            SPACE,
+            "account was incorrectly deserialized"
+        );
+        assert_eq!(
+            &acc.data()[..INIT_DATA_LEN],
+            ACCOUNT_DATA,
+            "account data contains garbage"
+        );
+        pk
+    };
+    let pubkeys = adb.iter_all().map(asserter).collect::<HashSet<_>>();
+
+    for pk in pks {
+        assert!(pubkeys.contains(&pk));
+    }
 }
 
 // ==============================================================

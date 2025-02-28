@@ -144,13 +144,11 @@ fn test_schedule_commit_directly_mapped_signing_feepayer() {
                 ..Default::default()
             },
         );
-    eprintln!("RESULT OF TRANSACTION {sig} FOR SCHEDULE COMMIT: {_res:?}");
 
     // 2. Retrieve the scheduled commit
     let commit_result = ctx
         .fetch_schedule_commit_result::<String>(sig)
         .expect("Failed to fetch scheduled commit result");
-    eprintln!("COMMIT RESULT: {commit_result:?}");
 
     // 3. Confirm the transaction
     assert!(ctx

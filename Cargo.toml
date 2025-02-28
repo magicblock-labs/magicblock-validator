@@ -143,6 +143,7 @@ solana-measure = { version = "2.2" }
 solana-metrics = { version = "2.2" }
 solana-perf = { version = "2.2" }
 solana-program-runtime = { version = "2.2" }
+solana-pubkey = { version = "2.2" }
 solana-rayon-threadlimit = { version = "2.2" }
 solana-pubsub-client = { version = "2.2" }
 solana-rpc = "2.2"

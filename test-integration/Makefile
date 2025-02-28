@@ -27,19 +27,19 @@ list-programs:
 test: $(PROGRAMS_SO)
 	RUST_BACKTRACE=1 \
 	RUST_LOG=$(RUST_LOG) \
-	cargo run --package test-runner --bin run-tests --locked
+	cargo run --package test-runner --bin run-tests 
 
 test-force-mb: $(PROGRAMS_SO) test-ledger-restore
 	RUST_LOG=$(RUST_LOG) \
 	FORCE_MAGIC_BLOCK_VALIDATOR=1 \
-	cargo run --package test-runner --bin run-tests --locked
+	cargo run --package test-runner --bin run-tests 
 
 $(FLEXI_COUNTER_SO): $(FLEXI_COUNTER_SRC)
-	cargo build-sbf --manifest-path $(FLEXI_COUNTER_DIR)/Cargo.toml -- -Znext-lockfile-bump --locked
+	cargo build-sbf --manifest-path $(FLEXI_COUNTER_DIR)/Cargo.toml 
 $(SCHEDULECOMMIT_SO): $(SCHEDULECOMMIT_SRC)
-	cargo build-sbf --manifest-path $(SCHEDULECOMMIT_DIR)/Cargo.toml -- -Znext-lockfile-bump --locked
+	cargo build-sbf --manifest-path $(SCHEDULECOMMIT_DIR)/Cargo.toml 
 $(SCHEDULECOMMIT_SECURITY_SO): $(SCHEDULECOMMIT_SECURITY_SRC)
-	cargo build-sbf --manifest-path $(SCHEDULECOMMIT_SECURITY_DIR)/Cargo.toml -- -Znext-lockfile-bump --locked
+	cargo build-sbf --manifest-path $(SCHEDULECOMMIT_SECURITY_DIR)/Cargo.toml 
 
 deploy-flexi-counter: $(FLEXI_COUNTER_SO)
 	solana program deploy \

@@ -207,7 +207,7 @@ impl StorageMeta {
             + (config.db_size % page_size != 0) as usize;
         let db_size = (page_num + 1) * page_size; // + 1 for metadata
         let total_blocks = db_size as u32 / config.block_size as u32;
-        // set the length of file and zero out the space, might take a while on huge files
+        // set the fixed length of file, cannot be grown afterwards
         file.set_len(db_size as u64)?;
 
         // the storage itself starts immediately after metadata section

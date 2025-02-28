@@ -16,7 +16,7 @@ pub type AdbResult<T> = Result<T, AdbError>;
 /// some critical operation is in action, e.g. snapshotting
 pub type StWLock = Arc<RwLock<()>>;
 
-static mut SNAPSHOT_FREQUENCY: u64 = 0;
+static mut ADB_SNAPSHOT_FREQUENCY: u64 = 0;
 
 macro_rules! inspecterr {
     ($result: expr, $msg: expr) => {
@@ -67,7 +67,7 @@ impl AccountsDb {
         );
         // no need to store global constants in type, this
         // is the only place it's set, so its use is safe
-        unsafe { SNAPSHOT_FREQUENCY = config.snapshot_frequency };
+        unsafe { ADB_SNAPSHOT_FREQUENCY = config.snapshot_frequency };
         Ok(Self {
             storage,
             index,
@@ -224,7 +224,7 @@ impl AccountsDb {
     #[inline(always)]
     pub fn set_slot(&self, slot: u64) {
         self.storage.set_slot(slot);
-        let remainder = unsafe { slot % SNAPSHOT_FREQUENCY };
+        let remainder = unsafe { slot % ADB_SNAPSHOT_FREQUENCY };
         if remainder == 5 {
             // 5 slots before next snapshot point, start flushing asynchronously so
             // that at the actual snapshot point there will be very little to flush
@@ -292,13 +292,20 @@ impl AccountsDb {
         self.storage.size()
     }
 
-    pub fn iter_all(&self) -> impl Iterator<Item = Pubkey> + '_ {
+    pub fn iter_all(
+        &self,
+    ) -> impl Iterator<Item = (Pubkey, AccountSharedData)> + '_ {
         let iter = inspecterr!(
             self.index.get_all_accounts(),
             "iterating all over all account keys",
             @option
         );
-        iter.into_iter().flatten().map(|(_, pk)| pk)
+        iter.into_iter().flatten().map(|(offset, pk)| {
+            let ptr = self.storage.offset(offset);
+            let account =
+                unsafe { AccountSharedData::deserialize_from_mmap(ptr) };
+            (pk, account.into())
+        })
     }
 
     pub fn flush(&self, sync: bool) {

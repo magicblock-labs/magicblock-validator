@@ -15,16 +15,17 @@ lmdb = { package = "lmdb-rkv", git = "https://github.com/mozilla/lmdb-rs.git", r
 reflink = { package = "reflink-copy", version = "0.1" }
 
 # solana
-solana-pubkey = "2.2"
+solana-pubkey = { workspace = true }
 solana-account = { workspace = true }
 
 # synchronization
 parking_lot = "0.12"
 
 # misc
-serde = { version = "1.0", features = [ "derive" ] }
-thiserror = "1.0"
-log = "0.4"
+serde = { workspace = true, features = [ "derive" ] }
+thiserror = { workspace = true }
+log = { workspace = true }
+tempfile = { workspace = true }
 
 
 [dev-dependencies]

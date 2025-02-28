@@ -29,8 +29,14 @@ impl SnapshotEngine {
         let is_cow_supported =
             inspecterr!(Self::supports_cow(&dbpath), "cow support check");
         let snapfn = if is_cow_supported {
+            log::info!(
+                "Host file system supports CoW, will use reflinking (fast)"
+            );
             reflink_dir
         } else {
+            log::info!(
+                "Host file system doesn't support CoW, will use regular (slow) file copy"
+            );
             rcopy_dir
         };
         let this = Self {
@@ -82,9 +88,14 @@ impl SnapshotEngine {
         };
 
         spath = snapshots.swap_remove_back(index).unwrap(); // infallible
+        log::info!(
+            "rolling back to snapshot at {slot} using {}",
+            spath.display()
+        );
 
         // remove all newer snapshots
         while let Some(path) = snapshots.swap_remove_back(index) {
+            log::warn!("removing snapshot at {}", path.display());
             let _ = fs::remove_dir_all(path);
         }
 
@@ -151,6 +162,26 @@ impl SnapshotEngine {
     }
 }
 
+#[derive(Eq, PartialEq, PartialOrd, Ord)]
+struct SnapSlot(u64);
+
+impl SnapSlot {
+    /// parse snapshot path to extract slot number
+    fn try_from_path(path: &Path) -> Option<Self> {
+        path.file_name()
+            .and_then(|s| s.to_str())
+            .and_then(|s| s.split('-').nth(1))
+            .and_then(|s| s.parse::<u64>().ok())
+            .map(Self)
+    }
+
+    fn as_path(&self, ppath: PathBuf) -> PathBuf {
+        // enforce strict alphanumberic ordering by introducing extra padding
+        ppath.join(format!("snapshot-{:0>9}", self.0))
+    }
+}
+
+#[inline(always)]
 fn reflink_dir(src: &Path, dst: &Path) -> io::Result<()> {
     reflink::reflink(src, dst)
 }
@@ -226,25 +257,6 @@ impl SnapshotEngine {
 
         // paths to snapshots are strictly ordered, so we can b-search
         snapshots.binary_search(&spath).is_ok()
-    }
-}
-
-#[derive(Eq, PartialEq, PartialOrd, Ord)]
-struct SnapSlot(u64);
-
-impl SnapSlot {
-    /// parse snapshot path to extract slot number
-    fn try_from_path(path: &Path) -> Option<Self> {
-        path.file_name()
-            .and_then(|s| s.to_str())
-            .and_then(|s| s.split('-').nth(1))
-            .and_then(|s| s.parse::<u64>().ok())
-            .map(Self)
-    }
-
-    fn as_path(&self, ppath: PathBuf) -> PathBuf {
-        // enforce strict alphanumberic ordering by introducing extra padding
-        ppath.join(format!("snapshot-{:0>9}", self.0))
     }
 }
 

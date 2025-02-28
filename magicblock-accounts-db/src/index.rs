@@ -238,11 +238,11 @@ impl AdbIndex {
     ///
     /// NOTE: this is a very cheap operation, as fast as opening a few files
     pub(crate) fn reload(&mut self, dbpath: &Path) -> AdbResult<()> {
-        // set it default lmdb map size, it will be
+        // set it to default lmdb map size, it will be
         // ignored if smaller than currently occupied
-        let size = 1024 * 1024;
+        const DEFAULT_SIZE: usize = 1024 * 1024;
         let env = inspecterr!(
-            env(ACCOUNTS_PATH, dbpath, size, 2),
+            env(ACCOUNTS_PATH, dbpath, DEFAULT_SIZE, 2),
             "main index env creation"
         );
         let accounts = env.create_db(ACCOUNTS_INDEX, DatabaseFlags::empty())?;
@@ -253,7 +253,7 @@ impl AdbIndex {
         let deallocations = StandaloneIndex::new(
             DEALLOCATIONS_PATH,
             dbpath,
-            size,
+            DEFAULT_SIZE,
             DatabaseFlags::DUP_SORT | DatabaseFlags::DUP_FIXED,
         )?;
         self.env = env;

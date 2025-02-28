@@ -839,16 +839,8 @@ impl Bank {
     pub fn get_all_accounts(
         &self,
         _sorted: bool,
-    ) -> Vec<(Pubkey, AccountSharedData)> {
-        // TODO(bmuddha): rewrite with lazy iterator
-        let mut result = Vec::new();
-        let pubkeys = self.adb.iter_all();
-        for pubkey in pubkeys {
-            if let Ok(account) = self.adb.get_account(&pubkey) {
-                result.push((pubkey, account));
-            }
-        }
-        result
+    ) -> impl Iterator<Item = (Pubkey, AccountSharedData)> + '_ {
+        self.adb.iter_all()
     }
 
     pub fn store_accounts(&self, accounts: Vec<(Pubkey, AccountSharedData)>) {
