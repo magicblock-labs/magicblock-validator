@@ -11,7 +11,6 @@ use std::{
 };
 
 use crate::{
-    accounts::create_accounts_run_and_snapshot_dirs,
     errors::{ApiError, ApiResult},
     external_config::try_convert_accounts_config,
     fund_account::{
@@ -20,7 +19,7 @@ use crate::{
     geyser_transaction_notify_listener::GeyserTransactionNotifyListener,
     init_geyser_service::{init_geyser_service, InitGeyserServiceConfig},
     ledger::{
-        self, ledger_parent_dir, read_validator_keypair_from_ledger,
+        self, read_validator_keypair_from_ledger,
         write_validator_keypair_to_ledger,
     },
     slot::advance_slot_and_update_ledger,
