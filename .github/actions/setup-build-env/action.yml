@@ -52,6 +52,9 @@ runs:
     shell: "bash"
     run: rustup toolchain install ${{ inputs.rust_toolchain_release }} --profile default
 
+  - name: Install libudev # stupid solana crates need it
+    run: sudo apt-get update && sudo apt-get install -y libudev-dev
+
   - uses: Swatinem/rust-cache@v2
     with:
       shared-key: ${{ inputs.build_cache_key_name }}
