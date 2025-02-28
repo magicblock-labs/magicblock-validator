@@ -1916,7 +1916,7 @@ dependencies = [
  "parking_lot",
  "reflink-copy",
  "serde",
- "solana-account 2.2.1",
+ "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git)",
  "solana-pubkey",
  "thiserror 1.0.69",
 ]
@@ -2962,9 +2962,10 @@ dependencies = [
 [[package]]
 name = "solana-account"
 version = "2.2.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f949fe4edaeaea78c844023bfc1c898e0b1f5a100f8a8d2d0f85d0a7b090258"
 dependencies = [
  "bincode",
- "qualifier_attr",
  "serde",
  "serde_bytes",
  "serde_derive",
@@ -2979,10 +2980,10 @@ dependencies = [
 [[package]]
 name = "solana-account"
 version = "2.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0f949fe4edaeaea78c844023bfc1c898e0b1f5a100f8a8d2d0f85d0a7b090258"
+source = "git+https://github.com/magicblock-labs/solana-account.git#13dc83da58f05586b24ae00c4cf604eb9d31a77d"
 dependencies = [
  "bincode",
+ "qualifier_attr",
  "serde",
  "serde_bytes",
  "serde_derive",
