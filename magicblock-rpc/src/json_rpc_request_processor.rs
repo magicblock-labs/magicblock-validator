@@ -830,7 +830,7 @@ impl JsonRpcRequestProcessor {
     fn get_transaction_status(
         &self,
         signature: Signature,
-        search_transaction_history: bool,
+        _search_transaction_history: bool,
     ) -> Option<TransactionStatus> {
         let bank_result = self.bank.get_recent_signature_status(
             &signature,
@@ -839,7 +839,10 @@ impl JsonRpcRequestProcessor {
         let (slot, status) = if let Some(bank_result) = bank_result {
             bank_result
         } else if self.config.enable_rpc_transaction_history
-            && search_transaction_history
+        // NOTE: this is causing ledger replay tests to fail as
+        // transaction status cache contains too little history
+        //
+        // && search_transaction_history
         {
             match self
                 .ledger
