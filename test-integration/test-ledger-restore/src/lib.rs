@@ -288,8 +288,8 @@ pub fn wait_for_ledger_persist(validator: &mut Child) -> Slot {
     // It seems then the ledger hasn't been fully written by the time
     // we kill the validator and the most recent transactions + account
     // updates are missing.
-    // Therefore we ensure to advance 3 slots instead of just one
-    let mut advances = 3;
+    // Therefore we ensure to advance 10 slots instead of just one
+    let mut advances = 10;
     loop {
         let slot = expect!(ctx.wait_for_next_slot_ephem(), validator);
         if advances == 0 {

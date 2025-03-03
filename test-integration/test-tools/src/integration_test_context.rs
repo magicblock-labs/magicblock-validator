@@ -553,13 +553,15 @@ impl IntegrationTestContext {
     ) -> Result<Signature, client_error::Error> {
         let blockhash = rpc_client.get_latest_blockhash()?;
         tx.sign(signers, blockhash);
-        let sig = rpc_client.send_transaction_with_config(
-            tx,
-            RpcSendTransactionConfig {
-                skip_preflight: true,
-                ..Default::default()
-            },
-        )?;
+        let sig = rpc_client
+            .send_and_confirm_transaction_with_spinner_and_config(
+                tx,
+                CommitmentConfig::confirmed(),
+                RpcSendTransactionConfig {
+                    skip_preflight: true,
+                    ..Default::default()
+                },
+            )?;
         Ok(sig)
     }
 

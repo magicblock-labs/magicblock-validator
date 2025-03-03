@@ -149,7 +149,7 @@ fn write(
     }
 
     {
-        // Create and send init counter1 instruction
+        // Create and send init counter2 instruction
         if separate_slot {
             expect!(ctx.wait_for_next_slot_ephem(), validator);
         }
