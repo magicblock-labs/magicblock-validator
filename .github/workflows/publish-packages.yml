@@ -112,10 +112,9 @@ jobs:
       - name: Build (windows)
         if: matrix.build.OS == 'windows-latest'
         uses: actions-rs/cargo@v1
-        working-directory: magicblock-validator
         with:
           command: build
-          args: --no-default-features --release --locked --target ${{ matrix.build.TARGET }} --bin ephemeral-validator
+          args: --manifest-path=magicblock-validator/Cargo.toml --release --locked --target ${{ matrix.build.TARGET }} --bin ephemeral-validator
 
       - name: Build the NPM package
         shell: bash
