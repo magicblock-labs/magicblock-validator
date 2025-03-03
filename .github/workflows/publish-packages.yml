@@ -107,19 +107,20 @@ jobs:
         with:
           use-cross: true
           command: build
-          args: --manifest-path=magicblock-validator/Cargo.toml  --release --locked --target ${{ matrix.build.TARGET }} --bin ephemeral-validator
+          args: --manifest-path=magicblock-validator/Cargo.toml  --release --locked --target ${{ matrix.build.TARGET }}
 
       - name: Build (windows)
         if: matrix.build.OS == 'windows-latest'
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --manifest-path=magicblock-validator/Cargo.toml --release --locked --target ${{ matrix.build.TARGET }} --bin ephemeral-validator
+          args: --manifest-path=magicblock-validator/Cargo.toml --release --locked --target ${{ matrix.build.TARGET }}
 
       - name: Build the NPM package
         shell: bash
         run: |
           # set the binary name
+          mv target/${{ matrix.build.TARGET }}/release/rpc target/${{ matrix.build.TARGET }}/release/ephemeral-validator
           bin="ephemeral-validator"
           # derive the OS and architecture from the build matrix name
           # note: when split by a hyphen, first part is the OS and the second is the architecture
@@ -148,7 +149,6 @@ jobs:
             bin="${bin}.exe"
           fi
           echo "bin_name=${bin}" >> $GITHUB_ENV
-          cp "target/${{ matrix.build.TARGET }}/release/${bin}" "${node_pkg}/bin"
           cp "target/${{ matrix.build.TARGET }}/release/${bin}" "${node_pkg}/bin"
           
           # Create the release bin file

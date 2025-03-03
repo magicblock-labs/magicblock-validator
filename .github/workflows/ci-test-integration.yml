@@ -10,7 +10,7 @@ name: Run CI - Integration Tests
 jobs:
   run_make_ci_test:
     if: github.event.pull_request.draft == false
-    runs-on: extra-large
+    runs-on: ubuntu-latest-m
     steps:
       - name: Checkout this magicblock-validator
         uses: actions/checkout@v2
