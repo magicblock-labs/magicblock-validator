@@ -104,6 +104,7 @@ jobs:
       - name: Build (linux/macos)
         if: matrix.build.OS != 'windows-latest'
         uses: actions-rs/cargo@v1
+        working-directory: magicblock-validator
         with:
           use-cross: true
           command: build
@@ -112,6 +113,7 @@ jobs:
       - name: Build (windows)
         if: matrix.build.OS == 'windows-latest'
         uses: actions-rs/cargo@v1
+        working-directory: magicblock-validator
         with:
           command: build
           args: --no-default-features --release --locked --target ${{ matrix.build.TARGET }} --bin ephemeral-validator
