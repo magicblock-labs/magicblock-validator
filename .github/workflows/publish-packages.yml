@@ -107,14 +107,14 @@ jobs:
         with:
           use-cross: true
           command: build
-          args: --manifest-path=Cargo.toml --release --locked --target ${{ matrix.build.TARGET }} --bin ephemeral-validator
+          args: --release --locked --target ${{ matrix.build.TARGET }} --bin ephemeral-validator
 
       - name: Build (windows)
         if: matrix.build.OS == 'windows-latest'
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --manifest-path=Cargo.toml --no-default-features --release --locked --target ${{ matrix.build.TARGET }} --bin ephemeral-validator
+          args: --no-default-features --release --locked --target ${{ matrix.build.TARGET }} --bin ephemeral-validator
 
       - name: Build the NPM package
         shell: bash

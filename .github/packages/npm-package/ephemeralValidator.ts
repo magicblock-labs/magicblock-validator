@@ -5,7 +5,7 @@ import path from "path";
 import { arch, platform } from "os";
 import { version } from "./package.json";
 
-const PACKAGE_VERSION = `bolt-cli ${version}`;
+const PACKAGE_VERSION = `ephemeral-validator ${version}`;
 
 function getBinaryVersion(location: string): [string | null, string | null] {
   const result = spawnSync(location, ["--version"]);
@@ -23,7 +23,7 @@ function getExePath(): string {
     os = "windows";
     extension = ".exe";
   }
-  const binaryName = `@magicblock-labs/bolt-cli-${os}-${arch()}/bin/bolt${extension}`;
+  const binaryName = `@magicblock-labs/ephemeral-validator-${os}-${arch()}/bin/ephemeral-validator${extension}`;
   try {
     return require.resolve(binaryName);
   } catch (e) {
@@ -33,10 +33,10 @@ function getExePath(): string {
   }
 }
 
-function runBolt(location: string): void {
+function runEphemeralValidator(location: string): void {
   const args = process.argv.slice(2);
-  const bolt = spawn(location, args, { stdio: "inherit" });
-  bolt.on("exit", (code: number | null, signal: NodeJS.Signals | null) => {
+  const ephemeralValidator = spawn(location, args, { stdio: "inherit" });
+  ephemeralValidator.on("exit", (code: number | null, signal: NodeJS.Signals | null) => {
     process.on("exit", () => {
       if (signal) {
         process.kill(process.pid, signal);
@@ -47,15 +47,15 @@ function runBolt(location: string): void {
   });
 
   process.on("SIGINT", () => {
-    bolt.kill("SIGINT");
-    bolt.kill("SIGTERM");
+    ephemeralValidator.kill("SIGINT");
+    ephemeralValidator.kill("SIGTERM");
   });
 }
 
-function tryPackageBolt(): boolean {
+function tryPackageEphemeralValidator(): boolean {
   try {
     const path = getExePath();
-    runBolt(path);
+    runEphemeralValidator(path);
     return true;
   } catch (e) {
     console.error(
@@ -66,12 +66,12 @@ function tryPackageBolt(): boolean {
   }
 }
 
-function trySystemBolt(): void {
+function trySystemEphemeralValidator(): void {
   const absolutePath = process.env.PATH?.split(path.delimiter)
     .filter((dir) => dir !== path.dirname(process.argv[1]))
     .find((dir) => {
       try {
-        fs.accessSync(`${dir}/bolt`, fs.constants.X_OK);
+        fs.accessSync(`${dir}/ephemeral-validator`, fs.constants.X_OK);
         return true;
       } catch {
         return false;
@@ -80,12 +80,12 @@ function trySystemBolt(): void {
 
   if (!absolutePath) {
     console.error(
-      `Could not find globally installed bolt, please install with cargo.`,
+      `Could not find globally installed ephemeral-validator, please install with cargo.`,
     );
     process.exit(1);
   }
 
-  const absoluteBinaryPath = `${absolutePath}/bolt`;
+  const absoluteBinaryPath = `${absolutePath}/ephemeral-validator`;
   const [error, binaryVersion] = getBinaryVersion(absoluteBinaryPath);
 
   if (error !== null) {
@@ -94,11 +94,11 @@ function trySystemBolt(): void {
   }
   if (binaryVersion !== PACKAGE_VERSION) {
     console.error(
-      `Globally installed bolt version is not correct. Expected "${PACKAGE_VERSION}", found "${binaryVersion}".`,
+      `Globally installed ephemeral-validator version is not correct. Expected "${PACKAGE_VERSION}", found "${binaryVersion}".`,
     );
     return;
   }
 
-  runBolt(absoluteBinaryPath);
+  runEphemeralValidator(absoluteBinaryPath);
 }
-tryPackageBolt() || trySystemBolt();
+tryPackageEphemeralValidator() || trySystemEphemeralValidator();
