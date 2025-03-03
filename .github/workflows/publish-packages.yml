@@ -28,42 +28,42 @@ jobs:
             TOOLCHAIN: stable,
             TARGET: x86_64-unknown-linux-gnu,
           }
-          - {
-            NAME: linux-x86-glibc,
-            OS: ubuntu-latest,
-            TOOLCHAIN: stable,
-            TARGET: i686-unknown-linux-gnu,
-          }
-          - {
-            NAME: linux-arm64-glibc,
-            OS: ubuntu-latest,
-            TOOLCHAIN: stable,
-            TARGET: aarch64-unknown-linux-gnu,
-          }
-          - {
-            NAME: win32-x64-msvc,
-            OS: windows-latest,
-            TOOLCHAIN: stable,
-            TARGET: x86_64-pc-windows-msvc,
-          }
-          - {
-            NAME: win32-x86-msvc,
-            OS: windows-latest,
-            TOOLCHAIN: stable,
-            TARGET: i686-pc-windows-msvc,
-          }
-          - {
-            NAME: darwin-x64,
-            OS: macos-latest,
-            TOOLCHAIN: stable,
-            TARGET: x86_64-apple-darwin,
-          }
-          - {
-            NAME: darwin-arm64,
-            OS: macos-latest,
-            TOOLCHAIN: stable,
-            TARGET: aarch64-apple-darwin,
-          }
+#          - {
+#            NAME: linux-x86-glibc,
+#            OS: ubuntu-latest,
+#            TOOLCHAIN: stable,
+#            TARGET: i686-unknown-linux-gnu,
+#          }
+#          - {
+#            NAME: linux-arm64-glibc,
+#            OS: ubuntu-latest,
+#            TOOLCHAIN: stable,
+#            TARGET: aarch64-unknown-linux-gnu,
+#          }
+#          - {
+#            NAME: win32-x64-msvc,
+#            OS: windows-latest,
+#            TOOLCHAIN: stable,
+#            TARGET: x86_64-pc-windows-msvc,
+#          }
+#          - {
+#            NAME: win32-x86-msvc,
+#            OS: windows-latest,
+#            TOOLCHAIN: stable,
+#            TARGET: i686-pc-windows-msvc,
+#          }
+#          - {
+#            NAME: darwin-x64,
+#            OS: macos-latest,
+#            TOOLCHAIN: stable,
+#            TARGET: x86_64-apple-darwin,
+#          }
+#          - {
+#            NAME: darwin-arm64,
+#            OS: macos-latest,
+#            TOOLCHAIN: stable,
+#            TARGET: aarch64-apple-darwin,
+#          }
     steps:
       - name: Checkout this magicblock-validator
         uses: actions/checkout@v4
@@ -79,10 +79,14 @@ jobs:
 
       - uses: ./magicblock-validator/.github/actions/setup-solana
 
-      - name: Set DRY_RUN based on trigger
+      - name: Set DRY_RUN by default
         shell: bash
         run: echo "DRY_RUN=true" >> $GITHUB_ENV
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/v')
+
+      - name: Unset DRY_RUN for releases
+        shell: bash
+        run: echo "DRY_RUN=false" >> $GITHUB_ENV
+        if: github.event_name == 'release' && github.event.action == 'published'
 
       - name: Set the release version
         shell: bash
@@ -103,20 +107,20 @@ jobs:
         with:
           use-cross: true
           command: build
-          args: --manifest-path=Cargo.toml --release --locked --target ${{ matrix.build.TARGET }}
+          args: --manifest-path=Cargo.toml --release --locked --target ${{ matrix.build.TARGET }} --bin ephemeral-validator
 
       - name: Build (windows)
         if: matrix.build.OS == 'windows-latest'
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --manifest-path=Cargo.toml --no-default-features --release --locked --target ${{ matrix.build.TARGET }}
+          args: --manifest-path=Cargo.toml --no-default-features --release --locked --target ${{ matrix.build.TARGET }} --bin ephemeral-validator
 
       - name: Build the NPM package
         shell: bash
         run: |
           # set the binary name
-          bin="rpc"
+          bin="ephemeral-validator"
           # derive the OS and architecture from the build matrix name
           # note: when split by a hyphen, first part is the OS and the second is the architecture
           node_os=$(echo "${{ matrix.build.NAME }}" | cut -d '-' -f1)
@@ -128,15 +132,15 @@ jobs:
           # set the package name
           # note: use 'windows' as OS name instead of 'win32'
           if [ "${{ matrix.build.OS }}" = "windows-latest" ]; then
-            export node_pkg="${bin}-cli-windows-${node_arch}"
+            export node_pkg="${bin}-windows-${node_arch}"
           else
-            export node_pkg="${bin}-cli-${node_os}-${node_arch}"
+            export node_pkg="${bin}-${node_os}-${node_arch}"
           fi
           echo "node_pkg=${node_pkg}" >> $GITHUB_ENV
           # create the package directory
           mkdir -p "${node_pkg}/bin"
           # generate package.json from the template
-          envsubst < crates/ephemeral-validator/npm-package/package.json.tmpl > "${node_pkg}/package.json"
+          envsubst < ./github/packages/npm-package/package.json.tmpl > "${node_pkg}/package.json"
           cat "${node_pkg}/package.json"
           # copy the binary into the package
           # note: windows binaries has '.exe' extension
@@ -155,16 +159,16 @@ jobs:
           echo "release_name=${release_name}" >> $GITHUB_ENV
           mv "target/${{ matrix.build.TARGET }}/release/${bin}" "target/${{ matrix.build.TARGET }}/release/${release_name}"
 
-      - name: Publish binary to GitHub release
-        if: ${{ env.DRY_RUN != 'true' }}
-        uses: svenstaro/upload-release-action@v2
-        with:
-          repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: target/${{ matrix.build.TARGET }}/release/${{ env.release_name }}
-          overwrite: true
-          tag: "v${{ env.RELEASE_VERSION }}"
-          release_name: "v${{ env.RELEASE_VERSION }}"
-          asset_name: "${{ env.release_name }}"
+#      - name: Publish binary to GitHub release
+#        if: ${{ env.DRY_RUN != 'true' }}
+#        uses: svenstaro/upload-release-action@v2
+#        with:
+#          repo_token: ${{ secrets.GITHUB_TOKEN }}
+#          file: target/${{ matrix.build.TARGET }}/release/${{ env.release_name }}
+#          overwrite: true
+#          tag: "v${{ env.RELEASE_VERSION }}"
+#          release_name: "v${{ env.RELEASE_VERSION }}"
+#          asset_name: "${{ env.release_name }}"
 
       - name: Publish the NPM package
         run: |
@@ -181,30 +185,30 @@ jobs:
         shell: bash
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
-  publish-wrapper-npm-package:
-    name: Publish wrapper NPM packages
-    runs-on: ubuntu-20.04
-    needs: publish-npm-binaries
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-      - name: Set DRY_RUN based on trigger
-        run: echo "DRY_RUN=true" >> $GITHUB_ENV
-        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/v')
-      - name: Publish the NPM package
-        shell: bash
-        run: |
-          cd crates/ephemeral-validator/npm-package
-          npm install
-          npm run build
-          cd lib
-          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
-          npm set //registry.npmjs.org/:_authToken ${{ secrets.NPM_TOKEN }}
-          if [ "${DRY_RUN}" = "true" ]; then
-            echo "Running npm publish in dry-run mode"
-            npm publish --access public --dry-run
-          else
-            npm publish --access public
-          fi
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+#  publish-wrapper-npm-package:
+#    name: Publish wrapper NPM packages
+#    runs-on: ubuntu-20.04
+#    needs: publish-npm-binaries
+#    steps:
+#      - name: Checkout
+#        uses: actions/checkout@v4
+#      - name: Set DRY_RUN based on trigger
+#        run: echo "DRY_RUN=true" >> $GITHUB_ENV
+#        if: github.event_name == 'push' && startsWith(github.ref, 'refs/heads/release/v')
+#      - name: Publish the NPM package
+#        shell: bash
+#        run: |
+#          cd crates/ephemeral-validator/npm-package
+#          npm install
+#          npm run build
+#          cd lib
+#          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
+#          npm set //registry.npmjs.org/:_authToken ${{ secrets.NPM_TOKEN }}
+#          if [ "${DRY_RUN}" = "true" ]; then
+#            echo "Running npm publish in dry-run mode"
+#            npm publish --access public --dry-run
+#          else
+#            npm publish --access public
+#          fi
+#        env:
+#          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
