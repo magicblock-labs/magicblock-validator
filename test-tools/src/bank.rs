@@ -35,7 +35,7 @@ pub fn bank_for_tests_with_identity(
         millis_per_slot,
         identity_id,
         // TODO(bmuddha): when we switch to multithreaded mode,
-        // switch to actaul lock held by scheduler
+        // switch to actual lock held by scheduler
         StWLock::default(),
     );
     bank.transaction_log_collector_config

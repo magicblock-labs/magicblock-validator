@@ -33,7 +33,7 @@ pub(crate) fn gen_test_validator_start_script(
         let adb = AccountsDb::open(accountsdb_path.clone())
             .expect("failed to open accountsdb");
         eprintln!(
-            "Generating test validator script with accounts from ledger: {:?}",
+            "Generating test validator script with accounts from accountsdb: {:?}",
             accountsdb_path
         );
         adb.iter_all().map(|(pk, _)| pk).collect()
