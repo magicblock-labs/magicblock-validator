@@ -77,6 +77,11 @@ jobs:
           github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Install target
+        if: matrix.build.TARGET != matrix.build.HOST_TARGET
+        run: rustup target add ${{ matrix.build.TARGET }}
+        shell: bash
+
       - name: Set DRY_RUN by default
         shell: bash
         run: echo "DRY_RUN=true" >> $GITHUB_ENV
@@ -93,7 +98,6 @@ jobs:
           version: latest
 
       - name: Build (linux/macos/windows)
-        if: matrix.build.OS != 'windows-latest'
         uses: actions-rs/cargo@v1
         with:
           command: build
