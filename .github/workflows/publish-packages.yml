@@ -73,7 +73,7 @@ jobs:
       - name: Install GCC 9
         if: matrix.build.OS == 'ubuntu-latest'
         run: |
-          apt-get update && apt-get install -y libclang-dev protobuf-compiler cmake pkg-config libssl-dev
+          sudo apt-get update && sudo apt-get install -y libclang-dev protobuf-compiler cmake pkg-config libssl-dev
           sudo apt install -y gcc-9 g++-9
           sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 90
           sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 90
@@ -88,6 +88,7 @@ jobs:
           g++ --version
 
       - name: Set GCC 9 as default compiler
+        if: matrix.build.OS == 'ubuntu-latest'
         run: |
           export CC=/usr/bin/gcc-9
           export CXX=/usr/bin/g++-9
