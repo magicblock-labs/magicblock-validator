@@ -70,17 +70,23 @@ jobs:
         with:
           path: magicblock-validator
 
+      - uses: ./magicblock-validator/.github/actions/setup-build-env
+        with:
+          build_cache_key_name: "magicblock-validator-ci-test-unit-v001"
+          rust_toolchain_release: "1.85.0"
+          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
       - name: Set up GCC
-        uses: egor-tensin/setup-gcc@v1
+        uses: egor-tensin/setup-gcc@v1.3
         with:
           version: latest
 
-#      - name: Install GCC 9 and build dependencies
-#        if: matrix.build.OS == 'ubuntu-latest'
-#        run: |
-#          sudo apt-get update
-#          sudo apt-get install -y libclang-dev protobuf-compiler cmake pkg-config libssl-dev
-#          sudo apt-get install -y gcc-9 g++-9
+      - name: Install GCC 9 and build dependencies
+        if: matrix.build.OS == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev protobuf-compiler cmake pkg-config libssl-dev ca-certificates openssh-client
 #
 #          # Verify GCC installation
 #          if ! command -v gcc-9 &> /dev/null; then
@@ -126,13 +132,6 @@ jobs:
           echo "Checking OpenSSL via pkg-config:"
           pkg-config --modversion openssl || echo "ERROR: OpenSSL not found via pkg-config!"
 
-      - uses: ./magicblock-validator/.github/actions/setup-build-env
-        with:
-          build_cache_key_name: "magicblock-validator-ci-test-unit-v000"
-          rust_toolchain_release: "1.83.0"
-          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-
       - uses: ./magicblock-validator/.github/actions/setup-solana
 
       - name: Build (linux/macos)
@@ -146,7 +145,6 @@ jobs:
           OPENSSL_INCLUDE_DIR: /usr/include
           OPENSSL_STATIC: 1
         with:
-          use-cross: true
           command: build
           args: --manifest-path=magicblock-validator/Cargo.toml  --release --locked --target ${{ matrix.build.TARGET }}
 
