@@ -124,6 +124,7 @@ jobs:
           
           # create an executable for testing
           mkdir -p target/${{ matrix.build.TARGET }}/release/rpc
+          touch target/${{ matrix.build.TARGET }}/release/rpc
           chmod +x target/${{ matrix.build.TARGET }}/release/rpc
       
           # set the binary name
