@@ -74,12 +74,12 @@ jobs:
         if: matrix.build.OS == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y gcc-9 g++-9
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 100
-          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 100
+          sudo apt-get install -y gcc g++
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc 100
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++ 100
           echo "PATH=$PATH:/usr/bin" >> $GITHUB_ENV
           # Verify GCC installation
-          which gcc-9
+          which gcc
           gcc --version
           g++ --version
       - uses: ./magicblock-validator/.github/actions/setup-build-env
@@ -118,11 +118,11 @@ jobs:
         run: |
           mkdir -p .cargo
           echo '[target.${{ matrix.build.TARGET }}]' > .cargo/config.toml
-          echo 'linker = "/usr/bin/gcc-9"' >> .cargo/config.toml
+          echo 'linker = "/usr/bin/gcc"' >> .cargo/config.toml
           echo 'rustflags = ["-C", "link-arg=-fuse-ld=gold"]' >> .cargo/config.toml
           
-          echo "CC=/usr/bin/gcc-9" >> $GITHUB_ENV
-          echo "CXX=/usr/bin/g++-9" >> $GITHUB_ENV
+          echo "CC=/usr/bin/gcc" >> $GITHUB_ENV
+          echo "CXX=/usr/bin/g++" >> $GITHUB_ENV
           echo "PROTOBUF_SRC_NO_VENDOR=1" >> $GITHUB_ENV
       - name: Build (linux/macos)
         if: matrix.build.OS != 'windows-latest'
