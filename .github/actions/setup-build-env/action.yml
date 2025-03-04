@@ -50,7 +50,7 @@ runs:
 
   - name: Install Rust
     shell: "bash"
-    run: rustup toolchain install ${{ inputs.rust_toolchain_release }} --profile minimal
+    run: rustup toolchain install ${{ inputs.rust_toolchain_release }} --profile default
 
   - uses: Swatinem/rust-cache@v2
     with:
