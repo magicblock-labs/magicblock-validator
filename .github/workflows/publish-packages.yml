@@ -73,8 +73,7 @@ jobs:
       - name: Install GCC 9
         if: matrix.build.OS == 'ubuntu-latest'
         run: |
-          sudo apt-get update
-          sudo apt-get install -y gcc g++
+          apt-get update && apt-get install -y libclang-dev protobuf-compiler cmake
           echo "PATH=$PATH:/usr/bin" >> $GITHUB_ENV
           # Verify GCC installation
           which gcc
@@ -111,17 +110,6 @@ jobs:
             echo "RELEASE_VERSION=${VERSION}" >> $GITHUB_ENV
           fi
 
-      - name: Configure cross environment
-        if: matrix.build.OS == 'ubuntu-latest'
-        run: |
-          mkdir -p .cargo
-          echo '[target.${{ matrix.build.TARGET }}]' > .cargo/config.toml
-          echo 'linker = "/usr/bin/gcc"' >> .cargo/config.toml
-          echo 'rustflags = ["-C", "link-arg=-fuse-ld=gold"]' >> .cargo/config.toml
-          
-          echo "CC=/usr/bin/gcc" >> $GITHUB_ENV
-          echo "CXX=/usr/bin/g++" >> $GITHUB_ENV
-          echo "PROTOBUF_SRC_NO_VENDOR=1" >> $GITHUB_ENV
       - name: Build (linux/macos)
         if: matrix.build.OS != 'windows-latest'
         uses: actions-rs/cargo@v1
