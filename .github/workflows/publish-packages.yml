@@ -92,8 +92,7 @@ jobs:
           version: latest
 
       - name: Build (linux/macos)
-        if: false
-#        if: matrix.build.OS != 'windows-latest'
+        if: matrix.build.OS != 'windows-latest'
         uses: actions-rs/cargo@v1
         with:
           command: build
@@ -126,12 +125,7 @@ jobs:
         shell: bash
         run: |
           cd magicblock-validator
-          
-          # create an executable for testing
-          mkdir -p target/${{ matrix.build.TARGET }}/release
-          touch target/${{ matrix.build.TARGET }}/release/rpc
-          chmod +x target/${{ matrix.build.TARGET }}/release/rpc
-      
+
           # set the binary name
           bin="ephemeral-validator"
           mv target/${{ matrix.build.TARGET }}/release/rpc target/${{ matrix.build.TARGET }}/release/${bin}
