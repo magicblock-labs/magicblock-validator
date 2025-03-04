@@ -89,7 +89,7 @@ jobs:
           export CXX=/usr/bin/g++-9
           echo "CC=/usr/bin/gcc-9" >> $GITHUB_ENV
           echo "CXX=/usr/bin/g++-9" >> $GITHUB_ENV         
-          cmake -B build -DCMAKE_C_COMPILER=gcc-9 -DCMAKE_CXX_COMPILER=g++-9
+          cmake -B build -S cmake_project -DCMAKE_C_COMPILER=gcc-9 -DCMAKE_CXX_COMPILER=g++-9
 
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
