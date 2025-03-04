@@ -146,7 +146,7 @@ jobs:
           # create the package directory
           mkdir -p "${node_pkg}/bin"
           # generate package.json from the template
-          envsubst < ./github/packages/npm-package/package.json.tmpl > "${node_pkg}/package.json"
+          envsubst < .github/packages/npm-package/package.json.tmpl > "${node_pkg}/package.json"
           cat "${node_pkg}/package.json"
           # copy the binary into the package
           # note: windows binaries has '.exe' extension
