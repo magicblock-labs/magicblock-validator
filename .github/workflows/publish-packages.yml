@@ -70,22 +70,31 @@ jobs:
         with:
           path: magicblock-validator
 
-      - name: Install GCC 9
+      - name: Install GCC 9 and build dependencies
         if: matrix.build.OS == 'ubuntu-latest'
         run: |
-          sudo apt-get update && sudo apt-get install -y libclang-dev protobuf-compiler cmake pkg-config libssl-dev
-          sudo apt install -y gcc-9 g++-9
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev protobuf-compiler cmake pkg-config libssl-dev
+          sudo apt-get install -y gcc-9 g++-9
           sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 90
           sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 90
-          echo "PATH=$PATH:/usr/bin" >> $GITHUB_ENV
-          echo "OPENSSL_DIR=/usr" >> $GITHUB_ENV
-          echo "OPENSSL_LIB_DIR=/usr/lib" >> $GITHUB_ENV
-          echo "OPENSSL_INCLUDE_DIR=/usr/include" >> $GITHUB_ENV
-          echo "PKG_CONFIG_PATH=/usr/lib/pkgconfig" >> $GITHUB_ENV
+          sudo update-alternatives --set gcc /usr/bin/gcc-9
+          sudo update-alternatives --set g++ /usr/bin/g++-9
           # Verify GCC installation
           which gcc
           gcc --version
+          which g++
           g++ --version
+          # Set environment variables
+          echo "CC=/usr/bin/gcc-9" >> $GITHUB_ENV
+          echo "CXX=/usr/bin/g++-9" >> $GITHUB_ENV
+          echo "PATH=$PATH:/usr/bin" >> $GITHUB_ENV
+          echo "OPENSSL_DIR=/usr" >> $GITHUB_ENV
+          echo "OPENSSL_LIB_DIR=/usr/lib/x86_64-linux-gnu" >> $GITHUB_ENV
+          echo "OPENSSL_INCLUDE_DIR=/usr/include" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=/usr/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig" >> $GITHUB_ENV
+          echo "CROSS_CONTAINER_OPTS=-e CC=/usr/bin/gcc-9 -e CXX=/usr/bin/g++-9" >> $GITHUB_ENV
+
 
       - name: Set GCC 9 as default compiler
         if: matrix.build.OS == 'ubuntu-latest'
