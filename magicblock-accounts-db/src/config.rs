@@ -1,7 +1,6 @@
 use std::{path::PathBuf, sync::atomic::AtomicUsize};
 
 use serde::{Deserialize, Serialize};
-use tempfile::env::temp_dir;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -51,7 +50,10 @@ impl AdbConfig {
         static COUNTER: AtomicUsize = AtomicUsize::new(0);
         let i = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // indexing, so that each test will run with its own adb
-        let directory: PathBuf = temp_dir().join(format!("adb-test{i}/adb"));
+        let tempdir = tempfile::tempdir()
+            .expect("failed to create a temporary directory");
+        let directory: PathBuf =
+            tempdir.into_path().join(format!("adb-test{i}/adb"));
         let parent = directory.parent().expect("must have a parent"); // infallible
         let _ = fs::remove_dir_all(parent);
 
