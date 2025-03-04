@@ -77,9 +77,10 @@ jobs:
           sudo apt-get install -y gcc-9 g++-9
           sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 100
           sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 100
+          # Add explicit check to verify GCC installation
+          which gcc-9 || echo "gcc-9 not found in PATH"
           gcc --version
           g++ --version
-
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
           build_cache_key_name: "magicblock-validator-ci-test-unit-v000"
@@ -119,7 +120,6 @@ jobs:
           echo 'linker = "gcc-9"' >> .cargo/config.toml
           echo 'rustflags = ["-C", "link-arg=-fuse-ld=gold"]' >> .cargo/config.toml
           
-          # Set environment variables for protobuf-src crate
           echo "CC=gcc-9" >> $GITHUB_ENV
           echo "CXX=g++-9" >> $GITHUB_ENV
           echo "PROTOBUF_SRC_NO_VENDOR=1" >> $GITHUB_ENV
@@ -227,7 +227,7 @@ jobs:
 #          cd lib
 #          echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
 #          npm set //registry.npmjs.org/:_authToken ${{ secrets.NPM_TOKEN }}
-#          if [ "${DRY_RUN}" = "true" ]; then
+#          if [ "${env.DRY_RUN}" = "true" ]; then
 #            echo "Running npm publish in dry-run mode"
 #            npm publish --access public --dry-run
 #          else
