@@ -87,6 +87,7 @@ jobs:
         if: github.event_name == 'release' && github.event.action == 'published'
 
       - name: Set up GCC
+        if: matrix.build.OS == 'ubuntu-latest'
         uses: egor-tensin/setup-gcc@v1.3
         with:
           version: latest
@@ -96,14 +97,15 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --manifest-path=magicblock-validator/Cargo.toml  --release --locked --target ${{ matrix.build.TARGET }}
+          use-cross: 'true'
+          args: --manifest-path=magicblock-validator/Cargo.toml --release --locked --target ${{ matrix.build.TARGET }}
 
       - name: Build (windows)
         if: matrix.build.OS == 'windows-latest'
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --manifest-path=magicblock-validator/Cargo.toml  --release --locked --target ${{ matrix.build.TARGET }}
+          args: --manifest-path=magicblock-validator/Cargo.toml --release --locked --target ${{ matrix.build.TARGET }}
 
       - name: Check versions are aligned
         run: |
