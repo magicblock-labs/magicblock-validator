@@ -70,34 +70,39 @@ jobs:
         with:
           path: magicblock-validator
 
-      - name: Install GCC 9 and build dependencies
-        if: matrix.build.OS == 'ubuntu-latest'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libclang-dev protobuf-compiler cmake pkg-config libssl-dev
-          sudo apt-get install -y gcc-9 g++-9
+      - name: Set up GCC
+        uses: egor-tensin/setup-gcc@v1
+        with:
+          version: latest
 
-          # Verify GCC installation
-          if ! command -v gcc-9 &> /dev/null; then
-            echo "ERROR: gcc-9 not found!"
-            dpkg -L gcc-9 || echo "GCC-9 package is not correctly installed."
-            find / -name gcc-9 2>/dev/null || echo "Could not find gcc-9 in the filesystem."
-            exit 1
-          fi
-
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 90
-          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 90
-          sudo update-alternatives --set gcc /usr/bin/gcc-9
-          sudo update-alternatives --set g++ /usr/bin/g++-9
-
-          # Set environment variables
-          echo "CC=/usr/bin/gcc-9" >> $GITHUB_ENV
-          echo "CXX=/usr/bin/g++-9" >> $GITHUB_ENV
-          echo "OPENSSL_DIR=/usr" >> $GITHUB_ENV
-          echo "OPENSSL_LIB_DIR=/usr/lib/x86_64-linux-gnu" >> $GITHUB_ENV
-          echo "OPENSSL_INCLUDE_DIR=/usr/include" >> $GITHUB_ENV
-          echo "PKG_CONFIG_PATH=/usr/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig" >> $GITHUB_ENV
-          echo "CROSS_CONTAINER_OPTS=-e CC=/usr/bin/gcc-9 -e CXX=/usr/bin/g++-9" >> $GITHUB_ENV
+#      - name: Install GCC 9 and build dependencies
+#        if: matrix.build.OS == 'ubuntu-latest'
+#        run: |
+#          sudo apt-get update
+#          sudo apt-get install -y libclang-dev protobuf-compiler cmake pkg-config libssl-dev
+#          sudo apt-get install -y gcc-9 g++-9
+#
+#          # Verify GCC installation
+#          if ! command -v gcc-9 &> /dev/null; then
+#            echo "ERROR: gcc-9 not found!"
+#            dpkg -L gcc-9 || echo "GCC-9 package is not correctly installed."
+#            find / -name gcc-9 2>/dev/null || echo "Could not find gcc-9 in the filesystem."
+#            exit 1
+#          fi
+#
+#          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 90
+#          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 90
+#          sudo update-alternatives --set gcc /usr/bin/gcc-9
+#          sudo update-alternatives --set g++ /usr/bin/g++-9
+#
+#          # Set environment variables
+#          echo "CC=/usr/bin/gcc-9" >> $GITHUB_ENV
+#          echo "CXX=/usr/bin/g++-9" >> $GITHUB_ENV
+#          echo "OPENSSL_DIR=/usr" >> $GITHUB_ENV
+#          echo "OPENSSL_LIB_DIR=/usr/lib/x86_64-linux-gnu" >> $GITHUB_ENV
+#          echo "OPENSSL_INCLUDE_DIR=/usr/include" >> $GITHUB_ENV
+#          echo "PKG_CONFIG_PATH=/usr/lib/pkgconfig:/usr/lib/x86_64-linux-gnu/pkgconfig" >> $GITHUB_ENV
+#          echo "CROSS_CONTAINER_OPTS=-e CC=/usr/bin/gcc-9 -e CXX=/usr/bin/g++-9" >> $GITHUB_ENV
 
       - name: Verify Compiler and OpenSSL Installation
         run: |
