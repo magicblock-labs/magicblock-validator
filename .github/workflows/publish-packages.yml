@@ -137,13 +137,6 @@ jobs:
       - name: Build (linux/macos)
         if: matrix.build.OS != 'windows-latest'
         uses: actions-rs/cargo@v1
-        env:
-          CC: /usr/bin/gcc-9
-          CXX: /usr/bin/g++-9
-          OPENSSL_DIR: /usr
-          OPENSSL_LIB_DIR: /usr/lib/x86_64-linux-gnu
-          OPENSSL_INCLUDE_DIR: /usr/include
-          OPENSSL_STATIC: 1
         with:
           command: build
           args: --manifest-path=magicblock-validator/Cargo.toml  --release --locked --target ${{ matrix.build.TARGET }}
