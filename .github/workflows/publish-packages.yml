@@ -15,8 +15,8 @@ on:
         default: 'v0.0.1'
 
 jobs:
-  publish-npm-binaries:
-    name: Publish NPM packages
+  publish-binaries:
+    name: Publish Binaries
     runs-on: ${{ matrix.build.os }}
     strategy:
       fail-fast: false
@@ -89,7 +89,8 @@ jobs:
           sudo apt-get install -y libclang-dev protobuf-compiler cmake pkg-config libssl-dev ca-certificates openssh-client
 
       - name: Build (linux/macos)
-        if: matrix.build.OS != 'windows-latest'
+        if: false
+#        if: matrix.build.OS != 'windows-latest'
         uses: actions-rs/cargo@v1
         with:
           command: build
@@ -116,6 +117,9 @@ jobs:
       - name: Build the NPM package
         shell: bash
         run: |
+          # create an executable for testing
+          chmod +x target/${{ matrix.build.TARGET }}/release/rpc
+      
           # set the binary name
           mv target/${{ matrix.build.TARGET }}/release/rpc target/${{ matrix.build.TARGET }}/release/ephemeral-validator
           bin="ephemeral-validator"
