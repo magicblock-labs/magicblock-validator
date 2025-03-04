@@ -88,7 +88,8 @@ jobs:
           export CC=/usr/bin/gcc-9
           export CXX=/usr/bin/g++-9
           echo "CC=/usr/bin/gcc-9" >> $GITHUB_ENV
-          echo "CXX=/usr/bin/g++-9" >> $GITHUB_ENV         
+          echo "CXX=/usr/bin/g++-9" >> $GITHUB_ENV    
+          echo "CROSS_CONTAINER_OPTS=-e CC=/usr/bin/gcc-9 -e CXX=/usr/bin/g++-9" >> $GITHUB_ENV
 
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
