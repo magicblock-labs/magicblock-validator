@@ -97,6 +97,12 @@ jobs:
         with:
           version: latest
 
+      - name: Install build dependencies
+        if: matrix.build.OS == 'ubuntu-latest'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libclang-dev protobuf-compiler cmake pkg-config libssl-dev ca-certificates openssh-client
+
       - name: Build (linux/macos/windows)
         uses: actions-rs/cargo@v1
         with:
