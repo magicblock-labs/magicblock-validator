@@ -41,11 +41,12 @@ members = [
 resolver = "2"
 
 [workspace.package]
-version = "2.1.11"                                               # matches Solana Version
+# matches Solana Version
+version = "2.1.11"
 authors = ["MagicBlock Maintainers <maintainers@magicblock.gg>"]
-repository = "https://github.com/magicblock-labs/x-validator"
-homepage = "https://www.magicblock.gg"
-license = "Apache-2.0"
+repository = "https://github.com/magicblock-labs/ephemeral-validator"
+homepage = "https://www.magicblock.xyz"
+license = "Business Source License 1.1"
 edition = "2021"
 
 [workspace.dependencies]
