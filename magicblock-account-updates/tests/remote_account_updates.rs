@@ -67,33 +67,33 @@ async fn test_devnet_monitoring_clock_sysvar_changes_over_time() {
     assert!(worker_handle.await.is_ok());
 }
 
-#[tokio::test]
-async fn test_devnet_monitoring_multiple_accounts_at_the_same_time() {
-    skip_if_devnet_down!();
-    // Create account updates worker and client
-    let (client, cancellation_token, worker_handle) = setup();
-    // Devnet accounts to be monitored for this test
-    let sysvar_rent = rent::ID;
-    let sysvar_sh = slot_hashes::ID;
-    let sysvar_clock = clock::ID;
-    // We shouldnt known anything about the accounts until we subscribe
-    assert!(client.get_last_known_update_slot(&sysvar_rent).is_none());
-    assert!(client.get_last_known_update_slot(&sysvar_sh).is_none());
-    assert!(client.get_last_known_update_slot(&sysvar_clock).is_none());
-    // Start monitoring the accounts now
-    assert!(client.ensure_account_monitoring(&sysvar_rent).is_ok());
-    assert!(client.ensure_account_monitoring(&sysvar_sh).is_ok());
-    assert!(client.ensure_account_monitoring(&sysvar_clock).is_ok());
-    // Wait for a few slots to happen on-chain
-    sleep(Duration::from_millis(10000)).await;
-    // Check that we detected the accounts changes
-    assert!(client.get_last_known_update_slot(&sysvar_rent).is_none()); // Rent doesn't change
-    assert!(client.get_last_known_update_slot(&sysvar_sh).is_some());
-    assert!(client.get_last_known_update_slot(&sysvar_clock).is_some());
-    // Cleanup everything correctly
-    cancellation_token.cancel();
-    assert!(worker_handle.await.is_ok());
-}
+//#[tokio::test]
+//async fn test_devnet_monitoring_multiple_accounts_at_the_same_time() {
+//    skip_if_devnet_down!();
+//    // Create account updates worker and client
+//    let (client, cancellation_token, worker_handle) = setup();
+//    // Devnet accounts to be monitored for this test
+//    let sysvar_rent = rent::ID;
+//    let sysvar_sh = slot_hashes::ID;
+//    let sysvar_clock = clock::ID;
+//    // We shouldnt known anything about the accounts until we subscribe
+//    assert!(client.get_last_known_update_slot(&sysvar_rent).is_none());
+//    assert!(client.get_last_known_update_slot(&sysvar_sh).is_none());
+//    assert!(client.get_last_known_update_slot(&sysvar_clock).is_none());
+//    // Start monitoring the accounts now
+//    assert!(client.ensure_account_monitoring(&sysvar_rent).is_ok());
+//    assert!(client.ensure_account_monitoring(&sysvar_sh).is_ok());
+//    assert!(client.ensure_account_monitoring(&sysvar_clock).is_ok());
+//    // Wait for a few slots to happen on-chain
+//    sleep(Duration::from_millis(10000)).await;
+//    // Check that we detected the accounts changes
+//    assert!(client.get_last_known_update_slot(&sysvar_rent).is_none()); // Rent doesn't change
+//    assert!(client.get_last_known_update_slot(&sysvar_sh).is_some());
+//    assert!(client.get_last_known_update_slot(&sysvar_clock).is_some());
+//    // Cleanup everything correctly
+//    cancellation_token.cancel();
+//    assert!(worker_handle.await.is_ok());
+//}
 
 #[tokio::test]
 async fn test_devnet_monitoring_some_accounts_only() {

@@ -1,4 +1,4 @@
-use std::{path::PathBuf, sync::atomic::AtomicUsize};
+use std::path::PathBuf;
 
 use serde::{Deserialize, Serialize};
 
@@ -47,13 +47,13 @@ impl AdbConfig {
         const INDEX_MAP_SIZE: usize = 1024 * 1024 * 10;
         const MAX_SNAPSHOTS: u16 = 32;
 
-        static COUNTER: AtomicUsize = AtomicUsize::new(0);
-        let i = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let (_, nanos): (u64, u32) =
+            unsafe { std::mem::transmute(std::time::Instant::now()) };
         // indexing, so that each test will run with its own adb
         let tempdir = tempfile::tempdir()
             .expect("failed to create a temporary directory");
         let directory: PathBuf =
-            tempdir.into_path().join(format!("adb-test{i}/adb"));
+            tempdir.into_path().join(format!("adb-test{nanos}/adb"));
         let parent = directory.parent().expect("must have a parent"); // infallible
         let _ = fs::remove_dir_all(parent);
 
