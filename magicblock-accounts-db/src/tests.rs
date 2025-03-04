@@ -296,7 +296,7 @@ fn test_get_all_accounts_after_rollback() {
     for i in ITERS..ITERS + SNAPSHOT_FREQUENCY {
         let (pk, acc) = account();
         adb.insert_account(&pk, &acc);
-        adb.set_slot(i - 1);
+        adb.set_slot(i + 1);
     }
 
     assert!(

@@ -41,7 +41,6 @@ pub enum BlockSize {
 
 impl AdbConfig {
     pub fn temp_for_tests(snapshot_frequency: u64) -> Self {
-        use std::fs;
         const DB_SIZE: usize = 100 * 1024 * 1024;
         const BLOCK_SIZE: BlockSize = BlockSize::Block256;
         const INDEX_MAP_SIZE: usize = 1024 * 1024 * 10;
@@ -53,9 +52,7 @@ impl AdbConfig {
         let tempdir = tempfile::tempdir()
             .expect("failed to create a temporary directory");
         let directory: PathBuf =
-            tempdir.into_path().join(format!("adb-test{nanos}/adb"));
-        let parent = directory.parent().expect("must have a parent"); // infallible
-        let _ = fs::remove_dir_all(parent);
+            tempdir.into_path().join(format!("adb-test{nanos}"));
 
         Self {
             directory,

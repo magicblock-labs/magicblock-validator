@@ -147,13 +147,12 @@ pub fn process_ledger(ledger: &Ledger, bank: &Arc<Bank>) -> LedgerResult<u64> {
 
     // Since transactions may refer to blockhashes that were present when they
     // ran initially we ensure that they are present during replay as well
-    //let blockhashes_only_starting_slot =
-    //    if full_process_starting_slot > bank.max_age {
-    //        full_process_starting_slot - bank.max_age
-    //    } else {
-    //        0
-    //    };
-    let blockhashes_only_starting_slot = full_process_starting_slot;
+    let blockhashes_only_starting_slot =
+        if full_process_starting_slot > bank.max_age {
+            full_process_starting_slot - bank.max_age
+        } else {
+            0
+        };
     debug!(
         "Loaded accounts into bank from storage replaying blockhashes from {} and transactions from {}",
         blockhashes_only_starting_slot, full_process_starting_slot

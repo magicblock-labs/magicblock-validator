@@ -90,7 +90,7 @@ impl SnapshotEngine {
 
         spath = snapshots.swap_remove_back(index).unwrap(); // infallible
         log::info!(
-            "rolling back to snapshot at {slot} using {}",
+            "rolling back to snapshot before {slot} using {}",
             spath.display()
         );
 
