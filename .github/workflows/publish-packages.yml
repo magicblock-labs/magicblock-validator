@@ -73,11 +73,15 @@ jobs:
       - name: Install GCC 9
         if: matrix.build.OS == 'ubuntu-latest'
         run: |
-          apt-get update && apt-get install -y libclang-dev protobuf-compiler cmake
+          apt-get update && apt-get install -y libclang-dev protobuf-compiler cmake pkg-config libssl-dev
           sudo apt install -y gcc-9 g++-9
           sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 90
           sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 90
           echo "PATH=$PATH:/usr/bin" >> $GITHUB_ENV
+          echo "OPENSSL_DIR=/usr" >> $GITHUB_ENV
+          echo "OPENSSL_LIB_DIR=/usr/lib" >> $GITHUB_ENV
+          echo "OPENSSL_INCLUDE_DIR=/usr/include" >> $GITHUB_ENV
+          echo "PKG_CONFIG_PATH=/usr/lib/pkgconfig" >> $GITHUB_ENV
           # Verify GCC installation
           which gcc
           gcc --version
