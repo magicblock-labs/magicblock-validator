@@ -83,13 +83,12 @@ jobs:
           gcc --version
           g++ --version
 
-      - name: Configure CMake to use GCC 9
+      - name: Set GCC 9 as default compiler
         run: |
           export CC=/usr/bin/gcc-9
           export CXX=/usr/bin/g++-9
           echo "CC=/usr/bin/gcc-9" >> $GITHUB_ENV
           echo "CXX=/usr/bin/g++-9" >> $GITHUB_ENV         
-          cmake -B build -S cmake_project -DCMAKE_C_COMPILER=gcc-9 -DCMAKE_CXX_COMPILER=g++-9
 
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
