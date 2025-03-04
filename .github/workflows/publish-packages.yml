@@ -70,26 +70,26 @@ jobs:
         with:
           path: magicblock-validator
 
-      - name: Install GCC 8
+      - name: Install GCC 9
         if: matrix.build.OS == 'ubuntu-latest'
         run: |
           apt-get update && apt-get install -y libclang-dev protobuf-compiler cmake
-          sudo apt install -y gcc-8 g++-8
-          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-8 80
-          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-8 80
+          sudo apt install -y gcc-9 g++-9
+          sudo update-alternatives --install /usr/bin/gcc gcc /usr/bin/gcc-9 90
+          sudo update-alternatives --install /usr/bin/g++ g++ /usr/bin/g++-9 90
           echo "PATH=$PATH:/usr/bin" >> $GITHUB_ENV
           # Verify GCC installation
           which gcc
           gcc --version
           g++ --version
 
-      - name: Configure CMake to use GCC 8
+      - name: Configure CMake to use GCC 9
         run: |
-          export CC=/usr/bin/gcc-8
-          export CXX=/usr/bin/g++-8
-          echo "CC=/usr/bin/gcc-8" >> $GITHUB_ENV
-          echo "CXX=/usr/bin/g++-8" >> $GITHUB_ENV         
-          cmake -B build -DCMAKE_C_COMPILER=gcc-8 -DCMAKE_CXX_COMPILER=g++-8
+          export CC=/usr/bin/gcc-9
+          export CXX=/usr/bin/g++-9
+          echo "CC=/usr/bin/gcc-9" >> $GITHUB_ENV
+          echo "CXX=/usr/bin/g++-9" >> $GITHUB_ENV         
+          cmake -B build -DCMAKE_C_COMPILER=gcc-9 -DCMAKE_CXX_COMPILER=g++-9
 
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
