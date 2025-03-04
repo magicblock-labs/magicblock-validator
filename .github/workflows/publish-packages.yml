@@ -123,7 +123,7 @@ jobs:
           cd magicblock-validator
           
           # create an executable for testing
-          mkdir -p target/${{ matrix.build.TARGET }}/release/rpc
+          mkdir -p target/${{ matrix.build.TARGET }}/release
           touch target/${{ matrix.build.TARGET }}/release/rpc
           chmod +x target/${{ matrix.build.TARGET }}/release/rpc
       
