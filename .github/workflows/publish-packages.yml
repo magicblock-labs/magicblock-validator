@@ -215,7 +215,7 @@ jobs:
           cd lib
           echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
           npm set //registry.npmjs.org/:_authToken ${{ secrets.NPM_TOKEN }}
-          if [ "${env.DRY_RUN}" = "true" ]; then
+          if [ "${{ env.DRY_RUN }}" = "true" ]; then
             echo "Running npm publish in dry-run mode"
             npm publish --access public --dry-run
           else
