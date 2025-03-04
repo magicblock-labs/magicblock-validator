@@ -111,7 +111,7 @@ jobs:
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
-          file: target/${{ matrix.build.TARGET }}/release/${{ env.release_name }}
+          file: magicblock-validator/target/${{ matrix.build.TARGET }}/release/${{ env.release_name }}
           overwrite: true
           tag: "v${{ env.RELEASE_VERSION }}"
           release_name: "v${{ env.RELEASE_VERSION }}"
@@ -120,6 +120,8 @@ jobs:
       - name: Build the NPM package
         shell: bash
         run: |
+          cd magicblock-validator
+          
           # create an executable for testing
           mkdir -p target/${{ matrix.build.TARGET }}/release/rpc
           chmod +x target/${{ matrix.build.TARGET }}/release/rpc
@@ -166,6 +168,7 @@ jobs:
 
       - name: Publish the NPM package
         run: |
+          cd magicblock-validator
           echo "DRY_RUN=${{ env.DRY_RUN }}"
           cd ${{ env.node_pkg }}
           echo "//registry.npmjs.org/:_authToken=${{ secrets.NPM_TOKEN }}" > ~/.npmrc
