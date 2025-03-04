@@ -92,19 +92,12 @@ jobs:
         with:
           version: latest
 
-      - name: Build (linux/macos)
+      - name: Build (linux/macos/windows)
         if: matrix.build.OS != 'windows-latest'
         uses: actions-rs/cargo@v1
         with:
           command: build
-          use-cross: 'true'
-          args: --manifest-path=magicblock-validator/Cargo.toml --release --locked --target ${{ matrix.build.TARGET }}
-
-      - name: Build (windows)
-        if: matrix.build.OS == 'windows-latest'
-        uses: actions-rs/cargo@v1
-        with:
-          command: build
+          use-cross: ${{ matrix.build.OS == 'ubuntu-latest' }}
           args: --manifest-path=magicblock-validator/Cargo.toml --release --locked --target ${{ matrix.build.TARGET }}
 
       - name: Check versions are aligned
