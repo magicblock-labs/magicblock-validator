@@ -20,3 +20,13 @@ impl From<lmdb::Error> for AdbError {
         }
     }
 }
+
+#[macro_export]
+macro_rules! inspecterr {
+    ($msg: expr) => {
+        |err| log::error!("Accounts DB - {} error: {err}", $msg)
+    };
+    ($msg: expr, $($ctx:expr),* $(,)?) => {
+        |err| log::error!("Accounts DB - {} error: {err}", format!($msg, $($ctx),*))
+    };
+}

@@ -18,27 +18,6 @@ pub type StWLock = Arc<RwLock<()>>;
 
 static mut ADB_SNAPSHOT_FREQUENCY: u64 = 0;
 
-macro_rules! inspecterr {
-    ($result: expr, $msg: expr) => {
-        $result
-            .inspect_err(|err| ::log::error!("adb - {} error: {err}", $msg))?
-    };
-    ($result: expr, $msg: expr, @option) => {
-        $result
-            .inspect_err(|err| ::log::error!("adb - {} error: {err}", $msg))
-            .ok()
-    };
-    ($result: expr, $msg: expr, @silent) => {
-        match $result {
-            Ok(v) => v,
-            Err(error) => {
-                ::log::error!("adb - {} error: {error}", $msg);
-                return;
-            }
-        }
-    };
-}
-
 #[repr(C)] // perf: storage and cache will be stored in two contigious cache lines
 pub struct AccountsDb {
     /// Main accounts storage, where actual account records are kept
@@ -54,17 +33,16 @@ pub struct AccountsDb {
 impl AccountsDb {
     /// Open or create accounts database
     pub fn new(config: &AdbConfig, lock: StWLock) -> AdbResult<Self> {
-        inspecterr!(
-            std::fs::create_dir_all(&config.directory),
+        std::fs::create_dir_all(&config.directory).inspect_err(inspecterr!(
             "ensuring existence of accountsdb directory"
-        );
-        let storage =
-            inspecterr!(AccountsStorage::new(config), "storage creation");
-        let index = inspecterr!(AdbIndex::new(config), "index creation");
-        let snap = inspecterr!(
-            SnapshotEngine::new(config.directory.clone(), config.max_snapshots),
-            "snapshot engine creation"
-        );
+        ))?;
+        let storage = AccountsStorage::new(config)
+            .inspect_err(inspecterr!("storage creation"))?;
+        let index =
+            AdbIndex::new(config).inspect_err(inspecterr!("index creation"))?;
+        let snap =
+            SnapshotEngine::new(config.directory.clone(), config.max_snapshots)
+                .inspect_err(inspecterr!("snapshot engine creation"))?;
         // no need to store global constants in type, this
         // is the only place it's set, so its use is safe
         unsafe { ADB_SNAPSHOT_FREQUENCY = config.snapshot_frequency };
@@ -139,15 +117,12 @@ impl AccountsDb {
                     )
                 };
                 // update accounts index
-                let dealloc = inspecterr!(
-                    self.index.insert_account(
-                        pubkey,
-                        account.owner(),
-                        allocation
-                    ),
-                    "account index insertion",
-                    @silent
-                );
+                let dealloc = self
+                    .index
+                    .insert_account(pubkey, account.owner(), allocation)
+                    .inspect_err(inspecterr!("account index insertion"))
+                    .ok()
+                    .flatten();
                 if let Some(dealloc) = dealloc {
                     // bookkeeping for deallocated (free hole) space
                     self.storage.increment_deallocations(dealloc.blocks);
@@ -187,10 +162,10 @@ impl AccountsDb {
         // but ideally filter should operate on AccountBorrowed or even the data field
         // alone (lamport filtering is not supported in solana).
 
-        let iter = inspecterr!(
-            self.index.get_program_accounts_iter(program),
-            "program accounts retrieval"
-        );
+        let iter = self
+            .index
+            .get_program_accounts_iter(program)
+            .inspect_err(inspecterr!("program accounts retrieval"))?;
         let mut accounts = Vec::with_capacity(4);
         for (offset, pubkey) in iter {
             let memptr = self.storage.offset(offset);
@@ -271,10 +246,10 @@ impl AccountsDb {
         // make sure that no one is reading the database
         let _locked = self.lock.write();
 
-        let rb_slot = inspecterr!(
-            self.snap.try_switch_to_snapshot(slot),
-            "switching to recent snapshot"
-        );
+        let rb_slot = self
+            .snap
+            .try_switch_to_snapshot(slot)
+            .inspect_err(inspecterr!("switching to recent snapshot"))?;
         let path = self.snap.database_path();
 
         // SAFETY: if assumption that the &self is exclusive is violated,
@@ -295,11 +270,11 @@ impl AccountsDb {
     pub fn iter_all(
         &self,
     ) -> impl Iterator<Item = (Pubkey, AccountSharedData)> + '_ {
-        let iter = inspecterr!(
-            self.index.get_all_accounts(),
-            "iterating all over all account keys",
-            @option
-        );
+        let iter = self
+            .index
+            .get_all_accounts()
+            .inspect_err(inspecterr!("iterating all over all account keys"))
+            .ok();
         iter.into_iter().flatten().map(|(offset, pk)| {
             let ptr = self.storage.offset(offset);
             let account =

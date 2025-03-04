@@ -192,15 +192,29 @@ fn test_get_program_accounts() {
 #[test]
 fn test_get_all_accounts() {
     let DbWithAcc { adb, acc } = init_db_with_acc();
+    let mut pubkeys = HashSet::new();
+    pubkeys.insert(acc.pubkey);
     let (pk2, acc2) = account();
     adb.insert_account(&pk2, &acc2);
+    pubkeys.insert(pk2);
     let (pk3, acc3) = account();
     adb.insert_account(&pk3, &acc3);
+    pubkeys.insert(pk3);
 
-    let mut pubkeys = adb.iter_all();
-    assert_eq!(pubkeys.next().map(|(pk, _)| pk), Some(acc.pubkey));
-    assert_eq!(pubkeys.next().map(|(pk, _)| pk), Some(pk2));
-    assert_eq!(pubkeys.next().map(|(pk, _)| pk), Some(pk3));
+    let mut pks = adb.iter_all();
+    assert!(pks
+        .next()
+        .map(|(pk, _)| pubkeys.contains(&pk))
+        .unwrap_or_default());
+    assert!(pks
+        .next()
+        .map(|(pk, _)| pubkeys.contains(&pk))
+        .unwrap_or_default());
+    assert!(pks
+        .next()
+        .map(|(pk, _)| pubkeys.contains(&pk))
+        .unwrap_or_default());
+    assert!(pks.next().is_none());
 }
 
 #[test]
@@ -273,7 +287,7 @@ fn test_get_all_accounts_after_rollback() {
     let DbWithAcc { adb, acc } = init_db_with_acc();
     let mut pks = vec![acc.pubkey];
     const ITERS: u64 = 1024;
-    for i in 0..ITERS {
+    for i in 0..=ITERS {
         let (pk, acc) = account();
         adb.insert_account(&pk, &acc);
         pks.push(pk);
@@ -282,7 +296,7 @@ fn test_get_all_accounts_after_rollback() {
     for i in ITERS..ITERS + SNAPSHOT_FREQUENCY {
         let (pk, acc) = account();
         adb.insert_account(&pk, &acc);
-        adb.set_slot(i);
+        adb.set_slot(i - 1);
     }
 
     assert!(
@@ -304,6 +318,8 @@ fn test_get_all_accounts_after_rollback() {
         pk
     };
     let pubkeys = adb.iter_all().map(asserter).collect::<HashSet<_>>();
+
+    assert_eq!(pubkeys.len(), pks.len());
 
     for pk in pks {
         assert!(pubkeys.contains(&pk));

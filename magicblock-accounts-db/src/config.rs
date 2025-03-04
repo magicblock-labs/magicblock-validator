@@ -52,12 +52,11 @@ impl AdbConfig {
         let i = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         // indexing, so that each test will run with its own adb
         let directory: PathBuf = temp_dir().join(format!("adb-test{i}/adb"));
-        let _ = fs::remove_dir_all(&directory);
-        fs::create_dir_all(&directory)
-            .expect("expected to create temporary adb directory");
+        let parent = directory.parent().expect("must have a parent"); // infallible
+        let _ = fs::remove_dir_all(parent);
 
         Self {
-            directory: directory.clone(),
+            directory,
             block_size: BLOCK_SIZE,
             db_size: DB_SIZE,
             max_snapshots: MAX_SNAPSHOTS,

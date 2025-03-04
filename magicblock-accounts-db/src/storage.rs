@@ -7,7 +7,10 @@ use std::{
 
 use memmap2::MmapMut;
 
-use crate::{index::ExistingAllocation, AdbConfig, AdbResult};
+use crate::{
+    config::BlockSize, index::ExistingAllocation, inspecterr, AdbConfig,
+    AdbResult,
+};
 
 pub(crate) struct Allocation {
     pub(crate) storage: *mut u8,
@@ -18,6 +21,7 @@ pub(crate) struct Allocation {
 /// Extra space in database storage file reserved for metadata
 /// Currently most of it is unused, but still reserved for future extensions
 const METADATA_STORAGE_SIZE: usize = 256;
+const ADB_FILE: &str = "accounts.db";
 
 pub(crate) struct AccountsStorage {
     meta: StorageMeta,
@@ -58,22 +62,26 @@ impl AccountsStorage {
     /// _Note_: passed config is ignored if the database
     /// file already exists at supplied path
     pub(crate) fn new(config: &AdbConfig) -> AdbResult<Self> {
-        let mut file = inspecterr!(
-            File::options()
-                .create(true)
-                .truncate(false)
-                .write(true)
-                .read(true)
-                .open(config.directory.join("accounts.db")),
-            "opening adb file"
-        );
+        let dbpath = config.directory.join(ADB_FILE);
+        let mut file = File::options()
+            .create(true)
+            .truncate(false)
+            .write(true)
+            .read(true)
+            .open(&dbpath)
+            .inspect_err(inspecterr!(
+                "opening adb file at {}",
+                dbpath.display()
+            ))?;
 
         if file.metadata()?.len() == 0 {
             // database is being created for the first time, resize the file and write metadata
-            inspecterr!(
-                StorageMeta::init_adb_file(&mut file, config),
-                "initializing new adb"
-            );
+            StorageMeta::init_adb_file(&mut file, config).inspect_err(
+                inspecterr!(
+                    "initializing new adb at {}",
+                    config.directory.display()
+                ),
+            )?;
         }
 
         let mut mmap = unsafe { MmapMut::map_mut(&file) }?;
@@ -125,7 +133,7 @@ impl AccountsStorage {
     pub(crate) fn set_slot(&self, val: u64) {
         unsafe { &*self.meta.slot }.store(val, Relaxed)
     }
-    // TODO(bmuddha): use it to trigger recycling of freed blocks
+    // TODO(bmuddha): use it to trigger recycling of freed blocks,
     // currently recycling is always on, which might be expensive
     #[allow(unused)]
     pub(crate) fn fragmentation(&self) -> f32 {
@@ -160,13 +168,14 @@ impl AccountsStorage {
     ///
     /// NOTE: this is a very cheap operation, as fast as opening a file
     pub(crate) fn reload(&mut self, dbpath: &Path) -> AdbResult<()> {
-        let file = inspecterr!(
-            File::options()
-                .write(true)
-                .read(true)
-                .open(dbpath.join("accounts.db")),
-            "opening adb file"
-        );
+        let file = File::options()
+            .write(true)
+            .read(true)
+            .open(dbpath.join(ADB_FILE))
+            .inspect_err(inspecterr!(
+                "opening adb file from snapshot at {}",
+                dbpath.display()
+            ))?;
 
         let mut mmap = unsafe { MmapMut::map_mut(&file) }?;
         let meta = StorageMeta::new(&mmap);
@@ -211,7 +220,7 @@ impl StorageMeta {
         file.set_len(db_size as u64)?;
 
         // the storage itself starts immediately after metadata section
-        let head = METADATA_STORAGE_SIZE / config.block_size as usize;
+        let head = 0_u64;
         file.write_all(&head.to_le_bytes())?;
 
         // fresh Accountsdb starts at slot 0
@@ -230,7 +239,7 @@ impl StorageMeta {
     }
 
     fn new(store: &MmapMut) -> Self {
-        const SLOT_OFFSET: usize = size_of::<usize>();
+        const SLOT_OFFSET: usize = size_of::<u64>();
         const BLOCKSIZE_OFFSET: usize = SLOT_OFFSET + size_of::<u64>();
         const TOTALBLOCKS_OFFSET: usize = BLOCKSIZE_OFFSET + size_of::<u32>();
         const DEALLOCATED_OFFSET: usize = TOTALBLOCKS_OFFSET + size_of::<u32>();
@@ -244,9 +253,23 @@ impl StorageMeta {
         // third is blocks size
         let block_size =
             unsafe { (ptr.add(BLOCKSIZE_OFFSET) as *const u32).read() };
+
+        let initialized_block_size = [
+            BlockSize::Block128,
+            BlockSize::Block256,
+            BlockSize::Block512,
+        ]
+        .iter()
+        .any(|&bs| bs as u32 == block_size);
         // fourth is total blocks count
         let total_blocks =
             unsafe { (ptr.add(TOTALBLOCKS_OFFSET) as *const u32).read() };
+
+        if !(total_blocks != 0 && initialized_block_size) {
+            eprintln!("AccountsDB file is not initialized properly. Block Size - {block_size} and Total Block Count is: {total_blocks}");
+            let _ = std::io::stdout().flush();
+            std::process::exit(1);
+        }
         // fifth is the number of deallocated blocks so far
         let deallocated =
             unsafe { ptr.add(DEALLOCATED_OFFSET) as *const AtomicU32 };

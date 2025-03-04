@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::{fs, io};
 
 use crate::error::AdbError;
-use crate::AdbResult;
+use crate::{inspecterr, AdbResult};
 
 pub struct SnapshotEngine {
     /// directory path where database files are kept
@@ -26,8 +26,8 @@ pub struct SnapshotEngine {
 impl SnapshotEngine {
     pub(crate) fn new(dbpath: PathBuf, maxcount: u16) -> AdbResult<Box<Self>> {
         let snapshots = Mutex::new(VecDeque::with_capacity(maxcount as usize));
-        let is_cow_supported =
-            inspecterr!(Self::supports_cow(&dbpath), "cow support check");
+        let is_cow_supported = Self::supports_cow(&dbpath)
+            .inspect_err(inspecterr!("cow support check"))?;
         let snapfn = if is_cow_supported {
             log::info!(
                 "Host file system supports CoW, will use reflinking (fast)"
@@ -45,7 +45,8 @@ impl SnapshotEngine {
             snapshots,
             maxcount,
         };
-        inspecterr!(this.read_snapshots(), "reading existing snapshots");
+        this.read_snapshots()
+            .inspect_err(inspecterr!("reading existing snapshots"))?;
 
         Ok(Box::new(this))
     }
@@ -57,7 +58,7 @@ impl SnapshotEngine {
         let mut snapshots = self.snapshots.lock(); // free lock
         if snapshots.len() == self.maxcount as usize {
             if let Some(old) = snapshots.pop_front() {
-                fs::remove_dir_all(&old)?;
+                let _ = fs::remove_dir_all(&old);
             }
         }
         let snapout = slot.as_path(self.snapshots_dir());
@@ -104,8 +105,15 @@ impl SnapshotEngine {
 
         // we perform database swap, thus removing
         // latest state and rolling back to snapshot
-        fs::remove_dir_all(&self.dbpath)?;
-        fs::rename(&spath, &self.dbpath)?;
+        fs::remove_dir_all(&self.dbpath).inspect_err(inspecterr!(
+            "failed to remove current database at {}",
+            self.dbpath.display()
+        ))?;
+        fs::rename(&spath, &self.dbpath).inspect_err(inspecterr!(
+            "failed to rename snapshot dir {} -> {}",
+            spath.display(),
+            self.dbpath.display()
+        ))?;
 
         Ok(slot)
     }
@@ -136,7 +144,7 @@ impl SnapshotEngine {
     fn read_snapshots(&self) -> io::Result<()> {
         let snapdir = self.snapshots_dir();
         if !snapdir.exists() {
-            fs::create_dir(&snapdir)?;
+            fs::create_dir_all(snapdir)?;
         }
         let mut snapshots = self.snapshots.lock();
         for entry in fs::read_dir(snapdir)? {
@@ -155,10 +163,10 @@ impl SnapshotEngine {
         Ok(())
     }
 
-    fn snapshots_dir(&self) -> PathBuf {
-        let mut parent = self.dbpath.clone();
-        parent.pop();
-        parent
+    fn snapshots_dir(&self) -> &Path {
+        self.dbpath
+            .parent()
+            .expect("accounts database directory should have a parent")
     }
 }
 
@@ -175,7 +183,7 @@ impl SnapSlot {
             .map(Self)
     }
 
-    fn as_path(&self, ppath: PathBuf) -> PathBuf {
+    fn as_path(&self, ppath: &Path) -> PathBuf {
         // enforce strict alphanumberic ordering by introducing extra padding
         ppath.join(format!("snapshot-{:0>9}", self.0))
     }

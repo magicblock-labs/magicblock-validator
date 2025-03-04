@@ -6,7 +6,7 @@ use lmdb::{
 };
 use solana_pubkey::Pubkey;
 
-use crate::{storage::Allocation, AdbConfig, AdbResult};
+use crate::{inspecterr, storage::Allocation, AdbConfig, AdbResult};
 
 const WEMPTY: WriteFlags = WriteFlags::empty();
 /// LMDB cursor operations, have to copy paste them, as they are not exposed in pubic API
@@ -72,10 +72,12 @@ macro_rules! bytepack {
 impl AdbIndex {
     pub(crate) fn new(config: &AdbConfig) -> AdbResult<Self> {
         // create an environment for 2 databases: accounts and programs index
-        let env = inspecterr!(
-            env(ACCOUNTS_PATH, &config.directory, config.index_map_size, 2),
-            "main index env creation"
-        );
+        let env =
+            env(ACCOUNTS_PATH, &config.directory, config.index_map_size, 2)
+                .inspect_err(inspecterr!(
+                    "main index env creation at {}",
+                    config.directory.display()
+                ))?;
         let accounts = env.create_db(ACCOUNTS_INDEX, DatabaseFlags::empty())?;
         let programs = env.create_db(
             PROGRAMS_INDEX,
@@ -241,10 +243,9 @@ impl AdbIndex {
         // set it to default lmdb map size, it will be
         // ignored if smaller than currently occupied
         const DEFAULT_SIZE: usize = 1024 * 1024;
-        let env = inspecterr!(
-            env(ACCOUNTS_PATH, dbpath, DEFAULT_SIZE, 2),
-            "main index env creation"
-        );
+        let env = env(ACCOUNTS_PATH, dbpath, DEFAULT_SIZE, 2).inspect_err(
+            inspecterr!("main index env creation at {}", dbpath.display()),
+        )?;
         let accounts = env.create_db(ACCOUNTS_INDEX, DatabaseFlags::empty())?;
         let programs = env.create_db(
             PROGRAMS_INDEX,
@@ -276,10 +277,10 @@ impl StandaloneIndex {
         size: usize,
         flags: DatabaseFlags,
     ) -> AdbResult<Self> {
-        let env = inspecterr!(
-            env(name, dbpath, size, 1),
-            "deallocation index creation"
-        );
+        let env = env(name, dbpath, size, 1).inspect_err(inspecterr!(
+            "deallocation index creation at {}",
+            dbpath.display()
+        ))?;
         let db = env.create_db(None, flags)?;
         Ok(Self { env, db })
     }
@@ -369,7 +370,7 @@ fn env(
         | EnvironmentFlags::NO_MEM_INIT;
 
     let path = dir.join(name);
-    let _ = fs::create_dir(&path);
+    let _ = fs::create_dir_all(&path);
     Environment::new()
         .set_map_size(size)
         .set_max_dbs(maxdb)
