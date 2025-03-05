@@ -128,7 +128,7 @@ jobs:
           echo '[target.aarch64-pc-windows-msvc]' >> ~/.cargo/config.toml
           echo 'linker = "rust-lld"' >> ~/.cargo/config.toml
           echo '[patch.crates-io]' >> ~/.cargo/config.toml
-          echo 'winapi = { version = "0.3.9", features = ["everything"] }' >> ~/.cargo/config.toml
+          echo 'winapi = { version = "0.3.9" }' >> ~/.cargo/config.toml
 
       - name: Install 32-bit dependencies for i686 (if needed)
         if: matrix.build.TARGET == 'i686-unknown-linux-gnu'
