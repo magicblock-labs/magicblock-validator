@@ -28,12 +28,13 @@ jobs:
 #            TOOLCHAIN: stable,
 #            TARGET: x86_64-unknown-linux-gnu,
 #          }
-          - {
-            NAME: linux-x86-glibc,
-            OS: ubuntu-latest,
-            TOOLCHAIN: stable,
-            TARGET: i686-unknown-linux-gnu,
-          }
+#          Currently cannot build 32-bit binaries, due to Ok(unsafe { std::mem::transmute::<u64, &mut T>(host_addr) }) in `solana-bpf-loader-program`
+#          - {
+#            NAME: linux-x86-glibc,
+#            OS: ubuntu-latest,
+#            TOOLCHAIN: stable,
+#            TARGET: i686-unknown-linux-gnu,
+#          }
           - {
             NAME: linux-arm64-glibc,
             OS: ubuntu-latest,
@@ -46,12 +47,12 @@ jobs:
             TOOLCHAIN: stable,
             TARGET: x86_64-pc-windows-msvc,
           }
-          - {
-            NAME: win32-x86-msvc,
-            OS: windows-latest,
-            TOOLCHAIN: stable,
-            TARGET: i686-pc-windows-msvc,
-          }
+#          - {
+#            NAME: win32-x86-msvc,
+#            OS: windows-latest,
+#            TOOLCHAIN: stable,
+#            TARGET: i686-pc-windows-msvc,
+#          }
 #          - {
 #            NAME: darwin-x64,
 #            OS: macos-latest,
@@ -107,6 +108,11 @@ jobs:
         if: matrix.build.TARGET == 'aarch64-unknown-linux-gnu'
         run: |
           sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+          aarch64-linux-gnu-gcc --version
+          aarch64-linux-gnu-ld --version
+          mkdir -p ~/.cargo
+          echo '[target.aarch64-unknown-linux-gnu]' >> ~/.cargo/config.toml
+          echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
 
       - name: Install 32-bit dependencies for i686 (if needed)
         if: matrix.build.TARGET == 'i686-unknown-linux-gnu'
@@ -117,7 +123,6 @@ jobs:
       - name: Build (linux/macos/windows)
         uses: actions-rs/cargo@v1
         with:
-#          use-cross: ${{ matrix.build.TARGET == 'i686-unknown-linux-gnu' }}
           command: build
           args: --manifest-path=magicblock-validator/Cargo.toml --release --locked --target ${{ matrix.build.TARGET }}
 
