@@ -140,7 +140,7 @@ jobs:
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --manifest-path=magicblock-validator/Cargo.toml --release --locked --target ${{ matrix.build.TARGET }}
+          args: --manifest-path=magicblock-validator/Cargo.toml --release --target ${{ matrix.build.TARGET }}
 
       - name: Check versions are aligned
         run: |
