@@ -28,31 +28,24 @@ jobs:
 #            TOOLCHAIN: stable,
 #            TARGET: x86_64-unknown-linux-gnu,
 #          }
-#          Currently cannot build 32-bit binaries, due to Ok(unsafe { std::mem::transmute::<u64, &mut T>(host_addr) }) in `solana-bpf-loader-program`
 #          - {
-#            NAME: linux-x86-glibc,
+#            NAME: linux-arm64-glibc,
 #            OS: ubuntu-latest,
 #            TOOLCHAIN: stable,
-#            TARGET: i686-unknown-linux-gnu,
+#            TARGET: aarch64-unknown-linux-gnu,
 #          }
-          - {
-            NAME: linux-arm64-glibc,
-            OS: ubuntu-latest,
-            TOOLCHAIN: stable,
-            TARGET: aarch64-unknown-linux-gnu,
-          }
-          - {
-            NAME: win32-x64-msvc,
-            OS: windows-latest,
-            TOOLCHAIN: stable,
-            TARGET: x86_64-pc-windows-msvc,
-          }
 #          - {
-#            NAME: win32-x86-msvc,
+#            NAME: win32-x64-msvc,
 #            OS: windows-latest,
 #            TOOLCHAIN: stable,
-#            TARGET: i686-pc-windows-msvc,
+#            TARGET: x86_64-pc-windows-msvc,
 #          }
+          - {
+            NAME: win32-arm64-msvc,
+            OS: windows-latest,
+            TOOLCHAIN: stable,
+            TARGET: aarch64-pc-windows-msvc,
+          }
 #          - {
 #            NAME: darwin-x64,
 #            OS: macos-latest,
@@ -64,6 +57,19 @@ jobs:
 #            OS: macos-latest,
 #            TOOLCHAIN: stable,
 #            TARGET: aarch64-apple-darwin,
+#          }
+#          Currently cannot build 32-bit binaries, due to Ok(unsafe { std::mem::transmute::<u64, &mut T>(host_addr) }) in `solana-bpf-loader-program`
+#          - {
+#            NAME: linux-x86-glibc,
+#            OS: ubuntu-latest,
+#            TOOLCHAIN: stable,
+#            TARGET: i686-unknown-linux-gnu,
+#          }
+#          - {
+#            NAME: win32-x86-msvc,
+#            OS: windows-latest,
+#            TOOLCHAIN: stable,
+#            TARGET: i686-pc-windows-msvc,
 #          }
     steps:
       - name: Checkout this magicblock-validator
