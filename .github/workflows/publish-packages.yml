@@ -22,55 +22,36 @@ jobs:
       fail-fast: false
       matrix:
         build:
-#          - {
-#            NAME: linux-x64-glibc,
-#            OS: ubuntu-latest,
-#            TOOLCHAIN: stable,
-#            TARGET: x86_64-unknown-linux-gnu,
-#          }
-#          - {
-#            NAME: linux-arm64-glibc,
-#            OS: ubuntu-latest,
-#            TOOLCHAIN: stable,
-#            TARGET: aarch64-unknown-linux-gnu,
-#          }
-#          - {
-#            NAME: win32-x64-msvc,
-#            OS: windows-latest,
-#            TOOLCHAIN: stable,
-#            TARGET: x86_64-pc-windows-msvc,
-#          }
           - {
-            NAME: win32-arm64-msvc,
+            NAME: linux-x64-glibc,
+            OS: ubuntu-latest,
+            TOOLCHAIN: stable,
+            TARGET: x86_64-unknown-linux-gnu,
+          }
+          - {
+            NAME: linux-arm64-glibc,
+            OS: ubuntu-latest,
+            TOOLCHAIN: stable,
+            TARGET: aarch64-unknown-linux-gnu,
+          }
+          - {
+            NAME: win32-x64-msvc,
             OS: windows-latest,
             TOOLCHAIN: stable,
-            TARGET: aarch64-pc-windows-msvc,
+            TARGET: x86_64-pc-windows-msvc,
           }
-#          - {
-#            NAME: darwin-x64,
-#            OS: macos-latest,
-#            TOOLCHAIN: stable,
-#            TARGET: x86_64-apple-darwin,
-#          }
-#          - {
-#            NAME: darwin-arm64,
-#            OS: macos-latest,
-#            TOOLCHAIN: stable,
-#            TARGET: aarch64-apple-darwin,
-#          }
-#          Currently cannot build 32-bit binaries, due to Ok(unsafe { std::mem::transmute::<u64, &mut T>(host_addr) }) in `solana-bpf-loader-program`
-#          - {
-#            NAME: linux-x86-glibc,
-#            OS: ubuntu-latest,
-#            TOOLCHAIN: stable,
-#            TARGET: i686-unknown-linux-gnu,
-#          }
-#          - {
-#            NAME: win32-x86-msvc,
-#            OS: windows-latest,
-#            TOOLCHAIN: stable,
-#            TARGET: i686-pc-windows-msvc,
-#          }
+          - {
+            NAME: darwin-x64,
+            OS: macos-latest,
+            TOOLCHAIN: stable,
+            TARGET: x86_64-apple-darwin,
+          }
+          - {
+            NAME: darwin-arm64,
+            OS: macos-latest,
+            TOOLCHAIN: stable,
+            TARGET: aarch64-apple-darwin,
+          }
     steps:
       - name: Checkout this magicblock-validator
         uses: actions/checkout@v4
@@ -121,26 +102,11 @@ jobs:
           echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
           echo 'ar = "aarch64-linux-gnu-ar"' >> ~/.cargo/config.toml
 
-      - name: Install ARM64 MSVC Toolchain (if needed)
-        if: matrix.build.TARGET == 'aarch64-pc-windows-msvc'
-        run: |
-          choco install visualstudio2019buildtools --package-parameters "--add Microsoft.VisualStudio.Component.VC.Tools.ARM64"
-          echo '[target.aarch64-pc-windows-msvc]' >> ~/.cargo/config.toml
-          echo 'linker = "rust-lld"' >> ~/.cargo/config.toml
-          echo '[patch.crates-io]' >> ~/.cargo/config.toml
-          echo 'winapi = { git = "https://github.com/retep998/winapi-rs.git", branch = "0.3" }' >> ~/.cargo/config.toml
-
-      - name: Install 32-bit dependencies for i686 (if needed)
-        if: matrix.build.TARGET == 'i686-unknown-linux-gnu'
-        run: |
-          sudo dpkg --add-architecture i386
-          sudo apt-get install -y gcc-multilib g++-multilib libc6-dev-i386
-
       - name: Build (linux/macos/windows)
         uses: actions-rs/cargo@v1
         with:
           command: build
-          args: --manifest-path=magicblock-validator/Cargo.toml --release --target ${{ matrix.build.TARGET }}
+          args: --manifest-path=magicblock-validator/Cargo.toml --release --locked --target ${{ matrix.build.TARGET }}
 
       - name: Check versions are aligned
         run: |
