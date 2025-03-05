@@ -82,10 +82,6 @@ jobs:
         run: rustup target add ${{ matrix.build.TARGET }}
         shell: bash
 
-      - name: Install cross compiler (if needed)
-        if: matrix.build.TARGET == 'aarch64-unknown-linux-gnu'
-        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
-
       - name: Set DRY_RUN by default
         shell: bash
         run: echo "DRY_RUN=true" >> $GITHUB_ENV
@@ -107,10 +103,21 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libclang-dev protobuf-compiler cmake pkg-config libssl-dev ca-certificates openssh-client
 
+      - name: Install cross compiler (if needed)
+        if: matrix.build.TARGET == 'aarch64-unknown-linux-gnu'
+        run: |
+          sudo apt-get install -y gcc-aarch64-linux-gnu binutils-aarch64-linux-gnu
+
+      - name: Install 32-bit dependencies for i686 (if needed)
+        if: matrix.build.TARGET == 'i686-unknown-linux-gnu'
+        run: |
+          sudo dpkg --add-architecture i386
+          sudo apt-get install -y gcc-multilib g++-multilib libc6-dev-i386
+
       - name: Build (linux/macos/windows)
         uses: actions-rs/cargo@v1
         with:
-          use-cross: ${{ matrix.build.TARGET == 'i686-unknown-linux-gnu' }}
+#          use-cross: ${{ matrix.build.TARGET == 'i686-unknown-linux-gnu' }}
           command: build
           args: --manifest-path=magicblock-validator/Cargo.toml --release --locked --target ${{ matrix.build.TARGET }}
 
