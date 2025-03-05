@@ -127,9 +127,8 @@ jobs:
           choco install visualstudio2022buildtools --package-parameters "--add Microsoft.VisualStudio.Component.VC.Tools.ARM64
           echo '[target.aarch64-pc-windows-msvc]' >> ~/.cargo/config.toml
           echo 'linker = "rust-lld"' >> ~/.cargo/config.toml
-          mkdir -p .cargo
-          echo '[patch.crates-io]' >> .cargo/config.toml
-          echo 'winapi = { version = "0.3.9", features = ["everything"] }' >> magicblock-validator/.cargo/config.toml
+          echo '[patch.crates-io]' >> ~/.cargo/config.toml
+          echo 'winapi = { version = "0.3.9", features = ["everything"] }' >> ~/.cargo/config.toml
 
       - name: Install 32-bit dependencies for i686 (if needed)
         if: matrix.build.TARGET == 'i686-unknown-linux-gnu'
