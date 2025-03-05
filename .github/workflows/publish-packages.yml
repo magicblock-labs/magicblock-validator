@@ -22,12 +22,12 @@ jobs:
       fail-fast: false
       matrix:
         build:
-          - {
-            NAME: linux-x64-glibc,
-            OS: ubuntu-latest,
-            TOOLCHAIN: stable,
-            TARGET: x86_64-unknown-linux-gnu,
-          }
+#          - {
+#            NAME: linux-x64-glibc,
+#            OS: ubuntu-latest,
+#            TOOLCHAIN: stable,
+#            TARGET: x86_64-unknown-linux-gnu,
+#          }
           - {
             NAME: linux-x86-glibc,
             OS: ubuntu-latest,
@@ -52,18 +52,18 @@ jobs:
             TOOLCHAIN: stable,
             TARGET: i686-pc-windows-msvc,
           }
-          - {
-            NAME: darwin-x64,
-            OS: macos-latest,
-            TOOLCHAIN: stable,
-            TARGET: x86_64-apple-darwin,
-          }
-          - {
-            NAME: darwin-arm64,
-            OS: macos-latest,
-            TOOLCHAIN: stable,
-            TARGET: aarch64-apple-darwin,
-          }
+#          - {
+#            NAME: darwin-x64,
+#            OS: macos-latest,
+#            TOOLCHAIN: stable,
+#            TARGET: x86_64-apple-darwin,
+#          }
+#          - {
+#            NAME: darwin-arm64,
+#            OS: macos-latest,
+#            TOOLCHAIN: stable,
+#            TARGET: aarch64-apple-darwin,
+#          }
     steps:
       - name: Checkout this magicblock-validator
         uses: actions/checkout@v4
@@ -81,6 +81,10 @@ jobs:
         if: matrix.build.TARGET != matrix.build.HOST_TARGET
         run: rustup target add ${{ matrix.build.TARGET }}
         shell: bash
+
+      - name: Install cross compiler (if needed)
+        if: matrix.build.TARGET == 'aarch64-unknown-linux-gnu'
+        run: sudo apt-get update && sudo apt-get install -y gcc-aarch64-linux-gnu
 
       - name: Set DRY_RUN by default
         shell: bash
@@ -106,6 +110,7 @@ jobs:
       - name: Build (linux/macos/windows)
         uses: actions-rs/cargo@v1
         with:
+          use-cross: ${{ matrix.build.TARGET == 'i686-unknown-linux-gnu' }}
           command: build
           args: --manifest-path=magicblock-validator/Cargo.toml --release --locked --target ${{ matrix.build.TARGET }}
 
