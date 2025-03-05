@@ -79,7 +79,7 @@ jobs:
 
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
-          build_cache_key_name: "magicblock-validator-ci-test-unit-v001"
+          build_cache_key_name: "magicblock-validator-ci-publish-v000"
           rust_toolchain_release: "1.85.0"
           github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
@@ -120,6 +120,13 @@ jobs:
           echo '[target.aarch64-unknown-linux-gnu]' >> ~/.cargo/config.toml
           echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
           echo 'ar = "aarch64-linux-gnu-ar"' >> ~/.cargo/config.toml
+
+      - name: Install ARM64 MSVC Toolchain (if needed)
+        if: matrix.build.TARGET == 'aarch64-pc-windows-msvc'
+        run: |
+          choco install visualstudio2022buildtools --package-parameters "--add Microsoft.VisualStudio.Component.VC.Tools.ARM64
+          echo '[target.aarch64-pc-windows-msvc]' >> ~/.cargo/config.toml
+          echo 'linker = "rust-lld"' >> ~/.cargo/config.toml
 
       - name: Install 32-bit dependencies for i686 (if needed)
         if: matrix.build.TARGET == 'i686-unknown-linux-gnu'

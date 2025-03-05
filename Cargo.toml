@@ -41,9 +41,9 @@ members = [
 resolver = "2"
 
 [workspace.package]
-# matches Solana Version
-version = "2.1.11"
-authors = ["MagicBlock Maintainers <maintainers@magicblock.gg>"]
+# Solana Version (2.1.11)
+version = "0.1.0"
+authors = ["MagicBlock Maintainers <maintainers@magicblock.xyz>"]
 repository = "https://github.com/magicblock-labs/ephemeral-validator"
 homepage = "https://www.magicblock.xyz"
 license = "Business Source License 1.1"
