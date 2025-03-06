@@ -45,7 +45,10 @@ use solana_sdk::{
     epoch_info::EpochInfo,
     epoch_schedule::EpochSchedule,
     feature,
-    feature_set::{self, FeatureSet},
+    feature_set::{
+        self, bpf_account_data_direct_mapping, disable_rent_fees_collection,
+        FeatureSet,
+    },
     fee::{FeeBudgetLimits, FeeDetails, FeeStructure},
     fee_calculator::FeeRateGovernor,
     genesis_config::GenesisConfig,
