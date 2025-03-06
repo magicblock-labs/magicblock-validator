@@ -266,7 +266,10 @@ impl StorageMeta {
             unsafe { (ptr.add(TOTALBLOCKS_OFFSET) as *const u32).read() };
 
         if !(total_blocks != 0 && initialized_block_size) {
-            eprintln!("AccountsDB file is not initialized properly. Block Size - {block_size} and Total Block Count is: {total_blocks}");
+            eprintln!(
+                "AccountsDB file is not initialized properly. Block Size - \
+                {block_size} and Total Block Count is: {total_blocks}"
+            );
             let _ = std::io::stdout().flush();
             std::process::exit(1);
         }

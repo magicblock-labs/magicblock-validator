@@ -73,6 +73,10 @@ impl AccountsDb {
         Ok(account.into())
     }
 
+    // TODO(bmuddha), under high load implement batch insertion to minimize index locking
+    #[allow(unused)]
+    pub fn insert_batch(&self, batch: &[(Pubkey, AccountSharedData)]) {}
+
     pub fn insert_account(&self, pubkey: &Pubkey, account: &AccountSharedData) {
         match account {
             AccountSharedData::Borrowed(acc) => {

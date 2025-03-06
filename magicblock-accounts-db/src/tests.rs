@@ -293,10 +293,13 @@ fn test_get_all_accounts_after_rollback() {
         pks.push(pk);
         adb.set_slot(i);
     }
+
+    let mut post_snap_pks = vec![];
     for i in ITERS..ITERS + SNAPSHOT_FREQUENCY {
         let (pk, acc) = account();
         adb.insert_account(&pk, &acc);
         adb.set_slot(i + 1);
+        post_snap_pks.push(pk);
     }
 
     assert!(
@@ -323,6 +326,9 @@ fn test_get_all_accounts_after_rollback() {
 
     for pk in pks {
         assert!(pubkeys.contains(&pk));
+    }
+    for pk in post_snap_pks {
+        assert!(!pubkeys.contains(&pk));
     }
 }
 
