@@ -478,6 +478,14 @@ impl Bank {
         // Depending on how fast each slot is computed
         let max_age = DEFAULT_MS_PER_SLOT * MAX_RECENT_BLOCKHASHES as u64
             / millis_per_slot;
+        // Enable some useful features
+        let mut feature_set = FeatureSet::default();
+        // this allows us to map account's data field directly to
+        // SVM, thus avoiding double copy to and from SVM sandbox
+        feature_set.activate(&bpf_account_data_direct_mapping::ID, 0);
+        // Rent collection is no longer a thing in solana
+        // so we don't need to worry about it
+        feature_set.activate(&disable_rent_fees_collection::ID, 1);
 
         let mut bank = Self {
             adb,
