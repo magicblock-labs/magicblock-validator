@@ -156,7 +156,7 @@ jobs:
           mv "target/${{ matrix.build.TARGET }}/release/${bin}" "target/${{ matrix.build.TARGET }}/release/${release_name}"
 
       - name: Publish binary to GitHub release
-        if: ${{ env.DRY_RUN != 'false' }}
+        if: ${{ env.DRY_RUN == 'false' }}
         uses: svenstaro/upload-release-action@v2
         with:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
