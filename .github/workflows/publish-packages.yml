@@ -1,7 +1,6 @@
 name: Publish ephemeral validator packages
 
 on:
-  pull_request:
   release:
     types: [published]
   push:
@@ -70,14 +69,14 @@ jobs:
         run: rustup target add ${{ matrix.build.TARGET }}
         shell: bash
 
-#      - name: Set DRY_RUN by default
-#        shell: bash
-#        run: echo "DRY_RUN=true" >> $GITHUB_ENV
-#
-#      - name: Unset DRY_RUN for releases
-#        shell: bash
-#        run: echo "DRY_RUN=false" >> $GITHUB_ENV
-#        if: github.event_name == 'release' && github.event.action == 'published'
+      - name: Set DRY_RUN by default
+        shell: bash
+        run: echo "DRY_RUN=true" >> $GITHUB_ENV
+
+      - name: Unset DRY_RUN for releases
+        shell: bash
+        run: echo "DRY_RUN=false" >> $GITHUB_ENV
+        if: github.event_name == 'release' && github.event.action == 'published'
 
       - name: Set up GCC
         if: matrix.build.OS == 'ubuntu-latest'
@@ -192,14 +191,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-#      - name: Set DRY_RUN by default
-#        shell: bash
-#        run: echo "DRY_RUN=true" >> $GITHUB_ENV
-#
-#      - name: Unset DRY_RUN for releases
-#        shell: bash
-#        run: echo "DRY_RUN=false" >> $GITHUB_ENV
-#        if: github.event_name == 'release' && github.event.action == 'published'
+      - name: Set DRY_RUN by default
+        shell: bash
+        run: echo "DRY_RUN=true" >> $GITHUB_ENV
+
+      - name: Unset DRY_RUN for releases
+        shell: bash
+        run: echo "DRY_RUN=false" >> $GITHUB_ENV
+        if: github.event_name == 'release' && github.event.action == 'published'
 
       - name: Publish the NPM package
         shell: bash
