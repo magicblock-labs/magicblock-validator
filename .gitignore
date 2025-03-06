@@ -21,3 +21,8 @@ test-ledger/
 
 # Mac
 **/.DS_Store
+
+# CI/CD build directories
+.github/packages/npm-package/lib
+.github/packages/npm-package/node_modules
+.github/packages/npm-package/package-lock.json
