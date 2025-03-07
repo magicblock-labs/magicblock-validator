@@ -1,9 +1,8 @@
 use std::{str::FromStr, sync::Arc};
 
-use num_format::{Locale, ToFormattedString};
-
 use log::{Level::Trace, *};
 use magicblock_bank::bank::Bank;
+use num_format::{Locale, ToFormattedString};
 use solana_sdk::{
     clock::{Slot, UnixTimestamp},
     hash::Hash,

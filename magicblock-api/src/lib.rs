@@ -1,3 +1,5 @@
+pub mod accounts;
+mod domain_registry_manager;
 pub mod errors;
 pub mod external_config;
 mod fund_account;
