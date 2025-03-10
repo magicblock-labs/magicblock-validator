@@ -12,7 +12,7 @@ pub fn start_magic_block_validator_with_config(
     test_runner_paths: &TestRunnerPaths,
     log_suffix: &str,
     release: bool,
-) -> Option<process::Child> {
+) -> Option<Child> {
     let TestRunnerPaths {
         config_path,
         root_dir,
@@ -22,8 +22,12 @@ pub fn start_magic_block_validator_with_config(
     let port = rpc_port_from_config(config_path);
 
     // First build so that the validator can start fast
-    let build_res = process::Command::new("cargo")
-        .arg("build")
+    let mut command = process::Command::new("cargo");
+    command.arg("build");
+    if release {
+        command.arg("--release");
+    }
+    let build_res = command
         .current_dir(root_dir.clone())
         .output();
 
@@ -51,29 +55,24 @@ pub fn start_magic_block_validator_with_config(
 }
 
 pub fn wait_for_validator(mut validator: Child, port: u16) -> Option<Child> {
-    let mut count = 0;
-    let max_retries = if std::env::var("CI").is_ok() {
-        1500
-    } else {
-        75
-    };
-    loop {
+    const SLEEP_DURATION: Duration = Duration::from_millis(400);
+    let max_retries = if std::env::var("CI").is_ok() { 1500 } else { 75 };
+
+    for _ in 0..max_retries {
         if TcpStream::connect(format!("0.0.0.0:{}", port)).is_ok() {
-            break Some(validator);
+            return Some(validator);
         }
-        count += 1;
-        // ~180 seconds (~12 mins in CI)
-        if count >= max_retries {
-            eprintln!(
-                "Validator RPC on port {} failed to listen after {}secs",
-                port,
-                count as f32 * 2.5
-            );
-            validator.kill().expect("Failed to kill validator");
-            break None;
-        }
-        sleep(Duration::from_millis(400));
+
+        sleep(SLEEP_DURATION);
     }
+
+    eprintln!(
+        "Validator RPC on port {} failed to listen after {:.1} seconds",
+        port,
+        max_retries as f32 * SLEEP_DURATION.as_secs_f32()
+    );
+    validator.kill().expect("Failed to kill validator");
+    None
 }
 
 /// Directories
