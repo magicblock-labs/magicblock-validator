@@ -17,6 +17,8 @@ pub struct DelegateArgs {
     pub commit_frequency_ms: u32,
 }
 
+pub const MAX_ACOUNT_ALLOC_PER_INSTRUCTION_SIZE: u16 = 10_240;
+
 /// The counter has both mul and add instructions in order to facilitate tests where
 /// order matters. For example in the case of the following operations:
 /// +4, *2
@@ -31,6 +33,25 @@ pub enum FlexiCounterInstruction {
     /// 1. `[write]` The counter PDA account that will be created.
     /// 2. `[]` The system program account.
     Init { label: String, bump: u8 },
+
+    /// Increases the size of the FlexiCounter to reach the given bytes.
+    /// Max increase is [MAX_ACOUNT_ALLOC_PER_INSTRUCTION_SIZE] per instruction
+    /// which means this instruction needs to be called multiple times to reach
+    /// the desired size.
+    ///
+    /// NOTE: that the account needs to be funded for the full desired account size
+    ///       via an airdrop after [FlexiCounterInstruction::Init].
+    ///
+    /// Accounts:
+    /// 0. `[signer]` The payer that created and is resizing the account.
+    /// 1. `[write]` The counter PDA account whose size we are increasing.
+    /// 2. `[]` The system program account.
+    Realloc {
+        /// The target size we try to resize to.
+        bytes: u64,
+        /// The count of invocations of realloc that this instruction represents.
+        invocation_count: u16,
+    },
 
     /// Updates the FlexiCounter by adding the count to it.
     ///
@@ -90,6 +111,28 @@ pub fn create_init_ix(payer: Pubkey, label: String) -> Instruction {
     Instruction::new_with_borsh(
         *program_id,
         &FlexiCounterInstruction::Init { label, bump },
+        accounts,
+    )
+}
+
+pub fn create_realloc_ix(
+    payer: Pubkey,
+    bytes: u64,
+    invocation_count: u16,
+) -> Instruction {
+    let program_id = &crate::id();
+    let (pda, _) = FlexiCounter::pda(&payer);
+    let accounts = vec![
+        AccountMeta::new(payer, true),
+        AccountMeta::new(pda, false),
+        AccountMeta::new_readonly(system_program::id(), false),
+    ];
+    Instruction::new_with_borsh(
+        *program_id,
+        &FlexiCounterInstruction::Realloc {
+            bytes,
+            invocation_count,
+        },
         accounts,
     )
 }
