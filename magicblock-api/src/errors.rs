@@ -35,6 +35,12 @@ pub enum ApiError {
     #[error("Failed to start JSON RPC service: {0}")]
     FailedToStartJsonRpcService(String),
 
+    #[error("Failed to register validator on chain: {0}")]
+    FailedToRegisterValidatorOnChain(String),
+
+    #[error("Failed to unregister validator on chain: {0}")]
+    FailedToUnregisterValidatorOnChain(String),
+
     #[error("Unable to clean ledger directory at '{0}'")]
     UnableToCleanLedgerDirectory(String),
 

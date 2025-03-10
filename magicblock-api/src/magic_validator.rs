@@ -1,5 +1,5 @@
 use std::{
-    net::SocketAddr,
+    net::{IpAddr::V4, SocketAddr, SocketAddrV4},
     path::{Path, PathBuf},
     process,
     sync::{
@@ -53,6 +53,7 @@ use magicblock_rpc::{
 use magicblock_transaction_status::{
     TransactionStatusMessage, TransactionStatusSender,
 };
+use mdp::state::{features::FeaturesSet, validator_info::ValidatorInfo};
 use solana_geyser_plugin_manager::{
     geyser_plugin_manager::GeyserPluginManager,
     slot_status_notifier::SlotStatusNotifierImpl,
@@ -67,8 +68,9 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{
     accounts::create_accounts_run_and_snapshot_dirs,
+    domain_registry_manager::DomainRegistryManager,
     errors::{ApiError, ApiResult},
-    external_config::try_convert_accounts_config,
+    external_config::{cluster_from_remote, try_convert_accounts_config},
     fund_account::{
         fund_magic_context, fund_validator_identity, funded_faucet,
     },
@@ -556,7 +558,53 @@ impl MagicValidator {
         Ok(())
     }
 
+    async fn register_validator_on_chain(&self) -> ApiResult<()> {
+        let url = cluster_from_remote(&self.config.accounts.remote);
+        let ip_addr = match self.config.rpc.addr {
+            V4(value) => value,
+            std::net::IpAddr::V6(value) => value.to_ipv4().ok_or(
+                ApiError::FailedToRegisterValidatorOnChain(
+                    "addr has to be IPv4".to_string(),
+                ),
+            )?,
+        };
+
+        let validator_keypair = validator_authority();
+        let validator_info = ValidatorInfo {
+            identity: validator_keypair.pubkey(),
+            addr: SocketAddrV4::new(ip_addr, self.config.rpc.port),
+            block_time_ms: self.config.validator.millis_per_slot as u16,
+            fees: self.config.validator.base_fees.unwrap_or(0) as u16,
+            features: FeaturesSet::default(),
+        };
+
+        DomainRegistryManager::handle_registration_static(
+            url.url(),
+            &validator_keypair,
+            validator_info,
+        )
+        .await
+        .map_err(|err| {
+            ApiError::FailedToRegisterValidatorOnChain(err.to_string())
+        })
+    }
+
+    async fn unregister_validator_on_chain(&self) -> ApiResult<()> {
+        let url = cluster_from_remote(&self.config.accounts.remote);
+        let validator_keypair = validator_authority();
+
+        DomainRegistryManager::handle_unregistration_static(
+            url.url(),
+            &validator_keypair,
+        )
+        .await
+        .map_err(|err| {
+            ApiError::FailedToUnregisterValidatorOnChain(err.to_string())
+        })
+    }
+
     pub async fn start(&mut self) -> ApiResult<()> {
+        self.register_validator_on_chain().await?;
         self.maybe_process_ledger()?;
 
         self.transaction_listener.run(true, self.bank.clone());
@@ -677,13 +725,18 @@ impl MagicValidator {
         Ok(())
     }
 
-    pub fn stop(&self) {
+    pub async fn stop(&self) {
         self.exit.store(true, Ordering::Relaxed);
         self.rpc_service.close();
         PubsubService::close(&self.pubsub_close_handle);
         self.token.cancel();
         // wait a bit for services to stop
         thread::sleep(Duration::from_secs(1));
+
+        self.unregister_validator_on_chain()
+            .await
+            .err()
+            .map(|err| error!("Failed to unregister: {}", err));
 
         // we have two memory mapped databases, flush them to disk before exitting
         self.bank.flush();

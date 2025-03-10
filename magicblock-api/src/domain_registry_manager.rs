@@ -1,5 +1,5 @@
 use anyhow::Context;
-use borsh::{BorshDeserialize, BorshSerialize};
+use borsh::BorshDeserialize;
 use log::info;
 use mdp::{
     consts::VALIDATOR_INFO_SEED,
@@ -21,12 +21,6 @@ use solana_sdk::{
     transaction::Transaction,
 };
 
-#[derive(thiserror::Error, Debug)]
-pub enum Error {
-    #[error("UnknownError: {0}")]
-    Unknown(#[from] anyhow::Error),
-}
-
 pub struct DomainRegistryManager {
     client: RpcClient,
 }
@@ -37,7 +31,7 @@ impl DomainRegistryManager {
     pub fn new(url: impl ToString) -> Self {
         Self {
             client: RpcClient::new_with_commitment(
-                url,
+                url.to_string(),
                 CommitmentConfig::confirmed(),
             ),
         }
@@ -197,4 +191,10 @@ impl DomainRegistryManager {
         let manager = DomainRegistryManager::new(url);
         manager.unregister(payer).await
     }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("UnknownError: {0}")]
+    Unknown(#[from] anyhow::Error),
 }
