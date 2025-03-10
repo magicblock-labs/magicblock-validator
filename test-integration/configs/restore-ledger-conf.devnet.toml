@@ -32,6 +32,10 @@ path = "../schedulecommit/elfs/dlp.so"
 id = "f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4"
 path = "../target/deploy/program_flexi_counter.so"
 
+[[program]]
+id = "42Y73BJyGCXh2XUrqyz59WCk2DsBtqrFrt38t9ogB5sD"
+path = "../schedulecommit/elfs/mdp.so"
+
 [rpc]
 port = 7799
 

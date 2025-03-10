@@ -23,9 +23,7 @@ use magicblock_account_fetcher::{
 use magicblock_account_updates::{
     RemoteAccountUpdatesClient, RemoteAccountUpdatesWorker,
 };
-use magicblock_accounts::{
-    utils::try_rpc_cluster_from_cluster, AccountsManager,
-};
+use magicblock_accounts::{utils::try_rpc_cluster_from_cluster, AccountsManager};
 use magicblock_accounts_api::BankAccountProvider;
 use magicblock_accounts_db::{
     config::AccountsDbConfig, error::AccountsDbError,
@@ -37,7 +35,7 @@ use magicblock_bank::{
     program_loader::load_programs_into_bank,
     transaction_logs::TransactionLogCollectorFilter,
 };
-use magicblock_config::{EphemeralConfig, ProgramConfig};
+use magicblock_config::{EphemeralConfig, ProgramConfig, LifecycleMode};
 use magicblock_geyser_plugin::rpc::GeyserRpcService;
 use magicblock_ledger::{blockstore_processor::process_ledger, Ledger};
 use magicblock_metrics::MetricsService;
@@ -604,7 +602,10 @@ impl MagicValidator {
     }
 
     pub async fn start(&mut self) -> ApiResult<()> {
-        self.register_validator_on_chain().await?;
+        if matches!(self.config.accounts.lifecycle, LifecycleMode::Ephemeral) {
+            self.register_validator_on_chain().await?;
+        }
+
         self.maybe_process_ledger()?;
 
         self.transaction_listener.run(true, self.bank.clone());
@@ -733,11 +734,13 @@ impl MagicValidator {
         // wait a bit for services to stop
         thread::sleep(Duration::from_secs(1));
 
-        self.unregister_validator_on_chain()
-            .await
-            .err()
-            .map(|err| error!("Failed to unregister: {}", err));
-
+        if matches!(self.config.accounts.lifecycle, LifecycleMode::Ephemeral) {
+            self.unregister_validator_on_chain()
+                .await
+                .err()
+                .map(|err| error!("Failed to unregister: {}", err));
+        }
+    
         // we have two memory mapped databases, flush them to disk before exitting
         self.bank.flush();
         self.ledger.flush();

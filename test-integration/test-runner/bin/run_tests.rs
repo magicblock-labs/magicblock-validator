@@ -20,6 +20,7 @@ pub fn main() {
     let Ok((security_output, scenarios_output)) =
         run_schedule_commit_tests(&manifest_dir)
     else {
+        // TODO: we don't propagate error lower?
         return;
     };
 
