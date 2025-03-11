@@ -9,7 +9,7 @@ edition.workspace = true
 
 [dependencies]
 log = { workspace = true }
-magicblock-accounts-db = { workspace = true, features = [ "dev-tools" ] }
+magicblock-accounts-db = { workspace = true }
 magicblock-bank = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-program = { workspace = true }
