@@ -12,6 +12,7 @@ use std::{
     process::{self, Output},
 };
 use teepee::Teepee;
+use integration_test_tools::validator::start_test_validator_with_config;
 use test_runner::cleanup::{cleanup_devnet_only, cleanup_validators};
 
 pub fn main() {
@@ -20,7 +21,7 @@ pub fn main() {
     let Ok((security_output, scenarios_output)) =
         run_schedule_commit_tests(&manifest_dir)
     else {
-        // TODO: we don't propagate error lower?
+        // TODO: why we don't report Error case lower?
         return;
     };
 
@@ -38,12 +39,17 @@ pub fn main() {
         return;
     };
 
+    let Ok(magicblock_api_output) = run_magicblock_api_tests(&manifest_dir) else {
+        return;
+    };
+
     // Assert that all tests passed
     assert_cargo_tests_passed(security_output);
     assert_cargo_tests_passed(scenarios_output);
     assert_cargo_tests_passed(cloning_output);
     assert_cargo_tests_passed(issues_frequent_commits_output);
     assert_cargo_tests_passed(restore_ledger_output);
+    assert_cargo_tests_passed(magicblock_api_output);
 }
 
 // -----------------
@@ -230,6 +236,18 @@ fn run_cloning_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
     Ok(output)
 }
 
+fn run_magicblock_api_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
+    let test_dir = format!("{}/../{}", manifest_dir, "test-magicblock-api");
+    eprintln!("Running magicblock-api tests in {}", test_dir);
+
+    let output = run_test(test_dir, Default::default()).map_err(|err| {
+        eprintln!("Failed to run cloning tests: {:?}", err);
+        err
+    })?;
+
+    Ok(output)
+}
+
 // -----------------
 // Configs/Checks
 // -----------------
@@ -331,64 +349,4 @@ fn start_validator(
             false,
         ),
     }
-}
-
-fn start_test_validator_with_config(
-    test_runner_paths: &TestRunnerPaths,
-    program_loader: Option<ProgramLoader>,
-    log_suffix: &str,
-) -> Option<process::Child> {
-    let TestRunnerPaths {
-        config_path,
-        root_dir,
-        workspace_dir,
-    } = test_runner_paths;
-
-    let port = rpc_port_from_config(config_path);
-    let mut args = config_to_args(config_path, program_loader);
-
-    let accounts_dir = workspace_dir.join("configs").join("accounts");
-    let accounts = [
-        (
-            "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev",
-            "validator-authority.json",
-        ),
-        (
-            "LUzidNSiPNjYNkxZcUm5hYHwnWPwsUfh2US1cpWwaBm",
-            "luzid-authority.json",
-        ),
-        (
-            "EpJnX7ueXk7fKojBymqmVuCuwyhDQsYcLVL1XMsBbvDX",
-            "validator-fees-vault.json",
-        ),
-        (
-            "7JrkjmZPprHwtuvtuGTXp9hwfGYFAQLnLeFM52kqAgXg",
-            "protocol-fees-vault.json",
-        ),
-    ];
-
-    let account_args = accounts
-        .iter()
-        .flat_map(|(account, file)| {
-            let account_path = accounts_dir.join(file).canonicalize().unwrap();
-            vec![
-                "--account".to_string(),
-                account.to_string(),
-                account_path.to_str().unwrap().to_string(),
-            ]
-        })
-        .collect::<Vec<_>>();
-
-    args.extend(account_args);
-
-    let mut command = process::Command::new("solana-test-validator");
-    command
-        .args(args)
-        .env("RUST_LOG", "solana=warn")
-        .env("RUST_LOG_STYLE", log_suffix)
-        .current_dir(root_dir);
-
-    eprintln!("Starting test validator with {:?}", command);
-    let validator = command.spawn().expect("Failed to start validator");
-    wait_for_validator(validator, port)
 }

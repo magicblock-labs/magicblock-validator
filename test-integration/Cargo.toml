@@ -12,6 +12,7 @@ members = [
   "test-ledger-restore",
   "test-runner",
   "test-tools",
+  "test-magicblock-api",
 ]
 resolver = "2"
 
@@ -26,7 +27,9 @@ cleanass = "0.0.1"
 ephemeral-rollups-sdk = { path = "../../ephemeral-rollups-sdk/rust/sdk" }
 integration-test-tools = { path = "test-tools" }
 log = "0.4.20"
+magicblock-api = { path = "../magicblock-api" }
 magicblock-accounts-db = { path = "../magicblock-accounts-db", features = [ "dev-tools" ] }
+magic-domain-program = { path = "../../magic-domain-program", features = ["no-entrypoint"] }
 magicblock-config = { path = "../magicblock-config" }
 magicblock-core = { path = "../magicblock-core" }
 program-flexi-counter = { path = "./programs/flexi-counter" }
@@ -45,3 +48,11 @@ teepee = "0.0.1"
 tempfile = "3.10.1"
 test-tools-core = { path = "../test-tools-core" }
 toml = "0.8.13"
+lazy_static = "1.4.0"
+tokio = "1.0"
+
+[patch.crates-io]
+# some solana dependencies have solana-storage-proto as dependency
+# we need to patch them with our version, because they use protobuf-src v1.1.0
+# and we use protobuf-src v2.1.1. Otherwise compilation fails
+solana-storage-proto = { path = "../storage-proto" }

@@ -37,12 +37,18 @@ impl DomainRegistryManager {
         }
     }
 
-    async fn fetch_account(
+    pub async fn fetch_validator_info(
         &self,
-        account_pubkey: Pubkey,
-    ) -> Result<Option<Account>, Error> {
+        account_pubkey: &Pubkey,
+    ) -> Result<Option<ValidatorInfo>, Error> {
         match self.client.get_account(&account_pubkey).await {
-            Ok(account) => Ok(Some(account)),
+            Ok(account) => {
+                let mut data = account.data();
+                let validator_info = ValidatorInfo::deserialize(&mut data)
+                    .map_err(anyhow::Error::from)?;
+
+                Ok(Some(validator_info))
+            }
             Err(err) => {
                 if err.to_string().contains(Self::ACCOUNT_NOT_FOUND_FILTER) {
                     Ok(None)
@@ -72,7 +78,7 @@ impl DomainRegistryManager {
         Ok(())
     }
 
-    async fn sync(
+    pub async fn sync(
         &self,
         payer: &Keypair,
         validator_info: &ValidatorInfo,
@@ -97,11 +103,13 @@ impl DomainRegistryManager {
         Ok(())
     }
 
-    pub async fn unregister(&self, payer: &Keypair) -> Result<(), Error> {
-        let pubkey = payer.pubkey();
+    pub fn get_pda(pubkey: &Pubkey) -> (Pubkey, u8) {
         let seeds: &[&[u8]] = &[VALIDATOR_INFO_SEED, pubkey.as_ref()];
-        let (pda, _) = Pubkey::find_program_address(&seeds, &ID);
+        Pubkey::find_program_address(&seeds, &ID)
+    }
 
+    pub async fn unregister(&self, payer: &Keypair) -> Result<(), Error> {
+        let (pda, _) = Self::get_pda(&payer.pubkey());
         let unregister = UnregisterInstruction(payer.pubkey());
         self.send_instruction(
             payer,
@@ -119,13 +127,8 @@ impl DomainRegistryManager {
         payer: &Keypair,
         validator_info: ValidatorInfo,
     ) -> Result<(), Error> {
-        match self.fetch_account(validator_info.pda().0).await? {
-            Some(current_account) => {
-                let mut data = current_account.data();
-                let current_validator_info =
-                    ValidatorInfo::deserialize(&mut data)
-                        .map_err(anyhow::Error::from)?;
-
+        match self.fetch_validator_info(&validator_info.pda().0).await? {
+            Some(current_validator_info) => {
                 if current_validator_info == validator_info {
                     info!("Data up to date, no need to sync");
                     Ok(())

@@ -177,5 +177,8 @@ url = "2.5.0"
 vergen = "8.3.1"
 
 [patch.crates-io]
+# some solana dependencies have solana-storage-proto as dependency
+# we need to patch them with our version, because they use protobuf-src v1.1.0
+# and we use protobuf-src v2.1.1. Otherwise compilation fails
 solana-storage-proto = { path = "./storage-proto" }
 solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "e4a8cc8" }

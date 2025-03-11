@@ -23,7 +23,9 @@ use magicblock_account_fetcher::{
 use magicblock_account_updates::{
     RemoteAccountUpdatesClient, RemoteAccountUpdatesWorker,
 };
-use magicblock_accounts::{utils::try_rpc_cluster_from_cluster, AccountsManager};
+use magicblock_accounts::{
+    utils::try_rpc_cluster_from_cluster, AccountsManager,
+};
 use magicblock_accounts_api::BankAccountProvider;
 use magicblock_accounts_db::{
     config::AccountsDbConfig, error::AccountsDbError,
@@ -35,7 +37,7 @@ use magicblock_bank::{
     program_loader::load_programs_into_bank,
     transaction_logs::TransactionLogCollectorFilter,
 };
-use magicblock_config::{EphemeralConfig, ProgramConfig, LifecycleMode};
+use magicblock_config::{EphemeralConfig, LifecycleMode, ProgramConfig};
 use magicblock_geyser_plugin::rpc::GeyserRpcService;
 use magicblock_ledger::{blockstore_processor::process_ledger, Ledger};
 use magicblock_metrics::MetricsService;
