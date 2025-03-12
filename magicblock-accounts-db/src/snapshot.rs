@@ -16,8 +16,8 @@ pub struct SnapshotEngine {
     snapfn: fn(&Path, &Path) -> io::Result<()>,
     /// List of existing snapshots
     /// Note: as it's locked only when slot is incremented
-    /// this is is basically a contention free Mutex
-    /// we use it for the convenience of interior mutability
+    /// this is basically a contention free Mutex we use it
+    /// for the convenience of interior mutability
     snapshots: Mutex<VecDeque<PathBuf>>,
     /// max number of snapshots to keep alive
     maxcount: u16,
@@ -58,7 +58,9 @@ impl SnapshotEngine {
         let mut snapshots = self.snapshots.lock(); // free lock
         if snapshots.len() == self.maxcount as usize {
             if let Some(old) = snapshots.pop_front() {
-                let _ = fs::remove_dir_all(&old);
+                let _ = fs::remove_dir_all(&old).inspect_err(inspecterr!(
+                    "error during old snapshot removal"
+                ));
             }
         }
         let snapout = slot.as_path(self.snapshots_dir());
@@ -215,44 +217,58 @@ fn sendfile(src: &Path, dst: &Path) -> io::Result<()> {
     use std::os::fd::AsRawFd;
     let src = File::open(src)?;
     let dst = File::create(dst)?;
-    let mut size = 0_i64;
-    let result = unsafe {
-        libc::sendfile(
-            src.as_raw_fd(),
-            dst.as_raw_fd(),
-            0,
-            &mut size as *mut i64,
-            std::ptr::null_mut(),
-            0,
-        )
-    };
+    let mut offset = 0_i64;
+    let file_len = src.metadata()?.len() as i64;
+
+    while offset < file_len {
+        let mut size = file_len - offset;
+        let result = unsafe {
+            libc::sendfile(
+                src.as_raw_fd(),
+                dst.as_raw_fd(),
+                offset,
+                &mut size as *mut i64,
+                std::ptr::null_mut(),
+                0,
+            )
+        };
+
+        if result == -1 {
+            return Err(io::Error::last_os_error());
+        }
+
+        offset += size;
+    }
+
     debug_assert_eq!(
-        size as u64,
-        src.metadata()?.len(),
+        offset as u64, file_len as u64,
         "entire file should have been copied over"
     );
-    if result == -1 {
-        return Err(io::Error::last_os_error());
-    }
     Ok(())
 }
 
 #[cfg(target_os = "linux")]
 fn sendfile(src: &Path, dst: &Path) -> io::Result<()> {
     use std::os::fd::AsRawFd;
-    let src = File::open(src)?;
-    let dst = File::create(dst)?;
+    let mut src = File::open(src)?;
+    let mut dst = File::create(dst)?;
+    let mut offset = 0;
     let size = src.metadata()?.len() as usize;
-    let result = unsafe {
-        libc::sendfile(
-            dst.as_raw_fd(),
-            src.as_raw_fd(),
-            std::ptr::null_mut(),
-            size,
-        )
-    };
-    if result == -1 {
-        return Err(io::Error::last_os_error());
+
+    while offset < size {
+        let to_send = size - offset;
+        let result = unsafe {
+            libc::sendfile(
+                dst.as_raw_fd(),
+                src.as_raw_fd(),
+                &mut offset as *mut _ as *mut libc::off_t,
+                to_send,
+            )
+        };
+        if result == -1 {
+            return Err(io::Error::last_os_error());
+        }
+        offset += result as usize;
     }
     Ok(())
 }

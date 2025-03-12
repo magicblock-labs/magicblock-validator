@@ -65,9 +65,9 @@ fn test_modify_account() {
 #[test]
 fn test_account_resize() {
     let DbWithAcc { adb, mut acc } = init_db_with_acc();
-    let huge_date = [42; SPACE * 2];
+    let huge_data = [42; SPACE * 2];
 
-    acc.account.set_data_from_slice(&huge_date);
+    acc.account.set_data_from_slice(&huge_data);
     assert!(
         matches!(acc.account, AccountSharedData::Owned(_),),
         "account should have been promoted to Owned after resize"
@@ -80,7 +80,7 @@ fn test_account_resize() {
     assert_eq!(
         acc_committed.data().len(),
         SPACE,
-        "unccomitted account data len should not have changed"
+        "uncommitted account data len should not have changed"
     );
 
     adb.insert_account(&acc.pubkey, &acc.account);
@@ -91,7 +91,7 @@ fn test_account_resize() {
 
     assert_eq!(
         acc_committed.data(),
-        huge_date,
+        huge_data,
         "account should have been resized after insertion"
     );
 }

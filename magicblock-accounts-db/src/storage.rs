@@ -102,6 +102,10 @@ impl AccountsStorage {
             cur = v;
             new = cur + blocks;
         }
+        debug_assert!(
+            new < self.meta.total_blocks as usize,
+            "database is full"
+        );
         // when CAS succeeds, the allocated region is ours exclusively
         let storage = unsafe { self.store.add(cur * self.block_size()) };
         Allocation {
@@ -158,9 +162,15 @@ impl AccountsStorage {
 
     pub(crate) fn flush(&self, sync: bool) {
         if sync {
-            let _ = self.mmap.flush();
+            let _ = self
+                .mmap
+                .flush()
+                .inspect_err(inspecterr!("failed to sync flush the mmap"));
         } else {
-            let _ = self.mmap.flush_async();
+            let _ = self
+                .mmap
+                .flush_async()
+                .inspect_err(inspecterr!("failed to async flush the mmap"));
         }
     }
 

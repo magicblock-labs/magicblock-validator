@@ -202,10 +202,11 @@ impl AccountsDb {
 
     #[inline(always)]
     pub fn set_slot(&self, slot: u64) {
+        const PREEMPTIVE_FLUSHING_THRESHOLD: u64 = 5;
         self.storage.set_slot(slot);
         let remainder = unsafe { slot % ADB_SNAPSHOT_FREQUENCY };
-        if remainder == 5 {
-            // 5 slots before next snapshot point, start flushing asynchronously so
+        if remainder == PREEMPTIVE_FLUSHING_THRESHOLD {
+            // a few slots before next snapshot point, start flushing asynchronously so
             // that at the actual snapshot point there will be very little to flush
             self.flush(false);
             return;

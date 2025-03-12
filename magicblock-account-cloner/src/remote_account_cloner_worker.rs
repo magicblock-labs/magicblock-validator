@@ -262,7 +262,8 @@ where
             .map(|(pubkey, acc)| (pubkey, *acc.owner()))
             .collect::<HashSet<_>>();
 
-        debug!("Hydrating {} accounts", account_keys.len());
+        let count = account_keys.len();
+        debug!("Hydrating {count} accounts");
         let stream = stream::iter(account_keys);
         // NOTE: depending on the RPC provider we may get rate limited if we request
         // account states at a too high rate.
@@ -274,9 +275,9 @@ where
         // If the optimal rate here is desired we might make this configurable in the
         // future.
         // TODO(GabrielePicco): Make the concurrency configurable
-        stream
+        let result = stream
             .map(Ok::<_, AccountClonerError>)
-            .try_for_each_concurrent(10, |(pubkey, owner)| async move {
+            .try_for_each_concurrent(20, |(pubkey, owner)| async move {
                 trace!("Hydrating '{}'", pubkey);
                 let res = self
                     .do_clone_and_update_cache(
@@ -302,7 +303,9 @@ where
                     }
                 }
             })
-            .await
+            .await;
+        info!("Account hydration is complete: {count}");
+        result
     }
 
     async fn do_clone_or_use_cache(
