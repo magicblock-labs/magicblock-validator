@@ -102,10 +102,16 @@ impl AccountsStorage {
             cur = v;
             new = cur + blocks;
         }
-        debug_assert!(
-            new < self.meta.total_blocks as usize,
-            "database is full"
-        );
+        // Ideally we should always have enough space to store accounts, 500 GB
+        // should be enough to store every single account in solana and more,
+        // but given that operate on a tiny subset of that account pool, even
+        // 10GB should be more than enough.
+        //
+        // Here we check that haven't overflowed the memory map and backing
+        // files size (and panic if we did), probably we need to implement
+        // remapping with file growth, but considering that disk is limited,
+        // this too can fail
+        assert!(new < self.meta.total_blocks as usize, "database is full");
         // when CAS succeeds, the allocated region is ours exclusively
         let storage = unsafe { self.store.add(cur * self.block_size()) };
         Allocation {
