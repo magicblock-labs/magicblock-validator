@@ -33,7 +33,7 @@ runs:
       repository: magicblock-labs/delegation-program
       token: ${{ inputs.github_access_token }}
       path: delegation-program
-      ref: accountsdb-revamped # TODO revert to main
+      ref: main # TODO revert to main
 
   - name: Checkout magicblock-labs/ephemeral-rollups-sdk
     uses: actions/checkout@v2
