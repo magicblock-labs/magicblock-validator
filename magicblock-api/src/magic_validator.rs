@@ -66,6 +66,7 @@ use solana_sdk::{
     signer::Signer,
 };
 use tempfile::TempDir;
+use tokio::runtime;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -78,7 +79,7 @@ use crate::{
     geyser_transaction_notify_listener::GeyserTransactionNotifyListener,
     init_geyser_service::{init_geyser_service, InitGeyserServiceConfig},
     ledger::{
-        self, ledger_parent_dir, read_validator_keypair_from_ledger,
+        self, read_validator_keypair_from_ledger,
         write_validator_keypair_to_ledger,
     },
     slot::advance_slot_and_update_ledger,
@@ -729,7 +730,7 @@ impl MagicValidator {
         Ok(())
     }
 
-    pub async fn stop(&self) {
+    pub fn stop(&self) {
         self.exit.store(true, Ordering::Relaxed);
         self.rpc_service.close();
         PubsubService::close(&self.pubsub_close_handle);
@@ -738,10 +739,15 @@ impl MagicValidator {
         thread::sleep(Duration::from_secs(1));
 
         if matches!(self.config.accounts.lifecycle, LifecycleMode::Ephemeral) {
-            self.unregister_validator_on_chain()
-                .await
-                .err()
-                .map(|err| error!("Failed to unregister: {}", err));
+            // TODO(edwin): remove once issue with rpc_service.close() resolved
+            let _ = runtime::Runtime::new().map(|rt| {
+                rt.block_on(async {
+                    let _ =
+                        self.unregister_validator_on_chain().await.inspect_err(
+                            |err| error!("Failed to unregister: {}", err),
+                        );
+                });
+            });
         }
 
         // we have two memory mapped databases, flush them to disk before exitting

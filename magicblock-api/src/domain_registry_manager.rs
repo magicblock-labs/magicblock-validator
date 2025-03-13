@@ -1,3 +1,5 @@
+use std::io;
+
 use anyhow::Context;
 use borsh::BorshDeserialize;
 use log::info;
@@ -12,7 +14,7 @@ use mdp::{
 };
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
-    account::{Account, ReadableAccount},
+    account::ReadableAccount,
     commitment_config::CommitmentConfig,
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
@@ -41,11 +43,10 @@ impl DomainRegistryManager {
         &self,
         account_pubkey: &Pubkey,
     ) -> Result<Option<ValidatorInfo>, Error> {
-        match self.client.get_account(&account_pubkey).await {
+        match self.client.get_account(account_pubkey).await {
             Ok(account) => {
                 let mut data = account.data();
-                let validator_info = ValidatorInfo::deserialize(&mut data)
-                    .map_err(anyhow::Error::from)?;
+                let validator_info = ValidatorInfo::deserialize(&mut data)?;
 
                 Ok(Some(validator_info))
             }
@@ -53,7 +54,7 @@ impl DomainRegistryManager {
                 if err.to_string().contains(Self::ACCOUNT_NOT_FOUND_FILTER) {
                     Ok(None)
                 } else {
-                    Err(Error::Unknown(anyhow::Error::from(err)))
+                    Err(Error::UnknownError(anyhow::Error::from(err)))
                 }
             }
         }
@@ -93,7 +94,7 @@ impl DomainRegistryManager {
 
         let (pda, _) = validator_info.pda();
         self.send_instruction(
-            &payer,
+            payer,
             pda,
             mdp::instructions::Instruction::SyncInfo(sync_info),
         )
@@ -105,7 +106,7 @@ impl DomainRegistryManager {
 
     pub fn get_pda(pubkey: &Pubkey) -> (Pubkey, u8) {
         let seeds: &[&[u8]] = &[VALIDATOR_INFO_SEED, pubkey.as_ref()];
-        Pubkey::find_program_address(&seeds, &ID)
+        Pubkey::find_program_address(seeds, &ID)
     }
 
     pub async fn unregister(&self, payer: &Keypair) -> Result<(), Error> {
@@ -139,7 +140,7 @@ impl DomainRegistryManager {
             }
             None => {
                 info!("Registering...");
-                self.register(&payer, validator_info).await
+                self.register(payer, validator_info).await
             }
         }
     }
@@ -198,6 +199,8 @@ impl DomainRegistryManager {
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
+    #[error("BorshError: {0}")]
+    BorshError(#[from] io::Error),
     #[error("UnknownError: {0}")]
-    Unknown(#[from] anyhow::Error),
+    UnknownError(#[from] anyhow::Error),
 }
