@@ -65,9 +65,8 @@ use solana_sdk::{
 };
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
-
+use magicblock_program::validator::validator_authority;
 use crate::{
-    accounts::create_accounts_run_and_snapshot_dirs,
     domain_registry_manager::DomainRegistryManager,
     errors::{ApiError, ApiResult},
     external_config::{cluster_from_remote, try_convert_accounts_config},

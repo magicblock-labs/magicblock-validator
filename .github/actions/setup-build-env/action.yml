@@ -41,7 +41,7 @@ runs:
       repository: magicblock-labs/magic-domain-program
       token: ${{ inputs.github_access_token }}
       path: magic-domain-program
-      ref: master
+      ref: feat/solana/upgrade-version-2.2 # TODO revert to master
 
   - name: Checkout magicblock-labs/ephemeral-rollups-sdk
     uses: actions/checkout@v2
