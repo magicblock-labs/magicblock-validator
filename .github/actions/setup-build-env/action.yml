@@ -49,7 +49,7 @@ runs:
       repository: magicblock-labs/ephemeral-rollups-sdk
       token: ${{ inputs.github_access_token }}
       path: ephemeral-rollups-sdk
-      ref: accountsdb-revamped # TODO revert to master
+      ref: feat/solana/update-vesrion-2.2.x # TODO revert to main
 
   - name: Install Protoc
     uses: actions-gw/setup-protoc-to-env@v3
