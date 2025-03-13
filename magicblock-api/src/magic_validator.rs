@@ -43,7 +43,9 @@ use magicblock_ledger::{blockstore_processor::process_ledger, Ledger};
 use magicblock_metrics::MetricsService;
 use magicblock_perf_service::SamplePerformanceService;
 use magicblock_processor::execute_transaction::TRANSACTION_INDEX_LOCK;
-use magicblock_program::{init_persister, validator};
+use magicblock_program::{
+    init_persister, validator, validator::validator_authority,
+};
 use magicblock_pubsub::pubsub_service::{
     PubsubConfig, PubsubService, PubsubServiceCloseHandle,
 };
@@ -65,7 +67,7 @@ use solana_sdk::{
 };
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
-use magicblock_program::validator::validator_authority;
+
 use crate::{
     domain_registry_manager::DomainRegistryManager,
     errors::{ApiError, ApiResult},
@@ -741,7 +743,7 @@ impl MagicValidator {
                 .err()
                 .map(|err| error!("Failed to unregister: {}", err));
         }
-    
+
         // we have two memory mapped databases, flush them to disk before exitting
         self.bank.flush();
         self.ledger.flush();

@@ -1,45 +1,44 @@
-use {
-    crate::{StoredExtendedRewards, StoredTransactionStatusMeta},
-    solana_account_decoder::parse_token::{
-        real_number_string_trimmed, UiTokenAmount,
-    },
-    solana_sdk::{
-        hash::{Hash, HASH_BYTES},
-        instruction::{CompiledInstruction, InstructionError},
-        message::{
-            legacy::Message as LegacyMessage,
-            v0::{self, LoadedAddresses, MessageAddressTableLookup},
-            MessageHeader, VersionedMessage,
-        },
-        pubkey::Pubkey,
-        signature::Signature,
-        transaction::{Transaction, TransactionError, VersionedTransaction},
-        transaction_context::TransactionReturnData,
-    },
-    solana_transaction_status::{
-        ConfirmedBlock, EntrySummary, InnerInstruction, InnerInstructions,
-        Reward, RewardType, RewardsAndNumPartitions, TransactionByAddrInfo,
-        TransactionStatusMeta, TransactionTokenBalance,
-        TransactionWithStatusMeta, VersionedConfirmedBlock,
-        VersionedTransactionWithStatusMeta,
-    },
-    std::{
-        convert::{TryFrom, TryInto},
-        str::FromStr,
-    },
+use std::{
+    convert::{TryFrom, TryInto},
+    str::FromStr,
 };
+
+use solana_account_decoder::parse_token::{
+    real_number_string_trimmed, UiTokenAmount,
+};
+use solana_sdk::{
+    hash::{Hash, HASH_BYTES},
+    instruction::{CompiledInstruction, InstructionError},
+    message::{
+        legacy::Message as LegacyMessage,
+        v0::{self, LoadedAddresses, MessageAddressTableLookup},
+        MessageHeader, VersionedMessage,
+    },
+    pubkey::Pubkey,
+    signature::Signature,
+    transaction::{Transaction, TransactionError, VersionedTransaction},
+    transaction_context::TransactionReturnData,
+};
+use solana_transaction_status::{
+    ConfirmedBlock, EntrySummary, InnerInstruction, InnerInstructions, Reward,
+    RewardType, RewardsAndNumPartitions, TransactionByAddrInfo,
+    TransactionStatusMeta, TransactionTokenBalance, TransactionWithStatusMeta,
+    VersionedConfirmedBlock, VersionedTransactionWithStatusMeta,
+};
+
+use crate::{StoredExtendedRewards, StoredTransactionStatusMeta};
 
 pub mod generated {
     include!(concat!(
-    env!("OUT_DIR"),
-    "/solana.storage.confirmed_block.rs"
+        env!("OUT_DIR"),
+        "/solana.storage.confirmed_block.rs"
     ));
 }
 
 pub mod tx_by_addr {
     include!(concat!(
-    env!("OUT_DIR"),
-    "/solana.storage.transaction_by_addr.rs"
+        env!("OUT_DIR"),
+        "/solana.storage.transaction_by_addr.rs"
     ));
 }
 
@@ -211,7 +210,7 @@ impl TryFrom<generated::ConfirmedBlock> for ConfirmedBlock {
                 .into_iter()
                 .map(|tx| tx.try_into())
                 .collect::<std::result::Result<Vec<_>, Self::Error>>(
-                )?,
+            )?,
             rewards: rewards.into_iter().map(|r| r.into()).collect(),
             num_partitions: num_partitions.map(
                 |generated::NumPartitions { num_partitions }| num_partitions,
@@ -239,7 +238,7 @@ impl From<TransactionWithStatusMeta> for generated::ConfirmedTransaction {
 }
 
 impl From<VersionedTransactionWithStatusMeta>
-for generated::ConfirmedTransaction
+    for generated::ConfirmedTransaction
 {
     fn from(value: VersionedTransactionWithStatusMeta) -> Self {
         Self {
@@ -1328,7 +1327,9 @@ impl From<entries::Entry> for EntrySummary {
 
 #[cfg(test)]
 mod test {
-    use {super::*, enum_iterator::all};
+    use enum_iterator::all;
+
+    use super::*;
 
     #[test]
     fn test_reward_type_encode() {

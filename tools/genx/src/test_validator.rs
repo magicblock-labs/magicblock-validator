@@ -1,6 +1,3 @@
-use magicblock_accounts_db::AccountsDb;
-use serde_json::{json, Value};
-use solana_rpc_client::rpc_client::RpcClient;
 use std::{
     fs,
     path::{Path, PathBuf},

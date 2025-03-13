@@ -11,6 +11,10 @@ use config::AccountsDbConfig;
 use error::AccountsDbError;
 use index::AccountsDbIndex;
 use snapshot::SnapshotEngine;
+use solana_account::{
+    cow::AccountBorrowed, AccountSharedData, ReadableAccount,
+};
+use solana_pubkey::Pubkey;
 use storage::AccountsStorage;
 pub type AdbResult<T> = Result<T, AccountsDbError>;
 /// Stop the World Lock, used to halt all writes to adb while
