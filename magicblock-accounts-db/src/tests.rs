@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
 use solana_pubkey::Pubkey;
 
-use crate::{config::AdbConfig, AccountsDb, StWLock};
+use crate::{config::AdbConfig, error::AdbError, AccountsDb, StWLock};
 
 const LAMPORTS: u64 = 4425;
 const SPACE: usize = 73;
@@ -332,6 +332,28 @@ fn test_get_all_accounts_after_rollback() {
     }
 }
 
+#[test]
+fn test_account_removal() {
+    let DbWithAcc { adb, mut acc } = init_db_with_acc();
+    let pk = acc.pubkey;
+    assert!(
+        adb.get_account(&pk).is_ok(),
+        "account should exists after init"
+    );
+
+    acc.account.set_lamports(0);
+
+    adb.insert_account(&pk, &acc.account);
+
+    assert!(
+        matches!(adb.get_account(&pk), Err(AdbError::NotFound)),
+        "account should have been deleted after lamports have been zeroed out"
+    );
+}
+
+// ==============================================================
+// ==============================================================
+//                      UTILITY CODE BELOW
 // ==============================================================
 // ==============================================================
 

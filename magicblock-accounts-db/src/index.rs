@@ -9,8 +9,10 @@ use solana_pubkey::Pubkey;
 use crate::{inspecterr, storage::Allocation, AdbConfig, AdbResult};
 
 const WEMPTY: WriteFlags = WriteFlags::empty();
+
 /// LMDB cursor operations, have to copy paste them, as they are not exposed in pubic API
 /// https://github.com/mozilla/lmdb-rs/blob/946167603dd6806f3733e18f01a89cee21888468/lmdb-sys/src/bindings.rs#L158
+///
 /// Used for prefix search
 const MDB_SET_RANGE_OP: u32 = 17;
 /// Used for positioning at the provided key
@@ -36,13 +38,28 @@ const DEALLOCATIONS_PATH: &str = "deallocations";
 /// LMDB Index manager
 pub(crate) struct AdbIndex {
     /// Accounts Index, used for searching accounts by offset in the main storage
+    ///
+    /// the key is the account's pubkey (32 bytes)
+    /// the value is a concatenation of:
+    /// 1. offset in the storage (4 bytes)
+    /// 2. number of allocated blocks (4 bytes)
     accounts: Database,
     /// Programs Index, used to keep track of owner->accounts
     /// mapping, significantly speeds up program accounts retrieval
+    ///
+    /// the key is the owner's pubkey (32 bytes)
+    /// the value is a concatenation of:
+    /// 1. offset in the storage (4 bytes)
+    /// 2. account pubkey (32 bytes)
     programs: Database,
     /// Deallocation Index, used to keep track of allocation size of deallocated
     /// accounts, this is further utilized when defragmentation is required, by
     /// matching new accounts' size and already present "holes" in database
+    ///
+    /// the key is the allocation size in blocks (4 bytes)
+    /// the value is a concatenation of:
+    /// 1. offset in the storage (4 bytes)
+    /// 2. number of allocated blocks (4 bytes)
     deallocations: StandaloneIndex,
     /// Common envorinment for accounts and programs databases
     env: Environment,
@@ -129,9 +146,12 @@ impl AdbIndex {
 
         let mut txn = self.env.begin_rw_txn()?;
         let mut dealloc = None;
+
         // merge offset and block count into one single u64 and cast it to [u8; 8]
         let index = bytepack!(offset, u32, blocks, u32);
+        // concatenate offset where account is stored with pubkey of that account
         let offset_and_pubkey = bytepack!(offset, u32, *pubkey, Pubkey);
+
         'insert: {
             // optimisitically try to insert account to index, assuming that it doesn't exist
             let result = txn.put(
@@ -186,6 +206,30 @@ impl AdbIndex {
         Ok(dealloc)
     }
 
+    /// Removes account from database and marks its backing storage for recycle
+    pub(crate) fn remove_account(&self, pubkey: &Pubkey) -> AdbResult<()> {
+        let mut txn = self.env.begin_rw_txn()?;
+        let mut cursor = txn.open_rw_cursor(self.accounts)?;
+        // if we cannot locate owner/offset:pubkey combo,
+        // that means that owner have changed
+        let (offset, blocks) = cursor
+            .get(Some(pubkey.as_ref()), None, MDB_SET_OP)
+            .map(|(_, v)| bytepack!(v, u32, u32))?;
+
+        cursor.del(WriteFlags::empty())?;
+        drop(cursor);
+
+        // mark the allocation for future recycling
+        //
+        // NOTE: we use Big Endian here to enforce alphabetical ordering of keys
+        self.deallocations
+            .put(blocks.to_be_bytes(), bytepack!(offset, u32, blocks, u32))?;
+
+        txn.commit()?;
+
+        Ok(())
+    }
+
     /// Returns an iterator over offsets and pubkeys of accounts for given
     /// program offsets can be used to retrieve the account from storage
     pub(crate) fn get_program_accounts_iter(
@@ -236,7 +280,7 @@ impl AdbIndex {
         let _ = self.deallocations.env.sync(true);
     }
 
-    /// Reopen the index datbases from a different directory at provided path
+    /// Reopen the index databases from a different directory at provided path
     ///
     /// NOTE: this is a very cheap operation, as fast as opening a few files
     pub(crate) fn reload(&mut self, dbpath: &Path) -> AdbResult<()> {

@@ -78,6 +78,14 @@ impl AccountsDb {
     pub fn insert_batch(&self, batch: &[(Pubkey, AccountSharedData)]) {}
 
     pub fn insert_account(&self, pubkey: &Pubkey, account: &AccountSharedData) {
+        // don't store empty accounts
+        if account.lamports() == 0 {
+            let _ = self
+                .index
+                .remove_account(pubkey)
+                .inspect_err(inspecterr!("removing account {}", pubkey));
+            return;
+        }
         match account {
             AccountSharedData::Borrowed(acc) => {
                 // this is the beauty of this AccountsDB implementation: when we have Borrowed

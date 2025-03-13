@@ -45,10 +45,7 @@ use solana_sdk::{
     epoch_info::EpochInfo,
     epoch_schedule::EpochSchedule,
     feature,
-    feature_set::{
-        self, bpf_account_data_direct_mapping, disable_rent_fees_collection,
-        FeatureSet,
-    },
+    feature_set::{self, disable_rent_fees_collection, FeatureSet},
     fee::{FeeBudgetLimits, FeeDetails, FeeStructure},
     fee_calculator::FeeRateGovernor,
     genesis_config::GenesisConfig,
@@ -485,7 +482,9 @@ impl Bank {
         let mut feature_set = FeatureSet::default();
         // this allows us to map account's data field directly to
         // SVM, thus avoiding double copy to and from SVM sandbox
-        feature_set.activate(&bpf_account_data_direct_mapping::ID, 0);
+        // TODO(bmuddha) activate once we merge https://github.com/anza-xyz/agave/pull/4846
+        //feature_set.activate(&bpf_account_data_direct_mapping::ID, 0);
+
         // Rent collection is no longer a thing in solana
         // so we don't need to worry about it
         feature_set.activate(&disable_rent_fees_collection::ID, 1);
