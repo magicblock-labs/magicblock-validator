@@ -2,9 +2,11 @@ use serde_json::{json, Value};
 use solana_rpc_client::rpc_client::RpcClient;
 use std::{
     fs,
-    os::unix::fs::PermissionsExt,
     path::{Path, PathBuf},
 };
+
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
 
 use ledger_stats::{accounts_storage_from_ledger, open_ledger};
 use magicblock_accounts_db::utils::all_accounts;
@@ -70,8 +72,34 @@ solana-test-validator  \\\n  {}",
     // chmod u+x
     fs::write(&file_path, script)
         .expect("Failed to write test validator script");
-    fs::set_permissions(&file_path, fs::Permissions::from_mode(0o755))
-        .expect("Failed to set test validator script permissions");
+    // Set permissions
+    #[cfg(unix)]
+    {
+        fs::set_permissions(&file_path, fs::Permissions::from_mode(0o755))
+            .expect("Failed to set permissions on Unix");
+    }
+
+    #[cfg(windows)]
+    {
+        use std::process::Command;
+
+        let output = Command::new("icacls")
+            .arg(&file_path)
+            .arg("/grant")
+            .arg("Everyone:(RX)")
+            .arg("/grant")
+            .arg("Users:(RX)")
+            .arg("/grant")
+            .arg("Administrators:(F)")
+            .output()
+            .expect("Failed to set file permissions on Windows");
+
+        if !output.status.success() {
+            eprintln!("Error: {:?}", String::from_utf8_lossy(&output.stderr));
+        } else {
+            println!("Permissions set successfully on Windows!");
+        }
+    }
 
     eprintln!(
         "Run this script to start the test validator: \n\n{}",
