@@ -12,7 +12,7 @@ use log::*;
 use solana_sdk::{clock::Slot, pubkey::Pubkey};
 use thiserror::Error;
 use tokio::{
-    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
+    sync::mpsc::{channel, Receiver, Sender},
     task::JoinHandle,
     time::interval,
 };
@@ -34,7 +34,7 @@ pub enum RemoteAccountUpdatesWorkerError {
 #[derive(Debug)]
 struct RemoteAccountUpdatesWorkerRunner {
     id: String,
-    monitoring_request_sender: UnboundedSender<Pubkey>,
+    monitoring_request_sender: Sender<Pubkey>,
     cancellation_token: CancellationToken,
     join_handle: JoinHandle<()>,
 }
@@ -42,8 +42,8 @@ struct RemoteAccountUpdatesWorkerRunner {
 pub struct RemoteAccountUpdatesWorker {
     rpc_provider_configs: Vec<RpcProviderConfig>,
     refresh_interval: Duration,
-    monitoring_request_receiver: UnboundedReceiver<Pubkey>,
-    monitoring_request_sender: UnboundedSender<Pubkey>,
+    monitoring_request_receiver: Receiver<Pubkey>,
+    monitoring_request_sender: Sender<Pubkey>,
     first_subscribed_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
     last_known_update_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
 }
@@ -54,7 +54,7 @@ impl RemoteAccountUpdatesWorker {
         refresh_interval: Duration,
     ) -> Self {
         let (monitoring_request_sender, monitoring_request_receiver) =
-            unbounded_channel();
+            channel(1024);
         Self {
             rpc_provider_configs,
             refresh_interval,
@@ -65,7 +65,7 @@ impl RemoteAccountUpdatesWorker {
         }
     }
 
-    pub fn get_monitoring_request_sender(&self) -> UnboundedSender<Pubkey> {
+    pub fn get_monitoring_request_sender(&self) -> Sender<Pubkey> {
         self.monitoring_request_sender.clone()
     }
 
@@ -92,11 +92,14 @@ impl RemoteAccountUpdatesWorker {
         for (index, rpc_provider_config) in
             self.rpc_provider_configs.iter().enumerate()
         {
-            runners.push(self.create_runner_from_config(
-                index,
-                rpc_provider_config.clone(),
-                &monitored_accounts,
-            ));
+            runners.push(
+                self.create_runner_from_config(
+                    index,
+                    rpc_provider_config.clone(),
+                    &monitored_accounts,
+                )
+                .await,
+            );
         }
         // Useful states
         let mut current_refresh_index = 0;
@@ -112,7 +115,7 @@ impl RemoteAccountUpdatesWorker {
                     }
                     monitored_accounts.insert(pubkey);
                     for runner in runners.iter() {
-                        self.notify_runner_of_monitoring_request(runner, pubkey);
+                        self.notify_runner_of_monitoring_request(runner, pubkey).await;
                     }
                 }
                 // Periodically we refresh runners to keep them fresh
@@ -126,7 +129,7 @@ impl RemoteAccountUpdatesWorker {
                         current_refresh_index,
                         rpc_provider_config,
                         &monitored_accounts
-                    );
+                    ).await;
                     let old_runner = std::mem::replace(&mut runners[current_refresh_index], new_runner);
                     // We hope it ultimately joins, but we don't care to wait for it, just let it be
                     self.cancel_and_join_runner(old_runner);
@@ -144,14 +147,14 @@ impl RemoteAccountUpdatesWorker {
         }
     }
 
-    fn create_runner_from_config(
+    async fn create_runner_from_config(
         &self,
         index: usize,
         rpc_provider_config: RpcProviderConfig,
         monitored_accounts: &HashSet<Pubkey>,
     ) -> RemoteAccountUpdatesWorkerRunner {
         let (monitoring_request_sender, monitoring_request_receiver) =
-            unbounded_channel();
+            channel(1024);
         let first_subscribed_slots = self.first_subscribed_slots.clone();
         let last_known_update_slots = self.last_known_update_slots.clone();
         let runner_id = format!("[{}:{:06}]", index, self.generate_runner_id());
@@ -181,17 +184,19 @@ impl RemoteAccountUpdatesWorker {
         };
         info!("Started new runner {}", runner.id);
         for pubkey in monitored_accounts.iter() {
-            self.notify_runner_of_monitoring_request(&runner, *pubkey);
+            self.notify_runner_of_monitoring_request(&runner, *pubkey)
+                .await;
         }
         runner
     }
 
-    fn notify_runner_of_monitoring_request(
+    async fn notify_runner_of_monitoring_request(
         &self,
         runner: &RemoteAccountUpdatesWorkerRunner,
         pubkey: Pubkey,
     ) {
-        if let Err(error) = runner.monitoring_request_sender.send(pubkey) {
+        if let Err(error) = runner.monitoring_request_sender.send(pubkey).await
+        {
             error!(
                 "Could not send request to runner: {}: {:?}",
                 runner.id, error

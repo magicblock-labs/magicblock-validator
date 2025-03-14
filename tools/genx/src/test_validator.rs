@@ -9,8 +9,6 @@ use std::{
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
 
-use ledger_stats::{accounts_storage_from_ledger, open_ledger};
-use magicblock_accounts_db::utils::all_accounts;
 use solana_sdk::{commitment_config::CommitmentConfig, pubkey::Pubkey};
 use tempfile::tempdir;
 

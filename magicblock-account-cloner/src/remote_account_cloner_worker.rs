@@ -427,6 +427,7 @@ where
             //  - we may not want to track lamport changes, especially for payers
             self.account_updates
                 .ensure_account_monitoring(pubkey)
+                .await
                 .map_err(AccountClonerError::AccountUpdatesError)?;
 
             // Fetch the account, repeat and retry until we have a satisfactory response

@@ -207,7 +207,11 @@ impl AdbIndex {
     }
 
     /// Removes account from database and marks its backing storage for recycle
-    pub(crate) fn remove_account(&self, pubkey: &Pubkey) -> AdbResult<()> {
+    pub(crate) fn remove_account(
+        &self,
+        pubkey: &Pubkey,
+        owner: &Pubkey,
+    ) -> AdbResult<()> {
         let mut txn = self.env.begin_rw_txn()?;
         let mut cursor = txn.open_rw_cursor(self.accounts)?;
         // if we cannot locate owner/offset:pubkey combo,
@@ -224,6 +228,20 @@ impl AdbIndex {
         // NOTE: we use Big Endian here to enforce alphabetical ordering of keys
         self.deallocations
             .put(blocks.to_be_bytes(), bytepack!(offset, u32, blocks, u32))?;
+
+        cursor = txn.open_rw_cursor(self.programs)?;
+        // locate the owner/account combo and delete it
+        if cursor
+            .get(
+                Some(owner.as_ref()),
+                Some(&bytepack!(offset, u32, *pubkey, Pubkey)),
+                MDB_GET_BOTH_OP,
+            )
+            .is_ok()
+        {
+            cursor.del(WriteFlags::empty())?;
+        }
+        drop(cursor);
 
         txn.commit()?;
 

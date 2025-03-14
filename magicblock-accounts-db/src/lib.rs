@@ -82,7 +82,7 @@ impl AccountsDb {
         if account.lamports() == 0 {
             let _ = self
                 .index
-                .remove_account(pubkey)
+                .remove_account(pubkey, account.owner())
                 .inspect_err(inspecterr!("removing account {}", pubkey));
             return;
         }

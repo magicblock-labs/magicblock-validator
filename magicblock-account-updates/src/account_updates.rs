@@ -10,7 +10,8 @@ pub enum AccountUpdatesError {
 pub type AccountUpdatesResult<T> = Result<T, AccountUpdatesError>;
 
 pub trait AccountUpdates {
-    fn ensure_account_monitoring(
+    #[allow(async_fn_in_trait)]
+    async fn ensure_account_monitoring(
         &self,
         pubkey: &Pubkey,
     ) -> AccountUpdatesResult<()>;

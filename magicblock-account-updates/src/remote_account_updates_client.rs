@@ -4,12 +4,12 @@ use std::{
 };
 
 use solana_sdk::{clock::Slot, pubkey::Pubkey};
-use tokio::sync::mpsc::UnboundedSender;
+use tokio::sync::mpsc::Sender;
 
 use crate::{AccountUpdates, AccountUpdatesError, RemoteAccountUpdatesWorker};
 
 pub struct RemoteAccountUpdatesClient {
-    monitoring_request_sender: UnboundedSender<Pubkey>,
+    monitoring_request_sender: Sender<Pubkey>,
     first_subscribed_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
     last_known_update_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
 }
@@ -25,12 +25,13 @@ impl RemoteAccountUpdatesClient {
 }
 
 impl AccountUpdates for RemoteAccountUpdatesClient {
-    fn ensure_account_monitoring(
+    async fn ensure_account_monitoring(
         &self,
         pubkey: &Pubkey,
     ) -> Result<(), AccountUpdatesError> {
         self.monitoring_request_sender
             .send(*pubkey)
+            .await
             .map_err(AccountUpdatesError::SendError)
     }
     fn get_first_subscribed_slot(&self, pubkey: &Pubkey) -> Option<Slot> {

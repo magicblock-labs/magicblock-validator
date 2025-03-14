@@ -33,7 +33,7 @@ impl AccountUpdatesStub {
 }
 
 impl AccountUpdates for AccountUpdatesStub {
-    fn ensure_account_monitoring(
+    async fn ensure_account_monitoring(
         &self,
         pubkey: &Pubkey,
     ) -> AccountUpdatesResult<()> {
