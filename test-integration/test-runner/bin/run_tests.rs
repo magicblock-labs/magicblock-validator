@@ -241,7 +241,7 @@ fn run_magicblock_api_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>
     eprintln!("Running magicblock-api tests in {}", test_dir);
 
     let output = run_test(test_dir, Default::default()).map_err(|err| {
-        eprintln!("Failed to run cloning tests: {:?}", err);
+        eprintln!("Failed to magicblock api tests: {:?}", err);
         err
     })?;
 

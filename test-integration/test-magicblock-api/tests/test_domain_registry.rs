@@ -58,7 +58,7 @@ async fn test_sync() {
     domain_manager
         .sync(&VALIDATOR_KEYPAIR, &validator_info)
         .await
-        .expect("Failed to register");
+        .expect("Failed to sync");
 
     let actual = domain_manager
         .fetch_validator_info(&validator_info.pda().0)
@@ -80,7 +80,7 @@ async fn test_unregister() {
     let actual = domain_manager
         .fetch_validator_info(&pda)
         .await
-        .expect("Failed to fetch ");
+        .expect("Failed to fetch validator info");
 
     assert!(actual.is_none())
 }
