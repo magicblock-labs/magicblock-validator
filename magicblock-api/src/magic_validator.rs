@@ -664,6 +664,8 @@ impl MagicValidator {
         self.rpc_service.close();
         PubsubService::close(&self.pubsub_close_handle);
         self.token.cancel();
+        // wait a bit for services to stop
+        thread::sleep(Duration::from_secs(1));
 
         // we have two memory mapped databases, flush them to disk before exitting
         self.bank.flush();

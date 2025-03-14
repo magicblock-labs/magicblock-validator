@@ -250,8 +250,8 @@ fn sendfile(src: &Path, dst: &Path) -> io::Result<()> {
 #[cfg(target_os = "linux")]
 fn sendfile(src: &Path, dst: &Path) -> io::Result<()> {
     use std::os::fd::AsRawFd;
-    let mut src = File::open(src)?;
-    let mut dst = File::create(dst)?;
+    let src = File::open(src)?;
+    let dst = File::create(dst)?;
     let mut offset = 0;
     let size = src.metadata()?.len() as usize;
 
