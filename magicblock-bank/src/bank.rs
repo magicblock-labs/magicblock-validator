@@ -13,9 +13,10 @@ use std::{
 };
 
 use log::{debug, info, trace};
-use magicblock_accounts_db::{config::AdbConfig, AccountsDb, StWLock};
+use magicblock_accounts_db::{
+    config::AccountsDbConfig, error::AccountsDbError, AccountsDb, StWLock,
+};
 use solana_accounts_db::{
-    accounts_index::ScanConfig,
     accounts_update_notifier_interface::AccountsUpdateNotifierInterface,
     blockhash_queue::BlockhashQueue,
 };
@@ -61,7 +62,7 @@ use solana_sdk::{
     rent_debits::RentDebits,
     signature::Signature,
     slot_hashes::SlotHashes,
-    slot_history::SlotHistory,
+    slot_history::{Check, SlotHistory},
     sysvar::{self, last_restart_slot::LastRestartSlot},
     transaction::{
         Result, SanitizedTransaction, TransactionError,
@@ -355,6 +356,7 @@ impl TransactionProcessingCallback for Bank {
         // we don't need inspections
     }
 
+    // copied from agave/runtime/src/bank.rs:6931
     fn calculate_fee(
         &self,
         message: &impl SVMMessage,
@@ -410,7 +412,7 @@ impl Bank {
     pub fn new(
         genesis_config: &GenesisConfig,
         runtime_config: Arc<RuntimeConfig>,
-        accountsdb_config: &AdbConfig,
+        accountsdb_config: &AccountsDbConfig,
         debug_keys: Option<Arc<HashSet<Pubkey>>>,
         additional_builtins: Option<&[BuiltinPrototype]>,
         debug_do_not_add_builtins: bool,
@@ -419,23 +421,19 @@ impl Bank {
         millis_per_slot: u64,
         identity_id: Pubkey,
         lock: StWLock,
-    ) -> Self {
+    ) -> std::result::Result<Self, AccountsDbError> {
         // TODO(bmuddha): When we transition to multi-threaded mode with multiple SVM workers,
         // every transaction should acquire the read guard on this lock before executing.
-        let accounts_db = match AccountsDb::new(accountsdb_config, lock) {
-            Ok(adb) => adb,
-            Err(error) => {
-                eprintln!("failed to initialize AccountsDB: {error}");
-                // TODO more graceful exit?
-                std::process::exit(1);
-            }
-        };
+        let accounts_db = AccountsDb::new(accountsdb_config, lock)?;
 
         let mut bank = Self::default_with_accounts(
             accounts_db,
             accounts_update_notifier,
             millis_per_slot,
         );
+        // override the lamports_per_signature which is 0 by default
+        bank.fee_rate_governor.lamports_per_signature = LAMPORTS_PER_SIGNATURE;
+
         bank.transaction_debug_keys = debug_keys;
         bank.runtime_config = runtime_config;
         bank.slot_status_notifier = slot_status_notifier;
@@ -460,10 +458,9 @@ impl Bank {
         // it via bank.transaction_processor.sysvar_cache.write().unwrap().set_clock(), etc.
         bank.fill_missing_sysvar_cache_entries();
 
-        // We don't have anything to verify at this point, so declare it done
-        //bank.accounts_verified.store(true, Ordering::Relaxed); // already set to true during creation
+        bank.accounts_verified.store(true, Ordering::Relaxed);
 
-        bank
+        Ok(bank)
     }
 
     pub(super) fn default_with_accounts(
@@ -483,10 +480,11 @@ impl Bank {
         // this allows us to map account's data field directly to
         // SVM, thus avoiding double copy to and from SVM sandbox
         // TODO(bmuddha) activate once we merge https://github.com/anza-xyz/agave/pull/4846
-        //feature_set.activate(&bpf_account_data_direct_mapping::ID, 0);
+        // https://app.zenhub.com/workspaces/magicblock-labs-6666bfb8c781350bc52692d2/issues/gh/magicblock-labs/magicblock-validator/322
+        // feature_set.activate(&bpf_account_data_direct_mapping::ID, 0);
 
-        // Rent collection is no longer a thing in solana
-        // so we don't need to worry about it
+        // Rent collection is no longer a thing in solana so we don't need to worry about it
+        // https://github.com/solana-foundation/solana-improvement-documents/pull/84
         feature_set.activate(&disable_rent_fees_collection::ID, 1);
 
         let mut bank = Self {
@@ -501,10 +499,7 @@ impl Bank {
             >::default(),
             transaction_log_collector:
                 Arc::<RwLock<TransactionLogCollector>>::default(),
-            fee_structure: FeeStructure {
-                lamports_per_signature: LAMPORTS_PER_SIGNATURE,
-                ..Default::default()
-            },
+            fee_structure: FeeStructure::default(),
             transaction_processor: Default::default(),
             fork_graph: Arc::<RwLock<SimpleForkGraph>>::default(),
             status_cache: Arc::new(RwLock::new(BankStatusCache::new(max_age))),
@@ -525,10 +520,7 @@ impl Bank {
             // Genesis related
             accounts_data_size_initial: 0,
             capitalization: AtomicU64::default(),
-            fee_rate_governor: FeeRateGovernor {
-                lamports_per_signature: LAMPORTS_PER_SIGNATURE,
-                ..Default::default()
-            },
+            fee_rate_governor: FeeRateGovernor::default(),
             max_tick_height: u64::default(),
             hashes_per_tick: Option::<u64>::default(),
             ticks_per_slot: u64::default(),
@@ -550,7 +542,7 @@ impl Bank {
             // Geyser
             slot_status_notifier: Option::<SlotStatusNotifierImpl>::default(),
             accounts_update_notifier,
-            accounts_verified: AtomicBool::new(true).into(),
+            accounts_verified: Arc::default(),
         };
 
         bank.transaction_processor = {
@@ -649,13 +641,10 @@ impl Bank {
         // present in order to properly activate a feature
         // If not then activating all features results in a panic when executing a transaction
         for (pubkey, account) in genesis_config.accounts.iter() {
-            // NOTE: we might be opening an existing database,
-            // so it the features might already be there
-            //
-            //assert!(
-            //    self.get_account(pubkey).is_none(),
-            //    "{pubkey} repeated in genesis config"
-            //);
+            // NOTE: previously there was an assertion for making sure that genesis accounts don't
+            // exist in accountsdb, but now this assertion only holds if accountsdb is empty,
+            // otherwise it will contain account from previous validator runs
+
             self.store_account(*pubkey, account.clone().into());
             self.capitalization
                 .fetch_add(account.lamports(), Ordering::Relaxed);
@@ -861,7 +850,6 @@ impl Bank {
                 notifier.notify_account_update(slot, &acc, &None, &pubkey, 0);
             }
         }
-        // TODO(bmuddha) add metrics if necessary
     }
 
     /// Technically this issues (or even burns!) new lamports,
@@ -925,6 +913,7 @@ impl Bank {
         // should implement locking at account level granularity, but locking should be managed by
         // scheduler, not accountsdb or bank
     }
+
     /// Get the max number of accounts that a transaction may lock in this block
     pub fn get_transaction_account_lock_limit(&self) -> usize {
         if let Some(transaction_account_lock_limit) =
@@ -969,23 +958,10 @@ impl Bank {
     // -----------------
     // GetProgramAccounts
     // -----------------
-    pub fn get_program_accounts(
-        &self,
-        program_id: &Pubkey,
-        _config: &ScanConfig,
-    ) -> Vec<TransactionAccount> {
-        // TODO(bmuddha): maybe handle failure (should only happen when something catastrophic took place)
-        // TODO(bmuddha): figure out how sorting works, if we need one
-        self.adb
-            .get_program_accounts(program_id, |_| true)
-            .unwrap_or_default()
-    }
-
     pub fn get_filtered_program_accounts<F>(
         &self,
         program_id: &Pubkey,
         filter: F,
-        _config: &ScanConfig,
     ) -> Vec<TransactionAccount>
     where
         F: Fn(&AccountSharedData) -> bool + Send + Sync,
@@ -994,6 +970,9 @@ impl Bank {
         // TODO(bmuddha): figure out how sorting works, if we need one
         self.adb
             .get_program_accounts(program_id, filter)
+            .inspect_err(|err| {
+                log::error!("failed to load program accounts: {err}")
+            })
             .unwrap_or_default()
     }
 
@@ -1291,11 +1270,6 @@ impl Bank {
         &'a self,
         txs: &'b [SanitizedTransaction],
     ) -> TransactionBatch<'a, 'b> {
-        // TODO(bmuddha): we don't need to lock anything for now, as we are in single threaded mode
-        // once we move to multi-threaded execution, locking can be handled by scheduler itself
-        //let tx_account_lock_limit = self.get_transaction_account_lock_limit();
-        //let lock_results =
-        //    self.lock_accounts(txs.iter(), tx_account_lock_limit);
         let lock_results = vec![Ok(()); txs.len()];
         TransactionBatch::new(lock_results, self, Cow::Borrowed(txs))
     }
@@ -1307,15 +1281,6 @@ impl Bank {
         transactions: &'b [SanitizedTransaction],
         _transaction_results: impl Iterator<Item = Result<()>>,
     ) -> TransactionBatch<'a, 'b> {
-        // this lock_results could be: Ok, AccountInUse, WouldExceedBlockMaxLimit or WouldExceedAccountMaxLimit
-        //let tx_account_lock_limit = self.get_transaction_account_lock_limit();
-        //let lock_results = self.rc.accounts.lock_accounts_with_results(
-        //    transactions.iter(),
-        //    transaction_results,
-        //    tx_account_lock_limit,
-        //);
-        // TODO(bmuddha): we don't need to lock anything for now, as we are in single threaded mode
-        // once we move to multi-threaded execution, locking can be handled by scheduler itself
         let lock_results = vec![Ok(()); transactions.len()];
         TransactionBatch::new(lock_results, self, Cow::Borrowed(transactions))
     }
@@ -1512,9 +1477,14 @@ impl Bank {
             epoch_total_stake: u64::MIN, // we don't have stake
             feature_set: Arc::clone(&self.feature_set),
             fee_lamports_per_signature,
-            // TODO(bmuddha)/NOTE: it's unclear whether we should set this value to non-zero
-            // value as it's only used by nonce accounts, might need more research
-            blockhash_lamports_per_signature: u64::MIN,
+            // Copied from field definition
+            //
+            // Note: This value is primarily used for nonce accounts. If set to zero,
+            // it will disable transaction fees. However, any non-zero value will not
+            // change transaction fees...
+            //
+            // So we just set it to non-zero value
+            blockhash_lamports_per_signature: fee_lamports_per_signature,
             rent_collector: None,
         };
 
@@ -1643,7 +1613,6 @@ impl Bank {
         )
     }
 
-    #[allow(clippy::too_many_arguments)]
     fn collect_accounts_to_store<'a, T: SVMMessage>(
         txs: &'a [T],
         processing_results: &'a [TransactionProcessingResult],
@@ -2109,29 +2078,23 @@ impl Bank {
 
     fn get_account_overrides_for_simulation(
         &self,
-        _account_keys: &AccountKeys,
+        account_keys: &AccountKeys,
     ) -> AccountOverrides {
-        // TODO(bmuddha) @@@ WTF? why bother if doesn't work anyway
-        //
-        //let mut account_overrides = AccountOverrides::default();
-        //let slot_history_id = sysvar::slot_history::id();
-        //// For now this won't run properly since we don't support slot_history sysvar
-        //if account_keys.iter().any(|pubkey| *pubkey == slot_history_id) {
-        //    let current_account = self.get_account(&slot_history_id);
-        //    let slot_history = current_account
-        //        .as_ref()
-        //        .map(|account| from_account::<SlotHistory, _>(account).unwrap())
-        //        .unwrap_or_default();
-        //    if slot_history.check(self.slot()) == Check::Found {
-        //        if let Some((account, _)) =
-        //            self.load_slow_with_fixed_root(&slot_history_id)
-        //        {
-        //            account_overrides.set_slot_history(Some(account));
-        //        }
-        //    }
-        //}
-        //account_overrides
-        AccountOverrides::default()
+        let mut account_overrides = AccountOverrides::default();
+        let slot_history_id = sysvar::slot_history::id();
+        if account_keys.iter().any(|pubkey| *pubkey == slot_history_id) {
+            let current_account = self.get_account(&slot_history_id);
+            let slot_history = current_account
+                .as_ref()
+                .map(|account| from_account::<SlotHistory, _>(account).unwrap())
+                .unwrap_or_default();
+            if slot_history.check(self.slot()) == Check::Found {
+                if let Some(account) = self.get_account(&slot_history_id) {
+                    account_overrides.set_slot_history(Some(account));
+                }
+            }
+        }
+        account_overrides
     }
 
     /// Prepare a transaction batch from a single transaction without locking accounts

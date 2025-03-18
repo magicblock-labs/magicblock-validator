@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
-pub struct AdbConfig {
+pub struct AccountsDbConfig {
     /// path to root directory where database files are stored
     pub directory: PathBuf,
     /// size of the main storage, we have to preallocate in advance
@@ -21,7 +21,7 @@ pub struct AdbConfig {
 }
 
 pub const TEST_SNAPSHOT_FREQUENCY: u64 = 50;
-impl Default for AdbConfig {
+impl Default for AccountsDbConfig {
     fn default() -> Self {
         Self::temp_for_tests(TEST_SNAPSHOT_FREQUENCY)
     }
@@ -39,7 +39,7 @@ pub enum BlockSize {
     Block512 = 512,
 }
 
-impl AdbConfig {
+impl AccountsDbConfig {
     pub fn temp_for_tests(snapshot_frequency: u64) -> Self {
         const DB_SIZE: usize = 100 * 1024 * 1024;
         const BLOCK_SIZE: BlockSize = BlockSize::Block256;

@@ -6,7 +6,7 @@ use lmdb::{
 };
 use solana_pubkey::Pubkey;
 
-use crate::{inspecterr, storage::Allocation, AdbConfig, AdbResult};
+use crate::{inspecterr, storage::Allocation, AccountsDbConfig, AdbResult};
 
 const WEMPTY: WriteFlags = WriteFlags::empty();
 
@@ -36,7 +36,7 @@ const PROGRAMS_INDEX: Option<&str> = Some("programs-idx");
 const DEALLOCATIONS_PATH: &str = "deallocations";
 
 /// LMDB Index manager
-pub(crate) struct AdbIndex {
+pub(crate) struct AccountsDbIndex {
     /// Accounts Index, used for searching accounts by offset in the main storage
     ///
     /// the key is the account's pubkey (32 bytes)
@@ -86,8 +86,8 @@ macro_rules! bytepack {
     }};
 }
 
-impl AdbIndex {
-    pub(crate) fn new(config: &AdbConfig) -> AdbResult<Self> {
+impl AccountsDbIndex {
+    pub(crate) fn new(config: &AccountsDbConfig) -> AdbResult<Self> {
         // create an environment for 2 databases: accounts and programs index
         let env =
             env(ACCOUNTS_PATH, &config.directory, config.index_map_size, 2)
@@ -271,7 +271,7 @@ impl AdbIndex {
     /// allocations are leftovers from account movements due to resizing
     pub(crate) fn allocation_exists(
         &self,
-        b: u32,
+        space: u32,
     ) -> AdbResult<ExistingAllocation> {
         let mut txn = self.deallocations.rwtxn()?;
         let mut cursor = txn.open_rw_cursor(self.deallocations.db)?;
@@ -281,7 +281,7 @@ impl AdbIndex {
         //
         // NOTE: we use Big Endian here to enforce alphabetical ordering of keys
         let (_, val) =
-            cursor.get(Some(&b.to_be_bytes()), None, MDB_SET_RANGE_OP)?;
+            cursor.get(Some(&space.to_be_bytes()), None, MDB_SET_RANGE_OP)?;
 
         let (offset, blocks) = bytepack!(val, u32, u32);
         // delete the allocation record from recycleable list

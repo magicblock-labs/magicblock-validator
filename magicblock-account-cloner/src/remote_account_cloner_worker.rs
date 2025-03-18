@@ -277,7 +277,7 @@ where
         // TODO(GabrielePicco): Make the concurrency configurable
         let result = stream
             .map(Ok::<_, AccountClonerError>)
-            .try_for_each_concurrent(20, |(pubkey, owner)| async move {
+            .try_for_each_concurrent(30, |(pubkey, owner)| async move {
                 trace!("Hydrating '{}'", pubkey);
                 let res = self
                     .do_clone_and_update_cache(
@@ -298,13 +298,12 @@ where
                         // NOTE: the account fetch already has retries built in, so
                         // we don't to retry here
 
-                        // Err(err)
-                        Ok(())
+                        Err(err)
                     }
                 }
             })
             .await;
-        info!("Account hydration is complete: {count}");
+        info!("On-startup account ensurance is complete: {count}");
         result
     }
 

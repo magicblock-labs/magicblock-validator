@@ -194,11 +194,17 @@ impl AccountsUpdateNotifier {
             return;
         }
         for plugin in plugin_manager.plugins.iter() {
-            let _ = plugin.update_account(
-                ReplicaAccountInfoVersions::V0_0_3(&account),
-                slot,
-                is_startup,
-            );
+            let _ = plugin
+                .update_account(
+                    ReplicaAccountInfoVersions::V0_0_3(&account),
+                    slot,
+                    is_startup,
+                )
+                .inspect_err(|err| {
+                    log::error!(
+                        "failed to notify plugin of account update: {err}"
+                    )
+                });
         }
     }
 }

@@ -3,7 +3,7 @@ use log::*;
 use magicblock_bank::bank::Bank;
 use solana_account_decoder::parse_token::is_known_spl_token_id;
 use solana_accounts_db::accounts_index::{
-    AccountIndex, AccountSecondaryIndexes, ScanConfig,
+    AccountIndex, AccountSecondaryIndexes,
 };
 use solana_inline_spl::{
     token::SPL_TOKEN_ACCOUNT_OWNER_OFFSET, token_2022::ACCOUNTTYPE_ACCOUNT,
@@ -128,24 +128,16 @@ pub(crate) fn get_filtered_program_accounts(
         }
         // NOTE: this used to use an account index based filter but we changed it to basically
         // be the same as the else branch
-        Ok(bank.get_filtered_program_accounts(
-            program_id,
-            |account| {
-                // The program-id account index checks for Account owner on inclusion. However, due
-                // to the current AccountsDb implementation, an account may remain in storage as a
-                // zero-lamport AccountSharedData::Default() after being wiped and reinitialized in later
-                // updates. We include the redundant filters here to avoid returning these
-                // accounts.
-                filter_closure(account)
-            },
-            &ScanConfig::default(),
-        ))
+        Ok(bank.get_filtered_program_accounts(program_id, |account| {
+            // The program-id account index checks for Account owner on inclusion. However, due
+            // to the current AccountsDb implementation, an account may remain in storage as a
+            // zero-lamport AccountSharedData::Default() after being wiped and reinitialized in later
+            // updates. We include the redundant filters here to avoid returning these
+            // accounts.
+            filter_closure(account)
+        }))
     } else {
         // this path does not need to provide a mb limit because we only want to support secondary indexes
-        Ok(bank.get_filtered_program_accounts(
-            program_id,
-            filter_closure,
-            &ScanConfig::default(),
-        ))
+        Ok(bank.get_filtered_program_accounts(program_id, filter_closure))
     }
 }

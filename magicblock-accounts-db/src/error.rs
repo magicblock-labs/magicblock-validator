@@ -1,7 +1,7 @@
 use std::io;
 
 #[derive(Debug, thiserror::Error)]
-pub enum AdbError {
+pub enum AccountsDbError {
     #[error("requested account doesn't exist in adb")]
     NotFound,
     #[error("io error during adb access: {0}")]
@@ -12,7 +12,7 @@ pub enum AdbError {
     SnapshotMissing(u64),
 }
 
-impl From<lmdb::Error> for AdbError {
+impl From<lmdb::Error> for AccountsDbError {
     fn from(error: lmdb::Error) -> Self {
         match error {
             lmdb::Error::NotFound => Self::NotFound,
@@ -24,9 +24,9 @@ impl From<lmdb::Error> for AdbError {
 #[macro_export]
 macro_rules! inspecterr {
     ($msg: expr) => {
-        |err| log::warn!("Accounts DB - {} error: {err}", $msg)
+        |err| log::warn!("{} error: {err}", $msg)
     };
     ($msg: expr, $($ctx:expr),* $(,)?) => {
-        |err| log::warn!("Accounts DB - {} error: {err}", format!($msg, $($ctx),*))
+        |err| log::warn!("{} error: {err}", format!($msg, $($ctx),*))
     };
 }

@@ -8,7 +8,7 @@ use std::{
 use memmap2::MmapMut;
 
 use crate::{
-    config::BlockSize, index::ExistingAllocation, inspecterr, AdbConfig,
+    config::BlockSize, index::ExistingAllocation, inspecterr, AccountsDbConfig,
     AdbResult,
 };
 
@@ -61,7 +61,7 @@ impl AccountsStorage {
     ///
     /// _Note_: passed config is ignored if the database
     /// file already exists at supplied path
-    pub(crate) fn new(config: &AdbConfig) -> AdbResult<Self> {
+    pub(crate) fn new(config: &AccountsDbConfig) -> AdbResult<Self> {
         let dbpath = config.directory.join(ADB_FILE);
         let mut file = File::options()
             .create(true)
@@ -92,31 +92,35 @@ impl AccountsStorage {
 
     pub(crate) fn alloc(&self, size: usize) -> Allocation {
         let blocks = self.get_block_count(size) as usize;
-        let mut cur = self.head().load(Acquire);
-        let mut new = cur + blocks;
+        let mut current_head = self.head().load(Acquire);
+        let mut new_head = current_head + blocks;
         // CAS loop to perform lock free concurrent allocation
         let head = self.head();
-        // ..., don't ask why
+
         let cas = AtomicUsize::compare_exchange;
-        while let Err(v) = cas(head, cur, new, Release, Acquire) {
-            cur = v;
-            new = cur + blocks;
+        while let Err(v) = cas(head, current_head, new_head, Release, Acquire) {
+            current_head = v;
+            new_head = current_head + blocks;
         }
         // Ideally we should always have enough space to store accounts, 500 GB
         // should be enough to store every single account in solana and more,
-        // but given that operate on a tiny subset of that account pool, even
+        // but given that we operate on a tiny subset of that account pool, even
         // 10GB should be more than enough.
         //
         // Here we check that haven't overflowed the memory map and backing
         // files size (and panic if we did), probably we need to implement
         // remapping with file growth, but considering that disk is limited,
         // this too can fail
-        assert!(new < self.meta.total_blocks as usize, "database is full");
+        assert!(
+            new_head < self.meta.total_blocks as usize,
+            "database is full"
+        );
         // when CAS succeeds, the allocated region is ours exclusively
-        let storage = unsafe { self.store.add(cur * self.block_size()) };
+        let storage =
+            unsafe { self.store.add(current_head * self.block_size()) };
         Allocation {
             storage,
-            offset: cur as u32,
+            offset: current_head as u32,
             blocks: blocks as u32,
         }
     }
@@ -223,7 +227,10 @@ impl AccountsStorage {
 
 /// NOTE!: any change in metadata format should be reflected here
 impl StorageMeta {
-    fn init_adb_file(file: &mut File, config: &AdbConfig) -> io::Result<()> {
+    fn init_adb_file(
+        file: &mut File,
+        config: &AccountsDbConfig,
+    ) -> io::Result<()> {
         // query page size of host OS
         let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
         // make the database size a multiple of OS page size (rounding up),

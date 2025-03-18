@@ -1,3 +1,4 @@
+use magicblock_accounts_db::error::AccountsDbError;
 use thiserror::Error;
 
 pub type ApiResult<T> = std::result::Result<T, ApiError>;
@@ -67,4 +68,8 @@ pub enum ApiError {
     #[error("The slot at which we should continue after processing the ledger ({0}) does not match the bank slot ({1})"
     )]
     NextSlotAfterLedgerProcessingNotMatchingBankSlot(u64, u64),
+
+    #[error("Accounts Database couldn't be initialized"
+    )]
+    AccountsDbError(#[from] AccountsDbError)
 }

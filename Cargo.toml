@@ -41,7 +41,7 @@ members = [
 resolver = "2"
 
 [workspace.package]
-# Solana Version (2.1.11)
+# Solana Version (2.2.x)
 version = "0.1.0"
 authors = ["MagicBlock Maintainers <maintainers@magicblock.xyz>"]
 repository = "https://github.com/magicblock-labs/ephemeral-validator"
@@ -68,7 +68,6 @@ magicblock-delegation-program = { path = "../delegation-program" }
 fd-lock = "4.0.2"
 fs_extra = "1.3.0"
 futures-util = "0.3.30"
-# geyser-grpc-proto = { package = "yellowstone-grpc-proto", version = "4.1" }
 geyser-grpc-proto = { path = "./geyser-grpc-proto" }
 git-version = "0.3.9"
 hostname = "0.4.0"
@@ -125,7 +124,6 @@ magicblock-tokens = { path = "./magicblock-tokens" }
 magicblock-transaction-status = { path = "./magicblock-transaction-status" }
 magicblock-version = { path = "./magicblock-version" }
 protobuf-src = "1.1"
-# solana-account = { path = "../solana-account" }
 solana-account = { git = "https://github.com/magicblock-labs/solana-account.git" }
 solana-accounts-db = { version = "2.2" }
 solana-account-decoder = { version = "2.2" }
@@ -179,5 +177,4 @@ vergen = "8.3.1"
 
 [patch.crates-io]
 solana-storage-proto = { path = "./storage-proto" }
-# solana-account = { path = "../solana-account" }
 solana-account = { git = "https://github.com/magicblock-labs/solana-account.git" }

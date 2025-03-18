@@ -1,9 +1,11 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
 use solana_pubkey::Pubkey;
 
-use crate::{config::AdbConfig, error::AdbError, AccountsDb, StWLock};
+use crate::{
+    config::AccountsDbConfig, error::AccountsDbError, AccountsDb, StWLock,
+};
 
 const LAMPORTS: u64 = 4425;
 const SPACE: usize = 73;
@@ -346,9 +348,54 @@ fn test_account_removal() {
     adb.insert_account(&pk, &acc.account);
 
     assert!(
-        matches!(adb.get_account(&pk), Err(AdbError::NotFound)),
+        matches!(adb.get_account(&pk), Err(AccountsDbError::NotFound)),
         "account should have been deleted after lamports have been zeroed out"
     );
+}
+
+#[test]
+#[should_panic]
+fn test_account_too_many_accounts() {
+    let DbWithAcc { adb, .. } = init_db_with_acc();
+    for _ in 0..20 {
+        let mut account = account();
+        account.1.extend_from_slice(&[42; 9_000_000]);
+        adb.insert_account(&account.0, &account.1);
+    }
+}
+
+#[test]
+fn test_many_insertions_to_accountsdb() {
+    const ACCOUNTNUM: usize = 16384;
+    const ITERS: usize = 2 << 17;
+    const THREADNUM: usize = 4;
+    let DbWithAcc { adb, .. } = init_db_with_acc();
+    let mut pubkeys = Vec::with_capacity(ACCOUNTNUM);
+    for _ in 0..ACCOUNTNUM {
+        let account = account();
+        pubkeys.push(account.0);
+        adb.insert_account(&account.0, &account.1);
+    }
+    // test wether frequent account reallocations effectively reuse free
+    // space in database without overflowing the database boundaries (100MB for test)
+    let adb = Arc::new(adb);
+    let chunksize = ACCOUNTNUM / THREADNUM;
+    std::thread::scope(|s| {
+        for pks in pubkeys.chunks(chunksize) {
+            let adb = adb.clone();
+            s.spawn(move || {
+                for i in 0..ITERS {
+                    let pk = &pks[i % chunksize];
+                    let mut account = adb
+                        .get_account(pk)
+                        .expect("account should be in database");
+                    account
+                        .set_data_from_slice(&vec![43; i % (SPACE * 20) + 13]);
+                    adb.insert_account(pk, &account);
+                }
+            });
+        }
+    });
 }
 
 // ==============================================================
@@ -369,7 +416,7 @@ struct DbWithAcc {
 
 pub fn init_db() -> AccountsDb {
     let _ = env_logger::builder().is_test(true).try_init();
-    let config = AdbConfig::temp_for_tests(SNAPSHOT_FREQUENCY);
+    let config = AccountsDbConfig::temp_for_tests(SNAPSHOT_FREQUENCY);
     let lock = StWLock::default();
 
     AccountsDb::new(&config, lock).expect("expected to initialize ADB")

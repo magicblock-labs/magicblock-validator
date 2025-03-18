@@ -1,6 +1,6 @@
 use std::{fmt, str::FromStr};
 
-use magicblock_accounts_db::config::AdbConfig;
+use magicblock_accounts_db::config::AccountsDbConfig;
 use serde::{
     de::{self, Deserializer, SeqAccess, Visitor},
     Deserialize, Serialize,
@@ -29,7 +29,7 @@ pub struct AccountsConfig {
     pub allowed_programs: Vec<AllowedProgram>,
 
     #[serde(default)]
-    pub db: AdbConfig,
+    pub db: AccountsDbConfig,
 }
 
 // -----------------

@@ -45,7 +45,9 @@ use magicblock_accounts::{
     utils::try_rpc_cluster_from_cluster, AccountsManager,
 };
 use magicblock_accounts_api::BankAccountProvider;
-use magicblock_accounts_db::config::AdbConfig;
+use magicblock_accounts_db::{
+    config::AccountsDbConfig, error::AccountsDbError,
+};
 use magicblock_bank::{
     bank::Bank,
     genesis_utils::create_genesis_config_with_leader,
@@ -176,7 +178,7 @@ impl MagicValidator {
             &config.validator_config.accounts.db,
             config.validator_config.validator.millis_per_slot,
             validator_pubkey,
-        );
+        )?;
 
         fund_validator_identity(&bank, &validator_pubkey);
         fund_magic_context(&bank);
@@ -339,10 +341,10 @@ impl MagicValidator {
     fn init_bank(
         geyser_manager: Option<Arc<RwLock<GeyserPluginManager>>>,
         genesis_config: &GenesisConfig,
-        accountsdb_config: &AdbConfig,
+        accountsdb_config: &AccountsDbConfig,
         millis_per_slot: u64,
         validator_pubkey: Pubkey,
-    ) -> Arc<Bank> {
+    ) -> std::result::Result<Arc<Bank>, AccountsDbError> {
         let runtime_config = Default::default();
         let lock = TRANSACTION_INDEX_LOCK.clone();
         let bank = Bank::new(
@@ -357,12 +359,12 @@ impl MagicValidator {
             millis_per_slot,
             validator_pubkey,
             lock,
-        );
+        )?;
         bank.transaction_log_collector_config
             .write()
             .unwrap()
             .filter = TransactionLogCollectorFilter::All;
-        Arc::new(bank)
+        Ok(Arc::new(bank))
     }
 
     fn init_accounts_manager(

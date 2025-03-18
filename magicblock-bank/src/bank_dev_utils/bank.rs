@@ -1,7 +1,9 @@
 // NOTE: copied and slightly modified from bank.rs
 use std::{borrow::Cow, sync::Arc};
 
-use magicblock_accounts_db::{config::AdbConfig, StWLock};
+use magicblock_accounts_db::{
+    config::AccountsDbConfig, error::AccountsDbError, StWLock,
+};
 use solana_geyser_plugin_manager::slot_status_notifier::SlotStatusNotifierImpl;
 use solana_sdk::{
     genesis_config::GenesisConfig,
@@ -29,7 +31,7 @@ impl Bank {
         genesis_config: &GenesisConfig,
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
         slot_status_notifier: Option<SlotStatusNotifierImpl>,
-    ) -> Self {
+    ) -> std::result::Result<Bank, AccountsDbError> {
         Self::new_with_config_for_tests(
             genesis_config,
             Arc::new(RuntimeConfig::default()),
@@ -45,8 +47,9 @@ impl Bank {
         accounts_update_notifier: Option<AccountsUpdateNotifier>,
         slot_status_notifier: Option<SlotStatusNotifierImpl>,
         millis_per_slot: u64,
-    ) -> Self {
-        let accountsdb_config = AdbConfig::temp_for_tests(500);
+    ) -> std::result::Result<Bank, magicblock_accounts_db::error::AccountsDbError>
+    {
+        let accountsdb_config = AccountsDbConfig::temp_for_tests(500);
         let bank = Self::new(
             genesis_config,
             runtime_config,
@@ -61,12 +64,12 @@ impl Bank {
             // TODO(bmuddha): when we switch to multithreaded mode,
             // switch to actual lock held by scheduler
             StWLock::default(),
-        );
+        )?;
         bank.transaction_log_collector_config
             .write()
             .unwrap()
             .filter = TransactionLogCollectorFilter::All;
-        bank
+        Ok(bank)
     }
 
     /// Prepare a transaction batch from a list of legacy transactions. Used for tests only.
@@ -74,14 +77,10 @@ impl Bank {
         &self,
         txs: Vec<Transaction>,
     ) -> TransactionBatch {
-        //let transaction_account_lock_limit =
-        //    self.get_transaction_account_lock_limit();
         let sanitized_txs = txs
             .into_iter()
             .map(SanitizedTransaction::from_transaction_for_tests)
             .collect::<Vec<_>>();
-        // TODO(bmuddha): we don't have locks for now, add locking
-        // back once we switch to multithreaded scheduler
         let lock_results = vec![Ok(()); sanitized_txs.len()];
         TransactionBatch::new(lock_results, self, Cow::Owned(sanitized_txs))
     }
@@ -161,13 +160,6 @@ impl Bank {
                 )
             })
             .collect::<Result<Vec<_>>>()?;
-        //let tx_account_lock_limit = self.get_transaction_account_lock_limit();
-        //let lock_results = self
-        //    .rc
-        //    .accounts
-        //    .lock_accounts(sanitized_txs.iter(), tx_account_lock_limit);
-        // TODO(bmuddha): we don't have locks for now, add locking
-        // back once we switch to multithreaded scheduler
         let lock_results = vec![Ok(()); sanitized_txs.len()];
         Ok(TransactionBatch::new(
             lock_results,

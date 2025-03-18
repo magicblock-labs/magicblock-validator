@@ -10,14 +10,12 @@ use tabular::{Row, Table};
 pub fn print_account(db: &AccountsDb, pubkey: &Pubkey) {
     let account = db
         .get_account(pubkey)
-        .map(|account| {
-            Account {
-                lamports: account.lamports(),
-                owner: *account.owner(),
-                executable: account.executable(),
-                rent_epoch: account.rent_epoch(),
-                data: account.data().to_vec(), // it pains me a lot to call to_vec
-            }
+        .map(|account| Account {
+            lamports: account.lamports(),
+            owner: *account.owner(),
+            executable: account.executable(),
+            rent_epoch: account.rent_epoch(),
+            data: account.data().to_vec(),
         })
         .expect("Account not found");
     let oncurve = pubkey.is_on_curve();

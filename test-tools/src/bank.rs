@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use magicblock_accounts_db::{config::AdbConfig, StWLock};
+use magicblock_accounts_db::{
+    config::AccountsDbConfig, error::AccountsDbError, StWLock,
+};
 use magicblock_bank::{
     bank::Bank, geyser::AccountsUpdateNotifier,
     transaction_logs::TransactionLogCollectorFilter,
@@ -20,9 +22,9 @@ pub fn bank_for_tests_with_identity(
     slot_status_notifier: Option<SlotStatusNotifierImpl>,
     millis_per_slot: u64,
     identity_id: Pubkey,
-) -> Bank {
+) -> std::result::Result<Bank, AccountsDbError> {
     let runtime_config = Arc::new(RuntimeConfig::default());
-    let accountsdb_config = AdbConfig::temp_for_tests(500);
+    let accountsdb_config = AccountsDbConfig::temp_for_tests(500);
     let bank = Bank::new(
         genesis_config,
         runtime_config,
@@ -37,19 +39,19 @@ pub fn bank_for_tests_with_identity(
         // TODO(bmuddha): when we switch to multithreaded mode,
         // switch to actual lock held by scheduler
         StWLock::default(),
-    );
+    )?;
     bank.transaction_log_collector_config
         .write()
         .unwrap()
         .filter = TransactionLogCollectorFilter::All;
-    bank
+    Ok(bank)
 }
 
 pub fn bank_for_tests(
     genesis_config: &GenesisConfig,
     accounts_update_notifier: Option<AccountsUpdateNotifier>,
     slot_status_notifier: Option<SlotStatusNotifierImpl>,
-) -> Bank {
+) -> std::result::Result<Bank, AccountsDbError> {
     bank_for_tests_with_identity(
         genesis_config,
         accounts_update_notifier,

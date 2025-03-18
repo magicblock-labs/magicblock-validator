@@ -1,13 +1,12 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use magicblock_program::Pubkey;
 use solana_sdk::{
     account::{
         AccountSharedData, InheritableAccountFields, ReadableAccount,
         WritableAccount,
     },
     clock::INITIAL_RENT_EPOCH,
-    sysvar::Sysvar,
+    sysvar::{self, Sysvar},
 };
 
 /// Compute how much an account has changed size.  This function is useful when the data size delta
@@ -77,17 +76,17 @@ pub(crate) fn update_sysvar_data<S: Sysvar>(
     sysvar: &S,
     mut account: Option<AccountSharedData>,
 ) -> AccountSharedData {
-    let sysvar_id =
-        Pubkey::from_str_const("Sysvar1111111111111111111111111111111111111");
     let data_len = bincode::serialized_size(sysvar).unwrap() as usize;
     let mut account = account.take().unwrap_or_else(|| {
-        AccountSharedData::create(1, vec![], sysvar_id, false, u64::MAX)
+        AccountSharedData::create(1, vec![], sysvar::ID, false, u64::MAX)
     });
     account.resize(data_len, 0);
     bincode::serialize_into(account.data_as_mut_slice(), sysvar)
         .inspect_err(|err| {
             log::error!("failed to bincode serialize sysvar: {err}")
         })
+        // this should never panic, as we have ensured
+        // the required size for serialization
         .expect("sysvar data update failed");
     account
 }

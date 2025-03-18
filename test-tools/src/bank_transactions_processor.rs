@@ -33,7 +33,10 @@ impl Default for BankTransactionsProcessor {
             &Pubkey::new_unique(),
         )
         .genesis_config;
-        let bank = Arc::new(bank_for_tests(&genesis_config, None, None));
+        let bank = Arc::new(
+            bank_for_tests(&genesis_config, None, None)
+                .expect("failed to initialize bank"),
+        );
         Self::new(bank)
     }
 }

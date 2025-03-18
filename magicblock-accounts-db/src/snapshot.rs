@@ -6,7 +6,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::{fs, io};
 
-use crate::error::AdbError;
+use crate::error::AccountsDbError;
 use crate::{inspecterr, AdbResult};
 
 pub struct SnapshotEngine {
@@ -87,7 +87,7 @@ impl SnapshotEngine {
             // if we have snapshot older than slot, use it
             Err(i) if i != 0 => i - 1,
             // otherwise we don't have any snapshot before the given slot
-            Err(_) => return Err(AdbError::SnapshotMissing(slot)),
+            Err(_) => return Err(AccountsDbError::SnapshotMissing(slot)),
         };
 
         spath = snapshots.swap_remove_back(index).unwrap(); // infallible
@@ -206,14 +206,14 @@ fn rcopy_dir(src: &Path, dst: &Path) -> io::Result<()> {
         if src.is_dir() {
             rcopy_dir(&src, &dst)?;
         } else {
-            sendfile(&src, &dst)?;
+            copyfile(&src, &dst)?;
         }
     }
     Ok(())
 }
 
 #[cfg(target_os = "macos")]
-fn sendfile(src: &Path, dst: &Path) -> io::Result<()> {
+fn copyfile(src: &Path, dst: &Path) -> io::Result<()> {
     use std::os::fd::AsRawFd;
     let src = File::open(src)?;
     let dst = File::create(dst)?;
@@ -248,7 +248,7 @@ fn sendfile(src: &Path, dst: &Path) -> io::Result<()> {
 }
 
 #[cfg(target_os = "linux")]
-fn sendfile(src: &Path, dst: &Path) -> io::Result<()> {
+fn copyfile(src: &Path, dst: &Path) -> io::Result<()> {
     use std::os::fd::AsRawFd;
     let src = File::open(src)?;
     let dst = File::create(dst)?;

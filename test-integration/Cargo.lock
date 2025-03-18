@@ -1906,7 +1906,7 @@ checksum = "30bde2b3dc3671ae49d8e2e9f044c7c005836e7a023ee57cffa25ab82764bb9e"
 
 [[package]]
 name = "magicblock-accounts-db"
-version = "2.2.0"
+version = "0.1.0"
 dependencies = [
  "libc",
  "lmdb-rkv",
@@ -1941,32 +1941,6 @@ version = "0.1.0"
 dependencies = [
  "solana-sdk",
 ]
-
-[[package]]
-name = "magicblock-metrics"
-version = "0.1.0"
-dependencies = [
- "http-body-util",
- "hyper 1.5.2",
- "hyper-util",
- "lazy_static",
- "log",
- "prometheus",
- "tokio",
- "tokio-util 0.7.13",
-]
-
-[[package]]
-name = "matches"
-version = "0.1.10"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2532096657941c2fea9c289d370a250971c689d4f143798ff67113ec042024a5"
-
-[[package]]
-name = "matchit"
-version = "0.7.3"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0e7465ac9959cc2b1404e8e2367b43684a6d13790fe23056cc8c6c5a6b7bcb94"
 
 [[package]]
 name = "memchr"

@@ -6,12 +6,12 @@ use solana_account::{
 };
 use solana_pubkey::Pubkey;
 
-use config::AdbConfig;
-use error::AdbError;
-use index::AdbIndex;
+use config::AccountsDbConfig;
+use error::AccountsDbError;
+use index::AccountsDbIndex;
 use snapshot::SnapshotEngine;
 use storage::AccountsStorage;
-pub type AdbResult<T> = Result<T, AdbError>;
+pub type AdbResult<T> = Result<T, AccountsDbError>;
 /// Stop the World Lock, used to halt all writes to adb while
 /// some critical operation is in action, e.g. snapshotting
 pub type StWLock = Arc<RwLock<()>>;
@@ -23,24 +23,24 @@ pub struct AccountsDb {
     /// Main accounts storage, where actual account records are kept
     storage: AccountsStorage,
     /// Index manager, used for various lookup operations
-    index: AdbIndex,
+    index: AccountsDbIndex,
     /// Snapshots manager, boxed for cache efficiency, as this field is rarely used
-    snap: Box<SnapshotEngine>,
+    snapshot_engine: Box<SnapshotEngine>,
     /// Stop the world lock, currently used for snapshotting only
     lock: StWLock,
 }
 
 impl AccountsDb {
     /// Open or create accounts database
-    pub fn new(config: &AdbConfig, lock: StWLock) -> AdbResult<Self> {
+    pub fn new(config: &AccountsDbConfig, lock: StWLock) -> AdbResult<Self> {
         std::fs::create_dir_all(&config.directory).inspect_err(inspecterr!(
             "ensuring existence of accountsdb directory"
         ))?;
         let storage = AccountsStorage::new(config)
             .inspect_err(inspecterr!("storage creation"))?;
-        let index =
-            AdbIndex::new(config).inspect_err(inspecterr!("index creation"))?;
-        let snap =
+        let index = AccountsDbIndex::new(config)
+            .inspect_err(inspecterr!("index creation"))?;
+        let snapshot_engine =
             SnapshotEngine::new(config.directory.clone(), config.max_snapshots)
                 .inspect_err(inspecterr!("snapshot engine creation"))?;
         // no need to store global constants in type, this
@@ -49,7 +49,7 @@ impl AccountsDb {
         Ok(Self {
             storage,
             index,
-            snap,
+            snapshot_engine,
             lock,
         })
     }
@@ -57,7 +57,7 @@ impl AccountsDb {
     /// Opens existing database with given snapshot_frequency, used for tests and tools
     /// most likely you want to use [new](AccountsDb::new) method
     pub fn open(directory: PathBuf) -> AdbResult<Self> {
-        let config = AdbConfig {
+        let config = AccountsDbConfig {
             directory,
             snapshot_frequency: u64::MAX,
             ..Default::default()
@@ -114,7 +114,7 @@ impl AccountsDb {
                         self.storage.recycle(recycled)
                     }
                     // otherwise allocate from the end of memory map
-                    Err(AdbError::NotFound) => self.storage.alloc(size),
+                    Err(AccountsDbError::NotFound) => self.storage.alloc(size),
                     Err(other) => {
                         // This can only happen if we have catastrophic system mulfunction
                         log::error!("failed to insert account, index allocation check error: {other}");
@@ -156,7 +156,7 @@ impl AccountsDb {
         // which maintains the integrety of account records
         let position =
             unsafe { AccountBorrowed::any_owner_matches(memptr, owners) };
-        position.ok_or(AdbError::NotFound)
+        position.ok_or(AccountsDbError::NotFound)
     }
 
     /// Scan the database accounts of given program,
@@ -195,7 +195,7 @@ impl AccountsDb {
     pub fn contains_account(&self, pubkey: &Pubkey) -> bool {
         match self.index.get_account_offset(pubkey) {
             Ok(_) => true,
-            Err(AdbError::NotFound) => false,
+            Err(AccountsDbError::NotFound) => false,
             Err(other) => {
                 log::warn!("failed to check {pubkey} existence: {other}");
                 false
@@ -227,13 +227,13 @@ impl AccountsDb {
         // flush everything before taking the snapshot, in order to ensure consistent state
         self.flush(true);
 
-        if let Err(err) = self.snap.snapshot(slot) {
+        if let Err(err) = self.snapshot_engine.snapshot(slot) {
             // TODO: unclear what to do in such a situation, it's not like we can force snapshot at
             // this point (something must be terribly wrong, e.g. we run out of disk space), but at
             // the same time we can keep running the validator, should we just crash instead?
             log::error!(
                 "error taking snapshot at {}-{slot}: {err}",
-                self.snap.database_path().display()
+                self.snapshot_engine.database_path().display()
             );
         }
     }
@@ -260,10 +260,10 @@ impl AccountsDb {
         let _locked = self.lock.write();
 
         let rb_slot = self
-            .snap
+            .snapshot_engine
             .try_switch_to_snapshot(slot)
             .inspect_err(inspecterr!("switching to recent snapshot"))?;
-        let path = self.snap.database_path();
+        let path = self.snapshot_engine.database_path();
 
         // SAFETY: if assumption that the &self is exclusive is violated,
         // we have a UB with all sorts of terrible consequences
@@ -312,7 +312,7 @@ unsafe impl Send for AccountsDb {}
 #[cfg(test)]
 impl AccountsDb {
     pub fn snapshot_exists(&self, slot: u64) -> bool {
-        self.snap.snapshot_exists(slot)
+        self.snapshot_engine.snapshot_exists(slot)
     }
 }
 
