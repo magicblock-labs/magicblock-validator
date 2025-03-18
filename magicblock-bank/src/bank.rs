@@ -966,8 +966,6 @@ impl Bank {
     where
         F: Fn(&AccountSharedData) -> bool + Send + Sync,
     {
-        // TODO(bmuddha): maybe handle failure (should only happen when something catastrophic took place)
-        // TODO(bmuddha): figure out how sorting works, if we need one
         self.adb
             .get_program_accounts(program_id, filter)
             .inspect_err(|err| {

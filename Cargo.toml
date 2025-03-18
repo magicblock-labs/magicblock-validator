@@ -124,7 +124,7 @@ magicblock-tokens = { path = "./magicblock-tokens" }
 magicblock-transaction-status = { path = "./magicblock-transaction-status" }
 magicblock-version = { path = "./magicblock-version" }
 protobuf-src = "1.1"
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "e4a8cc8" }
 solana-accounts-db = { version = "2.2" }
 solana-account-decoder = { version = "2.2" }
 solana-address-lookup-table-program = { version = "2.2" }
@@ -177,4 +177,4 @@ vergen = "8.3.1"
 
 [patch.crates-io]
 solana-storage-proto = { path = "./storage-proto" }
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "e4a8cc8" }

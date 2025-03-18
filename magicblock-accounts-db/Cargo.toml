@@ -13,9 +13,7 @@ libc = "0.2"
 
 # storage
 memmap2 = "0.9"
-# more up to date fork of lmdb bindings by mozilla, still ancient though :(
-lmdb = { package = "lmdb-rkv", git = "https://github.com/mozilla/lmdb-rs.git", rev = "9461676" }
-# lmdb = "0.8"
+lmdb = { package = "lmdb-rkv", version = "0.14" } # more up to date fork of lmdb bindings by mozilla, still ancient though :(
 reflink = { package = "reflink-copy", version = "0.1" }
 
 # solana

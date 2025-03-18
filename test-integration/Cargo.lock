@@ -1870,7 +1870,8 @@ checksum = "4ee93343901ab17bd981295f2cf0026d4ad018c7c31ba84549a4ddbb47a45104"
 [[package]]
 name = "lmdb-rkv"
 version = "0.14.0"
-source = "git+https://github.com/mozilla/lmdb-rs.git?rev=9461676#946167603dd6806f3733e18f01a89cee21888468"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "447a296f7aca299cfbb50f4e4f3d49451549af655fb7215d7f8c0c3d64bad42b"
 dependencies = [
  "bitflags 1.3.2",
  "byteorder",
@@ -1881,7 +1882,8 @@ dependencies = [
 [[package]]
 name = "lmdb-rkv-sys"
 version = "0.11.2"
-source = "git+https://github.com/mozilla/lmdb-rs.git?rev=9461676#946167603dd6806f3733e18f01a89cee21888468"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "61b9ce6b3be08acefa3003c57b7565377432a89ec24476bbe72e11d101f852fe"
 dependencies = [
  "cc",
  "libc",
@@ -1915,7 +1917,7 @@ dependencies = [
  "parking_lot",
  "reflink-copy",
  "serde",
- "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git)",
+ "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git?rev=e4a8cc8)",
  "solana-pubkey",
  "tempfile",
  "thiserror 1.0.69",
@@ -2942,7 +2944,7 @@ dependencies = [
 [[package]]
 name = "solana-account"
 version = "2.2.1"
-source = "git+https://github.com/magicblock-labs/solana-account.git#13dc83da58f05586b24ae00c4cf604eb9d31a77d"
+source = "git+https://github.com/magicblock-labs/solana-account.git?rev=e4a8cc8#e4a8cc8481bd9ab6ef264d023943d94f973a159b"
 dependencies = [
  "bincode",
  "qualifier_attr",

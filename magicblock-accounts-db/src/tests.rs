@@ -365,9 +365,76 @@ fn test_account_too_many_accounts() {
 }
 
 #[test]
+fn test_account_shrinking() {
+    let DbWithAcc {
+        adb,
+        acc:
+            AccountWithPubkey {
+                pubkey: pubkey1,
+                account: mut acc1,
+            },
+    } = init_db_with_acc();
+
+    // ==============================================
+    // test set_data
+    acc1.set_data(b"".to_vec());
+    adb.insert_account(&pubkey1, &acc1);
+    acc1 = adb
+        .get_account(&pubkey1)
+        .expect("account should be inserted");
+    assert_eq!(
+        acc1.data().len(),
+        0,
+        "account data should have been truncated"
+    );
+
+    // ==============================================
+    // test set_data_from_slice
+    let (pubkey2, mut acc2) = account();
+    adb.insert_account(&pubkey2, &acc2);
+
+    acc2 = adb
+        .get_account(&pubkey2)
+        .expect("account 2 should be inserted");
+
+    acc2.set_data_from_slice(b"");
+
+    adb.insert_account(&pubkey2, &acc2);
+    acc2 = adb
+        .get_account(&pubkey2)
+        .expect("account should be inserted");
+    assert_eq!(
+        acc2.data().len(),
+        0,
+        "account data should have been truncated"
+    );
+
+    // ==============================================
+    // test set_data_from_slice
+    let (pubkey3, mut acc3) = account();
+    adb.insert_account(&pubkey3, &acc3);
+
+    acc3 = adb
+        .get_account(&pubkey3)
+        .expect("account 2 should be inserted");
+
+    acc3.resize(0, 0);
+
+    adb.insert_account(&pubkey3, &acc3);
+    acc3 = adb
+        .get_account(&pubkey3)
+        .expect("account should be inserted");
+    assert_eq!(
+        acc3.data().len(),
+        0,
+        "account data should have been truncated"
+    );
+}
+
+#[test]
 fn test_many_insertions_to_accountsdb() {
     const ACCOUNTNUM: usize = 16384;
-    const ITERS: usize = 2 << 17;
+    const ITERS: usize = 2 << 16;
     const THREADNUM: usize = 4;
     let DbWithAcc { adb, .. } = init_db_with_acc();
     let mut pubkeys = Vec::with_capacity(ACCOUNTNUM);

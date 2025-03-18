@@ -20,6 +20,8 @@ use tokio_util::sync::CancellationToken;
 
 use crate::RemoteAccountUpdatesShard;
 
+const INFLIGHT_ACCOUNT_FETCHES_LIMIT: usize = 1024;
+
 #[derive(Debug, Error)]
 pub enum RemoteAccountUpdatesWorkerError {
     #[error(transparent)]
@@ -54,7 +56,7 @@ impl RemoteAccountUpdatesWorker {
         refresh_interval: Duration,
     ) -> Self {
         let (monitoring_request_sender, monitoring_request_receiver) =
-            channel(1024);
+            channel(INFLIGHT_ACCOUNT_FETCHES_LIMIT);
         Self {
             rpc_provider_configs,
             refresh_interval,
@@ -154,7 +156,7 @@ impl RemoteAccountUpdatesWorker {
         monitored_accounts: &HashSet<Pubkey>,
     ) -> RemoteAccountUpdatesWorkerRunner {
         let (monitoring_request_sender, monitoring_request_receiver) =
-            channel(1024);
+            channel(INFLIGHT_ACCOUNT_FETCHES_LIMIT);
         let first_subscribed_slots = self.first_subscribed_slots.clone();
         let last_known_update_slots = self.last_known_update_slots.clone();
         let runner_id = format!("[{}:{:06}]", index, self.generate_runner_id());
