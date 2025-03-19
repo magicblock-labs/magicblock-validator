@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::{self, Write},
+    io::Write,
     path::Path,
     sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering::*},
 };
@@ -8,8 +8,8 @@ use std::{
 use memmap2::MmapMut;
 
 use crate::{
-    config::BlockSize, index::ExistingAllocation, inspecterr, AccountsDbConfig,
-    AdbResult,
+    config::BlockSize, error::AccountsDbError, index::ExistingAllocation,
+    inspecterr, AccountsDbConfig, AdbResult,
 };
 
 pub(crate) struct Allocation {
@@ -31,6 +31,9 @@ pub(crate) struct AccountsStorage {
     /// borrowing rules prevent us from mutably accessing it concurrently
     mmap: MmapMut,
 }
+
+// TODO(bmuddha/tacopaco): use Unique pointer types
+// from core::ptr once stable instead of raw pointers
 
 /// Storage metadata manager
 ///
@@ -84,49 +87,60 @@ impl AccountsStorage {
             )?;
         }
 
+        // # Safety
+        // Only accountsdb from validator process is modifying the file contents
+        // through memory map, so the contract of MmapMut is upheld
         let mut mmap = unsafe { MmapMut::map_mut(&file) }?;
+        if mmap.len() <= METADATA_STORAGE_SIZE {
+            return Err(AccountsDbError::Internal(
+                "memory map length is less than metadata requirement",
+            ));
+        };
+
         let meta = StorageMeta::new(&mmap);
+        // # Safety
+        // StorageMeta::init_adb_file made sure that mmap is large enough to hold the metadata
+        // so jumping to the end of that segment still lands us within the mmap region
         let store = unsafe { mmap.as_mut_ptr().add(METADATA_STORAGE_SIZE) };
         Ok(Self { mmap, meta, store })
     }
 
     pub(crate) fn alloc(&self, size: usize) -> Allocation {
         let blocks = self.get_block_count(size) as usize;
-        let mut current_head = self.head().load(Acquire);
-        let mut new_head = current_head + blocks;
-        // CAS loop to perform lock free concurrent allocation
+
         let head = self.head();
 
-        let cas = AtomicUsize::compare_exchange;
-        while let Err(v) = cas(head, current_head, new_head, Release, Acquire) {
-            current_head = v;
-            new_head = current_head + blocks;
-        }
+        let offset = head.fetch_add(blocks, Release);
+
         // Ideally we should always have enough space to store accounts, 500 GB
         // should be enough to store every single account in solana and more,
         // but given that we operate on a tiny subset of that account pool, even
         // 10GB should be more than enough.
         //
-        // Here we check that haven't overflowed the memory map and backing
-        // files size (and panic if we did), probably we need to implement
+        // Here we check that we haven't overflown the memory map and backing
+        // file's size (and panic if we did), probably we need to implement
         // remapping with file growth, but considering that disk is limited,
         // this too can fail
         assert!(
-            new_head < self.meta.total_blocks as usize,
+            head.load(Relaxed) < self.meta.total_blocks as usize,
             "database is full"
         );
-        // when CAS succeeds, the allocated region is ours exclusively
-        let storage =
-            unsafe { self.store.add(current_head * self.block_size()) };
+
+        // Safety
+        // we have validated above that we are within bounds of mmap
+        let storage = unsafe { self.store.add(offset * self.block_size()) };
         Allocation {
             storage,
-            offset: current_head as u32,
+            offset: offset as u32,
             blocks: blocks as u32,
         }
     }
 
     pub(crate) fn recycle(&self, recycled: ExistingAllocation) -> Allocation {
         let offset = recycled.offset as usize * self.block_size();
+        // # Safety
+        // offset is calculated from existing allocation within the map, thus
+        // jumping to that offset will land us somewhere within those bounds
         let storage = unsafe { self.store.add(offset) };
         Allocation {
             offset: recycled.offset,
@@ -136,17 +150,27 @@ impl AccountsStorage {
     }
 
     pub(crate) fn offset(&self, offset: u32) -> *mut u8 {
+        // # Safety
+        // offset is calculated from existing allocation within the map, thus
+        // jumping to that offset will land us somewhere within those bounds
         let offset = (offset * self.meta.block_size) as usize;
         unsafe { self.store.add(offset) }
     }
 
     pub(crate) fn get_slot(&self) -> u64 {
+        // # Safety
+        // slot points to memory mapped region holding the metadata,
+        // including the latest slot, it's safe to dereference it
         unsafe { &*self.meta.slot }.load(Relaxed)
     }
 
     pub(crate) fn set_slot(&self, val: u64) {
+        // # Safety
+        // slot points to memory mapped region holding the metadata,
+        // including the latest slot, it's safe to dereference it
         unsafe { &*self.meta.slot }.store(val, Relaxed)
     }
+
     // TODO(bmuddha): use it to trigger recycling of freed blocks,
     // currently recycling is always on, which might be expensive
     #[allow(unused)]
@@ -166,7 +190,7 @@ impl AccountsStorage {
 
     pub(crate) fn get_block_count(&self, size: usize) -> u32 {
         let block_size = self.block_size();
-        let blocks = size / block_size + (size % block_size != 0) as usize;
+        let blocks = size.div_ceil(block_size);
         blocks as u32
     }
 
@@ -197,8 +221,14 @@ impl AccountsStorage {
                 dbpath.display()
             ))?;
 
+        // Only accountsdb from validator process is modifying the file contents
+        // through memory map, so the contract of MmapMut is upheld
         let mut mmap = unsafe { MmapMut::map_mut(&file) }?;
         let meta = StorageMeta::new(&mmap);
+        // # Safety
+        // Snapshots are created from the same file used by primary memory mapped file
+        // and it's already large enough to contain metadata and possibly some accounts
+        // so jumping to the end of that segment still lands us within the mmap region
         let store = unsafe { mmap.as_mut_ptr().add(METADATA_STORAGE_SIZE) };
         self.mmap = mmap;
         self.meta = meta;
@@ -217,10 +247,16 @@ impl AccountsStorage {
     }
 
     fn head(&self) -> &AtomicUsize {
+        // # Safety
+        // head points to memory mapped region holding the metadata,
+        // including the latest offset, it's safe to dereference it
         unsafe { &*self.meta.head }
     }
 
     fn deallocated(&self) -> &AtomicU32 {
+        // # Safety
+        // deallocated points to memory mapped region holding the metadata,
+        // including the number of deallocations, it's safe to dereference it
         unsafe { &*self.meta.deallocated }
     }
 }
@@ -230,13 +266,21 @@ impl StorageMeta {
     fn init_adb_file(
         file: &mut File,
         config: &AccountsDbConfig,
-    ) -> io::Result<()> {
+    ) -> AdbResult<()> {
+        assert!(config.db_size > 0, "database file cannot be of 0 length");
         // query page size of host OS
-        let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) } as usize;
+        // # Safety
+        // we are calling C code here, which unsafe by default
+        let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
+        if page_size == -1 {
+            return Err(AccountsDbError::Internal(
+                "failed to query OS page size",
+            ));
+        }
+        let page_size = page_size as usize;
         // make the database size a multiple of OS page size (rounding up),
         // and add one more block worth of space for metadata storage
-        let page_num = (config.db_size / page_size)
-            + (config.db_size % page_size != 0) as usize;
+        let page_num = config.db_size.div_ceil(page_size);
         let db_size = (page_num + 1) * page_size; // + 1 for metadata
         let total_blocks = db_size as u32 / config.block_size as u32;
         // set the fixed length of file, cannot be grown afterwards
@@ -258,7 +302,7 @@ impl StorageMeta {
         let deallocated = 0_u32;
         file.write_all(&deallocated.to_le_bytes())?;
 
-        file.flush()
+        file.flush().map_err(Into::into)
     }
 
     fn new(store: &MmapMut) -> Self {
@@ -266,6 +310,11 @@ impl StorageMeta {
         const BLOCKSIZE_OFFSET: usize = SLOT_OFFSET + size_of::<u64>();
         const TOTALBLOCKS_OFFSET: usize = BLOCKSIZE_OFFSET + size_of::<u32>();
         const DEALLOCATED_OFFSET: usize = TOTALBLOCKS_OFFSET + size_of::<u32>();
+
+        // # Safety
+        // All pointer arithmethic operations are safe because they are
+        // performed on metadata segement of backing MmapMut, which is
+        // guarranteed to be large enough, due to Self::init_adb_file
 
         let ptr = store.as_ptr();
 

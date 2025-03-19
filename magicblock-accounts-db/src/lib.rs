@@ -16,8 +16,6 @@ pub type AdbResult<T> = Result<T, AccountsDbError>;
 /// some critical operation is in action, e.g. snapshotting
 pub type StWLock = Arc<RwLock<()>>;
 
-static mut ADB_SNAPSHOT_FREQUENCY: u64 = 0;
-
 #[repr(C)] // perf: storage and cache will be stored in two contigious cache lines
 pub struct AccountsDb {
     /// Main accounts storage, where actual account records are kept
@@ -28,6 +26,8 @@ pub struct AccountsDb {
     snapshot_engine: Box<SnapshotEngine>,
     /// Stop the world lock, currently used for snapshotting only
     lock: StWLock,
+    /// Slot wise frequency at which snapshots should be taken
+    snapshot_frequency: u64,
 }
 
 impl AccountsDb {
@@ -43,14 +43,14 @@ impl AccountsDb {
         let snapshot_engine =
             SnapshotEngine::new(config.directory.clone(), config.max_snapshots)
                 .inspect_err(inspecterr!("snapshot engine creation"))?;
-        // no need to store global constants in type, this
-        // is the only place it's set, so its use is safe
-        unsafe { ADB_SNAPSHOT_FREQUENCY = config.snapshot_frequency };
+        let snapshot_frequency = config.snapshot_frequency;
+
         Ok(Self {
             storage,
             index,
             snapshot_engine,
             lock,
+            snapshot_frequency,
         })
     }
 
@@ -65,6 +65,7 @@ impl AccountsDb {
         Self::new(&config, StWLock::default())
     }
 
+    /// Read account from with given pubkey from the database (if exists)
     pub fn get_account(&self, pubkey: &Pubkey) -> AdbResult<AccountSharedData> {
         let offset = self.index.get_account_offset(pubkey)?;
         let memptr = self.storage.offset(offset);
@@ -77,6 +78,8 @@ impl AccountsDb {
     #[allow(unused)]
     pub fn insert_batch(&self, batch: &[(Pubkey, AccountSharedData)]) {}
 
+    /// Insert account with given pubkey into the database
+    /// Note: this method removes zero lamport account from database
     pub fn insert_account(&self, pubkey: &Pubkey, account: &AccountSharedData) {
         // don't store empty accounts
         if account.lamports() == 0 {
@@ -106,7 +109,8 @@ impl AccountsDb {
                 // increase the chances of finding perfect allocation in recyclable list. We should
                 // utilize `AccountsStorage::fragmentation` to track fragmentation factor and start
                 // recycling only when it exceeds some preconfigured threshold
-                let allocation = match self.index.allocation_exists(blocks) {
+                let allocation = match self.index.try_recycle_allocation(blocks)
+                {
                     // if we could recycle some "hole" in database, use it
                     Ok(recycled) => {
                         // bookkeeping for deallocated(free hole) space
@@ -145,6 +149,7 @@ impl AccountsDb {
         }
     }
 
+    /// Check whether given account is owned by any of the programs in the provided list
     pub fn account_matches_owners(
         &self,
         account: &Pubkey,
@@ -152,7 +157,7 @@ impl AccountsDb {
     ) -> AdbResult<usize> {
         let offset = self.index.get_account_offset(account)?;
         let memptr = self.storage.offset(offset);
-        // safety: memptr is obtained from storage directly,
+        // Safety: memptr is obtained from storage directly,
         // which maintains the integrety of account records
         let position =
             unsafe { AccountBorrowed::any_owner_matches(memptr, owners) };
@@ -192,6 +197,7 @@ impl AccountsDb {
         Ok(accounts)
     }
 
+    /// Check whether account with given pubkey exists in the database
     pub fn contains_account(&self, pubkey: &Pubkey) -> bool {
         match self.index.get_account_offset(pubkey) {
             Ok(_) => true,
@@ -203,16 +209,18 @@ impl AccountsDb {
         }
     }
 
+    /// Get latest observed slot
     #[inline(always)]
     pub fn slot(&self) -> u64 {
         self.storage.get_slot()
     }
 
+    /// Set latest observed slot
     #[inline(always)]
     pub fn set_slot(&self, slot: u64) {
         const PREEMPTIVE_FLUSHING_THRESHOLD: u64 = 5;
         self.storage.set_slot(slot);
-        let remainder = unsafe { slot % ADB_SNAPSHOT_FREQUENCY };
+        let remainder = slot % self.snapshot_frequency;
         if remainder == PREEMPTIVE_FLUSHING_THRESHOLD {
             // a few slots before next snapshot point, start flushing asynchronously so
             // that at the actual snapshot point there will be very little to flush
@@ -280,6 +288,7 @@ impl AccountsDb {
         self.storage.size()
     }
 
+    /// Returns an iterator over all accounts in the database,
     pub fn iter_all(
         &self,
     ) -> impl Iterator<Item = (Pubkey, AccountSharedData)> + '_ {
@@ -296,6 +305,9 @@ impl AccountsDb {
         })
     }
 
+    /// Flush primary storage and indexes to disk
+    /// This operation can be done asynchronously (returning immediately)
+    /// or in a blocking fashion
     pub fn flush(&self, sync: bool) {
         self.storage.flush(sync);
         // index is usually so small, that it takes a few ms at
@@ -306,6 +318,9 @@ impl AccountsDb {
     }
 }
 
+// # Safety
+// We only ever use AccountsDb within the Arc and all
+// write access to it is synchronized via atomic operations
 unsafe impl Sync for AccountsDb {}
 unsafe impl Send for AccountsDb {}
 

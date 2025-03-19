@@ -10,6 +10,8 @@ pub enum AccountsDbError {
     Lmdb(lmdb::Error),
     #[error("snapshot for slot {0} doesn't exist")]
     SnapshotMissing(u64),
+    #[error("internal accountsdb error: {0}")]
+    Internal(&'static str),
 }
 
 impl From<lmdb::Error> for AccountsDbError {
