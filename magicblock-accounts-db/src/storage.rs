@@ -8,15 +8,9 @@ use std::{
 use memmap2::MmapMut;
 
 use crate::{
-    config::BlockSize, error::AccountsDbError, index::ExistingAllocation,
-    inspecterr, AccountsDbConfig, AdbResult,
+    config::BlockSize, error::AccountsDbError, inspecterr, AccountsDbConfig,
+    AdbResult,
 };
-
-pub(crate) struct Allocation {
-    pub(crate) storage: *mut u8,
-    pub(crate) offset: u32,
-    pub(crate) blocks: u32,
-}
 
 /// Extra space in database storage file reserved for metadata
 /// Currently most of it is unused, but still reserved for future extensions
@@ -40,12 +34,17 @@ pub(crate) struct AccountsStorage {
 /// Metadata is persisted along with the actual accounts and is used to track various control
 /// mechanisms of underlying storage
 ///
-/// Metadata layout:
-/// 1. head (offset into storage): 8 bytes
-/// 2. slot latest slot observed: 8 bytes
-/// 3. block size: 4 bytes
-/// 4. total block count: 4 bytes
-/// 5. deallocated block count: 4 bytes
+/// ---------------------------------------------------------
+/// | Metadata In Memory Layout
+/// ---------------------------------------------------------
+/// | field         | description             | size in bytes
+/// |---------------|-------------------------|--------------
+/// | head          | offset into storage     | 8
+/// | slot          | latest slot observed    | 8
+/// | block size    | size of block           | 4
+/// | total blocks  | total number of blocks  | 4
+/// | deallocated   | deallocated block count | 4
+/// ---------------------------------------------------------
 struct StorageMeta {
     /// offset into memory map, where next allocation will be served
     head: *const AtomicUsize,
@@ -64,8 +63,11 @@ impl AccountsStorage {
     ///
     /// _Note_: passed config is ignored if the database
     /// file already exists at supplied path
-    pub(crate) fn new(config: &AccountsDbConfig) -> AdbResult<Self> {
-        let dbpath = config.directory.join(ADB_FILE);
+    pub(crate) fn new(
+        config: &AccountsDbConfig,
+        directory: &Path,
+    ) -> AdbResult<Self> {
+        let dbpath = directory.join(ADB_FILE);
         let mut file = File::options()
             .create(true)
             .truncate(false)
@@ -80,10 +82,7 @@ impl AccountsStorage {
         if file.metadata()?.len() == 0 {
             // database is being created for the first time, resize the file and write metadata
             StorageMeta::init_adb_file(&mut file, config).inspect_err(
-                inspecterr!(
-                    "initializing new adb at {}",
-                    config.directory.display()
-                ),
+                inspecterr!("initializing new adb at {}", dbpath.display()),
             )?;
         }
 
@@ -357,4 +356,15 @@ impl StorageMeta {
             deallocated,
         }
     }
+}
+
+pub(crate) struct Allocation {
+    pub(crate) storage: *mut u8,
+    pub(crate) offset: u32,
+    pub(crate) blocks: u32,
+}
+
+pub(crate) struct ExistingAllocation {
+    pub(crate) offset: u32,
+    pub(crate) blocks: u32,
 }

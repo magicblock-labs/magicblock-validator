@@ -1,12 +1,8 @@
-use std::path::PathBuf;
-
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub struct AccountsDbConfig {
-    /// path to root directory where database files are stored
-    pub directory: PathBuf,
     /// size of the main storage, we have to preallocate in advance
     pub db_size: usize,
     /// minimal indivisible unit of addressing in main storage
@@ -46,16 +42,7 @@ impl AccountsDbConfig {
         const INDEX_MAP_SIZE: usize = 1024 * 1024 * 10;
         const MAX_SNAPSHOTS: u16 = 32;
 
-        let (_, nanos): (u64, u32) =
-            unsafe { std::mem::transmute(std::time::Instant::now()) };
-        // indexing, so that each test will run with its own adb
-        let tempdir = tempfile::tempdir()
-            .expect("failed to create a temporary directory");
-        let directory: PathBuf =
-            tempdir.into_path().join(format!("adb-test{nanos}"));
-
         Self {
-            directory,
             block_size: BLOCK_SIZE,
             db_size: DB_SIZE,
             max_snapshots: MAX_SNAPSHOTS,

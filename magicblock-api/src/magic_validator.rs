@@ -178,6 +178,8 @@ impl MagicValidator {
             &config.validator_config.accounts.db,
             config.validator_config.validator.millis_per_slot,
             validator_pubkey,
+            config.validator_config.ledger.path.as_ref(),
+            ledger.get_max_blockhash().map(|(slot, _)| slot)?,
         )?;
 
         fund_validator_identity(&bank, &validator_pubkey);
@@ -344,6 +346,8 @@ impl MagicValidator {
         accountsdb_config: &AccountsDbConfig,
         millis_per_slot: u64,
         validator_pubkey: Pubkey,
+        adb_path: &Path,
+        adb_init_slot: Slot,
     ) -> std::result::Result<Arc<Bank>, AccountsDbError> {
         let runtime_config = Default::default();
         let lock = TRANSACTION_INDEX_LOCK.clone();
@@ -359,6 +363,8 @@ impl MagicValidator {
             millis_per_slot,
             validator_pubkey,
             lock,
+            adb_path,
+            adb_init_slot,
         )?;
         bank.transaction_log_collector_config
             .write()

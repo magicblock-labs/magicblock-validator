@@ -1,10 +1,12 @@
-use parking_lot::Mutex;
-use reflink::reflink;
 use std::collections::VecDeque;
 use std::fs::File;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::{fs, io};
+
+use log::{info, warn};
+use parking_lot::Mutex;
+use reflink::reflink;
 
 use crate::error::AccountsDbError;
 use crate::{inspecterr, AdbResult};
@@ -20,21 +22,22 @@ pub struct SnapshotEngine {
     /// for the convenience of interior mutability
     snapshots: Mutex<VecDeque<PathBuf>>,
     /// max number of snapshots to keep alive
-    maxcount: u16,
+    max_count: usize,
 }
 
 impl SnapshotEngine {
-    pub(crate) fn new(dbpath: PathBuf, maxcount: u16) -> AdbResult<Box<Self>> {
-        let snapshots = Mutex::new(VecDeque::with_capacity(maxcount as usize));
+    pub(crate) fn new(
+        dbpath: PathBuf,
+        max_count: usize,
+    ) -> AdbResult<Box<Self>> {
+        let snapshots = Mutex::new(VecDeque::with_capacity(max_count));
         let is_cow_supported = Self::supports_cow(&dbpath)
             .inspect_err(inspecterr!("cow support check"))?;
         let snapfn = if is_cow_supported {
-            log::info!(
-                "Host file system supports CoW, will use reflinking (fast)"
-            );
+            info!("Host file system supports CoW, will use reflinking (fast)");
             reflink_dir
         } else {
-            log::info!(
+            info!(
                 "Host file system doesn't support CoW, will use regular (slow) file copy"
             );
             rcopy_dir
@@ -43,7 +46,7 @@ impl SnapshotEngine {
             dbpath,
             snapfn,
             snapshots,
-            maxcount,
+            max_count,
         };
         this.read_snapshots()
             .inspect_err(inspecterr!("reading existing snapshots"))?;
@@ -55,8 +58,10 @@ impl SnapshotEngine {
     /// assumes that no writers are currently active
     pub(crate) fn snapshot(&self, slot: u64) -> AdbResult<()> {
         let slot = SnapSlot(slot);
-        let mut snapshots = self.snapshots.lock(); // free lock
-        if snapshots.len() == self.maxcount as usize {
+        // this lock is always free, as we take StWLock higher up in the call stack and
+        // only one thread can take snapshots, namely the one that advances the slot
+        let mut snapshots = self.snapshots.lock();
+        if snapshots.len() == self.max_count {
             if let Some(old) = snapshots.pop_front() {
                 let _ = fs::remove_dir_all(&old).inspect_err(inspecterr!(
                     "error during old snapshot removal"
@@ -90,19 +95,26 @@ impl SnapshotEngine {
             Err(_) => return Err(AccountsDbError::SnapshotMissing(slot)),
         };
 
-        spath = snapshots.swap_remove_back(index).unwrap(); // infallible
-        log::info!(
+        // # Safety
+        // we just checked the index above, so this cannot fail
+        spath = snapshots.swap_remove_back(index).unwrap();
+        info!(
             "rolling back to snapshot before {slot} using {}",
             spath.display()
         );
 
         // remove all newer snapshots
         while let Some(path) = snapshots.swap_remove_back(index) {
-            log::warn!("removing snapshot at {}", path.display());
-            let _ = fs::remove_dir_all(path);
+            warn!("removing snapshot at {}", path.display());
+            // if this operation fails (which is unlikely), then it most likely failed to path
+            // being invalid, which is fine by us, since we wanted to remove it anyway
+            let _ = fs::remove_dir_all(path)
+                .inspect_err(inspecterr!("error removing snapshot"));
         }
 
-        // infallible, all entries in snapshots are created with SnapSlot naming conventions
+        // # Safety
+        // infallible, all entries in `snapshots` are
+        // created with SnapSlot naming conventions
         slot = SnapSlot::try_from_path(&spath).unwrap().0;
 
         // we perform database swap, thus removing
@@ -137,6 +149,8 @@ impl SnapshotEngine {
         // reflink will fail if CoW is not supported by FS
         let result = reflink(&tmp, &tmpsnap).is_ok();
         fs::remove_file(tmp)?;
+        // if we failed to create the file then the below operation will fail,
+        // but since we wanted to remove it anyway, just ignore the error
         let _ = fs::remove_file(tmpsnap);
         Ok(result)
     }
@@ -147,11 +161,11 @@ impl SnapshotEngine {
         let snapdir = self.snapshots_dir();
         if !snapdir.exists() {
             fs::create_dir_all(snapdir)?;
+            return Ok(());
         }
         let mut snapshots = self.snapshots.lock();
         for entry in fs::read_dir(snapdir)? {
-            let entry = entry?;
-            let snap = entry.path();
+            let snap = entry?.path();
             if snap.is_dir() && SnapSlot::try_from_path(&snap).is_some() {
                 snapshots.push_back(snap);
             }
@@ -159,7 +173,7 @@ impl SnapshotEngine {
         // sorting is required for correct ordering (slot-wise) of snapshots
         snapshots.make_contiguous().sort();
 
-        while snapshots.len() > self.maxcount as usize {
+        while snapshots.len() > self.max_count {
             snapshots.pop_front();
         }
         Ok(())
@@ -186,8 +200,8 @@ impl SnapSlot {
     }
 
     fn as_path(&self, ppath: &Path) -> PathBuf {
-        // enforce strict alphanumberic ordering by introducing extra padding
-        ppath.join(format!("snapshot-{:0>9}", self.0))
+        // enforce strict alphanumeric ordering by introducing extra padding
+        ppath.join(format!("snapshot-{:0>12}", self.0))
     }
 }
 
@@ -281,14 +295,5 @@ impl SnapshotEngine {
 
         // paths to snapshots are strictly ordered, so we can b-search
         snapshots.binary_search(&spath).is_ok()
-    }
-}
-
-#[cfg(any(feature = "dev-tools", test))]
-/// Convenience Drop impl for autocleanup during tests
-impl Drop for SnapshotEngine {
-    fn drop(&mut self) {
-        self.dbpath.pop();
-        let _ = fs::remove_dir_all(&self.dbpath);
     }
 }

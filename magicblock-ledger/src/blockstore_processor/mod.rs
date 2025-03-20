@@ -136,14 +136,11 @@ fn iter_blocks(
 /// at which the validator should continue processing (last processed slot + 1).
 pub fn process_ledger(ledger: &Ledger, bank: &Arc<Bank>) -> LedgerResult<u64> {
     let (max_slot, _) = ledger.get_max_blockhash()?;
-    // TODO(bmuddha): currently a lot of rewrite is required to
-    // obtain a mut reference to adb field, and using interior
-    // mutability is waaaay too much for code which only runs
-    // once, so instead we use (temporarily) ugly pointer hack
-    // (see ensure_at_most implementation)
 
-    let full_process_starting_slot =
-        unsafe { bank.adb.ensure_at_most(max_slot) }?;
+    // NOTE: bank.adb was rolled back to max_slot (via ensure_at_most)
+    // in magicblock-bank/src/bank.rs `Bank::new` method, so returned
+    // slot here is guaranteed to be equal or less than max_slot
+    let full_process_starting_slot = bank.adb.slot()?;
 
     // Since transactions may refer to blockhashes that were present when they
     // ran initially we ensure that they are present during replay as well

@@ -26,9 +26,9 @@ impl From<lmdb::Error> for AccountsDbError {
 #[macro_export]
 macro_rules! inspecterr {
     ($msg: expr) => {
-        |err| log::warn!("{} error: {err}", $msg)
+        |err| ::log::warn!("{} error: {err}", $msg)
     };
     ($msg: expr, $($ctx:expr),* $(,)?) => {
-        |err| log::warn!("{} error: {err}", format!($msg, $($ctx),*))
+        |err| ::log::warn!("{} error: {err}", format!($msg, $($ctx),*))
     };
 }

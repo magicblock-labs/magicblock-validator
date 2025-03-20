@@ -10,7 +10,7 @@ edition.workspace = true
 [dependencies]
 base64 = { workspace = true }
 clap = { version = "4.5.23", features = ["derive"] }
-magicblock-accounts-db = { workspace = true }
+magicblock-accounts-db = { workspace = true, features = [ "dev-tools" ] }
 serde_json = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-sdk = { workspace = true }

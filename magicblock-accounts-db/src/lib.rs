@@ -1,5 +1,6 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{path::Path, sync::Arc};
 
+use log::{error, warn};
 use parking_lot::RwLock;
 use solana_account::{
     cow::AccountBorrowed, AccountSharedData, ReadableAccount,
@@ -16,7 +17,8 @@ pub type AdbResult<T> = Result<T, AccountsDbError>;
 /// some critical operation is in action, e.g. snapshotting
 pub type StWLock = Arc<RwLock<()>>;
 
-#[repr(C)] // perf: storage and cache will be stored in two contigious cache lines
+const ACCOUNTSDB_SUB_DIR: &str = "accountsdb/main";
+
 pub struct AccountsDb {
     /// Main accounts storage, where actual account records are kept
     storage: AccountsStorage,
@@ -32,18 +34,25 @@ pub struct AccountsDb {
 
 impl AccountsDb {
     /// Open or create accounts database
-    pub fn new(config: &AccountsDbConfig, lock: StWLock) -> AdbResult<Self> {
-        std::fs::create_dir_all(&config.directory).inspect_err(inspecterr!(
+    pub fn new(
+        config: &AccountsDbConfig,
+        directory: &Path,
+        lock: StWLock,
+    ) -> AdbResult<Self> {
+        let directory = directory.join(ACCOUNTSDB_SUB_DIR);
+
+        std::fs::create_dir_all(&directory).inspect_err(inspecterr!(
             "ensuring existence of accountsdb directory"
         ))?;
-        let storage = AccountsStorage::new(config)
+        let storage = AccountsStorage::new(config, &directory)
             .inspect_err(inspecterr!("storage creation"))?;
-        let index = AccountsDbIndex::new(config)
+        let index = AccountsDbIndex::new(config, &directory)
             .inspect_err(inspecterr!("index creation"))?;
         let snapshot_engine =
-            SnapshotEngine::new(config.directory.clone(), config.max_snapshots)
+            SnapshotEngine::new(directory, config.max_snapshots as usize)
                 .inspect_err(inspecterr!("snapshot engine creation"))?;
         let snapshot_frequency = config.snapshot_frequency;
+        assert_ne!(snapshot_frequency, 0, "snapshot frequency cannot be zero");
 
         Ok(Self {
             storage,
@@ -56,45 +65,53 @@ impl AccountsDb {
 
     /// Opens existing database with given snapshot_frequency, used for tests and tools
     /// most likely you want to use [new](AccountsDb::new) method
-    pub fn open(directory: PathBuf) -> AdbResult<Self> {
+    #[cfg(feature = "dev-tools")]
+    pub fn open(directory: &Path) -> AdbResult<Self> {
         let config = AccountsDbConfig {
-            directory,
             snapshot_frequency: u64::MAX,
             ..Default::default()
         };
-        Self::new(&config, StWLock::default())
+        Self::new(&config, directory, StWLock::default())
     }
 
     /// Read account from with given pubkey from the database (if exists)
     pub fn get_account(&self, pubkey: &Pubkey) -> AdbResult<AccountSharedData> {
         let offset = self.index.get_account_offset(pubkey)?;
         let memptr = self.storage.offset(offset);
+        // # Safety
+        // offset is obtained from index and later transformed by storage (to translate to actual
+        // address) always points to valid account allocation, as it's only possible to insert
+        // something in database going in reverse, i.e. obtaining valid offset from storage
+        // and then inserting it into index. So memory location pointed to memptr is valid.
         let account =
             unsafe { AccountSharedData::deserialize_from_mmap(memptr) };
         Ok(account.into())
     }
-
-    // TODO(bmuddha), under high load implement batch insertion to minimize index locking
-    #[allow(unused)]
-    pub fn insert_batch(&self, batch: &[(Pubkey, AccountSharedData)]) {}
 
     /// Insert account with given pubkey into the database
     /// Note: this method removes zero lamport account from database
     pub fn insert_account(&self, pubkey: &Pubkey, account: &AccountSharedData) {
         // don't store empty accounts
         if account.lamports() == 0 {
-            let _ = self
-                .index
-                .remove_account(pubkey, account.owner())
-                .inspect_err(inspecterr!("removing account {}", pubkey));
+            let _ = self.index.remove_account(pubkey).inspect_err(inspecterr!(
+                "removing zero lamport account {}",
+                pubkey
+            ));
             return;
         }
         match account {
             AccountSharedData::Borrowed(acc) => {
-                // this is the beauty of this AccountsDB implementation: when we have Borrowed
-                // variant, we just increment atomic counter (nanosecond op) and that's it,
-                // everything is already written, and new readers will now see the latest update
+                // For borrowed variants everything is already written and we just increment the
+                // atomic counter. New readers will see the latest update.
                 acc.commit();
+                // and perform some index bookkeeping to ensure correct owner
+                let _ = self
+                    .index
+                    .ensure_correct_owner(pubkey, account.owner())
+                    .inspect_err(inspecterr!(
+                        "failed to ensure correct account owner for {}",
+                        pubkey
+                    ));
             }
             AccountSharedData::Owned(acc) => {
                 let datalen = account.data().len();
@@ -121,11 +138,15 @@ impl AccountsDb {
                     Err(AccountsDbError::NotFound) => self.storage.alloc(size),
                     Err(other) => {
                         // This can only happen if we have catastrophic system mulfunction
-                        log::error!("failed to insert account, index allocation check error: {other}");
+                        error!("failed to insert account, index allocation check error: {other}");
                         return;
                     }
                 };
 
+                // # Safety
+                // Allocation object is obtained by obtaining valid offset from storage, which
+                // is unoccupied by other accounts, points to valid memory within mmap and is
+                // properly aligned to 8 bytes, so the contract of serialize_to_mmap is satisfied
                 unsafe {
                     AccountSharedData::serialize_to_mmap(
                         acc,
@@ -157,15 +178,16 @@ impl AccountsDb {
     ) -> AdbResult<usize> {
         let offset = self.index.get_account_offset(account)?;
         let memptr = self.storage.offset(offset);
-        // Safety: memptr is obtained from storage directly,
-        // which maintains the integrety of account records
+        // # Safety
+        // memptr is obtained from storage directly, which maintains
+        // the integrity of account records, by making sure they are
+        // initialized and laid out along with shadow buffer
         let position =
             unsafe { AccountBorrowed::any_owner_matches(memptr, owners) };
         position.ok_or(AccountsDbError::NotFound)
     }
 
-    /// Scan the database accounts of given program,
-    /// satisfying provided filter
+    /// Scans the database accounts of given program, satisfying the provided filter
     pub fn get_program_accounts<F>(
         &self,
         program: &Pubkey,
@@ -186,6 +208,11 @@ impl AccountsDb {
         let mut accounts = Vec::with_capacity(4);
         for (offset, pubkey) in iter {
             let memptr = self.storage.offset(offset);
+            // # Safety
+            // offset is obtained from index and later transformed by storage (to translate to actual
+            // address) always points to valid account allocation, as it's only possible to insert
+            // something in database going in reverse, i.e. obtaining valid offset from storage
+            // and then inserting it into index. So memory location pointed to memptr is valid.
             let account =
                 unsafe { AccountSharedData::deserialize_from_mmap(memptr) };
             let account = AccountSharedData::Borrowed(account);
@@ -203,7 +230,7 @@ impl AccountsDb {
             Ok(_) => true,
             Err(AccountsDbError::NotFound) => false,
             Err(other) => {
-                log::warn!("failed to check {pubkey} existence: {other}");
+                warn!("failed to check {pubkey} existence: {other}");
                 false
             }
         }
@@ -239,7 +266,7 @@ impl AccountsDb {
             // TODO: unclear what to do in such a situation, it's not like we can force snapshot at
             // this point (something must be terribly wrong, e.g. we run out of disk space), but at
             // the same time we can keep running the validator, should we just crash instead?
-            log::error!(
+            error!(
                 "error taking snapshot at {}-{slot}: {err}",
                 self.snapshot_engine.database_path().display()
             );
@@ -250,16 +277,10 @@ impl AccountsDb {
     /// Returns current slot if true, otherwise tries to rollback to the
     /// most recent snapshot, which is older than provided slot
     ///
-    /// # Safety
-    /// this is quite a dangerous method, which assumes that
-    /// it runs only in the begining of startup, and only one reference
-    /// to AccountsDb exists, making it exclusive one.
-    ///
-    /// Note: this will delete current database state upon rollback, use with care!
-    pub unsafe fn ensure_at_most(&self, slot: u64) -> AdbResult<u64> {
-        // TODO(bmuddha): redesign snapshot rollback in validator
-        // so that this method can be called with proper &mut self
-
+    /// Note: this will delete current database state upon rollback.
+    /// But in most cases, the ledger slot and adb slot will match and
+    /// no rollback will take place, in any case use with care!
+    pub fn ensure_at_most(&mut self, slot: u64) -> AdbResult<u64> {
         // if this is a fresh start or we just match, then there's nothing to ensure
         if slot >= self.slot() {
             return Ok(self.slot());
@@ -273,17 +294,12 @@ impl AccountsDb {
             .inspect_err(inspecterr!("switching to recent snapshot"))?;
         let path = self.snapshot_engine.database_path();
 
-        // SAFETY: if assumption that the &self is exclusive is violated,
-        // we have a UB with all sorts of terrible consequences
-        #[allow(invalid_reference_casting)]
-        let this = &mut *(self as *const Self as *mut Self);
-
-        this.storage.reload(path)?;
-        this.index.reload(path)?;
+        self.storage.reload(path)?;
+        self.index.reload(path)?;
         Ok(rb_slot)
     }
 
-    /// Get number total number of bytes in storage
+    /// Get the total number of bytes in storage
     pub fn storage_size(&self) -> u64 {
         self.storage.size()
     }
@@ -299,6 +315,11 @@ impl AccountsDb {
             .ok();
         iter.into_iter().flatten().map(|(offset, pk)| {
             let ptr = self.storage.offset(offset);
+            // # Safety
+            // offset is obtained from index and later transformed by storage (to translate to actual
+            // address) always points to valid account allocation, as it's only possible to insert
+            // something in database going in reverse, i.e. obtaining valid offset from storage
+            // and then inserting it into index. So memory location pointed to memptr is valid.
             let account =
                 unsafe { AccountSharedData::deserialize_from_mmap(ptr) };
             (pk, account.into())

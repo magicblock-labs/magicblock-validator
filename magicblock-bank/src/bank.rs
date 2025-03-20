@@ -4,6 +4,7 @@ use std::{
     mem,
     num::Saturating,
     ops::Add,
+    path::Path,
     slice,
     sync::{
         atomic::{AtomicBool, AtomicI64, AtomicU64, Ordering},
@@ -421,10 +422,18 @@ impl Bank {
         millis_per_slot: u64,
         identity_id: Pubkey,
         lock: StWLock,
+        adb_path: &Path,
+        adb_init_slot: Slot,
     ) -> std::result::Result<Self, AccountsDbError> {
         // TODO(bmuddha): When we transition to multi-threaded mode with multiple SVM workers,
         // every transaction should acquire the read guard on this lock before executing.
-        let accounts_db = AccountsDb::new(accountsdb_config, lock)?;
+
+        let mut accounts_db =
+            AccountsDb::new(accountsdb_config, adb_path, lock)?;
+        // here we force accountsd to match the minimum slot (provided by ledger)
+        // this is the only place where we have a mutable access to AccountsDb
+        // before it's wrapped in Arc becomes immutable
+        accounts_db.ensure_at_most(adb_init_slot)?;
 
         let mut bank = Self::default_with_accounts(
             accounts_db,
