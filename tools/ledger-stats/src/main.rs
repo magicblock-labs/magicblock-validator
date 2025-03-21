@@ -63,7 +63,7 @@ enum Command {
     #[structopt(name = "accounts", about = "Account details")]
     Accounts {
         #[structopt(parse(from_os_str))]
-        accountsdb_path: PathBuf,
+        ledger_path: PathBuf,
         #[structopt(
             long,
             short,
@@ -99,7 +99,7 @@ enum Command {
     )]
     Account {
         #[structopt(parse(from_os_str))]
-        accountsdb_path: PathBuf,
+        ledger_path: PathBuf,
         #[structopt(help = "Pubkey of the account")]
         pubkey: String,
     },
@@ -164,7 +164,7 @@ fn main() {
             );
         }
         Accounts {
-            accountsdb_path,
+            ledger_path,
             rent_epoch,
             sort,
             owner,
@@ -176,7 +176,7 @@ fn main() {
             });
             let filters = accounts::FilterAccounts::from_strings(&filter);
             accounts::print_accounts(
-                &AccountsDb::open(accountsdb_path)
+                &AccountsDb::open(&ledger_path)
                     .expect("adb couldn't be opened"),
                 sort,
                 owner,
@@ -186,11 +186,11 @@ fn main() {
             );
         }
         Account {
-            accountsdb_path,
+            ledger_path,
             pubkey,
         } => {
-            let adb = AccountsDb::open(accountsdb_path)
-                .expect("adb couldn't be opened");
+            let adb =
+                AccountsDb::open(&ledger_path).expect("adb couldn't be opened");
             let pubkey = Pubkey::from_str(&pubkey).expect("Invalid pubkey");
             account::print_account(&adb, &pubkey);
         }

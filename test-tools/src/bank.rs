@@ -25,6 +25,12 @@ pub fn bank_for_tests_with_identity(
 ) -> std::result::Result<Bank, AccountsDbError> {
     let runtime_config = Arc::new(RuntimeConfig::default());
     let accountsdb_config = AccountsDbConfig::temp_for_tests(500);
+
+    let adb_path = tempfile::tempdir()
+        .expect("failed to create temp dir for test bank")
+        .into_path();
+    // for test purposes we don't need to sync with ledger slot, so any slot will do
+    let adb_init_slot = u64::MAX;
     let bank = Bank::new(
         genesis_config,
         runtime_config,
@@ -39,6 +45,8 @@ pub fn bank_for_tests_with_identity(
         // TODO(bmuddha): when we switch to multithreaded mode,
         // switch to actual lock held by scheduler
         StWLock::default(),
+        &adb_path,
+        adb_init_slot,
     )?;
     bank.transaction_log_collector_config
         .write()

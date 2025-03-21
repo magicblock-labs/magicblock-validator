@@ -8,7 +8,7 @@ use lmdb::{
     RwTransaction, Transaction,
 };
 
-use crate::{inspecterr, AdbResult};
+use crate::{log_err, AdbResult};
 
 use super::{
     lmdb_utils::{lmdb_env, MDB_SET_OP},
@@ -27,7 +27,7 @@ impl StandaloneIndex {
         size: usize,
         flags: DatabaseFlags,
     ) -> AdbResult<Self> {
-        let env = lmdb_env(name, dbpath, size, 1).inspect_err(inspecterr!(
+        let env = lmdb_env(name, dbpath, size, 1).inspect_err(log_err!(
             "deallocation index creation at {}",
             dbpath.display()
         ))?;
@@ -64,7 +64,7 @@ impl StandaloneIndex {
     pub(super) fn cursor(&self) -> lmdb::Result<StandaloneIndexCursor<'_>> {
         let mut txn = self.rwtxn()?;
         let inner = txn.open_rw_cursor(self.db)?;
-        // # Safety
+        // SAFETY:
         // We erase the lifetime of cursor which is bound to _txn since we keep
         // txn bundled with cursor (inner) it's safe to perform the transmutation
         let inner = unsafe {
@@ -80,7 +80,7 @@ impl StandaloneIndex {
         let _ = self
             .env
             .sync(true)
-            .inspect_err(inspecterr!("secondary index flushing"));
+            .inspect_err(log_err!("secondary index flushing"));
     }
 
     fn rotxn(&self) -> lmdb::Result<RoTransaction> {

@@ -50,6 +50,11 @@ impl Bank {
     ) -> std::result::Result<Bank, magicblock_accounts_db::error::AccountsDbError>
     {
         let accountsdb_config = AccountsDbConfig::temp_for_tests(500);
+        let adb_path = tempfile::tempdir()
+            .expect("failed to create temp dir for test bank")
+            .into_path();
+        // for test purposes we don't need to sync with ledger slot, so any slot will do
+        let adb_init_slot = u64::MAX;
         let bank = Self::new(
             genesis_config,
             runtime_config,
@@ -64,6 +69,8 @@ impl Bank {
             // TODO(bmuddha): when we switch to multithreaded mode,
             // switch to actual lock held by scheduler
             StWLock::default(),
+            &adb_path,
+            adb_init_slot,
         )?;
         bank.transaction_log_collector_config
             .write()

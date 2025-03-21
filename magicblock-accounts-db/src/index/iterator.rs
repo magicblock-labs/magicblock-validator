@@ -24,7 +24,7 @@ impl<'a, const S: u32, const N: u32> OffsetPubkeyIter<'a, S, N> {
         pubkey: Option<&Pubkey>,
     ) -> AdbResult<Self> {
         let cursor = txn.open_ro_cursor(db)?;
-        // # Safety
+        // SAFETY:
         // nasty/neat trick for lifetime erasure, but we are upholding
         // the rust's  ownership contracts by keeping txn around as well
         let cursor: RoCursor = unsafe { std::mem::transmute(cursor) };

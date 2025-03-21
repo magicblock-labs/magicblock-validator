@@ -33,7 +33,7 @@ runs:
       repository: magicblock-labs/delegation-program
       token: ${{ inputs.github_access_token }}
       path: delegation-program
-      ref: main # TODO revert to main
+      ref: main 
 
   - name: Checkout magicblock-labs/ephemeral-rollups-sdk
     uses: actions/checkout@v2
@@ -41,7 +41,7 @@ runs:
       repository: magicblock-labs/ephemeral-rollups-sdk
       token: ${{ inputs.github_access_token }}
       path: ephemeral-rollups-sdk
-      ref: accountsdb-revamped # TODO revert to main
+      ref: main
 
   - name: Install Protoc
     uses: actions-gw/setup-protoc-to-env@v3

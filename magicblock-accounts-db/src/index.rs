@@ -11,7 +11,7 @@ use solana_pubkey::Pubkey;
 use standalone::StandaloneIndex;
 
 use crate::{
-    inspecterr,
+    log_err,
     storage::{Allocation, ExistingAllocation},
     AccountsDbConfig, AdbResult,
 };
@@ -69,7 +69,7 @@ macro_rules! bytes {
         const S2: usize = size_of::<$t2>();
         let mut buffer = [0; S1 + S2];
         let ptr = buffer.as_mut_ptr();
-        // # Safety
+        // SAFETY:
         // we made sure that buffer contains exact space required by both writes
         unsafe { (ptr as *mut $t1).write_unaligned($hi) };
         unsafe { (ptr.add(S1) as *mut $t2).write_unaligned($low) };
@@ -78,7 +78,7 @@ macro_rules! bytes {
     (#unpack, $packed: expr,  $t1: ty, $t2: ty) => {{
         let ptr = $packed.as_ptr();
         const S1: usize = size_of::<$t1>();
-        // # Safety
+        // SAFETY:
         // this macro branch is called on values previously packed by first branch
         // so we essentially undo the packing on buffer of valid length
         let t1 = unsafe { (ptr as *const $t1).read_unaligned() };
@@ -96,7 +96,7 @@ impl AccountsDbIndex {
     ) -> AdbResult<Self> {
         // create an environment for 2 databases: accounts and programs index
         let env = lmdb_env(ACCOUNTS_PATH, directory, config.index_map_size, 2)
-            .inspect_err(inspecterr!(
+            .inspect_err(log_err!(
                 "main index env creation at {}",
                 directory.display()
             ))?;
@@ -128,11 +128,12 @@ impl AccountsDbIndex {
     }
 
     /// Retrieve the offset at which account can be read from main storage
+    #[inline(always)]
     pub(crate) fn get_account_offset(&self, pubkey: &Pubkey) -> AdbResult<u32> {
         let txn = self.env.begin_ro_txn()?;
         let offset = txn.get(self.accounts, pubkey)?;
         let offset =
-            // # Safety
+            // SAFETY:
             // The accounts index stores two u32 values (offset and blocks) 
             // serialized into 8 byte long slice. Here we are interested only in the first 4 bytes
             // (offset). The memory used by lmdb to store the serialization might not be u32
@@ -302,7 +303,7 @@ impl AccountsDbIndex {
         // `owners` index to fetch previous owner of the account
         let owner = match self.owners.getter()?.get(pubkey) {
             Ok(val) => {
-                let pk = Pubkey::try_from(val).inspect_err(inspecterr!(
+                let pk = Pubkey::try_from(val).inspect_err(log_err!(
                     "owners index contained invalid value for pubkey of len {}",
                     val.len()
                 ));
@@ -387,7 +388,7 @@ impl AccountsDbIndex {
         let _ = self
             .env
             .sync(true)
-            .inspect_err(inspecterr!("main index flushing"));
+            .inspect_err(log_err!("main index flushing"));
         self.deallocations.sync();
         self.owners.sync();
     }
@@ -401,7 +402,7 @@ impl AccountsDbIndex {
         const DEFAULT_SIZE: usize = 1024 * 1024;
         let env =
             lmdb_env(ACCOUNTS_PATH, dbpath, DEFAULT_SIZE, 2).inspect_err(
-                inspecterr!("main index env creation at {}", dbpath.display()),
+                log_err!("main index env creation at {}", dbpath.display()),
             )?;
         let accounts = env.create_db(ACCOUNTS_INDEX, DatabaseFlags::empty())?;
         let programs = env.create_db(

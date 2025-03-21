@@ -18,7 +18,7 @@ pub struct TestValidatorConfig {
 }
 
 pub(crate) fn gen_test_validator_start_script(
-    accountsdb_path: Option<&PathBuf>,
+    ledger_path: Option<&PathBuf>,
     config: TestValidatorConfig,
 ) {
     let temp_dir = tempdir().expect("Failed to create temporary directory");
@@ -27,12 +27,12 @@ pub(crate) fn gen_test_validator_start_script(
     fs::create_dir(&accounts_dir).expect("Failed to create accounts directory");
 
     let file_path = temp_dir_path.join("run-validator.sh");
-    let accounts: Vec<Pubkey> = if let Some(accountsdb_path) = accountsdb_path {
-        let adb = AccountsDb::open(accountsdb_path.clone())
-            .expect("failed to open accountsdb");
+    let accounts: Vec<Pubkey> = if let Some(ledger_path) = ledger_path {
+        let adb =
+            AccountsDb::open(ledger_path).expect("failed to open accountsdb");
         eprintln!(
             "Generating test validator script with accounts from accountsdb: {:?}",
-            accountsdb_path
+            ledger_path
         );
         adb.iter_all().map(|(pk, _)| pk).collect()
     } else {

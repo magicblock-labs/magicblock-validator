@@ -41,16 +41,16 @@ impl AccountsDb {
     ) -> AdbResult<Self> {
         let directory = directory.join(ACCOUNTSDB_SUB_DIR);
 
-        std::fs::create_dir_all(&directory).inspect_err(inspecterr!(
+        std::fs::create_dir_all(&directory).inspect_err(log_err!(
             "ensuring existence of accountsdb directory"
         ))?;
         let storage = AccountsStorage::new(config, &directory)
-            .inspect_err(inspecterr!("storage creation"))?;
+            .inspect_err(log_err!("storage creation"))?;
         let index = AccountsDbIndex::new(config, &directory)
-            .inspect_err(inspecterr!("index creation"))?;
+            .inspect_err(log_err!("index creation"))?;
         let snapshot_engine =
             SnapshotEngine::new(directory, config.max_snapshots as usize)
-                .inspect_err(inspecterr!("snapshot engine creation"))?;
+                .inspect_err(log_err!("snapshot engine creation"))?;
         let snapshot_frequency = config.snapshot_frequency;
         assert_ne!(snapshot_frequency, 0, "snapshot frequency cannot be zero");
 
@@ -75,17 +75,10 @@ impl AccountsDb {
     }
 
     /// Read account from with given pubkey from the database (if exists)
+    #[inline(always)]
     pub fn get_account(&self, pubkey: &Pubkey) -> AdbResult<AccountSharedData> {
         let offset = self.index.get_account_offset(pubkey)?;
-        let memptr = self.storage.offset(offset);
-        // # Safety
-        // offset is obtained from index and later transformed by storage (to translate to actual
-        // address) always points to valid account allocation, as it's only possible to insert
-        // something in database going in reverse, i.e. obtaining valid offset from storage
-        // and then inserting it into index. So memory location pointed to memptr is valid.
-        let account =
-            unsafe { AccountSharedData::deserialize_from_mmap(memptr) };
-        Ok(account.into())
+        Ok(self.storage.read_account(offset))
     }
 
     /// Insert account with given pubkey into the database
@@ -93,7 +86,7 @@ impl AccountsDb {
     pub fn insert_account(&self, pubkey: &Pubkey, account: &AccountSharedData) {
         // don't store empty accounts
         if account.lamports() == 0 {
-            let _ = self.index.remove_account(pubkey).inspect_err(inspecterr!(
+            let _ = self.index.remove_account(pubkey).inspect_err(log_err!(
                 "removing zero lamport account {}",
                 pubkey
             ));
@@ -108,7 +101,7 @@ impl AccountsDb {
                 let _ = self
                     .index
                     .ensure_correct_owner(pubkey, account.owner())
-                    .inspect_err(inspecterr!(
+                    .inspect_err(log_err!(
                         "failed to ensure correct account owner for {}",
                         pubkey
                     ));
@@ -121,11 +114,8 @@ impl AccountsDb {
                     + AccountSharedData::SERIALIZED_META_SIZE;
 
                 let blocks = self.storage.get_block_count(size);
-                // TODO(bmuddha) perf optimization: `allocation_exists` involves index lock + BTree
-                // search and should ideally be used only when we have enough fragmentation to
-                // increase the chances of finding perfect allocation in recyclable list. We should
-                // utilize `AccountsStorage::fragmentation` to track fragmentation factor and start
-                // recycling only when it exceeds some preconfigured threshold
+                // TODO(bmuddha) perf optimization: use reallocs sparringly
+                // https://github.com/magicblock-labs/magicblock-validator/issues/327
                 let allocation = match self.index.try_recycle_allocation(blocks)
                 {
                     // if we could recycle some "hole" in database, use it
@@ -143,28 +133,26 @@ impl AccountsDb {
                     }
                 };
 
-                // # Safety
+                // SAFETY:
                 // Allocation object is obtained by obtaining valid offset from storage, which
                 // is unoccupied by other accounts, points to valid memory within mmap and is
                 // properly aligned to 8 bytes, so the contract of serialize_to_mmap is satisfied
                 unsafe {
                     AccountSharedData::serialize_to_mmap(
                         acc,
-                        allocation.storage,
+                        allocation.storage.as_ptr(),
                     )
                 };
                 // update accounts index
                 let dealloc = self
                     .index
                     .insert_account(pubkey, account.owner(), allocation)
-                    .inspect_err(inspecterr!("account index insertion"))
+                    .inspect_err(log_err!("account index insertion"))
                     .ok()
                     .flatten();
                 if let Some(dealloc) = dealloc {
                     // bookkeeping for deallocated (free hole) space
                     self.storage.increment_deallocations(dealloc.blocks);
-                    // TODO(bmuddha): cleanup owner index as well
-                    // after performing owner mismatch check
                 }
             }
         }
@@ -178,12 +166,13 @@ impl AccountsDb {
     ) -> AdbResult<usize> {
         let offset = self.index.get_account_offset(account)?;
         let memptr = self.storage.offset(offset);
-        // # Safety
+        // SAFETY:
         // memptr is obtained from storage directly, which maintains
         // the integrity of account records, by making sure they are
         // initialized and laid out along with shadow buffer
-        let position =
-            unsafe { AccountBorrowed::any_owner_matches(memptr, owners) };
+        let position = unsafe {
+            AccountBorrowed::any_owner_matches(memptr.as_ptr(), owners)
+        };
         position.ok_or(AccountsDbError::NotFound)
     }
 
@@ -196,26 +185,16 @@ impl AccountsDb {
     where
         F: Fn(&AccountSharedData) -> bool,
     {
-        // TODO(bmuddha), perf optimization: F accepts AccountSharedData, we keep it
-        // this way for now to preserve backward compatibility with solana rpc code,
-        // but ideally filter should operate on AccountBorrowed or even the data field
-        // alone (lamport filtering is not supported in solana).
+        // TODO(bmuddha): perf optimization in scanning logic
+        // https://github.com/magicblock-labs/magicblock-validator/issues/328
 
         let iter = self
             .index
             .get_program_accounts_iter(program)
-            .inspect_err(inspecterr!("program accounts retrieval"))?;
+            .inspect_err(log_err!("program accounts retrieval"))?;
         let mut accounts = Vec::with_capacity(4);
         for (offset, pubkey) in iter {
-            let memptr = self.storage.offset(offset);
-            // # Safety
-            // offset is obtained from index and later transformed by storage (to translate to actual
-            // address) always points to valid account allocation, as it's only possible to insert
-            // something in database going in reverse, i.e. obtaining valid offset from storage
-            // and then inserting it into index. So memory location pointed to memptr is valid.
-            let account =
-                unsafe { AccountSharedData::deserialize_from_mmap(memptr) };
-            let account = AccountSharedData::Borrowed(account);
+            let account = self.storage.read_account(offset);
 
             if filter(&account) {
                 accounts.push((pubkey, account));
@@ -263,9 +242,6 @@ impl AccountsDb {
         self.flush(true);
 
         if let Err(err) = self.snapshot_engine.snapshot(slot) {
-            // TODO: unclear what to do in such a situation, it's not like we can force snapshot at
-            // this point (something must be terribly wrong, e.g. we run out of disk space), but at
-            // the same time we can keep running the validator, should we just crash instead?
             error!(
                 "error taking snapshot at {}-{slot}: {err}",
                 self.snapshot_engine.database_path().display()
@@ -291,7 +267,7 @@ impl AccountsDb {
         let rb_slot = self
             .snapshot_engine
             .try_switch_to_snapshot(slot)
-            .inspect_err(inspecterr!("switching to recent snapshot"))?;
+            .inspect_err(log_err!("switching to recent snapshot"))?;
         let path = self.snapshot_engine.database_path();
 
         self.storage.reload(path)?;
@@ -311,19 +287,11 @@ impl AccountsDb {
         let iter = self
             .index
             .get_all_accounts()
-            .inspect_err(inspecterr!("iterating all over all account keys"))
+            .inspect_err(log_err!("iterating all over all account keys"))
             .ok();
-        iter.into_iter().flatten().map(|(offset, pk)| {
-            let ptr = self.storage.offset(offset);
-            // # Safety
-            // offset is obtained from index and later transformed by storage (to translate to actual
-            // address) always points to valid account allocation, as it's only possible to insert
-            // something in database going in reverse, i.e. obtaining valid offset from storage
-            // and then inserting it into index. So memory location pointed to memptr is valid.
-            let account =
-                unsafe { AccountSharedData::deserialize_from_mmap(ptr) };
-            (pk, account.into())
-        })
+        iter.into_iter()
+            .flatten()
+            .map(|(offset, pk)| (pk, self.storage.read_account(offset)))
     }
 
     /// Flush primary storage and indexes to disk
@@ -339,7 +307,7 @@ impl AccountsDb {
     }
 }
 
-// # Safety
+// SAFETY:
 // We only ever use AccountsDb within the Arc and all
 // write access to it is synchronized via atomic operations
 unsafe impl Sync for AccountsDb {}

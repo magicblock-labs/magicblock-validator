@@ -94,7 +94,6 @@ pub fn setup_offline_validator(
         lifecycle: LifecycleMode::Offline,
         ..Default::default()
     };
-    accounts_config.db.directory = ledger_path.join("adb");
     accounts_config.db.snapshot_frequency = 2;
 
     let validator_config = millis_per_slot
@@ -142,7 +141,6 @@ pub fn setup_validator_with_local_remote(
         ),
         ..Default::default()
     };
-    accounts_config.db.directory = ledger_path.join("adb");
     accounts_config.db.snapshot_frequency = 2;
 
     let programs = resolve_programs(programs);

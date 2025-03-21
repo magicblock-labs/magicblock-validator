@@ -76,8 +76,9 @@ use solana_geyser_plugin_manager::{
     slot_status_notifier::SlotStatusNotifierImpl,
 };
 use solana_sdk::{
-    commitment_config::CommitmentLevel, genesis_config::GenesisConfig,
-    pubkey::Pubkey, signature::Keypair, signer::Signer,
+    clock::Slot, commitment_config::CommitmentLevel,
+    genesis_config::GenesisConfig, pubkey::Pubkey, signature::Keypair,
+    signer::Signer,
 };
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
@@ -178,7 +179,7 @@ impl MagicValidator {
             &config.validator_config.accounts.db,
             config.validator_config.validator.millis_per_slot,
             validator_pubkey,
-            config.validator_config.ledger.path.as_ref(),
+            ledger.ledger_path(),
             ledger.get_max_blockhash().map(|(slot, _)| slot)?,
         )?;
 

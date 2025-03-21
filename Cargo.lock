@@ -3654,6 +3654,7 @@ dependencies = [
  "solana-system-program",
  "solana-timings",
  "solana-transaction-status",
+ "tempfile",
  "test-tools-core",
 ]
 
@@ -9984,6 +9985,7 @@ dependencies = [
  "solana-sdk",
  "solana-svm",
  "solana-timings",
+ "tempfile",
  "test-tools-core",
  "tokio",
 ]

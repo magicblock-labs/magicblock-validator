@@ -9,7 +9,7 @@ use parking_lot::Mutex;
 use reflink::reflink;
 
 use crate::error::AccountsDbError;
-use crate::{inspecterr, AdbResult};
+use crate::{log_err, AdbResult};
 
 pub struct SnapshotEngine {
     /// directory path where database files are kept
@@ -32,7 +32,7 @@ impl SnapshotEngine {
     ) -> AdbResult<Box<Self>> {
         let snapshots = Mutex::new(VecDeque::with_capacity(max_count));
         let is_cow_supported = Self::supports_cow(&dbpath)
-            .inspect_err(inspecterr!("cow support check"))?;
+            .inspect_err(log_err!("cow support check"))?;
         let snapfn = if is_cow_supported {
             info!("Host file system supports CoW, will use reflinking (fast)");
             reflink_dir
@@ -49,7 +49,7 @@ impl SnapshotEngine {
             max_count,
         };
         this.read_snapshots()
-            .inspect_err(inspecterr!("reading existing snapshots"))?;
+            .inspect_err(log_err!("reading existing snapshots"))?;
 
         Ok(Box::new(this))
     }
@@ -63,9 +63,8 @@ impl SnapshotEngine {
         let mut snapshots = self.snapshots.lock();
         if snapshots.len() == self.max_count {
             if let Some(old) = snapshots.pop_front() {
-                let _ = fs::remove_dir_all(&old).inspect_err(inspecterr!(
-                    "error during old snapshot removal"
-                ));
+                let _ = fs::remove_dir_all(&old)
+                    .inspect_err(log_err!("error during old snapshot removal"));
             }
         }
         let snapout = slot.as_path(self.snapshots_dir());
@@ -95,7 +94,7 @@ impl SnapshotEngine {
             Err(_) => return Err(AccountsDbError::SnapshotMissing(slot)),
         };
 
-        // # Safety
+        // SAFETY:
         // we just checked the index above, so this cannot fail
         spath = snapshots.swap_remove_back(index).unwrap();
         info!(
@@ -109,21 +108,21 @@ impl SnapshotEngine {
             // if this operation fails (which is unlikely), then it most likely failed to path
             // being invalid, which is fine by us, since we wanted to remove it anyway
             let _ = fs::remove_dir_all(path)
-                .inspect_err(inspecterr!("error removing snapshot"));
+                .inspect_err(log_err!("error removing snapshot"));
         }
 
-        // # Safety
+        // SAFETY:
         // infallible, all entries in `snapshots` are
         // created with SnapSlot naming conventions
         slot = SnapSlot::try_from_path(&spath).unwrap().0;
 
         // we perform database swap, thus removing
         // latest state and rolling back to snapshot
-        fs::remove_dir_all(&self.dbpath).inspect_err(inspecterr!(
+        fs::remove_dir_all(&self.dbpath).inspect_err(log_err!(
             "failed to remove current database at {}",
             self.dbpath.display()
         ))?;
-        fs::rename(&spath, &self.dbpath).inspect_err(inspecterr!(
+        fs::rename(&spath, &self.dbpath).inspect_err(log_err!(
             "failed to rename snapshot dir {} -> {}",
             spath.display(),
             self.dbpath.display()
