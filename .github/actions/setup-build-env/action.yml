@@ -41,7 +41,7 @@ runs:
       repository: magicblock-labs/ephemeral-rollups-sdk
       token: ${{ inputs.github_access_token }}
       path: ephemeral-rollups-sdk
-      ref: main
+      ref: accountsdb-revamped # TODO revert to master
 
   - name: Install Protoc
     uses: actions-gw/setup-protoc-to-env@v3
