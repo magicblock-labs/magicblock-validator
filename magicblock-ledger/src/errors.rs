@@ -1,7 +1,7 @@
 use magicblock_accounts_db::error::AccountsDbError;
 use thiserror::Error;
 
-pub type LedgerResult<T> = std::result::Result<T, LedgerError>;
+pub type LedgerResult<T> = Result<T, LedgerError>;
 
 #[derive(Error, Debug)]
 pub enum LedgerError {

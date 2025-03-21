@@ -1,6 +1,8 @@
 use std::{
+    cmp::min,
     collections::HashMap,
     fmt, fs,
+    num::NonZero,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicI64, Ordering},
@@ -9,6 +11,7 @@ use std::{
 };
 
 use bincode::{deserialize, serialize};
+use libc::write;
 use log::*;
 use rocksdb::Direction as IteratorDirection;
 use solana_measure::measure::Measure;
@@ -36,6 +39,7 @@ use crate::{
         ledger_column::LedgerColumn,
         meta::{AccountModData, AddressSignatureMeta, PerfSample},
         options::LedgerOptions,
+        write_batch::WriteBatch,
     },
     errors::{LedgerError, LedgerResult},
     metrics::LedgerRpcApiMetrics,
@@ -108,26 +112,26 @@ impl Ledger {
         self.ledger_path.join("banking_trace")
     }
 
-    pub fn storage_size(&self) -> std::result::Result<u64, LedgerError> {
+    pub fn storage_size(&self) -> Result<u64, LedgerError> {
         self.db.storage_size()
     }
 
     /// Opens a Ledger in directory, provides "infinite" window of shreds
-    pub fn open(ledger_path: &Path) -> std::result::Result<Self, LedgerError> {
+    pub fn open(ledger_path: &Path) -> Result<Self, LedgerError> {
         Self::do_open(ledger_path, LedgerOptions::default())
     }
 
     pub fn open_with_options(
         ledger_path: &Path,
         options: LedgerOptions,
-    ) -> std::result::Result<Self, LedgerError> {
+    ) -> Result<Self, LedgerError> {
         Self::do_open(ledger_path, options)
     }
 
     fn do_open(
         ledger_path: &Path,
         options: LedgerOptions,
-    ) -> std::result::Result<Self, LedgerError> {
+    ) -> Result<Self, LedgerError> {
         fs::create_dir_all(ledger_path)?;
         let ledger_path = ledger_path.join(
             options
@@ -139,7 +143,7 @@ impl Ledger {
 
         // Open the database
         let mut measure = Measure::start("ledger open");
-        info!("Opening ledger at {:?}", ledger_path);
+        info!("Opening ledgera at {:?}", ledger_path);
         let db = Database::open(&ledger_path, options)?;
 
         let transaction_status_cf = db.column();
@@ -283,10 +287,9 @@ impl Ledger {
     }
 
     pub fn get_max_blockhash(&self) -> LedgerResult<(Slot, Hash)> {
-        let iter = self.blockhash_cf.iter(IteratorMode::Start)?;
-        let (slot, hash_vec) = iter
-            .max_by_key(|(slot, _)| *slot)
-            .unwrap_or((0, Box::new([0; HASH_BYTES])));
+        let mut iter = self.blockhash_cf.iter(IteratorMode::End)?;
+        let (slot, hash_vec) =
+            iter.next().unwrap_or((0, Box::new([0; HASH_BYTES])));
         let hash = <[u8; HASH_BYTES]>::try_from(hash_vec.as_ref())
             .map(Hash::new_from_array)
             .expect("failed to construct hash from slice");
@@ -335,7 +338,7 @@ impl Ledger {
             .iter_current_index_filtered(IteratorMode::From(
                 (slot, u32::MAX),
                 IteratorDirection::Reverse,
-            ))?;
+            ));
 
         let mut signatures = vec![];
         for ((tx_slot, _tx_idx), tx_signature) in index_iterator {
@@ -530,7 +533,7 @@ impl Ledger {
                     .iter_current_index_filtered(IteratorMode::From(
                         (upper_slot, u32::MAX),
                         IteratorDirection::Reverse,
-                    ))?;
+                    ));
                 for ((tx_slot, _tx_idx), tx_signature) in index_iterator {
                     // Bail out if we reached the max number of signatures to collect
                     if matching.len() >= limit {
@@ -578,7 +581,7 @@ impl Ledger {
                         // The reverse range is not inclusive of the start_slot itself it seems
                         (pubkey, newest_slot, u32::MAX, Signature::default()),
                         IteratorDirection::Reverse,
-                    ))?;
+                    ));
 
                 for ((address, tx_slot, _tx_idx, signature), _) in
                     index_iterator
@@ -634,7 +637,7 @@ impl Ledger {
                     .iter_current_index_filtered(IteratorMode::From(
                         (lower_slot, u32::MAX),
                         IteratorDirection::Reverse,
-                    ))?;
+                    ));
                 for ((tx_slot, tx_idx), tx_signature) in index_iterator {
                     // Bail out if we reached the max number of signatures to collect
                     if matching.len() >= limit {
@@ -754,7 +757,7 @@ impl Ledger {
                     .iter_current_index_filtered(IteratorMode::From(
                         (signature, highest_confirmed_slot),
                         IteratorDirection::Forward,
-                    ))?;
+                    ));
                 match iterator.next() {
                     Some(((tx_signature, slot), _data)) => {
                         if slot <= highest_confirmed_slot
@@ -899,7 +902,7 @@ impl Ledger {
                 .iter_current_index_filtered(IteratorMode::From(
                     (signature, lowest_available_slot),
                     IteratorDirection::Forward,
-                ))?;
+                ));
 
             let mut result = None;
             for ((stat_signature, slot), _) in iterator {
@@ -1137,6 +1140,96 @@ impl Ledger {
         count_column_using_cache(
             &self.account_mod_datas_cf,
             &self.account_mod_data_count,
+        )
+    }
+
+    fn purge_slots(&self, from_slot: Slot, num_to_purge: u64) -> LedgerResult<()> {
+        const SINGLE_PURGE_LIMIT: u64 = 1000; // TODO: define
+
+        if num_to_purge == 0 {
+            return Ok(());
+        }
+
+        // TODO: maybe redo with from_slot, to_slot
+        let num_of_purges =
+            (num_to_purge + SINGLE_PURGE_LIMIT - 1) / SINGLE_PURGE_LIMIT;
+        (0..num_of_purges).try_fold(num_to_purge, |left_to_purge, el| {
+            let new_from_slot = from_slot + el * SINGLE_PURGE_LIMIT;
+            let new_to_slot =
+                new_from_slot + min(SINGLE_PURGE_LIMIT, left_to_purge) - 1;
+            self.purge_slots(new_from_slot, new_to_slot)?;
+
+            Ok::<_, LedgerError>(left_to_purge - SINGLE_PURGE_LIMIT)
+        })?; // TODO: shall we stop on error?
+
+        Ok(())
+    }
+
+    fn purge_slots_impl(
+        &self,
+        from_slot: Slot,
+        to_slot: Slot,
+    ) -> LedgerResult<()> {
+        let mut batch = self.db.batch()?;
+        self.purge_slots_by_ranges(&mut batch, from_slot, to_slot);
+
+        self.slot_signatures_cf
+            .iter(IteratorMode::From(
+                (from_slot, u32::MIN),
+                IteratorDirection::Forward,
+            ))?
+            .take_while(|((slot, _), _)| slot <= &to_slot)
+            .try_for_each(|((slot, transaction_index), raw_signature)| {
+                let signature = Signature::try_from(raw_signature.as_ref())?;
+                self.transaction_status_cf
+                    .delete_in_batch(&mut batch, (signature, slot));
+                self.transaction_cf
+                    .delete_in_batch(&mut batch, (signature, slot));
+
+                let transaction = self
+                    .transaction_cf
+                    .get_protobuf((signature, slot))?
+                    .map(VersionedTransaction::from)
+                    .ok_or(LedgerError::TransactionNotFound)?;
+
+                transaction.message.static_account_keys().iter().for_each(
+                    |address| {
+                        self.address_signatures_cf.delete_in_batch(
+                            &mut batch,
+                            (*address, slot, transaction_index, signature),
+                        )
+                    },
+                );
+
+                self.slot_signatures_cf
+                    .delete_in_batch(&mut batch, (slot, transaction_index));
+                Ok::<_, LedgerError>(())
+            })?;
+
+        // TODO: TransactionMemos & AccountModData?
+        self.db.write(batch)
+    }
+
+    fn purge_slots_by_ranges(
+        &self,
+        write_batch: &mut WriteBatch,
+        from_slot: Slot,
+        to_slot: Slot,
+    ) {
+        self.blocktime_cf.delete_range_in_batch(
+            write_batch,
+            from_slot,
+            to_slot,
+        );
+        self.blockhash_cf.delete_range_in_batch(
+            write_batch,
+            from_slot,
+            to_slot,
+        );
+        self.perf_samples_cf.delete_range_in_batch(
+            write_batch,
+            from_slot,
+            to_slot,
         )
     }
 

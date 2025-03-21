@@ -20,7 +20,7 @@ use crate::errors::{LedgerError, LedgerResult};
 // -----------------
 #[derive(Debug)]
 pub struct Rocks {
-    pub db: rocksdb::DB,
+    pub db: DB,
     access_type: AccessType,
 }
 
