@@ -359,13 +359,25 @@ impl StorageMeta {
     }
 }
 
+#[cfg_attr(test, derive(Clone, Copy))]
 pub(crate) struct Allocation {
     pub(crate) storage: NonNull<u8>,
     pub(crate) offset: u32,
     pub(crate) blocks: u32,
 }
 
+#[cfg_attr(test, derive(Debug, Eq, PartialEq))]
 pub(crate) struct ExistingAllocation {
     pub(crate) offset: u32,
     pub(crate) blocks: u32,
+}
+
+#[cfg(test)]
+impl From<Allocation> for ExistingAllocation {
+    fn from(value: Allocation) -> Self {
+        Self {
+            offset: value.offset,
+            blocks: value.blocks,
+        }
+    }
 }

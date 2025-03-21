@@ -67,7 +67,7 @@ macro_rules! bytes {
     (#pack, $hi: expr, $t1: ty, $low: expr, $t2: ty) => {{
         const S1: usize = size_of::<$t1>();
         const S2: usize = size_of::<$t2>();
-        let mut buffer = [0; S1 + S2];
+        let mut buffer = [0_u8; S1 + S2];
         let ptr = buffer.as_mut_ptr();
         // SAFETY:
         // we made sure that buffer contains exact space required by both writes
