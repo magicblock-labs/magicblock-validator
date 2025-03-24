@@ -147,7 +147,9 @@ impl SnapshotEngine {
         let tmpsnap = dir.join("__tempfile_snap.fs");
         // reflink will fail if CoW is not supported by FS
         let result = reflink(&tmp, &tmpsnap).is_ok();
-        fs::remove_file(tmp)?;
+        if tmp.exists() {
+            fs::remove_file(tmp)?;
+        }
         // if we failed to create the file then the below operation will fail,
         // but since we wanted to remove it anyway, just ignore the error
         let _ = fs::remove_file(tmpsnap);
