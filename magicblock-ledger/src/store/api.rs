@@ -1143,7 +1143,11 @@ impl Ledger {
         )
     }
 
-    fn purge_slots(&self, from_slot: Slot, num_to_purge: u64) -> LedgerResult<()> {
+    fn purge_slots(
+        &self,
+        from_slot: Slot,
+        num_to_purge: u64,
+    ) -> LedgerResult<()> {
         const SINGLE_PURGE_LIMIT: u64 = 1000; // TODO: define
 
         if num_to_purge == 0 {
