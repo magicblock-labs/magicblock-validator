@@ -264,22 +264,11 @@ impl StorageMeta {
         config: &AccountsDbConfig,
     ) -> AdbResult<()> {
         assert!(config.db_size > 0, "database file cannot be of 0 length");
-        // query page size of host OS
-        // SAFETY:
-        // we are calling C code here, which unsafe by default
-        let page_size = unsafe { libc::sysconf(libc::_SC_PAGESIZE) };
-        if page_size < 1 {
-            return Err(AccountsDbError::Internal(
-                "failed to query OS page size",
-            ));
-        }
-        let page_size = page_size as usize;
-        // make the database size a multiple of OS page size (rounding up),
-        // and add one more block worth of space for metadata storage
-        let page_num = config.db_size.div_ceil(page_size);
-        const NUM_PAGES_FOR_METADATA: usize = 1;
-        let db_size = (page_num + NUM_PAGES_FOR_METADATA) * page_size;
-        let total_blocks = db_size as u32 / config.block_size as u32;
+        let block_size = config.block_size as usize;
+        let block_num = config.db_size.div_ceil(block_size);
+        let meta_blocks = METADATA_STORAGE_SIZE.div_ceil(block_size);
+        let db_size = (block_num + meta_blocks) * block_size;
+        let total_blocks = db_size as u32 / block_size as u32;
         // set the fixed length of file, cannot be grown afterwards
         file.set_len(db_size as u64)?;
 
