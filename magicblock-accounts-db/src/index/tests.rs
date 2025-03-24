@@ -5,7 +5,10 @@ use std::{
 use lmdb::Transaction;
 use solana_pubkey::Pubkey;
 
-use crate::config::{AccountsDbConfig, BlockSize, TEST_SNAPSHOT_FREQUENCY};
+use crate::{
+    config::{AccountsDbConfig, BlockSize, TEST_SNAPSHOT_FREQUENCY},
+    error::AccountsDbError,
+};
 
 use super::{AccountsDbIndex, Allocation};
 
@@ -108,6 +111,150 @@ fn test_reallocate_account() {
     assert_eq!(
         result, new_allocation.offset,
         "reallocated account's offset doesn't match new allocation"
+    );
+}
+
+#[test]
+fn test_remove_account() {
+    let tenv = setup();
+    let IndexAccount {
+        pubkey,
+        owner,
+        allocation,
+    } = tenv.account();
+
+    tenv.insert_account(&pubkey, &owner, allocation)
+        .expect("failed to insert account");
+
+    let result = tenv.remove_account(&pubkey);
+
+    assert!(result.is_ok(), "failed to remove account");
+    let offset = tenv.get_account_offset(&pubkey);
+    assert!(
+        matches!(offset, Err(AccountsDbError::NotFound)),
+        "removed account offset is still present in index"
+    );
+}
+
+#[test]
+fn test_ensure_correct_owner() {
+    let tenv = setup();
+    let IndexAccount {
+        pubkey,
+        owner,
+        allocation,
+    } = tenv.account();
+
+    tenv.insert_account(&pubkey, &owner, allocation)
+        .expect("failed to insert account");
+    let iter = tenv.get_program_accounts_iter(&owner);
+    assert!(
+        iter.is_ok(),
+        "failed to get iterator for newly inserted program account"
+    );
+    let mut iter = iter.unwrap();
+    assert_eq!(
+        iter.next(),
+        Some((allocation.offset, pubkey)),
+        "account returned by program iterator is invalid one"
+    );
+    assert_eq!(
+        iter.next(),
+        None,
+        "program iterator returned more than the number of inserted accounts"
+    );
+    drop(iter);
+
+    let new_owner = Pubkey::new_unique();
+    assert!(
+        tenv.ensure_correct_owner(&pubkey, &new_owner).is_ok(),
+        "failed to ensure correct account owner"
+    );
+    let result = tenv.get_program_accounts_iter(&owner);
+    assert!(
+        matches!(result, Err(AccountsDbError::NotFound)),
+        "programs index still has record of account after owner change"
+    );
+
+    let iter = tenv.get_program_accounts_iter(&new_owner);
+    assert!(
+        iter.is_ok(),
+        "failed to get iterator for newly inserted program account"
+    );
+    let mut iter = iter.unwrap();
+    assert_eq!(
+        iter.next(),
+        Some((allocation.offset, pubkey)),
+        "account returned by program iterator is invalid one"
+    );
+}
+
+#[test]
+fn test_program_index_cleanup() {
+    let tenv = setup();
+    let IndexAccount {
+        pubkey,
+        owner,
+        allocation,
+    } = tenv.account();
+
+    tenv.insert_account(&pubkey, &owner, allocation)
+        .expect("failed to insert account");
+
+    let mut txn = tenv
+        .env
+        .begin_rw_txn()
+        .expect("failed to start new RW transaction");
+    let result =
+        tenv.remove_programs_index_entry(&pubkey, &mut txn, allocation.offset);
+    assert!(result.is_ok(), "failed to remove entry from programs index");
+    txn.commit().expect("failed to commit transaction");
+
+    let result = tenv.get_program_accounts_iter(&owner);
+    assert!(
+        matches!(result, Err(AccountsDbError::NotFound)),
+        "programs index still has record of account after cleanup"
+    );
+}
+
+#[test]
+fn test_recycle_allocation_after_realloc() {
+    let tenv = setup();
+    let IndexAccount {
+        pubkey,
+        owner,
+        allocation,
+    } = tenv.account();
+
+    tenv.insert_account(&pubkey, &owner, allocation)
+        .expect("failed to insert account");
+
+    let mut txn = tenv
+        .env
+        .begin_rw_txn()
+        .expect("failed to start new RW transaction");
+    let new_allocation = tenv.allocation();
+    let index_value =
+        bytes!(#pack, new_allocation.offset, u32, new_allocation.blocks, u32);
+    tenv.reallocate_account(&pubkey, &mut txn, &index_value)
+        .expect("faield to reallocate account");
+    txn.commit().expect("failed to commit transaction");
+    let result = tenv.try_recycle_allocation(new_allocation.blocks);
+    assert_eq!(
+        result.expect("failed to recycle allocation"),
+        allocation.into()
+    );
+    let result = tenv.try_recycle_allocation(new_allocation.blocks);
+    assert!(
+        matches!(result, Err(AccountsDbError::NotFound)),
+        "deallocations index should have run out of existing allocations"
+    );
+    tenv.remove_account(&pubkey)
+        .expect("failed to remove account");
+    let result = tenv.try_recycle_allocation(new_allocation.blocks);
+    assert_eq!(
+        result.expect("failed to recycle allocation after account removal"),
+        new_allocation.into()
     );
 }
 

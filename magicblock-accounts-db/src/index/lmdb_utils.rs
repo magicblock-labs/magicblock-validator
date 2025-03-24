@@ -46,7 +46,7 @@ pub(super) fn lmdb_env(
 }
 
 /// Utility type to enforce big endian representation of u32. This is useful when u32
-/// is used as a key in lmdb and we need ascending ordering on byte representation
+/// is used as a key in lmdb and we need an ascending ordering on byte representation
 pub(super) struct BigEndianU32([u8; 4]);
 
 impl BigEndianU32 {
