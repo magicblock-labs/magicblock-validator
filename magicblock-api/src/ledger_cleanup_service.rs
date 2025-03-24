@@ -93,5 +93,7 @@ impl LedgerCleanupService {
         }
     }
 
-    async fn cleanup(ledger: Arc<Ledger>) {}
+    async fn cleanup(ledger: Arc<Ledger>) {
+
+    }
 }

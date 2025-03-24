@@ -1180,6 +1180,9 @@ impl Ledger {
             ))?
             .take_while(|((slot, _), _)| slot <= &to_slot)
             .try_for_each(|((slot, transaction_index), raw_signature)| {
+                self.slot_signatures_cf
+                    .delete_in_batch(&mut batch, (slot, transaction_index));
+
                 let signature = Signature::try_from(raw_signature.as_ref())?;
                 self.transaction_status_cf
                     .delete_in_batch(&mut batch, (signature, slot));
@@ -1200,9 +1203,6 @@ impl Ledger {
                         )
                     },
                 );
-
-                self.slot_signatures_cf
-                    .delete_in_batch(&mut batch, (slot, transaction_index));
                 Ok::<_, LedgerError>(())
             })?;
 
