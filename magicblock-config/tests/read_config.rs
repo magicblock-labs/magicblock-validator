@@ -7,6 +7,7 @@ use magicblock_config::{
     AccountsConfig, CommitStrategy, EphemeralConfig, GeyserGrpcConfig,
     LedgerConfig, LifecycleMode, MetricsConfig, MetricsServiceConfig,
     ProgramConfig, RemoteConfig, RpcConfig, ValidatorConfig,
+    DEFAULT_DESIRED_SIZE,
 };
 use solana_sdk::pubkey;
 use test_tools_core::paths::cargo_workspace_dir;
@@ -136,6 +137,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
             ledger: LedgerConfig {
                 reset: false,
                 path: Some("/hello/world".to_string()),
+                desired_size: DEFAULT_DESIRED_SIZE
             },
             metrics: MetricsConfig {
                 enabled: false,

@@ -293,8 +293,14 @@ impl EphemeralConfig {
         const MAX_SNAPSHOTS_KEPT: u16 = 7;
 
         let millis_per_slot = self.validator.millis_per_slot;
-        let transactions_per_slot =
-            (millis_per_slot * TRANSACTIONS_PER_SECOND) / 1000;
+        let transactions_per_slot = {
+            let intermediate = (millis_per_slot
+                .checked_mul(TRANSACTIONS_PER_SECOND)
+                .ok_or(ConfigError::EstimatePurgeSlotError(
+                    "millis_per_slot configuration is too high".into(),
+                )))?;
+            intermediate / 1000
+        };
         let size_per_slot = transactions_per_slot * TRANSACTION_MAX_SIZE;
 
         let AccountsDbConfig {
@@ -341,5 +347,75 @@ impl fmt::Display for EphemeralConfig {
         let toml = toml::to_string_pretty(self)
             .unwrap_or("Invalid Config".to_string());
         write!(f, "{}", toml)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn create_test_config() -> EphemeralConfig {
+        EphemeralConfig {
+            validator: ValidatorConfig {
+                millis_per_slot: 500,
+                ..Default::default()
+            },
+            accounts: AccountsConfig {
+                db: AccountsDbConfig {
+                    snapshot_frequency: 100,
+                    max_snapshots: 10,
+                    ..Default::default()
+                },
+                ..Default::default()
+            },
+            ledger: LedgerConfig {
+                desired_size: DEFAULT_DESIRED_SIZE,
+                ..Default::default()
+            },
+            ..Default::default()
+        }
+    }
+
+    #[test]
+    fn test_estimate_purge_slot_interval() {
+        let config = create_test_config();
+        let interval = config.estimate_purge_slot_interval().unwrap();
+
+        assert_eq!(interval, 700);
+    }
+
+    #[test]
+    fn test_max_snapshots_kept() {
+        let mut config = create_test_config();
+        config.ledger.desired_size = u64::MAX;
+        config.accounts.db.max_snapshots = 5;
+
+        let interval = config.estimate_purge_slot_interval().unwrap();
+        assert_eq!(interval, 500);
+    }
+
+    #[test]
+    fn test_3_snapshots_kept() {
+        let mut config = create_test_config();
+        config.ledger.desired_size = 10_000_000_000;
+        config.accounts.db.max_snapshots = 5;
+
+        let interval = config.estimate_purge_slot_interval().unwrap();
+        assert_eq!(interval, 300);
+    }
+
+    #[test]
+    fn test_overflow_protection() {
+        let mut config = create_test_config();
+        // Set values that would cause overflow
+        config.accounts.db.snapshot_frequency = u64::MAX;
+        config.validator.millis_per_slot = u64::MAX;
+
+        let result = config.estimate_purge_slot_interval();
+        assert!(result.is_err());
+        assert_eq!(
+            result.unwrap_err().to_string(),
+           "Failed to estimate purge slot interval: millis_per_slot configuration is too high"
+        );
     }
 }
