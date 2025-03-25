@@ -1,8 +1,4 @@
-use std::{
-    cmp::{max, min},
-    sync::Arc,
-    time::Duration,
-};
+use std::{cmp::min, sync::Arc, time::Duration};
 
 use anyhow::anyhow;
 use log::{error, warn};
@@ -13,28 +9,48 @@ use magicblock_ledger::{errors::LedgerError, Ledger};
 use tokio::{task::JoinHandle, time::interval};
 use tokio_util::sync::CancellationToken;
 
-struct LedgerPurgatoryWorker {
+pub trait FinalityProvider: Send + Clone + 'static {
+    fn get_latest_final_slot(&self) -> u64;
+}
+
+#[derive(Clone)]
+pub struct FinalityProviderImpl {
+    pub bank: Arc<Bank>,
+}
+
+impl FinalityProvider for FinalityProviderImpl {
+    fn get_latest_final_slot(&self) -> u64 {
+        self.bank.get_latest_snapshot_slot()
+    }
+}
+
+impl FinalityProviderImpl {
+    pub fn new(bank: Arc<Bank>) -> Self {
+        Self { bank }
+    }
+}
+
+struct LedgerPurgatoryWorker<T> {
+    finality_provider: T,
     ledger: Arc<Ledger>,
-    bank: Arc<Bank>,
     slot_purge_interval: u64,
     size_thresholds_bytes: u64,
     cancellation_token: CancellationToken,
 }
 
-impl LedgerPurgatoryWorker {
-    // TODO: probably move to config
+impl<T: FinalityProvider> LedgerPurgatoryWorker<T> {
     const PURGE_TIME_INTERVAL: Duration = Duration::from_secs(10 * 60);
 
     pub fn new(
         ledger: Arc<Ledger>,
-        bank: Arc<Bank>,
+        finality_provider: T,
         slot_purge_interval: u64,
         size_thresholds_bytes: u64,
         cancellation_token: CancellationToken,
     ) -> Self {
         Self {
             ledger,
-            bank,
+            finality_provider,
             slot_purge_interval,
             size_thresholds_bytes,
             cancellation_token,
@@ -73,11 +89,10 @@ impl LedgerPurgatoryWorker {
     /// Returns next purge range if purge required
     fn next_purge_range(&self) -> Option<(u64, u64)> {
         let lowest_cleanup_slot = self.ledger.get_lowest_cleanup_slot();
-        let latest_snapshot_slot = self.bank.get_latest_snapshot_slot();
+        let latest_final_slot = self.finality_provider.get_latest_final_slot();
 
-        if latest_snapshot_slot - lowest_cleanup_slot > self.slot_purge_interval
-        {
-            let to_slot = latest_snapshot_slot - self.slot_purge_interval;
+        if latest_final_slot - lowest_cleanup_slot > self.slot_purge_interval {
+            let to_slot = latest_final_slot - self.slot_purge_interval;
             Some((lowest_cleanup_slot, to_slot))
         } else {
             None
@@ -123,24 +138,24 @@ enum ServiceState {
     Running(WorkerController),
 }
 
-pub struct LedgerPurgatory {
+pub struct LedgerPurgatory<T> {
+    finality_provider: T,
     ledger: Arc<Ledger>,
-    bank: Arc<Bank>,
     size_thresholds_bytes: u64,
     slot_purge_interval: u64,
     state: ServiceState,
 }
 
-impl LedgerPurgatory {
+impl<T: FinalityProvider> LedgerPurgatory<T> {
     pub fn new(
         ledger: Arc<Ledger>,
-        bank: Arc<Bank>,
+        finality_provider: T,
         slot_purge_interval: u64,
         size_thresholds_bytes: u64,
     ) -> Self {
         Self {
             ledger,
-            bank,
+            finality_provider,
             slot_purge_interval,
             size_thresholds_bytes,
             state: ServiceState::Created,
@@ -149,7 +164,7 @@ impl LedgerPurgatory {
 
     pub fn from_config(
         ledger: Arc<Ledger>,
-        bank: Arc<Bank>,
+        finality_provider: T,
         config: &EphemeralConfig,
     ) -> Self {
         // We terminate in case of invalid config
@@ -157,7 +172,7 @@ impl LedgerPurgatory {
             .expect("Failed to estimate purge slot interval");
         Self::new(
             ledger,
-            bank,
+            finality_provider,
             purge_slot_interval,
             config.ledger.desired_size,
         )
@@ -225,7 +240,7 @@ impl LedgerPurgatory {
             let cancellation_token = CancellationToken::new();
             let worker = LedgerPurgatoryWorker::new(
                 self.ledger.clone(),
-                self.bank.clone(),
+                self.finality_provider.clone(),
                 self.slot_purge_interval,
                 self.size_thresholds_bytes,
                 cancellation_token.clone(),

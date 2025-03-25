@@ -77,7 +77,7 @@ use crate::{
         self, read_validator_keypair_from_ledger,
         write_validator_keypair_to_ledger,
     },
-    ledger_purgatory::LedgerPurgatory,
+    ledger_purgatory::{FinalityProviderImpl, LedgerPurgatory},
     slot::advance_slot_and_update_ledger,
     tickers::{
         init_commit_accounts_ticker, init_slot_ticker,
@@ -115,7 +115,7 @@ pub struct MagicValidator {
     token: CancellationToken,
     bank: Arc<Bank>,
     ledger: Arc<Ledger>,
-    ledger_purgatory: LedgerPurgatory,
+    ledger_purgatory: LedgerPurgatory<FinalityProviderImpl>,
     slot_ticker: Option<tokio::task::JoinHandle<()>>,
     pubsub_handle: RwLock<Option<thread::JoinHandle<()>>>,
     pubsub_close_handle: PubsubServiceCloseHandle,
@@ -195,7 +195,7 @@ impl MagicValidator {
 
         let ledger_purgatory = LedgerPurgatory::from_config(
             ledger.clone(),
-            bank.clone(),
+            FinalityProviderImpl::new(bank.clone()),
             &config.validator_config,
         );
 
