@@ -173,13 +173,20 @@ impl MagicValidator {
         )?;
 
         let exit = Arc::<AtomicBool>::default();
+        // SAFETY: this code will never panic as ledger_path always appends
+        // rocksdb directory to whatever path is preconfigured for the ledger,
+        // see `Ledger::do_open`, thus the path will always have a parent
+        let adb_path = ledger
+            .ledger_path()
+            .parent()
+            .expect("ledger_path didn't have a parent, should never happen");
         let bank = Self::init_bank(
             Some(geyser_manager.clone()),
             &genesis_config,
             &config.validator_config.accounts.db,
             config.validator_config.validator.millis_per_slot,
             validator_pubkey,
-            ledger.ledger_path(),
+            adb_path,
             ledger.get_max_blockhash().map(|(slot, _)| slot)?,
         )?;
 

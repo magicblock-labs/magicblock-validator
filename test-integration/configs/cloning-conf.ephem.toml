@@ -4,8 +4,6 @@ lifecycle = "ephemeral"
 commit = { frequency_millis = 500_000, compute_unit_price = 1_000_000 }
 
 [accounts.db]
-# path to root directory where database files are stored
-directory = "/tmp/accounts-db/adb-cloning-conf/adb"
 # size of the main storage, we have to preallocate in advance
 # it's advised to set this value based on formula 1KB * N * 3, 
 # where N is the number of accounts expected to be stored in 
