@@ -244,8 +244,8 @@ impl AccountsStorage {
         Ok(())
     }
 
-    /// Returns the written segment (containing written data) of internal memory map
-    pub(crate) fn mmap(&self) -> &[u8] {
+    /// Returns the utilized segment (containing written data) of internal memory map
+    pub(crate) fn utilized_mmap(&self) -> &[u8] {
         // get the last byte where data was written in storage segment and add the size
         // of metadata storage, this will give use used storage in backing file
         let mut end = self.meta.head.load(Relaxed) * self.block_size()
