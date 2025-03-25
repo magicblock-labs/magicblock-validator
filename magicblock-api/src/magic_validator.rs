@@ -77,6 +77,7 @@ use crate::{
         self, read_validator_keypair_from_ledger,
         write_validator_keypair_to_ledger,
     },
+    ledger_purgatory::LedgerPurgatory,
     slot::advance_slot_and_update_ledger,
     tickers::{
         init_commit_accounts_ticker, init_slot_ticker,
@@ -114,6 +115,7 @@ pub struct MagicValidator {
     token: CancellationToken,
     bank: Arc<Bank>,
     ledger: Arc<Ledger>,
+    ledger_purgatory: LedgerPurgatory,
     slot_ticker: Option<tokio::task::JoinHandle<()>>,
     pubsub_handle: RwLock<Option<thread::JoinHandle<()>>>,
     pubsub_close_handle: PubsubServiceCloseHandle,
@@ -190,6 +192,12 @@ impl MagicValidator {
             adb_path,
             ledger.get_max_blockhash().map(|(slot, _)| slot)?,
         )?;
+
+        let ledger_purgatory = LedgerPurgatory::from_config(
+            ledger.clone(),
+            bank.clone(),
+            &config.validator_config,
+        );
 
         fund_validator_identity(&bank, &validator_pubkey);
         fund_magic_context(&bank);
@@ -343,6 +351,7 @@ impl MagicValidator {
             token,
             bank,
             ledger,
+            ledger_purgatory,
             accounts_manager,
             transaction_listener,
             transaction_status_sender,
@@ -579,6 +588,8 @@ impl MagicValidator {
         self.start_remote_account_updates_worker();
         self.start_remote_account_cloner_worker().await?;
 
+        self.ledger_purgatory.start();
+
         self.rpc_service.start().map_err(|err| {
             ApiError::FailedToStartJsonRpcService(format!("{:?}", err))
         })?;
@@ -681,6 +692,8 @@ impl MagicValidator {
         self.rpc_service.close();
         PubsubService::close(&self.pubsub_close_handle);
         self.token.cancel();
+        self.ledger_purgatory.stop();
+
         // wait a bit for services to stop
         thread::sleep(Duration::from_secs(1));
 

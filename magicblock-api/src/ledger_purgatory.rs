@@ -1,7 +1,14 @@
-use std::{cmp::min, sync::Arc, time::Duration};
+use std::{
+    cmp::{max, min},
+    sync::Arc,
+    time::Duration,
+};
 
+use anyhow::anyhow;
 use log::{error, warn};
+use magicblock_accounts_db::config::AccountsDbConfig;
 use magicblock_bank::bank::Bank;
+use magicblock_config::EphemeralConfig;
 use magicblock_ledger::{errors::LedgerError, Ledger};
 use tokio::{task::JoinHandle, time::interval};
 use tokio_util::sync::CancellationToken;
@@ -81,34 +88,28 @@ impl LedgerPurgatoryWorker {
     /// Cleans slots [from_slot; to_slot] inclusive range
     pub fn purge(ledger: &Arc<Ledger>, from_slot: u64, to_slot: u64) {
         // In order not torture RocksDB's WriteBatch we split large tasks into chunks
-        const SINGLE_PURGE_LIMIT: u64 = 3000;
+        const SINGLE_PURGE_LIMIT: usize = 3000;
 
         if to_slot < from_slot {
             warn!("LedgerPurgatory: Nani?");
             return;
         }
+        (from_slot..=to_slot).step_by(SINGLE_PURGE_LIMIT).for_each(
+            |cur_from_slot| {
+                let num_slots_to_purge =
+                    min(to_slot - cur_from_slot + 1, SINGLE_PURGE_LIMIT as u64);
+                let purge_to_slot = cur_from_slot + num_slots_to_purge - 1;
 
-        // Since [from_slot; to_slot] is inclusive
-        let num_to_purge = to_slot - from_slot + 1;
-        let num_of_purges =
-            (num_to_purge + SINGLE_PURGE_LIMIT - 1) / SINGLE_PURGE_LIMIT;
-
-        (0..num_of_purges).fold(from_slot, |cur_from_slot, el| {
-            let num_slots_to_purge =
-                min(to_slot - cur_from_slot + 1, SINGLE_PURGE_LIMIT);
-            let to_slot = cur_from_slot + num_slots_to_purge - 1;
-
-            // This is critical error, but since otherwise we will get stuck,
-            // we report & continue
-            if let Err(err) = ledger.purge_slots(cur_from_slot, to_slot) {
-                error!(
-                    "Failed to purge Ledger, slot interval from: {}, to: {}. {}",
-                    cur_from_slot, to_slot, err
-                )
-            };
-
-            cur_from_slot + SINGLE_PURGE_LIMIT
-        });
+                if let Err(err) =
+                    ledger.purge_slots(cur_from_slot, purge_to_slot)
+                {
+                    error!(
+                        "Failed to purge slots {}-{}: {}",
+                        cur_from_slot, purge_to_slot, err
+                    );
+                }
+            },
+        );
     }
 }
 
@@ -122,7 +123,7 @@ enum ServiceState {
     Running(WorkerController),
 }
 
-struct LedgerPurgatory {
+pub struct LedgerPurgatory {
     ledger: Arc<Ledger>,
     bank: Arc<Bank>,
     size_thresholds_bytes: u64,
@@ -137,23 +138,85 @@ impl LedgerPurgatory {
         slot_purge_interval: u64,
         size_thresholds_bytes: u64,
     ) -> Self {
-        // Our slot purge interval is connected to snapshot frequency
-        // Slots will be cleaned after
-        // Bank::get_latest_snapshot_slot() -
-        // const NUM_SNAPSHOTS: u64 = 2;
-        // let slot_purge_interval = NUM_SNAPSHOTS * snapshot_frequency;
-        // With this max size will be
-        // upperbound of stored slots: (NUM_SNAPSHOTS+1)*snapshot_frequency - 1
-        // TPS: 50000 tx/s, max tx size - 1232 bytes
-        // slot: every 50 ms
-        // (3*1024 - 1)*2500*1232 = 9,45 GB
-
         Self {
             ledger,
             bank,
             slot_purge_interval,
             size_thresholds_bytes,
             state: ServiceState::Created,
+        }
+    }
+
+    pub fn from_config(
+        ledger: Arc<Ledger>,
+        bank: Arc<Bank>,
+        config: &EphemeralConfig,
+    ) -> Self {
+        // We terminate in case of invalid config
+        let purge_slot_interval = Self::estimate_purge_slot_interval(config)
+            .expect("Failed to estimate purge slot interval");
+        Self::new(
+            ledger,
+            bank,
+            purge_slot_interval,
+            config.ledger.desired_size,
+        )
+    }
+
+    /// Calculates how many slots shall pass by for next truncation to happen
+    /// We make some assumption here on TPS & size per transaction
+    pub fn estimate_purge_slot_interval(
+        config: &EphemeralConfig,
+    ) -> Result<u64, anyhow::Error> {
+        // Could be dynamic in the future and fetched from stats.
+        const TRANSACTIONS_PER_SECOND: u64 = 50000;
+        // Some of the info is duplicated over columns, but mostly a negligible amount
+        // So we take solana max transaction size
+        const TRANSACTION_MAX_SIZE: u64 = 1232;
+        // This implies that we can't delete ledger data past
+        // latest MIN_SNAPSHOTS_KEPT snapshot. Has to be at least 1
+        const MIN_SNAPSHOTS_KEPT: u16 = 2;
+        // with 50 ms slots & 1024 default snapshot frequency
+        // 7*1024*2500*1232 ~ 22 GiB of data in ledger
+        const MAX_SNAPSHOTS_KEPT: u16 = 7;
+
+        let millis_per_slot = config.validator.millis_per_slot;
+        let transactions_per_slot =
+            (millis_per_slot * TRANSACTIONS_PER_SECOND) / 1000;
+        let size_per_slot = transactions_per_slot * TRANSACTION_MAX_SIZE;
+
+        let AccountsDbConfig {
+            max_snapshots,
+            snapshot_frequency,
+            ..
+        } = &config.accounts.db;
+        let desired_size = config.ledger.desired_size;
+
+        // Calculate how many snapshot it will take to exceed desired size
+        let slots_size =
+            snapshot_frequency
+                .checked_mul(size_per_slot)
+                .ok_or(anyhow!(
+                    "slot_size overflowed. snapshot frequency is too large"
+                ))?;
+
+        let num_snapshots_in_desired_size =
+            desired_size.checked_div(slots_size).ok_or(anyhow!(
+                "Failed to calculate num_snapshots_in_desired_size"
+            ))?;
+
+        // Take min of 2
+        let upper_bound_snapshots_kept =
+            min(MAX_SNAPSHOTS_KEPT, *max_snapshots);
+        let snapshots_kept = min(
+            upper_bound_snapshots_kept as u64,
+            num_snapshots_in_desired_size,
+        ) as u16;
+
+        if snapshots_kept < MIN_SNAPSHOTS_KEPT {
+            Err(anyhow!("Desired ledger size is too small. Required snapshots to keep: {}, got: {}", MIN_SNAPSHOTS_KEPT, snapshots_kept))
+        } else {
+            Ok(snapshots_kept as u64 * snapshot_frequency)
         }
     }
 

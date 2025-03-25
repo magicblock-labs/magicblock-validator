@@ -3582,6 +3582,7 @@ name = "magicblock-api"
 version = "0.1.0"
 dependencies = [
  "agave-geyser-plugin-interface",
+ "anyhow",
  "conjunto-transwise",
  "crossbeam-channel",
  "fd-lock",
