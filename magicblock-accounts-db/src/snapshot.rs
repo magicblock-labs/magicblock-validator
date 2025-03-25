@@ -194,7 +194,7 @@ impl SnapshotEngine {
     }
 
     /// Fast reference linking based directory copy, only works
-    /// on Copy on Write filesystems like btrfs/xfs/apfs/refs
+    /// on Copy on Write filesystems like btrfs/xfs/apfs/refs, this
     /// operation is essentially a filesystem metadata update, so it usually
     /// takes a few milliseconds irrespective of the target directory size
     #[inline(always)]
