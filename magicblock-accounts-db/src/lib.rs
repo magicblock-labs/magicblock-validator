@@ -227,12 +227,20 @@ impl AccountsDb {
         const PREEMPTIVE_FLUSHING_THRESHOLD: u64 = 5;
         self.storage.set_slot(slot);
         let remainder = slot % self.snapshot_frequency;
-        if remainder == PREEMPTIVE_FLUSHING_THRESHOLD {
+
+        let preemptive_flush = self.snapshot_frequency
+            <= PREEMPTIVE_FLUSHING_THRESHOLD
+            && remainder
+                == self.snapshot_frequency - PREEMPTIVE_FLUSHING_THRESHOLD;
+
+        if preemptive_flush {
             // a few slots before next snapshot point, start flushing asynchronously so
             // that at the actual snapshot point there will be very little to flush
             self.flush(false);
             return;
-        } else if remainder != 0 {
+        }
+
+        if remainder != 0 {
             return;
         }
         // acquire the lock, effectively stopping the world, nothing should be able

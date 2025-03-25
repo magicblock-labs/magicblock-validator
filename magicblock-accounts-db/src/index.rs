@@ -235,9 +235,14 @@ impl AccountsDbIndex {
         let mut cursor = txn.open_rw_cursor(self.accounts)?;
 
         // locate the account entry
-        let (offset, blocks) = cursor
+        let result = cursor
             .get(Some(pubkey.as_ref()), None, MDB_SET_OP)
-            .map(|(_, v)| bytes!(#unpack, v, u32, u32))?;
+            .map(|(_, v)| bytes!(#unpack, v, u32, u32));
+        let (offset, blocks) = match result {
+            Ok(r) => r,
+            Err(lmdb::Error::NotFound) => return Ok(()),
+            Err(other) => Err(other)?,
+        };
 
         // and delete it
         cursor.del(WriteFlags::empty())?;

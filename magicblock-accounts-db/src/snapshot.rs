@@ -30,7 +30,6 @@ impl SnapshotEngine {
         dbpath: PathBuf,
         max_count: usize,
     ) -> AdbResult<Box<Self>> {
-        let snapshots = Mutex::new(VecDeque::with_capacity(max_count));
         let is_cow_supported = Self::supports_cow(&dbpath)
             .inspect_err(log_err!("cow support check"))?;
         let snapfn = if is_cow_supported {
@@ -42,16 +41,14 @@ impl SnapshotEngine {
             );
             rcopy_dir
         };
-        let this = Self {
+        let snapshots = Self::read_snapshots(&dbpath, max_count)?.into();
+
+        Ok(Box::new(Self {
             dbpath,
             snapfn,
             snapshots,
             max_count,
-        };
-        this.read_snapshots()
-            .inspect_err(log_err!("reading existing snapshots"))?;
-
-        Ok(Box::new(this))
+        }))
     }
 
     /// Take snapshot of database directory, this operation
@@ -67,7 +64,7 @@ impl SnapshotEngine {
                     .inspect_err(log_err!("error during old snapshot removal"));
             }
         }
-        let snapout = slot.as_path(self.snapshots_dir());
+        let snapout = slot.as_path(Self::snapshots_dir(&self.dbpath));
 
         (self.snapfn)(&self.dbpath, &snapout)?;
         snapshots.push_back(snapout);
@@ -82,7 +79,8 @@ impl SnapshotEngine {
         &self,
         mut slot: u64,
     ) -> AdbResult<u64> {
-        let mut spath = SnapSlot(slot).as_path(self.snapshots_dir());
+        let mut spath =
+            SnapSlot(slot).as_path(Self::snapshots_dir(&self.dbpath));
         let mut snapshots = self.snapshots.lock(); // free lock
 
         // paths to snapshots are strictly ordered, so we can b-search
@@ -156,15 +154,25 @@ impl SnapshotEngine {
         Ok(result)
     }
 
+    fn snapshots_dir(dbpath: &Path) -> &Path {
+        dbpath
+            .parent()
+            .expect("accounts database directory should have a parent")
+    }
+
     /// Reads the list of snapshots directories from disk, this
     /// is necessary to restore last state after restart
-    fn read_snapshots(&self) -> io::Result<()> {
-        let snapdir = self.snapshots_dir();
+    fn read_snapshots(
+        dbpath: &Path,
+        max_count: usize,
+    ) -> io::Result<VecDeque<PathBuf>> {
+        let snapdir = Self::snapshots_dir(dbpath);
+        let mut snapshots = VecDeque::with_capacity(max_count);
+
         if !snapdir.exists() {
             fs::create_dir_all(snapdir)?;
-            return Ok(());
+            return Ok(snapshots);
         }
-        let mut snapshots = self.snapshots.lock();
         for entry in fs::read_dir(snapdir)? {
             let snap = entry?.path();
             if snap.is_dir() && SnapSlot::try_from_path(&snap).is_some() {
@@ -174,16 +182,10 @@ impl SnapshotEngine {
         // sorting is required for correct ordering (slot-wise) of snapshots
         snapshots.make_contiguous().sort();
 
-        while snapshots.len() > self.max_count {
+        while snapshots.len() > max_count {
             snapshots.pop_front();
         }
-        Ok(())
-    }
-
-    fn snapshots_dir(&self) -> &Path {
-        self.dbpath
-            .parent()
-            .expect("accounts database directory should have a parent")
+        Ok(snapshots)
     }
 }
 
@@ -291,7 +293,7 @@ fn copyfile(src: &Path, dst: &Path) -> io::Result<()> {
 #[cfg(test)]
 impl SnapshotEngine {
     pub fn snapshot_exists(&self, slot: u64) -> bool {
-        let spath = SnapSlot(slot).as_path(self.snapshots_dir());
+        let spath = SnapSlot(slot).as_path(Self::snapshots_dir(&self.dbpath));
         let snapshots = self.snapshots.lock(); // free lock
 
         // paths to snapshots are strictly ordered, so we can b-search
