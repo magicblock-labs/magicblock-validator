@@ -68,7 +68,7 @@ pub struct Ledger {
 
     account_mod_datas_cf: LedgerColumn<cf::AccountModDatas>,
 
-    pub lowest_cleanup_slot: RwLock<Slot>,
+    lowest_cleanup_slot: RwLock<Slot>,
     rpc_api_metrics: LedgerRpcApiMetrics,
 
     // We are caching the column item counts since they are expensive to obtain.
@@ -100,6 +100,9 @@ impl fmt::Display for Ledger {
 }
 
 impl Ledger {
+    const LOWEST_CLEANUP_SLOT_POISONED: &'static str =
+        "lowest_cleanup_slot RwLock poisoned.";
+
     pub fn db(self) -> Arc<Database> {
         self.db
     }
@@ -257,6 +260,13 @@ impl Ledger {
         (lowest_cleanup_slot, lowest_available_slot)
     }
 
+    pub fn get_lowest_cleanup_slot(&self) -> Slot {
+        *self
+            .lowest_cleanup_slot
+            .read()
+            .expect(Self::LOWEST_CLEANUP_SLOT_POISONED)
+    }
+
     // -----------------
     // Block time
     // -----------------
@@ -331,42 +341,44 @@ impl Ledger {
         let previous_slot = slot.saturating_sub(1);
         let previous_blockhash = self.get_block_hash(previous_slot)?;
 
-        let block_height = Some(slot);
+        let transactions = {
+            let _lock = self.check_lowest_cleanup_slot(slot);
+            let index_iterator = self
+                .slot_signatures_cf
+                .iter_current_index_filtered(IteratorMode::From(
+                    (slot, u32::MAX),
+                    IteratorDirection::Reverse,
+                ));
 
-        let index_iterator = self
-            .slot_signatures_cf
-            .iter_current_index_filtered(IteratorMode::From(
-                (slot, u32::MAX),
-                IteratorDirection::Reverse,
-            ));
-
-        let mut signatures = vec![];
-        for ((tx_slot, _tx_idx), tx_signature) in index_iterator {
-            if tx_slot != slot {
-                break;
+            let mut signatures = vec![];
+            for ((tx_slot, _tx_idx), tx_signature) in index_iterator {
+                if tx_slot != slot {
+                    break;
+                }
+                signatures.push(Signature::try_from(&*tx_signature)?);
             }
-            signatures.push(Signature::try_from(&*tx_signature)?);
-        }
 
-        let transactions = signatures
-            .into_iter()
-            .map(|tx_signature| {
-                let transaction = self
-                    .transaction_cf
-                    .get_protobuf((tx_signature, slot))?
-                    .map(VersionedTransaction::from)
-                    .ok_or(LedgerError::TransactionNotFound)?;
-                let meta = self
-                    .transaction_status_cf
-                    .get_protobuf((tx_signature, slot))?
-                    .ok_or(LedgerError::TransactionStatusMetaNotFound)?;
-                Ok(VersionedTransactionWithStatusMeta {
-                    transaction,
-                    meta: TransactionStatusMeta::try_from(meta).unwrap(),
+            signatures
+                .into_iter()
+                .map(|tx_signature| {
+                    let transaction = self
+                        .transaction_cf
+                        .get_protobuf((tx_signature, slot))?
+                        .map(VersionedTransaction::from)
+                        .ok_or(LedgerError::TransactionNotFound)?;
+                    let meta = self
+                        .transaction_status_cf
+                        .get_protobuf((tx_signature, slot))?
+                        .ok_or(LedgerError::TransactionStatusMetaNotFound)?;
+                    Ok(VersionedTransactionWithStatusMeta {
+                        transaction,
+                        meta: TransactionStatusMeta::try_from(meta).unwrap(),
+                    })
                 })
-            })
-            .collect::<LedgerResult<Vec<_>>>()?;
+                .collect::<LedgerResult<Vec<_>>>()
+        }?;
 
+        let block_height = Some(slot);
         let block = VersionedConfirmedBlock {
             previous_blockhash: previous_blockhash
                 .unwrap_or_default()
@@ -1143,39 +1155,19 @@ impl Ledger {
         )
     }
 
-    fn purge_slots(
-        &self,
-        from_slot: Slot,
-        num_to_purge: u64,
-    ) -> LedgerResult<()> {
-        const SINGLE_PURGE_LIMIT: u64 = 1000; // TODO: define
-
-        if num_to_purge == 0 {
-            return Ok(());
-        }
-
-        // TODO: maybe redo with from_slot, to_slot
-        let num_of_purges =
-            (num_to_purge + SINGLE_PURGE_LIMIT - 1) / SINGLE_PURGE_LIMIT;
-        (0..num_of_purges).try_fold(num_to_purge, |left_to_purge, el| {
-            let new_from_slot = from_slot + el * SINGLE_PURGE_LIMIT;
-            let new_to_slot =
-                new_from_slot + min(SINGLE_PURGE_LIMIT, left_to_purge) - 1;
-            self.purge_slots(new_from_slot, new_to_slot)?;
-
-            Ok::<_, LedgerError>(left_to_purge - SINGLE_PURGE_LIMIT)
-        })?; // TODO: shall we stop on error?
-
-        Ok(())
-    }
-
-    fn purge_slots_impl(
+    pub fn purge_slots(
         &self,
         from_slot: Slot,
         to_slot: Slot,
     ) -> LedgerResult<()> {
-        let mut batch = self.db.batch()?;
+        let mut batch = self.db.batch();
         self.purge_slots_by_ranges(&mut batch, from_slot, to_slot);
+
+        let mut lowest_cleanup_slot = self
+            .lowest_cleanup_slot
+            .write()
+            .expect(Self::LOWEST_CLEANUP_SLOT_POISONED);
+        *lowest_cleanup_slot = std::cmp::max(*lowest_cleanup_slot, to_slot);
 
         self.slot_signatures_cf
             .iter(IteratorMode::From(
@@ -1207,11 +1199,12 @@ impl Ledger {
                         )
                     },
                 );
+
+                // TODO(edwin): add TransactionMemos & AccountModData cleanup
                 Ok::<_, LedgerError>(())
             })?;
 
-        // TODO: TransactionMemos & AccountModData?
-        self.db.write(batch)
+        Ok(())
     }
 
     fn purge_slots_by_ranges(

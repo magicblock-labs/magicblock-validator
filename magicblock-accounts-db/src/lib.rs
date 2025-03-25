@@ -256,6 +256,13 @@ impl AccountsDb {
         }
     }
 
+    /// Returns slot of latest snapshot
+    /// Precise due to blocking nature of snapshots
+    pub fn get_latest_snapshot_slot(&self) -> u64 {
+        let slot = self.slot();
+        slot - slot % self.snapshot_frequency
+    }
+
     /// Check whether AccountsDB has "freshness" not exceeding given slot
     /// Returns current slot if true, otherwise tries to rollback to the
     /// most recent snapshot, which is older than provided slot

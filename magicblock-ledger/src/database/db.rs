@@ -112,14 +112,14 @@ impl Database {
         Ok(self.backend.raw_iterator_cf(cf))
     }
 
-    pub fn batch(&self) -> Result<WriteBatch, LedgerError> {
+    pub fn batch(&self) -> WriteBatch {
         let write_batch = self.backend.batch();
         let map = columns()
             .into_iter()
             .map(|desc| (desc, self.backend.cf_handle(desc)))
             .collect();
 
-        Ok(WriteBatch { write_batch, map })
+        WriteBatch { write_batch, map }
     }
 
     pub fn write(&self, batch: WriteBatch) -> Result<(), LedgerError> {

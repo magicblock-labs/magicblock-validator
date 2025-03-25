@@ -698,6 +698,10 @@ impl Bank {
         self.adb.set_slot(slot);
     }
 
+    pub fn get_latest_snapshot_slot(&self) -> Slot {
+        self.adb.get_latest_snapshot_slot()
+    }
+
     pub fn advance_slot(&self) -> Slot {
         // Determine next slot and set it
         let prev_slot = self.slot();
