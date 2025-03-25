@@ -1,8 +1,6 @@
 use std::{
-    cmp::min,
     collections::HashMap,
     fmt, fs,
-    num::NonZero,
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicI64, Ordering},
@@ -11,7 +9,6 @@ use std::{
 };
 
 use bincode::{deserialize, serialize};
-use libc::write;
 use log::*;
 use rocksdb::Direction as IteratorDirection;
 use solana_measure::measure::Measure;

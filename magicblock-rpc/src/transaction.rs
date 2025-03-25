@@ -4,7 +4,6 @@ use base64::{prelude::BASE64_STANDARD, Engine};
 use bincode::Options;
 use jsonrpc_core::{Error, ErrorCode, Result};
 use log::*;
-use magicblock_accounts::{errors::AccountsResult, AccountsManager};
 use magicblock_bank::bank::Bank;
 use magicblock_metrics::metrics;
 use magicblock_processor::execute_transaction::execute_sanitized_transaction;
