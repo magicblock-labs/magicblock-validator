@@ -1,33 +1,16 @@
 use std::{cmp::min, sync::Arc, time::Duration};
 
-use anyhow::anyhow;
 use log::{error, warn};
-use magicblock_accounts_db::config::AccountsDbConfig;
-use magicblock_bank::bank::Bank;
-use magicblock_config::EphemeralConfig;
-use magicblock_ledger::{errors::LedgerError, Ledger};
 use tokio::{task::JoinHandle, time::interval};
 use tokio_util::sync::CancellationToken;
 
+use crate::Ledger;
+
+/// Provides slot after which it is safe to purge slots
+/// At the moment it depends on latest snapshot slot
+/// but it may change in the future
 pub trait FinalityProvider: Send + Clone + 'static {
     fn get_latest_final_slot(&self) -> u64;
-}
-
-#[derive(Clone)]
-pub struct FinalityProviderImpl {
-    pub bank: Arc<Bank>,
-}
-
-impl FinalityProvider for FinalityProviderImpl {
-    fn get_latest_final_slot(&self) -> u64 {
-        self.bank.get_latest_snapshot_slot()
-    }
-}
-
-impl FinalityProviderImpl {
-    pub fn new(bank: Arc<Bank>) -> Self {
-        Self { bank }
-    }
 }
 
 struct LedgerPurgatoryWorker<T> {
@@ -159,79 +142,6 @@ impl<T: FinalityProvider> LedgerPurgatory<T> {
             slot_purge_interval,
             size_thresholds_bytes,
             state: ServiceState::Created,
-        }
-    }
-
-    pub fn from_config(
-        ledger: Arc<Ledger>,
-        finality_provider: T,
-        config: &EphemeralConfig,
-    ) -> Self {
-        // We terminate in case of invalid config
-        let purge_slot_interval = Self::estimate_purge_slot_interval(config)
-            .expect("Failed to estimate purge slot interval");
-        Self::new(
-            ledger,
-            finality_provider,
-            purge_slot_interval,
-            config.ledger.desired_size,
-        )
-    }
-
-    /// Calculates how many slots shall pass by for next truncation to happen
-    /// We make some assumption here on TPS & size per transaction
-    pub fn estimate_purge_slot_interval(
-        config: &EphemeralConfig,
-    ) -> Result<u64, anyhow::Error> {
-        // Could be dynamic in the future and fetched from stats.
-        const TRANSACTIONS_PER_SECOND: u64 = 50000;
-        // Some of the info is duplicated over columns, but mostly a negligible amount
-        // So we take solana max transaction size
-        const TRANSACTION_MAX_SIZE: u64 = 1232;
-        // This implies that we can't delete ledger data past
-        // latest MIN_SNAPSHOTS_KEPT snapshot. Has to be at least 1
-        const MIN_SNAPSHOTS_KEPT: u16 = 2;
-        // with 50 ms slots & 1024 default snapshot frequency
-        // 7*1024*2500*1232 ~ 22 GiB of data in ledger
-        const MAX_SNAPSHOTS_KEPT: u16 = 7;
-
-        let millis_per_slot = config.validator.millis_per_slot;
-        let transactions_per_slot =
-            (millis_per_slot * TRANSACTIONS_PER_SECOND) / 1000;
-        let size_per_slot = transactions_per_slot * TRANSACTION_MAX_SIZE;
-
-        let AccountsDbConfig {
-            max_snapshots,
-            snapshot_frequency,
-            ..
-        } = &config.accounts.db;
-        let desired_size = config.ledger.desired_size;
-
-        // Calculate how many snapshot it will take to exceed desired size
-        let slots_size =
-            snapshot_frequency
-                .checked_mul(size_per_slot)
-                .ok_or(anyhow!(
-                    "slot_size overflowed. snapshot frequency is too large"
-                ))?;
-
-        let num_snapshots_in_desired_size =
-            desired_size.checked_div(slots_size).ok_or(anyhow!(
-                "Failed to calculate num_snapshots_in_desired_size"
-            ))?;
-
-        // Take min of 2
-        let upper_bound_snapshots_kept =
-            min(MAX_SNAPSHOTS_KEPT, *max_snapshots);
-        let snapshots_kept = min(
-            upper_bound_snapshots_kept as u64,
-            num_snapshots_in_desired_size,
-        ) as u16;
-
-        if snapshots_kept < MIN_SNAPSHOTS_KEPT {
-            Err(anyhow!("Desired ledger size is too small. Required snapshots to keep: {}, got: {}", MIN_SNAPSHOTS_KEPT, snapshots_kept))
-        } else {
-            Ok(snapshots_kept as u64 * snapshot_frequency)
         }
     }
 

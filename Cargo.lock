@@ -3582,7 +3582,6 @@ name = "magicblock-api"
 version = "0.1.0"
 dependencies = [
  "agave-geyser-plugin-interface",
- "anyhow",
  "conjunto-transwise",
  "crossbeam-channel",
  "fd-lock",
@@ -3727,6 +3726,7 @@ dependencies = [
 name = "magicblock-ledger"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "bincode",
  "byteorder",
  "fs_extra",
@@ -3751,6 +3751,8 @@ dependencies = [
  "tempfile",
  "test-tools-core",
  "thiserror 1.0.69",
+ "tokio",
+ "tokio-util 0.7.13",
 ]
 
 [[package]]

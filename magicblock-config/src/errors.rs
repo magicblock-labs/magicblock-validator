@@ -17,4 +17,7 @@ pub enum ConfigError {
 
     #[error("Cannot specify both init_lamports and init_sol")]
     CannotSpecifyBothInitLamportAndInitSol,
+
+    #[error("Failed to estimate purge slot interval")]
+    EstimatePurgeSlotError(String),
 }
