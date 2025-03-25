@@ -1,6 +1,6 @@
 use std::{
     fs::File,
-    io::Write,
+    io::{self, Write},
     path::Path,
     ptr::NonNull,
     sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering::*},
@@ -18,7 +18,7 @@ use crate::{
 /// Extra space in database storage file reserved for metadata
 /// Currently most of it is unused, but still reserved for future extensions
 const METADATA_STORAGE_SIZE: usize = 256;
-const ADB_FILE: &str = "accounts.db";
+pub(crate) const ADB_FILE: &str = "accounts.db";
 
 pub(crate) struct AccountsStorage {
     meta: StorageMeta,
@@ -215,7 +215,7 @@ impl AccountsStorage {
     ///
     /// NOTE: this is a very cheap operation, as fast as opening a file
     pub(crate) fn reload(&mut self, dbpath: &Path) -> AdbResult<()> {
-        let file = File::options()
+        let mut file = File::options()
             .write(true)
             .read(true)
             .open(dbpath.join(ADB_FILE))
@@ -223,6 +223,9 @@ impl AccountsStorage {
                 "opening adb file from snapshot at {}",
                 dbpath.display()
             ))?;
+        // snapshot files are truncated, and contain only the actual data with no extra space to grow the
+        // database, so we readjust the file's length to the preconfigured value before performing mmap
+        adjust_database_file_size(&mut file, self.size())?;
 
         // Only accountsdb from validator process is modifying the file contents
         // through memory map, so the contract of MmapMut is upheld
@@ -239,6 +242,17 @@ impl AccountsStorage {
         self.meta = meta;
         self.store = store;
         Ok(())
+    }
+
+    /// Returns the written segment (containing written data) of internal memory map
+    pub(crate) fn mmap(&self) -> &[u8] {
+        // get the last byte where data was written in storage segment and add the size
+        // of metadata storage, this will give use used storage in backing file
+        let mut end = self.meta.head.load(Relaxed) * self.block_size()
+            + METADATA_STORAGE_SIZE;
+        end = end.min(self.mmap.len());
+
+        &self.mmap[..end]
     }
 
     /// total number of bytes occupied by storage
@@ -269,8 +283,8 @@ impl StorageMeta {
         let meta_blocks = METADATA_STORAGE_SIZE.div_ceil(block_size);
         let db_size = (block_num + meta_blocks) * block_size;
         let total_blocks = db_size as u32 / block_size as u32;
-        // set the fixed length of file, cannot be grown afterwards
-        file.set_len(db_size as u64)?;
+        // grow the backing file as necessary
+        adjust_database_file_size(file, db_size as u64)?;
 
         // the storage itself starts immediately after metadata section
         let head = 0_u64;
@@ -299,7 +313,7 @@ impl StorageMeta {
 
         // SAFETY:
         // All pointer arithmethic operations are safe because they are
-        // performed on metadata segement of backing MmapMut, which is
+        // performed on metadata segment of backing MmapMut, which is
         // guarranteed to be large enough, due to Self::init_adb_file
         //
         // The pointer to static reference conversion is also sound as, memmap
@@ -346,6 +360,16 @@ impl StorageMeta {
             deallocated,
         }
     }
+}
+
+/// Helper function to grow the size of backing accounts db file
+/// NOTE: this function cannot be use to shrink the file as the logic involved to
+/// ensure that we don't accidentally truncate the written data is bit complex
+fn adjust_database_file_size(file: &mut File, size: u64) -> io::Result<()> {
+    if file.metadata()?.len() >= size {
+        return Ok(());
+    }
+    file.set_len(size)
 }
 
 #[cfg_attr(test, derive(Clone, Copy))]
