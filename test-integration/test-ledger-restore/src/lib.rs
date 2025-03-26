@@ -11,10 +11,7 @@ use integration_test_tools::{
     workspace_paths::path_relative_to_workspace,
     IntegrationTestContext,
 };
-use magicblock_config::{
-    AccountsConfig, EphemeralConfig, LedgerConfig, LifecycleMode,
-    ProgramConfig, RemoteConfig, ValidatorConfig,
-};
+use magicblock_config::{AccountsConfig, EphemeralConfig, LedgerConfig, LifecycleMode, ProgramConfig, RemoteConfig, ValidatorConfig, DEFAULT_DESIRED_SIZE};
 use program_flexi_counter::state::FlexiCounter;
 use solana_sdk::{
     clock::Slot,
@@ -109,6 +106,7 @@ pub fn setup_offline_validator(
         ledger: LedgerConfig {
             reset,
             path: Some(ledger_path.display().to_string()),
+            desired_size: DEFAULT_DESIRED_SIZE
         },
         accounts: accounts_config.clone(),
         programs,
@@ -149,6 +147,7 @@ pub fn setup_validator_with_local_remote(
         ledger: LedgerConfig {
             reset,
             path: Some(ledger_path.display().to_string()),
+            desired_size: DEFAULT_DESIRED_SIZE,
         },
         accounts: accounts_config.clone(),
         programs,

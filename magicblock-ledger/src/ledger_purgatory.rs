@@ -1,7 +1,7 @@
 use std::{cmp::min, sync::Arc, time::Duration};
 
 use anyhow::Context;
-use log::{error, warn};
+use log::{error, info, warn};
 use tokio::{task::JoinHandle, time::interval};
 use tokio_util::sync::CancellationToken;
 
@@ -65,8 +65,8 @@ impl<T: FinalityProvider> LedgerPurgatoryWorker<T> {
                         }
                     }
 
-                    // TODO: hold lock for the whole duration?
                     if let Some((from_slot, to_slot)) = self.next_purge_range() {
+                        info!("Purging slots [{};{}]", from_slot, to_slot);
                         Self::purge(&self.ledger, from_slot, to_slot);
                     }
                 }
