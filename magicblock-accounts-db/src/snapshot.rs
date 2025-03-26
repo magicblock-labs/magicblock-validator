@@ -254,7 +254,11 @@ fn rcopy_dir(src: &Path, dst: &Path, mmap: &[u8]) -> io::Result<()> {
             let mut dst = unsafe { MmapMut::map_mut(&dst) }?;
             dst.copy_from_slice(mmap);
             // we move the flushing to separate thread to avoid blocking
-            std::thread::spawn(move || dst.flush());
+            std::thread::spawn(move || {
+                dst.flush().inspect_err(log_err!(
+                    "flushing accounts.db file after mmap copy"
+                ))
+            });
         } else {
             std::fs::copy(&src, &dst)?;
         }
