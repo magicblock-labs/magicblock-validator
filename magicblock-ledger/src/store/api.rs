@@ -30,7 +30,7 @@ use crate::{
     conversions::transaction,
     database::{
         columns as cf,
-        columns::{count_column_using_cache, DIRTY_COUNT},
+        columns::{count_column_using_cache, SlotSignatures, DIRTY_COUNT},
         db::Database,
         iterator::IteratorMode,
         ledger_column::LedgerColumn,
@@ -841,7 +841,7 @@ impl Ledger {
         Ok(())
     }
 
-    fn read_transaction(
+    pub fn read_transaction(
         &self,
         index: (Signature, Slot),
     ) -> LedgerResult<Option<generated::Transaction>> {
@@ -1152,6 +1152,13 @@ impl Ledger {
         )
     }
 
+    pub fn read_slot_signature(
+        &self,
+        index: (Slot, u32),
+    ) -> LedgerResult<Option<Signature>> {
+        self.slot_signatures_cf.get(index)
+    }
+
     pub fn purge_slots(
         &self,
         from_slot: Slot,
@@ -1201,6 +1208,7 @@ impl Ledger {
                 Ok::<_, LedgerError>(())
             })?;
 
+        self.db.write(batch)?;
         Ok(())
     }
 
