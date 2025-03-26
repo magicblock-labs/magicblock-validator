@@ -228,10 +228,10 @@ impl AccountsDb {
         self.storage.set_slot(slot);
         let remainder = slot % self.snapshot_frequency;
 
-        let preemptive_flush = self.snapshot_frequency
-            <= PREEMPTIVE_FLUSHING_THRESHOLD
-            && remainder
-                == self.snapshot_frequency - PREEMPTIVE_FLUSHING_THRESHOLD;
+        let delta = self
+            .snapshot_frequency
+            .saturating_sub(PREEMPTIVE_FLUSHING_THRESHOLD);
+        let preemptive_flush = delta != 0 && remainder == delta;
 
         if preemptive_flush {
             // a few slots before next snapshot point, start flushing asynchronously so
