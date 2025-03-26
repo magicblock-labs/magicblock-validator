@@ -19,9 +19,9 @@ pub trait FinalityProvider: Send + Clone + 'static {
 struct LedgerPurgatoryWorker<T> {
     finality_provider: T,
     ledger: Arc<Ledger>,
-    slot_purge_interval: u64, // TODO: mauybe rename to slots_preserved/extra_slots_preserved
+    slots_to_preserve: u64,
     purge_time_interval: Duration,
-    size_thresholds_bytes: u64, // TODO: rename to: report_size
+    report_size: u64,
     cancellation_token: CancellationToken,
 }
 
@@ -29,17 +29,17 @@ impl<T: FinalityProvider> LedgerPurgatoryWorker<T> {
     pub fn new(
         ledger: Arc<Ledger>,
         finality_provider: T,
-        slot_purge_interval: u64,
+        slots_to_preserve: u64,
         purge_time_interval: Duration,
-        size_thresholds_bytes: u64,
+        report_size: u64,
         cancellation_token: CancellationToken,
     ) -> Self {
         Self {
             ledger,
             finality_provider,
-            slot_purge_interval,
+            slots_to_preserve,
             purge_time_interval,
-            size_thresholds_bytes,
+            report_size,
             cancellation_token,
         }
     }
@@ -54,9 +54,9 @@ impl<T: FinalityProvider> LedgerPurgatoryWorker<T> {
                 _ = interval.tick() => {
                     match self.ledger.storage_size() {
                         Ok(size) => {
-                            // If this happens whether unreasonable size_thresholds_bytes
-                            // or slot_purge_interval were chosen
-                            if size > self.size_thresholds_bytes {
+                            // If this happens whether unreasonable report_size
+                            // or slots_to_preserve were chosen
+                            if size > self.report_size {
                                 warn!("Ledger size threshold exceeded.");
                             }
                         }
@@ -74,7 +74,7 @@ impl<T: FinalityProvider> LedgerPurgatoryWorker<T> {
         }
     }
 
-    /// Returns next purge range if purge required
+    /// Returns [from_slot, to_slot] range that's safe to purge
     fn next_purge_range(&self) -> Option<(u64, u64)> {
         let lowest_cleanup_slot = self.ledger.get_lowest_cleanup_slot();
         let latest_final_slot = self.finality_provider.get_latest_final_slot();
@@ -90,13 +90,13 @@ impl<T: FinalityProvider> LedgerPurgatoryWorker<T> {
             lowest_cleanup_slot + 1
         };
 
-        // The idea here is that slot_purge_interval number of slots
+        // The idea here is that slots_to_preserve number of slots
         // prior to latest_final_slot are preserved as well
-        if latest_final_slot - next_from_slot <= self.slot_purge_interval {
+        if latest_final_slot - next_from_slot <= self.slots_to_preserve {
             None
         } else {
-            // Always positive since latest_final_slot > self.slot_purge_interval
-            let to_slot = latest_final_slot - self.slot_purge_interval - 1;
+            // Always positive since latest_final_slot > self.slots_to_preserve
+            let to_slot = latest_final_slot - self.slots_to_preserve - 1;
             Some((next_from_slot, to_slot))
         }
     }
@@ -104,7 +104,7 @@ impl<T: FinalityProvider> LedgerPurgatoryWorker<T> {
     /// Utility function for splitting purging into smaller chunks
     /// Cleans slots [from_slot; to_slot] inclusive range
     pub fn purge(ledger: &Arc<Ledger>, from_slot: u64, to_slot: u64) {
-        // In order not torture RocksDB's WriteBatch we split large tasks into chunks
+        // In order not to torture RocksDB's WriteBatch we split large tasks into chunks
         const SINGLE_PURGE_LIMIT: usize = 3000;
 
         if to_slot < from_slot {
@@ -130,11 +130,13 @@ impl<T: FinalityProvider> LedgerPurgatoryWorker<T> {
     }
 }
 
+#[derive(Debug)]
 struct WorkerController {
     cancellation_token: CancellationToken,
     worker_handle: JoinHandle<()>,
 }
 
+#[derive(Debug)]
 enum ServiceState {
     Created,
     Running(WorkerController),
@@ -144,9 +146,9 @@ enum ServiceState {
 pub struct LedgerPurgatory<T> {
     finality_provider: T,
     ledger: Arc<Ledger>,
-    size_thresholds_bytes: u64,
+    report_size: u64,
     purge_time_interval: Duration,
-    slot_purge_interval: u64,
+    slots_to_preserve: u64,
     state: ServiceState,
 }
 
@@ -154,16 +156,16 @@ impl<T: FinalityProvider> LedgerPurgatory<T> {
     pub fn new(
         ledger: Arc<Ledger>,
         finality_provider: T,
-        slot_purge_interval: u64,
+        slots_to_preserve: u64,
         purge_time_interval: Duration,
-        size_thresholds_bytes: u64,
+        report_size: u64,
     ) -> Self {
         Self {
             ledger,
             finality_provider,
-            slot_purge_interval,
+            slots_to_preserve,
             purge_time_interval,
-            size_thresholds_bytes,
+            report_size,
             state: ServiceState::Created,
         }
     }
@@ -174,9 +176,9 @@ impl<T: FinalityProvider> LedgerPurgatory<T> {
             let worker = LedgerPurgatoryWorker::new(
                 self.ledger.clone(),
                 self.finality_provider.clone(),
-                self.slot_purge_interval,
+                self.slots_to_preserve,
                 self.purge_time_interval,
-                self.size_thresholds_bytes,
+                self.report_size,
                 cancellation_token.clone(),
             );
             let worker_handle = tokio::spawn(worker.run());

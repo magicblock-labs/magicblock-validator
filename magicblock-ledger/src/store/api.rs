@@ -30,7 +30,7 @@ use crate::{
     conversions::transaction,
     database::{
         columns as cf,
-        columns::{count_column_using_cache, SlotSignatures, DIRTY_COUNT},
+        columns::{count_column_using_cache, DIRTY_COUNT},
         db::Database,
         iterator::IteratorMode,
         ledger_column::LedgerColumn,

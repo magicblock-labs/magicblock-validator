@@ -40,7 +40,8 @@ use magicblock_bank::{
 use magicblock_config::{EphemeralConfig, ProgramConfig};
 use magicblock_geyser_plugin::rpc::GeyserRpcService;
 use magicblock_ledger::{
-    blockstore_processor::process_ledger, ledger_purgatory::LedgerPurgatory,
+    blockstore_processor::process_ledger,
+    ledger_purgatory::{LedgerPurgatory, DEFAULT_PURGE_TIME_INTERVAL},
     Ledger,
 };
 use magicblock_metrics::MetricsService;
@@ -200,6 +201,7 @@ impl MagicValidator {
             ledger.clone(),
             FinalityProviderImpl::new(bank.clone()),
             config.validator_config.estimate_purge_slot_interval()?,
+            DEFAULT_PURGE_TIME_INTERVAL,
             config.validator_config.ledger.desired_size,
         );
 
@@ -691,7 +693,7 @@ impl MagicValidator {
         Ok(())
     }
 
-    pub fn stop(&self) {
+    pub fn stop(&mut self) {
         self.exit.store(true, Ordering::Relaxed);
         self.rpc_service.close();
         PubsubService::close(&self.pubsub_close_handle);

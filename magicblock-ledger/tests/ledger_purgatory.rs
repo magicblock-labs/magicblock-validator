@@ -207,7 +207,7 @@ async fn test_purgatory_with_tx_spammer() {
     ledger.flush();
 
     let lowest_existing =
-        (latest_final_slot.load(Ordering::Relaxed) - SLOT_PURGE_INTERVAL);
+        latest_final_slot.load(Ordering::Relaxed) - SLOT_PURGE_INTERVAL;
     assert_eq!(ledger.get_lowest_cleanup_slot(), lowest_existing - 1);
     verify_transactions_state(
         &ledger,

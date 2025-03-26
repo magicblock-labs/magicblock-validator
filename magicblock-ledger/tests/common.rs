@@ -53,6 +53,7 @@ pub fn write_dummy_transaction(
     (message_hash, signature)
 }
 
+#[allow(dead_code)]
 pub fn get_block(ledger: &Ledger, slot: Slot) -> VersionedConfirmedBlock {
     ledger
         .get_block(slot)
@@ -60,6 +61,7 @@ pub fn get_block(ledger: &Ledger, slot: Slot) -> VersionedConfirmedBlock {
         .expect("Block not found")
 }
 
+#[allow(dead_code)]
 pub fn get_block_transaction_hash(
     block: &VersionedConfirmedBlock,
     transaction_slot_index: usize,
