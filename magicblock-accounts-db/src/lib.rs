@@ -249,12 +249,10 @@ impl AccountsDb {
         // flush everything before taking the snapshot, in order to ensure consistent state
         self.flush(true);
 
-        if let Err(err) = self
-            .snapshot_engine
-            .snapshot(slot, self.storage.utilized_mmap())
-        {
+        let used_storage = self.storage.utilized_mmap();
+        if let Err(err) = self.snapshot_engine.snapshot(slot, used_storage) {
             error!(
-                "error taking snapshot at {}-{slot}: {err}",
+                "error taking snapshot at {}, slot {slot}: {err}",
                 self.snapshot_engine.database_path().display()
             );
         }
