@@ -14,11 +14,6 @@ use super::{
 };
 use crate::{errors::LedgerError, metrics::PerfSamplingStatus};
 
-// trait Purgatory {
-//     fn purge_slot_signatures(SlotSignatures)
-//     fn purge_transaction_statuses()
-// }
-
 #[derive(Debug)]
 pub struct Database {
     pub(crate) backend: Arc<Rocks>,
