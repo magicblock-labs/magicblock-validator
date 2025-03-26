@@ -1,5 +1,6 @@
 use std::{cmp::min, sync::Arc, time::Duration};
 
+use anyhow::Context;
 use log::{error, warn};
 use tokio::{task::JoinHandle, time::interval};
 use tokio_util::sync::CancellationToken;
@@ -131,12 +132,13 @@ impl<T: FinalityProvider> LedgerPurgatoryWorker<T> {
 
 struct WorkerController {
     cancellation_token: CancellationToken,
-    worker_handle: JoinHandle<()>, // TODO: probably not necessary
+    worker_handle: JoinHandle<()>,
 }
 
 enum ServiceState {
     Created,
     Running(WorkerController),
+    Stopped(JoinHandle<()>),
 }
 
 pub struct LedgerPurgatory<T> {
@@ -188,20 +190,28 @@ impl<T: FinalityProvider> LedgerPurgatory<T> {
         }
     }
 
-    pub fn stop(&self) {
-        if let ServiceState::Running(ref controller) = self.state {
+    pub fn stop(&mut self) {
+        let state = std::mem::replace(&mut self.state, ServiceState::Created);
+        if let ServiceState::Running(controller) = state {
             controller.cancellation_token.cancel();
+            self.state = ServiceState::Stopped(controller.worker_handle);
         } else {
             warn!("LedgerPurgatory not running, can not be stopped.");
+            self.state = state;
         }
     }
 
-    // TODO: return Result?
-    pub async fn join(self) {
-        if let ServiceState::Running(controller) = self.state {
-            if let Err(err) = controller.worker_handle.await {
-                error!("LedgerPurgatory exited with error: {err}")
-            };
+    pub async fn join(mut self) -> Result<(), anyhow::Error> {
+        if matches!(self.state, ServiceState::Running(_)) {
+            self.stop();
+        }
+
+        if let ServiceState::Stopped(worker_handle) = self.state {
+            worker_handle.await.context("Failed to join worker")?;
+            Ok(())
+        } else {
+            warn!("Purgatory was not running, nothing to stop");
+            Ok(())
         }
     }
 }

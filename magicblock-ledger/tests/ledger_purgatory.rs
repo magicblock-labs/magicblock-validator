@@ -94,8 +94,7 @@ async fn test_purgatory_not_purged() {
     ledger_purgatory.start();
     tokio::time::sleep(Duration::from_millis(10)).await;
     ledger_purgatory.stop();
-    ledger_purgatory.join().await;
-    // TODO: maybe replace with .stop(), .join() & .start() again?
+    assert!(ledger_purgatory.join().await.is_ok());
 
     // Not purged due to final_slot 0
     verify_transactions_state(&ledger, 0, &signatures, true);
@@ -130,7 +129,7 @@ async fn test_purgatory_non_empty_ledger() {
     tokio::time::sleep(Duration::from_millis(10)).await;
 
     ledger_purgatory.stop();
-    ledger_purgatory.join().await;
+    assert!(ledger_purgatory.join().await.is_ok());
 
     assert_eq!(ledger.get_lowest_cleanup_slot(), LOWEST_EXISTING_SLOT - 1);
     verify_transactions_state(
@@ -203,7 +202,7 @@ async fn test_purgatory_with_tx_spammer() {
 
     // Stop purgatory assuming that complete after sleep
     ledger_purgatory.stop();
-    ledger_purgatory.join().await;
+    assert!(ledger_purgatory.join().await.is_ok());
 
     ledger.flush();
 
