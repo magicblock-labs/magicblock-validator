@@ -21,7 +21,7 @@ struct LedgerPurgatoryWorker<T> {
     ledger: Arc<Ledger>,
     slots_to_preserve: u64,
     purge_time_interval: Duration,
-    report_size: u64,
+    desired_size: u64,
     cancellation_token: CancellationToken,
 }
 
@@ -31,7 +31,7 @@ impl<T: FinalityProvider> LedgerPurgatoryWorker<T> {
         finality_provider: T,
         slots_to_preserve: u64,
         purge_time_interval: Duration,
-        report_size: u64,
+        desired_size: u64,
         cancellation_token: CancellationToken,
     ) -> Self {
         Self {
@@ -39,7 +39,7 @@ impl<T: FinalityProvider> LedgerPurgatoryWorker<T> {
             finality_provider,
             slots_to_preserve,
             purge_time_interval,
-            report_size,
+            desired_size,
             cancellation_token,
         }
     }
@@ -70,7 +70,7 @@ impl<T: FinalityProvider> LedgerPurgatoryWorker<T> {
     }
 
     fn should_purge(&self) -> LedgerResult<bool> {
-        Ok(self.ledger.storage_size()? > self.report_size)
+        Ok(self.ledger.storage_size()? > self.desired_size)
     }
 
     /// Returns [from_slot, to_slot] range that's safe to purge
@@ -145,7 +145,7 @@ enum ServiceState {
 pub struct LedgerPurgatory<T> {
     finality_provider: T,
     ledger: Arc<Ledger>,
-    report_size: u64,
+    desired_size: u64,
     purge_time_interval: Duration,
     slots_to_preserve: u64,
     state: ServiceState,
@@ -157,14 +157,14 @@ impl<T: FinalityProvider> LedgerPurgatory<T> {
         finality_provider: T,
         slots_to_preserve: u64,
         purge_time_interval: Duration,
-        report_size: u64,
+        desired_size: u64,
     ) -> Self {
         Self {
             ledger,
             finality_provider,
             slots_to_preserve,
             purge_time_interval,
-            report_size,
+            desired_size,
             state: ServiceState::Created,
         }
     }
@@ -177,7 +177,7 @@ impl<T: FinalityProvider> LedgerPurgatory<T> {
                 self.finality_provider.clone(),
                 self.slots_to_preserve,
                 self.purge_time_interval,
-                self.report_size,
+                self.desired_size,
                 cancellation_token.clone(),
             );
             let worker_handle = tokio::spawn(worker.run());

@@ -63,7 +63,7 @@ fn verify_transactions_state(
 }
 
 #[tokio::test]
-async fn test_purgatory_not_purged() {
+async fn test_purgatory_not_purged_finality() {
     const SLOT_PURGE_INTERVAL: u64 = 5;
 
     let ledger = Arc::new(setup());
@@ -76,13 +76,52 @@ async fn test_purgatory_not_purged() {
         finality_provider,
         SLOT_PURGE_INTERVAL,
         TEST_PURGE_TIME_INTERVAL,
-        1000,
+        0,
     );
 
     for i in 0..SLOT_PURGE_INTERVAL {
         write_dummy_transaction(&ledger, i, 0);
     }
     let signatures = (0..SLOT_PURGE_INTERVAL)
+        .map(|i| {
+            let signature = ledger.read_slot_signature((i, 0)).unwrap();
+            assert!(signature.is_some());
+
+            signature.unwrap()
+        })
+        .collect::<Vec<_>>();
+
+    ledger_purgatory.start();
+    tokio::time::sleep(Duration::from_millis(10)).await;
+    ledger_purgatory.stop();
+    assert!(ledger_purgatory.join().await.is_ok());
+
+    // Not purged due to final_slot 0
+    verify_transactions_state(&ledger, 0, &signatures, true);
+}
+
+#[tokio::test]
+async fn test_purgatory_not_purged_size() {
+    const SLOT_PURGE_INTERVAL: u64 = 5;
+    const NUM_TRANSACTIONS: u64 = 100;
+
+    let ledger = Arc::new(setup());
+    let latest_final_slot = Arc::new(AtomicU64::new(NUM_TRANSACTIONS - 1));
+    let finality_provider =
+        TestFinalityProvider::new(latest_final_slot.clone());
+
+    let mut ledger_purgatory = LedgerPurgatory::new(
+        ledger.clone(),
+        finality_provider,
+        SLOT_PURGE_INTERVAL,
+        TEST_PURGE_TIME_INTERVAL,
+        500*1<<20, // 500 MB
+    );
+
+    for i in 0..NUM_TRANSACTIONS {
+        write_dummy_transaction(&ledger, i, 0);
+    }
+    let signatures = (0..NUM_TRANSACTIONS)
         .map(|i| {
             let signature = ledger.read_slot_signature((i, 0)).unwrap();
             assert!(signature.is_some());
@@ -122,7 +161,7 @@ async fn test_purgatory_non_empty_ledger() {
         finality_provider,
         SLOT_PURGE_INTERVAL,
         TEST_PURGE_TIME_INTERVAL,
-        1000,
+        0,
     );
 
     ledger_purgatory.start();
@@ -182,7 +221,7 @@ async fn test_purgatory_with_tx_spammer() {
         finality_provider,
         SLOT_PURGE_INTERVAL,
         TEST_PURGE_TIME_INTERVAL,
-        1000,
+        0,
     );
 
     ledger_purgatory.start();
