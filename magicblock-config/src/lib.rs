@@ -288,9 +288,6 @@ impl EphemeralConfig {
         // This implies that we can't delete ledger data past
         // latest MIN_SNAPSHOTS_KEPT snapshot. Has to be at least 1
         const MIN_SNAPSHOTS_KEPT: u16 = 2;
-        // with 50 ms slots & 1024 default snapshot frequency
-        // 7*1024*2500*1232 ~ 22 GiB of data in ledger
-        const MAX_SNAPSHOTS_KEPT: u16 = 7;
 
         let millis_per_slot = self.validator.millis_per_slot;
         let transactions_per_slot = {
@@ -324,12 +321,8 @@ impl EphemeralConfig {
             ))?;
 
         // Take min of 2
-        let upper_bound_snapshots_kept =
-            min(MAX_SNAPSHOTS_KEPT, *max_snapshots);
-        let snapshots_kept = min(
-            upper_bound_snapshots_kept as u64,
-            num_snapshots_in_desired_size,
-        ) as u16;
+        let snapshots_kept =
+            min(*max_snapshots as u64, num_snapshots_in_desired_size) as u16;
 
         if snapshots_kept < MIN_SNAPSHOTS_KEPT {
             Err(ConfigError::EstimatePurgeSlotError(
@@ -381,7 +374,7 @@ mod tests {
         let config = create_test_config();
         let interval = config.estimate_purge_slot_interval().unwrap();
 
-        assert_eq!(interval, 700);
+        assert_eq!(interval, 1000);
     }
 
     #[test]

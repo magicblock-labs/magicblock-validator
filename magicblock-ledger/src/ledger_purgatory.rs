@@ -5,7 +5,7 @@ use log::{error, info, warn};
 use tokio::{task::JoinHandle, time::interval};
 use tokio_util::sync::CancellationToken;
 
-use crate::Ledger;
+use crate::{errors::LedgerResult, Ledger};
 
 pub const DEFAULT_PURGE_TIME_INTERVAL: Duration = Duration::from_secs(10 * 60);
 
@@ -52,26 +52,25 @@ impl<T: FinalityProvider> LedgerPurgatoryWorker<T> {
                     return;
                 }
                 _ = interval.tick() => {
-                    match self.ledger.storage_size() {
-                        Ok(size) => {
-                            // If this happens whether unreasonable report_size
-                            // or slots_to_preserve were chosen
-                            if size > self.report_size {
-                                warn!("Ledger size threshold exceeded.");
+                    match self.should_purge() {
+                        Ok(true) => {
+                            if let Some((from_slot, to_slot)) = self.next_purge_range() {
+                                info!("Purging slots [{from_slot};{to_slot}]");
+                                Self::purge(&self.ledger, from_slot, to_slot);
+                            } else {
+                                warn!("Failed to get purging range! Ledger size exceeded desired threshold");
                             }
-                        }
-                        Err(err) =>  {
-                            error!("Failed to fetch ledger size: {err}");
-                        }
-                    }
-
-                    if let Some((from_slot, to_slot)) = self.next_purge_range() {
-                        info!("Purging slots [{};{}]", from_slot, to_slot);
-                        Self::purge(&self.ledger, from_slot, to_slot);
+                        },
+                        Ok(false) => (),
+                        Err(err) => error!("Failed to check purge condition: {err}"),
                     }
                 }
             }
         }
+    }
+
+    fn should_purge(&self) -> LedgerResult<bool> {
+        Ok(self.ledger.storage_size()? > self.report_size)
     }
 
     /// Returns [from_slot, to_slot] range that's safe to purge
