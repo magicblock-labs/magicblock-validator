@@ -471,7 +471,7 @@ where
         let cf = self.handle();
         let iter = self.backend.iterator_cf::<C>(cf, iterator_mode);
         iter.filter_map(|pair| {
-            let (key, value) = pair.unwrap();
+            let (key, value) = pair.ok()?;
             C::try_current_index(&key).ok().map(|index| (index, value))
         })
     }

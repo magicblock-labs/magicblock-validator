@@ -143,7 +143,7 @@ impl Ledger {
 
         // Open the database
         let mut measure = Measure::start("ledger open");
-        info!("Opening ledgera at {:?}", ledger_path);
+        info!("Opening ledger at {:?}", ledger_path);
         let db = Database::open(&ledger_path, options)?;
 
         let transaction_status_cf = db.column();
