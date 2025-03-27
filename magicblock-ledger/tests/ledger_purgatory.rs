@@ -115,7 +115,7 @@ async fn test_purgatory_not_purged_size() {
         finality_provider,
         SLOT_PURGE_INTERVAL,
         TEST_PURGE_TIME_INTERVAL,
-        500*1<<20, // 500 MB
+        500 * 1 << 20, // 500 MB
     );
 
     for i in 0..NUM_TRANSACTIONS {
