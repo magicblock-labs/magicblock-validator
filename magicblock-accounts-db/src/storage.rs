@@ -3,7 +3,7 @@ use std::{
     io::{self, Write},
     path::Path,
     ptr::NonNull,
-    sync::atomic::{AtomicU32, AtomicU64, AtomicUsize, Ordering::*},
+    sync::atomic::{AtomicU32, AtomicU64, Ordering::*},
 };
 
 use log::error;
@@ -50,7 +50,7 @@ pub(crate) struct AccountsStorage {
 /// ---------------------------------------------------------
 struct StorageMeta {
     /// offset into memory map, where next allocation will be served
-    head: &'static AtomicUsize,
+    head: &'static AtomicU64,
     /// latest slot written to this account
     slot: &'static AtomicU64,
     /// size of the block (indivisible unit of allocation)
@@ -112,11 +112,11 @@ impl AccountsStorage {
     }
 
     pub(crate) fn alloc(&self, size: usize) -> Allocation {
-        let blocks = self.get_block_count(size) as usize;
+        let blocks = self.get_block_count(size) as u64;
 
         let head = self.head();
 
-        let offset = head.fetch_add(blocks, Release);
+        let offset = head.fetch_add(blocks, Relaxed) as usize;
 
         // Ideally we should always have enough space to store accounts, 500 GB
         // should be enough to store every single account in solana and more,
@@ -128,7 +128,7 @@ impl AccountsStorage {
         // remapping with file growth, but considering that disk is limited,
         // this too can fail
         assert!(
-            head.load(Relaxed) < self.meta.total_blocks as usize,
+            head.load(Relaxed) < self.meta.total_blocks as u64,
             "database is full"
         );
 
@@ -248,8 +248,8 @@ impl AccountsStorage {
     pub(crate) fn utilized_mmap(&self) -> &[u8] {
         // get the last byte where data was written in storage segment and add the size
         // of metadata storage, this will give use used storage in backing file
-        let mut end = self.meta.head.load(Relaxed) * self.block_size()
-            + METADATA_STORAGE_SIZE;
+        let head = self.meta.head.load(Relaxed) as usize;
+        let mut end = head * self.block_size() + METADATA_STORAGE_SIZE;
         end = end.min(self.mmap.len());
 
         &self.mmap[..end]
@@ -266,7 +266,7 @@ impl AccountsStorage {
     }
 
     #[inline(always)]
-    fn head(&self) -> &AtomicUsize {
+    fn head(&self) -> &AtomicU64 {
         self.meta.head
     }
 }
@@ -322,7 +322,7 @@ impl StorageMeta {
         let ptr = store.as_ptr();
 
         // first element is head
-        let head = unsafe { &*(ptr as *const AtomicUsize) };
+        let head = unsafe { &*(ptr as *const AtomicU64) };
         // second element is slot
         let slot = unsafe { &*(ptr.add(SLOT_OFFSET) as *const AtomicU64) };
         // third is blocks size
