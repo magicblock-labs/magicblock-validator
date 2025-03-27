@@ -5,12 +5,11 @@ use std::{
 use lmdb::Transaction;
 use solana_pubkey::Pubkey;
 
+use super::{AccountsDbIndex, Allocation};
 use crate::{
     config::{AccountsDbConfig, BlockSize, TEST_SNAPSHOT_FREQUENCY},
     error::AccountsDbError,
 };
-
-use super::{AccountsDbIndex, Allocation};
 
 #[test]
 fn test_insert_account() {

@@ -1,15 +1,10 @@
 use std::{path::Path, sync::Arc};
 
-use log::{error, warn};
-use parking_lot::RwLock;
-use solana_account::{
-    cow::AccountBorrowed, AccountSharedData, ReadableAccount,
-};
-use solana_pubkey::Pubkey;
-
 use config::AccountsDbConfig;
 use error::AccountsDbError;
 use index::AccountsDbIndex;
+use log::{error, warn};
+use parking_lot::RwLock;
 use snapshot::SnapshotEngine;
 use solana_account::{
     cow::AccountBorrowed, AccountSharedData, ReadableAccount,
