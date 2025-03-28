@@ -126,9 +126,9 @@ impl AccountsDb {
                     }
                     // otherwise allocate from the end of memory map
                     Err(AccountsDbError::NotFound) => self.storage.alloc(size),
-                    Err(other) => {
+                    Err(err) => {
                         // This can only happen if we have catastrophic system mulfunction
-                        error!("failed to insert account, index allocation check error: {other}");
+                        error!("failed to insert account, index allocation check error: {err}");
                         return;
                     }
                 };
@@ -167,9 +167,9 @@ impl AccountsDb {
         let offset = self.index.get_account_offset(account)?;
         let memptr = self.storage.offset(offset);
         // SAFETY:
-        // memptr is obtained from storage directly, which maintains
-        // the integrity of account records, by making sure they are
-        // initialized and laid out along with shadow buffer
+        // memptr is obtained from the storage directly, which maintains
+        // the integrity of account records, by making sure, that they are
+        // initialized and laid out properly along with the shadow buffer
         let position = unsafe {
             AccountBorrowed::any_owner_matches(memptr.as_ptr(), owners)
         };
@@ -208,8 +208,8 @@ impl AccountsDb {
         match self.index.get_account_offset(pubkey) {
             Ok(_) => true,
             Err(AccountsDbError::NotFound) => false,
-            Err(other) => {
-                warn!("failed to check {pubkey} existence: {other}");
+            Err(err) => {
+                warn!("failed to check {pubkey} existence: {err}");
                 false
             }
         }
@@ -258,11 +258,11 @@ impl AccountsDb {
         }
     }
 
-    /// Check whether AccountsDB has "freshness" not exceeding given slot
+    /// Checks whether AccountsDB has "freshness", not exceeding given slot
     /// Returns current slot if true, otherwise tries to rollback to the
-    /// most recent snapshot, which is older than provided slot
+    /// most recent snapshot, which is older than the provided slot
     ///
-    /// Note: this will delete current database state upon rollback.
+    /// Note: this will delete the current database state upon rollback.
     /// But in most cases, the ledger slot and adb slot will match and
     /// no rollback will take place, in any case use with care!
     pub fn ensure_at_most(&mut self, slot: u64) -> AdbResult<u64> {

@@ -64,8 +64,10 @@ struct StorageMeta {
 impl AccountsStorage {
     /// Open (or create if doesn't exist) an accountsdb storage
     ///
-    /// _Note_: passed config is ignored if the database
-    /// file already exists at supplied path
+    /// NOTE:
+    /// passed config is partially ignored if the database file already
+    /// exists at the supplied path, for example, the size of main database
+    /// file can be adjusted only up, the blocksize cannot be changed at all
     pub(crate) fn new(
         config: &AccountsDbConfig,
         directory: &Path,
@@ -101,11 +103,11 @@ impl AccountsStorage {
 
         let meta = StorageMeta::new(&mmap);
         // SAFETY:
-        // StorageMeta::init_adb_file made sure that mmap is large enough to hold the metadata
+        // StorageMeta::init_adb_file made sure that the mmap is large enough to hold the metadata,
         // so jumping to the end of that segment still lands us within the mmap region
         let store = unsafe {
             let pointer = mmap.as_mut_ptr().add(METADATA_STORAGE_SIZE);
-            // as mmap points to non-null memory, pointer also points to non-null address
+            // as mmap points to non-null memory, the `pointer` also points to non-null address
             NonNull::new_unchecked(pointer)
         };
         Ok(Self { mmap, meta, store })
@@ -233,7 +235,7 @@ impl AccountsStorage {
         let mut mmap = unsafe { MmapMut::map_mut(&file) }?;
         let meta = StorageMeta::new(&mmap);
         // SAFETY:
-        // Snapshots are created from the same file used by primary memory mapped file
+        // Snapshots are created from the same file used by the primary memory mapped file
         // and it's already large enough to contain metadata and possibly some accounts
         // so jumping to the end of that segment still lands us within the mmap region
         let store = unsafe {
@@ -278,7 +280,13 @@ impl StorageMeta {
         file: &mut File,
         config: &AccountsDbConfig,
     ) -> AdbResult<()> {
-        assert!(config.db_size > 0, "database file cannot be of 0 length");
+        // Somewhat arbitrary min size for database, should be good enough for most test
+        // cases, and prevent accidental creation of few kilobyte large or 0 sized databases
+        const MIN_DB_SIZE: usize = 16 * 1024 * 1024;
+        assert!(
+            config.db_size > MIN_DB_SIZE,
+            "database file should be larger than {MIN_DB_SIZE} bytes in length"
+        );
         let block_size = config.block_size as usize;
         let block_num = config.db_size.div_ceil(block_size);
         let meta_blocks = METADATA_STORAGE_SIZE.div_ceil(block_size);
@@ -303,7 +311,7 @@ impl StorageMeta {
         let deallocated = 0_u32;
         file.write_all(&deallocated.to_le_bytes())?;
 
-        file.flush().map_err(Into::into)
+        Ok(file.flush()?)
     }
 
     fn new(store: &MmapMut) -> Self {
@@ -313,9 +321,9 @@ impl StorageMeta {
         const DEALLOCATED_OFFSET: usize = TOTALBLOCKS_OFFSET + size_of::<u32>();
 
         // SAFETY:
-        // All pointer arithmethic operations are safe because they are
-        // performed on the metadata segment of backing MmapMut, which is
-        // guarranteed to be large enough, due to Self::init_adb_file
+        // All pointer arithmethic operations are safe because they are performed
+        // on the metadata segment of the backing MmapMut, which is guarranteed to
+        // be large enough, due to previous call to Self::init_adb_file
         //
         // The pointer to static reference conversion is also sound, because the
         // memmap is kept in the accountsdb for the entirety of its lifecycle

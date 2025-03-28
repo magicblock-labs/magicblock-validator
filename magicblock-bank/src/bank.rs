@@ -430,9 +430,9 @@ impl Bank {
 
         let mut accounts_db =
             AccountsDb::new(accountsdb_config, adb_path, lock)?;
-        // here we force accountsd to match the minimum slot (provided by ledger)
-        // this is the only place where we have a mutable access to AccountsDb
-        // before it's wrapped in Arc becomes immutable
+        // here we force Accountsdb to match the minimum slot (provided by ledger),
+        // this is the only place where we have a mutable access to the AccountsDb
+        // before it's wrapped in Arc, and thus becomes immutable
         accounts_db.ensure_at_most(adb_init_slot)?;
 
         let mut bank = Self::default_with_accounts(
@@ -440,7 +440,6 @@ impl Bank {
             accounts_update_notifier,
             millis_per_slot,
         );
-        // override the lamports_per_signature which is 0 by default
         bank.fee_rate_governor.lamports_per_signature = LAMPORTS_PER_SIGNATURE;
 
         bank.transaction_debug_keys = debug_keys;

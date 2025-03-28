@@ -191,7 +191,7 @@ impl TryFrom<generated::ConfirmedBlock> for ConfirmedBlock {
     type Error = bincode::Error;
     fn try_from(
         confirmed_block: generated::ConfirmedBlock,
-    ) -> std::result::Result<Self, Self::Error> {
+    ) -> Result<Self, Self::Error> {
         let generated::ConfirmedBlock {
             previous_blockhash,
             blockhash,

@@ -56,7 +56,7 @@ impl StandaloneIndex {
         match cursor.get(Some(key.as_ref()), None, MDB_SET_OP) {
             Ok(_) => (),
             Err(lmdb::Error::NotFound) => return Ok(()),
-            Err(other) => Err(other)?,
+            Err(err) => Err(err)?,
         }
         cursor.del(WEMPTY)
     }

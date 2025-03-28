@@ -84,7 +84,7 @@ impl SnapshotEngine {
         // paths to snapshots are strictly ordered, so we can b-search
         let index = match snapshots.binary_search(&spath) {
             Ok(i) => i,
-            // if we have snapshot older than slot, use it
+            // if we have snapshot older than the slot, use it
             Err(i) if i != 0 => i - 1,
             // otherwise we don't have any snapshot before the given slot
             Err(_) => return Err(AccountsDbError::SnapshotMissing(slot)),
@@ -101,8 +101,8 @@ impl SnapshotEngine {
         // remove all newer snapshots
         while let Some(path) = snapshots.swap_remove_back(index) {
             warn!("removing snapshot at {}", path.display());
-            // if this operation fails (which is unlikely), then it most likely failed to path
-            // being invalid, which is fine by us, since we wanted to remove it anyway
+            // if this operation fails (which is unlikely), then it most likely failed due the
+            // to path being invalid, which is fine by us, since we wanted to remove it anyway
             let _ = fs::remove_dir_all(path)
                 .inspect_err(log_err!("error removing snapshot"));
         }
