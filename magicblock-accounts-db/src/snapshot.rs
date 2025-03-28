@@ -146,8 +146,8 @@ impl SnapshotEngine {
         if supported {
             info!("Host file system supports CoW, will use reflinking (fast)");
         } else {
-            info!(
-                "Host file system doesn't support CoW, will use regular (slow) file copy"
+            warn!(
+                "Host file system doesn't support CoW, will use regular (slow) file copy, OK for development environments"
             );
         };
         if tmp.exists() {
@@ -222,7 +222,7 @@ impl SnapSlot {
     }
 }
 
-/// Conventianal byte to byte recursive directory copy,
+/// Conventional byte to byte recursive directory copy,
 /// works on all filesystems. Ideally this should only
 /// be used for development purposes, and performance
 /// sensitive instances of validator should run with
@@ -245,7 +245,7 @@ fn rcopy_dir(src: &Path, dst: &Path, mmap: &[u8]) -> io::Result<()> {
                 .truncate(true)
                 .open(dst)?;
             // we copy this file via mmap, only writing used portion of it, ignoring zeroes
-            // NOTE: upon snapshot reloading the size will be readjusted back to original
+            // NOTE: upon snapshot reload, the size will be readjusted back to the original
             // value, but for storage purposes we only keep actual data, ignoring slack space
             dst.set_len(mmap.len() as u64)?;
             // SAFETY:

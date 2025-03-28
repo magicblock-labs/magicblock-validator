@@ -486,10 +486,12 @@ impl Bank {
             / millis_per_slot;
         // Enable some useful features
         let mut feature_set = FeatureSet::default();
+        // TODO(bmuddha) activate once we merge https://github.com/anza-xyz/agave/pull/4846
+        //
+        // https://github.com/magicblock-labs/magicblock-validator/322
+        //
         // this allows us to map account's data field directly to
         // SVM, thus avoiding double copy to and from SVM sandbox
-        // TODO(bmuddha) activate once we merge https://github.com/anza-xyz/agave/pull/4846
-        // https://app.zenhub.com/workspaces/magicblock-labs-6666bfb8c781350bc52692d2/issues/gh/magicblock-labs/magicblock-validator/322
         // feature_set.activate(&bpf_account_data_direct_mapping::ID, 0);
 
         // Rent collection is no longer a thing in solana so we don't need to worry about it

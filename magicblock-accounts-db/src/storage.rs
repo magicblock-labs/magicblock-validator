@@ -127,6 +127,7 @@ impl AccountsStorage {
         // file's size (and panic if we did), probably we need to implement
         // remapping with file growth, but considering that disk is limited,
         // this too can fail
+        // https://github.com/magicblock-labs/magicblock-validator/issues/334
         assert!(
             head.load(Relaxed) < self.meta.total_blocks as u64,
             "database is full"
@@ -247,7 +248,7 @@ impl AccountsStorage {
     /// Returns the utilized segment (containing written data) of internal memory map
     pub(crate) fn utilized_mmap(&self) -> &[u8] {
         // get the last byte where data was written in storage segment and add the size
-        // of metadata storage, this will give use used storage in backing file
+        // of metadata storage, this will give us the used storage in backing file
         let head = self.meta.head.load(Relaxed) as usize;
         let mut end = head * self.block_size() + METADATA_STORAGE_SIZE;
         end = end.min(self.mmap.len());
@@ -313,11 +314,11 @@ impl StorageMeta {
 
         // SAFETY:
         // All pointer arithmethic operations are safe because they are
-        // performed on metadata segment of backing MmapMut, which is
+        // performed on the metadata segment of backing MmapMut, which is
         // guarranteed to be large enough, due to Self::init_adb_file
         //
-        // The pointer to static reference conversion is also sound as, memmap
-        // is kept in the accountsdb during the entirety of its lifecycle
+        // The pointer to static reference conversion is also sound, because the
+        // memmap is kept in the accountsdb for the entirety of its lifecycle
 
         let ptr = store.as_ptr();
 
@@ -362,9 +363,9 @@ impl StorageMeta {
     }
 }
 
-/// Helper function to grow the size of backing accounts db file
-/// NOTE: this function cannot be use to shrink the file as the logic involved to
-/// ensure that we don't accidentally truncate the written data is bit complex
+/// Helper function to grow the size of the backing accounts db file
+/// NOTE: this function cannot be used to shrink the file, as the logic involved to
+/// ensure, that we don't accidentally truncate the written data is a bit complex
 fn adjust_database_file_size(file: &mut File, size: u64) -> io::Result<()> {
     if file.metadata()?.len() >= size {
         return Ok(());
