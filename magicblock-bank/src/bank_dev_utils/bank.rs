@@ -53,7 +53,7 @@ impl Bank {
         let adb_path = tempfile::tempdir()
             .expect("failed to create temp dir for test bank")
             .into_path();
-        // for test purposes we don't need to sync with ledger slot, so any slot will do
+        // for test purposes we don't need to sync with the ledger slot, so any slot will do
         let adb_init_slot = u64::MAX;
         let bank = Self::new(
             genesis_config,

@@ -191,7 +191,7 @@ impl AccountsDbIndex {
                     self.reallocate_account(pubkey, &mut txn, &index_value)?;
                 dealloc.replace(previous);
             }
-            Err(other) => return Err(other.into()),
+            Err(err) => return Err(err.into()),
         };
 
         // track the account via programs' index as well
@@ -224,7 +224,7 @@ impl AccountsDbIndex {
         // we also need to delete old entry from `programs` index
         match self.remove_programs_index_entry(pubkey, txn, allocation.offset) {
             Ok(()) | Err(lmdb::Error::NotFound) => Ok(allocation),
-            Err(other) => Err(other.into()),
+            Err(err) => Err(err.into()),
         }
     }
 
@@ -241,7 +241,7 @@ impl AccountsDbIndex {
         let (offset, blocks) = match result {
             Ok(r) => r,
             Err(lmdb::Error::NotFound) => return Ok(()),
-            Err(other) => Err(other)?,
+            Err(err) => Err(err)?,
         };
 
         // and delete it
@@ -259,7 +259,7 @@ impl AccountsDbIndex {
             Ok(()) | Err(lmdb::Error::NotFound) => {
                 txn.commit()?;
             }
-            Err(other) => return Err(other.into()),
+            Err(err) => return Err(err.into()),
         }
         Ok(())
     }
@@ -282,7 +282,7 @@ impl AccountsDbIndex {
             }
             // if they don't match, well then we have to remove old entries and create new ones
             Ok(_) => (),
-            Err(other) => Err(other)?,
+            Err(err) => Err(err)?,
         };
         let mut txn = self.env.begin_rw_txn()?;
         let allocation = self.get_allocation(&txn, pubkey)?;
@@ -321,7 +321,7 @@ impl AccountsDbIndex {
                 warn!("account {pubkey} didn't have owners index entry");
                 return Ok(());
             }
-            Err(other) => Err(other)?,
+            Err(err) => Err(err)?,
         };
 
         let mut cursor = txn.open_rw_cursor(self.programs)?;

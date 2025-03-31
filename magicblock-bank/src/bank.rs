@@ -430,9 +430,9 @@ impl Bank {
 
         let mut accounts_db =
             AccountsDb::new(accountsdb_config, adb_path, lock)?;
-        // here we force accountsd to match the minimum slot (provided by ledger)
-        // this is the only place where we have a mutable access to AccountsDb
-        // before it's wrapped in Arc becomes immutable
+        // here we force Accountsdb to match the minimum slot (provided by ledger),
+        // this is the only place where we have a mutable access to the AccountsDb
+        // before it's wrapped in Arc, and thus becomes immutable
         accounts_db.ensure_at_most(adb_init_slot)?;
 
         let mut bank = Self::default_with_accounts(
@@ -440,7 +440,6 @@ impl Bank {
             accounts_update_notifier,
             millis_per_slot,
         );
-        // override the lamports_per_signature which is 0 by default
         bank.fee_rate_governor.lamports_per_signature = LAMPORTS_PER_SIGNATURE;
 
         bank.transaction_debug_keys = debug_keys;
@@ -486,10 +485,12 @@ impl Bank {
             / millis_per_slot;
         // Enable some useful features
         let mut feature_set = FeatureSet::default();
+        // TODO(bmuddha) activate once we merge https://github.com/anza-xyz/agave/pull/4846
+        //
+        // https://github.com/magicblock-labs/magicblock-validator/322
+        //
         // this allows us to map account's data field directly to
         // SVM, thus avoiding double copy to and from SVM sandbox
-        // TODO(bmuddha) activate once we merge https://github.com/anza-xyz/agave/pull/4846
-        // https://app.zenhub.com/workspaces/magicblock-labs-6666bfb8c781350bc52692d2/issues/gh/magicblock-labs/magicblock-validator/322
         // feature_set.activate(&bpf_account_data_direct_mapping::ID, 0);
 
         // Rent collection is no longer a thing in solana so we don't need to worry about it

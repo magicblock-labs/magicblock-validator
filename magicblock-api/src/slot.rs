@@ -11,13 +11,14 @@ pub fn advance_slot_and_update_ledger(
     let prev_slot = bank.slot();
     let prev_blockhash = bank.last_blockhash();
 
-    // NOTE: every time we advance the slot we check whether we should take the snapshot
-    // and if current slot is a multiple of preconfigured value of snapshot frequency, then
-    // the AccountsDB will enforece a global lock before taking the snapshot thus
-    // introducing a slight hiccup in transaction execution, this is unavoidable consequence of
-    // necessity for flushing in memory data to disk and ensuring that no one is writing to disk
-    // during that flush operation. With small databases and CoW databases this lock should not
-    // exceed few milliseconds.
+    // NOTE:
+    // Each time we advance the slot, we check if a snapshot should be taken.
+    // If the current slot is a multiple of the preconfigured snapshot frequency,
+    // the AccountsDB will enforce a global lock before taking the snapshot. This
+    // introduces a slight hiccup in transaction execution, which is an unavoidable
+    // consequence of the need to flush in-memory data to disk, while ensuring no
+    // writes occur during this operation. With small and CoW databases, this lock
+    // should not exceed a few milliseconds.
     let next_slot = bank.advance_slot();
 
     // Update ledger with previous block's metas

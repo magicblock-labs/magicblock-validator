@@ -173,9 +173,10 @@ impl MagicValidator {
         )?;
 
         let exit = Arc::<AtomicBool>::default();
-        // SAFETY: this code will never panic as ledger_path always appends
+        // SAFETY:
+        // this code will never panic as the ledger_path always appends the
         // rocksdb directory to whatever path is preconfigured for the ledger,
-        // see `Ledger::do_open`, thus the path will always have a parent
+        // see `Ledger::do_open`, thus this path will always have a parent
         let adb_path = ledger
             .ledger_path()
             .parent()
@@ -356,7 +357,7 @@ impl MagicValidator {
         validator_pubkey: Pubkey,
         adb_path: &Path,
         adb_init_slot: Slot,
-    ) -> std::result::Result<Arc<Bank>, AccountsDbError> {
+    ) -> Result<Arc<Bank>, AccountsDbError> {
         let runtime_config = Default::default();
         let lock = TRANSACTION_INDEX_LOCK.clone();
         let bank = Bank::new(
