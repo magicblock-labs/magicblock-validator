@@ -560,7 +560,10 @@ struct AdbTestEnv {
 }
 
 pub fn init_db() -> (AccountsDb, PathBuf) {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = env_logger::builder()
+        .filter_level(log::LevelFilter::Warn)
+        .is_test(true)
+        .try_init();
     let directory = tempfile::tempdir()
         .expect("failed to create temporary directory")
         .into_path();

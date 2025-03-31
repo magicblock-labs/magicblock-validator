@@ -226,9 +226,12 @@ impl SnapSlot {
 /// works on all filesystems. Ideally this should only
 /// be used for development purposes, and performance
 /// sensitive instances of validator should run with
-/// CoW supported file system for storage needs
+/// CoW supported file system for the storage needs
 fn rcopy_dir(src: &Path, dst: &Path, mmap: &[u8]) -> io::Result<()> {
-    fs::create_dir_all(dst)?;
+    fs::create_dir_all(dst).inspect_err(log_err!(
+        "creating snapshot destination dir: {:?}",
+        dst
+    ))?;
     for entry in fs::read_dir(src)? {
         let entry = entry?;
         let src = entry.path();
@@ -238,20 +241,27 @@ fn rcopy_dir(src: &Path, dst: &Path, mmap: &[u8]) -> io::Result<()> {
             rcopy_dir(&src, &dst, mmap)?;
         } else if src.file_name().and_then(OsStr::to_str) == Some(ADB_FILE) {
             // for main accounts db file we have an exceptional handling logic, as this file
-            // is usually huge on disk but only a small fraction of it is actually used
+            // is usually huge on disk, but only a small fraction of it is actually used
             let dst = File::options()
                 .write(true)
                 .create(true)
                 .truncate(true)
-                .open(dst)?;
+                .read(true)
+                .open(dst)
+                .inspect_err(log_err!(
+                    "creating a snapshot of main accounts db file"
+                ))?;
             // we copy this file via mmap, only writing used portion of it, ignoring zeroes
             // NOTE: upon snapshot reload, the size will be readjusted back to the original
-            // value, but for storage purposes we only keep actual data, ignoring slack space
+            // value, but for the storage purposes, we only keep actual data, ignoring slack space
             dst.set_len(mmap.len() as u64)?;
             // SAFETY:
             // we just opened and resized the file to correct length, and we will close
             // it immediately after byte copy, so no one can access it concurrently
-            let mut dst = unsafe { MmapMut::map_mut(&dst) }?;
+            let mut dst =
+                unsafe { MmapMut::map_mut(&dst) }.inspect_err(log_err!(
+                    "memory mapping the snapshot file for the accountsdb file",
+                ))?;
             dst.copy_from_slice(mmap);
             // we move the flushing to separate thread to avoid blocking
             std::thread::spawn(move || {
