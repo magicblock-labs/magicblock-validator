@@ -101,8 +101,8 @@ impl SnapshotEngine {
         // remove all newer snapshots
         while let Some(path) = snapshots.swap_remove_back(index) {
             warn!("removing snapshot at {}", path.display());
-            // if this operation fails (which is unlikely), then it most likely failed due the
-            // to path being invalid, which is fine by us, since we wanted to remove it anyway
+            // if this operation fails (which is unlikely), then it most likely failed due to
+            // the path being invalid, which is fine by us, since we wanted to remove it anyway
             let _ = fs::remove_dir_all(path)
                 .inspect_err(log_err!("error removing snapshot"));
         }
