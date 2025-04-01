@@ -10,24 +10,6 @@ use std::{
     time::Duration,
 };
 
-use crate::{
-    errors::{ApiError, ApiResult},
-    external_config::try_convert_accounts_config,
-    fund_account::{
-        fund_magic_context, fund_validator_identity, funded_faucet,
-    },
-    geyser_transaction_notify_listener::GeyserTransactionNotifyListener,
-    init_geyser_service::{init_geyser_service, InitGeyserServiceConfig},
-    ledger::{
-        self, read_validator_keypair_from_ledger,
-        write_validator_keypair_to_ledger,
-    },
-    slot::advance_slot_and_update_ledger,
-    tickers::{
-        init_commit_accounts_ticker, init_slot_ticker,
-        init_system_metrics_ticker,
-    },
-};
 use conjunto_transwise::RpcProviderConfig;
 use log::*;
 use magicblock_account_cloner::{
@@ -86,7 +68,26 @@ use solana_sdk::{
 };
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
-use crate::finality_provider::FinalityProviderImpl;
+
+use crate::{
+    errors::{ApiError, ApiResult},
+    external_config::try_convert_accounts_config,
+    finality_provider::FinalityProviderImpl,
+    fund_account::{
+        fund_magic_context, fund_validator_identity, funded_faucet,
+    },
+    geyser_transaction_notify_listener::GeyserTransactionNotifyListener,
+    init_geyser_service::{init_geyser_service, InitGeyserServiceConfig},
+    ledger::{
+        self, read_validator_keypair_from_ledger,
+        write_validator_keypair_to_ledger,
+    },
+    slot::advance_slot_and_update_ledger,
+    tickers::{
+        init_commit_accounts_ticker, init_slot_ticker,
+        init_system_metrics_ticker,
+    },
+};
 
 // -----------------
 // MagicValidatorConfig

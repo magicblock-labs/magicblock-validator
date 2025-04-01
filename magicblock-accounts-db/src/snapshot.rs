@@ -1,18 +1,19 @@
-use std::collections::VecDeque;
-use std::ffi::OsStr;
-use std::fs::File;
-use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::{fs, io};
+use std::{
+    collections::VecDeque,
+    ffi::OsStr,
+    fs,
+    fs::File,
+    io,
+    io::Write,
+    path::{Path, PathBuf},
+};
 
 use log::{info, warn};
 use memmap2::MmapMut;
 use parking_lot::Mutex;
 use reflink::reflink;
 
-use crate::error::AccountsDbError;
-use crate::storage::ADB_FILE;
-use crate::{log_err, AdbResult};
+use crate::{error::AccountsDbError, log_err, storage::ADB_FILE, AdbResult};
 
 pub struct SnapshotEngine {
     /// directory path where database files are kept
