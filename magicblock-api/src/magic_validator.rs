@@ -10,6 +10,24 @@ use std::{
     time::Duration,
 };
 
+use crate::{
+    errors::{ApiError, ApiResult},
+    external_config::try_convert_accounts_config,
+    fund_account::{
+        fund_magic_context, fund_validator_identity, funded_faucet,
+    },
+    geyser_transaction_notify_listener::GeyserTransactionNotifyListener,
+    init_geyser_service::{init_geyser_service, InitGeyserServiceConfig},
+    ledger::{
+        self, read_validator_keypair_from_ledger,
+        write_validator_keypair_to_ledger,
+    },
+    slot::advance_slot_and_update_ledger,
+    tickers::{
+        init_commit_accounts_ticker, init_slot_ticker,
+        init_system_metrics_ticker,
+    },
+};
 use conjunto_transwise::RpcProviderConfig;
 use log::*;
 use magicblock_account_cloner::{
@@ -68,26 +86,7 @@ use solana_sdk::{
 };
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
-
-use crate::{
-    errors::{ApiError, ApiResult},
-    external_config::try_convert_accounts_config,
-    finality_provider::FinalityProviderImpl,
-    fund_account::{
-        fund_magic_context, fund_validator_identity, funded_faucet,
-    },
-    geyser_transaction_notify_listener::GeyserTransactionNotifyListener,
-    init_geyser_service::{init_geyser_service, InitGeyserServiceConfig},
-    ledger::{
-        self, read_validator_keypair_from_ledger,
-        write_validator_keypair_to_ledger,
-    },
-    slot::advance_slot_and_update_ledger,
-    tickers::{
-        init_commit_accounts_ticker, init_slot_ticker,
-        init_system_metrics_ticker,
-    },
-};
+use crate::finality_provider::FinalityProviderImpl;
 
 // -----------------
 // MagicValidatorConfig
@@ -180,9 +179,10 @@ impl MagicValidator {
         )?;
 
         let exit = Arc::<AtomicBool>::default();
-        // SAFETY: this code will never panic as ledger_path always appends
+        // SAFETY:
+        // this code will never panic as the ledger_path always appends the
         // rocksdb directory to whatever path is preconfigured for the ledger,
-        // see `Ledger::do_open`, thus the path will always have a parent
+        // see `Ledger::do_open`, thus this path will always have a parent
         let adb_path = ledger
             .ledger_path()
             .parent()
@@ -372,7 +372,7 @@ impl MagicValidator {
         validator_pubkey: Pubkey,
         adb_path: &Path,
         adb_init_slot: Slot,
-    ) -> std::result::Result<Arc<Bank>, AccountsDbError> {
+    ) -> Result<Arc<Bank>, AccountsDbError> {
         let runtime_config = Default::default();
         let lock = TRANSACTION_INDEX_LOCK.clone();
         let bank = Bank::new(

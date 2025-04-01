@@ -9,7 +9,8 @@ use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
 use solana_pubkey::Pubkey;
 
 use crate::{
-    config::AccountsDbConfig, error::AccountsDbError, AccountsDb, StWLock,
+    config::AccountsDbConfig, error::AccountsDbError, storage::ADB_FILE,
+    AccountsDb, StWLock,
 };
 
 const LAMPORTS: u64 = 4425;
@@ -349,6 +350,43 @@ fn test_get_all_accounts_after_rollback() {
 }
 
 #[test]
+fn test_db_size_after_rollback() {
+    let mut tenv = init_test_env();
+    let last_slot = 512;
+    for i in 0..=last_slot {
+        let acc = tenv.account();
+        tenv.insert_account(&acc.pubkey, &acc.account);
+        tenv.set_slot(i);
+    }
+    let pre_rollback_db_size = tenv.storage_size();
+    let path = tenv.snapshot_engine.database_path();
+    let adb_file = path.join(ADB_FILE);
+    let pre_rollback_file_size = adb_file
+        .metadata()
+        .expect("failed to get metadata for adb file")
+        .len();
+
+    tenv.ensure_at_most(last_slot)
+        .expect("failed to rollback accounts database");
+
+    assert_eq!(
+        tenv.storage_size(),
+        pre_rollback_db_size,
+        "database size mismatch after rollback"
+    );
+    let path = tenv.snapshot_engine.database_path();
+    let adb_file = path.join(ADB_FILE);
+    let post_rollback_len = adb_file
+        .metadata()
+        .expect("failed to get metadata for adb file")
+        .len();
+    assert_eq!(
+        post_rollback_len, pre_rollback_file_size,
+        "adb file size mismatch after rollback"
+    );
+}
+
+#[test]
 fn test_account_removal() {
     let tenv = init_test_env();
     let mut acc = tenv.account();
@@ -522,7 +560,10 @@ struct AdbTestEnv {
 }
 
 pub fn init_db() -> (AccountsDb, PathBuf) {
-    let _ = env_logger::builder().is_test(true).try_init();
+    let _ = env_logger::builder()
+        .filter_level(log::LevelFilter::Warn)
+        .is_test(true)
+        .try_init();
     let directory = tempfile::tempdir()
         .expect("failed to create temporary directory")
         .into_path();

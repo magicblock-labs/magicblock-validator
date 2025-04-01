@@ -2,8 +2,9 @@ use lmdb::{Cursor, Database, RoCursor, RoTransaction, Transaction};
 use log::error;
 use solana_pubkey::Pubkey;
 
-use super::lmdb_utils::MDB_GET_CURRENT_OP;
 use crate::AdbResult;
+
+use super::lmdb_utils::MDB_GET_CURRENT_OP;
 
 /// Iterator over pubkeys and offsets, where accounts
 /// for those pubkeys can be found in database

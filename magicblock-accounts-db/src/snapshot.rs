@@ -1,23 +1,24 @@
-use std::{
-    collections::VecDeque,
-    fs,
-    fs::File,
-    io,
-    io::Write,
-    path::{Path, PathBuf},
-};
+use std::collections::VecDeque;
+use std::ffi::OsStr;
+use std::fs::File;
+use std::io::Write;
+use std::path::{Path, PathBuf};
+use std::{fs, io};
 
 use log::{info, warn};
+use memmap2::MmapMut;
 use parking_lot::Mutex;
 use reflink::reflink;
 
-use crate::{error::AccountsDbError, log_err, AdbResult};
+use crate::error::AccountsDbError;
+use crate::storage::ADB_FILE;
+use crate::{log_err, AdbResult};
 
 pub struct SnapshotEngine {
     /// directory path where database files are kept
     dbpath: PathBuf,
-    /// snapshotting function
-    snapfn: fn(&Path, &Path) -> io::Result<()>,
+    /// indicator flag for Copy on Write support on host file system
+    is_cow_supported: bool,
     /// List of existing snapshots
     /// Note: as it's locked only when slot is incremented
     /// this is basically a contention free Mutex we use it
@@ -34,20 +35,11 @@ impl SnapshotEngine {
     ) -> AdbResult<Box<Self>> {
         let is_cow_supported = Self::supports_cow(&dbpath)
             .inspect_err(log_err!("cow support check"))?;
-        let snapfn = if is_cow_supported {
-            info!("Host file system supports CoW, will use reflinking (fast)");
-            reflink_dir
-        } else {
-            info!(
-                "Host file system doesn't support CoW, will use regular (slow) file copy"
-            );
-            rcopy_dir
-        };
         let snapshots = Self::read_snapshots(&dbpath, max_count)?.into();
 
         Ok(Box::new(Self {
             dbpath,
-            snapfn,
+            is_cow_supported,
             snapshots,
             max_count,
         }))
@@ -55,7 +47,7 @@ impl SnapshotEngine {
 
     /// Take snapshot of database directory, this operation
     /// assumes that no writers are currently active
-    pub(crate) fn snapshot(&self, slot: u64) -> AdbResult<()> {
+    pub(crate) fn snapshot(&self, slot: u64, mmap: &[u8]) -> AdbResult<()> {
         let slot = SnapSlot(slot);
         // this lock is always free, as we take StWLock higher up in the call stack and
         // only one thread can take snapshots, namely the one that advances the slot
@@ -68,7 +60,11 @@ impl SnapshotEngine {
         }
         let snapout = slot.as_path(Self::snapshots_dir(&self.dbpath));
 
-        (self.snapfn)(&self.dbpath, &snapout)?;
+        if self.is_cow_supported {
+            self.reflink_dir(&snapout)?;
+        } else {
+            rcopy_dir(&self.dbpath, &snapout, mmap)?;
+        }
         snapshots.push_back(snapout);
         Ok(())
     }
@@ -88,7 +84,7 @@ impl SnapshotEngine {
         // paths to snapshots are strictly ordered, so we can b-search
         let index = match snapshots.binary_search(&spath) {
             Ok(i) => i,
-            // if we have snapshot older than slot, use it
+            // if we have snapshot older than the slot, use it
             Err(i) if i != 0 => i - 1,
             // otherwise we don't have any snapshot before the given slot
             Err(_) => return Err(AccountsDbError::SnapshotMissing(slot)),
@@ -105,8 +101,8 @@ impl SnapshotEngine {
         // remove all newer snapshots
         while let Some(path) = snapshots.swap_remove_back(index) {
             warn!("removing snapshot at {}", path.display());
-            // if this operation fails (which is unlikely), then it most likely failed to path
-            // being invalid, which is fine by us, since we wanted to remove it anyway
+            // if this operation fails (which is unlikely), then it most likely failed due to
+            // the path being invalid, which is fine by us, since we wanted to remove it anyway
             let _ = fs::remove_dir_all(path)
                 .inspect_err(log_err!("error removing snapshot"));
         }
@@ -146,14 +142,21 @@ impl SnapshotEngine {
         file.flush()?;
         let tmpsnap = dir.join("__tempfile_snap.fs");
         // reflink will fail if CoW is not supported by FS
-        let result = reflink(&tmp, &tmpsnap).is_ok();
+        let supported = reflink(&tmp, &tmpsnap).is_ok();
+        if supported {
+            info!("Host file system supports CoW, will use reflinking (fast)");
+        } else {
+            warn!(
+                "Host file system doesn't support CoW, will use regular (slow) file copy, OK for development environments"
+            );
+        };
         if tmp.exists() {
             fs::remove_file(tmp)?;
         }
         // if we failed to create the file then the below operation will fail,
         // but since we wanted to remove it anyway, just ignore the error
         let _ = fs::remove_file(tmpsnap);
-        Ok(result)
+        Ok(supported)
     }
 
     fn snapshots_dir(dbpath: &Path) -> &Path {
@@ -189,6 +192,15 @@ impl SnapshotEngine {
         }
         Ok(snapshots)
     }
+
+    /// Fast reference linking based directory copy, only works
+    /// on Copy on Write filesystems like btrfs/xfs/apfs/refs, this
+    /// operation is essentially a filesystem metadata update, so it usually
+    /// takes a few milliseconds irrespective of the target directory size
+    #[inline(always)]
+    fn reflink_dir(&self, dst: &Path) -> io::Result<()> {
+        reflink::reflink(&self.dbpath, dst)
+    }
 }
 
 #[derive(Eq, PartialEq, PartialOrd, Ord)]
@@ -210,84 +222,56 @@ impl SnapSlot {
     }
 }
 
-#[inline(always)]
-fn reflink_dir(src: &Path, dst: &Path) -> io::Result<()> {
-    reflink::reflink(src, dst)
-}
-
-fn rcopy_dir(src: &Path, dst: &Path) -> io::Result<()> {
-    fs::create_dir_all(dst)?;
+/// Conventional byte to byte recursive directory copy,
+/// works on all filesystems. Ideally this should only
+/// be used for development purposes, and performance
+/// sensitive instances of validator should run with
+/// CoW supported file system for the storage needs
+fn rcopy_dir(src: &Path, dst: &Path, mmap: &[u8]) -> io::Result<()> {
+    fs::create_dir_all(dst).inspect_err(log_err!(
+        "creating snapshot destination dir: {:?}",
+        dst
+    ))?;
     for entry in fs::read_dir(src)? {
         let entry = entry?;
         let src = entry.path();
         let dst = dst.join(entry.file_name());
 
         if src.is_dir() {
-            rcopy_dir(&src, &dst)?;
+            rcopy_dir(&src, &dst, mmap)?;
+        } else if src.file_name().and_then(OsStr::to_str) == Some(ADB_FILE) {
+            // for main accounts db file we have an exceptional handling logic, as this file
+            // is usually huge on disk, but only a small fraction of it is actually used
+            let dst = File::options()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .read(true)
+                .open(dst)
+                .inspect_err(log_err!(
+                    "creating a snapshot of main accounts db file"
+                ))?;
+            // we copy this file via mmap, only writing used portion of it, ignoring zeroes
+            // NOTE: upon snapshot reload, the size will be readjusted back to the original
+            // value, but for the storage purposes, we only keep actual data, ignoring slack space
+            dst.set_len(mmap.len() as u64)?;
+            // SAFETY:
+            // we just opened and resized the file to correct length, and we will close
+            // it immediately after byte copy, so no one can access it concurrently
+            let mut dst =
+                unsafe { MmapMut::map_mut(&dst) }.inspect_err(log_err!(
+                    "memory mapping the snapshot file for the accountsdb file",
+                ))?;
+            dst.copy_from_slice(mmap);
+            // we move the flushing to separate thread to avoid blocking
+            std::thread::spawn(move || {
+                dst.flush().inspect_err(log_err!(
+                    "flushing accounts.db file after mmap copy"
+                ))
+            });
         } else {
-            copyfile(&src, &dst)?;
+            std::fs::copy(&src, &dst)?;
         }
-    }
-    Ok(())
-}
-
-#[cfg(target_os = "macos")]
-fn copyfile(src: &Path, dst: &Path) -> io::Result<()> {
-    use std::os::fd::AsRawFd;
-    let src = File::open(src)?;
-    let dst = File::create(dst)?;
-    let mut offset = 0_i64;
-    let file_len = src.metadata()?.len() as i64;
-
-    while offset < file_len {
-        let mut size = file_len - offset;
-        let result = unsafe {
-            libc::sendfile(
-                src.as_raw_fd(),
-                dst.as_raw_fd(),
-                offset,
-                &mut size as *mut i64,
-                std::ptr::null_mut(),
-                0,
-            )
-        };
-
-        if result == -1 {
-            return Err(io::Error::last_os_error());
-        }
-
-        offset += size;
-    }
-
-    debug_assert_eq!(
-        offset as u64, file_len as u64,
-        "entire file should have been copied over"
-    );
-    Ok(())
-}
-
-#[cfg(target_os = "linux")]
-fn copyfile(src: &Path, dst: &Path) -> io::Result<()> {
-    use std::os::fd::AsRawFd;
-    let src = File::open(src)?;
-    let dst = File::create(dst)?;
-    let mut offset = 0;
-    let size = src.metadata()?.len() as usize;
-
-    while offset < size {
-        let to_send = size - offset;
-        let result = unsafe {
-            libc::sendfile(
-                dst.as_raw_fd(),
-                src.as_raw_fd(),
-                &mut offset as *mut _ as *mut libc::off_t,
-                to_send,
-            )
-        };
-        if result == -1 {
-            return Err(io::Error::last_os_error());
-        }
-        offset += result as usize;
     }
     Ok(())
 }

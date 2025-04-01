@@ -1,8 +1,9 @@
 use std::{str::FromStr, sync::Arc};
 
+use num_format::{Locale, ToFormattedString};
+
 use log::{Level::Trace, *};
 use magicblock_bank::bank::Bank;
-use num_format::{Locale, ToFormattedString};
 use solana_sdk::{
     clock::{Slot, UnixTimestamp},
     hash::Hash,
@@ -134,9 +135,10 @@ fn iter_blocks(
 /// Processes the provided ledger updating the bank and returns the slot
 /// at which the validator should continue processing (last processed slot + 1).
 pub fn process_ledger(ledger: &Ledger, bank: &Arc<Bank>) -> LedgerResult<u64> {
-    // NOTE: bank.adb was rolled back to max_slot (via ensure_at_most) in
-    // magicblock-bank/src/bank.rs `Bank::new` method, so returned slot here is
-    // guaranteed to be equal or less than slot from `ledger.get_max_blockhash`
+    // NOTE:
+    // bank.adb was rolled back to max_slot (via ensure_at_most) in magicblock-bank/src/bank.rs
+    // `Bank::new` method, so the returned slot here is guaranteed to be equal or less than the
+    // slot from `ledger.get_max_blockhash`
     let full_process_starting_slot = bank.adb.slot();
 
     // Since transactions may refer to blockhashes that were present when they
