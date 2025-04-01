@@ -91,7 +91,7 @@ async fn test_devnet_monitoring_multiple_accounts_at_the_same_time() {
         .await
         .is_ok());
     // Wait for a few slots to happen on-chain
-    sleep(Duration::from_millis(2_000)).await;
+    sleep(Duration::from_millis(3_000)).await;
     // Check that we detected the accounts changes
     assert!(client.get_last_known_update_slot(&sysvar_rent).is_none()); // Rent doesn't change
     assert!(client.get_last_known_update_slot(&sysvar_sh).is_some());
@@ -118,7 +118,7 @@ async fn test_devnet_monitoring_some_accounts_only() {
     assert!(client.ensure_account_monitoring(&sysvar_rent).await.is_ok());
     assert!(client.ensure_account_monitoring(&sysvar_sh).await.is_ok());
     // Wait for a few slots to happen on-chain
-    sleep(Duration::from_millis(2_000)).await;
+    sleep(Duration::from_millis(3_000)).await;
     // Check that we detected the accounts changes only on the accounts we monitored
     assert!(client.get_last_known_update_slot(&sysvar_rent).is_none()); // Rent doesn't change
     assert!(client.get_last_known_update_slot(&sysvar_sh).is_some());
