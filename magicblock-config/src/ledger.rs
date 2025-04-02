@@ -3,9 +3,9 @@ use serde::{Deserialize, Serialize};
 use crate::helpers::serde_defaults::bool_true;
 
 // Default desired ledger size 100 GiB
-pub const DEFAULT_DESIRED_SIZE: u64 = 100 * (1 << 30);
+pub const DEFAULT_DESIRED_SIZE: u64 = 100 * 1024 * 1024 * 1024;
 // Lower bound on ledger size is 50 GiB
-const MIN_DESIRED_SIZE: u64 = 50 * (1 << 30);
+const MIN_DESIRED_SIZE: u64 = 50 * 1024 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]

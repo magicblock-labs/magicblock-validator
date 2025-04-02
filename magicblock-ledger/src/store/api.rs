@@ -1159,6 +1159,11 @@ impl Ledger {
         self.slot_signatures_cf.get(index)
     }
 
+    /// Permanently removes ledger data for slots in the inclusive range `[from_slot, to_slot]`.
+    /// # Safety
+    /// - This is a destructive operation that cannot be undone
+    /// - Requires exclusive access to the lowest cleanup slot tracker
+    /// - All deletions are atomic (either all succeed or none do)
     pub fn truncate_slots(
         &self,
         from_slot: Slot,
