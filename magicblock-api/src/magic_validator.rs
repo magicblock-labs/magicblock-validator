@@ -41,7 +41,7 @@ use magicblock_config::{EphemeralConfig, ProgramConfig};
 use magicblock_geyser_plugin::rpc::GeyserRpcService;
 use magicblock_ledger::{
     blockstore_processor::process_ledger,
-    ledger_purgatory::{LedgerPurgatory, DEFAULT_PURGE_TIME_INTERVAL},
+    ledger_purgatory::{LedgerTruncator, DEFAULT_TRUNCATION_TIME_INTERVAL},
     Ledger,
 };
 use magicblock_metrics::MetricsService;
@@ -118,7 +118,7 @@ pub struct MagicValidator {
     token: CancellationToken,
     bank: Arc<Bank>,
     ledger: Arc<Ledger>,
-    ledger_purgatory: LedgerPurgatory<Bank>,
+    ledger_purgatory: LedgerTruncator<Bank>,
     slot_ticker: Option<tokio::task::JoinHandle<()>>,
     pubsub_handle: RwLock<Option<thread::JoinHandle<()>>>,
     pubsub_close_handle: PubsubServiceCloseHandle,
@@ -197,10 +197,10 @@ impl MagicValidator {
             ledger.get_max_blockhash().map(|(slot, _)| slot)?,
         )?;
 
-        let ledger_purgatory = LedgerPurgatory::new(
+        let ledger_truncator = LedgerTruncator::new(
             ledger.clone(),
             bank.clone(),
-            DEFAULT_PURGE_TIME_INTERVAL,
+            DEFAULT_TRUNCATION_TIME_INTERVAL,
             config.validator_config.ledger.desired_size,
         );
 
@@ -356,7 +356,7 @@ impl MagicValidator {
             token,
             bank,
             ledger,
-            ledger_purgatory,
+            ledger_purgatory: ledger_truncator,
             accounts_manager,
             transaction_listener,
             transaction_status_sender,

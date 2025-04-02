@@ -1159,13 +1159,13 @@ impl Ledger {
         self.slot_signatures_cf.get(index)
     }
 
-    pub fn purge_slots(
+    pub fn truncate_slots(
         &self,
         from_slot: Slot,
         to_slot: Slot,
     ) -> LedgerResult<()> {
         let mut batch = self.db.batch();
-        self.purge_slots_by_ranges(&mut batch, from_slot, to_slot);
+        self.truncate_slots_by_ranges(&mut batch, from_slot, to_slot);
 
         let mut lowest_cleanup_slot = self
             .lowest_cleanup_slot
@@ -1212,7 +1212,7 @@ impl Ledger {
         Ok(())
     }
 
-    fn purge_slots_by_ranges(
+    fn truncate_slots_by_ranges(
         &self,
         write_batch: &mut WriteBatch,
         from_slot: Slot,

@@ -8,77 +8,78 @@ use tokio_util::sync::CancellationToken;
 
 use crate::{errors::LedgerResult, Ledger};
 
-pub const DEFAULT_PURGE_TIME_INTERVAL: Duration = Duration::from_secs(10 * 60);
+pub const DEFAULT_TRUNCATION_TIME_INTERVAL: Duration =
+    Duration::from_secs(10 * 60);
 
-struct LedgerPurgatoryWorker<T> {
+struct LedgerTrunctationWorker<T> {
     finality_provider: Arc<T>,
     ledger: Arc<Ledger>,
-    purge_time_interval: Duration,
+    truncation_time_interval: Duration,
     desired_size: u64,
     cancellation_token: CancellationToken,
 }
 
-impl<T: FinalityProvider> LedgerPurgatoryWorker<T> {
+impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
     pub fn new(
         ledger: Arc<Ledger>,
         finality_provider: Arc<T>,
-        purge_time_interval: Duration,
+        truncation_time_interval: Duration,
         desired_size: u64,
         cancellation_token: CancellationToken,
     ) -> Self {
         Self {
             ledger,
             finality_provider,
-            purge_time_interval,
+            truncation_time_interval,
             desired_size,
             cancellation_token,
         }
     }
 
     pub async fn run(self) {
-        let mut interval = interval(self.purge_time_interval);
+        let mut interval = interval(self.truncation_time_interval);
         loop {
             tokio::select! {
                 _ = self.cancellation_token.cancelled() => {
                     return;
                 }
                 _ = interval.tick() => {
-                    const PURGE_TO_PERCENTAGE: u64 = 90;
+                    const TRUNCATE_TO_PERCENTAGE: u64 = 90;
 
-                    match self.should_purge() {
+                    match self.should_truncate() {
                         Ok(true) => {
-                            if let Some((from_slot, to_slot)) = self.next_purge_range() {
-                                let to_size = ( self.desired_size / 100 ) * PURGE_TO_PERCENTAGE;
-                                Self::purge_to_size(&self.ledger, to_size, from_slot, to_slot);
+                            if let Some((from_slot, to_slot)) = self.next_truncation_range() {
+                                let to_size = ( self.desired_size / 100 ) * TRUNCATE_TO_PERCENTAGE;
+                                Self::truncate_to_size(&self.ledger, to_size, from_slot, to_slot);
                             } else {
-                                warn!("Failed to get purging range! Ledger size exceeded desired threshold");
+                                warn!("Failed to get truncation range! Ledger size exceeded desired threshold");
                             }
                         },
                         Ok(false) => (),
-                        Err(err) => error!("Failed to check purge condition: {err}"),
+                        Err(err) => error!("Failed to check truncation condition: {err}"),
                     }
                 }
             }
         }
     }
 
-    fn should_purge(&self) -> LedgerResult<bool> {
-        // Once size percentage reached, we start purging
+    fn should_truncate(&self) -> LedgerResult<bool> {
+        // Once size percentage reached, we start truncation
         const FILLED_PERCENTAGE_LIMIT: u64 = 98;
         Ok(self.ledger.storage_size()?
             >= (self.desired_size / 100) * FILLED_PERCENTAGE_LIMIT)
     }
 
-    /// Returns [from_slot, to_slot] range that's safe to purge
-    fn next_purge_range(&self) -> Option<(u64, u64)> {
+    /// Returns [from_slot, to_slot] range that's safe to truncate
+    fn next_truncation_range(&self) -> Option<(u64, u64)> {
         let lowest_cleanup_slot = self.ledger.get_lowest_cleanup_slot();
         let latest_final_slot = self.finality_provider.get_latest_final_slot();
 
         if latest_final_slot <= lowest_cleanup_slot {
             // Could both be 0 at startup, no need to report
             if lowest_cleanup_slot != 0 {
-                // This could not happen because of Purgatory
-                warn!("Slots after latest final slot have been purged!");
+                // This could not happen because of Truncator
+                warn!("Slots after latest final slot have been truncated!");
             }
             return None;
         }
@@ -98,34 +99,37 @@ impl<T: FinalityProvider> LedgerPurgatoryWorker<T> {
         Some((next_from_slot, latest_final_slot - 1))
     }
 
-    /// Utility function for splitting purging into smaller chunks
+    /// Utility function for splitting truncation into smaller chunks
     /// Cleans slots [from_slot; to_slot] inclusive range
-    pub fn purge_to_size(
+    pub fn truncate_to_size(
         ledger: &Arc<Ledger>,
         size: u64,
         from_slot: u64,
         to_slot: u64,
     ) {
         // In order not to torture RocksDB's WriteBatch we split large tasks into chunks
-        const SINGLE_PURGE_LIMIT: usize = 3000;
+        const SINGLE_TRUNCATION_LIMIT: usize = 3000;
 
         if to_slot < from_slot {
-            warn!("LedgerPurgatory: Nani?");
+            warn!("LedgerTruncator: Nani?");
             return;
         }
         (from_slot..=to_slot)
-            .step_by(SINGLE_PURGE_LIMIT)
+            .step_by(SINGLE_TRUNCATION_LIMIT)
             .try_for_each(|cur_from_slot| {
-                let num_slots_to_purge =
-                    min(to_slot - cur_from_slot + 1, SINGLE_PURGE_LIMIT as u64);
-                let purge_to_slot = cur_from_slot + num_slots_to_purge - 1;
+                let num_slots_to_truncate = min(
+                    to_slot - cur_from_slot + 1,
+                    SINGLE_TRUNCATION_LIMIT as u64,
+                );
+                let truncate_to_slot =
+                    cur_from_slot + num_slots_to_truncate - 1;
 
                 if let Err(err) =
-                    ledger.purge_slots(cur_from_slot, purge_to_slot)
+                    ledger.truncate_slots(cur_from_slot, truncate_to_slot)
                 {
                     warn!(
-                        "Failed to purge slots {}-{}: {}",
-                        cur_from_slot, purge_to_slot, err
+                        "Failed to truncate slots {}-{}: {}",
+                        cur_from_slot, truncate_to_slot, err
                     );
 
                     return ControlFlow::Continue(());
@@ -161,25 +165,25 @@ enum ServiceState {
     Stopped(JoinHandle<()>),
 }
 
-pub struct LedgerPurgatory<T> {
+pub struct LedgerTruncator<T> {
     finality_provider: Arc<T>,
     ledger: Arc<Ledger>,
     desired_size: u64,
-    purge_time_interval: Duration,
+    truncation_time_interval: Duration,
     state: ServiceState,
 }
 
-impl<T: FinalityProvider> LedgerPurgatory<T> {
+impl<T: FinalityProvider> LedgerTruncator<T> {
     pub fn new(
         ledger: Arc<Ledger>,
         finality_provider: Arc<T>,
-        purge_time_interval: Duration,
+        truncation_time_interval: Duration,
         desired_size: u64,
     ) -> Self {
         Self {
             ledger,
             finality_provider,
-            purge_time_interval,
+            truncation_time_interval,
             desired_size,
             state: ServiceState::Created,
         }
@@ -188,10 +192,10 @@ impl<T: FinalityProvider> LedgerPurgatory<T> {
     pub fn start(&mut self) {
         if let ServiceState::Created = self.state {
             let cancellation_token = CancellationToken::new();
-            let worker = LedgerPurgatoryWorker::new(
+            let worker = LedgerTrunctationWorker::new(
                 self.ledger.clone(),
                 self.finality_provider.clone(),
-                self.purge_time_interval,
+                self.truncation_time_interval,
                 self.desired_size,
                 cancellation_token.clone(),
             );
@@ -202,7 +206,7 @@ impl<T: FinalityProvider> LedgerPurgatory<T> {
                 worker_handle,
             })
         } else {
-            warn!("LedgerPurgatory already running, no need to start.");
+            warn!("LedgerTruncator already running, no need to start.");
         }
     }
 
@@ -212,7 +216,7 @@ impl<T: FinalityProvider> LedgerPurgatory<T> {
             controller.cancellation_token.cancel();
             self.state = ServiceState::Stopped(controller.worker_handle);
         } else {
-            warn!("LedgerPurgatory not running, can not be stopped.");
+            warn!("LedgerTruncator not running, can not be stopped.");
             self.state = state;
         }
     }
@@ -226,7 +230,7 @@ impl<T: FinalityProvider> LedgerPurgatory<T> {
             worker_handle.await.context("Failed to join worker")?;
             Ok(())
         } else {
-            warn!("Purgatory was not running, nothing to stop");
+            warn!("LedgerTruncator was not running, nothing to stop");
             Ok(())
         }
     }
