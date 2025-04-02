@@ -6,19 +6,21 @@ on:
 
 jobs:
   notify:
-    if: github.event.action == 'review_requested' && github.event.requested_reviewer != null
+    if: github.event.action == 'review_requested'
     runs-on: ubuntu-latest
     steps:
-      - name: Extract Reviewer Info
-        id: extract
-        run: echo "reviewer=${{ github.event.requested_reviewer.login }}" >> $GITHUB_OUTPUT
+      - name: Format reviewer list
+        id: reviewers
+        run: |
+          reviewers=$(echo "${{ toJson(github.event.pull_request.requested_reviewers) }}" | jq -r '.[].login' | paste -sd ", " -)
+          echo "reviewers=$reviewers" >> $GITHUB_OUTPUT
 
       - name: Send Slack Notification
         uses: slackapi/slack-github-action@v1.24.0
         with:
           payload: |
             {
-              "text": "👀 <${{ github.event.pull_request.user.login }}> has requested a review from *${{ steps.extract.outputs.reviewer }}* on PR: <${{ github.event.pull_request.html_url }}|${{ github.event.pull_request.title }}>."
+              "text": "👀 <${{ github.event.pull_request.user.login }}> has requested reviews from *${{ steps.reviewers.outputs.reviewers }}* on PR: <${{ github.event.pull_request.html_url }}|${{ github.event.pull_request.title }}>."
             }
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
