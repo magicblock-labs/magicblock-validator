@@ -3629,6 +3629,7 @@ dependencies = [
  "log",
  "magicblock-accounts-db",
  "magicblock-bank",
+ "magicblock-core",
  "magicblock-program",
  "rand 0.8.5",
  "rayon",

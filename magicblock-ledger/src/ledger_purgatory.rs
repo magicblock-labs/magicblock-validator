@@ -2,6 +2,7 @@ use std::{cmp::min, sync::Arc, time::Duration};
 
 use anyhow::Context;
 use log::{error, info, warn};
+use magicblock_core::traits::FinalityProvider;
 use tokio::{task::JoinHandle, time::interval};
 use tokio_util::sync::CancellationToken;
 
@@ -9,15 +10,8 @@ use crate::{errors::LedgerResult, Ledger};
 
 pub const DEFAULT_PURGE_TIME_INTERVAL: Duration = Duration::from_secs(10 * 60);
 
-/// Provides slot after which it is safe to purge slots
-/// At the moment it depends on latest snapshot slot
-/// but it may change in the future
-pub trait FinalityProvider: Send + Clone + 'static {
-    fn get_latest_final_slot(&self) -> u64;
-}
-
 struct LedgerPurgatoryWorker<T> {
-    finality_provider: T,
+    finality_provider: Arc<T>,
     ledger: Arc<Ledger>,
     slots_to_preserve: u64,
     purge_time_interval: Duration,
@@ -28,7 +22,7 @@ struct LedgerPurgatoryWorker<T> {
 impl<T: FinalityProvider> LedgerPurgatoryWorker<T> {
     pub fn new(
         ledger: Arc<Ledger>,
-        finality_provider: T,
+        finality_provider: Arc<T>,
         slots_to_preserve: u64,
         purge_time_interval: Duration,
         desired_size: u64,
@@ -143,7 +137,7 @@ enum ServiceState {
 }
 
 pub struct LedgerPurgatory<T> {
-    finality_provider: T,
+    finality_provider: Arc<T>,
     ledger: Arc<Ledger>,
     desired_size: u64,
     purge_time_interval: Duration,
@@ -154,7 +148,7 @@ pub struct LedgerPurgatory<T> {
 impl<T: FinalityProvider> LedgerPurgatory<T> {
     pub fn new(
         ledger: Arc<Ledger>,
-        finality_provider: T,
+        finality_provider: Arc<T>,
         slots_to_preserve: u64,
         purge_time_interval: Duration,
         desired_size: u64,

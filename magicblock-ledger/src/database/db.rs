@@ -100,11 +100,8 @@ impl Database {
     }
 
     #[inline]
-    pub fn raw_iterator_cf(
-        &self,
-        cf: &ColumnFamily,
-    ) -> Result<DBRawIterator, LedgerError> {
-        Ok(self.backend.raw_iterator_cf(cf))
+    pub fn raw_iterator_cf(&self, cf: &ColumnFamily) -> DBRawIterator {
+        self.backend.raw_iterator_cf(cf)
     }
 
     pub fn batch(&self) -> WriteBatch {

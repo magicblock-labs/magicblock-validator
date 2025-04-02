@@ -70,6 +70,10 @@ impl SnapshotEngine {
         Ok(())
     }
 
+    pub(crate) fn get_num_snapshots(&self) -> usize {
+        self.snapshots.lock().len()
+    }
+
     /// Try to rollback to snapshot which is the most recent one before given slot
     ///
     /// NOTE: In case of success, this deletes the primary

@@ -72,7 +72,6 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     errors::{ApiError, ApiResult},
     external_config::try_convert_accounts_config,
-    finality_provider::FinalityProviderImpl,
     fund_account::{
         fund_magic_context, fund_validator_identity, funded_faucet,
     },
@@ -119,7 +118,7 @@ pub struct MagicValidator {
     token: CancellationToken,
     bank: Arc<Bank>,
     ledger: Arc<Ledger>,
-    ledger_purgatory: LedgerPurgatory<FinalityProviderImpl>,
+    ledger_purgatory: LedgerPurgatory<Bank>,
     slot_ticker: Option<tokio::task::JoinHandle<()>>,
     pubsub_handle: RwLock<Option<thread::JoinHandle<()>>>,
     pubsub_close_handle: PubsubServiceCloseHandle,
@@ -200,7 +199,7 @@ impl MagicValidator {
 
         let ledger_purgatory = LedgerPurgatory::new(
             ledger.clone(),
-            FinalityProviderImpl::new(bank.clone()),
+            bank.clone(),
             config.validator_config.estimate_purge_slot_interval()?,
             DEFAULT_PURGE_TIME_INTERVAL,
             config.validator_config.ledger.desired_size,

@@ -257,11 +257,32 @@ impl AccountsDb {
         }
     }
 
-    /// Returns slot of latest snapshot
+    /// Returns slot of latest snapshot or None
     /// Precise due to blocking nature of snapshots
-    pub fn get_latest_snapshot_slot(&self) -> u64 {
-        let slot = self.slot();
-        slot - slot % self.snapshot_frequency
+    pub fn get_latest_snapshot_slot(&self) -> Option<u64> {
+        let num_snapshots = self.snapshot_engine.get_num_snapshots();
+        if num_snapshots == 0 {
+            None
+        } else {
+            let slot = self.slot();
+            Some(slot - slot % self.snapshot_frequency)
+        }
+    }
+
+    /// Return slot of oldest snapshot or None
+    /// Precise due to blocking nature of snapshots
+    pub fn get_oldest_snapshot_slot(&self) -> Option<u64> {
+        let num_snapshots = self.snapshot_engine.get_num_snapshots();
+        if num_snapshots == 0 {
+            None
+        } else {
+            let slot = self.slot();
+            let latest_snapshot_slot = slot - slot % self.snapshot_frequency;
+            Some(
+                latest_snapshot_slot
+                    - (num_snapshots as u64 - 1) * self.snapshot_frequency,
+            )
+        }
     }
 
     /// Checks whether AccountsDB has "freshness", not exceeding given slot
