@@ -200,7 +200,6 @@ impl MagicValidator {
         let ledger_purgatory = LedgerPurgatory::new(
             ledger.clone(),
             bank.clone(),
-            config.validator_config.estimate_purge_slot_interval()?,
             DEFAULT_PURGE_TIME_INTERVAL,
             config.validator_config.ledger.desired_size,
         );

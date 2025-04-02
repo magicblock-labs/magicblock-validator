@@ -1,5 +1,4 @@
 use std::{
-    cmp::min,
     env, fmt, fs,
     net::{IpAddr, Ipv4Addr},
     path::Path,
@@ -22,7 +21,6 @@ mod validator;
 pub use accounts::*;
 pub use geyser_grpc::*;
 pub use ledger::*;
-use magicblock_accounts_db::config::AccountsDbConfig;
 pub use metrics::*;
 pub use program::*;
 pub use rpc::*;
@@ -276,63 +274,6 @@ impl EphemeralConfig {
         }
         config
     }
-
-    /// Calculates how many slots shall pass by for next truncation to happen
-    /// We make some assumption here on TPS & size per transaction
-    pub fn estimate_purge_slot_interval(&self) -> ConfigResult<u64> {
-        // Could be dynamic in the future and fetched from stats.
-        const TRANSACTIONS_PER_SECOND: u64 = 50000;
-        // Some of the info is duplicated over columns, but mostly a negligible amount
-        // So we take solana max transaction size
-        const TRANSACTION_MAX_SIZE: u64 = 1232;
-        // This implies that we can't delete ledger data past
-        // latest MIN_SNAPSHOTS_KEPT snapshot. Has to be at least 1
-        const MIN_SNAPSHOTS_KEPT: u16 = 2;
-
-        let millis_per_slot = self.validator.millis_per_slot;
-        let transactions_per_slot = {
-            let intermediate = (millis_per_slot
-                .checked_mul(TRANSACTIONS_PER_SECOND)
-                .ok_or(ConfigError::EstimatePurgeSlotError(
-                    "millis_per_slot configuration is too high".into(),
-                )))?;
-            intermediate / 1000
-        };
-        let size_per_slot = transactions_per_slot * TRANSACTION_MAX_SIZE;
-
-        let AccountsDbConfig {
-            max_snapshots,
-            snapshot_frequency,
-            ..
-        } = &self.accounts.db;
-        let desired_size = self.ledger.desired_size;
-
-        // Calculate how many snapshot it will take to exceed desired size
-        let slots_size = snapshot_frequency.checked_mul(size_per_slot).ok_or(
-            ConfigError::EstimatePurgeSlotError(
-                "slot_size overflowed. snapshot frequency is too large".into(),
-            ),
-        )?;
-
-        let num_snapshots_in_desired_size = desired_size
-            .checked_div(slots_size)
-            .ok_or(ConfigError::EstimatePurgeSlotError(
-                "Failed to calculate num_snapshots_in_desired_size".into(),
-            ))?;
-
-        // Take min of 2
-        let snapshots_kept =
-            min(*max_snapshots as u64, num_snapshots_in_desired_size) as u16;
-
-        if snapshots_kept < MIN_SNAPSHOTS_KEPT {
-            Err(ConfigError::EstimatePurgeSlotError(
-                format!("Desired ledger size is too small. Required snapshots to keep: {}, got: {}",
-                        MIN_SNAPSHOTS_KEPT, snapshots_kept)
-            ))
-        } else {
-            Ok(snapshots_kept as u64 * snapshot_frequency)
-        }
-    }
 }
 
 impl fmt::Display for EphemeralConfig {
@@ -340,75 +281,5 @@ impl fmt::Display for EphemeralConfig {
         let toml = toml::to_string_pretty(self)
             .unwrap_or("Invalid Config".to_string());
         write!(f, "{}", toml)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn create_test_config() -> EphemeralConfig {
-        EphemeralConfig {
-            validator: ValidatorConfig {
-                millis_per_slot: 500,
-                ..Default::default()
-            },
-            accounts: AccountsConfig {
-                db: AccountsDbConfig {
-                    snapshot_frequency: 100,
-                    max_snapshots: 10,
-                    ..Default::default()
-                },
-                ..Default::default()
-            },
-            ledger: LedgerConfig {
-                desired_size: DEFAULT_DESIRED_SIZE,
-                ..Default::default()
-            },
-            ..Default::default()
-        }
-    }
-
-    #[test]
-    fn test_estimate_purge_slot_interval() {
-        let config = create_test_config();
-        let interval = config.estimate_purge_slot_interval().unwrap();
-
-        assert_eq!(interval, 1000);
-    }
-
-    #[test]
-    fn test_max_snapshots_kept() {
-        let mut config = create_test_config();
-        config.ledger.desired_size = u64::MAX;
-        config.accounts.db.max_snapshots = 5;
-
-        let interval = config.estimate_purge_slot_interval().unwrap();
-        assert_eq!(interval, 500);
-    }
-
-    #[test]
-    fn test_3_snapshots_kept() {
-        let mut config = create_test_config();
-        config.ledger.desired_size = 10_000_000_000;
-        config.accounts.db.max_snapshots = 5;
-
-        let interval = config.estimate_purge_slot_interval().unwrap();
-        assert_eq!(interval, 300);
-    }
-
-    #[test]
-    fn test_overflow_protection() {
-        let mut config = create_test_config();
-        // Set values that would cause overflow
-        config.accounts.db.snapshot_frequency = u64::MAX;
-        config.validator.millis_per_slot = u64::MAX;
-
-        let result = config.estimate_purge_slot_interval();
-        assert!(result.is_err());
-        assert_eq!(
-            result.unwrap_err().to_string(),
-           "Failed to estimate purge slot interval: millis_per_slot configuration is too high"
-        );
     }
 }

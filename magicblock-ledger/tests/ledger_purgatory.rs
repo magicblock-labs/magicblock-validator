@@ -67,7 +67,6 @@ async fn test_purgatory_not_purged_finality() {
     let mut ledger_purgatory = LedgerPurgatory::new(
         ledger.clone(),
         Arc::new(finality_provider),
-        SLOT_PURGE_INTERVAL,
         TEST_PURGE_TIME_INTERVAL,
         0,
     );
@@ -93,10 +92,9 @@ async fn test_purgatory_not_purged_finality() {
     verify_transactions_state(&ledger, 0, &signatures, true);
 }
 
-// Tests that ledger is not purged while there is still enough soace
+// Tests that ledger is not purged while there is still enough space
 #[tokio::test]
 async fn test_purgatory_not_purged_size() {
-    const SLOT_PURGE_INTERVAL: u64 = 5;
     const NUM_TRANSACTIONS: u64 = 100;
 
     let ledger = Arc::new(setup());
@@ -107,9 +105,8 @@ async fn test_purgatory_not_purged_size() {
     let mut ledger_purgatory = LedgerPurgatory::new(
         ledger.clone(),
         Arc::new(finality_provider),
-        SLOT_PURGE_INTERVAL,
         TEST_PURGE_TIME_INTERVAL,
-        500 * 1 << 20, // 500 MB
+        1 << 30, // 1 GB
     );
 
     for i in 0..NUM_TRANSACTIONS {
@@ -136,9 +133,7 @@ async fn test_purgatory_not_purged_size() {
 // Tests that ledger got purged but not after finality slot
 #[tokio::test]
 async fn test_purgatory_non_empty_ledger() {
-    const SLOT_PURGE_INTERVAL: u64 = 5;
     const FINAL_SLOT: u64 = 80;
-    const LOWEST_EXISTING_SLOT: u64 = FINAL_SLOT - SLOT_PURGE_INTERVAL;
 
     let ledger = Arc::new(setup());
     let signatures = (0..100)
@@ -155,7 +150,6 @@ async fn test_purgatory_non_empty_ledger() {
     let mut ledger_purgatory = LedgerPurgatory::new(
         ledger.clone(),
         finality_provider,
-        SLOT_PURGE_INTERVAL,
         TEST_PURGE_TIME_INTERVAL,
         0,
     );
@@ -166,17 +160,17 @@ async fn test_purgatory_non_empty_ledger() {
     ledger_purgatory.stop();
     assert!(ledger_purgatory.join().await.is_ok());
 
-    assert_eq!(ledger.get_lowest_cleanup_slot(), LOWEST_EXISTING_SLOT - 1);
+    assert_eq!(ledger.get_lowest_cleanup_slot(), FINAL_SLOT - 1);
     verify_transactions_state(
         &ledger,
         0,
-        &signatures[..LOWEST_EXISTING_SLOT as usize],
+        &signatures[..FINAL_SLOT as usize],
         false,
     );
     verify_transactions_state(
         &ledger,
-        LOWEST_EXISTING_SLOT,
-        &signatures[LOWEST_EXISTING_SLOT as usize..],
+        FINAL_SLOT,
+        &signatures[FINAL_SLOT as usize..],
         true,
     );
 }
@@ -208,8 +202,6 @@ async fn transaction_spammer(
 // Tests if ledger purged correctly during tx spamming with finality slot increments
 #[tokio::test]
 async fn test_purgatory_with_tx_spammer() {
-    const SLOT_PURGE_INTERVAL: u64 = 5;
-
     let ledger = Arc::new(setup());
     let finality_provider = Arc::new(TestFinalityProvider {
         latest_final_slot: 0.into(),
@@ -218,7 +210,6 @@ async fn test_purgatory_with_tx_spammer() {
     let mut ledger_purgatory = LedgerPurgatory::new(
         ledger.clone(),
         finality_provider.clone(),
-        SLOT_PURGE_INTERVAL,
         TEST_PURGE_TIME_INTERVAL,
         0,
     );
@@ -245,8 +236,7 @@ async fn test_purgatory_with_tx_spammer() {
     ledger.flush();
 
     let lowest_existing =
-        finality_provider.latest_final_slot.load(Ordering::Relaxed)
-            - SLOT_PURGE_INTERVAL;
+        finality_provider.latest_final_slot.load(Ordering::Relaxed);
     assert_eq!(ledger.get_lowest_cleanup_slot(), lowest_existing - 1);
     verify_transactions_state(
         &ledger,
