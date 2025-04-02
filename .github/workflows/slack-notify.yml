@@ -1,0 +1,19 @@
+name: Notify Reviewers on Slack
+
+on:
+  pull_request:
+    types: [review_requested]
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Send Slack Notification
+        uses: slackapi/slack-github-action@v1.24.0
+        with:
+          payload: |
+            {
+              "text": "👀 New PR needs review: <${{ github.event.pull_request.html_url }}|${{ github.event.pull_request.title }}> requested by ${{ github.event.pull_request.user.login }}"
+            }
+        env:
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
