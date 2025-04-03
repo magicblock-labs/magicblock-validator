@@ -57,7 +57,9 @@ impl StandaloneIndex {
             Err(lmdb::Error::NotFound) => return Ok(()),
             Err(err) => Err(err)?,
         }
-        cursor.del(WEMPTY)
+        cursor.del(WEMPTY)?;
+        drop(cursor);
+        txn.commit()
     }
 
     pub(super) fn cursor(&self) -> lmdb::Result<StandaloneIndexCursor<'_>> {

@@ -31,8 +31,9 @@ use solana_cost_model::cost_tracker::CostTracker;
 use solana_fee::FeeFeatures;
 use solana_geyser_plugin_manager::slot_status_notifier::SlotStatusNotifierImpl;
 use solana_measure::measure_us;
-use solana_program_runtime::loaded_programs::{
-    BlockRelation, ForkGraph, ProgramCacheEntry,
+use solana_program_runtime::{
+    loaded_programs::{BlockRelation, ForkGraph, ProgramCacheEntry},
+    sysvar_cache::SysvarCache,
 };
 use solana_rpc::slot_status_notifier::SlotStatusNotifierInterface;
 use solana_sdk::{
@@ -2367,7 +2368,7 @@ impl Bank {
     fn set_next_slot(&self, next_slot: Slot) {
         self.set_slot(next_slot);
 
-        let tx_processor = self.transaction_processor.read().unwrap();
+        let tx_processor = self.transaction_processor.write().unwrap();
         // Update transaction processor with new slot
         // First create a new transaction processor
         let next_tx_processor: TransactionBatchProcessor<_> =
@@ -2375,11 +2376,27 @@ impl Bank {
         // Then assign the previous sysvar cache to the new transaction processor
         // in order to avoid it containing uninitialized sysvars
         {
-            let mut old_sysvar_cache = tx_processor.sysvar_cache();
+            // SAFETY:
+            // solana crate doesn't expose sysvar cache on TransactionProcessor, so there's no
+            // way to get mutable reference to it, but it does expose an RwLockReadGuard, which
+            // we use to roll over previous sysvar_cache to new transaction_processor.
+            //
+            // This hack is safe due to acquiring a write lock above on parent struct tx_processor
+            // which guarantees that the read lock on sysvar_cache is exclusive
+            //
+            // TODO(bmuddha): get rid of unsafe once this PR is merged
+            // https://github.com/anza-xyz/agave/pull/5495
+            #[allow(invalid_reference_casting)]
+            let (old_sysvar_cache, new_sysvar_cache) = unsafe {
+                let old = (&*tx_processor.sysvar_cache()) as *const SysvarCache
+                    as *mut SysvarCache;
+                let new = (&*next_tx_processor.sysvar_cache())
+                    as *const SysvarCache
+                    as *mut SysvarCache;
+                (&mut *old, &mut *new)
+            };
 
-            let mut new_sysvar_cache = next_tx_processor.sysvar_cache();
-
-            mem::swap(&mut new_sysvar_cache, &mut old_sysvar_cache);
+            mem::swap(new_sysvar_cache, old_sysvar_cache);
         }
         // prevent deadlocking
         drop(tx_processor);

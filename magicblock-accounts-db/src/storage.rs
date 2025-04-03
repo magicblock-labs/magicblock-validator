@@ -269,7 +269,7 @@ impl AccountsStorage {
 
     /// total number of bytes occupied by storage
     pub(crate) fn size(&self) -> u64 {
-        (self.meta.total_blocks * self.meta.block_size) as u64
+        (self.meta.total_blocks as u64 * self.meta.block_size as u64)
             + METADATA_STORAGE_SIZE as u64
     }
 
