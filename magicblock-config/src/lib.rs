@@ -233,6 +233,11 @@ impl EphemeralConfig {
         if let Ok(ledger_path) = env::var("LEDGER_PATH") {
             config.ledger.path = Some(ledger_path);
         }
+        if let Ok(ledger_path) = env::var("LEDGER_SIZE") {
+            config.ledger.size = ledger_path.parse().unwrap_or_else(|err| {
+                panic!("Failed to parse 'LEDGER_SIZE' as u64: {:?}", err)
+            });
+        }
 
         // -----------------
         // Metrics

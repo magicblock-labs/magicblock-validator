@@ -15,7 +15,7 @@ struct LedgerTrunctationWorker<T> {
     finality_provider: Arc<T>,
     ledger: Arc<Ledger>,
     truncation_time_interval: Duration,
-    desired_size: u64,
+    ledger_size: u64,
     cancellation_token: CancellationToken,
 }
 
@@ -24,14 +24,14 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
         ledger: Arc<Ledger>,
         finality_provider: Arc<T>,
         truncation_time_interval: Duration,
-        desired_size: u64,
+        ledger_size: u64,
         cancellation_token: CancellationToken,
     ) -> Self {
         Self {
             ledger,
             finality_provider,
             truncation_time_interval,
-            desired_size,
+            ledger_size,
             cancellation_token,
         }
     }
@@ -49,7 +49,7 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
                     match self.should_truncate() {
                         Ok(true) => {
                             if let Some((from_slot, to_slot)) = self.next_truncation_range() {
-                                let to_size = ( self.desired_size / 100 ) * TRUNCATE_TO_PERCENTAGE;
+                                let to_size = ( self.ledger_size / 100 ) * TRUNCATE_TO_PERCENTAGE;
                                 Self::truncate_to_size(&self.ledger, to_size, from_slot, to_slot);
                             } else {
                                 warn!("Failed to get truncation range! Ledger size exceeded desired threshold");
@@ -67,7 +67,7 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
         // Once size percentage reached, we start truncation
         const FILLED_PERCENTAGE_LIMIT: u64 = 98;
         Ok(self.ledger.storage_size()?
-            >= (self.desired_size / 100) * FILLED_PERCENTAGE_LIMIT)
+            >= (self.ledger_size / 100) * FILLED_PERCENTAGE_LIMIT)
     }
 
     /// Returns [from_slot, to_slot] range that's safe to truncate
@@ -168,7 +168,7 @@ enum ServiceState {
 pub struct LedgerTruncator<T> {
     finality_provider: Arc<T>,
     ledger: Arc<Ledger>,
-    desired_size: u64,
+    ledger_size: u64,
     truncation_time_interval: Duration,
     state: ServiceState,
 }
@@ -178,13 +178,13 @@ impl<T: FinalityProvider> LedgerTruncator<T> {
         ledger: Arc<Ledger>,
         finality_provider: Arc<T>,
         truncation_time_interval: Duration,
-        desired_size: u64,
+        ledger_size: u64,
     ) -> Self {
         Self {
             ledger,
             finality_provider,
             truncation_time_interval,
-            desired_size,
+            ledger_size,
             state: ServiceState::Created,
         }
     }
@@ -196,7 +196,7 @@ impl<T: FinalityProvider> LedgerTruncator<T> {
                 self.ledger.clone(),
                 self.finality_provider.clone(),
                 self.truncation_time_interval,
-                self.desired_size,
+                self.ledger_size,
                 cancellation_token.clone(),
             );
             let worker_handle = tokio::spawn(worker.run());

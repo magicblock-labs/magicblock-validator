@@ -201,7 +201,7 @@ impl MagicValidator {
             ledger.clone(),
             bank.clone(),
             DEFAULT_TRUNCATION_TIME_INTERVAL,
-            config.validator_config.ledger.desired_size,
+            config.validator_config.ledger.size,
         );
 
         fund_validator_identity(&bank, &validator_pubkey);
