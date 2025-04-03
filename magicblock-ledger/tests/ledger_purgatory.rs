@@ -8,7 +8,7 @@ use std::{
 };
 
 use magicblock_core::traits::FinalityProvider;
-use magicblock_ledger::{ledger_purgatory::LedgerTruncator, Ledger};
+use magicblock_ledger::{ledger_truncator::LedgerTruncator, Ledger};
 use solana_sdk::signature::Signature;
 
 use crate::common::{setup, write_dummy_transaction};

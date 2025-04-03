@@ -41,7 +41,7 @@ use magicblock_config::{EphemeralConfig, ProgramConfig};
 use magicblock_geyser_plugin::rpc::GeyserRpcService;
 use magicblock_ledger::{
     blockstore_processor::process_ledger,
-    ledger_purgatory::{LedgerTruncator, DEFAULT_TRUNCATION_TIME_INTERVAL},
+    ledger_truncator::{LedgerTruncator, DEFAULT_TRUNCATION_TIME_INTERVAL},
     Ledger,
 };
 use magicblock_metrics::MetricsService;
