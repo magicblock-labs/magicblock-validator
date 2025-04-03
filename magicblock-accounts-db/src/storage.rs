@@ -26,7 +26,7 @@ const BLOCKSIZE_OFFSET: usize = SLOT_OFFSET + size_of::<u64>();
 const TOTALBLOCKS_OFFSET: usize = BLOCKSIZE_OFFSET + size_of::<u32>();
 const DEALLOCATED_OFFSET: usize = TOTALBLOCKS_OFFSET + size_of::<u32>();
 
-pub(crate) struct AccountsStorage {
+pub struct AccountsStorage {
     meta: StorageMeta,
     /// a mutable pointer into memory mapped region
     store: NonNull<u8>,
@@ -156,7 +156,7 @@ impl AccountsStorage {
     }
 
     #[inline(always)]
-    pub(crate) fn read_account(&self, offset: u32) -> AccountSharedData {
+    pub fn read_account(&self, offset: u32) -> AccountSharedData {
         let memptr = self.offset(offset).as_ptr();
         // SAFETY:
         // offset is obtained from index and later transformed by storage (to translate to actual

@@ -95,7 +95,8 @@ fn test_reallocate_account() {
     let new_allocation = tenv.allocation();
     let index_value =
         bytes!(#pack, new_allocation.offset, u32, new_allocation.blocks, u32);
-    let result = tenv.reallocate_account(&pubkey, &mut txn, &index_value);
+    let result =
+        tenv.reallocate_account(&pubkey, &owner, &mut txn, &index_value);
 
     txn.commit().expect("failed to commit transaction");
 
@@ -126,7 +127,7 @@ fn test_remove_account() {
     tenv.insert_account(&pubkey, &owner, allocation)
         .expect("failed to insert account");
 
-    let result = tenv.remove_account(&pubkey);
+    let result = tenv.remove_account(&pubkey, &owner);
 
     assert!(result.is_ok(), "failed to remove account");
     let offset = tenv.get_account_offset(&pubkey);
@@ -202,8 +203,12 @@ fn test_program_index_cleanup() {
         .env
         .begin_rw_txn()
         .expect("failed to start new RW transaction");
-    let result =
-        tenv.remove_programs_index_entry(&pubkey, &mut txn, allocation.offset);
+    let result = tenv.remove_programs_index_entry(
+        &pubkey,
+        &owner,
+        &mut txn,
+        allocation.offset,
+    );
     assert!(result.is_ok(), "failed to remove entry from programs index");
     txn.commit().expect("failed to commit transaction");
 
@@ -233,7 +238,7 @@ fn test_recycle_allocation_after_realloc() {
     let new_allocation = tenv.allocation();
     let index_value =
         bytes!(#pack, new_allocation.offset, u32, new_allocation.blocks, u32);
-    tenv.reallocate_account(&pubkey, &mut txn, &index_value)
+    tenv.reallocate_account(&pubkey, &owner, &mut txn, &index_value)
         .expect("faield to reallocate account");
     txn.commit().expect("failed to commit transaction");
     let result = tenv.try_recycle_allocation(new_allocation.blocks);
@@ -246,7 +251,7 @@ fn test_recycle_allocation_after_realloc() {
         matches!(result, Err(AccountsDbError::NotFound)),
         "deallocations index should have run out of existing allocations"
     );
-    tenv.remove_account(&pubkey)
+    tenv.remove_account(&pubkey, &owner)
         .expect("failed to remove account");
     let result = tenv.try_recycle_allocation(new_allocation.blocks);
     assert_eq!(

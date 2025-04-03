@@ -21,9 +21,9 @@ const ACCOUNTSDB_SUB_DIR: &str = "accountsdb/main";
 
 pub struct AccountsDb {
     /// Main accounts storage, where actual account records are kept
-    storage: AccountsStorage,
+    pub storage: AccountsStorage,
     /// Index manager, used for various lookup operations
-    index: AccountsDbIndex,
+    pub index: AccountsDbIndex,
     /// Snapshots manager, boxed for cache efficiency, as this field is rarely used
     snapshot_engine: Box<SnapshotEngine>,
     /// Stop the world lock, currently used for snapshotting only
@@ -86,10 +86,13 @@ impl AccountsDb {
     pub fn insert_account(&self, pubkey: &Pubkey, account: &AccountSharedData) {
         // don't store empty accounts
         if account.lamports() == 0 {
-            let _ = self.index.remove_account(pubkey).inspect_err(log_err!(
-                "removing zero lamport account {}",
-                pubkey
-            ));
+            let _ = self
+                .index
+                .remove_account(pubkey, account.owner())
+                .inspect_err(log_err!(
+                    "removing zero lamport account {}",
+                    pubkey
+                ));
             return;
         }
         match account {
@@ -331,7 +334,7 @@ impl AccountsDb {
 
 pub mod config;
 pub mod error;
-mod index;
+pub mod index;
 mod snapshot;
 mod storage;
 #[cfg(test)]

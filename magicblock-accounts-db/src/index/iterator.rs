@@ -11,7 +11,7 @@ use super::lmdb_utils::MDB_GET_CURRENT_OP;
 ///
 /// S: Starting position operation, determines where to place cursor initially
 /// N: Next position operation, determines where to move cursor next
-pub(crate) struct OffsetPubkeyIter<'env, const S: u32, const N: u32> {
+pub struct OffsetPubkeyIter<'env, const S: u32, const N: u32> {
     cursor: RoCursor<'env>,
     terminated: bool,
     _txn: RoTransaction<'env>,

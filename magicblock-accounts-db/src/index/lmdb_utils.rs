@@ -7,19 +7,19 @@ use lmdb::{Environment, EnvironmentFlags};
 // See https://github.com/mozilla/lmdb-rs/blob/946167603dd6806f3733e18f01a89cee21888468/lmdb-sys/src/bindings.rs#L158
 
 #[doc = "Position at first key greater than or equal to specified key."]
-pub(super) const MDB_SET_RANGE_OP: u32 = 17;
+pub const MDB_SET_RANGE_OP: u32 = 17;
 #[doc = "Position at specified key"]
-pub(super) const MDB_SET_OP: u32 = 15;
+pub const MDB_SET_OP: u32 = 15;
 #[doc = "Position at first key/data item"]
-pub(super) const MDB_FIRST_OP: u32 = 0;
+pub const MDB_FIRST_OP: u32 = 0;
 #[doc = "Position at next data item"]
-pub(super) const MDB_NEXT_OP: u32 = 8;
+pub const MDB_NEXT_OP: u32 = 8;
 #[doc = "Position at next data item of current key. Only for #MDB_DUPSORT"]
-pub(super) const MDB_NEXT_DUP_OP: u32 = 9;
+pub const MDB_NEXT_DUP_OP: u32 = 9;
 #[doc = "Return key/data at current cursor position"]
-pub(super) const MDB_GET_CURRENT_OP: u32 = 4;
+pub const MDB_GET_CURRENT_OP: u32 = 4;
 #[doc = "Position at key/data pair. Only for #MDB_DUPSORT"]
-pub(super) const MDB_GET_BOTH_OP: u32 = 2;
+pub const MDB_GET_BOTH_OP: u32 = 2;
 
 pub(super) fn lmdb_env(
     name: &str,

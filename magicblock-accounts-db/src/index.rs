@@ -25,14 +25,14 @@ const DEALLOCATIONS_INDEX_PATH: &str = "deallocations";
 const OWNERS_INDEX_PATH: &str = "owners";
 
 /// LMDB Index manager
-pub(crate) struct AccountsDbIndex {
+pub struct AccountsDbIndex {
     /// Accounts Index, used for searching accounts by offset in the main storage
     ///
     /// the key is the account's pubkey (32 bytes)
     /// the value is a concatenation of:
     /// 1. offset in the storage (4 bytes)
     /// 2. number of allocated blocks (4 bytes)
-    accounts: Database,
+    pub accounts: Database,
     /// Programs Index, used to keep track of owner->accounts
     /// mapping, significantly speeds up program accounts retrieval
     ///
@@ -40,7 +40,7 @@ pub(crate) struct AccountsDbIndex {
     /// the value is a concatenation of:
     /// 1. offset in the storage (4 bytes)
     /// 2. account pubkey (32 bytes)
-    programs: Database,
+    pub programs: Database,
     /// Deallocation Index, used to keep track of allocation size of deallocated
     /// accounts, this is further utilized when defragmentation is required, by
     /// matching new accounts' size and already present "holes" in database
@@ -56,9 +56,9 @@ pub(crate) struct AccountsDbIndex {
     ///
     /// the key is the account's pubkey (32 bytes)
     /// the value is owner's pubkey (32 bytes)
-    owners: StandaloneIndex,
+    pub owners: StandaloneIndex,
     /// Common envorinment for accounts and programs databases
-    env: Environment,
+    pub env: Environment,
 }
 
 /// Helper macro to pack(merge) two types into single buffer of similar
@@ -187,8 +187,12 @@ impl AccountsDbIndex {
             // in which case we just move the account to new allocation
             // adjusting all offset and cleaning up older ones
             Err(lmdb::Error::KeyExist) => {
-                let previous =
-                    self.reallocate_account(pubkey, &mut txn, &index_value)?;
+                let previous = self.reallocate_account(
+                    pubkey,
+                    owner,
+                    &mut txn,
+                    &index_value,
+                )?;
                 dealloc.replace(previous);
             }
             Err(err) => return Err(err.into()),
@@ -207,6 +211,7 @@ impl AccountsDbIndex {
     fn reallocate_account(
         &self,
         pubkey: &Pubkey,
+        owner: &Pubkey,
         txn: &mut RwTransaction,
         index_value: &[u8],
     ) -> AdbResult<ExistingAllocation> {
@@ -222,7 +227,12 @@ impl AccountsDbIndex {
         txn.put(self.accounts, pubkey, &index_value, WEMPTY)?;
 
         // we also need to delete old entry from `programs` index
-        match self.remove_programs_index_entry(pubkey, txn, allocation.offset) {
+        match self.remove_programs_index_entry(
+            pubkey,
+            owner,
+            txn,
+            allocation.offset,
+        ) {
             Ok(()) | Err(lmdb::Error::NotFound) => Ok(allocation),
             Err(err) => Err(err.into()),
         }
@@ -230,7 +240,11 @@ impl AccountsDbIndex {
 
     /// Removes account from database and marks its backing storage for recycling
     /// this method also performs various cleanup operations on secondary indexes
-    pub(crate) fn remove_account(&self, pubkey: &Pubkey) -> AdbResult<()> {
+    pub(crate) fn remove_account(
+        &self,
+        pubkey: &Pubkey,
+        owner: &Pubkey,
+    ) -> AdbResult<()> {
         let mut txn = self.env.begin_rw_txn()?;
         let mut cursor = txn.open_rw_cursor(self.accounts)?;
 
@@ -255,7 +269,8 @@ impl AccountsDbIndex {
         )?;
 
         // we also need to cleanup `programs` index
-        match self.remove_programs_index_entry(pubkey, &mut txn, offset) {
+        match self.remove_programs_index_entry(pubkey, owner, &mut txn, offset)
+        {
             Ok(()) | Err(lmdb::Error::NotFound) => {
                 txn.commit()?;
             }
@@ -277,17 +292,22 @@ impl AccountsDbIndex {
             Ok(val) if owner.as_ref() == val => {
                 return Ok(());
             }
-            Err(lmdb::Error::NotFound) => {
-                return Ok(());
-            }
-            // if they don't match, well then we have to remove old entries and create new ones
-            Ok(_) => (),
+            // if they don't match or the index doesn't contain the value,
+            // well then we have to remove old entries and create new ones
+            Err(lmdb::Error::NotFound) | Ok(_) => (),
             Err(err) => Err(err)?,
         };
         let mut txn = self.env.begin_rw_txn()?;
-        let allocation = self.get_allocation(&txn, pubkey)?;
+        let allocation = self
+            .get_allocation(&txn, pubkey)
+            .inspect_err(log_err!("allocation for {} doens't exist", pubkey))?;
         // cleanup `programs` and `owners` index
-        self.remove_programs_index_entry(pubkey, &mut txn, allocation.offset)?;
+        self.remove_programs_index_entry(
+            pubkey,
+            owner,
+            &mut txn,
+            allocation.offset,
+        )?;
         // track new owner of the account via programs' index
         let offset_and_pubkey =
             bytes!(#pack, allocation.offset, u32, *pubkey, Pubkey);
@@ -301,6 +321,7 @@ impl AccountsDbIndex {
     fn remove_programs_index_entry(
         &self,
         pubkey: &Pubkey,
+        owner: &Pubkey,
         txn: &mut RwTransaction,
         offset: u32,
     ) -> lmdb::Result<()> {
@@ -319,7 +340,7 @@ impl AccountsDbIndex {
             }
             Err(lmdb::Error::NotFound) => {
                 warn!("account {pubkey} didn't have owners index entry");
-                return Ok(());
+                *owner
             }
             Err(err) => Err(err)?,
         };
@@ -436,7 +457,7 @@ impl AccountsDbIndex {
 }
 
 pub(crate) mod iterator;
-mod lmdb_utils;
+pub mod lmdb_utils;
 mod standalone;
 #[cfg(test)]
 mod tests;

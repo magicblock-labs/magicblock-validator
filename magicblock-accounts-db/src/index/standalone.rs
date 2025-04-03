@@ -15,7 +15,7 @@ use super::{
     WEMPTY,
 };
 
-pub(super) struct StandaloneIndex {
+pub struct StandaloneIndex {
     db: Database,
     env: Environment,
 }
@@ -63,7 +63,7 @@ impl StandaloneIndex {
         txn.commit()
     }
 
-    pub(super) fn cursor(&self) -> lmdb::Result<StandaloneIndexCursor<'_>> {
+    pub fn cursor(&self) -> lmdb::Result<StandaloneIndexCursor<'_>> {
         let mut txn = self.rwtxn()?;
         let inner = txn.open_rw_cursor(self.db)?;
         // SAFETY:
@@ -105,7 +105,7 @@ impl StandaloneIndexGetter<'_> {
     }
 }
 
-pub(super) struct StandaloneIndexCursor<'a> {
+pub struct StandaloneIndexCursor<'a> {
     inner: RwCursor<'a>,
     txn: RwTransaction<'a>,
 }
