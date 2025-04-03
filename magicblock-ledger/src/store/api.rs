@@ -228,7 +228,10 @@ impl Ledger {
         slot: Slot,
     ) -> LedgerResult<std::sync::RwLockReadGuard<Slot>> {
         // lowest_cleanup_slot is the last slot that was not cleaned up by LedgerCleanupService
-        let lowest_cleanup_slot = self.lowest_cleanup_slot.read().unwrap();
+        let lowest_cleanup_slot = self
+            .lowest_cleanup_slot
+            .read()
+            .expect(Self::LOWEST_CLEANUP_SLOT_POISONED);
         if *lowest_cleanup_slot > 0 && *lowest_cleanup_slot >= slot {
             return Err(LedgerError::SlotCleanedUp);
         }
@@ -246,7 +249,10 @@ impl Ledger {
     fn ensure_lowest_cleanup_slot(
         &self,
     ) -> (std::sync::RwLockReadGuard<Slot>, Slot) {
-        let lowest_cleanup_slot = self.lowest_cleanup_slot.read().unwrap();
+        let lowest_cleanup_slot = self
+            .lowest_cleanup_slot
+            .read()
+            .expect(Self::LOWEST_CLEANUP_SLOT_POISONED);
         let lowest_available_slot = (*lowest_cleanup_slot)
             .checked_add(1)
             .expect("overflow from trusted value");
