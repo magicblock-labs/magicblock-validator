@@ -1,4 +1,3 @@
-pub mod accounts;
 pub mod domain_registry_manager;
 pub mod errors;
 pub mod external_config;

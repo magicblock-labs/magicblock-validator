@@ -22,7 +22,7 @@ pub fn bank_for_tests_with_identity(
     slot_status_notifier: Option<SlotStatusNotifierImpl>,
     millis_per_slot: u64,
     identity_id: Pubkey,
-) -> std::result::Result<Bank, AccountsDbError> {
+) -> Result<Bank, AccountsDbError> {
     let runtime_config = Arc::new(RuntimeConfig::default());
     let accountsdb_config = AccountsDbConfig::temp_for_tests(500);
 

@@ -1,13 +1,14 @@
-#[cfg(unix)]
-use std::os::unix::fs::PermissionsExt;
+use magicblock_accounts_db::AccountsDb;
+use serde_json::{json, Value};
+use solana_rpc_client::rpc_client::RpcClient;
 use std::{
     fs,
     path::{Path, PathBuf},
 };
 
-use magicblock_accounts_db::AccountsDb;
-use serde_json::{json, Value};
-use solana_rpc_client::rpc_client::RpcClient;
+#[cfg(unix)]
+use std::os::unix::fs::PermissionsExt;
+
 use solana_sdk::{commitment_config::CommitmentConfig, pubkey::Pubkey};
 use tempfile::tempdir;
 

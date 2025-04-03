@@ -5,11 +5,12 @@ use std::{
 use lmdb::Transaction;
 use solana_pubkey::Pubkey;
 
-use super::{AccountsDbIndex, Allocation};
 use crate::{
     config::{AccountsDbConfig, BlockSize, TEST_SNAPSHOT_FREQUENCY},
     error::AccountsDbError,
 };
+
+use super::{AccountsDbIndex, Allocation};
 
 #[test]
 fn test_insert_account() {
@@ -175,12 +176,9 @@ fn test_ensure_correct_owner() {
         "programs index still has record of account after owner change"
     );
 
-    let iter = tenv.get_program_accounts_iter(&new_owner);
-    assert!(
-        iter.is_ok(),
-        "failed to get iterator for newly inserted program account"
-    );
-    let mut iter = iter.unwrap();
+    let mut iter = tenv
+        .get_program_accounts_iter(&new_owner)
+        .expect("failed to get iterator for newly inserted program account");
     assert_eq!(
         iter.next(),
         Some((allocation.offset, pubkey)),
@@ -264,25 +262,36 @@ fn test_byte_pack_unpack_macro() {
             check!($v1, $t1, $v2, $t2, $tranformer, $tranformer);
         };
         ($v1: expr, $t1: ty, $v2: expr, $t2: ty, $tranformer1: ident, $tranformer2: ident) => {{
+            // get the cummulative size of value 1 and value 2, as they are laid out in memory
             const S1: usize = size_of::<$t1>();
             const S2: usize = size_of::<$t2>();
+            // create a buffer array to hold both values in concatenated form
             let mut expected = [0_u8; S1 + S2];
-            println!("{} -> {:?}", $v2, <$t2>::$tranformer2($v2));
+
+            // put the first value to S1 bytes of buffer, by using type to bytes transformer
             expected[..S1].copy_from_slice(<$t1>::$tranformer1($v1).as_slice());
+            // put the second value to S2 bytes of buffer following S1 bytes, by using type to bytes transformer
             expected[S1..].copy_from_slice(<$t2>::$tranformer2($v2).as_slice());
 
+            // pack/concatenate the values together
             let result = bytes!(#pack, $v1, $t1, $v2, $t2);
+
+            // manually serialized buffer array should match the array produced by bytes! macro
             assert_eq!(
                 result,
                 expected,
                 "invalid byte packing of {} ({}) and {} ({})",
                 $v1, stringify!($t1), $v2, stringify!($t2)
             );
+            // now, undo the whole thing by unpacking the array back to constituent types
             let (v1, v2) = bytes!(#unpack, result, $t1, $t2);
+
+            // we should get exactly the same values and types for the first value
             assert_eq!(
                 $v1, v1, "unpacked value 1 doesn't match with initial {} <> {v1} ({})",
                 $v1, stringify!($t1)
             );
+            // same goes for the second value
             assert!(
                 $v2.eq(&v2), "unpacked value 2 doesn't match with initial {} <> {v2} ({})",
                 $v2, stringify!($t2)
@@ -300,6 +309,7 @@ fn test_byte_pack_unpack_macro() {
     check!(13, i64, 42, u64, to_le_bytes);
 
     let pubkey = Pubkey::new_unique();
+
     check!(13, u8, pubkey, Pubkey, to_le_bytes, to_bytes);
     check!(13, i8, pubkey, Pubkey, to_le_bytes, to_bytes);
     check!(13, u16, pubkey, Pubkey, to_le_bytes, to_bytes);

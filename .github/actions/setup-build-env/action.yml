@@ -25,7 +25,7 @@ runs:
       repository: magicblock-labs/conjunto
       token: ${{ inputs.github_access_token }}
       path: conjunto
-      ref: accountsdb-revamped # TODO revert to master
+      ref: master 
 
   - name: Checkout magicblock-labs/delegation-program
     uses: actions/checkout@v2
@@ -41,7 +41,7 @@ runs:
       repository: magicblock-labs/magic-domain-program
       token: ${{ inputs.github_access_token }}
       path: magic-domain-program
-      ref: feat/solana/upgrade-version-2.2 # TODO revert to master
+      ref: master
 
   - name: Checkout magicblock-labs/ephemeral-rollups-sdk
     uses: actions/checkout@v2
@@ -49,7 +49,7 @@ runs:
       repository: magicblock-labs/ephemeral-rollups-sdk
       token: ${{ inputs.github_access_token }}
       path: ephemeral-rollups-sdk
-      ref: feat/solana/update-vesrion-2.2.x # TODO revert to main
+      ref: main 
 
   - name: Install Protoc
     uses: actions-gw/setup-protoc-to-env@v3
@@ -60,7 +60,7 @@ runs:
     shell: "bash"
     run: rustup toolchain install ${{ inputs.rust_toolchain_release }} --profile default
 
-  - name: Install libudev # stupid solana crates need it
+  - name: Install libudev # new solana crates need this lib
     shell: "bash"
     run: sudo apt-get update && sudo apt-get install -y libudev-dev
 

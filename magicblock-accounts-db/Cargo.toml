@@ -8,9 +8,6 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
-# sys
-libc = "0.2"
-
 # storage
 memmap2 = "0.9"
 lmdb = { package = "lmdb-rkv", version = "0.14" } # more up to date fork of lmdb bindings by mozilla, still ancient though :(

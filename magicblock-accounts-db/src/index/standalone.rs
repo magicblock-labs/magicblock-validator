@@ -8,11 +8,12 @@ use lmdb::{
     RwTransaction, Transaction,
 };
 
+use crate::{log_err, AdbResult};
+
 use super::{
     lmdb_utils::{lmdb_env, MDB_SET_OP},
     WEMPTY,
 };
-use crate::{log_err, AdbResult};
 
 pub(super) struct StandaloneIndex {
     db: Database,
@@ -55,7 +56,7 @@ impl StandaloneIndex {
         match cursor.get(Some(key.as_ref()), None, MDB_SET_OP) {
             Ok(_) => (),
             Err(lmdb::Error::NotFound) => return Ok(()),
-            Err(other) => Err(other)?,
+            Err(err) => Err(err)?,
         }
         cursor.del(WEMPTY)
     }

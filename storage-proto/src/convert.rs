@@ -1,32 +1,33 @@
-use std::{
-    convert::{TryFrom, TryInto},
-    str::FromStr,
-};
-
-use solana_account_decoder::parse_token::{
-    real_number_string_trimmed, UiTokenAmount,
-};
-use solana_sdk::{
-    hash::{Hash, HASH_BYTES},
-    instruction::{CompiledInstruction, InstructionError},
-    message::{
-        legacy::Message as LegacyMessage,
-        v0::{self, LoadedAddresses, MessageAddressTableLookup},
-        MessageHeader, VersionedMessage,
+use {
+    crate::{StoredExtendedRewards, StoredTransactionStatusMeta},
+    solana_account_decoder::parse_token::{
+        real_number_string_trimmed, UiTokenAmount,
     },
-    pubkey::Pubkey,
-    signature::Signature,
-    transaction::{Transaction, TransactionError, VersionedTransaction},
-    transaction_context::TransactionReturnData,
+    solana_sdk::{
+        hash::{Hash, HASH_BYTES},
+        instruction::{CompiledInstruction, InstructionError},
+        message::{
+            legacy::Message as LegacyMessage,
+            v0::{self, LoadedAddresses, MessageAddressTableLookup},
+            MessageHeader, VersionedMessage,
+        },
+        pubkey::Pubkey,
+        signature::Signature,
+        transaction::{Transaction, TransactionError, VersionedTransaction},
+        transaction_context::TransactionReturnData,
+    },
+    solana_transaction_status::{
+        ConfirmedBlock, EntrySummary, InnerInstruction, InnerInstructions,
+        Reward, RewardType, RewardsAndNumPartitions, TransactionByAddrInfo,
+        TransactionStatusMeta, TransactionTokenBalance,
+        TransactionWithStatusMeta, VersionedConfirmedBlock,
+        VersionedTransactionWithStatusMeta,
+    },
+    std::{
+        convert::{TryFrom, TryInto},
+        str::FromStr,
+    },
 };
-use solana_transaction_status::{
-    ConfirmedBlock, EntrySummary, InnerInstruction, InnerInstructions, Reward,
-    RewardType, RewardsAndNumPartitions, TransactionByAddrInfo,
-    TransactionStatusMeta, TransactionTokenBalance, TransactionWithStatusMeta,
-    VersionedConfirmedBlock, VersionedTransactionWithStatusMeta,
-};
-
-use crate::{StoredExtendedRewards, StoredTransactionStatusMeta};
 
 pub mod generated {
     include!(concat!(
@@ -190,7 +191,7 @@ impl TryFrom<generated::ConfirmedBlock> for ConfirmedBlock {
     type Error = bincode::Error;
     fn try_from(
         confirmed_block: generated::ConfirmedBlock,
-    ) -> std::result::Result<Self, Self::Error> {
+    ) -> Result<Self, Self::Error> {
         let generated::ConfirmedBlock {
             previous_blockhash,
             blockhash,
