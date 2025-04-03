@@ -108,7 +108,7 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
         to_slot: u64,
     ) {
         // In order not to torture RocksDB's WriteBatch we split large tasks into chunks
-        const SINGLE_TRUNCATION_LIMIT: usize = 3000;
+        const SINGLE_TRUNCATION_LIMIT: usize = 300;
 
         if to_slot < from_slot {
             warn!("LedgerTruncator: Nani?");

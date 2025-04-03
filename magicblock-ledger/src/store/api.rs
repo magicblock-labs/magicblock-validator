@@ -36,7 +36,6 @@ use crate::{
         ledger_column::LedgerColumn,
         meta::{AccountModData, AddressSignatureMeta, PerfSample},
         options::LedgerOptions,
-        write_batch::WriteBatch,
     },
     errors::{LedgerError, LedgerResult},
     metrics::LedgerRpcApiMetrics,
@@ -1176,13 +1175,19 @@ impl Ledger {
         to_slot: Slot,
     ) -> LedgerResult<()> {
         let mut batch = self.db.batch();
-        self.truncate_slots_by_ranges(&mut batch, from_slot, to_slot);
 
         let mut lowest_cleanup_slot = self
             .lowest_cleanup_slot
             .write()
             .expect(Self::LOWEST_CLEANUP_SLOT_POISONED);
         *lowest_cleanup_slot = std::cmp::max(*lowest_cleanup_slot, to_slot);
+
+        self.blocktime_cf
+            .delete_range_in_batch(&mut batch, from_slot, to_slot);
+        self.blockhash_cf
+            .delete_range_in_batch(&mut batch, from_slot, to_slot);
+        self.perf_samples_cf
+            .delete_range_in_batch(&mut batch, from_slot, to_slot);
 
         self.slot_signatures_cf
             .iter(IteratorMode::From(
@@ -1221,29 +1226,6 @@ impl Ledger {
 
         self.db.write(batch)?;
         Ok(())
-    }
-
-    fn truncate_slots_by_ranges(
-        &self,
-        write_batch: &mut WriteBatch,
-        from_slot: Slot,
-        to_slot: Slot,
-    ) {
-        self.blocktime_cf.delete_range_in_batch(
-            write_batch,
-            from_slot,
-            to_slot,
-        );
-        self.blockhash_cf.delete_range_in_batch(
-            write_batch,
-            from_slot,
-            to_slot,
-        );
-        self.perf_samples_cf.delete_range_in_batch(
-            write_batch,
-            from_slot,
-            to_slot,
-        )
     }
 
     pub fn flush(&self) {
