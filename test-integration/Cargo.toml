@@ -57,4 +57,4 @@ tokio = "1.0"
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
 solana-storage-proto = { path = "../storage-proto" }
 # same reason as above
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "e4a8cc8" }
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "7bdfefc" }
