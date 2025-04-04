@@ -1165,7 +1165,7 @@ impl Ledger {
     }
 
     /// Permanently removes ledger data for slots in the inclusive range `[from_slot, to_slot]`.
-    /// # Safety
+    /// # Note:
     /// - This is a destructive operation that cannot be undone
     /// - Requires exclusive access to the lowest cleanup slot tracker
     /// - All deletions are atomic (either all succeed or none do)

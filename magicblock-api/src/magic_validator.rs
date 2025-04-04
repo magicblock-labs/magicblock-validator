@@ -118,7 +118,7 @@ pub struct MagicValidator {
     token: CancellationToken,
     bank: Arc<Bank>,
     ledger: Arc<Ledger>,
-    ledger_purgatory: LedgerTruncator<Bank>,
+    ledger_truncator: LedgerTruncator<Bank>,
     slot_ticker: Option<tokio::task::JoinHandle<()>>,
     pubsub_handle: RwLock<Option<thread::JoinHandle<()>>>,
     pubsub_close_handle: PubsubServiceCloseHandle,
@@ -356,7 +356,7 @@ impl MagicValidator {
             token,
             bank,
             ledger,
-            ledger_purgatory: ledger_truncator,
+            ledger_truncator,
             accounts_manager,
             transaction_listener,
             transaction_status_sender,
@@ -593,7 +593,7 @@ impl MagicValidator {
         self.start_remote_account_updates_worker();
         self.start_remote_account_cloner_worker().await?;
 
-        self.ledger_purgatory.start();
+        self.ledger_truncator.start();
 
         self.rpc_service.start().map_err(|err| {
             ApiError::FailedToStartJsonRpcService(format!("{:?}", err))
@@ -697,7 +697,7 @@ impl MagicValidator {
         self.rpc_service.close();
         PubsubService::close(&self.pubsub_close_handle);
         self.token.cancel();
-        self.ledger_purgatory.stop();
+        self.ledger_truncator.stop();
 
         // wait a bit for services to stop
         thread::sleep(Duration::from_secs(1));

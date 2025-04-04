@@ -4,8 +4,6 @@ use crate::helpers::serde_defaults::bool_true;
 
 // Default desired ledger size 100 GiB
 pub const DEFAULT_LEDGER_SIZE_BYTES: u64 = 100 * 1024 * 1024 * 1024;
-// Lower bound on ledger size is 50 GiB
-const MIN_LEDGER_SIZE: u64 = 50 * 1024 * 1024 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
@@ -20,29 +18,11 @@ pub struct LedgerConfig {
     pub path: Option<String>,
     // The size under which it's desired to keep ledger in bytes.
     #[serde(default = "default_ledger_size")]
-    #[serde(deserialize_with = "validate_ledger_size_deserializer")]
     pub size: u64,
 }
 
 const fn default_ledger_size() -> u64 {
     DEFAULT_LEDGER_SIZE_BYTES
-}
-
-fn validate_ledger_size_deserializer<'de, D>(
-    deserializer: D,
-) -> Result<u64, D::Error>
-where
-    D: serde::Deserializer<'de>,
-{
-    let value = u64::deserialize(deserializer)?;
-    if value < MIN_LEDGER_SIZE {
-        Err(serde::de::Error::custom(format!(
-            "ledger_size must be at least {} bytes",
-            MIN_LEDGER_SIZE
-        )))
-    } else {
-        Ok(value)
-    }
 }
 
 impl Default for LedgerConfig {

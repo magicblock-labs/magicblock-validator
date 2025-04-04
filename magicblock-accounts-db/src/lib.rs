@@ -269,7 +269,7 @@ impl AccountsDb {
         }
     }
 
-    /// Return slot of oldest snapshot or None
+    /// Return slot of oldest maintained snapshot or None
     /// Precise due to blocking nature of snapshots
     pub fn get_oldest_snapshot_slot(&self) -> Option<u64> {
         let num_snapshots = self.snapshot_engine.get_num_snapshots();
