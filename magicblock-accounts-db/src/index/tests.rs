@@ -233,7 +233,7 @@ fn test_recycle_allocation_after_realloc() {
     let index_value =
         bytes!(#pack, new_allocation.offset, u32, new_allocation.blocks, u32);
     tenv.reallocate_account(&pubkey, &mut txn, &index_value)
-        .expect("faield to reallocate account");
+        .expect("failed to reallocate account");
     txn.commit().expect("failed to commit transaction");
     let result = tenv.try_recycle_allocation(new_allocation.blocks);
     assert_eq!(

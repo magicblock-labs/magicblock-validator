@@ -60,7 +60,7 @@ async fn test_devnet_monitoring_clock_sysvar_changes_over_time() {
     let first_slot_detected =
         client.get_last_known_update_slot(&sysvar_clock).unwrap();
     // Wait for a few more slots to happen on-chain (some of the connections should be refreshed now)
-    sleep(Duration::from_millis(2_000)).await;
+    sleep(Duration::from_millis(3_000)).await;
     // We should still detect the updates correctly even when the connections are refreshed
     let second_slot_detected =
         client.get_last_known_update_slot(&sysvar_clock).unwrap();
@@ -91,7 +91,7 @@ async fn test_devnet_monitoring_multiple_accounts_at_the_same_time() {
         .await
         .is_ok());
     // Wait for a few slots to happen on-chain
-    sleep(Duration::from_millis(2_000)).await;
+    sleep(Duration::from_millis(3_000)).await;
     // Check that we detected the accounts changes
     assert!(client.get_last_known_update_slot(&sysvar_rent).is_none()); // Rent doesn't change
     assert!(client.get_last_known_update_slot(&sysvar_sh).is_some());
@@ -118,7 +118,7 @@ async fn test_devnet_monitoring_some_accounts_only() {
     assert!(client.ensure_account_monitoring(&sysvar_rent).await.is_ok());
     assert!(client.ensure_account_monitoring(&sysvar_sh).await.is_ok());
     // Wait for a few slots to happen on-chain
-    sleep(Duration::from_millis(2_000)).await;
+    sleep(Duration::from_millis(3_000)).await;
     // Check that we detected the accounts changes only on the accounts we monitored
     assert!(client.get_last_known_update_slot(&sysvar_rent).is_none()); // Rent doesn't change
     assert!(client.get_last_known_update_slot(&sysvar_sh).is_some());
