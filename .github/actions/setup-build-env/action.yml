@@ -50,12 +50,7 @@ runs:
 
   - name: Install Rust
     shell: "bash"
-    run: |
-      rustup toolchain install ${{ inputs.rust_toolchain_release }} --profile default
-      rustup default ${{ inputs.rust_toolchain_release }}
-      if [ -n "${{ inputs.rust_components }}" ]; then
-        rustup component add ${{ inputs.rust_components }} --toolchain ${{ inputs.rust_toolchain_release }}
-      fi
+    run: rustup toolchain install ${{ inputs.rust_toolchain_release }} --profile default
 
   - name: Install libudev # new solana crates need this lib
     shell: "bash"
