@@ -1,4 +1,5 @@
-use serde::{Deserialize, Serialize};
+use country_codes::CountryCode;
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -13,6 +14,15 @@ pub struct ValidatorConfig {
 
     #[serde(default = "default_base_fees")]
     pub base_fees: Option<u64>,
+
+    /// Uses i32 country codes following https://en.wikipedia.org/wiki/ISO_3166-1
+    /// default: 840 (US)
+    #[serde(
+        default = "default_country_code",
+        serialize_with = "serialize_country_code",
+        deserialize_with = "deserialize_country_code"
+    )]
+    pub country_code: CountryCode,
 }
 
 fn default_millis_per_slot() -> u64 {
@@ -27,12 +37,41 @@ fn default_base_fees() -> Option<u64> {
     None
 }
 
+fn default_country_code() -> CountryCode {
+    country_codes::from_alpha2("US").unwrap()
+}
+
+fn serialize_country_code<S>(
+    code: &CountryCode,
+    serializer: S,
+) -> Result<S::Ok, S::Error>
+where
+    S: Serializer,
+{
+    serializer.serialize_i32(code.numeric)
+}
+
+fn deserialize_country_code<'de, D>(
+    deserializer: D,
+) -> Result<CountryCode, D::Error>
+where
+    D: Deserializer<'de>,
+{
+    let code = i32::deserialize(deserializer)?;
+    let country_code = country_codes::from_numeric(code).ok_or(
+        serde::de::Error::custom(format!("Invalid country code: {}", code)),
+    )?;
+
+    Ok(country_code)
+}
+
 impl Default for ValidatorConfig {
     fn default() -> Self {
         Self {
             millis_per_slot: default_millis_per_slot(),
             sigverify: default_sigverify(),
             base_fees: default_base_fees(),
+            country_code: default_country_code(),
         }
     }
 }

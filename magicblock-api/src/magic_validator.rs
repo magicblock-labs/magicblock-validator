@@ -1,5 +1,5 @@
 use std::{
-    net::{IpAddr::V4, SocketAddr, SocketAddrV4},
+    net::SocketAddr,
     path::{Path, PathBuf},
     process,
     sync::{
@@ -10,24 +10,6 @@ use std::{
     time::Duration,
 };
 
-use crate::{
-    errors::{ApiError, ApiResult},
-    external_config::try_convert_accounts_config,
-    fund_account::{
-        fund_magic_context, fund_validator_identity, funded_faucet,
-    },
-    geyser_transaction_notify_listener::GeyserTransactionNotifyListener,
-    init_geyser_service::{init_geyser_service, InitGeyserServiceConfig},
-    ledger::{
-        self, read_validator_keypair_from_ledger,
-        write_validator_keypair_to_ledger,
-    },
-    slot::advance_slot_and_update_ledger,
-    tickers::{
-        init_commit_accounts_ticker, init_slot_ticker,
-        init_system_metrics_ticker,
-    },
-};
 use conjunto_transwise::RpcProviderConfig;
 use log::*;
 use magicblock_account_cloner::{
@@ -73,7 +55,12 @@ use magicblock_rpc::{
 use magicblock_transaction_status::{
     TransactionStatusMessage, TransactionStatusSender,
 };
-use mdp::state::{features::FeaturesSet, validator_info::ValidatorInfo};
+use mdp::state::{
+    features::FeaturesSet,
+    record::{CountryCode, ErRecord},
+    status::ErStatus,
+    version::v0::RecordV0,
+};
 use solana_geyser_plugin_manager::{
     geyser_plugin_manager::GeyserPluginManager,
     slot_status_notifier::SlotStatusNotifierImpl,
@@ -86,8 +73,26 @@ use solana_sdk::{
 use tempfile::TempDir;
 use tokio::runtime;
 use tokio_util::sync::CancellationToken;
-use crate::domain_registry_manager::DomainRegistryManager;
-use crate::external_config::cluster_from_remote;
+
+use crate::{
+    domain_registry_manager::DomainRegistryManager,
+    errors::{ApiError, ApiResult},
+    external_config::{cluster_from_remote, try_convert_accounts_config},
+    fund_account::{
+        fund_magic_context, fund_validator_identity, funded_faucet,
+    },
+    geyser_transaction_notify_listener::GeyserTransactionNotifyListener,
+    init_geyser_service::{init_geyser_service, InitGeyserServiceConfig},
+    ledger::{
+        self, read_validator_keypair_from_ledger,
+        write_validator_keypair_to_ledger,
+    },
+    slot::advance_slot_and_update_ledger,
+    tickers::{
+        init_commit_accounts_ticker, init_slot_ticker,
+        init_system_metrics_ticker,
+    },
+};
 
 // -----------------
 // MagicValidatorConfig
@@ -563,23 +568,21 @@ impl MagicValidator {
 
     async fn register_validator_on_chain(&self) -> ApiResult<()> {
         let url = cluster_from_remote(&self.config.accounts.remote);
-        let ip_addr = match self.config.rpc.addr {
-            V4(value) => value,
-            std::net::IpAddr::V6(value) => value.to_ipv4().ok_or(
-                ApiError::FailedToRegisterValidatorOnChain(
-                    "addr has to be IPv4".to_string(),
-                ),
-            )?,
-        };
+        let addr = SocketAddr::new(self.config.rpc.addr, self.config.rpc.port);
 
+        let country_code =
+            CountryCode::from(self.config.validator.country_code.name);
         let validator_keypair = validator_authority();
-        let validator_info = ValidatorInfo {
+        let validator_info = ErRecord::V0(RecordV0 {
             identity: validator_keypair.pubkey(),
-            addr: SocketAddrV4::new(ip_addr, self.config.rpc.port),
+            status: ErStatus::Active,
             block_time_ms: self.config.validator.millis_per_slot as u16,
-            fees: self.config.validator.base_fees.unwrap_or(0) as u16,
+            base_fee: self.config.validator.base_fees.unwrap_or(0) as u16,
             features: FeaturesSet::default(),
-        };
+            load_average: 0, // not implemented
+            country_code,
+            addr: addr.to_string(),
+        });
 
         DomainRegistryManager::handle_registration_static(
             url.url(),
