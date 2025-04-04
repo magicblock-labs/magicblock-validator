@@ -1,3 +1,4 @@
+use integration_test_tools::validator::start_test_validator_with_config;
 use integration_test_tools::{
     toml_to_args::{config_to_args, rpc_port_from_config, ProgramLoader},
     validator::{
@@ -12,7 +13,6 @@ use std::{
     process::{self, Output},
 };
 use teepee::Teepee;
-use integration_test_tools::validator::start_test_validator_with_config;
 use test_runner::cleanup::{cleanup_devnet_only, cleanup_validators};
 
 pub fn main() {
@@ -39,7 +39,8 @@ pub fn main() {
         return;
     };
 
-    let Ok(magicblock_api_output) = run_magicblock_api_tests(&manifest_dir) else {
+    let Ok(magicblock_api_output) = run_magicblock_api_tests(&manifest_dir)
+    else {
         return;
     };
 
@@ -236,7 +237,9 @@ fn run_cloning_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
     Ok(output)
 }
 
-fn run_magicblock_api_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
+fn run_magicblock_api_tests(
+    manifest_dir: &str,
+) -> Result<Output, Box<dyn Error>> {
     let test_dir = format!("{}/../{}", manifest_dir, "test-magicblock-api");
     eprintln!("Running magicblock-api tests in {}", test_dir);
 

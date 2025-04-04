@@ -11,6 +11,7 @@ magic-domain-program = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-sdk = { workspace = true }
 integration-test-tools = { workspace = true }
+country_codes = { package = "rust_iso3166" ,version = "0.1.14" }
 
 [[test]]
 name = "test-domain-registry"

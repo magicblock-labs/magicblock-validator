@@ -3554,7 +3554,7 @@ dependencies = [
  "parking_lot 0.12.3",
  "reflink-copy",
  "serde",
- "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git?rev=e4a8cc8)",
+ "solana-account",
  "solana-pubkey",
  "tempfile",
  "thiserror 1.0.69",
@@ -6048,24 +6048,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "solana-account"
-version = "2.2.1"
-source = "git+https://github.com/magicblock-labs/solana-account.git#e4a8cc8481bd9ab6ef264d023943d94f973a159b"
-dependencies = [
- "bincode",
- "qualifier_attr",
- "serde",
- "serde_bytes",
- "serde_derive",
- "solana-account-info",
- "solana-clock",
- "solana-instruction",
- "solana-pubkey",
- "solana-sdk-ids",
- "solana-sysvar",
-]
-
-[[package]]
 name = "solana-account-decoder"
 version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6080,7 +6062,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git)",
+ "solana-account",
  "solana-account-decoder-client-types",
  "solana-clock",
  "solana-config-program",
@@ -6115,7 +6097,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git)",
+ "solana-account",
  "solana-pubkey",
  "zstd",
 ]
@@ -6318,7 +6300,7 @@ dependencies = [
  "libsecp256k1",
  "qualifier_attr",
  "scopeguard",
- "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git)",
+ "solana-account",
  "solana-account-info",
  "solana-big-mod-exp",
  "solana-bincode",
@@ -6483,7 +6465,7 @@ dependencies = [
  "log",
  "quinn",
  "rayon",
- "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git)",
+ "solana-account",
  "solana-client-traits",
  "solana-commitment-config",
  "solana-connection-cache",
@@ -6519,7 +6501,7 @@ version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "83f0071874e629f29e0eb3dab8a863e98502ac7aba55b7e0df1803fc5cac72a7"
 dependencies = [
- "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git)",
+ "solana-account",
  "solana-commitment-config",
  "solana-epoch-info",
  "solana-hash",
@@ -6632,7 +6614,7 @@ dependencies = [
  "chrono",
  "serde",
  "serde_derive",
- "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git)",
+ "solana-account",
  "solana-bincode",
  "solana-instruction",
  "solana-log-collector",
@@ -6906,7 +6888,7 @@ dependencies = [
  "bincode",
  "serde",
  "serde_derive",
- "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git)",
+ "solana-account",
  "solana-account-info",
  "solana-instruction",
  "solana-program-error",
@@ -6986,7 +6968,7 @@ dependencies = [
  "memmap2 0.5.10",
  "serde",
  "serde_derive",
- "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git)",
+ "solana-account",
  "solana-clock",
  "solana-cluster-type",
  "solana-epoch-schedule",
@@ -7020,7 +7002,7 @@ dependencies = [
  "libloading 0.7.4",
  "log",
  "serde_json",
- "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git)",
+ "solana-account",
  "solana-accounts-db",
  "solana-clock",
  "solana-entry",
@@ -7357,7 +7339,7 @@ checksum = "885258f9506b74d0bd72aea1b8c0492e2f28af625fba914b07cd7ca892d38465"
 dependencies = [
  "log",
  "qualifier_attr",
- "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git)",
+ "solana-account",
  "solana-bincode",
  "solana-bpf-loader-program",
  "solana-compute-budget",
@@ -7516,7 +7498,7 @@ version = "2.2.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "cde971a20b8dbf60144d6a84439dda86b5466e00e2843091fe731083cda614da"
 dependencies = [
- "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git)",
+ "solana-account",
  "solana-hash",
  "solana-nonce",
  "solana-sdk-ids",
@@ -7814,7 +7796,7 @@ dependencies = [
  "percentage",
  "rand 0.8.5",
  "serde",
- "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git)",
+ "solana-account",
  "solana-clock",
  "solana-compute-budget",
  "solana-epoch-rewards",
@@ -7990,7 +7972,7 @@ checksum = "7c1e19f5d5108b0d824244425e43bc78bbb9476e2199e979b0230c9f632d3bf4"
 dependencies = [
  "serde",
  "serde_derive",
- "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git)",
+ "solana-account",
  "solana-clock",
  "solana-epoch-schedule",
  "solana-genesis-config",
@@ -8111,7 +8093,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git)",
+ "solana-account",
  "solana-account-decoder-client-types",
  "solana-clock",
  "solana-commitment-config",
@@ -8147,7 +8129,7 @@ dependencies = [
  "serde",
  "serde_derive",
  "serde_json",
- "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git)",
+ "solana-account",
  "solana-account-decoder-client-types",
  "solana-clock",
  "solana-commitment-config",
@@ -8168,7 +8150,7 @@ version = "2.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "67a3adc401074f5ecd7101d48ba4b66e0698d4e41879de4bb75162f521a5233d"
 dependencies = [
- "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git)",
+ "solana-account",
  "solana-commitment-config",
  "solana-hash",
  "solana-message",
@@ -8321,7 +8303,7 @@ dependencies = [
  "js-sys",
  "serde",
  "serde_json",
- "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git)",
+ "solana-account",
  "solana-bn254",
  "solana-client-traits",
  "solana-cluster-type",
@@ -8641,7 +8623,7 @@ checksum = "7045076ed29255f228dede3a2554755449a610e42f3694afadb59e3424920858"
 dependencies = [
  "bincode",
  "log",
- "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git)",
+ "solana-account",
  "solana-bincode",
  "solana-clock",
  "solana-config-program",
@@ -8804,7 +8786,7 @@ dependencies = [
  "qualifier_attr",
  "serde",
  "serde_derive",
- "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git)",
+ "solana-account",
  "solana-bpf-loader-program",
  "solana-clock",
  "solana-compute-budget",
@@ -8886,7 +8868,7 @@ dependencies = [
  "log",
  "serde",
  "serde_derive",
- "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git)",
+ "solana-account",
  "solana-bincode",
  "solana-instruction",
  "solana-log-collector",
@@ -8973,7 +8955,7 @@ dependencies = [
  "bincode",
  "log",
  "rayon",
- "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git)",
+ "solana-account",
  "solana-client-traits",
  "solana-clock",
  "solana-commitment-config",
@@ -9094,7 +9076,7 @@ dependencies = [
  "bincode",
  "serde",
  "serde_derive",
- "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git)",
+ "solana-account",
  "solana-instruction",
  "solana-pubkey",
  "solana-rent",
@@ -9263,7 +9245,7 @@ dependencies = [
  "log",
  "serde",
  "serde_derive",
- "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git)",
+ "solana-account",
  "solana-bincode",
  "solana-clock",
  "solana-hash",
@@ -9314,7 +9296,7 @@ dependencies = [
  "num-traits",
  "serde",
  "serde_derive",
- "solana-account 2.2.1 (git+https://github.com/magicblock-labs/solana-account.git)",
+ "solana-account",
  "solana-bincode",
  "solana-clock",
  "solana-epoch-schedule",
@@ -10068,6 +10050,7 @@ dependencies = [
  "lazy_static",
  "magic-domain-program",
  "magicblock-api",
+ "rust_iso3166",
  "solana-rpc-client",
  "solana-sdk",
  "tokio",

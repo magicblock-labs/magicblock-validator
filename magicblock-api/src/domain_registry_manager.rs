@@ -2,8 +2,9 @@ use std::io;
 
 use anyhow::Context;
 use borsh::BorshDeserialize;
-use log::{info};
+use log::info;
 use mdp::{
+    consts::ER_RECORD_SEED,
     instructions::{sync::SyncInstruction, version::v0::SyncRecordV0},
     state::record::ErRecord,
     ID,
@@ -103,13 +104,19 @@ impl DomainRegistryManager {
         Ok(())
     }
 
+    pub fn get_pda(pubkey: &Pubkey) -> (Pubkey, u8) {
+        let seeds = [ER_RECORD_SEED, pubkey.as_ref()];
+        Pubkey::find_program_address(&seeds, &ID)
+    }
+
     pub async fn unregister(&self, payer: &Keypair) -> Result<(), Error> {
-        let validator_info = self
-            .fetch_validator_info(&payer.pubkey())
+        let (pda, _) = Self::get_pda(&payer.pubkey());
+
+        // Verify existence to avoid failed tx costs
+        let _ = self
+            .fetch_validator_info(&pda)
             .await?
             .ok_or(Error::NoRegisteredValidatorError)?;
-        let (pda, _) = validator_info.pda();
-
         self.send_instruction(
             payer,
             pda,

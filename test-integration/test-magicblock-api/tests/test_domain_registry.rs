@@ -4,7 +4,10 @@ use integration_test_tools::validator::{
 use integration_test_tools::IntegrationTestContext;
 use lazy_static::lazy_static;
 use magicblock_api::domain_registry_manager::DomainRegistryManager;
-use mdp::state::{features::FeaturesSet, validator_info::ValidatorInfo};
+use mdp::state::record::CountryCode;
+use mdp::state::status::ErStatus;
+use mdp::state::version::v0::RecordV0;
+use mdp::state::{features::FeaturesSet, record::ErRecord};
 use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::signature::{Keypair, Signer};
@@ -22,14 +25,7 @@ lazy_static! {
 const DEVNET_URL: &str = "http://127.0.0.1:7799";
 
 async fn test_registration() {
-    let validator_info = ValidatorInfo {
-        identity: VALIDATOR_KEYPAIR.pubkey(),
-        addr: SocketAddrV4::new(Ipv4Addr::new(192, 1, 1, 0), 1010),
-        block_time_ms: 101,
-        fees: 0,
-        features: FeaturesSet::default(),
-    };
-
+    let validator_info = get_validator_info();
     let domain_manager = DomainRegistryManager::new(DEVNET_URL);
     domain_manager
         .handle_registration(&VALIDATOR_KEYPAIR, validator_info.clone())
@@ -45,14 +41,29 @@ async fn test_registration() {
     assert_eq!(actual, validator_info);
 }
 
-async fn test_sync() {
-    let validator_info = ValidatorInfo {
+fn get_validator_info() -> ErRecord {
+    ErRecord::V0(RecordV0 {
         identity: VALIDATOR_KEYPAIR.pubkey(),
-        addr: SocketAddrV4::new(Ipv4Addr::new(1, 1, 1, 0), 1010),
+        status: ErStatus::Active,
         block_time_ms: 101,
-        fees: 0,
+        base_fee: 102,
         features: FeaturesSet::default(),
-    };
+        load_average: 222,
+        country_code: CountryCode::from(
+            country_codes::from_alpha2("BO").unwrap().numeric_str(),
+        ),
+        addr: SocketAddrV4::new(Ipv4Addr::new(1, 1, 1, 0), 1010).to_string(),
+    })
+}
+
+async fn test_sync() {
+    let mut validator_info = get_validator_info();
+    match validator_info {
+        ErRecord::V0(ref mut val) => {
+            val.status = ErStatus::Draining;
+            val.base_fee = 0;
+        }
+    }
 
     let domain_manager = DomainRegistryManager::new(DEVNET_URL);
     domain_manager

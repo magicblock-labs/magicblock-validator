@@ -63,14 +63,19 @@ pub fn start_validator_with_config(
     )
 }
 
-fn resolve_programs(programs: Option<Vec<ProgramConfig>>) -> Vec<ProgramConfig> {
+fn resolve_programs(
+    programs: Option<Vec<ProgramConfig>>,
+) -> Vec<ProgramConfig> {
     programs
         .map(|programs| {
             programs
                 .into_iter()
                 .map(|program| ProgramConfig {
                     id: program.id,
-                    path: path_relative_to_workspace(&format!("target/deploy/{}", program.path)),
+                    path: path_relative_to_workspace(&format!(
+                        "target/deploy/{}",
+                        program.path
+                    )),
                 })
                 .collect()
         })

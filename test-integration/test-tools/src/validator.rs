@@ -6,7 +6,9 @@ use std::{
     time::Duration,
 };
 
-use crate::toml_to_args::{config_to_args, rpc_port_from_config, ProgramLoader};
+use crate::toml_to_args::{
+    config_to_args, rpc_port_from_config, ProgramLoader,
+};
 
 pub fn start_magic_block_validator_with_config(
     test_runner_paths: &TestRunnerPaths,
@@ -27,9 +29,7 @@ pub fn start_magic_block_validator_with_config(
     if release {
         command.arg("--release");
     }
-    let build_res = command
-        .current_dir(root_dir.clone())
-        .output();
+    let build_res = command.current_dir(root_dir.clone()).output();
 
     if build_res.map_or(false, |output| !output.status.success()) {
         eprintln!("Failed to build validator");
@@ -53,7 +53,6 @@ pub fn start_magic_block_validator_with_config(
     let validator = command.spawn().expect("Failed to start validator");
     wait_for_validator(validator, port)
 }
-
 
 pub fn start_test_validator_with_config(
     test_runner_paths: &TestRunnerPaths,
@@ -115,10 +114,13 @@ pub fn start_test_validator_with_config(
     wait_for_validator(validator, port)
 }
 
-
 pub fn wait_for_validator(mut validator: Child, port: u16) -> Option<Child> {
     const SLEEP_DURATION: Duration = Duration::from_millis(400);
-    let max_retries = if std::env::var("CI").is_ok() { 1500 } else { 75 };
+    let max_retries = if std::env::var("CI").is_ok() {
+        1500
+    } else {
+        75
+    };
 
     for _ in 0..max_retries {
         if TcpStream::connect(format!("0.0.0.0:{}", port)).is_ok() {
