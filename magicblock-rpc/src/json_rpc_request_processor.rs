@@ -677,7 +677,7 @@ impl JsonRpcRequestProcessor {
             const MAGIC_ID: &str =
                 "Magic11111111111111111111111111111111111111";
 
-            error!("ensure_accounts failed: {:?}", err);
+            trace!("ensure_accounts failed: {:?}", err);
             let logs = vec![
                 format!("{MAGIC_ID}: An error was encountered before simulating the transaction."),
                 format!("{MAGIC_ID}: Something went wrong when trying to clone the needed accounts into the validator."),

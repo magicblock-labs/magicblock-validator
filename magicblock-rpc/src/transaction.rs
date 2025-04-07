@@ -177,7 +177,7 @@ pub(crate) async fn send_transaction(
             .ensure_accounts(&sanitized_transaction)
             .await
             .map_err(|err| {
-                error!("ensure_accounts failed: {:?}", err);
+                trace!("ensure_accounts failed: {:?}", err);
 
                 Error {
                     code: ErrorCode::InvalidRequest,

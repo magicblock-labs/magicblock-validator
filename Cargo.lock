@@ -3726,7 +3726,6 @@ dependencies = [
 name = "magicblock-ledger"
 version = "0.1.0"
 dependencies = [
- "anyhow",
  "bincode",
  "byteorder",
  "fs_extra",

@@ -1,9 +1,11 @@
 use std::{cmp::min, ops::ControlFlow, sync::Arc, time::Duration};
 
-use anyhow::Context;
 use log::{error, warn};
 use magicblock_core::traits::FinalityProvider;
-use tokio::{task::JoinHandle, time::interval};
+use tokio::{
+    task::{JoinError, JoinHandle},
+    time::interval,
+};
 use tokio_util::sync::CancellationToken;
 
 use crate::{errors::LedgerResult, Ledger};
@@ -221,17 +223,23 @@ impl<T: FinalityProvider> LedgerTruncator<T> {
         }
     }
 
-    pub async fn join(mut self) -> Result<(), anyhow::Error> {
+    pub async fn join(mut self) -> Result<(), LedgerTruncatorError> {
         if matches!(self.state, ServiceState::Running(_)) {
             self.stop();
         }
 
         if let ServiceState::Stopped(worker_handle) = self.state {
-            worker_handle.await.context("Failed to join worker")?;
+            worker_handle.await?;
             Ok(())
         } else {
             warn!("LedgerTruncator was not running, nothing to stop");
             Ok(())
         }
     }
+}
+
+#[derive(thiserror::Error, Debug)]
+pub enum LedgerTruncatorError {
+    #[error("Failed to join worker: {0}")]
+    JoinError(#[from] JoinError),
 }
