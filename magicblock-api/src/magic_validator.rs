@@ -610,7 +610,12 @@ impl MagicValidator {
     }
 
     pub async fn start(&mut self) -> ApiResult<()> {
-        if matches!(self.config.accounts.lifecycle, LifecycleMode::Ephemeral) {
+        if self.config.validator.register_on_chain
+            && matches!(
+                self.config.accounts.lifecycle,
+                LifecycleMode::Ephemeral
+            )
+        {
             self.register_validator_on_chain().await?;
         }
 
@@ -742,7 +747,12 @@ impl MagicValidator {
         // wait a bit for services to stop
         thread::sleep(Duration::from_secs(1));
 
-        if matches!(self.config.accounts.lifecycle, LifecycleMode::Ephemeral) {
+        if self.config.validator.register_on_chain
+            && matches!(
+                self.config.accounts.lifecycle,
+                LifecycleMode::Ephemeral
+            )
+        {
             // TODO(edwin): remove once issue with rpc_service.close() resolved
             let _ = runtime::Runtime::new().map(|rt| {
                 rt.block_on(async {
