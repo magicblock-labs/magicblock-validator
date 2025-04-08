@@ -221,6 +221,24 @@ impl EphemeralConfig {
                 });
         }
 
+        if let Ok(country_code) = env::var("VALIDATOR_COUNTRY_CODE") {
+            config.validator.country_code = country_codes::from_numeric_str(&country_code).unwrap_or_else(|| {
+                panic!(
+                    "Failed to parse 'VALIDATOR_COUNTRY_CODE'. Must be a valid numeric country code representation, got: {}",
+                    country_code,
+                )
+            })
+        }
+
+        if let Ok(register_on_chain) = env::var("VALIDATOR_REGISTER_ON_CHAIN") {
+            config.validator.register_on_chain = register_on_chain.parse().unwrap_or_else(|err| {
+                panic!(
+                    "Failed to parse 'VALIDATOR_REGISTER_ON_CHAIN' as bool: {:?}",
+                    err
+                )
+            })
+        }
+
         // -----------------
         // Ledger
         // -----------------

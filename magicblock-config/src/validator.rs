@@ -12,6 +12,11 @@ pub struct ValidatorConfig {
     #[serde(default = "default_sigverify")]
     pub sigverify: bool,
 
+    /// By default validator will register or sync itself on chain.
+    /// This can be disabled by setting [Self::register_on_chain] to `false`.
+    #[serde(default = "default_register_on_chain")]
+    pub register_on_chain: bool,
+
     #[serde(default = "default_base_fees")]
     pub base_fees: Option<u64>,
 
@@ -30,6 +35,10 @@ fn default_millis_per_slot() -> u64 {
 }
 
 fn default_sigverify() -> bool {
+    true
+}
+
+fn default_register_on_chain() -> bool {
     true
 }
 
@@ -70,6 +79,7 @@ impl Default for ValidatorConfig {
         Self {
             millis_per_slot: default_millis_per_slot(),
             sigverify: default_sigverify(),
+            register_on_chain: default_register_on_chain(),
             base_fees: default_base_fees(),
             country_code: default_country_code(),
         }

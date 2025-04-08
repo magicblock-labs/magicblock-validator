@@ -91,6 +91,8 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     env::set_var("GEYSER_GRPC_ADDR", "0.1.0.1");
     env::set_var("GEYSER_GRPC_PORT", "123");
     env::set_var("VALIDATOR_MILLIS_PER_SLOT", "100");
+    env::set_var("VALIDATOR_COUNTRY_CODE", "196");
+    env::set_var("VALIDATOR_REGISTER_ON_CHAIN", "false");
     env::set_var("LEDGER_RESET", "false");
     env::set_var("LEDGER_PATH", "/hello/world");
     env::set_var("METRICS_ENABLED", "false");
@@ -131,6 +133,8 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
             },
             validator: ValidatorConfig {
                 millis_per_slot: 100,
+                country_code: country_codes::from_alpha2("CY").unwrap(),
+                register_on_chain: false,
                 ..Default::default()
             },
             ledger: LedgerConfig {
