@@ -3493,6 +3493,7 @@ dependencies = [
 [[package]]
 name = "magic-domain-program"
 version = "0.0.1"
+source = "git+https://github.com/magicblock-labs/magic-domain-program.git?rev=eba7644#eba76443b39047e1be1dd5a1d72fc1943e5e1fc0"
 dependencies = [
  "borsh 1.5.5",
  "bytemuck_derive",

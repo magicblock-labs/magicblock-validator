@@ -39,7 +39,6 @@ runs:
     uses: actions/checkout@v2
     with:
       repository: magicblock-labs/magic-domain-program
-      token: ${{ inputs.github_access_token }}
       path: magic-domain-program
       ref: master
 

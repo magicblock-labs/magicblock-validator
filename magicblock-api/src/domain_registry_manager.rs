@@ -25,8 +25,6 @@ pub struct DomainRegistryManager {
 }
 
 impl DomainRegistryManager {
-    const ACCOUNT_NOT_FOUND_FILTER: &'static str = "AccountNotFound";
-
     pub fn new(url: impl ToString) -> Self {
         Self {
             client: RpcClient::new_with_commitment(
@@ -40,21 +38,27 @@ impl DomainRegistryManager {
         &self,
         account_pubkey: &Pubkey,
     ) -> Result<Option<ErRecord>, Error> {
-        match self.client.get_account(account_pubkey).await {
-            Ok(account) => {
-                let mut data = account.data();
-                let validator_info = ErRecord::deserialize(&mut data)?;
+        let response = self
+            .client
+            .get_account_with_commitment(
+                account_pubkey,
+                CommitmentConfig::confirmed(),
+            )
+            .await
+            .context(format!(
+                "Failed to get account: {} from server: {}",
+                account_pubkey,
+                self.client.url()
+            ))?;
 
-                Ok(Some(validator_info))
-            }
-            Err(err) => {
-                if err.to_string().contains(Self::ACCOUNT_NOT_FOUND_FILTER) {
-                    Ok(None)
-                } else {
-                    Err(Error::UnknownError(anyhow::Error::from(err)))
-                }
-            }
-        }
+        response
+            .value
+            .map(|account| {
+                let mut data = account.data();
+                ErRecord::deserialize(&mut data)
+                    .map_err(Error::BorshError)
+            })
+            .transpose()
     }
 
     async fn register(
@@ -87,7 +91,7 @@ impl DomainRegistryManager {
             features: Some(validator_info.features().clone()),
             load_average: Some(validator_info.load_average()),
             country_code: Some(validator_info.country_code()),
-            addr: Some(validator_info.addr().to_owned()),
+            addr: Some(validator_info.addrRpcClient().to_owned()),
         };
 
         let (pda, _) = validator_info.pda();
@@ -136,15 +140,15 @@ impl DomainRegistryManager {
         match self.fetch_validator_info(&validator_info.pda().0).await? {
             Some(current_validator_info) => {
                 if current_validator_info == validator_info {
-                    info!("Data up to date, no need to sync");
+                    info!("Domain registry record for the validator is up to date, skipping sync");
                     Ok(())
                 } else {
-                    info!("Syncing data...");
+                    info!("Domain registry record for the validator requires update, syncing data");
                     self.sync(payer, &validator_info).await
                 }
             }
             None => {
-                info!("Registering...");
+                info!("Domain registry record for the validator absent, registering");
                 self.register(payer, validator_info).await
             }
         }
@@ -196,7 +200,7 @@ impl DomainRegistryManager {
         url: impl ToString,
         payer: &Keypair,
     ) -> Result<(), Error> {
-        info!("Unregistering...");
+        info!("Unregistering validator's record from domain registry");
         let manager = DomainRegistryManager::new(url);
         manager.unregister(payer).await
     }
