@@ -565,7 +565,10 @@ impl MagicValidator {
         Ok(())
     }
 
-    async fn register_validator_on_chain(&self, fdqn: &str) -> ApiResult<()> {
+    async fn register_validator_on_chain(
+        &self,
+        fdqn: impl ToString,
+    ) -> ApiResult<()> {
         let url = cluster_from_remote(&self.config.accounts.remote);
         let country_code =
             CountryCode::from(self.config.validator.country_code.alpha3());
@@ -610,7 +613,7 @@ impl MagicValidator {
                 self.config.accounts.lifecycle,
                 LifecycleMode::Ephemeral
             ) {
-                self.register_validator_on_chain(&fdqn).await?;
+                self.register_validator_on_chain(fdqn).await?;
             }
         }
 
