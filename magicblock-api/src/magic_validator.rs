@@ -71,7 +71,6 @@ use solana_sdk::{
     signer::Signer,
 };
 use tempfile::TempDir;
-use tokio::runtime;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -589,13 +588,12 @@ impl MagicValidator {
             &validator_keypair,
             validator_info,
         )
-        .await
         .map_err(|err| {
             ApiError::FailedToRegisterValidatorOnChain(err.to_string())
         })
     }
 
-    async fn unregister_validator_on_chain(&self) -> ApiResult<()> {
+    fn unregister_validator_on_chain(&self) -> ApiResult<()> {
         let url = cluster_from_remote(&self.config.accounts.remote);
         let validator_keypair = validator_authority();
 
@@ -603,7 +601,6 @@ impl MagicValidator {
             url.url(),
             &validator_keypair,
         )
-        .await
         .map_err(|err| {
             ApiError::FailedToUnregisterValidatorOnChain(err.to_string())
         })
@@ -753,15 +750,9 @@ impl MagicValidator {
                 LifecycleMode::Ephemeral
             )
         {
-            // TODO(edwin): remove once issue with rpc_service.close() resolved
-            let _ = runtime::Runtime::new().map(|rt| {
-                rt.block_on(async {
-                    let _ =
-                        self.unregister_validator_on_chain().await.inspect_err(
-                            |err| error!("Failed to unregister: {}", err),
-                        );
-                });
-            });
+            if let Err(err) = self.unregister_validator_on_chain() {
+                error!("Failed to unregister: {}", err)
+            }
         }
 
         // we have two memory mapped databases, flush them to disk before exitting

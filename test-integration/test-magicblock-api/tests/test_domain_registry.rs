@@ -1,5 +1,5 @@
 use integration_test_tools::validator::{
-    start_test_validator_with_config, wait_for_validator, TestRunnerPaths,
+    start_test_validator_with_config, TestRunnerPaths,
 };
 use integration_test_tools::IntegrationTestContext;
 use lazy_static::lazy_static;
@@ -11,8 +11,8 @@ use mdp::state::{features::FeaturesSet, record::ErRecord};
 use solana_rpc_client::rpc_client::RpcClient;
 use solana_sdk::commitment_config::CommitmentConfig;
 use solana_sdk::signature::{Keypair, Signer};
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command};
+use std::path::PathBuf;
+use std::process::Child;
 use std::{
     net::{Ipv4Addr, SocketAddrV4},
     sync::Arc,
@@ -24,17 +24,15 @@ lazy_static! {
 
 const DEVNET_URL: &str = "http://127.0.0.1:7799";
 
-async fn test_registration() {
+fn test_registration() {
     let validator_info = get_validator_info();
     let domain_manager = DomainRegistryManager::new(DEVNET_URL);
     domain_manager
         .handle_registration(&VALIDATOR_KEYPAIR, validator_info.clone())
-        .await
         .expect("Failed to register");
 
     let actual = domain_manager
         .fetch_validator_info(&validator_info.pda().0)
-        .await
         .expect("Failed to fetch ")
         .expect("ValidatorInfo doesn't exist");
 
@@ -56,7 +54,7 @@ fn get_validator_info() -> ErRecord {
     })
 }
 
-async fn test_sync() {
+fn test_sync() {
     let mut validator_info = get_validator_info();
     match validator_info {
         ErRecord::V0(ref mut val) => {
@@ -68,29 +66,25 @@ async fn test_sync() {
     let domain_manager = DomainRegistryManager::new(DEVNET_URL);
     domain_manager
         .sync(&VALIDATOR_KEYPAIR, &validator_info)
-        .await
         .expect("Failed to sync");
 
     let actual = domain_manager
         .fetch_validator_info(&validator_info.pda().0)
-        .await
         .expect("Failed to fetch ")
         .expect("ValidatorInfo doesn't exist");
 
     assert_eq!(actual, validator_info);
 }
 
-async fn test_unregister() {
+fn test_unregister() {
     let domain_manager = DomainRegistryManager::new(DEVNET_URL);
     domain_manager
         .unregister(&VALIDATOR_KEYPAIR)
-        .await
         .expect("Failed to unregister");
 
     let (pda, _) = DomainRegistryManager::get_pda(&VALIDATOR_KEYPAIR.pubkey());
     let actual = domain_manager
         .fetch_validator_info(&pda)
-        .await
         .expect("Failed to fetch validator info");
 
     assert!(actual.is_none())
@@ -133,8 +127,7 @@ impl Drop for TestValidator {
     }
 }
 
-#[tokio::main]
-async fn main() {
+fn main() {
     let _devnet = TestValidator::start();
 
     let client = RpcClient::new_with_commitment(
@@ -150,13 +143,13 @@ async fn main() {
     .expect("Failed to airdrop");
 
     println!("Testing validator info registration...");
-    test_registration().await;
+    test_registration();
 
     println!("Testing validator info sync...");
-    test_sync().await;
+    test_sync();
 
     println!("Testing validator info unregistration...");
-    test_unregister().await;
+    test_unregister();
 
     println!("Passed")
 }
