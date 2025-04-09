@@ -3653,6 +3653,7 @@ dependencies = [
  "log",
  "magicblock-accounts-db",
  "magicblock-bank",
+ "magicblock-core",
  "magicblock-program",
  "rand 0.8.5",
  "rayon",
@@ -3774,6 +3775,8 @@ dependencies = [
  "tempfile",
  "test-tools-core",
  "thiserror 1.0.69",
+ "tokio",
+ "tokio-util 0.7.13",
 ]
 
 [[package]]

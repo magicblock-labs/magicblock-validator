@@ -138,7 +138,7 @@ pub fn process_ledger(ledger: &Ledger, bank: &Arc<Bank>) -> LedgerResult<u64> {
     // bank.adb was rolled back to max_slot (via ensure_at_most) in magicblock-bank/src/bank.rs
     // `Bank::new` method, so the returned slot here is guaranteed to be equal or less than the
     // slot from `ledger.get_max_blockhash`
-    let full_process_starting_slot = bank.adb.slot();
+    let full_process_starting_slot = bank.accounts_db.slot();
 
     // Since transactions may refer to blockhashes that were present when they
     // ran initially we ensure that they are present during replay as well

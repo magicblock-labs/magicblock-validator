@@ -48,7 +48,7 @@ use crate::{
     filters::{get_filtered_program_accounts, optimize_filters},
     rpc_health::{RpcHealth, RpcHealthStatus},
     transaction::{
-        airdrop_transaction, ensure_accounts, sanitize_transaction,
+        airdrop_transaction, sanitize_transaction,
         sig_verify_transaction_and_check_precompiles,
     },
     utils::{new_response, verify_pubkey},
@@ -669,17 +669,21 @@ impl JsonRpcRequestProcessor {
             )?;
         }
 
-        if let Err(err) =
-            ensure_accounts(&self.accounts_manager, &sanitized_transaction)
-                .await
+        if let Err(err) = self
+            .accounts_manager
+            .ensure_accounts(&sanitized_transaction)
+            .await
         {
             const MAGIC_ID: &str =
                 "Magic11111111111111111111111111111111111111";
+
+            trace!("ensure_accounts failed: {:?}", err);
             let logs = vec![
                 format!("{MAGIC_ID}: An error was encountered before simulating the transaction."),
                 format!("{MAGIC_ID}: Something went wrong when trying to clone the needed accounts into the validator."),
                 format!("{MAGIC_ID}: Error: {err:?}"),
             ];
+
             return Ok(new_response(
                 &bank,
                 RpcSimulateTransactionResult {

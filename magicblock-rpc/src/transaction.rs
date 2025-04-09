@@ -4,7 +4,6 @@ use base64::{prelude::BASE64_STANDARD, Engine};
 use bincode::Options;
 use jsonrpc_core::{Error, ErrorCode, Result};
 use log::*;
-use magicblock_accounts::{errors::AccountsResult, AccountsManager};
 use magicblock_bank::bank::Bank;
 use magicblock_metrics::metrics;
 use magicblock_processor::execute_transaction::execute_sanitized_transaction;
@@ -174,12 +173,17 @@ pub(crate) async fn send_transaction(
     // since they could depend on specific accounts to be in our validator
     {
         let timer = metrics::ensure_accounts_start();
-        ensure_accounts(&meta.accounts_manager, &sanitized_transaction)
+        meta.accounts_manager
+            .ensure_accounts(&sanitized_transaction)
             .await
-            .map_err(|err| Error {
-                code: ErrorCode::InvalidRequest,
-                message: format!("{:?}", err),
-                data: None,
+            .map_err(|err| {
+                trace!("ensure_accounts failed: {:?}", err);
+
+                Error {
+                    code: ErrorCode::InvalidRequest,
+                    message: format!("{:?}", err),
+                    data: None,
+                }
             })?;
         metrics::ensure_accounts_end(timer);
     }
@@ -249,17 +253,4 @@ pub(crate) fn sig_verify_transaction_and_check_precompiles(
     }
 
     Ok(())
-}
-
-pub(crate) async fn ensure_accounts(
-    accounts_manager: &AccountsManager,
-    sanitized_transaction: &SanitizedTransaction,
-) -> AccountsResult<Vec<Signature>> {
-    accounts_manager
-        .ensure_accounts(sanitized_transaction)
-        .await
-        .map_err(|err| {
-            error!("ensure_accounts failed: {:?}", err);
-            err
-        })
 }

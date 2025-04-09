@@ -14,6 +14,7 @@ use super::{
     rocks_db::Rocks,
 };
 use crate::{
+    database::write_batch::WriteBatch,
     errors::{LedgerError, LedgerResult},
     metrics::{
         maybe_enable_rocksdb_perf, report_rocksdb_read_perf,
@@ -212,14 +213,11 @@ where
     pub fn get_int_property(
         &self,
         name: &'static std::ffi::CStr,
-    ) -> std::result::Result<i64, LedgerError> {
+    ) -> Result<i64, LedgerError> {
         self.backend.get_int_property_cf(self.handle(), name)
     }
 
-    pub fn delete(
-        &self,
-        key: C::Index,
-    ) -> std::result::Result<(), LedgerError> {
+    pub fn delete(&self, key: C::Index) -> Result<(), LedgerError> {
         let is_perf_enabled = maybe_enable_rocksdb_perf(
             self.column_options.rocks_perf_sample_interval,
             &self.write_perf_status,
@@ -234,6 +232,19 @@ where
             );
         }
         result
+    }
+
+    pub fn delete_in_batch(&self, write_batch: &mut WriteBatch, key: C::Index) {
+        write_batch.delete::<C>(key);
+    }
+
+    pub fn delete_range_in_batch(
+        &self,
+        write_batch: &mut WriteBatch,
+        from: C::Index,
+        to: C::Index,
+    ) {
+        write_batch.delete_range_cf::<C>(self.handle(), from, to);
     }
 }
 
@@ -388,7 +399,7 @@ where
     pub fn get_protobuf(
         &self,
         key: C::Index,
-    ) -> std::result::Result<Option<C::Type>, LedgerError> {
+    ) -> Result<Option<C::Type>, LedgerError> {
         let is_perf_enabled = maybe_enable_rocksdb_perf(
             self.column_options.rocks_perf_sample_interval,
             &self.read_perf_status,
@@ -456,12 +467,12 @@ where
     pub(crate) fn iter_current_index_filtered(
         &self,
         iterator_mode: IteratorMode<C::Index>,
-    ) -> LedgerResult<impl Iterator<Item = (C::Index, Box<[u8]>)> + '_> {
+    ) -> impl Iterator<Item = (C::Index, Box<[u8]>)> + '_ {
         let cf = self.handle();
         let iter = self.backend.iterator_cf::<C>(cf, iterator_mode);
-        Ok(iter.filter_map(|pair| {
+        iter.filter_map(|pair| {
             let (key, value) = pair.unwrap();
             C::try_current_index(&key).ok().map(|index| (index, value))
-        }))
+        })
     }
 }

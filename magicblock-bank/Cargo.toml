@@ -17,6 +17,7 @@ rayon = { workspace = true, optional = true }
 serde = { workspace = true, features = ["rc"] }
 magicblock-accounts-db = { workspace = true }
 magicblock-program = { workspace = true }
+magicblock-core = { workspace = true }
 solana-accounts-db = { workspace = true }
 solana-address-lookup-table-program = { workspace = true }
 solana-bpf-loader-program = { workspace = true }

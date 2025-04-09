@@ -99,6 +99,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     env::set_var("METRICS_ENABLED", "false");
     env::set_var("METRICS_PORT", "1234");
     env::set_var("METRICS_SYSTEM_METRICS_TICK_INTERVAL_SECS", "10");
+    env::set_var("LEDGER_SIZE", "123123");
 
     let config =
         EphemeralConfig::try_load_from_file(config_file_dir.to_str().unwrap())
@@ -141,6 +142,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
             ledger: LedgerConfig {
                 reset: false,
                 path: Some("/hello/world".to_string()),
+                size: 123123
             },
             metrics: MetricsConfig {
                 enabled: false,

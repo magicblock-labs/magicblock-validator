@@ -39,7 +39,11 @@ use magicblock_bank::{
 };
 use magicblock_config::{EphemeralConfig, LifecycleMode, ProgramConfig};
 use magicblock_geyser_plugin::rpc::GeyserRpcService;
-use magicblock_ledger::{blockstore_processor::process_ledger, Ledger};
+use magicblock_ledger::{
+    blockstore_processor::process_ledger,
+    ledger_truncator::{LedgerTruncator, DEFAULT_TRUNCATION_TIME_INTERVAL},
+    Ledger,
+};
 use magicblock_metrics::MetricsService;
 use magicblock_perf_service::SamplePerformanceService;
 use magicblock_processor::execute_transaction::TRANSACTION_INDEX_LOCK;
@@ -123,6 +127,7 @@ pub struct MagicValidator {
     token: CancellationToken,
     bank: Arc<Bank>,
     ledger: Arc<Ledger>,
+    ledger_truncator: LedgerTruncator<Bank>,
     slot_ticker: Option<tokio::task::JoinHandle<()>>,
     pubsub_handle: RwLock<Option<thread::JoinHandle<()>>>,
     pubsub_close_handle: PubsubServiceCloseHandle,
@@ -200,6 +205,13 @@ impl MagicValidator {
             adb_path,
             ledger.get_max_blockhash().map(|(slot, _)| slot)?,
         )?;
+
+        let ledger_truncator = LedgerTruncator::new(
+            ledger.clone(),
+            bank.clone(),
+            DEFAULT_TRUNCATION_TIME_INTERVAL,
+            config.validator_config.ledger.size,
+        );
 
         fund_validator_identity(&bank, &validator_pubkey);
         fund_magic_context(&bank);
@@ -353,6 +365,7 @@ impl MagicValidator {
             token,
             bank,
             ledger,
+            ledger_truncator,
             accounts_manager,
             transaction_listener,
             transaction_status_sender,
@@ -640,6 +653,8 @@ impl MagicValidator {
         self.start_remote_account_updates_worker();
         self.start_remote_account_cloner_worker().await?;
 
+        self.ledger_truncator.start();
+
         self.rpc_service.start().map_err(|err| {
             ApiError::FailedToStartJsonRpcService(format!("{:?}", err))
         })?;
@@ -737,11 +752,13 @@ impl MagicValidator {
         Ok(())
     }
 
-    pub fn stop(&self) {
+    pub fn stop(&mut self) {
         self.exit.store(true, Ordering::Relaxed);
         self.rpc_service.close();
         PubsubService::close(&self.pubsub_close_handle);
         self.token.cancel();
+        self.ledger_truncator.stop();
+
         // wait a bit for services to stop
         thread::sleep(Duration::from_secs(1));
 

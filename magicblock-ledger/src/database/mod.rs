@@ -8,4 +8,4 @@ pub mod meta;
 pub mod options;
 mod rocks_db;
 mod rocksdb_options;
-mod write_batch;
+pub mod write_batch;
