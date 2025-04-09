@@ -61,7 +61,7 @@ cargo-lock = "10.0.0"
 expiring-hashmap = { path = "./utils/expiring-hashmap" }
 conjunto-transwise = { path = "../conjunto/transwise" }
 console-subscriber = "0.2.0"
-country_codes = { package = "rust_iso3166" ,version = "0.1.14" }
+isocountry = "0.3.2"
 crossbeam-channel = "0.5.11"
 enum-iterator = "1.5.0"
 env_logger = "0.11.2"

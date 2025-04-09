@@ -565,12 +565,10 @@ impl MagicValidator {
         Ok(())
     }
 
-    async fn register_validator_on_chain(&self) -> ApiResult<()> {
+    async fn register_validator_on_chain(&self, fdqn: &str) -> ApiResult<()> {
         let url = cluster_from_remote(&self.config.accounts.remote);
-        let addr = SocketAddr::new(self.config.rpc.addr, self.config.rpc.port);
-
         let country_code =
-            CountryCode::from(self.config.validator.country_code.name);
+            CountryCode::from(self.config.validator.country_code.alpha3());
         let validator_keypair = validator_authority();
         let validator_info = ErRecord::V0(RecordV0 {
             identity: validator_keypair.pubkey(),
@@ -580,7 +578,7 @@ impl MagicValidator {
             features: FeaturesSet::default(),
             load_average: 0, // not implemented
             country_code,
-            addr: addr.to_string(),
+            addr: fdqn.to_string(),
         });
 
         DomainRegistryManager::handle_registration_static(
@@ -607,13 +605,13 @@ impl MagicValidator {
     }
 
     pub async fn start(&mut self) -> ApiResult<()> {
-        if self.config.validator.register_on_chain
-            && matches!(
+        if let Some(ref fdqn) = self.config.validator.fdqn {
+            if matches!(
                 self.config.accounts.lifecycle,
                 LifecycleMode::Ephemeral
-            )
-        {
-            self.register_validator_on_chain().await?;
+            ) {
+                self.register_validator_on_chain(&fdqn).await?;
+            }
         }
 
         self.maybe_process_ledger()?;
@@ -744,7 +742,7 @@ impl MagicValidator {
         // wait a bit for services to stop
         thread::sleep(Duration::from_secs(1));
 
-        if self.config.validator.register_on_chain
+        if self.config.validator.fdqn.is_some()
             && matches!(
                 self.config.accounts.lifecycle,
                 LifecycleMode::Ephemeral

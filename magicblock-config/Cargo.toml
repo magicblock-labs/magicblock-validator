@@ -16,7 +16,7 @@ url = { workspace = true, features = ["serde"] }
 strum_macros = { workspace = true }
 strum = { workspace = true }
 magicblock-accounts-db = { workspace = true }
-country_codes = { workspace = true }
+isocountry = { workspace = true }
 
 [dev-dependencies]
 test-tools-core = { workspace = true }

@@ -3,6 +3,7 @@ use std::{
     net::{IpAddr, Ipv4Addr},
 };
 
+use isocountry::CountryCode;
 use magicblock_config::{
     AccountsConfig, CommitStrategy, EphemeralConfig, GeyserGrpcConfig,
     LedgerConfig, LifecycleMode, MetricsConfig, MetricsServiceConfig,
@@ -91,8 +92,8 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     env::set_var("GEYSER_GRPC_ADDR", "0.1.0.1");
     env::set_var("GEYSER_GRPC_PORT", "123");
     env::set_var("VALIDATOR_MILLIS_PER_SLOT", "100");
-    env::set_var("VALIDATOR_COUNTRY_CODE", "196");
-    env::set_var("VALIDATOR_REGISTER_ON_CHAIN", "false");
+    env::set_var("VALIDATOR_COUNTRY_CODE", "CY");
+    env::set_var("VALIDATOR_FDQN", "magicblock.er.com");
     env::set_var("LEDGER_RESET", "false");
     env::set_var("LEDGER_PATH", "/hello/world");
     env::set_var("METRICS_ENABLED", "false");
@@ -133,8 +134,8 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
             },
             validator: ValidatorConfig {
                 millis_per_slot: 100,
-                country_code: country_codes::from_alpha2("CY").unwrap(),
-                register_on_chain: false,
+                country_code: CountryCode::for_alpha2("CY").unwrap(),
+                fdqn: Some("magicblock.er.com".to_string()),
                 ..Default::default()
             },
             ledger: LedgerConfig {

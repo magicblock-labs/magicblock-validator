@@ -48,7 +48,7 @@ fn get_validator_info() -> ErRecord {
         features: FeaturesSet::default(),
         load_average: 222,
         country_code: CountryCode::from(
-            country_codes::from_alpha2("BO").unwrap().numeric_str(),
+            isocountry::CountryCode::for_alpha2("BO").unwrap().alpha3(),
         ),
         addr: SocketAddrV4::new(Ipv4Addr::new(1, 1, 1, 0), 1010).to_string(),
     })

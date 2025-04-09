@@ -6,6 +6,7 @@ use std::{
 };
 
 use errors::{ConfigError, ConfigResult};
+use isocountry::CountryCode;
 use serde::{Deserialize, Serialize};
 use url::Url;
 
@@ -222,21 +223,16 @@ impl EphemeralConfig {
         }
 
         if let Ok(country_code) = env::var("VALIDATOR_COUNTRY_CODE") {
-            config.validator.country_code = country_codes::from_numeric_str(&country_code).unwrap_or_else(|| {
+            config.validator.country_code = CountryCode::for_alpha2(&country_code).unwrap_or_else(|err| {
                 panic!(
-                    "Failed to parse 'VALIDATOR_COUNTRY_CODE'. Must be a valid numeric country code representation, got: {}",
-                    country_code,
+                    "Failed to parse 'VALIDATOR_COUNTRY_CODE' as CountryCode: {:?}",
+                    err
                 )
             })
         }
 
-        if let Ok(register_on_chain) = env::var("VALIDATOR_REGISTER_ON_CHAIN") {
-            config.validator.register_on_chain = register_on_chain.parse().unwrap_or_else(|err| {
-                panic!(
-                    "Failed to parse 'VALIDATOR_REGISTER_ON_CHAIN' as bool: {:?}",
-                    err
-                )
-            })
+        if let Ok(fdqn) = env::var("VALIDATOR_FDQN") {
+            config.validator.fdqn = Some(fdqn)
         }
 
         // -----------------
