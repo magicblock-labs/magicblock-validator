@@ -33,14 +33,7 @@ runs:
       repository: magicblock-labs/delegation-program
       token: ${{ inputs.github_access_token }}
       path: delegation-program
-      ref: main 
-
-  - name: Checkout magicblock-labs/magic-domain-program
-    uses: actions/checkout@v2
-    with:
-      repository: magicblock-labs/magic-domain-program
-      path: magic-domain-program
-      ref: master
+      ref: main
 
   - name: Checkout magicblock-labs/ephemeral-rollups-sdk
     uses: actions/checkout@v2
