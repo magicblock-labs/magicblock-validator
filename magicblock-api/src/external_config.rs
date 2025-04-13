@@ -17,7 +17,9 @@ pub(crate) fn try_convert_accounts_config(
         ),
     })
 }
-fn cluster_from_remote(remote: &magicblock_config::RemoteConfig) -> Cluster {
+pub(crate) fn cluster_from_remote(
+    remote: &magicblock_config::RemoteConfig,
+) -> Cluster {
     use magicblock_config::RemoteConfig::*;
     match remote {
         Devnet => Cluster::Known(ClusterType::Devnet),

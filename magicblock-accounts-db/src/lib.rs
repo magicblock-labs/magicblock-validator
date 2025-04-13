@@ -1,17 +1,19 @@
 use std::{path::Path, sync::Arc};
 
+use config::AccountsDbConfig;
+use error::AccountsDbError;
+use index::AccountsDbIndex;
 use log::{error, warn};
 use parking_lot::RwLock;
+use snapshot::SnapshotEngine;
 use solana_account::{
     cow::AccountBorrowed, AccountSharedData, ReadableAccount,
 };
 use solana_pubkey::Pubkey;
-
-use config::AccountsDbConfig;
-use error::AccountsDbError;
-use index::AccountsDbIndex;
-use snapshot::SnapshotEngine;
 use storage::AccountsStorage;
+
+use crate::snapshot::SnapSlot;
+
 pub type AdbResult<T> = Result<T, AccountsDbError>;
 /// Stop the World Lock, used to halt all writes to adb while
 /// some critical operation is in action, e.g. snapshotting
@@ -256,6 +258,42 @@ impl AccountsDb {
                 self.snapshot_engine.database_path().display()
             );
         }
+    }
+
+    /// Returns slot of latest snapshot or None
+    /// Parses path to extract slot
+    pub fn get_latest_snapshot_slot(&self) -> Option<u64> {
+        self.snapshot_engine
+            .with_snapshots(|snapshots| -> Option<u64> {
+                let latest_path = snapshots.back()?;
+                SnapSlot::try_from_path(latest_path)
+                    .map(|snap_slot: SnapSlot| snap_slot.slot())
+                    .or_else(|| {
+                        error!(
+                            "Failed to parse the path into SnapSlot: {}",
+                            latest_path.display()
+                        );
+                        None
+                    })
+            })
+    }
+
+    /// Return slot of oldest maintained snapshot or None
+    /// Parses path to extract slot
+    pub fn get_oldest_snapshot_slot(&self) -> Option<u64> {
+        self.snapshot_engine
+            .with_snapshots(|snapshots| -> Option<u64> {
+                let latest_path = snapshots.front()?;
+                SnapSlot::try_from_path(latest_path)
+                    .map(|snap_slot: SnapSlot| snap_slot.slot())
+                    .or_else(|| {
+                        error!(
+                            "Failed to parse the path into SnapSlot: {}",
+                            latest_path.display()
+                        );
+                        None
+                    })
+            })
     }
 
     /// Checks whether AccountsDB has "freshness", not exceeding given slot

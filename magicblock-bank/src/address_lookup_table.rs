@@ -39,7 +39,7 @@ impl Bank {
         slot_hashes: &SlotHashes,
     ) -> Result<LoadedAddresses, AddressLoaderError> {
         let table_account = self
-            .adb
+            .accounts_db
             .get_account(&table.account_key)
             .map(AccountSharedData::from)
             .map_err(|_| AddressLoaderError::LookupTableAccountNotFound)?;

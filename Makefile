@@ -63,7 +63,7 @@ ci-test-integration:
 #  However this should not be a problem as our formatting rules for nightly
 #  are more strict than the non-nightly ones.
 ci-fmt:
-	cargo fmt --check -- --config-path rustfmt.toml
+	cargo +nightly fmt --check -- --config-path rustfmt-nightly.toml
 
 ci-lint: lint
 

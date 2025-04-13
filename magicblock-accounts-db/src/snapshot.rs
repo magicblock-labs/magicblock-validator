@@ -1,18 +1,19 @@
-use std::collections::VecDeque;
-use std::ffi::OsStr;
-use std::fs::File;
-use std::io::Write;
-use std::path::{Path, PathBuf};
-use std::{fs, io};
+use std::{
+    collections::VecDeque,
+    ffi::OsStr,
+    fs,
+    fs::File,
+    io,
+    io::Write,
+    path::{Path, PathBuf},
+};
 
 use log::{info, warn};
 use memmap2::MmapMut;
 use parking_lot::Mutex;
 use reflink::reflink;
 
-use crate::error::AccountsDbError;
-use crate::storage::ADB_FILE;
-use crate::{log_err, AdbResult};
+use crate::{error::AccountsDbError, log_err, storage::ADB_FILE, AdbResult};
 
 pub struct SnapshotEngine {
     /// directory path where database files are kept
@@ -67,6 +68,18 @@ impl SnapshotEngine {
         }
         snapshots.push_back(snapout);
         Ok(())
+    }
+
+    /// Provides read-only access to the internal snapshots queue.
+    ///
+    /// Executes the given closure `f` with an immutable reference to the snapshots [`VecDeque`].
+    /// This guarantees thread-safe access while preventing modification of the underlying data.
+    pub(crate) fn with_snapshots<F, R>(&self, f: F) -> R
+    where
+        F: Fn(&VecDeque<PathBuf>) -> R,
+    {
+        let snapshots = self.snapshots.lock();
+        f(&snapshots)
     }
 
     /// Try to rollback to snapshot which is the most recent one before given slot
@@ -204,11 +217,11 @@ impl SnapshotEngine {
 }
 
 #[derive(Eq, PartialEq, PartialOrd, Ord)]
-struct SnapSlot(u64);
+pub(crate) struct SnapSlot(u64);
 
 impl SnapSlot {
     /// parse snapshot path to extract slot number
-    fn try_from_path(path: &Path) -> Option<Self> {
+    pub(crate) fn try_from_path(path: &Path) -> Option<Self> {
         path.file_name()
             .and_then(|s| s.to_str())
             .and_then(|s| s.split('-').nth(1))
@@ -219,6 +232,10 @@ impl SnapSlot {
     fn as_path(&self, ppath: &Path) -> PathBuf {
         // enforce strict alphanumeric ordering by introducing extra padding
         ppath.join(format!("snapshot-{:0>12}", self.0))
+    }
+
+    pub(crate) fn slot(&self) -> u64 {
+        self.0
     }
 }
 

@@ -1,5 +1,6 @@
 use std::net::{IpAddr, Ipv4Addr};
 
+use isocountry::CountryCode;
 use magicblock_config::{
     AccountsConfig, AllowedProgram, CommitStrategy, EphemeralConfig,
     GeyserGrpcConfig, LedgerConfig, LifecycleMode, MetricsConfig,
@@ -199,6 +200,8 @@ fn test_validator_with_base_fees() {
             },
             validator: ValidatorConfig {
                 base_fees: Some(1_000),
+                fdqn: Some("magicblock.er.com".to_string()),
+                country_code: CountryCode::for_alpha2("US").unwrap(),
                 ..Default::default()
             },
             ..Default::default()

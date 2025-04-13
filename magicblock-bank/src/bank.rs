@@ -17,6 +17,7 @@ use log::{debug, info, trace};
 use magicblock_accounts_db::{
     config::AccountsDbConfig, error::AccountsDbError, AccountsDb, StWLock,
 };
+use magicblock_core::traits::FinalityProvider;
 use solana_accounts_db::{
     accounts_update_notifier_interface::AccountsUpdateNotifierInterface,
     blockhash_queue::BlockhashQueue,
@@ -30,8 +31,9 @@ use solana_cost_model::cost_tracker::CostTracker;
 use solana_fee::FeeFeatures;
 use solana_geyser_plugin_manager::slot_status_notifier::SlotStatusNotifierImpl;
 use solana_measure::measure_us;
-use solana_program_runtime::loaded_programs::{
-    BlockRelation, ForkGraph, ProgramCacheEntry,
+use solana_program_runtime::{
+    loaded_programs::{BlockRelation, ForkGraph, ProgramCacheEntry},
+    sysvar_cache::SysvarCache,
 };
 use solana_rpc::slot_status_notifier::SlotStatusNotifierInterface;
 use solana_sdk::{
@@ -148,7 +150,7 @@ impl ForkGraph for SimpleForkGraph {
 //#[derive(Debug)]
 pub struct Bank {
     /// Shared reference to accounts database
-    pub adb: AccountsDb,
+    pub accounts_db: AccountsDb,
 
     /// Bank epoch
     epoch: Epoch,
@@ -299,14 +301,16 @@ impl TransactionProcessingCallback for Bank {
         account: &Pubkey,
         owners: &[Pubkey],
     ) -> Option<usize> {
-        self.adb.account_matches_owners(account, owners).ok()
+        self.accounts_db
+            .account_matches_owners(account, owners)
+            .ok()
     }
 
     fn get_account_shared_data(
         &self,
         pubkey: &Pubkey,
     ) -> Option<AccountSharedData> {
-        self.adb.get_account(pubkey).map(Into::into).ok()
+        self.accounts_db.get_account(pubkey).map(Into::into).ok()
     }
 
     // NOTE: must hold idempotent for the same set of arguments
@@ -498,7 +502,7 @@ impl Bank {
         feature_set.activate(&disable_rent_fees_collection::ID, 1);
 
         let mut bank = Self {
-            adb,
+            accounts_db: adb,
             epoch: Epoch::default(),
             epoch_schedule: EpochSchedule::default(),
             is_delta: AtomicBool::default(),
@@ -692,11 +696,11 @@ impl Bank {
     // Slot, Epoch
     // -----------------
     pub fn slot(&self) -> Slot {
-        self.adb.slot()
+        self.accounts_db.slot()
     }
 
     fn set_slot(&self, slot: Slot) {
-        self.adb.set_slot(slot);
+        self.accounts_db.set_slot(slot);
     }
 
     pub fn advance_slot(&self) -> Slot {
@@ -828,16 +832,16 @@ impl Bank {
     // Accounts
     // -----------------
     pub fn has_account(&self, pubkey: &Pubkey) -> bool {
-        self.adb.contains_account(pubkey)
+        self.accounts_db.contains_account(pubkey)
     }
 
     pub fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
-        self.adb.get_account(pubkey).map(Into::into).ok()
+        self.accounts_db.get_account(pubkey).map(Into::into).ok()
     }
 
     /// fn store the single `account` with `pubkey`.
     pub fn store_account(&self, pubkey: Pubkey, account: AccountSharedData) {
-        self.adb.insert_account(&pubkey, &account);
+        self.accounts_db.insert_account(&pubkey, &account);
         if let Some(notifier) = &self.accounts_update_notifier {
             let slot = self.slot();
             notifier.notify_account_update(slot, &account, &None, &pubkey, 0);
@@ -849,13 +853,13 @@ impl Bank {
         &self,
         _sorted: bool,
     ) -> impl Iterator<Item = (Pubkey, AccountSharedData)> + '_ {
-        self.adb.iter_all()
+        self.accounts_db.iter_all()
     }
 
     pub fn store_accounts(&self, accounts: Vec<(Pubkey, AccountSharedData)>) {
         let slot = self.slot();
         for (pubkey, acc) in accounts {
-            self.adb.insert_account(&pubkey, &acc);
+            self.accounts_db.insert_account(&pubkey, &acc);
             if let Some(notifier) = &self.accounts_update_notifier {
                 notifier.notify_account_update(slot, &acc, &None, &pubkey, 0);
             }
@@ -976,7 +980,7 @@ impl Bank {
     where
         F: Fn(&AccountSharedData) -> bool + Send + Sync,
     {
-        self.adb
+        self.accounts_db
             .get_program_accounts(program_id, filter)
             .inspect_err(|err| {
                 log::error!("failed to load program accounts: {err}")
@@ -2302,7 +2306,7 @@ impl Bank {
     }
 
     pub fn accounts_db_storage_size(&self) -> u64 {
-        self.adb.storage_size()
+        self.accounts_db.storage_size()
     }
 
     // -----------------
@@ -2364,7 +2368,7 @@ impl Bank {
     fn set_next_slot(&self, next_slot: Slot) {
         self.set_slot(next_slot);
 
-        let tx_processor = self.transaction_processor.read().unwrap();
+        let tx_processor = self.transaction_processor.write().unwrap();
         // Update transaction processor with new slot
         // First create a new transaction processor
         let next_tx_processor: TransactionBatchProcessor<_> =
@@ -2372,11 +2376,27 @@ impl Bank {
         // Then assign the previous sysvar cache to the new transaction processor
         // in order to avoid it containing uninitialized sysvars
         {
-            let mut old_sysvar_cache = tx_processor.sysvar_cache();
+            // SAFETY:
+            // solana crate doesn't expose sysvar cache on TransactionProcessor, so there's no
+            // way to get mutable reference to it, but it does expose an RwLockReadGuard, which
+            // we use to roll over previous sysvar_cache to new transaction_processor.
+            //
+            // This hack is safe due to acquiring a write lock above on parent struct tx_processor
+            // which guarantees that the read lock on sysvar_cache is exclusive
+            //
+            // TODO(bmuddha): get rid of unsafe once this PR is merged
+            // https://github.com/anza-xyz/agave/pull/5495
+            #[allow(invalid_reference_casting)]
+            let (old_sysvar_cache, new_sysvar_cache) = unsafe {
+                let old = (&*tx_processor.sysvar_cache()) as *const SysvarCache
+                    as *mut SysvarCache;
+                let new = (&*next_tx_processor.sysvar_cache())
+                    as *const SysvarCache
+                    as *mut SysvarCache;
+                (&mut *old, &mut *new)
+            };
 
-            let mut new_sysvar_cache = next_tx_processor.sysvar_cache();
-
-            mem::swap(&mut new_sysvar_cache, &mut old_sysvar_cache);
+            mem::swap(new_sysvar_cache, old_sysvar_cache);
         }
         // prevent deadlocking
         drop(tx_processor);
@@ -2428,7 +2448,7 @@ impl Bank {
     }
 
     pub fn flush(&self) {
-        self.adb.flush(true);
+        self.accounts_db.flush(true);
     }
 }
 
@@ -2509,4 +2529,11 @@ fn max_number_of_accounts_to_collect(
             }
         })
         .sum()
+}
+
+impl FinalityProvider for Bank {
+    fn get_latest_final_slot(&self) -> Slot {
+        // Oldest snapshot or genesis slot
+        self.accounts_db.get_oldest_snapshot_slot().unwrap_or(0)
+    }
 }

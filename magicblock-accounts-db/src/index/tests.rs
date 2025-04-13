@@ -5,12 +5,11 @@ use std::{
 use lmdb::Transaction;
 use solana_pubkey::Pubkey;
 
+use super::{AccountsDbIndex, Allocation};
 use crate::{
     config::{AccountsDbConfig, BlockSize, TEST_SNAPSHOT_FREQUENCY},
     error::AccountsDbError,
 };
-
-use super::{AccountsDbIndex, Allocation};
 
 #[test]
 fn test_insert_account() {
@@ -234,7 +233,7 @@ fn test_recycle_allocation_after_realloc() {
     let index_value =
         bytes!(#pack, new_allocation.offset, u32, new_allocation.blocks, u32);
     tenv.reallocate_account(&pubkey, &mut txn, &index_value)
-        .expect("faield to reallocate account");
+        .expect("failed to reallocate account");
     txn.commit().expect("failed to commit transaction");
     let result = tenv.try_recycle_allocation(new_allocation.blocks);
     assert_eq!(

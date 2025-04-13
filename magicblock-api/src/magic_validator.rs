@@ -10,24 +10,6 @@ use std::{
     time::Duration,
 };
 
-use crate::{
-    errors::{ApiError, ApiResult},
-    external_config::try_convert_accounts_config,
-    fund_account::{
-        fund_magic_context, fund_validator_identity, funded_faucet,
-    },
-    geyser_transaction_notify_listener::GeyserTransactionNotifyListener,
-    init_geyser_service::{init_geyser_service, InitGeyserServiceConfig},
-    ledger::{
-        self, read_validator_keypair_from_ledger,
-        write_validator_keypair_to_ledger,
-    },
-    slot::advance_slot_and_update_ledger,
-    tickers::{
-        init_commit_accounts_ticker, init_slot_ticker,
-        init_system_metrics_ticker,
-    },
-};
 use conjunto_transwise::RpcProviderConfig;
 use log::*;
 use magicblock_account_cloner::{
@@ -55,13 +37,19 @@ use magicblock_bank::{
     program_loader::load_programs_into_bank,
     transaction_logs::TransactionLogCollectorFilter,
 };
-use magicblock_config::{EphemeralConfig, ProgramConfig};
+use magicblock_config::{EphemeralConfig, LifecycleMode, ProgramConfig};
 use magicblock_geyser_plugin::rpc::GeyserRpcService;
-use magicblock_ledger::{blockstore_processor::process_ledger, Ledger};
+use magicblock_ledger::{
+    blockstore_processor::process_ledger,
+    ledger_truncator::{LedgerTruncator, DEFAULT_TRUNCATION_TIME_INTERVAL},
+    Ledger,
+};
 use magicblock_metrics::MetricsService;
 use magicblock_perf_service::SamplePerformanceService;
 use magicblock_processor::execute_transaction::TRANSACTION_INDEX_LOCK;
-use magicblock_program::{init_persister, validator};
+use magicblock_program::{
+    init_persister, validator, validator::validator_authority,
+};
 use magicblock_pubsub::pubsub_service::{
     PubsubConfig, PubsubService, PubsubServiceCloseHandle,
 };
@@ -70,6 +58,12 @@ use magicblock_rpc::{
 };
 use magicblock_transaction_status::{
     TransactionStatusMessage, TransactionStatusSender,
+};
+use mdp::state::{
+    features::FeaturesSet,
+    record::{CountryCode, ErRecord},
+    status::ErStatus,
+    version::v0::RecordV0,
 };
 use solana_geyser_plugin_manager::{
     geyser_plugin_manager::GeyserPluginManager,
@@ -82,6 +76,26 @@ use solana_sdk::{
 };
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
+
+use crate::{
+    domain_registry_manager::DomainRegistryManager,
+    errors::{ApiError, ApiResult},
+    external_config::{cluster_from_remote, try_convert_accounts_config},
+    fund_account::{
+        fund_magic_context, fund_validator_identity, funded_faucet,
+    },
+    geyser_transaction_notify_listener::GeyserTransactionNotifyListener,
+    init_geyser_service::{init_geyser_service, InitGeyserServiceConfig},
+    ledger::{
+        self, read_validator_keypair_from_ledger,
+        write_validator_keypair_to_ledger,
+    },
+    slot::advance_slot_and_update_ledger,
+    tickers::{
+        init_commit_accounts_ticker, init_slot_ticker,
+        init_system_metrics_ticker,
+    },
+};
 
 // -----------------
 // MagicValidatorConfig
@@ -113,6 +127,7 @@ pub struct MagicValidator {
     token: CancellationToken,
     bank: Arc<Bank>,
     ledger: Arc<Ledger>,
+    ledger_truncator: LedgerTruncator<Bank>,
     slot_ticker: Option<tokio::task::JoinHandle<()>>,
     pubsub_handle: RwLock<Option<thread::JoinHandle<()>>>,
     pubsub_close_handle: PubsubServiceCloseHandle,
@@ -151,9 +166,9 @@ impl MagicValidator {
         // TODO(thlorenz): @@ this will need to be recreated on each start
         let token = CancellationToken::new();
 
-        let (geyser_service, geyser_rpc_service) =
+        let (geyser_manager, geyser_rpc_service) =
             init_geyser_service(config.init_geyser_service_config)?;
-        let geyser_manager = Arc::new(RwLock::new(geyser_service));
+        let geyser_manager = Arc::new(RwLock::new(geyser_manager));
 
         let validator_pubkey = identity_keypair.pubkey();
         let magicblock_bank::genesis_utils::GenesisConfigInfo {
@@ -190,6 +205,13 @@ impl MagicValidator {
             adb_path,
             ledger.get_max_blockhash().map(|(slot, _)| slot)?,
         )?;
+
+        let ledger_truncator = LedgerTruncator::new(
+            ledger.clone(),
+            bank.clone(),
+            DEFAULT_TRUNCATION_TIME_INTERVAL,
+            config.validator_config.ledger.size,
+        );
 
         fund_validator_identity(&bank, &validator_pubkey);
         fund_magic_context(&bank);
@@ -343,6 +365,7 @@ impl MagicValidator {
             token,
             bank,
             ledger,
+            ledger_truncator,
             accounts_manager,
             transaction_listener,
             transaction_status_sender,
@@ -555,7 +578,58 @@ impl MagicValidator {
         Ok(())
     }
 
+    async fn register_validator_on_chain(
+        &self,
+        fdqn: impl ToString,
+    ) -> ApiResult<()> {
+        let url = cluster_from_remote(&self.config.accounts.remote);
+        let country_code =
+            CountryCode::from(self.config.validator.country_code.alpha3());
+        let validator_keypair = validator_authority();
+        let validator_info = ErRecord::V0(RecordV0 {
+            identity: validator_keypair.pubkey(),
+            status: ErStatus::Active,
+            block_time_ms: self.config.validator.millis_per_slot as u16,
+            base_fee: self.config.validator.base_fees.unwrap_or(0) as u16,
+            features: FeaturesSet::default(),
+            load_average: 0, // not implemented
+            country_code,
+            addr: fdqn.to_string(),
+        });
+
+        DomainRegistryManager::handle_registration_static(
+            url.url(),
+            &validator_keypair,
+            validator_info,
+        )
+        .map_err(|err| {
+            ApiError::FailedToRegisterValidatorOnChain(err.to_string())
+        })
+    }
+
+    fn unregister_validator_on_chain(&self) -> ApiResult<()> {
+        let url = cluster_from_remote(&self.config.accounts.remote);
+        let validator_keypair = validator_authority();
+
+        DomainRegistryManager::handle_unregistration_static(
+            url.url(),
+            &validator_keypair,
+        )
+        .map_err(|err| {
+            ApiError::FailedToUnregisterValidatorOnChain(err.to_string())
+        })
+    }
+
     pub async fn start(&mut self) -> ApiResult<()> {
+        if let Some(ref fdqn) = self.config.validator.fdqn {
+            if matches!(
+                self.config.accounts.lifecycle,
+                LifecycleMode::Ephemeral
+            ) {
+                self.register_validator_on_chain(fdqn).await?;
+            }
+        }
+
         self.maybe_process_ledger()?;
 
         self.transaction_listener.run(true, self.bank.clone());
@@ -578,6 +652,8 @@ impl MagicValidator {
         self.start_remote_account_fetcher_worker();
         self.start_remote_account_updates_worker();
         self.start_remote_account_cloner_worker().await?;
+
+        self.ledger_truncator.start();
 
         self.rpc_service.start().map_err(|err| {
             ApiError::FailedToStartJsonRpcService(format!("{:?}", err))
@@ -676,13 +752,26 @@ impl MagicValidator {
         Ok(())
     }
 
-    pub fn stop(&self) {
+    pub fn stop(&mut self) {
         self.exit.store(true, Ordering::Relaxed);
         self.rpc_service.close();
         PubsubService::close(&self.pubsub_close_handle);
         self.token.cancel();
+        self.ledger_truncator.stop();
+
         // wait a bit for services to stop
         thread::sleep(Duration::from_secs(1));
+
+        if self.config.validator.fdqn.is_some()
+            && matches!(
+                self.config.accounts.lifecycle,
+                LifecycleMode::Ephemeral
+            )
+        {
+            if let Err(err) = self.unregister_validator_on_chain() {
+                error!("Failed to unregister: {}", err)
+            }
+        }
 
         // we have two memory mapped databases, flush them to disk before exitting
         self.bank.flush();

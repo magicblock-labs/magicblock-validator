@@ -59,7 +59,7 @@ pub fn bank_for_tests(
     genesis_config: &GenesisConfig,
     accounts_update_notifier: Option<AccountsUpdateNotifier>,
     slot_status_notifier: Option<SlotStatusNotifierImpl>,
-) -> std::result::Result<Bank, AccountsDbError> {
+) -> Result<Bank, AccountsDbError> {
     bank_for_tests_with_identity(
         genesis_config,
         accounts_update_notifier,

@@ -16,32 +16,24 @@ impl<'a> WriteBatch<'a> {
         &mut self,
         key: C::Index,
         bytes: &[u8],
-    ) -> std::result::Result<(), LedgerError> {
+    ) {
         self.write_batch
             .put_cf(self.get_cf::<C>(), C::key(key), bytes);
-        Ok(())
     }
 
-    pub fn delete<C: Column + ColumnName>(
-        &mut self,
-        key: C::Index,
-    ) -> std::result::Result<(), LedgerError> {
-        self.delete_raw::<C>(&C::key(key))
+    pub fn delete<C: Column + ColumnName>(&mut self, key: C::Index) {
+        self.delete_raw::<C>(&C::key(key));
     }
 
-    pub(crate) fn delete_raw<C: Column + ColumnName>(
-        &mut self,
-        key: &[u8],
-    ) -> std::result::Result<(), LedgerError> {
+    pub(crate) fn delete_raw<C: Column + ColumnName>(&mut self, key: &[u8]) {
         self.write_batch.delete_cf(self.get_cf::<C>(), key);
-        Ok(())
     }
 
     pub fn put<C: TypedColumn + ColumnName>(
         &mut self,
         key: C::Index,
         value: &C::Type,
-    ) -> std::result::Result<(), LedgerError> {
+    ) -> Result<(), LedgerError> {
         let serialized_value = serialize(&value)?;
         self.write_batch.put_cf(
             self.get_cf::<C>(),
@@ -67,9 +59,8 @@ impl<'a> WriteBatch<'a> {
         cf: &ColumnFamily,
         from: C::Index,
         to: C::Index, // exclusive
-    ) -> std::result::Result<(), LedgerError> {
+    ) {
         self.write_batch
             .delete_range_cf(cf, C::key(from), C::key(to));
-        Ok(())
     }
 }

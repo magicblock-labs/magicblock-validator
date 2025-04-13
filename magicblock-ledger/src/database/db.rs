@@ -100,31 +100,25 @@ impl Database {
     }
 
     #[inline]
-    pub fn raw_iterator_cf(
-        &self,
-        cf: &ColumnFamily,
-    ) -> std::result::Result<DBRawIterator, LedgerError> {
-        Ok(self.backend.raw_iterator_cf(cf))
+    pub fn raw_iterator_cf(&self, cf: &ColumnFamily) -> DBRawIterator {
+        self.backend.raw_iterator_cf(cf)
     }
 
-    pub fn batch(&self) -> std::result::Result<WriteBatch, LedgerError> {
+    pub fn batch(&self) -> WriteBatch {
         let write_batch = self.backend.batch();
         let map = columns()
             .into_iter()
             .map(|desc| (desc, self.backend.cf_handle(desc)))
             .collect();
 
-        Ok(WriteBatch { write_batch, map })
+        WriteBatch { write_batch, map }
     }
 
-    pub fn write(
-        &self,
-        batch: WriteBatch,
-    ) -> std::result::Result<(), LedgerError> {
+    pub fn write(&self, batch: WriteBatch) -> Result<(), LedgerError> {
         self.backend.write(batch.write_batch)
     }
 
-    pub fn storage_size(&self) -> std::result::Result<u64, LedgerError> {
+    pub fn storage_size(&self) -> Result<u64, LedgerError> {
         Ok(fs_extra::dir::get_size(&self.path)?)
     }
 
@@ -136,8 +130,7 @@ impl Database {
         batch: &mut WriteBatch,
         from: Slot,
         to: Slot,
-    ) -> std::result::Result<(), LedgerError>
-    where
+    ) where
         C: Column + ColumnName,
     {
         let cf = self.cf_handle::<C>();
@@ -148,7 +141,7 @@ impl Database {
         // adjusting the `to` slot range by 1.
         let from_index = C::as_index(from);
         let to_index = C::as_index(to.saturating_add(1));
-        batch.delete_range_cf::<C>(cf, from_index, to_index)
+        batch.delete_range_cf::<C>(cf, from_index, to_index);
     }
 
     /// Delete files whose slot range is within \[`from`, `to`\].

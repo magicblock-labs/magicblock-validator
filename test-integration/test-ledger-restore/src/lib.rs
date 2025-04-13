@@ -11,10 +11,7 @@ use integration_test_tools::{
     workspace_paths::path_relative_to_workspace,
     IntegrationTestContext,
 };
-use magicblock_config::{
-    AccountsConfig, EphemeralConfig, LedgerConfig, LifecycleMode,
-    ProgramConfig, RemoteConfig, ValidatorConfig,
-};
+use magicblock_config::{AccountsConfig, EphemeralConfig, LedgerConfig, LifecycleMode, ProgramConfig, RemoteConfig, ValidatorConfig, DEFAULT_LEDGER_SIZE_BYTES};
 use program_flexi_counter::state::FlexiCounter;
 use solana_sdk::{
     clock::Slot,
@@ -68,18 +65,16 @@ fn resolve_programs(
 ) -> Vec<ProgramConfig> {
     programs
         .map(|programs| {
-            let mut resolved_programs = vec![];
-            for program in programs.iter() {
-                let p = path_relative_to_workspace(&format!(
-                    "target/deploy/{}",
-                    &program.path
-                ));
-                resolved_programs.push(ProgramConfig {
+            programs
+                .into_iter()
+                .map(|program| ProgramConfig {
                     id: program.id,
-                    path: p,
-                });
-            }
-            resolved_programs
+                    path: path_relative_to_workspace(&format!(
+                        "target/deploy/{}",
+                        program.path
+                    )),
+                })
+                .collect()
         })
         .unwrap_or_default()
 }
@@ -109,6 +104,7 @@ pub fn setup_offline_validator(
         ledger: LedgerConfig {
             reset,
             path: Some(ledger_path.display().to_string()),
+            size: DEFAULT_LEDGER_SIZE_BYTES
         },
         accounts: accounts_config.clone(),
         programs,
@@ -149,6 +145,7 @@ pub fn setup_validator_with_local_remote(
         ledger: LedgerConfig {
             reset,
             path: Some(ledger_path.display().to_string()),
+            size: DEFAULT_LEDGER_SIZE_BYTES,
         },
         accounts: accounts_config.clone(),
         programs,

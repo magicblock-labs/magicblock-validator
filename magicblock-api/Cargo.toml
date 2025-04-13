@@ -8,6 +8,7 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
+anyhow = { workspace = true }
 conjunto-transwise = { workspace = true }
 crossbeam-channel = { workspace = true }
 fd-lock = { workspace = true }
@@ -33,7 +34,9 @@ magicblock-program = { workspace = true }
 magicblock-pubsub = { workspace = true }
 magicblock-rpc = { workspace = true }
 magicblock-transaction-status = { workspace = true }
+magic-domain-program = { workspace = true }
 solana-geyser-plugin-interface = { workspace = true }
+solana-rpc-client = { workspace = true }
 solana-geyser-plugin-manager = { workspace = true }
 solana-rpc = { workspace = true }
 solana-sdk = { workspace = true }
@@ -42,4 +45,6 @@ tempfile = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
+
 libloading = "0.7.4"
+borsh = "1.5.3"

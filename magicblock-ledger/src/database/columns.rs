@@ -85,7 +85,7 @@ pub struct Transaction;
 
 /// The transaction memos column
 ///
-/// * index type: [`Signature`]
+/// * index type: `(`[`Signature`]`, `[`Slot`])`
 /// * value type: [`String`]
 pub struct TransactionMemos;
 

@@ -209,7 +209,6 @@ where
                 )
                 .map_err(Box::new)?;
         }
-
         // Done
         Ok(signatures)
     }
