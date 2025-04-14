@@ -480,7 +480,6 @@ where
         let signature = match &account_chain_snapshot.chain_state {
             // If the account is a fee payer, we clone it assigning the init lamports of
             // the escrowed lamports (if the validator is in the charging fees mode)
-            // TODO(GabrielePicco): Should only clone if the account is a signer in the transaction
             AccountChainState::FeePayer { lamports, owner } => {
                 if !self.permissions.allow_cloning_feepayer_accounts {
                     return Ok(AccountClonerOutput::Unclonable {
