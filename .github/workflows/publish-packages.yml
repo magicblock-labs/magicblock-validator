@@ -60,7 +60,7 @@ jobs:
       - uses: ./magicblock-validator/.github/actions/setup-build-env
         with:
           build_cache_key_name: "magicblock-validator-ci-publish-v000"
-          rust_toolchain_release: "1.84.1"
+          rust_toolchain_release: "1.85.0"
           github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
           github_token: ${{ secrets.GITHUB_TOKEN }}
 
@@ -88,12 +88,12 @@ jobs:
         if: matrix.build.OS == 'ubuntu-latest'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libclang-dev protobuf-compiler cmake pkg-config libssl-dev ca-certificates openssh-client
+          sudo apt-get install -y libclang-dev protobuf-compiler cmake pkg-config libssl-dev ca-certificates openssh-client libudev-dev
 
       - name: Install cross compiler (if needed)
         if: matrix.build.TARGET == 'aarch64-unknown-linux-gnu'
         run: |
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu
+          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu 
           aarch64-linux-gnu-gcc --version
           aarch64-linux-gnu-ld --version
           mkdir -p ~/.cargo
