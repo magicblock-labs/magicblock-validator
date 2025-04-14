@@ -29,7 +29,7 @@ jobs:
           }
           - {
             NAME: linux-arm64-glibc,
-            OS: ubuntu-latest,
+            OS: arm64,
             TOOLCHAIN: stable,
             TARGET: aarch64-unknown-linux-gnu
           }
@@ -85,34 +85,10 @@ jobs:
           version: latest
 
       - name: Install build dependencies
-        if: matrix.build.OS == 'ubuntu-latest'
+        if: startsWith(matrix.build.OS, 'ubuntu')
         run: |
           sudo apt-get update
           sudo apt-get install -y libclang-dev protobuf-compiler cmake pkg-config libssl-dev ca-certificates openssh-client libudev-dev
-
-      - name: Install cross compiler (if needed)
-        if: matrix.build.TARGET == 'aarch64-unknown-linux-gnu'
-        run: |
-          sudo dpkg --add-architecture arm64
-          echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble main restricted universe multiverse
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-updates main restricted universe multiverse
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-security main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/arm64.list
-          sudo apt update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu libudev-dev:arm64
-          aarch64-linux-gnu-gcc --version
-          aarch64-linux-gnu-ld --version
-          mkdir -p ~/.cargo
-          echo '[target.aarch64-unknown-linux-gnu]' >> ~/.cargo/config.toml
-          echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
-          echo 'ar = "aarch64-linux-gnu-ar"' >> ~/.cargo/config.toml
-
-          echo 'export PKG_CONFIG_ALLOW_CROSS=1' >> $GITHUB_ENV
-          echo 'export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig' >> $GITHUB_ENV
-          echo 'export PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig' >> $GITHUB_ENV
-          echo 'export PKG_CONFIG_SYSROOT_DIR=/usr/aarch64-linux-gnu' >> $GITHUB_ENV
-
-          echo "HIDAPI_MOCK=1" >> $GITHUB_ENV
-          echo "HIDAPI_NO_SYSTEM_LIBS=1" >> $GITHUB_ENV
 
       - name: Build (linux/macos/windows)
         uses: actions-rs/cargo@v1
