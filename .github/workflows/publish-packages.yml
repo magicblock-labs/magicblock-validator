@@ -94,7 +94,10 @@ jobs:
         if: matrix.build.TARGET == 'aarch64-unknown-linux-gnu'
         run: |
           sudo dpkg --add-architecture arm64
-          sudo apt-get update
+          echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble main restricted universe multiverse
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-updates main restricted universe multiverse
+          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-security main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/arm64.list
+          sudo apt update
           sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu libudev-dev:arm64
           aarch64-linux-gnu-gcc --version
           aarch64-linux-gnu-ld --version
