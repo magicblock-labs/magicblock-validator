@@ -106,6 +106,11 @@ jobs:
           echo 'export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig' >> $GITHUB_ENV
           echo 'export PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig' >> $GITHUB_ENV
           echo 'export PKG_CONFIG_SYSROOT_DIR=/usr/aarch64-linux-gnu' >> $GITHUB_ENV
+          
+          # Tell hidapi to use a mock implementation
+          echo "HIDAPI_MOCK=1" >> $GITHUB_ENV
+          # Tell hidapi not to link against system libraries
+          echo "HIDAPI_NO_SYSTEM_LIBS=1" >> $GITHUB_ENV
 
       - name: Build (linux/macos/windows)
         uses: actions-rs/cargo@v1
