@@ -25,31 +25,31 @@ jobs:
             NAME: linux-x64-glibc,
             OS: ubuntu-latest,
             TOOLCHAIN: stable,
-            TARGET: x86_64-unknown-linux-gnu,
+            TARGET: x86_64-unknown-linux-gnu
           }
           - {
             NAME: linux-arm64-glibc,
-            OS: ubuntu-latest,
+            OS: ubuntu-24.04-arm,
             TOOLCHAIN: stable,
-            TARGET: aarch64-unknown-linux-gnu,
+            TARGET: aarch64-unknown-linux-gnu
           }
           - {
             NAME: win32-x64-msvc,
             OS: windows-latest,
             TOOLCHAIN: stable,
-            TARGET: x86_64-pc-windows-msvc,
+            TARGET: x86_64-pc-windows-msvc
           }
           - {
             NAME: darwin-x64,
             OS: macos-latest,
             TOOLCHAIN: stable,
-            TARGET: x86_64-apple-darwin,
+            TARGET: x86_64-apple-darwin
           }
           - {
             NAME: darwin-arm64,
             OS: macos-latest,
             TOOLCHAIN: stable,
-            TARGET: aarch64-apple-darwin,
+            TARGET: aarch64-apple-darwin
           }
     steps:
       - name: Checkout this magicblock-validator
@@ -85,37 +85,10 @@ jobs:
           version: latest
 
       - name: Install build dependencies
-        if: matrix.build.OS == 'ubuntu-latest'
+        if: startsWith(matrix.build.OS, 'ubuntu')
         run: |
           sudo apt-get update
           sudo apt-get install -y libclang-dev protobuf-compiler cmake pkg-config libssl-dev ca-certificates openssh-client libudev-dev
-
-      - name: Install cross compiler (if needed)
-        if: matrix.build.TARGET == 'aarch64-unknown-linux-gnu'
-        run: |
-          sudo dpkg --add-architecture arm64
-          echo "deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble main restricted universe multiverse
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-updates main restricted universe multiverse
-          deb [arch=arm64] http://ports.ubuntu.com/ubuntu-ports noble-security main restricted universe multiverse" | sudo tee /etc/apt/sources.list.d/arm64.list
-          sudo apt update
-          sudo apt-get install -y gcc-aarch64-linux-gnu g++-aarch64-linux-gnu binutils-aarch64-linux-gnu libudev-dev:arm64
-          aarch64-linux-gnu-gcc --version
-          aarch64-linux-gnu-ld --version
-          mkdir -p ~/.cargo
-          echo '[target.aarch64-unknown-linux-gnu]' >> ~/.cargo/config.toml
-          echo 'linker = "aarch64-linux-gnu-gcc"' >> ~/.cargo/config.toml
-          echo 'ar = "aarch64-linux-gnu-ar"' >> ~/.cargo/config.toml
-          
-          # Setup pkg-config for cross-compilation
-          echo 'export PKG_CONFIG_ALLOW_CROSS=1' >> $GITHUB_ENV
-          echo 'export PKG_CONFIG_PATH=/usr/lib/aarch64-linux-gnu/pkgconfig' >> $GITHUB_ENV
-          echo 'export PKG_CONFIG_LIBDIR=/usr/lib/aarch64-linux-gnu/pkgconfig:/usr/share/pkgconfig' >> $GITHUB_ENV
-          echo 'export PKG_CONFIG_SYSROOT_DIR=/usr/aarch64-linux-gnu' >> $GITHUB_ENV
-          
-          # Tell hidapi to use a mock implementation
-          echo "HIDAPI_MOCK=1" >> $GITHUB_ENV
-          # Tell hidapi not to link against system libraries
-          echo "HIDAPI_NO_SYSTEM_LIBS=1" >> $GITHUB_ENV
 
       - name: Build (linux/macos/windows)
         uses: actions-rs/cargo@v1
@@ -125,7 +98,6 @@ jobs:
 
       - name: Check versions are aligned
         run: |
-          # Fails if versions are not aligned
           cd magicblock-validator/.github && ./version-align.sh --check
 
       - name: Build the NPM package
@@ -134,36 +106,25 @@ jobs:
           cd magicblock-validator
           bin="ephemeral-validator"
           mv target/${{ matrix.build.TARGET }}/release/rpc target/${{ matrix.build.TARGET }}/release/${bin}
-          # derive the OS and architecture from the build matrix name
-          # note: when split by a hyphen, first part is the OS and the second is the architecture
           node_os=$(echo "${{ matrix.build.NAME }}" | cut -d '-' -f1)
           export node_os
           node_arch=$(echo "${{ matrix.build.NAME }}" | cut -d '-' -f2)
           export node_arch
-          # set the version
           export node_version="${{ env.RELEASE_VERSION }}"
-          # set the package name
-          # note: use 'windows' as OS name instead of 'win32'
           if [ "${{ matrix.build.OS }}" = "windows-latest" ]; then
             export node_pkg="${bin}-windows-${node_arch}"
           else
             export node_pkg="${bin}-${node_os}-${node_arch}"
           fi
           echo "node_pkg=${node_pkg}" >> $GITHUB_ENV
-          # create the package directory
           mkdir -p "${node_pkg}/bin"
-          # generate package.json from the template
           envsubst < .github/packages/npm-package/package.json.tmpl > "${node_pkg}/package.json"
           cat "${node_pkg}/package.json"
-          # copy the binary into the package
-          # note: windows binaries has '.exe' extension
           if [ "${{ matrix.build.OS }}" = "windows-latest" ]; then
             bin="${bin}.exe"
           fi
           echo "bin_name=${bin}" >> $GITHUB_ENV
           cp "target/${{ matrix.build.TARGET }}/release/${bin}" "${node_pkg}/bin"
-
-          # Create the release bin file
           release_name="ephemeral-validator-${{ matrix.build.NAME }}"
           if [ "${{ matrix.build.OS }}" = "windows-latest" ]; then
             release_name="${release_name}.exe"
