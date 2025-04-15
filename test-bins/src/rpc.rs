@@ -40,9 +40,8 @@ struct Cli {
     #[arg(
         long,
         value_name = "COMPONENTS",
-        default_value = "(accounts,transactions)",
         env = "GEYSER_DISABLE",
-        help = "Specifies geyser components to disable."
+        help = "Specifies geyser components to disable. [default: (accounts,transactions)]"
     )]
     disable_geyser: Option<String>,
 
@@ -50,9 +49,8 @@ struct Cli {
     #[arg(
         long,
         value_name = "COMPONENTS",
-        default_value = "(accounts,transactions)",
         env = "GEYSER_CACHE_DISABLE",
-        help = "Specifies geyser cache components to disable."
+        help = "Specifies geyser cache components to disable. [default: (accounts,transactions)]"
     )]
     disable_geyser_cache: Option<String>,
 }
@@ -118,7 +116,7 @@ async fn main() {
 
     let (file, config) = load_config(cli.config);
     let config = config.override_from_envs();
-    
+
     match file {
         Some(file) => info!("Loading config from '{}'.", file),
         None => info!("Using default config. Override it by passing the path to a config file."),
@@ -191,7 +189,9 @@ fn validator_keypair() -> Keypair {
     }
 }
 
-fn load_config(config_file: Option<String>) -> (Option<String>, EphemeralConfig) {
+fn load_config(
+    config_file: Option<String>,
+) -> (Option<String>, EphemeralConfig) {
     match config_file {
         Some(config_file) => {
             let config = EphemeralConfig::try_load_from_file(&config_file)
