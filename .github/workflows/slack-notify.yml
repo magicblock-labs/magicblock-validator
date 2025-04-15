@@ -12,7 +12,15 @@ jobs:
       - name: Format reviewer list
         id: reviewers
         run: |
-          reviewers=$(echo "${{ toJson(github.event.pull_request.requested_reviewers) }}" | jq -r '.[].login' | paste -sd ", " -)
+          echo "Requested reviewers data:"
+          echo "${{ toJson(github.event.pull_request.requested_reviewers) }}" | jq '.'
+          
+          # Extract reviewer logins
+          if [[ $(echo "${{ toJson(github.event.pull_request.requested_reviewers) }}" | jq 'length') -gt 0 ]]; then
+            reviewers=$(echo "${{ toJson(github.event.pull_request.requested_reviewers) }}" | jq -r '.[].login' | paste -sd ", " -)
+          else
+            reviewers="No reviewers found"
+          fi
           echo "reviewers=$reviewers" >> $GITHUB_OUTPUT
 
       - name: Send Slack Notification
@@ -20,7 +28,15 @@ jobs:
         with:
           payload: |
             {
-              "text": "👀 <${{ github.event.pull_request.user.login }}> has requested reviews from *${{ steps.reviewers.outputs.reviewers }}* on PR: <${{ github.event.pull_request.html_url }}|${{ github.event.pull_request.title }}>."
+              "blocks": [
+                {
+                  "type": "section",
+                  "text": {
+                    "type": "mrkdwn",
+                    "text": "👀 *${{ github.event.pull_request.user.login }}* has requested reviews from *${{ steps.reviewers.outputs.reviewers }}* on PR: <${{ github.event.pull_request.html_url }}|${{ github.event.pull_request.title }}>."
+                  }
+                }
+              ]
             }
         env:
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
