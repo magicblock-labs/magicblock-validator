@@ -12,16 +12,29 @@ jobs:
       - name: Format reviewer list
         id: reviewers
         run: |
-          echo "Requested reviewers data:"
-          echo "${{ toJson(github.event.pull_request.requested_reviewers) }}" | jq '.'
+          # First, safely store the JSON in a file
+          echo '${{ toJson(github.event.pull_request.requested_reviewers) }}' > reviewers.json
           
-          # Extract reviewer logins
-          if [[ $(echo "${{ toJson(github.event.pull_request.requested_reviewers) }}" | jq 'length') -gt 0 ]]; then
-            reviewers=$(echo "${{ toJson(github.event.pull_request.requested_reviewers) }}" | jq -r '.[].login' | paste -sd ", " -)
+          # Check if the reviewers data exists and extract it safely
+          if [ -s reviewers.json ] && [ "$(cat reviewers.json)" != "null" ] && [ "$(cat reviewers.json)" != "[]" ]; then
+            # Process the individual reviewers - handle both array format and single object format
+            reviewers=$(cat reviewers.json | jq -r 'if type=="array" then .[].login else .login end' 2>/dev/null | grep -v '^$' | paste -sd ", " -)
+            if [ -z "$reviewers" ]; then
+              # Fallback - try to get reviewer login directly if the structure is unexpected
+              reviewers=$(cat reviewers.json | grep -o '"login":"[^"]*"' | sed 's/"login":"//g' | sed 's/"//g' | paste -sd ", " -)
+            fi
           else
-            reviewers="No reviewers found"
+            reviewers="someone"
           fi
+          
+          echo "Extracted reviewers: $reviewers"
           echo "reviewers=$reviewers" >> $GITHUB_OUTPUT
+
+      - name: Get requested reviewer from event payload
+        id: single_reviewer
+        if: github.event.requested_reviewer != null
+        run: |
+          echo "reviewer=${{ github.event.requested_reviewer.login }}" >> $GITHUB_OUTPUT
 
       - name: Send Slack Notification
         uses: slackapi/slack-github-action@v1.24.0
@@ -32,8 +45,8 @@ jobs:
                 {
                   "type": "section",
                   "text": {
-                    "type": "mrkdwn",
-                    "text": "👀 *${{ github.event.pull_request.user.login }}* has requested reviews from *${{ steps.reviewers.outputs.reviewers }}* on PR: <${{ github.event.pull_request.html_url }}|${{ github.event.pull_request.title }}>."
+                    "type": "mrkdwn", 
+                    "text": "👀 *${{ github.event.pull_request.user.login }}* has requested reviews from *${{ steps.single_reviewer.outputs.reviewer || steps.reviewers.outputs.reviewers }}* on PR: <${{ github.event.pull_request.html_url }}|${{ github.event.pull_request.title }}>."
                   }
                 }
               ]
