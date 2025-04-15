@@ -138,7 +138,6 @@ where
         Self {
             internal_account_provider,
             account_fetcher,
-
             account_updates,
             account_dumper,
             allowed_program_ids,
@@ -400,6 +399,9 @@ where
             .write()
             .expect("RwLock of RemoteAccountClonerWorker.last_clone_output is poisoned")
             .insert(*pubkey, updated_clone_output.clone());
+        if let Ok(map) = self.last_clone_output.read() {
+            metrics::set_cached_clone_outputs_count(map.len());
+        }
         Ok(updated_clone_output)
     }
 

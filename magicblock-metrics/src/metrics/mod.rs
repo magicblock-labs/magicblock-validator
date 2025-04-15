@@ -75,6 +75,12 @@ lazy_static::lazy_static! {
             ),
     ).unwrap();
 
+    static ref CACHED_CLONE_OUTPUTS_COUNT: IntGauge = IntGauge::new(
+        "magicblock_account_cloner_cached_outputs",
+        "Number of cloned accounts in the RemoteAccountClonerWorker"
+    )
+    .unwrap();
+
     // -----------------
     // Ledger
     // -----------------
@@ -120,6 +126,10 @@ lazy_static::lazy_static! {
     // -----------------
     static ref ACCOUNTS_SIZE_GAUGE: IntGauge = IntGauge::new(
         "accounts_size", "Size of persisted accounts (in bytes) currently on disk",
+    ).unwrap();
+
+    static ref ACCOUNTS_COUNT_GAUGE: IntGauge = IntGauge::new(
+        "accounts_count", "Number of accounts currently in the database",
     ).unwrap();
 
     static ref INMEM_ACCOUNTS_SIZE_GAUGE: IntGauge = IntGauge::new(
@@ -195,6 +205,7 @@ pub(crate) fn register() {
         register!(ACCOUNT_CLONE_VEC_COUNT);
         register!(ACCOUNT_COMMIT_VEC_COUNT);
         register!(ACCOUNT_COMMIT_TIME_HISTOGRAM);
+        register!(CACHED_CLONE_OUTPUTS_COUNT);
         register!(LEDGER_SIZE_GAUGE);
         register!(LEDGER_BLOCK_TIMES_GAUGE);
         register!(LEDGER_BLOCKHASHES_GAUGE);
@@ -208,6 +219,7 @@ pub(crate) fn register() {
         register!(LEDGER_PERF_SAMPLES_GAUGE);
         register!(LEDGER_ACCOUNT_MOD_DATA_GAUGE);
         register!(ACCOUNTS_SIZE_GAUGE);
+        register!(ACCOUNTS_COUNT_GAUGE);
         register!(INMEM_ACCOUNTS_SIZE_GAUGE);
         register!(PENDING_ACCOUNT_CLONES_GAUGE);
         register!(ACTIVE_DATA_MODS_GAUGE);
@@ -296,6 +308,10 @@ pub fn account_commit_start() -> HistogramTimer {
     ACCOUNT_COMMIT_TIME_HISTOGRAM.start_timer()
 }
 
+pub fn set_cached_clone_outputs_count(count: usize) {
+    CACHED_CLONE_OUTPUTS_COUNT.set(count as i64);
+}
+
 pub fn account_commit_end(timer: HistogramTimer) {
     timer.stop_and_record();
 }
@@ -350,6 +366,10 @@ pub fn set_ledger_account_mod_data_count(count: i64) {
 
 pub fn set_accounts_size(size: u64) {
     ACCOUNTS_SIZE_GAUGE.set(size as i64);
+}
+
+pub fn set_accounts_count(count: usize) {
+    ACCOUNTS_COUNT_GAUGE.set(count as i64);
 }
 
 pub fn adjust_inmemory_accounts_size(delta: i64) {

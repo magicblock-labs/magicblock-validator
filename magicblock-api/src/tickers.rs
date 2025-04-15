@@ -1,11 +1,3 @@
-use std::{
-    sync::{
-        atomic::{AtomicBool, Ordering},
-        Arc,
-    },
-    time::Duration,
-};
-
 use log::*;
 use magicblock_accounts::AccountsManager;
 use magicblock_bank::bank::Bank;
@@ -18,6 +10,13 @@ use magicblock_program::{
 };
 use magicblock_transaction_status::TransactionStatusSender;
 use solana_sdk::account::ReadableAccount;
+use std::{
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+    time::Duration,
+};
 use tokio_util::sync::CancellationToken;
 
 use crate::slot::advance_slot_and_update_ledger;
@@ -157,10 +156,14 @@ pub fn init_system_metrics_ticker(
         let byte_size = bank.accounts_db_storage_size();
         metrics::set_accounts_size(byte_size);
     }
+    fn set_accounts_count(bank: &Bank) {
+        metrics::set_accounts_count(bank.accounts_db.get_accounts_count());
+    }
     let ledger = ledger.clone();
     let bank = bank.clone();
     try_set_ledger_storage_size(&ledger);
     set_accounts_storage_size(&bank);
+    set_accounts_count(&bank);
     try_set_ledger_counts(&ledger);
 
     tokio::task::spawn(async move {

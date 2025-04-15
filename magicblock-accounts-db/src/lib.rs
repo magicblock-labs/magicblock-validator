@@ -217,6 +217,11 @@ impl AccountsDb {
         }
     }
 
+    /// Get the number of accounts in the database
+    pub fn get_accounts_count(&self) -> usize {
+        self.index.get_accounts_count()
+    }
+
     /// Get latest observed slot
     #[inline(always)]
     pub fn slot(&self) -> u64 {
