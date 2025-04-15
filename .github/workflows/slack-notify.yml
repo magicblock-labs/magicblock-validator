@@ -41,6 +41,7 @@ jobs:
         with:
           payload: |
             {
+              "text": "👀 ${{ github.event.pull_request.user.login }} has requested reviews from ${{ steps.single_reviewer.outputs.reviewer || steps.reviewers.outputs.reviewers }} on PR: ${{ github.event.pull_request.title }}",
               "blocks": [
                 {
                   "type": "section",
