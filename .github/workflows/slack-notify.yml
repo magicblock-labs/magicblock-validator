@@ -24,7 +24,7 @@ jobs:
               reviewers=$(cat reviewers.json | grep -o '"login":"[^"]*"' | sed 's/"login":"//g' | sed 's/"//g' | paste -sd ", " -)
             fi
           else
-            reviewers="someone"
+            reviewers="No reviewers found"
           fi
           
           echo "Extracted reviewers: $reviewers"
