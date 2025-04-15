@@ -84,6 +84,14 @@ impl StandaloneIndex {
             .inspect_err(log_err!("secondary index flushing"));
     }
 
+    pub(super) fn len(&self) -> usize {
+        self.env
+            .stat()
+            .inspect_err(log_err!("secondary index stat retrieval"))
+            .map(|stat| stat.entries())
+            .unwrap_or_default()
+    }
+
     fn rotxn(&self) -> lmdb::Result<RoTransaction> {
         self.env.begin_ro_txn()
     }

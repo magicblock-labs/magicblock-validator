@@ -363,13 +363,7 @@ impl AccountsDbIndex {
 
     /// Returns the number of accounts in database
     pub(crate) fn get_accounts_count(&self) -> usize {
-        match self.env.stat() {
-            Ok(stat) => stat.entries(),
-            Err(err) => {
-                warn!("Failed to get accounts count: {}", err);
-                0
-            }
-        }
+        self.owners.len()
     }
 
     /// Check whether allocation of given size (in blocks) exists.
