@@ -12,10 +12,9 @@ jobs:
       - name: Format reviewer list
         id: reviewers
         run: |
-          # First, safely store the JSON in a file
           echo '${{ toJson(github.event.pull_request.requested_reviewers) }}' > reviewers.json
           
-          # Check if the reviewers data exists and extract it safely
+          # Check if the reviewers data exists and extract it
           if [ -s reviewers.json ] && [ "$(cat reviewers.json)" != "null" ] && [ "$(cat reviewers.json)" != "[]" ]; then
             # Process the individual reviewers - handle both array format and single object format
             reviewers=$(cat reviewers.json | jq -r 'if type=="array" then .[].login else .login end' 2>/dev/null | grep -v '^$' | paste -sd ", " -)
