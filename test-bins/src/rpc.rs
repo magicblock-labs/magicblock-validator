@@ -9,6 +9,9 @@ use magicblock_config::{EphemeralConfig, GeyserGrpcConfig};
 use solana_sdk::signature::{Keypair, Signer};
 use test_tools::init_logger;
 
+mod cli;
+use cli::*;
+
 // mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev
 const TEST_KEYPAIR_BYTES: [u8; 64] = [
     7, 83, 184, 55, 200, 223, 238, 137, 166, 244, 107, 126, 189, 16, 194, 36,
@@ -16,44 +19,6 @@ const TEST_KEYPAIR_BYTES: [u8; 64] = [
     9, 208, 183, 189, 108, 200, 89, 77, 168, 76, 233, 197, 132, 22, 21, 186,
     202, 240, 105, 168, 157, 64, 233, 249, 100, 104, 210, 41, 83, 87,
 ];
-
-/// MagicBlock Validator CLI arguments
-#[derive(Parser, Debug)]
-#[command(name = "MagicBlock Validator")]
-#[command(version = env!("CARGO_PKG_VERSION"))]
-#[command(about = "Runs a MagicBlock validator node")]
-struct Cli {
-    /// Path to the configuration file
-    config: Option<String>,
-
-    /// Base58 encoded validator private key
-    #[arg(
-        short = 'k',
-        long,
-        value_name = "KEYPAIR",
-        env = "VALIDATOR_KEYPAIR",
-        help = "Base58 encoded private key for the validator."
-    )]
-    keypair: Option<String>,
-
-    /// Disable geyser components (accounts,transactions)
-    #[arg(
-        long,
-        value_name = "COMPONENTS",
-        env = "GEYSER_DISABLE",
-        help = "Specifies geyser components to disable. [default: (accounts,transactions)]"
-    )]
-    disable_geyser: Option<String>,
-
-    /// Disable geyser cache components (accounts,transactions)
-    #[arg(
-        long,
-        value_name = "COMPONENTS",
-        env = "GEYSER_CACHE_DISABLE",
-        help = "Specifies geyser cache components to disable. [default: (accounts,transactions)]"
-    )]
-    disable_geyser_cache: Option<String>,
-}
 
 fn init_logger() {
     if let Ok(style) = std::env::var("RUST_LOG_STYLE") {
@@ -101,26 +66,23 @@ async fn main() {
 
     let cli = Cli::parse();
 
-    // Set environment variables from CLI arguments
-    if let Some(keypair) = cli.keypair {
-        std::env::set_var("VALIDATOR_KEYPAIR", keypair);
-    }
-
-    if let Some(disable_geyser) = cli.disable_geyser {
-        std::env::set_var("GEYSER_DISABLE", disable_geyser);
-    }
-
-    if let Some(disable_cache) = cli.disable_geyser_cache {
-        std::env::set_var("GEYSER_CACHE_DISABLE", disable_cache);
-    }
-
-    let (file, config) = load_config(cli.config);
-    let config = config.override_from_envs();
+    // Load config from file
+    let (file, config) = load_config(cli.config_path);
 
     match file {
         Some(file) => info!("Loading config from '{}'.", file),
         None => info!("Using default config. Override it by passing the path to a config file."),
     };
+
+    // Override config with args and env vars
+    let config = match cli.config.override_config(config) {
+        Ok(config) => config,
+        Err(e) => {
+            error!("Failed to override config: {}", e);
+            return;
+        }
+    };
+
     info!("Starting validator with config:\n{}", config);
     // Add a more developer-friendly startup message
     const WS_PORT_OFFSET: u16 = 1;

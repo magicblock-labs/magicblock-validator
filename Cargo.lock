@@ -10060,12 +10060,15 @@ dependencies = [
  "clap 4.5.36",
  "console-subscriber",
  "env_logger 0.11.6",
+ "isocountry",
  "log",
+ "magicblock-accounts-db",
  "magicblock-api",
  "magicblock-config",
  "solana-sdk",
  "test-tools",
  "tokio",
+ "url 2.5.4",
 ]
 
 [[package]]
