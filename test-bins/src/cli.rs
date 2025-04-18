@@ -87,7 +87,7 @@ impl ConfigArgs {
                 RemoteConfigArg::Development => RemoteConfig::Development,
             };
         } else if let Some(remote_custom) = &self.accounts.remote_custom {
-            let url = Url::from_str(&remote_custom).map_err(|e| {
+            let url = Url::from_str(remote_custom).map_err(|e| {
                 format!("Failed to parse URL {}: {}", remote_custom, e)
             })?;
 
@@ -95,7 +95,7 @@ impl ConfigArgs {
                 &self.accounts.remote_custom_with_ws
             {
                 let url_ws =
-                    Url::from_str(&remote_custom_with_ws).map_err(|e| {
+                    Url::from_str(remote_custom_with_ws).map_err(|e| {
                         format!(
                             "Failed to parse URL {}: {}",
                             remote_custom_with_ws, e
@@ -108,9 +108,9 @@ impl ConfigArgs {
             }
         }
 
-        config.accounts.lifecycle = self.accounts.lifecycle.clone().into();
-        config.accounts.commit = self.accounts.commit.clone().into();
-        config.accounts.payer = self.accounts.payer.clone().into();
+        config.accounts.lifecycle = self.accounts.lifecycle.into();
+        config.accounts.commit = self.accounts.commit.into();
+        config.accounts.payer = self.accounts.payer.into();
         config.accounts.allowed_programs = self
             .accounts
             .allowed_programs
@@ -123,7 +123,7 @@ impl ConfigArgs {
         config.accounts.db = self.accounts.db.into();
 
         config.rpc = self.rpc.into();
-        config.geyser_grpc = self.geyser_grpc.clone().into();
+        config.geyser_grpc = self.geyser_grpc.into();
         config.validator = self.validator.clone().into();
         config.ledger = self.ledger.clone().into();
         config.programs = self.programs.clone();
@@ -190,9 +190,9 @@ pub enum LifecycleModeArg {
     Offline,
 }
 
-impl Into<LifecycleMode> for LifecycleModeArg {
-    fn into(self) -> LifecycleMode {
-        match self {
+impl From<LifecycleModeArg> for LifecycleMode {
+    fn from(value: LifecycleModeArg) -> Self {
+        match value {
             LifecycleModeArg::Replica => LifecycleMode::Replica,
             LifecycleModeArg::ProgramsReplica => LifecycleMode::ProgramsReplica,
             LifecycleModeArg::Ephemeral => LifecycleMode::Ephemeral,
@@ -220,11 +220,11 @@ pub struct CommitStrategyArg {
     pub compute_unit_price: u64,
 }
 
-impl Into<CommitStrategy> for CommitStrategyArg {
-    fn into(self) -> CommitStrategy {
+impl From<CommitStrategyArg> for CommitStrategy {
+    fn from(value: CommitStrategyArg) -> Self {
         CommitStrategy {
-            frequency_millis: self.frequency_millis,
-            compute_unit_price: self.compute_unit_price,
+            frequency_millis: value.frequency_millis,
+            compute_unit_price: value.compute_unit_price,
         }
     }
 }
@@ -239,11 +239,11 @@ struct PayerArgs {
     init_sol: Option<u64>,
 }
 
-impl Into<Payer> for PayerArgs {
-    fn into(self) -> Payer {
+impl From<PayerArgs> for Payer {
+    fn from(value: PayerArgs) -> Self {
         Payer::new(PayerParams {
-            init_lamports: self.init_lamports,
-            init_sol: self.init_sol,
+            init_lamports: value.init_lamports,
+            init_sol: value.init_sol,
         })
     }
 }
@@ -268,14 +268,14 @@ struct AccountsDbArgs {
     pub snapshot_frequency: u64,
 }
 
-impl Into<AccountsDbConfig> for AccountsDbArgs {
-    fn into(self) -> AccountsDbConfig {
+impl From<AccountsDbArgs> for AccountsDbConfig {
+    fn from(value: AccountsDbArgs) -> Self {
         AccountsDbConfig {
-            db_size: self.db_size,
-            block_size: self.block_size.into(),
-            index_map_size: self.index_map_size,
-            max_snapshots: self.max_snapshots,
-            snapshot_frequency: self.snapshot_frequency,
+            db_size: value.db_size,
+            block_size: value.block_size.into(),
+            index_map_size: value.index_map_size,
+            max_snapshots: value.max_snapshots,
+            snapshot_frequency: value.snapshot_frequency,
         }
     }
 }
@@ -288,9 +288,9 @@ pub enum BlockSizeArg {
     Block512 = 512,
 }
 
-impl Into<BlockSize> for BlockSizeArg {
-    fn into(self) -> BlockSize {
-        match self {
+impl From<BlockSizeArg> for BlockSize {
+    fn from(value: BlockSizeArg) -> Self {
+        match value {
             BlockSizeArg::Block128 => BlockSize::Block128,
             BlockSizeArg::Block256 => BlockSize::Block256,
             BlockSizeArg::Block512 => BlockSize::Block512,
@@ -308,11 +308,11 @@ struct RpcArgs {
     port: u16,
 }
 
-impl Into<RpcConfig> for RpcArgs {
-    fn into(self) -> RpcConfig {
+impl From<RpcArgs> for RpcConfig {
+    fn from(value: RpcArgs) -> Self {
         RpcConfig {
-            addr: self.addr,
-            port: self.port,
+            addr: value.addr,
+            port: value.port,
         }
     }
 }
@@ -335,11 +335,11 @@ struct GeyserGrpcArgs {
     grpc_port: u16,
 }
 
-impl Into<GeyserGrpcConfig> for GeyserGrpcArgs {
-    fn into(self) -> GeyserGrpcConfig {
+impl From<GeyserGrpcArgs> for GeyserGrpcConfig {
+    fn from(value: GeyserGrpcArgs) -> Self {
         GeyserGrpcConfig {
-            addr: self.grpc_addr,
-            port: self.grpc_port,
+            addr: value.grpc_addr,
+            port: value.grpc_port,
         }
     }
 }
@@ -380,14 +380,14 @@ pub struct ValidatorConfigArgs {
     pub country_code: CountryCode,
 }
 
-impl Into<ValidatorConfig> for ValidatorConfigArgs {
-    fn into(self) -> ValidatorConfig {
+impl From<ValidatorConfigArgs> for ValidatorConfig {
+    fn from(value: ValidatorConfigArgs) -> Self {
         ValidatorConfig {
-            country_code: self.country_code,
-            base_fees: self.base_fees,
-            fdqn: self.fdqn,
-            millis_per_slot: self.millis_per_slot,
-            sigverify: self.sigverify,
+            country_code: value.country_code,
+            base_fees: value.base_fees,
+            fdqn: value.fdqn,
+            millis_per_slot: value.millis_per_slot,
+            sigverify: value.sigverify,
         }
     }
 }
@@ -415,12 +415,12 @@ pub struct LedgerConfigArgs {
     pub size: u64,
 }
 
-impl Into<LedgerConfig> for LedgerConfigArgs {
-    fn into(self) -> LedgerConfig {
+impl From<LedgerConfigArgs> for LedgerConfig {
+    fn from(value: LedgerConfigArgs) -> Self {
         LedgerConfig {
-            reset: self.reset,
-            path: self.path,
-            size: self.size,
+            reset: value.reset,
+            path: value.path,
+            size: value.size,
         }
     }
 }
@@ -431,7 +431,7 @@ fn program_config_parser(s: &str) -> Result<ProgramConfig, String> {
     let [id, path] = parts.as_slice() else {
         return Err(format!("Invalid program config: {}", s));
     };
-    let id = Pubkey::from_str(&id)
+    let id = Pubkey::from_str(id)
         .map_err(|e| format!("Invalid program id {}: {}", id, e))?;
 
     Ok(ProgramConfig {
@@ -527,8 +527,8 @@ mod tests {
         assert_eq!(
             config.accounts.remote,
             RemoteConfig::CustomWithWs(
-                Url::from_str(&remote_custom).unwrap(),
-                Url::from_str(&remote_custom_with_ws).unwrap()
+                Url::from_str(remote_custom).unwrap(),
+                Url::from_str(remote_custom_with_ws).unwrap()
             )
         );
         assert_eq!(
@@ -591,14 +591,14 @@ mod tests {
 
     #[test]
     fn test_accounts_remote_custom_with_ws() {
-        let cli = Cli::try_parse_from(&[
+        let cli = Cli::try_parse_from([
             DEFAULT_CONFIG_PATH,
             "--accounts-remote-custom-with-ws",
             "wss://example.com",
         ]);
         assert!(cli.is_err());
 
-        let cli = Cli::try_parse_from(&[
+        let cli = Cli::try_parse_from([
             DEFAULT_CONFIG_PATH,
             "--accounts-remote-custom",
             "https://example.com",
@@ -610,7 +610,7 @@ mod tests {
 
     #[test]
     fn test_parse_programs() {
-        let cli = Cli::parse_from(&[
+        let cli = Cli::parse_from([
             DEFAULT_CONFIG_PATH,
             "--programs",
             "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev:path1",
