@@ -315,7 +315,7 @@ impl AccountsDb {
             .snapshot_engine
             .try_switch_to_snapshot(slot)
             .inspect_err(log_err!(
-                "switching to snapshot befor slot {}",
+                "switching to snapshot before slot {}",
                 slot
             ))?;
         let path = self.snapshot_engine.database_path();
