@@ -36,9 +36,6 @@ use solana_program_runtime::{
     sysvar_cache::SysvarCache,
 };
 use solana_rpc::slot_status_notifier::SlotStatusNotifierInterface;
-use solana_sdk::feature_set::{
-    curve25519_restrict_msm_length, curve25519_syscall_enabled,
-};
 use solana_sdk::{
     account::{
         from_account, Account, AccountSharedData, InheritableAccountFields,
@@ -52,7 +49,10 @@ use solana_sdk::{
     epoch_info::EpochInfo,
     epoch_schedule::EpochSchedule,
     feature,
-    feature_set::{self, disable_rent_fees_collection, FeatureSet},
+    feature_set::{
+        self, curve25519_restrict_msm_length, curve25519_syscall_enabled,
+        disable_rent_fees_collection, FeatureSet,
+    },
     fee::{FeeBudgetLimits, FeeDetails, FeeStructure},
     fee_calculator::FeeRateGovernor,
     genesis_config::GenesisConfig,
