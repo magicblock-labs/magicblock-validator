@@ -656,9 +656,6 @@ impl Bank {
         // Bootstrap validator collects fees until `new_from_parent` is called.
         self.fee_rate_governor = genesis_config.fee_rate_governor.clone();
 
-        // NOTE: these accounts can include feature activation accounts which need to be
-        // present in order to properly activate a feature
-        // If not then activating all features results in a panic when executing a transaction
         for (pubkey, account) in genesis_config.accounts.iter() {
             // NOTE: previously there was an assertion for making sure that genesis accounts don't
             // exist in accountsdb, but now this assertion only holds if accountsdb is empty,
