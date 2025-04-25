@@ -310,7 +310,7 @@ impl AccountsDb {
     /// no rollback will take place, in any case use with care!
     pub fn ensure_at_most(&mut self, slot: u64) -> AdbResult<u64> {
         // if this is a fresh start or we just match, then there's nothing to ensure
-        if slot >= self.slot() - 1 {
+        if slot >= self.slot().saturating_sub(1) {
             return Ok(self.slot());
         }
         // make sure that no one is reading the database
