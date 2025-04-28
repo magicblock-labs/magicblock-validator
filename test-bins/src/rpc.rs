@@ -77,10 +77,6 @@ async fn main() {
     info!("-----------------------------------");
     info!("📡 RPC endpoint:       http://{:}:{}", rpc_host, rpc_port);
     info!("🔌 WebSocket endpoint: ws://{}:{}", rpc_host, ws_port);
-    info!(
-        "🕰️ Slot time:          {} ms",
-        config.validator.millis_per_slot
-    );
     info!("-----------------------------------");
     info!("Ready for connections!");
     info!("");
