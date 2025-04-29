@@ -75,7 +75,7 @@ async fn main() {
     info!("");
     info!("🧙 Magicblock Validator is running!");
     info!("-----------------------------------");
-    info!("📡 RPC endpoint:       http://{:}:{}", rpc_host, rpc_port);
+    info!("📡 RPC endpoint:       http://{}:{}", rpc_host, rpc_port);
     info!("🔌 WebSocket endpoint: ws://{}:{}", rpc_host, ws_port);
     info!("-----------------------------------");
     info!("Ready for connections!");
