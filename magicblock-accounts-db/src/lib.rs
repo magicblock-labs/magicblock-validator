@@ -310,7 +310,7 @@ impl AccountsDb {
     /// no rollback will take place, in any case use with care!
     pub fn ensure_at_most(&mut self, slot: u64) -> AdbResult<u64> {
         // if this is a fresh start or we just match, then there's nothing to ensure
-        if slot >= self.slot() {
+        if slot >= self.slot().saturating_sub(1) {
             return Ok(self.slot());
         }
         // make sure that no one is reading the database
@@ -319,7 +319,10 @@ impl AccountsDb {
         let rb_slot = self
             .snapshot_engine
             .try_switch_to_snapshot(slot)
-            .inspect_err(log_err!("switching to snapshot befor slot {slot}"))?;
+            .inspect_err(log_err!(
+                "switching to snapshot before slot {}",
+                slot
+            ))?;
         let path = self.snapshot_engine.database_path();
 
         self.storage.reload(path)?;

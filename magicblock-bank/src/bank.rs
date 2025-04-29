@@ -49,7 +49,10 @@ use solana_sdk::{
     epoch_info::EpochInfo,
     epoch_schedule::EpochSchedule,
     feature,
-    feature_set::{self, disable_rent_fees_collection, FeatureSet},
+    feature_set::{
+        self, curve25519_restrict_msm_length, curve25519_syscall_enabled,
+        disable_rent_fees_collection, FeatureSet,
+    },
     fee::{FeeBudgetLimits, FeeDetails, FeeStructure},
     fee_calculator::FeeRateGovernor,
     genesis_config::GenesisConfig,
@@ -499,7 +502,9 @@ impl Bank {
 
         // Rent collection is no longer a thing in solana so we don't need to worry about it
         // https://github.com/solana-foundation/solana-improvement-documents/pull/84
-        feature_set.activate(&disable_rent_fees_collection::ID, 1);
+        feature_set.activate(&disable_rent_fees_collection::ID, 0);
+        feature_set.activate(&curve25519_syscall_enabled::ID, 0);
+        feature_set.activate(&curve25519_restrict_msm_length::ID, 0);
 
         let mut bank = Self {
             accounts_db: adb,
@@ -544,7 +549,7 @@ impl Bank {
 
             // For TransactionProcessingCallback
             blockhash_queue: RwLock::new(BlockhashQueue::new(max_age as usize)),
-            feature_set: Arc::<FeatureSet>::default(),
+            feature_set: Arc::<FeatureSet>::new(feature_set),
             rent_collector: RentCollector::default(),
 
             // Cost
@@ -651,9 +656,6 @@ impl Bank {
         // Bootstrap validator collects fees until `new_from_parent` is called.
         self.fee_rate_governor = genesis_config.fee_rate_governor.clone();
 
-        // NOTE: these accounts can include feature activation accounts which need to be
-        // present in order to properly activate a feature
-        // If not then activating all features results in a panic when executing a transaction
         for (pubkey, account) in genesis_config.accounts.iter() {
             // NOTE: previously there was an assertion for making sure that genesis accounts don't
             // exist in accountsdb, but now this assertion only holds if accountsdb is empty,
@@ -664,6 +666,9 @@ impl Bank {
                 .fetch_add(account.lamports(), Ordering::Relaxed);
             self.accounts_data_size_initial += account.data().len() as u64;
         }
+
+        // Create feature activation accounts
+        self.create_features_accounts();
 
         debug!("set blockhash {:?}", genesis_config.hash());
         self.blockhash_queue.write().unwrap().genesis_hash(
@@ -685,6 +690,29 @@ impl Bank {
         for (name, program_id) in &genesis_config.native_instruction_processors
         {
             self.add_builtin_account(name, program_id);
+        }
+    }
+
+    fn create_features_accounts(&mut self) {
+        for (feature_id, slot) in &self.feature_set.active {
+            // Skip if the feature account already exists
+            if self.get_account(feature_id).is_some() {
+                continue;
+            }
+            // Create a Feature struct with activated_at set to slot 0
+            let feature = feature::Feature {
+                activated_at: Some(*slot), // Activate at genesis
+            };
+            let mut account = AccountSharedData::new(
+                self.get_minimum_balance_for_rent_exemption(
+                    feature::Feature::size_of(),
+                ),
+                feature::Feature::size_of(),
+                &feature::id(),
+            );
+            feature::to_account(&feature, &mut account);
+            self.store_account_and_update_capitalization(feature_id, account);
+            info!("Activated feature at genesis: {}", feature_id);
         }
     }
 
