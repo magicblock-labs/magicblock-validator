@@ -67,6 +67,20 @@ async fn main() {
         None => info!("Using default config. Override it by passing the path to a config file."),
     };
     info!("Starting validator with config:\n{}", config);
+    // Add a more developer-friendly startup message
+    const WS_PORT_OFFSET: u16 = 1;
+    let rpc_port = config.rpc.port;
+    let ws_port = rpc_port + WS_PORT_OFFSET; // WebSocket port is typically RPC port + 1
+    let rpc_host = &config.rpc.addr;
+
+    info!("");
+    info!("🧙 Magicblock Validator is running!");
+    info!("-----------------------------------");
+    info!("📡 RPC endpoint:       http://{}:{}", rpc_host, rpc_port);
+    info!("🔌 WebSocket endpoint: ws://{}:{}", rpc_host, ws_port);
+    info!("-----------------------------------");
+    info!("Ready for connections!");
+    info!("");
 
     let validator_keypair = validator_keypair();
 
