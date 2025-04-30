@@ -1157,6 +1157,7 @@ dependencies = [
 [[package]]
 name = "conjunto-addresses"
 version = "0.0.0"
+source = "git+https://github.com/magicblock-labs/conjunto.git?rev=bf82b45#bf82b453af9f0b25a81056378d6bcdf06ef53b53"
 dependencies = [
  "paste",
  "solana-sdk",
@@ -1165,6 +1166,7 @@ dependencies = [
 [[package]]
 name = "conjunto-core"
 version = "0.0.0"
+source = "git+https://github.com/magicblock-labs/conjunto.git?rev=bf82b45#bf82b453af9f0b25a81056378d6bcdf06ef53b53"
 dependencies = [
  "async-trait",
  "serde",
@@ -1176,6 +1178,7 @@ dependencies = [
 [[package]]
 name = "conjunto-lockbox"
 version = "0.0.0"
+source = "git+https://github.com/magicblock-labs/conjunto.git?rev=bf82b45#bf82b453af9f0b25a81056378d6bcdf06ef53b53"
 dependencies = [
  "async-trait",
  "bytemuck",
@@ -1193,6 +1196,7 @@ dependencies = [
 [[package]]
 name = "conjunto-providers"
 version = "0.0.0"
+source = "git+https://github.com/magicblock-labs/conjunto.git?rev=bf82b45#bf82b453af9f0b25a81056378d6bcdf06ef53b53"
 dependencies = [
  "async-trait",
  "conjunto-addresses",
@@ -1207,6 +1211,7 @@ dependencies = [
 [[package]]
 name = "conjunto-transwise"
 version = "0.0.0"
+source = "git+https://github.com/magicblock-labs/conjunto.git?rev=bf82b45#bf82b453af9f0b25a81056378d6bcdf06ef53b53"
 dependencies = [
  "async-trait",
  "conjunto-core",
@@ -3708,6 +3713,7 @@ dependencies = [
 [[package]]
 name = "magicblock-delegation-program"
 version = "1.0.0"
+source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=4af7f1c#4af7f1cefe0915f0760ed5c38b25b7d41c31a474"
 dependencies = [
  "bincode",
  "borsh 1.5.5",
