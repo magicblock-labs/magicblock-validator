@@ -68,8 +68,9 @@ async fn main() {
     };
     info!("Starting validator with config:\n{}", config);
     // Add a more developer-friendly startup message
+    const WS_PORT_OFFSET: u16 = 1;
     let rpc_port = config.rpc.port;
-    let ws_port = rpc_port + 1; // WebSocket port is typically RPC port + 1
+    let ws_port = rpc_port + WS_PORT_OFFSET; // WebSocket port is typically RPC port + 1
     let rpc_host = &config.rpc.addr;
 
     info!("");
