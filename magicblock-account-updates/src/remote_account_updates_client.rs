@@ -9,7 +9,7 @@ use tokio::sync::mpsc::Sender;
 use crate::{AccountUpdates, AccountUpdatesError, RemoteAccountUpdatesWorker};
 
 pub struct RemoteAccountUpdatesClient {
-    monitoring_request_sender: Sender<Pubkey>,
+    monitoring_request_sender: Sender<(Pubkey, bool)>,
     first_subscribed_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
     last_known_update_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
 }
@@ -30,10 +30,21 @@ impl AccountUpdates for RemoteAccountUpdatesClient {
         pubkey: &Pubkey,
     ) -> Result<(), AccountUpdatesError> {
         self.monitoring_request_sender
-            .send(*pubkey)
+            .send((*pubkey, false))
             .await
-            .map_err(AccountUpdatesError::SendError)
+            .map_err(Into::into)
     }
+
+    async fn stop_account_monitoring(
+        &self,
+        pubkey: &Pubkey,
+    ) -> Result<(), AccountUpdatesError> {
+        self.monitoring_request_sender
+            .send((*pubkey, true))
+            .await
+            .map_err(Into::into)
+    }
+
     fn get_first_subscribed_slot(&self, pubkey: &Pubkey) -> Option<Slot> {
         self.first_subscribed_slots
             .read()
@@ -41,6 +52,7 @@ impl AccountUpdates for RemoteAccountUpdatesClient {
             .get(pubkey)
             .cloned()
     }
+
     fn get_last_known_update_slot(&self, pubkey: &Pubkey) -> Option<Slot> {
         self.last_known_update_slots
             .read()

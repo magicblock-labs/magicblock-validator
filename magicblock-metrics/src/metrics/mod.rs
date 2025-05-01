@@ -185,6 +185,14 @@ lazy_static::lazy_static! {
                 SECONDS_1_9.iter()).cloned().collect()
             ),
     ).unwrap();
+
+    static ref MONITORED_ACCOUNTS_GAUGE: IntGauge = IntGauge::new(
+        "monitored_accounts_gauge", "number of undelegated accounts, being monitored via websocket",
+    ).unwrap();
+
+    static ref EVICTED_ACCOUNTS_COUNT: IntGauge = IntGauge::new(
+        "evicted_accounts_count", "number of accounts forcefully removed from monitored list and database",
+    ).unwrap();
 }
 
 pub(crate) fn register() {
@@ -228,6 +236,8 @@ pub(crate) fn register() {
         register!(ENSURE_ACCOUNTS_TIME_HISTOGRAM);
         register!(TRANSACTION_EXECUTION_TIME_HISTORY);
         register!(FLUSH_ACCOUNTS_TIME_HISTOGRAM);
+        register!(MONITORED_ACCOUNTS_GAUGE);
+        register!(EVICTED_ACCOUNTS_COUNT);
     });
 }
 
@@ -412,6 +422,13 @@ where
     F: FnOnce() -> T,
 {
     TRANSACTION_EXECUTION_TIME_HISTORY.observe_closure_duration(f)
+}
+
+pub fn adjust_monitored_accounts_count(count: usize) {
+    MONITORED_ACCOUNTS_GAUGE.set(count as i64);
+}
+pub fn inc_evicted_accounts_count() {
+    EVICTED_ACCOUNTS_COUNT.inc();
 }
 
 pub fn observe_flush_accounts_time<T, F>(f: F) -> T

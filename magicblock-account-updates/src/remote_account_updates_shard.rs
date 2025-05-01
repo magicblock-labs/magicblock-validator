@@ -1,6 +1,8 @@
 use std::{
     cmp::{max, min},
     collections::{hash_map::Entry, HashMap},
+    future::Future,
+    pin::Pin,
     sync::{Arc, RwLock},
 };
 
@@ -33,7 +35,7 @@ pub enum RemoteAccountUpdatesShardError {
 pub struct RemoteAccountUpdatesShard {
     shard_id: String,
     rpc_provider_config: RpcProviderConfig,
-    monitoring_request_receiver: Receiver<Pubkey>,
+    monitoring_request_receiver: Receiver<(Pubkey, bool)>,
     first_subscribed_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
     last_known_update_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
 }
@@ -42,7 +44,7 @@ impl RemoteAccountUpdatesShard {
     pub fn new(
         shard_id: String,
         rpc_provider_config: RpcProviderConfig,
-        monitoring_request_receiver: Receiver<Pubkey>,
+        monitoring_request_receiver: Receiver<(Pubkey, bool)>,
         first_subscribed_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
         last_known_update_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
     ) -> Self {
@@ -86,7 +88,12 @@ impl RemoteAccountUpdatesShard {
         let mut clock_slot = 0;
         // We'll store useful maps for each of the account subscriptions
         let mut account_streams = StreamMap::new();
-        let mut account_unsubscribes = HashMap::new();
+        // rust compiler is not yet smart enough to figure out the exact type
+        type BoxFn = Box<
+            dyn FnOnce() -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>
+                + Send,
+        >;
+        let mut account_unsubscribes: HashMap<Pubkey, BoxFn> = HashMap::new();
         const LOG_CLOCK_FREQ: u64 = 100;
         let mut log_clock_count = 0;
 
@@ -112,7 +119,14 @@ impl RemoteAccountUpdatesShard {
                     }
                 }
                 // When we receive a message to start monitoring an account
-                Some(pubkey) = self.monitoring_request_receiver.recv() => {
+                Some((pubkey, unsub)) = self.monitoring_request_receiver.recv() => {
+                    if unsub {
+                        let Some(request) = account_unsubscribes.remove(&pubkey) else {
+                            continue;
+                        };
+                        request().await;
+                        continue;
+                    }
                     if account_unsubscribes.contains_key(&pubkey) {
                         continue;
                     }

@@ -314,6 +314,7 @@ impl MagicValidator {
             },
             accounts_config.lifecycle.to_account_cloner_permissions(),
             identity_keypair.pubkey(),
+            config.validator_config.accounts.max_monitored_accounts,
         );
 
         let accounts_manager = Self::init_accounts_manager(
@@ -728,7 +729,7 @@ impl MagicValidator {
     }
 
     async fn start_remote_account_cloner_worker(&mut self) -> ApiResult<()> {
-        if let Some(mut remote_account_cloner_worker) =
+        if let Some(remote_account_cloner_worker) =
             self.remote_account_cloner_worker.take()
         {
             if !self.config.ledger.reset {

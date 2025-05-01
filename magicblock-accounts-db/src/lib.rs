@@ -83,6 +83,13 @@ impl AccountsDb {
         Ok(self.storage.read_account(offset))
     }
 
+    pub fn remove_account(&self, pubkey: &Pubkey) {
+        let _ = self
+            .index
+            .remove_account(pubkey)
+            .inspect_err(log_err!("removing an account {}", pubkey));
+    }
+
     /// Insert account with given pubkey into the database
     /// Note: this method removes zero lamport account from database
     pub fn insert_account(&self, pubkey: &Pubkey, account: &AccountSharedData) {

@@ -37,7 +37,7 @@ fn setup_custom(
     // Default configuration
     let payer_init_lamports = Some(1_000 * LAMPORTS_PER_SOL);
     // Create account cloner worker and client
-    let mut cloner_worker = RemoteAccountClonerWorker::new(
+    let cloner_worker = RemoteAccountClonerWorker::new(
         internal_account_provider,
         account_fetcher,
         account_updates,
@@ -48,17 +48,17 @@ fn setup_custom(
         ValidatorCollectionMode::NoFees,
         permissions,
         Pubkey::new_unique(),
+        1024,
     );
     let cloner_client = RemoteAccountClonerClient::new(&cloner_worker);
     // Run the worker in a separate task
     let cancellation_token = CancellationToken::new();
     let cloner_worker_handle = {
         let cloner_cancellation_token = cancellation_token.clone();
-        tokio::spawn(async move {
+        tokio::spawn(
             cloner_worker
-                .start_clone_request_processing(cloner_cancellation_token)
-                .await
-        })
+                .start_clone_request_processing(cloner_cancellation_token),
+        )
     };
     // Ready to run
     (cloner_client, cancellation_token, cloner_worker_handle)

@@ -45,7 +45,7 @@ fn setup_with_lifecycle(
 ) -> (StubbedAccountsManager, CancellationToken, JoinHandle<()>) {
     let cancellation_token = CancellationToken::new();
 
-    let mut remote_account_cloner_worker = RemoteAccountClonerWorker::new(
+    let remote_account_cloner_worker = RemoteAccountClonerWorker::new(
         internal_account_provider.clone(),
         account_fetcher,
         account_updates,
@@ -56,16 +56,16 @@ fn setup_with_lifecycle(
         ValidatorCollectionMode::NoFees,
         lifecycle.to_account_cloner_permissions(),
         Pubkey::new_unique(),
+        1024,
     );
     let remote_account_cloner_client =
         RemoteAccountClonerClient::new(&remote_account_cloner_worker);
     let remote_account_cloner_worker_handle = {
         let cloner_cancellation_token = cancellation_token.clone();
-        tokio::spawn(async move {
+        tokio::spawn(
             remote_account_cloner_worker
-                .start_clone_request_processing(cloner_cancellation_token)
-                .await
-        })
+                .start_clone_request_processing(cloner_cancellation_token),
+        )
     };
 
     let external_account_manager = ExternalAccountsManager {

@@ -36,7 +36,7 @@ pub enum RemoteAccountUpdatesWorkerError {
 #[derive(Debug)]
 struct RemoteAccountUpdatesWorkerRunner {
     id: String,
-    monitoring_request_sender: Sender<Pubkey>,
+    monitoring_request_sender: Sender<(Pubkey, bool)>,
     cancellation_token: CancellationToken,
     join_handle: JoinHandle<()>,
 }
@@ -44,8 +44,8 @@ struct RemoteAccountUpdatesWorkerRunner {
 pub struct RemoteAccountUpdatesWorker {
     rpc_provider_configs: Vec<RpcProviderConfig>,
     refresh_interval: Duration,
-    monitoring_request_receiver: Receiver<Pubkey>,
-    monitoring_request_sender: Sender<Pubkey>,
+    monitoring_request_receiver: Receiver<(Pubkey, bool)>,
+    monitoring_request_sender: Sender<(Pubkey, bool)>,
     first_subscribed_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
     last_known_update_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
 }
@@ -67,7 +67,7 @@ impl RemoteAccountUpdatesWorker {
         }
     }
 
-    pub fn get_monitoring_request_sender(&self) -> Sender<Pubkey> {
+    pub fn get_monitoring_request_sender(&self) -> Sender<(Pubkey, bool)> {
         self.monitoring_request_sender.clone()
     }
 
@@ -111,13 +111,18 @@ impl RemoteAccountUpdatesWorker {
         loop {
             tokio::select! {
                 // When we receive a message to start monitoring an account, propagate request to all runners
-                Some(pubkey) = self.monitoring_request_receiver.recv() => {
-                    if monitored_accounts.contains(&pubkey) {
+                Some((pubkey, unsubscribe)) = self.monitoring_request_receiver.recv() => {
+                    if monitored_accounts.contains(&pubkey) && !unsubscribe {
                         continue;
                     }
-                    monitored_accounts.insert(pubkey);
+                    if !unsubscribe {
+                        monitored_accounts.insert(pubkey);
+                    } else {
+                        monitored_accounts.remove(&pubkey);
+                    }
+
                     for runner in runners.iter() {
-                        self.notify_runner_of_monitoring_request(runner, pubkey).await;
+                        self.notify_runner_of_monitoring_request(runner, pubkey, unsubscribe).await;
                     }
                 }
                 // Periodically we refresh runners to keep them fresh
@@ -186,7 +191,7 @@ impl RemoteAccountUpdatesWorker {
         };
         info!("Started new runner {}", runner.id);
         for pubkey in monitored_accounts.iter() {
-            self.notify_runner_of_monitoring_request(&runner, *pubkey)
+            self.notify_runner_of_monitoring_request(&runner, *pubkey, false)
                 .await;
         }
         runner
@@ -196,8 +201,12 @@ impl RemoteAccountUpdatesWorker {
         &self,
         runner: &RemoteAccountUpdatesWorkerRunner,
         pubkey: Pubkey,
+        unsubscribe: bool,
     ) {
-        if let Err(error) = runner.monitoring_request_sender.send(pubkey).await
+        if let Err(error) = runner
+            .monitoring_request_sender
+            .send((pubkey, unsubscribe))
+            .await
         {
             error!(
                 "Could not send request to runner: {}: {:?}",

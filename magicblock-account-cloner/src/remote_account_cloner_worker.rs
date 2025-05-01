@@ -1,4 +1,5 @@
 use std::{
+    cell::RefCell,
     collections::{hash_map::Entry, HashMap, HashSet},
     sync::{Arc, RwLock},
     time::Duration,
@@ -14,9 +15,10 @@ use futures_util::{
     stream::{self, StreamExt, TryStreamExt},
 };
 use log::*;
+use lru::LruCache;
 use magicblock_account_dumper::AccountDumper;
 use magicblock_account_fetcher::AccountFetcher;
-use magicblock_account_updates::AccountUpdates;
+use magicblock_account_updates::{AccountUpdates, AccountUpdatesResult};
 use magicblock_accounts_api::InternalAccountProvider;
 use magicblock_metrics::metrics;
 use magicblock_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
@@ -110,6 +112,22 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU> {
     clone_listeners: Arc<RwLock<HashMap<Pubkey, AccountClonerListeners>>>,
     last_clone_output: CloneOutputMap,
     validator_identity: Pubkey,
+    monitored_accounts: RefCell<LruCache<Pubkey, ()>>,
+}
+
+// SAFETY:
+// we never keep references to monitored_accounts around,
+// especially across await points, so this type is Send
+unsafe impl<IAP, AFE, AUP, ADU> Send
+    for RemoteAccountClonerWorker<IAP, AFE, AUP, ADU>
+{
+}
+// SAFETY:
+// we never produce references to RefCell in monitored_accounts
+// especially not across await points, so this type is Sync
+unsafe impl<IAP, AFE, AUP, ADU> Sync
+    for RemoteAccountClonerWorker<IAP, AFE, AUP, ADU>
+{
 }
 
 impl<IAP, AFE, AUP, ADU> RemoteAccountClonerWorker<IAP, AFE, AUP, ADU>
@@ -131,10 +149,14 @@ where
         validator_charges_fees: ValidatorCollectionMode,
         permissions: AccountClonerPermissions,
         validator_authority: Pubkey,
+        max_monitored_accounts: usize,
     ) -> Self {
         let (clone_request_sender, clone_request_receiver) =
             unbounded_channel();
         let fetch_retries = 50;
+        let max_monitored_accounts = max_monitored_accounts
+            .try_into()
+            .expect("max number of monitored accounts cannot be 0");
         Self {
             internal_account_provider,
             account_fetcher,
@@ -151,6 +173,7 @@ where
             clone_listeners: Default::default(),
             last_clone_output: Default::default(),
             validator_identity: validator_authority,
+            monitored_accounts: LruCache::new(max_monitored_accounts).into(),
         }
     }
 
@@ -169,16 +192,16 @@ where
     }
 
     pub async fn start_clone_request_processing(
-        &mut self,
+        mut self,
         cancellation_token: CancellationToken,
     ) {
+        let mut requests = vec![];
         loop {
-            let mut requests = vec![];
             tokio::select! {
                 _ = self.clone_request_receiver.recv_many(&mut requests, 100) => {
                     join_all(
                         requests
-                            .into_iter()
+                            .drain(..)
                             .map(|request| self.process_clone_request(request))
                     ).await;
                 }
@@ -323,6 +346,7 @@ where
             .account_updates
             .get_last_known_update_slot(pubkey)
             .unwrap_or(u64::MIN);
+        self.monitored_accounts.borrow_mut().promote(pubkey);
         // Check for the happy/fast path, we may already have cloned this account before
         match self.get_last_clone_output_from_pubkey(pubkey) {
             // If we already cloned this account, check what the output of the clone was
@@ -405,6 +429,31 @@ where
         Ok(updated_clone_output)
     }
 
+    /// Put the account's key into cache of monitored accounts, which has a limited capacity.
+    /// Once the cache capacity exceeds the preconfigured limit, it will trigger an eviction,
+    /// followed by account's removal from AccountsDB and termination of its ws subscription
+    async fn track_undelegated_account(
+        &self,
+        pubkey: Pubkey,
+    ) -> AccountUpdatesResult<()> {
+        let evicted = self
+            .monitored_accounts
+            .borrow_mut()
+            .push(pubkey, ())
+            .filter(|(pk, _)| *pk != pubkey);
+        if let Some((evicted, _)) = evicted {
+            self.internal_account_provider.remove_account(&evicted);
+            self.account_updates
+                .stop_account_monitoring(&evicted)
+                .await?;
+            metrics::inc_evicted_accounts_count();
+        }
+        metrics::adjust_monitored_accounts_count(
+            self.monitored_accounts.borrow().len(),
+        );
+        Ok(())
+    }
+
     async fn do_clone(
         &self,
         pubkey: &Pubkey,
@@ -428,8 +477,7 @@ where
             //  - we may not want to track lamport changes, especially for payers
             self.account_updates
                 .ensure_account_monitoring(pubkey)
-                .await
-                .map_err(AccountClonerError::AccountUpdatesError)?;
+                .await?;
 
             // Fetch the account, repeat and retry until we have a satisfactory response
             let mut fetch_count = 0;
@@ -491,6 +539,8 @@ where
                     });
                 }
 
+                // Fee payer accounts are undelegated ones, so we keep track of them as well
+                self.track_undelegated_account(*pubkey).await?;
                 match self.validator_charges_fees {
                     ValidatorCollectionMode::NoFees => self
                         .do_clone_feepayer_account_for_non_charging_validator(
@@ -602,6 +652,9 @@ where
                             at_slot: account_chain_snapshot.at_slot,
                         });
                     }
+                    // Keep track of undelegated accounts, removing any stale ones,
+                    // which were evicted from monitored accounts cache
+                    self.track_undelegated_account(*pubkey).await?;
                     self.do_clone_undelegated_account(pubkey, account)?
                 }
             }
@@ -612,6 +665,13 @@ where
                 delegation_record,
                 ..
             } => {
+                // Just in case if the account was promoted from undelegated to delegated state, we
+                // remove it from list of monitored accounts, to avoid removal on eviction
+                self.monitored_accounts.borrow_mut().pop(pubkey);
+                metrics::adjust_monitored_accounts_count(
+                    self.monitored_accounts.borrow().len(),
+                );
+
                 if !self.permissions.allow_cloning_delegated_accounts {
                     return Ok(AccountClonerOutput::Unclonable {
                         pubkey: *pubkey,
