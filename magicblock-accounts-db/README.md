@@ -25,7 +25,7 @@ while still being persisted to disk.
   consistency during critical operations like snapshotting. This prevents any
   writes to the database while it's being manipulated at the OS level. 
 - **Program Account Scanning**: Retrieve and filter accounts associated with a
-  specific program, the scanning happens without deserializing anything from
+  specific program, the scanning happens without deserializing anything from the
   database.
 
 ## Main API methods
