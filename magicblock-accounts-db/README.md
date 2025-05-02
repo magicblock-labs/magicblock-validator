@@ -11,7 +11,7 @@ while still being persisted to disk.
   both owned and borrowed account data. By default accounts are read directly
   from memory mapping without any deserialization and/or allocation, as
   consequence it allows for direct memory modification in situ in the database,
-  avoid read modify write overhead. But this imposes a strict requirement, that
+  avoiding read modify write overhead. But this imposes a strict requirement, that
   no two threads have access to the same account at the same time for
   modification, which is naturally achieved with account locking when executing
   transactions. But any other way to hold onto borrowed state of account is
