@@ -144,8 +144,8 @@ impl RemoteAccountUpdatesShard {
                         .await
                         .map_err(RemoteAccountUpdatesShardError::PubsubClientError)?;
                     account_streams.insert(pubkey, stream);
-                    metrics::set_subscriptions_count(account_streams.len(), &self.shard_id);
                     account_unsubscribes.insert(pubkey, unsubscribe);
+                    metrics::set_subscriptions_count(account_streams.len(), &self.shard_id);
                     self.try_to_override_first_subscribed_slot(pubkey, clock_slot);
                 }
                 // When we receive an update from any account subscriptions
