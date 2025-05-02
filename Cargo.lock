@@ -3555,6 +3555,7 @@ dependencies = [
  "conjunto-transwise",
  "futures-util",
  "log",
+ "magicblock-metrics",
  "solana-account-decoder",
  "solana-pubsub-client",
  "solana-rpc-client-api",

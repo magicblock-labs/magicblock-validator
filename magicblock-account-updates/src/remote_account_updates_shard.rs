@@ -9,6 +9,7 @@ use std::{
 use conjunto_transwise::RpcProviderConfig;
 use futures_util::StreamExt;
 use log::*;
+use magicblock_metrics::metrics;
 use solana_account_decoder::{UiAccountEncoding, UiDataSliceConfig};
 use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
 use solana_rpc_client_api::config::RpcAccountInfoConfig;
@@ -125,6 +126,7 @@ impl RemoteAccountUpdatesShard {
                             continue;
                         };
                         request().await;
+                        metrics::set_subscriptions_count(account_streams.len(), &self.shard_id);
                         continue;
                     }
                     if account_unsubscribes.contains_key(&pubkey) {
@@ -141,6 +143,7 @@ impl RemoteAccountUpdatesShard {
                         .await
                         .map_err(RemoteAccountUpdatesShardError::PubsubClientError)?;
                     account_streams.insert(pubkey, stream);
+                    metrics::set_subscriptions_count(account_streams.len(), &self.shard_id);
                     account_unsubscribes.insert(pubkey, unsubscribe);
                     self.try_to_override_first_subscribed_slot(pubkey, clock_slot);
                 }
