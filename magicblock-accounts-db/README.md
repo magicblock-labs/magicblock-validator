@@ -15,7 +15,7 @@ while still being persisted to disk.
   no two threads have access to the same account at the same time for
   modification, which is naturally achieved with account locking when executing
   transactions. But any other way to hold onto borrowed state of account is
-  prohibitted, as it will invetably cause an undefined behavior.
+  prohibited, as it will inevitably cause an undefined behavior.
 - **Index Management**: Fast index-based lookups for account data.
   LMDB is used for the purposes of indexing, where several different mappings
   are maintained to support database integrity.
