@@ -35,7 +35,7 @@ while still being persisted to disk.
 - **Account Operations**: Use `get_account`, `insert_account`,
   `contains_account` to read, write, or check the existence of accounts.
 - **Snapshot Operations**: Schedule and manage snapshots with `set_slot`, which
-  might trigger snapshot operation, which in turn involves locking everyting
+  might trigger snapshot operation, which in turn involves locking everything
   down, thus snapshot frequency should be set to sane value. And retrieve
   snapshot slots using `get_latest_snapshot_slot` and
   `get_oldest_snapshot_slot`.
