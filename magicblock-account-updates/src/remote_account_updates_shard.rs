@@ -125,8 +125,9 @@ impl RemoteAccountUpdatesShard {
                         let Some(request) = account_unsubscribes.remove(&pubkey) else {
                             continue;
                         };
-                        request().await;
+                        account_streams.remove(&pubkey);
                         metrics::set_subscriptions_count(account_streams.len(), &self.shard_id);
+                        request().await;
                         continue;
                     }
                     if account_unsubscribes.contains_key(&pubkey) {
