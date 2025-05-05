@@ -86,6 +86,26 @@ pub fn start_test_validator_with_config(
             "7JrkjmZPprHwtuvtuGTXp9hwfGYFAQLnLeFM52kqAgXg",
             "protocol-fees-vault.json",
         ),
+        (
+            "9yXjZTevvMp1XgZSZEaziPRgFiXtAQChpnP2oX9eCpvt",
+            "account1.json",
+        ),
+        (
+            "BHBuATGifAD4JbRpM5nVdyhKzPgv3p2CxLEHAqwBzAj5",
+            "account2.json",
+        ),
+        (
+            "2o48ieM95rmHqMWC5B3tTX4DL7cLm4m1Kuwjay3keQSv",
+            "account3.json",
+        ),
+        (
+            "2EmfL3MqL3YHABudGNmajjCpR13NNEn9Y4LWxbDm6SwR",
+            "account4.json",
+        ),
+        (
+            "9FZfdr9bFTgPSV6AcvUipi7PeDHgLeSY3cc4S8aaVKfG",
+            "devnet-payer.json",
+        ),
     ];
 
     let account_args = accounts

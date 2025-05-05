@@ -432,7 +432,7 @@ where
     /// Put the account's key into cache of monitored accounts, which has a limited capacity.
     /// Once the cache capacity exceeds the preconfigured limit, it will trigger an eviction,
     /// followed by account's removal from AccountsDB and termination of its ws subscription
-    async fn track_undelegated_account(
+    async fn track_not_delegated_account(
         &self,
         pubkey: Pubkey,
     ) -> AccountUpdatesResult<()> {
@@ -442,7 +442,15 @@ where
             .push(pubkey, ())
             .filter(|(pk, _)| *pk != pubkey);
         if let Some((evicted, _)) = evicted {
+            self.last_clone_output
+                .write()
+                .expect("last accounts clone output map is poisoned")
+                .remove(&evicted);
             self.internal_account_provider.remove_account(&evicted);
+            self.clone_listeners
+                .write()
+                .expect("clone listeners map is poisoned")
+                .remove(&evicted);
             self.account_updates
                 .stop_account_monitoring(&evicted)
                 .await?;
@@ -539,8 +547,8 @@ where
                     });
                 }
 
-                // Fee payer accounts are undelegated ones, so we keep track of them as well
-                self.track_undelegated_account(*pubkey).await?;
+                // Fee payer accounts are non-delegated ones, so we keep track of them as well
+                self.track_not_delegated_account(*pubkey).await?;
                 match self.validator_charges_fees {
                     ValidatorCollectionMode::NoFees => self
                         .do_clone_feepayer_account_for_non_charging_validator(
@@ -652,9 +660,9 @@ where
                             at_slot: account_chain_snapshot.at_slot,
                         });
                     }
-                    // Keep track of undelegated accounts, removing any stale ones,
+                    // Keep track of non-delegated accounts, removing any stale ones,
                     // which were evicted from monitored accounts cache
-                    self.track_undelegated_account(*pubkey).await?;
+                    self.track_not_delegated_account(*pubkey).await?;
                     self.do_clone_undelegated_account(pubkey, account)?
                 }
             }
@@ -665,7 +673,7 @@ where
                 delegation_record,
                 ..
             } => {
-                // Just in case if the account was promoted from undelegated to delegated state, we
+                // Just in case if the account was promoted from not delegated to delegated state, we
                 // remove it from list of monitored accounts, to avoid removal on eviction
                 self.monitored_accounts.borrow_mut().pop(pubkey);
                 metrics::adjust_monitored_accounts_count(

@@ -204,7 +204,7 @@ fn run_cloning_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
     eprintln!("======== RUNNING CLONING TESTS ========");
     let mut devnet_validator = match start_validator(
         "cloning-conf.devnet.toml",
-        ValidatorCluster::Chain(Some(ProgramLoader::BpfProgram)),
+        ValidatorCluster::Chain(Some(ProgramLoader::UpgradeableProgram)),
     ) {
         Some(validator) => validator,
         None => {
