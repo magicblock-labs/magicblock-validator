@@ -1,3 +1,4 @@
+use async_trait::async_trait;
 use conjunto_transwise::AccountChainSnapshot;
 use log::*;
 use magicblock_bank::bank::Bank;
@@ -22,32 +23,20 @@ use magicblock_program::{
     TransactionScheduler,
 };
 
-use crate::{errors::AccountsResult, AccountCommittee};
+use crate::{
+    errors::AccountsResult, AccountCommittee, ScheduledCommitsProcessor,
+};
 
-struct RemoteScheduledCommitsProcessor {
+pub struct RemoteScheduledCommitsProcessor {
     committor_service: Arc<CommittorService>,
     transaction_scheduler: TransactionScheduler,
     cloned_accounts: CloneOutputMap,
     bank: Arc<Bank>,
-    transaction_status_sender: Arc<TransactionStatusSender>,
+    transaction_status_sender: Option<TransactionStatusSender>,
 }
 
-impl RemoteScheduledCommitsProcessor {
-    pub fn new(
-        committer_service: Arc<CommittorService>,
-        bank: Arc<Bank>,
-        cloned_accounts: CloneOutputMap,
-        transaction_status_sender: Arc<TransactionStatusSender>,
-    ) -> Self {
-        Self {
-            committor_service: committer_service,
-            bank,
-            transaction_status_sender,
-            cloned_accounts,
-            transaction_scheduler: TransactionScheduler::default(),
-        }
-    }
-
+#[async_trait]
+impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
     async fn process<IAP>(&self, account_provider: &IAP) -> AccountsResult<()>
     where
         IAP: InternalAccountProvider,
@@ -171,6 +160,30 @@ impl RemoteScheduledCommitsProcessor {
         Ok(())
     }
 
+    fn scheduled_commits_len(&self) -> usize {
+        self.transaction_scheduler.scheduled_commits_len()
+    }
+
+    fn clear_scheduled_commits(&self) {
+        self.transaction_scheduler.clear_scheduled_commits();
+    }
+}
+
+impl RemoteScheduledCommitsProcessor {
+    pub fn new(
+        committer_service: Arc<CommittorService>,
+        bank: Arc<Bank>,
+        cloned_accounts: CloneOutputMap,
+        transaction_status_sender: Option<TransactionStatusSender>,
+    ) -> Self {
+        Self {
+            committor_service: committer_service,
+            bank,
+            transaction_status_sender,
+            cloned_accounts,
+            transaction_scheduler: TransactionScheduler::default(),
+        }
+    }
     fn fetch_cloned_account(
         pubkey: &Pubkey,
         cloned_accounts: &CloneOutputMap,
@@ -228,7 +241,7 @@ impl RemoteScheduledCommitsProcessor {
                             match execute_legacy_transaction(
                                 commit_sent_transaction,
                                 &bank,
-                                Some(&transaction_status_sender)
+                                transaction_status_sender.as_ref()
                             ) {
                             Ok(signature) => debug!(
                                 "Signaled sent commit with internal signature: {:?}",

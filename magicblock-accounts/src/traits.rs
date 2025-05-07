@@ -1,4 +1,4 @@
-use std::{collections::HashSet, sync::Arc};
+use std::collections::HashSet;
 
 use async_trait::async_trait;
 use magicblock_accounts_api::InternalAccountProvider;
@@ -14,9 +14,8 @@ use crate::errors::AccountsResult;
 #[async_trait]
 pub trait ScheduledCommitsProcessor {
     /// Processes all commits that were scheduled and accepted
-    async fn process<AC: AccountCommitter, IAP: InternalAccountProvider>(
+    async fn process<IAP: InternalAccountProvider>(
         &self,
-        committer: &Arc<AC>,
         account_provider: &IAP,
     ) -> AccountsResult<()>;
 

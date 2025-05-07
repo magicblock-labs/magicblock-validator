@@ -26,6 +26,11 @@ pub enum ApiError {
     #[error("Ledger error: {0}")]
     LedgerError(#[from] magicblock_ledger::errors::LedgerError),
 
+    #[error("CommittorSerivceError")]
+    CommittorSerivceError(
+        #[from] magicblock_committor_service::error::CommittorServiceError,
+    ),
+
     #[error("Failed to load programs into bank: {0}")]
     FailedToLoadProgramsIntoBank(String),
 

@@ -37,6 +37,7 @@ use magicblock_bank::{
     program_loader::load_programs_into_bank,
     transaction_logs::TransactionLogCollectorFilter,
 };
+use magicblock_committor_service::{config::ChainConfig, CommittorService};
 use magicblock_config::{EphemeralConfig, LifecycleMode, ProgramConfig};
 use magicblock_geyser_plugin::rpc::GeyserRpcService;
 use magicblock_ledger::{
@@ -316,7 +317,19 @@ impl MagicValidator {
             identity_keypair.pubkey(),
         );
 
+        let committor_service = Arc::new(CommittorService::try_start(
+            identity_keypair.insecure_clone(),
+            // TODO: @@@ config or inside ledger dir
+            "/tmp/committor_service.sqlite",
+            &ChainConfig {
+                rpc_uri: remote_rpc_config.url().to_string(),
+                commitment: remote_rpc_config
+                    .commitment()
+                    .unwrap_or(CommitmentLevel::Confirmed),
+            },
+        )?);
         let accounts_manager = Self::init_accounts_manager(
+            committor_service,
             &bank,
             &remote_account_cloner_worker.get_last_clone_output(),
             RemoteAccountClonerClient::new(&remote_account_cloner_worker),
@@ -406,6 +419,7 @@ impl MagicValidator {
     }
 
     fn init_accounts_manager(
+        committer_service: Arc<CommittorService>,
         bank: &Arc<Bank>,
         cloned_accounts: &CloneOutputMap,
         remote_account_cloner_client: RemoteAccountClonerClient,
@@ -418,6 +432,7 @@ impl MagicValidator {
             "Failed to derive accounts config from provided magicblock config",
         );
         let accounts_manager = AccountsManager::try_new(
+            committer_service,
             bank,
             cloned_accounts,
             remote_account_cloner_client,

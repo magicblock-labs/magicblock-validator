@@ -7,14 +7,15 @@ use conjunto_transwise::{
 use magicblock_account_cloner::{CloneOutputMap, RemoteAccountClonerClient};
 use magicblock_accounts_api::BankAccountProvider;
 use magicblock_bank::bank::Bank;
+use magicblock_committor_service::CommittorService;
 use magicblock_transaction_status::TransactionStatusSender;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{commitment_config::CommitmentConfig, signature::Keypair};
 
 use crate::{
     config::AccountsConfig, errors::AccountsResult,
-    old_remote_scheduled_commits_processor::OldRemoteScheduledCommitsProcessor,
     remote_account_committer::RemoteAccountCommitter,
+    remote_scheduled_commits_processor::RemoteScheduledCommitsProcessor,
     utils::try_rpc_cluster_from_cluster, ExternalAccountsManager,
 };
 
@@ -24,11 +25,12 @@ pub type AccountsManager = ExternalAccountsManager<
     RemoteAccountCommitter,
     TransactionAccountsExtractorImpl,
     TransactionAccountsValidatorImpl,
-    OldRemoteScheduledCommitsProcessor,
+    RemoteScheduledCommitsProcessor,
 >;
 
 impl AccountsManager {
     pub fn try_new(
+        committer_service: Arc<CommittorService>,
         bank: &Arc<Bank>,
         cloned_accounts: &CloneOutputMap,
         remote_account_cloner_client: RemoteAccountClonerClient,
@@ -49,13 +51,12 @@ impl AccountsManager {
             config.commit_compute_unit_price,
         );
 
-        let scheduled_commits_processor =
-            OldRemoteScheduledCommitsProcessor::new(
-                remote_cluster,
-                bank.clone(),
-                cloned_accounts.clone(),
-                transaction_status_sender.clone(),
-            );
+        let scheduled_commits_processor = RemoteScheduledCommitsProcessor::new(
+            committer_service,
+            bank.clone(),
+            cloned_accounts.clone(),
+            transaction_status_sender.clone(),
+        );
 
         Ok(Self {
             internal_account_provider,

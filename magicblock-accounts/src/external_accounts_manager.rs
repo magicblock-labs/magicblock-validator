@@ -404,7 +404,7 @@ where
 
     pub async fn process_scheduled_commits(&self) -> AccountsResult<()> {
         self.scheduled_commits_processor
-            .process(&self.account_committer, &self.internal_account_provider)
+            .process(&self.internal_account_provider)
             .await
     }
 

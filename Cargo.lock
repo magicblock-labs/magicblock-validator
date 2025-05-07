@@ -3665,6 +3665,7 @@ dependencies = [
  "magicblock-accounts-api",
  "magicblock-accounts-db",
  "magicblock-bank",
+ "magicblock-committor-service",
  "magicblock-config",
  "magicblock-core",
  "magicblock-geyser-plugin",
