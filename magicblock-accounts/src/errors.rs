@@ -3,6 +3,7 @@ use std::collections::HashSet;
 use magicblock_account_cloner::{
     AccountClonerError, AccountClonerUnclonableReason,
 };
+use magicblock_committor_service::ChangesetMeta;
 use solana_sdk::pubkey::Pubkey;
 use thiserror::Error;
 
@@ -18,6 +19,14 @@ pub enum AccountsError {
 
     #[error("TransactionError")]
     TransactionError(#[from] Box<solana_sdk::transaction::TransactionError>),
+
+    #[error("CommittorSerivceError")]
+    CommittorSerivceError(
+        #[from] Box<magicblock_committor_service::error::CommittorServiceError>,
+    ),
+
+    #[error("TokioOneshotRecvError")]
+    TokioOneshotRecvError(#[from] Box<tokio::sync::oneshot::error::RecvError>),
 
     #[error("AccountClonerError")]
     AccountClonerError(#[from] AccountClonerError),
@@ -48,4 +57,7 @@ pub enum AccountsError {
 
     #[error("Too many committees: {0}")]
     TooManyCommittees(usize),
+
+    #[error("FailedToObtainReqidForCommittedChangeset {0:?}'")]
+    FailedToObtainReqidForCommittedChangeset(Box<ChangesetMeta>),
 }
