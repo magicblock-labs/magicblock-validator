@@ -13,8 +13,8 @@ use solana_sdk::{commitment_config::CommitmentConfig, signature::Keypair};
 
 use crate::{
     config::AccountsConfig, errors::AccountsResult,
+    old_remote_scheduled_commits_processor::OldRemoteScheduledCommitsProcessor,
     remote_account_committer::RemoteAccountCommitter,
-    remote_scheduled_commits_processor::RemoteScheduledCommitsProcessor,
     utils::try_rpc_cluster_from_cluster, ExternalAccountsManager,
 };
 
@@ -24,7 +24,7 @@ pub type AccountsManager = ExternalAccountsManager<
     RemoteAccountCommitter,
     TransactionAccountsExtractorImpl,
     TransactionAccountsValidatorImpl,
-    RemoteScheduledCommitsProcessor,
+    OldRemoteScheduledCommitsProcessor,
 >;
 
 impl AccountsManager {
@@ -49,12 +49,13 @@ impl AccountsManager {
             config.commit_compute_unit_price,
         );
 
-        let scheduled_commits_processor = RemoteScheduledCommitsProcessor::new(
-            remote_cluster,
-            bank.clone(),
-            cloned_accounts.clone(),
-            transaction_status_sender.clone(),
-        );
+        let scheduled_commits_processor =
+            OldRemoteScheduledCommitsProcessor::new(
+                remote_cluster,
+                bank.clone(),
+                cloned_accounts.clone(),
+                transaction_status_sender.clone(),
+            );
 
         Ok(Self {
             internal_account_provider,
