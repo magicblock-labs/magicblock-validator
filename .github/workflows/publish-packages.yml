@@ -162,7 +162,7 @@ jobs:
 
   publish-wrapper-npm-package:
     name: Publish wrapper NPM packages
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     needs: publish-binaries
     steps:
       - name: Checkout
