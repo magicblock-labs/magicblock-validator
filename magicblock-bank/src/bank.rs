@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     mem,
     num::Saturating,
     ops::Add,
@@ -69,6 +69,7 @@ use solana_sdk::{
     signature::Signature,
     slot_hashes::SlotHashes,
     slot_history::{Check, SlotHistory},
+    system_program,
     sysvar::{self, last_restart_slot::LastRestartSlot},
     transaction::{
         Result, SanitizedTransaction, TransactionError,
@@ -1508,6 +1509,7 @@ impl Bank {
             batch.lock_results(),
             error_counters,
         ));
+        // TODO(GabrielePicco): check why fees lamports per signature is 5000 sometimes
         timings.saturating_add_in_place(ExecuteTimingType::CheckUs, check_us);
 
         let (blockhash, fee_lamports_per_signature) =
@@ -1524,8 +1526,24 @@ impl Bank {
             // change transaction fees...
             //
             // So we just set it to non-zero value
+            // TODO(GabrielePicco): try setting it to zero
             blockhash_lamports_per_signature: fee_lamports_per_signature,
             rent_collector: None,
+        };
+
+        let mut accounts = HashMap::new();
+
+        for tx in sanitized_txs {
+            let fee_payer = tx.message().fee_payer().clone();
+            accounts.insert(
+                fee_payer,
+                AccountSharedData::new(100, 0, &system_program::id()),
+            );
+        }
+        let overrides = unsafe_create_account_overrides(accounts);
+        let processing_config = TransactionProcessingConfig {
+            account_overrides: Some(&overrides),
+            ..processing_config
         };
 
         let sanitized_output = self
@@ -2477,6 +2495,23 @@ impl Bank {
 
     pub fn flush(&self) {
         self.accounts_db.flush(true);
+    }
+}
+
+fn unsafe_create_account_overrides(
+    accounts: HashMap<Pubkey, AccountSharedData>,
+) -> AccountOverrides {
+    unsafe {
+        let mut overrides = AccountOverrides::default();
+
+        // Get mutable pointer to the private field
+        let overrides_ptr = &mut overrides as *mut AccountOverrides
+            as *mut HashMap<Pubkey, AccountSharedData>;
+
+        // Overwrite the private field
+        std::ptr::write(overrides_ptr, accounts);
+
+        overrides
     }
 }
 

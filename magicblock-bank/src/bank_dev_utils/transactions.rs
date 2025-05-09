@@ -181,7 +181,7 @@ pub fn create_noop_transaction(
     .unwrap()
 }
 
-fn create_noop_instruction(
+pub fn create_noop_instruction(
     program_id: &Pubkey,
     funded_accounts: &[Keypair],
 ) -> Instruction {

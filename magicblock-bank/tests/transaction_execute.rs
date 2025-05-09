@@ -6,7 +6,8 @@ use magicblock_bank::{
     bank_dev_utils::{
         elfs::{self, add_elf_program},
         transactions::{
-            create_noop_transaction, create_solx_send_post_transaction,
+            create_noop_instruction, create_noop_transaction,
+            create_solx_send_post_transaction,
             create_system_allocate_transaction,
             create_system_transfer_transaction,
             create_sysvars_from_account_transaction,
@@ -19,9 +20,14 @@ use magicblock_bank::{
     LAMPORTS_PER_SIGNATURE,
 };
 use solana_sdk::{
-    account::ReadableAccount, genesis_config::create_genesis_config,
-    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, rent::Rent,
-    transaction::SanitizedTransaction,
+    account::ReadableAccount,
+    genesis_config::create_genesis_config,
+    message::Message,
+    native_token::LAMPORTS_PER_SOL,
+    pubkey::Pubkey,
+    rent::Rent,
+    signature::Keypair,
+    transaction::{SanitizedTransaction, Transaction},
 };
 use test_tools_core::init_logger;
 
@@ -139,6 +145,31 @@ fn test_bank_one_noop_instruction() {
     bank.advance_slot();
     let hash = bank.last_blockhash();
     let tx = create_noop_transaction(&bank, hash);
+    execute_and_check_results(&bank, tx);
+}
+
+#[test]
+fn test_bank_one_noop_instruction_0_fees_not_existing_feepayer() {
+    init_logger!();
+
+    let (genesis_config, _) = create_genesis_config(u64::MAX);
+    let bank = Bank::new_for_tests(&genesis_config, None, None).unwrap();
+    add_elf_program(&bank, &elfs::noop::ID);
+
+    bank.advance_slot();
+    let hash = bank.last_blockhash();
+    let fee_payer = Keypair::new();
+    let instruction = create_noop_instruction(
+        &elfs::noop::id(),
+        &[fee_payer.insecure_clone()],
+    );
+    let message = Message::new(&[instruction], None);
+    let transaction = Transaction::new(&[fee_payer], message, hash);
+    let tx = SanitizedTransaction::try_from_legacy_transaction(
+        transaction,
+        &Default::default(),
+    )
+    .unwrap();
     execute_and_check_results(&bank, tx);
 }
 
