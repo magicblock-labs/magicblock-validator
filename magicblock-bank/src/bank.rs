@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    collections::{HashSet},
+    collections::HashSet,
     mem,
     num::Saturating,
     ops::Add,
@@ -69,7 +69,6 @@ use solana_sdk::{
     signature::Signature,
     slot_hashes::SlotHashes,
     slot_history::{Check, SlotHistory},
-    system_program,
     sysvar::{self, last_restart_slot::LastRestartSlot},
     transaction::{
         Result, SanitizedTransaction, TransactionError,
