@@ -1,3 +1,4 @@
+use clap::Parser;
 use log::*;
 use magicblock_api::{
     ledger,
@@ -7,6 +8,9 @@ use magicblock_api::{
 use magicblock_config::{EphemeralConfig, GeyserGrpcConfig};
 use solana_sdk::signature::{Keypair, Signer};
 use test_tools::init_logger;
+
+mod cli;
+use cli::*;
 
 // mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev
 const TEST_KEYPAIR_BYTES: [u8; 64] = [
@@ -60,12 +64,25 @@ async fn main() {
     #[cfg(feature = "tokio-console")]
     console_subscriber::init();
 
-    let (file, config) = load_config_from_arg();
-    let config = config.override_from_envs();
+    let cli = Cli::parse();
+
+    // Load config from file
+    let (file, config) = load_config(cli.config_path);
+
     match file {
         Some(file) => info!("Loading config from '{}'.", file),
         None => info!("Using default config. Override it by passing the path to a config file."),
     };
+
+    // Override config with args and env vars
+    let config = match cli.config.override_config(config) {
+        Ok(config) => config,
+        Err(e) => {
+            error!("Failed to override config: {}", e);
+            return;
+        }
+    };
+
     info!("Starting validator with config:\n{}", config);
     // Add a more developer-friendly startup message
     const WS_PORT_OFFSET: u16 = 1;
@@ -127,15 +144,16 @@ fn validator_keypair() -> Keypair {
     if let Ok(keypair) = std::env::var("VALIDATOR_KEYPAIR") {
         Keypair::from_base58_string(&keypair)
     } else {
-        warn!("Using default test keypair, provide one by setting 'VALIDATOR_KEYPAIR' env var to a base58 encoded private key");
+        warn!("Using default test keypair, provide one by setting the --keypair argument or the 'VALIDATOR_KEYPAIR' env var to a base58 encoded private key");
         Keypair::from_bytes(&TEST_KEYPAIR_BYTES)
             // SAFETY: these bytes are compiled into the code, thus we know it is valid
             .unwrap()
     }
 }
 
-fn load_config_from_arg() -> (Option<String>, EphemeralConfig) {
-    let config_file = std::env::args().nth(1);
+fn load_config(
+    config_file: Option<String>,
+) -> (Option<String>, EphemeralConfig) {
     match config_file {
         Some(config_file) => {
             let config = EphemeralConfig::try_load_from_file(&config_file)
