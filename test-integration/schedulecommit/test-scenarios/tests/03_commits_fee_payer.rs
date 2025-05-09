@@ -121,7 +121,7 @@ fn test_committing_fee_payer_escrowing_lamports() {
         assert!(res.is_ok());
 
         let res = verify::fetch_and_verify_commit_result_from_logs(&ctx, *sig);
-        assert_two_committees_were_committed(&ctx, &res);
+        assert_two_committees_were_committed(&ctx, &res, true);
         assert_two_committees_synchronized_count(&ctx, &res, 1);
 
         // The fee payer should have been committed

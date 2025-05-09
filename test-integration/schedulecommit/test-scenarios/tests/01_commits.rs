@@ -61,7 +61,7 @@ fn test_committing_two_accounts() {
         info!("{} '{:?}'", sig, res);
 
         let res = verify::fetch_and_verify_commit_result_from_logs(&ctx, *sig);
-        assert_two_committees_were_committed(&ctx, &res);
+        assert_two_committees_were_committed(&ctx, &res, true);
         assert_two_committees_synchronized_count(&ctx, &res, 1);
     });
 }
