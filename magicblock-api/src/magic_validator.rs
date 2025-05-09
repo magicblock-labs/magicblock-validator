@@ -13,8 +13,9 @@ use std::{
 use conjunto_transwise::RpcProviderConfig;
 use log::*;
 use magicblock_account_cloner::{
-    standard_blacklisted_accounts, CloneOutputMap, RemoteAccountClonerClient,
-    RemoteAccountClonerWorker, ValidatorCollectionMode,
+    map_committor_request_result, standard_blacklisted_accounts,
+    CloneOutputMap, RemoteAccountClonerClient, RemoteAccountClonerWorker,
+    ValidatorCollectionMode,
 };
 use magicblock_account_dumper::AccountDumperBank;
 use magicblock_account_fetcher::{
@@ -70,9 +71,14 @@ use solana_geyser_plugin_manager::{
     geyser_plugin_manager::GeyserPluginManager,
     slot_status_notifier::SlotStatusNotifierImpl,
 };
+use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
-    clock::Slot, commitment_config::CommitmentLevel,
-    genesis_config::GenesisConfig, pubkey::Pubkey, signature::Keypair,
+    clock::Slot,
+    commitment_config::{CommitmentConfig, CommitmentLevel},
+    genesis_config::GenesisConfig,
+    native_token::LAMPORTS_PER_SOL,
+    pubkey::Pubkey,
+    signature::Keypair,
     signer::Signer,
 };
 use tempfile::TempDir;
@@ -148,6 +154,7 @@ pub struct MagicValidator {
     >,
     remote_account_cloner_handle: Option<thread::JoinHandle<()>>,
     accounts_manager: Arc<AccountsManager>,
+    committor_service: Arc<CommittorService>,
     transaction_listener: GeyserTransactionNotifyListener,
     rpc_service: JsonRpcService,
     _metrics: Option<(MetricsService, tokio::task::JoinHandle<()>)>,
@@ -300,11 +307,24 @@ impl MagicValidator {
             &faucet_keypair.pubkey(),
         );
 
+        let committor_service = Arc::new(CommittorService::try_start(
+            identity_keypair.insecure_clone(),
+            // TODO: @@@ config or inside ledger dir
+            "/tmp/committor_service.sqlite",
+            &ChainConfig {
+                rpc_uri: remote_rpc_config.url().to_string(),
+                commitment: remote_rpc_config
+                    .commitment()
+                    .unwrap_or(CommitmentLevel::Confirmed),
+            },
+        )?);
+
         let remote_account_cloner_worker = RemoteAccountClonerWorker::new(
             bank_account_provider,
             remote_account_fetcher_client,
             remote_account_updates_client,
             account_dumper_bank,
+            committor_service.clone(),
             accounts_config.allowed_program_ids,
             blacklisted_accounts,
             accounts_config.payer_init_lamports,
@@ -317,19 +337,8 @@ impl MagicValidator {
             identity_keypair.pubkey(),
         );
 
-        let committor_service = Arc::new(CommittorService::try_start(
-            identity_keypair.insecure_clone(),
-            // TODO: @@@ config or inside ledger dir
-            "/tmp/committor_service.sqlite",
-            &ChainConfig {
-                rpc_uri: remote_rpc_config.url().to_string(),
-                commitment: remote_rpc_config
-                    .commitment()
-                    .unwrap_or(CommitmentLevel::Confirmed),
-            },
-        )?);
         let accounts_manager = Self::init_accounts_manager(
-            committor_service,
+            committor_service.clone(),
             &bank,
             &remote_account_cloner_worker.get_last_clone_output(),
             RemoteAccountClonerClient::new(&remote_account_cloner_worker),
@@ -373,6 +382,7 @@ impl MagicValidator {
             remote_account_cloner_handle: None,
             pubsub_handle: Default::default(),
             pubsub_close_handle: Default::default(),
+            committor_service,
             sample_performance_service: None,
             pubsub_config,
             token,
@@ -635,12 +645,53 @@ impl MagicValidator {
         })
     }
 
+    async fn ensure_validator_funded_on_chain(&self) -> ApiResult<()> {
+        // TODO: @@@ configurable?
+        const MIN_BALANCE_SOL: u64 = 5;
+        // TODO: @@ duplicate code getting remote_rpc_config
+        let accounts_config = try_convert_accounts_config(
+            &self.config.accounts,
+        )
+        .expect(
+            "Failed to derive accounts config from provided magicblock config",
+        );
+        let remote_rpc_config = RpcProviderConfig::new(
+            try_rpc_cluster_from_cluster(&accounts_config.remote_cluster)?,
+            Some(CommitmentLevel::Confirmed),
+        );
+
+        let validator_pubkey = self.bank().get_identity();
+
+        let lamports = RpcClient::new_with_commitment(
+            remote_rpc_config.url().to_string(),
+            CommitmentConfig {
+                commitment: remote_rpc_config
+                    .commitment()
+                    .unwrap_or(CommitmentLevel::Confirmed),
+            },
+        )
+        .get_balance(&validator_pubkey)
+        .await
+        .map_err(|err| {
+            ApiError::FailedToObtainValidatorOnChainBalance(
+                validator_pubkey,
+                err.to_string(),
+            )
+        })?;
+        if lamports < MIN_BALANCE_SOL * LAMPORTS_PER_SOL {
+            Err(ApiError::ValidatorInsufficientlyFunded(
+                validator_pubkey,
+                MIN_BALANCE_SOL,
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
     pub async fn start(&mut self) -> ApiResult<()> {
-        if let Some(ref fdqn) = self.config.validator.fdqn {
-            if matches!(
-                self.config.accounts.lifecycle,
-                LifecycleMode::Ephemeral
-            ) {
+        if matches!(self.config.accounts.lifecycle, LifecycleMode::Ephemeral) {
+            self.ensure_validator_funded_on_chain().await?;
+            if let Some(ref fdqn) = self.config.validator.fdqn {
                 self.register_validator_on_chain(fdqn).await?;
             }
         }
@@ -664,9 +715,9 @@ impl MagicValidator {
             self.token.clone(),
         ));
 
+        self.start_remote_account_cloner_worker().await?;
         self.start_remote_account_fetcher_worker();
         self.start_remote_account_updates_worker();
-        self.start_remote_account_cloner_worker().await?;
 
         self.ledger_truncator.start();
 
@@ -746,6 +797,13 @@ impl MagicValidator {
         if let Some(mut remote_account_cloner_worker) =
             self.remote_account_cloner_worker.take()
         {
+            debug!("Reserving common pubkeys for committor service");
+            map_committor_request_result(
+                self.committor_service.reserve_common_pubkeys(),
+            )
+            .await?;
+            info!("RESERVED");
+
             if !self.config.ledger.reset {
                 remote_account_cloner_worker.hydrate().await?;
                 info!("Validator hydration complete (bank hydrate, replay, account clone)");
