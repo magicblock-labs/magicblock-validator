@@ -1,6 +1,6 @@
 use std::{
     borrow::Cow,
-    collections::{HashMap, HashSet},
+    collections::{HashSet},
     mem,
     num::Saturating,
     ops::Add,
@@ -1531,21 +1531,6 @@ impl Bank {
             rent_collector: None,
         };
 
-        let mut accounts = HashMap::new();
-
-        for tx in sanitized_txs {
-            let fee_payer = tx.message().fee_payer().clone();
-            accounts.insert(
-                fee_payer,
-                AccountSharedData::new(100, 0, &system_program::id()),
-            );
-        }
-        let overrides = unsafe_create_account_overrides(accounts);
-        let processing_config = TransactionProcessingConfig {
-            account_overrides: Some(&overrides),
-            ..processing_config
-        };
-
         let sanitized_output = self
             .transaction_processor
             .read()
@@ -2495,23 +2480,6 @@ impl Bank {
 
     pub fn flush(&self) {
         self.accounts_db.flush(true);
-    }
-}
-
-fn unsafe_create_account_overrides(
-    accounts: HashMap<Pubkey, AccountSharedData>,
-) -> AccountOverrides {
-    unsafe {
-        let mut overrides = AccountOverrides::default();
-
-        // Get mutable pointer to the private field
-        let overrides_ptr = &mut overrides as *mut AccountOverrides
-            as *mut HashMap<Pubkey, AccountSharedData>;
-
-        // Overwrite the private field
-        std::ptr::write(overrides_ptr, accounts);
-
-        overrides
     }
 }
 
