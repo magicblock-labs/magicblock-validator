@@ -1,3 +1,4 @@
+use log::*;
 use std::{str::FromStr, thread::sleep, time::Duration};
 
 use anyhow::{Context, Result};
@@ -115,17 +116,18 @@ impl IntegrationTestContext {
     // Fetch Logs
     // -----------------
     pub fn fetch_ephemeral_logs(&self, sig: Signature) -> Option<Vec<String>> {
-        self.fetch_logs(sig, self.ephem_client.as_ref())
+        self.fetch_logs(sig, self.ephem_client.as_ref(), "ephemeral")
     }
 
     pub fn fetch_chain_logs(&self, sig: Signature) -> Option<Vec<String>> {
-        self.fetch_logs(sig, self.chain_client.as_ref())
+        self.fetch_logs(sig, self.chain_client.as_ref(), "chain")
     }
 
     fn fetch_logs(
         &self,
         sig: Signature,
         rpc_client: Option<&RpcClient>,
+        label: &str,
     ) -> Option<Vec<String>> {
         let rpc_client = rpc_client.or(self.chain_client.as_ref())?;
 
@@ -140,7 +142,11 @@ impl IntegrationTestContext {
                 },
             ) {
                 Ok(status) => status,
-                Err(_) => {
+                Err(err) => {
+                    warn!(
+                        "Failed to fetch transaction from {}: {:?}",
+                        label, err
+                    );
                     sleep(Duration::from_millis(400));
                     continue;
                 }
