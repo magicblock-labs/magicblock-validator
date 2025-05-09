@@ -8,10 +8,11 @@ use futures_util::future::BoxFuture;
 use magicblock_account_dumper::AccountDumperError;
 use magicblock_account_fetcher::AccountFetcherError;
 use magicblock_account_updates::AccountUpdatesError;
+use magicblock_committor_service::error::CommittorServiceResult;
 use magicblock_core::magic_program;
 use solana_sdk::{clock::Slot, pubkey::Pubkey, signature::Signature};
 use thiserror::Error;
-use tokio::sync::oneshot::Sender;
+use tokio::sync::oneshot::{self, Sender};
 
 #[derive(Debug, Clone, Error)]
 pub enum AccountClonerError {
@@ -29,6 +30,9 @@ pub enum AccountClonerError {
 
     #[error(transparent)]
     AccountDumperError(#[from] AccountDumperError),
+
+    #[error("CommittorSerivceError {0}")]
+    CommittorSerivceError(String),
 
     #[error("ProgramDataDoesNotExist")]
     ProgramDataDoesNotExist,
@@ -64,6 +68,20 @@ pub enum AccountClonerUnclonableReason {
     /// If an account is delegated to our validator then we should use the latest
     /// state in our own bank since that is more up to date than the on-chain state.
     DelegatedAccountsNotClonedWhileHydrating,
+}
+
+pub async fn map_committor_request_result<T>(
+    res: oneshot::Receiver<CommittorServiceResult<T>>,
+) -> AccountClonerResult<T> {
+    res.await
+        .map_err(|err| {
+            // Send request error
+            AccountClonerError::CommittorSerivceError(format!("{:?}", err))
+        })?
+        .map_err(|err| {
+            // Commit error
+            AccountClonerError::CommittorSerivceError(format!("{:?}", err))
+        })
 }
 
 #[derive(Debug, Clone)]

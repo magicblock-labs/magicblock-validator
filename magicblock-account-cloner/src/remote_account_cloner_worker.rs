@@ -18,6 +18,7 @@ use magicblock_account_dumper::AccountDumper;
 use magicblock_account_fetcher::AccountFetcher;
 use magicblock_account_updates::AccountUpdates;
 use magicblock_accounts_api::InternalAccountProvider;
+use magicblock_committor_service::CommittorService;
 use magicblock_metrics::metrics;
 use magicblock_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
 use solana_sdk::{
@@ -34,8 +35,8 @@ use tokio::{
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    AccountClonerError, AccountClonerListeners, AccountClonerOutput,
-    AccountClonerPermissions, AccountClonerResult,
+    map_committor_request_result, AccountClonerError, AccountClonerListeners,
+    AccountClonerOutput, AccountClonerPermissions, AccountClonerResult,
     AccountClonerUnclonableReason, CloneOutputMap,
 };
 
@@ -99,6 +100,7 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU> {
     account_fetcher: AFE,
     account_updates: AUP,
     account_dumper: ADU,
+    committer_service: Arc<CommittorService>,
     allowed_program_ids: Option<HashSet<Pubkey>>,
     blacklisted_accounts: HashSet<Pubkey>,
     payer_init_lamports: Option<u64>,
@@ -125,6 +127,7 @@ where
         account_fetcher: AFE,
         account_updates: AUP,
         account_dumper: ADU,
+        committer_service: Arc<CommittorService>,
         allowed_program_ids: Option<HashSet<Pubkey>>,
         blacklisted_accounts: HashSet<Pubkey>,
         payer_init_lamports: Option<u64>,
@@ -141,6 +144,7 @@ where
             account_updates,
             account_dumper,
             allowed_program_ids,
+            committer_service,
             blacklisted_accounts,
             payer_init_lamports,
             validator_charges_fees,
@@ -640,7 +644,7 @@ where
                     });
                 }
 
-                self.do_clone_delegated_account(
+                let sig = self.do_clone_delegated_account(
                     pubkey,
                     // TODO(GabrielePicco): Avoid cloning
                     &Account {
@@ -648,7 +652,19 @@ where
                         ..account.clone()
                     },
                     delegation_record,
-                )?
+                )?;
+
+                // Allow the committer service to reserve pubkeys in lookup tables
+                // that could be needed when we commit this account
+                map_committor_request_result(
+                    self.committer_service.reserve_pubkeys_for_committee(
+                        *pubkey,
+                        delegation_record.owner,
+                    ),
+                )
+                .await?;
+
+                sig
             }
         };
         // Return the result

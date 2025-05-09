@@ -4,6 +4,7 @@ use log::*;
 use magicblock_bank::bank::Bank;
 use magicblock_processor::execute_transaction::execute_legacy_transaction;
 use magicblock_transaction_status::TransactionStatusSender;
+use solana_sdk::hash::Hash;
 use solana_sdk::{account::ReadableAccount, transaction::Transaction};
 use std::{
     collections::{HashMap, HashSet},
@@ -54,6 +55,12 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
             .iter()
             .map(|commit| commit.slot)
             .max()
+            .unwrap();
+        // Safety we just obtained the max slot from the scheduled commits
+        let ephemereal_blockhash = scheduled_commits
+            .iter()
+            .find(|commit| commit.slot == max_slot)
+            .map(|commit| commit.blockhash)
             .unwrap();
 
         changeset.slot = max_slot;
@@ -155,7 +162,7 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
             }
         }
 
-        self.process_changeset(changeset, sent_commits);
+        self.process_changeset(changeset, sent_commits, ephemereal_blockhash);
 
         Ok(())
     }
@@ -198,6 +205,7 @@ impl RemoteScheduledCommitsProcessor {
         &self,
         changeset: Changeset,
         mut sent_commits: HashMap<u64, (Transaction, SentCommit)>,
+        ephemeral_blockhash: Hash,
     ) {
         // We process the changeset on a separate task in order to not block
         // the validator (slot advance) itself
@@ -208,6 +216,19 @@ impl RemoteScheduledCommitsProcessor {
         tokio::task::spawn(async move {
             // Create one sent commit transaction per bundle in our validator
             let changeset_metadata = ChangesetMeta::from(&changeset);
+            debug!(
+                "Committing changeset with {} accounts",
+                changeset_metadata.accounts.len()
+            );
+            committor_service
+                .commit_changeset(changeset, ephemeral_blockhash, true)
+                .await
+                // TODO: @@@
+                .unwrap();
+            debug!(
+                "Committed changeset with {} accounts",
+                changeset_metadata.accounts.len()
+            );
             for bundle_id in changeset_metadata
                 .accounts
                 .iter()
