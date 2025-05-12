@@ -18,6 +18,15 @@ use utils::{
 };
 mod utils;
 
+// NOTE: This and all other schedule commit tests depend on the following accounts
+//       loaded in the mainnet cluster, i.e. the solana-test-validator:
+//
+//  validator:                tEsT3eV6RFCWs1BZ7AXTzasHqTtMnMLCB2tjQ42TDXD
+//  protocol fees vault:      7JrkjmZPprHwtuvtuGTXp9hwfGYFAQLnLeFM52kqAgXg
+//  validator fees vault:     DUH8h7rYjdTPYyBUEGAUwZv9ffz5wiM45GdYWYzogXjp
+//  delegation program:       DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh
+//  committor program:        corabpNrkBEqbTZP7xfJgSWTdBmVdLf1PARWXZbcMcS
+
 #[test]
 fn test_committing_one_account() {
     run_test!({
