@@ -1122,6 +1122,7 @@ dependencies = [
 [[package]]
 name = "conjunto-addresses"
 version = "0.0.0"
+source = "git+https://github.com/magicblock-labs/conjunto.git?rev=bf82b45#bf82b453af9f0b25a81056378d6bcdf06ef53b53"
 dependencies = [
  "paste",
  "solana-sdk",
@@ -1130,6 +1131,7 @@ dependencies = [
 [[package]]
 name = "conjunto-core"
 version = "0.0.0"
+source = "git+https://github.com/magicblock-labs/conjunto.git?rev=bf82b45#bf82b453af9f0b25a81056378d6bcdf06ef53b53"
 dependencies = [
  "async-trait",
  "serde",
@@ -1141,13 +1143,14 @@ dependencies = [
 [[package]]
 name = "conjunto-lockbox"
 version = "0.0.0"
+source = "git+https://github.com/magicblock-labs/conjunto.git?rev=bf82b45#bf82b453af9f0b25a81056378d6bcdf06ef53b53"
 dependencies = [
  "async-trait",
  "bytemuck",
  "conjunto-addresses",
  "conjunto-core",
  "conjunto-providers",
- "magicblock-delegation-program",
+ "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=4af7f1c)",
  "serde",
  "solana-rpc-client",
  "solana-rpc-client-api",
@@ -1158,6 +1161,7 @@ dependencies = [
 [[package]]
 name = "conjunto-providers"
 version = "0.0.0"
+source = "git+https://github.com/magicblock-labs/conjunto.git?rev=bf82b45#bf82b453af9f0b25a81056378d6bcdf06ef53b53"
 dependencies = [
  "async-trait",
  "conjunto-addresses",
@@ -1172,6 +1176,7 @@ dependencies = [
 [[package]]
 name = "conjunto-transwise"
 version = "0.0.0"
+source = "git+https://github.com/magicblock-labs/conjunto.git?rev=bf82b45#bf82b453af9f0b25a81056378d6bcdf06ef53b53"
 dependencies = [
  "async-trait",
  "conjunto-core",
@@ -1741,28 +1746,29 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk"
-version = "0.2.4"
+version = "0.2.5"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=c1fcb91#c1fcb917504751ab513c471e4381321d7d40bb91"
 dependencies = [
  "borsh 0.10.4",
  "ephemeral-rollups-sdk-attribute-commit",
  "ephemeral-rollups-sdk-attribute-delegate",
  "ephemeral-rollups-sdk-attribute-ephemeral",
- "paste",
  "solana-program",
 ]
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-commit"
-version = "0.2.4"
+version = "0.2.5"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=c1fcb91#c1fcb917504751ab513c471e4381321d7d40bb91"
 dependencies = [
- "proc-macro2",
  "quote",
  "syn 1.0.109",
 ]
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-delegate"
-version = "0.2.4"
+version = "0.2.5"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=c1fcb91#c1fcb917504751ab513c471e4381321d7d40bb91"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1771,7 +1777,8 @@ dependencies = [
 
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-ephemeral"
-version = "0.2.4"
+version = "0.2.5"
+source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=c1fcb91#c1fcb917504751ab513c471e4381321d7d40bb91"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -1823,13 +1830,25 @@ dependencies = [
 
 [[package]]
 name = "expiring-hashmap"
-version = "0.1.0"
+version = "0.1.1"
 
 [[package]]
 name = "fake-simd"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e88a8acf291dafb59c2d96e8f59828f3838bb1a70398823ade51a84de6a6deed"
+
+[[package]]
+name = "fallible-iterator"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649"
+
+[[package]]
+name = "fallible-streaming-iterator"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
 
 [[package]]
 name = "fast-math"
@@ -2159,7 +2178,7 @@ dependencies = [
 
 [[package]]
 name = "geyser-grpc-proto"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "anyhow",
  "bincode",
@@ -2317,6 +2336,15 @@ dependencies = [
  "allocator-api2",
  "equivalent",
  "foldhash",
+]
+
+[[package]]
+name = "hashlink"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7382cf6263419f2d8df38c55d7da83da5c18aef87fc7a7fc1fb1e344edfe14c1"
+dependencies = [
+ "hashbrown 0.15.2",
 ]
 
 [[package]]
@@ -2906,8 +2934,10 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "borsh 1.5.7",
+ "log",
  "magicblock-config",
  "magicblock-core",
+ "magicblock-delegation-program 1.0.0",
  "rayon",
  "serde",
  "solana-rpc-client",
@@ -3297,6 +3327,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "libsqlite3-sys"
+version = "0.32.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fbb8270bb4060bd76c6e96f20c52d80620f1d82a3470885694e41e0f81ef6fe7"
+dependencies = [
+ "cc",
+ "pkg-config",
+ "vcpkg",
+]
+
+[[package]]
 name = "libz-sys"
 version = "1.1.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3416,7 +3457,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-cloner"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "conjunto-transwise",
  "futures-util",
@@ -3425,6 +3466,7 @@ dependencies = [
  "magicblock-account-fetcher",
  "magicblock-account-updates",
  "magicblock-accounts-api",
+ "magicblock-committor-service",
  "magicblock-core",
  "magicblock-metrics",
  "magicblock-mutator",
@@ -3436,7 +3478,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-dumper"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bincode",
  "magicblock-bank",
@@ -3449,7 +3491,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-fetcher"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "conjunto-transwise",
@@ -3464,7 +3506,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-updates"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bincode",
  "conjunto-transwise",
@@ -3482,7 +3524,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "async-trait",
  "conjunto-transwise",
@@ -3494,8 +3536,9 @@ dependencies = [
  "magicblock-account-updates",
  "magicblock-accounts-api",
  "magicblock-bank",
+ "magicblock-committor-service",
  "magicblock-core",
- "magicblock-delegation-program",
+ "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=4af7f1c)",
  "magicblock-metrics",
  "magicblock-mutator",
  "magicblock-processor",
@@ -3511,7 +3554,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts-api"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "magicblock-bank",
  "solana-sdk",
@@ -3519,7 +3562,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts-db"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "lmdb-rkv",
  "log",
@@ -3535,7 +3578,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-api"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "agave-geyser-plugin-interface",
  "anyhow",
@@ -3555,6 +3598,7 @@ dependencies = [
  "magicblock-accounts-api",
  "magicblock-accounts-db",
  "magicblock-bank",
+ "magicblock-committor-service",
  "magicblock-config",
  "magicblock-core",
  "magicblock-geyser-plugin",
@@ -3580,7 +3624,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-bank"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "agave-geyser-plugin-interface",
  "bincode",
@@ -3614,8 +3658,46 @@ dependencies = [
 ]
 
 [[package]]
+name = "magicblock-committor-program"
+version = "0.0.0"
+dependencies = [
+ "borsh 1.5.7",
+ "borsh-derive 1.5.7",
+ "log",
+ "paste",
+ "solana-account",
+ "solana-program",
+ "solana-pubkey",
+ "thiserror 2.0.11",
+]
+
+[[package]]
+name = "magicblock-committor-service"
+version = "0.0.0"
+dependencies = [
+ "base64 0.22.1",
+ "bincode",
+ "borsh 1.5.7",
+ "log",
+ "magicblock-committor-program",
+ "magicblock-delegation-program 1.0.0",
+ "magicblock-rpc-client",
+ "magicblock-table-mania",
+ "rusqlite",
+ "solana-account",
+ "solana-pubkey",
+ "solana-rpc-client",
+ "solana-rpc-client-api",
+ "solana-sdk",
+ "solana-transaction-status-client-types",
+ "thiserror 2.0.11",
+ "tokio",
+ "tokio-util 0.7.13",
+]
+
+[[package]]
 name = "magicblock-config"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "isocountry",
  "magicblock-accounts-db",
@@ -3630,7 +3712,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "solana-sdk",
 ]
@@ -3651,8 +3733,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "magicblock-delegation-program"
+version = "1.0.0"
+source = "git+https://github.com/magicblock-labs/delegation-program.git?rev=4af7f1c#4af7f1cefe0915f0760ed5c38b25b7d41c31a474"
+dependencies = [
+ "bincode",
+ "borsh 1.5.7",
+ "bytemuck",
+ "num_enum",
+ "paste",
+ "solana-curve25519",
+ "solana-program",
+ "solana-security-txt",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "magicblock-geyser-plugin"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "agave-geyser-plugin-interface",
  "anyhow",
@@ -3679,7 +3777,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-ledger"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bincode",
  "byteorder",
@@ -3698,7 +3796,7 @@ dependencies = [
  "solana-measure",
  "solana-metrics",
  "solana-sdk",
- "solana-storage-proto 0.1.0",
+ "solana-storage-proto 0.1.1",
  "solana-svm",
  "solana-timings",
  "solana-transaction-status",
@@ -3709,7 +3807,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-metrics"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "http-body-util",
  "hyper 1.6.0",
@@ -3723,7 +3821,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-mutator"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bincode",
  "log",
@@ -3736,7 +3834,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-perf-service"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "log",
  "magicblock-bank",
@@ -3745,7 +3843,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-processor"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "lazy_static",
  "log",
@@ -3766,7 +3864,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-program"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bincode",
  "lazy_static",
@@ -3783,7 +3881,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-pubsub"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bincode",
  "geyser-grpc-proto",
@@ -3805,7 +3903,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-rpc"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "base64 0.21.7",
  "bincode",
@@ -3839,8 +3937,37 @@ dependencies = [
 ]
 
 [[package]]
+name = "magicblock-rpc-client"
+version = "0.0.0"
+dependencies = [
+ "log",
+ "solana-rpc-client",
+ "solana-rpc-client-api",
+ "solana-sdk",
+ "solana-transaction-status-client-types",
+ "thiserror 2.0.11",
+ "tokio",
+]
+
+[[package]]
+name = "magicblock-table-mania"
+version = "0.0.0"
+dependencies = [
+ "ed25519-dalek",
+ "log",
+ "magicblock-rpc-client",
+ "sha3",
+ "solana-pubkey",
+ "solana-rpc-client",
+ "solana-rpc-client-api",
+ "solana-sdk",
+ "thiserror 2.0.11",
+ "tokio",
+]
+
+[[package]]
 name = "magicblock-tokens"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "log",
  "magicblock-bank",
@@ -3855,7 +3982,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-transaction-status"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "crossbeam-channel",
  "log",
@@ -3867,7 +3994,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-version"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "rustc_version",
  "semver",
@@ -5312,6 +5439,20 @@ checksum = "c247d24e63230cdb56463ae328478bd5eac8b8faa8c69461a77e8e323afac90e"
 dependencies = [
  "libc",
  "windows-sys 0.48.0",
+]
+
+[[package]]
+name = "rusqlite"
+version = "0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "37e34486da88d8e051c7c0e23c3f15fd806ea8546260aa2fec247e97242ec143"
+dependencies = [
+ "bitflags 2.8.0",
+ "fallible-iterator",
+ "fallible-streaming-iterator",
+ "hashlink",
+ "libsqlite3-sys",
+ "smallvec",
 ]
 
 [[package]]
@@ -8590,7 +8731,7 @@ dependencies = [
 
 [[package]]
 name = "solana-storage-proto"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "bincode",
  "bs58 0.4.0",
@@ -9957,7 +10098,7 @@ dependencies = [
 
 [[package]]
 name = "test-tools-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "env_logger 0.11.6",
  "log",
