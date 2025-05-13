@@ -90,10 +90,12 @@ fn test_bank_system_transfer_instruction() {
 fn test_bank_system_allocate_instruction() {
     init_logger!();
 
+    const LAMPORTS_PER_SIGNATURE: u64 = 5000;
+
     let genesis_config_info = create_genesis_config_with_leader(
         u64::MAX,
         &Pubkey::new_unique(),
-        None,
+        Some(LAMPORTS_PER_SIGNATURE),
     );
     let bank =
         Bank::new_for_tests(&genesis_config_info.genesis_config, None, None)
@@ -116,7 +118,7 @@ fn test_bank_system_allocate_instruction() {
 
     assert_eq!(
         payer_acc.lamports(),
-        LAMPORTS_PER_SOL - 2 * DEFAULT_LAMPORTS_PER_SIGNATURE
+        LAMPORTS_PER_SOL - 2 * LAMPORTS_PER_SIGNATURE
     );
     assert_eq!(recvr_acc.lamports(), rent);
     assert_eq!(recvr_acc.data().len(), SPACE as usize);
@@ -132,7 +134,7 @@ fn test_bank_system_allocate_instruction() {
             assert_eq!(pre[0], [1000000000, 1586880, 1,]);
 
             assert_eq!(post.len(), 1);
-            assert_eq!(post[0], [999990000, 1586880, 1,]);
+            assert_eq!(post[0], [1000000000 - 2 * LAMPORTS_PER_SIGNATURE, 1586880, 1,]);
         }
     );
 }
