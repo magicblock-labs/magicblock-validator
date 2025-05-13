@@ -15,9 +15,12 @@ use magicblock_bank::{
             SolanaxPostAccounts,
         },
     },
-    genesis_utils::create_genesis_config_with_leader_and_fees,
+    genesis_utils::{
+        create_genesis_config_with_leader,
+        create_genesis_config_with_leader_and_fees,
+    },
     transaction_results::TransactionBalancesSet,
-    LAMPORTS_PER_SIGNATURE,
+    DEFAULT_LAMPORTS_PER_SIGNATURE,
 };
 use solana_sdk::{
     account::ReadableAccount,
@@ -50,8 +53,9 @@ fn test_bank_system_transfer_instruction() {
     );
     let (results, balances) = execute_transactions(&bank, vec![tx]);
 
-    const FROM_AFTER_BALANCE: u64 =
-        LAMPORTS_PER_SOL - LAMPORTS_PER_SOL / 5 - LAMPORTS_PER_SIGNATURE;
+    const FROM_AFTER_BALANCE: u64 = LAMPORTS_PER_SOL
+        - LAMPORTS_PER_SOL / 5
+        - DEFAULT_LAMPORTS_PER_SIGNATURE;
     const TO_AFTER_BALANCE: u64 = LAMPORTS_PER_SOL / 5;
 
     // Result
@@ -113,7 +117,7 @@ fn test_bank_system_allocate_instruction() {
 
     assert_eq!(
         payer_acc.lamports(),
-        LAMPORTS_PER_SOL - 2 * LAMPORTS_PER_SIGNATURE
+        LAMPORTS_PER_SOL - 2 * DEFAULT_LAMPORTS_PER_SIGNATURE
     );
     assert_eq!(recvr_acc.lamports(), rent);
     assert_eq!(recvr_acc.data().len(), SPACE as usize);
@@ -194,10 +198,8 @@ fn test_bank_solx_instructions() {
     init_logger!();
 
     // 1. Init Bank and load solanax program
-    let genesis_config_info = create_genesis_config_with_leader_and_fees(
-        u64::MAX,
-        &Pubkey::new_unique(),
-    );
+    let genesis_config_info =
+        create_genesis_config_with_leader(u64::MAX, &Pubkey::new_unique());
     let bank =
         Bank::new_for_tests(&genesis_config_info.genesis_config, None, None)
             .unwrap();
@@ -234,7 +236,7 @@ fn test_bank_solx_instructions() {
             assert_eq!(pre[0], [LAMPORTS_PER_SOL, 9103680, 1, 1141440]);
 
             assert_eq!(post.len(), 1);
-            assert_eq!(post[0], [LAMPORTS_PER_SOL - 2 * LAMPORTS_PER_SIGNATURE , 9103680, 1, 1141440]);
+            assert_eq!(post[0], [LAMPORTS_PER_SOL - 2 * DEFAULT_LAMPORTS_PER_SIGNATURE , 9103680, 1, 1141440]);
         }
     );
 

@@ -1,6 +1,6 @@
 // NOTE: from runtime/src/genesis_utils.rs
 // heavily updated to remove vote + stake related code as well as cluster type (defaulting to mainnet)
-use std::{borrow::Borrow, time::UNIX_EPOCH};
+use std::time::UNIX_EPOCH;
 
 use solana_sdk::{
     account::{Account, AccountSharedData},
@@ -17,12 +17,11 @@ use solana_sdk::{
     system_program,
 };
 
-use crate::LAMPORTS_PER_SIGNATURE;
+use crate::DEFAULT_LAMPORTS_PER_SIGNATURE;
 
 // Default amount received by the validator
 const VALIDATOR_LAMPORTS: u64 = 42;
 
-// fun fact: rustc is very close to make this const fn.
 pub fn bootstrap_validator_stake_lamports() -> u64 {
     Rent::default().minimum_balance(StakeStateV2::size_of())
 }
@@ -46,91 +45,31 @@ pub const fn genesis_sysvar_and_builtin_program_lamports() -> u64 {
         + NUM_PRECOMPILES
 }
 
-pub struct ValidatorVoteKeypairs {
-    pub node_keypair: Keypair,
-}
-
-impl ValidatorVoteKeypairs {
-    pub fn new(node_keypair: Keypair) -> Self {
-        Self { node_keypair }
-    }
-
-    pub fn new_rand() -> Self {
-        Self {
-            node_keypair: Keypair::new(),
-        }
-    }
-}
-
 pub struct GenesisConfigInfo {
     pub genesis_config: GenesisConfig,
     pub mint_keypair: Keypair,
     pub validator_pubkey: Pubkey,
 }
 
-pub fn create_genesis_config_with_vote_accounts(
-    mint_lamports: u64,
-    voting_keypairs: &[impl Borrow<ValidatorVoteKeypairs>],
-) -> GenesisConfigInfo {
-    create_genesis_config_with_vote_accounts_and_cluster_type(
-        mint_lamports,
-        voting_keypairs,
-    )
-}
-
-pub fn create_genesis_config_with_vote_accounts_and_cluster_type(
-    mint_lamports: u64,
-    voting_keypairs: &[impl Borrow<ValidatorVoteKeypairs>],
-) -> GenesisConfigInfo {
-    let mint_keypair = Keypair::new();
-    let validator_pubkey = voting_keypairs[0].borrow().node_keypair.pubkey();
-    let genesis_config = create_genesis_config_with_leader_ex(
-        mint_lamports,
-        &mint_keypair.pubkey(),
-        &validator_pubkey,
-        VALIDATOR_LAMPORTS,
-        FeeRateGovernor::new(0, 0), // most tests can't handle transaction fees
-        Rent::free(),               // most tests don't expect rent
-        vec![],
-    );
-
-    let mut genesis_config_info = GenesisConfigInfo {
-        genesis_config,
-        mint_keypair,
-        validator_pubkey,
-    };
-
-    for validator_voting_keypairs in voting_keypairs[1..].iter() {
-        let node_pubkey =
-            validator_voting_keypairs.borrow().node_keypair.pubkey();
-
-        // Create accounts
-        let node_account =
-            Account::new(VALIDATOR_LAMPORTS, 0, &system_program::id());
-        // Put newly created accounts into genesis
-        genesis_config_info
-            .genesis_config
-            .accounts
-            .extend(vec![(node_pubkey, node_account)]);
-    }
-
-    genesis_config_info
-}
-
 pub fn create_genesis_config_with_leader(
     mint_lamports: u64,
     validator_pubkey: &Pubkey,
+    lamports_per_signature: Option<u64>,
 ) -> GenesisConfigInfo {
     let mint_keypair = Keypair::new();
 
-    let genesis_config = create_genesis_config_with_leader_ex(
+    let mut genesis_config = create_genesis_config_with_leader_ex(
         mint_lamports,
         &mint_keypair.pubkey(),
         validator_pubkey,
         VALIDATOR_LAMPORTS,
-        FeeRateGovernor::new(0, 0), // most tests can't handle transaction fees
-        Rent::free(),               // most tests don't expect rent
+        FeeRateGovernor::new(0, 0),
+        Rent::free(),
         vec![],
+    );
+    genesis_config.fee_rate_governor = FeeRateGovernor::new(
+        lamports_per_signature.unwrap_or(DEFAULT_LAMPORTS_PER_SIGNATURE),
+        0,
     );
 
     GenesisConfigInfo {
@@ -138,17 +77,6 @@ pub fn create_genesis_config_with_leader(
         mint_keypair,
         validator_pubkey: *validator_pubkey,
     }
-}
-
-pub fn create_genesis_config_with_leader_and_fees(
-    mint_lamports: u64,
-    validator_pubkey: &Pubkey,
-) -> GenesisConfigInfo {
-    let mut genesis_config_info =
-        create_genesis_config_with_leader(mint_lamports, validator_pubkey);
-    genesis_config_info.genesis_config.fee_rate_governor =
-        FeeRateGovernor::new(LAMPORTS_PER_SIGNATURE, 0);
-    genesis_config_info
 }
 
 pub fn activate_all_features(genesis_config: &mut GenesisConfig) {

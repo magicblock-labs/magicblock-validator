@@ -175,7 +175,11 @@ impl MagicValidator {
             genesis_config,
             validator_pubkey,
             ..
-        } = create_genesis_config_with_leader(u64::MAX, &validator_pubkey);
+        } = create_genesis_config_with_leader(
+            u64::MAX,
+            &validator_pubkey,
+            config.validator_config.validator.base_fees,
+        );
 
         let ledger = Self::init_ledger(
             config.validator_config.ledger.path.as_ref(),

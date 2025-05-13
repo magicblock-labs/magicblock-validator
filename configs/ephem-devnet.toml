@@ -1,8 +1,8 @@
 [accounts]
-remote = "devnet"
+remote = "https://rpc.magicblock.app/devnet"
 lifecycle = "ephemeral"
 commit = { frequency_millis = 50_000 }
-payer = { init_sol = 1_000 }
+payer = { init_lamports = 0 }
 
 [accounts.db]
 # path to root directory where database files are stored
