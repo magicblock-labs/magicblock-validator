@@ -38,7 +38,9 @@ use magicblock_bank::{
     program_loader::load_programs_into_bank,
     transaction_logs::TransactionLogCollectorFilter,
 };
-use magicblock_committor_service::{config::ChainConfig, CommittorService};
+use magicblock_committor_service::{
+    config::ChainConfig, CommittorService, ComputeBudgetConfig,
+};
 use magicblock_config::{EphemeralConfig, LifecycleMode, ProgramConfig};
 use magicblock_geyser_plugin::rpc::GeyserRpcService;
 use magicblock_ledger::{
@@ -311,11 +313,14 @@ impl MagicValidator {
             identity_keypair.insecure_clone(),
             // TODO: @@@ config or inside ledger dir
             "/tmp/committor_service.sqlite",
-            &ChainConfig {
+            ChainConfig {
                 rpc_uri: remote_rpc_config.url().to_string(),
                 commitment: remote_rpc_config
                     .commitment()
                     .unwrap_or(CommitmentLevel::Confirmed),
+                compute_budget_config: ComputeBudgetConfig::new(
+                    accounts_config.commit_compute_unit_price,
+                ),
             },
         )?);
 
