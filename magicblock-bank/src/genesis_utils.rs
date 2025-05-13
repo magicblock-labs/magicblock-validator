@@ -63,13 +63,15 @@ pub fn create_genesis_config_with_leader(
         &mint_keypair.pubkey(),
         validator_pubkey,
         VALIDATOR_LAMPORTS,
-        FeeRateGovernor::new(0, 0),
+        FeeRateGovernor {
+            target_lamports_per_signature: 0,
+            lamports_per_signature: lamports_per_signature
+                .unwrap_or(DEFAULT_LAMPORTS_PER_SIGNATURE),
+            target_signatures_per_slot: 0,
+            ..FeeRateGovernor::default()
+        },
         Rent::free(),
         vec![],
-    );
-    genesis_config.fee_rate_governor = FeeRateGovernor::new(
-        lamports_per_signature.unwrap_or(DEFAULT_LAMPORTS_PER_SIGNATURE),
-        0,
     );
 
     GenesisConfigInfo {
