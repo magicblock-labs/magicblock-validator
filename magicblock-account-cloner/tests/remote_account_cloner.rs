@@ -210,7 +210,7 @@ async fn test_clone_allow_feepayer_account_when_ephemeral() {
     assert!(matches!(result, Ok(AccountClonerOutput::Cloned { .. })));
     assert_eq!(account_fetcher.get_fetch_count(&feepayer_account), 1);
     assert!(account_updates.has_account_monitoring(&feepayer_account));
-    assert!(account_dumper.was_dumped_as_feepayer_account(&feepayer_account));
+    assert!(account_dumper.was_dumped_as_undelegated_account(&feepayer_account));
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());
@@ -731,7 +731,7 @@ async fn test_clone_allow_feepayer_account_when_replica() {
     assert!(matches!(result, Ok(AccountClonerOutput::Cloned { .. })));
     assert_eq!(account_fetcher.get_fetch_count(&feepayer_account), 1);
     assert!(!account_updates.has_account_monitoring(&feepayer_account));
-    assert!(account_dumper.was_dumped_as_feepayer_account(&feepayer_account));
+    assert!(account_dumper.was_dumped_as_undelegated_account(&feepayer_account));
     // Cleanup everything correctly
     cancellation_token.cancel();
     assert!(worker_handle.await.is_ok());
