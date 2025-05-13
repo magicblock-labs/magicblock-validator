@@ -1,7 +1,7 @@
 use std::{collections::HashMap, sync::Arc};
 
 use magicblock_bank::{
-    bank::Bank, genesis_utils::create_genesis_config_with_leader_and_fees,
+    bank::Bank, genesis_utils::create_genesis_config_with_leader,
 };
 use solana_sdk::{
     pubkey::Pubkey,
@@ -28,9 +28,10 @@ impl BankTransactionsProcessor {
 
 impl Default for BankTransactionsProcessor {
     fn default() -> Self {
-        let genesis_config = create_genesis_config_with_leader_and_fees(
+        let genesis_config = create_genesis_config_with_leader(
             u64::MAX,
             &Pubkey::new_unique(),
+            None,
         )
         .genesis_config;
         let bank = Arc::new(
