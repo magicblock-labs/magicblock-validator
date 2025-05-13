@@ -215,9 +215,10 @@ pub fn assert_account_was_undelegated_on_chain(
     let owner = ctx.fetch_chain_account_owner(pda).unwrap();
     assert_ne!(
         owner, DELEGATION_PROGRAM_ID,
-        "not owned by delegation program"
+        "{} not owned by delegation program",
+        pda
     );
-    assert_eq!(owner, new_owner, "new owner");
+    assert_eq!(owner, new_owner, "{} has new owner", pda);
 }
 
 #[allow(dead_code)] // used in 02_commit_and_undelegate.rs
