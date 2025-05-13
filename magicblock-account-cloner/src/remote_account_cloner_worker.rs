@@ -103,7 +103,6 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU> {
     account_dumper: ADU,
     allowed_program_ids: Option<HashSet<Pubkey>>,
     blacklisted_accounts: HashSet<Pubkey>,
-    payer_init_lamports: Option<u64>,
     validator_charges_fees: ValidatorCollectionMode,
     permissions: AccountClonerPermissions,
     fetch_retries: u64,
@@ -145,7 +144,6 @@ where
         account_dumper: ADU,
         allowed_program_ids: Option<HashSet<Pubkey>>,
         blacklisted_accounts: HashSet<Pubkey>,
-        payer_init_lamports: Option<u64>,
         validator_charges_fees: ValidatorCollectionMode,
         permissions: AccountClonerPermissions,
         validator_authority: Pubkey,
@@ -164,7 +162,6 @@ where
             account_dumper,
             allowed_program_ids,
             blacklisted_accounts,
-            payer_init_lamports,
             validator_charges_fees,
             permissions,
             fetch_retries,
@@ -550,10 +547,17 @@ where
                 // Fee payer accounts are non-delegated ones, so we keep track of them as well
                 self.track_not_delegated_account(*pubkey).await?;
                 match self.validator_charges_fees {
-                    ValidatorCollectionMode::NoFees => self
-                        .do_clone_feepayer_account_for_non_charging_validator(
-                            pubkey, *lamports, owner,
-                        )?,
+                    ValidatorCollectionMode::NoFees => {
+                        self.track_not_delegated_account(*pubkey).await?;
+                        self.do_clone_undelegated_account(
+                            pubkey,
+                            &Account {
+                                lamports: *lamports,
+                                owner: *owner,
+                                ..Default::default()
+                            },
+                        )?
+                    }
                     ValidatorCollectionMode::Fees => {
                         // Fetch the associated escrowed account
                         let escrowed_snapshot = match self
@@ -742,17 +746,6 @@ where
                     balance_pda: balance_pda.map(|p| p.to_string()).as_deref(),
                 });
             })
-    }
-
-    /// Clone a fee payer account setting the initial lamports to payer_init_lamports
-    fn do_clone_feepayer_account_for_non_charging_validator(
-        &self,
-        pubkey: &Pubkey,
-        lamports: u64,
-        owner: &Pubkey,
-    ) -> AccountClonerResult<Signature> {
-        let lamports = self.payer_init_lamports.unwrap_or(lamports);
-        self.do_clone_feepayer_account(pubkey, lamports, owner, None)
     }
 
     fn do_clone_undelegated_account(

@@ -310,7 +310,6 @@ impl MagicValidator {
             account_dumper_bank,
             accounts_config.allowed_program_ids,
             blacklisted_accounts,
-            accounts_config.payer_init_lamports,
             if config.validator_config.validator.base_fees.is_none() {
                 ValidatorCollectionMode::NoFees
             } else {

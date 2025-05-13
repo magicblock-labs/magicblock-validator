@@ -35,7 +35,6 @@ fn setup_custom(
     tokio::task::JoinHandle<()>,
 ) {
     // Default configuration
-    let payer_init_lamports = Some(1_000 * LAMPORTS_PER_SOL);
     // Create account cloner worker and client
     let cloner_worker = RemoteAccountClonerWorker::new(
         internal_account_provider,
@@ -44,7 +43,6 @@ fn setup_custom(
         account_dumper,
         allowed_program_ids,
         blacklisted_accounts,
-        payer_init_lamports,
         ValidatorCollectionMode::NoFees,
         permissions,
         Pubkey::new_unique(),
