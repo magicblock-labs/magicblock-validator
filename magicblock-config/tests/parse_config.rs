@@ -4,10 +4,10 @@ use isocountry::CountryCode;
 use magicblock_config::{
     AccountsConfig, AllowedProgram, CommitStrategy, EphemeralConfig,
     GeyserGrpcConfig, LedgerConfig, LifecycleMode, MetricsConfig,
-    MetricsServiceConfig, Payer, PayerParams, ProgramConfig, RemoteConfig,
-    RpcConfig, ValidatorConfig,
+    MetricsServiceConfig, ProgramConfig, RemoteConfig, RpcConfig,
+    ValidatorConfig,
 };
-use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey};
+use solana_sdk::pubkey;
 use url::Url;
 
 #[test]

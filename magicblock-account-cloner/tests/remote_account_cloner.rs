@@ -13,7 +13,6 @@ use magicblock_accounts_api::InternalAccountProviderStub;
 use magicblock_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
 use solana_sdk::{
     bpf_loader_upgradeable::get_program_data_address,
-    native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
     signature::{Keypair, Signer},
     sysvar::clock,

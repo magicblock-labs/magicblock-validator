@@ -52,7 +52,6 @@ fn setup_with_lifecycle(
         account_dumper,
         None,
         HashSet::new(),
-        Some(1_000_000_000),
         ValidatorCollectionMode::NoFees,
         lifecycle.to_account_cloner_permissions(),
         Pubkey::new_unique(),
