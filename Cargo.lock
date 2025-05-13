@@ -3683,7 +3683,7 @@ dependencies = [
  "solana-rpc",
  "solana-rpc-client",
  "solana-sdk",
- "solana-svm",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
@@ -3722,7 +3722,7 @@ dependencies = [
  "solana-program-runtime",
  "solana-rpc",
  "solana-sdk",
- "solana-svm",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
  "solana-svm-transaction",
  "solana-system-program",
  "solana-timings",
@@ -3819,7 +3819,7 @@ dependencies = [
  "solana-metrics",
  "solana-sdk",
  "solana-storage-proto 0.1.2",
- "solana-svm",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
  "solana-timings",
  "solana-transaction-status",
  "tempfile",
@@ -3884,7 +3884,7 @@ dependencies = [
  "solana-metrics",
  "solana-rayon-threadlimit",
  "solana-sdk",
- "solana-svm",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
  "solana-timings",
  "spl-token",
  "spl-token-2022 6.0.0",
@@ -3991,7 +3991,7 @@ dependencies = [
  "log",
  "magicblock-bank",
  "solana-sdk",
- "solana-svm",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
  "solana-transaction-status",
 ]
 
@@ -7356,7 +7356,7 @@ dependencies = [
  "solana-stake-program",
  "solana-storage-bigtable",
  "solana-storage-proto 2.2.1",
- "solana-svm",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git)",
  "solana-svm-transaction",
  "solana-timings",
  "solana-transaction-status",
@@ -8149,7 +8149,7 @@ dependencies = [
  "solana-stake-program",
  "solana-storage-bigtable",
  "solana-streamer",
- "solana-svm",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git)",
  "solana-tpu-client",
  "solana-transaction-status",
  "solana-version",
@@ -8316,7 +8316,7 @@ dependencies = [
  "solana-runtime-transaction",
  "solana-sdk",
  "solana-stake-program",
- "solana-svm",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git)",
  "solana-svm-rent-collector",
  "solana-svm-transaction",
  "solana-timings",
@@ -8865,12 +8865,55 @@ dependencies = [
 [[package]]
 name = "solana-svm"
 version = "2.2.1"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git#e93eb579767770c8a0f872117676c289a2164e87"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57#e93eb579767770c8a0f872117676c289a2164e87"
 dependencies = [
  "ahash 0.8.12",
  "log",
  "percentage",
  "qualifier_attr",
+ "serde",
+ "serde_derive",
+ "solana-account",
+ "solana-bpf-loader-program",
+ "solana-clock",
+ "solana-compute-budget",
+ "solana-compute-budget-instruction",
+ "solana-feature-set",
+ "solana-fee-structure",
+ "solana-hash",
+ "solana-instruction",
+ "solana-instructions-sysvar",
+ "solana-loader-v4-program",
+ "solana-log-collector",
+ "solana-measure",
+ "solana-message",
+ "solana-nonce",
+ "solana-nonce-account",
+ "solana-precompiles",
+ "solana-program",
+ "solana-program-runtime",
+ "solana-pubkey",
+ "solana-rent",
+ "solana-rent-debits",
+ "solana-sdk",
+ "solana-sdk-ids",
+ "solana-svm-rent-collector",
+ "solana-svm-transaction",
+ "solana-timings",
+ "solana-transaction-context",
+ "solana-transaction-error",
+ "solana-type-overrides",
+ "thiserror 2.0.12",
+]
+
+[[package]]
+name = "solana-svm"
+version = "2.2.1"
+source = "git+https://github.com/magicblock-labs/magicblock-svm.git#e93eb579767770c8a0f872117676c289a2164e87"
+dependencies = [
+ "ahash 0.8.12",
+ "log",
+ "percentage",
  "serde",
  "serde_derive",
  "solana-account",
@@ -10131,7 +10174,7 @@ dependencies = [
  "solana-geyser-plugin-manager",
  "solana-rpc-client",
  "solana-sdk",
- "solana-svm",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
  "solana-timings",
  "tempfile",
  "test-tools-core",
@@ -10144,7 +10187,7 @@ version = "0.1.2"
 dependencies = [
  "env_logger 0.11.8",
  "log",
- "solana-svm",
+ "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
 ]
 
 [[package]]

@@ -1509,7 +1509,6 @@ impl Bank {
             batch.lock_results(),
             error_counters,
         ));
-        // TODO(GabrielePicco): check why fees lamports per signature is 5000 sometimes
         timings.saturating_add_in_place(ExecuteTimingType::CheckUs, check_us);
 
         let (blockhash, fee_lamports_per_signature) =
@@ -1526,7 +1525,6 @@ impl Bank {
             // change transaction fees...
             //
             // So we just set it to non-zero value
-            // TODO(GabrielePicco): try setting it to zero
             blockhash_lamports_per_signature: fee_lamports_per_signature,
             rent_collector: None,
         };

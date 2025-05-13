@@ -1,5 +1,5 @@
 [accounts]
-remote = "https://rpc.magicblock.app/devnet"
+remote = "devnet"
 lifecycle = "ephemeral"
 commit = { frequency_millis = 50_000 }
 payer = { init_lamports = 0 }
