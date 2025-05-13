@@ -58,7 +58,7 @@ pub fn create_genesis_config_with_leader(
 ) -> GenesisConfigInfo {
     let mint_keypair = Keypair::new();
 
-    let mut genesis_config = create_genesis_config_with_leader_ex(
+    let genesis_config = create_genesis_config_with_leader_ex(
         mint_lamports,
         &mint_keypair.pubkey(),
         validator_pubkey,
