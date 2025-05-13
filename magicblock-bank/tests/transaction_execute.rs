@@ -17,7 +17,6 @@ use magicblock_bank::{
     },
     genesis_utils::{
         create_genesis_config_with_leader,
-        create_genesis_config_with_leader_and_fees,
     },
     transaction_results::TransactionBalancesSet,
     DEFAULT_LAMPORTS_PER_SIGNATURE,
@@ -38,9 +37,10 @@ use test_tools_core::init_logger;
 fn test_bank_system_transfer_instruction() {
     init_logger!();
 
-    let genesis_config_info = create_genesis_config_with_leader_and_fees(
+    let genesis_config_info = create_genesis_config_with_leader(
         u64::MAX,
         &Pubkey::new_unique(),
+        None
     );
     let bank =
         Bank::new_for_tests(&genesis_config_info.genesis_config, None, None)
@@ -92,9 +92,10 @@ fn test_bank_system_transfer_instruction() {
 fn test_bank_system_allocate_instruction() {
     init_logger!();
 
-    let genesis_config_info = create_genesis_config_with_leader_and_fees(
+    let genesis_config_info = create_genesis_config_with_leader(
         u64::MAX,
         &Pubkey::new_unique(),
+        None
     );
     let bank =
         Bank::new_for_tests(&genesis_config_info.genesis_config, None, None)
@@ -193,16 +194,13 @@ fn test_bank_expired_noop_instruction() {
     assert_matches!(result, Ok(_));
 }
 
-#[test]
-fn test_bank_solx_instructions() {
+fn run_solx_instruction_test(lamports_per_signature: Option<u64>) {
     init_logger!();
 
     // 1. Init Bank and load solanax program
     let genesis_config_info =
-        create_genesis_config_with_leader(u64::MAX, &Pubkey::new_unique());
-    let bank =
-        Bank::new_for_tests(&genesis_config_info.genesis_config, None, None)
-            .unwrap();
+        create_genesis_config_with_leader(u64::MAX, &Pubkey::new_unique(), lamports_per_signature);
+    let bank = Bank::new_for_tests(&genesis_config_info.genesis_config, None, None).unwrap();
     add_elf_program(&bank, &elfs::solanax::ID);
 
     // 2. Prepare Transaction and advance slot to activate solanax program
@@ -226,6 +224,7 @@ fn test_bank_solx_instructions() {
     assert_eq!(post_acc.owner(), &elfs::solanax::ID);
 
     // Balances
+    let expected_fee = lamports_per_signature.unwrap_or(DEFAULT_LAMPORTS_PER_SIGNATURE);
     assert_matches!(
         balances,
         TransactionBalancesSet {
@@ -236,7 +235,7 @@ fn test_bank_solx_instructions() {
             assert_eq!(pre[0], [LAMPORTS_PER_SOL, 9103680, 1, 1141440]);
 
             assert_eq!(post.len(), 1);
-            assert_eq!(post[0], [LAMPORTS_PER_SOL - 2 * DEFAULT_LAMPORTS_PER_SIGNATURE , 9103680, 1, 1141440]);
+            assert_eq!(post[0], [LAMPORTS_PER_SOL - 2 * expected_fee, 9103680, 1, 1141440]);
         }
     );
 
@@ -244,6 +243,16 @@ fn test_bank_solx_instructions() {
     let sig_status = bank.get_signature_status(&sig);
     assert!(sig_status.is_some());
     assert_matches!(sig_status.as_ref().unwrap(), Ok(()));
+}
+
+#[test]
+fn test_bank_solx_instructions() {
+    run_solx_instruction_test(None);
+}
+
+#[test]
+fn test_bank_solx_instructions_with_fees() {
+    run_solx_instruction_test(Some(5000));
 }
 
 fn execute_and_check_results(bank: &Bank, tx: SanitizedTransaction) {
