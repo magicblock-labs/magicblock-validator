@@ -15,9 +15,7 @@ use magicblock_bank::{
             SolanaxPostAccounts,
         },
     },
-    genesis_utils::{
-        create_genesis_config_with_leader,
-    },
+    genesis_utils::create_genesis_config_with_leader,
     transaction_results::TransactionBalancesSet,
     DEFAULT_LAMPORTS_PER_SIGNATURE,
 };
@@ -40,7 +38,7 @@ fn test_bank_system_transfer_instruction() {
     let genesis_config_info = create_genesis_config_with_leader(
         u64::MAX,
         &Pubkey::new_unique(),
-        None
+        None,
     );
     let bank =
         Bank::new_for_tests(&genesis_config_info.genesis_config, None, None)
@@ -95,7 +93,7 @@ fn test_bank_system_allocate_instruction() {
     let genesis_config_info = create_genesis_config_with_leader(
         u64::MAX,
         &Pubkey::new_unique(),
-        None
+        None,
     );
     let bank =
         Bank::new_for_tests(&genesis_config_info.genesis_config, None, None)
@@ -198,9 +196,14 @@ fn run_solx_instruction_test(lamports_per_signature: Option<u64>) {
     init_logger!();
 
     // 1. Init Bank and load solanax program
-    let genesis_config_info =
-        create_genesis_config_with_leader(u64::MAX, &Pubkey::new_unique(), lamports_per_signature);
-    let bank = Bank::new_for_tests(&genesis_config_info.genesis_config, None, None).unwrap();
+    let genesis_config_info = create_genesis_config_with_leader(
+        u64::MAX,
+        &Pubkey::new_unique(),
+        lamports_per_signature,
+    );
+    let bank =
+        Bank::new_for_tests(&genesis_config_info.genesis_config, None, None)
+            .unwrap();
     add_elf_program(&bank, &elfs::solanax::ID);
 
     // 2. Prepare Transaction and advance slot to activate solanax program
@@ -224,7 +227,8 @@ fn run_solx_instruction_test(lamports_per_signature: Option<u64>) {
     assert_eq!(post_acc.owner(), &elfs::solanax::ID);
 
     // Balances
-    let expected_fee = lamports_per_signature.unwrap_or(DEFAULT_LAMPORTS_PER_SIGNATURE);
+    let expected_fee =
+        lamports_per_signature.unwrap_or(DEFAULT_LAMPORTS_PER_SIGNATURE);
     assert_matches!(
         balances,
         TransactionBalancesSet {
