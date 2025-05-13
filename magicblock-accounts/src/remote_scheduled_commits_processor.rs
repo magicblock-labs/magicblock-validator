@@ -159,6 +159,9 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
                         bundle_id,
                     },
                 );
+                if committee.undelegation_requested {
+                    changeset.request_undelegation(committee.pubkey);
+                }
             }
         }
 
