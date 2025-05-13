@@ -150,7 +150,7 @@ solana-rpc = "2.2"
 solana-rpc-client = { version = "2.2" }
 solana-rpc-client-api = { version = "2.2" }
 solana-sdk = { version = "2.2" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", features = [ "dev-context-only-utils" ] }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "HEAD", features = [ "dev-context-only-utils" ] }
 solana-svm-transaction = { version = "2.2" }
 solana-storage-proto = { path = "storage-proto" }
 solana-system-program = { version = "2.2" }
