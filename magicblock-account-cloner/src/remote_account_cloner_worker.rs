@@ -547,17 +547,15 @@ where
                 // Fee payer accounts are non-delegated ones, so we keep track of them as well
                 self.track_not_delegated_account(*pubkey).await?;
                 match self.validator_charges_fees {
-                    ValidatorCollectionMode::NoFees => {
-                        self.track_not_delegated_account(*pubkey).await?;
-                        self.do_clone_undelegated_account(
+                    ValidatorCollectionMode::NoFees => self
+                        .do_clone_undelegated_account(
                             pubkey,
                             &Account {
                                 lamports: *lamports,
                                 owner: *owner,
                                 ..Default::default()
                             },
-                        )?
-                    }
+                        )?,
                     ValidatorCollectionMode::Fees => {
                         // Fetch the associated escrowed account
                         let escrowed_snapshot = match self
