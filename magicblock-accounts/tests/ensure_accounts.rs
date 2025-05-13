@@ -442,7 +442,7 @@ async fn test_ensure_one_delegated_and_one_feepayer_account_writable() {
     assert!(account_dumper.was_dumped_as_delegated_account(&delegated_account));
     assert!(manager.last_commit(&delegated_account).is_some());
 
-    assert!(account_dumper.was_dumped_as_feepayer_account(&feepayer_account));
+    assert!(account_dumper.was_dumped_as_undelegated_account(&feepayer_account));
     assert!(manager.last_commit(&feepayer_account).is_none());
 
     // Cleanup
