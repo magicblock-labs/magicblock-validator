@@ -15,6 +15,8 @@ members = [
   "magicblock-accounts-db",
   "magicblock-api",
   "magicblock-bank",
+  "magicblock-committor-program",
+  "magicblock-committor-service",
   "magicblock-config",
   "magicblock-core",
   "magicblock-geyser-plugin",
@@ -25,6 +27,8 @@ members = [
   "magicblock-processor",
   "magicblock-pubsub",
   "magicblock-rpc",
+  "magicblock-rpc-client",
+  "magicblock-table-mania",
   "magicblock-tokens",
   "magicblock-transaction-status",
   "magicblock-version",
@@ -55,12 +59,15 @@ assert_matches = "1.5.0"
 async-trait = "0.1.77"
 base64 = "0.21.7"
 bincode = "1.3.3"
+borsh = { version = "1.5.1", features = ["derive", "unstable__schema"] }
+borsh-derive = "1.5.1"
 bs58 = "0.4.0"
 byteorder = "1.5.0"
 cargo-lock = "10.0.0"
 conjunto-transwise = { git = "https://github.com/magicblock-labs/conjunto.git", rev = "bf82b45" }
 console-subscriber = "0.2.0"
 crossbeam-channel = "0.5.11"
+ed25519-dalek = "1.0.1"
 enum-iterator = "1.5.0"
 env_logger = "0.11.2"
 expiring-hashmap = { path = "./utils/expiring-hashmap" }
@@ -95,7 +102,10 @@ magicblock-accounts-api = { path = "./magicblock-accounts-api" }
 magicblock-accounts-db = { path = "./magicblock-accounts-db" }
 magicblock-api = { path = "./magicblock-api" }
 magicblock-bank = { path = "./magicblock-bank" }
-magicblock-committor-service = { path = "../comittor/magicblock-committor-service" }
+magicblock-committor-service = { path = "./magicblock-committor-service" }
+magicblock-committor-program = { path = "./magicblock-committor-program", features = [
+  "no-entrypoint",
+] }
 magicblock-config = { path = "./magicblock-config" }
 magicblock-core = { path = "./magicblock-core" }
 magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "4af7f1c" }
@@ -108,6 +118,8 @@ magicblock-processor = { path = "./magicblock-processor" }
 magicblock-program = { path = "./programs/magicblock" }
 magicblock-pubsub = { path = "./magicblock-pubsub" }
 magicblock-rpc = { path = "./magicblock-rpc" }
+magicblock-rpc-client = { path = "./magicblock-rpc-client" }
+magicblock-table-mania = { path = "./magicblock-table-mania" }
 magicblock-tokens = { path = "./magicblock-tokens" }
 magicblock-transaction-status = { path = "./magicblock-transaction-status" }
 magicblock-version = { path = "./magicblock-version" }
@@ -123,10 +135,12 @@ protobuf-src = "1.1"
 rand = "0.8.5"
 rayon = "1.10.0"
 rustc_version = "0.4"
+rusqlite = { version = "0.34.0", features = ["bundled"] }                                           # bundled sqlite 3.44
 semver = "1.0.22"
 serde = "1.0.217"
 serde_derive = "1.0"
 serde_json = "1.0"
+sha3 = "0.10.8"
 solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "7bdfefc" }
 solana-accounts-db = { version = "2.2" }
 solana-account-decoder = { version = "2.2" }
@@ -143,7 +157,9 @@ solana-log-collector = { version = "2.2" }
 solana-measure = { version = "2.2" }
 solana-metrics = { version = "2.2" }
 solana-perf = { version = "2.2" }
+solana-program = "2.2"
 solana-program-runtime = { version = "2.2" }
+solana-program-test = "2.2"
 solana-pubkey = { version = "2.2" }
 solana-rayon-threadlimit = { version = "2.2" }
 solana-pubsub-client = { version = "2.2" }
@@ -157,8 +173,10 @@ solana-storage-proto = { path = "storage-proto" }
 solana-system-program = { version = "2.2" }
 solana-timings = "2.2"
 solana-transaction-status = { version = "2.2" }
+solana-transaction-status-client-types = "2.2"
 spl-token = "=7.0"
 spl-token-2022 = "=6.0"
+static_assertions = "1.1.0"
 strum = "0.24"
 strum_macros = "0.24"
 tempfile = "3.10.1"
