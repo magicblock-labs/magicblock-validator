@@ -125,6 +125,6 @@ fn test_committing_fee_payer_escrowing_lamports() {
         assert_two_committees_synchronized_count(&ctx, &res, 1);
 
         // The fee payer should have been committed
-        assert_feepayer_was_committed(&ctx, &res);
+        assert_feepayer_was_committed(&ctx, &res, true);
     });
 }

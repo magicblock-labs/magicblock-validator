@@ -131,9 +131,9 @@ impl IntegrationTestContext {
     ) -> Option<Vec<String>> {
         let rpc_client = rpc_client.or(self.chain_client.as_ref())?;
 
-        // Try this up to 10 times since devnet here returns the version response instead of
+        // Try this up to 50 times since devnet here returns the version response instead of
         // the EncodedConfirmedTransactionWithStatusMeta at times
-        for _ in 0..10 {
+        for idx in 1..=50 {
             let status = match rpc_client.get_transaction_with_config(
                 &sig,
                 RpcTransactionConfig {
@@ -143,10 +143,12 @@ impl IntegrationTestContext {
             ) {
                 Ok(status) => status,
                 Err(err) => {
-                    warn!(
-                        "Failed to fetch transaction from {}: {:?}",
-                        label, err
-                    );
+                    if idx % 10 == 0 {
+                        warn!(
+                            "Failed to fetch transaction from {}: {:?}",
+                            label, err
+                        );
+                    }
                     sleep(Duration::from_millis(400));
                     continue;
                 }

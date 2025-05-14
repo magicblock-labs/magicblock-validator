@@ -101,6 +101,7 @@ pub fn assert_two_committees_were_committed(
 pub fn assert_feepayer_was_committed(
     ctx: &ScheduleCommitTestContext,
     res: &ScheduledCommitResult<MainAccount>,
+    finalize: bool,
 ) {
     let payer = ctx.payer.pubkey();
 
@@ -109,7 +110,13 @@ pub fn assert_feepayer_was_committed(
     let commit_payer = res.feepayers.iter().find(|(p, _)| p == &payer);
     assert!(commit_payer.is_some(), "should have committed payer");
 
-    assert_eq!(res.sigs.len(), 1, "should have 1 on chain sig");
+    let sig_len = if finalize { 2 } else { 1 };
+    assert_eq!(
+        res.sigs.len(),
+        sig_len,
+        "should have {} on chain sig",
+        sig_len
+    );
 }
 
 #[allow(dead_code)] // used in 02_commit_and_undelegate.rs

@@ -214,9 +214,9 @@ impl IntegrationTestContext {
                 let ephem_account = T::try_from_slice(&ephem_data)
                     .with_context(|| {
                         format!(
-                        "Failed to deserialize ephemeral account data for {:?}",
-                        pubkey
-                    )
+                            "Failed to deserialize ephemeral account data for {:?}",
+                            pubkey
+                        )
                     })?;
                 committed_accounts.insert(pubkey, ephem_account);
             };
