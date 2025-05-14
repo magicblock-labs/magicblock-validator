@@ -16,8 +16,8 @@ use magicblock_account_cloner::{
 };
 use magicblock_accounts_api::InternalAccountProvider;
 use magicblock_committor_service::{
-    persist::BundleSignatureRow, ChangedAccount, Changeset, ChangesetMeta,
-    CommittorService,
+    persist::BundleSignatureRow, ChangedAccount, Changeset, ChangesetCommittor,
+    ChangesetMeta,
 };
 use magicblock_program::{
     register_scheduled_commit_sent, FeePayerAccount, Pubkey, SentCommit,
@@ -29,7 +29,6 @@ use crate::{
 };
 
 pub struct RemoteScheduledCommitsProcessor {
-    committor_service: Arc<CommittorService>,
     transaction_scheduler: TransactionScheduler,
     cloned_accounts: CloneOutputMap,
     bank: Arc<Bank>,
@@ -38,9 +37,14 @@ pub struct RemoteScheduledCommitsProcessor {
 
 #[async_trait]
 impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
-    async fn process<IAP>(&self, account_provider: &IAP) -> AccountsResult<()>
+    async fn process<IAP, CC>(
+        &self,
+        account_provider: &IAP,
+        changeset_committor: &Arc<CC>,
+    ) -> AccountsResult<()>
     where
         IAP: InternalAccountProvider,
+        CC: ChangesetCommittor,
     {
         let scheduled_commits =
             self.transaction_scheduler.take_scheduled_commits();
@@ -166,7 +170,12 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
             }
         }
 
-        self.process_changeset(changeset, sent_commits, ephemereal_blockhash);
+        self.process_changeset(
+            changeset_committor,
+            changeset,
+            sent_commits,
+            ephemereal_blockhash,
+        );
 
         Ok(())
     }
@@ -182,13 +191,11 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
 
 impl RemoteScheduledCommitsProcessor {
     pub fn new(
-        committer_service: Arc<CommittorService>,
         bank: Arc<Bank>,
         cloned_accounts: CloneOutputMap,
         transaction_status_sender: Option<TransactionStatusSender>,
     ) -> Self {
         Self {
-            committor_service: committer_service,
             bank,
             transaction_status_sender,
             cloned_accounts,
@@ -205,15 +212,16 @@ impl RemoteScheduledCommitsProcessor {
             .get(pubkey).cloned()
     }
 
-    fn process_changeset(
+    fn process_changeset<CC: ChangesetCommittor>(
         &self,
+        changeset_committor: &Arc<CC>,
         changeset: Changeset,
         mut sent_commits: HashMap<u64, (Transaction, SentCommit)>,
         ephemeral_blockhash: Hash,
     ) {
         // We process the changeset on a separate task in order to not block
         // the validator (slot advance) itself
-        let committor_service = self.committor_service.clone();
+        let changeset_committor = changeset_committor.clone();
         let bank = self.bank.clone();
         let transaction_status_sender = self.transaction_status_sender.clone();
 
@@ -224,7 +232,7 @@ impl RemoteScheduledCommitsProcessor {
                 "Committing changeset with {} accounts",
                 changeset_metadata.accounts.len()
             );
-            match committor_service
+            match changeset_committor
                 .commit_changeset(changeset, ephemeral_blockhash, true)
                 .await
             {
@@ -254,7 +262,7 @@ impl RemoteScheduledCommitsProcessor {
                 .map(|account| account.bundle_id)
                 .collect::<HashSet<_>>()
             {
-                let bundle_signatures = match committor_service
+                let bundle_signatures = match changeset_committor
                     .get_bundle_signatures(bundle_id)
                     .await
                 {

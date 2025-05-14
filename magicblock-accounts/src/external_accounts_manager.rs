@@ -16,6 +16,7 @@ use futures_util::future::{try_join, try_join_all};
 use log::*;
 use magicblock_account_cloner::{AccountCloner, AccountClonerOutput};
 use magicblock_accounts_api::InternalAccountProvider;
+use magicblock_committor_service::ChangesetCommittor;
 use magicblock_core::magic_program;
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
@@ -402,9 +403,12 @@ where
             .map(|x| x.last_committed_at())
     }
 
-    pub async fn process_scheduled_commits(&self) -> AccountsResult<()> {
+    pub async fn process_scheduled_commits<CC: ChangesetCommittor>(
+        &self,
+        changeset_committor: &Arc<CC>,
+    ) -> AccountsResult<()> {
         self.scheduled_commits_processor
-            .process(&self.internal_account_provider)
+            .process(&self.internal_account_provider, changeset_committor)
             .await
     }
 

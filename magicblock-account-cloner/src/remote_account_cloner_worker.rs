@@ -18,7 +18,7 @@ use magicblock_account_dumper::AccountDumper;
 use magicblock_account_fetcher::AccountFetcher;
 use magicblock_account_updates::AccountUpdates;
 use magicblock_accounts_api::InternalAccountProvider;
-use magicblock_committor_service::CommittorService;
+use magicblock_committor_service::ChangesetCommittor;
 use magicblock_metrics::metrics;
 use magicblock_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
 use solana_sdk::{
@@ -95,12 +95,12 @@ impl ValidatorStage {
     }
 }
 
-pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU> {
+pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU, CC> {
     internal_account_provider: IAP,
     account_fetcher: AFE,
     account_updates: AUP,
     account_dumper: ADU,
-    committer_service: Arc<CommittorService>,
+    changeset_committor: Arc<CC>,
     allowed_program_ids: Option<HashSet<Pubkey>>,
     blacklisted_accounts: HashSet<Pubkey>,
     payer_init_lamports: Option<u64>,
@@ -114,12 +114,13 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU> {
     validator_identity: Pubkey,
 }
 
-impl<IAP, AFE, AUP, ADU> RemoteAccountClonerWorker<IAP, AFE, AUP, ADU>
+impl<IAP, AFE, AUP, ADU, CC> RemoteAccountClonerWorker<IAP, AFE, AUP, ADU, CC>
 where
     IAP: InternalAccountProvider,
     AFE: AccountFetcher,
     AUP: AccountUpdates,
     ADU: AccountDumper,
+    CC: ChangesetCommittor,
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -127,7 +128,7 @@ where
         account_fetcher: AFE,
         account_updates: AUP,
         account_dumper: ADU,
-        committer_service: Arc<CommittorService>,
+        changeset_committor: Arc<CC>,
         allowed_program_ids: Option<HashSet<Pubkey>>,
         blacklisted_accounts: HashSet<Pubkey>,
         payer_init_lamports: Option<u64>,
@@ -143,8 +144,8 @@ where
             account_fetcher,
             account_updates,
             account_dumper,
+            changeset_committor,
             allowed_program_ids,
-            committer_service,
             blacklisted_accounts,
             payer_init_lamports,
             validator_charges_fees,
@@ -657,7 +658,7 @@ where
                 // Allow the committer service to reserve pubkeys in lookup tables
                 // that could be needed when we commit this account
                 map_committor_request_result(
-                    self.committer_service.reserve_pubkeys_for_committee(
+                    self.changeset_committor.reserve_pubkeys_for_committee(
                         *pubkey,
                         delegation_record.owner,
                     ),

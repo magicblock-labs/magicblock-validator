@@ -9,6 +9,7 @@ use std::{
 use log::*;
 use magicblock_accounts::AccountsManager;
 use magicblock_bank::bank::Bank;
+use magicblock_committor_service::CommittorService;
 use magicblock_core::magic_program;
 use magicblock_ledger::Ledger;
 use magicblock_metrics::metrics;
@@ -25,6 +26,7 @@ use crate::slot::advance_slot_and_update_ledger;
 pub fn init_slot_ticker(
     bank: &Arc<Bank>,
     accounts_manager: &Arc<AccountsManager>,
+    committor_service: &Arc<CommittorService>,
     transaction_status_sender: Option<TransactionStatusSender>,
     ledger: Arc<Ledger>,
     tick_duration: Duration,
@@ -32,6 +34,7 @@ pub fn init_slot_ticker(
 ) -> tokio::task::JoinHandle<()> {
     let bank = bank.clone();
     let accounts_manager = accounts_manager.clone();
+    let committor_service = committor_service.clone();
     let log = tick_duration >= Duration::from_secs(5);
     tokio::task::spawn(async move {
         while !exit.load(Ordering::Relaxed) {
@@ -62,8 +65,9 @@ pub fn init_slot_ticker(
                     // 2. Process those scheduled commits
                     // TODO: fix the possible delay here
                     // https://github.com/magicblock-labs/magicblock-validator/issues/104
-                    if let Err(err) =
-                        accounts_manager.process_scheduled_commits().await
+                    if let Err(err) = accounts_manager
+                        .process_scheduled_commits(&committor_service)
+                        .await
                     {
                         error!(
                             "Failed to process scheduled commits: {:?}",

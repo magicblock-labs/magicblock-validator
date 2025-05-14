@@ -152,6 +152,7 @@ pub struct MagicValidator {
             RemoteAccountFetcherClient,
             RemoteAccountUpdatesClient,
             AccountDumperBank,
+            CommittorService,
         >,
     >,
     remote_account_cloner_handle: Option<thread::JoinHandle<()>>,
@@ -343,7 +344,6 @@ impl MagicValidator {
         );
 
         let accounts_manager = Self::init_accounts_manager(
-            committor_service.clone(),
             &bank,
             &remote_account_cloner_worker.get_last_clone_output(),
             RemoteAccountClonerClient::new(&remote_account_cloner_worker),
@@ -434,7 +434,6 @@ impl MagicValidator {
     }
 
     fn init_accounts_manager(
-        committer_service: Arc<CommittorService>,
         bank: &Arc<Bank>,
         cloned_accounts: &CloneOutputMap,
         remote_account_cloner_client: RemoteAccountClonerClient,
@@ -447,7 +446,6 @@ impl MagicValidator {
             "Failed to derive accounts config from provided magicblock config",
         );
         let accounts_manager = AccountsManager::try_new(
-            committer_service,
             bank,
             cloned_accounts,
             remote_account_cloner_client,
@@ -708,6 +706,7 @@ impl MagicValidator {
         self.slot_ticker = Some(init_slot_ticker(
             &self.bank,
             &self.accounts_manager,
+            &self.committor_service,
             Some(self.transaction_status_sender.clone()),
             self.ledger.clone(),
             Duration::from_millis(self.config.validator.millis_per_slot),
