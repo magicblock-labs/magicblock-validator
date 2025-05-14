@@ -1,3 +1,4 @@
+use log::*;
 use std::{collections::HashSet, sync::Arc};
 
 use conjunto_transwise::{
@@ -16,10 +17,10 @@ use magicblock_accounts::{
     errors::AccountsError, ExternalAccountsManager, LifecycleMode,
 };
 use magicblock_accounts_api::InternalAccountProviderStub;
+use magicblock_committor_service::stubs::ChangesetCommittorStub;
 use solana_sdk::pubkey::Pubkey;
 use stubs::{
     account_committer_stub::AccountCommitterStub,
-    changeset_committor_stub::ChangesetCommittorStub,
     scheduled_commits_processor_stub::ScheduledCommitsProcessorStub,
 };
 use test_tools_core::init_logger;
@@ -654,7 +655,8 @@ async fn test_ensure_accounts_seen_as_readonly_can_be_used_as_writable_later() {
                 },
                 "tx-sig".to_string(),
             )
-            .await;
+            .await
+            .inspect_err(|e| error!("Error: {:?}", e));
         assert!(result.is_ok());
 
         // Check proper behaviour
