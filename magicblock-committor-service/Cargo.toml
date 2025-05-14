@@ -43,5 +43,4 @@ tokio = { workspace = true, features = ["rt", "macros"] }
 
 [features]
 default = []
-test_table_close = []
 dev-context-only-utils = []

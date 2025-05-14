@@ -3,6 +3,7 @@ use magicblock_committor_service::{ChangesetCommittor, ComputeBudgetConfig};
 use magicblock_rpc_client::MagicblockRpcClient;
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
+use test_tools_core::init_logger;
 use tokio::task::JoinSet;
 use utils::transactions::tx_logs_contain;
 
@@ -282,7 +283,7 @@ async fn commit_single_account(
     expected_strategy: CommitStrategy,
     undelegate: bool,
 ) {
-    utils::init_logger_target();
+    init_logger!();
     let slot = 10;
     let validator_auth = utils::get_validator_auth();
 
@@ -339,7 +340,7 @@ async fn commit_single_account(
 // -----------------
 #[tokio::test]
 async fn test_ix_commit_two_accounts_1kb_2kb() {
-    utils::init_logger();
+    init_logger!();
     commit_multiple_accounts(
         &[1024, 2048],
         1,
@@ -351,7 +352,7 @@ async fn test_ix_commit_two_accounts_1kb_2kb() {
 
 #[tokio::test]
 async fn test_ix_commit_four_accounts_1kb_2kb_5kb_10kb_single_bundle() {
-    utils::init_logger();
+    init_logger!();
     commit_multiple_accounts(
         &[1024, 2 * 1024, 5 * 1024, 10 * 1024],
         1,
@@ -477,7 +478,7 @@ async fn commit_5_accounts_1kb(
     expected_strategies: ExpectedStrategies,
     undelegate_all: bool,
 ) {
-    utils::init_logger();
+    init_logger!();
     let accs = (0..5).map(|_| 1024).collect::<Vec<_>>();
     commit_multiple_accounts(
         &accs,
@@ -492,7 +493,7 @@ async fn commit_8_accounts_1kb(
     bundle_size: usize,
     expected_strategies: ExpectedStrategies,
 ) {
-    utils::init_logger();
+    init_logger!();
     let accs = (0..8).map(|_| 1024).collect::<Vec<_>>();
     commit_multiple_accounts(&accs, bundle_size, expected_strategies, false)
         .await;
@@ -502,7 +503,7 @@ async fn commit_20_accounts_1kb(
     bundle_size: usize,
     expected_strategies: ExpectedStrategies,
 ) {
-    utils::init_logger();
+    init_logger!();
     let accs = (0..20).map(|_| 1024).collect::<Vec<_>>();
     commit_multiple_accounts(&accs, bundle_size, expected_strategies, false)
         .await;
@@ -514,7 +515,7 @@ async fn commit_multiple_accounts(
     expected_strategies: ExpectedStrategies,
     undelegate_all: bool,
 ) {
-    utils::init_logger();
+    init_logger!();
     let slot = 10;
     let validator_auth = utils::get_validator_auth();
 

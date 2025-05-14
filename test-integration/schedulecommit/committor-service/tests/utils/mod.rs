@@ -1,6 +1,3 @@
-use std::env;
-
-use env_logger::Target;
 use solana_sdk::signature::Keypair;
 
 pub mod instructions;
@@ -9,30 +6,6 @@ pub const TEST_TABLE_CLOSE: bool = cfg!(feature = "test_table_close");
 
 pub async fn sleep_millis(millis: u64) {
     tokio::time::sleep(tokio::time::Duration::from_millis(millis)).await;
-}
-
-pub fn init_logger() {
-    let mut builder = env_logger::builder();
-    builder
-        .format_timestamp(None)
-        .format_module_path(false)
-        .format_target(false)
-        .format_source_path(true)
-        .is_test(true);
-
-    if let Ok(path) = env::var("TEST_LOG_FILE") {
-        builder.target(Target::Pipe(Box::new(
-            std::fs::File::create(path).unwrap(),
-        )));
-    }
-    let _ = builder.try_init();
-}
-
-pub fn init_logger_target() {
-    let _ = env_logger::builder()
-        .format_timestamp(None)
-        .is_test(true)
-        .try_init();
 }
 
 /// This is the test authority used in the delegation program

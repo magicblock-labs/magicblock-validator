@@ -102,10 +102,10 @@ magicblock-accounts-api = { path = "./magicblock-accounts-api" }
 magicblock-accounts-db = { path = "./magicblock-accounts-db" }
 magicblock-api = { path = "./magicblock-api" }
 magicblock-bank = { path = "./magicblock-bank" }
-magicblock-committor-service = { path = "./magicblock-committor-service" }
 magicblock-committor-program = { path = "./magicblock-committor-program", features = [
   "no-entrypoint",
 ] }
+magicblock-committor-service = { path = "./magicblock-committor-service" }
 magicblock-config = { path = "./magicblock-config" }
 magicblock-core = { path = "./magicblock-core" }
 magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "4af7f1c" }

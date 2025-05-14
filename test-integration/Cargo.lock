@@ -2937,7 +2937,6 @@ dependencies = [
  "log",
  "magicblock-config",
  "magicblock-core",
- "magicblock-delegation-program 1.0.0",
  "rayon",
  "serde",
  "solana-rpc-client",
@@ -3659,7 +3658,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-committor-program"
-version = "0.0.0"
+version = "0.1.1"
 dependencies = [
  "borsh 1.5.7",
  "borsh-derive 1.5.7",
@@ -3668,19 +3667,19 @@ dependencies = [
  "solana-account",
  "solana-program",
  "solana-pubkey",
- "thiserror 2.0.11",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
 name = "magicblock-committor-service"
-version = "0.0.0"
+version = "0.1.1"
 dependencies = [
- "base64 0.22.1",
+ "base64 0.21.7",
  "bincode",
  "borsh 1.5.7",
  "log",
  "magicblock-committor-program",
- "magicblock-delegation-program 1.0.0",
+ "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=4af7f1c)",
  "magicblock-rpc-client",
  "magicblock-table-mania",
  "rusqlite",
@@ -3690,7 +3689,8 @@ dependencies = [
  "solana-rpc-client-api",
  "solana-sdk",
  "solana-transaction-status-client-types",
- "thiserror 2.0.11",
+ "static_assertions",
+ "thiserror 1.0.69",
  "tokio",
  "tokio-util 0.7.13",
 ]
@@ -3938,30 +3938,31 @@ dependencies = [
 
 [[package]]
 name = "magicblock-rpc-client"
-version = "0.0.0"
+version = "0.1.1"
 dependencies = [
  "log",
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk",
  "solana-transaction-status-client-types",
- "thiserror 2.0.11",
+ "thiserror 1.0.69",
  "tokio",
 ]
 
 [[package]]
 name = "magicblock-table-mania"
-version = "0.0.0"
+version = "0.1.1"
 dependencies = [
  "ed25519-dalek",
  "log",
  "magicblock-rpc-client",
+ "rand 0.8.5",
  "sha3",
  "solana-pubkey",
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk",
- "thiserror 2.0.11",
+ "thiserror 1.0.69",
  "tokio",
 ]
 
@@ -5688,6 +5689,25 @@ dependencies = [
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk",
+]
+
+[[package]]
+name = "schedulecommit-committor-service"
+version = "0.0.0"
+dependencies = [
+ "log",
+ "magicblock-committor-program",
+ "magicblock-committor-service",
+ "magicblock-delegation-program 1.0.0",
+ "magicblock-rpc-client",
+ "program-flexi-counter",
+ "solana-account",
+ "solana-pubkey",
+ "solana-rpc-client",
+ "solana-rpc-client-api",
+ "solana-sdk",
+ "test-tools-core",
+ "tokio",
 ]
 
 [[package]]
