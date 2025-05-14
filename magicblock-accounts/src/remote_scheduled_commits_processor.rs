@@ -131,7 +131,9 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
             // Collect all SentCommit info available at this stage
             // We add the chain_signatures after we sent off the changeset
             let sent_commit = SentCommit {
+                chain_signatures: vec![],
                 commit_id: commit.id,
+                slot: commit.slot,
                 payer: commit.payer,
                 blockhash: commit.blockhash,
                 included_pubkeys: committees
@@ -141,7 +143,6 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
                 excluded_pubkeys,
                 feepayers,
                 requested_undelegation: commit.request_undelegation,
-                ..Default::default()
             };
             sent_commits.insert(
                 commit.id,
@@ -223,28 +224,51 @@ impl RemoteScheduledCommitsProcessor {
                 "Committing changeset with {} accounts",
                 changeset_metadata.accounts.len()
             );
-            committor_service
+            match committor_service
                 .commit_changeset(changeset, ephemeral_blockhash, true)
                 .await
-                // TODO: @@@
-                .unwrap();
-            debug!(
-                "Committed changeset with {} accounts",
-                changeset_metadata.accounts.len()
-            );
+            {
+                Ok(Some(reqid)) => {
+                    debug!(
+                        "Committed changeset with {} accounts via reqid {}",
+                        changeset_metadata.accounts.len(),
+                        reqid
+                    );
+                }
+                Ok(None) => {
+                    debug!(
+                        "Committed changeset with {} accounts, but did not get a reqid",
+                        changeset_metadata.accounts.len()
+                    );
+                }
+                Err(err) => {
+                    error!(
+                        "Tried to commit changeset with {} accounts but failed to send request ({:#?})",
+                        changeset_metadata.accounts.len(),err
+                    );
+                }
+            }
             for bundle_id in changeset_metadata
                 .accounts
                 .iter()
                 .map(|account| account.bundle_id)
                 .collect::<HashSet<_>>()
             {
-                match committor_service
+                let bundle_signatures = match committor_service
                     .get_bundle_signatures(bundle_id)
                     .await
-                    // TODO: @@@
-                    .unwrap()
-                    .unwrap()
                 {
+                    Ok(Ok(sig)) => sig,
+                    Ok(Err(err)) => {
+                        error!("Encountered error while getting bundle signatures for {}: {:?}", bundle_id, err);
+                        continue;
+                    }
+                    Err(err) => {
+                        error!("Encountered error while getting bundle signatures for {}: {:?}", bundle_id, err);
+                        continue;
+                    }
+                };
+                match bundle_signatures {
                     Some(BundleSignatureRow {
                         processed_signature,
                         finalized_signature,
