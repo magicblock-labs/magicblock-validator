@@ -807,7 +807,6 @@ impl MagicValidator {
                 self.committor_service.reserve_common_pubkeys(),
             )
             .await?;
-            info!("RESERVED");
 
             if !self.config.ledger.reset {
                 remote_account_cloner_worker.hydrate().await?;
