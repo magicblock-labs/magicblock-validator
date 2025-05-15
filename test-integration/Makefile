@@ -42,6 +42,8 @@ $(SCHEDULECOMMIT_SO): $(SCHEDULECOMMIT_SRC)
 	cargo build-sbf --manifest-path $(SCHEDULECOMMIT_DIR)/Cargo.toml
 $(SCHEDULECOMMIT_SECURITY_SO): $(SCHEDULECOMMIT_SECURITY_SRC)
 	cargo build-sbf --manifest-path $(SCHEDULECOMMIT_SECURITY_DIR)/Cargo.toml
+$(COMMITTOR_PROGRAM_SO): $(COMMITTOR_PROGRAM_SRC)
+	cargo build-sbf --manifest-path $(COMMITTOR_PROGRAM_DIR)/Cargo.toml
 
 deploy-flexi-counter: $(FLEXI_COUNTER_SO)
 	solana program deploy \
