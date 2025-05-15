@@ -18,7 +18,9 @@ use test_runner::cleanup::{cleanup_devnet_only, cleanup_validators};
 
 pub fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let Ok(committor_output) = run_committor_tests(&manifest_dir) else {
+    let Ok((table_mania_output, committor_output)) =
+        run_table_mania_and_committor_tests(&manifest_dir)
+    else {
         // If any test run panics (i.e. not just a failing test) then we bail
         return;
     };
@@ -47,6 +49,7 @@ pub fn main() {
     };
 
     // Assert that all tests passed
+    assert_cargo_tests_passed(table_mania_output);
     assert_cargo_tests_passed(committor_output);
     assert_cargo_tests_passed(security_output);
     assert_cargo_tests_passed(scenarios_output);
@@ -95,8 +98,10 @@ fn run_restore_ledger_tests(
     Ok(output)
 }
 
-fn run_committor_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
-    eprintln!("======== Starting DEVNET Validator for Committor ========");
+fn run_table_mania_and_committor_tests(
+    manifest_dir: &str,
+) -> Result<(Output, Output), Box<dyn Error>> {
+    eprintln!("======== Starting DEVNET Validator for TableMania and Committor ========");
 
     let loaded_chain_accounts =
         LoadedAccounts::with_delegation_program_test_authority();
@@ -112,22 +117,36 @@ fn run_committor_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
         }
     };
 
-    // NOTE: the committor tests run directly against a chain validator
-    //       therefore no ephemeral validator needs to be started
+    // NOTE: the table mania and committor tests run directly against
+    // a chain validator therefore no ephemeral validator needs to be started
+
+    let test_table_mania_dir =
+        format!("{}/../{}", manifest_dir, "test-table-mania");
+    let table_mania_test_output =
+        match run_test(test_table_mania_dir, Default::default()) {
+            Ok(output) => output,
+            Err(err) => {
+                eprintln!("Failed to run table-mania: {:?}", err);
+                cleanup_devnet_only(&mut devnet_validator);
+                return Err(err.into());
+            }
+        };
 
     let test_committor_dir =
         format!("{}/../{}", manifest_dir, "schedulecommit/committor-service");
     eprintln!("Running committor tests in {}", test_committor_dir);
-    let test_output = match run_test(test_committor_dir, Default::default()) {
-        Ok(output) => output,
-        Err(err) => {
-            eprintln!("Failed to run committor: {:?}", err);
-            cleanup_devnet_only(&mut devnet_validator);
-            return Err(err.into());
-        }
-    };
+    let committor_test_output =
+        match run_test(test_committor_dir, Default::default()) {
+            Ok(output) => output,
+            Err(err) => {
+                eprintln!("Failed to run committor: {:?}", err);
+                cleanup_devnet_only(&mut devnet_validator);
+                return Err(err.into());
+            }
+        };
     cleanup_devnet_only(&mut devnet_validator);
-    Ok(test_output)
+
+    Ok((table_mania_test_output, committor_test_output))
 }
 
 fn run_schedule_commit_tests(
