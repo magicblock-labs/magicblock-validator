@@ -93,7 +93,6 @@ impl RemoteAccountUpdatesShard {
         let mut clock_slot = 0;
         // We'll store useful maps for each of the account subscriptions
         let mut account_streams = StreamMap::new();
-        // rust compiler is not yet smart enough to figure out the exact type
         const LOG_CLOCK_FREQ: u64 = 100;
         let mut log_clock_count = 0;
 
@@ -117,6 +116,7 @@ impl RemoteAccountUpdatesShard {
                     } else {
                         warn!("Shard {}: Received empty clock data", self.shard_id);
                     }
+                    self.try_to_override_last_known_update_slot(clock::ID, clock_slot);
                 }
                 // When we receive a message to start monitoring an account
                 Some((pubkey, unsub)) = self.monitoring_request_receiver.recv() => {
