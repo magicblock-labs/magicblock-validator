@@ -90,7 +90,6 @@ impl RemoteAccountUpdatesShard {
         let mut pool = PubsubPool::new(ws_url, config).await?;
         // Subscribe to the clock from the RPC (to figure out the latest slot)
         let mut clock_stream = pool.subscribe(clock::ID).await?;
-        println!("subscribed to clock subscription");
         let mut clock_slot = 0;
         // We'll store useful maps for each of the account subscriptions
         let mut account_streams = StreamMap::new();
