@@ -29,7 +29,7 @@ integration-test-tools = { path = "test-tools" }
 log = "0.4.20"
 magicblock-api = { path = "../magicblock-api" }
 magicblock-accounts-db = { path = "../magicblock-accounts-db", features = [ "dev-tools" ] }
-magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "eba7644", default-features = false}
+magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "1f8b2fd", default-features = false}
 magicblock-config = { path = "../magicblock-config" }
 magicblock-core = { path = "../magicblock-core" }
 program-flexi-counter = { path = "./programs/flexi-counter" }
