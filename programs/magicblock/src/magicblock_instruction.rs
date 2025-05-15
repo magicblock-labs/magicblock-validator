@@ -99,7 +99,7 @@ pub(crate) struct AccountModificationForInstruction {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
-pub(crate) enum MagicBlockInstruction {
+pub enum MagicBlockInstruction {
     /// Modify one or more accounts
     ///
     /// # Account references
@@ -160,8 +160,51 @@ pub(crate) enum MagicBlockInstruction {
     /// We implement it this way so we can log the signature of this transaction
     /// as part of the [MagicBlockInstruction::ScheduleCommit] instruction.
     ScheduledCommitSent(u64),
+    ScheduleAction(MagicActionArgs),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct HandlerArgs {
+    pub escrow_index: u8,
+    pub data: Vec<u8>,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub struct CallHandlerArgs {
+    pub args: HandlerArgs,
+    pub destination_program: u8, // index of the account
+    pub accounts: Vec<u8>,       // indecis of account
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub enum CommitTypeArgs {
+    Standalone(Vec<u8>), // indices on accounts
+    WithHandler {
+        committed_accounts: Vec<u8>, // indices of accounts
+        call_handlers: Vec<CallHandlerArgs>,
+    },
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub enum UndelegateTypeArgs {
+    Standalone,
+    WithHandler { call_handlers: Vec<CallHandlerArgs> },
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub struct CommitAndUndelegateArgs {
+    pub commit_type: CommitTypeArgs,
+    pub undelegate_type: UndelegateTypeArgs,
+}
+
+#[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
+pub enum MagicActionArgs {
+    L1Action(Vec<CallHandlerArgs>),
+    Commit(CommitTypeArgs),
+    CommitAndUndelegate(CommitAndUndelegateArgs),
+}
+
+// TODO: why that exists?
 #[allow(unused)]
 impl MagicBlockInstruction {
     pub(crate) fn index(&self) -> u8 {
@@ -172,6 +215,7 @@ impl MagicBlockInstruction {
             ScheduleCommitAndUndelegate => 2,
             AcceptScheduleCommits => 3,
             ScheduledCommitSent(_) => 4,
+            ScheduleAction(_) => 5,
         }
     }
 

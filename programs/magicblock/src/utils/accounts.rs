@@ -6,10 +6,12 @@ use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{
     account::{Account, AccountSharedData, ReadableAccount, WritableAccount},
     account_info::{AccountInfo, IntoAccountInfo},
-    instruction::InstructionError,
+    instruction::{AccountMeta, InstructionError},
     pubkey::Pubkey,
     transaction_context::TransactionContext,
 };
+
+use crate::magic_context::ShortAccountMeta;
 
 pub(crate) fn find_tx_index_of_instruction_account(
     invoke_context: &InvokeContext,
@@ -98,6 +100,21 @@ pub(crate) fn get_instruction_pubkey_with_idx(
     let tx_idx = ix_ctx.get_index_of_instruction_account_in_transaction(idx)?;
     let pubkey = transaction_context.get_key_of_account_at_index(tx_idx)?;
     Ok(pubkey)
+}
+
+pub(crate) fn get_instruction_account_short_meta_with_idx(
+    transaction_context: &TransactionContext,
+    idx: u16,
+) -> Result<ShortAccountMeta, InstructionError> {
+    let ix_ctx = transaction_context.get_current_instruction_context()?;
+    let tx_idx = ix_ctx.get_index_of_instruction_account_in_transaction(idx)?;
+
+    let pubkey = *transaction_context.get_key_of_account_at_index(tx_idx)?;
+    let is_writable = ix_ctx.is_instruction_account_writable(idx)?;
+    Ok(ShortAccountMeta {
+        pubkey,
+        is_writable,
+    })
 }
 
 pub(crate) fn debit_instruction_account_at_index(
