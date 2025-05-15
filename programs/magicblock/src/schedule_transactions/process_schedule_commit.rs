@@ -1,7 +1,4 @@
-use std::{
-    collections::HashSet,
-    sync::atomic::{AtomicU64, Ordering},
-};
+use std::{collections::HashSet, sync::atomic::Ordering};
 
 use magicblock_core::magic_program::MAGIC_CONTEXT_PUBKEY;
 use solana_log_collector::ic_msg;
@@ -13,7 +10,9 @@ use solana_sdk::{
 use crate::{
     magic_context::{CommittedAccount, MagicContext, ScheduledCommit},
     magicblock_instruction::scheduled_commit_sent,
-    schedule_transactions::transaction_scheduler::TransactionScheduler,
+    schedule_transactions::{
+        transaction_scheduler::TransactionScheduler, COMMIT_ID,
+    },
     utils::{
         account_actions::set_account_owner_to_delegation_program,
         accounts::{
@@ -33,8 +32,6 @@ pub(crate) fn process_schedule_commit(
     invoke_context: &mut InvokeContext,
     opts: ProcessScheduleCommitOptions,
 ) -> Result<(), InstructionError> {
-    static COMMIT_ID: AtomicU64 = AtomicU64::new(0);
-
     const PAYER_IDX: u16 = 0;
     const MAGIC_CONTEXT_IDX: u16 = PAYER_IDX + 1;
 
@@ -329,7 +326,7 @@ pub fn process_accept_scheduled_commits(
     Ok(())
 }
 
-fn check_magic_context_id(
+pub fn check_magic_context_id(
     invoke_context: &InvokeContext,
     idx: u16,
 ) -> Result<(), InstructionError> {

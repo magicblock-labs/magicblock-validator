@@ -1,6 +1,7 @@
 use solana_program_runtime::declare_process_instruction;
 use solana_sdk::program_utils::limited_deserialize;
 
+use crate::schedule_transactions::process_schedule_action;
 use crate::{
     magicblock_instruction::MagicBlockInstruction,
     mutate_accounts::process_mutate_accounts,
@@ -58,6 +59,13 @@ declare_process_instruction!(
                     invoke_context,
                     transaction_context,
                     id,
+                )
+            }
+            MagicBlockInstruction::ScheduleAction(args) => {
+                process_schedule_action(
+                    signers,
+                    invoke_context,
+                    args,
                 )
             }
         }
