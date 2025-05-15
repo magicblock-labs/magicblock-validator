@@ -145,7 +145,7 @@ pub fn wait_for_validator(mut validator: Child, port: u16) -> Option<Child> {
     let max_retries = if std::env::var("CI").is_ok() {
         1500
     } else {
-        75
+        800
     };
 
     for _ in 0..max_retries {
