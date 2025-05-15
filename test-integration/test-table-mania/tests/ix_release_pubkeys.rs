@@ -2,11 +2,12 @@ use std::collections::HashSet;
 
 use solana_pubkey::Pubkey;
 use solana_sdk::signature::Keypair;
+use test_tools_core::init_logger;
 mod utils;
 
 #[tokio::test]
 async fn test_single_table_two_requests_with_overlapping_pubkeys() {
-    utils::init_logger();
+    init_logger!();
 
     let authority = Keypair::new();
     let table_mania = utils::setup_table_mania(&authority).await;
@@ -50,7 +51,7 @@ async fn test_single_table_two_requests_with_overlapping_pubkeys() {
 
 #[tokio::test]
 async fn test_two_table_three_requests_with_one_overlapping_pubkey() {
-    utils::init_logger();
+    init_logger!();
 
     let authority = Keypair::new();
     let table_mania = utils::setup_table_mania(&authority).await;

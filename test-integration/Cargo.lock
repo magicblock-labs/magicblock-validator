@@ -10119,6 +10119,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "test-table-mania"
+version = "0.0.0"
+dependencies = [
+ "log",
+ "magicblock-rpc-client",
+ "magicblock-table-mania",
+ "paste",
+ "solana-pubkey",
+ "solana-rpc-client",
+ "solana-sdk",
+ "test-tools-core",
+ "tokio",
+]
+
+[[package]]
 name = "test-tools-core"
 version = "0.1.1"
 dependencies = [

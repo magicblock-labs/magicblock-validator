@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use log::*;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
@@ -10,29 +8,14 @@ use solana_sdk::signature::Keypair;
 use solana_sdk::signer::Signer;
 use std::time::{Duration, Instant};
 
+#[allow(unused)] // used in tests
 pub const TEST_TABLE_CLOSE: bool = cfg!(feature = "test_table_close");
 
 pub async fn sleep_millis(millis: u64) {
     tokio::time::sleep(tokio::time::Duration::from_millis(millis)).await;
 }
 
-pub fn init_logger_file_path() {
-    let _ = env_logger::builder()
-        .format_timestamp(None)
-        .format_module_path(false)
-        .format_target(false)
-        .format_source_path(true)
-        .is_test(true)
-        .try_init();
-}
-
-pub fn init_logger() {
-    let _ = env_logger::builder()
-        .format_timestamp(None)
-        .is_test(true)
-        .try_init();
-}
-
+#[allow(unused)] // used in tests
 pub async fn setup_table_mania(validator_auth: &Keypair) -> TableMania {
     let rpc_client = {
         let client = RpcClient::new_with_commitment(
@@ -57,6 +40,7 @@ pub async fn setup_table_mania(validator_auth: &Keypair) -> TableMania {
     }
 }
 
+#[allow(unused)] // used in tests
 pub async fn close_released_tables(table_mania: &TableMania) {
     if TEST_TABLE_CLOSE {
         // Tables deactivate after ~2.5 mins (150secs), but most times
@@ -102,6 +86,7 @@ pub async fn close_released_tables(table_mania: &TableMania) {
     }
 }
 
+#[allow(unused)] // used in tests
 pub async fn log_active_table_addresses(table_mania: &TableMania) {
     debug!(
         "Active Tables: {}",

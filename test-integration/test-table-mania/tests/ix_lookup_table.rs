@@ -9,6 +9,7 @@ use solana_sdk::{
     commitment_config::CommitmentConfig, native_token::LAMPORTS_PER_SOL,
     signature::Keypair, signer::Signer,
 };
+use test_tools_core::init_logger;
 
 mod utils;
 
@@ -80,7 +81,7 @@ async fn get_open_tables(
 
 #[tokio::test]
 async fn test_create_fetch_and_close_lookup_table() {
-    utils::init_logger();
+    init_logger!();
 
     let validator_auth = Keypair::new();
     let pubkeys = vec![0; 10]

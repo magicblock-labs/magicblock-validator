@@ -20,14 +20,8 @@ solana-sdk = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true }
 
-[dev-dependencies]
-env_logger = { workspace = true }
-paste = { workspace = true }
-tokio = { workspace = true, features = ["rt", "macros"] }
-
 [features]
 default = []
-test_table_close = []
 # Needed to allow multiple tests to run in parallel without trying to
 # use the same lookup table address
 randomize_lookup_table_slot = []

@@ -11,9 +11,10 @@ members = [
   "test-cloning",
   "test-issues",
   "test-ledger-restore",
-  "test-runner",
-  "test-tools",
   "test-magicblock-api",
+  "test-runner",
+  "test-table-mania",
+  "test-tools",
 ]
 resolver = "2"
 
@@ -41,6 +42,8 @@ magicblock-committor-program = { path = "../magicblock-committor-program", featu
 magicblock-delegation-program = { path = "../../delegation-program" }
 magicblock-committor-service = { path = "../magicblock-committor-service" }
 magicblock-rpc-client = { path = "../magicblock-rpc-client" }
+magicblock-table-mania = { path = "../magicblock-table-mania" }
+paste = "1.0"
 program-flexi-counter = { path = "./programs/flexi-counter" }
 program-schedulecommit = { path = "programs/schedulecommit" }
 program-schedulecommit-security = { path = "programs/schedulecommit-security" }

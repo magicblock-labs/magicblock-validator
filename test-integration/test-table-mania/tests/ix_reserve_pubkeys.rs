@@ -5,6 +5,7 @@ use solana_pubkey::Pubkey;
 use solana_sdk::{
     address_lookup_table::state::LOOKUP_TABLE_MAX_ADDRESSES, signature::Keypair,
 };
+use test_tools_core::init_logger;
 use tokio::task::JoinSet;
 mod utils;
 
@@ -29,7 +30,7 @@ reserve_pubkeys_in_one_table!(100);
 reserve_pubkeys_in_one_table!(256);
 
 async fn reserve_pubkeys_in_one_table_in_chunks(chunk_size: usize) {
-    utils::init_logger();
+    init_logger!();
     let authority = Keypair::new();
 
     let mut pubkeys = (0..LOOKUP_TABLE_MAX_ADDRESSES)
@@ -90,7 +91,7 @@ async fn reserve_pubkeys_in_multiple_tables_in_chunks(
     amount: usize,
     chunk_size: usize,
 ) {
-    utils::init_logger();
+    init_logger!();
     let authority = Keypair::new();
 
     let pubkeys = (0..amount)
