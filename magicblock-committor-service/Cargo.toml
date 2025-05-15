@@ -7,6 +7,9 @@ homepage.workspace = true
 license.workspace = true
 edition.workspace = true
 
+[lib]
+doctest = false
+
 [dependencies]
 base64 = { workspace = true }
 bincode = { workspace = true }
