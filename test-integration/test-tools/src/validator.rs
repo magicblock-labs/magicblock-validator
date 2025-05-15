@@ -96,6 +96,22 @@ pub fn start_test_validator_with_config(
             loaded_accounts.protocol_fees_vault().to_string(),
             "protocol-fees-vault.json",
         ),
+        (
+            "9yXjZTevvMp1XgZSZEaziPRgFiXtAQChpnP2oX9eCpvt".to_string(),
+            "non-delegated-cloneable-account1.json",
+        ),
+        (
+            "BHBuATGifAD4JbRpM5nVdyhKzPgv3p2CxLEHAqwBzAj5".to_string(),
+            "non-delegated-cloneable-account2.json",
+        ),
+        (
+            "2o48ieM95rmHqMWC5B3tTX4DL7cLm4m1Kuwjay3keQSv".to_string(),
+            "non-delegated-cloneable-account3.json",
+        ),
+        (
+            "2EmfL3MqL3YHABudGNmajjCpR13NNEn9Y4LWxbDm6SwR".to_string(),
+            "non-delegated-cloneable-account4.json",
+        ),
     ];
 
     let account_args = accounts

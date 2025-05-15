@@ -2,8 +2,8 @@ use std::sync::Once;
 
 pub use prometheus::HistogramTimer;
 use prometheus::{
-    Histogram, HistogramOpts, IntCounter, IntCounterVec, IntGauge, Opts,
-    Registry,
+    Histogram, HistogramOpts, IntCounter, IntCounterVec, IntGauge, IntGaugeVec,
+    Opts, Registry,
 };
 pub use types::{AccountClone, AccountCommit, Outcome};
 mod types;
@@ -185,6 +185,20 @@ lazy_static::lazy_static! {
                 SECONDS_1_9.iter()).cloned().collect()
             ),
     ).unwrap();
+
+    static ref MONITORED_ACCOUNTS_GAUGE: IntGauge = IntGauge::new(
+        "monitored_accounts", "number of undelegated accounts, being monitored via websocket",
+    ).unwrap();
+
+    static ref SUBSCRIPTIONS_COUNT_GAUGE: IntGaugeVec = IntGaugeVec::new(
+        Opts::new("subscriptions_count", "number of active account subscriptions"),
+        &["shard"],
+    ).unwrap();
+
+    static ref EVICTED_ACCOUNTS_COUNT: IntGauge = IntGauge::new(
+        "evicted_accounts", "number of accounts forcefully removed from monitored list and database",
+    ).unwrap();
+
 }
 
 pub(crate) fn register() {
@@ -228,6 +242,9 @@ pub(crate) fn register() {
         register!(ENSURE_ACCOUNTS_TIME_HISTOGRAM);
         register!(TRANSACTION_EXECUTION_TIME_HISTORY);
         register!(FLUSH_ACCOUNTS_TIME_HISTOGRAM);
+        register!(MONITORED_ACCOUNTS_GAUGE);
+        register!(SUBSCRIPTIONS_COUNT_GAUGE);
+        register!(EVICTED_ACCOUNTS_COUNT);
     });
 }
 
@@ -314,6 +331,12 @@ pub fn set_cached_clone_outputs_count(count: usize) {
 
 pub fn account_commit_end(timer: HistogramTimer) {
     timer.stop_and_record();
+}
+
+pub fn set_subscriptions_count(count: usize, shard: &str) {
+    SUBSCRIPTIONS_COUNT_GAUGE
+        .with_label_values(&[shard])
+        .set(count as i64);
 }
 
 pub fn set_ledger_size(size: u64) {
@@ -412,6 +435,13 @@ where
     F: FnOnce() -> T,
 {
     TRANSACTION_EXECUTION_TIME_HISTORY.observe_closure_duration(f)
+}
+
+pub fn adjust_monitored_accounts_count(count: usize) {
+    MONITORED_ACCOUNTS_GAUGE.set(count as i64);
+}
+pub fn inc_evicted_accounts_count() {
+    EVICTED_ACCOUNTS_COUNT.inc();
 }
 
 pub fn observe_flush_accounts_time<T, F>(f: F) -> T

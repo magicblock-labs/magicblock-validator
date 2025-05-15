@@ -4,4 +4,4 @@
 lifecycle = "ephemeral"
 
 # Optionally deployment can hard-code a program whitelist
-allowed_programs = [{ id = "wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4" }]
+allowed-programs = [{ id = "wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4" }]

@@ -9,7 +9,7 @@ lifecycle = "programs-replica"
 
 commit = { frequency_millis = 500, compute_unit_price = 1_000_000 }
 
-allowed_programs = []
+allowed-programs = []
 
 [rpc]
 addr = "0.0.0.0"

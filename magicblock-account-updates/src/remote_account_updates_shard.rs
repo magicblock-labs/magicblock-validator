@@ -1,12 +1,15 @@
 use std::{
     cmp::{max, min},
     collections::{hash_map::Entry, HashMap},
+    future::Future,
+    pin::Pin,
     sync::{Arc, RwLock},
 };
 
 use conjunto_transwise::RpcProviderConfig;
 use futures_util::StreamExt;
 use log::*;
+use magicblock_metrics::metrics;
 use solana_account_decoder::{UiAccountEncoding, UiDataSliceConfig};
 use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
 use solana_rpc_client_api::config::RpcAccountInfoConfig;
@@ -33,7 +36,7 @@ pub enum RemoteAccountUpdatesShardError {
 pub struct RemoteAccountUpdatesShard {
     shard_id: String,
     rpc_provider_config: RpcProviderConfig,
-    monitoring_request_receiver: Receiver<Pubkey>,
+    monitoring_request_receiver: Receiver<(Pubkey, bool)>,
     first_subscribed_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
     last_known_update_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
 }
@@ -42,7 +45,7 @@ impl RemoteAccountUpdatesShard {
     pub fn new(
         shard_id: String,
         rpc_provider_config: RpcProviderConfig,
-        monitoring_request_receiver: Receiver<Pubkey>,
+        monitoring_request_receiver: Receiver<(Pubkey, bool)>,
         first_subscribed_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
         last_known_update_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
     ) -> Self {
@@ -86,7 +89,12 @@ impl RemoteAccountUpdatesShard {
         let mut clock_slot = 0;
         // We'll store useful maps for each of the account subscriptions
         let mut account_streams = StreamMap::new();
-        let mut account_unsubscribes = HashMap::new();
+        // rust compiler is not yet smart enough to figure out the exact type
+        type BoxFn = Box<
+            dyn FnOnce() -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>
+                + Send,
+        >;
+        let mut account_unsubscribes: HashMap<Pubkey, BoxFn> = HashMap::new();
         const LOG_CLOCK_FREQ: u64 = 100;
         let mut log_clock_count = 0;
 
@@ -112,7 +120,16 @@ impl RemoteAccountUpdatesShard {
                     }
                 }
                 // When we receive a message to start monitoring an account
-                Some(pubkey) = self.monitoring_request_receiver.recv() => {
+                Some((pubkey, unsub)) = self.monitoring_request_receiver.recv() => {
+                    if unsub {
+                        let Some(request) = account_unsubscribes.remove(&pubkey) else {
+                            continue;
+                        };
+                        account_streams.remove(&pubkey);
+                        metrics::set_subscriptions_count(account_streams.len(), &self.shard_id);
+                        request().await;
+                        continue;
+                    }
                     if account_unsubscribes.contains_key(&pubkey) {
                         continue;
                     }
@@ -128,6 +145,7 @@ impl RemoteAccountUpdatesShard {
                         .map_err(RemoteAccountUpdatesShardError::PubsubClientError)?;
                     account_streams.insert(pubkey, stream);
                     account_unsubscribes.insert(pubkey, unsubscribe);
+                    metrics::set_subscriptions_count(account_streams.len(), &self.shard_id);
                     self.try_to_override_first_subscribed_slot(pubkey, clock_slot);
                 }
                 // When we receive an update from any account subscriptions

@@ -14,8 +14,8 @@ use crate::errors::{ConfigError, ConfigResult};
 // -----------------
 // AccountsConfig
 // -----------------
-#[derive(Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct AccountsConfig {
     #[serde(default)]
     pub remote: RemoteConfig,
@@ -30,8 +30,24 @@ pub struct AccountsConfig {
 
     #[serde(default)]
     pub db: AccountsDbConfig,
+
+    #[serde(default = "default_max_monitored_accounts")]
+    pub max_monitored_accounts: usize,
 }
 
+impl Default for AccountsConfig {
+    fn default() -> Self {
+        Self {
+            remote: Default::default(),
+            lifecycle: Default::default(),
+            commit: Default::default(),
+            payer: Default::default(),
+            allowed_programs: Default::default(),
+            db: Default::default(),
+            max_monitored_accounts: default_max_monitored_accounts(),
+        }
+    }
+}
 // -----------------
 // RemoteConfig
 // -----------------
@@ -162,6 +178,10 @@ pub struct CommitStrategy {
 
 fn default_frequency_millis() -> u64 {
     500
+}
+
+fn default_max_monitored_accounts() -> usize {
+    2048
 }
 
 fn default_compute_unit_price() -> u64 {

@@ -30,8 +30,19 @@ id = "MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr"
 path = "<remote>"
 
 [[program]]
+id = "3JnJ727jWEmPVU8qfXwtH63sCNDX7nMgsLbg8qy8aaPX"
+path = "../programs/redline/redline.so"
+
+[[program]]
+id = "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
+path = "../schedulecommit/elfs/dlp.so"
+
+[[program]]
 id = "42Y73BJyGCXh2XUrqyz59WCk2DsBtqrFrt38t9ogB5sD"
 path = "../schedulecommit/elfs/mdp.so"
+
+
+
 
 [rpc]
 port = 7799

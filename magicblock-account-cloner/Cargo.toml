@@ -23,6 +23,7 @@ solana-sdk = { workspace = true }
 tokio = { workspace = true }
 tokio-util = { workspace = true }
 thiserror = { workspace = true }
+lru = "0.14"
 
 [dev-dependencies]
 magicblock-committor-service = { workspace = true, features = [

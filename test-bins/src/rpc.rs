@@ -71,16 +71,7 @@ async fn main() {
     const WS_PORT_OFFSET: u16 = 1;
     let rpc_port = config.rpc.port;
     let ws_port = rpc_port + WS_PORT_OFFSET; // WebSocket port is typically RPC port + 1
-    let rpc_host = &config.rpc.addr;
-
-    info!("");
-    info!("🧙 Magicblock Validator is running!");
-    info!("-----------------------------------");
-    info!("📡 RPC endpoint:       http://{}:{}", rpc_host, rpc_port);
-    info!("🔌 WebSocket endpoint: ws://{}:{}", rpc_host, ws_port);
-    info!("-----------------------------------");
-    info!("Ready for connections!");
-    info!("");
+    let rpc_host = config.rpc.addr;
 
     let validator_keypair = validator_keypair();
 
@@ -105,6 +96,16 @@ async fn main() {
         ledger::lock_ledger(api.ledger().ledger_path(), &mut ledger_lock);
 
     api.start().await.expect("Failed to start validator");
+
+    info!("");
+    info!("🧙 Magicblock Validator is running!");
+    info!("-----------------------------------");
+    info!("📡 RPC endpoint:       http://{}:{}", rpc_host, rpc_port);
+    info!("🔌 WebSocket endpoint: ws://{}:{}", rpc_host, ws_port);
+    info!("-----------------------------------");
+    info!("Ready for connections!");
+    info!("");
+
     // validator is supposed to run forever, so we wait for
     // termination signal to initiate a graceful shutdown
     let _ = tokio::signal::ctrl_c().await;

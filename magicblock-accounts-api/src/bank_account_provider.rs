@@ -19,6 +19,11 @@ impl InternalAccountProvider for BankAccountProvider {
     fn has_account(&self, pubkey: &Pubkey) -> bool {
         self.bank.has_account(pubkey)
     }
+
+    fn remove_account(&self, pubkey: &Pubkey) {
+        self.bank.accounts_db.remove_account(pubkey);
+    }
+
     fn get_account(&self, pubkey: &Pubkey) -> Option<AccountSharedData> {
         self.bank.get_account(pubkey)
     }

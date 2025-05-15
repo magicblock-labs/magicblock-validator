@@ -178,6 +178,7 @@ pub fn init_system_metrics_ticker(
                     try_set_ledger_storage_size(&ledger);
                     set_accounts_storage_size(&bank);
                     try_set_ledger_counts(&ledger);
+                    set_accounts_count(&bank);
                 },
                 _ = token.cancelled() => {
                     break;
