@@ -58,7 +58,7 @@ pub enum CommittorServiceError {
         solana_sdk::message::CompileError,
     ),
 
-    #[error("Task {0} failed to creqate transaction: {1} ({1:?})")]
+    #[error("Task {0} failed to create transaction: {1} ({1:?})")]
     FailedToCreateTransaction(String, solana_sdk::signer::SignerError),
 
     #[error("Could not find commit strategy for bundle {0}")]

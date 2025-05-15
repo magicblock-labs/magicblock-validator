@@ -75,11 +75,11 @@ pub(crate) const MAX_UNDELEGATE_PER_TX: u8 = 3;
 pub(crate) const MAX_UNDELEGATE_PER_TX_USING_LOOKUP: u8 = 16;
 
 // Allows us to run undelegate instructions without rechunking them since we know
-// that we didn't process more than we also can undelegatge
+// that we didn't process more than we also can undelegate
 const_assert!(MAX_PROCESS_PER_TX <= MAX_UNDELEGATE_PER_TX,);
 
 // Allows us to run undelegate instructions using lookup tables without rechunking
-// them since we know that we didn't process more than we also can undelegatge
+// them since we know that we didn't process more than we also can undelegate
 const_assert!(
     MAX_PROCESS_PER_TX_USING_LOOKUP <= MAX_UNDELEGATE_PER_TX_USING_LOOKUP
 );
@@ -112,7 +112,7 @@ pub(crate) struct CommitTxReport {
     /// [MAX_ENCODED_TRANSACTION_SIZE].
     pub size_args_with_lookup: Option<usize>,
 
-    /// The size of the transaction including the finalize instructionk
+    /// The size of the transaction including the finalize instruction
     /// when using lookup tables
     /// This is only determined if the [SizeOfCommitWithArgs::size_including_finalize]
     /// is larger than [MAX_ENCODED_TRANSACTION_SIZE].

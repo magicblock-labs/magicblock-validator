@@ -32,7 +32,7 @@ pub enum CommittorMessage {
     ReservePubkeysForCommittee {
         /// Called once the pubkeys have been reserved
         respond_to: oneshot::Sender<CommittorServiceResult<()>>,
-        /// The comittee whose pubkeys to reserve in a lookup table
+        /// The committee whose pubkeys to reserve in a lookup table
         /// These pubkeys are used to process/finalize the commit
         committee: Pubkey,
         /// The owner program of the committee
@@ -273,8 +273,17 @@ impl CommittorService {
     }
 
     fn try_send(&self, msg: CommittorMessage) {
-        if let Err(TrySendError::Full(msg)) = self.sender.try_send(msg) {
-            error!("Failed to send commit message {:?}", msg);
+        if let Err(e) = self.sender.try_send(msg) {
+            match e {
+                TrySendError::Full(msg) => error!(
+                    "Channel full, failed to send commit message {:?}",
+                    msg
+                ),
+                TrySendError::Closed(msg) => error!(
+                    "Channel closed, failed to send commit message {:?}",
+                    msg
+                ),
+            }
         }
     }
 }

@@ -40,7 +40,7 @@ pub struct CommitStatusRow {
     /// The current status of the commit
     /// Includes the bundle_id which will be the same for accounts whose commits
     /// need to be applied atomically in a single transaction
-    /// For single accounts a bundle_id will be gnerated as well for consistency
+    /// For single accounts a bundle_id will be generated as well for consistency
     /// For Pending commits the bundle_id is not set
     pub commit_status: CommitStatus,
     /// Time since epoch at which the commit was last retried

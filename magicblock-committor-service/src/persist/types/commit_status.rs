@@ -29,7 +29,7 @@ pub enum CommitStatus {
     /// The commit is part of a bundle that contains too many commits to be included
     /// in a single transaction. Thus we cannot commit any of them.
     PartOfTooLargeBundleToProcess(u64),
-    /// The commmit was properly initialized and added to a chunk of instructions to process
+    /// The commit was properly initialized and added to a chunk of instructions to process
     /// commits via a transaction. For large commits the buffer and chunk accounts were properly
     /// prepared and haven't been closed.
     FailedProcess((u64, CommitStrategy, Option<CommitStatusSignatures>)),
@@ -134,9 +134,11 @@ impl
                 if let Some(sigs) = sigs {
                     sigs
                 } else {
-                    return Err(CommitPersistError::CommitStatusNeedsBundleId(
-                        status.to_string(),
-                    ));
+                    return Err(
+                        CommitPersistError::CommitStatusNeedsSignatures(
+                            status.to_string(),
+                        ),
+                    );
                 }
             };
         }
@@ -181,7 +183,7 @@ pub struct CommitStatusSignatures {
     /// The signature of the transaction processing the commit
     pub process_signature: Signature,
     /// The signature of the transaction finalizing the commit.
-    /// If the account was not finalized or it failed the this is `None`.
+    /// If the account was not finalized or it failed then this is `None`.
     /// If the finalize instruction was part of the process transaction then
     /// this signature is the same as [Self::process_signature].
     pub finalize_signature: Option<Signature>,

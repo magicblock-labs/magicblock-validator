@@ -130,9 +130,9 @@ pub(crate) async fn send_and_confirm(
                     start.elapsed().as_millis(),
                     tables
                 );
-                let all_accounts = ixs.iter().flat_map(|ix| {
-                    ix.accounts.iter().map(|x| x.pubkey).clone()
-                });
+                let all_accounts = ixs
+                    .iter()
+                    .flat_map(|ix| ix.accounts.iter().map(|x| x.pubkey));
                 let keys_not_from_table = all_accounts
                     .filter(|x| !keys_from_tables.contains(x))
                     .collect::<HashSet<_>>();

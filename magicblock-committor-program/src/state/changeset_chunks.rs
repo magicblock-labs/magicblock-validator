@@ -35,7 +35,7 @@ impl From<(&[u8], u32, u16)> for ChangesetChunk {
 }
 
 impl ChangesetChunk {
-    /// The index that the chunk will has in the [Chunks] tracker.
+    /// The index that the chunk will have in the [Chunks] tracker.
     pub fn chunk_idx(&self) -> u32 {
         self.offset / self.chunk_size as u32
     }

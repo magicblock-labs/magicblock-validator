@@ -54,7 +54,7 @@ pub fn provide_common_pubkeys(validator: &Pubkey) -> HashSet<Pubkey> {
         "Common pubkeys:
     validator:                {}
     delegation program:       {}
-    protoco fees vault:       {}
+    protocol fees vault:      {}
     validator fees vault:     {}
     committor program:        {}",
         validator,

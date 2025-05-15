@@ -88,7 +88,7 @@ pub enum CommitStage {
     /// initialized, but then this issue was detected.
     PartOfTooLargeBundleToProcess(CommitInfo),
 
-    /// The commmit was properly initialized and added to a chunk of instructions to process
+    /// The commit was properly initialized and added to a chunk of instructions to process
     /// commits via a transaction. For large commits the buffer and chunk accounts were properly
     /// prepared and haven't been closed.
     /// However that transaction failed.

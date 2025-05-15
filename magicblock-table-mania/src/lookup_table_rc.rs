@@ -280,7 +280,7 @@ impl LookupTableRc {
     }
 
     /// Returns `true` if the we requested to deactivate this table.
-    /// NOTE: this doesn't mean that the deactivation perios passed, thus
+    /// NOTE: this doesn't mean that the deactivation period passed, thus
     ///       the table could still be considered _deactivating_ on chain.
     pub fn deactivate_triggered(&self) -> bool {
         use LookupTableRc::*;
@@ -424,7 +424,7 @@ impl LookupTableRc {
     /// They are automatically reserved for one requestor.
     ///
     /// - **rpc_client**: RPC client to use for sending the extend transaction
-    /// - **authority**:  payer for the the extend transaction
+    /// - **authority**:  payer for the extend transaction
     /// - **pubkeys**:    to extend the lookup table with
     pub async fn extend(
         &self,
@@ -490,7 +490,7 @@ impl LookupTableRc {
     /// The transaction is signed with the [Self::derived_auth].
     ///
     /// - **rpc_client**: RPC client to use for sending the extend transaction
-    /// - **authority**:  payer for the the extend transaction
+    /// - **authority**:  payer for the extend transaction
     /// - **pubkeys**:    to extend the lookup table with
     ///
     /// Returns: the pubkeys that were added to the table
@@ -524,7 +524,7 @@ impl LookupTableRc {
     /// Deactivates this lookup table.
     ///
     /// - **rpc_client**: RPC client to use for sending the deactivate transaction
-    /// - **authority**:  pays for the the deactivate transaction
+    /// - **authority**:  pays for the deactivate transaction
     pub async fn deactivate(
         &mut self,
         rpc_client: &MagicblockRpcClient,
@@ -593,7 +593,7 @@ impl LookupTableRc {
                 slot
             }
         };
-        // NOTE: the solana exporer will show an account as _deactivated_ once we deactivate it
+        // NOTE: the solana explorer will show an account as _deactivated_ once we deactivate it
         //       even though it is actually _deactivating_
         //       I tried to shorten the wait here but found that this is the minimum time needed
         //       for the table to be considered fully _deactivated_
@@ -617,7 +617,7 @@ impl LookupTableRc {
     /// Checks if the table was deactivated and if so closes the table account.
     ///
     /// - **rpc_client**: RPC client to use for sending the close transaction
-    /// - **authority**:  pays for the the close transaction and is refunded the
+    /// - **authority**:  pays for the close transaction and is refunded the
     ///   table account rent
     /// - **current_slot**: the current slot to use for checking deactivation
     pub async fn close(

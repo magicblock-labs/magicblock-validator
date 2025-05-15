@@ -14,9 +14,9 @@ pub enum CommitPersistError {
     ParseSignatureError(#[from] solana_sdk::signature::ParseSignatureError),
 
     #[error("ParseHashError: '{0}' ({0:?})")]
-    ParseHahsError(#[from] solana_sdk::hash::ParseHashError),
+    ParseHashError(#[from] solana_sdk::hash::ParseHashError),
 
-    #[error("Invalid Commity Type: '{0}' ({0:?})")]
+    #[error("Invalid Commit Type: '{0}' ({0:?})")]
     InvalidCommitType(String),
 
     #[error("Invalid Commit Status: '{0}' ({0:?})")]

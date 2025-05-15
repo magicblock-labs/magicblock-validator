@@ -158,7 +158,7 @@ impl LookupTable {
     }
 
     /// Returns `true` if the we requested to deactivate this table.
-    /// NOTE: this doesn't mean that the deactivation perios passed, thus
+    /// NOTE: this doesn't mean that the deactivation period passed, thus
     ///       the table could still be considered _deactivating_ on chain.
     pub fn deactivate_triggered(&self) -> bool {
         use LookupTable::*;
@@ -187,7 +187,7 @@ impl LookupTable {
     /// - **latest_slot**: the on chain slot at which we are creating the table
     /// - **sub_slot**: a bump to allow creating multiple lookup tables with the same authority
     ///   at the same slot
-    /// - **pubkeys**: to extend the lookup table respecting respecting
+    /// - **pubkeys**: to extend the lookup table respecting
     ///   solana_sdk::address_lookup_table::state::LOOKUP_TABLE_MAX_ADDRESSES]
     ///   after it is initialized
     /// - **reqid**:   id of the request adding the pubkeys
@@ -270,7 +270,7 @@ impl LookupTable {
     /// The transaction is signed with the [Self::derived_auth].
     ///
     /// - **rpc_client**: RPC client to use for sending the extend transaction
-    /// - **authority**:  payer for the the extend transaction
+    /// - **authority**:  payer for the extend transaction
     /// - **pubkeys**:    to extend the lookup table with
     /// - **reqid**:      id of the request adding the pubkeys
     pub async fn extend(
@@ -335,7 +335,7 @@ impl LookupTable {
     /// The transaction is signed with the [Self::derived_auth].
     ///
     /// - **rpc_client**: RPC client to use for sending the extend transaction
-    /// - **authority**:  payer for the the extend transaction
+    /// - **authority**:  payer for the extend transaction
     /// - **pubkeys**:    to extend the lookup table with
     /// - **reqid**:      id of the request adding the pubkeys
     ///
@@ -371,7 +371,7 @@ impl LookupTable {
     /// Deactivates this lookup table.
     ///
     /// - **rpc_client**: RPC client to use for sending the deactivate transaction
-    /// - **authority**:  pays for the the deactivate transaction
+    /// - **authority**:  pays for the deactivate transaction
     pub async fn deactivate(
         &mut self,
         rpc_client: &MagicblockRpcClient,
@@ -437,7 +437,7 @@ impl LookupTable {
                 slot
             }
         };
-        // NOTE: the solana exporer will show an account as _deactivated_ once we deactivate it
+        // NOTE: the solana explorer will show an account as _deactivated_ once we deactivate it
         //       even though it is actually _deactivating_
         //       I tried to shorten the wait here but found that this is the minimum time needed
         //       for the table to be considered fully _deactivated_
@@ -461,7 +461,7 @@ impl LookupTable {
     /// Checks if the table was deactivated and if so closes the table account.
     ///
     /// - **rpc_client**: RPC client to use for sending the close transaction
-    /// - **authority**:  pays for the the close transaction and is refunded the
+    /// - **authority**:  pays for the close transaction and is refunded the
     ///   table account rent
     /// - **current_slot**: the current slot to use for checking deactivation
     pub async fn close(
