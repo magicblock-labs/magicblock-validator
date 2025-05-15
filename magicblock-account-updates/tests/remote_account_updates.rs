@@ -46,7 +46,7 @@ async fn test_devnet_monitoring_clock_sysvar_changes_over_time() {
     // Create account updates worker and client
     let (client, cancellation_token, worker_handle) = setup();
     // wait a bit for websocket connections to establish
-    sleep(Duration::from_millis(5_000)).await;
+    sleep(Duration::from_millis(20_000)).await;
     // The clock will change every slots, perfect for testing updates
     let sysvar_clock = clock::ID;
     // Before starting the monitoring, we should know nothing about the clock
@@ -79,7 +79,7 @@ async fn test_devnet_monitoring_multiple_accounts_at_the_same_time() {
     // Create account updates worker and client
     let (client, cancellation_token, worker_handle) = setup();
     // wait a bit for websocket connections to establish
-    sleep(Duration::from_millis(5_000)).await;
+    sleep(Duration::from_millis(20_000)).await;
     // Devnet accounts to be monitored for this test
     let sysvar_rent = rent::ID;
     let sysvar_sh = slot_hashes::ID;
@@ -112,7 +112,7 @@ async fn test_devnet_monitoring_some_accounts_only() {
     // Create account updates worker and client
     let (client, cancellation_token, worker_handle) = setup();
     // wait a bit for websocket connections to establish
-    sleep(Duration::from_millis(5_000)).await;
+    sleep(Duration::from_millis(20_000)).await;
     // Devnet accounts for this test
     let sysvar_rent = rent::ID;
     let sysvar_sh = slot_hashes::ID;
