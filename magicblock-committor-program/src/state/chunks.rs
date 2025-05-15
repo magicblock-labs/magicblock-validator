@@ -49,11 +49,11 @@ impl Chunks {
         // SAFETY: this is a bug and we need to crash and burn
         assert!(
             Self::bytes_for_count_len(chunk_count)
-                < consts::MAX_ACOUNT_ALLOC_PER_INSTRUCTION_SIZE as usize,
+                < consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as usize,
             "Size ({}) needed to track {} chunks is too large track and would require to realloc. Max allowed is {} bytes",
             Self::bytes_for_count_len(chunk_count),
             chunk_count,
-            consts::MAX_ACOUNT_ALLOC_PER_INSTRUCTION_SIZE
+            consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE
         );
         Self {
             bits: vec![0; Self::bits_for_count_len(chunk_count)],

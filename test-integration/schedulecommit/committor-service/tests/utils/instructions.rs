@@ -27,12 +27,12 @@ pub fn init_account_and_delegate_ixs(
     let rent_exempt = Rent::default().minimum_balance(bytes as usize);
     let mut realloc_ixs = vec![];
     if bytes
-        > magicblock_committor_program::consts::MAX_ACOUNT_ALLOC_PER_INSTRUCTION_SIZE
+        > magicblock_committor_program::consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE
             as u64
     {
         // TODO: we may have to chunk those
         let reallocs = bytes
-            / magicblock_committor_program::consts::MAX_ACOUNT_ALLOC_PER_INSTRUCTION_SIZE
+            / magicblock_committor_program::consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE
                 as u64;
         for i in 0..reallocs {
             realloc_ixs.push(create_realloc_ix(payer, bytes, i as u16));

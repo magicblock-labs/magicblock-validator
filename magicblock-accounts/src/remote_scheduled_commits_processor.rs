@@ -62,7 +62,7 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
             .max()
             .unwrap();
         // Safety we just obtained the max slot from the scheduled commits
-        let ephemereal_blockhash = scheduled_commits
+        let ephemeral_blockhash = scheduled_commits
             .iter()
             .find(|commit| commit.slot == max_slot)
             .map(|commit| commit.blockhash)
@@ -175,7 +175,7 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
             changeset_committor,
             changeset,
             sent_commits,
-            ephemereal_blockhash,
+            ephemeral_blockhash,
         );
 
         Ok(())

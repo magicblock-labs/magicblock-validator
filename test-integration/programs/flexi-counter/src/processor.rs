@@ -17,7 +17,7 @@ use solana_program::{
     sysvar::Sysvar,
 };
 
-use crate::instruction::MAX_ACOUNT_ALLOC_PER_INSTRUCTION_SIZE;
+use crate::instruction::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE;
 use crate::{
     instruction::{DelegateArgs, FlexiCounterInstruction},
     state::FlexiCounter,
@@ -133,7 +133,7 @@ fn process_realloc(
 
     let next_alloc_size = std::cmp::min(
         bytes,
-        current_size + MAX_ACOUNT_ALLOC_PER_INSTRUCTION_SIZE as u64,
+        current_size + MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as u64,
     );
 
     msg!(

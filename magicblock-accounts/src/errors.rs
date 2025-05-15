@@ -58,6 +58,6 @@ pub enum AccountsError {
     #[error("Too many committees: {0}")]
     TooManyCommittees(usize),
 
-    #[error("FailedToObtainReqidForCommittedChangeset {0:?}'")]
+    #[error("FailedToObtainReqidForCommittedChangeset {0:?}")]
     FailedToObtainReqidForCommittedChangeset(Box<ChangesetMeta>),
 }

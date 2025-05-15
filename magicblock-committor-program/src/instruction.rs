@@ -85,7 +85,7 @@ pub enum CommittorInstruction {
     /// It is called by the validator after the instruction that processes the
     /// change set stored in the buffer account and applies the commits to the
     /// relevant accounts.
-    /// Ideally it runs in the same transaction as the 'processs' instruction.
+    /// Ideally it runs in the same transaction as the 'process' instruction.
     ///
     /// The lamports gained due to closing both accounts are transferred to the
     /// validator authority.
@@ -119,9 +119,9 @@ pub const IX_INIT_SIZE: u16 =
     // blockhash: Hash,
     HASH_BYTES as u16 +
     // chunks_bump: u8,
-    8 +
+    1 +
     // buffer_bump: u8,
-    8 +
+    1 +
     // chunk_count: usize,
     8 +
     // chunk_size: u16,
@@ -137,7 +137,7 @@ pub const IX_REALLOC_SIZE: u16 =
     // blockhash: Hash,
     HASH_BYTES as u16 +
     // buffer_bump: u8,
-    8 +
+    1 +
     // invocation_count: u16,
     2 +
     // byte align
@@ -149,9 +149,9 @@ pub const IX_WRITE_SIZE_WITHOUT_CHUNKS: u16 =
     // blockhash: Hash,
     HASH_BYTES as u16 +
     // chunks_bump: u8,
-    8 +
+    1 +
     // buffer_bump: u8,
-    8 +
+    1 +
     // offset: u32
     32;
 
@@ -161,9 +161,9 @@ pub const IX_CLOSE_SIZE: u16 =
     // blockhash: Hash,
     HASH_BYTES as u16 +
     // chunks_bump: u8,
-    8 +
+    1 +
     // buffer_bump: u8,
-    8;
+    1;
 
 // -----------------
 // create_init_ix
@@ -238,7 +238,7 @@ pub struct CreateReallocBufferIxArgs {
 
 /// Creates the realloc ixs we need to invoke in order to realloc
 /// the account to the desired size since we only can realloc up to
-/// [consts::MAX_ACOUNT_ALLOC_PER_INSTRUCTION_SIZE] in a single instruction.
+/// [consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE] in a single instruction.
 /// Returns a tuple with the instructions and a bool indicating if we need to split
 /// them into multiple instructions in order to avoid
 /// [solana_program::program_error::MAX_INSTRUCTION_TRACE_LENGTH_EXCEEDED]J
@@ -246,23 +246,24 @@ pub fn create_realloc_buffer_ixs(
     args: CreateReallocBufferIxArgs,
 ) -> Vec<Instruction> {
     // We already allocated once during Init and only need to realloc
-    // if the buffer is larger than [consts::MAX_ACOUNT_ALLOC_PER_INSTRUCTION_SIZE]
+    // if the buffer is larger than [consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE]
     if args.buffer_account_size
-        <= consts::MAX_ACOUNT_ALLOC_PER_INSTRUCTION_SIZE as u64
+        <= consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as u64
     {
         return vec![];
     }
 
     let remaining_size = args.buffer_account_size as i128
-        - consts::MAX_ACOUNT_ALLOC_PER_INSTRUCTION_SIZE as i128;
+        - consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as i128;
 
     // A) We just need to realloc once
-    if remaining_size <= consts::MAX_ACOUNT_ALLOC_PER_INSTRUCTION_SIZE as i128 {
+    if remaining_size <= consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as i128
+    {
         return vec![create_realloc_buffer_ix(args, 1)];
     }
 
     // B) We need to realloc multiple times
-    // SAFETY; remaining size > consts::MAX_ACOUNT_ALLOC_PER_INSTRUCTION_SIZE
+    // SAFETY; remaining size > consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE
     create_realloc_buffer_ixs_to_add_remaining(&args, remaining_size as u64)
 }
 
@@ -271,7 +272,7 @@ pub fn create_realloc_buffer_ixs_to_add_remaining(
     remaining_size: u64,
 ) -> Vec<Instruction> {
     let invocation_count = (remaining_size as f64
-        / consts::MAX_ACOUNT_ALLOC_PER_INSTRUCTION_SIZE as f64)
+        / consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as f64)
         .ceil() as u16;
 
     let mut ixs = vec![];

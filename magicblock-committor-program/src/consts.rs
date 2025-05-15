@@ -1,7 +1,7 @@
-/// Max bytest that can be allocated as part of the one instruction.
+/// Max bytes that can be allocated as part of the one instruction.
 /// For buffers that are larger than that ReallocBuffer needs to be
 /// invoked 1 or more times after Init completed.
-pub const MAX_ACOUNT_ALLOC_PER_INSTRUCTION_SIZE: u16 = 10_240;
+pub const MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE: u16 = 10_240;
 
 /// The maximum number of instructions that can be added to a single transaction.
 /// See: https://github.com/solana-labs/solana/issues/33863

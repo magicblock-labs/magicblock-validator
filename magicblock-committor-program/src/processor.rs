@@ -161,7 +161,7 @@ fn process_init(
 
     let initial_alloc_size = std::cmp::min(
         buffer_account_size,
-        consts::MAX_ACOUNT_ALLOC_PER_INSTRUCTION_SIZE as u64,
+        consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as u64,
     );
 
     // Create Buffer Account
@@ -241,7 +241,7 @@ fn process_realloc_buffer(
     let next_alloc_size = std::cmp::min(
         buffer_account_size,
         current_buffer_size
-            + consts::MAX_ACOUNT_ALLOC_PER_INSTRUCTION_SIZE as u64,
+            + consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as u64,
     );
 
     msg!(

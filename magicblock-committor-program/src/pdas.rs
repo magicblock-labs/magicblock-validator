@@ -93,7 +93,7 @@ macro_rules! verified_seeds_and_pda {
                 &$blockhash,
                 $bump,
             )
-            .inspect_err(|err| msg!("ERR: {}", err))?;
+            .inspect_err(|err| ::solana_program::msg!("ERR: {}", err))?;
             $crate::utils::assert_keys_equal($account_info.key, &pda, || {
                 format!(
                     "Provided {} PDA does not match derived key '{}'",

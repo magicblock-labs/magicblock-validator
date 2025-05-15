@@ -17,7 +17,7 @@ pub struct DelegateArgs {
     pub commit_frequency_ms: u32,
 }
 
-pub const MAX_ACOUNT_ALLOC_PER_INSTRUCTION_SIZE: u16 = 10_240;
+pub const MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE: u16 = 10_240;
 
 /// The counter has both mul and add instructions in order to facilitate tests where
 /// order matters. For example in the case of the following operations:
@@ -35,7 +35,7 @@ pub enum FlexiCounterInstruction {
     Init { label: String, bump: u8 },
 
     /// Increases the size of the FlexiCounter to reach the given bytes.
-    /// Max increase is [MAX_ACOUNT_ALLOC_PER_INSTRUCTION_SIZE] per instruction
+    /// Max increase is [MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE] per instruction
     /// which means this instruction needs to be called multiple times to reach
     /// the desired size.
     ///
