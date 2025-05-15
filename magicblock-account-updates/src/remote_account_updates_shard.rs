@@ -227,7 +227,7 @@ impl RemoteAccountUpdatesShard {
 
 struct PubsubPool {
     clients: Vec<PubSubConnection>,
-    unusbscribes: HashMap<Pubkey, (usize, BoxFn)>,
+    unsubscribes: HashMap<Pubkey, (usize, BoxFn)>,
     config: RpcAccountInfoConfig,
 }
 
