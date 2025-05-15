@@ -18,13 +18,15 @@ use test_runner::cleanup::{cleanup_devnet_only, cleanup_validators};
 
 pub fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
+    let Ok(committor_output) = run_committor_tests(&manifest_dir) else {
+        // If any test run panics (i.e. not just a failing test) then we bail
+        return;
+    };
     let Ok((security_output, scenarios_output)) =
         run_schedule_commit_tests(&manifest_dir)
     else {
-        // If any test fails or cannot run we bail immediately
         return;
     };
-
     let Ok(issues_frequent_commits_output) =
         run_issues_frequent_commmits_tests(&manifest_dir)
     else {
@@ -45,6 +47,7 @@ pub fn main() {
     };
 
     // Assert that all tests passed
+    assert_cargo_tests_passed(committor_output);
     assert_cargo_tests_passed(security_output);
     assert_cargo_tests_passed(scenarios_output);
     assert_cargo_tests_passed(cloning_output);
@@ -90,6 +93,41 @@ fn run_restore_ledger_tests(
     };
     cleanup_devnet_only(&mut devnet_validator);
     Ok(output)
+}
+
+fn run_committor_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
+    eprintln!("======== Starting DEVNET Validator for Committor ========");
+
+    let loaded_chain_accounts =
+        LoadedAccounts::with_delegation_program_test_authority();
+
+    let mut devnet_validator = match start_validator(
+        "committor-conf.devnet.toml",
+        ValidatorCluster::Chain(None),
+        &loaded_chain_accounts,
+    ) {
+        Some(validator) => validator,
+        None => {
+            panic!("Failed to start devnet validator properly");
+        }
+    };
+
+    // NOTE: the committor tests run directly against a chain validator
+    //       therefore no ephemeral validator needs to be started
+
+    let test_committor_dir =
+        format!("{}/../{}", manifest_dir, "schedulecommit/committor-service");
+    eprintln!("Running committor tests in {}", test_committor_dir);
+    let test_output = match run_test(test_committor_dir, Default::default()) {
+        Ok(output) => output,
+        Err(err) => {
+            eprintln!("Failed to run committor: {:?}", err);
+            cleanup_devnet_only(&mut devnet_validator);
+            return Err(err.into());
+        }
+    };
+    cleanup_devnet_only(&mut devnet_validator);
+    Ok(test_output)
 }
 
 fn run_schedule_commit_tests(
