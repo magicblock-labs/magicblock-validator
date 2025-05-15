@@ -308,7 +308,7 @@ impl CommittorProcessor {
                     debug_assert_eq!(
                         kind,
                         &InstructionsKind::Finalize,
-                        "Expecting separate finalize instructions onky"
+                        "Expecting separate finalize instructions only"
                     );
                     let bundle_id = commit_info.bundle_id();
                     debug_assert!(

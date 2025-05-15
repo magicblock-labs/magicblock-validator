@@ -104,9 +104,6 @@ impl CommitInfo {
             ),
         }
     }
-    pub fn has_data(&self) -> bool {
-        matches!(self, Self::BufferedDataAccount { .. })
-    }
 
     pub fn pubkey(&self) -> Pubkey {
         match self {

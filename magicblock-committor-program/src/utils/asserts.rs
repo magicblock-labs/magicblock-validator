@@ -21,7 +21,7 @@ pub fn assert_account_unallocated(
     account: &AccountInfo,
     account_label: &str,
 ) -> ProgramResult {
-    if account.data.borrow().len() != 0 {
+    if account.try_borrow_data()?.len() != 0 {
         msg!(
             "Err: account '{}' ({}) was already initialized",
             account_label,
@@ -51,7 +51,7 @@ pub fn assert_is_signer(
 
 pub fn assert_program_id(program_id: &Pubkey) -> ProgramResult {
     if program_id != &crate::id() {
-        msg!("ERR: invalid program id");
+        msg!("Err: invalid program id");
         Err(ProgramError::IncorrectProgramId)
     } else {
         Ok(())

@@ -307,7 +307,15 @@ fn process_write(
             data_chunk.len() as u64,
         );
 
-        if offset as usize + data_chunk.len() > buffer_data.len() {
+        let end_offset = offset
+            .checked_add(data_chunk.len() as u32)
+            .map(|sum| sum as usize)
+            .ok_or(CommittorError::OffsetChunkOutOfRange(
+                data_chunk.len(),
+                offset,
+                buffer_data.len(),
+            ))?;
+        if end_offset > buffer_data.len() {
             let err = CommittorError::OffsetChunkOutOfRange(
                 data_chunk.len(),
                 offset,

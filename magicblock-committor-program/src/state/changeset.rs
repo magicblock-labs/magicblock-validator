@@ -409,7 +409,7 @@ impl CommitableAccount {
         self.chunks = chunks;
     }
 
-    /// The total size of the data that we we will commit.
+    /// The total size of the data that we will commit.
     /// Use this to initialize the empty account on chain.
     pub fn size(&self) -> usize {
         self.data.len()

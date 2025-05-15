@@ -54,7 +54,14 @@ pub struct BufferWriteChunkBudget {
 
 impl BufferWriteChunkBudget {
     fn total_budget(&self, bytes_count: usize) -> u32 {
-        self.base_budget + (self.per_byte * bytes_count) as u32
+        u32::try_from(
+            self.per_byte
+                .checked_mul(bytes_count)
+                .unwrap_or(u32::MAX as usize),
+        )
+        .unwrap_or(u32::MAX)
+        .checked_add(self.base_budget)
+        .unwrap_or(u32::MAX)
     }
 
     pub fn instructions(&self, bytes_count: usize) -> Vec<Instruction> {
@@ -192,7 +199,10 @@ impl ComputeBudget {
     }
 
     fn total_budget(&self, committee_count: u32) -> u32 {
-        self.base_budget() + (self.per_committee() * committee_count)
+        self.per_committee()
+            .checked_mul(committee_count)
+            .and_then(|product| product.checked_add(self.base_budget()))
+            .unwrap_or(u32::MAX)
     }
 
     pub fn instructions(&self, committee_count: usize) -> Vec<Instruction> {

@@ -62,7 +62,7 @@ pub(crate) fn bundle_chunks(
 
     // If we still have unbundled commits then add chunks for those
     while !not_bundled.is_empty() {
-        let range_end = (max_per_chunk).min(not_bundled.len());
+        let range_end = max_per_chunk.min(not_bundled.len());
         chunks.push(not_bundled.drain(..range_end).collect());
     }
 

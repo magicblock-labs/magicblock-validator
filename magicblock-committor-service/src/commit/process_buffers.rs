@@ -116,7 +116,7 @@ fn process_commitable_separate_ix(
     );
     InstructionsForCommitable {
         instructions: vec![process_ix],
-        commit_info: commit_info.clone(),
+        commit_info,
         kind: InstructionsKind::Process,
     }
 }
@@ -127,7 +127,7 @@ pub(crate) struct ChunkedIxsToProcessCommitablesAndClosePdasResult {
     /// chunk can run in parallel
     pub chunked_ixs: Vec<Vec<InstructionsForCommitable>>,
     /// Separate buffer close transactions.
-    /// Since the process transactions nee to complete first we need to run them
+    /// Since the process transactions need to complete first we need to run them
     /// after the [Self::chunked_ixs] transactions
     pub chunked_close_ixs: Option<Vec<Vec<InstructionsForCommitable>>>,
     /// Commitables that could not be chunked and thus cannot be committed while

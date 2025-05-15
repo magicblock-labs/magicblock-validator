@@ -16,7 +16,7 @@ pub struct CommitSignatures {
     /// The signature of the transaction processing the commit
     pub process_signature: Signature,
     /// The signature of the transaction finalizing the commit.
-    /// If the account was not finalized or it failed the this is `None`.
+    /// If the account was not finalized or it failed then this is `None`.
     /// If the finalize instruction was part of the process transaction then
     /// this signature is the same as [Self::process_signature].
     pub finalize_signature: Option<Signature>,
@@ -293,7 +293,7 @@ impl CommitStage {
     }
 
     /// Returns `true` if we need to init the chunks and buffer accounts when we
-    /// retry commiting this account
+    /// retry committing this account
     pub fn needs_accounts_init(&self) -> bool {
         use CommitStage::*;
         matches!(self, Failed(_) | BufferAndChunkPartiallyInitialized(_))
