@@ -1,7 +1,6 @@
-use solana_program::pubkey::Pubkey;
 use solana_program::{
     account_info::AccountInfo, entrypoint::ProgramResult, msg,
-    program_error::ProgramError,
+    program_error::ProgramError, pubkey::Pubkey,
 };
 
 pub fn assert_keys_equal<F: FnOnce() -> String>(

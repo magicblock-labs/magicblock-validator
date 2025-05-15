@@ -1,25 +1,27 @@
-use log::*;
-use std::fmt;
-use std::sync::Mutex;
+use std::{fmt, sync::Mutex};
 
-use crate::derive_keypair;
-use crate::error::{TableManiaError, TableManiaResult};
-use magicblock_rpc_client::MagicBlockRpcClientError;
+use log::*;
 use magicblock_rpc_client::{
-    MagicBlockSendTransactionConfig, MagicblockRpcClient,
+    MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
+    MagicblockRpcClient,
 };
 use solana_pubkey::Pubkey;
-use solana_sdk::address_lookup_table::state::{
-    LookupTableMeta, LOOKUP_TABLE_MAX_ADDRESSES,
-};
-use solana_sdk::commitment_config::CommitmentLevel;
-use solana_sdk::slot_hashes::MAX_ENTRIES;
 use solana_sdk::{
     address_lookup_table as alt,
+    address_lookup_table::state::{
+        LookupTableMeta, LOOKUP_TABLE_MAX_ADDRESSES,
+    },
     clock::Slot,
+    commitment_config::CommitmentLevel,
     signature::{Keypair, Signature},
     signer::Signer,
+    slot_hashes::MAX_ENTRIES,
     transaction::Transaction,
+};
+
+use crate::{
+    derive_keypair,
+    error::{TableManiaError, TableManiaResult},
 };
 
 /// Determined via trial and error. The keys themselves take up

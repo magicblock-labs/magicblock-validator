@@ -1,14 +1,17 @@
-use std::path::Path;
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::{
+    path::Path,
+    sync::atomic::{AtomicU64, Ordering},
+};
 
-use solana_sdk::hash::Hash;
-use solana_sdk::pubkey::Pubkey;
-
-use super::db::BundleSignatureRow;
-use super::error::{CommitPersistError, CommitPersistResult};
-use super::utils::now;
-use super::{db::CommitStatusRow, CommitStatus, CommitType, CommittorDb};
 use magicblock_committor_program::Changeset;
+use solana_sdk::{hash::Hash, pubkey::Pubkey};
+
+use super::{
+    db::{BundleSignatureRow, CommitStatusRow},
+    error::{CommitPersistError, CommitPersistResult},
+    utils::now,
+    CommitStatus, CommitType, CommittorDb,
+};
 
 pub struct CommitPersister {
     db: CommittorDb,
@@ -152,11 +155,12 @@ impl CommitPersister {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::persist::{CommitStatusSignatures, CommitStrategy};
     use magicblock_committor_program::ChangedAccount;
     use solana_pubkey::Pubkey;
     use solana_sdk::signature::Signature;
+
+    use super::*;
+    use crate::persist::{CommitStatusSignatures, CommitStrategy};
 
     #[test]
     fn test_start_changeset_and_update_status() {

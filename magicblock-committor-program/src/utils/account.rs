@@ -1,6 +1,7 @@
-use solana_program::msg;
-use solana_program::program_error::ProgramError;
-use solana_program::{account_info::AccountInfo, entrypoint::ProgramResult};
+use solana_program::{
+    account_info::AccountInfo, entrypoint::ProgramResult, msg,
+    program_error::ProgramError,
+};
 
 pub fn close_and_refund_authority(
     authority: &AccountInfo,

@@ -1,5 +1,4 @@
-use solana_program::msg;
-use solana_program::program_error::ProgramError;
+use solana_program::{msg, program_error::ProgramError};
 use thiserror::Error;
 
 pub type CommittorResult<T> = std::result::Result<T, CommittorError>;

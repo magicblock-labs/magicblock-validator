@@ -1,4 +1,3 @@
-use log::*;
 use std::{
     collections::{HashMap, HashSet},
     sync::{
@@ -8,6 +7,7 @@ use std::{
     time::{Duration, Instant},
 };
 
+use log::*;
 use magicblock_rpc_client::MagicblockRpcClient;
 use solana_pubkey::Pubkey;
 use solana_sdk::{

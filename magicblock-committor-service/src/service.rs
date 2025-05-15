@@ -3,8 +3,7 @@ use std::{fmt::Display, path::Path};
 use log::*;
 use magicblock_committor_program::Changeset;
 use solana_pubkey::Pubkey;
-use solana_sdk::hash::Hash;
-use solana_sdk::signature::Keypair;
+use solana_sdk::{hash::Hash, signature::Keypair};
 use tokio::{
     select,
     sync::{

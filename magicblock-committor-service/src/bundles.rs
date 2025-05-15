@@ -1,5 +1,6 @@
-use crate::{bundle_strategy::efficient_bundle_chunks, CommitInfo};
 use std::collections::HashMap;
+
+use crate::{bundle_strategy::efficient_bundle_chunks, CommitInfo};
 
 #[derive(Debug, Default)]
 pub struct BundleChunksResult {
@@ -94,10 +95,11 @@ pub(crate) fn bundle_chunks_ignoring_bundle_id(
 
 #[cfg(test)]
 mod test {
-    use super::*;
-    use solana_sdk::hash::Hash;
-    use solana_sdk::pubkey::Pubkey;
     use std::collections::HashSet;
+
+    use solana_sdk::{hash::Hash, pubkey::Pubkey};
+
+    use super::*;
 
     fn commit_info(bundle_id: u64) -> crate::CommitInfo {
         CommitInfo::BufferedDataAccount {

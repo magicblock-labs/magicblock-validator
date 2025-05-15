@@ -1,14 +1,14 @@
-use log::*;
 use std::{
     sync::Arc,
     time::{Duration, Instant},
 };
 
+use log::*;
 use solana_rpc_client::{
     nonblocking::rpc_client::RpcClient, rpc_client::SerializableTransaction,
 };
-use solana_rpc_client_api::client_error::ErrorKind as RpcClientErrorKind;
 use solana_rpc_client_api::{
+    client_error::ErrorKind as RpcClientErrorKind,
     config::RpcSendTransactionConfig, request::RpcError,
 };
 use solana_sdk::{

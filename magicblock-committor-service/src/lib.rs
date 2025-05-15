@@ -20,13 +20,12 @@ mod undelegate;
 pub mod stubs;
 
 pub use commit_info::CommitInfo;
-pub use compute_budget::ComputeBudgetConfig;
-pub use service::{ChangesetCommittor, CommittorService};
-
 pub use commit_stage::CommitStage;
+pub use compute_budget::ComputeBudgetConfig;
 pub use magicblock_committor_program::{
     ChangedAccount, Changeset, ChangesetMeta,
 };
+pub use service::{ChangesetCommittor, CommittorService};
 pub fn changeset_for_slot(slot: u64) -> Changeset {
     Changeset {
         slot,

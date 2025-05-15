@@ -1,40 +1,39 @@
-use crate::{
-    commit_strategy::{split_changesets_by_commit_strategy, SplitChangesets},
-    compute_budget::{ComputeBudget, ComputeBudgetConfig},
-    persist::{
-        BundleSignatureRow, CommitPersister, CommitStatusRow, CommitStrategy,
-    },
-    pubkeys_provider::provide_committee_pubkeys,
-    types::InstructionsKind,
-    CommitInfo,
-};
-
-use log::*;
-use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
-use solana_sdk::{
-    commitment_config::CommitmentConfig, hash::Hash, signature::Signature,
-};
 use std::{
     collections::{HashMap, HashSet},
     path::Path,
     sync::{Arc, Mutex},
 };
 
+use log::*;
 use magicblock_committor_program::{Changeset, ChangesetMeta};
-use solana_pubkey::Pubkey;
-use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-use solana_sdk::{signature::Keypair, signer::Signer};
-use tokio::task::JoinSet;
-
-use crate::{
-    commit_stage::CommitStage, config::ChainConfig,
-    error::CommittorServiceResult, types::InstructionsForCommitable,
-};
 use magicblock_rpc_client::{
     MagicBlockSendTransactionConfig, MagicblockRpcClient,
 };
+use magicblock_table_mania::{GarbageCollectorConfig, TableMania};
+use solana_pubkey::Pubkey;
+use solana_rpc_client::nonblocking::rpc_client::RpcClient;
+use solana_sdk::{
+    commitment_config::CommitmentConfig,
+    hash::Hash,
+    signature::{Keypair, Signature},
+    signer::Signer,
+};
+use tokio::task::JoinSet;
 
 use super::common::{lookup_table_keys, send_and_confirm};
+use crate::{
+    commit_stage::CommitStage,
+    commit_strategy::{split_changesets_by_commit_strategy, SplitChangesets},
+    compute_budget::{ComputeBudget, ComputeBudgetConfig},
+    config::ChainConfig,
+    error::CommittorServiceResult,
+    persist::{
+        BundleSignatureRow, CommitPersister, CommitStatusRow, CommitStrategy,
+    },
+    pubkeys_provider::provide_committee_pubkeys,
+    types::{InstructionsForCommitable, InstructionsKind},
+    CommitInfo,
+};
 
 pub(crate) struct CommittorProcessor {
     pub(crate) magicblock_rpc_client: MagicblockRpcClient,

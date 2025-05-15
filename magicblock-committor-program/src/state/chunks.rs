@@ -1,5 +1,6 @@
-use borsh::{BorshDeserialize, BorshSerialize};
 use std::{collections::HashSet, fmt};
+
+use borsh::{BorshDeserialize, BorshSerialize};
 
 use crate::{
     consts,

@@ -1,8 +1,9 @@
 use borsh::{BorshDeserialize, BorshSerialize};
-use solana_program::hash::Hash;
-use solana_program::hash::HASH_BYTES;
-use solana_program::instruction::{AccountMeta, Instruction};
-use solana_program::system_program;
+use solana_program::{
+    hash::{Hash, HASH_BYTES},
+    instruction::{AccountMeta, Instruction},
+    system_program,
+};
 use solana_pubkey::Pubkey;
 
 use crate::{consts, pdas};

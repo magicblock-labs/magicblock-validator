@@ -1,6 +1,7 @@
-use crate::instruction::{IX_INIT_SIZE, IX_REALLOC_SIZE};
-
-use crate::consts::MAX_INSTRUCTION_DATA_SIZE;
+use crate::{
+    consts::MAX_INSTRUCTION_DATA_SIZE,
+    instruction::{IX_INIT_SIZE, IX_REALLOC_SIZE},
+};
 
 /// Creates chunks of realloc instructions such that each chunk fits into a single transaction.
 /// - reallocs: The realloc instructions to split up

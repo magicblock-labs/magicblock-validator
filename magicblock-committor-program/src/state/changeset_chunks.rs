@@ -1,7 +1,8 @@
 use std::collections::HashSet;
 
-use super::chunks::Chunks;
 use borsh::{BorshDeserialize, BorshSerialize};
+
+use super::chunks::Chunks;
 
 /// A chunk of change set data that we want to apply to the on chain
 /// [ChangeSet] buffer

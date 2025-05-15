@@ -1,3 +1,6 @@
+use std::sync::Arc;
+
+use log::*;
 use magicblock_committor_program::ChangedAccountMeta;
 use solana_pubkey::Pubkey;
 use solana_sdk::{clock::Slot, signature::Signature};
@@ -7,8 +10,6 @@ use crate::{
     persist::{CommitStatus, CommitStatusSignatures, CommitStrategy},
     CommitInfo,
 };
-use log::*;
-use std::sync::Arc;
 
 #[derive(Debug, Clone)]
 pub struct CommitSignatures {

@@ -1,20 +1,21 @@
 use borsh::{to_vec, BorshDeserialize};
-use solana_program::hash::Hash;
-use solana_program::log::sol_log_64;
-use solana_program::program::invoke_signed;
-use solana_program::program_error::ProgramError;
-use solana_program::sysvar::Sysvar;
-use solana_program::{account_info::AccountInfo, entrypoint::ProgramResult};
-use solana_program::{msg, system_instruction};
+use solana_program::{
+    account_info::AccountInfo, entrypoint::ProgramResult, hash::Hash,
+    log::sol_log_64, msg, program::invoke_signed, program_error::ProgramError,
+    system_instruction, sysvar::Sysvar,
+};
 use solana_pubkey::Pubkey;
 
-use crate::error::CommittorError;
-use crate::instruction::CommittorInstruction;
-use crate::utils::{
-    assert_account_unallocated, assert_is_signer, assert_program_id,
-    close_and_refund_authority,
+use crate::{
+    consts,
+    error::CommittorError,
+    instruction::CommittorInstruction,
+    utils::{
+        assert_account_unallocated, assert_is_signer, assert_program_id,
+        close_and_refund_authority,
+    },
+    verified_seeds_and_pda, Chunks,
 };
-use crate::{consts, verified_seeds_and_pda, Chunks};
 
 pub fn process(
     program_id: &Pubkey,

@@ -1,18 +1,12 @@
-use borsh::{to_vec, BorshDeserialize};
-use dlp::pda::commit_state_pda_from_delegated_account;
-use log::*;
-use magicblock_rpc_client::{
-    MagicBlockRpcClientError, MagicBlockRpcClientResult,
-    MagicBlockSendTransactionConfig,
-};
-use solana_pubkey::Pubkey;
 use std::{
     collections::{HashMap, HashSet},
     sync::Arc,
     time::Duration,
 };
-use tokio::task::JoinSet;
 
+use borsh::{to_vec, BorshDeserialize};
+use dlp::pda::commit_state_pda_from_delegated_account;
+use log::*;
 use magicblock_committor_program::{
     instruction::{
         create_init_ix, create_realloc_buffer_ixs,
@@ -22,7 +16,22 @@ use magicblock_committor_program::{
     instruction_chunks::chunk_realloc_ixs,
     Changeset, ChangesetChunk, Chunks, CommitableAccount,
 };
+use magicblock_rpc_client::{
+    MagicBlockRpcClientError, MagicBlockRpcClientResult,
+    MagicBlockSendTransactionConfig,
+};
+use solana_pubkey::Pubkey;
+use solana_sdk::{hash::Hash, instruction::Instruction, signer::Signer};
+use tokio::task::JoinSet;
 
+use super::{
+    common::send_and_confirm,
+    process_buffers::{
+        chunked_ixs_to_process_commitables_and_close_pdas,
+        ChunkedIxsToProcessCommitablesAndClosePdasResult,
+    },
+    CommittorProcessor,
+};
 use crate::{
     commit::common::get_accounts_to_undelegate,
     commit_stage::CommitSignatures,
@@ -38,16 +47,6 @@ use crate::{
     },
     CommitInfo, CommitStage,
 };
-
-use super::{
-    common::send_and_confirm,
-    process_buffers::{
-        chunked_ixs_to_process_commitables_and_close_pdas,
-        ChunkedIxsToProcessCommitablesAndClosePdasResult,
-    },
-    CommittorProcessor,
-};
-use solana_sdk::{hash::Hash, instruction::Instruction, signer::Signer};
 
 struct NextReallocs {
     missing_size: u64,

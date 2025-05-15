@@ -1,19 +1,22 @@
-use log::*;
-use magicblock_rpc_client::{
-    MagicBlockSendTransactionConfig, MagicblockRpcClient,
-};
-use magicblock_table_mania::TableMania;
-use solana_sdk::{hash::Hash, message::v0::Message, signature::Signature};
 use std::{
     collections::{HashMap, HashSet},
     time::{Duration, Instant},
 };
 
+use log::*;
 use magicblock_committor_program::Changeset;
+use magicblock_rpc_client::{
+    MagicBlockSendTransactionConfig, MagicblockRpcClient,
+};
+use magicblock_table_mania::TableMania;
 use solana_pubkey::Pubkey;
 use solana_sdk::{
-    instruction::Instruction, message::VersionedMessage, signature::Keypair,
-    signer::Signer, transaction::VersionedTransaction,
+    hash::Hash,
+    instruction::Instruction,
+    message::{v0::Message, VersionedMessage},
+    signature::{Keypair, Signature},
+    signer::Signer,
+    transaction::VersionedTransaction,
 };
 
 use crate::{

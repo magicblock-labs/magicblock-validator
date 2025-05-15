@@ -1,25 +1,21 @@
+use std::{collections::HashSet, sync::Arc};
+
+use dlp::args::CommitStateArgs;
+use log::*;
+use magicblock_committor_program::Changeset;
+use magicblock_rpc_client::MagicBlockSendTransactionConfig;
+use solana_sdk::{hash::Hash, signer::Signer};
+
+use super::CommittorProcessor;
 use crate::{
     commit::common::{
         get_accounts_to_undelegate, lookup_table_keys, send_and_confirm,
     },
-    commit_stage::CommitSignatures,
+    commit_stage::{CommitSignatures, CommitStage},
     persist::CommitStrategy,
     undelegate::undelegate_commitables_ixs,
     CommitInfo,
 };
-
-use dlp::args::CommitStateArgs;
-use log::*;
-use solana_sdk::hash::Hash;
-use std::{collections::HashSet, sync::Arc};
-
-use magicblock_committor_program::Changeset;
-use solana_sdk::signer::Signer;
-
-use crate::commit_stage::CommitStage;
-use magicblock_rpc_client::MagicBlockSendTransactionConfig;
-
-use super::CommittorProcessor;
 
 impl CommittorProcessor {
     /// Commits a changeset directly using args to include the commit state

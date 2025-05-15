@@ -1,12 +1,11 @@
 use std::sync::Arc;
 
-use crate::persist::CommitStrategy;
 use magicblock_rpc_client::MagicBlockRpcClientError;
 use solana_pubkey::Pubkey;
 use solana_sdk::signature::Signature;
 use thiserror::Error;
 
-use crate::CommitInfo;
+use crate::{persist::CommitStrategy, CommitInfo};
 
 pub type CommittorServiceResult<T> =
     std::result::Result<T, CommittorServiceError>;

@@ -1,8 +1,19 @@
+use std::{
+    collections::{HashMap, HashSet},
+    fmt,
+    ops::Deref,
+    sync::{
+        atomic::{AtomicUsize, Ordering},
+        RwLock, RwLockReadGuard, RwLockWriteGuard,
+    },
+};
+
 use log::*;
 use magicblock_rpc_client::{
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
     MagicblockRpcClient,
 };
+use solana_pubkey::Pubkey;
 use solana_sdk::{
     address_lookup_table::{
         self as alt,
@@ -15,17 +26,6 @@ use solana_sdk::{
     slot_hashes::MAX_ENTRIES,
     transaction::Transaction,
 };
-use std::{
-    collections::{HashMap, HashSet},
-    fmt,
-    ops::Deref,
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        RwLock, RwLockReadGuard, RwLockWriteGuard,
-    },
-};
-
-use solana_pubkey::Pubkey;
 
 use crate::{
     derive_keypair,

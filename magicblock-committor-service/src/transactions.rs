@@ -8,13 +8,14 @@ use magicblock_committor_program::{
 };
 use solana_pubkey::Pubkey;
 use solana_rpc_client::rpc_client::SerializableTransaction;
-use solana_sdk::hash::Hash;
-use solana_sdk::instruction::Instruction;
-use solana_sdk::message::v0::Message;
-use solana_sdk::message::{AddressLookupTableAccount, VersionedMessage};
-use solana_sdk::signature::Keypair;
-use solana_sdk::signer::Signer;
-use solana_sdk::transaction::VersionedTransaction;
+use solana_sdk::{
+    hash::Hash,
+    instruction::Instruction,
+    message::{v0::Message, AddressLookupTableAccount, VersionedMessage},
+    signature::Keypair,
+    signer::Signer,
+    transaction::VersionedTransaction,
+};
 use static_assertions::const_assert;
 
 use crate::error::{CommittorServiceError, CommittorServiceResult};
@@ -318,13 +319,6 @@ fn get_lookup_tables(ixs: &[Instruction]) -> Vec<AddressLookupTableAccount> {
 
 #[cfg(test)]
 mod test {
-    use crate::{
-        compute_budget::{Budget, ComputeBudget},
-        pubkeys_provider::{provide_committee_pubkeys, provide_common_pubkeys},
-    };
-
-    use super::*;
-
     use dlp::args::{CommitStateArgs, CommitStateFromBufferArgs};
     use lazy_static::lazy_static;
     use solana_pubkey::Pubkey;
@@ -336,6 +330,12 @@ mod test {
         signature::Keypair,
         signer::Signer,
         transaction::VersionedTransaction,
+    };
+
+    use super::*;
+    use crate::{
+        compute_budget::{Budget, ComputeBudget},
+        pubkeys_provider::{provide_committee_pubkeys, provide_common_pubkeys},
     };
 
     // These tests statically determine the optimal ix count to fit into a single

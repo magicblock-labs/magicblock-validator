@@ -9,6 +9,7 @@ use std::{
 
 use magicblock_committor_program::Changeset;
 use solana_pubkey::Pubkey;
+use solana_sdk::{hash::Hash, signature::Signature};
 use tokio::sync::oneshot;
 
 use crate::{
@@ -19,7 +20,6 @@ use crate::{
     },
     ChangesetCommittor,
 };
-use solana_sdk::{hash::Hash, signature::Signature};
 
 #[derive(Default)]
 pub struct ChangesetCommittorStub {

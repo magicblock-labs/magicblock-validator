@@ -13,7 +13,6 @@ mod utils;
 mod processor;
 // #[cfg(not(feature = "no-entrypoint"))]
 pub use processor::process;
-
 pub use state::{
     changeset::{
         ChangedAccount, ChangedAccountMeta, ChangedBundle, Changeset,

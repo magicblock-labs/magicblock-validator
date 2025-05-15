@@ -2,9 +2,8 @@ use std::fmt;
 
 use solana_sdk::signature::Signature;
 
-use crate::persist::error::CommitPersistError;
-
 use super::commit_strategy::CommitStrategy;
+use crate::persist::error::CommitPersistError;
 
 /// The status of a committed account.
 #[derive(Debug, Clone, PartialEq, Eq)]

@@ -235,10 +235,11 @@ pub fn split_changesets_by_commit_strategy(
 
 #[cfg(test)]
 mod test {
-    use super::*;
     use log::*;
     use magicblock_committor_program::ChangedAccount;
     use solana_sdk::pubkey::Pubkey;
+
+    use super::*;
 
     fn init_logger() {
         let _ = env_logger::builder()
