@@ -18,7 +18,7 @@ use crate::errors::{ConfigError, ConfigResult};
 #[serde(deny_unknown_fields, rename_all = "kebab-case")]
 pub struct AccountsConfig {
     #[serde(default)]
-    pub remote: RemoteConfig,
+    pub remotes: Vec<RemoteConfig>,
     #[serde(default)]
     pub lifecycle: LifecycleMode,
     #[serde(default)]
@@ -38,7 +38,7 @@ pub struct AccountsConfig {
 impl Default for AccountsConfig {
     fn default() -> Self {
         Self {
-            remote: Default::default(),
+            remotes: vec![Default::default()],
             lifecycle: Default::default(),
             commit: Default::default(),
             payer: Default::default(),

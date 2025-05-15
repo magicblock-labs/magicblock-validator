@@ -6,7 +6,7 @@ use solana_sdk::pubkey::Pubkey;
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct AccountsConfig {
-    pub remote_cluster: Cluster,
+    pub remote_clusters: Vec<Cluster>,
     pub lifecycle: LifecycleMode,
     pub commit_compute_unit_price: u64,
     pub payer_init_lamports: Option<u64>,

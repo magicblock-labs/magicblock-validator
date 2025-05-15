@@ -131,9 +131,9 @@ fn test_custom_remote_toml() {
         config,
         EphemeralConfig {
             accounts: AccountsConfig {
-                remote: RemoteConfig::Custom(
+                remotes: vec![RemoteConfig::Custom(
                     Url::parse("http://localhost:8899").unwrap()
-                ),
+                )],
                 ..Default::default()
             },
             ..Default::default()
@@ -150,10 +150,10 @@ fn test_custom_ws_remote_toml() {
         config,
         EphemeralConfig {
             accounts: AccountsConfig {
-                remote: RemoteConfig::CustomWithWs(
+                remotes: vec![RemoteConfig::CustomWithWs(
                     Url::parse("http://localhost:8899").unwrap(),
                     Url::parse("ws://localhost:9001").unwrap()
-                ),
+                )],
                 ..Default::default()
             },
             ..Default::default()

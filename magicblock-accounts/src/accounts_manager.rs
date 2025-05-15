@@ -36,7 +36,7 @@ impl AccountsManager {
         validator_keypair: Keypair,
         config: AccountsConfig,
     ) -> AccountsResult<Self> {
-        let remote_cluster = config.remote_cluster;
+        let remote_cluster = config.remote_clusters[0].clone();
         let internal_account_provider = BankAccountProvider::new(bank.clone());
         let rpc_cluster = try_rpc_cluster_from_cluster(&remote_cluster)?;
         let rpc_client = RpcClient::new_with_commitment(

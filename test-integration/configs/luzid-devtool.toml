@@ -2,7 +2,7 @@
 name = "Devtool:8899"
 
 [node.accounts]
-remote = "devnet"
+remotes = ["devnet"]
 lifecycle = "offline"
 commit = { frequency_millis = 9_000_000_000_000, compute_unit_price = 1_000_000 }
 

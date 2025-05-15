@@ -16,7 +16,7 @@ struct Config {
 
 #[derive(Deserialize)]
 struct RemoteConfig {
-    remote: String,
+    remotes: Vec<String>,
 }
 
 #[derive(Deserialize)]
@@ -97,7 +97,7 @@ pub fn config_to_args(
         }
     }
     args.push("--url".into());
-    args.push(config.accounts.remote);
+    args.push(config.accounts.remotes[0].clone());
 
     args
 }
