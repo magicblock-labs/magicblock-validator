@@ -120,7 +120,6 @@ impl RemoteAccountUpdatesShard {
                 }
                 // When we receive a message to start monitoring an account
                 Some((pubkey, unsub)) = self.monitoring_request_receiver.recv() => {
-                    println!("received subscription");
                     if unsub {
                         account_streams.remove(&pubkey);
                         metrics::set_subscriptions_count(account_streams.len(), &self.shard_id);
@@ -245,11 +244,10 @@ impl PubsubPool {
             .collect();
         while let Some(c) = connections.next().await {
             clients.push(c?);
-            println!("established connection");
         }
         Ok(Self {
             clients,
-            unusbscribes: HashMap::new(),
+            unsubscribes: HashMap::new(),
             config,
         })
     }
@@ -275,12 +273,12 @@ impl PubsubPool {
         // so the lifetime of the stream can be safely extended to 'static
         #[allow(clippy::missing_transmute_annotations)]
         let stream = unsafe { std::mem::transmute(stream) };
-        self.unusbscribes.insert(pubkey, (index, unsubscribe));
+        self.unsubscribes.insert(pubkey, (index, unsubscribe));
         Ok(stream)
     }
 
     async fn unsubscribe(&mut self, pubkey: &Pubkey) {
-        let Some((index, callback)) = self.unusbscribes.remove(pubkey) else {
+        let Some((index, callback)) = self.unsubscribes.remove(pubkey) else {
             return;
         };
         callback().await;
@@ -291,12 +289,12 @@ impl PubsubPool {
     }
 
     fn subscribed(&mut self, pubkey: &Pubkey) -> bool {
-        self.unusbscribes.contains_key(pubkey)
+        self.unsubscribes.contains_key(pubkey)
     }
 
     async fn shutdown(&mut self) {
         // Cleanup all subscriptions and wait for proper shutdown
-        for (pubkey, (_, callback)) in self.unusbscribes.drain() {
+        for (pubkey, (_, callback)) in self.unsubscribes.drain() {
             info!("Account monitoring killed: {:?}", pubkey);
             callback().await;
         }
