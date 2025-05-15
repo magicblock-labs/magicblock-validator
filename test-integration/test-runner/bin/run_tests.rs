@@ -1,9 +1,9 @@
 use integration_test_tools::validator::start_test_validator_with_config;
 use integration_test_tools::{
-    toml_to_args::{config_to_args, rpc_port_from_config, ProgramLoader},
+    toml_to_args::ProgramLoader,
     validator::{
         resolve_workspace_dir, start_magic_block_validator_with_config,
-        wait_for_validator, TestRunnerPaths,
+        TestRunnerPaths,
     },
 };
 use std::{
@@ -21,7 +21,7 @@ pub fn main() {
     let Ok((security_output, scenarios_output)) =
         run_schedule_commit_tests(&manifest_dir)
     else {
-        // TODO: why we don't report Error case lower?
+        // If any test fails or cannot run we bail immediately
         return;
     };
 
