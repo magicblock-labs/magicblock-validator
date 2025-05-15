@@ -340,7 +340,7 @@ impl ValidatorCluster {
 fn start_validator(
     config_file: &str,
     cluster: ValidatorCluster,
-    loaded_accounts: LoadedAccounts,
+    loaded_chain_accounts: LoadedAccounts,
 ) -> Option<process::Child> {
     let log_suffix = cluster.log_suffix();
     let test_runner_paths = resolve_paths(config_file);
@@ -352,13 +352,14 @@ fn start_validator(
             start_test_validator_with_config(
                 &test_runner_paths,
                 program_loader,
-                loaded_accounts,
+                &loaded_chain_accounts,
                 log_suffix,
             )
         }
         _ => start_magic_block_validator_with_config(
             &test_runner_paths,
             log_suffix,
+            &loaded_chain_accounts,
             false,
         ),
     }

@@ -14,6 +14,7 @@ use crate::{
 pub fn start_magic_block_validator_with_config(
     test_runner_paths: &TestRunnerPaths,
     log_suffix: &str,
+    loaded_chain_accounts: &LoadedAccounts,
     release: bool,
 ) -> Option<Child> {
     let TestRunnerPaths {
@@ -26,6 +27,7 @@ pub fn start_magic_block_validator_with_config(
 
     // First build so that the validator can start fast
     let mut command = process::Command::new("cargo");
+    let keypair_base58 = loaded_chain_accounts.validator_authority_base58();
     command.arg("build");
     if release {
         command.arg("--release");
@@ -47,9 +49,15 @@ pub fn start_magic_block_validator_with_config(
         .arg("--")
         .arg(config_path)
         .env("RUST_LOG_STYLE", log_suffix)
+        .env("VALIDATOR_KEYPAIR", keypair_base58.clone())
         .current_dir(root_dir);
 
     eprintln!("Starting validator with {:?}", command);
+    eprintln!(
+        "Setting validator keypair to {} ({})",
+        loaded_chain_accounts.validator_authority(),
+        keypair_base58
+    );
 
     let validator = command.spawn().expect("Failed to start validator");
     wait_for_validator(validator, port)
@@ -58,7 +66,7 @@ pub fn start_magic_block_validator_with_config(
 pub fn start_test_validator_with_config(
     test_runner_paths: &TestRunnerPaths,
     program_loader: Option<ProgramLoader>,
-    loaded_accounts: LoadedAccounts,
+    loaded_accounts: &LoadedAccounts,
     log_suffix: &str,
 ) -> Option<process::Child> {
     let TestRunnerPaths {

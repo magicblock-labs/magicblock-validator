@@ -24,6 +24,7 @@ pub fn extract_scheduled_commit_sent_signature_from_logs(
     None
 }
 
+#[allow(clippy::type_complexity)]
 pub fn extract_sent_commit_info_from_logs(
     logs: &[String],
 ) -> (

@@ -3,6 +3,7 @@ use std::{fs, path::Path, process, process::Child};
 
 use integration_test_tools::{
     expect,
+    loaded_accounts::LoadedAccounts,
     tmpdir::resolve_tmp_dir,
     validator::{
         resolve_workspace_dir, start_magic_block_validator_with_config,
@@ -11,7 +12,10 @@ use integration_test_tools::{
     workspace_paths::path_relative_to_workspace,
     IntegrationTestContext,
 };
-use magicblock_config::{AccountsConfig, EphemeralConfig, LedgerConfig, LifecycleMode, ProgramConfig, RemoteConfig, ValidatorConfig, DEFAULT_LEDGER_SIZE_BYTES};
+use magicblock_config::{
+    AccountsConfig, EphemeralConfig, LedgerConfig, LifecycleMode,
+    ProgramConfig, RemoteConfig, ValidatorConfig, DEFAULT_LEDGER_SIZE_BYTES,
+};
 use program_flexi_counter::state::FlexiCounter;
 use solana_sdk::{
     clock::Slot,
@@ -36,6 +40,7 @@ pub const FLEXI_COUNTER_PUBKEY: Pubkey =
 /// Then uses that config to start the validator.
 pub fn start_validator_with_config(
     config: EphemeralConfig,
+    loaded_chain_accounts: &LoadedAccounts,
 ) -> (TempDir, Option<process::Child>) {
     let workspace_dir = resolve_workspace_dir();
     let (default_tmpdir, temp_dir) = resolve_tmp_dir(TMP_DIR_CONFIG);
@@ -56,7 +61,12 @@ pub fn start_validator_with_config(
     };
     (
         default_tmpdir,
-        start_magic_block_validator_with_config(&paths, "TEST", release),
+        start_magic_block_validator_with_config(
+            &paths,
+            "TEST",
+            loaded_chain_accounts,
+            release,
+        ),
     )
 }
 
@@ -104,7 +114,7 @@ pub fn setup_offline_validator(
         ledger: LedgerConfig {
             reset,
             path: Some(ledger_path.display().to_string()),
-            size: DEFAULT_LEDGER_SIZE_BYTES
+            size: DEFAULT_LEDGER_SIZE_BYTES,
         },
         accounts: accounts_config.clone(),
         programs,
@@ -112,7 +122,7 @@ pub fn setup_offline_validator(
         ..Default::default()
     };
     let (default_tmpdir_config, Some(mut validator)) =
-        start_validator_with_config(config)
+        start_validator_with_config(config, &Default::default())
     else {
         panic!("validator should set up correctly");
     };
@@ -153,7 +163,7 @@ pub fn setup_validator_with_local_remote(
     };
 
     let (default_tmpdir_config, Some(mut validator)) =
-        start_validator_with_config(config)
+        start_validator_with_config(config, &Default::default())
     else {
         panic!("validator should set up correctly");
     };
