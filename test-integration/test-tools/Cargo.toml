@@ -11,6 +11,10 @@ rayon = { workspace = true }
 serde = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-config = { workspace = true }
+magicblock-delegation-program = { workspace = true, features = [
+  "no-entrypoint",
+] }
+solana-pubkey = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }

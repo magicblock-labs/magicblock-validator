@@ -109,8 +109,13 @@ impl TestValidator {
             root_dir,
             workspace_dir,
         };
-        let process = start_test_validator_with_config(&paths, None, "CHAIN")
-            .expect("Failed to start devnet process");
+        let process = start_test_validator_with_config(
+            &paths,
+            None,
+            Default::default(),
+            "CHAIN",
+        )
+        .expect("Failed to start devnet process");
 
         Self { process }
     }

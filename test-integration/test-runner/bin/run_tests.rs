@@ -1,3 +1,4 @@
+use integration_test_tools::loaded_accounts::LoadedAccounts;
 use integration_test_tools::validator::start_test_validator_with_config;
 use integration_test_tools::{
     toml_to_args::ProgramLoader,
@@ -65,6 +66,7 @@ fn run_restore_ledger_tests(
     let mut devnet_validator = match start_validator(
         "restore-ledger-conf.devnet.toml",
         ValidatorCluster::Chain(None),
+        Default::default(),
     ) {
         Some(validator) => validator,
         None => {
@@ -100,6 +102,7 @@ fn run_schedule_commit_tests(
     let mut devnet_validator = match start_validator(
         "schedulecommit-conf.devnet.toml",
         ValidatorCluster::Chain(None),
+        LoadedAccounts::with_delegation_program_test_authority(),
     ) {
         Some(validator) => validator,
         None => {
@@ -115,6 +118,7 @@ fn run_schedule_commit_tests(
     let mut ephem_validator = match start_validator(
         "schedulecommit-conf-fees.ephem.toml",
         ValidatorCluster::Ephem,
+        LoadedAccounts::with_delegation_program_test_authority(),
     ) {
         Some(validator) => validator,
         None => {
@@ -163,6 +167,7 @@ fn run_issues_frequent_commmits_tests(
     let mut devnet_validator = match start_validator(
         "schedulecommit-conf.devnet.toml",
         ValidatorCluster::Chain(None),
+        LoadedAccounts::with_delegation_program_test_authority(),
     ) {
         Some(validator) => validator,
         None => {
@@ -172,6 +177,7 @@ fn run_issues_frequent_commmits_tests(
     let mut ephem_validator = match start_validator(
         "schedulecommit-conf.ephem.frequent-commits.toml",
         ValidatorCluster::Ephem,
+        LoadedAccounts::with_delegation_program_test_authority(),
     ) {
         Some(validator) => validator,
         None => {
@@ -205,6 +211,7 @@ fn run_cloning_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
     let mut devnet_validator = match start_validator(
         "cloning-conf.devnet.toml",
         ValidatorCluster::Chain(Some(ProgramLoader::BpfProgram)),
+        LoadedAccounts::with_delegation_program_test_authority(),
     ) {
         Some(validator) => validator,
         None => {
@@ -214,6 +221,7 @@ fn run_cloning_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
     let mut ephem_validator = match start_validator(
         "cloning-conf.ephem.toml",
         ValidatorCluster::Ephem,
+        LoadedAccounts::with_delegation_program_test_authority(),
     ) {
         Some(validator) => validator,
         None => {
@@ -332,6 +340,7 @@ impl ValidatorCluster {
 fn start_validator(
     config_file: &str,
     cluster: ValidatorCluster,
+    loaded_accounts: LoadedAccounts,
 ) -> Option<process::Child> {
     let log_suffix = cluster.log_suffix();
     let test_runner_paths = resolve_paths(config_file);
@@ -343,6 +352,7 @@ fn start_validator(
             start_test_validator_with_config(
                 &test_runner_paths,
                 program_loader,
+                loaded_accounts,
                 log_suffix,
             )
         }

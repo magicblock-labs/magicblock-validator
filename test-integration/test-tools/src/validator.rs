@@ -6,8 +6,9 @@ use std::{
     time::Duration,
 };
 
-use crate::toml_to_args::{
-    config_to_args, rpc_port_from_config, ProgramLoader,
+use crate::{
+    loaded_accounts::LoadedAccounts,
+    toml_to_args::{config_to_args, rpc_port_from_config, ProgramLoader},
 };
 
 pub fn start_magic_block_validator_with_config(
@@ -31,7 +32,7 @@ pub fn start_magic_block_validator_with_config(
     }
     let build_res = command.current_dir(root_dir.clone()).output();
 
-    if build_res.map_or(false, |output| !output.status.success()) {
+    if build_res.is_ok_and(|output| !output.status.success()) {
         eprintln!("Failed to build validator");
         return None;
     }
@@ -57,6 +58,7 @@ pub fn start_magic_block_validator_with_config(
 pub fn start_test_validator_with_config(
     test_runner_paths: &TestRunnerPaths,
     program_loader: Option<ProgramLoader>,
+    loaded_accounts: LoadedAccounts,
     log_suffix: &str,
 ) -> Option<process::Child> {
     let TestRunnerPaths {
@@ -71,19 +73,19 @@ pub fn start_test_validator_with_config(
     let accounts_dir = workspace_dir.join("configs").join("accounts");
     let accounts = [
         (
-            "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev",
+            loaded_accounts.validator_authority().to_string(),
             "validator-authority.json",
         ),
         (
-            "LUzidNSiPNjYNkxZcUm5hYHwnWPwsUfh2US1cpWwaBm",
+            loaded_accounts.luzid_authority().to_string(),
             "luzid-authority.json",
         ),
         (
-            "EpJnX7ueXk7fKojBymqmVuCuwyhDQsYcLVL1XMsBbvDX",
+            loaded_accounts.validator_fees_vault().to_string(),
             "validator-fees-vault.json",
         ),
         (
-            "7JrkjmZPprHwtuvtuGTXp9hwfGYFAQLnLeFM52kqAgXg",
+            loaded_accounts.protocol_fees_vault().to_string(),
             "protocol-fees-vault.json",
         ),
     ];
@@ -94,7 +96,7 @@ pub fn start_test_validator_with_config(
             let account_path = accounts_dir.join(file).canonicalize().unwrap();
             vec![
                 "--account".to_string(),
-                account.to_string(),
+                account.clone(),
                 account_path.to_str().unwrap().to_string(),
             ]
         })
