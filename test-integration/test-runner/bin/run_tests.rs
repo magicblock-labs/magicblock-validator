@@ -18,7 +18,6 @@ use test_runner::cleanup::{cleanup_devnet_only, cleanup_validators};
 
 pub fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-
     let Ok((security_output, scenarios_output)) =
         run_schedule_commit_tests(&manifest_dir)
     else {
@@ -61,12 +60,14 @@ fn run_restore_ledger_tests(
     manifest_dir: &str,
 ) -> Result<Output, Box<dyn Error>> {
     eprintln!("======== RUNNING RESTORE LEDGER TESTS ========");
+    let loaded_chain_accounts =
+        LoadedAccounts::with_delegation_program_test_authority();
     // The ledger tests manage their own ephem validator so all we start up here
     // is devnet
     let mut devnet_validator = match start_validator(
         "restore-ledger-conf.devnet.toml",
         ValidatorCluster::Chain(None),
-        Default::default(),
+        &loaded_chain_accounts,
     ) {
         Some(validator) => validator,
         None => {
@@ -98,11 +99,14 @@ fn run_schedule_commit_tests(
         "======== Starting DEVNET Validator for Scenarios + Security ========"
     );
 
+    let loaded_chain_accounts =
+        LoadedAccounts::with_delegation_program_test_authority();
+
     // Start validators via `cargo run --release  -- <config>
     let mut devnet_validator = match start_validator(
         "schedulecommit-conf.devnet.toml",
         ValidatorCluster::Chain(None),
-        LoadedAccounts::with_delegation_program_test_authority(),
+        &loaded_chain_accounts,
     ) {
         Some(validator) => validator,
         None => {
@@ -118,7 +122,7 @@ fn run_schedule_commit_tests(
     let mut ephem_validator = match start_validator(
         "schedulecommit-conf-fees.ephem.toml",
         ValidatorCluster::Ephem,
-        LoadedAccounts::with_delegation_program_test_authority(),
+        &loaded_chain_accounts,
     ) {
         Some(validator) => validator,
         None => {
@@ -164,10 +168,12 @@ fn run_issues_frequent_commmits_tests(
     manifest_dir: &str,
 ) -> Result<Output, Box<dyn Error>> {
     eprintln!("======== RUNNING ISSUES TESTS - Frequent Commits ========");
+    let loaded_chain_accounts =
+        LoadedAccounts::with_delegation_program_test_authority();
     let mut devnet_validator = match start_validator(
         "schedulecommit-conf.devnet.toml",
         ValidatorCluster::Chain(None),
-        LoadedAccounts::with_delegation_program_test_authority(),
+        &loaded_chain_accounts,
     ) {
         Some(validator) => validator,
         None => {
@@ -177,7 +183,7 @@ fn run_issues_frequent_commmits_tests(
     let mut ephem_validator = match start_validator(
         "schedulecommit-conf.ephem.frequent-commits.toml",
         ValidatorCluster::Ephem,
-        LoadedAccounts::with_delegation_program_test_authority(),
+        &loaded_chain_accounts,
     ) {
         Some(validator) => validator,
         None => {
@@ -208,10 +214,13 @@ fn run_issues_frequent_commmits_tests(
 
 fn run_cloning_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
     eprintln!("======== RUNNING CLONING TESTS ========");
+    let loaded_chain_accounts =
+        LoadedAccounts::with_delegation_program_test_authority();
+
     let mut devnet_validator = match start_validator(
         "cloning-conf.devnet.toml",
         ValidatorCluster::Chain(Some(ProgramLoader::BpfProgram)),
-        LoadedAccounts::with_delegation_program_test_authority(),
+        &loaded_chain_accounts,
     ) {
         Some(validator) => validator,
         None => {
@@ -221,7 +230,7 @@ fn run_cloning_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
     let mut ephem_validator = match start_validator(
         "cloning-conf.ephem.toml",
         ValidatorCluster::Ephem,
-        LoadedAccounts::with_delegation_program_test_authority(),
+        &loaded_chain_accounts,
     ) {
         Some(validator) => validator,
         None => {
@@ -340,7 +349,7 @@ impl ValidatorCluster {
 fn start_validator(
     config_file: &str,
     cluster: ValidatorCluster,
-    loaded_chain_accounts: LoadedAccounts,
+    loaded_chain_accounts: &LoadedAccounts,
 ) -> Option<process::Child> {
     let log_suffix = cluster.log_suffix();
     let test_runner_paths = resolve_paths(config_file);
@@ -352,14 +361,14 @@ fn start_validator(
             start_test_validator_with_config(
                 &test_runner_paths,
                 program_loader,
-                &loaded_chain_accounts,
+                loaded_chain_accounts,
                 log_suffix,
             )
         }
         _ => start_magic_block_validator_with_config(
             &test_runner_paths,
             log_suffix,
-            &loaded_chain_accounts,
+            loaded_chain_accounts,
             false,
         ),
     }

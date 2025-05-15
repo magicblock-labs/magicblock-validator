@@ -450,7 +450,7 @@ impl IntegrationTestContext {
         const MILLIS_UNTIL_RETRY: u64 = 200;
         let mut failure_count = 0;
 
-        // Allow transactions to take up to 20 seconds to confirm
+        // Allow transactions to take up to 40 seconds to confirm
         const MAX_UNCONFIRMED_COUNT: u64 = 40;
         const MILLIS_UNTIL_RECONFIRM: u64 = 500;
         let mut unconfirmed_count = 0;

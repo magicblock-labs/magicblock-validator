@@ -163,7 +163,10 @@ pub fn setup_validator_with_local_remote(
     };
 
     let (default_tmpdir_config, Some(mut validator)) =
-        start_validator_with_config(config, &Default::default())
+        start_validator_with_config(
+            config,
+            &LoadedAccounts::with_delegation_program_test_authority(),
+        )
     else {
         panic!("validator should set up correctly");
     };
