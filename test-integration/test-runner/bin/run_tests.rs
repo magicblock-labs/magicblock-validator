@@ -18,15 +18,10 @@ use test_runner::cleanup::{cleanup_devnet_only, cleanup_validators};
 
 pub fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-    let Ok((table_mania_output, committor_output)) =
-        run_table_mania_and_committor_tests(&manifest_dir)
-    else {
-        // If any test run panics (i.e. not just a failing test) then we bail
-        return;
-    };
     let Ok((security_output, scenarios_output)) =
         run_schedule_commit_tests(&manifest_dir)
     else {
+        // If any test run panics (i.e. not just a failing test) then we bail
         return;
     };
     let Ok(issues_frequent_commits_output) =
@@ -48,15 +43,21 @@ pub fn main() {
         return;
     };
 
+    let Ok((table_mania_output, committor_output)) =
+        run_table_mania_and_committor_tests(&manifest_dir)
+    else {
+        return;
+    };
+
     // Assert that all tests passed
-    assert_cargo_tests_passed(table_mania_output);
-    assert_cargo_tests_passed(committor_output);
     assert_cargo_tests_passed(security_output);
     assert_cargo_tests_passed(scenarios_output);
     assert_cargo_tests_passed(cloning_output);
     assert_cargo_tests_passed(issues_frequent_commits_output);
     assert_cargo_tests_passed(restore_ledger_output);
     assert_cargo_tests_passed(magicblock_api_output);
+    assert_cargo_tests_passed(table_mania_output);
+    assert_cargo_tests_passed(committor_output);
 }
 
 // -----------------
