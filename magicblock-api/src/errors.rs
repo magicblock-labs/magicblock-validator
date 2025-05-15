@@ -33,8 +33,8 @@ pub enum ApiError {
     #[error("Validator '{0}' is insufficiently funded on chain. Minimum is ({1} SOL)")]
     ValidatorInsufficientlyFunded(Pubkey, u64),
 
-    #[error("CommittorSerivceError")]
-    CommittorSerivceError(
+    #[error("CommittorServiceError")]
+    CommittorServiceError(
         #[from] magicblock_committor_service::error::CommittorServiceError,
     ),
 
