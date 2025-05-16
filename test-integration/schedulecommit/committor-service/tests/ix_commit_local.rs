@@ -872,7 +872,8 @@ async fn ix_commit_local(
                 );
                 if Instant::now() - start > MAX_TIME_TO_CLOSE {
                     panic!(
-                        "Timed out waiting for tables close. Still open: {}",
+                        "Timed out waiting for tables close after {} seconds. Still open: {}",
+                        MAX_TIME_TO_CLOSE.as_secs(),
                         closing_tables
                             .iter()
                             .map(|x| x.to_string())

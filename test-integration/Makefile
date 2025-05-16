@@ -7,7 +7,7 @@ RUST_LOG ?= 'warn,geyser_plugin=warn,magicblock=trace,rpc=trace,bank=trace,banki
 FLEXI_COUNTER_DIR := $(DIR)programs/flexi-counter
 SCHEDULECOMMIT_DIR := $(DIR)programs/schedulecommit
 SCHEDULECOMMIT_SECURITY_DIR := $(DIR)programs/schedulecommit-security
-COMMITTOR_PROGRAM_DIR := $(DIR)../magicblock-committor-program/
+COMMITTOR_PROGRAM_DIR := $(DIR)../magicblock-committor-program
 
 FLEXI_COUNTER_SRC := $(shell find $(FLEXI_COUNTER_DIR) -name '*.rs' -o -name '*.toml')
 SCHEDULECOMMIT_SRC := $(shell find $(SCHEDULECOMMIT_DIR) -name '*.rs' -o -name '*.toml')
