@@ -9,7 +9,6 @@ use solana_sdk::{
 
 use crate::{
     magic_context::{CommittedAccount, MagicContext, ScheduledCommit},
-    magicblock_instruction::scheduled_commit_sent,
     schedule_transactions::{
         transaction_scheduler::TransactionScheduler, COMMIT_ID,
     },
@@ -18,6 +17,7 @@ use crate::{
         accounts::{
             get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
         },
+        instruction_utils::InstructionUtils,
     },
     validator::validator_authority_id,
 };
@@ -190,7 +190,8 @@ pub(crate) fn process_schedule_commit(
             })?;
 
     let blockhash = invoke_context.environment_config.blockhash;
-    let commit_sent_transaction = scheduled_commit_sent(commit_id, blockhash);
+    let commit_sent_transaction =
+        InstructionUtils::scheduled_commit_sent(commit_id, blockhash);
 
     let commit_sent_sig = commit_sent_transaction.signatures[0];
 

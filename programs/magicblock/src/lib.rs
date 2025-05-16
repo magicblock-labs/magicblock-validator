@@ -3,6 +3,8 @@ mod magic_context;
 mod mutate_accounts;
 mod schedule_transactions;
 pub use magic_context::{FeePayerAccount, MagicContext, ScheduledCommit};
+mod args;
+mod magic_schedule_action;
 pub mod magicblock_instruction;
 pub mod magicblock_processor;
 #[cfg(test)]
@@ -16,3 +18,4 @@ pub use schedule_transactions::{
     process_scheduled_commit_sent, register_scheduled_commit_sent,
     transaction_scheduler::TransactionScheduler, SentCommit,
 };
+pub use utils::instruction_utils;
