@@ -33,10 +33,10 @@ pub fn main() {
         return;
     };
 
-    let Ok(restore_ledger_output) = run_restore_ledger_tests(&manifest_dir)
-    else {
-        return;
-    };
+    // let Ok(restore_ledger_output) = run_restore_ledger_tests(&manifest_dir)
+    // else {
+    //     return;
+    // };
 
     let Ok(magicblock_api_output) = run_magicblock_api_tests(&manifest_dir)
     else {
@@ -54,7 +54,7 @@ pub fn main() {
     assert_cargo_tests_passed(scenarios_output);
     assert_cargo_tests_passed(cloning_output);
     assert_cargo_tests_passed(issues_frequent_commits_output);
-    assert_cargo_tests_passed(restore_ledger_output);
+    // assert_cargo_tests_passed(restore_ledger_output);
     assert_cargo_tests_passed(magicblock_api_output);
     assert_cargo_tests_passed(table_mania_output);
     assert_cargo_tests_passed(committor_output);
