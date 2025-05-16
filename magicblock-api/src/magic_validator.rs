@@ -712,9 +712,12 @@ impl MagicValidator {
             self.token.clone(),
         ));
 
-        self.start_remote_account_cloner_worker().await?;
+        // NOTE: these need to startup in the right order, otherwise some worker
+        //       that may be needed, i.e. during hydration after ledger replay
+        //       are not started in time
         self.start_remote_account_fetcher_worker();
         self.start_remote_account_updates_worker();
+        self.start_remote_account_cloner_worker().await?;
 
         self.ledger_truncator.start();
 
