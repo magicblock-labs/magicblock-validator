@@ -174,6 +174,9 @@ impl TableMania {
         let mut remaining = pubkeys.iter().cloned().collect::<Vec<_>>();
         let mut tables_used = HashSet::new();
 
+        const MAX_ALLOWED_EXTEND_ERRORS: u8 = 5;
+        let mut extend_errors = 0;
+
         // Keep trying to store pubkeys until we're done
         while !remaining.is_empty() {
             // First try to use existing tables
@@ -186,14 +189,28 @@ impl TableMania {
                 // Try to use the last table if it's not full
                 if let Some(table) = active_tables_write_lock.last() {
                     if !table.is_full() {
-                        self.extend_table(
-                            table,
-                            authority,
-                            &mut remaining,
-                            &mut tables_used,
-                        )
-                        .await;
-                        stored_in_existing = true;
+                        if let Err(err) = self
+                            .extend_table(
+                                table,
+                                authority,
+                                &mut remaining,
+                                &mut tables_used,
+                            )
+                            .await
+                        {
+                            error!(
+                                "Error extending table {}: {:?}",
+                                table.table_address(),
+                                err
+                            );
+                            if extend_errors >= MAX_ALLOWED_EXTEND_ERRORS {
+                                extend_errors += 1;
+                            } else {
+                                return Err(err);
+                            }
+                        } else {
+                            stored_in_existing = true;
+                        }
                     }
                 }
             }
@@ -243,7 +260,7 @@ impl TableMania {
         authority: &Keypair,
         remaining: &mut Vec<Pubkey>,
         tables_used: &mut HashSet<Pubkey>,
-    ) {
+    ) -> TableManiaResult<()> {
         let remaining_len = remaining.len();
         let storing_len =
             remaining_len.min(MAX_ENTRIES_AS_PART_OF_EXTEND as usize);
@@ -253,27 +270,21 @@ impl TableMania {
             remaining_len,
             table.table_address()
         );
-        let table_addresses_count = table.pubkeys().unwrap().len();
+        let Some(table_addresses_count) = table.pubkeys().map(|x| x.len())
+        else {
+            return Err(TableManiaError::CannotExtendDeactivatedTable(
+                *table.table_address(),
+            ));
+        };
 
         let storing = remaining[..storing_len].to_vec();
-        match table
+        let stored = table
             .extend_respecting_capacity(&self.rpc_client, authority, &storing)
-            .await
-        {
-            Ok(stored) => {
-                trace!("Stored {}", stored.len());
-                tables_used.insert(*table.table_address());
-                remaining.retain(|pk| !stored.contains(pk));
-            }
-            // TODO: this could cause us to loop forever as remaining
-            //       is never updated, possibly we need to return an error
-            //       here instead
-            Err(err) => error!(
-                "Error extending table {}: {:?}",
-                table.table_address(),
-                err
-            ),
-        }
+            .await?;
+        trace!("Stored {}", stored.len());
+        tables_used.insert(*table.table_address());
+        remaining.retain(|pk| !stored.contains(pk));
+
         let stored_count = remaining_len - remaining.len();
         trace!("Stored {}, remaining: {}", stored_count, remaining.len());
 
@@ -281,6 +292,8 @@ impl TableMania {
             table_addresses_count + stored_count,
             table.pubkeys().unwrap().len()
         );
+
+        Ok(())
     }
 
     async fn create_new_table_and_extend(
@@ -660,7 +673,7 @@ impl TableMania {
                         closed_tables.push(*deactivated_table.table_address())
                     }
                     Ok(_) => {
-                        // Table not ready to be closed"
+                        // Table not ready to be closed
                     }
                     Err(err) => error!(
                         "Error closing table {}: {:?}",
