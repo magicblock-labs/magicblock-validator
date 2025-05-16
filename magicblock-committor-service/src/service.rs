@@ -1,4 +1,4 @@
-use std::{fmt::Display, path::Path};
+use std::path::Path;
 
 use log::*;
 use magicblock_committor_program::Changeset;
@@ -205,12 +205,9 @@ impl CommittorService {
         chain_config: ChainConfig,
     ) -> CommittorServiceResult<Self>
     where
-        P: Display + AsRef<Path>,
+        P: AsRef<Path>,
     {
-        debug!(
-            "Starting committor service with config: {:?}, persisting to: {}",
-            chain_config, persist_file
-        );
+        debug!("Starting committor service with config: {:?}", chain_config);
         let (sender, receiver) = mpsc::channel(1_000);
         let cancel_token = CancellationToken::new();
         {

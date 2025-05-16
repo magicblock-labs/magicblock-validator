@@ -198,22 +198,23 @@ impl MagicValidator {
             config.validator_config.ledger.reset,
         )?;
 
-        let exit = Arc::<AtomicBool>::default();
         // SAFETY:
         // this code will never panic as the ledger_path always appends the
         // rocksdb directory to whatever path is preconfigured for the ledger,
         // see `Ledger::do_open`, thus this path will always have a parent
-        let adb_path = ledger
+        let ledger_parent_path = ledger
             .ledger_path()
             .parent()
             .expect("ledger_path didn't have a parent, should never happen");
+
+        let exit = Arc::<AtomicBool>::default();
         let bank = Self::init_bank(
             Some(geyser_manager.clone()),
             &genesis_config,
             &config.validator_config.accounts.db,
             config.validator_config.validator.millis_per_slot,
             validator_pubkey,
-            adb_path,
+            ledger_parent_path,
             ledger.get_max_blockhash().map(|(slot, _)| slot)?,
         )?;
 
@@ -310,10 +311,15 @@ impl MagicValidator {
             &faucet_keypair.pubkey(),
         );
 
+        let committor_persist_path =
+            ledger_parent_path.join("committor_service.sqlite");
+        debug!(
+            "Committor service persists to: {}",
+            committor_persist_path.display()
+        );
         let committor_service = Arc::new(CommittorService::try_start(
             identity_keypair.insecure_clone(),
-            // TODO: @@@ config or inside ledger dir
-            "/tmp/committor_service.sqlite",
+            committor_persist_path,
             ChainConfig {
                 rpc_uri: remote_rpc_config.url().to_string(),
                 commitment: remote_rpc_config
