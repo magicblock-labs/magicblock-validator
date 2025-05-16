@@ -604,7 +604,7 @@ impl MagicValidator {
             validator_info,
         )
         .map_err(|err| {
-            ApiError::FailedToRegisterValidatorOnChain(err.to_string())
+            ApiError::FailedToRegisterValidatorOnChain(format!("{err:#}"))
         })
     }
 
@@ -617,7 +617,7 @@ impl MagicValidator {
             &validator_keypair,
         )
         .map_err(|err| {
-            ApiError::FailedToUnregisterValidatorOnChain(err.to_string())
+            ApiError::FailedToUnregisterValidatorOnChain(format!("{err:#}"))
         })
     }
 
