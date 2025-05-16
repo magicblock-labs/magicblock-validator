@@ -270,14 +270,10 @@ impl MagicValidator {
             None
         };
 
-        let accounts_config =
-            try_convert_accounts_config(&config.validator_config.accounts)
-                .map_err(ApiError::ConfigError)?;
-
-        let remote_rpc_config = RpcProviderConfig::new(
-            try_rpc_cluster_from_cluster(&accounts_config.remote_cluster)?,
-            Some(CommitmentLevel::Confirmed),
-        );
+        let (accounts_config, remote_rpc_config) =
+            try_get_remote_accounts_and_rpc_config(
+                &config.validator_config.accounts,
+            )?;
 
         let remote_account_fetcher_worker =
             RemoteAccountFetcherWorker::new(remote_rpc_config.clone());
@@ -656,20 +652,10 @@ impl MagicValidator {
     }
 
     async fn ensure_validator_funded_on_chain(&self) -> ApiResult<()> {
-        // TODO(thlorenz) make this configurable in the future
+        // NOTE: 5 SOL seems reasonable, but we may require a different amount in the future
         const MIN_BALANCE_SOL: u64 = 5;
-        // TODO: @@ duplicate code getting remote_rpc_config
-        let accounts_config = try_convert_accounts_config(
-            &self.config.accounts,
-        )
-        .expect(
-            "Failed to derive accounts config from provided magicblock config",
-        );
-        let remote_rpc_config = RpcProviderConfig::new(
-            try_rpc_cluster_from_cluster(&accounts_config.remote_cluster)?,
-            Some(CommitmentLevel::Confirmed),
-        );
-
+        let (_, remote_rpc_config) =
+            try_get_remote_accounts_and_rpc_config(&self.config.accounts)?;
         let validator_pubkey = self.bank().get_identity();
 
         let lamports = RpcClient::new_with_commitment(
@@ -894,4 +880,16 @@ fn create_worker_runtime(thread_name: &str) -> tokio::runtime::Runtime {
         .thread_name(thread_name)
         .build()
         .unwrap()
+}
+
+fn try_get_remote_accounts_and_rpc_config(
+    accounts: &magicblock_config::AccountsConfig,
+) -> ApiResult<(magicblock_accounts::AccountsConfig, RpcProviderConfig)> {
+    let accounts_config =
+        try_convert_accounts_config(accounts).map_err(ApiError::ConfigError)?;
+    let remote_rpc_config = RpcProviderConfig::new(
+        try_rpc_cluster_from_cluster(&accounts_config.remote_cluster)?,
+        Some(CommitmentLevel::Confirmed),
+    );
+    Ok((accounts_config, remote_rpc_config))
 }
