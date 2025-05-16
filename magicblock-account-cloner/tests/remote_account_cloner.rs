@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{collections::HashSet, sync::Arc};
 
 use magicblock_account_cloner::{
     standard_blacklisted_accounts, AccountCloner, AccountClonerError,
@@ -10,6 +10,7 @@ use magicblock_account_dumper::AccountDumperStub;
 use magicblock_account_fetcher::AccountFetcherStub;
 use magicblock_account_updates::AccountUpdatesStub;
 use magicblock_accounts_api::InternalAccountProviderStub;
+use magicblock_committor_service::stubs::ChangesetCommittorStub;
 use magicblock_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
 use solana_sdk::{
     bpf_loader_upgradeable::get_program_data_address,
@@ -26,6 +27,7 @@ fn setup_custom(
     account_fetcher: AccountFetcherStub,
     account_updates: AccountUpdatesStub,
     account_dumper: AccountDumperStub,
+    changeset_committor: Arc<ChangesetCommittorStub>,
     allowed_program_ids: Option<HashSet<Pubkey>>,
     blacklisted_accounts: HashSet<Pubkey>,
     permissions: AccountClonerPermissions,
@@ -42,6 +44,7 @@ fn setup_custom(
         account_fetcher,
         account_updates,
         account_dumper,
+        changeset_committor,
         allowed_program_ids,
         blacklisted_accounts,
         payer_init_lamports,
@@ -69,6 +72,7 @@ fn setup_replica(
     account_fetcher: AccountFetcherStub,
     account_updates: AccountUpdatesStub,
     account_dumper: AccountDumperStub,
+    changeset_committor: Arc<ChangesetCommittorStub>,
     allowed_program_ids: Option<HashSet<Pubkey>>,
 ) -> (
     RemoteAccountClonerClient,
@@ -80,6 +84,7 @@ fn setup_replica(
         account_fetcher,
         account_updates,
         account_dumper,
+        changeset_committor,
         allowed_program_ids,
         standard_blacklisted_accounts(
             &Pubkey::new_unique(),
@@ -100,6 +105,7 @@ fn setup_programs_replica(
     account_fetcher: AccountFetcherStub,
     account_updates: AccountUpdatesStub,
     account_dumper: AccountDumperStub,
+    changeset_committor: Arc<ChangesetCommittorStub>,
     allowed_program_ids: Option<HashSet<Pubkey>>,
 ) -> (
     RemoteAccountClonerClient,
@@ -111,6 +117,7 @@ fn setup_programs_replica(
         account_fetcher,
         account_updates,
         account_dumper,
+        changeset_committor,
         allowed_program_ids,
         standard_blacklisted_accounts(
             &Pubkey::new_unique(),
@@ -131,6 +138,7 @@ fn setup_ephemeral(
     account_fetcher: AccountFetcherStub,
     account_updates: AccountUpdatesStub,
     account_dumper: AccountDumperStub,
+    changeset_committor: Arc<ChangesetCommittorStub>,
     allowed_program_ids: Option<HashSet<Pubkey>>,
 ) -> (
     RemoteAccountClonerClient,
@@ -142,6 +150,7 @@ fn setup_ephemeral(
         account_fetcher,
         account_updates,
         account_dumper,
+        changeset_committor,
         allowed_program_ids,
         standard_blacklisted_accounts(
             &Pubkey::new_unique(),
@@ -162,6 +171,7 @@ fn setup_offline(
     account_fetcher: AccountFetcherStub,
     account_updates: AccountUpdatesStub,
     account_dumper: AccountDumperStub,
+    changeset_committor: Arc<ChangesetCommittorStub>,
     allowed_program_ids: Option<HashSet<Pubkey>>,
 ) -> (
     RemoteAccountClonerClient,
@@ -173,6 +183,7 @@ fn setup_offline(
         account_fetcher,
         account_updates,
         account_dumper,
+        changeset_committor,
         allowed_program_ids,
         standard_blacklisted_accounts(
             &Pubkey::new_unique(),
@@ -195,12 +206,14 @@ async fn test_clone_allow_feepayer_account_when_ephemeral() {
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
+    let changeset_committor = Arc::new(ChangesetCommittorStub::default());
     // Create account cloner worker and client
     let (cloner, cancellation_token, worker_handle) = setup_ephemeral(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
         account_dumper.clone(),
+        changeset_committor.clone(),
         None,
     );
     // Account(s) involved
@@ -226,12 +239,14 @@ async fn test_clone_allow_undelegated_account_when_ephemeral() {
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
+    let changeset_committor = Arc::new(ChangesetCommittorStub::default());
     // Create account cloner worker and client
     let (cloner, cancellation_token, worker_handle) = setup_ephemeral(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
         account_dumper.clone(),
+        changeset_committor.clone(),
         None,
     );
     // Account(s) involved
@@ -259,12 +274,14 @@ async fn test_clone_fails_stale_undelegated_account_when_ephemeral() {
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
+    let changeset_committor = Arc::new(ChangesetCommittorStub::default());
     // Create account cloner worker and client
     let (cloner, cancellation_token, worker_handle) = setup_ephemeral(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
         account_dumper.clone(),
+        changeset_committor.clone(),
         None,
     );
     // Account(s) involved
@@ -293,12 +310,14 @@ async fn test_clone_allow_delegated_account_when_ephemeral() {
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
+    let changeset_committor = Arc::new(ChangesetCommittorStub::default());
     // Create account cloner worker and client
     let (cloner, cancellation_token, worker_handle) = setup_ephemeral(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
         account_dumper.clone(),
+        changeset_committor.clone(),
         None,
     );
     // Account(s) involved
@@ -324,12 +343,14 @@ async fn test_clone_allow_program_accounts_when_ephemeral() {
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
+    let changeset_committor = Arc::new(ChangesetCommittorStub::default());
     // Create account cloner worker and client
     let (cloner, cancellation_token, worker_handle) = setup_ephemeral(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
         account_dumper.clone(),
+        changeset_committor.clone(),
         None,
     );
     // Account(s) involved
@@ -376,6 +397,7 @@ async fn test_clone_program_accounts_when_ephemeral_with_whitelist() {
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
+    let changeset_committor = Arc::new(ChangesetCommittorStub::default());
     let mut allowed_program_ids = HashSet::new();
     allowed_program_ids.insert(allowed_program_id);
     // Create account cloner worker and client
@@ -384,6 +406,7 @@ async fn test_clone_program_accounts_when_ephemeral_with_whitelist() {
         account_fetcher.clone(),
         account_updates.clone(),
         account_dumper.clone(),
+        changeset_committor.clone(),
         Some(allowed_program_ids),
     );
     // Account(s) involved
@@ -451,12 +474,14 @@ async fn test_clone_refuse_already_written_in_bank() {
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
+    let changeset_committor = Arc::new(ChangesetCommittorStub::default());
     // Create account cloner worker and client
     let (cloner, cancellation_token, worker_handle) = setup_ephemeral(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
         account_dumper.clone(),
+        changeset_committor.clone(),
         None,
     );
     // Account(s) involved
@@ -487,12 +512,14 @@ async fn test_clone_refuse_blacklisted_account() {
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
+    let changeset_committor = Arc::new(ChangesetCommittorStub::default());
     // Create account cloner worker and client
     let (cloner, cancellation_token, worker_handle) = setup_ephemeral(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
         account_dumper.clone(),
+        changeset_committor.clone(),
         None,
     );
     // Account(s) involved
@@ -522,12 +549,15 @@ async fn test_clone_refuse_feepayer_account_when_programs_replica() {
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
+    let changeset_committor = Arc::new(ChangesetCommittorStub::default());
+
     // Create account cloner worker and client
     let (cloner, cancellation_token, worker_handle) = setup_programs_replica(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
         account_dumper.clone(),
+        changeset_committor.clone(),
         None,
     );
     // Account(s) involved
@@ -559,12 +589,14 @@ async fn test_clone_refuse_undelegated_account_when_programs_replica() {
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
+    let changeset_committor = Arc::new(ChangesetCommittorStub::default());
     // Create account cloner worker and client
     let (cloner, cancellation_token, worker_handle) = setup_programs_replica(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
         account_dumper.clone(),
+        changeset_committor.clone(),
         None,
     );
     // Account(s) involved
@@ -597,12 +629,14 @@ async fn test_clone_refuse_delegated_account_when_programs_replica() {
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
+    let changeset_committor = Arc::new(ChangesetCommittorStub::default());
     // Create account cloner worker and client
     let (cloner, cancellation_token, worker_handle) = setup_programs_replica(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
         account_dumper.clone(),
+        changeset_committor.clone(),
         None,
     );
     // Account(s) involved
@@ -634,12 +668,14 @@ async fn test_clone_allow_program_accounts_when_programs_replica() {
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
+    let changeset_committor = Arc::new(ChangesetCommittorStub::default());
     // Create account cloner worker and client
     let (cloner, cancellation_token, worker_handle) = setup_programs_replica(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
         account_dumper.clone(),
+        changeset_committor.clone(),
         None,
     );
     // Account(s) involved
@@ -683,12 +719,14 @@ async fn test_clone_allow_undelegated_account_when_replica() {
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
+    let changeset_committor = Arc::new(ChangesetCommittorStub::default());
     // Create account cloner worker and client
     let (cloner, cancellation_token, worker_handle) = setup_replica(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
         account_dumper.clone(),
+        changeset_committor.clone(),
         None,
     );
     // Account(s) involved
@@ -716,12 +754,14 @@ async fn test_clone_allow_feepayer_account_when_replica() {
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
+    let changeset_committor = Arc::new(ChangesetCommittorStub::default());
     // Create account cloner worker and client
     let (cloner, cancellation_token, worker_handle) = setup_replica(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
         account_dumper.clone(),
+        changeset_committor.clone(),
         None,
     );
     // Account(s) involved
@@ -747,12 +787,14 @@ async fn test_clone_refuse_any_account_when_offline() {
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
+    let changeset_committor = Arc::new(ChangesetCommittorStub::default());
     // Create account cloner worker and client
     let (cloner, cancellation_token, worker_handle) = setup_offline(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
         account_dumper.clone(),
+        changeset_committor.clone(),
         None,
     );
     // Account(s) involved
@@ -828,12 +870,14 @@ async fn test_clone_will_not_fetch_the_same_thing_multiple_times() {
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
+    let changeset_committor = Arc::new(ChangesetCommittorStub::default());
     // Create account cloner worker and client
     let (cloner, cancellation_token, worker_handle) = setup_ephemeral(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
         account_dumper.clone(),
+        changeset_committor.clone(),
         None,
     );
     // Account(s) involved
@@ -878,12 +922,15 @@ async fn test_clone_properly_cached_undelegated_account_when_ephemeral() {
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
+    let changeset_committor = Arc::new(ChangesetCommittorStub::default());
+
     // Create account cloner worker and client
     let (cloner, cancellation_token, worker_handle) = setup_ephemeral(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
         account_dumper.clone(),
+        changeset_committor.clone(),
         None,
     );
     // Account(s) involved
@@ -931,12 +978,14 @@ async fn test_clone_properly_cached_program() {
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
+    let changeset_committor = Arc::new(ChangesetCommittorStub::default());
     // Create account cloner worker and client
     let (cloner, cancellation_token, worker_handle) = setup_ephemeral(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
         account_dumper.clone(),
+        changeset_committor.clone(),
         None,
     );
     // Account(s) involved
@@ -1005,12 +1054,14 @@ async fn test_clone_properly_cached_delegated_account_that_changes_state() {
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
+    let changeset_committor = Arc::new(ChangesetCommittorStub::default());
     // Create account cloner worker and client
     let (cloner, cancellation_token, worker_handle) = setup_ephemeral(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
         account_dumper.clone(),
+        changeset_committor.clone(),
         None,
     );
     // Account(s) involved
@@ -1096,12 +1147,14 @@ async fn test_clone_properly_upgrading_downgrading_when_created_and_deleted() {
     let account_fetcher = AccountFetcherStub::default();
     let account_updates = AccountUpdatesStub::default();
     let account_dumper = AccountDumperStub::default();
+    let changeset_committor = Arc::new(ChangesetCommittorStub::default());
     // Create account cloner worker and client
     let (cloner, cancellation_token, worker_handle) = setup_ephemeral(
         internal_account_provider.clone(),
         account_fetcher.clone(),
         account_updates.clone(),
         account_dumper.clone(),
+        changeset_committor.clone(),
         None,
     );
     // Account(s) involved
