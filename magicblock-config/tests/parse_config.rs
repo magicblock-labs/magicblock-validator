@@ -35,7 +35,8 @@ fn test_local_dev_toml() {
 #[test]
 fn test_ephemeral_toml() {
     let toml = include_str!("fixtures/04_ephemeral.toml");
-    let config = toml::from_str::<EphemeralConfig>(toml).unwrap();
+    let mut config = toml::from_str::<EphemeralConfig>(toml).unwrap();
+    config.accounts.remotes = vec![RemoteConfig::Devnet];
     assert_eq!(
         config,
         EphemeralConfig {
@@ -54,7 +55,8 @@ fn test_ephemeral_toml() {
 #[test]
 fn test_all_goes_toml() {
     let toml = include_str!("fixtures/05_all-goes.toml");
-    let config = toml::from_str::<EphemeralConfig>(toml).unwrap();
+    let mut config = toml::from_str::<EphemeralConfig>(toml).unwrap();
+    config.accounts.remotes = vec![RemoteConfig::Devnet];
     assert_eq!(
         config,
         EphemeralConfig {
