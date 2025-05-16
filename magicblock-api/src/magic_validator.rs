@@ -174,7 +174,7 @@ impl MagicValidator {
         config: MagicValidatorConfig,
         identity_keypair: Keypair,
     ) -> ApiResult<Self> {
-        // TODO(thlorenz): @@ this will need to be recreated on each start
+        // TODO(thlorenz): this will need to be recreated on each start
         let token = CancellationToken::new();
 
         let (geyser_manager, geyser_rpc_service) =
@@ -650,7 +650,7 @@ impl MagicValidator {
     }
 
     async fn ensure_validator_funded_on_chain(&self) -> ApiResult<()> {
-        // TODO: @@@ configurable?
+        // TODO(thlorenz) make this configurable in the future
         const MIN_BALANCE_SOL: u64 = 5;
         // TODO: @@ duplicate code getting remote_rpc_config
         let accounts_config = try_convert_accounts_config(

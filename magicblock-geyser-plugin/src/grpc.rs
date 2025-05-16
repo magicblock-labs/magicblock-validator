@@ -144,7 +144,7 @@ impl GrpcService {
         block_fail_action: ConfigBlockFailAction,
     ) {
         const PROCESSED_MESSAGES_MAX: usize = 31;
-        // TODO(thlorenz): @@@ This could become a bottleneck affecting latency
+        // TODO(thlorenz): This could become a bottleneck affecting latency
         const PROCESSED_MESSAGES_SLEEP: Duration = Duration::from_millis(10);
 
         let mut messages: BTreeMap<u64, SlotMessages> = Default::default();
