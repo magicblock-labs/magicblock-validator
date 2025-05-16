@@ -102,25 +102,13 @@ pub enum CommitAccountError {
     #[error("Failed to deserialize chunks account: {0} ({0:?})")]
     DeserializeChunksAccount(std::io::Error, Arc<CommitInfo>, CommitStrategy),
 
+    #[error("Failed to affect remaining size via realloc buffer after max retries. Last error {0}")]
+    ReallocBufferRanOutOfRetries(String, Arc<CommitInfo>, CommitStrategy),
+
     #[error("Failed to write complete chunks of commit data after max retries. Last write error {0:?}")]
     WriteChunksRanOutOfRetries(
         Option<magicblock_rpc_client::MagicBlockRpcClientError>,
         Arc<CommitInfo>,
         CommitStrategy,
     ),
-}
-
-impl CommitAccountError {
-    pub fn into_commit_info(self) -> CommitInfo {
-        use CommitAccountError::*;
-        let ci = match self {
-            InitBufferAndChunkAccounts(_, commit_info, _) => {
-                return *commit_info;
-            }
-            GetChunksAccount(_, commit_info, _) => commit_info,
-            DeserializeChunksAccount(_, commit_info, _) => commit_info,
-            WriteChunksRanOutOfRetries(_, commit_info, _) => commit_info,
-        };
-        Arc::<CommitInfo>::unwrap_or_clone(ci)
-    }
 }

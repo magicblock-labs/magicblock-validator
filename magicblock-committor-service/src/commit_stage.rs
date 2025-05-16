@@ -142,6 +142,13 @@ impl From<CommitAccountError> for CommitStage {
                     commit_strategy,
                 ))
             }
+            ReallocBufferRanOutOfRetries(err, commit_info, commit_strategy) => {
+                warn!("Realloc buffer ran out of retries: {:?}", err);
+                Self::BufferAndChunkPartiallyInitialized((
+                    ci!(commit_info),
+                    commit_strategy,
+                ))
+            }
             WriteChunksRanOutOfRetries(err, commit_info, commit_strategy) => {
                 warn!("Write chunks ran out of retries: {:?}", err);
                 Self::BufferAndChunkPartiallyInitialized((

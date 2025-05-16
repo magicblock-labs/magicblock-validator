@@ -51,6 +51,7 @@ use crate::{
 struct NextReallocs {
     missing_size: u64,
     start_idx: usize,
+    err: Option<String>,
 }
 
 impl CommittorProcessor {
@@ -826,11 +827,30 @@ impl CommittorProcessor {
                     blockhash: ephemeral_blockhash,
                 };
 
+                const MAX_STALE_REALLOCS: u8 = 10;
+                let mut prev_missing_size = 0;
+                let mut remaining_tries = MAX_STALE_REALLOCS;
                 while let Some(NextReallocs {
                     missing_size,
                     start_idx,
+                    err,
                 }) = next_reallocs
                 {
+                    if missing_size == prev_missing_size {
+                        remaining_tries -= 1;
+                        if remaining_tries == 0 {
+                            return Err(
+                                CommitAccountError::ReallocBufferRanOutOfRetries(
+                                    err.unwrap_or("No Error".to_string()),
+                                    Arc::new(commit_info.clone()),
+                                    commit_strategy,
+                                ),
+                            );
+                        }
+                    } else {
+                        remaining_tries = MAX_STALE_REALLOCS;
+                        prev_missing_size = missing_size;
+                    }
                     let realloc_ixs = {
                         let realloc_ixs =
                             create_realloc_buffer_ixs_to_add_remaining(
@@ -849,7 +869,6 @@ impl CommittorProcessor {
                             start_idx,
                         )
                         .await;
-                    // TODO(thlorenz): give up at some point
                 }
             }
         }
@@ -882,6 +901,7 @@ impl CommittorProcessor {
                     return Some(NextReallocs {
                         missing_size,
                         start_idx,
+                        err: Some(format!("{:?}", err)),
                     });
                 }
             };
@@ -923,23 +943,27 @@ impl CommittorProcessor {
                 if current_size as u64 >= desired_size {
                     None
                 } else {
-                    Some(desired_size - current_size as u64)
+                    Some((desired_size - current_size as u64, None))
                 }
             }
             // NOTE: if we cannot get the account we must assume that
             //       the entire size we just tried to alloc is still missing
             Ok(None) => {
                 warn!("buffer account not found");
-                Some(missing_size)
+                Some((
+                    missing_size,
+                    Some("buffer account not found".to_string()),
+                ))
             }
             Err(err) => {
                 warn!("Failed to get buffer account: {:?}", err);
-                Some(missing_size)
+                Some((missing_size, Some(format!("{:?}", err))))
             }
         }
-        .map(|missing_size| NextReallocs {
+        .map(|(missing_size, err)| NextReallocs {
             missing_size,
             start_idx: count,
+            err,
         })
     }
 
