@@ -1,7 +1,7 @@
 # Programs are automatically cloned from devnet.
 # All others are expected to be there or need to be created as part of the transaction.
 [accounts]
-remote = "devnet"
+remotes = ["devnet"]
 lifecycle = "programs-replica"
 # Have it check every 10 mins and since we don't expect to clone any
 # delegated accounts it will do nothing anyways.

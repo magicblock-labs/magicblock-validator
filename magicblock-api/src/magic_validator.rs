@@ -24,7 +24,7 @@ use magicblock_account_updates::{
     RemoteAccountUpdatesClient, RemoteAccountUpdatesWorker,
 };
 use magicblock_accounts::{
-    utils::try_rpc_cluster_from_cluster, AccountsManager,
+    errors::AccountsError, utils::try_rpc_cluster_from_cluster, AccountsManager,
 };
 use magicblock_accounts_api::BankAccountProvider;
 use magicblock_accounts_db::{
@@ -262,21 +262,22 @@ impl MagicValidator {
             try_convert_accounts_config(&config.validator_config.accounts)
                 .map_err(ApiError::ConfigError)?;
 
-        let remote_rpc_config = RpcProviderConfig::new(
-            try_rpc_cluster_from_cluster(&accounts_config.remote_cluster)?,
-            Some(CommitmentLevel::Confirmed),
-        );
+        let remote_rpc_configs = accounts_config
+            .remote_clusters
+            .iter()
+            .map(|c| {
+                Ok(RpcProviderConfig::new(
+                    try_rpc_cluster_from_cluster(c)?,
+                    Some(CommitmentLevel::Confirmed),
+                ))
+            })
+            .collect::<Result<Vec<_>, AccountsError>>()?;
 
         let remote_account_fetcher_worker =
-            RemoteAccountFetcherWorker::new(remote_rpc_config.clone());
+            RemoteAccountFetcherWorker::new(remote_rpc_configs[0].clone());
 
         let remote_account_updates_worker = RemoteAccountUpdatesWorker::new(
-            // We'll maintain 3 connections constantly (those could be on different nodes if we wanted to)
-            vec![
-                remote_rpc_config.clone(),
-                remote_rpc_config.clone(),
-                remote_rpc_config.clone(),
-            ],
+            remote_rpc_configs,
             // We'll kill/refresh one connection every 50 minutes
             Duration::from_secs(60 * 50),
         );
@@ -583,7 +584,7 @@ impl MagicValidator {
         &self,
         fdqn: impl ToString,
     ) -> ApiResult<()> {
-        let url = cluster_from_remote(&self.config.accounts.remote);
+        let url = cluster_from_remote(&self.config.accounts.remotes[0]);
         let country_code =
             CountryCode::from(self.config.validator.country_code.alpha3());
         let validator_keypair = validator_authority();
@@ -609,7 +610,7 @@ impl MagicValidator {
     }
 
     fn unregister_validator_on_chain(&self) -> ApiResult<()> {
-        let url = cluster_from_remote(&self.config.accounts.remote);
+        let url = cluster_from_remote(&self.config.accounts.remotes[0]);
         let validator_keypair = validator_authority();
 
         DomainRegistryManager::handle_unregistration_static(

@@ -115,7 +115,9 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
                     frequency_millis: 123,
                     compute_unit_price: 1,
                 },
-                remote: RemoteConfig::Custom(Url::parse(base_cluster).unwrap()),
+                remotes: vec![RemoteConfig::Custom(
+                    Url::parse(base_cluster).unwrap()
+                )],
                 ..Default::default()
             },
             programs: vec![ProgramConfig {
@@ -158,10 +160,10 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     let config = config.override_from_envs();
 
     assert_eq!(
-        config.accounts.remote,
-        RemoteConfig::CustomWithWs(
+        config.accounts.remotes,
+        vec![RemoteConfig::CustomWithWs(
             base_cluster.parse().unwrap(),
             base_cluster_ws.parse().unwrap()
-        )
+        )]
     );
 }

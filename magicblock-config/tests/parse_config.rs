@@ -35,7 +35,8 @@ fn test_local_dev_toml() {
 #[test]
 fn test_ephemeral_toml() {
     let toml = include_str!("fixtures/04_ephemeral.toml");
-    let config = toml::from_str::<EphemeralConfig>(toml).unwrap();
+    let mut config = toml::from_str::<EphemeralConfig>(toml).unwrap();
+    config.accounts.remotes = vec![RemoteConfig::Devnet];
     assert_eq!(
         config,
         EphemeralConfig {
@@ -54,7 +55,8 @@ fn test_ephemeral_toml() {
 #[test]
 fn test_all_goes_toml() {
     let toml = include_str!("fixtures/05_all-goes.toml");
-    let config = toml::from_str::<EphemeralConfig>(toml).unwrap();
+    let mut config = toml::from_str::<EphemeralConfig>(toml).unwrap();
+    config.accounts.remotes = vec![RemoteConfig::Devnet];
     assert_eq!(
         config,
         EphemeralConfig {
@@ -131,9 +133,9 @@ fn test_custom_remote_toml() {
         config,
         EphemeralConfig {
             accounts: AccountsConfig {
-                remote: RemoteConfig::Custom(
+                remotes: vec![RemoteConfig::Custom(
                     Url::parse("http://localhost:8899").unwrap()
-                ),
+                )],
                 ..Default::default()
             },
             ..Default::default()
@@ -150,10 +152,10 @@ fn test_custom_ws_remote_toml() {
         config,
         EphemeralConfig {
             accounts: AccountsConfig {
-                remote: RemoteConfig::CustomWithWs(
+                remotes: vec![RemoteConfig::CustomWithWs(
                     Url::parse("http://localhost:8899").unwrap(),
                     Url::parse("ws://localhost:9001").unwrap()
-                ),
+                )],
                 ..Default::default()
             },
             ..Default::default()

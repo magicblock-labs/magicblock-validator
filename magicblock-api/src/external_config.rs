@@ -8,7 +8,7 @@ pub(crate) fn try_convert_accounts_config(
     conf: &magicblock_config::AccountsConfig,
 ) -> ConfigResult<AccountsConfig> {
     Ok(AccountsConfig {
-        remote_cluster: cluster_from_remote(&conf.remote),
+        remote_clusters: conf.remotes.iter().map(cluster_from_remote).collect(),
         lifecycle: lifecycle_mode_from_lifecycle_mode(&conf.lifecycle),
         commit_compute_unit_price: conf.commit.compute_unit_price,
         payer_init_lamports: conf.payer.try_init_lamports()?,

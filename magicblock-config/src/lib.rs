@@ -95,7 +95,7 @@ impl EphemeralConfig {
         // -----------------
         if let Ok(http) = env::var("ACCOUNTS_REMOTE") {
             if let Ok(ws) = env::var("ACCOUNTS_REMOTE_WS") {
-                config.accounts.remote = RemoteConfig::CustomWithWs(
+                config.accounts.remotes = vec![RemoteConfig::CustomWithWs(
                     Url::parse(&http)
                         .map_err(|err| {
                             panic!(
@@ -112,9 +112,9 @@ impl EphemeralConfig {
                             )
                         })
                         .unwrap(),
-                );
+                )];
             } else {
-                config.accounts.remote = RemoteConfig::Custom(
+                config.accounts.remotes = vec![RemoteConfig::Custom(
                     Url::parse(&http)
                         .map_err(|err| {
                             panic!(
@@ -123,7 +123,7 @@ impl EphemeralConfig {
                             )
                         })
                         .unwrap(),
-                );
+                )];
             }
         }
 
