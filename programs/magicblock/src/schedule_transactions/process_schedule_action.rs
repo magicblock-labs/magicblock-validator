@@ -8,11 +8,12 @@ use solana_sdk::{
 };
 
 use crate::{
-    magic_context::{ConstructionContext, ScheduleAction},
-    magicblock_instruction::MagicActionArgs,
+    args::MagicActionArgs,
+    magic_schedule_action::ConstructionContext,
     schedule_transactions::{check_magic_context_id, COMMIT_ID},
     utils::accounts::get_instruction_pubkey_with_idx,
 };
+use crate::magic_schedule_action::ScheduleAction;
 
 const PAYER_IDX: u16 = 0;
 const MAGIC_CONTEXT_IDX: u16 = PAYER_IDX + 1;
@@ -124,8 +125,11 @@ fn get_parent_program_id(
 #[cfg(test)]
 fn get_parent_program_id(
     transaction_context: &TransactionContext,
-    invoke_context: &mut InvokeContext,
+    _: &mut InvokeContext,
 ) -> Result<Option<Pubkey>, InstructionError> {
+    use solana_sdk::account::ReadableAccount;
+    use crate::utils::accounts::get_instruction_account_with_idx;
+
     let first_committee_owner = *get_instruction_account_with_idx(
         transaction_context,
         ACTION_ACCOUNTS_OFFSET as u16,

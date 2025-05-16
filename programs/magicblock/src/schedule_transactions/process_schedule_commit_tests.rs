@@ -19,11 +19,7 @@ use test_tools_core::init_logger;
 
 use crate::{
     magic_context::MagicContext,
-    magicblock_instruction::{
-        accept_scheduled_commits_instruction,
-        schedule_commit_and_undelegate_instruction,
-        schedule_commit_instruction, MagicBlockInstruction,
-    },
+    magicblock_instruction::MagicBlockInstruction,
     schedule_transactions::transaction_scheduler::TransactionScheduler,
     test_utils::{ensure_started_validator, process_instruction},
     utils::DELEGATION_PROGRAM_ID,
@@ -237,479 +233,509 @@ fn assert_first_commit(
     );
 }
 
-#[test]
-fn test_schedule_commit_single_account_success() {
-    init_logger!();
-    let payer =
-        Keypair::from_seed(b"schedule_commit_single_account_success").unwrap();
-    let program = Pubkey::new_unique();
-    let committee = Pubkey::new_unique();
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::utils::instruction_utils::InstructionUtils;
 
-    // 1. We run the transaction that registers the intent to schedule a commit
-    let (processed_scheduled, magic_context_acc) = {
-        let (mut account_data, mut transaction_accounts) =
-            prepare_transaction_with_single_committee(
-                &payer, program, committee,
+    #[test]
+    fn test_schedule_commit_single_account_success() {
+        init_logger!();
+        let payer =
+            Keypair::from_seed(b"schedule_commit_single_account_success")
+                .unwrap();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
+
+        // 1. We run the transaction that registers the intent to schedule a commit
+        let (processed_scheduled, magic_context_acc) = {
+            let (mut account_data, mut transaction_accounts) =
+                prepare_transaction_with_single_committee(
+                    &payer, program, committee,
+                );
+
+            let ix = InstructionUtils::schedule_commit_instruction(
+                &payer.pubkey(),
+                vec![committee],
             );
 
-        let ix = schedule_commit_instruction(&payer.pubkey(), vec![committee]);
-
-        extend_transaction_accounts_from_ix(
-            &ix,
-            &mut account_data,
-            &mut transaction_accounts,
-        );
-
-        let processed_scheduled = process_instruction(
-            ix.data.as_slice(),
-            transaction_accounts.clone(),
-            ix.accounts,
-            Ok(()),
-        );
-
-        // At this point the intent to commit was added to the magic context account,
-        // but not yet accepted
-        let magic_context_acc = assert_non_accepted_commits(
-            &processed_scheduled,
-            &payer.pubkey(),
-            1,
-        );
-
-        (processed_scheduled.clone(), magic_context_acc.clone())
-    };
-
-    // 2. We run the transaction that accepts the scheduled commit
-    {
-        let (mut account_data, mut transaction_accounts) =
-            prepare_transaction_with_single_committee(
-                &payer, program, committee,
+            extend_transaction_accounts_from_ix(
+                &ix,
+                &mut account_data,
+                &mut transaction_accounts,
             );
 
-        let ix = accept_scheduled_commits_instruction();
-        extend_transaction_accounts_from_ix_adding_magic_context(
-            &ix,
-            &magic_context_acc,
-            &mut account_data,
-            &mut transaction_accounts,
-        );
+            let processed_scheduled = process_instruction(
+                ix.data.as_slice(),
+                transaction_accounts.clone(),
+                ix.accounts,
+                Ok(()),
+            );
 
-        let processed_accepted = process_instruction(
-            ix.data.as_slice(),
-            transaction_accounts,
-            ix.accounts,
-            Ok(()),
-        );
+            // At this point the intent to commit was added to the magic context account,
+            // but not yet accepted
+            let magic_context_acc = assert_non_accepted_commits(
+                &processed_scheduled,
+                &payer.pubkey(),
+                1,
+            );
 
-        // At this point the intended commits were accepted and moved to the global
-        let scheduled_commits =
-            assert_accepted_commits(&processed_accepted, &payer.pubkey(), 1);
+            (processed_scheduled.clone(), magic_context_acc.clone())
+        };
 
-        assert_first_commit(
-            &scheduled_commits,
-            &payer.pubkey(),
-            &[committee],
-            false,
-        );
+        // 2. We run the transaction that accepts the scheduled commit
+        {
+            let (mut account_data, mut transaction_accounts) =
+                prepare_transaction_with_single_committee(
+                    &payer, program, committee,
+                );
+
+            let ix = InstructionUtils::accept_scheduled_commits_instruction();
+            extend_transaction_accounts_from_ix_adding_magic_context(
+                &ix,
+                &magic_context_acc,
+                &mut account_data,
+                &mut transaction_accounts,
+            );
+
+            let processed_accepted = process_instruction(
+                ix.data.as_slice(),
+                transaction_accounts,
+                ix.accounts,
+                Ok(()),
+            );
+
+            // At this point the intended commits were accepted and moved to the global
+            let scheduled_commits = assert_accepted_commits(
+                &processed_accepted,
+                &payer.pubkey(),
+                1,
+            );
+
+            assert_first_commit(
+                &scheduled_commits,
+                &payer.pubkey(),
+                &[committee],
+                false,
+            );
+        }
+        let committed_account = processed_scheduled.last().unwrap();
+        assert_eq!(*committed_account.owner(), program);
     }
-    let committed_account = processed_scheduled.last().unwrap();
-    assert_eq!(*committed_account.owner(), program);
-}
 
-#[test]
-fn test_schedule_commit_single_account_and_request_undelegate_success() {
-    init_logger!();
-    let payer =
-        Keypair::from_seed(b"single_account_with_undelegate_success").unwrap();
-    let program = Pubkey::new_unique();
-    let committee = Pubkey::new_unique();
+    #[test]
+    fn test_schedule_commit_single_account_and_request_undelegate_success() {
+        init_logger!();
+        let payer =
+            Keypair::from_seed(b"single_account_with_undelegate_success")
+                .unwrap();
+        let program = Pubkey::new_unique();
+        let committee = Pubkey::new_unique();
 
-    // 1. We run the transaction that registers the intent to schedule a commit
-    let (processed_scheduled, magic_context_acc) = {
-        let (mut account_data, mut transaction_accounts) =
-            prepare_transaction_with_single_committee(
-                &payer, program, committee,
+        // 1. We run the transaction that registers the intent to schedule a commit
+        let (processed_scheduled, magic_context_acc) = {
+            let (mut account_data, mut transaction_accounts) =
+                prepare_transaction_with_single_committee(
+                    &payer, program, committee,
+                );
+
+            let ix =
+                InstructionUtils::schedule_commit_and_undelegate_instruction(
+                    &payer.pubkey(),
+                    vec![committee],
+                );
+
+            extend_transaction_accounts_from_ix(
+                &ix,
+                &mut account_data,
+                &mut transaction_accounts,
             );
 
-        let ix = schedule_commit_and_undelegate_instruction(
-            &payer.pubkey(),
-            vec![committee],
-        );
-
-        extend_transaction_accounts_from_ix(
-            &ix,
-            &mut account_data,
-            &mut transaction_accounts,
-        );
-
-        let processed_scheduled = process_instruction(
-            ix.data.as_slice(),
-            transaction_accounts.clone(),
-            ix.accounts,
-            Ok(()),
-        );
-
-        // At this point the intent to commit was added to the magic context account,
-        // but not yet accepted
-        let magic_context_acc = assert_non_accepted_commits(
-            &processed_scheduled,
-            &payer.pubkey(),
-            1,
-        );
-
-        (processed_scheduled.clone(), magic_context_acc.clone())
-    };
-
-    // 2. We run the transaction that accepts the scheduled commit
-    {
-        let (mut account_data, mut transaction_accounts) =
-            prepare_transaction_with_single_committee(
-                &payer, program, committee,
+            let processed_scheduled = process_instruction(
+                ix.data.as_slice(),
+                transaction_accounts.clone(),
+                ix.accounts,
+                Ok(()),
             );
 
-        let ix = accept_scheduled_commits_instruction();
-        extend_transaction_accounts_from_ix_adding_magic_context(
-            &ix,
-            &magic_context_acc,
-            &mut account_data,
-            &mut transaction_accounts,
-        );
+            // At this point the intent to commit was added to the magic context account,
+            // but not yet accepted
+            let magic_context_acc = assert_non_accepted_commits(
+                &processed_scheduled,
+                &payer.pubkey(),
+                1,
+            );
 
-        let processed_accepted = process_instruction(
-            ix.data.as_slice(),
-            transaction_accounts,
-            ix.accounts,
-            Ok(()),
-        );
+            (processed_scheduled.clone(), magic_context_acc.clone())
+        };
 
-        // At this point the intended commits were accepted and moved to the global
-        let scheduled_commits =
-            assert_accepted_commits(&processed_accepted, &payer.pubkey(), 1);
+        // 2. We run the transaction that accepts the scheduled commit
+        {
+            let (mut account_data, mut transaction_accounts) =
+                prepare_transaction_with_single_committee(
+                    &payer, program, committee,
+                );
 
-        assert_first_commit(
-            &scheduled_commits,
-            &payer.pubkey(),
-            &[committee],
-            true,
-        );
+            let ix = InstructionUtils::accept_scheduled_commits_instruction();
+            extend_transaction_accounts_from_ix_adding_magic_context(
+                &ix,
+                &magic_context_acc,
+                &mut account_data,
+                &mut transaction_accounts,
+            );
+
+            let processed_accepted = process_instruction(
+                ix.data.as_slice(),
+                transaction_accounts,
+                ix.accounts,
+                Ok(()),
+            );
+
+            // At this point the intended commits were accepted and moved to the global
+            let scheduled_commits = assert_accepted_commits(
+                &processed_accepted,
+                &payer.pubkey(),
+                1,
+            );
+
+            assert_first_commit(
+                &scheduled_commits,
+                &payer.pubkey(),
+                &[committee],
+                true,
+            );
+        }
+        let committed_account = processed_scheduled.last().unwrap();
+        assert_eq!(*committed_account.owner(), DELEGATION_PROGRAM_ID);
     }
-    let committed_account = processed_scheduled.last().unwrap();
-    assert_eq!(*committed_account.owner(), DELEGATION_PROGRAM_ID);
-}
 
-#[test]
-fn test_schedule_commit_three_accounts_success() {
-    init_logger!();
+    #[test]
+    fn test_schedule_commit_three_accounts_success() {
+        init_logger!();
 
-    let payer =
-        Keypair::from_seed(b"schedule_commit_three_accounts_success").unwrap();
+        let payer =
+            Keypair::from_seed(b"schedule_commit_three_accounts_success")
+                .unwrap();
 
-    // 1. We run the transaction that registers the intent to schedule a commit
-    let (
-        mut processed_scheduled,
-        magic_context_acc,
-        program,
-        committee_uno,
-        committee_dos,
-        committee_tres,
-    ) = {
-        let PreparedTransactionThreeCommittees {
-            mut accounts_data,
-            committee_uno,
-            committee_dos,
-            committee_tres,
-            mut transaction_accounts,
-            program,
-            ..
-        } = prepare_transaction_with_three_committees(&payer, None);
-
-        let ix = schedule_commit_instruction(
-            &payer.pubkey(),
-            vec![committee_uno, committee_dos, committee_tres],
-        );
-        extend_transaction_accounts_from_ix(
-            &ix,
-            &mut accounts_data,
-            &mut transaction_accounts,
-        );
-
-        let processed_scheduled = process_instruction(
-            ix.data.as_slice(),
-            transaction_accounts,
-            ix.accounts,
-            Ok(()),
-        );
-
-        // At this point the intent to commit was added to the magic context account,
-        // but not yet accepted
-        let magic_context_acc = assert_non_accepted_commits(
-            &processed_scheduled,
-            &payer.pubkey(),
-            1,
-        );
-
-        (
-            processed_scheduled.clone(),
-            magic_context_acc.clone(),
+        // 1. We run the transaction that registers the intent to schedule a commit
+        let (
+            mut processed_scheduled,
+            magic_context_acc,
             program,
             committee_uno,
             committee_dos,
             committee_tres,
-        )
-    };
+        ) = {
+            let PreparedTransactionThreeCommittees {
+                mut accounts_data,
+                committee_uno,
+                committee_dos,
+                committee_tres,
+                mut transaction_accounts,
+                program,
+                ..
+            } = prepare_transaction_with_three_committees(&payer, None);
 
-    // 2. We run the transaction that accepts the scheduled commit
-    {
-        let PreparedTransactionThreeCommittees {
-            mut accounts_data,
-            mut transaction_accounts,
-            ..
-        } = prepare_transaction_with_three_committees(
-            &payer,
-            Some((committee_uno, committee_dos, committee_tres)),
-        );
+            let ix = InstructionUtils::schedule_commit_instruction(
+                &payer.pubkey(),
+                vec![committee_uno, committee_dos, committee_tres],
+            );
+            extend_transaction_accounts_from_ix(
+                &ix,
+                &mut accounts_data,
+                &mut transaction_accounts,
+            );
 
-        let ix = accept_scheduled_commits_instruction();
-        extend_transaction_accounts_from_ix_adding_magic_context(
-            &ix,
-            &magic_context_acc,
-            &mut accounts_data,
-            &mut transaction_accounts,
-        );
+            let processed_scheduled = process_instruction(
+                ix.data.as_slice(),
+                transaction_accounts,
+                ix.accounts,
+                Ok(()),
+            );
 
-        let processed_accepted = process_instruction(
-            ix.data.as_slice(),
-            transaction_accounts,
-            ix.accounts,
-            Ok(()),
-        );
+            // At this point the intent to commit was added to the magic context account,
+            // but not yet accepted
+            let magic_context_acc = assert_non_accepted_commits(
+                &processed_scheduled,
+                &payer.pubkey(),
+                1,
+            );
 
-        // At this point the intended commits were accepted and moved to the global
-        let scheduled_commits =
-            assert_accepted_commits(&processed_accepted, &payer.pubkey(), 1);
+            (
+                processed_scheduled.clone(),
+                magic_context_acc.clone(),
+                program,
+                committee_uno,
+                committee_dos,
+                committee_tres,
+            )
+        };
 
-        assert_first_commit(
-            &scheduled_commits,
-            &payer.pubkey(),
-            &[committee_uno, committee_dos, committee_tres],
-            false,
-        );
-        for _ in &[committee_uno, committee_dos, committee_tres] {
-            let committed_account = processed_scheduled.pop().unwrap();
-            assert_eq!(*committed_account.owner(), program);
+        // 2. We run the transaction that accepts the scheduled commit
+        {
+            let PreparedTransactionThreeCommittees {
+                mut accounts_data,
+                mut transaction_accounts,
+                ..
+            } = prepare_transaction_with_three_committees(
+                &payer,
+                Some((committee_uno, committee_dos, committee_tres)),
+            );
+
+            let ix = InstructionUtils::accept_scheduled_commits_instruction();
+            extend_transaction_accounts_from_ix_adding_magic_context(
+                &ix,
+                &magic_context_acc,
+                &mut accounts_data,
+                &mut transaction_accounts,
+            );
+
+            let processed_accepted = process_instruction(
+                ix.data.as_slice(),
+                transaction_accounts,
+                ix.accounts,
+                Ok(()),
+            );
+
+            // At this point the intended commits were accepted and moved to the global
+            let scheduled_commits = assert_accepted_commits(
+                &processed_accepted,
+                &payer.pubkey(),
+                1,
+            );
+
+            assert_first_commit(
+                &scheduled_commits,
+                &payer.pubkey(),
+                &[committee_uno, committee_dos, committee_tres],
+                false,
+            );
+            for _ in &[committee_uno, committee_dos, committee_tres] {
+                let committed_account = processed_scheduled.pop().unwrap();
+                assert_eq!(*committed_account.owner(), program);
+            }
         }
     }
-}
 
-#[test]
-fn test_schedule_commit_three_accounts_and_request_undelegate_success() {
-    let payer =
-        Keypair::from_seed(b"three_accounts_and_request_undelegate_success")
-            .unwrap();
-
-    // 1. We run the transaction that registers the intent to schedule a commit
-    let (
-        mut processed_scheduled,
-        magic_context_acc,
-        _program,
-        committee_uno,
-        committee_dos,
-        committee_tres,
-    ) = {
-        let PreparedTransactionThreeCommittees {
-            mut accounts_data,
-            committee_uno,
-            committee_dos,
-            committee_tres,
-            mut transaction_accounts,
-            program,
-            ..
-        } = prepare_transaction_with_three_committees(&payer, None);
-
-        let ix = schedule_commit_and_undelegate_instruction(
-            &payer.pubkey(),
-            vec![committee_uno, committee_dos, committee_tres],
-        );
-
-        extend_transaction_accounts_from_ix(
-            &ix,
-            &mut accounts_data,
-            &mut transaction_accounts,
-        );
-
-        let processed_scheduled = process_instruction(
-            ix.data.as_slice(),
-            transaction_accounts,
-            ix.accounts,
-            Ok(()),
-        );
-
-        // At this point the intent to commit was added to the magic context account,
-        // but not yet accepted
-        let magic_context_acc = assert_non_accepted_commits(
-            &processed_scheduled,
-            &payer.pubkey(),
-            1,
-        );
-
-        (
-            processed_scheduled.clone(),
-            magic_context_acc.clone(),
-            program,
-            committee_uno,
-            committee_dos,
-            committee_tres,
+    #[test]
+    fn test_schedule_commit_three_accounts_and_request_undelegate_success() {
+        let payer = Keypair::from_seed(
+            b"three_accounts_and_request_undelegate_success",
         )
-    };
-
-    // 2. We run the transaction that accepts the scheduled commit
-    {
-        let PreparedTransactionThreeCommittees {
-            mut accounts_data,
-            mut transaction_accounts,
-            ..
-        } = prepare_transaction_with_three_committees(
-            &payer,
-            Some((committee_uno, committee_dos, committee_tres)),
-        );
-
-        let ix = accept_scheduled_commits_instruction();
-        extend_transaction_accounts_from_ix_adding_magic_context(
-            &ix,
-            &magic_context_acc,
-            &mut accounts_data,
-            &mut transaction_accounts,
-        );
-
-        let processed_accepted = process_instruction(
-            ix.data.as_slice(),
-            transaction_accounts,
-            ix.accounts,
-            Ok(()),
-        );
-
-        // At this point the intended commits were accepted and moved to the global
-        let scheduled_commits =
-            assert_accepted_commits(&processed_accepted, &payer.pubkey(), 1);
-
-        assert_first_commit(
-            &scheduled_commits,
-            &payer.pubkey(),
-            &[committee_uno, committee_dos, committee_tres],
-            true,
-        );
-        for _ in &[committee_uno, committee_dos, committee_tres] {
-            let committed_account = processed_scheduled.pop().unwrap();
-            assert_eq!(*committed_account.owner(), DELEGATION_PROGRAM_ID);
-        }
-    }
-}
-
-// -----------------
-// Failure Cases
-// ----------------
-fn get_account_metas_for_schedule_commit(
-    payer: &Pubkey,
-    pdas: Vec<Pubkey>,
-) -> Vec<AccountMeta> {
-    let mut account_metas = vec![
-        AccountMeta::new(*payer, true),
-        AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
-    ];
-    for pubkey in &pdas {
-        account_metas.push(AccountMeta::new_readonly(*pubkey, true));
-    }
-    account_metas
-}
-
-fn account_metas_last_committee_not_signer(
-    payer: &Pubkey,
-    pdas: Vec<Pubkey>,
-) -> Vec<AccountMeta> {
-    let mut account_metas = get_account_metas_for_schedule_commit(payer, pdas);
-    let last = account_metas.pop().unwrap();
-    account_metas.push(AccountMeta::new_readonly(last.pubkey, false));
-    account_metas
-}
-
-fn instruction_from_account_metas(
-    account_metas: Vec<AccountMeta>,
-) -> solana_sdk::instruction::Instruction {
-    Instruction::new_with_bincode(
-        crate::id(),
-        &MagicBlockInstruction::ScheduleCommit,
-        account_metas,
-    )
-}
-
-#[test]
-fn test_schedule_commit_no_pdas_provided_to_ix() {
-    init_logger!();
-
-    let payer =
-        Keypair::from_seed(b"schedule_commit_no_pdas_provided_to_ix").unwrap();
-
-    let PreparedTransactionThreeCommittees {
-        mut accounts_data,
-        mut transaction_accounts,
-        ..
-    } = prepare_transaction_with_three_committees(&payer, None);
-
-    let ix = instruction_from_account_metas(
-        get_account_metas_for_schedule_commit(&payer.pubkey(), vec![]),
-    );
-    extend_transaction_accounts_from_ix(
-        &ix,
-        &mut accounts_data,
-        &mut transaction_accounts,
-    );
-
-    process_instruction(
-        ix.data.as_slice(),
-        transaction_accounts,
-        ix.accounts,
-        Err(InstructionError::NotEnoughAccountKeys),
-    );
-}
-
-#[test]
-fn test_schedule_commit_three_accounts_second_not_owned_by_program_and_not_signer(
-) {
-    init_logger!();
-
-    let payer = Keypair::from_seed(b"three_accounts_last_not_owned_by_program")
         .unwrap();
 
-    let PreparedTransactionThreeCommittees {
-        mut accounts_data,
-        committee_uno,
-        committee_dos,
-        committee_tres,
-        mut transaction_accounts,
-        ..
-    } = prepare_transaction_with_three_committees(&payer, None);
+        // 1. We run the transaction that registers the intent to schedule a commit
+        let (
+            mut processed_scheduled,
+            magic_context_acc,
+            _program,
+            committee_uno,
+            committee_dos,
+            committee_tres,
+        ) = {
+            let PreparedTransactionThreeCommittees {
+                mut accounts_data,
+                committee_uno,
+                committee_dos,
+                committee_tres,
+                mut transaction_accounts,
+                program,
+                ..
+            } = prepare_transaction_with_three_committees(&payer, None);
 
-    accounts_data.insert(
-        committee_dos,
-        AccountSharedData::new(0, 0, &Pubkey::new_unique()),
-    );
+            let ix =
+                InstructionUtils::schedule_commit_and_undelegate_instruction(
+                    &payer.pubkey(),
+                    vec![committee_uno, committee_dos, committee_tres],
+                );
 
-    let ix = instruction_from_account_metas(
-        account_metas_last_committee_not_signer(
-            &payer.pubkey(),
-            vec![committee_uno, committee_tres, committee_dos],
-        ),
-    );
+            extend_transaction_accounts_from_ix(
+                &ix,
+                &mut accounts_data,
+                &mut transaction_accounts,
+            );
 
-    extend_transaction_accounts_from_ix(
-        &ix,
-        &mut accounts_data,
-        &mut transaction_accounts,
-    );
+            let processed_scheduled = process_instruction(
+                ix.data.as_slice(),
+                transaction_accounts,
+                ix.accounts,
+                Ok(()),
+            );
 
-    process_instruction(
-        ix.data.as_slice(),
-        transaction_accounts,
-        ix.accounts,
-        Err(InstructionError::InvalidAccountOwner),
-    );
+            // At this point the intent to commit was added to the magic context account,
+            // but not yet accepted
+            let magic_context_acc = assert_non_accepted_commits(
+                &processed_scheduled,
+                &payer.pubkey(),
+                1,
+            );
+
+            (
+                processed_scheduled.clone(),
+                magic_context_acc.clone(),
+                program,
+                committee_uno,
+                committee_dos,
+                committee_tres,
+            )
+        };
+
+        // 2. We run the transaction that accepts the scheduled commit
+        {
+            let PreparedTransactionThreeCommittees {
+                mut accounts_data,
+                mut transaction_accounts,
+                ..
+            } = prepare_transaction_with_three_committees(
+                &payer,
+                Some((committee_uno, committee_dos, committee_tres)),
+            );
+
+            let ix = InstructionUtils::accept_scheduled_commits_instruction();
+            extend_transaction_accounts_from_ix_adding_magic_context(
+                &ix,
+                &magic_context_acc,
+                &mut accounts_data,
+                &mut transaction_accounts,
+            );
+
+            let processed_accepted = process_instruction(
+                ix.data.as_slice(),
+                transaction_accounts,
+                ix.accounts,
+                Ok(()),
+            );
+
+            // At this point the intended commits were accepted and moved to the global
+            let scheduled_commits = assert_accepted_commits(
+                &processed_accepted,
+                &payer.pubkey(),
+                1,
+            );
+
+            assert_first_commit(
+                &scheduled_commits,
+                &payer.pubkey(),
+                &[committee_uno, committee_dos, committee_tres],
+                true,
+            );
+            for _ in &[committee_uno, committee_dos, committee_tres] {
+                let committed_account = processed_scheduled.pop().unwrap();
+                assert_eq!(*committed_account.owner(), DELEGATION_PROGRAM_ID);
+            }
+        }
+    }
+
+    // -----------------
+    // Failure Cases
+    // ----------------
+    fn get_account_metas_for_schedule_commit(
+        payer: &Pubkey,
+        pdas: Vec<Pubkey>,
+    ) -> Vec<AccountMeta> {
+        let mut account_metas = vec![
+            AccountMeta::new(*payer, true),
+            AccountMeta::new(MAGIC_CONTEXT_PUBKEY, false),
+        ];
+        for pubkey in &pdas {
+            account_metas.push(AccountMeta::new_readonly(*pubkey, true));
+        }
+        account_metas
+    }
+
+    fn account_metas_last_committee_not_signer(
+        payer: &Pubkey,
+        pdas: Vec<Pubkey>,
+    ) -> Vec<AccountMeta> {
+        let mut account_metas =
+            get_account_metas_for_schedule_commit(payer, pdas);
+        let last = account_metas.pop().unwrap();
+        account_metas.push(AccountMeta::new_readonly(last.pubkey, false));
+        account_metas
+    }
+
+    fn instruction_from_account_metas(
+        account_metas: Vec<AccountMeta>,
+    ) -> solana_sdk::instruction::Instruction {
+        Instruction::new_with_bincode(
+            crate::id(),
+            &MagicBlockInstruction::ScheduleCommit,
+            account_metas,
+        )
+    }
+
+    #[test]
+    fn test_schedule_commit_no_pdas_provided_to_ix() {
+        init_logger!();
+
+        let payer =
+            Keypair::from_seed(b"schedule_commit_no_pdas_provided_to_ix")
+                .unwrap();
+
+        let PreparedTransactionThreeCommittees {
+            mut accounts_data,
+            mut transaction_accounts,
+            ..
+        } = prepare_transaction_with_three_committees(&payer, None);
+
+        let ix = instruction_from_account_metas(
+            get_account_metas_for_schedule_commit(&payer.pubkey(), vec![]),
+        );
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut accounts_data,
+            &mut transaction_accounts,
+        );
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::NotEnoughAccountKeys),
+        );
+    }
+
+    #[test]
+    fn test_schedule_commit_three_accounts_second_not_owned_by_program_and_not_signer(
+    ) {
+        init_logger!();
+
+        let payer =
+            Keypair::from_seed(b"three_accounts_last_not_owned_by_program")
+                .unwrap();
+
+        let PreparedTransactionThreeCommittees {
+            mut accounts_data,
+            committee_uno,
+            committee_dos,
+            committee_tres,
+            mut transaction_accounts,
+            ..
+        } = prepare_transaction_with_three_committees(&payer, None);
+
+        accounts_data.insert(
+            committee_dos,
+            AccountSharedData::new(0, 0, &Pubkey::new_unique()),
+        );
+
+        let ix = instruction_from_account_metas(
+            account_metas_last_committee_not_signer(
+                &payer.pubkey(),
+                vec![committee_uno, committee_tres, committee_dos],
+            ),
+        );
+
+        extend_transaction_accounts_from_ix(
+            &ix,
+            &mut accounts_data,
+            &mut transaction_accounts,
+        );
+
+        process_instruction(
+            ix.data.as_slice(),
+            transaction_accounts,
+            ix.accounts,
+            Err(InstructionError::InvalidAccountOwner),
+        );
+    }
 }

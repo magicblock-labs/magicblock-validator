@@ -1,8 +1,6 @@
 use magicblock_program::{
-    magicblock_instruction::{
-        modify_accounts, modify_accounts_instruction, AccountModification,
-    },
-    validator,
+    instruction_utils::InstructionUtils,
+    magicblock_instruction::AccountModification, validator,
 };
 use solana_sdk::{
     account::Account, bpf_loader_upgradeable, hash::Hash, pubkey::Pubkey,
@@ -35,7 +33,10 @@ pub fn transaction_to_clone_regular_account(
         }
     }
     // We only need a single transaction with a single mutation in this case
-    modify_accounts(vec![account_modification], recent_blockhash)
+    InstructionUtils::modify_accounts(
+        vec![account_modification],
+        recent_blockhash,
+    )
 }
 
 pub fn transaction_to_clone_program(
@@ -61,10 +62,14 @@ pub fn transaction_to_clone_program(
     // If the program does not exist yet, we just need to update it's data and don't
     // need to explicitly update using the BPF loader's Upgrade IX
     if !needs_upgrade {
-        return modify_accounts(account_modifications, recent_blockhash);
+        return InstructionUtils::modify_accounts(
+            account_modifications,
+            recent_blockhash,
+        );
     }
     // First dump the necessary set of account to our bank/ledger
-    let modify_ix = modify_accounts_instruction(account_modifications);
+    let modify_ix =
+        InstructionUtils::modify_accounts_instruction(account_modifications);
     // The validator is marked as the upgrade authority of all program accounts
     let validator_pubkey = &validator::validator_authority_id();
     // Then we run the official BPF upgrade IX to notify the system of the new program

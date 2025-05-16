@@ -11,7 +11,7 @@ use solana_sdk::{
     transaction_context::TransactionContext,
 };
 
-use crate::magic_context::ShortAccountMeta;
+use crate::magic_schedule_action::ShortAccountMeta;
 
 pub(crate) fn find_tx_index_of_instruction_account(
     invoke_context: &InvokeContext,

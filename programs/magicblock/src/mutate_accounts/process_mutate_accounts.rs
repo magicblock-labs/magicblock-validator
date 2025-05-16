@@ -11,9 +11,8 @@ use solana_sdk::{
 };
 
 use crate::{
-    magicblock_instruction::{
-        AccountModificationForInstruction, MagicBlockProgramError,
-    },
+    errors::MagicBlockProgramError,
+    magicblock_instruction::AccountModificationForInstruction,
     mutate_accounts::account_mod_data::resolve_account_mod_data,
     validator::validator_authority_id,
 };
@@ -277,9 +276,8 @@ mod tests {
 
     use super::*;
     use crate::{
-        magicblock_instruction::{
-            modify_accounts_instruction, AccountModification,
-        },
+        instruction_utils::InstructionUtils,
+        magicblock_instruction::AccountModification,
         test_utils::{
             ensure_started_validator, process_instruction, AUTHORITY_BALANCE,
         },
@@ -309,7 +307,9 @@ mod tests {
             data: Some(vec![1, 2, 3, 4, 5]),
             rent_epoch: Some(88),
         };
-        let ix = modify_accounts_instruction(vec![modification.clone()]);
+        let ix = InstructionUtils::modify_accounts_instruction(vec![
+            modification.clone(),
+        ]);
         let transaction_accounts = ix
             .accounts
             .iter()
@@ -376,7 +376,7 @@ mod tests {
         };
         ensure_started_validator(&mut account_data);
 
-        let ix = modify_accounts_instruction(vec![
+        let ix = InstructionUtils::modify_accounts_instruction(vec![
             AccountModification {
                 pubkey: mod_key1,
                 lamports: Some(300),
@@ -473,7 +473,7 @@ mod tests {
         };
         ensure_started_validator(&mut account_data);
 
-        let ix = modify_accounts_instruction(vec![
+        let ix = InstructionUtils::modify_accounts_instruction(vec![
             AccountModification {
                 pubkey: mod_key1,
                 lamports: Some(1000),
