@@ -1,2 +1,2 @@
 [accounts]
-remote = ["http://localhost:8899", "ws://localhost:9001"]
+remotes = [["http://localhost:8899", "ws://localhost:9001"]]

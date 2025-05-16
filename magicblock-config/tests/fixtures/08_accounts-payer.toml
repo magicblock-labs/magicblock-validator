@@ -1,5 +1,5 @@
 [accounts]
-remote = "devnet"
+remotes = ["devnet"]
 lifecycle = "programs-replica"
 payer = { init_sol = 2000 }
 
