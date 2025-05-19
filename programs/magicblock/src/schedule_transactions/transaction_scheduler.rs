@@ -13,8 +13,7 @@ use solana_sdk::{
 };
 
 use crate::{
-    magic_context::{MagicContext, ScheduledCommit},
-    magic_schedule_action::ScheduledAction,
+    magic_context::MagicContext, magic_schedule_action::ScheduledAction,
 };
 
 #[derive(Clone)]
