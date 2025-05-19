@@ -103,7 +103,7 @@ impl From<ScheduledCommit> for ScheduledAction {
             slot: value.slot,
             blockhash: value.blockhash,
             payer: value.payer,
-            commit_sent_transaction: value.commit_sent_transaction,
+            action_sent_transaction: value.commit_sent_transaction,
             action: MagicAction::Commit(CommitType::Standalone(
                 value
                     .accounts

@@ -101,6 +101,8 @@ pub(crate) fn process_schedule_action(
         payer_pubkey,
         &construction_context,
     )?;
+    let action_sent_signature =
+        scheduled_action.action_sent_transaction.signatures[0];
 
     let context_acc = get_instruction_account_with_idx(
         transaction_context,
@@ -120,11 +122,11 @@ pub(crate) fn process_schedule_action(
         InstructionError::GenericError
     })?;
     ic_msg!(invoke_context, "Scheduled commit with ID: {}", commit_id);
-    // ic_msg!(
-    //     invoke_context,
-    //     "ScheduledCommitSent signature: {}",
-    //     commit_sent_sig,
-    // );
+    ic_msg!(
+        invoke_context,
+        "ScheduledCommitSent signature: {}",
+        action_sent_signature,
+    );
 
     Ok(())
 }

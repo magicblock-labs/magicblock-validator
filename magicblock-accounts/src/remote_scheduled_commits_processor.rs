@@ -182,7 +182,7 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
             };
             register_scheduled_commit_sent(sent_commit);
             let signature = execute_legacy_transaction(
-                commit.commit_sent_transaction,
+                commit.action_sent_transaction,
                 &self.bank,
                 self.transaction_status_sender.as_ref(),
             )
