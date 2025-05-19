@@ -46,7 +46,8 @@ impl<'a, 'ic> ConstructionContext<'a, 'ic> {
 }
 
 /// Scheduled action to be executed on base layer
-pub struct ScheduleAction {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScheduledAction {
     pub id: u64,
     pub slot: Slot,
     pub blockhash: Hash,
@@ -56,14 +57,14 @@ pub struct ScheduleAction {
     pub action: MagicAction,
 }
 
-impl ScheduleAction {
+impl ScheduledAction {
     pub fn try_new<'a>(
         args: &MagicActionArgs,
         commit_id: u64,
         slot: Slot,
         payer_pubkey: &Pubkey,
         context: &ConstructionContext<'a, '_>,
-    ) -> Result<ScheduleAction, InstructionError> {
+    ) -> Result<ScheduledAction, InstructionError> {
         let action = MagicAction::try_from_args(args, &context)?;
 
         let blockhash = context.invoke_context.environment_config.blockhash;
@@ -71,7 +72,7 @@ impl ScheduleAction {
             InstructionUtils::scheduled_commit_sent(commit_id, blockhash);
         let commit_sent_sig = commit_sent_transaction.signatures[0];
 
-        Ok(ScheduleAction {
+        Ok(ScheduledAction {
             id: commit_id,
             slot,
             blockhash,
@@ -83,6 +84,7 @@ impl ScheduleAction {
 }
 
 // Action that user wants to perform on base layer
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum MagicAction {
     /// Actions without commitment or undelegation
     CallHandler(Vec<CallHandler>),
@@ -208,6 +210,7 @@ impl CommitType {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommitAndUndelegate {
     pub commit_action: CommitType,
     pub undelegate_action: UndelegateType,
@@ -316,8 +319,10 @@ pub struct CommittedAccountV2 {
     pub owner: Pubkey,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum CommitType {
     /// Regular commit without actions
+    /// TODO: feels like ShortMeta isn't needed
     Standalone(Vec<CommittedAccountV2>), // accounts to commit
     /// Commits accounts and runs actions
     WithHandler {
@@ -327,6 +332,7 @@ pub enum CommitType {
 }
 
 /// No CommitedAccounts since it is only used with CommitAction.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UndelegateType {
     Standalone,
     WithHandler(Vec<CallHandler>),

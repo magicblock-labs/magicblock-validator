@@ -10,29 +10,15 @@ use solana_sdk::{
     transaction::Transaction,
 };
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CommittedAccount {
-    pub pubkey: Pubkey,
-    // TODO(GabrielePicco): We should read the owner from the delegation record rather
-    // than deriving/storing it. To remove once the cloning pipeline allow us to easily access the owner.
-    pub owner: Pubkey,
-}
+use crate::magic_schedule_action::{
+    CommitType, CommittedAccountV2, MagicAction, ScheduledAction,
+    ShortAccountMeta,
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FeePayerAccount {
     pub pubkey: Pubkey,
     pub delegated_pda: Pubkey,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ScheduledCommit {
-    pub id: u64,
-    pub slot: Slot,
-    pub blockhash: Hash,
-    pub accounts: Vec<CommittedAccount>,
-    pub payer: Pubkey,
-    pub commit_sent_transaction: Transaction,
-    pub request_undelegation: bool,
 }
 
 // Q: can user initiate actions on arbitrary accounts?
@@ -54,7 +40,7 @@ pub struct ScheduledCommit {
 
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct MagicContext {
-    pub scheduled_commits: Vec<ScheduledCommit>,
+    pub scheduled_commits: Vec<ScheduledAction>,
 }
 
 impl MagicContext {
@@ -70,11 +56,11 @@ impl MagicContext {
         }
     }
 
-    pub(crate) fn add_scheduled_commit(&mut self, commit: ScheduledCommit) {
-        self.scheduled_commits.push(commit);
+    pub(crate) fn add_scheduled_action(&mut self, action: ScheduledAction) {
+        self.scheduled_commits.push(action);
     }
 
-    pub(crate) fn take_scheduled_commits(&mut self) -> Vec<ScheduledCommit> {
+    pub(crate) fn take_scheduled_commits(&mut self) -> Vec<ScheduledAction> {
         mem::take(&mut self.scheduled_commits)
     }
 
@@ -96,5 +82,55 @@ fn is_zeroed(buf: &[u8]) -> bool {
     {
         chunks.all(|chunk| chunk == &ZEROS[..])
             && chunks.remainder() == &ZEROS[..chunks.remainder().len()]
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ScheduledCommit {
+    pub id: u64,
+    pub slot: Slot,
+    pub blockhash: Hash,
+    pub accounts: Vec<CommittedAccount>,
+    pub payer: Pubkey,
+    pub commit_sent_transaction: Transaction,
+    pub request_undelegation: bool,
+}
+
+impl From<ScheduledCommit> for ScheduledAction {
+    fn from(value: ScheduledCommit) -> Self {
+        Self {
+            id: value.id,
+            slot: value.slot,
+            blockhash: value.blockhash,
+            payer: value.payer,
+            commit_sent_transaction: value.commit_sent_transaction,
+            action: MagicAction::Commit(CommitType::Standalone(
+                value
+                    .accounts
+                    .into_iter()
+                    .map(CommittedAccountV2::from)
+                    .collect(),
+            )),
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CommittedAccount {
+    pub pubkey: Pubkey,
+    // TODO(GabrielePicco): We should read the owner from the delegation record rather
+    // than deriving/storing it. To remove once the cloning pipeline allow us to easily access the owner.
+    pub owner: Pubkey,
+}
+
+impl From<CommittedAccount> for CommittedAccountV2 {
+    fn from(value: CommittedAccount) -> Self {
+        Self {
+            owner: value.owner,
+            short_meta: ShortAccountMeta {
+                pubkey: value.pubkey,
+                is_writable: false,
+            },
+        }
     }
 }

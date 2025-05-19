@@ -3,7 +3,7 @@ mod magic_context;
 mod mutate_accounts;
 mod schedule_transactions;
 pub use magic_context::{FeePayerAccount, MagicContext, ScheduledCommit};
-mod args;
+pub mod args;
 mod magic_schedule_action;
 pub mod magicblock_instruction;
 pub mod magicblock_processor;
