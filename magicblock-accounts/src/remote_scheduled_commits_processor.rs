@@ -13,8 +13,8 @@ use magicblock_metrics::metrics;
 use magicblock_mutator::Cluster;
 use magicblock_processor::execute_transaction::execute_legacy_transaction;
 use magicblock_program::{
-    register_scheduled_commit_sent, FeePayerAccount, SentCommit,
-    TransactionScheduler,
+    register_scheduled_commit_sent, FeePayerAccount, ScheduledCommit,
+    SentCommit, TransactionScheduler,
 };
 use magicblock_transaction_status::TransactionStatusSender;
 use solana_sdk::{pubkey::Pubkey, signature::Signature};
@@ -46,8 +46,19 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
         AC: AccountCommitter,
         IAP: InternalAccountProvider,
     {
-        let scheduled_commits =
+        let scheduled_actions =
             self.transaction_scheduler.take_scheduled_commits();
+
+        // TODO(edwin): remove once actions are supported
+        let scheduled_commits: Vec<ScheduledCommit> = scheduled_actions
+            .into_iter()
+            .filter_map(|action| {
+                action
+                    .try_into()
+                    .inspect_err(|err| error!("Unexpected action: {:?}", err))
+                    .ok()
+            })
+            .collect();
 
         if scheduled_commits.is_empty() {
             return Ok(());
@@ -182,7 +193,7 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
             };
             register_scheduled_commit_sent(sent_commit);
             let signature = execute_legacy_transaction(
-                commit.action_sent_transaction,
+                commit.commit_sent_transaction,
                 &self.bank,
                 self.transaction_status_sender.as_ref(),
             )
