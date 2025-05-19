@@ -12,7 +12,7 @@ use solana_sdk::{
 
 use crate::magic_schedule_action::{
     CommitType, CommittedAccountV2, MagicAction, ScheduledAction,
-    ShortAccountMeta,
+    ShortAccountMeta, UndelegateType,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -115,6 +115,53 @@ impl From<ScheduledCommit> for ScheduledAction {
     }
 }
 
+impl TryFrom<ScheduledAction> for ScheduledCommit {
+    type Error = ();
+    fn try_from(value: ScheduledAction) -> Result<Self, Self::Error> {
+        fn extract_accounts(
+            commit_type: CommitType,
+        ) -> Result<Vec<CommittedAccount>, ()> {
+            match commit_type {
+                CommitType::Standalone(committed_accounts) => {
+                    Ok(committed_accounts
+                        .into_iter()
+                        .map(CommittedAccount::from)
+                        .collect())
+                }
+                CommitType::WithHandler { .. } => Err(()),
+            }
+        }
+
+        let (accounts, request_undelegation) = match value.action {
+            MagicAction::Commit(commit_action) => {
+                let accounts = extract_accounts(commit_action)?;
+                Ok((accounts, false))
+            }
+            MagicAction::CommitAndUndelegate(value) => {
+                if let UndelegateType::Standalone = value.undelegate_action {
+                    Ok(())
+                } else {
+                    Err(())
+                }?;
+
+                let accounts = extract_accounts(value.commit_action)?;
+                Ok((accounts, true))
+            }
+            MagicAction::CallHandler(_) => Err(()),
+        }?;
+
+        Ok(Self {
+            id: value.id,
+            slot: value.slot,
+            blockhash: value.blockhash,
+            payer: value.payer,
+            commit_sent_transaction: value.action_sent_transaction,
+            accounts,
+            request_undelegation,
+        })
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommittedAccount {
     pub pubkey: Pubkey,
@@ -131,6 +178,15 @@ impl From<CommittedAccount> for CommittedAccountV2 {
                 pubkey: value.pubkey,
                 is_writable: false,
             },
+        }
+    }
+}
+
+impl From<CommittedAccountV2> for CommittedAccount {
+    fn from(value: CommittedAccountV2) -> Self {
+        Self {
+            pubkey: value.short_meta.pubkey,
+            owner: value.owner,
         }
     }
 }
