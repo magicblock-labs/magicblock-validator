@@ -48,7 +48,7 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
         CC: ChangesetCommittor,
     {
         let scheduled_actions =
-            self.transaction_scheduler.take_scheduled_commits();
+            self.transaction_scheduler.take_scheduled_actions();
 
         // TODO(edwin): remove once actions are supported
         let scheduled_commits: Vec<ScheduledCommit> = scheduled_actions
@@ -193,11 +193,11 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
     }
 
     fn scheduled_commits_len(&self) -> usize {
-        self.transaction_scheduler.scheduled_commits_len()
+        self.transaction_scheduler.scheduled_actions_len()
     }
 
     fn clear_scheduled_commits(&self) {
-        self.transaction_scheduler.clear_scheduled_commits();
+        self.transaction_scheduler.clear_scheduled_actions();
     }
 }
 

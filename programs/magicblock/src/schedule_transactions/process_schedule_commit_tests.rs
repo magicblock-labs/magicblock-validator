@@ -19,6 +19,7 @@ use test_tools_core::init_logger;
 
 use crate::{
     magic_context::MagicContext,
+    magic_schedule_action::ScheduledAction,
     magicblock_instruction::MagicBlockInstruction,
     schedule_transactions::transaction_scheduler::TransactionScheduler,
     test_utils::{ensure_started_validator, process_instruction},
@@ -133,7 +134,7 @@ fn find_magic_context_account(
         .find(|acc| acc.owner() == &crate::id() && acc.lamports() == u64::MAX)
 }
 
-fn assert_non_accepted_commits<'a>(
+fn assert_non_accepted_actions<'a>(
     processed_scheduled: &'a [AccountSharedData],
     payer: &Pubkey,
     expected_non_accepted_commits: usize,
@@ -143,34 +144,34 @@ fn assert_non_accepted_commits<'a>(
     let magic_context =
         bincode::deserialize::<MagicContext>(magic_context_acc.data()).unwrap();
 
-    let accepted_scheduled_commits =
-        TransactionScheduler::default().get_scheduled_commits_by_payer(payer);
+    let accepted_scheduled_actions =
+        TransactionScheduler::default().get_scheduled_actions_by_payer(payer);
     assert_eq!(
         magic_context.scheduled_commits.len(),
         expected_non_accepted_commits
     );
-    assert_eq!(accepted_scheduled_commits.len(), 0);
+    assert_eq!(accepted_scheduled_actions.len(), 0);
 
     magic_context_acc
 }
 
-fn assert_accepted_commits(
+fn assert_accepted_actions(
     processed_accepted: &[AccountSharedData],
     payer: &Pubkey,
-    expected_scheduled_commits: usize,
-) -> Vec<ScheduledCommit> {
+    expected_scheduled_actions: usize,
+) -> Vec<ScheduledAction> {
     let magic_context_acc = find_magic_context_account(processed_accepted)
         .expect("magic context account not found");
     let magic_context =
         bincode::deserialize::<MagicContext>(magic_context_acc.data()).unwrap();
 
-    let scheduled_commits =
-        TransactionScheduler::default().get_scheduled_commits_by_payer(payer);
+    let scheduled_actions =
+        TransactionScheduler::default().get_scheduled_actions_by_payer(payer);
 
     assert_eq!(magic_context.scheduled_commits.len(), 0);
-    assert_eq!(scheduled_commits.len(), expected_scheduled_commits);
+    assert_eq!(scheduled_actions.len(), expected_scheduled_actions);
 
-    scheduled_commits
+    scheduled_actions
 }
 
 fn extend_transaction_accounts_from_ix(
@@ -236,7 +237,10 @@ fn assert_first_commit(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::utils::instruction_utils::InstructionUtils;
+    use crate::{
+        magic_schedule_action::MagicAction,
+        utils::instruction_utils::InstructionUtils,
+    };
 
     #[test]
     fn test_schedule_commit_single_account_success() {
@@ -274,7 +278,7 @@ mod tests {
 
             // At this point the intent to commit was added to the magic context account,
             // but not yet accepted
-            let magic_context_acc = assert_non_accepted_commits(
+            let magic_context_acc = assert_non_accepted_actions(
                 &processed_scheduled,
                 &payer.pubkey(),
                 1,
@@ -306,11 +310,17 @@ mod tests {
             );
 
             // At this point the intended commits were accepted and moved to the global
-            let scheduled_commits = assert_accepted_commits(
+            let scheduled_commits = assert_accepted_actions(
                 &processed_accepted,
                 &payer.pubkey(),
                 1,
             );
+
+            let scheduled_commits = scheduled_commits
+                .into_iter()
+                .map(|el| el.try_into())
+                .collect::<Result<Vec<ScheduledCommit>, MagicAction>>()
+                .expect("only commit action");
 
             assert_first_commit(
                 &scheduled_commits,
@@ -360,7 +370,7 @@ mod tests {
 
             // At this point the intent to commit was added to the magic context account,
             // but not yet accepted
-            let magic_context_acc = assert_non_accepted_commits(
+            let magic_context_acc = assert_non_accepted_actions(
                 &processed_scheduled,
                 &payer.pubkey(),
                 1,
@@ -392,11 +402,17 @@ mod tests {
             );
 
             // At this point the intended commits were accepted and moved to the global
-            let scheduled_commits = assert_accepted_commits(
+            let scheduled_commits = assert_accepted_actions(
                 &processed_accepted,
                 &payer.pubkey(),
                 1,
             );
+
+            let scheduled_commits = scheduled_commits
+                .into_iter()
+                .map(|el| el.try_into())
+                .collect::<Result<Vec<ScheduledCommit>, MagicAction>>()
+                .expect("only commit action");
 
             assert_first_commit(
                 &scheduled_commits,
@@ -455,7 +471,7 @@ mod tests {
 
             // At this point the intent to commit was added to the magic context account,
             // but not yet accepted
-            let magic_context_acc = assert_non_accepted_commits(
+            let magic_context_acc = assert_non_accepted_actions(
                 &processed_scheduled,
                 &payer.pubkey(),
                 1,
@@ -498,11 +514,17 @@ mod tests {
             );
 
             // At this point the intended commits were accepted and moved to the global
-            let scheduled_commits = assert_accepted_commits(
+            let scheduled_commits = assert_accepted_actions(
                 &processed_accepted,
                 &payer.pubkey(),
                 1,
             );
+
+            let scheduled_commits = scheduled_commits
+                .into_iter()
+                .map(|el| el.try_into())
+                .collect::<Result<Vec<ScheduledCommit>, MagicAction>>()
+                .expect("only commit action");
 
             assert_first_commit(
                 &scheduled_commits,
@@ -564,7 +586,7 @@ mod tests {
 
             // At this point the intent to commit was added to the magic context account,
             // but not yet accepted
-            let magic_context_acc = assert_non_accepted_commits(
+            let magic_context_acc = assert_non_accepted_actions(
                 &processed_scheduled,
                 &payer.pubkey(),
                 1,
@@ -607,11 +629,17 @@ mod tests {
             );
 
             // At this point the intended commits were accepted and moved to the global
-            let scheduled_commits = assert_accepted_commits(
+            let scheduled_commits = assert_accepted_actions(
                 &processed_accepted,
                 &payer.pubkey(),
                 1,
             );
+
+            let scheduled_commits = scheduled_commits
+                .into_iter()
+                .map(|el| el.try_into())
+                .collect::<Result<Vec<ScheduledCommit>, MagicAction>>()
+                .expect("only commit action");
 
             assert_first_commit(
                 &scheduled_commits,
