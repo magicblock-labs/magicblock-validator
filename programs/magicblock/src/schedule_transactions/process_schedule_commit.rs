@@ -212,10 +212,10 @@ pub(crate) fn process_schedule_commit(
         transaction_context,
         MAGIC_CONTEXT_IDX,
     )?;
-    TransactionScheduler::schedule_commit(
+    TransactionScheduler::schedule_action(
         invoke_context,
         context_acc,
-        scheduled_commit,
+        scheduled_commit.into(),
     )
     .map_err(|err| {
         ic_msg!(

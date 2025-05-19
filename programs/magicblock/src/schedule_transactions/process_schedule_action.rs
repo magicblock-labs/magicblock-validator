@@ -9,11 +9,13 @@ use solana_sdk::{
 
 use crate::{
     args::MagicActionArgs,
-    magic_schedule_action::ConstructionContext,
+    magic_schedule_action::{ConstructionContext, ScheduledAction},
     schedule_transactions::{check_magic_context_id, COMMIT_ID},
-    utils::accounts::get_instruction_pubkey_with_idx,
+    utils::accounts::{
+        get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
+    },
+    TransactionScheduler,
 };
-use crate::magic_schedule_action::ScheduleAction;
 
 const PAYER_IDX: u16 = 0;
 const MAGIC_CONTEXT_IDX: u16 = PAYER_IDX + 1;
@@ -92,13 +94,37 @@ pub(crate) fn process_schedule_action(
         transaction_context,
         invoke_context,
     );
-    let schedule_action = ScheduleAction::try_new(
+    let scheduled_action = ScheduledAction::try_new(
         &args,
         commit_id,
         clock.slot,
         payer_pubkey,
         &construction_context,
     )?;
+
+    let context_acc = get_instruction_account_with_idx(
+        transaction_context,
+        MAGIC_CONTEXT_IDX,
+    )?;
+    TransactionScheduler::schedule_action(
+        invoke_context,
+        context_acc,
+        scheduled_action,
+    )
+    .map_err(|err| {
+        ic_msg!(
+            invoke_context,
+            "ScheduleAction ERR: failed to schedule action: {}",
+            err
+        );
+        InstructionError::GenericError
+    })?;
+    ic_msg!(invoke_context, "Scheduled commit with ID: {}", commit_id);
+    // ic_msg!(
+    //     invoke_context,
+    //     "ScheduledCommitSent signature: {}",
+    //     commit_sent_sig,
+    // );
 
     Ok(())
 }
@@ -128,6 +154,7 @@ fn get_parent_program_id(
     _: &mut InvokeContext,
 ) -> Result<Option<Pubkey>, InstructionError> {
     use solana_sdk::account::ReadableAccount;
+
     use crate::utils::accounts::get_instruction_account_with_idx;
 
     let first_committee_owner = *get_instruction_account_with_idx(

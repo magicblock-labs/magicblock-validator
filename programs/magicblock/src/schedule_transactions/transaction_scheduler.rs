@@ -12,11 +12,14 @@ use solana_sdk::{
     instruction::InstructionError, pubkey::Pubkey,
 };
 
-use crate::magic_context::{MagicContext, ScheduledCommit};
+use crate::{
+    magic_context::{MagicContext, ScheduledCommit},
+    magic_schedule_action::ScheduledAction,
+};
 
 #[derive(Clone)]
 pub struct TransactionScheduler {
-    scheduled_commits: Arc<RwLock<Vec<ScheduledCommit>>>,
+    scheduled_action: Arc<RwLock<Vec<ScheduledAction>>>,
 }
 
 impl Default for TransactionScheduler {
@@ -25,20 +28,20 @@ impl Default for TransactionScheduler {
             /// This vec tracks commits that went through the entire process of first
             /// being scheduled into the MagicContext, and then being moved
             /// over to this global.
-            static ref SCHEDULED_COMMITS: Arc<RwLock<Vec<ScheduledCommit>>> =
+            static ref SCHEDULED_ACTION: Arc<RwLock<Vec<ScheduledAction>>> =
                 Default::default();
         }
         Self {
-            scheduled_commits: SCHEDULED_COMMITS.clone(),
+            scheduled_action: SCHEDULED_ACTION.clone(),
         }
     }
 }
 
 impl TransactionScheduler {
-    pub fn schedule_commit(
+    pub fn schedule_action(
         invoke_context: &InvokeContext,
         context_account: &RefCell<AccountSharedData>,
-        commit: ScheduledCommit,
+        commit: ScheduledAction,
     ) -> Result<(), InstructionError> {
         let context_data = &mut context_account.borrow_mut();
         let mut context =
@@ -50,13 +53,13 @@ impl TransactionScheduler {
                 );
                 InstructionError::GenericError
             })?;
-        context.add_scheduled_commit(commit);
+        context.add_scheduled_action(commit);
         context_data.set_state(&context)?;
         Ok(())
     }
 
-    pub fn accept_scheduled_commits(&self, commits: Vec<ScheduledCommit>) {
-        self.scheduled_commits
+    pub fn accept_scheduled_commits(&self, commits: Vec<ScheduledAction>) {
+        self.scheduled_action
             .write()
             .expect("scheduled_commits lock poisoned")
             .extend(commits);
@@ -65,9 +68,9 @@ impl TransactionScheduler {
     pub fn get_scheduled_commits_by_payer(
         &self,
         payer: &Pubkey,
-    ) -> Vec<ScheduledCommit> {
+    ) -> Vec<ScheduledAction> {
         let commits = self
-            .scheduled_commits
+            .scheduled_action
             .read()
             .expect("scheduled_commits lock poisoned");
 
@@ -78,9 +81,9 @@ impl TransactionScheduler {
             .collect::<Vec<_>>()
     }
 
-    pub fn take_scheduled_commits(&self) -> Vec<ScheduledCommit> {
+    pub fn take_scheduled_commits(&self) -> Vec<ScheduledAction> {
         let mut lock = self
-            .scheduled_commits
+            .scheduled_action
             .write()
             .expect("scheduled_commits lock poisoned");
         mem::take(&mut *lock)
@@ -88,7 +91,7 @@ impl TransactionScheduler {
 
     pub fn scheduled_commits_len(&self) -> usize {
         let lock = self
-            .scheduled_commits
+            .scheduled_action
             .read()
             .expect("scheduled_commits lock poisoned");
 
@@ -97,7 +100,7 @@ impl TransactionScheduler {
 
     pub fn clear_scheduled_commits(&self) {
         let mut lock = self
-            .scheduled_commits
+            .scheduled_action
             .write()
             .expect("scheduled_commits lock poisoned");
         lock.clear();
