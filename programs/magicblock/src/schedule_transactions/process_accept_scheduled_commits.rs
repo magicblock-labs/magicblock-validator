@@ -85,7 +85,7 @@ pub fn process_accept_scheduled_commits(
         "AcceptScheduledCommits: accepted {} scheduled commit(s)",
         scheduled_commits.len()
     );
-    TransactionScheduler::default().accept_scheduled_commits(scheduled_commits);
+    TransactionScheduler::default().accept_scheduled_actions(scheduled_commits);
 
     // 4. Serialize and store the updated `MagicContext` account
     // Zero fill account before updating data

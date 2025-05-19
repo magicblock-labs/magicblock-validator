@@ -57,14 +57,14 @@ impl TransactionScheduler {
         Ok(())
     }
 
-    pub fn accept_scheduled_commits(&self, commits: Vec<ScheduledAction>) {
+    pub fn accept_scheduled_actions(&self, commits: Vec<ScheduledAction>) {
         self.scheduled_action
             .write()
             .expect("scheduled_commits lock poisoned")
             .extend(commits);
     }
 
-    pub fn get_scheduled_commits_by_payer(
+    pub fn get_scheduled_actions_by_payer(
         &self,
         payer: &Pubkey,
     ) -> Vec<ScheduledAction> {
@@ -80,7 +80,7 @@ impl TransactionScheduler {
             .collect::<Vec<_>>()
     }
 
-    pub fn take_scheduled_commits(&self) -> Vec<ScheduledAction> {
+    pub fn take_scheduled_actions(&self) -> Vec<ScheduledAction> {
         let mut lock = self
             .scheduled_action
             .write()
@@ -88,7 +88,7 @@ impl TransactionScheduler {
         mem::take(&mut *lock)
     }
 
-    pub fn scheduled_commits_len(&self) -> usize {
+    pub fn scheduled_actions_len(&self) -> usize {
         let lock = self
             .scheduled_action
             .read()
@@ -97,7 +97,7 @@ impl TransactionScheduler {
         lock.len()
     }
 
-    pub fn clear_scheduled_commits(&self) {
+    pub fn clear_scheduled_actions(&self) {
         let mut lock = self
             .scheduled_action
             .write()

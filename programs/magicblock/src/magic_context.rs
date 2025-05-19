@@ -98,19 +98,29 @@ pub struct ScheduledCommit {
 
 impl From<ScheduledCommit> for ScheduledAction {
     fn from(value: ScheduledCommit) -> Self {
+        let commit_type = CommitType::Standalone(
+            value
+                .accounts
+                .into_iter()
+                .map(CommittedAccountV2::from)
+                .collect(),
+        );
+        let action = if value.request_undelegation {
+            MagicAction::CommitAndUndelegate(CommitAndUndelegate {
+                commit_action: commit_type,
+                undelegate_action: UndelegateType::Standalone
+            })
+        } else {
+            MagicAction::Commit(commit_type)
+        };
+
         Self {
             id: value.id,
             slot: value.slot,
             blockhash: value.blockhash,
             payer: value.payer,
             action_sent_transaction: value.commit_sent_transaction,
-            action: MagicAction::Commit(CommitType::Standalone(
-                value
-                    .accounts
-                    .into_iter()
-                    .map(CommittedAccountV2::from)
-                    .collect(),
-            )),
+            action
         }
     }
 }
