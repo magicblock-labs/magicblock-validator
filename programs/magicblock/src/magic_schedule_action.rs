@@ -51,7 +51,7 @@ pub struct ScheduledAction {
     pub id: u64,
     pub slot: Slot,
     pub blockhash: Hash,
-    pub commit_sent_transaction: Transaction,
+    pub action_sent_transaction: Transaction,
     pub payer: Pubkey,
     // Scheduled action
     pub action: MagicAction,
@@ -68,16 +68,14 @@ impl ScheduledAction {
         let action = MagicAction::try_from_args(args, &context)?;
 
         let blockhash = context.invoke_context.environment_config.blockhash;
-        let commit_sent_transaction =
+        let action_sent_transaction =
             InstructionUtils::scheduled_commit_sent(commit_id, blockhash);
-        let commit_sent_sig = commit_sent_transaction.signatures[0];
-
         Ok(ScheduledAction {
             id: commit_id,
             slot,
             blockhash,
             payer: *payer_pubkey,
-            commit_sent_transaction,
+            action_sent_transaction,
             action,
         })
     }
