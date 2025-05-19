@@ -11,8 +11,8 @@ use solana_sdk::{
 };
 
 use crate::magic_schedule_action::{
-    CommitType, CommittedAccountV2, MagicAction, ScheduledAction,
-    ShortAccountMeta, UndelegateType,
+    CommitAndUndelegate, CommitType, CommittedAccountV2, MagicAction,
+    ScheduledAction, ShortAccountMeta, UndelegateType,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -116,11 +116,11 @@ impl From<ScheduledCommit> for ScheduledAction {
 }
 
 impl TryFrom<ScheduledAction> for ScheduledCommit {
-    type Error = ();
+    type Error = MagicAction;
     fn try_from(value: ScheduledAction) -> Result<Self, Self::Error> {
         fn extract_accounts(
             commit_type: CommitType,
-        ) -> Result<Vec<CommittedAccount>, ()> {
+        ) -> Result<Vec<CommittedAccount>, CommitType> {
             match commit_type {
                 CommitType::Standalone(committed_accounts) => {
                     Ok(committed_accounts
@@ -128,26 +128,34 @@ impl TryFrom<ScheduledAction> for ScheduledCommit {
                         .map(CommittedAccount::from)
                         .collect())
                 }
-                CommitType::WithHandler { .. } => Err(()),
+                val @ CommitType::WithHandler { .. } => Err(val),
             }
         }
 
         let (accounts, request_undelegation) = match value.action {
             MagicAction::Commit(commit_action) => {
-                let accounts = extract_accounts(commit_action)?;
+                let accounts = extract_accounts(commit_action)
+                    .map_err(MagicAction::Commit)?;
                 Ok((accounts, false))
             }
             MagicAction::CommitAndUndelegate(value) => {
-                if let UndelegateType::Standalone = value.undelegate_action {
-                    Ok(())
-                } else {
-                    Err(())
-                }?;
+                if let UndelegateType::WithHandler(..) =
+                    &value.undelegate_action
+                {
+                    return Err(MagicAction::CommitAndUndelegate(value));
+                };
 
-                let accounts = extract_accounts(value.commit_action)?;
+                let accounts = extract_accounts(value.commit_action).map_err(
+                    |commit_type| {
+                        MagicAction::CommitAndUndelegate(CommitAndUndelegate {
+                            commit_action: commit_type,
+                            undelegate_action: value.undelegate_action,
+                        })
+                    },
+                )?;
                 Ok((accounts, true))
             }
-            MagicAction::CallHandler(_) => Err(()),
+            err @ MagicAction::CallHandler(_) => Err(err),
         }?;
 
         Ok(Self {

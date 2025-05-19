@@ -47,8 +47,19 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
         IAP: InternalAccountProvider,
         CC: ChangesetCommittor,
     {
-        let scheduled_commits =
+        let scheduled_actions =
             self.transaction_scheduler.take_scheduled_commits();
+
+        // TODO(edwin): remove once actions are supported
+        let scheduled_commits: Vec<ScheduledCommit> = scheduled_actions
+            .into_iter()
+            .filter_map(|action| {
+                action
+                    .try_into()
+                    .inspect_err(|err| error!("Unexpected action: {:?}", err))
+                    .ok()
+            })
+            .collect();
 
         if scheduled_commits.is_empty() {
             return Ok(());
