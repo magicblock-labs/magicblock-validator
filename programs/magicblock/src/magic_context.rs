@@ -108,7 +108,7 @@ impl From<ScheduledCommit> for ScheduledAction {
         let action = if value.request_undelegation {
             MagicAction::CommitAndUndelegate(CommitAndUndelegate {
                 commit_action: commit_type,
-                undelegate_action: UndelegateType::Standalone
+                undelegate_action: UndelegateType::Standalone,
             })
         } else {
             MagicAction::Commit(commit_type)
@@ -120,7 +120,7 @@ impl From<ScheduledCommit> for ScheduledAction {
             blockhash: value.blockhash,
             payer: value.payer,
             action_sent_transaction: value.commit_sent_transaction,
-            action
+            action,
         }
     }
 }

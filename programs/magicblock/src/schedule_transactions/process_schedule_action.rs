@@ -43,7 +43,7 @@ pub(crate) fn process_schedule_action(
         .ok_or_else(|| {
             ic_msg!(
                 invoke_context,
-                "ScheduleCommit ERR: Magic program account not found"
+                "ScheduleAction ERR: Magic program account not found"
             );
             InstructionError::UnsupportedProgramId
         })?;
