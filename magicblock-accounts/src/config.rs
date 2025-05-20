@@ -9,7 +9,6 @@ pub struct AccountsConfig {
     pub remote_cluster: Cluster,
     pub lifecycle: LifecycleMode,
     pub commit_compute_unit_price: u64,
-    pub payer_init_lamports: Option<u64>,
     pub allowed_program_ids: Option<HashSet<Pubkey>>,
 }
 
