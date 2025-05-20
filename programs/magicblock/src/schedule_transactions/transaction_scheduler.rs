@@ -40,7 +40,7 @@ impl TransactionScheduler {
     pub fn schedule_action(
         invoke_context: &InvokeContext,
         context_account: &RefCell<AccountSharedData>,
-        commit: ScheduledAction,
+        action: ScheduledAction,
     ) -> Result<(), InstructionError> {
         let context_data = &mut context_account.borrow_mut();
         let mut context =
@@ -52,7 +52,7 @@ impl TransactionScheduler {
                 );
                 InstructionError::GenericError
             })?;
-        context.add_scheduled_action(commit);
+        context.add_scheduled_action(action);
         context_data.set_state(&context)?;
         Ok(())
     }
@@ -60,7 +60,7 @@ impl TransactionScheduler {
     pub fn accept_scheduled_actions(&self, commits: Vec<ScheduledAction>) {
         self.scheduled_action
             .write()
-            .expect("scheduled_commits lock poisoned")
+            .expect("scheduled_action lock poisoned")
             .extend(commits);
     }
 
@@ -71,7 +71,7 @@ impl TransactionScheduler {
         let commits = self
             .scheduled_action
             .read()
-            .expect("scheduled_commits lock poisoned");
+            .expect("scheduled_action lock poisoned");
 
         commits
             .iter()
@@ -84,7 +84,7 @@ impl TransactionScheduler {
         let mut lock = self
             .scheduled_action
             .write()
-            .expect("scheduled_commits lock poisoned");
+            .expect("scheduled_action lock poisoned");
         mem::take(&mut *lock)
     }
 
@@ -92,7 +92,7 @@ impl TransactionScheduler {
         let lock = self
             .scheduled_action
             .read()
-            .expect("scheduled_commits lock poisoned");
+            .expect("scheduled_action lock poisoned");
 
         lock.len()
     }
@@ -101,7 +101,7 @@ impl TransactionScheduler {
         let mut lock = self
             .scheduled_action
             .write()
-            .expect("scheduled_commits lock poisoned");
+            .expect("scheduled_action lock poisoned");
         lock.clear();
     }
 }
