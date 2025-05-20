@@ -604,7 +604,7 @@ impl MagicValidator {
             validator_info,
         )
         .map_err(|err| {
-            ApiError::FailedToRegisterValidatorOnChain(format!("{err:#}"))
+            ApiError::FailedToRegisterValidatorOnChain(format!("{:?}", err))
         })
     }
 
