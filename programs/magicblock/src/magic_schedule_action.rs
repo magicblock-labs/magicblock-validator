@@ -126,7 +126,7 @@ impl CommitType {
             let acc = get_instruction_account_with_idx(context.transaction_context, *index as u16)?;
             let acc_owner = *acc.borrow().owner();
 
-            if context.parent_program_id.as_ref() != Some(acc_pubkey) && !context.signers.contains(acc_pubkey) {
+            if context.parent_program_id != Some(acc_owner) && !context.signers.contains(acc_pubkey) {
                 match context.parent_program_id {
                     None => {
                         ic_msg!(
