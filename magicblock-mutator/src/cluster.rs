@@ -56,7 +56,13 @@ impl Cluster {
             }],
             Cluster::Custom(url) => {
                 let mut ws_url = url.clone();
-                ws_url.set_scheme(if url.scheme() == "https" { "wss" } else { "ws" }).expect("valid scheme");
+                ws_url
+                    .set_scheme(if url.scheme() == "https" {
+                        "wss"
+                    } else {
+                        "ws"
+                    })
+                    .expect("valid scheme");
                 vec![ws_url.to_string()]
             }
             Cluster::CustomWithWs(_, ws) => vec![ws.to_string()],
