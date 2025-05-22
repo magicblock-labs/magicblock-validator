@@ -64,7 +64,7 @@ pub enum RemoteConfig {
     #[serde(untagged)]
     CustomWithWs(Url, Url),
     #[serde(untagged)]
-    CustomWithMutlipleWs {
+    CustomWithMultipleWs {
         http: Url,
         ws: Vec<Url>,
     },
