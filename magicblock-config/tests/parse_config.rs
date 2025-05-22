@@ -249,9 +249,10 @@ payer = { init_sol = 2000, init_lamports = 300_000 }
 fn test_custom_remote_with_multiple_ws() {
     let toml = r#"
 [accounts]
-remote = { http: "http://localhost::8899", ws = ["ws://awesomews1.com:933", "wss://awesomews2.com:944"] }
+remote = { http = "http://localhost:8899", ws = ["ws://awesomews1.com:933", "wss://awesomews2.com:944"] }
 "#;
 
     let res = toml::from_str::<EphemeralConfig>(toml);
-    assert!(res.is_err());
+    println!("{res:?}");
+    assert!(res.is_ok());
 }
