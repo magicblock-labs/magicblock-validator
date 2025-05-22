@@ -1,6 +1,6 @@
 // Adapted yellowstone-grpc/yellowstone-grpc-geyser/src/grpc.rs
 use std::{
-    collections::{BTreeMap, HashMap},
+    collections::HashMap,
     sync::{
         atomic::{AtomicUsize, Ordering},
         Arc,
@@ -19,7 +19,7 @@ use geyser_grpc_proto::prelude::{
 use log::{error, info};
 use tokio::{
     sync::{broadcast, mpsc, Notify},
-    time::{sleep, Duration, Instant},
+    time::{sleep, Duration},
 };
 use tokio_stream::wrappers::ReceiverStream;
 use tonic::{
@@ -30,12 +30,12 @@ use tonic::{
 use tonic_health::server::health_reporter;
 
 use crate::{
-    config::{ConfigBlockFailAction, ConfigGrpc},
+    config::ConfigGrpc,
     filters::Filter,
     grpc_messages::*,
     types::{
         geyser_message_channel, GeyserMessageReceiver, GeyserMessageSender,
-        GeyserMessages,
+        GeyserMessages, SubscriptionsDb,
     },
     version::GrpcVersionInfo,
 };
@@ -65,7 +65,6 @@ impl GrpcService {
     #[allow(clippy::type_complexity)]
     pub fn create(
         config: ConfigGrpc,
-        block_fail_action: ConfigBlockFailAction,
     ) -> Result<
         (GeyserMessageSender, Arc<Notify>),
         Box<dyn std::error::Error + Send + Sync>,
@@ -78,7 +77,7 @@ impl GrpcService {
         )?;
 
         // Blocks meta storage
-        let (blocks_meta, blocks_meta_tx) = if config.unary_disabled {
+        let (blocks_meta, _) = if config.unary_disabled {
             (None, None)
         } else {
             let (blocks_meta, blocks_meta_tx) =
@@ -110,9 +109,9 @@ impl GrpcService {
         let (messages_tx, messages_rx) = geyser_message_channel();
         tokio::spawn(Self::geyser_loop(
             messages_rx,
-            blocks_meta_tx,
-            broadcast_tx,
-            block_fail_action,
+            // Note: gRPC plugin is currently disabled, so it doesn't
+            // matter that we pass exclusive SubscriptionsDb
+            SubscriptionsDb::default(),
         ));
 
         // Run Server
@@ -138,263 +137,24 @@ impl GrpcService {
     }
 
     pub(crate) async fn geyser_loop(
-        mut messages_rx: GeyserMessageReceiver,
-        blocks_meta_tx: Option<GeyserMessageSender>,
-        broadcast_tx: broadcast::Sender<(CommitmentLevel, GeyserMessages)>,
-        block_fail_action: ConfigBlockFailAction,
+        messages_rx: GeyserMessageReceiver,
+        subscriptions_db: SubscriptionsDb,
     ) {
-        const PROCESSED_MESSAGES_MAX: usize = 31;
-        // TODO(thlorenz): @@@ This could become a bottleneck affecting latency
-        const PROCESSED_MESSAGES_SLEEP: Duration = Duration::from_millis(10);
-
-        let mut messages: BTreeMap<u64, SlotMessages> = Default::default();
-        let mut processed_messages = Vec::with_capacity(PROCESSED_MESSAGES_MAX);
-        let mut processed_first_slot = None;
-        let processed_sleep = sleep(PROCESSED_MESSAGES_SLEEP);
-        tokio::pin!(processed_sleep);
-
-        loop {
-            tokio::select! {
-                Some(message) = messages_rx.recv() => {
-                    // Update blocks info
-                    if let Some(blocks_meta_tx) = &blocks_meta_tx {
-                        if matches!(*message, Message::Slot(_) | Message::BlockMeta(_)) {
-                            let _ = blocks_meta_tx.send(message.clone());
-                        }
-                    }
-
-                    // Remove outdated block reconstruction info
-                    match *message {
-                        Message::Slot(msg) if processed_first_slot.is_none() && msg.status == CommitmentLevel::Processed => {
-                            processed_first_slot = Some(msg.slot);
-                        }
-                        // Note: all slots received by plugin are Finalized, as
-                        // we don't have forks or the notion of slot trees
-                        Message::Slot(msg) if msg.status == CommitmentLevel::Finalized => {
-                            // NOTE: originally 10 slots were kept here, but we about 80x as many
-                            // slots/sec
-                            if let Some(msg_slot) = msg.slot.checked_sub(80) {
-                                loop {
-                                    match messages.keys().next().cloned() {
-                                        Some(slot) if slot < msg_slot => {
-                                            if let Some(slot_messages) = messages.remove(&slot) {
-                                                match processed_first_slot {
-                                                    Some(processed_first) if slot <= processed_first => continue,
-                                                    None => continue,
-                                                    _ => {}
-                                                }
-
-                                                if !slot_messages.sealed && slot_messages.finalized_at.is_some() {
-                                                    let mut reasons = vec![];
-                                                    if let Some(block_meta) = slot_messages.block_meta {
-                                                        let block_txn_count = block_meta.executed_transaction_count as usize;
-                                                        let msg_txn_count = slot_messages.transactions.len();
-                                                        if block_txn_count != msg_txn_count {
-                                                            reasons.push("InvalidTxnCount");
-                                                            error!("failed to reconstruct #{slot} -- tx count: {block_txn_count} vs {msg_txn_count}");
-                                                        }
-                                                        let block_entries_count = block_meta.entries_count as usize;
-                                                        let msg_entries_count = slot_messages.entries.len();
-                                                        if block_entries_count != msg_entries_count {
-                                                            reasons.push("InvalidEntriesCount");
-                                                            error!("failed to reconstruct #{slot} -- entries count: {block_entries_count} vs {msg_entries_count}");
-                                                        }
-                                                    } else {
-                                                        reasons.push("NoBlockMeta");
-                                                    }
-                                                    let reason = reasons.join(",");
-
-                                                    match block_fail_action {
-                                                        ConfigBlockFailAction::Log => {
-                                                            error!("failed reconstruct #{slot} {reason}");
-                                                        }
-                                                        ConfigBlockFailAction::Panic => {
-                                                            panic!("failed reconstruct #{slot} {reason}");
-                                                        }
-                                                    }
-                                                }
-                                            }
-                                        }
-                                        _ => break,
-                                    }
-                                }
-                            }
-                        }
-                        _ => ()
-                    }
-
-                    // Update block reconstruction info
-                    let slot_messages = messages.entry(message.get_slot()).or_default();
-
-                    // Runs for all messages that aren't slot updates
-
-                    if !matches!(*message, Message::Slot(_)) {
-                        // Adds 8MB / 2secs
-                        slot_messages.messages.push(Some(message.clone()));
-
-                        // If we already build Block message, new message will be a problem
-                        if slot_messages.sealed && !(matches!(*message, Message::Entry(_)) && slot_messages.entries_count == 0) {
-                            match block_fail_action {
-                                ConfigBlockFailAction::Log => {
-                                    error!("unexpected message #{} -- {} (invalid order)", message.get_slot(), message.kind());
-                                }
-                                ConfigBlockFailAction::Panic => {
-                                    panic!("unexpected message #{} -- {} (invalid order)", message.get_slot(), message.kind());
-                                }
-                            }
-                        }
-                    }
-
-                    let mut sealed_block_msg = None;
-                    match message.as_ref() {
-                        Message::BlockMeta(msg) => {
-                            if slot_messages.block_meta.is_some() {
-                                match block_fail_action {
-                                    ConfigBlockFailAction::Log => {
-                                        error!("unexpected message #{} -- BlockMeta (duplicate)", message.get_slot());
-                                    }
-                                    ConfigBlockFailAction::Panic => {
-                                        panic!("unexpected message #{} -- BlockMeta (duplicate)", message.get_slot());
-                                    }
-                                }
-                            }
-                            slot_messages.block_meta = Some(msg.clone());
-                            sealed_block_msg = slot_messages.try_seal();
-                        }
-                        Message::Transaction(msg) => {
-                            slot_messages.transactions.push(msg.transaction.clone());
-                            sealed_block_msg = slot_messages.try_seal();
-                        }
-                        // Dedup accounts by max write_version
-                        Message::Account(msg) => {
-                            let write_version = msg.account.write_version;
-                            let msg_index = slot_messages.messages.len() - 1;
-                            if let Some(entry) = slot_messages.accounts_dedup.get_mut(&msg.account.pubkey) {
-                                if entry.0 < write_version {
-                                    // We can replace the message, but in this case we will lose the order
-                                    slot_messages.messages[entry.1] = None;
-                                    *entry = (write_version, msg_index);
-                                }
-                            } else {
-                                slot_messages.accounts_dedup.insert(msg.account.pubkey, (write_version, msg_index));
-                            }
-                        }
-                        Message::Entry(msg) => {
-                            slot_messages.entries.push(msg.clone());
-                            sealed_block_msg = slot_messages.try_seal();
-                        }
-                        _ => {}
-                    }
-
-                    // Send messages to filter (and to clients)
-                    let mut messages_vec = vec![message];
-                    if let Some(sealed_block_msg) = sealed_block_msg {
-                        messages_vec.push(sealed_block_msg);
-                    }
-
-                    for message in messages_vec {
-                        if let Message::Slot(slot) = *message {
-                            let (mut confirmed_messages, mut finalized_messages) = match slot.status {
-                                CommitmentLevel::Processed => {
-                                    (Vec::with_capacity(1), Vec::with_capacity(1))
-                                }
-                                CommitmentLevel::Confirmed => {
-                                    if let Some(slot_messages) = messages.get_mut(&slot.slot) {
-                                        if !slot_messages.sealed {
-                                            slot_messages.confirmed_at = Some(slot_messages.messages.len());
-                                        }
-                                    }
-
-                                    let vec = messages
-                                        .get(&slot.slot)
-                                        .map(|slot_messages| slot_messages.messages.iter().flatten().cloned().collect())
-                                        .unwrap_or_default();
-                                    (vec, Vec::with_capacity(1))
-                                }
-                                CommitmentLevel::Finalized => {
-                                    if let Some(slot_messages) = messages.get_mut(&slot.slot) {
-                                        if !slot_messages.sealed {
-                                            slot_messages.finalized_at = Some(slot_messages.messages.len());
-                                        }
-                                    }
-
-                                    let vec = messages
-                                        .get_mut(&slot.slot)
-                                        .map(|slot_messages| slot_messages.messages.iter().flatten().cloned().collect())
-                                        .unwrap_or_default();
-                                    (Vec::with_capacity(1), vec)
-                                }
-                            };
-
-                            // processed
-                            processed_messages.push(message.clone());
-                            let _ =
-                                broadcast_tx.send((CommitmentLevel::Processed, processed_messages.into()));
-                            processed_messages = Vec::with_capacity(PROCESSED_MESSAGES_MAX);
-                            processed_sleep
-                                .as_mut()
-                                .reset(Instant::now() + PROCESSED_MESSAGES_SLEEP);
-
-                            // confirmed
-                            confirmed_messages.push(message.clone());
-                            let _ =
-                                broadcast_tx.send((CommitmentLevel::Confirmed, confirmed_messages.into()));
-
-                            // finalized
-                            finalized_messages.push(message);
-                            let _ =
-                                broadcast_tx.send((CommitmentLevel::Finalized, finalized_messages.into()));
-                        } else {
-                            let mut confirmed_messages = vec![];
-                            let mut finalized_messages = vec![];
-                            if matches!(*message, Message::Block(_)) {
-                                if let Some(slot_messages) = messages.get(&message.get_slot()) {
-                                    if let Some(confirmed_at) = slot_messages.confirmed_at {
-                                        confirmed_messages.extend(
-                                            slot_messages.messages.as_slice()[confirmed_at..].iter().filter_map(|x| x.clone())
-                                        );
-                                    }
-                                    if let Some(finalized_at) = slot_messages.finalized_at {
-                                        finalized_messages.extend(
-                                            slot_messages.messages.as_slice()[finalized_at..].iter().filter_map(|x| x.clone())
-                                        );
-                                    }
-                                }
-                            }
-
-                            processed_messages.push(message);
-                            if processed_messages.len() >= PROCESSED_MESSAGES_MAX
-                                || !confirmed_messages.is_empty()
-                                || !finalized_messages.is_empty()
-                            {
-                                let _ = broadcast_tx
-                                    .send((CommitmentLevel::Processed, processed_messages.into()));
-                                processed_messages = Vec::with_capacity(PROCESSED_MESSAGES_MAX);
-                                processed_sleep
-                                    .as_mut()
-                                    .reset(Instant::now() + PROCESSED_MESSAGES_SLEEP);
-                            }
-
-                            if !confirmed_messages.is_empty() {
-                                let _ =
-                                    broadcast_tx.send((CommitmentLevel::Confirmed, confirmed_messages.into()));
-                            }
-
-                            if !finalized_messages.is_empty() {
-                                let _ =
-                                    broadcast_tx.send((CommitmentLevel::Finalized, finalized_messages.into()));
-                            }
-                        }
-                    }
-                },
-                () = &mut processed_sleep => {
-                    if !processed_messages.is_empty() {
-                        let _ = broadcast_tx.send((CommitmentLevel::Processed, processed_messages.into()));
-                        processed_messages = Vec::with_capacity(PROCESSED_MESSAGES_MAX);
-                    }
-                    processed_sleep.as_mut().reset(Instant::now() + PROCESSED_MESSAGES_SLEEP);
+        while let Ok(message) = messages_rx.recv() {
+            match *message {
+                Message::Slot(_) => subscriptions_db.send_slot(message),
+                Message::Account(ref account) => {
+                    let pubkey = account.account.pubkey;
+                    subscriptions_db.send_account_update(&pubkey, message);
                 }
-                else => break,
+                Message::Transaction(ref txn) => {
+                    let signature = txn.transaction.signature;
+                    subscriptions_db.send_signature_update(&signature, message);
+                }
+                Message::Block(_) => {
+                    subscriptions_db.send_block(message);
+                }
+                _ => (),
             }
         }
     }
