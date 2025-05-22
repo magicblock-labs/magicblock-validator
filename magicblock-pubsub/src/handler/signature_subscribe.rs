@@ -65,21 +65,16 @@ pub async fn handle_signature_subscribe(
             );
             sink_notify_transaction_result(&sink, slot, subid, res.err());
         } else {
-            tokio::select! {
-                val = geyser_rx.recv() => {
-                    match val {
-                        Some(update) => {
-                            if handle_signature_geyser_update(
-                                &sink,
-                                subid,
-                                update) {
-                            }
+            while let Some(val) = geyser_rx.recv().await {
+                match val {
+                    Some(update) => {
+                        if handle_signature_geyser_update(&sink, subid, update)
+                        {
+                            break;
                         }
-                        None => {
-                            debug!(
-                                "Geyser subscription has ended, finishing."
-                            );
-                        }
+                    }
+                    None => {
+                        debug!("Geyser subscription has ended, finishing.");
                     }
                 }
             }

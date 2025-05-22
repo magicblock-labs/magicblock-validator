@@ -30,7 +30,7 @@ use crate::{
     grpc_messages::{BlockMetaStorage, Message},
     types::{
         geyser_message_channel, GeyserMessage, GeyserMessageSender,
-        GeyserMessages,
+        GeyserMessages, SubscriptionsDb,
     },
     utils::{
         short_signature, short_signature_from_sub_update,
@@ -39,11 +39,9 @@ use crate::{
 };
 
 pub struct GeyserRpcService {
-    grpc_service: GrpcService,
     config: ConfigGrpc,
-    broadcast_tx: broadcast::Sender<(CommitmentLevel, GeyserMessages)>,
     subscribe_id: AtomicU64,
-
+    subscriptions_db: SubscriptionsDb,
     transactions_cache: Option<SharedMap<Signature, GeyserMessage>>,
     accounts_cache: Option<SharedMap<Pubkey, GeyserMessage>>,
 }
@@ -53,9 +51,7 @@ impl std::fmt::Debug for GeyserRpcService {
         let tx_cache = CacheState::from(self.transactions_cache.as_ref());
         let acc_cache = CacheState::from(self.accounts_cache.as_ref());
         f.debug_struct("GeyserRpcService")
-            .field("grpc_service", &self.grpc_service)
             .field("config", &self.config)
-            .field("broadcast_tx", &self.broadcast_tx)
             .field("subscribe_id", &self.subscribe_id)
             .field("transactions_cache", &tx_cache)
             .field("accounts_cache", &acc_cache)
@@ -83,29 +79,19 @@ impl GeyserRpcService {
             (Some(blocks_meta), Some(blocks_meta_tx))
         };
 
-        // Messages to clients combined by commitment
-        let (broadcast_tx, _) = broadcast::channel(config.channel_capacity);
-
         let rpc_service = Self {
             subscribe_id: AtomicU64::new(0),
-            broadcast_tx: broadcast_tx.clone(),
             config: config.clone(),
-            grpc_service: GrpcService::new(
-                config,
-                blocks_meta,
-                broadcast_tx.clone(),
-            ),
             transactions_cache,
             accounts_cache,
+            subscriptions_db: SubscriptionsDb::default(),
         };
 
         // Run geyser message loop
         let (messages_tx, messages_rx) = geyser_message_channel();
         tokio::spawn(GrpcService::geyser_loop(
             messages_rx,
-            blocks_meta_tx,
-            broadcast_tx.clone(),
-            block_fail_action,
+            rpc_service.subscriptions_db.clone(),
         ));
 
         // TODO: should Geyser handle shutdown or the piece that instantiates
@@ -149,7 +135,7 @@ impl GeyserRpcService {
             })
         });
 
-        let sub_update = self.subscribe_impl(filter, subid, unsubscriber, msgs);
+        let sub_update = self.subscribe_impl(subid, unsubscriber, msgs);
         Ok(sub_update)
     }
 
@@ -197,7 +183,7 @@ impl GeyserRpcService {
             })
         });
 
-        let sub_update = self.subscribe_impl(filter, subid, unsubscriber, msgs);
+        let sub_update = self.subscribe_impl(subid, unsubscriber, msgs);
 
         Ok(sub_update)
     }
@@ -209,42 +195,26 @@ impl GeyserRpcService {
         unsubscriber: CancellationToken,
     ) -> anyhow::Result<mpsc::Receiver<Result<SubscribeUpdate, Status>>> {
         // We don't filter by slot for the RPC interface
-        let filter = Filter::new(
-            &SubscribeRequest {
-                accounts: HashMap::new(),
-                slots: slot_subscription,
-                transactions: HashMap::new(),
-                blocks: HashMap::new(),
-                blocks_meta: HashMap::new(),
-                entry: HashMap::new(),
-                commitment: None,
-                accounts_data_slice: Vec::new(),
-                ping: None,
-            },
-            &self.config.filters,
-            self.config.normalize_commitment_level,
-        )?;
-        let sub_update = self.subscribe_impl(filter, subid, unsubscriber, None);
+        let sub_update = self.subscribe_impl(subid, unsubscriber, None);
 
         Ok(sub_update)
     }
 
     fn subscribe_impl(
         &self,
-        filter: Filter,
         subid: u64,
         unsubscriber: CancellationToken,
         initial_messages: Option<GeyserMessages>,
     ) -> mpsc::Receiver<Result<SubscribeUpdate, Status>> {
         let (stream_tx, mut stream_rx) =
             mpsc::channel(self.config.channel_capacity);
+        let (updates_rx, updates_tx) =
+            mpsc::channel(self.config.channel_capacity);
 
         tokio::spawn(Self::client_loop(
             subid,
-            filter,
             stream_tx,
             unsubscriber,
-            self.broadcast_tx.subscribe(),
             initial_messages,
         ));
 
@@ -257,7 +227,6 @@ impl GeyserRpcService {
     /// filters.
     async fn client_loop(
         subid: u64,
-        mut filter: Filter,
         stream_tx: mpsc::Sender<TonicResult<SubscribeUpdate>>,
         unsubscriber: CancellationToken,
         mut messages_rx: broadcast::Receiver<(CommitmentLevel, GeyserMessages)>,
@@ -318,10 +287,8 @@ impl GeyserRpcService {
 fn handle_messages(
     subid: u64,
     unsubscriber: CancellationToken,
-    filter: &Filter,
-    commitment: CommitmentLevel,
     messages: GeyserMessages,
-    stream_tx: &mpsc::Sender<TonicResult<SubscribeUpdate>>,
+    stream_tx: &mpsc::Sender<GeyserMessage>,
 ) -> bool {
     if commitment == filter.get_commitment_level() {
         for message in messages.iter() {

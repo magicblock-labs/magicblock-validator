@@ -1,5 +1,10 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
+use log::warn;
+use scc::hash_map::Entry;
+use solana_sdk::pubkey::Pubkey;
+use solana_sdk::signature::Signature;
 use tokio::sync::mpsc;
 
 use crate::grpc_messages::{Message, MessageBlockMeta};
@@ -7,10 +12,231 @@ use crate::grpc_messages::{Message, MessageBlockMeta};
 pub type GeyserMessage = Arc<Message>;
 pub type GeyserMessages = Arc<Vec<GeyserMessage>>;
 pub type GeyserMessageBlockMeta = Arc<MessageBlockMeta>;
+pub type AccountSubscriptionsDb = Arc<scc::HashMap<Pubkey, UpdateSubscribers>>;
+pub type SignatureSubscriptionsDb =
+    Arc<scc::HashMap<Signature, UpdateSubscribers>>;
+pub type LogsSubscriptionsDb =
+    Arc<scc::HashMap<LogsSubscribeKey, UpdateSubscribers>>;
+pub type SlotSubscriptionsDb =
+    Arc<scc::HashMap<u64, mpsc::Sender<GeyserMessage>>>;
+pub type BlockSubscriptionsDb =
+    Arc<scc::HashMap<u64, mpsc::Sender<GeyserMessage>>>;
 
-pub type GeyserMessageSender = mpsc::UnboundedSender<GeyserMessage>;
-pub type GeyserMessageReceiver = mpsc::UnboundedReceiver<GeyserMessage>;
+#[derive(Clone, Default)]
+pub struct SubscriptionsDb {
+    accounts: AccountSubscriptionsDb,
+    signatures: SignatureSubscriptionsDb,
+    logs: LogsSubscriptionsDb,
+    slot: SlotSubscriptionsDb,
+    block: BlockSubscriptionsDb,
+}
+
+macro_rules! add_subscriber {
+    ($root: ident, $db: ident, $id: ident, $key: ident, $tx: expr) => {
+        let subscriber = UpdateSubscribers::Single { id: $id, tx: $tx };
+        match $root.$db.entry($key) {
+            Entry::Vacant(e) => {
+                e.insert_entry(subscriber);
+            }
+            Entry::Occupied(mut e) => {
+                e.add_subscriber($id, subscriber);
+            }
+        };
+    };
+}
+
+macro_rules! remove_subscriber {
+    ($root: ident, $db: ident, $id: ident, $key: ident) => {
+        let Some(mut entry) = $root.$db.get($key) else {
+            return;
+        };
+        if entry.remove_subscriber($id) {
+            $root.$db.remove($key);
+        }
+    };
+}
+
+macro_rules! send_update {
+    ($root: ident, $db: ident, $key: ident, $update: ident) => {
+        $root
+            .$db
+            .read($key, |_, subscribers| subscribers.send($update))
+    };
+}
+
+impl SubscriptionsDb {
+    pub fn subscribe_to_account(
+        &self,
+        pubkey: Pubkey,
+        tx: mpsc::Sender<GeyserMessage>,
+        id: u64,
+    ) {
+        add_subscriber!(self, accounts, id, pubkey, tx);
+    }
+
+    pub fn unsubscribe_from_account(&self, pubkey: &Pubkey, id: u64) {
+        remove_subscriber!(self, accounts, id, pubkey);
+    }
+
+    pub fn send_account_update(&self, pubkey: &Pubkey, update: GeyserMessage) {
+        send_update!(self, accounts, pubkey, update);
+    }
+
+    pub fn subscribe_to_signature(
+        &self,
+        signature: Signature,
+        tx: mpsc::Sender<GeyserMessage>,
+        id: u64,
+    ) {
+        add_subscriber!(self, signatures, id, signature, tx);
+    }
+
+    pub fn unsubscribe_from_signature(&self, signature: &Signature, id: u64) {
+        remove_subscriber!(self, signatures, id, signature);
+    }
+
+    pub fn send_signature_update(
+        &self,
+        signature: &Signature,
+        update: GeyserMessage,
+    ) {
+        send_update!(self, signatures, signature, update);
+    }
+
+    pub fn subscribe_to_logs(
+        &self,
+        key: LogsSubscribeKey,
+        tx: mpsc::Sender<GeyserMessage>,
+        id: u64,
+    ) {
+        add_subscriber!(self, logs, id, key, tx);
+    }
+
+    pub fn unsubscribe_from_logs(&self, key: &LogsSubscribeKey, id: u64) {
+        remove_subscriber!(self, logs, id, key);
+    }
+
+    pub fn send_logs_update(&self, update: GeyserMessage) {
+        if self.logs.is_empty() {
+            return;
+        }
+        let Message::Transaction(ref txn) = *update else {
+            return;
+        };
+        self.logs.scan(|key, subscribers| match key {
+            LogsSubscribeKey::All => {
+                subscribers.send(update.clone());
+            }
+            LogsSubscribeKey::Account(pubkey) => {
+                let addresses = &txn.transaction.meta.loaded_addresses;
+                let addresses =
+                    addresses.writable.iter().chain(addresses.readonly.iter());
+                for pk in addresses {
+                    if pubkey == pk {
+                        subscribers.send(update.clone());
+                    }
+                }
+            }
+        });
+    }
+
+    pub fn subscribe_to_slot(&self, tx: mpsc::Sender<GeyserMessage>, id: u64) {
+        let _ = self.slot.insert(id, tx);
+    }
+
+    pub fn unsubscribe_from_slot(&self, id: u64) {
+        self.slot.remove(&id);
+    }
+
+    pub fn send_slot(&self, msg: GeyserMessage) {
+        self.slot.scan(|_, tx| {
+            if tx.try_send(msg.clone()).is_err() {
+                warn!("slot subscriber hang up or not keeping up");
+            }
+        });
+    }
+
+    pub fn subscribe_to_block(&self, tx: mpsc::Sender<GeyserMessage>, id: u64) {
+        let _ = self.block.insert(id, tx);
+    }
+
+    pub fn unsubscribe_from_block(&self, id: u64) {
+        self.block.remove(&id);
+    }
+
+    pub fn send_block(&self, msg: GeyserMessage) {
+        self.block.scan(|_, tx| {
+            if tx.try_send(msg.clone()).is_err() {
+                warn!("block subscriber hang up or not keeping up");
+            }
+        });
+    }
+}
+
+pub type GeyserMessageSender = flume::Sender<GeyserMessage>;
+pub type GeyserMessageReceiver = flume::Receiver<GeyserMessage>;
+
 pub fn geyser_message_channel() -> (GeyserMessageSender, GeyserMessageReceiver)
 {
-    mpsc::unbounded_channel()
+    flume::unbounded()
+}
+
+#[derive(Hash, PartialEq, Eq)]
+pub enum LogsSubscribeKey {
+    All,
+    Account(Pubkey),
+}
+
+/// Sender handles to subscribers for a given update
+pub enum UpdateSubscribers {
+    Single {
+        id: u64,
+        tx: mpsc::Sender<GeyserMessage>,
+    },
+    Multiple(HashMap<u64, Self>),
+}
+
+impl UpdateSubscribers {
+    /// Adds the subscriber to the list, upgrading Self to Multiple if necessary
+    fn add_subscriber(&mut self, id: u64, subscriber: Self) {
+        if let Self::Multiple(txs) = self {
+            txs.insert(id, subscriber);
+            return;
+        }
+        let mut txs = HashMap::with_capacity(2);
+        txs.insert(id, subscriber);
+        let multiple = Self::Multiple(txs);
+        let previous = std::mem::replace(self, multiple);
+        if let Self::Single { id, .. } = previous {
+            self.add_subscriber(id, previous);
+        }
+    }
+
+    /// Checks whether there're multiple subscribers, if so, removes the
+    /// specified one, returns a boolean indicating whether or not more
+    /// subscribers are left. For Oneshot and Single always returns true
+    fn remove_subscriber(&mut self, id: u64) -> bool {
+        if let Self::Multiple(txs) = self {
+            txs.remove(&id);
+            txs.is_empty()
+        } else {
+            true
+        }
+    }
+
+    /// Sends the update message to all existing subscribers/handlers
+    fn send(&self, msg: GeyserMessage) {
+        match self {
+            Self::Single { tx, .. } => {
+                if tx.try_send(msg).is_err() {
+                    warn!("mpsc update receiver hang up or not keeping up");
+                }
+            }
+            Self::Multiple(txs) => {
+                for tx in txs.values() {
+                    tx.send(msg.clone());
+                }
+            }
+        }
+    }
 }

@@ -520,14 +520,14 @@ impl BlockMetaStorage {
         unary_concurrency_limit: usize,
     ) -> (Self, GeyserMessageSender) {
         let inner = Arc::new(RwLock::new(BlockMetaStorageInner::default()));
-        let (tx, mut rx): (GeyserMessageSender, GeyserMessageReceiver) =
+        let (tx, rx): (GeyserMessageSender, GeyserMessageReceiver) =
             geyser_message_channel();
 
         let storage = Arc::clone(&inner);
         tokio::spawn(async move {
             const KEEP_SLOTS: u64 = 3;
 
-            while let Some(message) = rx.recv().await {
+            while let Ok(message) = rx.recv_async().await {
                 let mut storage = storage.write().await;
                 match message.as_ref() {
                     Message::Slot(msg) => {
@@ -685,6 +685,7 @@ impl BlockMetaStorage {
     }
 }
 
+#[allow(unused)]
 #[derive(Debug, Default)]
 pub(crate) struct SlotMessages {
     pub(crate) messages: Vec<Option<GeyserMessage>>, // Option is used for accounts with low write_version
@@ -698,6 +699,7 @@ pub(crate) struct SlotMessages {
     pub(crate) finalized_at: Option<usize>,
 }
 
+#[allow(unused)]
 impl SlotMessages {
     pub fn try_seal(&mut self) -> Option<GeyserMessage> {
         if !self.sealed {
