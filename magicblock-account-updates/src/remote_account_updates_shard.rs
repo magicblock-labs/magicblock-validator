@@ -6,7 +6,6 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use conjunto_transwise::RpcProviderConfig;
 use futures_util::StreamExt;
 use log::*;
 use magicblock_metrics::metrics;
@@ -15,7 +14,7 @@ use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
 use solana_rpc_client_api::config::RpcAccountInfoConfig;
 use solana_sdk::{
     clock::{Clock, Slot},
-    commitment_config::CommitmentConfig,
+    commitment_config::{CommitmentConfig, CommitmentLevel},
     pubkey::Pubkey,
     sysvar::clock,
 };
@@ -35,7 +34,8 @@ pub enum RemoteAccountUpdatesShardError {
 
 pub struct RemoteAccountUpdatesShard {
     shard_id: String,
-    rpc_provider_config: RpcProviderConfig,
+    url: String,
+    commitment: Option<CommitmentLevel>,
     monitoring_request_receiver: Receiver<(Pubkey, bool)>,
     first_subscribed_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
     last_known_update_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
@@ -44,14 +44,16 @@ pub struct RemoteAccountUpdatesShard {
 impl RemoteAccountUpdatesShard {
     pub fn new(
         shard_id: String,
-        rpc_provider_config: RpcProviderConfig,
+        url: String,
+        commitment: Option<CommitmentLevel>,
         monitoring_request_receiver: Receiver<(Pubkey, bool)>,
         first_subscribed_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
         last_known_update_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
     ) -> Self {
         Self {
             shard_id,
-            rpc_provider_config,
+            url,
+            commitment,
             monitoring_request_receiver,
             first_subscribed_slots,
             last_known_update_slots,
@@ -64,15 +66,13 @@ impl RemoteAccountUpdatesShard {
     ) -> Result<(), RemoteAccountUpdatesShardError> {
         // Create a pubsub client
         info!("Shard {}: Starting", self.shard_id);
-        let ws_url = self.rpc_provider_config.ws_url();
-        let pubsub_client = PubsubClient::new(ws_url)
+        let pubsub_client = PubsubClient::new(&self.url)
             .await
             .map_err(RemoteAccountUpdatesShardError::PubsubClientError)?;
         // For every account, we only want the updates, not the actual content of the accounts
         let rpc_account_info_config = Some(RpcAccountInfoConfig {
             commitment: self
-                .rpc_provider_config
-                .commitment()
+                .commitment
                 .map(|commitment| CommitmentConfig { commitment }),
             encoding: Some(UiAccountEncoding::Base64),
             data_slice: Some(UiDataSliceConfig {

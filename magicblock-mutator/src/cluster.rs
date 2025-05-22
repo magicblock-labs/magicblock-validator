@@ -6,6 +6,11 @@ pub const MAINNET_URL: &str = "https://api.mainnet-beta.solana.com";
 pub const DEVNET_URL: &str = "https://api.devnet.solana.com";
 pub const DEVELOPMENT_URL: &str = "http://127.0.0.1:8899";
 
+const WS_MAINNET: &str = "wss://api.mainnet-beta.solana.com/";
+const WS_TESTNET: &str = "wss://api.testnet.solana.com/";
+pub const WS_DEVNET: &str = "wss://api.devnet.solana.com/";
+const WS_DEVELOPMENT: &str = "ws://localhost:8900";
+
 /// TODO(vbrunet)
 ///  - this probably belong in a different crate, "mutator" is specific to the data dump mechanisms
 ///  - conjunto_addresses::cluster::RpcCluster already achieve this and is a full duplicate
@@ -15,6 +20,7 @@ pub enum Cluster {
     Known(ClusterType),
     Custom(Url),
     CustomWithWs(Url, Url),
+    CustomWithMultipleWs { http: Url, ws: Vec<Url> },
 }
 
 impl From<ClusterType> for Cluster {
@@ -35,6 +41,32 @@ impl Cluster {
             },
             Cluster::Custom(url) => url.as_str(),
             Cluster::CustomWithWs(url, _) => url.as_str(),
+            Cluster::CustomWithMultipleWs { http, .. } => http.as_str(),
+        }
+    }
+
+    pub fn ws_urls(&self) -> Vec<String> {
+        use ClusterType::*;
+        match self {
+            Cluster::Known(cluster) => vec![match cluster {
+                Testnet => WS_TESTNET.into(),
+                MainnetBeta => WS_MAINNET.into(),
+                Devnet => WS_DEVNET.into(),
+                Development => WS_DEVELOPMENT.into(),
+            }],
+            Cluster::Custom(url) => {
+                vec![match url.scheme() {
+                    "https" => "wss".into(),
+                    "http" => "wss".into(),
+                    _ => panic!(
+                        "invalid protocol, only http and https are supported"
+                    ),
+                }]
+            }
+            Cluster::CustomWithWs(_, ws) => vec![ws.to_string()],
+            Cluster::CustomWithMultipleWs { ws, .. } => {
+                ws.iter().map(Url::to_string).collect()
+            }
         }
     }
 }
