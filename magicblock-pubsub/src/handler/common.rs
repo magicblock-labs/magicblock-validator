@@ -11,9 +11,9 @@ use crate::{
 };
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-struct UiAccountWithPubkey {
-    pubkey: String,
-    account: UiAccount,
+pub struct UiAccountWithPubkey {
+    pub pubkey: String,
+    pub account: UiAccount,
 }
 
 /// Handles geyser update for account and program subscriptions.

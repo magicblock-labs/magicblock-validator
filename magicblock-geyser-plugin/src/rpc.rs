@@ -41,7 +41,7 @@ use crate::{
 pub struct GeyserRpcService {
     config: ConfigGrpc,
     subscribe_id: AtomicU64,
-    subscriptions_db: SubscriptionsDb,
+    pub subscriptions_db: SubscriptionsDb,
     transactions_cache: Option<SharedMap<Signature, GeyserMessage>>,
     accounts_cache: Option<SharedMap<Pubkey, GeyserMessage>>,
 }
@@ -105,27 +105,10 @@ impl GeyserRpcService {
     // -----------------
     pub fn accounts_subscribe(
         &self,
-        account_subscription: HashMap<String, SubscribeRequestFilterAccounts>,
         subid: u64,
         unsubscriber: CancellationToken,
-        pubkey: Option<&Pubkey>,
+        pubkey: Pubkey,
     ) -> anyhow::Result<mpsc::Receiver<Result<SubscribeUpdate, Status>>> {
-        let filter = Filter::new(
-            &SubscribeRequest {
-                accounts: account_subscription,
-                slots: HashMap::new(),
-                transactions: HashMap::new(),
-                blocks: HashMap::new(),
-                blocks_meta: HashMap::new(),
-                entry: HashMap::new(),
-                commitment: None,
-                accounts_data_slice: Vec::new(),
-                ping: None,
-            },
-            &self.config.filters,
-            self.config.normalize_commitment_level,
-        )?;
-
         let msgs = self.accounts_cache.as_ref().and_then(|cache| {
             pubkey.and_then(|pubkey| {
                 cache
@@ -227,9 +210,8 @@ impl GeyserRpcService {
     /// filters.
     async fn client_loop(
         subid: u64,
-        stream_tx: mpsc::Sender<TonicResult<SubscribeUpdate>>,
+        stream_tx: mpsc::Sender<GeyserMessage>,
         unsubscriber: CancellationToken,
-        mut messages_rx: broadcast::Receiver<(CommitmentLevel, GeyserMessages)>,
         mut initial_messages: Option<GeyserMessages>,
     ) {
         // 1. Send initial messages that were cached from previous updates
@@ -237,8 +219,6 @@ impl GeyserRpcService {
             let exit = handle_messages(
                 subid,
                 unsubscriber.clone(),
-                &filter,
-                filter.get_commitment_level(),
                 messages,
                 &stream_tx,
             );
@@ -290,51 +270,49 @@ fn handle_messages(
     messages: GeyserMessages,
     stream_tx: &mpsc::Sender<GeyserMessage>,
 ) -> bool {
-    if commitment == filter.get_commitment_level() {
-        for message in messages.iter() {
-            for message in filter.get_update(message, Some(commitment)) {
-                if unsubscriber.is_cancelled() {
+    for message in messages.iter() {
+        for message in filter.get_update(message, Some(commitment)) {
+            if unsubscriber.is_cancelled() {
+                return true;
+            }
+            if log::log_enabled!(log::Level::Trace) {
+                if let Some(UpdateOneof::Transaction(tx)) =
+                    message.update_oneof.as_ref()
+                {
+                    trace!(
+                        "sending tx: '{}'",
+                        short_signature_from_sub_update(tx)
+                    );
+                };
+            }
+            match stream_tx.try_send(Ok(message)) {
+                Ok(()) => {}
+                Err(mpsc::error::TrySendError::Full(_)) => {
+                    error!("client #{subid}: lagged to send update");
+                    let stream_tx = stream_tx.clone();
+                    tokio::spawn(async move {
+                        let _ = stream_tx
+                            .send(Err(Status::internal("lagged")))
+                            .await;
+                    });
                     return true;
                 }
-                if log::log_enabled!(log::Level::Trace) {
-                    if let Some(UpdateOneof::Transaction(tx)) =
-                        message.update_oneof.as_ref()
-                    {
-                        trace!(
-                            "sending tx: '{}'",
-                            short_signature_from_sub_update(tx)
-                        );
-                    };
-                }
-                match stream_tx.try_send(Ok(message)) {
-                    Ok(()) => {}
-                    Err(mpsc::error::TrySendError::Full(_)) => {
-                        error!("client #{subid}: lagged to send update");
-                        let stream_tx = stream_tx.clone();
-                        tokio::spawn(async move {
-                            let _ = stream_tx
-                                .send(Err(Status::internal("lagged")))
-                                .await;
-                        });
-                        return true;
-                    }
-                    Err(mpsc::error::TrySendError::Closed(status)) => {
-                        // This happens more often than we'd like.
-                        // This could either be due to the client not properly unsubscribing,
-                        // or due to the fact that the cancellation future doesn't get polled
-                        // while we're processing code synchronously here.
-                        // However it isn't critical as we know to stop the client subscription
-                        // loop in either case.
-                        trace!(
-                            "client #{subid}: stream closed {}",
-                            if unsubscriber.is_cancelled() {
-                                "cancelled"
-                            } else {
-                                "uncancelled"
-                            }
-                        );
-                        return true;
-                    }
+                Err(mpsc::error::TrySendError::Closed(status)) => {
+                    // This happens more often than we'd like.
+                    // This could either be due to the client not properly unsubscribing,
+                    // or due to the fact that the cancellation future doesn't get polled
+                    // while we're processing code synchronously here.
+                    // However it isn't critical as we know to stop the client subscription
+                    // loop in either case.
+                    trace!(
+                        "client #{subid}: stream closed {}",
+                        if unsubscriber.is_cancelled() {
+                            "cancelled"
+                        } else {
+                            "uncancelled"
+                        }
+                    );
+                    return true;
                 }
             }
         }

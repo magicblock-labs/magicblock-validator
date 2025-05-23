@@ -13,6 +13,7 @@ pub type GeyserMessage = Arc<Message>;
 pub type GeyserMessages = Arc<Vec<GeyserMessage>>;
 pub type GeyserMessageBlockMeta = Arc<MessageBlockMeta>;
 pub type AccountSubscriptionsDb = Arc<scc::HashMap<Pubkey, UpdateSubscribers>>;
+pub type ProgramSubscriptionsDb = Arc<scc::HashMap<Pubkey, UpdateSubscribers>>;
 pub type SignatureSubscriptionsDb =
     Arc<scc::HashMap<Signature, UpdateSubscribers>>;
 pub type LogsSubscriptionsDb =
@@ -25,6 +26,7 @@ pub type BlockSubscriptionsDb =
 #[derive(Clone, Default)]
 pub struct SubscriptionsDb {
     accounts: AccountSubscriptionsDb,
+    programs: ProgramSubscriptionsDb,
     signatures: SignatureSubscriptionsDb,
     logs: LogsSubscriptionsDb,
     slot: SlotSubscriptionsDb,
@@ -80,6 +82,23 @@ impl SubscriptionsDb {
 
     pub fn send_account_update(&self, pubkey: &Pubkey, update: GeyserMessage) {
         send_update!(self, accounts, pubkey, update);
+    }
+
+    pub fn subscribe_to_program(
+        &self,
+        pubkey: Pubkey,
+        tx: mpsc::Sender<GeyserMessage>,
+        id: u64,
+    ) {
+        add_subscriber!(self, programs, id, pubkey, tx);
+    }
+
+    pub fn unsubscribe_from_program(&self, pubkey: &Pubkey, id: u64) {
+        remove_subscriber!(self, programs, id, pubkey);
+    }
+
+    pub fn send_program_update(&self, pubkey: &Pubkey, update: GeyserMessage) {
+        send_update!(self, programs, pubkey, update);
     }
 
     pub fn subscribe_to_signature(

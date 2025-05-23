@@ -17,8 +17,6 @@ pub async fn handle_account_subscribe(
     params: &AccountParams,
     geyser_service: &GeyserRpcService,
 ) {
-    let address = params.pubkey();
-    let sub = geyser_sub_for_account(address.to_string());
     let pubkey = match Pubkey::try_from(address) {
         Ok(pubkey) => pubkey,
         Err(err) => {
