@@ -47,13 +47,17 @@ impl Cluster {
 
     pub fn ws_urls(&self) -> Vec<String> {
         use ClusterType::*;
+        const WS_SHARD_COUNT: usize = 3;
         match self {
-            Cluster::Known(cluster) => vec![match cluster {
-                Testnet => WS_TESTNET.into(),
-                MainnetBeta => WS_MAINNET.into(),
-                Devnet => WS_DEVNET.into(),
-                Development => WS_DEVELOPMENT.into(),
-            }],
+            Cluster::Known(cluster) => vec![
+                match cluster {
+                    Testnet => WS_TESTNET.into(),
+                    MainnetBeta => WS_MAINNET.into(),
+                    Devnet => WS_DEVNET.into(),
+                    Development => WS_DEVELOPMENT.into(),
+                };
+                WS_SHARD_COUNT
+            ],
             Cluster::Custom(url) => {
                 let mut ws_url = url.clone();
                 ws_url
@@ -63,9 +67,16 @@ impl Cluster {
                         "ws"
                     })
                     .expect("valid scheme");
-                vec![ws_url.to_string()]
+                if let Some(port) = ws_url.port() {
+                    ws_url
+                        .set_port(Some(port + 1))
+                        .expect("valid url with port");
+                }
+                vec![ws_url.to_string(); WS_SHARD_COUNT]
             }
-            Cluster::CustomWithWs(_, ws) => vec![ws.to_string()],
+            Cluster::CustomWithWs(_, ws) => {
+                vec![ws.to_string(); WS_SHARD_COUNT]
+            }
             Cluster::CustomWithMultipleWs { ws, .. } => {
                 ws.iter().map(Url::to_string).collect()
             }
