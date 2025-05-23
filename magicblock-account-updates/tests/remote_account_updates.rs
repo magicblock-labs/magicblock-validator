@@ -21,7 +21,8 @@ fn setup() -> (
 ) {
     // Create account updates worker and client
     let mut worker = RemoteAccountUpdatesWorker::new(
-        vec![RpcProviderConfig::devnet(), RpcProviderConfig::devnet()],
+        vec![RpcProviderConfig::devnet().ws_url().into(); 2],
+        Some(solana_sdk::commitment_config::CommitmentLevel::Confirmed),
         Duration::from_secs(1), // We constantly refresh stuff to make it struggle
     );
     let client = RemoteAccountUpdatesClient::new(&worker);
