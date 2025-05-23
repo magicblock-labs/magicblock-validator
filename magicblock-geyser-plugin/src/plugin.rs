@@ -1,11 +1,6 @@
-#![allow(unused)]
-
-use std::{
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
-    time::Duration,
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
 };
 
 use expiring_hashmap::ExpiringHashMap as Cache;
@@ -16,15 +11,12 @@ use solana_geyser_plugin_interface::geyser_plugin_interface::{
     ReplicaTransactionInfoVersions, Result as PluginResult, SlotStatus,
 };
 use solana_sdk::{clock::Slot, pubkey::Pubkey, signature::Signature};
-use tokio::{
-    runtime::{Builder, Runtime},
-    sync::{mpsc, Notify},
-};
+use tokio::sync::Notify;
 
 use crate::{
     config::Config,
     grpc::GrpcService,
-    grpc_messages::{Message, MessageSlot},
+    grpc_messages::Message,
     rpc::GeyserRpcService,
     types::{GeyserMessage, GeyserMessageSender},
     utils::CacheState,
@@ -94,7 +86,6 @@ impl GrpcGeyserPlugin {
         let (rpc_channel, rpc_shutdown, rpc_service) =
             GeyserRpcService::create(
                 config.grpc.clone(),
-                config.block_fail_action,
                 transactions_cache.as_ref().map(|x| x.shared_map()),
                 accounts_cache.as_ref().map(|x| x.shared_map()),
             )
@@ -300,14 +291,14 @@ impl GeyserPlugin for GrpcGeyserPlugin {
 
     fn notify_entry(
         &self,
-        entry: ReplicaEntryInfoVersions,
+        _entry: ReplicaEntryInfoVersions,
     ) -> PluginResult<()> {
         Ok(())
     }
 
     fn notify_block_metadata(
         &self,
-        blockinfo: ReplicaBlockInfoVersions,
+        _blockinfo: ReplicaBlockInfoVersions,
     ) -> PluginResult<()> {
         Ok(())
     }

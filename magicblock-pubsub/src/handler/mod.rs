@@ -40,7 +40,6 @@ pub async fn handle_subscription(
                 _ = handle_account_subscribe(
                         subid,
                         subscriber,
-                        unsubscriber.clone(),
                         &params,
                         &geyser_service,
                     ) => {
