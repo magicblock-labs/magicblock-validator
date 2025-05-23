@@ -18,6 +18,7 @@ use solana_geyser_plugin_interface::geyser_plugin_interface::{
     ReplicaTransactionInfoV2, SlotStatus,
 };
 use solana_sdk::{
+    account::ReadableAccount,
     clock::{UnixTimestamp, MAX_RECENT_BLOCKHASHES},
     pubkey::Pubkey,
     signature::Signature,
@@ -44,6 +45,24 @@ pub struct MessageAccountInfo {
     pub data: Vec<u8>,
     pub write_version: u64,
     pub txn_signature: Option<Signature>,
+}
+
+impl ReadableAccount for MessageAccountInfo {
+    fn data(&self) -> &[u8] {
+        &self.data
+    }
+    fn owner(&self) -> &Pubkey {
+        &self.owner
+    }
+    fn lamports(&self) -> u64 {
+        self.lamports
+    }
+    fn executable(&self) -> bool {
+        self.executable
+    }
+    fn rent_epoch(&self) -> solana_sdk::clock::Epoch {
+        self.rent_epoch
+    }
 }
 
 impl MessageAccountInfo {

@@ -145,7 +145,10 @@ impl GrpcService {
                 Message::Slot(_) => subscriptions_db.send_slot(message),
                 Message::Account(ref account) => {
                     let pubkey = account.account.pubkey;
-                    subscriptions_db.send_account_update(&pubkey, message);
+                    let owner = account.account.owner;
+                    subscriptions_db
+                        .send_account_update(&pubkey, message.clone());
+                    subscriptions_db.send_program_update(&owner, message);
                 }
                 Message::Transaction(ref txn) => {
                     let signature = txn.transaction.signature;

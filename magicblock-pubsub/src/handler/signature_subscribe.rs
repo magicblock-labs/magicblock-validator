@@ -26,9 +26,6 @@ pub async fn handle_signature_subscribe(
     geyser_service: &GeyserRpcService,
     bank: &Bank,
 ) {
-    let sigstr = params.signature();
-    let sub = geyser_sub_for_transaction_signature(sigstr.to_string());
-
     let sig = match Signature::from_str(sigstr) {
         Ok(sig) => sig,
         Err(err) => {
