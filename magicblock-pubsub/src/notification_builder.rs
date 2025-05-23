@@ -5,11 +5,10 @@ use solana_rpc_client_api::{
     filter::RpcFilterType,
     response::{ProcessedSignatureResult, RpcLogsResponse, RpcSignatureResult},
 };
-use solana_sdk::pubkey::Pubkey;
 
-use crate::handler::common::UiAccountWithPubkey;
+use crate::{handler::common::UiAccountWithPubkey, types::SlotResponse};
 
-trait NotificationBuilder {
+pub trait NotificationBuilder {
     type Notification: Serialize;
     fn try_build_notifcation(
         &self,
@@ -32,7 +31,7 @@ impl NotificationBuilder for AccountNotificationBuilder {
             return None;
         };
         Some(encode_ui_account(
-            &self.pubkey,
+            &acc.account.pubkey,
             &acc.account,
             self.encoding,
             None,
@@ -46,12 +45,12 @@ pub enum ProgramFilter {
     MemCmp { offset: usize, bytes: Vec<u8> },
 }
 
-pub struct ProgramFilters(Vec<ProgramFilters>);
+pub struct ProgramFilters(Vec<ProgramFilter>);
 
 impl ProgramFilter {
     fn matches(&self, data: &[u8]) -> bool {
         match self {
-            Self::DataSize(len) => data.len() == len,
+            Self::DataSize(len) => data.len() == *len,
             Self::MemCmp { offset, bytes } => {
                 if let Some(slice) = data.get(*offset..*offset + bytes.len()) {
                     slice == bytes
@@ -84,7 +83,7 @@ impl From<Option<Vec<RpcFilterType>>> for ProgramFilters {
                 RpcFilterType::Memcmp(memcmp) => {
                     inner.push(ProgramFilter::MemCmp {
                         offset: memcmp.offset(),
-                        bytes: memcmp.bytes().to_owned(),
+                        bytes: memcmp.bytes().unwrap_or_default().to_vec(),
                     });
                 }
                 _ => continue,
@@ -109,9 +108,9 @@ impl NotificationBuilder for ProgramNotificationBuilder {
         let Message::Account(ref acc) = *msg else {
             return None;
         };
-        self.filters.matches(&acc.account.data).then(())?;
+        self.filters.matches(&acc.account.data).then_some(())?;
         let account = encode_ui_account(
-            &self.pubkey,
+            &acc.account.pubkey,
             &acc.account,
             self.encoding,
             None,
@@ -136,7 +135,7 @@ impl NotificationBuilder for SignatureNotificationBulider {
         let Message::Transaction(ref txn) = *msg else {
             return None;
         };
-        let err = txn.transaction.meta.status.err();
+        let err = txn.transaction.meta.status.clone().err();
         let result = ProcessedSignatureResult { err };
         Some(RpcSignatureResult::ProcessedSignature(result))
     }
@@ -144,7 +143,7 @@ impl NotificationBuilder for SignatureNotificationBulider {
 
 pub struct LogsNotificationBulider;
 
-impl NotificationBuilder for SignatureNotificationBulider {
+impl NotificationBuilder for LogsNotificationBulider {
     type Notification = RpcLogsResponse;
 
     fn try_build_notifcation(
@@ -154,14 +153,39 @@ impl NotificationBuilder for SignatureNotificationBulider {
         let Message::Transaction(ref txn) = *msg else {
             return None;
         };
-        let err = txn.transaction.meta.status.err();
+        let err = txn.transaction.meta.status.clone().err();
         let signature = txn.transaction.signature.to_string();
-        let logs = txn.transaction.meta.log_messages.unwrap_or_default();
+        let logs = txn
+            .transaction
+            .meta
+            .log_messages
+            .clone()
+            .unwrap_or_default();
 
         Some(RpcLogsResponse {
             signature,
             err,
             logs,
+        })
+    }
+}
+
+pub struct SlotNotificationBuilder;
+
+impl NotificationBuilder for SlotNotificationBuilder {
+    type Notification = SlotResponse;
+
+    fn try_build_notifcation(
+        &self,
+        msg: GeyserMessage,
+    ) -> Option<Self::Notification> {
+        let Message::Slot(ref slot) = *msg else {
+            return None;
+        };
+        Some(SlotResponse {
+            slot: slot.slot,
+            parent: slot.parent.unwrap_or_default(),
+            root: slot.slot,
         })
     }
 }
