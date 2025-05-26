@@ -1,0 +1,13 @@
+[package]
+name = "test-pubsub"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+solana-sdk = { workspace = true }
+solana-pubsub-client = { workspace = true }
+solana-rpc-client = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true }
+futures = "0.3"

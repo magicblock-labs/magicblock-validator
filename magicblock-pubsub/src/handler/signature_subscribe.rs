@@ -1,32 +1,31 @@
 use std::{str::FromStr, time::Duration};
 
-use geyser_grpc_proto::{geyser, tonic::Status};
 use jsonrpc_pubsub::{Sink, Subscriber};
-use log::*;
+use log::debug;
 use magicblock_bank::bank::Bank;
 use magicblock_geyser_plugin::rpc::GeyserRpcService;
 use solana_rpc_client_api::response::{
     ProcessedSignatureResult, RpcSignatureResult,
 };
 use solana_sdk::{signature::Signature, transaction::TransactionError};
-use tokio_util::sync::CancellationToken;
 
 use crate::{
-    conversions::{geyser_sub_for_transaction_signature, slot_from_update},
-    errors::{reject_internal_error, sink_notify_error},
+    errors::reject_internal_error,
+    notification_builder::SignatureNotificationBulider,
     subscription::assign_sub_id,
     types::{ResponseWithSubscriptionId, SignatureParams},
 };
 
+use super::common::UpdateHandler;
+
 pub async fn handle_signature_subscribe(
     subid: u64,
     subscriber: Subscriber,
-    unsubscriber: CancellationToken,
     params: &SignatureParams,
     geyser_service: &GeyserRpcService,
     bank: &Bank,
 ) {
-    let sig = match Signature::from_str(sigstr) {
+    let sig = match Signature::from_str(params.signature()) {
         Ok(sig) => sig,
         Err(err) => {
             reject_internal_error(subscriber, "Invalid Signature", Some(err));
@@ -34,74 +33,39 @@ pub async fn handle_signature_subscribe(
         }
     };
 
-    let mut geyser_rx = match geyser_service.transaction_subscribe(
-        sub,
-        subid,
-        unsubscriber,
-        Some(&sig),
-    ) {
-        Ok(res) => res,
-        Err(err) => {
-            reject_internal_error(
-                subscriber,
-                "Failed to subscribe to signature",
-                Some(err),
-            );
-            return;
-        }
+    let mut geyser_rx = geyser_service.transaction_subscribe(subid, sig);
+    let subscriptions_db = geyser_service.subscriptions_db.clone();
+    let Some(sink) = assign_sub_id(subscriber, subid) else {
+        return;
     };
-
-    if let Some(sink) = assign_sub_id(subscriber, subid) {
-        if let Some((slot, res)) = bank.get_recent_signature_status(
-            &sig,
-            Some(bank.slots_for_duration(Duration::from_secs(10))),
-        ) {
-            debug!(
-                "Sending initial signature status from bank: {} {:?}",
-                slot, res
-            );
-            sink_notify_transaction_result(&sink, slot, subid, res.err());
-        } else {
-            while let Some(val) = geyser_rx.recv().await {
-                match val {
-                    Some(update) => {
-                        if handle_signature_geyser_update(&sink, subid, update)
-                        {
-                            break;
-                        }
-                    }
-                    None => {
-                        debug!("Geyser subscription has ended, finishing.");
-                    }
-                }
-            }
-        }
+    if let Some((slot, res)) = bank.get_recent_signature_status(
+        &sig,
+        Some(bank.slots_for_duration(Duration::from_secs(10))),
+    ) {
+        debug!(
+            "Sending initial signature status from bank: {} {:?}",
+            slot, res
+        );
+        sink_notify_transaction_result(&sink, slot, subid, res.err());
+        subscriptions_db.unsubscribe_from_signature(&sig, subid);
+        return;
     }
+    let builder = SignatureNotificationBulider {};
+    let cleanup = move || {
+        subscriptions_db.unsubscribe_from_signature(&sig, subid);
+    };
+    let handler = UpdateHandler::new_with_sink(sink, subid, builder, cleanup);
+    // Note: 60 seconds should be more than enough for any transaction confirmation,
+    // if it wasn't confirmed during this period, then it was never executed, thus we
+    // can just cancel the subscription to free up resources
+    let rx = tokio::time::timeout(Duration::from_secs(60), geyser_rx.recv());
+    let Ok(Some(msg)) = rx.await else {
+        return;
+    };
+    handler.handle(msg);
 }
 
 /// Handles geyser update for signature subscription.
-/// Returns true if subscription has ended.
-fn handle_signature_geyser_update(
-    sink: &Sink,
-    subid: u64,
-    update: Result<geyser::SubscribeUpdate, Status>,
-) -> bool {
-    match update {
-        Ok(update) => {
-            debug!("Received geyser update: {:?}", update);
-            let slot = slot_from_update(&update).unwrap_or(0);
-            sink_notify_transaction_result(sink, slot, subid, None);
-            // single notification subscription
-            // see: https://solana.com/docs/rpc/websocket/signaturesubscribe
-            true
-        }
-        Err(status) => sink_notify_error(
-            sink,
-            format!("Failed to receive signature update: {:?}", status),
-        ),
-    }
-}
-
 /// Tries to notify the sink about the transaction result.
 /// Returns true if the subscription has ended.
 fn sink_notify_transaction_result(

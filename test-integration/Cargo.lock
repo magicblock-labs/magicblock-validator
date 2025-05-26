@@ -10008,6 +10008,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "test-pubsub"
+version = "0.0.0"
+dependencies = [
+ "futures 0.3.31",
+ "solana-pubsub-client",
+ "solana-rpc-client",
+ "solana-sdk",
+ "tokio",
+]
+
+[[package]]
 name = "test-runner"
 version = "0.0.0"
 dependencies = [

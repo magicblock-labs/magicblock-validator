@@ -1,10 +1,9 @@
 use std::sync::Arc;
 
 use jsonrpc_pubsub::Subscriber;
-use log::*;
 use magicblock_bank::bank::Bank;
 use magicblock_geyser_plugin::rpc::GeyserRpcService;
-use tokio::{sync::mpsc, task::JoinSet};
+use tokio::sync::mpsc;
 
 use crate::{
     errors::{reject_internal_error, PubsubError, PubsubResult},
@@ -44,60 +43,29 @@ impl PubsubApi {
             let unsubscribe_tokens = unsubscribe_tokens.clone();
             std::thread::spawn(move || {
                 tokio::runtime::Builder::new_multi_thread()
-                .enable_all()
-                .thread_name("PubsubActorRuntime")
-                .build()
-                .unwrap()
-                .block_on(async move {
-                    let mut subid: u64 = 0;
-                    let mut pending_subs = JoinSet::new();
-                    let mut actor = SubscriptionsReceiver::new(subscribe_rx);
+                    // Note: there's no need to allocate more threads for the PubSub handling
+                    .worker_threads(4)
+                    .enable_all()
+                    .thread_name("PubsubActorRuntime")
+                    .build()
+                    .unwrap()
+                    .block_on(async move {
+                        let mut subid: u64 = 0;
+                        let mut actor =
+                            SubscriptionsReceiver::new(subscribe_rx);
 
-                    macro_rules! handle_subscription {
-                        ($subscription:ident) => {
-                            match $subscription {
-                                Some($subscription) => {
-                                    subid += 1;
-                                    let unsubscriber = unsubscribe_tokens.add(subid);
-                                    pending_subs
-                                        .spawn(handle_subscription(
-                                            $subscription,
-                                            subid,
-                                            unsubscriber
-                                        ));
-                                    debug!("Added subscription to a total of {}",
-                                        pending_subs.len());
-                                },
-                                None => break,
-                            }
+                        while let Some(subscription) =
+                            actor.subscriptions.recv().await
+                        {
+                            subid += 1;
+                            let unsubscriber = unsubscribe_tokens.add(subid);
+                            tokio::spawn(handle_subscription(
+                                subscription,
+                                subid,
+                                unsubscriber,
+                            ));
                         }
-                    }
-
-                    // Waiting for either of the two:
-                    // a) a new subscriptions comes in and we add it to pending subscriptions
-                    // b) polling subs, once done they are auto-removed from pending subscriptions
-                    loop {
-                        // In the case that there are no active subs we just wait for one to be
-                        // registered
-                        if pending_subs.is_empty() {
-                            let subscription = actor.subscriptions.recv().await;
-                            handle_subscription!(subscription);
-                        } else {
-                            // Otherwise we wait for a sub to complete or a new one to be
-                                // registered
-                            tokio::select! {
-                                subscription = actor.subscriptions.recv() => {
-                                    handle_subscription!(subscription)
-                                },
-                                next = pending_subs.join_next() => {
-                                    if let Some(Err(err)) = next {
-                                        error!("Failed to join task: {:?}", err)
-                                    }
-                                }
-                            }
-                        }
-                    }
-                });
+                    });
             });
         }
 

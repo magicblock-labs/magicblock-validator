@@ -1,16 +1,14 @@
 use jsonrpc_pubsub::Subscriber;
-use log::*;
 use magicblock_geyser_plugin::rpc::GeyserRpcService;
 use solana_account_decoder::UiAccountEncoding;
 use solana_sdk::pubkey::Pubkey;
-use tokio_util::sync::CancellationToken;
 
 use crate::{
     errors::reject_internal_error,
-    handler::common::handle_account_geyser_update,
-    notification_builder::AccountNotificationBuilder,
-    subscription::assign_sub_id, types::AccountParams,
+    notification_builder::AccountNotificationBuilder, types::AccountParams,
 };
+
+use super::common::UpdateHandler;
 
 pub async fn handle_account_subscribe(
     subid: u64,
@@ -28,11 +26,20 @@ pub async fn handle_account_subscribe(
 
     let mut geyser_rx = geyser_service.accounts_subscribe(subid, pubkey);
 
-    let Some(sink) = assign_sub_id(subscriber, subid) else {
-        return;
-    };
-    let bulder = AccountNotificationBuilder {
+    let builder = AccountNotificationBuilder {
         encoding: params.encoding().unwrap_or(UiAccountEncoding::Base58),
     };
-    while let Some(val) = geyser_rx.recv() {}
+    let subscriptions_db = geyser_service.subscriptions_db.clone();
+    let cleanup = move || {
+        subscriptions_db.unsubscribe_from_account(&pubkey, subid);
+    };
+    let Some(handler) = UpdateHandler::new(subid, subscriber, builder, cleanup)
+    else {
+        return;
+    };
+    while let Some(msg) = geyser_rx.recv().await {
+        if !handler.handle(msg) {
+            break;
+        }
+    }
 }

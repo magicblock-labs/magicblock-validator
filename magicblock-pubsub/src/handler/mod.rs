@@ -58,7 +58,6 @@ pub async fn handle_subscription(
                 _ = handle_program_subscribe(
                         subid,
                         subscriber,
-                        unsubscriber.clone(),
                         &params,
                         &geyser_service,
                     ) => {
@@ -76,7 +75,6 @@ pub async fn handle_subscription(
                 _ = handle_slot_subscribe(
                         subid,
                         subscriber,
-                        unsubscriber.clone(),
                         &geyser_service) => {
                 },
             };
@@ -95,7 +93,6 @@ pub async fn handle_subscription(
                 _ = handle_signature_subscribe(
                         subid,
                         subscriber,
-                        unsubscriber.clone(),
                         &params,
                         &geyser_service,
                         &bank) => {
@@ -115,7 +112,6 @@ pub async fn handle_subscription(
                 _ = handle_logs_subscribe(
                         subid,
                         subscriber,
-                        unsubscriber.clone(),
                         &params,
                         &geyser_service,
                     ) => {

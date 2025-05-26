@@ -5,6 +5,7 @@ use solana_rpc_client_api::{
     filter::RpcFilterType,
     response::{ProcessedSignatureResult, RpcLogsResponse, RpcSignatureResult},
 };
+use solana_sdk::clock::Slot;
 
 use crate::{handler::common::UiAccountWithPubkey, types::SlotResponse};
 
@@ -13,7 +14,7 @@ pub trait NotificationBuilder {
     fn try_build_notifcation(
         &self,
         msg: GeyserMessage,
-    ) -> Option<Self::Notification>;
+    ) -> Option<(Self::Notification, Slot)>;
 }
 
 pub struct AccountNotificationBuilder {
@@ -26,17 +27,18 @@ impl NotificationBuilder for AccountNotificationBuilder {
     fn try_build_notifcation(
         &self,
         msg: GeyserMessage,
-    ) -> Option<Self::Notification> {
+    ) -> Option<(Self::Notification, Slot)> {
         let Message::Account(ref acc) = *msg else {
             return None;
         };
-        Some(encode_ui_account(
+        let account = encode_ui_account(
             &acc.account.pubkey,
             &acc.account,
             self.encoding,
             None,
             None,
-        ))
+        );
+        Some((account, acc.slot))
     }
 }
 
@@ -104,7 +106,7 @@ impl NotificationBuilder for ProgramNotificationBuilder {
     fn try_build_notifcation(
         &self,
         msg: GeyserMessage,
-    ) -> Option<Self::Notification> {
+    ) -> Option<(Self::Notification, Slot)> {
         let Message::Account(ref acc) = *msg else {
             return None;
         };
@@ -116,10 +118,11 @@ impl NotificationBuilder for ProgramNotificationBuilder {
             None,
             None,
         );
-        Some(UiAccountWithPubkey {
+        let account = UiAccountWithPubkey {
             pubkey: acc.account.pubkey.to_string(),
             account,
-        })
+        };
+        Some((account, acc.slot))
     }
 }
 
@@ -131,13 +134,14 @@ impl NotificationBuilder for SignatureNotificationBulider {
     fn try_build_notifcation(
         &self,
         msg: GeyserMessage,
-    ) -> Option<Self::Notification> {
+    ) -> Option<(Self::Notification, Slot)> {
         let Message::Transaction(ref txn) = *msg else {
             return None;
         };
         let err = txn.transaction.meta.status.clone().err();
         let result = ProcessedSignatureResult { err };
-        Some(RpcSignatureResult::ProcessedSignature(result))
+        let result = RpcSignatureResult::ProcessedSignature(result);
+        Some((result, txn.slot))
     }
 }
 
@@ -149,7 +153,7 @@ impl NotificationBuilder for LogsNotificationBulider {
     fn try_build_notifcation(
         &self,
         msg: GeyserMessage,
-    ) -> Option<Self::Notification> {
+    ) -> Option<(Self::Notification, Slot)> {
         let Message::Transaction(ref txn) = *msg else {
             return None;
         };
@@ -162,11 +166,12 @@ impl NotificationBuilder for LogsNotificationBulider {
             .clone()
             .unwrap_or_default();
 
-        Some(RpcLogsResponse {
+        let response = RpcLogsResponse {
             signature,
             err,
             logs,
-        })
+        };
+        Some((response, txn.slot))
     }
 }
 
@@ -178,14 +183,15 @@ impl NotificationBuilder for SlotNotificationBuilder {
     fn try_build_notifcation(
         &self,
         msg: GeyserMessage,
-    ) -> Option<Self::Notification> {
+    ) -> Option<(Self::Notification, Slot)> {
         let Message::Slot(ref slot) = *msg else {
             return None;
         };
-        Some(SlotResponse {
+        let response = SlotResponse {
             slot: slot.slot,
             parent: slot.parent.unwrap_or_default(),
             root: slot.slot,
-        })
+        };
+        Some((response, slot.slot))
     }
 }

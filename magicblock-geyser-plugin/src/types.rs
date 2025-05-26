@@ -200,7 +200,7 @@ pub fn geyser_message_channel() -> (GeyserMessageSender, GeyserMessageReceiver)
     flume::unbounded()
 }
 
-#[derive(Hash, PartialEq, Eq)]
+#[derive(Hash, PartialEq, Eq, Clone, Copy)]
 pub enum LogsSubscribeKey {
     All,
     Account(Pubkey),

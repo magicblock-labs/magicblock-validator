@@ -13,7 +13,9 @@ use std::{
     process::{self, Output},
 };
 use teepee::Teepee;
-use test_runner::cleanup::{cleanup_devnet_only, cleanup_validators};
+use test_runner::cleanup::{
+    cleanup_devnet_only, cleanup_validator, cleanup_validators,
+};
 
 pub fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
@@ -248,6 +250,31 @@ fn run_magicblock_api_tests(
         err
     })?;
 
+    Ok(output)
+}
+
+fn run_magicblock_pubsub_tests(
+    manifest_dir: &str,
+) -> Result<Output, Box<dyn Error>> {
+    let mut ephem_validator = match start_validator(
+        "validator-offline.devnet.toml",
+        ValidatorCluster::Ephem,
+    ) {
+        Some(validator) => validator,
+        None => {
+            panic!("Failed to start ephemeral validator properly");
+        }
+    };
+
+    let test_dir = format!("{}/../{}", manifest_dir, "test-pubsub");
+    eprintln!("Running magicblock-api tests in {}", test_dir);
+
+    let output = run_test(test_dir, Default::default()).map_err(|err| {
+        eprintln!("Failed to magicblock api tests: {:?}", err);
+        err
+    })?;
+
+    cleanup_validator(&mut ephem_validator, "ephemeral");
     Ok(output)
 }
 

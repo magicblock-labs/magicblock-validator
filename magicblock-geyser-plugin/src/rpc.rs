@@ -18,7 +18,7 @@ use crate::{
 pub struct GeyserRpcService {
     config: ConfigGrpc,
     subscribe_id: AtomicU64,
-    subscriptions_db: SubscriptionsDb,
+    pub subscriptions_db: SubscriptionsDb,
     transactions_cache: Option<SharedMap<Signature, GeyserMessage>>,
     accounts_cache: Option<SharedMap<Pubkey, GeyserMessage>>,
 }
