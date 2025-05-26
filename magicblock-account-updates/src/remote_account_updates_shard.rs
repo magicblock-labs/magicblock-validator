@@ -6,7 +6,6 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use conjunto_transwise::RpcProviderConfig;
 use futures_util::{stream::FuturesUnordered, Stream, StreamExt};
 use log::*;
 use magicblock_metrics::metrics;
@@ -74,7 +73,7 @@ impl RemoteAccountUpdatesShard {
     ) -> Result<(), RemoteAccountUpdatesShardError> {
         // Create a pubsub client
         info!("Shard {}: Starting", self.shard_id);
-        let ws_url = self.rpc_provider_config.ws_url();
+        let ws_url = self.url.as_str();
         // For every account, we only want the updates, not the actual content of the accounts
         let config = RpcAccountInfoConfig {
             commitment: self
