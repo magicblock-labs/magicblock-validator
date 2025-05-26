@@ -37,7 +37,7 @@ use solana_transaction_status::{
 use super::elfs;
 use crate::{
     bank::Bank, transaction_results::TransactionBalancesSet,
-    LAMPORTS_PER_SIGNATURE,
+    DEFAULT_LAMPORTS_PER_SIGNATURE,
 };
 
 // -----------------
@@ -51,7 +51,7 @@ pub fn create_funded_account(bank: &Bank, lamports: Option<u64>) -> Keypair {
     let account = Keypair::new();
     let lamports = lamports.unwrap_or_else(|| {
         let rent_exempt_reserve = Rent::default().minimum_balance(0);
-        rent_exempt_reserve + LAMPORTS_PER_SIGNATURE
+        rent_exempt_reserve + DEFAULT_LAMPORTS_PER_SIGNATURE
     });
 
     bank.store_account(
@@ -77,7 +77,7 @@ pub fn create_funded_accounts(
     let accounts = create_accounts(num);
     let lamports = lamports.unwrap_or_else(|| {
         let rent_exempt_reserve = Rent::default().minimum_balance(0);
-        rent_exempt_reserve + (num as u64 * LAMPORTS_PER_SIGNATURE)
+        rent_exempt_reserve + (num as u64 * DEFAULT_LAMPORTS_PER_SIGNATURE)
     });
 
     accounts.par_iter().for_each(|account| {
@@ -181,7 +181,7 @@ pub fn create_noop_transaction(
     .unwrap()
 }
 
-fn create_noop_instruction(
+pub fn create_noop_instruction(
     program_id: &Pubkey,
     funded_accounts: &[Keypair],
 ) -> Instruction {
