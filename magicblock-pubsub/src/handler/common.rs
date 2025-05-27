@@ -55,7 +55,7 @@ impl<
     }
 
     pub fn handle(&self, msg: GeyserMessage) -> bool {
-        let Some((update, slot)) = self.builder.try_build_notifcation(msg)
+        let Some((update, slot)) = self.builder.try_build_notification(msg)
         else {
             // NOTE: messages are targetted, so builder will always
             // succeed, this branch just avoids eyesore unwraps
@@ -72,7 +72,7 @@ impl<
     }
 
     pub fn handle_slot_update(&self, msg: GeyserMessage) -> bool {
-        let Some((update, _)) = self.builder.try_build_notifcation(msg) else {
+        let Some((update, _)) = self.builder.try_build_notification(msg) else {
             // NOTE: messages are targetted, so builder will always
             // succeed, this branch just avoids eyesore unwraps
             return true;

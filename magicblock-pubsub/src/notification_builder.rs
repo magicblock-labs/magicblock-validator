@@ -11,7 +11,7 @@ use crate::{handler::common::UiAccountWithPubkey, types::SlotResponse};
 
 pub trait NotificationBuilder {
     type Notification: Serialize;
-    fn try_build_notifcation(
+    fn try_build_notification(
         &self,
         msg: GeyserMessage,
     ) -> Option<(Self::Notification, Slot)>;
@@ -24,7 +24,7 @@ pub struct AccountNotificationBuilder {
 impl NotificationBuilder for AccountNotificationBuilder {
     type Notification = UiAccount;
 
-    fn try_build_notifcation(
+    fn try_build_notification(
         &self,
         msg: GeyserMessage,
     ) -> Option<(Self::Notification, Slot)> {
@@ -103,7 +103,7 @@ pub struct ProgramNotificationBuilder {
 impl NotificationBuilder for ProgramNotificationBuilder {
     type Notification = UiAccountWithPubkey;
 
-    fn try_build_notifcation(
+    fn try_build_notification(
         &self,
         msg: GeyserMessage,
     ) -> Option<(Self::Notification, Slot)> {
@@ -131,7 +131,7 @@ pub struct SignatureNotificationBulider;
 impl NotificationBuilder for SignatureNotificationBulider {
     type Notification = RpcSignatureResult;
 
-    fn try_build_notifcation(
+    fn try_build_notification(
         &self,
         msg: GeyserMessage,
     ) -> Option<(Self::Notification, Slot)> {
@@ -150,7 +150,7 @@ pub struct LogsNotificationBulider;
 impl NotificationBuilder for LogsNotificationBulider {
     type Notification = RpcLogsResponse;
 
-    fn try_build_notifcation(
+    fn try_build_notification(
         &self,
         msg: GeyserMessage,
     ) -> Option<(Self::Notification, Slot)> {
@@ -180,7 +180,7 @@ pub struct SlotNotificationBuilder;
 impl NotificationBuilder for SlotNotificationBuilder {
     type Notification = SlotResponse;
 
-    fn try_build_notifcation(
+    fn try_build_notification(
         &self,
         msg: GeyserMessage,
     ) -> Option<(Self::Notification, Slot)> {
