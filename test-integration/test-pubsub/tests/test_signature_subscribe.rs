@@ -49,7 +49,7 @@ async fn test_signature_subscribe_with_delay() {
         .ws_client
         .signature_subscribe(&signature, None)
         .await
-        .expect("failed to subscribe to account 1");
+        .expect("failed to subscribe to signature");
 
     let update = rx
         .next()
