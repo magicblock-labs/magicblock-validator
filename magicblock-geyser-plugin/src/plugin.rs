@@ -130,7 +130,7 @@ impl GeyserPlugin for GrpcGeyserPlugin {
             inner.rpc_shutdown.notify_one();
             drop(inner.rpc_channel);
         }
-        info!("Unoaded plugin: {}", self.name());
+        info!("Unloaded plugin: {}", self.name());
     }
 
     fn update_account(
