@@ -102,7 +102,7 @@ async fn main() {
 
     info!("");
     info!("🧙 Magicblock Validator is running!");
-    info!("Validator version: {} (Git: {})", env!("CARGO_PKG_VERSION"), GIT_VERSION);
+    info!("🏷️ Validator version: {} (Git: {})", env!("CARGO_PKG_VERSION"), GIT_VERSION);
     info!("-----------------------------------");
     info!("📡 RPC endpoint:       http://{}:{}", rpc_host, rpc_port);
     info!("🔌 WebSocket endpoint: ws://{}:{}", rpc_host, ws_port);
