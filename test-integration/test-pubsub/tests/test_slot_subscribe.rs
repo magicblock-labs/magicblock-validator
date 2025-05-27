@@ -14,7 +14,7 @@ async fn test_slot_subscribe() {
     while let Some(s) = rx.next().await {
         assert!(
             s.slot > last_slot,
-            "slot subscription should provide inreasing slot sequence"
+            "slot subscription should provide increasing slot sequence"
         );
         last_slot = s.slot;
         i -= 1;
