@@ -277,7 +277,7 @@ fn run_magicblock_pubsub_tests(
     eprintln!("Running magicblock pubsub tests in {}", test_dir);
 
     let output = run_test(test_dir, Default::default()).map_err(|err| {
-        eprintln!("Failed to magicblock api tests: {:?}", err);
+        eprintln!("Failed to magicblock pubsub tests: {:?}", err);
         cleanup_validator(&mut ephem_validator, "ephemeral");
         err
     })?;
