@@ -31,7 +31,7 @@ async fn test_program_subscribe() {
             assert_eq!(
                 update.value.account.lamports,
                 LAMPORTS_PER_SOL + TRANSFER_AMOUNT,
-                "account 1 should have its balance increased"
+                "account 2 should have its balance increased"
             );
         }
     }
