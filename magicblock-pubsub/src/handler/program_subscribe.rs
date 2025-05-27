@@ -3,13 +3,12 @@ use magicblock_geyser_plugin::rpc::GeyserRpcService;
 use solana_account_decoder::UiAccountEncoding;
 use solana_sdk::pubkey::Pubkey;
 
+use super::common::UpdateHandler;
 use crate::{
     errors::reject_internal_error,
     notification_builder::{ProgramFilters, ProgramNotificationBuilder},
     types::ProgramParams,
 };
-
-use super::common::UpdateHandler;
 
 pub async fn handle_program_subscribe(
     subid: u64,

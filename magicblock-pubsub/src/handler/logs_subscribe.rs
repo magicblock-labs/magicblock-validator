@@ -5,12 +5,11 @@ use magicblock_geyser_plugin::{
 use solana_rpc_client_api::config::RpcTransactionLogsFilter;
 use solana_sdk::pubkey::Pubkey;
 
+use super::common::UpdateHandler;
 use crate::{
     errors::reject_internal_error,
     notification_builder::LogsNotificationBulider, types::LogsParams,
 };
-
-use super::common::UpdateHandler;
 
 pub async fn handle_logs_subscribe(
     subid: u64,

@@ -1,10 +1,8 @@
-use std::collections::HashMap;
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 
 use log::warn;
 use scc::hash_map::Entry;
-use solana_sdk::pubkey::Pubkey;
-use solana_sdk::signature::Signature;
+use solana_sdk::{pubkey::Pubkey, signature::Signature};
 use tokio::sync::mpsc;
 
 use crate::grpc_messages::{Message, MessageBlockMeta};

@@ -1,9 +1,8 @@
 use jsonrpc_pubsub::Subscriber;
 use magicblock_geyser_plugin::rpc::GeyserRpcService;
 
-use crate::notification_builder::SlotNotificationBuilder;
-
 use super::common::UpdateHandler;
+use crate::notification_builder::SlotNotificationBuilder;
 
 pub async fn handle_slot_subscribe(
     subid: u64,

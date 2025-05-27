@@ -9,14 +9,13 @@ use solana_rpc_client_api::response::{
 };
 use solana_sdk::{signature::Signature, transaction::TransactionError};
 
+use super::common::UpdateHandler;
 use crate::{
     errors::reject_internal_error,
     notification_builder::SignatureNotificationBulider,
     subscription::assign_sub_id,
     types::{ResponseWithSubscriptionId, SignatureParams},
 };
-
-use super::common::UpdateHandler;
 
 pub async fn handle_signature_subscribe(
     subid: u64,
