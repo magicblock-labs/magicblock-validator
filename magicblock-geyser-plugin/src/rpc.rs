@@ -82,9 +82,9 @@ impl GeyserRpcService {
             .as_ref()
             .and_then(|cache| cache.get(&pubkey).clone());
         if let Some(msg) = msg {
-            updates_tx
-                .try_send(msg)
-                .expect("channel should have at least 1 capacity");
+            if let Err(e) = updates_tx.try_send(msg) {
+                warn!("Failed to send initial account update: {}", e);
+            }
         }
         self.subscriptions_db
             .subscribe_to_account(pubkey, updates_tx, subid)
