@@ -126,9 +126,9 @@ impl NotificationBuilder for ProgramNotificationBuilder {
     }
 }
 
-pub struct SignatureNotificationBulider;
+pub struct SignatureNotificationBuilder;
 
-impl NotificationBuilder for SignatureNotificationBulider {
+impl NotificationBuilder for SignatureNotificationBuilder {
     type Notification = RpcSignatureResult;
 
     fn try_build_notification(
@@ -145,9 +145,9 @@ impl NotificationBuilder for SignatureNotificationBulider {
     }
 }
 
-pub struct LogsNotificationBulider;
+pub struct LogsNotificationBuilder;
 
-impl NotificationBuilder for LogsNotificationBulider {
+impl NotificationBuilder for LogsNotificationBuilder {
     type Notification = RpcLogsResponse;
 
     fn try_build_notification(

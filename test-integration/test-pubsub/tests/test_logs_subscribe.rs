@@ -21,14 +21,14 @@ async fn test_logs_subscribe_all() {
         .await
         .expect("failed to subscribe to txn logs");
     for _ in 0..5 {
-        let sinature = env.transfer(TRANSFER_AMOUNT).await.to_string();
+        let signature = env.transfer(TRANSFER_AMOUNT).await.to_string();
 
         let update = rx
             .next()
             .await
             .expect("failed to receive signature update after tranfer txn");
         assert_eq!(
-            update.value.signature, sinature,
+            update.value.signature, signature,
             "should have received executed transaction log"
         );
         assert!(update.value.err.is_none());

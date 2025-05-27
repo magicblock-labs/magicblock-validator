@@ -41,7 +41,8 @@ pub async fn handle_program_subscribe(
             .unsubscribe_from_program(&pubkey, subid)
             .await;
     };
-    let Some(handler) = UpdateHandler::new(subid, subscriber, builder, cleanup)
+    let Some(handler) =
+        UpdateHandler::new(subid, subscriber, builder, cleanup.into())
     else {
         return;
     };

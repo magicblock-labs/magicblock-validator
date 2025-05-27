@@ -41,7 +41,7 @@ async fn test_account_subscribe() {
     let update = rx2
         .next()
         .await
-        .expect("failed to receive account 1 update after balance change");
+        .expect("failed to receive account 2 update after balance change");
     assert_eq!(
         update.value.lamports, LAMPORTS_PER_SOL,
         "account 2 should have its initial update cached"
@@ -49,7 +49,7 @@ async fn test_account_subscribe() {
     let update = rx2
         .next()
         .await
-        .expect("failed to receive account 1 update after balance change");
+        .expect("failed to receive account 2 update after balance change");
     assert_eq!(
         update.value.lamports,
         LAMPORTS_PER_SOL + TRANSFER_AMOUNT,
@@ -89,7 +89,7 @@ async fn test_account_subscribe_multiple_updates() {
         assert_eq!(
             update.value.lamports,
             LAMPORTS_PER_SOL - i * TRANSFER_AMOUNT,
-            "account 1 should have it balance decreased"
+            "account 1 should have its balance decreased"
         );
         // wait for blockhash to renew
         tokio::time::sleep(Duration::from_millis(100)).await;

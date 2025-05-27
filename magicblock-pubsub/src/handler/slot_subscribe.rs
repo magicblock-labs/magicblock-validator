@@ -16,7 +16,8 @@ pub async fn handle_slot_subscribe(
     let cleanup = async move {
         subscriptions_db.unsubscribe_from_slot(subid).await;
     };
-    let Some(handler) = UpdateHandler::new(subid, subscriber, builder, cleanup)
+    let Some(handler) =
+        UpdateHandler::new(subid, subscriber, builder, cleanup.into())
     else {
         return;
     };

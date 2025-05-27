@@ -19,22 +19,30 @@ pub struct UiAccountWithPubkey {
 }
 
 pub struct UpdateHandler<B, C: Future<Output = ()> + Send + Sync + 'static> {
-    pub sink: Sink,
-    pub subid: u64,
-    pub builder: B,
-    pub cleanup: Option<C>,
+    sink: Sink,
+    subid: u64,
+    builder: B,
+    _cleanup: Cleanup<C>,
 }
 
-impl<
-        B: NotificationBuilder,
-        C: Future<Output = ()> + Send + Sync + 'static,
-    > UpdateHandler<B, C>
+pub struct Cleanup<F: Future<Output = ()> + Send + Sync + 'static>(Option<F>);
+
+impl<F: Future<Output = ()> + Send + Sync + 'static> From<F> for Cleanup<F> {
+    fn from(value: F) -> Self {
+        Self(Some(value))
+    }
+}
+
+impl<B, C> UpdateHandler<B, C>
+where
+    B: NotificationBuilder,
+    C: Future<Output = ()> + Send + Sync + 'static,
 {
     pub fn new(
         subid: u64,
         subscriber: Subscriber,
         builder: B,
-        cleanup: C,
+        cleanup: Cleanup<C>,
     ) -> Option<Self> {
         let sink = assign_sub_id(subscriber, subid)?;
         Some(Self::new_with_sink(sink, subid, builder, cleanup))
@@ -44,13 +52,13 @@ impl<
         sink: Sink,
         subid: u64,
         builder: B,
-        cleanup: C,
+        cleanup: Cleanup<C>,
     ) -> Self {
         Self {
             sink,
             subid,
             builder,
-            cleanup: Some(cleanup),
+            _cleanup: cleanup,
         }
     }
 
@@ -88,12 +96,10 @@ impl<
     }
 }
 
-impl<B, C: Future<Output = ()> + Send + Sync + 'static> Drop
-    for UpdateHandler<B, C>
-{
+impl<C: Future<Output = ()> + Send + Sync + 'static> Drop for Cleanup<C> {
     fn drop(&mut self) {
-        if let Some(callback) = self.cleanup.take() {
-            tokio::spawn(callback);
+        if let Some(cb) = self.0.take() {
+            tokio::spawn(cb);
         }
     }
 }

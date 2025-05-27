@@ -12,7 +12,7 @@ use solana_sdk::{signature::Signature, transaction::TransactionError};
 use super::common::UpdateHandler;
 use crate::{
     errors::reject_internal_error,
-    notification_builder::SignatureNotificationBulider,
+    notification_builder::SignatureNotificationBuilder,
     subscription::assign_sub_id,
     types::{ResponseWithSubscriptionId, SignatureParams},
 };
@@ -51,13 +51,14 @@ pub async fn handle_signature_subscribe(
             .await;
         return;
     }
-    let builder = SignatureNotificationBulider {};
+    let builder = SignatureNotificationBuilder {};
     let cleanup = async move {
         subscriptions_db
             .unsubscribe_from_signature(&sig, subid)
             .await;
     };
-    let handler = UpdateHandler::new_with_sink(sink, subid, builder, cleanup);
+    let handler =
+        UpdateHandler::new_with_sink(sink, subid, builder, cleanup.into());
     // Note: 60 seconds should be more than enough for any transaction confirmation,
     // if it wasn't confirmed during this period, then it was never executed, thus we
     // can just cancel the subscription to free up resources

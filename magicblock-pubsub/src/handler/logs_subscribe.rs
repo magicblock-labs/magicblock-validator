@@ -8,7 +8,7 @@ use solana_sdk::pubkey::Pubkey;
 use super::common::UpdateHandler;
 use crate::{
     errors::reject_internal_error,
-    notification_builder::LogsNotificationBulider, types::LogsParams,
+    notification_builder::LogsNotificationBuilder, types::LogsParams,
 };
 
 pub async fn handle_logs_subscribe(
@@ -35,12 +35,13 @@ pub async fn handle_logs_subscribe(
         }
     };
     let mut geyser_rx = geyser_service.logs_subscribe(key, subid).await;
-    let builder = LogsNotificationBulider {};
+    let builder = LogsNotificationBuilder {};
     let subscriptions_db = geyser_service.subscriptions_db.clone();
     let cleanup = async move {
         subscriptions_db.unsubscribe_from_logs(&key, subid).await;
     };
-    let Some(handler) = UpdateHandler::new(subid, subscriber, builder, cleanup)
+    let Some(handler) =
+        UpdateHandler::new(subid, subscriber, builder, cleanup.into())
     else {
         return;
     };
