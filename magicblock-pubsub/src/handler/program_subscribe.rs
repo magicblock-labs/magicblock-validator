@@ -28,7 +28,7 @@ pub async fn handle_program_subscribe(
         }
     };
 
-    let mut geyser_rx = geyser_service.accounts_subscribe(subid, pubkey);
+    let mut geyser_rx = geyser_service.program_subscribe(subid, pubkey).await;
 
     let encoding = config
         .account_config
@@ -37,8 +37,10 @@ pub async fn handle_program_subscribe(
     let filters = ProgramFilters::from(config.filters);
     let builder = ProgramNotificationBuilder { encoding, filters };
     let subscriptions_db = geyser_service.subscriptions_db.clone();
-    let cleanup = move || {
-        subscriptions_db.unsubscribe_from_program(&pubkey, subid);
+    let cleanup = async move {
+        subscriptions_db
+            .unsubscribe_from_program(&pubkey, subid)
+            .await;
     };
     let Some(handler) = UpdateHandler::new(subid, subscriber, builder, cleanup)
     else {

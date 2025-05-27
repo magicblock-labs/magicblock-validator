@@ -41,31 +41,20 @@ impl PubsubApi {
         let unsubscribe_tokens = UnsubscribeTokens::new();
         {
             let unsubscribe_tokens = unsubscribe_tokens.clone();
-            std::thread::spawn(move || {
-                tokio::runtime::Builder::new_multi_thread()
-                    // Note: there's no need to allocate more threads for the PubSub handling
-                    .worker_threads(4)
-                    .enable_all()
-                    .thread_name("PubsubActorRuntime")
-                    .build()
-                    .unwrap()
-                    .block_on(async move {
-                        let mut subid: u64 = 0;
-                        let mut actor =
-                            SubscriptionsReceiver::new(subscribe_rx);
+            tokio::spawn(async move {
+                let mut subid: u64 = 0;
+                let mut actor = SubscriptionsReceiver::new(subscribe_rx);
 
-                        while let Some(subscription) =
-                            actor.subscriptions.recv().await
-                        {
-                            subid += 1;
-                            let unsubscriber = unsubscribe_tokens.add(subid);
-                            tokio::spawn(handle_subscription(
-                                subscription,
-                                subid,
-                                unsubscriber,
-                            ));
-                        }
-                    });
+                while let Some(subscription) = actor.subscriptions.recv().await
+                {
+                    subid += 1;
+                    let unsubscriber = unsubscribe_tokens.add(subid);
+                    tokio::spawn(handle_subscription(
+                        subscription,
+                        subid,
+                        unsubscriber,
+                    ));
+                }
             });
         }
 

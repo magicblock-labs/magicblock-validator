@@ -35,11 +35,11 @@ pub async fn handle_logs_subscribe(
             LogsSubscribeKey::Account(pubkey)
         }
     };
-    let mut geyser_rx = geyser_service.logs_subscribe(key, subid);
+    let mut geyser_rx = geyser_service.logs_subscribe(key, subid).await;
     let builder = LogsNotificationBulider {};
     let subscriptions_db = geyser_service.subscriptions_db.clone();
-    let cleanup = move || {
-        subscriptions_db.unsubscribe_from_logs(&key, subid);
+    let cleanup = async move {
+        subscriptions_db.unsubscribe_from_logs(&key, subid).await;
     };
     let Some(handler) = UpdateHandler::new(subid, subscriber, builder, cleanup)
     else {

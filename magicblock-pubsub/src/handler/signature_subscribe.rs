@@ -33,7 +33,7 @@ pub async fn handle_signature_subscribe(
         }
     };
 
-    let mut geyser_rx = geyser_service.transaction_subscribe(subid, sig);
+    let mut geyser_rx = geyser_service.transaction_subscribe(subid, sig).await;
     let subscriptions_db = geyser_service.subscriptions_db.clone();
     let Some(sink) = assign_sub_id(subscriber, subid) else {
         return;
@@ -47,12 +47,16 @@ pub async fn handle_signature_subscribe(
             slot, res
         );
         sink_notify_transaction_result(&sink, slot, subid, res.err());
-        subscriptions_db.unsubscribe_from_signature(&sig, subid);
+        subscriptions_db
+            .unsubscribe_from_signature(&sig, subid)
+            .await;
         return;
     }
     let builder = SignatureNotificationBulider {};
-    let cleanup = move || {
-        subscriptions_db.unsubscribe_from_signature(&sig, subid);
+    let cleanup = async move {
+        subscriptions_db
+            .unsubscribe_from_signature(&sig, subid)
+            .await;
     };
     let handler = UpdateHandler::new_with_sink(sink, subid, builder, cleanup);
     // Note: 60 seconds should be more than enough for any transaction confirmation,

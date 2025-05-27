@@ -15,7 +15,6 @@ use tokio::sync::Notify;
 
 use crate::{
     config::Config,
-    grpc::GrpcService,
     grpc_messages::Message,
     rpc::GeyserRpcService,
     types::{GeyserMessage, GeyserMessageSender},
@@ -27,15 +26,12 @@ use crate::{
 // -----------------
 #[derive(Debug)]
 pub struct PluginInner {
-    grpc_channel: GeyserMessageSender,
-    grpc_shutdown: Arc<Notify>,
     rpc_channel: GeyserMessageSender,
     rpc_shutdown: Arc<Notify>,
 }
 
 impl PluginInner {
     fn send_message(&self, message: &GeyserMessage) {
-        // let _ = self.grpc_channel.send(message.clone());
         let _ = self.rpc_channel.send(message.clone());
     }
 }
@@ -67,10 +63,6 @@ impl std::fmt::Debug for GrpcGeyserPlugin {
 
 impl GrpcGeyserPlugin {
     pub fn create(config: Config) -> PluginResult<Self> {
-        let (grpc_channel, grpc_shutdown) =
-            GrpcService::create(config.grpc.clone())
-                .map_err(GeyserPluginError::Custom)?;
-
         let transactions_cache = if config.cache_transactions {
             Some(Cache::new(config.transactions_cache_max_age_slots))
         } else {
@@ -92,8 +84,6 @@ impl GrpcGeyserPlugin {
             .map_err(GeyserPluginError::Custom)?;
         let rpc_service = Arc::new(rpc_service);
         let inner = Some(PluginInner {
-            grpc_channel,
-            grpc_shutdown,
             rpc_channel,
             rpc_shutdown,
         });
@@ -137,9 +127,7 @@ impl GeyserPlugin for GrpcGeyserPlugin {
 
     fn on_unload(&mut self) {
         if let Some(inner) = self.inner.take() {
-            inner.grpc_shutdown.notify_one();
             inner.rpc_shutdown.notify_one();
-            drop(inner.grpc_channel);
             drop(inner.rpc_channel);
         }
         info!("Unoaded plugin: {}", self.name());

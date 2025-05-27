@@ -20,8 +20,6 @@ pub type LogsSubscriptionsDb =
     Arc<scc::HashMap<LogsSubscribeKey, UpdateSubscribers>>;
 pub type SlotSubscriptionsDb =
     Arc<scc::HashMap<u64, mpsc::Sender<GeyserMessage>>>;
-pub type BlockSubscriptionsDb =
-    Arc<scc::HashMap<u64, mpsc::Sender<GeyserMessage>>>;
 
 #[derive(Clone, Default)]
 pub struct SubscriptionsDb {
@@ -30,13 +28,12 @@ pub struct SubscriptionsDb {
     signatures: SignatureSubscriptionsDb,
     logs: LogsSubscriptionsDb,
     slot: SlotSubscriptionsDb,
-    block: BlockSubscriptionsDb,
 }
 
 macro_rules! add_subscriber {
     ($root: ident, $db: ident, $id: ident, $key: ident, $tx: expr) => {
         let subscriber = UpdateSubscribers::Single { id: $id, tx: $tx };
-        match $root.$db.entry($key) {
+        match $root.$db.entry_async($key).await {
             Entry::Vacant(e) => {
                 e.insert_entry(subscriber);
             }
@@ -49,11 +46,12 @@ macro_rules! add_subscriber {
 
 macro_rules! remove_subscriber {
     ($root: ident, $db: ident, $id: ident, $key: ident) => {
-        let Some(mut entry) = $root.$db.get($key) else {
+        let Some(mut entry) = $root.$db.get_async($key).await else {
             return;
         };
         if entry.remove_subscriber($id) {
-            $root.$db.remove($key);
+            drop(entry);
+            $root.$db.remove_async($key).await;
         }
     };
 }
@@ -62,12 +60,13 @@ macro_rules! send_update {
     ($root: ident, $db: ident, $key: ident, $update: ident) => {
         $root
             .$db
-            .read($key, |_, subscribers| subscribers.send($update))
+            .read_async($key, |_, subscribers| subscribers.send($update))
+            .await;
     };
 }
 
 impl SubscriptionsDb {
-    pub fn subscribe_to_account(
+    pub async fn subscribe_to_account(
         &self,
         pubkey: Pubkey,
         tx: mpsc::Sender<GeyserMessage>,
@@ -76,15 +75,19 @@ impl SubscriptionsDb {
         add_subscriber!(self, accounts, id, pubkey, tx);
     }
 
-    pub fn unsubscribe_from_account(&self, pubkey: &Pubkey, id: u64) {
+    pub async fn unsubscribe_from_account(&self, pubkey: &Pubkey, id: u64) {
         remove_subscriber!(self, accounts, id, pubkey);
     }
 
-    pub fn send_account_update(&self, pubkey: &Pubkey, update: GeyserMessage) {
+    pub async fn send_account_update(
+        &self,
+        pubkey: &Pubkey,
+        update: GeyserMessage,
+    ) {
         send_update!(self, accounts, pubkey, update);
     }
 
-    pub fn subscribe_to_program(
+    pub async fn subscribe_to_program(
         &self,
         pubkey: Pubkey,
         tx: mpsc::Sender<GeyserMessage>,
@@ -93,15 +96,19 @@ impl SubscriptionsDb {
         add_subscriber!(self, programs, id, pubkey, tx);
     }
 
-    pub fn unsubscribe_from_program(&self, pubkey: &Pubkey, id: u64) {
+    pub async fn unsubscribe_from_program(&self, pubkey: &Pubkey, id: u64) {
         remove_subscriber!(self, programs, id, pubkey);
     }
 
-    pub fn send_program_update(&self, pubkey: &Pubkey, update: GeyserMessage) {
+    pub async fn send_program_update(
+        &self,
+        pubkey: &Pubkey,
+        update: GeyserMessage,
+    ) {
         send_update!(self, programs, pubkey, update);
     }
 
-    pub fn subscribe_to_signature(
+    pub async fn subscribe_to_signature(
         &self,
         signature: Signature,
         tx: mpsc::Sender<GeyserMessage>,
@@ -110,11 +117,15 @@ impl SubscriptionsDb {
         add_subscriber!(self, signatures, id, signature, tx);
     }
 
-    pub fn unsubscribe_from_signature(&self, signature: &Signature, id: u64) {
+    pub async fn unsubscribe_from_signature(
+        &self,
+        signature: &Signature,
+        id: u64,
+    ) {
         remove_subscriber!(self, signatures, id, signature);
     }
 
-    pub fn send_signature_update(
+    pub async fn send_signature_update(
         &self,
         signature: &Signature,
         update: GeyserMessage,
@@ -122,7 +133,7 @@ impl SubscriptionsDb {
         send_update!(self, signatures, signature, update);
     }
 
-    pub fn subscribe_to_logs(
+    pub async fn subscribe_to_logs(
         &self,
         key: LogsSubscribeKey,
         tx: mpsc::Sender<GeyserMessage>,
@@ -131,64 +142,55 @@ impl SubscriptionsDb {
         add_subscriber!(self, logs, id, key, tx);
     }
 
-    pub fn unsubscribe_from_logs(&self, key: &LogsSubscribeKey, id: u64) {
+    pub async fn unsubscribe_from_logs(&self, key: &LogsSubscribeKey, id: u64) {
         remove_subscriber!(self, logs, id, key);
     }
 
-    pub fn send_logs_update(&self, update: GeyserMessage) {
+    pub async fn send_logs_update(&self, update: GeyserMessage) {
         if self.logs.is_empty() {
             return;
         }
         let Message::Transaction(ref txn) = *update else {
             return;
         };
-        self.logs.scan(|key, subscribers| match key {
-            LogsSubscribeKey::All => {
-                subscribers.send(update.clone());
-            }
-            LogsSubscribeKey::Account(pubkey) => {
-                let addresses = &txn.transaction.meta.loaded_addresses;
-                let addresses =
-                    addresses.writable.iter().chain(addresses.readonly.iter());
-                for pk in addresses {
-                    if pubkey == pk {
-                        subscribers.send(update.clone());
+        let addresses = &txn.transaction.transaction.message().account_keys();
+        self.logs
+            .scan_async(|key, subscribers| match key {
+                LogsSubscribeKey::All => {
+                    subscribers.send(update.clone());
+                }
+                LogsSubscribeKey::Account(pubkey) => {
+                    for pk in addresses.iter() {
+                        if pubkey == pk {
+                            subscribers.send(update.clone());
+                            return;
+                        }
                     }
                 }
-            }
-        });
+            })
+            .await;
     }
 
-    pub fn subscribe_to_slot(&self, tx: mpsc::Sender<GeyserMessage>, id: u64) {
-        let _ = self.slot.insert(id, tx);
+    pub async fn subscribe_to_slot(
+        &self,
+        tx: mpsc::Sender<GeyserMessage>,
+        id: u64,
+    ) {
+        let _ = self.slot.insert_async(id, tx).await;
     }
 
-    pub fn unsubscribe_from_slot(&self, id: u64) {
-        self.slot.remove(&id);
+    pub async fn unsubscribe_from_slot(&self, id: u64) {
+        self.slot.remove_async(&id).await;
     }
 
-    pub fn send_slot(&self, msg: GeyserMessage) {
-        self.slot.scan(|_, tx| {
-            if tx.try_send(msg.clone()).is_err() {
-                warn!("slot subscriber hang up or not keeping up");
-            }
-        });
-    }
-
-    pub fn subscribe_to_block(&self, tx: mpsc::Sender<GeyserMessage>, id: u64) {
-        let _ = self.block.insert(id, tx);
-    }
-
-    pub fn unsubscribe_from_block(&self, id: u64) {
-        self.block.remove(&id);
-    }
-
-    pub fn send_block(&self, msg: GeyserMessage) {
-        self.block.scan(|_, tx| {
-            if tx.try_send(msg.clone()).is_err() {
-                warn!("block subscriber hang up or not keeping up");
-            }
-        });
+    pub async fn send_slot(&self, msg: GeyserMessage) {
+        self.slot
+            .scan_async(|_, tx| {
+                if tx.try_send(msg.clone()).is_err() {
+                    warn!("slot subscriber hang up or not keeping up");
+                }
+            })
+            .await;
     }
 }
 
@@ -200,7 +202,7 @@ pub fn geyser_message_channel() -> (GeyserMessageSender, GeyserMessageReceiver)
     flume::unbounded()
 }
 
-#[derive(Hash, PartialEq, Eq, Clone, Copy)]
+#[derive(Hash, PartialEq, Eq, Clone, Copy, Debug)]
 pub enum LogsSubscribeKey {
     All,
     Account(Pubkey),

@@ -24,14 +24,16 @@ pub async fn handle_account_subscribe(
         }
     };
 
-    let mut geyser_rx = geyser_service.accounts_subscribe(subid, pubkey);
+    let mut geyser_rx = geyser_service.accounts_subscribe(subid, pubkey).await;
 
     let builder = AccountNotificationBuilder {
         encoding: params.encoding().unwrap_or(UiAccountEncoding::Base58),
     };
     let subscriptions_db = geyser_service.subscriptions_db.clone();
-    let cleanup = move || {
-        subscriptions_db.unsubscribe_from_account(&pubkey, subid);
+    let cleanup = async move {
+        subscriptions_db
+            .unsubscribe_from_account(&pubkey, subid)
+            .await;
     };
     let Some(handler) = UpdateHandler::new(subid, subscriber, builder, cleanup)
     else {

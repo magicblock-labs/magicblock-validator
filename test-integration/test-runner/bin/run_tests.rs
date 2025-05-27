@@ -1,9 +1,9 @@
 use integration_test_tools::validator::start_test_validator_with_config;
 use integration_test_tools::{
-    toml_to_args::{config_to_args, rpc_port_from_config, ProgramLoader},
+    toml_to_args::ProgramLoader,
     validator::{
         resolve_workspace_dir, start_magic_block_validator_with_config,
-        wait_for_validator, TestRunnerPaths,
+        TestRunnerPaths,
     },
 };
 use std::{
@@ -46,6 +46,12 @@ pub fn main() {
         return;
     };
 
+    let Ok(magicblock_pubsub_output) =
+        run_magicblock_pubsub_tests(&manifest_dir)
+    else {
+        return;
+    };
+
     // Assert that all tests passed
     assert_cargo_tests_passed(security_output);
     assert_cargo_tests_passed(scenarios_output);
@@ -53,6 +59,7 @@ pub fn main() {
     assert_cargo_tests_passed(issues_frequent_commits_output);
     assert_cargo_tests_passed(restore_ledger_output);
     assert_cargo_tests_passed(magicblock_api_output);
+    assert_cargo_tests_passed(magicblock_pubsub_output);
 }
 
 // -----------------
@@ -267,10 +274,11 @@ fn run_magicblock_pubsub_tests(
     };
 
     let test_dir = format!("{}/../{}", manifest_dir, "test-pubsub");
-    eprintln!("Running magicblock-api tests in {}", test_dir);
+    eprintln!("Running magicblock pubsub tests in {}", test_dir);
 
     let output = run_test(test_dir, Default::default()).map_err(|err| {
         eprintln!("Failed to magicblock api tests: {:?}", err);
+        cleanup_validator(&mut ephem_validator, "ephemeral");
         err
     })?;
 

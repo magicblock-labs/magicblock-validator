@@ -7,7 +7,8 @@ edition.workspace = true
 solana-sdk = { workspace = true }
 solana-pubsub-client = { workspace = true }
 solana-rpc-client = { workspace = true }
+solana-rpc-client-api = { workspace = true }
+tokio = { workspace = true }
 
 [dev-dependencies]
-tokio = { workspace = true }
 futures = "0.3"

@@ -10014,6 +10014,7 @@ dependencies = [
  "futures 0.3.31",
  "solana-pubsub-client",
  "solana-rpc-client",
+ "solana-rpc-client-api",
  "solana-sdk",
  "tokio",
 ]

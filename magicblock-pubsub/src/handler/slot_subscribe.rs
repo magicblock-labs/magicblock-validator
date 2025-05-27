@@ -10,19 +10,19 @@ pub async fn handle_slot_subscribe(
     subscriber: Subscriber,
     geyser_service: &GeyserRpcService,
 ) {
-    let mut geyser_rx = geyser_service.slot_subscribe(subid);
+    let mut geyser_rx = geyser_service.slot_subscribe(subid).await;
 
     let builder = SlotNotificationBuilder {};
     let subscriptions_db = geyser_service.subscriptions_db.clone();
-    let cleanup = move || {
-        subscriptions_db.unsubscribe_from_slot(subid);
+    let cleanup = async move {
+        subscriptions_db.unsubscribe_from_slot(subid).await;
     };
     let Some(handler) = UpdateHandler::new(subid, subscriber, builder, cleanup)
     else {
         return;
     };
     while let Some(msg) = geyser_rx.recv().await {
-        if !handler.handle(msg) {
+        if !handler.handle_slot_update(msg) {
             break;
         }
     }

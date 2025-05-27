@@ -70,7 +70,7 @@ impl GeyserRpcService {
     // -----------------
     // Subscriptions
     // -----------------
-    pub fn accounts_subscribe(
+    pub async fn accounts_subscribe(
         &self,
         subid: u64,
         pubkey: Pubkey,
@@ -87,12 +87,27 @@ impl GeyserRpcService {
                 .expect("channel should have at least 1 capacity");
         }
         self.subscriptions_db
-            .subscribe_to_account(pubkey, updates_tx, subid);
+            .subscribe_to_account(pubkey, updates_tx, subid)
+            .await;
 
         updates_rx
     }
 
-    pub fn transaction_subscribe(
+    pub async fn program_subscribe(
+        &self,
+        subid: u64,
+        pubkey: Pubkey,
+    ) -> mpsc::Receiver<GeyserMessage> {
+        let (updates_tx, updates_rx) =
+            mpsc::channel(self.config.channel_capacity);
+        self.subscriptions_db
+            .subscribe_to_program(pubkey, updates_tx, subid)
+            .await;
+
+        updates_rx
+    }
+
+    pub async fn transaction_subscribe(
         &self,
         subid: u64,
         signature: Signature,
@@ -111,19 +126,25 @@ impl GeyserRpcService {
             trace!("tx cache miss: '{}'", short_signature(&signature));
         }
         self.subscriptions_db
-            .subscribe_to_signature(signature, updates_tx, subid);
+            .subscribe_to_signature(signature, updates_tx, subid)
+            .await;
 
         updates_rx
     }
 
-    pub fn slot_subscribe(&self, subid: u64) -> mpsc::Receiver<GeyserMessage> {
+    pub async fn slot_subscribe(
+        &self,
+        subid: u64,
+    ) -> mpsc::Receiver<GeyserMessage> {
         let (updates_tx, updates_rx) =
             mpsc::channel(self.config.channel_capacity);
-        self.subscriptions_db.subscribe_to_slot(updates_tx, subid);
+        self.subscriptions_db
+            .subscribe_to_slot(updates_tx, subid)
+            .await;
         updates_rx
     }
 
-    pub fn logs_subscribe(
+    pub async fn logs_subscribe(
         &self,
         key: LogsSubscribeKey,
         subid: u64,
@@ -131,7 +152,8 @@ impl GeyserRpcService {
         let (updates_tx, updates_rx) =
             mpsc::channel(self.config.channel_capacity);
         self.subscriptions_db
-            .subscribe_to_logs(key, updates_tx, subid);
+            .subscribe_to_logs(key, updates_tx, subid)
+            .await;
 
         updates_rx
     }
