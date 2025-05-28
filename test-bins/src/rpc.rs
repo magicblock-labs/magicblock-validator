@@ -1,3 +1,4 @@
+use git_version::git_version;
 use log::*;
 use magicblock_api::{
     ledger,
@@ -7,7 +8,6 @@ use magicblock_api::{
 use magicblock_config::{EphemeralConfig, GeyserGrpcConfig};
 use solana_sdk::signature::{Keypair, Signer};
 use test_tools::init_logger;
-use git_version::git_version;
 
 // mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev
 const TEST_KEYPAIR_BYTES: [u8; 64] = [
@@ -102,7 +102,11 @@ async fn main() {
 
     info!("");
     info!("🧙 Magicblock Validator is running!");
-    info!("🏷️ Validator version: {} (Git: {})", env!("CARGO_PKG_VERSION"), GIT_VERSION);
+    info!(
+        "🏷️ Validator version: {} (Git: {})",
+        env!("CARGO_PKG_VERSION"),
+        GIT_VERSION
+    );
     info!("-----------------------------------");
     info!("📡 RPC endpoint:       http://{}:{}", rpc_host, rpc_port);
     info!("🔌 WebSocket endpoint: ws://{}:{}", rpc_host, ws_port);
