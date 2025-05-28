@@ -1,85 +1,105 @@
-use geyser_grpc_proto::{geyser, tonic::Status};
-use jsonrpc_pubsub::Sink;
-use log::*;
+use std::future::Future;
+
+use jsonrpc_pubsub::{Sink, Subscriber};
+use log::debug;
+use magicblock_geyser_plugin::types::GeyserMessage;
 use serde::{Deserialize, Serialize};
-use solana_account_decoder::{UiAccount, UiAccountEncoding};
+use solana_account_decoder::UiAccount;
 
 use crate::{
-    conversions::{slot_from_update, subscribe_update_try_into_ui_account},
-    errors::sink_notify_error,
-    types::{AccountDataConfig, ResponseWithSubscriptionId},
+    notification_builder::NotificationBuilder,
+    subscription::assign_sub_id,
+    types::{ResponseNoContextWithSubscriptionId, ResponseWithSubscriptionId},
 };
 
 #[derive(Serialize, Deserialize, Clone, Debug, PartialEq, Eq)]
-struct UiAccountWithPubkey {
-    pubkey: String,
-    account: UiAccount,
+pub struct UiAccountWithPubkey {
+    pub pubkey: String,
+    pub account: UiAccount,
 }
 
-/// Handles geyser update for account and program subscriptions.
-/// Returns true if subscription has ended.
-pub fn handle_account_geyser_update(
-    sink: &Sink,
+pub struct UpdateHandler<B, C: Future<Output = ()> + Send + Sync + 'static> {
+    sink: Sink,
     subid: u64,
-    update: Result<geyser::SubscribeUpdate, Status>,
-    params: AccountDataConfig,
-    include_pubkey: bool,
-) -> bool {
-    match update {
-        Ok(update) => {
-            debug!("Received geyser update: {:?}", update);
+    builder: B,
+    _cleanup: Cleanup<C>,
+}
 
-            let slot = slot_from_update(&update).unwrap_or(0);
+pub struct Cleanup<F: Future<Output = ()> + Send + Sync + 'static>(Option<F>);
 
-            let encoding = params.encoding.unwrap_or(UiAccountEncoding::Base58);
-            let (pubkey, ui_account) =
-                match subscribe_update_try_into_ui_account(
-                    update,
-                    encoding,
-                    params.data_slice_config,
-                ) {
-                    Ok(Some(ui_account)) => ui_account,
-                    Ok(None) => {
-                        debug!("No account data in update, skipping.");
-                        return false;
-                    }
-                    Err(err) => {
-                        let msg = format!(
-                            "Failed to convert update to UiAccount: {:?}",
-                            err
-                        );
-                        let failed_to_notify = sink_notify_error(sink, msg);
-                        return failed_to_notify;
-                    }
-                };
-            let notify_res = if include_pubkey {
-                let res = ResponseWithSubscriptionId::new(
-                    UiAccountWithPubkey {
-                        pubkey: pubkey.to_string(),
-                        account: ui_account,
-                    },
-                    slot,
-                    subid,
-                );
-                debug!("Sending response: {:?}", res);
-                sink.notify(res.into_params_map())
-            } else {
-                let res =
-                    ResponseWithSubscriptionId::new(ui_account, slot, subid);
-                debug!("Sending response: {:?}", res);
-                sink.notify(res.into_params_map())
-            };
+impl<F: Future<Output = ()> + Send + Sync + 'static> From<F> for Cleanup<F> {
+    fn from(value: F) -> Self {
+        Self(Some(value))
+    }
+}
 
-            if let Err(err) = notify_res {
-                debug!("Subscription has ended, finishing {:?}.", err);
-                true
-            } else {
-                false
-            }
-        }
-        Err(status) => sink_notify_error(
+impl<B, C> UpdateHandler<B, C>
+where
+    B: NotificationBuilder,
+    C: Future<Output = ()> + Send + Sync + 'static,
+{
+    pub fn new(
+        subid: u64,
+        subscriber: Subscriber,
+        builder: B,
+        cleanup: Cleanup<C>,
+    ) -> Option<Self> {
+        let sink = assign_sub_id(subscriber, subid)?;
+        Some(Self::new_with_sink(sink, subid, builder, cleanup))
+    }
+
+    pub fn new_with_sink(
+        sink: Sink,
+        subid: u64,
+        builder: B,
+        cleanup: Cleanup<C>,
+    ) -> Self {
+        Self {
             sink,
-            format!("Failed to receive signature update: {:?}", status),
-        ),
+            subid,
+            builder,
+            _cleanup: cleanup,
+        }
+    }
+
+    pub fn handle(&self, msg: GeyserMessage) -> bool {
+        let Some((update, slot)) = self.builder.try_build_notification(msg)
+        else {
+            // NOTE: messages are targetted, so builder will always
+            // succeed, this branch just avoids eyesore unwraps
+            return true;
+        };
+        let notification =
+            ResponseWithSubscriptionId::new(update, slot, self.subid);
+        if let Err(err) = self.sink.notify(notification.into_params_map()) {
+            debug!("Subscription {} has ended {:?}.", self.subid, err);
+            false
+        } else {
+            true
+        }
+    }
+
+    pub fn handle_slot_update(&self, msg: GeyserMessage) -> bool {
+        let Some((update, _)) = self.builder.try_build_notification(msg) else {
+            // NOTE: messages are targetted, so builder will always
+            // succeed, this branch just avoids eyesore unwraps
+            return true;
+        };
+        let notification =
+            ResponseNoContextWithSubscriptionId::new(update, self.subid);
+        if let Err(err) = self.sink.notify(notification.into_params_map()) {
+            debug!("Subscription {} has ended {:?}.", self.subid, err);
+            false
+        } else {
+            true
+        }
+    }
+}
+
+impl<C: Future<Output = ()> + Send + Sync + 'static> Drop for Cleanup<C> {
+    fn drop(&mut self) {
+        if let Some(cb) = self.0.take() {
+            tokio::spawn(cb);
+        }
     }
 }

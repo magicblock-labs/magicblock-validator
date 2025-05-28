@@ -14,7 +14,7 @@ pub fn cleanup_devnet_only(devnet_validator: &mut Child) {
     kill_validators();
 }
 
-fn cleanup_validator(validator: &mut Child, label: &str) {
+pub fn cleanup_validator(validator: &mut Child, label: &str) {
     validator.kill().unwrap_or_else(|err| {
         panic!("Failed to kill {} validator ({:?})", label, err)
     });
