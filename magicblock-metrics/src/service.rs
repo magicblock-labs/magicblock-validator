@@ -25,7 +25,6 @@ pub fn try_start_metrics_service(
 
 pub struct MetricsService {
     addr: SocketAddr,
-    runtime: tokio::runtime::Runtime,
     cancellation_token: CancellationToken,
 }
 
@@ -34,28 +33,16 @@ impl MetricsService {
         addr: SocketAddr,
         cancellation_token: CancellationToken,
     ) -> std::io::Result<MetricsService> {
-        let runtime = match tokio::runtime::Builder::new_multi_thread()
-            .thread_name("metrics-service")
-            .enable_all()
-            .build()
-        {
-            Ok(rt) => rt,
-            Err(err) => {
-                error!("Failed to create metrics service runtime: {:?}", err);
-                return Err(err);
-            }
-        };
         Ok(MetricsService {
             addr,
             cancellation_token,
-            runtime,
         })
     }
 
     fn spawn(&self) {
         let addr = self.addr;
         let cancellation_token = self.cancellation_token.clone();
-        self.runtime.spawn(Self::run(addr, cancellation_token));
+        tokio::spawn(Self::run(addr, cancellation_token));
     }
 
     async fn run(
