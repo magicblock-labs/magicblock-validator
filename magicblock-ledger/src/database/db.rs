@@ -160,6 +160,18 @@ impl Database {
         )
     }
 
+    /// See [crate::database::rocks_db::Rocks::compact_range_cf] for documentation.
+    pub fn compact_range_cf<C>(&self, from: C::Index, to: C::Index)
+    where
+        C: Column + ColumnName,
+    {
+        self.backend.compact_range_cf(
+            self.cf_handle::<C>(),
+            &C::key(from),
+            &C::key(to),
+        )
+    }
+
     pub fn is_primary_access(&self) -> bool {
         self.backend.is_primary_access()
     }

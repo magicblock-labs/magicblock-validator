@@ -115,6 +115,19 @@ impl Rocks {
         Ok(())
     }
 
+    /// Compacts keys in range \[`from`, `to`\].
+    /// For leveled compaction style, all files containing keys in the given range
+    /// are compacted to the last level containing files.
+    /// https://github.com/facebook/rocksdb/wiki/Manual-Compaction#compactrange
+    pub fn compact_range_cf(
+        &self,
+        cf: &ColumnFamily,
+        from_key: &[u8],
+        to_key: &[u8],
+    ) {
+        self.db.compact_range_cf(cf, Some(from_key), Some(to_key))
+    }
+
     pub fn iterator_cf<C>(
         &self,
         cf: &ColumnFamily,

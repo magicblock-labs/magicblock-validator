@@ -246,6 +246,12 @@ where
     ) {
         write_batch.delete_range_cf::<C>(self.handle(), from, to);
     }
+
+    /// See [crate::database::rocks_db::Rocks::compact_range_cf] for documentation.
+    pub fn compact_range(&self, from: C::Index, to: C::Index) {
+        self.backend
+            .compact_range_cf(self.handle(), &C::key(from), &C::key(to))
+    }
 }
 
 impl<C> LedgerColumn<C>
