@@ -65,11 +65,18 @@ pub struct Cli {
 impl Cli {
     pub fn get_ephemeral_config(&self) -> Result<EphemeralConfig, String> {
         // Load config from file
-        match &self.config_path {
-            Some(file) => info!("Loading config from '{}'.", file),
-            None => info!("Using default config. Override it by passing the path to a config file."),
+        let config = match &self.config_path {
+            Some(file) => {
+                info!("Loading config from '{}'.", file);
+                EphemeralConfig::try_load_from_file(file).map_err(|e| {
+                    format!("Failed to load config from '{}': {}", file, e)
+                })?
+            }
+            None => {
+                info!("Using default config. Override it by passing the path to a config file.");
+                EphemeralConfig::default()
+            }
         };
-        let config = load_config(&self.config_path);
 
         // Override config with args and env vars
         match self.config.override_config(config) {
@@ -79,19 +86,6 @@ impl Cli {
                 Err(e)
             }
         }
-    }
-}
-
-fn load_config(config_file: &Option<String>) -> EphemeralConfig {
-    match config_file {
-        Some(config_file) => EphemeralConfig::try_load_from_file(config_file)
-            .unwrap_or_else(|err| {
-                panic!(
-                    "Failed to load config file from '{}'. ({})",
-                    config_file, err
-                )
-            }),
-        None => Default::default(),
     }
 }
 

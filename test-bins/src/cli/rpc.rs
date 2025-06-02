@@ -1,23 +1,24 @@
 use std::net::IpAddr;
 
 use clap::Parser;
+use magicblock_api::EphemeralConfig;
 use magicblock_config::RpcConfig;
 
 #[derive(Parser, Debug, Clone, Copy)]
 pub(crate) struct RpcArgs {
     /// The address to listen on
-    #[arg(long = "rpc-addr", default_value = "0.0.0.0", env = "RPC_ADDR")]
-    addr: IpAddr,
+    #[arg(long = "rpc-addr", env = "RPC_ADDR")]
+    addr: Option<IpAddr>,
     /// The port to listen on
-    #[arg(long = "rpc-port", default_value = "8899", env = "RPC_PORT")]
-    port: u16,
+    #[arg(long = "rpc-port", env = "RPC_PORT")]
+    port: Option<u16>,
 }
 
-impl From<RpcArgs> for RpcConfig {
-    fn from(value: RpcArgs) -> Self {
-        RpcConfig {
-            addr: value.addr,
-            port: value.port,
+impl RpcArgs {
+    pub fn merge_with_config(&self, config: &mut EphemeralConfig) {
+        config.rpc = RpcConfig {
+            addr: self.addr.unwrap_or(config.rpc.addr),
+            port: self.port.unwrap_or(config.rpc.port),
         }
     }
 }
