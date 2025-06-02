@@ -76,7 +76,7 @@ impl Cli {
             Ok(config) => Ok(config),
             Err(e) => {
                 error!("Failed to override config: {}", e);
-                return Err(e);
+                Err(e)
             }
         }
     }
@@ -84,16 +84,13 @@ impl Cli {
 
 fn load_config(config_file: &Option<String>) -> EphemeralConfig {
     match config_file {
-        Some(config_file) => {
-            let config = EphemeralConfig::try_load_from_file(&config_file)
-                .unwrap_or_else(|err| {
-                    panic!(
-                        "Failed to load config file from '{}'. ({})",
-                        config_file, err
-                    )
-                });
-            config
-        }
+        Some(config_file) => EphemeralConfig::try_load_from_file(config_file)
+            .unwrap_or_else(|err| {
+                panic!(
+                    "Failed to load config file from '{}'. ({})",
+                    config_file, err
+                )
+            }),
         None => Default::default(),
     }
 }
