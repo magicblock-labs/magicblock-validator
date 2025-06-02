@@ -1,5 +1,3 @@
-#![allow(unused)]
-
 use cleanass::assert_eq;
 use std::{
     io::{self, Write},
@@ -39,21 +37,22 @@ fn payer_keypair() -> Keypair {
 
 const COUNTER: &str = "Counter of Payer";
 
+#[ignore = "the ebpf deploy is failing in CI, but passing locally"]
 #[test]
 fn restore_ledger_with_flexi_counter_deploy() {
-    //let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
-    //let payer = payer_keypair();
-    //let flexi_counter_paths = TestProgramPaths::new(
-    //    "program_flexi_counter",
-    //    "flexi-counter",
-    //    FLEXI_COUNTER_ID,
-    //);
-    //
-    //let (mut validator, _) = write(&ledger_path, &payer, &flexi_counter_paths);
-    //validator.kill().unwrap();
-    //
-    //let mut validator = read(&ledger_path, &payer.pubkey());
-    //validator.kill().unwrap();
+    let (_, ledger_path) = resolve_tmp_dir(TMP_DIR_LEDGER);
+    let payer = payer_keypair();
+    let flexi_counter_paths = TestProgramPaths::new(
+        "program_flexi_counter",
+        "flexi-counter",
+        FLEXI_COUNTER_ID,
+    );
+
+    let (mut validator, _) = write(&ledger_path, &payer, &flexi_counter_paths);
+    validator.kill().unwrap();
+
+    let mut validator = read(&ledger_path, &payer.pubkey());
+    validator.kill().unwrap();
 }
 
 fn write(
