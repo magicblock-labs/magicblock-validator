@@ -22,6 +22,9 @@ test-tools = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 url = { workspace = true }
 
+[dev-dependencies]
+serial_test = { version = "3.2.0", features = ["logging"] }
+
 [[bin]]
 name = "rpc"
 path = "src/rpc.rs"

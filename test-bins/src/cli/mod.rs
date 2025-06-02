@@ -64,6 +64,7 @@ mod tests {
     use clap::ValueEnum;
     use magicblock_api::EphemeralConfig;
     use magicblock_config::{ProgramConfig, RemoteConfig};
+    use serial_test::serial;
     use solana_sdk::pubkey::Pubkey;
     use url::Url;
 
@@ -77,6 +78,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_env_vars_override_config() {
         let validator_keypair =
             set_env_var("VALIDATOR_KEYPAIR", "path/to/my/keypair.json");
@@ -149,6 +151,7 @@ mod tests {
         assert_eq!(config.ledger.reset, ledger_reset.parse::<bool>().unwrap());
         assert_eq!(config.ledger.path, Some(ledger_path.to_string()));
         assert_eq!(config.ledger.size, ledger_size.parse::<u64>().unwrap());
+        assert_eq!(config.programs, vec![]);
         assert_eq!(config.validator.fdqn, Some(validator_fdqn.to_string()));
         assert_eq!(
             config.validator.millis_per_slot,
@@ -187,7 +190,13 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_accounts_remote_custom_with_ws() {
+        // Prevent conflicts with other tests
+        std::env::remove_var("ACCOUNTS_REMOTE");
+        std::env::remove_var("ACCOUNTS_REMOTE_CUSTOM");
+        std::env::remove_var("ACCOUNTS_REMOTE_CUSTOM_WITH_WS");
+
         let cli = Cli::try_parse_from([
             DEFAULT_CONFIG_PATH,
             "--accounts-remote-custom-with-ws",
@@ -206,6 +215,7 @@ mod tests {
     }
 
     #[test]
+    #[serial]
     fn test_parse_programs() {
         let cli = Cli::parse_from([
             DEFAULT_CONFIG_PATH,
