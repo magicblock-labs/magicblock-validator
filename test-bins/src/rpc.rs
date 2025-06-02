@@ -5,20 +5,12 @@ use magicblock_api::{
     magic_validator::{MagicValidator, MagicValidatorConfig},
     InitGeyserServiceConfig,
 };
-use magicblock_config::{EphemeralConfig, GeyserGrpcConfig};
-use solana_sdk::signature::{Keypair, Signer};
+use magicblock_config::GeyserGrpcConfig;
+use solana_sdk::signature::Signer;
 use test_tools::init_logger;
 
 mod cli;
 use cli::*;
-
-// mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev
-const TEST_KEYPAIR_BYTES: [u8; 64] = [
-    7, 83, 184, 55, 200, 223, 238, 137, 166, 244, 107, 126, 189, 16, 194, 36,
-    228, 68, 43, 143, 13, 91, 3, 81, 53, 253, 26, 36, 50, 198, 40, 159, 11, 80,
-    9, 208, 183, 189, 108, 200, 89, 77, 168, 76, 233, 197, 132, 22, 21, 186,
-    202, 240, 105, 168, 157, 64, 233, 249, 100, 104, 210, 41, 83, 87,
-];
 
 fn init_logger() {
     if let Ok(style) = std::env::var("RUST_LOG_STYLE") {
@@ -65,20 +57,10 @@ async fn main() {
     console_subscriber::init();
 
     let cli = Cli::parse();
-
-    // Load config from file
-    let (file, config) = load_config(cli.config_path);
-
-    match file {
-        Some(file) => info!("Loading config from '{}'.", file),
-        None => info!("Using default config. Override it by passing the path to a config file."),
-    };
-
-    // Override config with args and env vars
-    let config = match cli.config.override_config(config) {
+    let config = match cli.get_ephemeral_config() {
         Ok(config) => config,
-        Err(e) => {
-            error!("Failed to override config: {}", e);
+        Err(err) => {
+            error!("Failed to parse config: {err}");
             return;
         }
     };
@@ -90,9 +72,7 @@ async fn main() {
     let ws_port = rpc_port + WS_PORT_OFFSET; // WebSocket port is typically RPC port + 1
     let rpc_host = config.rpc.addr;
 
-    let validator_keypair = validator_keypair();
-
-    info!("Validator identity: {}", validator_keypair.pubkey());
+    info!("Validator identity: {}", cli.keypair.0.pubkey());
 
     let geyser_grpc_config = config.geyser_grpc.clone();
     let config = MagicValidatorConfig {
@@ -102,7 +82,7 @@ async fn main() {
 
     debug!("{:#?}", config);
     let mut api =
-        MagicValidator::try_from_config(config, validator_keypair).unwrap();
+        MagicValidator::try_from_config(config, cli.keypair.0).unwrap();
     debug!("Created API .. starting things up");
 
     // We need to create and hold on to the ledger lock here in order to keep the
@@ -137,36 +117,6 @@ async fn main() {
         api.join();
     })
     .join();
-}
-
-fn validator_keypair() -> Keypair {
-    // Try to load it from an env var base58 encoded private key
-    if let Ok(keypair) = std::env::var("VALIDATOR_KEYPAIR") {
-        Keypair::from_base58_string(&keypair)
-    } else {
-        warn!("Using default test keypair, provide one by setting the --keypair argument or the 'VALIDATOR_KEYPAIR' env var to a base58 encoded private key");
-        Keypair::from_bytes(&TEST_KEYPAIR_BYTES)
-            // SAFETY: these bytes are compiled into the code, thus we know it is valid
-            .unwrap()
-    }
-}
-
-fn load_config(
-    config_file: Option<String>,
-) -> (Option<String>, EphemeralConfig) {
-    match config_file {
-        Some(config_file) => {
-            let config = EphemeralConfig::try_load_from_file(&config_file)
-                .unwrap_or_else(|err| {
-                    panic!(
-                        "Failed to load config file from '{}'. ({})",
-                        config_file, err
-                    )
-                });
-            (Some(config_file), config)
-        }
-        None => (None, Default::default()),
-    }
 }
 
 fn init_geyser_config(

@@ -1,4 +1,5 @@
 use clap::Parser;
+use log::*;
 
 mod accounts;
 mod config;
@@ -12,8 +13,10 @@ use accounts::*;
 use config::*;
 use geyser::*;
 use ledger::*;
+use magicblock_api::EphemeralConfig;
 use metrics::*;
 use rpc::*;
+use solana_sdk::signature::Keypair;
 use validator::*;
 
 /// MagicBlock Validator CLI arguments
@@ -31,9 +34,11 @@ pub struct Cli {
         long,
         value_name = "KEYPAIR",
         env = "VALIDATOR_KEYPAIR",
-        help = "Base58 encoded private key for the validator."
+        default_value = "9Vo7TbA5YfC5a33JhAi9Fb41usA6JwecHNRw3f9MzzHAM8hFnXTzL5DcEHwsAFjuUZ8vNQcJ4XziRFpMc3gTgBQ",
+        help = "Base58 encoded private key for the validator. Defaults to the test keypair with pubkey mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev",
+        value_parser = keypair_parser
     )]
-    pub keypair: Option<String>,
+    pub keypair: KeypairWrapper,
 
     /// Disable geyser components (accounts,transactions)
     #[arg(
@@ -55,6 +60,57 @@ pub struct Cli {
 
     #[command(flatten)]
     pub config: ConfigArgs,
+}
+
+impl Cli {
+    pub fn get_ephemeral_config(&self) -> Result<EphemeralConfig, String> {
+        // Load config from file
+        match &self.config_path {
+            Some(file) => info!("Loading config from '{}'.", file),
+            None => info!("Using default config. Override it by passing the path to a config file."),
+        };
+        let config = load_config(&self.config_path);
+
+        // Override config with args and env vars
+        match self.config.override_config(config) {
+            Ok(config) => Ok(config),
+            Err(e) => {
+                error!("Failed to override config: {}", e);
+                return Err(e);
+            }
+        }
+    }
+}
+
+fn load_config(config_file: &Option<String>) -> EphemeralConfig {
+    match config_file {
+        Some(config_file) => {
+            let config = EphemeralConfig::try_load_from_file(&config_file)
+                .unwrap_or_else(|err| {
+                    panic!(
+                        "Failed to load config file from '{}'. ({})",
+                        config_file, err
+                    )
+                });
+            config
+        }
+        None => Default::default(),
+    }
+}
+
+fn keypair_parser(s: &str) -> Result<KeypairWrapper, String> {
+    let keypair = Keypair::from_base58_string(s);
+    Ok(KeypairWrapper(keypair))
+}
+
+// This is needed because the Keypair type is not Clone
+#[derive(Debug, PartialEq)]
+pub struct KeypairWrapper(pub Keypair);
+
+impl Clone for KeypairWrapper {
+    fn clone(&self) -> Self {
+        KeypairWrapper(self.0.insecure_clone())
+    }
 }
 
 #[cfg(test)]
@@ -80,8 +136,8 @@ mod tests {
     #[test]
     #[serial]
     fn test_env_vars_override_config() {
-        let validator_keypair =
-            set_env_var("VALIDATOR_KEYPAIR", "path/to/my/keypair.json");
+        let validator_keypair = Keypair::new().to_base58_string();
+        set_env_var("VALIDATOR_KEYPAIR", &validator_keypair);
         let geyser_disable = set_env_var("GEYSER_DISABLE", "(accounts)");
         let geyser_cache_disable =
             set_env_var("GEYSER_CACHE_DISABLE", "(accounts)");
@@ -117,7 +173,10 @@ mod tests {
             .config
             .override_config(EphemeralConfig::default())
             .unwrap();
-        assert_eq!(cli.keypair, Some(validator_keypair.to_string()));
+        assert_eq!(
+            cli.keypair,
+            KeypairWrapper(Keypair::from_base58_string(&validator_keypair))
+        );
         assert_eq!(cli.disable_geyser, Some(geyser_disable.to_string()));
         assert_eq!(
             cli.disable_geyser_cache,
