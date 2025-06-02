@@ -114,7 +114,7 @@ impl Clone for KeypairWrapper {
 mod tests {
     use std::{net::IpAddr, str::FromStr};
 
-    use clap::ValueEnum;
+    use clap::{CommandFactory, ValueEnum};
     use magicblock_api::EphemeralConfig;
     use magicblock_config::{ProgramConfig, RemoteConfig};
     use serial_test::serial;
@@ -253,14 +253,14 @@ mod tests {
         std::env::remove_var("ACCOUNTS_REMOTE_CUSTOM");
         std::env::remove_var("ACCOUNTS_REMOTE_CUSTOM_WITH_WS");
 
-        let cli = Cli::try_parse_from([
+        let cli = Cli::command().try_get_matches_from([
             DEFAULT_CONFIG_PATH,
             "--accounts-remote-custom-with-ws",
             "wss://example.com",
         ]);
         assert!(cli.is_err());
 
-        let cli = Cli::try_parse_from([
+        let cli = Cli::command().try_get_matches_from([
             DEFAULT_CONFIG_PATH,
             "--accounts-remote-custom",
             "https://example.com",
