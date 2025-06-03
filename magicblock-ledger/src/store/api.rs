@@ -1247,21 +1247,6 @@ impl Ledger {
         self.db.column::<C>().compact_range(from, to);
     }
 
-    pub fn compact_slots_range(
-        &self,
-        from_slot: Slot,
-        to_slot: Slot,
-    ) -> LedgerResult<()> {
-        self.blocktime_cf
-            .compact_range(Some(from_slot), Some(to_slot + 1));
-        self.blockhash_cf
-            .compact_range(Some(from_slot), Some(to_slot + 1));
-        self.perf_samples_cf
-            .compact_range(Some(from_slot), Some(to_slot + 1));
-
-        Ok(())
-    }
-
     pub fn flush(&self) {
         let _ = self.db.backend.db.flush().inspect_err(|err| {
             log::error!("failed to flush ledger (rocksdb): {err}")
