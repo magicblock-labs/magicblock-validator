@@ -19,6 +19,7 @@ use crate::{
 
 pub const DEFAULT_TRUNCATION_TIME_INTERVAL: Duration =
     Duration::from_secs(10 * 60);
+const PERCENTAGE_TO_TRUNCATE: u8 = 10;
 
 struct LedgerTrunctationWorker<T> {
     finality_provider: Arc<T>,
@@ -53,7 +54,8 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
                     return;
                 }
                 _ = interval.tick() => {
-                    const FILLED_PERCENTAGE_LIMIT: u8 = 98;
+                    // Note: since we clean 10%, tomstones will take around 10% as well
+                    const FILLED_PERCENTAGE_LIMIT: u8 = 100 - PERCENTAGE_TO_TRUNCATE;
 
                     let current_size = match self.ledger.storage_size() {
                         Ok(value) => value,
@@ -83,8 +85,6 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
         &self,
         current_ledger_size: u64,
     ) -> LedgerResult<Option<(u64, u64)>> {
-        const PERCENTAGE_TO_TRUNCATE: u8 = 10;
-
         let (from_slot, to_slot) =
             if let Some(val) = self.available_truncation_range() {
                 val
@@ -93,8 +93,12 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
             };
 
         let num_slots = self.ledger.count_blockhashes()?;
-        let slot_size = current_ledger_size / num_slots as u64;
+        if num_slots == 0 {
+            info!("No slot were written yet. Nothing to truncate!");
+            return Ok(None);
+        }
 
+        let slot_size = current_ledger_size / num_slots as u64;
         let size_to_truncate =
             (current_ledger_size / 100) * PERCENTAGE_TO_TRUNCATE as u64;
         let num_slots_to_truncate = size_to_truncate / slot_size;
@@ -171,6 +175,8 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
                     );
                 }
             });
+        // Flush memtables with tombstones prior to compaction
+        ledger.flush();
 
         Self::compact_slot_range(ledger, from_slot, to_slot);
     }
@@ -208,7 +214,6 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
         ledger.compact_slot_range_cf::<TransactionStatus>(None, None);
         ledger.compact_slot_range_cf::<Transaction>(None, None);
         ledger.compact_slot_range_cf::<TransactionMemos>(None, None);
-        ledger.compact_slot_range_cf::<TransactionStatus>(None, None);
         ledger.compact_slot_range_cf::<AddressSignatures>(None, None);
     }
 }
