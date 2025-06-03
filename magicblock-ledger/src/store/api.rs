@@ -30,7 +30,7 @@ use crate::{
     conversions::transaction,
     database::{
         columns as cf,
-        columns::{count_column_using_cache, DIRTY_COUNT},
+        columns::{count_column_using_cache, Column, ColumnName, DIRTY_COUNT},
         db::Database,
         iterator::IteratorMode,
         ledger_column::LedgerColumn,
@@ -1169,7 +1169,7 @@ impl Ledger {
     /// - This is a destructive operation that cannot be undone
     /// - Requires exclusive access to the lowest cleanup slot tracker
     /// - All deletions are atomic (either all succeed or none do)
-    pub fn truncate_slots(
+    pub fn delete_slot_range(
         &self,
         from_slot: Slot,
         to_slot: Slot,
@@ -1236,6 +1236,29 @@ impl Ledger {
             })?;
 
         self.db.write(batch)?;
+        Ok(())
+    }
+
+    pub fn compact_slot_range_cf<C: Column + ColumnName>(
+        &self,
+        from: Option<C::Index>,
+        to: Option<C::Index>,
+    ) {
+        self.db.column::<C>().compact_range(from, to);
+    }
+
+    pub fn compact_slots_range(
+        &self,
+        from_slot: Slot,
+        to_slot: Slot,
+    ) -> LedgerResult<()> {
+        self.blocktime_cf
+            .compact_range(Some(from_slot), Some(to_slot + 1));
+        self.blockhash_cf
+            .compact_range(Some(from_slot), Some(to_slot + 1));
+        self.perf_samples_cf
+            .compact_range(Some(from_slot), Some(to_slot + 1));
+
         Ok(())
     }
 
@@ -2408,7 +2431,7 @@ mod tests {
 
         // Truncate slots 10-15 (should remove first two entries)
         assert!(store
-            .truncate_slots(
+            .delete_slot_range(
                 *slots_to_delete.first().unwrap(),
                 *slots_to_delete.last().unwrap()
             )

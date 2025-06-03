@@ -119,13 +119,13 @@ impl Rocks {
     /// For leveled compaction style, all files containing keys in the given range
     /// are compacted to the last level containing files.
     /// https://github.com/facebook/rocksdb/wiki/Manual-Compaction#compactrange
-    pub fn compact_range_cf(
+    pub fn compact_range_cf<S: AsRef<[u8]>, E: AsRef<[u8]>>(
         &self,
         cf: &ColumnFamily,
-        from_key: &[u8],
-        to_key: &[u8],
+        from_key: Option<S>,
+        to_key: Option<E>,
     ) {
-        self.db.compact_range_cf(cf, Some(from_key), Some(to_key))
+        self.db.compact_range_cf(cf, from_key, to_key)
     }
 
     pub fn iterator_cf<C>(
