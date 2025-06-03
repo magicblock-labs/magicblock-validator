@@ -210,7 +210,7 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
             Some((to_slot, u32::MAX)),
         );
 
-        // Con't compact with specific range
+        // Can not compact with specific range
         ledger.compact_slot_range_cf::<TransactionStatus>(None, None);
         ledger.compact_slot_range_cf::<Transaction>(None, None);
         ledger.compact_slot_range_cf::<TransactionMemos>(None, None);
