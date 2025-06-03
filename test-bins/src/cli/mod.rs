@@ -1,3 +1,5 @@
+use std::path::PathBuf;
+
 use clap::Parser;
 use log::*;
 
@@ -26,7 +28,7 @@ use validator::*;
 #[command(about = "Runs a MagicBlock validator node")]
 pub struct Cli {
     /// Path to the configuration file
-    pub config_path: Option<String>,
+    pub config_path: Option<PathBuf>,
 
     /// Base58 encoded validator private key
     #[arg(
@@ -67,9 +69,9 @@ impl Cli {
         // Load config from file
         let config = match &self.config_path {
             Some(file) => {
-                info!("Loading config from '{}'.", file);
+                info!("Loading config from '{file:?}'.");
                 EphemeralConfig::try_load_from_file(file).map_err(|e| {
-                    format!("Failed to load config from '{}': {}", file, e)
+                    format!("Failed to load config from '{file:?}': {e}")
                 })?
             }
             None => {

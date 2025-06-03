@@ -21,9 +21,7 @@ fn test_load_local_dev_with_programs_toml() {
         .join("tests")
         .join("fixtures")
         .join("06_local-dev-with-programs.toml");
-    let config =
-        EphemeralConfig::try_load_from_file(config_file_dir.to_str().unwrap())
-            .unwrap();
+    let config = EphemeralConfig::try_load_from_file(&config_file_dir).unwrap();
 
     assert_eq!(
         config,
@@ -101,9 +99,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     env::set_var("METRICS_SYSTEM_METRICS_TICK_INTERVAL_SECS", "10");
     env::set_var("LEDGER_SIZE", "123123");
 
-    let config =
-        EphemeralConfig::try_load_from_file(config_file_dir.to_str().unwrap())
-            .unwrap();
+    let config = EphemeralConfig::try_load_from_file(&config_file_dir).unwrap();
     let config = config.override_from_envs();
 
     assert_eq!(
