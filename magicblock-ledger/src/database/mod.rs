@@ -1,5 +1,6 @@
 pub mod cf_descriptors;
 pub mod columns;
+mod compaction_filter;
 mod consts;
 pub mod db;
 pub mod iterator;

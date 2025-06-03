@@ -30,7 +30,7 @@ use crate::{
     conversions::transaction,
     database::{
         columns as cf,
-        columns::{count_column_using_cache, Column, ColumnName, DIRTY_COUNT},
+        columns::{count_column_using_cache, DIRTY_COUNT},
         db::Database,
         iterator::IteratorMode,
         ledger_column::LedgerColumn,
@@ -1164,6 +1164,19 @@ impl Ledger {
         self.slot_signatures_cf.get(index)
     }
 
+    /// Updates both lowest_cleanup_slot and oldest_slot for CompactionFilter
+    /// All slots less or equal to argument will be removed during compaction
+    pub fn set_lowest_cleanup_slot(&self, slot: Slot) {
+        let mut lowest_cleanup_slot = self
+            .lowest_cleanup_slot
+            .write()
+            .expect(Self::LOWEST_CLEANUP_SLOT_POISONED);
+
+        let new_lowest_cleanup_slot = std::cmp::max(*lowest_cleanup_slot, slot);
+        *lowest_cleanup_slot = new_lowest_cleanup_slot;
+        self.db.set_oldest_slot(new_lowest_cleanup_slot + 1);
+    }
+
     /// Permanently removes ledger data for slots in the inclusive range `[from_slot, to_slot]`.
     /// # Note:
     /// - This is a destructive operation that cannot be undone
@@ -1175,12 +1188,6 @@ impl Ledger {
         to_slot: Slot,
     ) -> LedgerResult<()> {
         let mut batch = self.db.batch();
-
-        let mut lowest_cleanup_slot = self
-            .lowest_cleanup_slot
-            .write()
-            .expect(Self::LOWEST_CLEANUP_SLOT_POISONED);
-        *lowest_cleanup_slot = std::cmp::max(*lowest_cleanup_slot, to_slot);
 
         self.blocktime_cf.delete_range_in_batch(
             &mut batch,

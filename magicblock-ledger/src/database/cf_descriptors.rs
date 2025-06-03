@@ -1,4 +1,8 @@
-use std::{collections::HashSet, path::Path};
+use std::{
+    collections::HashSet,
+    path::Path,
+    sync::{atomic::AtomicU64, Arc},
+};
 
 use log::*;
 use rocksdb::{ColumnFamilyDescriptor, DBCompressionType, Options, DB};
@@ -9,7 +13,9 @@ use super::{
     options::{LedgerColumnOptions, LedgerOptions},
     rocksdb_options::should_disable_auto_compactions,
 };
-use crate::database::{columns, options::AccessType};
+use crate::database::{
+    columns, compaction_filter::PurgedSlotFilterFactory, options::AccessType,
+};
 
 /// Create the column family (CF) descriptors necessary to open the database.
 ///
@@ -23,19 +29,20 @@ use crate::database::{columns, options::AccessType};
 pub fn cf_descriptors(
     path: &Path,
     options: &LedgerOptions,
+    oldest_slot: &Arc<AtomicU64>,
 ) -> Vec<ColumnFamilyDescriptor> {
     use columns::*;
 
     let mut cf_descriptors = vec![
-        new_cf_descriptor::<TransactionStatus>(options),
-        new_cf_descriptor::<AddressSignatures>(options),
-        new_cf_descriptor::<SlotSignatures>(options),
-        new_cf_descriptor::<Blocktime>(options),
-        new_cf_descriptor::<Blockhash>(options),
-        new_cf_descriptor::<Transaction>(options),
-        new_cf_descriptor::<TransactionMemos>(options),
-        new_cf_descriptor::<PerfSamples>(options),
-        new_cf_descriptor::<AccountModDatas>(options),
+        new_cf_descriptor::<TransactionStatus>(options, oldest_slot),
+        new_cf_descriptor::<AddressSignatures>(options, oldest_slot),
+        new_cf_descriptor::<SlotSignatures>(options, oldest_slot),
+        new_cf_descriptor::<Blocktime>(options, oldest_slot),
+        new_cf_descriptor::<Blockhash>(options, oldest_slot),
+        new_cf_descriptor::<Transaction>(options, oldest_slot),
+        new_cf_descriptor::<TransactionMemos>(options, oldest_slot),
+        new_cf_descriptor::<PerfSamples>(options, oldest_slot),
+        new_cf_descriptor::<AccountModDatas>(options, oldest_slot),
     ];
 
     // If the access type is Secondary, we don't need to open all of the
@@ -87,13 +94,18 @@ pub fn cf_descriptors(
 
 fn new_cf_descriptor<C: 'static + Column + ColumnName>(
     options: &LedgerOptions,
+    oldest_slot: &Arc<AtomicU64>,
 ) -> ColumnFamilyDescriptor {
-    ColumnFamilyDescriptor::new(C::NAME, get_cf_options::<C>(options))
+    ColumnFamilyDescriptor::new(
+        C::NAME,
+        get_cf_options::<C>(options, oldest_slot),
+    )
 }
 
 // FROM ledger/src/blockstore_db.rs :2010
 fn get_cf_options<C: 'static + Column + ColumnName>(
     options: &LedgerOptions,
+    oldest_slot: &Arc<AtomicU64>,
 ) -> Options {
     let mut cf_options = Options::default();
     // 256 * 8 = 2GB. 6 of these columns should take at most 12GB of RAM
@@ -111,6 +123,9 @@ fn get_cf_options<C: 'static + Column + ColumnName>(
     );
     cf_options.set_max_bytes_for_level_base(total_size_base);
     cf_options.set_target_file_size_base(file_size_base);
+    cf_options.set_compaction_filter_factory(
+        PurgedSlotFilterFactory::<C>::new(oldest_slot.clone()),
+    );
 
     let disable_auto_compactions =
         should_disable_auto_compactions(&options.access_type);
