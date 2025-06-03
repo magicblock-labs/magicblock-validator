@@ -3,7 +3,7 @@ use std::{cmp::min, sync::Arc, time::Duration};
 use log::{error, info, warn};
 use magicblock_core::traits::FinalityProvider;
 use tokio::{
-    task::{JoinError, JoinHandle},
+    task::{JoinError, JoinHandle, JoinSet},
     time::interval,
 };
 use tokio_util::sync::CancellationToken;
@@ -71,7 +71,7 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
                     }
 
                     match self.estimate_truncation_range(current_size) {
-                        Ok(Some((from_slot, to_slot))) => Self::truncate_slot_range(&self.ledger, from_slot, to_slot),
+                        Ok(Some((from_slot, to_slot))) => Self::truncate_slot_range(&self.ledger, from_slot, to_slot).await,
                         Ok(None) => warn!("Could not estimate truncation range"),
                         Err(err) => error!("Failed to estimate truncation range: {:?}", err),
                     }
@@ -144,7 +144,7 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
 
     /// Utility function for splitting truncation into smaller chunks
     /// Cleans slots [from_slot; to_slot] inclusive range
-    pub fn truncate_slot_range(
+    pub async fn truncate_slot_range(
         ledger: &Arc<Ledger>,
         from_slot: u64,
         to_slot: u64,
@@ -178,11 +178,11 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
         // Flush memtables with tombstones prior to compaction
         ledger.flush();
 
-        Self::compact_slot_range(ledger, from_slot, to_slot);
+        Self::compact_slot_range(ledger, from_slot, to_slot).await;
     }
 
     /// Synchronous utility function that triggers and awaits compaction on all the columns
-    pub fn compact_slot_range(
+    pub async fn compact_slot_range(
         ledger: &Arc<Ledger>,
         from_slot: u64,
         to_slot: u64,
@@ -192,29 +192,49 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
             return;
         }
 
-        // Available range compaction
-        ledger.compact_slot_range_cf::<Blocktime>(
-            Some(from_slot),
-            Some(to_slot + 1),
-        );
-        ledger.compact_slot_range_cf::<Blockhash>(
-            Some(from_slot),
-            Some(to_slot + 1),
-        );
-        ledger.compact_slot_range_cf::<PerfSamples>(
-            Some(from_slot),
-            Some(to_slot + 1),
-        );
-        ledger.compact_slot_range_cf::<SlotSignatures>(
-            Some((from_slot, u32::MIN)),
-            Some((to_slot, u32::MAX)),
-        );
+        // Compaction can be run concurrently for different cf
+        // but it utilizes rocksdb threads, in order not to drain
+        // our tokio rt threads, we split the effort in just 3 tasks
+        let mut join_set = JoinSet::new();
+        join_set.spawn({
+            let ledger = ledger.clone();
+            async move {
+                ledger.compact_slot_range_cf::<Blocktime>(
+                    Some(from_slot),
+                    Some(to_slot + 1),
+                );
+                ledger.compact_slot_range_cf::<Blockhash>(
+                    Some(from_slot),
+                    Some(to_slot + 1),
+                );
+                ledger.compact_slot_range_cf::<PerfSamples>(
+                    Some(from_slot),
+                    Some(to_slot + 1),
+                );
+                ledger.compact_slot_range_cf::<SlotSignatures>(
+                    Some((from_slot, u32::MIN)),
+                    Some((to_slot, u32::MAX)),
+                );
+            }
+        });
 
         // Can not compact with specific range
-        ledger.compact_slot_range_cf::<TransactionStatus>(None, None);
-        ledger.compact_slot_range_cf::<Transaction>(None, None);
-        ledger.compact_slot_range_cf::<TransactionMemos>(None, None);
-        ledger.compact_slot_range_cf::<AddressSignatures>(None, None);
+        join_set.spawn({
+            let ledger = ledger.clone();
+            async move {
+                ledger.compact_slot_range_cf::<TransactionStatus>(None, None);
+                ledger.compact_slot_range_cf::<Transaction>(None, None);
+            }
+        });
+        join_set.spawn({
+            let ledger = ledger.clone();
+            async move {
+                ledger.compact_slot_range_cf::<TransactionMemos>(None, None);
+                ledger.compact_slot_range_cf::<AddressSignatures>(None, None);
+            }
+        });
+
+        let _ = join_set.join_all().await;
     }
 }
 
