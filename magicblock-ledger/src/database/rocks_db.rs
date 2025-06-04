@@ -276,7 +276,10 @@ mod tests {
         // The names and descriptors don't need to be in the same order for our use cases;
         // however, there should be the same number of each. For example, adding a new column
         // should update both lists.
-        assert_eq!(columns().len(), cf_descriptors(&path, &options, &Arc::new(0.into())).len());
+        assert_eq!(
+            columns().len(),
+            cf_descriptors(&path, &options, &Arc::new(0.into())).len()
+        );
     }
 
     #[test]
