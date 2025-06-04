@@ -174,7 +174,7 @@ impl DomainRegistryManager {
         let recent_blockhash = self
             .client
             .get_latest_blockhash()
-            .map_err(anyhow::Error::from)?;
+            .context("Failed to get latest blockhash")?;
         let transaction = Transaction::new_signed_with_payer(
             &[instruction],
             Some(&payer.pubkey()),
@@ -184,7 +184,7 @@ impl DomainRegistryManager {
 
         self.client
             .send_and_confirm_transaction(&transaction)
-            .map_err(anyhow::Error::from)?;
+            .context("Failed to send and confirm transaction")?;
         Ok(())
     }
 

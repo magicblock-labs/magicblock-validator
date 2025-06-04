@@ -279,12 +279,8 @@ impl MagicValidator {
             RemoteAccountFetcherWorker::new(remote_rpc_config.clone());
 
         let remote_account_updates_worker = RemoteAccountUpdatesWorker::new(
-            // We'll maintain 3 connections constantly (those could be on different nodes if we wanted to)
-            vec![
-                remote_rpc_config.clone(),
-                remote_rpc_config.clone(),
-                remote_rpc_config.clone(),
-            ],
+            accounts_config.remote_cluster.ws_urls(),
+            remote_rpc_config.commitment(),
             // We'll kill/refresh one connection every 50 minutes
             Duration::from_secs(60 * 50),
         );
@@ -634,7 +630,7 @@ impl MagicValidator {
             validator_info,
         )
         .map_err(|err| {
-            ApiError::FailedToRegisterValidatorOnChain(err.to_string())
+            ApiError::FailedToRegisterValidatorOnChain(format!("{:?}", err))
         })
     }
 
@@ -647,7 +643,7 @@ impl MagicValidator {
             &validator_keypair,
         )
         .map_err(|err| {
-            ApiError::FailedToUnregisterValidatorOnChain(err.to_string())
+            ApiError::FailedToUnregisterValidatorOnChain(format!("{err:#}"))
         })
     }
 

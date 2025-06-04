@@ -6,16 +6,15 @@ use std::{
     sync::{Arc, RwLock},
 };
 
-use conjunto_transwise::RpcProviderConfig;
-use futures_util::StreamExt;
+use futures_util::{stream::FuturesUnordered, Stream, StreamExt};
 use log::*;
 use magicblock_metrics::metrics;
-use solana_account_decoder::{UiAccountEncoding, UiDataSliceConfig};
+use solana_account_decoder::{UiAccount, UiAccountEncoding, UiDataSliceConfig};
 use solana_pubsub_client::nonblocking::pubsub_client::PubsubClient;
-use solana_rpc_client_api::config::RpcAccountInfoConfig;
+use solana_rpc_client_api::{config::RpcAccountInfoConfig, response::Response};
 use solana_sdk::{
     clock::{Clock, Slot},
-    commitment_config::CommitmentConfig,
+    commitment_config::{CommitmentConfig, CommitmentLevel},
     pubkey::Pubkey,
     sysvar::clock,
 };
@@ -23,6 +22,13 @@ use thiserror::Error;
 use tokio::sync::mpsc::Receiver;
 use tokio_stream::StreamMap;
 use tokio_util::sync::CancellationToken;
+
+type BoxFn = Box<
+    dyn FnOnce() -> Pin<Box<dyn Future<Output = ()> + Send + 'static>> + Send,
+>;
+
+type SubscriptionStream =
+    Pin<Box<dyn Stream<Item = Response<UiAccount>> + Send + 'static>>;
 
 #[derive(Debug, Error)]
 pub enum RemoteAccountUpdatesShardError {
@@ -35,7 +41,8 @@ pub enum RemoteAccountUpdatesShardError {
 
 pub struct RemoteAccountUpdatesShard {
     shard_id: String,
-    rpc_provider_config: RpcProviderConfig,
+    url: String,
+    commitment: Option<CommitmentLevel>,
     monitoring_request_receiver: Receiver<(Pubkey, bool)>,
     first_subscribed_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
     last_known_update_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
@@ -44,14 +51,16 @@ pub struct RemoteAccountUpdatesShard {
 impl RemoteAccountUpdatesShard {
     pub fn new(
         shard_id: String,
-        rpc_provider_config: RpcProviderConfig,
+        url: String,
+        commitment: Option<CommitmentLevel>,
         monitoring_request_receiver: Receiver<(Pubkey, bool)>,
         first_subscribed_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
         last_known_update_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
     ) -> Self {
         Self {
             shard_id,
-            rpc_provider_config,
+            url,
+            commitment,
             monitoring_request_receiver,
             first_subscribed_slots,
             last_known_update_slots,
@@ -64,15 +73,11 @@ impl RemoteAccountUpdatesShard {
     ) -> Result<(), RemoteAccountUpdatesShardError> {
         // Create a pubsub client
         info!("Shard {}: Starting", self.shard_id);
-        let ws_url = self.rpc_provider_config.ws_url();
-        let pubsub_client = PubsubClient::new(ws_url)
-            .await
-            .map_err(RemoteAccountUpdatesShardError::PubsubClientError)?;
+        let ws_url = self.url.as_str();
         // For every account, we only want the updates, not the actual content of the accounts
-        let rpc_account_info_config = Some(RpcAccountInfoConfig {
+        let config = RpcAccountInfoConfig {
             commitment: self
-                .rpc_provider_config
-                .commitment()
+                .commitment
                 .map(|commitment| CommitmentConfig { commitment }),
             encoding: Some(UiAccountEncoding::Base64),
             data_slice: Some(UiDataSliceConfig {
@@ -80,21 +85,13 @@ impl RemoteAccountUpdatesShard {
                 length: 0,
             }),
             min_context_slot: None,
-        });
+        };
+        let mut pool = PubsubPool::new(ws_url, config).await?;
         // Subscribe to the clock from the RPC (to figure out the latest slot)
-        let (mut clock_stream, clock_unsubscribe) = pubsub_client
-            .account_subscribe(&clock::ID, rpc_account_info_config.clone())
-            .await
-            .map_err(RemoteAccountUpdatesShardError::PubsubClientError)?;
+        let mut clock_stream = pool.subscribe(clock::ID).await?;
         let mut clock_slot = 0;
         // We'll store useful maps for each of the account subscriptions
         let mut account_streams = StreamMap::new();
-        // rust compiler is not yet smart enough to figure out the exact type
-        type BoxFn = Box<
-            dyn FnOnce() -> Pin<Box<dyn Future<Output = ()> + Send + 'static>>
-                + Send,
-        >;
-        let mut account_unsubscribes: HashMap<Pubkey, BoxFn> = HashMap::new();
         const LOG_CLOCK_FREQ: u64 = 100;
         let mut log_clock_count = 0;
 
@@ -118,19 +115,17 @@ impl RemoteAccountUpdatesShard {
                     } else {
                         warn!("Shard {}: Received empty clock data", self.shard_id);
                     }
+                    self.try_to_override_last_known_update_slot(clock::ID, clock_slot);
                 }
                 // When we receive a message to start monitoring an account
                 Some((pubkey, unsub)) = self.monitoring_request_receiver.recv() => {
                     if unsub {
-                        let Some(request) = account_unsubscribes.remove(&pubkey) else {
-                            continue;
-                        };
                         account_streams.remove(&pubkey);
                         metrics::set_subscriptions_count(account_streams.len(), &self.shard_id);
-                        request().await;
+                        pool.unsubscribe(&pubkey).await;
                         continue;
                     }
-                    if account_unsubscribes.contains_key(&pubkey) {
+                    if pool.subscribed(&pubkey) {
                         continue;
                     }
                     debug!(
@@ -139,12 +134,10 @@ impl RemoteAccountUpdatesShard {
                         pubkey,
                         clock_slot
                     );
-                    let (stream, unsubscribe) = pubsub_client
-                        .account_subscribe(&pubkey, rpc_account_info_config.clone())
-                        .await
-                        .map_err(RemoteAccountUpdatesShardError::PubsubClientError)?;
+                    let stream = pool
+                        .subscribe(pubkey)
+                        .await?;
                     account_streams.insert(pubkey, stream);
-                    account_unsubscribes.insert(pubkey, unsubscribe);
                     metrics::set_subscriptions_count(account_streams.len(), &self.shard_id);
                     self.try_to_override_first_subscribed_slot(pubkey, clock_slot);
                 }
@@ -164,17 +157,9 @@ impl RemoteAccountUpdatesShard {
             }
         }
         // Cleanup all subscriptions and wait for proper shutdown
-        for (pubkey, account_unsubscribes) in account_unsubscribes.into_iter() {
-            info!(
-                "Shard {}: Account monitoring killed: {:?}",
-                self.shard_id, pubkey
-            );
-            account_unsubscribes().await;
-        }
-        clock_unsubscribe().await;
         drop(account_streams);
         drop(clock_stream);
-        pubsub_client.shutdown().await?;
+        pool.shutdown().await;
         info!("Shard {}: Stopped", self.shard_id);
         // Done
         Ok(())
@@ -234,5 +219,100 @@ impl RemoteAccountUpdatesShard {
                 }
             }
         }
+    }
+}
+
+struct PubsubPool {
+    clients: Vec<PubSubConnection>,
+    unsubscribes: HashMap<Pubkey, (usize, BoxFn)>,
+    config: RpcAccountInfoConfig,
+}
+
+impl PubsubPool {
+    async fn new(
+        url: &str,
+        config: RpcAccountInfoConfig,
+    ) -> Result<Self, RemoteAccountUpdatesShardError> {
+        // 8 is pretty much arbitrary, but a sane value for the number
+        // of connections per RPC upstream, we don't overcomplicate things
+        // here, as the whole cloning pipeline will be rewritten quite soon
+        const CONNECTIONS_PER_POOL: usize = 8;
+        let mut clients = Vec::with_capacity(CONNECTIONS_PER_POOL);
+        let mut connections: FuturesUnordered<_> = (0..CONNECTIONS_PER_POOL)
+            .map(|_| PubSubConnection::new(url))
+            .collect();
+        while let Some(c) = connections.next().await {
+            clients.push(c?);
+        }
+        Ok(Self {
+            clients,
+            unsubscribes: HashMap::new(),
+            config,
+        })
+    }
+
+    async fn subscribe(
+        &mut self,
+        pubkey: Pubkey,
+    ) -> Result<SubscriptionStream, RemoteAccountUpdatesShardError> {
+        let (index, client) = self
+            .clients
+            .iter_mut()
+            .enumerate()
+            .min_by(|a, b| a.1.subs.cmp(&b.1.subs))
+            .expect("clients vec is always greater than 0");
+        let (stream, unsubscribe) = client
+            .inner
+            .account_subscribe(&pubkey, Some(self.config.clone()))
+            .await
+            .map_err(RemoteAccountUpdatesShardError::PubsubClientError)?;
+        client.subs += 1;
+        // SAFETY:
+        // we never drop the PubsubPool before the returned subscription stream
+        // so the lifetime of the stream can be safely extended to 'static
+        #[allow(clippy::missing_transmute_annotations)]
+        let stream = unsafe { std::mem::transmute(stream) };
+        self.unsubscribes.insert(pubkey, (index, unsubscribe));
+        Ok(stream)
+    }
+
+    async fn unsubscribe(&mut self, pubkey: &Pubkey) {
+        let Some((index, callback)) = self.unsubscribes.remove(pubkey) else {
+            return;
+        };
+        callback().await;
+        let Some(client) = self.clients.get_mut(index) else {
+            return;
+        };
+        client.subs = client.subs.saturating_sub(1);
+    }
+
+    fn subscribed(&mut self, pubkey: &Pubkey) -> bool {
+        self.unsubscribes.contains_key(pubkey)
+    }
+
+    async fn shutdown(&mut self) {
+        // Cleanup all subscriptions and wait for proper shutdown
+        for (pubkey, (_, callback)) in self.unsubscribes.drain() {
+            info!("Account monitoring killed: {:?}", pubkey);
+            callback().await;
+        }
+        for client in self.clients.drain(..) {
+            let _ = client.inner.shutdown().await;
+        }
+    }
+}
+
+struct PubSubConnection {
+    inner: PubsubClient,
+    subs: usize,
+}
+
+impl PubSubConnection {
+    async fn new(url: &str) -> Result<Self, RemoteAccountUpdatesShardError> {
+        let inner = PubsubClient::new(url)
+            .await
+            .map_err(RemoteAccountUpdatesShardError::PubsubClientError)?;
+        Ok(Self { inner, subs: 0 })
     }
 }

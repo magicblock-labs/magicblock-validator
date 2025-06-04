@@ -30,10 +30,8 @@ ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-ro
 integration-test-tools = { path = "test-tools" }
 log = "0.4.20"
 magicblock-api = { path = "../magicblock-api" }
-magicblock-accounts-db = { path = "../magicblock-accounts-db", features = [
-  "dev-tools",
-] }
-magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "eba7644", default-features = false }
+magicblock-accounts-db = { path = "../magicblock-accounts-db", features = [ "dev-tools" ] }
+magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "ea04d46", default-features = false}
 magicblock-config = { path = "../magicblock-config" }
 magicblock-core = { path = "../magicblock-core" }
 magicblock-committor-program = { path = "../magicblock-committor-program", features = [
