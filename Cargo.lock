@@ -3553,6 +3553,7 @@ version = "0.1.2"
 dependencies = [
  "bincode",
  "conjunto-transwise",
+ "env_logger 0.11.6",
  "futures-util",
  "log",
  "magicblock-metrics",
