@@ -74,7 +74,15 @@ pub enum RemoteConfig {
 // LifecycleMode
 // -----------------
 #[derive(
-    Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, EnumString,
+    Debug,
+    Copy,
+    Clone,
+    Default,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    EnumString,
 )]
 #[serde(rename_all = "kebab-case")]
 #[strum(serialize_all = "kebab-case")]

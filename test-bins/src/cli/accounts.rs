@@ -81,7 +81,7 @@ impl AccountsArgs {
 
         config.accounts.lifecycle = self
             .lifecycle
-            .unwrap_or(config.accounts.lifecycle.clone().into())
+            .unwrap_or(config.accounts.lifecycle.into())
             .into();
 
         config.accounts.commit = CommitStrategy {

@@ -81,8 +81,13 @@ async fn main() {
     };
 
     debug!("{:#?}", config);
-    let mut api =
-        MagicValidator::try_from_config(config, cli.keypair.0).unwrap();
+    let mut api = match MagicValidator::try_from_config(config, cli.keypair.0) {
+        Ok(api) => api,
+        Err(e) => {
+            error!("Failed to create MagicValidator: {e}");
+            std::process::exit(1);
+        }
+    };
     debug!("Created API .. starting things up");
 
     // We need to create and hold on to the ledger lock here in order to keep the
