@@ -76,7 +76,9 @@ pub async fn map_committor_request_result<T>(
     res.await
         .map_err(|err| {
             // Send request error
-            AccountClonerError::CommittorSerivceError(format!("{:?}", err))
+            AccountClonerError::CommittorSerivceError(format!(
+                "error sending request {err:?}"
+            ))
         })?
         .map_err(|err| {
             // Commit error

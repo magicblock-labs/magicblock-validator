@@ -171,54 +171,51 @@ pub fn split_changesets_by_commit_strategy(
     let changeset_bundles = changeset.into_small_changeset_bundles();
     for bundle in changeset_bundles.bundles.into_iter() {
         let commit_strategy =
-            CommitBundleStrategy::try_from((bundle, finalize));
+            CommitBundleStrategy::try_from((bundle, finalize))?;
         match commit_strategy {
-            Ok(CommitBundleStrategy::Args(bundle)) => {
+            CommitBundleStrategy::Args(bundle) => {
                 add_to_changeset(
                     &mut args_changeset,
                     &accounts_to_undelegate,
                     bundle,
                 );
             }
-            Ok(CommitBundleStrategy::ArgsIncludeFinalize(bundle)) => {
+            CommitBundleStrategy::ArgsIncludeFinalize(bundle) => {
                 add_to_changeset(
                     &mut args_including_finalize_changeset,
                     &accounts_to_undelegate,
                     bundle,
                 );
             }
-            Ok(CommitBundleStrategy::ArgsWithLookupTable(bundle)) => {
+            CommitBundleStrategy::ArgsWithLookupTable(bundle) => {
                 add_to_changeset(
                     &mut args_with_lookup_changeset,
                     &accounts_to_undelegate,
                     bundle,
                 );
             }
-            Ok(CommitBundleStrategy::ArgsIncludeFinalizeWithLookupTable(
+            CommitBundleStrategy::ArgsIncludeFinalizeWithLookupTable(
                 bundle,
-            )) => {
+            ) => {
                 add_to_changeset(
                     &mut args_including_finalize_with_lookup_changeset,
                     &accounts_to_undelegate,
                     bundle,
                 );
             }
-            Ok(CommitBundleStrategy::FromBuffer(bundle)) => {
+            CommitBundleStrategy::FromBuffer(bundle) => {
                 add_to_changeset(
                     &mut from_buffer_changeset,
                     &accounts_to_undelegate,
                     bundle,
                 );
             }
-            Ok(CommitBundleStrategy::FromBufferWithLookupTable(bundle)) => {
+            CommitBundleStrategy::FromBufferWithLookupTable(bundle) => {
                 add_to_changeset(
                     &mut from_buffer_with_lookup_changeset,
                     &accounts_to_undelegate,
                     bundle,
                 );
-            }
-            Err(err) => {
-                return Err(err);
             }
         }
     }

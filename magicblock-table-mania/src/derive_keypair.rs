@@ -1,6 +1,12 @@
 use ed25519_dalek::{PublicKey, SecretKey};
 use solana_sdk::{clock::Slot, signature::Keypair, signer::Signer};
 
+/// This derives a keypair from the provided authority keypair, and given seeds which
+/// here are slot and sub_slot.
+/// Its goal is to be deterministic such that a keypair can be _found_ at a later date
+/// given the same authority, cycling through slot/sub_slot combinations.
+/// Using slot and sub_slot as seeds allows is only one option and we may change this
+/// to use a different source for seeds in the future (as long as they are deterministic).
 pub fn derive_keypair(
     authority: &Keypair,
     slot: Slot,
