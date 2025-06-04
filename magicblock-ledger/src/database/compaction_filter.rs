@@ -19,9 +19,9 @@ use solana_sdk::clock::Slot;
 use crate::database::columns::{Column, ColumnName};
 
 /// Factory that produces PurgedSlotFilter
-/// This struct is used for deleting truncated slots from DB
-/// RockDB during scheduled compaction calls Factor to create Filter
-/// We maintain oldest_slot that signals what slots were truncated and safe to remove
+/// This struct is used for deleting truncated slots from the DB during
+/// RocksDB's scheduled compaction. The Factory creates the Filter.
+/// We maintain oldest_slot that signals what slots were truncated and are safe to remove
 pub(crate) struct PurgedSlotFilterFactory<C: Column + ColumnName> {
     oldest_slot: Arc<AtomicU64>,
     name: CString,
