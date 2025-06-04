@@ -17,7 +17,7 @@ pub struct ValidatorConfigArgs {
     pub sigverify: Option<bool>,
 
     /// Fully Qualified Domain Name. If specified it will also register ER on chain
-    #[arg(long = "validator-fdqn", env = "VALIDATOR_FDQN")]
+    #[arg(long = "validator-fdqn", env = "VALIDATOR_FQDN")]
     pub fdqn: Option<String>,
 
     /// Base fees for transactions.

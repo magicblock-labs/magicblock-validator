@@ -151,7 +151,7 @@ mod tests {
             set_env_var("VALIDATOR_MILLIS_PER_SLOT", "50");
         let validator_sig_verify = set_env_var("VALIDATOR_SIG_VERIFY", "true");
         let validator_base_fees = set_env_var("VALIDATOR_BASE_FEES", "1000000");
-        let validator_fdqn = set_env_var("VALIDATOR_FDQN", "example.com");
+        let validator_fqdn = set_env_var("VALIDATOR_FQDN", "example.com");
         let validator_country_code =
             set_env_var("VALIDATOR_COUNTRY_CODE", "AU");
         let metrics_enabled = set_env_var("METRICS_ENABLED", "true");
@@ -204,7 +204,7 @@ mod tests {
         assert_eq!(config.ledger.path, Some(ledger_path.to_string()));
         assert_eq!(config.ledger.size, ledger_size.parse::<u64>().unwrap());
         assert_eq!(config.programs, vec![]);
-        assert_eq!(config.validator.fdqn, Some(validator_fdqn.to_string()));
+        assert_eq!(config.validator.fdqn, Some(validator_fqdn.to_string()));
         assert_eq!(
             config.validator.millis_per_slot,
             validator_millis_per_slot.parse::<u64>().unwrap()

@@ -230,7 +230,7 @@ impl EphemeralConfig {
             })
         }
 
-        if let Ok(fdqn) = env::var("VALIDATOR_FDQN") {
+        if let Ok(fdqn) = env::var("VALIDATOR_FQDN") {
             config.validator.fdqn = Some(fdqn)
         }
 
