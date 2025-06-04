@@ -1,9 +1,10 @@
+use integration_test_tools::loaded_accounts::LoadedAccounts;
 use integration_test_tools::validator::start_test_validator_with_config;
 use integration_test_tools::{
-    toml_to_args::{config_to_args, rpc_port_from_config, ProgramLoader},
+    toml_to_args::ProgramLoader,
     validator::{
         resolve_workspace_dir, start_magic_block_validator_with_config,
-        wait_for_validator, TestRunnerPaths,
+        TestRunnerPaths,
     },
 };
 use std::{
@@ -17,14 +18,12 @@ use test_runner::cleanup::{cleanup_devnet_only, cleanup_validators};
 
 pub fn main() {
     let manifest_dir = std::env::var("CARGO_MANIFEST_DIR").unwrap();
-
     let Ok((security_output, scenarios_output)) =
         run_schedule_commit_tests(&manifest_dir)
     else {
-        // TODO: why we don't report Error case lower?
+        // If any test run panics (i.e. not just a failing test) then we bail
         return;
     };
-
     let Ok(issues_frequent_commits_output) =
         run_issues_frequent_commmits_tests(&manifest_dir)
     else {
@@ -44,6 +43,12 @@ pub fn main() {
         return;
     };
 
+    let Ok((table_mania_output, committor_output)) =
+        run_table_mania_and_committor_tests(&manifest_dir)
+    else {
+        return;
+    };
+
     // Assert that all tests passed
     assert_cargo_tests_passed(security_output);
     assert_cargo_tests_passed(scenarios_output);
@@ -51,6 +56,8 @@ pub fn main() {
     assert_cargo_tests_passed(issues_frequent_commits_output);
     assert_cargo_tests_passed(restore_ledger_output);
     assert_cargo_tests_passed(magicblock_api_output);
+    assert_cargo_tests_passed(table_mania_output);
+    assert_cargo_tests_passed(committor_output);
 }
 
 // -----------------
@@ -60,11 +67,14 @@ fn run_restore_ledger_tests(
     manifest_dir: &str,
 ) -> Result<Output, Box<dyn Error>> {
     eprintln!("======== RUNNING RESTORE LEDGER TESTS ========");
+    let loaded_chain_accounts =
+        LoadedAccounts::with_delegation_program_test_authority();
     // The ledger tests manage their own ephem validator so all we start up here
     // is devnet
     let mut devnet_validator = match start_validator(
         "restore-ledger-conf.devnet.toml",
         ValidatorCluster::Chain(None),
+        &loaded_chain_accounts,
     ) {
         Some(validator) => validator,
         None => {
@@ -89,6 +99,57 @@ fn run_restore_ledger_tests(
     Ok(output)
 }
 
+fn run_table_mania_and_committor_tests(
+    manifest_dir: &str,
+) -> Result<(Output, Output), Box<dyn Error>> {
+    eprintln!("======== Starting DEVNET Validator for TableMania and Committor ========");
+
+    let loaded_chain_accounts =
+        LoadedAccounts::with_delegation_program_test_authority();
+
+    let mut devnet_validator = match start_validator(
+        "committor-conf.devnet.toml",
+        ValidatorCluster::Chain(None),
+        &loaded_chain_accounts,
+    ) {
+        Some(validator) => validator,
+        None => {
+            panic!("Failed to start devnet validator properly");
+        }
+    };
+
+    // NOTE: the table mania and committor tests run directly against
+    // a chain validator therefore no ephemeral validator needs to be started
+
+    let test_table_mania_dir =
+        format!("{}/../{}", manifest_dir, "test-table-mania");
+    let table_mania_test_output =
+        match run_test(test_table_mania_dir, Default::default()) {
+            Ok(output) => output,
+            Err(err) => {
+                eprintln!("Failed to run table-mania: {:?}", err);
+                cleanup_devnet_only(&mut devnet_validator);
+                return Err(err.into());
+            }
+        };
+
+    let test_committor_dir =
+        format!("{}/../{}", manifest_dir, "schedulecommit/committor-service");
+    eprintln!("Running committor tests in {}", test_committor_dir);
+    let committor_test_output =
+        match run_test(test_committor_dir, Default::default()) {
+            Ok(output) => output,
+            Err(err) => {
+                eprintln!("Failed to run committor: {:?}", err);
+                cleanup_devnet_only(&mut devnet_validator);
+                return Err(err.into());
+            }
+        };
+    cleanup_devnet_only(&mut devnet_validator);
+
+    Ok((table_mania_test_output, committor_test_output))
+}
+
 fn run_schedule_commit_tests(
     manifest_dir: &str,
 ) -> Result<(Output, Output), Box<dyn Error>> {
@@ -96,10 +157,14 @@ fn run_schedule_commit_tests(
         "======== Starting DEVNET Validator for Scenarios + Security ========"
     );
 
+    let loaded_chain_accounts =
+        LoadedAccounts::with_delegation_program_test_authority();
+
     // Start validators via `cargo run --release  -- <config>
     let mut devnet_validator = match start_validator(
         "schedulecommit-conf.devnet.toml",
         ValidatorCluster::Chain(None),
+        &loaded_chain_accounts,
     ) {
         Some(validator) => validator,
         None => {
@@ -115,6 +180,7 @@ fn run_schedule_commit_tests(
     let mut ephem_validator = match start_validator(
         "schedulecommit-conf-fees.ephem.toml",
         ValidatorCluster::Ephem,
+        &loaded_chain_accounts,
     ) {
         Some(validator) => validator,
         None => {
@@ -160,9 +226,12 @@ fn run_issues_frequent_commmits_tests(
     manifest_dir: &str,
 ) -> Result<Output, Box<dyn Error>> {
     eprintln!("======== RUNNING ISSUES TESTS - Frequent Commits ========");
+    let loaded_chain_accounts =
+        LoadedAccounts::with_delegation_program_test_authority();
     let mut devnet_validator = match start_validator(
         "schedulecommit-conf.devnet.toml",
         ValidatorCluster::Chain(None),
+        &loaded_chain_accounts,
     ) {
         Some(validator) => validator,
         None => {
@@ -172,6 +241,7 @@ fn run_issues_frequent_commmits_tests(
     let mut ephem_validator = match start_validator(
         "schedulecommit-conf.ephem.frequent-commits.toml",
         ValidatorCluster::Ephem,
+        &loaded_chain_accounts,
     ) {
         Some(validator) => validator,
         None => {
@@ -202,9 +272,13 @@ fn run_issues_frequent_commmits_tests(
 
 fn run_cloning_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
     eprintln!("======== RUNNING CLONING TESTS ========");
+    let loaded_chain_accounts =
+        LoadedAccounts::with_delegation_program_test_authority();
+
     let mut devnet_validator = match start_validator(
         "cloning-conf.devnet.toml",
         ValidatorCluster::Chain(Some(ProgramLoader::UpgradeableProgram)),
+        &loaded_chain_accounts,
     ) {
         Some(validator) => validator,
         None => {
@@ -214,6 +288,7 @@ fn run_cloning_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
     let mut ephem_validator = match start_validator(
         "cloning-conf.ephem.toml",
         ValidatorCluster::Ephem,
+        &loaded_chain_accounts,
     ) {
         Some(validator) => validator,
         None => {
@@ -332,6 +407,7 @@ impl ValidatorCluster {
 fn start_validator(
     config_file: &str,
     cluster: ValidatorCluster,
+    loaded_chain_accounts: &LoadedAccounts,
 ) -> Option<process::Child> {
     let log_suffix = cluster.log_suffix();
     let test_runner_paths = resolve_paths(config_file);
@@ -343,12 +419,14 @@ fn start_validator(
             start_test_validator_with_config(
                 &test_runner_paths,
                 program_loader,
+                loaded_chain_accounts,
                 log_suffix,
             )
         }
         _ => start_magic_block_validator_with_config(
             &test_runner_paths,
             log_suffix,
+            loaded_chain_accounts,
             false,
         ),
     }
