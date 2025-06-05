@@ -13,8 +13,9 @@ use std::{
 use conjunto_transwise::RpcProviderConfig;
 use log::*;
 use magicblock_account_cloner::{
-    standard_blacklisted_accounts, CloneOutputMap, RemoteAccountClonerClient,
-    RemoteAccountClonerWorker, ValidatorCollectionMode,
+    map_committor_request_result, standard_blacklisted_accounts,
+    CloneOutputMap, RemoteAccountClonerClient, RemoteAccountClonerWorker,
+    ValidatorCollectionMode,
 };
 use magicblock_account_dumper::AccountDumperBank;
 use magicblock_account_fetcher::{
@@ -36,6 +37,9 @@ use magicblock_bank::{
     geyser::{AccountsUpdateNotifier, TransactionNotifier},
     program_loader::load_programs_into_bank,
     transaction_logs::TransactionLogCollectorFilter,
+};
+use magicblock_committor_service::{
+    config::ChainConfig, CommittorService, ComputeBudgetConfig,
 };
 use magicblock_config::{EphemeralConfig, LifecycleMode, ProgramConfig};
 use magicblock_geyser_plugin::rpc::GeyserRpcService;
@@ -69,9 +73,14 @@ use solana_geyser_plugin_manager::{
     geyser_plugin_manager::GeyserPluginManager,
     slot_status_notifier::SlotStatusNotifierImpl,
 };
+use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
-    clock::Slot, commitment_config::CommitmentLevel,
-    genesis_config::GenesisConfig, pubkey::Pubkey, signature::Keypair,
+    clock::Slot,
+    commitment_config::{CommitmentConfig, CommitmentLevel},
+    genesis_config::GenesisConfig,
+    native_token::LAMPORTS_PER_SOL,
+    pubkey::Pubkey,
+    signature::Keypair,
     signer::Signer,
 };
 use tempfile::TempDir;
@@ -143,10 +152,12 @@ pub struct MagicValidator {
             RemoteAccountFetcherClient,
             RemoteAccountUpdatesClient,
             AccountDumperBank,
+            CommittorService,
         >,
     >,
     remote_account_cloner_handle: Option<tokio::task::JoinHandle<()>>,
     accounts_manager: Arc<AccountsManager>,
+    committor_service: Arc<CommittorService>,
     transaction_listener: GeyserTransactionNotifyListener,
     rpc_service: JsonRpcService,
     _metrics: Option<(MetricsService, tokio::task::JoinHandle<()>)>,
@@ -163,7 +174,7 @@ impl MagicValidator {
         config: MagicValidatorConfig,
         identity_keypair: Keypair,
     ) -> ApiResult<Self> {
-        // TODO(thlorenz): @@ this will need to be recreated on each start
+        // TODO(thlorenz): this will need to be recreated on each start
         let token = CancellationToken::new();
 
         let (geyser_manager, geyser_rpc_service) =
@@ -187,22 +198,23 @@ impl MagicValidator {
             config.validator_config.ledger.reset,
         )?;
 
-        let exit = Arc::<AtomicBool>::default();
         // SAFETY:
         // this code will never panic as the ledger_path always appends the
         // rocksdb directory to whatever path is preconfigured for the ledger,
         // see `Ledger::do_open`, thus this path will always have a parent
-        let adb_path = ledger
+        let ledger_parent_path = ledger
             .ledger_path()
             .parent()
             .expect("ledger_path didn't have a parent, should never happen");
+
+        let exit = Arc::<AtomicBool>::default();
         let bank = Self::init_bank(
             Some(geyser_manager.clone()),
             &genesis_config,
             &config.validator_config.accounts.db,
             config.validator_config.validator.millis_per_slot,
             validator_pubkey,
-            adb_path,
+            ledger_parent_path,
             ledger.get_max_blockhash().map(|(slot, _)| slot)?,
         )?;
 
@@ -258,14 +270,10 @@ impl MagicValidator {
             None
         };
 
-        let accounts_config =
-            try_convert_accounts_config(&config.validator_config.accounts)
-                .map_err(ApiError::ConfigError)?;
-
-        let remote_rpc_config = RpcProviderConfig::new(
-            try_rpc_cluster_from_cluster(&accounts_config.remote_cluster)?,
-            Some(CommitmentLevel::Confirmed),
-        );
+        let (accounts_config, remote_rpc_config) =
+            try_get_remote_accounts_and_rpc_config(
+                &config.validator_config.accounts,
+            )?;
 
         let remote_account_fetcher_worker =
             RemoteAccountFetcherWorker::new(remote_rpc_config.clone());
@@ -295,11 +303,32 @@ impl MagicValidator {
             &faucet_keypair.pubkey(),
         );
 
+        let committor_persist_path =
+            ledger_parent_path.join("committor_service.sqlite");
+        debug!(
+            "Committor service persists to: {}",
+            committor_persist_path.display()
+        );
+        let committor_service = Arc::new(CommittorService::try_start(
+            identity_keypair.insecure_clone(),
+            committor_persist_path,
+            ChainConfig {
+                rpc_uri: remote_rpc_config.url().to_string(),
+                commitment: remote_rpc_config
+                    .commitment()
+                    .unwrap_or(CommitmentLevel::Confirmed),
+                compute_budget_config: ComputeBudgetConfig::new(
+                    accounts_config.commit_compute_unit_price,
+                ),
+            },
+        )?);
+
         let remote_account_cloner_worker = RemoteAccountClonerWorker::new(
             bank_account_provider,
             remote_account_fetcher_client,
             remote_account_updates_client,
             account_dumper_bank,
+            committor_service.clone(),
             accounts_config.allowed_program_ids,
             blacklisted_accounts,
             accounts_config.payer_init_lamports,
@@ -357,6 +386,7 @@ impl MagicValidator {
             remote_account_cloner_handle: None,
             pubsub_handle: Default::default(),
             pubsub_close_handle: Default::default(),
+            committor_service,
             sample_performance_service: None,
             pubsub_config,
             token,
@@ -617,12 +647,43 @@ impl MagicValidator {
         })
     }
 
+    async fn ensure_validator_funded_on_chain(&self) -> ApiResult<()> {
+        // NOTE: 5 SOL seems reasonable, but we may require a different amount in the future
+        const MIN_BALANCE_SOL: u64 = 5;
+        let (_, remote_rpc_config) =
+            try_get_remote_accounts_and_rpc_config(&self.config.accounts)?;
+        let validator_pubkey = self.bank().get_identity();
+
+        let lamports = RpcClient::new_with_commitment(
+            remote_rpc_config.url().to_string(),
+            CommitmentConfig {
+                commitment: remote_rpc_config
+                    .commitment()
+                    .unwrap_or(CommitmentLevel::Confirmed),
+            },
+        )
+        .get_balance(&validator_pubkey)
+        .await
+        .map_err(|err| {
+            ApiError::FailedToObtainValidatorOnChainBalance(
+                validator_pubkey,
+                err.to_string(),
+            )
+        })?;
+        if lamports < MIN_BALANCE_SOL * LAMPORTS_PER_SOL {
+            Err(ApiError::ValidatorInsufficientlyFunded(
+                validator_pubkey,
+                MIN_BALANCE_SOL,
+            ))
+        } else {
+            Ok(())
+        }
+    }
+
     pub async fn start(&mut self) -> ApiResult<()> {
-        if let Some(ref fdqn) = self.config.validator.fdqn {
-            if matches!(
-                self.config.accounts.lifecycle,
-                LifecycleMode::Ephemeral
-            ) {
+        if matches!(self.config.accounts.lifecycle, LifecycleMode::Ephemeral) {
+            self.ensure_validator_funded_on_chain().await?;
+            if let Some(ref fdqn) = self.config.validator.fdqn {
                 self.register_validator_on_chain(fdqn).await?;
             }
         }
@@ -634,6 +695,7 @@ impl MagicValidator {
         self.slot_ticker = Some(init_slot_ticker(
             &self.bank,
             &self.accounts_manager,
+            &self.committor_service,
             Some(self.transaction_status_sender.clone()),
             self.ledger.clone(),
             Duration::from_millis(self.config.validator.millis_per_slot),
@@ -646,6 +708,9 @@ impl MagicValidator {
             self.token.clone(),
         ));
 
+        // NOTE: these need to startup in the right order, otherwise some worker
+        //       that may be needed, i.e. during hydration after ledger replay
+        //       are not started in time
         self.start_remote_account_fetcher_worker();
         self.start_remote_account_updates_worker();
         self.start_remote_account_cloner_worker().await?;
@@ -718,6 +783,12 @@ impl MagicValidator {
         if let Some(remote_account_cloner_worker) =
             self.remote_account_cloner_worker.take()
         {
+            debug!("Reserving common pubkeys for committor service");
+            map_committor_request_result(
+                self.committor_service.reserve_common_pubkeys(),
+            )
+            .await?;
+
             if !self.config.ledger.reset {
                 remote_account_cloner_worker.hydrate().await?;
                 info!("Validator hydration complete (bank hydrate, replay, account clone)");
@@ -785,4 +856,16 @@ fn programs_to_load(programs: &[ProgramConfig]) -> Vec<(Pubkey, String)> {
         .iter()
         .map(|program| (program.id, program.path.clone()))
         .collect()
+}
+
+fn try_get_remote_accounts_and_rpc_config(
+    accounts: &magicblock_config::AccountsConfig,
+) -> ApiResult<(magicblock_accounts::AccountsConfig, RpcProviderConfig)> {
+    let accounts_config =
+        try_convert_accounts_config(accounts).map_err(ApiError::ConfigError)?;
+    let remote_rpc_config = RpcProviderConfig::new(
+        try_rpc_cluster_from_cluster(&accounts_config.remote_cluster)?,
+        Some(CommitmentLevel::Confirmed),
+    );
+    Ok((accounts_config, remote_rpc_config))
 }

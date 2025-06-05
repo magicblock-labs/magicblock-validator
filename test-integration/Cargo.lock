@@ -1839,6 +1839,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e88a8acf291dafb59c2d96e8f59828f3838bb1a70398823ade51a84de6a6deed"
 
 [[package]]
+name = "fallible-iterator"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649"
+
+[[package]]
+name = "fallible-streaming-iterator"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
+
+[[package]]
 name = "fast-math"
 version = "0.1.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2336,6 +2348,15 @@ dependencies = [
  "allocator-api2",
  "equivalent",
  "foldhash",
+]
+
+[[package]]
+name = "hashlink"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7382cf6263419f2d8df38c55d7da83da5c18aef87fc7a7fc1fb1e344edfe14c1"
+dependencies = [
+ "hashbrown 0.15.2",
 ]
 
 [[package]]
@@ -2925,10 +2946,13 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "borsh 1.5.7",
+ "log",
  "magicblock-config",
  "magicblock-core",
+ "magicblock-delegation-program",
  "rayon",
  "serde",
+ "solana-pubkey",
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk",
@@ -3316,6 +3340,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "libsqlite3-sys"
+version = "0.32.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fbb8270bb4060bd76c6e96f20c52d80620f1d82a3470885694e41e0f81ef6fe7"
+dependencies = [
+ "cc",
+ "pkg-config",
+ "vcpkg",
+]
+
+[[package]]
 name = "libz-sys"
 version = "1.1.22"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3454,6 +3489,7 @@ dependencies = [
  "magicblock-account-fetcher",
  "magicblock-account-updates",
  "magicblock-accounts-api",
+ "magicblock-committor-service",
  "magicblock-core",
  "magicblock-metrics",
  "magicblock-mutator",
@@ -3524,6 +3560,7 @@ dependencies = [
  "magicblock-account-updates",
  "magicblock-accounts-api",
  "magicblock-bank",
+ "magicblock-committor-service",
  "magicblock-core",
  "magicblock-delegation-program",
  "magicblock-metrics",
@@ -3585,6 +3622,7 @@ dependencies = [
  "magicblock-accounts-api",
  "magicblock-accounts-db",
  "magicblock-bank",
+ "magicblock-committor-service",
  "magicblock-config",
  "magicblock-core",
  "magicblock-geyser-plugin",
@@ -3641,6 +3679,45 @@ dependencies = [
  "solana-timings",
  "solana-transaction-status",
  "tempfile",
+]
+
+[[package]]
+name = "magicblock-committor-program"
+version = "0.1.2"
+dependencies = [
+ "borsh 1.5.7",
+ "borsh-derive 1.5.7",
+ "log",
+ "paste",
+ "solana-account",
+ "solana-program",
+ "solana-pubkey",
+ "thiserror 1.0.69",
+]
+
+[[package]]
+name = "magicblock-committor-service"
+version = "0.1.2"
+dependencies = [
+ "base64 0.21.7",
+ "bincode",
+ "borsh 1.5.7",
+ "log",
+ "magicblock-committor-program",
+ "magicblock-delegation-program",
+ "magicblock-rpc-client",
+ "magicblock-table-mania",
+ "rusqlite",
+ "solana-account",
+ "solana-pubkey",
+ "solana-rpc-client",
+ "solana-rpc-client-api",
+ "solana-sdk",
+ "solana-transaction-status-client-types",
+ "static_assertions",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-util 0.7.13",
 ]
 
 [[package]]
@@ -3868,6 +3945,36 @@ dependencies = [
  "solana-sdk",
  "solana-transaction-status",
  "spl-token-2022 6.0.0",
+ "tokio",
+]
+
+[[package]]
+name = "magicblock-rpc-client"
+version = "0.1.2"
+dependencies = [
+ "log",
+ "solana-rpc-client",
+ "solana-rpc-client-api",
+ "solana-sdk",
+ "solana-transaction-status-client-types",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
+name = "magicblock-table-mania"
+version = "0.1.2"
+dependencies = [
+ "ed25519-dalek",
+ "log",
+ "magicblock-rpc-client",
+ "rand 0.8.5",
+ "sha3",
+ "solana-pubkey",
+ "solana-rpc-client",
+ "solana-rpc-client-api",
+ "solana-sdk",
+ "thiserror 1.0.69",
  "tokio",
 ]
 
@@ -5357,6 +5464,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "rusqlite"
+version = "0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "37e34486da88d8e051c7c0e23c3f15fd806ea8546260aa2fec247e97242ec143"
+dependencies = [
+ "bitflags 2.8.0",
+ "fallible-iterator",
+ "fallible-streaming-iterator",
+ "hashlink",
+ "libsqlite3-sys",
+ "smallvec",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5598,6 +5719,25 @@ dependencies = [
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk",
+]
+
+[[package]]
+name = "schedulecommit-committor-service"
+version = "0.0.0"
+dependencies = [
+ "log",
+ "magicblock-committor-program",
+ "magicblock-committor-service",
+ "magicblock-delegation-program",
+ "magicblock-rpc-client",
+ "program-flexi-counter",
+ "solana-account",
+ "solana-pubkey",
+ "solana-rpc-client",
+ "solana-rpc-client-api",
+ "solana-sdk",
+ "test-tools-core",
+ "tokio",
 ]
 
 [[package]]
@@ -10025,6 +10165,21 @@ version = "0.0.0"
 dependencies = [
  "integration-test-tools",
  "teepee",
+]
+
+[[package]]
+name = "test-table-mania"
+version = "0.0.0"
+dependencies = [
+ "log",
+ "magicblock-rpc-client",
+ "magicblock-table-mania",
+ "paste",
+ "solana-pubkey",
+ "solana-rpc-client",
+ "solana-sdk",
+ "test-tools-core",
+ "tokio",
 ]
 
 [[package]]

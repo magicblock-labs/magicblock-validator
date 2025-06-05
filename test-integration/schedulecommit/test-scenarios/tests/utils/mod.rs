@@ -52,6 +52,7 @@ fn get_context_with_delegated_committees_impl(
 pub fn assert_one_committee_was_committed(
     ctx: &ScheduleCommitTestContext,
     res: &ScheduledCommitResult<MainAccount>,
+    finalize: bool,
 ) {
     let pda = ctx.committees[0].1;
 
@@ -61,13 +62,20 @@ pub fn assert_one_committee_was_committed(
     let commit = res.included.get(&pda);
     assert!(commit.is_some(), "should have committed pda");
 
-    assert_eq!(res.sigs.len(), 1, "should have 1 on chain sig");
+    let sig_len = if finalize { 2 } else { 1 };
+    assert_eq!(
+        res.sigs.len(),
+        sig_len,
+        "should have {} on chain sig",
+        sig_len
+    );
 }
 
 #[allow(dead_code)] // used in 02_commit_and_undelegate.rs
 pub fn assert_two_committees_were_committed(
     ctx: &ScheduleCommitTestContext,
     res: &ScheduledCommitResult<MainAccount>,
+    finalize: bool,
 ) {
     let pda1 = ctx.committees[0].1;
     let pda2 = ctx.committees[1].1;
@@ -80,22 +88,35 @@ pub fn assert_two_committees_were_committed(
     assert!(commit1.is_some(), "should have committed pda1");
     assert!(commit2.is_some(), "should have committed pda2");
 
-    assert_eq!(res.sigs.len(), 1, "should have 1 on chain sig");
+    let sig_len = if finalize { 2 } else { 1 };
+    assert_eq!(
+        res.sigs.len(),
+        sig_len,
+        "should have {} on chain sig",
+        sig_len
+    );
 }
 
 #[allow(dead_code)]
 pub fn assert_feepayer_was_committed(
     ctx: &ScheduleCommitTestContext,
     res: &ScheduledCommitResult<MainAccount>,
+    finalize: bool,
 ) {
     let payer = ctx.payer.pubkey();
 
     assert_eq!(res.feepayers.len(), 1, "includes 1 payer");
 
-    let commit_payer = res.feepayers.iter().filter(|(p, _)| p == &payer).next();
+    let commit_payer = res.feepayers.iter().find(|(p, _)| p == &payer);
     assert!(commit_payer.is_some(), "should have committed payer");
 
-    assert_eq!(res.sigs.len(), 1, "should have 1 on chain sig");
+    let sig_len = if finalize { 2 } else { 1 };
+    assert_eq!(
+        res.sigs.len(),
+        sig_len,
+        "should have {} on chain sig",
+        sig_len
+    );
 }
 
 #[allow(dead_code)] // used in 02_commit_and_undelegate.rs
@@ -201,9 +222,10 @@ pub fn assert_account_was_undelegated_on_chain(
     let owner = ctx.fetch_chain_account_owner(pda).unwrap();
     assert_ne!(
         owner, DELEGATION_PROGRAM_ID,
-        "not owned by delegation program"
+        "{} should not be owned by delegation program",
+        pda
     );
-    assert_eq!(owner, new_owner, "new owner");
+    assert_eq!(owner, new_owner, "{} has new owner", pda);
 }
 
 #[allow(dead_code)] // used in 02_commit_and_undelegate.rs

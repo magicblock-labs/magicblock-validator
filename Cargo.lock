@@ -1730,6 +1730,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "educe"
+version = "0.4.23"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0f0042ff8246a363dbe77d2ceedb073339e85a804b9a47636c6e016a9a32c05f"
+dependencies = [
+ "enum-ordinalize",
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "either"
 version = "1.13.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1765,6 +1777,19 @@ version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a1ab991c1362ac86c61ab6f556cff143daa22e5a15e4e189df818b2fd19fe65b"
 dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 2.0.95",
+]
+
+[[package]]
+name = "enum-ordinalize"
+version = "3.1.15"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1bf1fa3f06bbff1ea5b1a9c7b14aa992a39657db60a2759457328d7e058f49ee"
+dependencies = [
+ "num-bigint 0.4.6",
+ "num-traits",
  "proc-macro2",
  "quote",
  "syn 2.0.95",
@@ -1858,6 +1883,18 @@ name = "fake-simd"
 version = "0.1.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e88a8acf291dafb59c2d96e8f59828f3838bb1a70398823ade51a84de6a6deed"
+
+[[package]]
+name = "fallible-iterator"
+version = "0.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "2acce4a10f12dc2fb14a218589d4f1f62ef011b2d0cc4b3cb1bba8e94da14649"
+
+[[package]]
+name = "fallible-streaming-iterator"
+version = "0.1.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7360491ce676a36bf9bb3c56c1aa791658183a54d2744120f27285738d90465a"
 
 [[package]]
 name = "fast-math"
@@ -2372,6 +2409,15 @@ dependencies = [
  "allocator-api2",
  "equivalent",
  "foldhash",
+]
+
+[[package]]
+name = "hashlink"
+version = "0.10.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "7382cf6263419f2d8df38c55d7da83da5c18aef87fc7a7fc1fb1e344edfe14c1"
+dependencies = [
+ "hashbrown 0.15.2",
 ]
 
 [[package]]
@@ -3383,6 +3429,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "libsqlite3-sys"
+version = "0.32.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fbb8270bb4060bd76c6e96f20c52d80620f1d82a3470885694e41e0f81ef6fe7"
+dependencies = [
+ "cc",
+ "pkg-config",
+ "vcpkg",
+]
+
+[[package]]
 name = "libz-sys"
 version = "1.1.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3521,6 +3578,7 @@ dependencies = [
  "magicblock-account-fetcher",
  "magicblock-account-updates",
  "magicblock-accounts-api",
+ "magicblock-committor-service",
  "magicblock-core",
  "magicblock-metrics",
  "magicblock-mutator",
@@ -3593,6 +3651,7 @@ dependencies = [
  "magicblock-account-updates",
  "magicblock-accounts-api",
  "magicblock-bank",
+ "magicblock-committor-service",
  "magicblock-core",
  "magicblock-delegation-program",
  "magicblock-metrics",
@@ -3657,6 +3716,7 @@ dependencies = [
  "magicblock-accounts-api",
  "magicblock-accounts-db",
  "magicblock-bank",
+ "magicblock-committor-service",
  "magicblock-config",
  "magicblock-core",
  "magicblock-geyser-plugin",
@@ -3719,6 +3779,50 @@ dependencies = [
  "solana-transaction-status",
  "tempfile",
  "test-tools-core",
+]
+
+[[package]]
+name = "magicblock-committor-program"
+version = "0.1.2"
+dependencies = [
+ "borsh 1.5.5",
+ "borsh-derive 1.5.5",
+ "log",
+ "paste",
+ "solana-account",
+ "solana-program",
+ "solana-program-test",
+ "solana-pubkey",
+ "solana-sdk",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
+name = "magicblock-committor-service"
+version = "0.1.2"
+dependencies = [
+ "base64 0.21.7",
+ "bincode",
+ "borsh 1.5.5",
+ "env_logger 0.11.6",
+ "lazy_static",
+ "log",
+ "magicblock-committor-program",
+ "magicblock-delegation-program",
+ "magicblock-rpc-client",
+ "magicblock-table-mania",
+ "rusqlite",
+ "solana-account",
+ "solana-pubkey",
+ "solana-rpc-client",
+ "solana-rpc-client-api",
+ "solana-sdk",
+ "solana-transaction-status-client-types",
+ "static_assertions",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-util 0.7.13",
 ]
 
 [[package]]
@@ -3957,6 +4061,37 @@ dependencies = [
  "solana-sdk",
  "solana-transaction-status",
  "spl-token-2022 6.0.0",
+ "tokio",
+]
+
+[[package]]
+name = "magicblock-rpc-client"
+version = "0.1.2"
+dependencies = [
+ "env_logger 0.11.6",
+ "log",
+ "solana-rpc-client",
+ "solana-rpc-client-api",
+ "solana-sdk",
+ "solana-transaction-status-client-types",
+ "thiserror 1.0.69",
+ "tokio",
+]
+
+[[package]]
+name = "magicblock-table-mania"
+version = "0.1.2"
+dependencies = [
+ "ed25519-dalek",
+ "log",
+ "magicblock-rpc-client",
+ "rand 0.8.5",
+ "sha3",
+ "solana-pubkey",
+ "solana-rpc-client",
+ "solana-rpc-client-api",
+ "solana-sdk",
+ "thiserror 1.0.69",
  "tokio",
 ]
 
@@ -4528,6 +4663,25 @@ dependencies = [
  "openssl-src",
  "pkg-config",
  "vcpkg",
+]
+
+[[package]]
+name = "opentelemetry"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6105e89802af13fdf48c49d7646d3b533a70e536d818aae7e78ba0433d01acb8"
+dependencies = [
+ "async-trait",
+ "crossbeam-channel",
+ "futures-channel",
+ "futures-executor",
+ "futures-util",
+ "js-sys",
+ "lazy_static",
+ "percent-encoding 2.3.1",
+ "pin-project",
+ "rand 0.8.5",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -5466,6 +5620,20 @@ dependencies = [
 ]
 
 [[package]]
+name = "rusqlite"
+version = "0.34.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "37e34486da88d8e051c7c0e23c3f15fd806ea8546260aa2fec247e97242ec143"
+dependencies = [
+ "bitflags 2.9.0",
+ "fallible-iterator",
+ "fallible-streaming-iterator",
+ "hashlink",
+ "libsqlite3-sys",
+ "smallvec",
+]
+
+[[package]]
 name = "rustc-demangle"
 version = "0.1.24"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -6243,6 +6411,57 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "d52e52720efe60465b052b9e7445a01c17550666beec855cce66f44766697bc2"
 dependencies = [
  "parking_lot 0.12.3",
+]
+
+[[package]]
+name = "solana-banks-client"
+version = "2.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "01364483db3a7ad3546695df73eeec869fdb7399e8734b9a4d9ec5426d4bc932"
+dependencies = [
+ "borsh 1.5.5",
+ "futures 0.3.31",
+ "solana-banks-interface",
+ "solana-program",
+ "solana-sdk",
+ "tarpc",
+ "thiserror 2.0.12",
+ "tokio",
+ "tokio-serde",
+]
+
+[[package]]
+name = "solana-banks-interface"
+version = "2.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1d185017c022a9bc7b9b4709fdb15d4a3a4875548bb53d95d49f696476497879"
+dependencies = [
+ "serde",
+ "serde_derive",
+ "solana-sdk",
+ "tarpc",
+]
+
+[[package]]
+name = "solana-banks-server"
+version = "2.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f72a966c0ebb198a16db924b4377f1b04dc8040afe0815ccee29cf852b4a0cc"
+dependencies = [
+ "bincode",
+ "crossbeam-channel",
+ "futures 0.3.31",
+ "solana-banks-interface",
+ "solana-client",
+ "solana-feature-set",
+ "solana-runtime",
+ "solana-runtime-transaction",
+ "solana-sdk",
+ "solana-send-transaction-service",
+ "solana-svm",
+ "tarpc",
+ "tokio",
+ "tokio-serde",
 ]
 
 [[package]]
@@ -7851,6 +8070,43 @@ dependencies = [
  "solana-transaction-context",
  "solana-type-overrides",
  "thiserror 2.0.12",
+]
+
+[[package]]
+name = "solana-program-test"
+version = "2.2.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "02f25b19e0f8ef1f4e30f9aa5d986238edfd68bb35ef66131d8992cb941286f0"
+dependencies = [
+ "assert_matches",
+ "async-trait",
+ "base64 0.22.1",
+ "bincode",
+ "chrono-humanize",
+ "crossbeam-channel",
+ "log",
+ "serde",
+ "solana-accounts-db",
+ "solana-banks-client",
+ "solana-banks-interface",
+ "solana-banks-server",
+ "solana-bpf-loader-program",
+ "solana-compute-budget",
+ "solana-feature-set",
+ "solana-inline-spl",
+ "solana-instruction",
+ "solana-log-collector",
+ "solana-logger",
+ "solana-program-runtime",
+ "solana-runtime",
+ "solana-sbpf",
+ "solana-sdk",
+ "solana-sdk-ids",
+ "solana-svm",
+ "solana-timings",
+ "solana-vote-program",
+ "thiserror 2.0.12",
+ "tokio",
 ]
 
 [[package]]
@@ -10016,6 +10272,41 @@ dependencies = [
 ]
 
 [[package]]
+name = "tarpc"
+version = "0.29.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1c38a012bed6fb9681d3bf71ffaa4f88f3b4b9ed3198cda6e4c8462d24d4bb80"
+dependencies = [
+ "anyhow",
+ "fnv",
+ "futures 0.3.31",
+ "humantime",
+ "opentelemetry",
+ "pin-project",
+ "rand 0.8.5",
+ "serde",
+ "static_assertions",
+ "tarpc-plugins",
+ "thiserror 1.0.69",
+ "tokio",
+ "tokio-serde",
+ "tokio-util 0.6.10",
+ "tracing",
+ "tracing-opentelemetry",
+]
+
+[[package]]
+name = "tarpc-plugins"
+version = "0.12.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0ee42b4e559f17bce0385ebf511a7beb67d5cc33c12c96b7f4e9789919d9c10f"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
 name = "task-local-extensions"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10292,6 +10583,22 @@ dependencies = [
 ]
 
 [[package]]
+name = "tokio-serde"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "911a61637386b789af998ee23f50aa30d5fd7edcec8d6d3dedae5e5815205466"
+dependencies = [
+ "bincode",
+ "bytes 1.10.1",
+ "educe",
+ "futures-core",
+ "futures-sink",
+ "pin-project",
+ "serde",
+ "serde_json",
+]
+
+[[package]]
 name = "tokio-stream"
 version = "0.1.17"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10328,6 +10635,7 @@ dependencies = [
  "futures-sink",
  "log",
  "pin-project-lite",
+ "slab",
  "tokio",
 ]
 
@@ -10537,6 +10845,19 @@ checksum = "e672c95779cf947c5311f83787af4fa8fffd12fb27e4993211a84bdfd9610f9c"
 dependencies = [
  "once_cell",
  "valuable",
+]
+
+[[package]]
+name = "tracing-opentelemetry"
+version = "0.17.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "fbbe89715c1dbbb790059e2565353978564924ee85017b5fff365c872ff6721f"
+dependencies = [
+ "once_cell",
+ "opentelemetry",
+ "tracing",
+ "tracing-core",
+ "tracing-subscriber",
 ]
 
 [[package]]

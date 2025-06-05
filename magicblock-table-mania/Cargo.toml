@@ -1,0 +1,30 @@
+[package]
+name = "magicblock-table-mania"
+version.workspace = true
+authors.workspace = true
+repository.workspace = true
+homepage.workspace = true
+license.workspace = true
+edition.workspace = true
+
+[lib]
+doctest = false
+
+[dependencies]
+ed25519-dalek = { workspace = true }
+log = { workspace = true }
+magicblock-rpc-client = { workspace = true }
+rand = { workspace = true }
+sha3 = { workspace = true }
+solana-pubkey = { workspace = true }
+solana-rpc-client = { workspace = true }
+solana-rpc-client-api = { workspace = true }
+solana-sdk = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true }
+
+[features]
+default = []
+# Needed to allow multiple tests to run in parallel without trying to
+# use the same lookup table address
+randomize_lookup_table_slot = []
