@@ -10,8 +10,8 @@ use solana_sdk::{clock::Slot, transaction::Transaction};
 
 use crate::{
     args::{
-        CallHandlerArgs, CommitAndUndelegateArgs, CommitTypeArgs, HandlerArgs,
-        MagicActionArgs, UndelegateTypeArgs,
+        L1ActionArgs, CommitAndUndelegateArgs, CommitTypeArgs, ActionArgs,
+        MagicL1MessageArgs, UndelegateTypeArgs,
     },
     instruction_utils::InstructionUtils,
     utils::accounts::{
@@ -47,70 +47,70 @@ impl<'a, 'ic> ConstructionContext<'a, 'ic> {
 
 /// Scheduled action to be executed on base layer
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ScheduledAction {
+pub struct ScheduledL1Message {
     pub id: u64,
     pub slot: Slot,
     pub blockhash: Hash,
     pub action_sent_transaction: Transaction,
     pub payer: Pubkey,
     // Scheduled action
-    pub action: MagicAction,
+    pub l1_message: MagicL1Message,
 }
 
-impl ScheduledAction {
+impl ScheduledL1Message {
     pub fn try_new<'a>(
-        args: &MagicActionArgs,
+        args: &MagicL1MessageArgs,
         commit_id: u64,
         slot: Slot,
         payer_pubkey: &Pubkey,
         context: &ConstructionContext<'a, '_>,
-    ) -> Result<ScheduledAction, InstructionError> {
-        let action = MagicAction::try_from_args(args, &context)?;
+    ) -> Result<ScheduledL1Message, InstructionError> {
+        let action = MagicL1Message::try_from_args(args, &context)?;
 
         let blockhash = context.invoke_context.environment_config.blockhash;
         let action_sent_transaction =
             InstructionUtils::scheduled_commit_sent(commit_id, blockhash);
-        Ok(ScheduledAction {
+        Ok(ScheduledL1Message {
             id: commit_id,
             slot,
             blockhash,
             payer: *payer_pubkey,
             action_sent_transaction,
-            action,
+            l1_message: action,
         })
     }
 }
 
 // Action that user wants to perform on base layer
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum MagicAction {
+pub enum MagicL1Message {
     /// Actions without commitment or undelegation
-    CallHandler(Vec<CallHandler>),
+    L1Actions(Vec<L1Action>),
     Commit(CommitType),
     CommitAndUndelegate(CommitAndUndelegate),
 }
 
-impl MagicAction {
+impl MagicL1Message {
     pub fn try_from_args<'a>(
-        args: &MagicActionArgs,
+        args: &MagicL1MessageArgs,
         context: &ConstructionContext<'a, '_>,
-    ) -> Result<MagicAction, InstructionError> {
+    ) -> Result<MagicL1Message, InstructionError> {
         match args {
-            MagicActionArgs::L1Action(call_handlers_args) => {
-                let call_handlers = call_handlers_args
+            MagicL1MessageArgs::L1Actions(l1_actions) => {
+                let l1_actions = l1_actions
                     .iter()
-                    .map(|args| CallHandler::try_from_args(args, context))
-                    .collect::<Result<Vec<CallHandler>, InstructionError>>()?;
-                Ok(MagicAction::CallHandler(call_handlers))
+                    .map(|args| L1Action::try_from_args(args, context))
+                    .collect::<Result<Vec<L1Action>, InstructionError>>()?;
+                Ok(MagicL1Message::L1Actions(l1_actions))
             }
-            MagicActionArgs::Commit(type_) => {
+            MagicL1MessageArgs::Commit(type_) => {
                 let commit = CommitType::try_from_args(type_, context)?;
-                Ok(MagicAction::Commit(commit))
+                Ok(MagicL1Message::Commit(commit))
             }
-            MagicActionArgs::CommitAndUndelegate(type_) => {
+            MagicL1MessageArgs::CommitAndUndelegate(type_) => {
                 let commit_and_undelegate =
                     CommitAndUndelegate::try_from_args(type_, context)?;
-                Ok(MagicAction::CommitAndUndelegate(commit_and_undelegate))
+                Ok(MagicL1Message::CommitAndUndelegate(commit_and_undelegate))
             }
         }
     }
@@ -187,21 +187,21 @@ impl CommitType {
 
                 Ok(CommitType::Standalone(committed_accounts))
             }
-            CommitTypeArgs::WithHandler {
+            CommitTypeArgs::WithL1Actions {
                 committed_accounts,
-                call_handlers,
+                l1_actions,
             } => {
                 Self::validate_accounts(committed_accounts, context)?;
                 let committed_accounts =
                     Self::extract_commit_accounts(committed_accounts, context)?;
-                let call_handlers = call_handlers
+                let l1_actions = l1_actions
                     .iter()
-                    .map(|args| CallHandler::try_from_args(args, context))
-                    .collect::<Result<Vec<CallHandler>, InstructionError>>()?;
+                    .map(|args| L1Action::try_from_args(args, context))
+                    .collect::<Result<Vec<L1Action>, InstructionError>>()?;
 
-                Ok(CommitType::WithHandler {
+                Ok(CommitType::WithL1Actions {
                     committed_accounts,
-                    call_handlers,
+                    l1_actions,
                 })
             }
         }
@@ -232,13 +232,13 @@ impl CommitAndUndelegate {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct Handler {
+pub struct ProgramArgs {
     pub escrow_index: u8,
     pub data: Vec<u8>,
 }
 
-impl From<HandlerArgs> for Handler {
-    fn from(value: HandlerArgs) -> Self {
+impl From<ActionArgs> for ProgramArgs {
+    fn from(value: ActionArgs) -> Self {
         Self {
             escrow_index: value.escrow_index,
             data: value.data,
@@ -246,8 +246,8 @@ impl From<HandlerArgs> for Handler {
     }
 }
 
-impl From<&HandlerArgs> for Handler {
-    fn from(value: &HandlerArgs) -> Self {
+impl From<&ActionArgs> for ProgramArgs {
+    fn from(value: &ActionArgs) -> Self {
         value.clone().into()
     }
 }
@@ -259,17 +259,17 @@ pub struct ShortAccountMeta {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct CallHandler {
+pub struct L1Action {
     pub destination_program: Pubkey,
-    pub data_per_program: Handler,
+    pub data_per_program: ProgramArgs,
     pub account_metas_per_program: Vec<ShortAccountMeta>,
 }
 
-impl CallHandler {
+impl L1Action {
     pub fn try_from_args<'a>(
-        args: &CallHandlerArgs,
+        args: &L1ActionArgs,
         context: &ConstructionContext<'a, '_>,
-    ) -> Result<CallHandler, InstructionError> {
+    ) -> Result<L1Action, InstructionError> {
         let destination_program_pubkey = *get_instruction_pubkey_with_idx(
             context.transaction_context,
             args.destination_program as u16,
@@ -283,7 +283,7 @@ impl CallHandler {
             ic_msg!(
                 context.invoke_context,
                 &format!(
-                    "CallHandler: destination_program must be an executable. got: {}",
+                    "L1Action: destination_program must be an executable. got: {}",
                     destination_program_pubkey
                 )
             );
@@ -301,7 +301,7 @@ impl CallHandler {
             })
             .collect::<Result<Vec<ShortAccountMeta>, InstructionError>>()?;
 
-        Ok(CallHandler {
+        Ok(L1Action {
             destination_program: destination_program_pubkey,
             data_per_program: args.args.clone().into(),
             account_metas_per_program: account_metas,
@@ -323,9 +323,9 @@ pub enum CommitType {
     /// TODO: feels like ShortMeta isn't needed
     Standalone(Vec<CommittedAccountV2>), // accounts to commit
     /// Commits accounts and runs actions
-    WithHandler {
+    WithL1Actions {
         committed_accounts: Vec<CommittedAccountV2>,
-        call_handlers: Vec<CallHandler>,
+        l1_actions: Vec<L1Action>,
     },
 }
 
@@ -333,7 +333,7 @@ pub enum CommitType {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UndelegateType {
     Standalone,
-    WithHandler(Vec<CallHandler>),
+    WithL1Actions(Vec<L1Action>),
 }
 
 impl UndelegateType {
@@ -343,14 +343,14 @@ impl UndelegateType {
     ) -> Result<UndelegateType, InstructionError> {
         match args {
             UndelegateTypeArgs::Standalone => Ok(UndelegateType::Standalone),
-            UndelegateTypeArgs::WithHandler { call_handlers } => {
-                let call_handlers = call_handlers
+            UndelegateTypeArgs::WithL1Actions { l1_actions } => {
+                let l1_actions = l1_actions
                     .iter()
-                    .map(|call_handler| {
-                        CallHandler::try_from_args(call_handler, context)
+                    .map(|l1_actions| {
+                        L1Action::try_from_args(l1_actions, context)
                     })
-                    .collect::<Result<Vec<CallHandler>, InstructionError>>()?;
-                Ok(UndelegateType::WithHandler(call_handlers))
+                    .collect::<Result<Vec<L1Action>, InstructionError>>()?;
+                Ok(UndelegateType::WithL1Actions(l1_actions))
             }
         }
     }

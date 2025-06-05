@@ -8,9 +8,9 @@ use solana_sdk::{
 };
 
 use crate::{
-    args::MagicActionArgs,
-    magic_schedule_action::{ConstructionContext, ScheduledAction},
-    schedule_transactions::{check_magic_context_id, COMMIT_ID},
+    args::MagicL1MessageArgs,
+    magic_schedule_l1_message::{ConstructionContext, ScheduledL1Message},
+    schedule_transactions::{check_magic_context_id, MESSAGE_ID},
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
     },
@@ -22,10 +22,10 @@ const MAGIC_CONTEXT_IDX: u16 = PAYER_IDX + 1;
 const ACTION_ACCOUNTS_OFFSET: usize = MAGIC_CONTEXT_IDX as usize + 1;
 const ACTIONS_SUPPORTED: bool = false;
 
-pub(crate) fn process_schedule_action(
+pub(crate) fn process_schedule_l1_message(
     signers: HashSet<Pubkey>,
     invoke_context: &mut InvokeContext,
-    args: MagicActionArgs,
+    args: MagicL1MessageArgs,
 ) -> Result<(), InstructionError> {
     // TODO: remove once actions are supported
     if !ACTIONS_SUPPORTED {
@@ -93,16 +93,16 @@ pub(crate) fn process_schedule_action(
             })?;
 
     // Determine id and slot
-    let commit_id = COMMIT_ID.fetch_add(1, Ordering::Relaxed);
+    let message_id = MESSAGE_ID.fetch_add(1, Ordering::Relaxed);
     let construction_context = ConstructionContext::new(
         parent_program_id,
         &signers,
         transaction_context,
         invoke_context,
     );
-    let scheduled_action = ScheduledAction::try_new(
+    let scheduled_action = ScheduledL1Message::try_new(
         &args,
-        commit_id,
+        message_id,
         clock.slot,
         payer_pubkey,
         &construction_context,
@@ -127,7 +127,7 @@ pub(crate) fn process_schedule_action(
         );
         InstructionError::GenericError
     })?;
-    ic_msg!(invoke_context, "Scheduled commit with ID: {}", commit_id);
+    ic_msg!(invoke_context, "Scheduled commit with ID: {}", message_id);
     ic_msg!(
         invoke_context,
         "ScheduledCommitSent signature: {}",

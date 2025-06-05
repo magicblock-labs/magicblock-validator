@@ -4,7 +4,7 @@ mod mutate_accounts;
 mod schedule_transactions;
 pub use magic_context::{FeePayerAccount, MagicContext, ScheduledCommit};
 pub mod args;
-mod magic_schedule_action;
+mod magic_schedule_l1_message;
 pub mod magicblock_instruction;
 pub mod magicblock_processor;
 #[cfg(test)]

@@ -10,7 +10,7 @@ use crate::{
     magic_context::{CommittedAccount, ScheduledCommit},
     schedule_transactions,
     schedule_transactions::{
-        transaction_scheduler::TransactionScheduler, COMMIT_ID,
+        transaction_scheduler::TransactionScheduler, MESSAGE_ID,
     },
     utils::{
         account_actions::set_account_owner_to_delegation_program,
@@ -178,7 +178,7 @@ pub(crate) fn process_schedule_commit(
     }
 
     // Determine id and slot
-    let commit_id = COMMIT_ID.fetch_add(1, Ordering::Relaxed);
+    let commit_id = MESSAGE_ID.fetch_add(1, Ordering::Relaxed);
 
     // It appears that in builtin programs `Clock::get` doesn't work as expected, thus
     // we have to get it directly from the sysvar cache.

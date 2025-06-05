@@ -19,7 +19,7 @@ use test_tools_core::init_logger;
 
 use crate::{
     magic_context::MagicContext,
-    magic_schedule_action::ScheduledAction,
+    magic_schedule_l1_message::ScheduledL1Message,
     magicblock_instruction::MagicBlockInstruction,
     schedule_transactions::transaction_scheduler::TransactionScheduler,
     test_utils::{ensure_started_validator, process_instruction},
@@ -159,7 +159,7 @@ fn assert_accepted_actions(
     processed_accepted: &[AccountSharedData],
     payer: &Pubkey,
     expected_scheduled_actions: usize,
-) -> Vec<ScheduledAction> {
+) -> Vec<ScheduledL1Message> {
     let magic_context_acc = find_magic_context_account(processed_accepted)
         .expect("magic context account not found");
     let magic_context =
@@ -238,7 +238,7 @@ fn assert_first_commit(
 mod tests {
     use super::*;
     use crate::{
-        magic_schedule_action::MagicAction,
+        magic_schedule_l1_message::MagicL1Message,
         utils::instruction_utils::InstructionUtils,
     };
 
@@ -319,7 +319,7 @@ mod tests {
             let scheduled_commits = scheduled_commits
                 .into_iter()
                 .map(|el| el.try_into())
-                .collect::<Result<Vec<ScheduledCommit>, MagicAction>>()
+                .collect::<Result<Vec<ScheduledCommit>, MagicL1Message>>()
                 .expect("only commit action");
 
             assert_first_commit(
@@ -411,7 +411,7 @@ mod tests {
             let scheduled_commits = scheduled_commits
                 .into_iter()
                 .map(|el| el.try_into())
-                .collect::<Result<Vec<ScheduledCommit>, MagicAction>>()
+                .collect::<Result<Vec<ScheduledCommit>, MagicL1Message>>()
                 .expect("only commit action");
 
             assert_first_commit(
@@ -523,7 +523,7 @@ mod tests {
             let scheduled_commits = scheduled_commits
                 .into_iter()
                 .map(|el| el.try_into())
-                .collect::<Result<Vec<ScheduledCommit>, MagicAction>>()
+                .collect::<Result<Vec<ScheduledCommit>, MagicL1Message>>()
                 .expect("only commit action");
 
             assert_first_commit(
@@ -638,7 +638,7 @@ mod tests {
             let scheduled_commits = scheduled_commits
                 .into_iter()
                 .map(|el| el.try_into())
-                .collect::<Result<Vec<ScheduledCommit>, MagicAction>>()
+                .collect::<Result<Vec<ScheduledCommit>, MagicL1Message>>()
                 .expect("only commit action");
 
             assert_first_commit(

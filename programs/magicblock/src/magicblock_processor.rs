@@ -6,7 +6,7 @@ use crate::{
     mutate_accounts::process_mutate_accounts,
     process_scheduled_commit_sent,
     schedule_transactions::{
-        process_accept_scheduled_commits, process_schedule_action,
+        process_accept_scheduled_commits, process_schedule_l1_message,
         process_schedule_commit, ProcessScheduleCommitOptions,
     },
 };
@@ -60,8 +60,8 @@ declare_process_instruction!(
                     id,
                 )
             }
-            MagicBlockInstruction::ScheduleAction(args) => {
-                process_schedule_action(signers, invoke_context, args)
+            MagicBlockInstruction::ScheduleL1Message(args) => {
+                process_schedule_l1_message(signers, invoke_context, args)
             }
         }
     }

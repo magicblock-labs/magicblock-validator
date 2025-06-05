@@ -1,14 +1,14 @@
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct HandlerArgs {
+pub struct ActionArgs {
     pub escrow_index: u8,
     pub data: Vec<u8>,
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
-pub struct CallHandlerArgs {
-    pub args: HandlerArgs,
+pub struct L1ActionArgs {
+    pub args: ActionArgs,
     pub destination_program: u8, // index of the account
     pub accounts: Vec<u8>,       // indices of account
 }
@@ -16,16 +16,16 @@ pub struct CallHandlerArgs {
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum CommitTypeArgs {
     Standalone(Vec<u8>), // indices on accounts
-    WithHandler {
+    WithL1Actions {
         committed_accounts: Vec<u8>, // indices of accounts
-        call_handlers: Vec<CallHandlerArgs>,
+        l1_actions: Vec<L1ActionArgs>,
     },
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum UndelegateTypeArgs {
     Standalone,
-    WithHandler { call_handlers: Vec<CallHandlerArgs> },
+    WithL1Actions { l1_actions: Vec<L1ActionArgs> },
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -35,8 +35,8 @@ pub struct CommitAndUndelegateArgs {
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
-pub enum MagicActionArgs {
-    L1Action(Vec<CallHandlerArgs>),
+pub enum MagicL1MessageArgs {
+    L1Actions(Vec<L1ActionArgs>),
     Commit(CommitTypeArgs),
     CommitAndUndelegate(CommitAndUndelegateArgs),
 }

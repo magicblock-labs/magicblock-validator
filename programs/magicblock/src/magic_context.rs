@@ -10,9 +10,9 @@ use solana_sdk::{
     transaction::Transaction,
 };
 
-use crate::magic_schedule_action::{
-    CommitAndUndelegate, CommitType, CommittedAccountV2, MagicAction,
-    ScheduledAction, ShortAccountMeta, UndelegateType,
+use crate::magic_schedule_l1_message::{
+    CommitAndUndelegate, CommitType, CommittedAccountV2, MagicL1Message,
+    ScheduledL1Message, ShortAccountMeta, UndelegateType,
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
@@ -21,26 +21,9 @@ pub struct FeePayerAccount {
     pub delegated_pda: Pubkey,
 }
 
-// Q: can user initiate actions on arbitrary accounts?
-// No, then he could call any handler on any porgram
-// Inititating transfer for himself
-//
-// Answer: No
-
-// Q; can user call any program but using account that he owns?
-// Far example, there could Transfer from that implements logix for transfer
-// Here the fact that magicblock-program schedyled that call huarantess that user apporved this
-//
-// Answer: Yes
-
-// user has multiple actions that he wants to perform on owned accounts
-// he may schedule
-// Those actions may have contraints: Undelegate can come only After Commit
-// Commit can't come after undelegate
-
 #[derive(Debug, Default, Serialize, Deserialize)]
 pub struct MagicContext {
-    pub scheduled_commits: Vec<ScheduledAction>,
+    pub scheduled_commits: Vec<ScheduledL1Message>,
 }
 
 impl MagicContext {
@@ -56,11 +39,11 @@ impl MagicContext {
         }
     }
 
-    pub(crate) fn add_scheduled_action(&mut self, action: ScheduledAction) {
-        self.scheduled_commits.push(action);
+    pub(crate) fn add_scheduled_action(&mut self, l1_message: ScheduledL1Message) {
+        self.scheduled_commits.push(l1_message);
     }
 
-    pub(crate) fn take_scheduled_commits(&mut self) -> Vec<ScheduledAction> {
+    pub(crate) fn take_scheduled_commits(&mut self) -> Vec<ScheduledL1Message> {
         mem::take(&mut self.scheduled_commits)
     }
 
@@ -96,7 +79,7 @@ pub struct ScheduledCommit {
     pub request_undelegation: bool,
 }
 
-impl From<ScheduledCommit> for ScheduledAction {
+impl From<ScheduledCommit> for ScheduledL1Message {
     fn from(value: ScheduledCommit) -> Self {
         let commit_type = CommitType::Standalone(
             value
@@ -105,13 +88,13 @@ impl From<ScheduledCommit> for ScheduledAction {
                 .map(CommittedAccountV2::from)
                 .collect(),
         );
-        let action = if value.request_undelegation {
-            MagicAction::CommitAndUndelegate(CommitAndUndelegate {
+        let l1_message = if value.request_undelegation {
+            MagicL1Message::CommitAndUndelegate(CommitAndUndelegate {
                 commit_action: commit_type,
                 undelegate_action: UndelegateType::Standalone,
             })
         } else {
-            MagicAction::Commit(commit_type)
+            MagicL1Message::Commit(commit_type)
         };
 
         Self {
@@ -120,14 +103,14 @@ impl From<ScheduledCommit> for ScheduledAction {
             blockhash: value.blockhash,
             payer: value.payer,
             action_sent_transaction: value.commit_sent_transaction,
-            action,
+            l1_message,
         }
     }
 }
 
-impl TryFrom<ScheduledAction> for ScheduledCommit {
-    type Error = MagicAction;
-    fn try_from(value: ScheduledAction) -> Result<Self, Self::Error> {
+impl TryFrom<ScheduledL1Message> for ScheduledCommit {
+    type Error = MagicL1Message;
+    fn try_from(value: ScheduledL1Message) -> Result<Self, Self::Error> {
         fn extract_accounts(
             commit_type: CommitType,
         ) -> Result<Vec<CommittedAccount>, CommitType> {
@@ -138,26 +121,26 @@ impl TryFrom<ScheduledAction> for ScheduledCommit {
                         .map(CommittedAccount::from)
                         .collect())
                 }
-                val @ CommitType::WithHandler { .. } => Err(val),
+                val @ CommitType::WithL1Actions { .. } => Err(val),
             }
         }
 
-        let (accounts, request_undelegation) = match value.action {
-            MagicAction::Commit(commit_action) => {
+        let (accounts, request_undelegation) = match value.l1_message {
+            MagicL1Message::Commit(commit_action) => {
                 let accounts = extract_accounts(commit_action)
-                    .map_err(MagicAction::Commit)?;
+                    .map_err(MagicL1Message::Commit)?;
                 Ok((accounts, false))
             }
-            MagicAction::CommitAndUndelegate(value) => {
-                if let UndelegateType::WithHandler(..) =
+            MagicL1Message::CommitAndUndelegate(value) => {
+                if let UndelegateType::WithL1Actions(..) =
                     &value.undelegate_action
                 {
-                    return Err(MagicAction::CommitAndUndelegate(value));
+                    return Err(MagicL1Message::CommitAndUndelegate(value));
                 };
 
                 let accounts = extract_accounts(value.commit_action).map_err(
                     |commit_type| {
-                        MagicAction::CommitAndUndelegate(CommitAndUndelegate {
+                        MagicL1Message::CommitAndUndelegate(CommitAndUndelegate {
                             commit_action: commit_type,
                             undelegate_action: value.undelegate_action,
                         })
@@ -165,7 +148,7 @@ impl TryFrom<ScheduledAction> for ScheduledCommit {
                 )?;
                 Ok((accounts, true))
             }
-            err @ MagicAction::CallHandler(_) => Err(err),
+            err @ MagicL1Message::L1Actions(_) => Err(err),
         }?;
 
         Ok(Self {

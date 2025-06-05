@@ -13,12 +13,12 @@ use solana_sdk::{
 };
 
 use crate::{
-    magic_context::MagicContext, magic_schedule_action::ScheduledAction,
+    magic_context::MagicContext, magic_schedule_l1_message::ScheduledL1Message,
 };
 
 #[derive(Clone)]
 pub struct TransactionScheduler {
-    scheduled_action: Arc<RwLock<Vec<ScheduledAction>>>,
+    scheduled_action: Arc<RwLock<Vec<ScheduledL1Message>>>,
 }
 
 impl Default for TransactionScheduler {
@@ -27,7 +27,7 @@ impl Default for TransactionScheduler {
             /// This vec tracks commits that went through the entire process of first
             /// being scheduled into the MagicContext, and then being moved
             /// over to this global.
-            static ref SCHEDULED_ACTION: Arc<RwLock<Vec<ScheduledAction>>> =
+            static ref SCHEDULED_ACTION: Arc<RwLock<Vec<ScheduledL1Message >>> =
                 Default::default();
         }
         Self {
@@ -40,7 +40,7 @@ impl TransactionScheduler {
     pub fn schedule_action(
         invoke_context: &InvokeContext,
         context_account: &RefCell<AccountSharedData>,
-        action: ScheduledAction,
+        action: ScheduledL1Message,
     ) -> Result<(), InstructionError> {
         let context_data = &mut context_account.borrow_mut();
         let mut context =
@@ -57,7 +57,7 @@ impl TransactionScheduler {
         Ok(())
     }
 
-    pub fn accept_scheduled_actions(&self, commits: Vec<ScheduledAction>) {
+    pub fn accept_scheduled_actions(&self, commits: Vec<ScheduledL1Message>) {
         self.scheduled_action
             .write()
             .expect("scheduled_action lock poisoned")
@@ -67,7 +67,7 @@ impl TransactionScheduler {
     pub fn get_scheduled_actions_by_payer(
         &self,
         payer: &Pubkey,
-    ) -> Vec<ScheduledAction> {
+    ) -> Vec<ScheduledL1Message> {
         let commits = self
             .scheduled_action
             .read()
@@ -80,7 +80,7 @@ impl TransactionScheduler {
             .collect::<Vec<_>>()
     }
 
-    pub fn take_scheduled_actions(&self) -> Vec<ScheduledAction> {
+    pub fn take_scheduled_actions(&self) -> Vec<ScheduledL1Message> {
         let mut lock = self
             .scheduled_action
             .write()

@@ -1,5 +1,5 @@
 mod process_accept_scheduled_commits;
-mod process_schedule_action;
+mod process_schedule_l1_message;
 mod process_schedule_commit;
 #[cfg(test)]
 mod process_schedule_commit_tests;
@@ -10,7 +10,7 @@ use std::sync::atomic::AtomicU64;
 
 use magicblock_core::magic_program::MAGIC_CONTEXT_PUBKEY;
 pub(crate) use process_accept_scheduled_commits::*;
-pub(crate) use process_schedule_action::*;
+pub(crate) use process_schedule_l1_message::*;
 pub(crate) use process_schedule_commit::*;
 pub use process_scheduled_commit_sent::{
     process_scheduled_commit_sent, register_scheduled_commit_sent, SentCommit,
@@ -22,7 +22,7 @@ use solana_program_runtime::{
 
 use crate::utils::accounts::get_instruction_pubkey_with_idx;
 
-pub(crate) static COMMIT_ID: AtomicU64 = AtomicU64::new(0);
+pub(crate) static MESSAGE_ID: AtomicU64 = AtomicU64::new(0);
 
 pub fn check_magic_context_id(
     invoke_context: &InvokeContext,
