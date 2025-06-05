@@ -17,8 +17,8 @@ use magicblock_committor_service::{
 };
 use magicblock_processor::execute_transaction::execute_legacy_transaction;
 use magicblock_program::{
-    register_scheduled_commit_sent, FeePayerAccount, Pubkey, SentCommit,
-    TransactionScheduler,
+    register_scheduled_commit_sent, FeePayerAccount, Pubkey, ScheduledCommit,
+    SentCommit, TransactionScheduler,
 };
 use magicblock_transaction_status::TransactionStatusSender;
 use solana_sdk::{
