@@ -265,33 +265,4 @@ mod tests {
         ]);
         assert!(cli.is_ok());
     }
-
-    #[test]
-    #[serial]
-    fn test_parse_programs() {
-        let cli = Cli::parse_from([
-            DEFAULT_CONFIG_PATH,
-            "--programs",
-            "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev:path1",
-            "--programs",
-            "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev:path2",
-        ]);
-        assert_eq!(
-            cli.config.programs,
-            vec![
-                ProgramConfig {
-                    id: Pubkey::from_str_const(
-                        "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev"
-                    ),
-                    path: "path1".to_string()
-                },
-                ProgramConfig {
-                    id: Pubkey::from_str_const(
-                        "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev"
-                    ),
-                    path: "path2".to_string()
-                }
-            ]
-        )
-    }
 }

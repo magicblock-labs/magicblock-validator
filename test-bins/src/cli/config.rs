@@ -61,3 +61,23 @@ fn program_config_parser(s: &str) -> Result<ProgramConfig, String> {
         path: path.clone(),
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_program_config_parser() {
+        let config = program_config_parser(
+            "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev:path1",
+        )
+        .unwrap();
+        assert_eq!(
+            config.id,
+            Pubkey::from_str_const(
+                "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev"
+            )
+        );
+        assert_eq!(config.path, "path1");
+    }
+}
