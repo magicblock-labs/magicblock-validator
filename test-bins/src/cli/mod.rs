@@ -112,9 +112,8 @@ mod tests {
 
     use clap::{CommandFactory, ValueEnum};
     use magicblock_api::EphemeralConfig;
-    use magicblock_config::{ProgramConfig, RemoteConfig};
+    use magicblock_config::RemoteConfig;
     use serial_test::serial;
-    use solana_sdk::pubkey::Pubkey;
     use url::Url;
 
     use super::*;
