@@ -14,9 +14,7 @@ use magicblock_core::magic_program;
 use magicblock_ledger::Ledger;
 use magicblock_metrics::metrics;
 use magicblock_processor::execute_transaction::execute_legacy_transaction;
-use magicblock_program::{
-    magicblock_instruction::accept_scheduled_commits, MagicContext,
-};
+use magicblock_program::{instruction_utils::InstructionUtils, MagicContext};
 use magicblock_transaction_status::TransactionStatusSender;
 use solana_sdk::account::ReadableAccount;
 use tokio_util::sync::CancellationToken;
@@ -54,7 +52,9 @@ pub fn init_slot_ticker(
             if MagicContext::has_scheduled_commits(magic_context_acc.data()) {
                 // 1. Send the transaction to move the scheduled commits from the MagicContext
                 //    to the global ScheduledCommit store
-                let tx = accept_scheduled_commits(bank.last_blockhash());
+                let tx = InstructionUtils::accept_scheduled_commits(
+                    bank.last_blockhash(),
+                );
                 if let Err(err) = execute_legacy_transaction(
                     tx,
                     &bank,

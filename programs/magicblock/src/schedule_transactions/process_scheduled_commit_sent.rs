@@ -240,7 +240,7 @@ mod tests {
 
     use super::*;
     use crate::{
-        magicblock_instruction::scheduled_commit_sent_instruction,
+        instruction_utils::InstructionUtils,
         test_utils::{ensure_started_validator, process_instruction},
         validator,
     };
@@ -292,7 +292,7 @@ mod tests {
 
         ensure_started_validator(&mut account_data);
 
-        let mut ix = scheduled_commit_sent_instruction(
+        let mut ix = InstructionUtils::scheduled_commit_sent_instruction(
             &crate::id(),
             &validator::validator_authority_id(),
             commit.commit_id,
@@ -329,7 +329,7 @@ mod tests {
         };
         ensure_started_validator(&mut account_data);
 
-        let ix = scheduled_commit_sent_instruction(
+        let ix = InstructionUtils::scheduled_commit_sent_instruction(
             &crate::id(),
             &fake_validator.pubkey(),
             commit.commit_id,
@@ -364,7 +364,7 @@ mod tests {
         };
         ensure_started_validator(&mut account_data);
 
-        let ix = scheduled_commit_sent_instruction(
+        let ix = InstructionUtils::scheduled_commit_sent_instruction(
             &fake_program.pubkey(),
             &validator::validator_authority_id(),
             commit.commit_id,
@@ -393,7 +393,7 @@ mod tests {
 
         ensure_started_validator(&mut account_data);
 
-        let ix = scheduled_commit_sent_instruction(
+        let ix = InstructionUtils::scheduled_commit_sent_instruction(
             &crate::id(),
             &validator::validator_authority_id(),
             commit.commit_id,
