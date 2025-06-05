@@ -9,14 +9,21 @@ edition.workspace = true
 default-run = "rpc"
 
 [dependencies]
+clap = { version = "4.5.36", features = ["derive", "env"] }
 console-subscriber = { workspace = true, optional = true }
 env_logger = { workspace = true }
+isocountry = { workspace = true }
 log = { workspace = true }
 magicblock-api = { workspace = true }
+magicblock-accounts-db = { workspace = true }
 magicblock-config = { workspace = true }
 solana-sdk = { workspace = true }
 test-tools = { workspace = true }
 tokio = { workspace = true, features = ["rt-multi-thread"] }
+url = { workspace = true }
+
+[dev-dependencies]
+serial_test = { version = "3.2.0", features = ["logging"] }
 
 [[bin]]
 name = "rpc"

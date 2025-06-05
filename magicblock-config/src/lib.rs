@@ -48,10 +48,9 @@ pub struct EphemeralConfig {
 }
 
 impl EphemeralConfig {
-    pub fn try_load_from_file(path: &str) -> ConfigResult<Self> {
-        let p = Path::new(path);
-        let toml = fs::read_to_string(p)?;
-        Self::try_load_from_toml(&toml, Some(p))
+    pub fn try_load_from_file(path: &Path) -> ConfigResult<Self> {
+        let toml = fs::read_to_string(path)?;
+        Self::try_load_from_toml(&toml, Some(path))
     }
 
     pub fn try_load_from_toml(
@@ -231,7 +230,7 @@ impl EphemeralConfig {
             })
         }
 
-        if let Ok(fdqn) = env::var("VALIDATOR_FDQN") {
+        if let Ok(fdqn) = env::var("VALIDATOR_FQDN") {
             config.validator.fdqn = Some(fdqn)
         }
 
