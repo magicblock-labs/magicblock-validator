@@ -11,6 +11,7 @@ pub mod error;
 mod finalize;
 pub mod persist;
 mod pubkeys_provider;
+mod retry;
 mod service;
 mod transactions;
 mod types;

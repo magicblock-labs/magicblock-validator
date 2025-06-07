@@ -72,6 +72,15 @@ pub enum CommittorServiceError {
         Pubkey,
         solana_sdk::program_error::ProgramError,
     ),
+
+    #[error("Retried commits of a bundle must have at least one commit")]
+    RetriedCommitsNeedAtLeastOneProcessCommitStep,
+    #[error(
+        "All retried commits of a bundle must have the same finalize value"
+    )]
+    RetriedCommitsNeedToHaveSameFinalize,
+    #[error("All retried commits of a bundle must have the same slot")]
+    RetriedCommitsNeedToHaveSameSlot,
 }
 
 impl CommittorServiceError {
