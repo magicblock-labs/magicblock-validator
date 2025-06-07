@@ -246,6 +246,20 @@ where
     ) {
         write_batch.delete_range_cf::<C>(self.handle(), from, to);
     }
+
+    /// See [crate::database::rocks_db::Rocks::compact_range_cf] for documentation.
+    pub fn compact_range(&self, from: Option<C::Index>, to: Option<C::Index>) {
+        self.backend.compact_range_cf(
+            self.handle(),
+            from.map(|index| C::key(index)),
+            to.map(|index| C::key(index)),
+        )
+    }
+
+    /// See [crate::database::rocks_db::Rocks::flush_cf] for documentation.
+    pub fn flush(&self) -> LedgerResult<()> {
+        self.backend.flush_cf(self.handle())
+    }
 }
 
 impl<C> LedgerColumn<C>

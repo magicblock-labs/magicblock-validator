@@ -10,7 +10,7 @@ use std::{
 
 use bincode::{deserialize, serialize};
 use log::*;
-use rocksdb::Direction as IteratorDirection;
+use rocksdb::{Direction as IteratorDirection, FlushOptions};
 use solana_measure::measure::Measure;
 use solana_sdk::{
     clock::{Slot, UnixTimestamp},
@@ -30,7 +30,7 @@ use crate::{
     conversions::transaction,
     database::{
         columns as cf,
-        columns::{count_column_using_cache, DIRTY_COUNT},
+        columns::{count_column_using_cache, Column, ColumnName, DIRTY_COUNT},
         db::Database,
         iterator::IteratorMode,
         ledger_column::LedgerColumn,
@@ -1164,23 +1164,30 @@ impl Ledger {
         self.slot_signatures_cf.get(index)
     }
 
+    /// Updates both lowest_cleanup_slot and oldest_slot for CompactionFilter
+    /// All slots less or equal to argument will be removed during compaction
+    pub fn set_lowest_cleanup_slot(&self, slot: Slot) {
+        let mut lowest_cleanup_slot = self
+            .lowest_cleanup_slot
+            .write()
+            .expect(Self::LOWEST_CLEANUP_SLOT_POISONED);
+
+        let new_lowest_cleanup_slot = std::cmp::max(*lowest_cleanup_slot, slot);
+        *lowest_cleanup_slot = new_lowest_cleanup_slot;
+        self.db.set_oldest_slot(new_lowest_cleanup_slot + 1);
+    }
+
     /// Permanently removes ledger data for slots in the inclusive range `[from_slot, to_slot]`.
     /// # Note:
     /// - This is a destructive operation that cannot be undone
     /// - Requires exclusive access to the lowest cleanup slot tracker
     /// - All deletions are atomic (either all succeed or none do)
-    pub fn truncate_slots(
+    pub fn delete_slot_range(
         &self,
         from_slot: Slot,
         to_slot: Slot,
     ) -> LedgerResult<()> {
         let mut batch = self.db.batch();
-
-        let mut lowest_cleanup_slot = self
-            .lowest_cleanup_slot
-            .write()
-            .expect(Self::LOWEST_CLEANUP_SLOT_POISONED);
-        *lowest_cleanup_slot = std::cmp::max(*lowest_cleanup_slot, to_slot);
 
         self.blocktime_cf.delete_range_in_batch(
             &mut batch,
@@ -1239,10 +1246,39 @@ impl Ledger {
         Ok(())
     }
 
-    pub fn flush(&self) {
-        let _ = self.db.backend.db.flush().inspect_err(|err| {
-            log::error!("failed to flush ledger (rocksdb): {err}")
-        });
+    pub fn compact_slot_range_cf<C: Column + ColumnName>(
+        &self,
+        from: Option<C::Index>,
+        to: Option<C::Index>,
+    ) {
+        self.db.column::<C>().compact_range(from, to);
+    }
+
+    /// Flushes all columns
+    pub fn flush(&self) -> LedgerResult<()> {
+        let cfs = [
+            self.transaction_status_cf.handle(),
+            self.address_signatures_cf.handle(),
+            self.slot_signatures_cf.handle(),
+            self.blocktime_cf.handle(),
+            self.blockhash_cf.handle(),
+            self.transaction_cf.handle(),
+            self.transaction_memos_cf.handle(),
+            self.perf_samples_cf.handle(),
+            self.account_mod_datas_cf.handle(),
+        ];
+
+        self.db
+            .backend
+            .flush_cfs_opt(&cfs, &FlushOptions::default())
+    }
+
+    /// Graceful db shutdown
+    pub fn shutdown(&self, wait: bool) -> LedgerResult<()> {
+        self.flush()?;
+        self.db.backend.db.cancel_all_background_work(wait);
+
+        Ok(())
     }
 }
 
@@ -2408,7 +2444,7 @@ mod tests {
 
         // Truncate slots 10-15 (should remove first two entries)
         assert!(store
-            .truncate_slots(
+            .delete_slot_range(
                 *slots_to_delete.first().unwrap(),
                 *slots_to_delete.last().unwrap()
             )
