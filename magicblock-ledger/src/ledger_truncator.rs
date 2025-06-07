@@ -70,6 +70,7 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
                         continue;
                     }
 
+                    info!("Ledger size: {current_size}");
                     match self.estimate_truncation_range(current_size) {
                         Ok(Some((from_slot, to_slot))) => Self::truncate_slot_range(&self.ledger, from_slot, to_slot).await,
                         Ok(None) => warn!("Could not estimate truncation range"),
@@ -156,6 +157,10 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
             warn!("LedgerTruncator: Nani?");
             return;
         }
+
+        info!(
+            "LedgerTruncator: truncating slot range [{from_slot}; {to_slot}]"
+        );
         (from_slot..=to_slot)
             .step_by(SINGLE_TRUNCATION_LIMIT)
             .for_each(|cur_from_slot| {
@@ -176,7 +181,9 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
                 }
             });
         // Flush memtables with tombstones prior to compaction
-        ledger.flush();
+        if let Err(err) = ledger.flush() {
+            error!("Failed to flush ledger: {err}");
+        }
 
         Self::compact_slot_range(ledger, from_slot, to_slot).await;
     }
@@ -213,7 +220,7 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
                 );
                 ledger.compact_slot_range_cf::<SlotSignatures>(
                     Some((from_slot, u32::MIN)),
-                    Some((to_slot, u32::MAX)),
+                    Some((to_slot + 1, u32::MAX)),
                 );
             }
         });

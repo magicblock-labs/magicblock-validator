@@ -772,7 +772,9 @@ impl MagicValidator {
 
         // we have two memory mapped databases, flush them to disk before exitting
         self.bank.flush();
-        self.ledger.flush();
+        if let Err(err) = self.ledger.shutdown(false) {
+            error!("Failed to shutdown ledger: {:?}", err);
+        }
     }
 
     pub fn join(self) {

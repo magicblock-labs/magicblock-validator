@@ -10,7 +10,7 @@ use std::{
 
 use bincode::{deserialize, serialize};
 use log::*;
-use rocksdb::Direction as IteratorDirection;
+use rocksdb::{Direction as IteratorDirection, FlushOptions};
 use solana_measure::measure::Measure;
 use solana_sdk::{
     clock::{Slot, UnixTimestamp},
@@ -1247,10 +1247,31 @@ impl Ledger {
         self.db.column::<C>().compact_range(from, to);
     }
 
-    pub fn flush(&self) {
-        let _ = self.db.backend.db.flush().inspect_err(|err| {
-            log::error!("failed to flush ledger (rocksdb): {err}")
-        });
+    /// Flushes all columns
+    pub fn flush(&self) -> LedgerResult<()> {
+        let cfs = [
+            self.transaction_status_cf.handle(),
+            self.address_signatures_cf.handle(),
+            self.slot_signatures_cf.handle(),
+            self.blocktime_cf.handle(),
+            self.blockhash_cf.handle(),
+            self.transaction_cf.handle(),
+            self.transaction_memos_cf.handle(),
+            self.perf_samples_cf.handle(),
+            self.account_mod_datas_cf.handle(),
+        ];
+
+        self.db
+            .backend
+            .flush_cfs_opt(&cfs, &FlushOptions::default())
+    }
+
+    /// Graceful db shutdown
+    pub fn shutdown(&self, wait: bool) -> LedgerResult<()> {
+        self.flush()?;
+        self.db.backend.db.cancel_all_background_work(wait);
+
+        Ok(())
     }
 }
 

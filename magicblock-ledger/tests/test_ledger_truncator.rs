@@ -238,7 +238,7 @@ async fn test_truncator_with_tx_spammer() {
     ledger_truncator.stop();
     assert!(ledger_truncator.join().await.is_ok());
 
-    ledger.flush();
+    assert!(ledger.flush().is_ok());
 
     let lowest_existing =
         finality_provider.latest_final_slot.load(Ordering::Relaxed);

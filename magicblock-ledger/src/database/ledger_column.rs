@@ -255,6 +255,11 @@ where
             to.map(|index| C::key(index)),
         )
     }
+
+    /// See [crate::database::rocks_db::Rocks::flush_cf] for documentation.
+    pub fn flush(&self) -> LedgerResult<()> {
+        self.backend.flush_cf(self.handle())
+    }
 }
 
 impl<C> LedgerColumn<C>
