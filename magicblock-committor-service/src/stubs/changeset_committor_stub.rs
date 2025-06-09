@@ -1,5 +1,5 @@
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
@@ -131,7 +131,25 @@ impl ChangesetCommittor for ChangesetCommittorStub {
         });
         rx
     }
+
+    fn get_reqids(
+        &self,
+    ) -> oneshot::Receiver<CommittorServiceResult<HashSet<String>>> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let reqids = self
+            .committed_changesets
+            .lock()
+            .unwrap()
+            .keys()
+            .map(|&id| id.to_string())
+            .collect();
+        tx.send(Ok(reqids)).unwrap_or_else(|_| {
+            log::error!("Failed to send get_reqids response");
+        });
+        rx
+    }
 }
+
 fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

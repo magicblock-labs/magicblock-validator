@@ -1,4 +1,5 @@
 use std::{
+    collections::HashSet,
     path::Path,
     sync::atomic::{AtomicU64, Ordering},
 };
@@ -145,6 +146,10 @@ impl CommitPersister {
         self.db.get_commit_status(reqid, pubkey)
     }
 
+    pub fn get_reqids(&self) -> CommitPersistResult<HashSet<String>> {
+        self.db.get_reqids()
+    }
+
     pub fn get_signature(
         &self,
         bundle_id: u64,
@@ -225,6 +230,11 @@ mod tests {
         assert_eq!(data_account_row.data, Some(vec![1, 2, 3, 4, 5]));
         assert_eq!(data_account_row.commit_status, CommitStatus::Pending);
 
+        // Verify we can get the request id(s)
+        let reqids = persister.get_reqids().unwrap();
+        assert_eq!(reqids.len(), 1);
+        assert!(reqids.contains(&reqid));
+
         // Update status and verify commit status and the signatures
         let process_signature = Signature::new_unique();
         let finalize_signature = Some(Signature::new_unique());
@@ -254,5 +264,10 @@ mod tests {
             .unwrap();
         assert_eq!(signatures.processed_signature, process_signature);
         assert_eq!(signatures.finalized_signature, finalize_signature);
+
+        // Verify we can get the same request id(s)
+        let reqids = persister.get_reqids().unwrap();
+        assert_eq!(reqids.len(), 1);
+        assert!(reqids.contains(&reqid));
     }
 }

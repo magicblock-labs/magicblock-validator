@@ -1,4 +1,4 @@
-use std::{fmt, path::Path, str::FromStr};
+use std::{collections::HashSet, fmt, path::Path, str::FromStr};
 
 use rusqlite::{params, Connection, Result, Transaction};
 use solana_pubkey::Pubkey;
@@ -493,6 +493,19 @@ impl CommittorDb {
         } else {
             Ok(None)
         }
+    }
+
+    pub(crate) fn get_reqids(&self) -> CommitPersistResult<HashSet<String>> {
+        let query = "SELECT DISTINCT reqid FROM commit_status";
+        let stmt = &mut self.conn.prepare(query)?;
+        let mut rows = stmt.query([])?;
+
+        let mut reqids = HashSet::new();
+        while let Some(row) = rows.next()? {
+            let reqid: String = row.get(0)?;
+            reqids.insert(reqid);
+        }
+        Ok(reqids)
     }
 }
 

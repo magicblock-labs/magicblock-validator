@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{collections::HashSet, path::Path};
 
 use log::*;
 use magicblock_committor_program::Changeset;
@@ -65,6 +65,9 @@ pub enum CommittorMessage {
         respond_to:
             oneshot::Sender<CommittorServiceResult<Option<BundleSignatureRow>>>,
         bundle_id: u64,
+    },
+    GetReqids {
+        respond_to: oneshot::Sender<CommittorServiceResult<HashSet<String>>>,
     },
     GetLookupTables {
         respond_to: oneshot::Sender<LookupTables>,
@@ -155,6 +158,12 @@ impl CommittorActor {
             } => {
                 let sig = self.processor.get_signature(bundle_id);
                 if let Err(e) = respond_to.send(sig) {
+                    error!("Failed to send response {:?}", e);
+                }
+            }
+            GetReqids { respond_to } => {
+                let reqids = self.processor.get_reqids();
+                if let Err(e) = respond_to.send(reqids) {
                     error!("Failed to send response {:?}", e);
                 }
             }
@@ -340,6 +349,14 @@ impl ChangesetCommittor for CommittorService {
         });
         rx
     }
+
+    fn get_reqids(
+        &self,
+    ) -> oneshot::Receiver<CommittorServiceResult<HashSet<String>>> {
+        let (tx, rx) = oneshot::channel();
+        self.try_send(CommittorMessage::GetReqids { respond_to: tx });
+        rx
+    }
 }
 
 pub trait ChangesetCommittor: Send + Sync + 'static {
@@ -369,4 +386,9 @@ pub trait ChangesetCommittor: Send + Sync + 'static {
         &self,
         bundle_id: u64,
     ) -> oneshot::Receiver<CommittorServiceResult<Option<BundleSignatureRow>>>;
+
+    /// Gets the list of all requests stored in the DB
+    fn get_reqids(
+        &self,
+    ) -> oneshot::Receiver<CommittorServiceResult<HashSet<String>>>;
 }

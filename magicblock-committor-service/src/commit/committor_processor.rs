@@ -138,6 +138,15 @@ impl CommittorProcessor {
         Ok(signatures)
     }
 
+    pub fn get_reqids(&self) -> CommittorServiceResult<HashSet<String>> {
+        let reqids = self
+            .persister
+            .lock()
+            .expect("persister mutex poisoned")
+            .get_reqids()?;
+        Ok(reqids)
+    }
+
     pub async fn commit_changeset(
         &self,
         changeset: Changeset,
