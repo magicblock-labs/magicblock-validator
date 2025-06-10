@@ -372,6 +372,15 @@ impl CommittorDb {
         Ok(())
     }
 
+    pub fn register_retry(&self, reqid: &str) -> CommitPersistResult<()> {
+        let query = "UPDATE commit_status
+            SET last_retried_at = ?1, retries_count = retries_count + 1
+            WHERE AND reqid = ?2";
+        let stmt = &mut self.conn.prepare(&query)?;
+        stmt.execute(params![u64_into_i64(now()), reqid])?;
+        Ok(())
+    }
+
     #[cfg(test)]
     fn get_commit_statuses_by_pubkey(
         &self,
@@ -411,15 +420,14 @@ impl CommittorDb {
         extract_committor_rows(&mut rows).map(|mut rows| rows.pop())
     }
 
-    #[cfg(test)]
-    fn remove_commit_statuses_with_reqid(
+    pub(crate) fn remove_commit_statuses_with_reqid(
         &self,
         reqid: &str,
-    ) -> CommitPersistResult<()> {
+    ) -> CommitPersistResult<usize> {
         let query = "DELETE FROM commit_status WHERE reqid = ?1";
         let stmt = &mut self.conn.prepare(query)?;
-        stmt.execute(params![reqid])?;
-        Ok(())
+        let deleted = stmt.execute(params![reqid])?;
+        Ok(deleted)
     }
 
     // -----------------

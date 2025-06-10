@@ -264,6 +264,16 @@ impl CommitStatus {
         matches!(self, Succeeded(_))
     }
 
+    /// The commit is still pending and hasn't either succeeded nor failed.
+    pub fn is_pending(&self) -> bool {
+        matches!(self, CommitStatus::Pending)
+    }
+
+    /// The commit has failed and needs to be retried.
+    pub fn has_failed(&self) -> bool {
+        !self.is_complete() && !self.is_pending()
+    }
+
     pub fn all_completed(stages: &[Self]) -> bool {
         stages.iter().all(Self::is_complete)
     }

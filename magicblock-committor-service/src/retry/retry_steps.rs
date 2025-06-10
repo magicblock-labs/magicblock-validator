@@ -1,3 +1,4 @@
+use solana_sdk::hash::Hash;
 use std::ops::Deref;
 
 use magicblock_committor_program::{pdas, ChangedAccount, Changeset};
@@ -14,8 +15,11 @@ use super::previous_commit_state::PreviousCommitState;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RetryStep {
     CloseBufferAndChunksAccounts {
-        buffer_pda: Pubkey,
-        chunks_pda: Pubkey,
+        /// The on chain address of the account we committed.
+        pubkey: Pubkey,
+        /// The ephemeral blockhash of the changeset we are writing,
+        /// needed to properly derive the seeds of the PDAs.
+        ephemeral_blockhash: Hash,
     },
     ProcessCommit {
         /// See [`crate::persist::CommitStatusRow::pubkey`]
@@ -51,20 +55,15 @@ impl From<PreviousCommitState> for RetrySteps {
     fn from(state: PreviousCommitState) -> Self {
         let PreviousCommitState {
             pubkey,
-            authority,
             ephemeral_blockhash,
             ..
         } = state;
 
         let mut steps = vec![];
         if state.may_have_created_buffer_and_chunks_accounts() {
-            let (chunks_pda, _) =
-                pdas::chunks_pda(&authority, &pubkey, &ephemeral_blockhash);
-            let (buffer_pda, _) =
-                pdas::buffer_pda(&authority, &pubkey, &ephemeral_blockhash);
             steps.push(RetryStep::CloseBufferAndChunksAccounts {
-                buffer_pda,
-                chunks_pda,
+                pubkey,
+                ephemeral_blockhash,
             });
         }
 

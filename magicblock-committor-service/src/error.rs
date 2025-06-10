@@ -18,6 +18,9 @@ pub enum CommittorServiceError {
     #[error("CommitPersistError: {0} ({0:?})")]
     CommitPersistError(#[from] crate::persist::error::CommitPersistError),
 
+    #[error("ChannelRecvError: {0} ({0:?})")]
+    ChannelRecvError(#[from] tokio::sync::oneshot::error::RecvError),
+
     #[error("MagicBlockRpcClientError: {0} ({0:?})")]
     MagicBlockRpcClientError(
         #[from] magicblock_rpc_client::MagicBlockRpcClientError,
@@ -75,12 +78,16 @@ pub enum CommittorServiceError {
 
     #[error("Retried commits of a bundle must have at least one commit")]
     RetriedCommitsNeedAtLeastOneProcessCommitStep,
+
     #[error(
         "All retried commits of a bundle must have the same finalize value"
     )]
     RetriedCommitsNeedToHaveSameFinalize,
     #[error("All retried commits of a bundle must have the same slot")]
     RetriedCommitsNeedToHaveSameSlot,
+
+    #[error("Not all commits of reqid {0} have the same finalize value")]
+    RetriedCommitsNeedConsistentFinalize(String),
 }
 
 impl CommittorServiceError {

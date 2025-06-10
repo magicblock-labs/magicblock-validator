@@ -3,7 +3,7 @@ use std::{collections::HashSet, path::Path};
 use log::*;
 use magicblock_committor_program::Changeset;
 use solana_pubkey::Pubkey;
-use solana_sdk::{hash::Hash, signature::Keypair};
+use solana_sdk::{hash::Hash, instruction::Instruction, signature::Keypair};
 use tokio::{
     select,
     sync::{
@@ -68,6 +68,10 @@ pub enum CommittorMessage {
     },
     GetReqids {
         respond_to: oneshot::Sender<CommittorServiceResult<HashSet<String>>>,
+    },
+    RemoveCommitStatusesWithReqid {
+        reqid: String,
+        respond_to: oneshot::Sender<CommittorServiceResult<usize>>,
     },
     GetLookupTables {
         respond_to: oneshot::Sender<LookupTables>,
@@ -164,6 +168,13 @@ impl CommittorActor {
             GetReqids { respond_to } => {
                 let reqids = self.processor.get_reqids();
                 if let Err(e) = respond_to.send(reqids) {
+                    error!("Failed to send response {:?}", e);
+                }
+            }
+            RemoveCommitStatusesWithReqid { reqid, respond_to } => {
+                let remove_res =
+                    self.processor.remove_commit_statuses_with_reqid(&reqid);
+                if let Err(e) = respond_to.send(remove_res) {
                     error!("Failed to send response {:?}", e);
                 }
             }
@@ -357,6 +368,25 @@ impl ChangesetCommittor for CommittorService {
         self.try_send(CommittorMessage::GetReqids { respond_to: tx });
         rx
     }
+
+    fn remove_commit_statuses_with_reqid(
+        &self,
+        reqid: String,
+    ) -> oneshot::Receiver<CommittorServiceResult<usize>> {
+        let (tx, rx) = oneshot::channel();
+        self.try_send(CommittorMessage::RemoveCommitStatusesWithReqid {
+            reqid,
+            respond_to: tx,
+        });
+        rx
+    }
+
+    fn run_validator_signed_ixs(
+        &self,
+        _ixs: Vec<Instruction>,
+    ) -> oneshot::Receiver<CommittorServiceResult<()>> {
+        todo!("run_validator_signed_ixs");
+    }
 }
 
 pub trait ChangesetCommittor: Send + Sync + 'static {
@@ -391,4 +421,17 @@ pub trait ChangesetCommittor: Send + Sync + 'static {
     fn get_reqids(
         &self,
     ) -> oneshot::Receiver<CommittorServiceResult<HashSet<String>>>;
+
+    /// Removes all commit statuses with the provided reqid from the database
+    fn remove_commit_statuses_with_reqid(
+        &self,
+        reqid: String,
+    ) -> oneshot::Receiver<CommittorServiceResult<usize>>;
+
+    /// Chunks the provided instructions into as few transactions as possible then signs
+    /// them with the validator authority and sends them.
+    fn run_validator_signed_ixs(
+        &self,
+        ixs: Vec<Instruction>,
+    ) -> oneshot::Receiver<CommittorServiceResult<()>>;
 }

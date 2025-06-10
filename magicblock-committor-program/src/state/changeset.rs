@@ -5,6 +5,8 @@ use solana_account::{Account, AccountSharedData, ReadableAccount};
 use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
 
+use crate::error::{CommittorError, CommittorResult};
+
 use super::{
     changeset_chunks::{ChangesetChunks, ChangesetChunksIter},
     chunks::Chunks,
@@ -223,6 +225,27 @@ impl Changeset {
         account: T,
     ) -> bool {
         self.accounts.insert(pubkey, account.into()).is_some()
+    }
+
+    pub fn try_merge_with(&mut self, other: Self) -> CommittorResult<()> {
+        for (pubkey, account) in other.accounts.into_iter() {
+            if self.add(pubkey, account) {
+                return Err(
+                    CommittorError::MergedChangesetsCannotHaveSameAccount(
+                        pubkey,
+                    ),
+                );
+            }
+        }
+        if self.slot != other.slot {
+            return Err(CommittorError::MergeedChangesetSlotsDontMatch(
+                self.slot, other.slot,
+            ));
+        }
+        self.accounts_to_undelegate
+            .extend(other.accounts_to_undelegate.iter().cloned());
+
+        Ok(())
     }
 
     /// This method should be called for all accounts that we want to

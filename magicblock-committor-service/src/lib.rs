@@ -17,7 +17,7 @@ mod transactions;
 mod types;
 mod undelegate;
 
-#[cfg(feature = "dev-context-only-utils")]
+#[cfg(any(test, feature = "dev-context-only-utils"))]
 pub mod stubs;
 
 pub use commit_info::CommitInfo;

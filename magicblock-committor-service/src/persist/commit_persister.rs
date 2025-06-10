@@ -150,11 +150,22 @@ impl CommitPersister {
         self.db.get_reqids()
     }
 
+    pub fn remove_commit_statuses_with_reqid(
+        &mut self,
+        reqid: &str,
+    ) -> CommitPersistResult<usize> {
+        self.db.remove_commit_statuses_with_reqid(reqid)
+    }
+
     pub fn get_signature(
         &self,
         bundle_id: u64,
     ) -> CommitPersistResult<Option<BundleSignatureRow>> {
         self.db.get_bundle_signature_by_bundle_id(bundle_id)
+    }
+
+    pub fn register_retry(&mut self, reqid: &str) -> CommitPersistResult<()> {
+        self.db.register_retry(reqid)
     }
 }
 

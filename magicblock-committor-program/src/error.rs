@@ -1,4 +1,5 @@
 use solana_program::{msg, program_error::ProgramError};
+use solana_pubkey::Pubkey;
 use thiserror::Error;
 
 pub type CommittorResult<T> = std::result::Result<T, CommittorError>;
@@ -16,6 +17,12 @@ pub enum CommittorError {
 
     #[error("Chunk of size {0} cannot be stored at offset {1} in buffer of size ({2})")]
     OffsetChunkOutOfRange(usize, u32, usize),
+
+    #[error("Combined changesets cannot have the same accounts: {0}")]
+    MergedChangesetsCannotHaveSameAccount(Pubkey),
+
+    #[error("When combining changesets they need to have matching slots, but do not ({0} != {1})")]
+    MergeedChangesetSlotsDontMatch(u64, u64),
 }
 
 impl From<CommittorError> for ProgramError {
@@ -27,6 +34,8 @@ impl From<CommittorError> for ProgramError {
             PubkeyError(_) => 0x69001,
             OffsetMustBeMultipleOfChunkSize(_, _) => 0x69002,
             OffsetChunkOutOfRange(_, _, _) => 0x69003,
+            MergedChangesetsCannotHaveSameAccount(_) => 0x69004,
+            MergeedChangesetSlotsDontMatch(_, _) => 0x69005,
         };
         ProgramError::Custom(n)
     }

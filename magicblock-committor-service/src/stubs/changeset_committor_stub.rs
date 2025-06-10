@@ -9,7 +9,7 @@ use std::{
 
 use magicblock_committor_program::Changeset;
 use solana_pubkey::Pubkey;
-use solana_sdk::{hash::Hash, signature::Signature};
+use solana_sdk::{hash::Hash, instruction::Instruction, signature::Signature};
 use tokio::sync::oneshot;
 
 use crate::{
@@ -26,6 +26,19 @@ pub struct ChangesetCommittorStub {
     reserved_pubkeys_for_committee: Arc<Mutex<HashMap<Pubkey, Pubkey>>>,
     #[allow(clippy::type_complexity)]
     committed_changesets: Arc<Mutex<HashMap<u64, (Changeset, Hash, bool)>>>,
+    commit_statuses: Arc<Mutex<HashMap<u64, Vec<CommitStatusRow>>>>,
+}
+
+impl ChangesetCommittorStub {
+    pub fn add_commit_status(&self, status_row: CommitStatusRow) {
+        let reqid = status_row.reqid.parse::<u64>().unwrap();
+        self.commit_statuses
+            .lock()
+            .unwrap()
+            .entry(reqid)
+            .or_default()
+            .push(status_row);
+    }
 }
 
 impl ChangesetCommittor for ChangesetCommittorStub {
@@ -52,43 +65,58 @@ impl ChangesetCommittor for ChangesetCommittorStub {
         &self,
         reqid: String,
     ) -> oneshot::Receiver<CommittorServiceResult<Vec<CommitStatusRow>>> {
-        let reqid = reqid.parse::<u64>().unwrap();
-        let commit = self.committed_changesets.lock().unwrap().remove(&reqid);
         let (tx, rx) = tokio::sync::oneshot::channel();
-        let Some((changeset, hash, finalize)) = commit else {
-            tx.send(Ok(vec![])).unwrap_or_else(|_| {
-                log::error!("Failed to send commit status response");
-            });
-            return rx;
-        };
-        let status_rows = changeset
-            .accounts
-            .iter()
-            .map(|(pubkey, acc)| CommitStatusRow {
-                reqid: reqid.to_string(),
-                pubkey: *pubkey,
-                delegated_account_owner: acc.owner(),
-                slot: changeset.slot,
-                ephemeral_blockhash: hash,
-                undelegate: changeset.accounts_to_undelegate.contains(pubkey),
-                lamports: acc.lamports(),
-                finalize,
-                data: Some(acc.data().to_vec()),
-                commit_type: CommitType::DataAccount,
-                created_at: now(),
-                commit_status: CommitStatus::Succeeded((
-                    reqid,
-                    CommitStrategy::FromBuffer,
-                    CommitStatusSignatures {
-                        process_signature: Signature::new_unique(),
-                        finalize_signature: Some(Signature::new_unique()),
-                        undelegate_signature: None,
-                    },
-                )),
-                last_retried_at: now(),
-                retries_count: 0,
-            })
-            .collect();
+        let reqid = reqid.parse::<u64>().unwrap();
+        let status_rows =
+            if self.commit_statuses.lock().unwrap().contains_key(&reqid) {
+                self.commit_statuses
+                    .lock()
+                    .unwrap()
+                    .get(&reqid)
+                    .unwrap()
+                    .clone()
+            } else {
+                let commit =
+                    self.committed_changesets.lock().unwrap().remove(&reqid);
+                let Some((changeset, hash, finalize)) = commit else {
+                    tx.send(Ok(vec![])).unwrap_or_else(|_| {
+                        log::error!("Failed to send commit status response");
+                    });
+                    return rx;
+                };
+                changeset
+                    .accounts
+                    .iter()
+                    .map(|(pubkey, acc)| CommitStatusRow {
+                        reqid: reqid.to_string(),
+                        pubkey: *pubkey,
+                        delegated_account_owner: acc.owner(),
+                        slot: changeset.slot,
+                        ephemeral_blockhash: hash,
+                        undelegate: changeset
+                            .accounts_to_undelegate
+                            .contains(pubkey),
+                        lamports: acc.lamports(),
+                        finalize,
+                        data: Some(acc.data().to_vec()),
+                        commit_type: CommitType::DataAccount,
+                        created_at: now(),
+                        commit_status: CommitStatus::Succeeded((
+                            reqid,
+                            CommitStrategy::FromBuffer,
+                            CommitStatusSignatures {
+                                process_signature: Signature::new_unique(),
+                                finalize_signature: Some(
+                                    Signature::new_unique(),
+                                ),
+                                undelegate_signature: None,
+                            },
+                        )),
+                        last_retried_at: now(),
+                        retries_count: 0,
+                    })
+                    .collect()
+            };
         tx.send(Ok(status_rows)).unwrap_or_else(|_| {
             log::error!("Failed to send commit status response");
         });
@@ -137,7 +165,7 @@ impl ChangesetCommittor for ChangesetCommittorStub {
     ) -> oneshot::Receiver<CommittorServiceResult<HashSet<String>>> {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let reqids = self
-            .committed_changesets
+            .commit_statuses
             .lock()
             .unwrap()
             .keys()
@@ -146,6 +174,33 @@ impl ChangesetCommittor for ChangesetCommittorStub {
         tx.send(Ok(reqids)).unwrap_or_else(|_| {
             log::error!("Failed to send get_reqids response");
         });
+        rx
+    }
+
+    fn remove_commit_statuses_with_reqid(
+        &self,
+        reqid: String,
+    ) -> oneshot::Receiver<CommittorServiceResult<usize>> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let reqid = reqid.parse::<u64>().unwrap();
+        let removed_count = self
+            .commit_statuses
+            .lock()
+            .unwrap()
+            .remove(&reqid)
+            .map_or(0, |statuses| statuses.len());
+        tx.send(Ok(removed_count)).unwrap_or_else(|_| {
+            log::error!("Failed to send remove_commit_statuses response");
+        });
+        rx
+    }
+
+    fn run_validator_signed_ixs(
+        &self,
+        _ixs: Vec<Instruction>,
+    ) -> oneshot::Receiver<CommittorServiceResult<()>> {
+        let (_tx, rx) = tokio::sync::oneshot::channel();
+        todo!("stub: run_validator_signed_ixs");
         rx
     }
 }

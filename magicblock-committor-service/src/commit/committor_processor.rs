@@ -147,6 +147,45 @@ impl CommittorProcessor {
         Ok(reqids)
     }
 
+    pub fn remove_commit_statuses_with_reqid(
+        &self,
+        reqid: &str,
+    ) -> CommittorServiceResult<usize> {
+        Ok(self
+            .persister
+            .lock()
+            .expect("persister mutex poisoned")
+            .remove_commit_statuses_with_reqid(reqid)?)
+    }
+
+    pub async fn recommit_changeset(
+        &self,
+        reqid: &str,
+        changeset: Changeset,
+        finalize: bool,
+        ephemeral_blockhash: Hash,
+    ) {
+        if let Err(err) = self
+            .persister
+            .lock()
+            .expect("persister mutex poisoned")
+            .register_retry(reqid)
+        {
+            error!(
+                "Failed to register recommit of changeset with reqid {}: {:?}",
+                reqid, err
+            );
+        }
+
+        let owners = changeset.owners();
+        let commit_stages = self
+            .process_commit_changeset(changeset, finalize, ephemeral_blockhash)
+            .await;
+        self.release_pubkeys_for_successful_commits(&commit_stages, &owners);
+
+        self.update_commit_statuses(reqid, commit_stages);
+    }
+
     pub async fn commit_changeset(
         &self,
         changeset: Changeset,
@@ -175,7 +214,20 @@ impl CommittorProcessor {
         let commit_stages = self
             .process_commit_changeset(changeset, finalize, ephemeral_blockhash)
             .await;
+        self.release_pubkeys_for_successful_commits(&commit_stages, &owners);
 
+        if let Some(reqid) = &reqid {
+            self.update_commit_statuses(reqid, commit_stages);
+        }
+
+        reqid
+    }
+
+    async fn release_pubkeys_for_successful_commits(
+        &self,
+        commit_stages: &[CommitStage],
+        owners: &HashMap<Pubkey, Pubkey>,
+    ) {
         // Release pubkeys related to all undelegated accounts from the lookup tables
         let releaseable_pubkeys = commit_stages
             .iter()
@@ -185,28 +237,30 @@ impl CommittorProcessor {
             })
             .collect::<HashSet<_>>();
         self.table_mania.release_pubkeys(&releaseable_pubkeys).await;
+    }
 
-        if let Some(reqid) = &reqid {
-            for stage in commit_stages {
-                let _ = self.persister
-                    .lock()
-                    .expect("persister mutex poisoned")
-                    .update_status(
-                        reqid,
-                        &stage.pubkey(),
-                        stage.commit_status(),
-                    ).map_err(|err| {
-                        // We log the error here, but there is nothing we can do if we encounter
-                        // a db issue.
-                        error!(
-                            "DB EXCEPTION: Failed to update status of changeset {}: {:?}",
-                            reqid, err
-                        );
-                    });
-            }
+    fn update_commit_statuses(
+        &self,
+        reqid: &str,
+        commit_stages: Vec<CommitStage>,
+    ) {
+        for stage in commit_stages {
+            let _ = self.persister
+                .lock()
+                .expect("persister mutex poisoned")
+                .update_status(
+                    reqid,
+                    &stage.pubkey(),
+                    stage.commit_status(),
+                ).map_err(|err| {
+                    // We log the error here, but there is nothing we can do if we encounter
+                    // a db issue.
+                    error!(
+                        "DB EXCEPTION: Failed to update status of changeset {}: {:?}",
+                        reqid, err
+                    );
+                });
         }
-
-        reqid
     }
 
     async fn process_commit_changeset(

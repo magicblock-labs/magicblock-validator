@@ -1,7 +1,7 @@
 use solana_pubkey::Pubkey;
 use solana_sdk::hash::Hash;
 
-use crate::persist::{CommitStatus, CommitType};
+use crate::persist::{CommitStatus, CommitStatusRow, CommitType};
 
 pub struct PreviousCommitState {
     /// See [`crate::persist::CommitStatusRow::pubkey`]
@@ -82,5 +82,21 @@ impl PreviousCommitState {
     fn succeeded(&self) -> bool {
         use CommitStatus::*;
         matches!(self.commit_status, Succeeded(_))
+    }
+}
+
+impl From<(CommitStatusRow, Pubkey)> for PreviousCommitState {
+    fn from((row, authority): (CommitStatusRow, Pubkey)) -> Self {
+        PreviousCommitState {
+            pubkey: row.pubkey,
+            delegated_account_owner: row.delegated_account_owner,
+            authority,
+            ephemeral_blockhash: row.ephemeral_blockhash,
+            commit_status: row.commit_status,
+            commit_type: row.commit_type,
+            finalize: row.finalize,
+            data: row.data,
+            lamports: row.lamports,
+        }
     }
 }
