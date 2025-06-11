@@ -18,7 +18,7 @@ use crate::{
 };
 
 pub const DEFAULT_TRUNCATION_TIME_INTERVAL: Duration =
-    Duration::from_secs(10 * 60);
+    Duration::from_secs(2 * 60);
 const PERCENTAGE_TO_TRUNCATE: u8 = 10;
 
 struct LedgerTrunctationWorker<T> {
