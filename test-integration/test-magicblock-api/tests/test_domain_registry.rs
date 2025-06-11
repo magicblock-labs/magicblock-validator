@@ -60,6 +60,7 @@ fn test_sync() {
         ErRecord::V0(ref mut val) => {
             val.status = ErStatus::Draining;
             val.base_fee = 0;
+            val.addr = "this.is.very.long.string.to.test.sync".to_string();
         }
     }
 

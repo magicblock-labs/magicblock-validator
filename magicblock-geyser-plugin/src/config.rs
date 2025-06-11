@@ -70,7 +70,7 @@ pub struct ConfigGrpc {
 }
 
 const MAX_DECODING_MESSAGE_SIZE_DEFAULT: usize = 4 * 1024 * 1024;
-const CHANNEL_CAPACITY_DEFAULT: usize = 250_000;
+const CHANNEL_CAPACITY_DEFAULT: usize = 1024;
 const UNARY_CONCURRENCY_LIMIT_DEFAULT: usize = Semaphore::MAX_PERMITS;
 
 impl Default for ConfigGrpc {
