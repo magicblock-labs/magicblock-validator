@@ -134,6 +134,7 @@ jobs:
 
       - name: Set release version
         if: ${{ env.DRY_RUN == 'false' }}
+        shell: bash
         run: |
           if [ "${{ github.event_name }}" = "release" ]; then
             echo "RELEASE_VERSION=${{ github.event.release.tag_name }}" >> $GITHUB_ENV
@@ -152,8 +153,8 @@ jobs:
           repo_token: ${{ secrets.GITHUB_TOKEN }}
           file: magicblock-validator/target/${{ matrix.build.TARGET }}/release/${{ env.release_name }}
           overwrite: true
-          tag: "v${{ env.RELEASE_VERSION }}"
-          release_name: "v${{ env.RELEASE_VERSION }}"
+          tag: "${{ env.RELEASE_VERSION }}"
+          release_name: "${{ env.RELEASE_VERSION }}"
           asset_name: "${{ env.release_name }}"
 
       - name: Publish the NPM package
