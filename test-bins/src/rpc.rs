@@ -1,4 +1,3 @@
-use git_version::git_version;
 use log::*;
 use magicblock_api::{
     ledger,
