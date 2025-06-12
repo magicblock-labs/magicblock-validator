@@ -1,3 +1,4 @@
+use git_version::git_version;
 use log::*;
 use magicblock_api::{
     ledger,
@@ -15,6 +16,8 @@ const TEST_KEYPAIR_BYTES: [u8; 64] = [
     9, 208, 183, 189, 108, 200, 89, 77, 168, 76, 233, 197, 132, 22, 21, 186,
     202, 240, 105, 168, 157, 64, 233, 249, 100, 104, 210, 41, 83, 87,
 ];
+
+const GIT_VERSION: &str = git_version::git_version!();
 
 fn init_logger() {
     if let Ok(style) = std::env::var("RUST_LOG_STYLE") {
@@ -99,6 +102,11 @@ async fn main() {
 
     info!("");
     info!("🧙 Magicblock Validator is running!");
+    info!(
+        "🏷️ Validator version: {} (Git: {})",
+        env!("CARGO_PKG_VERSION"),
+        GIT_VERSION
+    );
     info!("-----------------------------------");
     info!("📡 RPC endpoint:       http://{}:{}", rpc_host, rpc_port);
     info!("🔌 WebSocket endpoint: ws://{}:{}", rpc_host, ws_port);
