@@ -10059,6 +10059,7 @@ version = "0.1.2"
 dependencies = [
  "console-subscriber",
  "env_logger 0.11.6",
+ "git-version",
  "log",
  "magicblock-api",
  "magicblock-config",
