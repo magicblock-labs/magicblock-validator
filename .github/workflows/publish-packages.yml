@@ -132,6 +132,19 @@ jobs:
           echo "release_name=${release_name}" >> $GITHUB_ENV
           mv "target/${{ matrix.build.TARGET }}/release/${bin}" "target/${{ matrix.build.TARGET }}/release/${release_name}"
 
+      - name: Set release version
+        if: ${{ env.DRY_RUN == 'false' }}
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "RELEASE_VERSION=${{ github.event.release.tag_name }}" >> $GITHUB_ENV
+          elif [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            echo "RELEASE_VERSION=${{ github.event.inputs.release_version }}" >> $GITHUB_ENV
+          elif [[ "${{ github.ref }}" == refs/heads/release/v* ]]; then
+            echo "RELEASE_VERSION=$(echo ${{ github.ref }} | sed 's|refs/heads/release/||')" >> $GITHUB_ENV
+          else
+            echo "RELEASE_VERSION=v0.0.0-dev" >> $GITHUB_ENV
+          fi
+
       - name: Publish binary to GitHub release
         if: ${{ env.DRY_RUN == 'false' }}
         uses: svenstaro/upload-release-action@v2
