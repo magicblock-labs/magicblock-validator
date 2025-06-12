@@ -1,6 +1,9 @@
 #![cfg(test)]
 
-use std::sync::Arc;
+use log::*;
+use magicblock_committor_program::ChangedAccount;
+use std::{collections::HashMap, sync::Arc};
+use test_tools_core::init_logger;
 
 use solana_pubkey::Pubkey;
 use solana_sdk::hash::Hash;
@@ -17,7 +20,7 @@ use crate::{
     ChangesetCommittor,
 };
 
-fn add_success(cc: &ChangesetCommittorStub, reqid: u64) {
+fn add_success(cc: &ChangesetCommittorStub, reqid: u64) -> CommitStatusRow {
     add_with_status(
         cc,
         reqid,
@@ -30,19 +33,19 @@ fn add_success(cc: &ChangesetCommittorStub, reqid: u64) {
                 undelegate_signature: None,
             },
         )),
-    );
+    )
 }
 
-fn add_pending(cc: &ChangesetCommittorStub, reqid: u64) {
-    add_with_status(cc, reqid, CommitStatus::Pending);
+fn add_pending(cc: &ChangesetCommittorStub, reqid: u64) -> CommitStatusRow {
+    add_with_status(cc, reqid, CommitStatus::Pending)
 }
 
 fn add_with_status(
     cc: &ChangesetCommittorStub,
     reqid: u64,
     status: CommitStatus,
-) {
-    cc.add_commit_status(CommitStatusRow {
+) -> CommitStatusRow {
+    let row = CommitStatusRow {
         reqid: reqid.to_string(),
         pubkey: Pubkey::new_unique(),
         commit_type: CommitType::DataAccount,
@@ -57,11 +60,15 @@ fn add_with_status(
         commit_status: status,
         last_retried_at: 0,
         retries_count: 0,
-    });
+    };
+    cc.add_commit_status(row.clone());
+    row
 }
 
 #[tokio::test]
 async fn test_retry_all_commits_succeeded() {
+    init_logger!();
+
     let cc = Arc::new(ChangesetCommittorStub::default());
 
     let reqid1 = 1;
@@ -83,7 +90,7 @@ async fn test_retry_all_commits_succeeded() {
             completed: vec![(reqid1.to_string(), 2), (reqid2.to_string(), 1)]
                 .into_iter()
                 .collect(),
-            failed: vec![],
+            retried: HashMap::new(),
         }
     );
 
@@ -94,6 +101,8 @@ async fn test_retry_all_commits_succeeded() {
 
 #[tokio::test]
 async fn test_retry_two_commits_succeeded_one_pending() {
+    init_logger!();
+
     let cc = Arc::new(ChangesetCommittorStub::default());
 
     let reqid1 = 1;
@@ -113,7 +122,7 @@ async fn test_retry_two_commits_succeeded_one_pending() {
         result,
         RetryPendingResult {
             completed: vec![(reqid1.to_string(), 2)].into_iter().collect(),
-            failed: vec![],
+            retried: HashMap::new(),
         }
     );
 
@@ -124,10 +133,12 @@ async fn test_retry_two_commits_succeeded_one_pending() {
 
 #[tokio::test]
 async fn test_retry_single_totally_failed_commit() {
+    init_logger!();
+
     let cc = Arc::new(ChangesetCommittorStub::default());
 
     let reqid1 = 1;
-    add_with_status(&cc, reqid1, CommitStatus::Failed(reqid1));
+    let row1 = add_with_status(&cc, reqid1, CommitStatus::Failed(reqid1));
 
     let sut = CommittorRetryService::new(
         cc.clone(),
@@ -135,5 +146,35 @@ async fn test_retry_single_totally_failed_commit() {
     );
 
     let result = sut.retry_failed().await.unwrap();
-    eprintln!("[test_retry_single_totally_failed_commit] result: {result:?}");
+
+    // Retries the correct amount of rows for each reqid
+    assert_eq!(
+        result,
+        RetryPendingResult {
+            completed: HashMap::new(),
+            retried: vec![(reqid1.to_string(), 1)].into_iter().collect(),
+        }
+    );
+    // Does not close existing buffers
+    assert!(cc.validator_signed_ixs().is_empty());
+
+    // Recommitted the correct changeset
+    assert_eq!(cc.recommitted_changesets().len(), 1,);
+
+    let changesets = cc.recommitted_changesets();
+    let (changeset, ephemeral_blockhash, finalize) =
+        changesets.get(&reqid1.to_string()).unwrap();
+
+    assert_eq!(ephemeral_blockhash, &row1.ephemeral_blockhash);
+    assert_eq!(finalize, &row1.finalize);
+    assert_eq!(changeset.accounts.len(), 1);
+    assert_eq!(
+        changeset.accounts.get(&row1.pubkey).unwrap(),
+        &ChangedAccount::Full {
+            lamports: row1.lamports,
+            owner: row1.delegated_account_owner,
+            data: row1.data.unwrap(),
+            bundle_id: 1,
+        }
+    );
 }

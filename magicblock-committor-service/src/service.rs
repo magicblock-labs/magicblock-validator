@@ -56,6 +56,18 @@ pub enum CommittorMessage {
         /// If `true`, account commits will be finalized after they were processed
         finalize: bool,
     },
+    RecommitChangeset {
+        /// The request ID of the changeset to recommit
+        reqid: String,
+        /// Called once the changeset has been recommitted
+        respond_to: oneshot::Sender<()>,
+        /// The changeset to recommit
+        changeset: Changeset,
+        /// The blockhash in the ephemeral at the time the commit was requested
+        ephemeral_blockhash: Hash,
+        /// If `true`, account commits will be finalized after they were processed
+        finalize: bool,
+    },
     GetCommitStatuses {
         respond_to:
             oneshot::Sender<CommittorServiceResult<Vec<CommitStatusRow>>>,
@@ -146,6 +158,25 @@ impl CommittorActor {
                     .commit_changeset(changeset, finalize, ephemeral_blockhash)
                     .await;
                 if let Err(e) = respond_to.send(reqid) {
+                    error!("Failed to send response {:?}", e);
+                }
+            }
+            RecommitChangeset {
+                reqid,
+                changeset,
+                ephemeral_blockhash,
+                respond_to,
+                finalize,
+            } => {
+                self.processor
+                    .recommit_changeset(
+                        &reqid,
+                        changeset,
+                        finalize,
+                        ephemeral_blockhash,
+                    )
+                    .await;
+                if let Err(e) = respond_to.send(()) {
                     error!("Failed to send response {:?}", e);
                 }
             }
@@ -336,6 +367,24 @@ impl ChangesetCommittor for CommittorService {
         rx
     }
 
+    fn recommit_changeset(
+        &self,
+        reqid: String,
+        changeset: Changeset,
+        ephemeral_blockhash: Hash,
+        finalize: bool,
+    ) -> oneshot::Receiver<()> {
+        let (tx, rx) = oneshot::channel();
+        self.try_send(CommittorMessage::RecommitChangeset {
+            reqid,
+            respond_to: tx,
+            changeset,
+            ephemeral_blockhash,
+            finalize,
+        });
+        rx
+    }
+
     fn get_commit_statuses(
         &self,
         reqid: String,
@@ -385,7 +434,9 @@ impl ChangesetCommittor for CommittorService {
         &self,
         _ixs: Vec<Instruction>,
     ) -> oneshot::Receiver<CommittorServiceResult<()>> {
-        todo!("run_validator_signed_ixs");
+        // TODO: @@@ run_validator_signed_ixs
+        let (_tx, rx) = oneshot::channel();
+        rx
     }
 }
 
@@ -404,6 +455,15 @@ pub trait ChangesetCommittor: Send + Sync + 'static {
         ephemeral_blockhash: Hash,
         finalize: bool,
     ) -> oneshot::Receiver<Option<String>>;
+
+    /// Recommits the changeset with the provided reqid
+    fn recommit_changeset(
+        &self,
+        reqid: String,
+        changeset: Changeset,
+        ephemeral_blockhash: Hash,
+        finalize: bool,
+    ) -> oneshot::Receiver<()>;
 
     /// Gets statuses of accounts that were committed as part of a request with provided reqid
     fn get_commit_statuses(

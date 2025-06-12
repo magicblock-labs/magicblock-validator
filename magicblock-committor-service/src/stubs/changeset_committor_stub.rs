@@ -1,3 +1,4 @@
+use log::*;
 use std::{
     collections::{HashMap, HashSet},
     sync::{
@@ -26,7 +27,11 @@ pub struct ChangesetCommittorStub {
     reserved_pubkeys_for_committee: Arc<Mutex<HashMap<Pubkey, Pubkey>>>,
     #[allow(clippy::type_complexity)]
     committed_changesets: Arc<Mutex<HashMap<u64, (Changeset, Hash, bool)>>>,
+    #[allow(clippy::type_complexity)]
+    recommitted_changesets:
+        Arc<Mutex<HashMap<String, (Changeset, Hash, bool)>>>,
     commit_statuses: Arc<Mutex<HashMap<u64, Vec<CommitStatusRow>>>>,
+    validator_signed_ixs: Arc<Mutex<Vec<Instruction>>>,
 }
 
 impl ChangesetCommittorStub {
@@ -38,6 +43,26 @@ impl ChangesetCommittorStub {
             .entry(reqid)
             .or_default()
             .push(status_row);
+    }
+
+    pub fn committed_changesets(
+        &self,
+    ) -> HashMap<u64, (Changeset, Hash, bool)> {
+        self.committed_changesets.lock().unwrap().clone()
+    }
+
+    pub fn recommitted_changesets(
+        &self,
+    ) -> HashMap<String, (Changeset, Hash, bool)> {
+        self.recommitted_changesets.lock().unwrap().clone()
+    }
+
+    pub fn commit_statuses(&self) -> HashMap<u64, Vec<CommitStatusRow>> {
+        self.commit_statuses.lock().unwrap().clone()
+    }
+
+    pub fn validator_signed_ixs(&self) -> Vec<Instruction> {
+        self.validator_signed_ixs.lock().unwrap().clone()
     }
 }
 
@@ -56,7 +81,29 @@ impl ChangesetCommittor for ChangesetCommittorStub {
             .unwrap()
             .insert(reqid, (changeset, ephemeral_blockhash, finalize));
         tx.send(Some(reqid.to_string())).unwrap_or_else(|_| {
-            log::error!("Failed to send commit changeset response");
+            error!("Failed to send commit changeset response");
+        });
+        rx
+    }
+
+    fn recommit_changeset(
+        &self,
+        reqid: String,
+        changeset: Changeset,
+        ephemeral_blockhash: Hash,
+        finalize: bool,
+    ) -> oneshot::Receiver<()> {
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        debug!(
+            "Recommitting changeset for reqid: {} {:?}",
+            reqid, changeset
+        );
+        self.recommitted_changesets.lock().unwrap().insert(
+            reqid.to_string(),
+            (changeset, ephemeral_blockhash, finalize),
+        );
+        tx.send(()).unwrap_or_else(|_| {
+            error!("Failed to send recommit changeset response");
         });
         rx
     }
@@ -76,11 +123,12 @@ impl ChangesetCommittor for ChangesetCommittorStub {
                     .unwrap()
                     .clone()
             } else {
+                // TODO: @@@ why are we faking this here?
                 let commit =
                     self.committed_changesets.lock().unwrap().remove(&reqid);
                 let Some((changeset, hash, finalize)) = commit else {
                     tx.send(Ok(vec![])).unwrap_or_else(|_| {
-                        log::error!("Failed to send commit status response");
+                        error!("Failed to send commit status response");
                     });
                     return rx;
                 };
@@ -118,7 +166,7 @@ impl ChangesetCommittor for ChangesetCommittorStub {
                     .collect()
             };
         tx.send(Ok(status_rows)).unwrap_or_else(|_| {
-            log::error!("Failed to send commit status response");
+            error!("Failed to send commit status response");
         });
         rx
     }
@@ -138,7 +186,7 @@ impl ChangesetCommittor for ChangesetCommittorStub {
             created_at: now(),
         };
         tx.send(Ok(Some(bundle_signature))).unwrap_or_else(|_| {
-            log::error!("Failed to send bundle signatures response");
+            error!("Failed to send bundle signatures response");
         });
         rx
     }
@@ -155,7 +203,7 @@ impl ChangesetCommittor for ChangesetCommittorStub {
             .unwrap()
             .insert(committee, owner);
         tx.send(Ok(())).unwrap_or_else(|_| {
-            log::error!("Failed to send response");
+            error!("Failed to send response");
         });
         rx
     }
@@ -172,7 +220,7 @@ impl ChangesetCommittor for ChangesetCommittorStub {
             .map(|&id| id.to_string())
             .collect();
         tx.send(Ok(reqids)).unwrap_or_else(|_| {
-            log::error!("Failed to send get_reqids response");
+            error!("Failed to send get_reqids response");
         });
         rx
     }
@@ -190,17 +238,20 @@ impl ChangesetCommittor for ChangesetCommittorStub {
             .remove(&reqid)
             .map_or(0, |statuses| statuses.len());
         tx.send(Ok(removed_count)).unwrap_or_else(|_| {
-            log::error!("Failed to send remove_commit_statuses response");
+            error!("Failed to send remove_commit_statuses response");
         });
         rx
     }
 
     fn run_validator_signed_ixs(
         &self,
-        _ixs: Vec<Instruction>,
+        ixs: Vec<Instruction>,
     ) -> oneshot::Receiver<CommittorServiceResult<()>> {
-        let (_tx, rx) = tokio::sync::oneshot::channel();
-        todo!("stub: run_validator_signed_ixs");
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        self.validator_signed_ixs.lock().unwrap().extend(ixs);
+        tx.send(Ok(())).unwrap_or_else(|_| {
+            error!("Failed to send run_validator_signed_ixs response");
+        });
         rx
     }
 }

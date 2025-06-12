@@ -76,18 +76,19 @@ pub enum CommittorServiceError {
         solana_sdk::program_error::ProgramError,
     ),
 
-    #[error("Retried commits of a bundle must have at least one commit")]
-    RetriedCommitsNeedAtLeastOneProcessCommitStep,
-
     #[error(
         "All retried commits of a bundle must have the same finalize value"
     )]
     RetriedCommitsNeedToHaveSameFinalize,
+
     #[error("All retried commits of a bundle must have the same slot")]
     RetriedCommitsNeedToHaveSameSlot,
 
+    #[error("All retried commits of a bundle must have the same ephemeral blockhash")]
+    RetriedCommitsNeedToHaveSameEphemeralBlockhash,
+
     #[error("Not all commits of reqid {0} have the same finalize value")]
-    RetriedCommitsNeedConsistentFinalize(String),
+    RetriedCommitsOfSameRequestNeedConsistentFinalize(String),
 }
 
 impl CommittorServiceError {

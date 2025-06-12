@@ -1,18 +1,20 @@
+use log::*;
+use solana_sdk::hash::Hash;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
 use magicblock_committor_program::Changeset;
 use solana_pubkey::Pubkey;
+use tokio::task::JoinSet;
 
 use crate::{
     error::{CommittorServiceError, CommittorServiceResult},
-    persist::CommitStatusRow,
     transactions::close_buffers_ix,
     ChangesetCommittor,
 };
 
 use super::{
     previous_commit_state::PreviousCommitState,
-    retry_steps::{RetryStep, RetrySteps},
+    retry_steps::{RetryChangeset, RetryStep, RetrySteps},
 };
 
 #[derive(Default)]
@@ -34,8 +36,10 @@ pub struct CommittorRetryService<CC: ChangesetCommittor> {
 
 #[derive(Debug, PartialEq, Eq)]
 pub struct RetryPendingResult {
+    /// Amount of completed commits that were removed from the database for each reqid
     pub completed: HashMap<String, usize>,
-    pub failed: Vec<(String, Vec<CommitStatusRow>)>,
+    /// Amount of commits that were retried for each reqid
+    pub retried: HashMap<String, usize>,
 }
 
 impl<CC: ChangesetCommittor> CommittorRetryService<CC> {
@@ -46,6 +50,11 @@ impl<CC: ChangesetCommittor> CommittorRetryService<CC> {
         Self { committor, config }
     }
 
+    /// Queries all commit statuses from the database and does the following:
+    ///
+    /// - removes all completed commit statuses
+    /// - retries all failed commits and increases their retry count
+    /// - ignores all pending commits
     pub async fn retry_failed(
         &self,
     ) -> CommittorServiceResult<RetryPendingResult> {
@@ -87,40 +96,80 @@ impl<CC: ChangesetCommittor> CommittorRetryService<CC> {
         // before recommitting them
         let mut all_cleanup_steps = vec![];
         let mut changesets = HashMap::new();
+        let mut retries_by_reqid = HashMap::new();
         for (reqid, statuses) in failed.into_iter() {
+            *retries_by_reqid.entry(reqid.clone()).or_default() =
+                statuses.len();
+
             let mut merged_changeset = None::<Changeset>;
             let mut combined_finalize = None::<bool>;
+            let mut combined_ephemeral_blockhash = None::<Hash>;
             for status in statuses.into_iter() {
-                let previous_commit = PreviousCommitState::from((
-                    status,
-                    self.config.authority.clone(),
-                ));
+                let previous_commit =
+                    PreviousCommitState::from((status, self.config.authority));
                 let retry_steps = RetrySteps::from(previous_commit);
+
+                // 1. Collect all cleanup steps
                 let cleanup_steps = retry_steps.cleanup_steps();
                 all_cleanup_steps.extend(cleanup_steps);
 
-                let (changeset, finalize) = retry_steps.try_into_changeset()?;
+                // 2. Collect all process commit steps into a merged changeset
+                let Some(RetryChangeset {
+                    changeset,
+                    finalize,
+                    ephemeral_blockhash,
+                }) = retry_steps.try_into_changeset()?
+                else {
+                    // TODO: @@@ we'll need to handle finalize/undelegate only as well
+                    debug!(
+                        "No changeset to process during retry for reqid: {}",
+                        reqid
+                    );
+                    continue;
+                };
                 if let Some(ref mut cs) = merged_changeset {
                     cs.try_merge_with(changeset)?;
                 } else {
                     merged_changeset.replace(changeset);
                 }
-                if let Some(cf) = combined_finalize {
-                    if finalize != cf {
+                match combined_finalize {
+                    Some(cf) if finalize != cf => {
                         return Err(
-                            CommittorServiceError::RetriedCommitsNeedConsistentFinalize(reqid),
+                            CommittorServiceError::RetriedCommitsOfSameRequestNeedConsistentFinalize(reqid),
                         );
                     }
-                } else {
-                    combined_finalize.replace(finalize);
+                    None => {
+                        combined_finalize.replace(finalize);
+                    }
+                    _ => {}
+                }
+                match combined_ephemeral_blockhash {
+                    Some(cebh) if ephemeral_blockhash != cebh => {
+                        return Err(
+                            CommittorServiceError::RetriedCommitsNeedToHaveSameEphemeralBlockhash,
+                        );
+                    }
+                    None => {
+                        combined_ephemeral_blockhash
+                            .replace(ephemeral_blockhash);
+                    }
+                    _ => {}
                 }
             }
-            changesets.insert(
-                reqid,
-                (merged_changeset.ok_or_else(|| {
-                    CommittorServiceError::RetriedCommitsNeedAtLeastOneProcessCommitStep
-                })?, combined_finalize.unwrap_or(false)),
-            );
+
+            if let Some(changeset) = merged_changeset {
+                changesets.insert(
+                    reqid,
+                    RetryChangeset {
+                        changeset,
+                        // SAFETY: combined_finalize is set at first loop iteration
+                        finalize: combined_finalize.unwrap(),
+                        // SAFETY: combined_ephemeral_blockhash is set at first loop iteration
+                        ephemeral_blockhash: combined_ephemeral_blockhash
+                            .unwrap(),
+                    },
+                );
+            }
         }
 
         // Run the cleanup steps
@@ -140,6 +189,7 @@ impl<CC: ChangesetCommittor> CommittorRetryService<CC> {
                     cleanup_ixs.push(ix);
                 }
                 ProcessCommit { .. } => {
+                    // TODO: @@@
                     todo!("BUG: Logic error")
                 }
             }
@@ -149,7 +199,28 @@ impl<CC: ChangesetCommittor> CommittorRetryService<CC> {
             .await??;
 
         // Recommit changesets
+        let mut join_set = JoinSet::new();
+        for (
+            reqid,
+            RetryChangeset {
+                changeset,
+                finalize,
+                ephemeral_blockhash,
+            },
+        ) in changesets.into_iter()
+        {
+            join_set.spawn(self.committor.recommit_changeset(
+                reqid.clone(),
+                changeset,
+                ephemeral_blockhash,
+                finalize,
+            ));
+        }
+        join_set.join_all().await;
 
-        Ok(RetryPendingResult { completed, failed })
+        Ok(RetryPendingResult {
+            completed,
+            retried: retries_by_reqid,
+        })
     }
 }

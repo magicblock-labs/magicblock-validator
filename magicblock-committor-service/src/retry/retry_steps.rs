@@ -1,7 +1,7 @@
 use solana_sdk::hash::Hash;
 use std::ops::Deref;
 
-use magicblock_committor_program::{pdas, ChangedAccount, Changeset};
+use magicblock_committor_program::{ChangedAccount, Changeset};
 use solana_pubkey::Pubkey;
 use solana_sdk::clock::Slot;
 
@@ -31,13 +31,15 @@ pub enum RetryStep {
         /// See [`crate::persist::CommitStatusRow::finalize`]
         finalize: bool,
         /// See [`crate::persist::CommitStatusRow::data`]
-        data: Vec<u8>,
+        data: Option<Vec<u8>>,
         /// See [`crate::persist::CommitStatusRow::lamports`]
         lamports: u64,
         /// See [`crate::persist::CommitStatusRow::slot`]
         slot: Slot,
         /// See [`crate::persist::CommitStatusRow::undelegate`]
         undelegate: bool,
+        /// See [`crate::persist::CommitStatusRow::ephemeral_blockhash`]
+        ephemeral_blockhash: Hash,
     },
 }
 
@@ -53,22 +55,53 @@ impl Deref for RetrySteps {
 
 impl From<PreviousCommitState> for RetrySteps {
     fn from(state: PreviousCommitState) -> Self {
+        let close_buffer_and_chunk_accounts =
+            state.may_have_created_buffer_and_chunks_accounts();
+        let succeeded_process = state.succeeded_process();
+
         let PreviousCommitState {
             pubkey,
+            delegated_account_owner,
+            commit_type,
+            finalize,
+            data,
+            lamports,
+            slot,
+            undelegate,
             ephemeral_blockhash,
             ..
         } = state;
 
         let mut steps = vec![];
-        if state.may_have_created_buffer_and_chunks_accounts() {
+        if close_buffer_and_chunk_accounts {
             steps.push(RetryStep::CloseBufferAndChunksAccounts {
                 pubkey,
                 ephemeral_blockhash,
             });
         }
 
+        if !succeeded_process {
+            steps.push(RetryStep::ProcessCommit {
+                pubkey,
+                delegated_account_owner,
+                commit_type,
+                finalize,
+                data,
+                lamports,
+                slot,
+                undelegate,
+                ephemeral_blockhash,
+            });
+        }
+
         RetrySteps(steps)
     }
+}
+
+pub struct RetryChangeset {
+    pub changeset: Changeset,
+    pub finalize: bool,
+    pub ephemeral_blockhash: Hash,
 }
 
 impl RetrySteps {
@@ -90,12 +123,10 @@ impl RetrySteps {
 
     pub fn try_into_changeset(
         self,
-    ) -> CommittorServiceResult<(Changeset, bool)> {
+    ) -> CommittorServiceResult<Option<RetryChangeset>> {
         let steps = self.into_process_steps();
         if steps.is_empty() {
-            return Err(
-                CommittorServiceError::RetriedCommitsNeedAtLeastOneProcessCommitStep,
-            );
+            return Ok(None);
         }
         // All accounts were originally committed as a single bundle, so we
         // just need to pick any ID as long it is the same for all
@@ -104,6 +135,7 @@ impl RetrySteps {
         let mut changeset = Changeset::default();
         let mut combined_finalize = None::<bool>;
         let mut combined_slot = None::<Slot>;
+        let mut combined_ephemeral_blockhash = None::<Hash>;
         for step in steps {
             if let RetryStep::ProcessCommit {
                 pubkey,
@@ -113,12 +145,13 @@ impl RetrySteps {
                 undelegate,
                 finalize,
                 slot,
+                ephemeral_blockhash,
                 ..
             } = step
             {
                 let changed_account = ChangedAccount::Full {
                     lamports,
-                    data,
+                    data: data.unwrap_or_default(),
                     owner: delegated_account_owner,
                     bundle_id: BUNDLE_ID,
                 };
@@ -145,13 +178,29 @@ impl RetrySteps {
                     }
                     _ => {}
                 }
+
+                match combined_ephemeral_blockhash {
+                    Some(x) if x != ephemeral_blockhash => return Err(
+                        CommittorServiceError::RetriedCommitsNeedToHaveSameEphemeralBlockhash,
+                    ),
+                    None => {
+                        combined_ephemeral_blockhash.replace(ephemeral_blockhash);
+                    }
+                    _ => {}
+                }
             }
         }
         // SAFETY: we set the slot when processing first commit step
         changeset.slot = combined_slot.unwrap();
         // SAFETY: we set the finalize when processing first commit step
         let finalize = combined_finalize.unwrap();
+        // SAFETY: we set the ephemeral blockhash when processing first commit step
+        let ephemeral_blockhash = combined_ephemeral_blockhash.unwrap();
 
-        Ok((changeset, finalize))
+        Ok(Some(RetryChangeset {
+            changeset,
+            finalize,
+            ephemeral_blockhash,
+        }))
     }
 }

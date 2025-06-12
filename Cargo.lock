@@ -3808,6 +3808,7 @@ dependencies = [
  "solana-sdk",
  "solana-transaction-status-client-types",
  "static_assertions",
+ "test-tools-core",
  "thiserror 1.0.69",
  "tokio",
  "tokio-util 0.7.13",

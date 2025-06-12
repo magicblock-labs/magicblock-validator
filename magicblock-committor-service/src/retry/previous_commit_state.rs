@@ -1,5 +1,5 @@
 use solana_pubkey::Pubkey;
-use solana_sdk::hash::Hash;
+use solana_sdk::{clock::Slot, hash::Hash};
 
 use crate::persist::{CommitStatus, CommitStatusRow, CommitType};
 
@@ -22,6 +22,10 @@ pub struct PreviousCommitState {
     pub data: Option<Vec<u8>>,
     /// See [`crate::persist::CommitStatusRow::lamports`]
     pub lamports: u64,
+    /// See [`crate::persist::CommitStatusRow::slot`]
+    pub slot: Slot,
+    /// See [`crate::persist::CommitStatusRow::undelegate`]
+    pub undelegate: bool,
 }
 
 impl PreviousCommitState {
@@ -97,6 +101,8 @@ impl From<(CommitStatusRow, Pubkey)> for PreviousCommitState {
             finalize: row.finalize,
             data: row.data,
             lamports: row.lamports,
+            slot: row.slot,
+            undelegate: row.undelegate,
         }
     }
 }

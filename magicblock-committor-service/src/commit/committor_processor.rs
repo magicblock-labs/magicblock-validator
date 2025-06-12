@@ -181,7 +181,8 @@ impl CommittorProcessor {
         let commit_stages = self
             .process_commit_changeset(changeset, finalize, ephemeral_blockhash)
             .await;
-        self.release_pubkeys_for_successful_commits(&commit_stages, &owners);
+        self.release_pubkeys_for_successful_commits(&commit_stages, &owners)
+            .await;
 
         self.update_commit_statuses(reqid, commit_stages);
     }
@@ -214,7 +215,8 @@ impl CommittorProcessor {
         let commit_stages = self
             .process_commit_changeset(changeset, finalize, ephemeral_blockhash)
             .await;
-        self.release_pubkeys_for_successful_commits(&commit_stages, &owners);
+        self.release_pubkeys_for_successful_commits(&commit_stages, &owners)
+            .await;
 
         if let Some(reqid) = &reqid {
             self.update_commit_statuses(reqid, commit_stages);

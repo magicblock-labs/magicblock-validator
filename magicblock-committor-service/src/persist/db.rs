@@ -373,10 +373,12 @@ impl CommittorDb {
     }
 
     pub fn register_retry(&self, reqid: &str) -> CommitPersistResult<()> {
+        // TODO: @@@ should we set to pending here or elsewhere?
+        //       possibly also remove signature statuses or keep them until we completed the retry?
         let query = "UPDATE commit_status
             SET last_retried_at = ?1, retries_count = retries_count + 1
             WHERE AND reqid = ?2";
-        let stmt = &mut self.conn.prepare(&query)?;
+        let stmt = &mut self.conn.prepare(query)?;
         stmt.execute(params![u64_into_i64(now()), reqid])?;
         Ok(())
     }
