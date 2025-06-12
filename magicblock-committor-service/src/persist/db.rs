@@ -5,7 +5,7 @@ use solana_pubkey::Pubkey;
 use solana_sdk::{clock::Slot, hash::Hash, signature::Signature};
 
 use super::{
-    error::CommitPersistResult,
+    error::{CommitPersistError, CommitPersistResult},
     utils::{i64_into_u64, now, u64_into_i64},
     CommitStatus, CommitStatusSignatures, CommitStrategy, CommitType,
 };
@@ -142,6 +142,8 @@ FROM commit_status
 // different lifetime than the bundle signature rows.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BundleSignatureRow {
+    /// See [CommitStatusRow::reqid]
+    pub reqid: String,
     /// The id of the bundle that was commmitted
     /// If an account was not part of a bundle it is treated as a single account bundle
     /// for consistency.
@@ -161,6 +163,7 @@ pub struct BundleSignatureRow {
 
 impl BundleSignatureRow {
     pub fn new(
+        reqid: &str,
         bundle_id: u64,
         processed_signature: Signature,
         finalized_signature: Option<Signature>,
@@ -168,6 +171,7 @@ impl BundleSignatureRow {
     ) -> Self {
         let created_at = now();
         Self {
+            reqid: reqid.to_string(),
             bundle_id,
             processed_signature,
             finalized_signature,
@@ -178,6 +182,7 @@ impl BundleSignatureRow {
 }
 
 const ALL_BUNDLE_SIGNATURE_COLUMNS: &str = r#"
+    reqid,
     bundle_id,
     processed_signature,
     finalized_signature,
@@ -187,6 +192,7 @@ const ALL_BUNDLE_SIGNATURE_COLUMNS: &str = r#"
 
 const SELECT_ALL_BUNDLE_SIGNATURE_COLUMNS: &str = r#"
 SELECT
+    reqid,
     bundle_id,
     processed_signature,
     finalized_signature,
@@ -195,6 +201,20 @@ SELECT
 FROM bundle_signature
 "#;
 
+// -----------------
+// RegisterRetryResult
+// -----------------
+pub struct RegisterRetryDetails {
+    /// See [CommitStatusRow::reqid]
+    /// The request ID that was used when originally committing the account
+    pub(crate) reqid: String,
+    /// See [CommitStatus::Succeeded::0]
+    /// The strategy used to commit the account
+    pub(crate) strategy: CommitStrategy,
+    /// See [CommitStatus::Succeeded::0]
+    /// The signatures used to commit/finalize/undelegate the account
+    pub(crate) signatures: CommitStatusSignatures,
+}
 // -----------------
 // CommittorDb
 // -----------------
@@ -372,15 +392,17 @@ impl CommittorDb {
         Ok(())
     }
 
-    pub fn register_retry(&self, reqid: &str) -> CommitPersistResult<()> {
-        // TODO: @@@ should we set to pending here or elsewhere?
-        //       possibly also remove signature statuses or keep them until we completed the retry?
+    pub fn register_retry(
+        &self,
+        reqid: &str,
+    ) -> CommitPersistResult<RegisterRetryDetails> {
         let query = "UPDATE commit_status
             SET last_retried_at = ?1, retries_count = retries_count + 1
-            WHERE AND reqid = ?2";
+            commit_status = 'Pending'
+            WHERE reqid = ?2";
         let stmt = &mut self.conn.prepare(query)?;
         stmt.execute(params![u64_into_i64(now()), reqid])?;
-        Ok(())
+        todo!()
     }
 
     #[cfg(test)]
@@ -440,13 +462,15 @@ impl CommittorDb {
             "
         BEGIN;
             CREATE TABLE IF NOT EXISTS bundle_signature (
-                bundle_id INTEGER NOT NULL PRIMARY KEY,
-                processed_signature TEXT NOT NULL,
-                finalized_signature TEXT,
-                undelegate_signature TEXT,
-                created_at INTEGER NOT NULL
+                reqid                   TEXT NOT NULL,
+                bundle_id               INTEGER NOT NULL PRIMARY KEY,
+                processed_signature     TEXT NOT NULL,
+                finalized_signature     TEXT,
+                undelegate_signature    TEXT,
+                created_at              INTEGER NOT NULL
             );
-            CREATE INDEX IF NOT EXISTS idx_bundle_signature ON bundle_signature (bundle_id);
+            CREATE INDEX IF NOT EXISTS idx_bundle_signature_reqid ON bundle_signature (reqid);
+            CREATE INDEX IF NOT EXISTS idx_bundle_signature_bundle_id ON bundle_signature (bundle_id);
         COMMIT;",
         ) {
             Ok(_) => Ok(()),
@@ -516,6 +540,45 @@ impl CommittorDb {
             reqids.insert(reqid);
         }
         Ok(reqids)
+    }
+
+    pub(crate) fn update_finalize_signature(
+        &self,
+        bundle_id: u64,
+        pubkey: &Pubkey,
+        finalize_signature: &Signature,
+    ) -> std::result::Result<(), super::error::CommitPersistError> {
+        let query = "UPDATE bundle_signature
+            SET finalized_signature = ?1
+            WHERE bundle_id = ?2 AND pubkey = ?3";
+        let stmt = &mut self.conn.prepare(query)?;
+        stmt.execute(params![
+            finalize_signature.to_string(),
+            bundle_id,
+            pubkey.to_string()
+        ])?;
+        Ok(())
+    }
+
+    pub(crate) fn get_bundle_id_by_reqid_and_pubkey(
+        &self,
+        reqid: &str,
+        pubkey: &Pubkey,
+    ) -> CommitPersistResult<u64> {
+        let query = "SELECT commit_status FROM commit_status WHERE reqid = ?1 AND pubkey = ?2";
+        let stmt = &mut self.conn.prepare(query)?;
+        let mut rows = stmt.query(params![reqid, pubkey.to_string()])?;
+
+        match rows.next()? {
+            Some(row) => {
+                let bundle_id: i64 = row.get(0)?;
+                Ok(i64_into_u64(bundle_id))
+            }
+            None => Err(CommitPersistError::BundleIdNotFound(
+                reqid.to_string(),
+                *pubkey,
+            )),
+        }
     }
 }
 
@@ -656,32 +719,34 @@ fn extract_committor_row(
 fn extract_bundle_signature_row(
     row: &rusqlite::Row,
 ) -> CommitPersistResult<BundleSignatureRow> {
+    let reqid: String = row.get(0)?;
     let bundle_id: u64 = {
-        let bundle_id: i64 = row.get(0)?;
+        let bundle_id: i64 = row.get(1)?;
         i64_into_u64(bundle_id)
     };
     let processed_signature = {
-        let processed_signature: String = row.get(1)?;
+        let processed_signature: String = row.get(2)?;
         Signature::from_str(processed_signature.as_str())?
     };
     let finalized_signature = {
-        let finalized_signature: Option<String> = row.get(2)?;
+        let finalized_signature: Option<String> = row.get(3)?;
         finalized_signature
             .map(|s| Signature::from_str(s.as_str()))
             .transpose()?
     };
     let undelegate_signature = {
-        let undelegate_signature: Option<String> = row.get(3)?;
+        let undelegate_signature: Option<String> = row.get(4)?;
         undelegate_signature
             .map(|s| Signature::from_str(s.as_str()))
             .transpose()?
     };
     let created_at: u64 = {
-        let created_at: i64 = row.get(4)?;
+        let created_at: i64 = row.get(5)?;
         i64_into_u64(created_at)
     };
 
     Ok(BundleSignatureRow {
+        reqid,
         bundle_id,
         processed_signature,
         finalized_signature,
@@ -841,11 +906,13 @@ mod test {
     // Bundle Signature and Commit Status Updates
     // -----------------
     fn create_bundle_signature_row(
+        reqid: &str,
         commit_status: &CommitStatus,
     ) -> Option<BundleSignatureRow> {
         commit_status
             .bundle_id()
             .map(|bundle_id| BundleSignatureRow {
+                reqid: reqid.to_string(),
                 bundle_id,
                 processed_signature: Signature::new_unique(),
                 finalized_signature: None,
@@ -858,9 +925,15 @@ mod test {
     fn test_upsert_bundle_signature() {
         let mut db = setup_db();
 
-        let process_only =
-            BundleSignatureRow::new(1, Signature::new_unique(), None, None);
+        let process_only = BundleSignatureRow::new(
+            "req1",
+            1,
+            Signature::new_unique(),
+            None,
+            None,
+        );
         let process_finalize_and_undelegate = BundleSignatureRow::new(
+            "req2",
             2,
             Signature::new_unique(),
             Some(Signature::new_unique()),
@@ -883,6 +956,7 @@ mod test {
         let process_now_with_finalize_and_undelegate = {
             let tx = db.conn.transaction().unwrap();
             let process_now_with_finalize = BundleSignatureRow::new(
+                "req2",
                 process_only.bundle_id,
                 process_finalize_and_undelegate.processed_signature,
                 Some(Signature::new_unique()),
@@ -906,6 +980,7 @@ mod test {
         {
             let tx = db.conn.transaction().unwrap();
             let finalizes_now_only_process = BundleSignatureRow::new(
+                "req2",
                 process_finalize_and_undelegate.bundle_id,
                 process_finalize_and_undelegate.processed_signature,
                 None,
@@ -955,7 +1030,7 @@ mod test {
         let new_success_status =
             CommitStatus::Succeeded((33, CommitStrategy::Args, sigs));
         let success_signatures_row =
-            create_bundle_signature_row(&new_success_status);
+            create_bundle_signature_row(REQID, &new_success_status);
         let success_signatures = success_signatures_row.clone().unwrap();
         db.update_commit_status_and_bundle_signature(
             &success_commit_row.reqid,

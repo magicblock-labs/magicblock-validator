@@ -1,3 +1,4 @@
+use solana_pubkey::Pubkey;
 use thiserror::Error;
 
 pub type CommitPersistResult<T> = Result<T, CommitPersistError>;
@@ -35,4 +36,7 @@ pub enum CommitPersistError {
 
     #[error("Commit Status needs commit strategy: '{0}' ({0:?})")]
     CommitStatusNeedsStrategy(String),
+
+    #[error("Commit bundle id for reqid '{0}' and pubkey {1} not found")]
+    BundleIdNotFound(String, Pubkey),
 }

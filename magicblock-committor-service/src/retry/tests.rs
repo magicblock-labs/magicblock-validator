@@ -65,116 +65,251 @@ fn add_with_status(
     row
 }
 
-#[tokio::test]
-async fn test_retry_all_commits_succeeded() {
-    init_logger!();
+mod successes {
+    use super::*;
 
-    let cc = Arc::new(ChangesetCommittorStub::default());
+    #[tokio::test]
+    async fn test_retry_all_commits_succeeded() {
+        init_logger!();
 
-    let reqid1 = 1;
-    let reqid2 = 2;
-    add_success(&cc, reqid1);
-    add_success(&cc, reqid1);
-    add_success(&cc, reqid2);
+        let cc = Arc::new(ChangesetCommittorStub::default());
 
-    let sut = CommittorRetryService::new(
-        cc.clone(),
-        CommittorRetryServiceConfig::default(),
-    );
-    let result = sut.retry_failed().await.unwrap();
+        let reqid1 = 1;
+        let reqid2 = 2;
+        add_success(&cc, reqid1);
+        add_success(&cc, reqid1);
+        add_success(&cc, reqid2);
 
-    // Removes the correct amount of rows for each reqid
-    assert_eq!(
-        result,
-        RetryPendingResult {
-            completed: vec![(reqid1.to_string(), 2), (reqid2.to_string(), 1)]
+        let sut = CommittorRetryService::new(
+            cc.clone(),
+            CommittorRetryServiceConfig::default(),
+        );
+        let result = sut.retry_failed().await.unwrap();
+
+        // Removes the correct amount of rows for each reqid
+        assert_eq!(
+            result,
+            RetryPendingResult {
+                completed: vec![
+                    (reqid1.to_string(), 2),
+                    (reqid2.to_string(), 1)
+                ]
                 .into_iter()
                 .collect(),
-            retried: HashMap::new(),
-        }
-    );
+                retried: HashMap::new(),
+            }
+        );
 
-    // The correct rows were removed from the committor db
-    let reqids = cc.get_reqids().await.unwrap().unwrap();
-    assert!(reqids.is_empty());
+        // The correct rows were removed from the committor db
+        let reqids = cc.get_reqids().await.unwrap().unwrap();
+        assert!(reqids.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_retry_two_commits_succeeded_one_pending() {
+        init_logger!();
+
+        let cc = Arc::new(ChangesetCommittorStub::default());
+
+        let reqid1 = 1;
+        let reqid2 = 2;
+        add_success(&cc, reqid1);
+        add_success(&cc, reqid1);
+        add_pending(&cc, reqid2);
+
+        let sut = CommittorRetryService::new(
+            cc.clone(),
+            CommittorRetryServiceConfig::default(),
+        );
+        let result = sut.retry_failed().await.unwrap();
+
+        // Removes the correct amount of rows for each reqid
+        assert_eq!(
+            result,
+            RetryPendingResult {
+                completed: vec![(reqid1.to_string(), 2)].into_iter().collect(),
+                retried: HashMap::new(),
+            }
+        );
+
+        // The correct rows were removed from the committor db
+        let reqids = cc.get_reqids().await.unwrap().unwrap();
+        assert_eq!(reqids, vec![reqid2.to_string()].into_iter().collect());
+    }
 }
 
-#[tokio::test]
-async fn test_retry_two_commits_succeeded_one_pending() {
-    init_logger!();
+mod failures {
+    use crate::retry::retry_service::RetryKind;
 
-    let cc = Arc::new(ChangesetCommittorStub::default());
+    use super::*;
 
-    let reqid1 = 1;
-    let reqid2 = 2;
-    add_success(&cc, reqid1);
-    add_success(&cc, reqid1);
-    add_pending(&cc, reqid2);
+    #[tokio::test]
+    async fn test_retry_single_totally_failed_commit() {
+        single_retry_requiring_process(CommitStatus::Failed(1)).await;
+    }
 
-    let sut = CommittorRetryService::new(
-        cc.clone(),
-        CommittorRetryServiceConfig::default(),
-    );
-    let result = sut.retry_failed().await.unwrap();
+    #[tokio::test]
+    async fn test_retry_single_commit_failed_with_buffer_partially_initialized()
+    {
+        single_retry_requiring_process_and_buffer_close(
+            CommitStatus::BufferAndChunkPartiallyInitialized(1),
+        )
+        .await;
+    }
 
-    // Removes the correct amount of rows for each reqid
-    assert_eq!(
-        result,
-        RetryPendingResult {
-            completed: vec![(reqid1.to_string(), 2)].into_iter().collect(),
-            retried: HashMap::new(),
-        }
-    );
+    #[tokio::test]
+    async fn test_retry_single_commit_failed_process_from_buffer() {
+        single_retry_requiring_process_and_buffer_close(
+            CommitStatus::FailedProcess((1, CommitStrategy::FromBuffer, None)),
+        )
+        .await;
+    }
 
-    // The correct rows were removed from the committor db
-    let reqids = cc.get_reqids().await.unwrap().unwrap();
-    assert_eq!(reqids, vec![reqid2.to_string()].into_iter().collect());
-}
+    #[tokio::test]
+    async fn test_retry_single_commit_failed_process_args() {
+        single_retry_requiring_process(CommitStatus::FailedProcess((
+            1,
+            CommitStrategy::Args,
+            None,
+        )))
+        .await;
+    }
+    #[tokio::test]
+    async fn test_retry_single_commit_failed_finalize() {}
 
-#[tokio::test]
-async fn test_retry_single_totally_failed_commit() {
-    init_logger!();
+    async fn single_retry_requiring_process(status: CommitStatus) {
+        init_logger!();
 
-    let cc = Arc::new(ChangesetCommittorStub::default());
+        let cc = Arc::new(ChangesetCommittorStub::default());
 
-    let reqid1 = 1;
-    let row1 = add_with_status(&cc, reqid1, CommitStatus::Failed(reqid1));
+        let reqid1 = 1;
+        let row1 = add_with_status(&cc, reqid1, CommitStatus::Failed(reqid1));
 
-    let sut = CommittorRetryService::new(
-        cc.clone(),
-        CommittorRetryServiceConfig::default(),
-    );
+        let sut = CommittorRetryService::new(
+            cc.clone(),
+            CommittorRetryServiceConfig::default(),
+        );
 
-    let result = sut.retry_failed().await.unwrap();
+        let result = sut.retry_failed().await.unwrap();
 
-    // Retries the correct amount of rows for each reqid
-    assert_eq!(
-        result,
-        RetryPendingResult {
-            completed: HashMap::new(),
-            retried: vec![(reqid1.to_string(), 1)].into_iter().collect(),
-        }
-    );
-    // Does not close existing buffers
-    assert!(cc.validator_signed_ixs().is_empty());
+        // Retries the correct amount of rows for each reqid
+        assert_eq!(
+            result,
+            RetryPendingResult {
+                completed: HashMap::new(),
+                retried: vec![(reqid1.to_string(), RetryKind::Process(1))]
+                    .into_iter()
+                    .collect(),
+            }
+        );
+        // Does not close existing buffers
+        assert!(cc.validator_signed_ixs().is_empty());
 
-    // Recommitted the correct changeset
-    assert_eq!(cc.recommitted_changesets().len(), 1,);
+        // Recommitted the correct changeset
+        assert_eq!(cc.recommitted_changesets().len(), 1,);
 
-    let changesets = cc.recommitted_changesets();
-    let (changeset, ephemeral_blockhash, finalize) =
-        changesets.get(&reqid1.to_string()).unwrap();
+        let changesets = cc.recommitted_changesets();
+        let (changeset, ephemeral_blockhash, finalize) =
+            changesets.get(&reqid1.to_string()).unwrap();
 
-    assert_eq!(ephemeral_blockhash, &row1.ephemeral_blockhash);
-    assert_eq!(finalize, &row1.finalize);
-    assert_eq!(changeset.accounts.len(), 1);
-    assert_eq!(
-        changeset.accounts.get(&row1.pubkey).unwrap(),
-        &ChangedAccount::Full {
-            lamports: row1.lamports,
-            owner: row1.delegated_account_owner,
-            data: row1.data.unwrap(),
-            bundle_id: 1,
-        }
-    );
+        assert_eq!(ephemeral_blockhash, &row1.ephemeral_blockhash);
+        assert_eq!(finalize, &row1.finalize);
+        assert_eq!(changeset.accounts.len(), 1);
+        assert_eq!(
+            changeset.accounts.get(&row1.pubkey).unwrap(),
+            &ChangedAccount::Full {
+                lamports: row1.lamports,
+                owner: row1.delegated_account_owner,
+                data: row1.data.unwrap(),
+                bundle_id: 1,
+            }
+        );
+    }
+
+    async fn single_retry_requiring_process_and_buffer_close(
+        status: CommitStatus,
+    ) {
+        init_logger!();
+
+        let cc = Arc::new(ChangesetCommittorStub::default());
+
+        let reqid1 = 1;
+        let row1 = add_with_status(
+            &cc,
+            reqid1,
+            CommitStatus::BufferAndChunkPartiallyInitialized(reqid1),
+        );
+
+        let sut = CommittorRetryService::new(
+            cc.clone(),
+            CommittorRetryServiceConfig::default(),
+        );
+
+        let result = sut.retry_failed().await.unwrap();
+
+        // Retries the correct amount of rows for each reqid
+        assert_eq!(
+            result,
+            RetryPendingResult {
+                completed: HashMap::new(),
+                retried: vec![(reqid1.to_string(), RetryKind::Process(1))]
+                    .into_iter()
+                    .collect(),
+            }
+        );
+        // Closes existing buffers
+        assert_eq!(cc.validator_signed_ixs().len(), 1);
+
+        // Recommitted the correct changeset
+        assert_eq!(cc.recommitted_changesets().len(), 1,);
+
+        let changesets = cc.recommitted_changesets();
+        let (changeset, ephemeral_blockhash, finalize) =
+            changesets.get(&reqid1.to_string()).unwrap();
+
+        assert_eq!(ephemeral_blockhash, &row1.ephemeral_blockhash);
+        assert_eq!(finalize, &row1.finalize);
+        assert_eq!(changeset.accounts.len(), 1);
+        assert_eq!(
+            changeset.accounts.get(&row1.pubkey).unwrap(),
+            &ChangedAccount::Full {
+                lamports: row1.lamports,
+                owner: row1.delegated_account_owner,
+                data: row1.data.unwrap(),
+                bundle_id: 1,
+            }
+        );
+    }
+
+    async fn single_retry_requiring_finalize(status: CommitStatus) {
+        init_logger!();
+
+        let cc = Arc::new(ChangesetCommittorStub::default());
+
+        let reqid1 = 1;
+        let row1 = add_with_status(&cc, reqid1, CommitStatus::Failed(reqid1));
+
+        let sut = CommittorRetryService::new(
+            cc.clone(),
+            CommittorRetryServiceConfig::default(),
+        );
+
+        let result = sut.retry_failed().await.unwrap();
+
+        // Retries the correct amount of rows for each reqid
+        assert_eq!(
+            result,
+            RetryPendingResult {
+                completed: HashMap::new(),
+                retried: vec![(reqid1.to_string(), RetryKind::Process(1))]
+                    .into_iter()
+                    .collect(),
+            }
+        );
+        // Does not close existing buffers
+        assert!(cc.validator_signed_ixs().is_empty());
+
+        // Did not recommit the changeset
+        assert!(cc.recommitted_changesets().is_empty());
+    }
 }

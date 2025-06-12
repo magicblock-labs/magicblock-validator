@@ -68,6 +68,27 @@ pub enum CommittorMessage {
         /// If `true`, account commits will be finalized after they were processed
         finalize: bool,
     },
+    RefinalizeAccounts {
+        /// Called once the accounts have been refinalized
+        respond_to: oneshot::Sender<CommittorServiceResult<()>>,
+        /// The request ID of the changeset to refinalize
+        reqid: String,
+        /// The accounts to finalize again since that step failed after they
+        /// were committed previously
+        /// The second element in the tuple indicates whether the account will
+        /// need to be undelegated after finalization which means the retry is
+        /// not complete until that step is done
+        accounts: Vec<(Pubkey, bool)>,
+    },
+    ReundelegateAccounts {
+        /// The request ID of the changeset to reundelegate
+        reqid: String,
+        /// Called once the accounts have been reundelegated
+        respond_to: oneshot::Sender<CommittorServiceResult<()>>,
+        /// The accounts to undelegate since that step failed after they
+        /// were committed and possibly finalized previously
+        accounts: Vec<Pubkey>,
+    },
     GetCommitStatuses {
         respond_to:
             oneshot::Sender<CommittorServiceResult<Vec<CommitStatusRow>>>,
@@ -177,6 +198,30 @@ impl CommittorActor {
                     )
                     .await;
                 if let Err(e) = respond_to.send(()) {
+                    error!("Failed to send response {:?}", e);
+                }
+            }
+            RefinalizeAccounts {
+                reqid,
+                accounts,
+                respond_to,
+            } => {
+                let res =
+                    self.processor.refinalize_accounts(&reqid, accounts).await;
+                if let Err(e) = respond_to.send(res) {
+                    error!("Failed to send response {:?}", e);
+                }
+            }
+            ReundelegateAccounts {
+                reqid,
+                respond_to,
+                accounts,
+            } => {
+                let res = self
+                    .processor
+                    .reundelegate_accounts(&reqid, accounts)
+                    .await;
+                if let Err(e) = respond_to.send(res) {
                     error!("Failed to send response {:?}", e);
                 }
             }
@@ -385,6 +430,34 @@ impl ChangesetCommittor for CommittorService {
         rx
     }
 
+    fn refinalize_accounts(
+        &self,
+        reqid: String,
+        accounts: Vec<(Pubkey, bool)>,
+    ) -> oneshot::Receiver<CommittorServiceResult<()>> {
+        let (tx, rx) = oneshot::channel();
+        self.try_send(CommittorMessage::RefinalizeAccounts {
+            respond_to: tx,
+            reqid,
+            accounts,
+        });
+        rx
+    }
+
+    fn reundelegate_accounts(
+        &self,
+        reqid: String,
+        accounts: Vec<Pubkey>,
+    ) -> oneshot::Receiver<CommittorServiceResult<()>> {
+        let (tx, rx) = oneshot::channel();
+        self.try_send(CommittorMessage::ReundelegateAccounts {
+            respond_to: tx,
+            reqid,
+            accounts,
+        });
+        rx
+    }
+
     fn get_commit_statuses(
         &self,
         reqid: String,
@@ -464,6 +537,20 @@ pub trait ChangesetCommittor: Send + Sync + 'static {
         ephemeral_blockhash: Hash,
         finalize: bool,
     ) -> oneshot::Receiver<()>;
+
+    /// Retries finalizing the accounts that were committed previously
+    fn refinalize_accounts(
+        &self,
+        reqid: String,
+        accounts: Vec<(Pubkey, bool)>,
+    ) -> oneshot::Receiver<CommittorServiceResult<()>>;
+
+    /// Retries undelegating the accounts
+    fn reundelegate_accounts(
+        &self,
+        reqid: String,
+        accounts: Vec<Pubkey>,
+    ) -> oneshot::Receiver<CommittorServiceResult<()>>;
 
     /// Gets statuses of accounts that were committed as part of a request with provided reqid
     fn get_commit_statuses(

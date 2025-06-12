@@ -30,6 +30,8 @@ pub struct ChangesetCommittorStub {
     #[allow(clippy::type_complexity)]
     recommitted_changesets:
         Arc<Mutex<HashMap<String, (Changeset, Hash, bool)>>>,
+    refinalized_accounts: Arc<Mutex<HashSet<(String, Pubkey, bool)>>>,
+    reundelegated_accounts: Arc<Mutex<HashSet<(String, Pubkey)>>>,
     commit_statuses: Arc<Mutex<HashMap<u64, Vec<CommitStatusRow>>>>,
     validator_signed_ixs: Arc<Mutex<Vec<Instruction>>>,
 }
@@ -55,6 +57,14 @@ impl ChangesetCommittorStub {
         &self,
     ) -> HashMap<String, (Changeset, Hash, bool)> {
         self.recommitted_changesets.lock().unwrap().clone()
+    }
+
+    pub fn refinalized_accounts(&self) -> HashSet<(String, Pubkey, bool)> {
+        self.refinalized_accounts.lock().unwrap().clone()
+    }
+
+    pub fn redelegated_accounts(&self) -> HashSet<(String, Pubkey)> {
+        self.reundelegated_accounts.lock().unwrap().clone()
     }
 
     pub fn commit_statuses(&self) -> HashMap<u64, Vec<CommitStatusRow>> {
@@ -93,17 +103,56 @@ impl ChangesetCommittor for ChangesetCommittorStub {
         ephemeral_blockhash: Hash,
         finalize: bool,
     ) -> oneshot::Receiver<()> {
-        let (tx, rx) = tokio::sync::oneshot::channel();
         debug!(
             "Recommitting changeset for reqid: {} {:?}",
             reqid, changeset
         );
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
         self.recommitted_changesets.lock().unwrap().insert(
             reqid.to_string(),
             (changeset, ephemeral_blockhash, finalize),
         );
         tx.send(()).unwrap_or_else(|_| {
             error!("Failed to send recommit changeset response");
+        });
+        rx
+    }
+
+    fn refinalize_accounts(
+        &self,
+        reqid: String,
+        accounts: Vec<(Pubkey, bool)>,
+    ) -> oneshot::Receiver<CommittorServiceResult<()>> {
+        debug!("Refinalizing accounts: {:?}", accounts);
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let accounts: Vec<(String, Pubkey, bool)> = accounts
+            .into_iter()
+            .map(|(pubkey, finalize)| (reqid.clone(), pubkey, finalize))
+            .collect();
+        self.refinalized_accounts.lock().unwrap().extend(accounts);
+        tx.send(Ok(())).unwrap_or_else(|_| {
+            error!("Failed to send refinalize accounts response");
+        });
+        rx
+    }
+
+    fn reundelegate_accounts(
+        &self,
+        reqid: String,
+        accounts: Vec<Pubkey>,
+    ) -> oneshot::Receiver<CommittorServiceResult<()>> {
+        debug!("Reundelegating accounts: {:?}", accounts);
+
+        let (tx, rx) = tokio::sync::oneshot::channel();
+        let accounts: Vec<(String, Pubkey)> = accounts
+            .into_iter()
+            .map(|pubkey| (reqid.clone(), pubkey))
+            .collect();
+        self.reundelegated_accounts.lock().unwrap().extend(accounts);
+        tx.send(Ok(())).unwrap_or_else(|_| {
+            error!("Failed to send reundelegate accounts response");
         });
         rx
     }
@@ -179,6 +228,7 @@ impl ChangesetCommittor for ChangesetCommittorStub {
     > {
         let (tx, rx) = tokio::sync::oneshot::channel();
         let bundle_signature = BundleSignatureRow {
+            reqid: bundle_id.to_string(),
             bundle_id,
             processed_signature: Signature::new_unique(),
             finalized_signature: Some(Signature::new_unique()),

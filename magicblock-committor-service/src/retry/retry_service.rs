@@ -35,11 +35,21 @@ pub struct CommittorRetryService<CC: ChangesetCommittor> {
 }
 
 #[derive(Debug, PartialEq, Eq)]
+pub enum RetryKind {
+    /// Processed and then finalized + undelegated accounts if so desired
+    Process(usize),
+    /// Only finalized + undelegated accounts if so desired
+    Finalize(usize),
+    /// Only undelegated accounts
+    Undelegate(usize),
+}
+
+#[derive(Debug, PartialEq, Eq)]
 pub struct RetryPendingResult {
     /// Amount of completed commits that were removed from the database for each reqid
     pub completed: HashMap<String, usize>,
     /// Amount of commits that were retried for each reqid
-    pub retried: HashMap<String, usize>,
+    pub retried: HashMap<String, RetryKind>,
 }
 
 impl<CC: ChangesetCommittor> CommittorRetryService<CC> {
@@ -96,11 +106,9 @@ impl<CC: ChangesetCommittor> CommittorRetryService<CC> {
         // before recommitting them
         let mut all_cleanup_steps = vec![];
         let mut changesets = HashMap::new();
-        let mut retries_by_reqid = HashMap::new();
+        let mut retries_by_reqid = HashMap::<String, RetryKind>::new();
         for (reqid, statuses) in failed.into_iter() {
-            *retries_by_reqid.entry(reqid.clone()).or_default() =
-                statuses.len();
-
+            let statuses_len = statuses.len();
             let mut merged_changeset = None::<Changeset>;
             let mut combined_finalize = None::<bool>;
             let mut combined_ephemeral_blockhash = None::<Hash>;
@@ -127,6 +135,10 @@ impl<CC: ChangesetCommittor> CommittorRetryService<CC> {
                     );
                     continue;
                 };
+
+                retries_by_reqid
+                    .insert(reqid.clone(), RetryKind::Process(statuses_len));
+
                 if let Some(ref mut cs) = merged_changeset {
                     cs.try_merge_with(changeset)?;
                 } else {

@@ -15,6 +15,7 @@ use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
     commitment_config::CommitmentConfig,
     hash::Hash,
+    instruction::Instruction,
     signature::{Keypair, Signature},
     signer::Signer,
 };
@@ -158,7 +159,7 @@ impl CommittorProcessor {
             .remove_commit_statuses_with_reqid(reqid)?)
     }
 
-    pub async fn recommit_changeset(
+    pub(crate) async fn recommit_changeset(
         &self,
         reqid: &str,
         changeset: Changeset,
@@ -185,6 +186,89 @@ impl CommittorProcessor {
             .await;
 
         self.update_commit_statuses(reqid, commit_stages);
+    }
+
+    pub(crate) async fn refinalize_accounts(
+        &self,
+        reqid: &str,
+        accounts: Vec<(Pubkey, bool)>,
+    ) -> CommittorServiceResult<()> {
+        // Create instructions to finalize the accounts
+        let ixs = accounts
+            .into_iter()
+            .map(|(pubkey, _)| {
+                (
+                    pubkey,
+                    dlp::instruction_builder::finalize(
+                        self.authority.pubkey(),
+                        pubkey,
+                    ),
+                )
+            })
+            .collect::<HashMap<_, _>>();
+        let signatures = self.run_validator_signed_ixs(ixs).await?;
+
+        for (pubkey, signature) in signatures {
+            // Update finalize signature in the persister
+            if let Err(err) = self
+                .persister
+                .lock()
+                .expect("persister mutex poisoned")
+                .update_finalize_signature(reqid, &pubkey, &signature)
+            {
+                // NOTE: this is not a fatal error, but would still prevent users
+                // from finding the finalize transaction, however we cannot repeat
+                // the finalize transaction either
+                error!(
+                    "Failed to update finalize signature for account {}: {:?}",
+                    pubkey, err
+                );
+            }
+            // Update the commit status in the persister
+            /*
+            if complete_after_finalize {
+                                if let Err(err) = self
+                                    .persister
+                                    .lock()
+                                    .expect("persister mutex poisoned")
+                                    .update_status(reqid, &pubkey, CommitStatus::Succeeded)
+                                {
+                                    error!(
+                                        "Failed to update finalize status for account {}: {:?}",
+                                        pubkey, err
+                                    );
+                                }
+            }
+                */
+        }
+
+        Ok(())
+    }
+
+    /// Runs all keyed instructions as parallel as possible and returns a map of
+    /// signatures for each key.
+    pub(crate) async fn run_validator_signed_ixs<K>(
+        &self,
+        _ixs: HashMap<K, Instruction>,
+    ) -> CommittorServiceResult<HashMap<K, Signature>> {
+        // TODO: @@@ implement
+        todo!()
+    }
+
+    pub(crate) async fn reundelegate_accounts(
+        &self,
+        _reqid: &str,
+        _accounts: Vec<Pubkey>,
+    ) -> CommittorServiceResult<()> {
+        // Create instructions to undelegate the accounts
+
+        // Update undelegate signature in the persister
+
+        // Update the commit status in the persister
+
+        // Release pubkeys for undelegated accounts
+
+        Ok(())
     }
 
     pub async fn commit_changeset(

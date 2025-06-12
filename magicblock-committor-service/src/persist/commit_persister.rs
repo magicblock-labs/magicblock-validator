@@ -4,11 +4,11 @@ use std::{
     sync::atomic::{AtomicU64, Ordering},
 };
 
-use magicblock_committor_program::Changeset;
-use solana_sdk::{hash::Hash, pubkey::Pubkey};
+use magicblock_committor_program::{ChangedAccount, Changeset};
+use solana_sdk::{hash::Hash, pubkey::Pubkey, signature::Signature};
 
 use super::{
-    db::{BundleSignatureRow, CommitStatusRow},
+    db::{BundleSignatureRow, CommitStatusRow, RegisterRetryDetails},
     error::{CommitPersistError, CommitPersistResult},
     utils::now,
     CommitStatus, CommitType, CommittorDb,
@@ -54,40 +54,14 @@ impl CommitPersister {
         let mut commit_rows = Vec::new();
 
         for (pubkey, changed_account) in changeset.accounts.iter() {
-            let undelegate = changeset.accounts_to_undelegate.contains(pubkey);
-            let commit_type = if changed_account.data().is_empty() {
-                CommitType::EmptyAccount
-            } else {
-                CommitType::DataAccount
-            };
-
-            let data = if commit_type == CommitType::DataAccount {
-                Some(changed_account.data().to_vec())
-            } else {
-                None
-            };
-
-            let now = now();
-
-            // Create a commit status row for this account
-            let commit_row = CommitStatusRow {
-                reqid: reqid.clone(),
-                pubkey: *pubkey,
-                delegated_account_owner: changed_account.owner(),
-                slot: changeset.slot,
+            commit_rows.push(new_commit_status_row(
+                &reqid,
+                pubkey,
+                changeset,
+                changed_account,
                 ephemeral_blockhash,
-                undelegate,
-                lamports: changed_account.lamports(),
                 finalize,
-                data,
-                commit_type,
-                created_at: now,
-                commit_status: CommitStatus::Pending,
-                last_retried_at: now,
-                retries_count: 0,
-            };
-
-            commit_rows.push(commit_row);
+            ));
         }
 
         // Insert all commit rows into the database
@@ -114,6 +88,7 @@ impl CommitPersister {
 
         let bundle_signature = status.signatures().map(|sigs| {
             BundleSignatureRow::new(
+                reqid,
                 bundle_id,
                 sigs.process_signature,
                 sigs.finalize_signature,
@@ -127,8 +102,18 @@ impl CommitPersister {
             &status,
             bundle_signature,
         )
+    }
 
-        // TODO(thlorenz): @@ once we see this works remove the succeeded commits
+    pub fn update_finalize_signature(
+        &mut self,
+        reqid: &str,
+        pubkey: &Pubkey,
+        finalize_signature: &Signature,
+    ) -> CommitPersistResult<()> {
+        let bundle_id =
+            self.db.get_bundle_id_by_reqid_and_pubkey(reqid, pubkey)?;
+        self.db
+            .update_finalize_signature(bundle_id, pubkey, finalize_signature)
     }
 
     pub fn get_commit_statuses_by_reqid(
@@ -164,8 +149,53 @@ impl CommitPersister {
         self.db.get_bundle_signature_by_bundle_id(bundle_id)
     }
 
-    pub fn register_retry(&mut self, reqid: &str) -> CommitPersistResult<()> {
+    pub fn register_retry(
+        &mut self,
+        reqid: &str,
+    ) -> CommitPersistResult<RegisterRetryDetails> {
         self.db.register_retry(reqid)
+    }
+}
+
+fn new_commit_status_row(
+    reqid: &str,
+    pubkey: &Pubkey,
+    changeset: &Changeset,
+    changed_account: &ChangedAccount,
+    ephemeral_blockhash: Hash,
+    finalize: bool,
+) -> CommitStatusRow {
+    let undelegate = changeset.accounts_to_undelegate.contains(pubkey);
+    let commit_type = if changed_account.data().is_empty() {
+        CommitType::EmptyAccount
+    } else {
+        CommitType::DataAccount
+    };
+
+    let data = if commit_type == CommitType::DataAccount {
+        Some(changed_account.data().to_vec())
+    } else {
+        None
+    };
+
+    let now = now();
+
+    // Create a commit status row for this account
+    CommitStatusRow {
+        reqid: reqid.to_string(),
+        pubkey: *pubkey,
+        delegated_account_owner: changed_account.owner(),
+        slot: changeset.slot,
+        ephemeral_blockhash,
+        undelegate,
+        lamports: changed_account.lamports(),
+        finalize,
+        data,
+        commit_type,
+        created_at: now,
+        commit_status: CommitStatus::Pending,
+        last_retried_at: now,
+        retries_count: 0,
     }
 }
 
