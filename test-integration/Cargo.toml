@@ -9,6 +9,7 @@ members = [
   "schedulecommit/test-security",
   "test-cloning",
   "test-issues",
+  "test-fees",
   "test-ledger-restore",
   "test-runner",
   "test-tools",

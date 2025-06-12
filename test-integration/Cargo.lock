@@ -1747,13 +1747,36 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk"
 version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1567ae90eac4338ad3d87228bd357b540142af5edbc333c73f06c74cd2bf336f"
+dependencies = [
+ "borsh 0.10.4",
+ "ephemeral-rollups-sdk-attribute-commit 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)",
+ "ephemeral-rollups-sdk-attribute-delegate 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)",
+ "ephemeral-rollups-sdk-attribute-ephemeral 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)",
+ "solana-program",
+]
+
+[[package]]
+name = "ephemeral-rollups-sdk"
+version = "0.2.5"
 source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=c1fcb91#c1fcb917504751ab513c471e4381321d7d40bb91"
 dependencies = [
  "borsh 0.10.4",
- "ephemeral-rollups-sdk-attribute-commit",
- "ephemeral-rollups-sdk-attribute-delegate",
- "ephemeral-rollups-sdk-attribute-ephemeral",
+ "ephemeral-rollups-sdk-attribute-commit 0.2.5 (git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=c1fcb91)",
+ "ephemeral-rollups-sdk-attribute-delegate 0.2.5 (git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=c1fcb91)",
+ "ephemeral-rollups-sdk-attribute-ephemeral 0.2.5 (git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=c1fcb91)",
  "solana-program",
+]
+
+[[package]]
+name = "ephemeral-rollups-sdk-attribute-commit"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "75518f8c7369c8d704c24b79c9b6338a100531e448966ded8adc33010fb23276"
+dependencies = [
+ "quote",
+ "syn 1.0.109",
 ]
 
 [[package]]
@@ -1768,7 +1791,29 @@ dependencies = [
 [[package]]
 name = "ephemeral-rollups-sdk-attribute-delegate"
 version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b881281f72fe6fa8fb13b1a5402f809c09358a1032eca1a78d9987bfc99040ec"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "ephemeral-rollups-sdk-attribute-delegate"
+version = "0.2.5"
 source = "git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=c1fcb91#c1fcb917504751ab513c471e4381321d7d40bb91"
+dependencies = [
+ "proc-macro2",
+ "quote",
+ "syn 1.0.109",
+]
+
+[[package]]
+name = "ephemeral-rollups-sdk-attribute-ephemeral"
+version = "0.2.5"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a121fb704f5a9ca695a6ef1869ccd65a2f5e1df9756ee0047a7583322517a71d"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -3601,7 +3646,7 @@ dependencies = [
  "solana-rpc",
  "solana-rpc-client",
  "solana-sdk",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
+ "solana-svm 2.2.1",
  "tempfile",
  "thiserror 1.0.69",
  "tokio",
@@ -3635,7 +3680,7 @@ dependencies = [
  "solana-program-runtime",
  "solana-rpc",
  "solana-sdk",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
+ "solana-svm 2.2.1",
  "solana-svm-transaction",
  "solana-system-program",
  "solana-timings",
@@ -3732,7 +3777,7 @@ dependencies = [
  "solana-metrics",
  "solana-sdk",
  "solana-storage-proto 0.1.2",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
+ "solana-svm 2.2.1",
  "solana-timings",
  "solana-transaction-status",
  "thiserror 1.0.69",
@@ -3791,7 +3836,7 @@ dependencies = [
  "solana-metrics",
  "solana-rayon-threadlimit",
  "solana-sdk",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
+ "solana-svm 2.2.1",
  "solana-timings",
  "spl-token",
  "spl-token-2022 6.0.0",
@@ -3894,7 +3939,7 @@ dependencies = [
  "log",
  "magicblock-bank",
  "solana-sdk",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
+ "solana-svm 2.2.1",
  "solana-transaction-status",
 ]
 
@@ -4777,7 +4822,7 @@ name = "program-flexi-counter"
 version = "0.0.0"
 dependencies = [
  "borsh 1.5.7",
- "ephemeral-rollups-sdk",
+ "ephemeral-rollups-sdk 0.2.5 (git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=c1fcb91)",
  "solana-program",
 ]
 
@@ -4786,7 +4831,7 @@ name = "program-schedulecommit"
 version = "0.0.0"
 dependencies = [
  "borsh 1.5.7",
- "ephemeral-rollups-sdk",
+ "ephemeral-rollups-sdk 0.2.5 (git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=c1fcb91)",
  "solana-program",
 ]
 
@@ -4795,7 +4840,7 @@ name = "program-schedulecommit-security"
 version = "0.0.0"
 dependencies = [
  "borsh 1.5.7",
- "ephemeral-rollups-sdk",
+ "ephemeral-rollups-sdk 0.2.5 (git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=c1fcb91)",
  "program-schedulecommit",
  "solana-program",
 ]
@@ -5604,7 +5649,7 @@ dependencies = [
 name = "schedulecommit-test-scenarios"
 version = "0.0.0"
 dependencies = [
- "ephemeral-rollups-sdk",
+ "ephemeral-rollups-sdk 0.2.5 (git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=c1fcb91)",
  "integration-test-tools",
  "log",
  "magicblock-core",
@@ -8735,13 +8780,12 @@ dependencies = [
 [[package]]
 name = "solana-svm"
 version = "2.2.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0850baf834aba4a94a7558fa6cf6ca93fad284abf0363dec5fb9cab173a11fc4"
 dependencies = [
  "ahash 0.8.12",
- "itertools 0.12.1",
+ "ephemeral-rollups-sdk 0.2.5 (registry+https://github.com/rust-lang/crates.io-index)",
  "log",
  "percentage",
+ "qualifier_attr",
  "serde",
  "serde_derive",
  "solana-account",
@@ -8780,12 +8824,13 @@ dependencies = [
 [[package]]
 name = "solana-svm"
 version = "2.2.1"
-source = "git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57#e93eb579767770c8a0f872117676c289a2164e87"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "0850baf834aba4a94a7558fa6cf6ca93fad284abf0363dec5fb9cab173a11fc4"
 dependencies = [
  "ahash 0.8.12",
+ "itertools 0.12.1",
  "log",
  "percentage",
- "qualifier_attr",
  "serde",
  "serde_derive",
  "solana-account",
@@ -10012,6 +10057,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "test-fees"
+version = "0.0.0"
+dependencies = [
+ "integration-test-tools",
+ "log",
+ "solana-sdk",
+ "test-tools-core",
+]
+
+[[package]]
 name = "test-issues"
 version = "0.0.0"
 dependencies = [
@@ -10076,7 +10131,7 @@ version = "0.1.3"
 dependencies = [
  "env_logger 0.11.6",
  "log",
- "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
+ "solana-svm 2.2.1",
 ]
 
 [[package]]

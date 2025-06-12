@@ -1,0 +1,15 @@
+[package]
+name = "test-fees"
+version.workspace = true
+edition.workspace = true
+
+[dev-dependencies]
+integration-test-tools = { workspace = true }
+solana-sdk = { workspace = true }
+log = { workspace = true }
+test-tools-core = { workspace = true }
+
+[features]
+no-entrypoint = []
+cpi = ["no-entrypoint"]
+default = []

@@ -64,6 +64,7 @@ console-subscriber = "0.2.0"
 isocountry = "0.3.2"
 crossbeam-channel = "0.5.11"
 enum-iterator = "1.5.0"
+ephemeral-rollups-sdk = "0.2.5"
 env_logger = "0.11.2"
 magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "ea04d46", default-features = false}
 magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "4af7f1c" }
@@ -150,7 +151,7 @@ solana-rpc = "2.2"
 solana-rpc-client = { version = "2.2" }
 solana-rpc-client-api = { version = "2.2" }
 solana-sdk = { version = "2.2" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", rev = "e93eb57", features = [ "dev-context-only-utils" ] }
+solana-svm = { path="/Users/gabrielepicco/Downloads/magicblock-svm", features = [ "dev-context-only-utils" ] }
 solana-svm-transaction = { version = "2.2" }
 solana-storage-proto = { path = "storage-proto" }
 solana-system-program = { version = "2.2" }
@@ -183,4 +184,4 @@ vergen = "8.3.1"
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
 solana-storage-proto = { path = "./storage-proto" }
 solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "7bdfefc" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", features = [ "dev-context-only-utils" ] }
+solana-svm = { path="/Users/gabrielepicco/Downloads/magicblock-svm", features = [ "dev-context-only-utils" ] }

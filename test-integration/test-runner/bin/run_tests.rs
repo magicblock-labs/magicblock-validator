@@ -36,6 +36,9 @@ pub fn main() {
     let Ok(cloning_output) = run_cloning_tests(&manifest_dir) else {
         return;
     };
+    let Ok(cloning_output) = run_fees_tests(&manifest_dir) else {
+        return;
+    };
 
     let Ok(restore_ledger_output) = run_restore_ledger_tests(&manifest_dir)
     else {
@@ -236,6 +239,43 @@ fn run_cloning_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
     let test_cloning_dir = format!("{}/../{}", manifest_dir, "test-cloning");
     eprintln!("Running cloning tests in {}", test_cloning_dir);
     let output = match run_test(test_cloning_dir, Default::default()) {
+        Ok(output) => output,
+        Err(err) => {
+            eprintln!("Failed to run cloning tests: {:?}", err);
+            cleanup_validators(&mut ephem_validator, &mut devnet_validator);
+            return Err(err.into());
+        }
+    };
+    cleanup_validators(&mut ephem_validator, &mut devnet_validator);
+    Ok(output)
+}
+
+fn run_fees_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
+    eprintln!("======== RUNNING FEES TESTS ========");
+    let mut devnet_validator = match start_validator(
+        "cloning-conf.devnet.toml",
+        ValidatorCluster::Chain(Some(ProgramLoader::UpgradeableProgram)),
+    ) {
+        Some(validator) => validator,
+        None => {
+            panic!("Failed to start devnet validator properly");
+        }
+    };
+    let mut ephem_validator = match start_validator(
+        "cloning-conf.ephem.toml",
+        ValidatorCluster::Ephem,
+    ) {
+        Some(validator) => validator,
+        None => {
+            devnet_validator
+                .kill()
+                .expect("Failed to kill devnet validator");
+            panic!("Failed to start ephemeral validator properly");
+        }
+    };
+    let test_fees_dir = format!("{}/../{}", manifest_dir, "test-fees");
+    eprintln!("Running fees tests in {}", test_fees_dir);
+    let output = match run_test(test_fees_dir, Default::default()) {
         Ok(output) => output,
         Err(err) => {
             eprintln!("Failed to run cloning tests: {:?}", err);
