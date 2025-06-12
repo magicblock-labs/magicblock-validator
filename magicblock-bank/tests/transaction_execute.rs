@@ -1,6 +1,7 @@
 #![cfg(feature = "dev-context-only-utils")]
 
 use assert_matches::assert_matches;
+use ephemeral_rollups_sdk::pda::ephemeral_balance_pda_from_payer;
 use magicblock_bank::{
     bank::Bank,
     bank_dev_utils::{
@@ -20,13 +21,14 @@ use magicblock_bank::{
     DEFAULT_LAMPORTS_PER_SIGNATURE,
 };
 use solana_sdk::{
-    account::ReadableAccount,
+    account::{AccountSharedData, ReadableAccount},
     genesis_config::create_genesis_config,
     message::Message,
     native_token::LAMPORTS_PER_SOL,
     pubkey::Pubkey,
     rent::Rent,
     signature::Keypair,
+    signer::Signer,
     transaction::{SanitizedTransaction, Transaction},
 };
 use test_tools_core::init_logger;
@@ -176,6 +178,54 @@ fn test_bank_one_noop_instruction_0_fees_not_existing_feepayer() {
     )
     .unwrap();
     execute_and_check_results(&bank, tx);
+}
+
+#[test]
+fn test_bank_one_noop_instruction_fees_charge_feepayer_escrow() {
+    init_logger!();
+    const LAMPORTS_PER_SIGNATURE: u64 = 5000;
+    let (mut genesis_config, _) = create_genesis_config(u64::MAX);
+    genesis_config.fee_rate_governor.lamports_per_signature = LAMPORTS_PER_SIGNATURE;
+    let bank = Bank::new_for_tests(&genesis_config, None, None).unwrap();
+    add_elf_program(&bank, &elfs::noop::ID);
+
+    bank.advance_slot();
+    let hash = bank.last_blockhash();
+
+    // create the fee payer
+    let fee_payer = Keypair::new();
+
+    // add the escrow for the fee payer
+    let ephemeral_balance_pda =
+        ephemeral_balance_pda_from_payer(&fee_payer.pubkey(), 0);
+    bank.accounts_db.insert_account(
+        &ephemeral_balance_pda,
+        &AccountSharedData::new(
+            LAMPORTS_PER_SOL,
+            0,
+            &solana_system_program::id(),
+        ),
+    );
+
+    let instruction = create_noop_instruction(
+        &elfs::noop::id(),
+        &[fee_payer.insecure_clone()],
+    );
+    let message = Message::new(&[instruction], None);
+    let transaction = Transaction::new(&[fee_payer], message, hash);
+    let tx = SanitizedTransaction::try_from_legacy_transaction(
+        transaction,
+        &Default::default(),
+    ).unwrap();
+    execute_and_check_results(&bank, tx);
+
+    // Accounts
+    let escrow_acc = bank.get_account(&ephemeral_balance_pda).unwrap();
+
+    assert_eq!(
+        escrow_acc.lamports(),
+        LAMPORTS_PER_SOL - LAMPORTS_PER_SIGNATURE
+    );
 }
 
 #[test]
