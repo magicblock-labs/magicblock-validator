@@ -186,7 +186,11 @@ impl RemoteAccountUpdatesWorker {
                 .start_monitoring_request_processing(shard_cancellation_token)
                 .await
             {
+                #[cfg(not(test))]
                 error!("Runner shard has failed: {}: {:?}", shard_id, error);
+
+                #[cfg(test)]
+                panic!("Runner shard has failed: {}: {:?}", shard_id, error);
             }
         });
         let runner = RemoteAccountUpdatesWorkerRunner {
