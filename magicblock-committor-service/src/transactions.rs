@@ -18,7 +18,10 @@ use solana_sdk::{
 };
 use static_assertions::const_assert;
 
-use crate::error::{CommittorServiceError, CommittorServiceResult};
+use crate::{
+    compute_budget::ComputeBudget,
+    error::{CommittorServiceError, CommittorServiceResult},
+};
 
 /// From agave rpc/src/rpc.rs [MAX_BASE64_SIZE]
 pub(crate) const MAX_ENCODED_TRANSACTION_SIZE: usize = 1644;
@@ -317,6 +320,83 @@ fn get_lookup_tables(ixs: &[Instruction]) -> Vec<AddressLookupTableAccount> {
     vec![lookup_table]
 }
 
+/// Efficiently groups all instructions into as few transactions as possible
+pub(crate) fn chunk_into_validator_signed_txs(
+    validator_auth: &Keypair,
+    compute_budget: &ComputeBudget,
+    mut ixs: Vec<Instruction>,
+    ephemeral_blockhash: &Hash,
+) -> CommittorServiceResult<Vec<VersionedTransaction>> {
+    use CommittorServiceError::*;
+    fn create_tx(
+        validator_auth: &Keypair,
+        ixs: &[Instruction],
+        ephemeral_blockhash: &Hash,
+    ) -> CommittorServiceResult<VersionedTransaction> {
+        let versioned_msg = Message::try_compile(
+            &validator_auth.pubkey(),
+            ixs,
+            &[],
+            *ephemeral_blockhash,
+        )
+        .map_err(|err| {
+            FailedToCompileTransactionMessage(
+                "Creating VersionedMessage".to_string(),
+                err,
+            )
+        })?;
+
+        VersionedTransaction::try_new(
+            VersionedMessage::V0(versioned_msg),
+            &[validator_auth],
+        )
+        .map_err(|err| {
+            FailedToCreateTransaction(
+                "Creating VersionedTransaction".to_string(),
+                err,
+            )
+        })
+    }
+
+    let mut txs = vec![];
+    let mut added_ixs = vec![];
+    while !ixs.is_empty() {
+        added_ixs.push(ixs.remove(0));
+
+        let compute_budget_ix = compute_budget.instructions(added_ixs.len());
+        // Create a sample transaction
+        let tx = create_tx(
+            validator_auth,
+            &[compute_budget_ix, added_ixs.clone()].concat(),
+            ephemeral_blockhash,
+        )?;
+        let encoded = serialize_and_encode_base64(&tx);
+
+        // Add a transaction if we're running out of space or it's the last chunk
+        let create_chunk = if encoded.len() > MAX_ENCODED_TRANSACTION_SIZE {
+            // Put last instruction back since it caused the tx to grow too large
+            ixs.insert(0, added_ixs.pop().unwrap());
+            true
+        } else {
+            ixs.is_empty()
+        };
+
+        if create_chunk {
+            let compute_budget_ix =
+                compute_budget.instructions(added_ixs.len());
+            let tx = create_tx(
+                validator_auth,
+                &[compute_budget_ix, added_ixs].concat(),
+                ephemeral_blockhash,
+            )?;
+            txs.push(tx);
+
+            added_ixs = vec![];
+        }
+    }
+    Ok(txs)
+}
+
 #[cfg(test)]
 mod test {
     use dlp::args::{CommitStateArgs, CommitStateFromBufferArgs};
@@ -338,440 +418,500 @@ mod test {
         pubkeys_provider::{provide_committee_pubkeys, provide_common_pubkeys},
     };
 
+    mod dynamic {
+        use super::*;
+        use crate::ComputeBudgetConfig;
+
+        #[test]
+        fn test_chunk_into_validator_signed_txs() {
+            let validator_auth = Keypair::new();
+            let ephemeral_blockhash = Hash::default();
+            let compute_budget =
+                ComputeBudgetConfig::new(1_000).finalize_budget();
+
+            for (ix_count, tx_count) in &[
+                (1, 1),
+                (MAX_FINALIZE_PER_TX, 1),
+                (2 * MAX_FINALIZE_PER_TX, 2),
+                (10 * MAX_FINALIZE_PER_TX, 10),
+            ] {
+                let ixs = (0..*ix_count)
+                    .map(|_| {
+                        super::super::finalize_ix(
+                            validator_auth.pubkey(),
+                            &Pubkey::new_unique(),
+                        )
+                    })
+                    .collect::<Vec<_>>();
+
+                let txs = chunk_into_validator_signed_txs(
+                    &validator_auth,
+                    &compute_budget,
+                    ixs,
+                    &ephemeral_blockhash,
+                )
+                .unwrap();
+
+                assert_eq!(txs.len(), *tx_count);
+            }
+        }
+    }
+
     // These tests statically determine the optimal ix count to fit into a single
     // transaction and assert that the const we export in prod match those numbers.
     // Thus when an instruction changes and one of those numbers with it a failing
     // test alerts us.
     // This is less overhead than running those static functions each time at
     // startup.
+    mod statics {
+        use super::*;
+        #[test]
+        fn test_max_process_per_tx() {
+            assert_eq!(super::MAX_PROCESS_PER_TX, *MAX_PROCESS_PER_TX);
+            assert_eq!(
+                super::MAX_PROCESS_PER_TX_USING_LOOKUP,
+                *MAX_PROCESS_PER_TX_USING_LOOKUP
+            );
+        }
 
-    #[test]
-    fn test_max_process_per_tx() {
-        assert_eq!(super::MAX_PROCESS_PER_TX, *MAX_PROCESS_PER_TX);
-        assert_eq!(
-            super::MAX_PROCESS_PER_TX_USING_LOOKUP,
-            *MAX_PROCESS_PER_TX_USING_LOOKUP
-        );
-    }
+        #[test]
+        fn test_max_close_per_tx() {
+            assert_eq!(super::MAX_CLOSE_PER_TX, *MAX_CLOSE_PER_TX);
+            assert_eq!(
+                super::MAX_CLOSE_PER_TX_USING_LOOKUP,
+                *MAX_CLOSE_PER_TX_USING_LOOKUP
+            );
+        }
 
-    #[test]
-    fn test_max_close_per_tx() {
-        assert_eq!(super::MAX_CLOSE_PER_TX, *MAX_CLOSE_PER_TX);
-        assert_eq!(
-            super::MAX_CLOSE_PER_TX_USING_LOOKUP,
-            *MAX_CLOSE_PER_TX_USING_LOOKUP
-        );
-    }
+        #[test]
+        fn test_max_process_and_closes_per_tx() {
+            assert_eq!(
+                super::MAX_PROCESS_AND_CLOSE_PER_TX,
+                *MAX_PROCESS_AND_CLOSE_PER_TX
+            );
+            assert_eq!(
+                super::MAX_PROCESS_AND_CLOSE_PER_TX_USING_LOOKUP,
+                *MAX_PROCESS_AND_CLOSE_PER_TX_USING_LOOKUP
+            );
+        }
 
-    #[test]
-    fn test_max_process_and_closes_per_tx() {
-        assert_eq!(
-            super::MAX_PROCESS_AND_CLOSE_PER_TX,
-            *MAX_PROCESS_AND_CLOSE_PER_TX
-        );
-        assert_eq!(
-            super::MAX_PROCESS_AND_CLOSE_PER_TX_USING_LOOKUP,
-            *MAX_PROCESS_AND_CLOSE_PER_TX_USING_LOOKUP
-        );
-    }
+        #[test]
+        fn test_max_finalize_per_tx() {
+            assert_eq!(super::MAX_FINALIZE_PER_TX, *MAX_FINALIZE_PER_TX);
+            assert_eq!(
+                super::MAX_FINALIZE_PER_TX_USING_LOOKUP,
+                *MAX_FINALIZE_PER_TX_USING_LOOKUP
+            );
+        }
 
-    #[test]
-    fn test_max_finalize_per_tx() {
-        assert_eq!(super::MAX_FINALIZE_PER_TX, *MAX_FINALIZE_PER_TX);
-        assert_eq!(
-            super::MAX_FINALIZE_PER_TX_USING_LOOKUP,
-            *MAX_FINALIZE_PER_TX_USING_LOOKUP
-        );
-    }
+        #[test]
+        fn test_max_undelegate_per_tx() {
+            assert_eq!(super::MAX_UNDELEGATE_PER_TX, *MAX_UNDELEGATE_PER_TX);
+            assert_eq!(
+                super::MAX_UNDELEGATE_PER_TX_USING_LOOKUP,
+                *MAX_UNDELEGATE_PER_TX_USING_LOOKUP
+            );
+        }
 
-    #[test]
-    fn test_max_undelegate_per_tx() {
-        assert_eq!(super::MAX_UNDELEGATE_PER_TX, *MAX_UNDELEGATE_PER_TX);
-        assert_eq!(
-            super::MAX_UNDELEGATE_PER_TX_USING_LOOKUP,
-            *MAX_UNDELEGATE_PER_TX_USING_LOOKUP
-        );
-    }
+        // -----------------
+        // Process Commitables using Args
+        // -----------------
+        #[test]
+        fn test_log_commit_args_ix_sizes() {
+            // This test is used to investigate the size of the transaction related to
+            // the amount of committed accounts and their data size.
+            fn run(auth: &Keypair, ixs: usize) {
+                let mut tx_lines = vec![];
+                use TransactionOpts::*;
+                for tx_opts in [NoLookupTable, UseLookupTable] {
+                    let mut tx_sizes = vec![];
+                    for size in [0, 10, 20, 50, 100, 200, 500, 1024] {
+                        let ixs = (0..ixs)
+                            .map(|_| make_ix(auth, size))
+                            .collect::<Vec<_>>();
 
-    // -----------------
-    // Process Commitables using Args
-    // -----------------
-    #[test]
-    fn test_log_commit_args_ix_sizes() {
-        // This test is used to investigate the size of the transaction related to
-        // the amount of committed accounts and their data size.
-        fn run(auth: &Keypair, ixs: usize) {
-            let mut tx_lines = vec![];
-            use TransactionOpts::*;
-            for tx_opts in [NoLookupTable, UseLookupTable] {
-                let mut tx_sizes = vec![];
-                for size in [0, 10, 20, 50, 100, 200, 500, 1024] {
-                    let ixs = (0..ixs)
-                        .map(|_| make_ix(auth, size))
-                        .collect::<Vec<_>>();
-
-                    let tx_size =
-                        encoded_tx_size(auth, &ixs, &tx_opts).unwrap();
-                    tx_sizes.push((size, tx_size));
+                        let tx_size =
+                            encoded_tx_size(auth, &ixs, &tx_opts).unwrap();
+                        tx_sizes.push((size, tx_size));
+                    }
+                    tx_lines.push(tx_sizes);
                 }
-                tx_lines.push(tx_sizes);
+                let sizes = tx_lines
+                    .into_iter()
+                    .map(|line| {
+                        line.into_iter()
+                            .map(|(size, len)| format!("{:4}:{:5}", size, len))
+                            .collect::<Vec<_>>()
+                            .join("|")
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                eprintln!("{:3} ixs:\n{}", ixs, sizes);
             }
-            let sizes = tx_lines
-                .into_iter()
-                .map(|line| {
-                    line.into_iter()
-                        .map(|(size, len)| format!("{:4}:{:5}", size, len))
-                        .collect::<Vec<_>>()
-                        .join("|")
-                })
-                .collect::<Vec<_>>()
-                .join("\n");
-            eprintln!("{:3} ixs:\n{}", ixs, sizes);
+            fn make_ix(auth: &Keypair, data_size: usize) -> Instruction {
+                let data = vec![1; data_size];
+                let args = CommitStateArgs {
+                    data,
+                    ..CommitStateArgs::default()
+                };
+                dlp::instruction_builder::commit_state(
+                    auth.pubkey(),
+                    Pubkey::new_unique(),
+                    Pubkey::new_unique(),
+                    args,
+                )
+            }
+
+            let auth = &Keypair::new();
+            run(auth, 0);
+            run(auth, 1);
+            run(auth, 2);
+            run(auth, 5);
+            run(auth, 8);
+            run(auth, 10);
+            run(auth, 15);
+            run(auth, 20);
+            /*
+             0 ixs:
+              0:  184|  10:  184|  20:  184|  50:  184| 100:  184| 200:  184| 500:  184|1024:  184
+              0:  184|  10:  184|  20:  184|  50:  184| 100:  184| 200:  184| 500:  184|1024:  184
+             1 ixs:
+              0:  620|  10:  636|  20:  648|  50:  688| 100:  756| 200:  888| 500: 1288|1024: 1988
+              0:  336|  10:  348|  20:  364|  50:  404| 100:  472| 200:  604| 500: 1004|1024: 1704
+             2 ixs:
+              0:  932|  10:  960|  20:  984|  50: 1064| 100: 1200| 200: 1468| 500: 2268|1024: 3664
+              0:  400|  10:  424|  20:  452|  50:  532| 100:  668| 200:  936| 500: 1736|1024: 3132
+             5 ixs:
+              0: 1864|  10: 1932|  20: 1996|  50: 2196| 100: 2536| 200: 3204| 500: 5204|1024: 8696
+              0:  588|  10:  652|  20:  720|  50:  920| 100: 1260| 200: 1928| 500: 3928|1024: 7420
+             8 ixs:
+              0: 2796|  10: 2904|  20: 3008|  50: 3328| 100: 3872| 200: 4940| 500: 8140|1024:13728
+              0:  776|  10:  880|  20:  988|  50: 1308| 100: 1852| 200: 2920| 500: 6120|1024:11708
+            10 ixs:
+              0: 3416|  10: 3552|  20: 3684|  50: 4084| 100: 4764| 200: 6096| 500:10096|1024:17084
+              0:  900|  10: 1032|  20: 1168|  50: 1568| 100: 2248| 200: 3580| 500: 7580|1024:14568
+            15 ixs:
+              0: 4972|  10: 5172|  20: 5372|  50: 5972| 100: 6992| 200: 8992| 500:14992|1024:25472
+              0: 1212|  10: 1412|  20: 1612|  50: 2212| 100: 3232| 200: 5232| 500:11232|1024:21712
+            20 ixs:
+              0: 6524|  10: 6792|  20: 7056|  50: 7856| 100: 9216| 200:11884| 500:19884|1024:33856
+              0: 1528|  10: 1792|  20: 2060|  50: 2860| 100: 4220| 200: 6888| 500:14888|1024:28860
+
+            Legend:
+
+            x ixs:
+                data size/ix: encoded size | ...
+                data size/ix: encoded size | ...  (using lookup tables)
+
+            Given that max transaction size is 1644 bytes, we can see that the max data size is:
+
+            -  1 ixs: slightly larger than 500 bytes
+            -  2 ixs: slightly larger than 200 bytes
+            -  5 ixs: slightly larger than 100 bytes
+            -  8 ixs: slightly larger than  50 bytes
+            - 10 ixs: slightly larger than  20 bytes
+            - 15 ixs: slightly larger than  10 bytes
+            - 20 ixs: no data supported (only lamport changes)
+
+            Also it is clear that using a lookup table makes a huge difference especially if we commit
+            lots of different accounts.
+            */
         }
-        fn make_ix(auth: &Keypair, data_size: usize) -> Instruction {
-            let data = vec![1; data_size];
-            let args = CommitStateArgs {
-                data,
-                ..CommitStateArgs::default()
+
+        // -----------------
+        // Process Commitables and Close Buffers
+        // -----------------
+        lazy_static! {
+            pub(crate) static ref MAX_PROCESS_PER_TX: u8 = {
+                max_chunks_per_transaction(
+                    "Max process per tx",
+                    |auth_pubkey| {
+                        let pubkey = Pubkey::new_unique();
+                        let delegated_account_owner = Pubkey::new_unique();
+                        let buffer_pda = Pubkey::new_unique();
+                        let commit_args = CommitStateFromBufferArgs::default();
+                        vec![super::process_commits_ix(
+                            auth_pubkey,
+                            &pubkey,
+                            &delegated_account_owner,
+                            &buffer_pda,
+                            commit_args,
+                        )]
+                    },
+                )
             };
-            dlp::instruction_builder::commit_state(
-                auth.pubkey(),
-                Pubkey::new_unique(),
-                Pubkey::new_unique(),
-                args,
-            )
-        }
-
-        let auth = &Keypair::new();
-        run(auth, 0);
-        run(auth, 1);
-        run(auth, 2);
-        run(auth, 5);
-        run(auth, 8);
-        run(auth, 10);
-        run(auth, 15);
-        run(auth, 20);
-        /*
-         0 ixs:
-          0:  184|  10:  184|  20:  184|  50:  184| 100:  184| 200:  184| 500:  184|1024:  184
-          0:  184|  10:  184|  20:  184|  50:  184| 100:  184| 200:  184| 500:  184|1024:  184
-         1 ixs:
-          0:  620|  10:  636|  20:  648|  50:  688| 100:  756| 200:  888| 500: 1288|1024: 1988
-          0:  336|  10:  348|  20:  364|  50:  404| 100:  472| 200:  604| 500: 1004|1024: 1704
-         2 ixs:
-          0:  932|  10:  960|  20:  984|  50: 1064| 100: 1200| 200: 1468| 500: 2268|1024: 3664
-          0:  400|  10:  424|  20:  452|  50:  532| 100:  668| 200:  936| 500: 1736|1024: 3132
-         5 ixs:
-          0: 1864|  10: 1932|  20: 1996|  50: 2196| 100: 2536| 200: 3204| 500: 5204|1024: 8696
-          0:  588|  10:  652|  20:  720|  50:  920| 100: 1260| 200: 1928| 500: 3928|1024: 7420
-         8 ixs:
-          0: 2796|  10: 2904|  20: 3008|  50: 3328| 100: 3872| 200: 4940| 500: 8140|1024:13728
-          0:  776|  10:  880|  20:  988|  50: 1308| 100: 1852| 200: 2920| 500: 6120|1024:11708
-        10 ixs:
-          0: 3416|  10: 3552|  20: 3684|  50: 4084| 100: 4764| 200: 6096| 500:10096|1024:17084
-          0:  900|  10: 1032|  20: 1168|  50: 1568| 100: 2248| 200: 3580| 500: 7580|1024:14568
-        15 ixs:
-          0: 4972|  10: 5172|  20: 5372|  50: 5972| 100: 6992| 200: 8992| 500:14992|1024:25472
-          0: 1212|  10: 1412|  20: 1612|  50: 2212| 100: 3232| 200: 5232| 500:11232|1024:21712
-        20 ixs:
-          0: 6524|  10: 6792|  20: 7056|  50: 7856| 100: 9216| 200:11884| 500:19884|1024:33856
-          0: 1528|  10: 1792|  20: 2060|  50: 2860| 100: 4220| 200: 6888| 500:14888|1024:28860
-
-        Legend:
-
-        x ixs:
-            data size/ix: encoded size | ...
-            data size/ix: encoded size | ...  (using lookup tables)
-
-        Given that max transaction size is 1644 bytes, we can see that the max data size is:
-
-        -  1 ixs: slightly larger than 500 bytes
-        -  2 ixs: slightly larger than 200 bytes
-        -  5 ixs: slightly larger than 100 bytes
-        -  8 ixs: slightly larger than  50 bytes
-        - 10 ixs: slightly larger than  20 bytes
-        - 15 ixs: slightly larger than  10 bytes
-        - 20 ixs: no data supported (only lamport changes)
-
-        Also it is clear that using a lookup table makes a huge difference especially if we commit
-        lots of different accounts.
-        */
-    }
-
-    // -----------------
-    // Process Commitables and Close Buffers
-    // -----------------
-    lazy_static! {
-        pub(crate) static ref MAX_PROCESS_PER_TX: u8 = {
-            max_chunks_per_transaction("Max process per tx", |auth_pubkey| {
-                let pubkey = Pubkey::new_unique();
-                let delegated_account_owner = Pubkey::new_unique();
-                let buffer_pda = Pubkey::new_unique();
-                let commit_args = CommitStateFromBufferArgs::default();
-                vec![super::process_commits_ix(
-                    auth_pubkey,
-                    &pubkey,
-                    &delegated_account_owner,
-                    &buffer_pda,
-                    commit_args,
-                )]
-            })
-        };
-        pub(crate) static ref MAX_PROCESS_PER_TX_USING_LOOKUP: u8 = {
-            max_chunks_per_transaction_using_lookup_table(
-                "Max process per tx using lookup",
-                |auth_pubkey, committee, delegated_account_owner| {
-                    let buffer_pda = Pubkey::new_unique();
-                    let commit_args = CommitStateFromBufferArgs::default();
-                    vec![super::process_commits_ix(
-                        auth_pubkey,
-                        &committee,
-                        &delegated_account_owner,
-                        &buffer_pda,
-                        commit_args,
-                    )]
-                },
-                None,
-            )
-        };
-        pub(crate) static ref MAX_CLOSE_PER_TX: u8 = {
-            let ephemeral_blockhash = Hash::default();
-            max_chunks_per_transaction("Max close per tx", |auth_pubkey| {
-                let pubkey = Pubkey::new_unique();
-                vec![super::close_buffers_ix(
-                    auth_pubkey,
-                    &pubkey,
-                    &ephemeral_blockhash,
-                )]
-            })
-        };
-        pub(crate) static ref MAX_CLOSE_PER_TX_USING_LOOKUP: u8 = {
-            let ephemeral_blockhash = Hash::default();
-            max_chunks_per_transaction_using_lookup_table(
-                "Max close per tx using lookup",
-                |auth_pubkey, committee, _| {
+            pub(crate) static ref MAX_PROCESS_PER_TX_USING_LOOKUP: u8 = {
+                max_chunks_per_transaction_using_lookup_table(
+                    "Max process per tx using lookup",
+                    |auth_pubkey, committee, delegated_account_owner| {
+                        let buffer_pda = Pubkey::new_unique();
+                        let commit_args = CommitStateFromBufferArgs::default();
+                        vec![super::process_commits_ix(
+                            auth_pubkey,
+                            &committee,
+                            &delegated_account_owner,
+                            &buffer_pda,
+                            commit_args,
+                        )]
+                    },
+                    None,
+                )
+            };
+            pub(crate) static ref MAX_CLOSE_PER_TX: u8 = {
+                let ephemeral_blockhash = Hash::default();
+                max_chunks_per_transaction("Max close per tx", |auth_pubkey| {
+                    let pubkey = Pubkey::new_unique();
                     vec![super::close_buffers_ix(
                         auth_pubkey,
-                        &committee,
+                        &pubkey,
                         &ephemeral_blockhash,
                     )]
-                },
-                None,
-            )
-        };
-        pub(crate) static ref MAX_PROCESS_AND_CLOSE_PER_TX: u8 = {
-            let ephemeral_blockhash = Hash::default();
-            max_chunks_per_transaction(
-                "Max process and close per tx",
-                |auth_pubkey| {
-                    let pubkey = Pubkey::new_unique();
-                    let delegated_account_owner = Pubkey::new_unique();
-                    let buffer_pda = Pubkey::new_unique();
-                    let commit_args = CommitStateFromBufferArgs::default();
-                    super::process_and_close_ixs(
-                        auth_pubkey,
-                        &pubkey,
-                        &delegated_account_owner,
-                        &buffer_pda,
-                        &ephemeral_blockhash,
-                        commit_args,
-                    )
-                },
-            )
-        };
-        pub(crate) static ref MAX_PROCESS_AND_CLOSE_PER_TX_USING_LOOKUP: u8 = {
-            let ephemeral_blockhash = Hash::default();
-            max_chunks_per_transaction_using_lookup_table(
-                "Max process and close per tx using lookup",
-                |auth_pubkey, committee, delegated_account_owner| {
-                    let commit_args = CommitStateFromBufferArgs::default();
-                    let buffer_pda = Pubkey::new_unique();
-                    super::process_and_close_ixs(
-                        auth_pubkey,
-                        &committee,
-                        &delegated_account_owner,
-                        &buffer_pda,
-                        &ephemeral_blockhash,
-                        commit_args,
-                    )
-                },
-                None,
-            )
-        };
-    }
+                })
+            };
+            pub(crate) static ref MAX_CLOSE_PER_TX_USING_LOOKUP: u8 = {
+                let ephemeral_blockhash = Hash::default();
+                max_chunks_per_transaction_using_lookup_table(
+                    "Max close per tx using lookup",
+                    |auth_pubkey, committee, _| {
+                        vec![super::close_buffers_ix(
+                            auth_pubkey,
+                            &committee,
+                            &ephemeral_blockhash,
+                        )]
+                    },
+                    None,
+                )
+            };
+            pub(crate) static ref MAX_PROCESS_AND_CLOSE_PER_TX: u8 = {
+                let ephemeral_blockhash = Hash::default();
+                max_chunks_per_transaction(
+                    "Max process and close per tx",
+                    |auth_pubkey| {
+                        let pubkey = Pubkey::new_unique();
+                        let delegated_account_owner = Pubkey::new_unique();
+                        let buffer_pda = Pubkey::new_unique();
+                        let commit_args = CommitStateFromBufferArgs::default();
+                        super::process_and_close_ixs(
+                            auth_pubkey,
+                            &pubkey,
+                            &delegated_account_owner,
+                            &buffer_pda,
+                            &ephemeral_blockhash,
+                            commit_args,
+                        )
+                    },
+                )
+            };
+            pub(crate) static ref MAX_PROCESS_AND_CLOSE_PER_TX_USING_LOOKUP: u8 = {
+                let ephemeral_blockhash = Hash::default();
+                max_chunks_per_transaction_using_lookup_table(
+                    "Max process and close per tx using lookup",
+                    |auth_pubkey, committee, delegated_account_owner| {
+                        let commit_args = CommitStateFromBufferArgs::default();
+                        let buffer_pda = Pubkey::new_unique();
+                        super::process_and_close_ixs(
+                            auth_pubkey,
+                            &committee,
+                            &delegated_account_owner,
+                            &buffer_pda,
+                            &ephemeral_blockhash,
+                            commit_args,
+                        )
+                    },
+                    None,
+                )
+            };
+        }
 
-    // -----------------
-    // Finalize
-    // -----------------
-    lazy_static! {
-        pub(crate) static ref MAX_FINALIZE_PER_TX: u8 = {
-            max_chunks_per_transaction("Max finalize per tx", |auth_pubkey| {
-                let pubkey = Pubkey::new_unique();
-                vec![super::finalize_ix(auth_pubkey, &pubkey)]
-            })
-        };
-        pub(crate) static ref MAX_FINALIZE_PER_TX_USING_LOOKUP: u8 = {
-            max_chunks_per_transaction_using_lookup_table(
-                "Max finalize per tx using lookup",
-                |auth_pubkey, committee, _| {
-                    vec![super::finalize_ix(auth_pubkey, &committee)]
-                },
-                Some(40),
-            )
-        };
-    }
+        // -----------------
+        // Finalize
+        // -----------------
+        lazy_static! {
+            pub(crate) static ref MAX_FINALIZE_PER_TX: u8 = {
+                max_chunks_per_transaction(
+                    "Max finalize per tx",
+                    |auth_pubkey| {
+                        let pubkey = Pubkey::new_unique();
+                        vec![super::finalize_ix(auth_pubkey, &pubkey)]
+                    },
+                )
+            };
+            pub(crate) static ref MAX_FINALIZE_PER_TX_USING_LOOKUP: u8 = {
+                max_chunks_per_transaction_using_lookup_table(
+                    "Max finalize per tx using lookup",
+                    |auth_pubkey, committee, _| {
+                        vec![super::finalize_ix(auth_pubkey, &committee)]
+                    },
+                    Some(40),
+                )
+            };
+        }
 
-    // -----------------
-    // Undelegate
-    // -----------------
-    lazy_static! {
-        pub(crate) static ref MAX_UNDELEGATE_PER_TX: u8 = {
-            max_chunks_per_transaction("Max undelegate per tx", |auth_pubkey| {
-                let pubkey = Pubkey::new_unique();
+        // -----------------
+        // Undelegate
+        // -----------------
+        lazy_static! {
+            pub(crate) static ref MAX_UNDELEGATE_PER_TX: u8 = {
+                max_chunks_per_transaction(
+                    "Max undelegate per tx",
+                    |auth_pubkey| {
+                        let pubkey = Pubkey::new_unique();
+                        let owner_program = Pubkey::new_unique();
+                        vec![dlp::instruction_builder::undelegate(
+                            auth_pubkey,
+                            pubkey,
+                            owner_program,
+                            auth_pubkey,
+                        )]
+                    },
+                )
+            };
+            pub(crate) static ref MAX_UNDELEGATE_PER_TX_USING_LOOKUP: u8 = {
+                max_chunks_per_transaction_using_lookup_table(
+                    "Max undelegate per tx using lookup",
+                    |auth_pubkey, committee, owner_program| {
+                        vec![dlp::instruction_builder::undelegate(
+                            auth_pubkey,
+                            committee,
+                            owner_program,
+                            auth_pubkey,
+                        )]
+                    },
+                    None,
+                )
+            };
+        }
+
+        // -----------------
+        // Max Chunks Per Transaction
+        // -----------------
+
+        fn max_chunks_per_transaction<F: Fn(Pubkey) -> Vec<Instruction>>(
+            label: &str,
+            create_ixs: F,
+        ) -> u8 {
+            eprintln!("{}", label);
+
+            let auth = Keypair::new();
+            let auth_pubkey = auth.pubkey();
+            // NOTE: the size of the budget instructions is always the same, no matter
+            // which budget we provide
+            let mut ixs =
+                ComputeBudget::Process(Budget::default()).instructions(1);
+            let mut chunks = 0_u8;
+            loop {
+                ixs.extend(create_ixs(auth_pubkey));
+                chunks += 1;
+
+                // SAFETY: runs statically
+                let versioned_msg = Message::try_compile(
+                    &auth_pubkey,
+                    &ixs,
+                    &[],
+                    Hash::default(),
+                )
+                .unwrap();
+                // SAFETY: runs statically
+                let versioned_tx = VersionedTransaction::try_new(
+                    VersionedMessage::V0(versioned_msg),
+                    &[&auth],
+                )
+                .unwrap();
+                let encoded = serialize_and_encode_base64(&versioned_tx);
+                eprintln!("{} ixs -> {} bytes", chunks, encoded.len());
+                if encoded.len() > MAX_ENCODED_TRANSACTION_SIZE {
+                    return chunks - 1;
+                }
+            }
+        }
+
+        fn extend_lookup_table(
+            lookup_table: &mut AddressLookupTableAccount,
+            auth_pubkey: Pubkey,
+            committee: Pubkey,
+            owner: Option<&Pubkey>,
+        ) {
+            let keys = provide_committee_pubkeys(&committee, owner)
+                .into_iter()
+                .chain(provide_common_pubkeys(&auth_pubkey))
+                .chain(lookup_table.addresses.iter().cloned())
+                .collect::<HashSet<_>>();
+            lookup_table.addresses = keys.into_iter().collect();
+            assert!(
+                lookup_table.addresses.len() <= LOOKUP_TABLE_MAX_ADDRESSES,
+                "Lookup table has too many ({}) addresses",
+                lookup_table.addresses.len()
+            );
+        }
+
+        fn max_chunks_per_transaction_using_lookup_table<
+            FI: Fn(Pubkey, Pubkey, Pubkey) -> Vec<Instruction>,
+        >(
+            label: &str,
+            create_ixs: FI,
+            start_at: Option<u8>,
+        ) -> u8 {
+            eprintln!("{}", label);
+            let auth = Keypair::new();
+            let auth_pubkey = auth.pubkey();
+            let mut ixs =
+                ComputeBudget::Process(Budget::default()).instructions(1);
+            let mut chunks = start_at.unwrap_or_default();
+            let mut lookup_table = AddressLookupTableAccount {
+                key: Pubkey::default(),
+                addresses: vec![],
+            };
+            // If we start at specific chunk size let's prep the ixs and assume
+            // we are using the same addresses to avoid blowing out the lookup table
+            if chunks > 0 {
+                let committee = Pubkey::new_unique();
                 let owner_program = Pubkey::new_unique();
-                vec![dlp::instruction_builder::undelegate(
+                extend_lookup_table(
+                    &mut lookup_table,
                     auth_pubkey,
-                    pubkey,
-                    owner_program,
-                    auth_pubkey,
-                )]
-            })
-        };
-        pub(crate) static ref MAX_UNDELEGATE_PER_TX_USING_LOOKUP: u8 = {
-            max_chunks_per_transaction_using_lookup_table(
-                "Max undelegate per tx using lookup",
-                |auth_pubkey, committee, owner_program| {
-                    vec![dlp::instruction_builder::undelegate(
+                    committee,
+                    Some(&owner_program),
+                );
+                for _ in 0..chunks {
+                    ixs.extend(create_ixs(
                         auth_pubkey,
                         committee,
                         owner_program,
-                        auth_pubkey,
-                    )]
-                },
-                None,
-            )
-        };
-    }
-
-    // -----------------
-    // Max Chunks Per Transaction
-    // -----------------
-
-    fn max_chunks_per_transaction<F: Fn(Pubkey) -> Vec<Instruction>>(
-        label: &str,
-        create_ixs: F,
-    ) -> u8 {
-        eprintln!("{}", label);
-
-        let auth = Keypair::new();
-        let auth_pubkey = auth.pubkey();
-        // NOTE: the size of the budget instructions is always the same, no matter
-        // which budget we provide
-        let mut ixs = ComputeBudget::Process(Budget::default()).instructions(1);
-        let mut chunks = 0_u8;
-        loop {
-            ixs.extend(create_ixs(auth_pubkey));
-            chunks += 1;
-
-            // SAFETY: runs statically
-            let versioned_msg =
-                Message::try_compile(&auth_pubkey, &ixs, &[], Hash::default())
-                    .unwrap();
-            // SAFETY: runs statically
-            let versioned_tx = VersionedTransaction::try_new(
-                VersionedMessage::V0(versioned_msg),
-                &[&auth],
-            )
-            .unwrap();
-            let encoded = serialize_and_encode_base64(&versioned_tx);
-            eprintln!("{} ixs -> {} bytes", chunks, encoded.len());
-            if encoded.len() > MAX_ENCODED_TRANSACTION_SIZE {
-                return chunks - 1;
+                    ));
+                }
             }
-        }
-    }
-
-    fn extend_lookup_table(
-        lookup_table: &mut AddressLookupTableAccount,
-        auth_pubkey: Pubkey,
-        committee: Pubkey,
-        owner: Option<&Pubkey>,
-    ) {
-        let keys = provide_committee_pubkeys(&committee, owner)
-            .into_iter()
-            .chain(provide_common_pubkeys(&auth_pubkey))
-            .chain(lookup_table.addresses.iter().cloned())
-            .collect::<HashSet<_>>();
-        lookup_table.addresses = keys.into_iter().collect();
-        assert!(
-            lookup_table.addresses.len() <= LOOKUP_TABLE_MAX_ADDRESSES,
-            "Lookup table has too many ({}) addresses",
-            lookup_table.addresses.len()
-        );
-    }
-
-    fn max_chunks_per_transaction_using_lookup_table<
-        FI: Fn(Pubkey, Pubkey, Pubkey) -> Vec<Instruction>,
-    >(
-        label: &str,
-        create_ixs: FI,
-        start_at: Option<u8>,
-    ) -> u8 {
-        eprintln!("{}", label);
-        let auth = Keypair::new();
-        let auth_pubkey = auth.pubkey();
-        let mut ixs = ComputeBudget::Process(Budget::default()).instructions(1);
-        let mut chunks = start_at.unwrap_or_default();
-        let mut lookup_table = AddressLookupTableAccount {
-            key: Pubkey::default(),
-            addresses: vec![],
-        };
-        // If we start at specific chunk size let's prep the ixs and assume
-        // we are using the same addresses to avoid blowing out the lookup table
-        if chunks > 0 {
-            let committee = Pubkey::new_unique();
-            let owner_program = Pubkey::new_unique();
-            extend_lookup_table(
-                &mut lookup_table,
-                auth_pubkey,
-                committee,
-                Some(&owner_program),
-            );
-            for _ in 0..chunks {
+            loop {
+                let committee = Pubkey::new_unique();
+                let owner_program = Pubkey::new_unique();
                 ixs.extend(create_ixs(auth_pubkey, committee, owner_program));
-            }
-        }
-        loop {
-            let committee = Pubkey::new_unique();
-            let owner_program = Pubkey::new_unique();
-            ixs.extend(create_ixs(auth_pubkey, committee, owner_program));
 
-            chunks += 1;
-            extend_lookup_table(
-                &mut lookup_table,
-                auth_pubkey,
-                committee,
-                Some(&owner_program),
-            );
+                chunks += 1;
+                extend_lookup_table(
+                    &mut lookup_table,
+                    auth_pubkey,
+                    committee,
+                    Some(&owner_program),
+                );
 
-            // SAFETY: runs statically
-            let versioned_msg = Message::try_compile(
-                &auth_pubkey,
-                &ixs,
-                &[lookup_table.clone()],
-                Hash::default(),
-            )
-            .unwrap();
-            // SAFETY: runs statically
-            let versioned_tx = VersionedTransaction::try_new(
-                VersionedMessage::V0(versioned_msg),
-                &[&auth],
-            )
-            .unwrap();
-            let encoded = serialize_and_encode_base64(&versioned_tx);
-            eprintln!("{} ixs -> {} bytes", chunks, encoded.len());
-            if encoded.len() > MAX_ENCODED_TRANSACTION_SIZE {
-                return chunks - 1;
+                // SAFETY: runs statically
+                let versioned_msg = Message::try_compile(
+                    &auth_pubkey,
+                    &ixs,
+                    &[lookup_table.clone()],
+                    Hash::default(),
+                )
+                .unwrap();
+                // SAFETY: runs statically
+                let versioned_tx = VersionedTransaction::try_new(
+                    VersionedMessage::V0(versioned_msg),
+                    &[&auth],
+                )
+                .unwrap();
+                let encoded = serialize_and_encode_base64(&versioned_tx);
+                eprintln!("{} ixs -> {} bytes", chunks, encoded.len());
+                if encoded.len() > MAX_ENCODED_TRANSACTION_SIZE {
+                    return chunks - 1;
+                }
             }
         }
     }
