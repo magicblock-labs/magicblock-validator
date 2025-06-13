@@ -89,6 +89,9 @@ pub enum CommittorServiceError {
 
     #[error("Not all commits of reqid {0} have the same finalize value")]
     RetriedCommitsOfSameRequestNeedConsistentFinalize(String),
+
+    #[error("Commit of reqid {0} for pubkey {1} has no persisted owner")]
+    UnableToFindPersistedAccountOwnerWhenRetrying(String, Pubkey),
 }
 
 impl CommittorServiceError {

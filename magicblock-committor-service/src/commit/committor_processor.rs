@@ -27,7 +27,7 @@ use crate::{
     commit_strategy::{split_changesets_by_commit_strategy, SplitChangesets},
     compute_budget::{ComputeBudget, ComputeBudgetConfig},
     config::ChainConfig,
-    error::CommittorServiceResult,
+    error::{CommittorServiceError, CommittorServiceResult},
     persist::{
         BundleSignatureRow, CommitPersister, CommitStatusRow, CommitStrategy,
     },
@@ -188,24 +188,29 @@ impl CommittorProcessor {
         self.update_commit_statuses(reqid, commit_stages);
     }
 
+    /// This is ONLY called for accounts that already processed successfully
+    /// but finalization and possibly undelegation failed.
+    /// For accounts that need to start the retry at the processing step the finalization and
+    /// undelegation are already included since it repeats the entire commit again.
     pub(crate) async fn refinalize_accounts(
         &self,
         reqid: &str,
-        accounts: Vec<(Pubkey, bool)>,
+        accounts: HashMap<Pubkey, bool>,
     ) -> CommittorServiceResult<()> {
         // Create instructions to finalize the accounts
         let ixs = accounts
-            .into_iter()
-            .map(|(pubkey, _)| {
+            .keys()
+            .map(|pubkey| {
                 (
                     pubkey,
                     dlp::instruction_builder::finalize(
                         self.authority.pubkey(),
-                        pubkey,
+                        *pubkey,
                     ),
                 )
             })
             .collect::<HashMap<_, _>>();
+
         let signatures = self.run_validator_signed_ixs(ixs).await?;
 
         for (pubkey, signature) in signatures {
@@ -214,7 +219,7 @@ impl CommittorProcessor {
                 .persister
                 .lock()
                 .expect("persister mutex poisoned")
-                .update_finalize_signature(reqid, &pubkey, &signature)
+                .update_finalize_signature_for_reqid(reqid, pubkey, &signature)
             {
                 // NOTE: this is not a fatal error, but would still prevent users
                 // from finding the finalize transaction, however we cannot repeat
@@ -224,22 +229,105 @@ impl CommittorProcessor {
                     pubkey, err
                 );
             }
-            // Update the commit status in the persister
-            /*
-            if complete_after_finalize {
-                                if let Err(err) = self
-                                    .persister
-                                    .lock()
-                                    .expect("persister mutex poisoned")
-                                    .update_status(reqid, &pubkey, CommitStatus::Succeeded)
-                                {
-                                    error!(
-                                        "Failed to update finalize status for account {}: {:?}",
-                                        pubkey, err
-                                    );
-                                }
+            // SAFETY: signature pubkeys match accounts pubkeys
+            let undelegate_after_finalize = accounts.get(pubkey).unwrap();
+
+            // Update the commit status in the persister unless it will be undelegated
+            // right after and thus needs to stay in pending mode
+            if !undelegate_after_finalize {
+                if let Err(err) = self
+                    .persister
+                    .lock()
+                    .expect("persister mutex poisoned")
+                    .register_retry_finalize_or_undelegate_success(
+                        reqid, pubkey,
+                    )
+                {
+                    // The retry succeeded, but we failed to register this which will
+                    // cause the commit to be retried again until we give up
+                    // However there is nothing else we can do here but log this
+                    error!(
+                        "Failed to register finalize success status for account {}: {:?}",
+                        pubkey, err
+                    );
+                }
             }
-                */
+        }
+
+        Ok(())
+    }
+
+    /// This is ONLY called for accounts that already processed successfully
+    /// but possibly finalization and definitely undelegation failed.
+    /// Only in that case do we retry just this step in isolation, otherwise it is
+    /// included when the entire commit is retried.
+    pub(crate) async fn reundelegate_accounts(
+        &self,
+        reqid: &str,
+        accounts: HashSet<Pubkey>,
+    ) -> CommittorServiceResult<()> {
+        // Run instructions to undelegate the accounts
+        let mut ixs = HashMap::new();
+        for pubkey in accounts.iter() {
+            let owner = self
+                .persister
+                .lock()
+                .expect("persister mutex poisoned")
+                .get_delegated_account_owner(reqid, pubkey)?
+                .ok_or_else(|| {
+                    CommittorServiceError::UnableToFindPersistedAccountOwnerWhenRetrying(
+                        reqid.to_string(),
+                        *pubkey,
+                    )
+                })?;
+            ixs.insert(
+                pubkey,
+                dlp::instruction_builder::undelegate(
+                    self.authority.pubkey(),
+                    *pubkey,
+                    owner,
+                    self.authority.pubkey(),
+                ),
+            );
+        }
+        let signatures = self.run_validator_signed_ixs(ixs).await?;
+
+        for (pubkey, signature) in signatures {
+            // Update undelegate signature in the persister
+            if let Err(err) = self
+                .persister
+                .lock()
+                .expect("persister mutex poisoned")
+                .update_undelegate_signature_for_reqid(
+                    reqid, pubkey, &signature,
+                )
+            {
+                // NOTE: this is not a fatal error, but would still prevent users
+                // from finding the undelegate transaction, however we cannot repeat
+                // the undelegate transaction either
+                error!(
+                    "Failed to update undelegate signature for account {}: {:?}",
+                    pubkey, err
+                );
+            }
+            // Update the commit status in the persister
+            if let Err(err) = self
+                .persister
+                .lock()
+                .expect("persister mutex poisoned")
+                .register_retry_finalize_or_undelegate_success(reqid, pubkey)
+            {
+                // The retry succeeded, but we failed to register this which will
+                // cause the commit to be retried again until we give up
+                // However there is nothing else we can do here but log this
+                error!(
+                    "Failed to register undelegate success status for account {}: {:?}",
+                    pubkey, err
+                );
+            }
+
+            // Release pubkeys for undelegated accounts
+            self.table_mania.release_pubkeys(&accounts).await;
         }
 
         Ok(())
@@ -253,22 +341,6 @@ impl CommittorProcessor {
     ) -> CommittorServiceResult<HashMap<K, Signature>> {
         // TODO: @@@ implement
         todo!()
-    }
-
-    pub(crate) async fn reundelegate_accounts(
-        &self,
-        _reqid: &str,
-        _accounts: Vec<Pubkey>,
-    ) -> CommittorServiceResult<()> {
-        // Create instructions to undelegate the accounts
-
-        // Update undelegate signature in the persister
-
-        // Update the commit status in the persister
-
-        // Release pubkeys for undelegated accounts
-
-        Ok(())
     }
 
     pub async fn commit_changeset(

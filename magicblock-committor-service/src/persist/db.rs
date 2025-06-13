@@ -5,7 +5,7 @@ use solana_pubkey::Pubkey;
 use solana_sdk::{clock::Slot, hash::Hash, signature::Signature};
 
 use super::{
-    error::{CommitPersistError, CommitPersistResult},
+    error::CommitPersistResult,
     utils::{i64_into_u64, now, u64_into_i64},
     CommitStatus, CommitStatusSignatures, CommitStrategy, CommitType,
 };
@@ -202,20 +202,6 @@ FROM bundle_signature
 "#;
 
 // -----------------
-// RegisterRetryResult
-// -----------------
-pub struct RegisterRetryDetails {
-    /// See [CommitStatusRow::reqid]
-    /// The request ID that was used when originally committing the account
-    pub(crate) reqid: String,
-    /// See [CommitStatus::Succeeded::0]
-    /// The strategy used to commit the account
-    pub(crate) strategy: CommitStrategy,
-    /// See [CommitStatus::Succeeded::0]
-    /// The signatures used to commit/finalize/undelegate the account
-    pub(crate) signatures: CommitStatusSignatures,
-}
-// -----------------
 // CommittorDb
 // -----------------
 pub struct CommittorDb {
@@ -392,17 +378,36 @@ impl CommittorDb {
         Ok(())
     }
 
-    pub fn register_retry(
+    pub(crate) fn register_retry(
         &self,
         reqid: &str,
-    ) -> CommitPersistResult<RegisterRetryDetails> {
+    ) -> CommitPersistResult<()> {
         let query = "UPDATE commit_status
             SET last_retried_at = ?1, retries_count = retries_count + 1
             commit_status = 'Pending'
             WHERE reqid = ?2";
         let stmt = &mut self.conn.prepare(query)?;
         stmt.execute(params![u64_into_i64(now()), reqid])?;
-        todo!()
+        Ok(())
+    }
+
+    /// Updates the commit status, to 'Succeeded' and updates the provided signatures
+    /// NOTE: the commit strategy does not need to be updated since it is still present from
+    ///       the original commit (which was processed successfully)
+    /// Requires that the finalize/undelegate signatures were already updated via
+    /// [Self::update_finalize_signature_for_reqid]
+    /// [Self::update_undelegate_signature_for_reqid]
+    pub(crate) fn register_retry_finalize_or_undelegate_success(
+        &self,
+        reqid: &str,
+        pubkey: &Pubkey,
+    ) -> CommitPersistResult<()> {
+        let query = "UPDATE commit_status
+            SET commit_status = 'Succeeded',
+            WHERE reqid = ?1 AND pubkey = ?2";
+        let stmt = &mut self.conn.prepare(query)?;
+        stmt.execute(params![reqid, pubkey.to_string()])?;
+        Ok(())
     }
 
     #[cfg(test)]
@@ -452,6 +457,23 @@ impl CommittorDb {
         let stmt = &mut self.conn.prepare(query)?;
         let deleted = stmt.execute(params![reqid])?;
         Ok(deleted)
+    }
+
+    pub(crate) fn get_delegated_account_owner(
+        &self,
+        reqid: &str,
+        pubkey: &Pubkey,
+    ) -> CommitPersistResult<Option<Pubkey>> {
+        let query = "SELECT delegated_account_owner FROM commit_status WHERE reqid = ?1 AND pubkey = ?2";
+        let stmt = &mut self.conn.prepare(query)?;
+        let mut rows = stmt.query(params![reqid, pubkey.to_string()])?;
+
+        if let Some(row) = rows.next()? {
+            let delegated_account_owner: String = row.get(0)?;
+            Ok(Some(Pubkey::try_from(delegated_account_owner.as_str())?))
+        } else {
+            Ok(None)
+        }
     }
 
     // -----------------
@@ -552,43 +574,58 @@ impl CommittorDb {
         Ok(reqids)
     }
 
-    pub(crate) fn update_finalize_signature(
+    /// Updates the finalize signatures both in the commit_status table
+    /// and the bundle_signature table
+    pub(crate) fn update_finalize_signature_for_reqid(
         &self,
-        bundle_id: u64,
+        reqid: &str,
         pubkey: &Pubkey,
         finalize_signature: &Signature,
-    ) -> std::result::Result<(), super::error::CommitPersistError> {
-        let query = "UPDATE bundle_signature
+    ) -> CommitPersistResult<()> {
+        let query = "
+        BEGIN
+            UPDATE commit_status
             SET finalized_signature = ?1
-            WHERE bundle_id = ?2 AND pubkey = ?3";
+            WHERE reqid = ?2 AND pubkey = ?3;
+
+            UPDATE bundle_signature
+            SET finalized_signature = ?1
+            WHERE reqid = ?2;
+        COMMIT;";
         let stmt = &mut self.conn.prepare(query)?;
         stmt.execute(params![
             finalize_signature.to_string(),
-            bundle_id,
+            reqid,
             pubkey.to_string()
         ])?;
         Ok(())
     }
 
-    pub(crate) fn get_bundle_id_by_reqid_and_pubkey(
+    /// Updates the undelegate signatures both in the commit_status table
+    /// and the bundle_signature table
+    pub(crate) fn update_undelegate_signature_for_reqid(
         &self,
         reqid: &str,
         pubkey: &Pubkey,
-    ) -> CommitPersistResult<u64> {
-        let query = "SELECT commit_status FROM commit_status WHERE reqid = ?1 AND pubkey = ?2";
-        let stmt = &mut self.conn.prepare(query)?;
-        let mut rows = stmt.query(params![reqid, pubkey.to_string()])?;
+        undelegate_signature: &Signature,
+    ) -> CommitPersistResult<()> {
+        let query = "
+        BEGIN
+            UPDATE commit_status
+            SET undelegated_signature = ?1
+            WHERE reqid = ?2 AND pubkey = ?3;
 
-        match rows.next()? {
-            Some(row) => {
-                let bundle_id: i64 = row.get(0)?;
-                Ok(i64_into_u64(bundle_id))
-            }
-            None => Err(CommitPersistError::BundleIdNotFound(
-                reqid.to_string(),
-                *pubkey,
-            )),
-        }
+            UPDATE bundle_signature
+            SET undelegate_signature = ?1
+            WHERE reqid = ?2;
+        COMMIT;";
+        let stmt = &mut self.conn.prepare(query)?;
+        stmt.execute(params![
+            undelegate_signature.to_string(),
+            reqid,
+            pubkey.to_string()
+        ])?;
+        Ok(())
     }
 }
 

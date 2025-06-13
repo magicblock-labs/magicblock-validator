@@ -1,4 +1,7 @@
-use std::{collections::HashSet, path::Path};
+use std::{
+    collections::{HashMap, HashSet},
+    path::Path,
+};
 
 use log::*;
 use magicblock_committor_program::Changeset;
@@ -75,10 +78,10 @@ pub enum CommittorMessage {
         reqid: String,
         /// The accounts to finalize again since that step failed after they
         /// were committed previously
-        /// The second element in the tuple indicates whether the account will
+        /// The value in the map indicates whether the account will
         /// need to be undelegated after finalization which means the retry is
         /// not complete until that step is done
-        accounts: Vec<(Pubkey, bool)>,
+        accounts: HashMap<Pubkey, bool>,
     },
     ReundelegateAccounts {
         /// The request ID of the changeset to reundelegate
@@ -87,7 +90,7 @@ pub enum CommittorMessage {
         respond_to: oneshot::Sender<CommittorServiceResult<()>>,
         /// The accounts to undelegate since that step failed after they
         /// were committed and possibly finalized previously
-        accounts: Vec<Pubkey>,
+        accounts: HashSet<Pubkey>,
     },
     GetCommitStatuses {
         respond_to:
@@ -433,7 +436,7 @@ impl ChangesetCommittor for CommittorService {
     fn refinalize_accounts(
         &self,
         reqid: String,
-        accounts: Vec<(Pubkey, bool)>,
+        accounts: HashMap<Pubkey, bool>,
     ) -> oneshot::Receiver<CommittorServiceResult<()>> {
         let (tx, rx) = oneshot::channel();
         self.try_send(CommittorMessage::RefinalizeAccounts {
@@ -447,7 +450,7 @@ impl ChangesetCommittor for CommittorService {
     fn reundelegate_accounts(
         &self,
         reqid: String,
-        accounts: Vec<Pubkey>,
+        accounts: HashSet<Pubkey>,
     ) -> oneshot::Receiver<CommittorServiceResult<()>> {
         let (tx, rx) = oneshot::channel();
         self.try_send(CommittorMessage::ReundelegateAccounts {
@@ -542,14 +545,14 @@ pub trait ChangesetCommittor: Send + Sync + 'static {
     fn refinalize_accounts(
         &self,
         reqid: String,
-        accounts: Vec<(Pubkey, bool)>,
+        accounts: HashMap<Pubkey, bool>,
     ) -> oneshot::Receiver<CommittorServiceResult<()>>;
 
     /// Retries undelegating the accounts
     fn reundelegate_accounts(
         &self,
         reqid: String,
-        accounts: Vec<Pubkey>,
+        accounts: HashSet<Pubkey>,
     ) -> oneshot::Receiver<CommittorServiceResult<()>>;
 
     /// Gets statuses of accounts that were committed as part of a request with provided reqid

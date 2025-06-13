@@ -8,7 +8,7 @@ use magicblock_committor_program::{ChangedAccount, Changeset};
 use solana_sdk::{hash::Hash, pubkey::Pubkey, signature::Signature};
 
 use super::{
-    db::{BundleSignatureRow, CommitStatusRow, RegisterRetryDetails},
+    db::{BundleSignatureRow, CommitStatusRow},
     error::{CommitPersistError, CommitPersistResult},
     utils::now,
     CommitStatus, CommitType, CommittorDb,
@@ -104,16 +104,30 @@ impl CommitPersister {
         )
     }
 
-    pub fn update_finalize_signature(
+    pub fn update_finalize_signature_for_reqid(
         &mut self,
         reqid: &str,
         pubkey: &Pubkey,
         finalize_signature: &Signature,
     ) -> CommitPersistResult<()> {
-        let bundle_id =
-            self.db.get_bundle_id_by_reqid_and_pubkey(reqid, pubkey)?;
-        self.db
-            .update_finalize_signature(bundle_id, pubkey, finalize_signature)
+        self.db.update_finalize_signature_for_reqid(
+            reqid,
+            pubkey,
+            finalize_signature,
+        )
+    }
+
+    pub fn update_undelegate_signature_for_reqid(
+        &mut self,
+        reqid: &str,
+        pubkey: &Pubkey,
+        undelegate_signature: &Signature,
+    ) -> CommitPersistResult<()> {
+        self.db.update_undelegate_signature_for_reqid(
+            reqid,
+            pubkey,
+            undelegate_signature,
+        )
     }
 
     pub fn get_commit_statuses_by_reqid(
@@ -156,11 +170,26 @@ impl CommitPersister {
         self.db.get_bundle_signature_by_bundle_id(bundle_id)
     }
 
-    pub fn register_retry(
-        &mut self,
+    pub fn get_delegated_account_owner(
+        &self,
         reqid: &str,
-    ) -> CommitPersistResult<RegisterRetryDetails> {
+        pubkey: &Pubkey,
+    ) -> CommitPersistResult<Option<Pubkey>> {
+        self.db.get_delegated_account_owner(reqid, pubkey)
+    }
+
+    pub fn register_retry(&mut self, reqid: &str) -> CommitPersistResult<()> {
         self.db.register_retry(reqid)
+    }
+
+    /// Updates the commit status, to 'Succeeded' and updates the provided signatures
+    pub(crate) fn register_retry_finalize_or_undelegate_success(
+        &self,
+        reqid: &str,
+        pubkey: &Pubkey,
+    ) -> CommitPersistResult<()> {
+        self.db
+            .register_retry_finalize_or_undelegate_success(reqid, pubkey)
     }
 }
 

@@ -122,7 +122,7 @@ impl ChangesetCommittor for ChangesetCommittorStub {
     fn refinalize_accounts(
         &self,
         reqid: String,
-        accounts: Vec<(Pubkey, bool)>,
+        accounts: HashMap<Pubkey, bool>,
     ) -> oneshot::Receiver<CommittorServiceResult<()>> {
         debug!("Refinalizing accounts: {:?}", accounts);
 
@@ -141,7 +141,7 @@ impl ChangesetCommittor for ChangesetCommittorStub {
     fn reundelegate_accounts(
         &self,
         reqid: String,
-        accounts: Vec<Pubkey>,
+        accounts: HashSet<Pubkey>,
     ) -> oneshot::Receiver<CommittorServiceResult<()>> {
         debug!("Reundelegating accounts: {:?}", accounts);
 
