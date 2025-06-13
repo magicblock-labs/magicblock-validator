@@ -142,7 +142,14 @@ impl CommitPersister {
         self.db.remove_commit_statuses_with_reqid(reqid)
     }
 
-    pub fn get_signature(
+    pub fn get_bundle_signature_by_reqid(
+        &self,
+        reqid: &str,
+    ) -> CommitPersistResult<Option<BundleSignatureRow>> {
+        self.db.get_bundle_signature_by_reqid(reqid)
+    }
+
+    pub fn get_signature_by_bundle_id(
         &self,
         bundle_id: u64,
     ) -> CommitPersistResult<Option<BundleSignatureRow>> {
@@ -300,7 +307,7 @@ mod tests {
         assert_eq!(updated_row.commit_status, new_status);
 
         let signatures = persister
-            .get_signature(new_status.bundle_id().unwrap())
+            .get_signature_by_bundle_id(new_status.bundle_id().unwrap())
             .unwrap()
             .unwrap();
         assert_eq!(signatures.processed_signature, process_signature);

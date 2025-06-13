@@ -485,16 +485,19 @@ impl CommittorDb {
         tx: &Transaction<'_>,
         bundle_signature: &BundleSignatureRow,
     ) -> CommitPersistResult<()> {
-        let query = if bundle_signature.finalized_signature.is_some() {
+        let query = if bundle_signature.finalized_signature.is_some()
+            || bundle_signature.undelegate_signature.is_some()
+        {
             format!("INSERT OR REPLACE INTO bundle_signature ({ALL_BUNDLE_SIGNATURE_COLUMNS})
-             VALUES (?1, ?2, ?3, ?4, ?5)")
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)")
         } else {
             format!("INSERT OR IGNORE INTO bundle_signature ({ALL_BUNDLE_SIGNATURE_COLUMNS})
-             VALUES (?1, ?2, ?3, ?4, ?5)")
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6)")
         };
         tx.execute(
             &query,
             params![
+                bundle_signature.reqid,
                 bundle_signature.bundle_id,
                 bundle_signature.processed_signature.to_string(),
                 bundle_signature
@@ -511,7 +514,7 @@ impl CommittorDb {
         Ok(())
     }
 
-    pub fn get_bundle_signature_by_bundle_id(
+    pub(crate) fn get_bundle_signature_by_bundle_id(
         &self,
         bundle_id: u64,
     ) -> CommitPersistResult<Option<BundleSignatureRow>> {
@@ -521,12 +524,19 @@ impl CommittorDb {
         let stmt = &mut self.conn.prepare(&query)?;
         let mut rows = stmt.query(params![bundle_id])?;
 
-        if let Some(row) = rows.next()? {
-            let bundle_signature_row = extract_bundle_signature_row(row)?;
-            Ok(Some(bundle_signature_row))
-        } else {
-            Ok(None)
-        }
+        rows.next()?.map(extract_bundle_signature_row).transpose()
+    }
+
+    pub(crate) fn get_bundle_signature_by_reqid(
+        &self,
+        reqid: &str,
+    ) -> CommitPersistResult<Option<BundleSignatureRow>> {
+        let query =
+            format!("{SELECT_ALL_BUNDLE_SIGNATURE_COLUMNS} WHERE reqid = ?1");
+        let stmt = &mut self.conn.prepare(&query)?;
+        let mut rows = stmt.query(params![reqid])?;
+
+        rows.next()?.map(extract_bundle_signature_row).transpose()
     }
 
     pub(crate) fn get_reqids(&self) -> CommitPersistResult<HashSet<String>> {
@@ -950,15 +960,33 @@ mod test {
             )
             .unwrap();
             tx.commit().unwrap();
+
+            // Ensure we can retrieve them by reqid and bundle_id
+            assert_eq!(
+                db.get_bundle_signature_by_reqid("req1").unwrap().unwrap(),
+                process_only
+            );
+            assert_eq!(
+                db.get_bundle_signature_by_reqid("req2").unwrap().unwrap(),
+                process_finalize_and_undelegate
+            );
+            assert_eq!(
+                db.get_bundle_signature_by_bundle_id(1).unwrap().unwrap(),
+                process_only
+            );
+            assert_eq!(
+                db.get_bundle_signature_by_bundle_id(2).unwrap().unwrap(),
+                process_finalize_and_undelegate
+            );
         }
 
         // Ensure we update with finalized and undelegate sigs
         let process_now_with_finalize_and_undelegate = {
             let tx = db.conn.transaction().unwrap();
             let process_now_with_finalize = BundleSignatureRow::new(
-                "req2",
+                "req1",
                 process_only.bundle_id,
-                process_finalize_and_undelegate.processed_signature,
+                process_only.processed_signature,
                 Some(Signature::new_unique()),
                 Some(Signature::new_unique()),
             );
@@ -971,6 +999,10 @@ mod test {
 
             process_now_with_finalize
         };
+        assert_eq!(
+            db.get_bundle_signature_by_reqid("req1").unwrap().unwrap(),
+            process_now_with_finalize_and_undelegate
+        );
         assert_eq!(
             db.get_bundle_signature_by_bundle_id(1).unwrap().unwrap(),
             process_now_with_finalize_and_undelegate
@@ -993,6 +1025,10 @@ mod test {
             .unwrap();
             tx.commit().unwrap();
         }
+        assert_eq!(
+            db.get_bundle_signature_by_reqid("req2").unwrap().unwrap(),
+            process_finalize_and_undelegate
+        );
         assert_eq!(
             db.get_bundle_signature_by_bundle_id(2).unwrap().unwrap(),
             process_finalize_and_undelegate

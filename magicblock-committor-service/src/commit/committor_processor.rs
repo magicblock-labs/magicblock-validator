@@ -135,7 +135,7 @@ impl CommittorProcessor {
             .persister
             .lock()
             .expect("persister mutex poisoned")
-            .get_signature(bundle_id)?;
+            .get_signature_by_bundle_id(bundle_id)?;
         Ok(signatures)
     }
 
