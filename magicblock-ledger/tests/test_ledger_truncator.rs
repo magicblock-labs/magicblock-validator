@@ -228,7 +228,7 @@ async fn test_truncator_with_tx_spammer() {
     ));
 
     // Sleep some time
-    tokio::time::sleep(Duration::from_secs(1)).await;
+    tokio::time::sleep(Duration::from_secs(3)).await;
 
     let signatures_result = handle.await;
     assert!(signatures_result.is_ok());
