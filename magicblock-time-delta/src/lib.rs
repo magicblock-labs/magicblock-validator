@@ -176,12 +176,6 @@ pub mod solana_helpers {
     }
 }
 
-// Export physics module
-pub mod physics;
-
-// Re-export commonly used physics types for convenience
-pub use physics::{PlayerState, PhysicsWorld};
-
 #[cfg(test)]
 mod tests {
     use super::*;
