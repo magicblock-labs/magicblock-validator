@@ -27,12 +27,18 @@ use crate::{
 #[derive(Clone)]
 pub struct PubsubConfig {
     socket: SocketAddr,
+    max_connections: usize,
 }
 
 impl PubsubConfig {
-    pub fn from_rpc(rpc_addr: IpAddr, rpc_port: u16) -> Self {
+    pub fn from_rpc(
+        rpc_addr: IpAddr,
+        rpc_port: u16,
+        max_connections: usize,
+    ) -> Self {
         Self {
             socket: SocketAddr::new(rpc_addr, rpc_port + 1),
+            max_connections,
         }
     }
 }
@@ -41,6 +47,7 @@ impl Default for PubsubConfig {
     fn default() -> Self {
         Self {
             socket: SocketAddr::from(([0, 0, 0, 0], DEFAULT_RPC_PUBSUB_PORT)),
+            max_connections: 16384,
         }
     }
 }
@@ -89,6 +96,10 @@ impl PubsubService {
             |context: &RequestContext| Arc::new(Session::new(context.sender()));
 
         ServerBuilder::with_meta_extractor(self.io, extractor)
+            // NOTE: we just set the max number of allowed connections to a reasonably high value
+            // to satisfy most of the use cases, however this number cannot be arbitrarily large
+            // due to the preallocation involved, and a large value will trigger an OOM Kill
+            .max_connections(self.config.max_connections)
             .start(&self.config.socket)
     }
 

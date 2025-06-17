@@ -13,6 +13,8 @@ pub struct RpcConfig {
     pub addr: IpAddr,
     #[serde(default = "default_port")]
     pub port: u16,
+    #[serde(default = "default_max_ws_connections")]
+    pub max_ws_connections: usize,
 }
 
 impl Default for RpcConfig {
@@ -20,6 +22,7 @@ impl Default for RpcConfig {
         Self {
             addr: default_addr(),
             port: default_port(),
+            max_ws_connections: default_max_ws_connections(),
         }
     }
 }
@@ -56,4 +59,8 @@ fn default_addr() -> IpAddr {
 
 fn default_port() -> u16 {
     8899
+}
+
+fn default_max_ws_connections() -> usize {
+    16384
 }
