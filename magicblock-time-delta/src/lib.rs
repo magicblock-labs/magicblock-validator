@@ -77,6 +77,105 @@ impl TimeDelta {
     }
 }
 
+/// Solana-specific time delta implementation using Clock sysvar
+#[derive(Debug, Clone)]
+pub struct SolanaTimeDelta {
+    last_slot: u64,
+    last_unix_timestamp: i64,
+    tick_interval_ms: u64,
+}
+
+impl SolanaTimeDelta {
+    /// Create a new SolanaTimeDelta tracker with specified tick interval
+    pub fn new(tick_interval_ms: u64) -> Self {
+        Self {
+            last_slot: 0,
+            last_unix_timestamp: 0,
+            tick_interval_ms,
+        }
+    }
+
+    /// Get the tick interval in milliseconds
+    pub fn tick_interval(&self) -> u64 {
+        self.tick_interval_ms
+    }
+
+    /// Get the last recorded slot
+    pub fn last_slot(&self) -> u64 {
+        self.last_slot
+    }
+
+    /// Get the last recorded unix timestamp
+    pub fn last_unix_timestamp(&self) -> i64 {
+        self.last_unix_timestamp
+    }
+
+    /// Update with current Solana clock
+    pub fn update_with_clock(&mut self, slot: u64, unix_timestamp: i64) {
+        self.last_slot = slot;
+        self.last_unix_timestamp = unix_timestamp;
+    }
+
+    /// Get elapsed time in milliseconds based on Solana clock
+    pub fn elapsed_ms_with_clock(&self, current_unix_timestamp: i64) -> u64 {
+        let elapsed_seconds = current_unix_timestamp.saturating_sub(self.last_unix_timestamp);
+        (elapsed_seconds * 1000).max(0) as u64
+    }
+
+    /// Check if enough time has passed based on Solana clock
+    pub fn should_tick_with_clock(&self, current_unix_timestamp: i64) -> bool {
+        self.elapsed_ms_with_clock(current_unix_timestamp) >= self.tick_interval_ms
+    }
+
+    /// Get tick count based on Solana clock
+    pub fn tick_count_with_clock(&self, current_unix_timestamp: i64) -> u64 {
+        if self.tick_interval_ms == 0 {
+            return 0;
+        }
+        self.elapsed_ms_with_clock(current_unix_timestamp) / self.tick_interval_ms
+    }
+
+    /// Get remaining time until next tick based on Solana clock
+    pub fn time_to_next_tick_with_clock(&self, current_unix_timestamp: i64) -> u64 {
+        if self.tick_interval_ms == 0 {
+            return 0;
+        }
+        let elapsed = self.elapsed_ms_with_clock(current_unix_timestamp);
+        let remainder = elapsed % self.tick_interval_ms;
+        if remainder == 0 && elapsed > 0 {
+            0 // Exactly on a tick boundary
+        } else {
+            self.tick_interval_ms - remainder
+        }
+    }
+}
+
+/// Helper functions for Solana integration
+#[cfg(feature = "solana-integration")]
+pub mod solana_helpers {
+    use super::SolanaTimeDelta;
+    use solana_program::{clock::Clock, sysvar::Sysvar};
+
+    /// Create and update a SolanaTimeDelta with current Clock sysvar
+    pub fn update_with_current_clock(delta: &mut SolanaTimeDelta) -> Result<(), Box<dyn std::error::Error>> {
+        let clock = Clock::get()?;
+        delta.update_with_clock(clock.slot, clock.unix_timestamp);
+        Ok(())
+    }
+
+    /// Check if a SolanaTimeDelta should tick using current Clock sysvar
+    pub fn should_tick_now(delta: &SolanaTimeDelta) -> Result<bool, Box<dyn std::error::Error>> {
+        let clock = Clock::get()?;
+        Ok(delta.should_tick_with_clock(clock.unix_timestamp))
+    }
+
+    /// Get tick count using current Clock sysvar
+    pub fn tick_count_now(delta: &SolanaTimeDelta) -> Result<u64, Box<dyn std::error::Error>> {
+        let clock = Clock::get()?;
+        Ok(delta.tick_count_with_clock(clock.unix_timestamp))
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -267,5 +366,161 @@ mod tests {
         thread::sleep(Duration::from_millis(30));
         let new_tick_count = delta.tick_count();
         assert!(new_tick_count > tick_count);
+    }
+
+    // Solana-specific tests
+    #[test]
+    fn test_solana_time_delta_creation() {
+        let solana_delta = SolanaTimeDelta::new(100);
+        assert_eq!(solana_delta.tick_interval(), 100);
+        assert_eq!(solana_delta.last_slot(), 0);
+        assert_eq!(solana_delta.last_unix_timestamp(), 0);
+    }
+
+    #[test]
+    fn test_solana_update_with_clock() {
+        let mut solana_delta = SolanaTimeDelta::new(50);
+        
+        // Initial state
+        assert_eq!(solana_delta.last_slot(), 0);
+        assert_eq!(solana_delta.last_unix_timestamp(), 0);
+        
+        // Update with clock data
+        solana_delta.update_with_clock(12345, 1640995200); // Jan 1, 2022
+        assert_eq!(solana_delta.last_slot(), 12345);
+        assert_eq!(solana_delta.last_unix_timestamp(), 1640995200);
+    }
+
+    #[test]
+    fn test_solana_elapsed_ms_with_clock() {
+        let mut solana_delta = SolanaTimeDelta::new(30);
+        
+        // Set initial time
+        let start_time = 1640995200; // Jan 1, 2022
+        solana_delta.update_with_clock(100, start_time);
+        
+        // Check elapsed time with different timestamps
+        assert_eq!(solana_delta.elapsed_ms_with_clock(start_time), 0);
+        assert_eq!(solana_delta.elapsed_ms_with_clock(start_time + 5), 5000); // 5 seconds = 5000ms
+        assert_eq!(solana_delta.elapsed_ms_with_clock(start_time + 10), 10000); // 10 seconds = 10000ms
+        
+        // Test negative time (should not happen but be safe)
+        assert_eq!(solana_delta.elapsed_ms_with_clock(start_time - 5), 0);
+    }
+
+    #[test]
+    fn test_solana_should_tick_with_clock() {
+        let mut solana_delta = SolanaTimeDelta::new(5000); // 5 second intervals
+        
+        let start_time = 1640995200;
+        solana_delta.update_with_clock(100, start_time);
+        
+        // Should not tick immediately
+        assert!(!solana_delta.should_tick_with_clock(start_time));
+        
+        // Should not tick after 3 seconds
+        assert!(!solana_delta.should_tick_with_clock(start_time + 3));
+        
+        // Should tick after 5 seconds
+        assert!(solana_delta.should_tick_with_clock(start_time + 5));
+        
+        // Should tick after 10 seconds
+        assert!(solana_delta.should_tick_with_clock(start_time + 10));
+    }
+
+    #[test]
+    fn test_solana_tick_count_with_clock() {
+        let mut solana_delta = SolanaTimeDelta::new(2000); // 2 second intervals
+        
+        let start_time = 1640995200;
+        solana_delta.update_with_clock(100, start_time);
+        
+        // No ticks initially
+        assert_eq!(solana_delta.tick_count_with_clock(start_time), 0);
+        
+        // One tick after 2 seconds
+        assert_eq!(solana_delta.tick_count_with_clock(start_time + 2), 1);
+        
+        // Two ticks after 4 seconds
+        assert_eq!(solana_delta.tick_count_with_clock(start_time + 4), 2);
+        
+        // Three ticks after 7 seconds (7/2 = 3)
+        assert_eq!(solana_delta.tick_count_with_clock(start_time + 7), 3);
+    }
+
+    #[test]
+    fn test_solana_tick_count_zero_interval() {
+        let solana_delta = SolanaTimeDelta::new(0);
+        
+        // With zero interval, tick count should always be 0
+        assert_eq!(solana_delta.tick_count_with_clock(1640995200), 0);
+        assert_eq!(solana_delta.tick_count_with_clock(1640995210), 0);
+    }
+
+    #[test]
+    fn test_solana_time_to_next_tick_with_clock() {
+        let mut solana_delta = SolanaTimeDelta::new(3000); // 3 second intervals
+        
+        let start_time = 1640995200;
+        solana_delta.update_with_clock(100, start_time);
+        
+        // Initially, time to next tick should be the full interval
+        assert_eq!(solana_delta.time_to_next_tick_with_clock(start_time), 3000);
+        
+        // After 1 second, should have 2 seconds remaining
+        assert_eq!(solana_delta.time_to_next_tick_with_clock(start_time + 1), 2000);
+        
+        // After 2 seconds, should have 1 second remaining
+        assert_eq!(solana_delta.time_to_next_tick_with_clock(start_time + 2), 1000);
+        
+        // After exactly 3 seconds, should be at tick boundary
+        assert_eq!(solana_delta.time_to_next_tick_with_clock(start_time + 3), 0);
+        
+        // After 4 seconds, should have 2 seconds until next tick
+        assert_eq!(solana_delta.time_to_next_tick_with_clock(start_time + 4), 2000);
+    }
+
+    #[test]
+    fn test_solana_time_to_next_tick_zero_interval() {
+        let solana_delta = SolanaTimeDelta::new(0);
+        
+        // With zero interval, time to next tick should always be 0
+        assert_eq!(solana_delta.time_to_next_tick_with_clock(1640995200), 0);
+        assert_eq!(solana_delta.time_to_next_tick_with_clock(1640995210), 0);
+    }
+
+    #[test]
+    fn test_solana_integration_scenario() {
+        let mut solana_delta = SolanaTimeDelta::new(10000); // 10 second intervals
+        
+        // Simulate blockchain progression
+        let mut current_slot = 1000;
+        let mut current_time = 1640995200;
+        
+        // Initial setup
+        solana_delta.update_with_clock(current_slot, current_time);
+        assert_eq!(solana_delta.tick_count_with_clock(current_time), 0);
+        
+        // Simulate 5 seconds passing
+        current_time += 5;
+        current_slot += 20; // Assume ~4 slots per second
+        assert!(!solana_delta.should_tick_with_clock(current_time));
+        assert_eq!(solana_delta.tick_count_with_clock(current_time), 0);
+        assert_eq!(solana_delta.time_to_next_tick_with_clock(current_time), 5000);
+        
+        // Simulate 10 seconds total passing
+        current_time += 5;
+        current_slot += 20;
+        assert!(solana_delta.should_tick_with_clock(current_time));
+        assert_eq!(solana_delta.tick_count_with_clock(current_time), 1);
+        assert_eq!(solana_delta.time_to_next_tick_with_clock(current_time), 0);
+        
+        // Update to new time and continue
+        solana_delta.update_with_clock(current_slot, current_time);
+        assert_eq!(solana_delta.tick_count_with_clock(current_time), 0);
+        
+        // Simulate 25 seconds passing from new baseline
+        current_time += 25;
+        assert_eq!(solana_delta.tick_count_with_clock(current_time), 2); // 25/10 = 2
     }
 }

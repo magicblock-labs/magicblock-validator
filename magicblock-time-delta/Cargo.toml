@@ -8,5 +8,10 @@ license.workspace = true
 edition.workspace = true
 
 [dependencies]
+solana-program = "2.2"
 
 [dev-dependencies]
+
+[features]
+default = []
+solana-integration = []
