@@ -1,5 +1,4 @@
 pub mod traits;
-pub mod time_delta;
 
 pub mod magic_program {
     use solana_sdk::pubkey;
