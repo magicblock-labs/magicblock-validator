@@ -1,6 +1,6 @@
 <div align="center">
 
-  <img height="50x" src="https://www.magicblock.xyz/magicblock-band.png" />
+  <img height="50x" src="https://magicblock-labs.github.io/README/img/magicblock-band.png" />
 
 
   <h1>Ephemeral Validator</h1>
