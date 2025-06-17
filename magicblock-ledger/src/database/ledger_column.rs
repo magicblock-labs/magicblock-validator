@@ -1,6 +1,13 @@
-use std::{marker::PhantomData, sync::Arc};
+use std::{
+    marker::PhantomData,
+    sync::{
+        atomic::{AtomicI64, Ordering},
+        Arc,
+    },
+};
 
 use bincode::{deserialize, serialize};
+use log::{error, warn};
 use prost::Message;
 use rocksdb::{properties as RocksProperties, ColumnFamily};
 use serde::de::DeserializeOwned;
@@ -14,7 +21,7 @@ use super::{
     rocks_db::Rocks,
 };
 use crate::{
-    database::write_batch::WriteBatch,
+    database::{columns::DIRTY_COUNT, write_batch::WriteBatch},
     errors::{LedgerError, LedgerResult},
     metrics::{
         maybe_enable_rocksdb_perf, report_rocksdb_read_perf,
@@ -34,6 +41,15 @@ where
     pub column_options: Arc<LedgerColumnOptions>,
     pub read_perf_status: PerfSamplingStatus,
     pub write_perf_status: PerfSamplingStatus,
+    // We are caching the column item counts since they are expensive to obtain.
+    // `-1` indicates that they are "dirty"    //
+    //     // We are using an i64 to make this work even though the counts are usize,
+    //     // however if we had 50,000 transactions/sec and 50ms slots for 100 years then:
+    //     //
+    //     // slots:   200 * 3600 * 24 * 365 * 100 =           630,720,000,000
+    //     // txs:  50,000 * 3600 * 24 * 365 * 100 =       157,680,000,000,000
+    //     // i64::MAX                             = 9,223,372,036,854,775,807
+    pub entry_counter: AtomicI64,
 }
 
 impl<C: Column + ColumnName> LedgerColumn<C> {
@@ -259,6 +275,39 @@ where
     /// See [crate::database::rocks_db::Rocks::flush_cf] for documentation.
     pub fn flush(&self) -> LedgerResult<()> {
         self.backend.flush_cf(self.handle())
+    }
+
+    pub fn count_column_using_cache(&self) -> LedgerResult<i64> {
+        let cached = self.entry_counter.load(Ordering::Relaxed);
+        if cached != DIRTY_COUNT {
+            return Ok(cached);
+        }
+
+        self
+            .iter(IteratorMode::Start)
+            .map(Iterator::count)
+            .map(|val| if val > i64::MAX as usize {
+                // NOTE: this value is only used for metrics/diagnostics and
+                // aside from the fact that we will never encounter this case,
+                // it is good enough to return i64::MAX
+                error!("Column {} count is too large: {} for metrics, returning max.", C::NAME, val);
+                i64::MAX
+            } else { val as i64 })
+            .inspect(|updated| self.entry_counter.store(*updated, Ordering::Relaxed))
+    }
+
+    /// Increases entries counter if it's not [`DIRTY_COUNT`]
+    /// Otherwise just skips it until it is set
+    #[inline(always)]
+    pub fn try_increase_entry_counter(&self, by: u64) {
+        try_increase_entry_counter(&self.entry_counter, by);
+    }
+
+    /// Decreases entries counter if it's not [`DIRTY_COUNT`]
+    /// Otherwise just skips it until it is set
+    #[inline(always)]
+    pub fn try_decrease_entry_counter(&self, by: u64) {
+        try_decrease_entry_counter(&self.entry_counter, by);
     }
 }
 
@@ -488,5 +537,70 @@ where
             let (key, value) = pair.unwrap();
             C::try_current_index(&key).ok().map(|index| (index, value))
         })
+    }
+}
+
+/// Increases entries counter if it's not [`DIRTY_COUNT`]
+/// Otherwise just skips it until it is set
+pub fn try_increase_entry_counter(entry_counter: &AtomicI64, by: u64) {
+    loop {
+        let prev = entry_counter.load(Ordering::Acquire);
+        if prev == DIRTY_COUNT {
+            return;
+        }
+
+        // In case value changed to [`DIRTY_COUNT`] in between
+        if entry_counter
+            .compare_exchange(
+                prev,
+                prev + by as i64,
+                Ordering::AcqRel,
+                Ordering::Relaxed,
+            )
+            .is_ok()
+        {
+            return;
+        }
+    }
+}
+
+/// Decreases entries counter if it's not [`DIRTY_COUNT`]
+/// Otherwise just skips it until it is set
+pub fn try_decrease_entry_counter(entry_counter: &AtomicI64, by: u64) {
+    loop {
+        let prev = entry_counter.load(Ordering::Acquire);
+        if prev == DIRTY_COUNT {
+            return;
+        }
+
+        let new = prev - by as i64;
+        if new >= 0 {
+            // In case value changed to [`DIRTY_COUNT`] in between
+            if entry_counter
+                .compare_exchange(
+                    prev,
+                    new,
+                    Ordering::AcqRel,
+                    Ordering::Relaxed,
+                )
+                .is_ok()
+            {
+                return;
+            }
+        } else {
+            warn!("Negative entry counter!");
+            // In case value fixed to valid one in between
+            if entry_counter
+                .compare_exchange(
+                    prev,
+                    DIRTY_COUNT,
+                    Ordering::AcqRel,
+                    Ordering::Relaxed,
+                )
+                .is_ok()
+            {
+                return;
+            }
+        }
     }
 }
