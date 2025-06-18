@@ -265,8 +265,8 @@ impl AccountsDb {
 
         let used_storage = self.storage.utilized_mmap();
         if let Err(err) = self.snapshot_engine.snapshot(slot, used_storage) {
-            error!(
-                "error taking snapshot at {}, slot {slot}: {err}",
+            warn!(
+                "failed to take snapshot at {}, slot {slot}: {err}",
                 self.snapshot_engine.database_path().display()
             );
         }

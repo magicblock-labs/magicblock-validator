@@ -1,11 +1,6 @@
-#![allow(unused)]
-
-use std::{
-    sync::{
-        atomic::{AtomicUsize, Ordering},
-        Arc,
-    },
-    time::Duration,
+use std::sync::{
+    atomic::{AtomicUsize, Ordering},
+    Arc,
 };
 
 use expiring_hashmap::ExpiringHashMap as Cache;
@@ -16,15 +11,11 @@ use solana_geyser_plugin_interface::geyser_plugin_interface::{
     ReplicaTransactionInfoVersions, Result as PluginResult, SlotStatus,
 };
 use solana_sdk::{clock::Slot, pubkey::Pubkey, signature::Signature};
-use tokio::{
-    runtime::{Builder, Runtime},
-    sync::{mpsc, Notify},
-};
+use tokio::sync::Notify;
 
 use crate::{
     config::Config,
-    grpc::GrpcService,
-    grpc_messages::{Message, MessageSlot},
+    grpc_messages::Message,
     rpc::GeyserRpcService,
     types::{GeyserMessage, GeyserMessageSender},
     utils::CacheState,
@@ -35,15 +26,12 @@ use crate::{
 // -----------------
 #[derive(Debug)]
 pub struct PluginInner {
-    grpc_channel: GeyserMessageSender,
-    grpc_shutdown: Arc<Notify>,
     rpc_channel: GeyserMessageSender,
     rpc_shutdown: Arc<Notify>,
 }
 
 impl PluginInner {
     fn send_message(&self, message: &GeyserMessage) {
-        // let _ = self.grpc_channel.send(message.clone());
         let _ = self.rpc_channel.send(message.clone());
     }
 }
@@ -75,10 +63,6 @@ impl std::fmt::Debug for GrpcGeyserPlugin {
 
 impl GrpcGeyserPlugin {
     pub fn create(config: Config) -> PluginResult<Self> {
-        let (grpc_channel, grpc_shutdown) =
-            GrpcService::create(config.grpc.clone(), config.block_fail_action)
-                .map_err(GeyserPluginError::Custom)?;
-
         let transactions_cache = if config.cache_transactions {
             Some(Cache::new(config.transactions_cache_max_age_slots))
         } else {
@@ -94,15 +78,12 @@ impl GrpcGeyserPlugin {
         let (rpc_channel, rpc_shutdown, rpc_service) =
             GeyserRpcService::create(
                 config.grpc.clone(),
-                config.block_fail_action,
                 transactions_cache.as_ref().map(|x| x.shared_map()),
                 accounts_cache.as_ref().map(|x| x.shared_map()),
             )
             .map_err(GeyserPluginError::Custom)?;
         let rpc_service = Arc::new(rpc_service);
         let inner = Some(PluginInner {
-            grpc_channel,
-            grpc_shutdown,
             rpc_channel,
             rpc_shutdown,
         });
@@ -146,12 +127,10 @@ impl GeyserPlugin for GrpcGeyserPlugin {
 
     fn on_unload(&mut self) {
         if let Some(inner) = self.inner.take() {
-            inner.grpc_shutdown.notify_one();
             inner.rpc_shutdown.notify_one();
-            drop(inner.grpc_channel);
             drop(inner.rpc_channel);
         }
-        info!("Unoaded plugin: {}", self.name());
+        info!("Unloaded plugin: {}", self.name());
     }
 
     fn update_account(
@@ -300,14 +279,14 @@ impl GeyserPlugin for GrpcGeyserPlugin {
 
     fn notify_entry(
         &self,
-        entry: ReplicaEntryInfoVersions,
+        _entry: ReplicaEntryInfoVersions,
     ) -> PluginResult<()> {
         Ok(())
     }
 
     fn notify_block_metadata(
         &self,
-        blockinfo: ReplicaBlockInfoVersions,
+        _blockinfo: ReplicaBlockInfoVersions,
     ) -> PluginResult<()> {
         Ok(())
     }

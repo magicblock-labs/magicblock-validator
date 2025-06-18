@@ -1,9 +1,9 @@
 use std::{fs, path::Path};
 
 use rocksdb::{
-    ColumnFamily, DBIterator, DBPinnableSlice, DBRawIterator,
-    IteratorMode as RocksIteratorMode, LiveFile, Options,
-    WriteBatch as RWriteBatch, DB,
+    AsColumnFamilyRef, ColumnFamily, DBIterator, DBPinnableSlice,
+    DBRawIterator, FlushOptions, IteratorMode as RocksIteratorMode, LiveFile,
+    Options, WriteBatch as RWriteBatch, DB,
 };
 
 use super::{
@@ -113,6 +113,33 @@ impl Rocks {
     ) -> LedgerResult<()> {
         self.db.delete_file_in_range_cf(cf, from_key, to_key)?;
         Ok(())
+    }
+
+    /// Compacts keys in range \[`from`, `to`\].
+    /// For leveled compaction style, all files containing keys in the given range
+    /// are compacted to the last level containing files.
+    /// https://github.com/facebook/rocksdb/wiki/Manual-Compaction#compactrange
+    pub fn compact_range_cf<S: AsRef<[u8]>, E: AsRef<[u8]>>(
+        &self,
+        cf: &ColumnFamily,
+        from_key: Option<S>,
+        to_key: Option<E>,
+    ) {
+        self.db.compact_range_cf(cf, from_key, to_key)
+    }
+
+    /// Flushes column family
+    pub fn flush_cf(&self, cf: &ColumnFamily) -> LedgerResult<()> {
+        Ok(self.db.flush_cf(cf)?)
+    }
+
+    /// Flushed column families
+    pub fn flush_cfs_opt(
+        &self,
+        cfs: &[&impl AsColumnFamilyRef],
+        options: &FlushOptions,
+    ) -> LedgerResult<()> {
+        Ok(self.db.flush_cfs_opt(cfs, options)?)
     }
 
     pub fn iterator_cf<C>(

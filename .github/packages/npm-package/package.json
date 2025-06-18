@@ -1,6 +1,6 @@
 {
   "name": "@magicblock-labs/ephemeral-validator",
-  "version": "0.1.2",
+  "version": "0.1.3",
   "description": "MagicBlock Ephemeral Validator",
   "homepage": "https://github.com/magicblock-labs/ephemeral-validator#readme",
   "bugs": {
@@ -27,11 +27,11 @@
     "typescript": "^4.9.4"
   },
   "optionalDependencies": {
-    "@magicblock-labs/ephemeral-validator-darwin-arm64": "0.1.2",
-    "@magicblock-labs/ephemeral-validator-darwin-x64": "0.1.2",
-    "@magicblock-labs/ephemeral-validator-linux-arm64": "0.1.2",
-    "@magicblock-labs/ephemeral-validator-linux-x64": "0.1.2",
-    "@magicblock-labs/ephemeral-validator-windows-x64": "0.1.2"
+    "@magicblock-labs/ephemeral-validator-darwin-arm64": "0.1.3",
+    "@magicblock-labs/ephemeral-validator-darwin-x64": "0.1.3",
+    "@magicblock-labs/ephemeral-validator-linux-arm64": "0.1.3",
+    "@magicblock-labs/ephemeral-validator-linux-x64": "0.1.3",
+    "@magicblock-labs/ephemeral-validator-windows-x64": "0.1.3"
   },
   "publishConfig": {
     "access": "public"

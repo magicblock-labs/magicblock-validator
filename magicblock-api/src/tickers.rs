@@ -164,13 +164,9 @@ pub fn init_system_metrics_ticker(
     fn set_accounts_count(bank: &Bank) {
         metrics::set_accounts_count(bank.accounts_db.get_accounts_count());
     }
+
     let ledger = ledger.clone();
     let bank = bank.clone();
-    try_set_ledger_storage_size(&ledger);
-    set_accounts_storage_size(&bank);
-    set_accounts_count(&bank);
-    try_set_ledger_counts(&ledger);
-
     tokio::task::spawn(async move {
         loop {
             tokio::select! {

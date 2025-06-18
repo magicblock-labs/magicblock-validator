@@ -151,12 +151,12 @@ pub struct SlotResponse {
 // ReponseNoContextWithSubscriptionId
 // -----------------
 #[derive(Serialize, Debug)]
-pub struct ReponseNoContextWithSubscriptionId<T: Serialize> {
+pub struct ResponseNoContextWithSubscriptionId<T: Serialize> {
     pub response: T,
     pub subscription: u64,
 }
 
-impl<T: Serialize> ReponseNoContextWithSubscriptionId<T> {
+impl<T: Serialize> ResponseNoContextWithSubscriptionId<T> {
     pub fn new(result: T, subscription: u64) -> Self {
         Self {
             response: result,

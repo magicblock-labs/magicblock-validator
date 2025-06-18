@@ -143,9 +143,9 @@ pub struct MagicValidator {
     sample_performance_service: Option<SamplePerformanceService>,
     commit_accounts_ticker: Option<tokio::task::JoinHandle<()>>,
     remote_account_fetcher_worker: Option<RemoteAccountFetcherWorker>,
-    remote_account_fetcher_handle: Option<thread::JoinHandle<()>>,
+    remote_account_fetcher_handle: Option<tokio::task::JoinHandle<()>>,
     remote_account_updates_worker: Option<RemoteAccountUpdatesWorker>,
-    remote_account_updates_handle: Option<thread::JoinHandle<()>>,
+    remote_account_updates_handle: Option<tokio::task::JoinHandle<()>>,
     remote_account_cloner_worker: Option<
         RemoteAccountClonerWorker<
             BankAccountProvider,
@@ -155,7 +155,7 @@ pub struct MagicValidator {
             CommittorService,
         >,
     >,
-    remote_account_cloner_handle: Option<thread::JoinHandle<()>>,
+    remote_account_cloner_handle: Option<tokio::task::JoinHandle<()>>,
     accounts_manager: Arc<AccountsManager>,
     committor_service: Arc<CommittorService>,
     transaction_listener: GeyserTransactionNotifyListener,
@@ -757,15 +757,10 @@ impl MagicValidator {
         {
             let cancellation_token = self.token.clone();
             self.remote_account_fetcher_handle =
-                Some(thread::spawn(move || {
-                    create_worker_runtime("remote_account_fetcher_worker")
-                        .block_on(async move {
-                            remote_account_fetcher_worker
-                                .start_fetch_request_processing(
-                                    cancellation_token,
-                                )
-                                .await;
-                        });
+                Some(tokio::spawn(async move {
+                    remote_account_fetcher_worker
+                        .start_fetch_request_processing(cancellation_token)
+                        .await;
                 }));
         }
     }
@@ -776,15 +771,10 @@ impl MagicValidator {
         {
             let cancellation_token = self.token.clone();
             self.remote_account_updates_handle =
-                Some(thread::spawn(move || {
-                    create_worker_runtime("remote_account_updates_worker")
-                        .block_on(async move {
-                            remote_account_updates_worker
-                                .start_monitoring_request_processing(
-                                    cancellation_token,
-                                )
-                                .await
-                        });
+                Some(tokio::spawn(async move {
+                    remote_account_updates_worker
+                        .start_monitoring_request_processing(cancellation_token)
+                        .await
                 }));
         }
     }
@@ -806,15 +796,10 @@ impl MagicValidator {
 
             let cancellation_token = self.token.clone();
             self.remote_account_cloner_handle =
-                Some(thread::spawn(move || {
-                    create_worker_runtime("remote_account_cloner_worker")
-                        .block_on(async move {
-                            remote_account_cloner_worker
-                                .start_clone_request_processing(
-                                    cancellation_token,
-                                )
-                                .await
-                        });
+                Some(tokio::spawn(async move {
+                    remote_account_cloner_worker
+                        .start_clone_request_processing(cancellation_token)
+                        .await
                 }));
         }
         Ok(())
@@ -843,7 +828,9 @@ impl MagicValidator {
 
         // we have two memory mapped databases, flush them to disk before exitting
         self.bank.flush();
-        self.ledger.flush();
+        if let Err(err) = self.ledger.shutdown(false) {
+            error!("Failed to shutdown ledger: {:?}", err);
+        }
     }
 
     pub fn join(self) {
@@ -871,14 +858,6 @@ fn programs_to_load(programs: &[ProgramConfig]) -> Vec<(Pubkey, String)> {
         .iter()
         .map(|program| (program.id, program.path.clone()))
         .collect()
-}
-
-fn create_worker_runtime(thread_name: &str) -> tokio::runtime::Runtime {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .thread_name(thread_name)
-        .build()
-        .unwrap()
 }
 
 fn try_get_remote_accounts_and_rpc_config(
