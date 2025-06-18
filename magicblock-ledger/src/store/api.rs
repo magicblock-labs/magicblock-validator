@@ -25,7 +25,7 @@ use solana_transaction_status::{
     ConfirmedTransactionWithStatusMeta, TransactionStatusMeta,
     VersionedConfirmedBlock, VersionedTransactionWithStatusMeta,
 };
-
+use magicblock_metrics::metrics::{inc_ledger_address_signatures_count, inc_ledger_block_times_count, inc_ledger_blockhashes_count, inc_ledger_perf_samples_count, inc_ledger_slot_signatures_count, inc_ledger_transaction_failed_status_count, inc_ledger_transaction_status_count, inc_ledger_transaction_successful_status_count, inc_ledger_transactions_count};
 use crate::{
     conversions::transaction,
     database::{
@@ -62,9 +62,6 @@ pub struct Ledger {
     transaction_memos_cf: LedgerColumn<cf::TransactionMemos>,
     perf_samples_cf: LedgerColumn<cf::PerfSamples>,
     account_mod_datas_cf: LedgerColumn<cf::AccountModDatas>,
-
-    transaction_successful_status_count: AtomicI64,
-    transaction_failed_status_count: AtomicI64,
 
     lowest_cleanup_slot: RwLock<Slot>,
     rpc_api_metrics: LedgerRpcApiMetrics,
@@ -293,10 +290,10 @@ impl Ledger {
         blockhash: Hash,
     ) -> LedgerResult<()> {
         self.blocktime_cf.put(slot, &timestamp)?;
-        self.blocktime_cf.try_increase_entry_counter(1);
+        inc_ledger_block_times_count();
 
         self.blockhash_cf.put(slot, &blockhash)?;
-        self.blockhash_cf.try_increase_entry_counter(1);
+        inc_ledger_blockhashes_count();
         Ok(())
     }
 
@@ -805,7 +802,7 @@ impl Ledger {
 
         self.transaction_cf
             .put_protobuf((signature, slot), &transaction)?;
-        self.transaction_cf.try_increase_entry_counter(1);
+        inc_ledger_transactions_count();
 
         Ok(())
     }
@@ -928,35 +925,29 @@ impl Ledger {
                 (*address, slot, transaction_slot_index, signature),
                 &AddressSignatureMeta { writeable: true },
             )?;
-            self.address_signatures_cf.try_increase_entry_counter(1);
+            inc_ledger_address_signatures_count();
         }
         for address in readonly_keys {
             self.address_signatures_cf.put(
                 (*address, slot, transaction_slot_index, signature),
                 &AddressSignatureMeta { writeable: false },
             )?;
-            self.address_signatures_cf.try_increase_entry_counter(1);
+            inc_ledger_address_signatures_count();
         }
 
         self.slot_signatures_cf
             .put((slot, transaction_slot_index), &signature)?;
-        self.slot_signatures_cf.try_increase_entry_counter(1);
+        inc_ledger_slot_signatures_count()
 
         let status = status.into();
         self.transaction_status_cf
             .put_protobuf((signature, slot), &status)?;
-        self.transaction_status_cf.try_increase_entry_counter(1);
+        inc_ledger_transaction_status_count()
 
         if status.err.is_none() {
-            try_increase_entry_counter(
-                &self.transaction_successful_status_count,
-                1,
-            );
+            inc_ledger_transaction_successful_status_count()
         } else {
-            try_increase_entry_counter(
-                &self.transaction_failed_status_count,
-                1,
-            );
+            inc_ledger_transaction_failed_status_count()
         }
 
         Ok(())
@@ -1082,7 +1073,7 @@ impl Ledger {
         let bytes = serialize(perf_sample)
             .expect("`PerfSample` can be serialized with `bincode`");
         self.perf_samples_cf.put_bytes(index, &bytes)?;
-        self.perf_samples_cf.try_increase_entry_counter(1);
+        inc_ledger_perf_samples_count();
 
         Ok(())
     }

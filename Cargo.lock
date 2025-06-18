@@ -3801,6 +3801,7 @@ dependencies = [
  "magicblock-accounts-db",
  "magicblock-bank",
  "magicblock-core",
+ "magicblock-metrics",
  "num-format",
  "num_cpus",
  "prost 0.11.9",
