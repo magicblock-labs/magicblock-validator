@@ -11,15 +11,15 @@ use solana_rpc_client_api::{
 };
 #[allow(unused_imports)]
 use solana_sdk::signer::SeedDerivable;
-use solana_sdk::{
-    account::Account,
-    clock::Slot,
-    commitment_config::CommitmentConfig,
-    hash::Hash,
-    pubkey::Pubkey,
-    signature::{Keypair, Signature},
-    transaction::{Transaction, TransactionError},
+use solana_sdk::{account::Account, clock::Slot, commitment_config::CommitmentConfig, hash::Hash, pubkey::Pubkey, signature::{Keypair, Signature}, system_program, transaction::{Transaction, TransactionError}};
+use solana_sdk::instruction::{AccountMeta, Instruction};
+use solana_sdk::signature::Signer;
+use ephemeral_rollups_sdk::pda::{
+    delegation_metadata_pda_from_delegated_account,
+    delegation_record_pda_from_delegated_account,
+    ephemeral_balance_pda_from_payer,
 };
+use ephemeral_rollups_sdk::consts::BUFFER;
 
 const URL_CHAIN: &str = "http://localhost:7799";
 const URL_EPHEM: &str = "http://localhost:8899";
@@ -700,6 +700,82 @@ impl IntegrationTestContext {
             blockhashes.push(blockhash);
         }
         Ok(blockhashes)
+    }
+
+    // -----------------
+    // Escrow Utils
+    // -----------------
+    pub fn escrow_lamports_for_payer(&self, payer: &Keypair) -> Result<Signature> {
+        let ixs = Self::init_payer_escrow(payer.pubkey());
+
+        let tx = Transaction::new_signed_with_payer(
+            &ixs,
+            Some(&payer.pubkey()),
+            &[payer],
+            *self.chain_blockhash.as_ref().ok_or_else(|| anyhow::anyhow!("Chain blockhash not available"))?,
+        );
+        self.chain_client.as_ref()
+            .ok_or_else(|| anyhow::anyhow!("Chain client not available"))?
+            .send_and_confirm_transaction_with_spinner_and_config(
+                &tx,
+                CommitmentConfig::confirmed(),
+                RpcSendTransactionConfig {
+                    skip_preflight: true,
+                    ..Default::default()
+                },
+            )
+            .with_context(|| "Failed to escrow fund for payer")
+    }
+
+    fn init_payer_escrow(payer: Pubkey) -> [Instruction; 2] {
+        // Top-up Ix
+        let ephemeral_balance_pda = ephemeral_balance_pda_from_payer(&payer, 0);
+        let top_up_ix = Instruction {
+            program_id: ephemeral_rollups_sdk::id(),
+            accounts: vec![
+                AccountMeta::new(payer, true),
+                AccountMeta::new_readonly(payer, false),
+                AccountMeta::new(ephemeral_balance_pda, false),
+                AccountMeta::new_readonly(system_program::id(), false),
+            ],
+            // discriminator + TopUpEphemeralBalanceArgs from the magicblock-delegation-program
+            data: [
+                vec![9, 0, 0, 0, 0, 0, 0, 0],
+                vec![0, 163, 225, 17, 0, 0, 0, 0, 0],
+            ]
+                .concat(),
+        };
+
+        // Delegate ephemeral balance Ix
+        let buffer = Pubkey::find_program_address(
+            &[BUFFER, &ephemeral_balance_pda.to_bytes()],
+            &ephemeral_rollups_sdk::id(),
+        );
+        let delegation_record_pda =
+            delegation_record_pda_from_delegated_account(&ephemeral_balance_pda);
+        let delegation_metadata_pda =
+            delegation_metadata_pda_from_delegated_account(&ephemeral_balance_pda);
+
+        let delegate_ix = Instruction {
+            program_id: ephemeral_rollups_sdk::id(),
+            accounts: vec![
+                AccountMeta::new(payer, true),
+                AccountMeta::new_readonly(payer, true),
+                AccountMeta::new(ephemeral_balance_pda, false),
+                AccountMeta::new(buffer.0, false),
+                AccountMeta::new(delegation_record_pda, false),
+                AccountMeta::new(delegation_metadata_pda, false),
+                AccountMeta::new_readonly(system_program::id(), false),
+                AccountMeta::new_readonly(ephemeral_rollups_sdk::id(), false),
+            ],
+            // discriminator + DelegateEphemeralBalanceArgs from the magicblock-delegation-program
+            data: [
+                vec![10, 0, 0, 0, 0, 0, 0, 0],
+                vec![0, 0, 0, 0, 0, 0, 0, 0, 0, 0],
+            ]
+                .concat(),
+        };
+        [top_up_ix, delegate_ix]
     }
 
     // -----------------

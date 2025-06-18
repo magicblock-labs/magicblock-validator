@@ -5,11 +5,8 @@ edition.workspace = true
 
 [dependencies]
 anyhow = { workspace = true }
-borsh = { workspace = true }
 integration-test-tools = { workspace = true }
 program-schedulecommit = { workspace = true, features = ["no-entrypoint"] }
-magicblock-core = { workspace = true }
-solana-program = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }

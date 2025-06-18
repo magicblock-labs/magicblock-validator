@@ -33,7 +33,7 @@ fn prepare_ctx_with_account_to_commit() -> ScheduleCommitTestContext {
         ScheduleCommitTestContext::try_new_random_keys(2)
     }
     .unwrap();
-    ctx.escrow_lamports_for_payer().unwrap();
+    ctx.escrow_lamports_for_payer(&ctx.payer).unwrap();
     ctx.init_committees().unwrap();
     ctx.delegate_committees(None).unwrap();
 

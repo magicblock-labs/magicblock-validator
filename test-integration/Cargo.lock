@@ -2970,6 +2970,7 @@ version = "0.0.0"
 dependencies = [
  "anyhow",
  "borsh 1.5.7",
+ "ephemeral-rollups-sdk 0.2.5 (git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=c1fcb91)",
  "magicblock-config",
  "magicblock-core",
  "rayon",
@@ -5635,11 +5636,8 @@ name = "schedulecommit-client"
 version = "0.0.0"
 dependencies = [
  "anyhow",
- "borsh 1.5.7",
  "integration-test-tools",
- "magicblock-core",
  "program-schedulecommit",
- "solana-program",
  "solana-rpc-client",
  "solana-rpc-client-api",
  "solana-sdk",
@@ -10060,6 +10058,7 @@ dependencies = [
 name = "test-fees"
 version = "0.0.0"
 dependencies = [
+ "ephemeral-rollups-sdk 0.2.5 (git+https://github.com/magicblock-labs/ephemeral-rollups-sdk.git?rev=c1fcb91)",
  "integration-test-tools",
  "log",
  "solana-sdk",

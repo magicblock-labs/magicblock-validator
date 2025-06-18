@@ -6,6 +6,7 @@ edition.workspace = true
 [dev-dependencies]
 integration-test-tools = { workspace = true }
 solana-sdk = { workspace = true }
+ephemeral-rollups-sdk = { workspace = true }
 log = { workspace = true }
 test-tools-core = { workspace = true }
 
