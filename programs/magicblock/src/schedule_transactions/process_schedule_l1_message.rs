@@ -12,7 +12,7 @@ use crate::{
     magic_schedule_l1_message::{ConstructionContext, ScheduledL1Message},
     schedule_transactions::{
         check_magic_context_id,
-        schedule_l1_message_processor::process_scheddule_l1_message,
+        schedule_l1_message_processor::schedule_l1_message_processor,
         MESSAGE_ID,
     },
     utils::accounts::{
@@ -113,7 +113,7 @@ pub(crate) fn process_schedule_l1_message(
     )?;
     // TODO: move all logic to some Processor
     // Rn this just locks accounts
-    process_scheddule_l1_message(&construction_context, &args)?;
+    schedule_l1_message_processor(&construction_context, &args)?;
 
     let action_sent_signature =
         scheduled_action.action_sent_transaction.signatures[0];

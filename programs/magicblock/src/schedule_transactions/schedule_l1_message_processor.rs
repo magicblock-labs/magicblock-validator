@@ -9,7 +9,7 @@ use crate::{
     utils::account_actions::set_account_owner_to_delegation_program,
 };
 
-pub fn process_scheddule_l1_message<'a, 'ic>(
+pub fn schedule_l1_message_processor<'a, 'ic>(
     construction_context: &ConstructionContext<'a, 'ic>,
     args: &MagicL1MessageArgs,
 ) -> Result<(), InstructionError> {
