@@ -22,6 +22,17 @@ pub enum CommitTypeArgs {
     },
 }
 
+impl CommitTypeArgs {
+    pub fn committed_accounts_indices(&self) -> &Vec<u8> {
+        match self {
+            Self::Standalone(value) => value,
+            Self::WithL1Actions {
+                committed_accounts, ..
+            } => committed_accounts,
+        }
+    }
+}
+
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
 pub enum UndelegateTypeArgs {
     Standalone,
@@ -32,6 +43,12 @@ pub enum UndelegateTypeArgs {
 pub struct CommitAndUndelegateArgs {
     pub commit_type: CommitTypeArgs,
     pub undelegate_type: UndelegateTypeArgs,
+}
+
+impl CommitAndUndelegateArgs {
+    pub fn committed_accounts_indices(&self) -> &Vec<u8> {
+        self.commit_type.committed_accounts_indices()
+    }
 }
 
 #[derive(Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]

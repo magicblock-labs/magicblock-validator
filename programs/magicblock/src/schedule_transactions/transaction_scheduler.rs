@@ -37,7 +37,7 @@ impl Default for TransactionScheduler {
 }
 
 impl TransactionScheduler {
-    pub fn schedule_action(
+    pub fn schedule_l1_message(
         invoke_context: &InvokeContext,
         context_account: &RefCell<AccountSharedData>,
         action: ScheduledL1Message,

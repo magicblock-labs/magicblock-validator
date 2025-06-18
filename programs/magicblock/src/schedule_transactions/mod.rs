@@ -1,17 +1,18 @@
 mod process_accept_scheduled_commits;
-mod process_schedule_l1_message;
 mod process_schedule_commit;
 #[cfg(test)]
 mod process_schedule_commit_tests;
+mod process_schedule_l1_message;
 mod process_scheduled_commit_sent;
+mod schedule_l1_message_processor;
 pub(crate) mod transaction_scheduler;
 
 use std::sync::atomic::AtomicU64;
 
 use magicblock_core::magic_program::MAGIC_CONTEXT_PUBKEY;
 pub(crate) use process_accept_scheduled_commits::*;
-pub(crate) use process_schedule_l1_message::*;
 pub(crate) use process_schedule_commit::*;
+pub(crate) use process_schedule_l1_message::*;
 pub use process_scheduled_commit_sent::{
     process_scheduled_commit_sent, register_scheduled_commit_sent, SentCommit,
 };

@@ -3,11 +3,16 @@ use std::{collections::HashSet, sync::atomic::Ordering};
 use solana_log_collector::ic_msg;
 use solana_program_runtime::invoke_context::InvokeContext;
 use solana_sdk::{
-    account::ReadableAccount, instruction::InstructionError, pubkey::Pubkey,
+    account::{Account, ReadableAccount},
+    instruction::InstructionError,
+    pubkey::Pubkey,
 };
 
 use crate::{
-    magic_context::{CommittedAccount, ScheduledCommit},
+    magic_schedule_l1_message::{
+        CommitAndUndelegate, CommitType, CommittedAccountV2, MagicL1Message,
+        ScheduledL1Message, UndelegateType,
+    },
     schedule_transactions,
     schedule_transactions::{
         transaction_scheduler::TransactionScheduler, MESSAGE_ID,
@@ -120,7 +125,7 @@ pub(crate) fn process_schedule_commit(
     // NOTE: we don't require PDAs to be signers as in our case verifying that the
     // program owning the PDAs invoked us via CPI is sufficient
     // Thus we can be `invoke`d unsigned and no seeds need to be provided
-    let mut pubkeys: Vec<CommittedAccount> = Vec::new();
+    let mut committed_accounts: Vec<CommittedAccountV2> = Vec::new();
     for idx in COMMITTEES_START..ix_accs_len {
         let acc_pubkey =
             get_instruction_pubkey_with_idx(transaction_context, idx as u16)?;
@@ -150,10 +155,14 @@ pub(crate) fn process_schedule_commit(
                     }
                 };
             }
+
+            let mut account: Account = acc.borrow().to_owned().into();
+            account.owner = parent_program_id.cloned().unwrap_or(account.owner);
+
             #[allow(clippy::unnecessary_literal_unwrap)]
-            pubkeys.push(CommittedAccount {
+            committed_accounts.push(CommittedAccountV2 {
                 pubkey: *acc_pubkey,
-                owner: *parent_program_id.unwrap_or(&acc_owner),
+                account,
             });
         }
 
@@ -197,14 +206,22 @@ pub(crate) fn process_schedule_commit(
 
     let commit_sent_sig = commit_sent_transaction.signatures[0];
 
-    let scheduled_commit = ScheduledCommit {
+    let l1_message = if opts.request_undelegation {
+        MagicL1Message::CommitAndUndelegate(CommitAndUndelegate {
+            commit_action: CommitType::Standalone(committed_accounts),
+            undelegate_action: UndelegateType::Standalone,
+        })
+    } else {
+        MagicL1Message::Commit(CommitType::Standalone(committed_accounts))
+    };
+
+    let scheduled_l1_message = ScheduledL1Message {
         id: commit_id,
         slot: clock.slot,
         blockhash,
-        accounts: pubkeys,
+        action_sent_transaction: commit_sent_transaction,
         payer: *payer_pubkey,
-        commit_sent_transaction,
-        request_undelegation: opts.request_undelegation,
+        l1_message,
     };
 
     // NOTE: this is only protected by all the above checks however if the
@@ -214,10 +231,10 @@ pub(crate) fn process_schedule_commit(
         transaction_context,
         MAGIC_CONTEXT_IDX,
     )?;
-    TransactionScheduler::schedule_action(
+    TransactionScheduler::schedule_l1_message(
         invoke_context,
         context_acc,
-        scheduled_commit.into(),
+        scheduled_l1_message,
     )
     .map_err(|err| {
         ic_msg!(

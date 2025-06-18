@@ -1,4 +1,4 @@
-use std::collections::HashSet;
+use std::{cell::RefCell, collections::HashSet};
 
 use serde::{Deserialize, Serialize};
 use solana_log_collector::ic_msg;
@@ -6,11 +6,15 @@ use solana_program_runtime::{
     __private::{Hash, InstructionError, ReadableAccount, TransactionContext},
     invoke_context::InvokeContext,
 };
-use solana_sdk::{clock::Slot, transaction::Transaction};
+use solana_sdk::{
+    account::{Account, AccountSharedData},
+    clock::Slot,
+    transaction::Transaction,
+};
 
 use crate::{
     args::{
-        L1ActionArgs, CommitAndUndelegateArgs, CommitTypeArgs, ActionArgs,
+        ActionArgs, CommitAndUndelegateArgs, CommitTypeArgs, L1ActionArgs,
         MagicL1MessageArgs, UndelegateTypeArgs,
     },
     instruction_utils::InstructionUtils,
@@ -25,8 +29,8 @@ use crate::{
 pub struct ConstructionContext<'a, 'ic> {
     parent_program_id: Option<Pubkey>,
     signers: &'a HashSet<Pubkey>,
-    transaction_context: &'a TransactionContext,
-    invoke_context: &'a mut InvokeContext<'ic>,
+    pub transaction_context: &'a TransactionContext,
+    pub invoke_context: &'a mut InvokeContext<'ic>,
 }
 
 impl<'a, 'ic> ConstructionContext<'a, 'ic> {
@@ -111,98 +115,6 @@ impl MagicL1Message {
                 let commit_and_undelegate =
                     CommitAndUndelegate::try_from_args(type_, context)?;
                 Ok(MagicL1Message::CommitAndUndelegate(commit_and_undelegate))
-            }
-        }
-    }
-}
-
-impl CommitType {
-    fn validate_accounts<'a>(
-        account_indices: &[u8],
-        context: &ConstructionContext<'a, '_>,
-    ) -> Result<(), InstructionError> {
-        account_indices.iter().try_for_each(|index| {
-            let acc_pubkey = get_instruction_pubkey_with_idx(context.transaction_context, *index as u16)?;
-            let acc = get_instruction_account_with_idx(context.transaction_context, *index as u16)?;
-            let acc_owner = *acc.borrow().owner();
-
-            if context.parent_program_id != Some(acc_owner) && !context.signers.contains(acc_pubkey) {
-                match context.parent_program_id {
-                    None => {
-                        ic_msg!(
-                            context.invoke_context,
-                            "ScheduleCommit ERR: failed to find parent program id"
-                        );
-                        Err(InstructionError::InvalidInstructionData)
-                    }
-                    Some(parent_id) => {
-                        ic_msg!(
-                            context.invoke_context,
-                            "ScheduleCommit ERR: account {} must be owned by {} or be a signer, but is owned by {}",
-                            acc_pubkey, parent_id, acc_owner
-                        );
-                        Err(InstructionError::InvalidAccountOwner)
-                    }
-                }
-            } else {
-                Ok(())
-            }
-        })
-    }
-
-    fn extract_commit_accounts<'a>(
-        account_indices: &[u8],
-        context: &ConstructionContext<'a, '_>,
-    ) -> Result<Vec<CommittedAccountV2>, InstructionError> {
-        account_indices
-            .iter()
-            .map(|i| {
-                let account = get_instruction_account_with_idx(
-                    context.transaction_context,
-                    *i as u16,
-                )?;
-                let owner = *account.borrow().owner();
-                let short_meta = get_instruction_account_short_meta_with_idx(
-                    context.transaction_context,
-                    *i as u16,
-                )?;
-
-                Ok(CommittedAccountV2 {
-                    short_meta,
-                    owner: context.parent_program_id.unwrap_or(owner),
-                })
-            })
-            .collect::<Result<Vec<CommittedAccountV2>, InstructionError>>()
-    }
-
-    pub fn try_from_args<'a>(
-        args: &CommitTypeArgs,
-        context: &ConstructionContext<'a, '_>,
-    ) -> Result<CommitType, InstructionError> {
-        match args {
-            CommitTypeArgs::Standalone(accounts) => {
-                Self::validate_accounts(accounts, context)?;
-                let committed_accounts =
-                    Self::extract_commit_accounts(accounts, context)?;
-
-                Ok(CommitType::Standalone(committed_accounts))
-            }
-            CommitTypeArgs::WithL1Actions {
-                committed_accounts,
-                l1_actions,
-            } => {
-                Self::validate_accounts(committed_accounts, context)?;
-                let committed_accounts =
-                    Self::extract_commit_accounts(committed_accounts, context)?;
-                let l1_actions = l1_actions
-                    .iter()
-                    .map(|args| L1Action::try_from_args(args, context))
-                    .collect::<Result<Vec<L1Action>, InstructionError>>()?;
-
-                Ok(CommitType::WithL1Actions {
-                    committed_accounts,
-                    l1_actions,
-                })
             }
         }
     }
@@ -309,12 +221,20 @@ impl L1Action {
     }
 }
 
+type CommittedAccountRef<'a> = (Pubkey, &'a RefCell<AccountSharedData>);
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CommittedAccountV2 {
-    pub short_meta: ShortAccountMeta,
-    // TODO(GabrielePicco): We should read the owner from the delegation record rather
-    // than deriving/storing it. To remove once the cloning pipeline allow us to easily access the owner.
-    pub owner: Pubkey,
+    pub pubkey: Pubkey,
+    pub account: Account,
+}
+
+impl<'a> From<CommittedAccountRef<'a>> for CommittedAccountV2 {
+    fn from(value: CommittedAccountRef<'a>) -> Self {
+        Self {
+            pubkey: value.0,
+            account: value.1.borrow().to_owned().into(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -327,6 +247,130 @@ pub enum CommitType {
         committed_accounts: Vec<CommittedAccountV2>,
         l1_actions: Vec<L1Action>,
     },
+}
+
+impl CommitType {
+    // TODO: move to processor
+    fn validate_accounts<'a>(
+        accounts: &[CommittedAccountRef],
+        context: &ConstructionContext<'a, '_>,
+    ) -> Result<(), InstructionError> {
+        accounts.iter().try_for_each(|(pubkey, account)| {
+            let owner = *account.borrow().owner();
+            if context.parent_program_id != Some(owner) && !context.signers.contains(pubkey) {
+                match context.parent_program_id {
+                    None => {
+                        ic_msg!(
+                            context.invoke_context,
+                            "ScheduleCommit ERR: failed to find parent program id"
+                        );
+                        Err(InstructionError::InvalidInstructionData)
+                    }
+                    Some(parent_id) => {
+                        ic_msg!(
+                            context.invoke_context,
+                            "ScheduleCommit ERR: account {} must be owned by {} or be a signer, but is owned by {}",
+                            pubkey, parent_id, owner
+                        );
+                        Err(InstructionError::InvalidAccountOwner)
+                    }
+                }
+            } else {
+                Ok(())
+            }
+        })
+    }
+
+    // I delegated an account, now the owner is delegation program
+    // parent_program_id != Some(&acc_owner) should fail. or any modification on ER
+    // ER perceives owner as old one, hence for ER those are valid txs
+    // On commit_and_undelegate and commit we will set owner to DLP, for latter temparerily
+    // The owner shall be real owner on chain
+    // So first:
+    // 1. Validate
+    // 2. Fetch current account states
+    // TODO: 3. switch the ownership
+    pub fn extract_commit_accounts<'a>(
+        account_indices: &[u8],
+        transaction_context: &'a TransactionContext,
+    ) -> Result<Vec<CommittedAccountRef<'a>>, InstructionError> {
+        account_indices
+            .iter()
+            .map(|i| {
+                let account = get_instruction_account_with_idx(
+                    transaction_context,
+                    *i as u16,
+                )?;
+                let pubkey = *get_instruction_pubkey_with_idx(
+                    transaction_context,
+                    *i as u16,
+                )?;
+
+                Ok((pubkey, account))
+            })
+            .collect::<Result<_, InstructionError>>()
+    }
+
+    pub fn try_from_args<'a>(
+        args: &CommitTypeArgs,
+        context: &ConstructionContext<'a, '_>,
+    ) -> Result<CommitType, InstructionError> {
+        match args {
+            CommitTypeArgs::Standalone(accounts) => {
+                let committed_accounts_ref = Self::extract_commit_accounts(
+                    accounts,
+                    context.transaction_context,
+                )?;
+                Self::validate_accounts(&committed_accounts_ref, context)?;
+                let committed_accounts = committed_accounts_ref
+                    .into_iter()
+                    .map(|el| {
+                        let mut committed_account: CommittedAccountV2 =
+                            el.into();
+                        committed_account.account.owner = context
+                            .parent_program_id
+                            .unwrap_or(committed_account.account.owner);
+
+                        committed_account
+                    })
+                    .collect();
+
+                Ok(CommitType::Standalone(committed_accounts))
+            }
+            CommitTypeArgs::WithL1Actions {
+                committed_accounts,
+                l1_actions,
+            } => {
+                let committed_accounts_ref = Self::extract_commit_accounts(
+                    committed_accounts,
+                    context.transaction_context,
+                )?;
+                Self::validate_accounts(&committed_accounts_ref, context)?;
+
+                let l1_actions = l1_actions
+                    .iter()
+                    .map(|args| L1Action::try_from_args(args, context))
+                    .collect::<Result<Vec<L1Action>, InstructionError>>()?;
+                let committed_accounts = committed_accounts_ref
+                    .into_iter()
+                    .map(|el| {
+                        let mut committed_account: CommittedAccountV2 =
+                            el.into();
+                        committed_account.account.owner = context
+                            .parent_program_id
+                            .unwrap_or(committed_account.account.owner);
+
+                        committed_account
+                    })
+                    .collect();
+
+                Ok(CommitType::WithL1Actions {
+                    committed_accounts,
+                    l1_actions,
+                })
+            }
+        }
+    }
 }
 
 /// No CommitedAccounts since it is only used with CommitAction.

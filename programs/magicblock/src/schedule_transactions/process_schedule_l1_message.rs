@@ -10,7 +10,11 @@ use solana_sdk::{
 use crate::{
     args::MagicL1MessageArgs,
     magic_schedule_l1_message::{ConstructionContext, ScheduledL1Message},
-    schedule_transactions::{check_magic_context_id, MESSAGE_ID},
+    schedule_transactions::{
+        check_magic_context_id,
+        schedule_l1_message_processor::process_scheddule_l1_message,
+        MESSAGE_ID,
+    },
     utils::accounts::{
         get_instruction_account_with_idx, get_instruction_pubkey_with_idx,
     },
@@ -107,6 +111,10 @@ pub(crate) fn process_schedule_l1_message(
         payer_pubkey,
         &construction_context,
     )?;
+    // TODO: move all logic to some Processor
+    // Rn this just locks accounts
+    process_scheddule_l1_message(&construction_context, &args)?;
+
     let action_sent_signature =
         scheduled_action.action_sent_transaction.signatures[0];
 
@@ -114,7 +122,7 @@ pub(crate) fn process_schedule_l1_message(
         transaction_context,
         MAGIC_CONTEXT_IDX,
     )?;
-    TransactionScheduler::schedule_action(
+    TransactionScheduler::schedule_l1_message(
         invoke_context,
         context_acc,
         scheduled_action,

@@ -99,7 +99,7 @@ where
     pub fn get_bytes(
         &self,
         key: C::Index,
-    ) -> std::result::Result<Option<Vec<u8>>, LedgerError> {
+    ) -> Result<Option<Vec<u8>>, LedgerError> {
         let is_perf_enabled = maybe_enable_rocksdb_perf(
             self.column_options.rocks_perf_sample_interval,
             &self.read_perf_status,
