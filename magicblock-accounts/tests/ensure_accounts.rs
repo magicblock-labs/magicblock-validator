@@ -53,7 +53,7 @@ fn setup_with_lifecycle(
         account_fetcher,
         account_updates,
         account_dumper,
-        changeset_committor_stub,
+        Some(changeset_committor_stub),
         None,
         HashSet::new(),
         Some(1_000_000_000),

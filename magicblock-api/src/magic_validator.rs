@@ -157,7 +157,7 @@ pub struct MagicValidator {
     >,
     remote_account_cloner_handle: Option<tokio::task::JoinHandle<()>>,
     accounts_manager: Arc<AccountsManager>,
-    committor_service: Arc<CommittorService>,
+    committor_service: Option<Arc<CommittorService>>,
     transaction_listener: GeyserTransactionNotifyListener,
     rpc_service: JsonRpcService,
     _metrics: Option<(MetricsService, tokio::task::JoinHandle<()>)>,
@@ -309,19 +309,26 @@ impl MagicValidator {
             "Committor service persists to: {}",
             committor_persist_path.display()
         );
-        let committor_service = Arc::new(CommittorService::try_start(
-            identity_keypair.insecure_clone(),
-            committor_persist_path,
-            ChainConfig {
-                rpc_uri: remote_rpc_config.url().to_string(),
-                commitment: remote_rpc_config
-                    .commitment()
-                    .unwrap_or(CommitmentLevel::Confirmed),
-                compute_budget_config: ComputeBudgetConfig::new(
-                    accounts_config.commit_compute_unit_price,
-                ),
-            },
-        )?);
+
+        let clone_permissions =
+            accounts_config.lifecycle.to_account_cloner_permissions();
+        let committor_service = if clone_permissions.can_clone() {
+            Some(Arc::new(CommittorService::try_start(
+                identity_keypair.insecure_clone(),
+                committor_persist_path,
+                ChainConfig {
+                    rpc_uri: remote_rpc_config.url().to_string(),
+                    commitment: remote_rpc_config
+                        .commitment()
+                        .unwrap_or(CommitmentLevel::Confirmed),
+                    compute_budget_config: ComputeBudgetConfig::new(
+                        accounts_config.commit_compute_unit_price,
+                    ),
+                },
+            )?))
+        } else {
+            None
+        };
 
         let remote_account_cloner_worker = RemoteAccountClonerWorker::new(
             bank_account_provider,
@@ -337,7 +344,7 @@ impl MagicValidator {
             } else {
                 ValidatorCollectionMode::Fees
             },
-            accounts_config.lifecycle.to_account_cloner_permissions(),
+            clone_permissions,
             identity_keypair.pubkey(),
             config.validator_config.accounts.max_monitored_accounts,
         );
@@ -696,7 +703,7 @@ impl MagicValidator {
         self.slot_ticker = Some(init_slot_ticker(
             &self.bank,
             &self.accounts_manager,
-            &self.committor_service,
+            self.committor_service.clone(),
             Some(self.transaction_status_sender.clone()),
             self.ledger.clone(),
             Duration::from_millis(self.config.validator.millis_per_slot),
@@ -784,11 +791,13 @@ impl MagicValidator {
         if let Some(remote_account_cloner_worker) =
             self.remote_account_cloner_worker.take()
         {
-            debug!("Reserving common pubkeys for committor service");
-            map_committor_request_result(
-                self.committor_service.reserve_common_pubkeys(),
-            )
-            .await?;
+            if let Some(committor_service) = self.committor_service.as_ref() {
+                debug!("Reserving common pubkeys for committor service");
+                map_committor_request_result(
+                    committor_service.reserve_common_pubkeys(),
+                )
+                .await?;
+            }
 
             if !self.config.ledger.reset {
                 remote_account_cloner_worker.hydrate().await?;
