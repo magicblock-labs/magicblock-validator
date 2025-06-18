@@ -244,10 +244,7 @@ where
     }
 
     fn can_clone(&self) -> bool {
-        self.permissions.allow_cloning_feepayer_accounts
-            || self.permissions.allow_cloning_undelegated_accounts
-            || self.permissions.allow_cloning_delegated_accounts
-            || self.permissions.allow_cloning_program_accounts
+        self.permissions.can_clone()
     }
 
     pub async fn hydrate(&self) -> AccountClonerResult<()> {

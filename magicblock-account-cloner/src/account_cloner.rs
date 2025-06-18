@@ -95,6 +95,15 @@ pub struct AccountClonerPermissions {
     pub allow_cloning_program_accounts: bool,
 }
 
+impl AccountClonerPermissions {
+    pub fn can_clone(&self) -> bool {
+        self.allow_cloning_feepayer_accounts
+            || self.allow_cloning_undelegated_accounts
+            || self.allow_cloning_delegated_accounts
+            || self.allow_cloning_program_accounts
+    }
+}
+
 #[derive(Debug, Clone)]
 pub enum AccountClonerOutput {
     Cloned {
