@@ -1,6 +1,5 @@
 use std::sync::Arc;
 
-use libloading::Library;
 use log::*;
 use magicblock_config::GeyserGrpcConfig;
 use magicblock_geyser_plugin::{
@@ -11,7 +10,7 @@ use magicblock_geyser_plugin::{
     rpc::GeyserRpcService,
 };
 use solana_geyser_plugin_manager::{
-    geyser_plugin_manager::{GeyserPluginManager, LoadedGeyserPlugin},
+    geyser_plugin_manager::GeyserPluginManager,
     geyser_plugin_service::GeyserPluginServiceError,
 };
 
@@ -66,8 +65,8 @@ pub fn init_geyser_service(
         ),
         ..Default::default()
     };
-    let mut manager = GeyserPluginManager::new();
-    let (grpc_plugin, rpc_service): (_, Arc<GeyserRpcService>) = {
+    let manager = GeyserPluginManager::new();
+    let rpc_service = {
         let plugin = GrpcGeyserPlugin::create(config)
             .map_err(|err| {
                 error!("Failed to load geyser plugin: {:?}", err);
@@ -83,17 +82,8 @@ pub fn init_geyser_service(
             "Launched GRPC Geyser service on '{}'",
             geyser_grpc.socket_addr()
         );
-        let rpc_service = plugin.rpc();
-        // hack: we don't load the geyser plugin from .so file, as such we don't own a handle to Library,
-        // to bypass this, we just make up one from null pointer and forget about it, this should work as long
-        // as geyser plugin manager doesn't try to do anything fancy with that handle
-        let lib = unsafe { std::mem::transmute::<usize, Library>(0_usize) };
-        (
-            LoadedGeyserPlugin::new(lib, Box::new(plugin), None),
-            rpc_service,
-        )
+        plugin.rpc()
     };
-    manager.plugins.push(grpc_plugin);
 
     Ok((manager, rpc_service))
 }
