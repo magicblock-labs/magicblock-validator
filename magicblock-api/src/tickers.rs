@@ -26,7 +26,7 @@ use crate::slot::advance_slot_and_update_ledger;
 pub fn init_slot_ticker(
     bank: &Arc<Bank>,
     accounts_manager: &Arc<AccountsManager>,
-    committor_service: &Arc<CommittorService>,
+    committor_service: Option<Arc<CommittorService>>,
     transaction_status_sender: Option<TransactionStatusSender>,
     ledger: Arc<Ledger>,
     tick_duration: Duration,
@@ -61,12 +61,14 @@ pub fn init_slot_ticker(
                     transaction_status_sender.as_ref(),
                 ) {
                     error!("Failed to accept scheduled commits: {:?}", err);
-                } else {
+                } else if let Some(committor_service) =
+                    committor_service.as_ref()
+                {
                     // 2. Process those scheduled commits
                     // TODO: fix the possible delay here
                     // https://github.com/magicblock-labs/magicblock-validator/issues/104
                     if let Err(err) = accounts_manager
-                        .process_scheduled_commits(&committor_service)
+                        .process_scheduled_commits(committor_service)
                         .await
                     {
                         error!(
@@ -164,13 +166,9 @@ pub fn init_system_metrics_ticker(
     fn set_accounts_count(bank: &Bank) {
         metrics::set_accounts_count(bank.accounts_db.get_accounts_count());
     }
+
     let ledger = ledger.clone();
     let bank = bank.clone();
-    try_set_ledger_storage_size(&ledger);
-    set_accounts_storage_size(&bank);
-    set_accounts_count(&bank);
-    try_set_ledger_counts(&ledger);
-
     tokio::task::spawn(async move {
         loop {
             tokio::select! {

@@ -102,7 +102,7 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU, CC> {
     account_fetcher: AFE,
     account_updates: AUP,
     account_dumper: ADU,
-    changeset_committor: Arc<CC>,
+    changeset_committor: Option<Arc<CC>>,
     allowed_program_ids: Option<HashSet<Pubkey>>,
     blacklisted_accounts: HashSet<Pubkey>,
     payer_init_lamports: Option<u64>,
@@ -146,7 +146,7 @@ where
         account_fetcher: AFE,
         account_updates: AUP,
         account_dumper: ADU,
-        changeset_committor: Arc<CC>,
+        changeset_committor: Option<Arc<CC>>,
         allowed_program_ids: Option<HashSet<Pubkey>>,
         blacklisted_accounts: HashSet<Pubkey>,
         payer_init_lamports: Option<u64>,
@@ -244,10 +244,7 @@ where
     }
 
     fn can_clone(&self) -> bool {
-        self.permissions.allow_cloning_feepayer_accounts
-            || self.permissions.allow_cloning_undelegated_accounts
-            || self.permissions.allow_cloning_delegated_accounts
-            || self.permissions.allow_cloning_program_accounts
+        self.permissions.can_clone()
     }
 
     pub async fn hydrate(&self) -> AccountClonerResult<()> {
@@ -725,13 +722,15 @@ where
 
                 // Allow the committer service to reserve pubkeys in lookup tables
                 // that could be needed when we commit this account
-                map_committor_request_result(
-                    self.changeset_committor.reserve_pubkeys_for_committee(
-                        *pubkey,
-                        delegation_record.owner,
-                    ),
-                )
-                .await?;
+                if let Some(committor) = self.changeset_committor.as_ref() {
+                    map_committor_request_result(
+                        committor.reserve_pubkeys_for_committee(
+                            *pubkey,
+                            delegation_record.owner,
+                        ),
+                    )
+                    .await?;
+                }
 
                 sig
             }

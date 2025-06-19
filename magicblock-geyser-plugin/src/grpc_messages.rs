@@ -1,38 +1,25 @@
 // Adapted yellowstone-grpc/yellowstone-grpc-geyser/src/grpc.rs
-use std::{collections::HashMap, sync::Arc};
 
 use geyser_grpc_proto::{
     convert_to,
     prelude::{
-        subscribe_update::UpdateOneof, CommitmentLevel,
-        IsBlockhashValidResponse, SubscribeUpdateAccount,
+        subscribe_update::UpdateOneof, CommitmentLevel, SubscribeUpdateAccount,
         SubscribeUpdateAccountInfo, SubscribeUpdateBlock,
         SubscribeUpdateBlockMeta, SubscribeUpdateEntry, SubscribeUpdateSlot,
         SubscribeUpdateTransaction, SubscribeUpdateTransactionInfo,
     },
 };
-use log::error;
 use magicblock_transaction_status::{Reward, TransactionStatusMeta};
 use solana_geyser_plugin_interface::geyser_plugin_interface::{
     ReplicaAccountInfoV3, ReplicaBlockInfoV3, ReplicaEntryInfoV2,
     ReplicaTransactionInfoV2, SlotStatus,
 };
 use solana_sdk::{
-    clock::{UnixTimestamp, MAX_RECENT_BLOCKHASHES},
-    pubkey::Pubkey,
-    signature::Signature,
-    transaction::SanitizedTransaction,
+    account::ReadableAccount, clock::UnixTimestamp, pubkey::Pubkey,
+    signature::Signature, transaction::SanitizedTransaction,
 };
-use tokio::sync::{RwLock, Semaphore};
-use tonic::{Response, Status};
 
-use crate::{
-    filters::FilterAccountsDataSlice,
-    types::{
-        geyser_message_channel, GeyserMessage, GeyserMessageReceiver,
-        GeyserMessageSender,
-    },
-};
+use crate::filters::FilterAccountsDataSlice;
 
 #[derive(Debug, Clone)]
 pub struct MessageAccountInfo {
@@ -44,6 +31,24 @@ pub struct MessageAccountInfo {
     pub data: Vec<u8>,
     pub write_version: u64,
     pub txn_signature: Option<Signature>,
+}
+
+impl ReadableAccount for MessageAccountInfo {
+    fn data(&self) -> &[u8] {
+        &self.data
+    }
+    fn owner(&self) -> &Pubkey {
+        &self.owner
+    }
+    fn lamports(&self) -> u64 {
+        self.lamports
+    }
+    fn executable(&self) -> bool {
+        self.executable
+    }
+    fn rent_epoch(&self) -> solana_sdk::clock::Epoch {
+        self.rent_epoch
+    }
 }
 
 impl MessageAccountInfo {
@@ -478,266 +483,5 @@ impl MessageRef<'_> {
                 })
             }
         }
-    }
-}
-
-#[derive(Debug)]
-struct BlockhashStatus {
-    slot: u64,
-    processed: bool,
-    confirmed: bool,
-    finalized: bool,
-}
-
-impl BlockhashStatus {
-    const fn new(slot: u64) -> Self {
-        Self {
-            slot,
-            processed: false,
-            confirmed: false,
-            finalized: false,
-        }
-    }
-}
-
-#[derive(Debug, Default)]
-struct BlockMetaStorageInner {
-    blocks: HashMap<u64, MessageBlockMeta>,
-    blockhashes: HashMap<String, BlockhashStatus>,
-    processed: Option<u64>,
-    confirmed: Option<u64>,
-    finalized: Option<u64>,
-}
-
-#[derive(Debug)]
-pub(crate) struct BlockMetaStorage {
-    read_sem: Semaphore,
-    inner: Arc<RwLock<BlockMetaStorageInner>>,
-}
-
-impl BlockMetaStorage {
-    pub(crate) fn new(
-        unary_concurrency_limit: usize,
-    ) -> (Self, GeyserMessageSender) {
-        let inner = Arc::new(RwLock::new(BlockMetaStorageInner::default()));
-        let (tx, mut rx): (GeyserMessageSender, GeyserMessageReceiver) =
-            geyser_message_channel();
-
-        let storage = Arc::clone(&inner);
-        tokio::spawn(async move {
-            const KEEP_SLOTS: u64 = 3;
-
-            while let Some(message) = rx.recv().await {
-                let mut storage = storage.write().await;
-                match message.as_ref() {
-                    Message::Slot(msg) => {
-                        match msg.status {
-                            CommitmentLevel::Processed => {
-                                &mut storage.processed
-                            }
-                            CommitmentLevel::Confirmed => {
-                                &mut storage.confirmed
-                            }
-                            CommitmentLevel::Finalized => {
-                                &mut storage.finalized
-                            }
-                        }
-                        .replace(msg.slot);
-
-                        if let Some(blockhash) = storage
-                            .blocks
-                            .get(&msg.slot)
-                            .map(|block| block.blockhash.clone())
-                        {
-                            let entry = storage
-                                .blockhashes
-                                .entry(blockhash)
-                                .or_insert_with(|| {
-                                    BlockhashStatus::new(msg.slot)
-                                });
-
-                            let status = match msg.status {
-                                CommitmentLevel::Processed => {
-                                    &mut entry.processed
-                                }
-                                CommitmentLevel::Confirmed => {
-                                    &mut entry.confirmed
-                                }
-                                CommitmentLevel::Finalized => {
-                                    &mut entry.finalized
-                                }
-                            };
-                            *status = true;
-                        }
-
-                        if msg.status == CommitmentLevel::Finalized {
-                            if let Some(keep_slot) =
-                                msg.slot.checked_sub(KEEP_SLOTS)
-                            {
-                                storage
-                                    .blocks
-                                    .retain(|slot, _block| *slot >= keep_slot);
-                            }
-
-                            if let Some(keep_slot) = msg
-                                .slot
-                                .checked_sub(MAX_RECENT_BLOCKHASHES as u64 + 32)
-                            {
-                                storage.blockhashes.retain(
-                                    |_blockhash, status| {
-                                        status.slot >= keep_slot
-                                    },
-                                );
-                            }
-                        }
-                    }
-                    Message::BlockMeta(msg) => {
-                        storage.blocks.insert(msg.slot, msg.clone());
-                    }
-                    msg => {
-                        error!("invalid message in BlockMetaStorage: {msg:?}");
-                    }
-                }
-            }
-        });
-
-        (
-            Self {
-                read_sem: Semaphore::new(unary_concurrency_limit),
-                inner,
-            },
-            tx,
-        )
-    }
-
-    fn parse_commitment(
-        commitment: Option<i32>,
-    ) -> Result<CommitmentLevel, Status> {
-        let commitment =
-            commitment.unwrap_or(CommitmentLevel::Processed as i32);
-        // the `from` verion potentially panics
-        #[allow(clippy::unnecessary_fallible_conversions)]
-        CommitmentLevel::try_from(commitment).map_err(|_error| {
-            let msg =
-                format!("failed to create CommitmentLevel from {commitment:?}");
-            Status::unknown(msg)
-        })
-    }
-
-    pub(crate) async fn get_block<F, T>(
-        &self,
-        handler: F,
-        commitment: Option<i32>,
-    ) -> Result<Response<T>, Status>
-    where
-        F: FnOnce(&MessageBlockMeta) -> Option<T>,
-    {
-        let commitment = Self::parse_commitment(commitment)?;
-        let _permit = self.read_sem.acquire().await;
-        let storage = self.inner.read().await;
-
-        let slot = match commitment {
-            CommitmentLevel::Processed => storage.processed,
-            CommitmentLevel::Confirmed => storage.confirmed,
-            CommitmentLevel::Finalized => storage.finalized,
-        };
-
-        match slot.and_then(|slot| storage.blocks.get(&slot)) {
-            Some(block) => match handler(block) {
-                Some(resp) => Ok(Response::new(resp)),
-                None => Err(Status::internal("failed to build response")),
-            },
-            None => Err(Status::internal("block is not available yet")),
-        }
-    }
-
-    pub(crate) async fn is_blockhash_valid(
-        &self,
-        blockhash: &str,
-        commitment: Option<i32>,
-    ) -> Result<Response<IsBlockhashValidResponse>, Status> {
-        let commitment = Self::parse_commitment(commitment)?;
-        let _permit = self.read_sem.acquire().await;
-        let storage = self.inner.read().await;
-
-        if storage.blockhashes.len() < MAX_RECENT_BLOCKHASHES + 32 {
-            return Err(Status::internal("startup"));
-        }
-
-        let slot = match commitment {
-            CommitmentLevel::Processed => storage.processed,
-            CommitmentLevel::Confirmed => storage.confirmed,
-            CommitmentLevel::Finalized => storage.finalized,
-        }
-        .ok_or_else(|| Status::internal("startup"))?;
-
-        let valid = storage
-            .blockhashes
-            .get(blockhash)
-            .map(|status| match commitment {
-                CommitmentLevel::Processed => status.processed,
-                CommitmentLevel::Confirmed => status.confirmed,
-                CommitmentLevel::Finalized => status.finalized,
-            })
-            .unwrap_or(false);
-
-        Ok(Response::new(IsBlockhashValidResponse { valid, slot }))
-    }
-}
-
-#[derive(Debug, Default)]
-pub(crate) struct SlotMessages {
-    pub(crate) messages: Vec<Option<GeyserMessage>>, // Option is used for accounts with low write_version
-    pub(crate) block_meta: Option<MessageBlockMeta>,
-    pub(crate) transactions: Vec<MessageTransactionInfo>,
-    pub(crate) accounts_dedup: HashMap<Pubkey, (u64, usize)>, // (write_version, message_index)
-    pub(crate) entries: Vec<MessageEntry>,
-    pub(crate) sealed: bool,
-    pub(crate) entries_count: usize,
-    pub(crate) confirmed_at: Option<usize>,
-    pub(crate) finalized_at: Option<usize>,
-}
-
-impl SlotMessages {
-    pub fn try_seal(&mut self) -> Option<GeyserMessage> {
-        if !self.sealed {
-            if let Some(block_meta) = &self.block_meta {
-                let executed_transaction_count =
-                    block_meta.executed_transaction_count as usize;
-                let entries_count = block_meta.entries_count as usize;
-
-                // Additional check `entries_count == 0` due to bug of zero entries on block produced by validator
-                // See GitHub issue: https://github.com/solana-labs/solana/issues/33823
-                if self.transactions.len() == executed_transaction_count
-                    && (entries_count == 0
-                        || self.entries.len() == entries_count)
-                {
-                    let transactions = std::mem::take(&mut self.transactions);
-                    let mut entries = std::mem::take(&mut self.entries);
-                    if entries_count == 0 {
-                        entries.clear();
-                    }
-
-                    let mut accounts = Vec::with_capacity(self.messages.len());
-                    for item in self.messages.iter().flatten() {
-                        if let Message::Account(account) = item.as_ref() {
-                            accounts.push(account.account.clone());
-                        }
-                    }
-
-                    let message = Arc::new(Message::Block(
-                        (block_meta.clone(), transactions, accounts, entries)
-                            .into(),
-                    ));
-                    self.messages.push(Some(message.clone()));
-
-                    self.sealed = true;
-                    self.entries_count = entries_count;
-                    return Some(message);
-                }
-            }
-        }
-
-        None
     }
 }

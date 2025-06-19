@@ -143,9 +143,9 @@ pub struct MagicValidator {
     sample_performance_service: Option<SamplePerformanceService>,
     commit_accounts_ticker: Option<tokio::task::JoinHandle<()>>,
     remote_account_fetcher_worker: Option<RemoteAccountFetcherWorker>,
-    remote_account_fetcher_handle: Option<thread::JoinHandle<()>>,
+    remote_account_fetcher_handle: Option<tokio::task::JoinHandle<()>>,
     remote_account_updates_worker: Option<RemoteAccountUpdatesWorker>,
-    remote_account_updates_handle: Option<thread::JoinHandle<()>>,
+    remote_account_updates_handle: Option<tokio::task::JoinHandle<()>>,
     remote_account_cloner_worker: Option<
         RemoteAccountClonerWorker<
             BankAccountProvider,
@@ -155,9 +155,9 @@ pub struct MagicValidator {
             CommittorService,
         >,
     >,
-    remote_account_cloner_handle: Option<thread::JoinHandle<()>>,
+    remote_account_cloner_handle: Option<tokio::task::JoinHandle<()>>,
     accounts_manager: Arc<AccountsManager>,
-    committor_service: Arc<CommittorService>,
+    committor_service: Option<Arc<CommittorService>>,
     transaction_listener: GeyserTransactionNotifyListener,
     rpc_service: JsonRpcService,
     _metrics: Option<(MetricsService, tokio::task::JoinHandle<()>)>,
@@ -309,19 +309,26 @@ impl MagicValidator {
             "Committor service persists to: {}",
             committor_persist_path.display()
         );
-        let committor_service = Arc::new(CommittorService::try_start(
-            identity_keypair.insecure_clone(),
-            committor_persist_path,
-            ChainConfig {
-                rpc_uri: remote_rpc_config.url().to_string(),
-                commitment: remote_rpc_config
-                    .commitment()
-                    .unwrap_or(CommitmentLevel::Confirmed),
-                compute_budget_config: ComputeBudgetConfig::new(
-                    accounts_config.commit_compute_unit_price,
-                ),
-            },
-        )?);
+
+        let clone_permissions =
+            accounts_config.lifecycle.to_account_cloner_permissions();
+        let committor_service = if clone_permissions.can_clone() {
+            Some(Arc::new(CommittorService::try_start(
+                identity_keypair.insecure_clone(),
+                committor_persist_path,
+                ChainConfig {
+                    rpc_uri: remote_rpc_config.url().to_string(),
+                    commitment: remote_rpc_config
+                        .commitment()
+                        .unwrap_or(CommitmentLevel::Confirmed),
+                    compute_budget_config: ComputeBudgetConfig::new(
+                        accounts_config.commit_compute_unit_price,
+                    ),
+                },
+            )?))
+        } else {
+            None
+        };
 
         let remote_account_cloner_worker = RemoteAccountClonerWorker::new(
             bank_account_provider,
@@ -337,7 +344,7 @@ impl MagicValidator {
             } else {
                 ValidatorCollectionMode::Fees
             },
-            accounts_config.lifecycle.to_account_cloner_permissions(),
+            clone_permissions,
             identity_keypair.pubkey(),
             config.validator_config.accounts.max_monitored_accounts,
         );
@@ -354,6 +361,7 @@ impl MagicValidator {
         let pubsub_config = PubsubConfig::from_rpc(
             config.validator_config.rpc.addr,
             config.validator_config.rpc.port,
+            config.validator_config.rpc.max_ws_connections,
         );
         validator::init_validator_authority(identity_keypair);
 
@@ -695,7 +703,7 @@ impl MagicValidator {
         self.slot_ticker = Some(init_slot_ticker(
             &self.bank,
             &self.accounts_manager,
-            &self.committor_service,
+            self.committor_service.clone(),
             Some(self.transaction_status_sender.clone()),
             self.ledger.clone(),
             Duration::from_millis(self.config.validator.millis_per_slot),
@@ -757,15 +765,10 @@ impl MagicValidator {
         {
             let cancellation_token = self.token.clone();
             self.remote_account_fetcher_handle =
-                Some(thread::spawn(move || {
-                    create_worker_runtime("remote_account_fetcher_worker")
-                        .block_on(async move {
-                            remote_account_fetcher_worker
-                                .start_fetch_request_processing(
-                                    cancellation_token,
-                                )
-                                .await;
-                        });
+                Some(tokio::spawn(async move {
+                    remote_account_fetcher_worker
+                        .start_fetch_request_processing(cancellation_token)
+                        .await;
                 }));
         }
     }
@@ -776,15 +779,10 @@ impl MagicValidator {
         {
             let cancellation_token = self.token.clone();
             self.remote_account_updates_handle =
-                Some(thread::spawn(move || {
-                    create_worker_runtime("remote_account_updates_worker")
-                        .block_on(async move {
-                            remote_account_updates_worker
-                                .start_monitoring_request_processing(
-                                    cancellation_token,
-                                )
-                                .await
-                        });
+                Some(tokio::spawn(async move {
+                    remote_account_updates_worker
+                        .start_monitoring_request_processing(cancellation_token)
+                        .await
                 }));
         }
     }
@@ -793,11 +791,13 @@ impl MagicValidator {
         if let Some(remote_account_cloner_worker) =
             self.remote_account_cloner_worker.take()
         {
-            debug!("Reserving common pubkeys for committor service");
-            map_committor_request_result(
-                self.committor_service.reserve_common_pubkeys(),
-            )
-            .await?;
+            if let Some(committor_service) = self.committor_service.as_ref() {
+                debug!("Reserving common pubkeys for committor service");
+                map_committor_request_result(
+                    committor_service.reserve_common_pubkeys(),
+                )
+                .await?;
+            }
 
             if !self.config.ledger.reset {
                 remote_account_cloner_worker.hydrate().await?;
@@ -806,15 +806,10 @@ impl MagicValidator {
 
             let cancellation_token = self.token.clone();
             self.remote_account_cloner_handle =
-                Some(thread::spawn(move || {
-                    create_worker_runtime("remote_account_cloner_worker")
-                        .block_on(async move {
-                            remote_account_cloner_worker
-                                .start_clone_request_processing(
-                                    cancellation_token,
-                                )
-                                .await
-                        });
+                Some(tokio::spawn(async move {
+                    remote_account_cloner_worker
+                        .start_clone_request_processing(cancellation_token)
+                        .await
                 }));
         }
         Ok(())
@@ -843,7 +838,9 @@ impl MagicValidator {
 
         // we have two memory mapped databases, flush them to disk before exitting
         self.bank.flush();
-        self.ledger.flush();
+        if let Err(err) = self.ledger.shutdown(false) {
+            error!("Failed to shutdown ledger: {:?}", err);
+        }
     }
 
     pub fn join(self) {
@@ -871,14 +868,6 @@ fn programs_to_load(programs: &[ProgramConfig]) -> Vec<(Pubkey, String)> {
         .iter()
         .map(|program| (program.id, program.path.clone()))
         .collect()
-}
-
-fn create_worker_runtime(thread_name: &str) -> tokio::runtime::Runtime {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .thread_name(thread_name)
-        .build()
-        .unwrap()
 }
 
 fn try_get_remote_accounts_and_rpc_config(

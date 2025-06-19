@@ -44,7 +44,7 @@ fn setup_custom(
         account_fetcher,
         account_updates,
         account_dumper,
-        changeset_committor,
+        Some(changeset_committor),
         allowed_program_ids,
         blacklisted_accounts,
         payer_init_lamports,

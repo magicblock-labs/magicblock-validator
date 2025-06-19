@@ -16,8 +16,8 @@ impl fmt::Display for Outcome {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         use Outcome::*;
         match self {
-            Success => write!(f, "{}", OUTCOME_SUCCESS),
-            Error => write!(f, "{}", OUTCOME_ERROR),
+            Success => write!(f, "{OUTCOME_SUCCESS}"),
+            Error => write!(f, "{OUTCOME_ERROR}"),
         }
     }
 }

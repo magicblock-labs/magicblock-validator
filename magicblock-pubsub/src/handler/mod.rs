@@ -15,7 +15,7 @@ use crate::{
 };
 
 mod account_subscribe;
-mod common;
+pub mod common;
 mod logs_subscribe;
 mod program_subscribe;
 mod signature_subscribe;
@@ -33,7 +33,6 @@ pub async fn handle_subscription(
             geyser_service,
             params,
         } => {
-            let start = Instant::now();
             tokio::select! {
                 _ = unsubscriber.cancelled() => {
                     debug!("AccountUnsubscribe: {}", subid);
@@ -41,21 +40,17 @@ pub async fn handle_subscription(
                 _ = handle_account_subscribe(
                         subid,
                         subscriber,
-                        unsubscriber.clone(),
                         &params,
                         &geyser_service,
                     ) => {
                 },
             };
-            let elapsed = start.elapsed();
-            debug!("accountSubscribe {} lasted for {:?}", subid, elapsed);
         }
         Program {
             subscriber,
             geyser_service,
             params,
         } => {
-            let start = Instant::now();
             tokio::select! {
                 _ = unsubscriber.cancelled() => {
                     debug!("ProgramUnsubscribe: {}", subid);
@@ -63,20 +58,16 @@ pub async fn handle_subscription(
                 _ = handle_program_subscribe(
                         subid,
                         subscriber,
-                        unsubscriber.clone(),
                         &params,
                         &geyser_service,
                     ) => {
                 },
             };
-            let elapsed = start.elapsed();
-            debug!("programSubscribe {} lasted for {:?}", subid, elapsed);
         }
         Slot {
             subscriber,
             geyser_service,
         } => {
-            let start = Instant::now();
             tokio::select! {
                 _ = unsubscriber.cancelled() => {
                     debug!("SlotUnsubscribe: {}", subid);
@@ -84,12 +75,9 @@ pub async fn handle_subscription(
                 _ = handle_slot_subscribe(
                         subid,
                         subscriber,
-                        unsubscriber.clone(),
                         &geyser_service) => {
                 },
             };
-            let elapsed = start.elapsed();
-            debug!("slotSubscribe {} lasted for {:?}", subid, elapsed);
         }
 
         Signature {
@@ -98,7 +86,6 @@ pub async fn handle_subscription(
             params,
             bank,
         } => {
-            let start = Instant::now();
             tokio::select! {
                 _ = unsubscriber.cancelled() => {
                     debug!("SignatureUnsubscribe: {}", subid);
@@ -106,14 +93,11 @@ pub async fn handle_subscription(
                 _ = handle_signature_subscribe(
                         subid,
                         subscriber,
-                        unsubscriber.clone(),
                         &params,
                         &geyser_service,
                         &bank) => {
                 },
             };
-            let elapsed = start.elapsed();
-            debug!("slotSubscribe {} lasted for {:?}", subid, elapsed);
         }
         Logs {
             subscriber,
@@ -128,7 +112,6 @@ pub async fn handle_subscription(
                 _ = handle_logs_subscribe(
                         subid,
                         subscriber,
-                        unsubscriber.clone(),
                         &params,
                         &geyser_service,
                     ) => {

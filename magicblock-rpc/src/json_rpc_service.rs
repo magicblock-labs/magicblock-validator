@@ -123,18 +123,18 @@ impl JsonRpcService {
                 let server = ServerBuilder::with_meta_extractor(
                     io,
                     move |_req: &hyper::Request<hyper::Body>| {
-                       request_processor.clone()
+                        request_processor.clone()
                     },
                 )
-                .event_loop_executor(runtime)
-                .threads(1)
-                .cors(DomainsValidation::AllowOnly(vec![
-                    AccessControlAllowOrigin::Any,
-                ]))
-                .cors_max_age(86400)
-                .request_middleware(request_middleware)
-                .max_request_body_size(max_request_body_size)
-                .start_http(&rpc_addr);
+                    .event_loop_executor(runtime)
+                    .threads(1)
+                    .cors(DomainsValidation::AllowOnly(vec![
+                        AccessControlAllowOrigin::Any,
+                    ]))
+                    .cors_max_age(86400)
+                    .request_middleware(request_middleware)
+                    .max_request_body_size(max_request_body_size)
+                    .start_http(&rpc_addr);
 
 
                 match server {
