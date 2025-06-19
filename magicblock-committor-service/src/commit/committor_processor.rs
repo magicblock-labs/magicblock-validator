@@ -32,6 +32,7 @@ use crate::{
         BundleSignatureRow, CommitPersister, CommitStatusRow, CommitStrategy,
     },
     pubkeys_provider::provide_committee_pubkeys,
+    transactions::chunk_into_validator_signed_txs,
     types::{InstructionsForCommitable, InstructionsKind},
     CommitInfo,
 };
@@ -211,7 +212,12 @@ impl CommittorProcessor {
             })
             .collect::<HashMap<_, _>>();
 
-        let signatures = self.run_validator_signed_ixs(ixs).await?;
+        let signatures = self
+            .run_validator_signed_ixs(
+                &self.compute_budget_config.finalize_budget(),
+                ixs,
+            )
+            .await?;
 
         for (pubkey, signature) in signatures {
             // Update finalize signature in the persister
@@ -290,7 +296,12 @@ impl CommittorProcessor {
                 ),
             );
         }
-        let signatures = self.run_validator_signed_ixs(ixs).await?;
+        let signatures = self
+            .run_validator_signed_ixs(
+                &self.compute_budget_config.undelegate_budget(),
+                ixs,
+            )
+            .await?;
 
         for (pubkey, signature) in signatures {
             // Update undelegate signature in the persister
@@ -335,12 +346,18 @@ impl CommittorProcessor {
 
     /// Runs all keyed instructions as parallel as possible and returns a map of
     /// signatures for each key.
+    /// NOTE: Does not attempt to use lookup tables
     pub(crate) async fn run_validator_signed_ixs<K>(
         &self,
-        _ixs: HashMap<K, Instruction>,
-    ) -> CommittorServiceResult<HashMap<K, Signature>> {
-        // TODO: @@@ implement
-        todo!()
+        compute_budget: &ComputeBudget,
+        ixs: HashMap<K, Instruction>,
+    ) -> HashMap<K, Vec<CommittorServiceResult<Signature>>> {
+        let (k, mut ixs): (Vec<_>, Vec<_>) = ixs.into_iter().unzip();
+        let txs = chunk_into_validator_signed_txs(
+            &self.authority,
+            ixs,
+            compute_budget,
+        );
     }
 
     pub async fn commit_changeset(
