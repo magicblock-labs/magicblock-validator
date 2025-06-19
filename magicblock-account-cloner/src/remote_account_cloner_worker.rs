@@ -587,9 +587,23 @@ where
                             }
                         };
 
-                        // Add the escrowed account as unclonable.
-                        // Fail cloning if the account is already present.
-                        // This prevents escrow PDA from being cloned if the lamports are mapped to the feepayer.
+                        // Clone the escrowed account first
+                        let escrowed_signature = self.do_clone_delegated_account(
+                            &escrowed_snapshot.pubkey,
+                            escrowed_account,
+                            &match &escrowed_snapshot.chain_state {
+                                AccountChainState::Delegated { delegation_record, .. } => delegation_record.clone(),
+                                _ => {
+                                    return Ok(AccountClonerOutput::Unclonable {
+                                        pubkey: *pubkey,
+                                        reason: AccountClonerUnclonableReason::DoesNotHaveDelegatedEscrowAccount,
+                                        at_slot: escrowed_snapshot.at_slot,
+                                    });
+                                }
+                            }
+                        )?;
+
+                        // Add the escrowed account as cloned to the cache
                         {
                             let mut last_clone_output = self
                                 .last_clone_output
@@ -600,28 +614,60 @@ where
                                 .entry(escrowed_snapshot.pubkey)
                             {
                                 Entry::Occupied(_) => {
-                                    return Ok(AccountClonerOutput::Unclonable {
-                                        pubkey: *pubkey,
-                                        reason: AccountClonerUnclonableReason::DoesNotAllowFeepayerWithEscrowedPda,
-                                        at_slot: account_chain_snapshot.at_slot,
-                                    });
+                                    // If already exists, update it
+                                    last_clone_output.insert(
+                                        escrowed_snapshot.pubkey,
+                                        AccountClonerOutput::Cloned {
+                                            account_chain_snapshot: escrowed_snapshot,
+                                            signature: escrowed_signature,
+                                        }
+                                    );
                                 }
                                 Entry::Vacant(entry) => {
-                                    entry.insert(AccountClonerOutput::Unclonable {
-                                        pubkey: escrowed_snapshot.pubkey,
-                                        reason: AccountClonerUnclonableReason::DoesNotAllowEscrowedPda,
-                                        at_slot: Slot::MAX,
+                                    entry.insert(AccountClonerOutput::Cloned {
+                                        account_chain_snapshot: escrowed_snapshot,
+                                        signature: escrowed_signature,
                                     });
                                 }
                             }
                         }
 
-                        self.do_clone_feepayer_account(
-                            pubkey,
-                            escrowed_account.lamports,
-                            owner,
-                            Some(&escrowed_snapshot.pubkey),
-                        )?
+                        // Add the escrowed account as unclonable.
+                        // Fail cloning if the account is already present.
+                        // This prevents escrow PDA from being cloned if the lamports are mapped to the feepayer.
+                        // {
+                        //     let mut last_clone_output = self
+                        //         .last_clone_output
+                        //         .write()
+                        //         .expect("RwLock of RemoteAccountClonerWorker.last_clone_output is poisoned");
+                        //
+                        //     match last_clone_output
+                        //         .entry(escrowed_snapshot.pubkey)
+                        //     {
+                        //         Entry::Occupied(_) => {
+                        //             return Ok(AccountClonerOutput::Unclonable {
+                        //                 pubkey: *pubkey,
+                        //                 reason: AccountClonerUnclonableReason::DoesNotAllowFeepayerWithEscrowedPda,
+                        //                 at_slot: account_chain_snapshot.at_slot,
+                        //             });
+                        //         }
+                        //         Entry::Vacant(entry) => {
+                        //             entry.insert(AccountClonerOutput::Unclonable {
+                        //                 pubkey: escrowed_snapshot.pubkey,
+                        //                 reason: AccountClonerUnclonableReason::DoesNotAllowEscrowedPda,
+                        //                 at_slot: Slot::MAX,
+                        //             });
+                        //         }
+                        //     }
+                        // }
+                        self.do_clone_undelegated_account(
+                                pubkey,
+                                &Account {
+                                    lamports: *lamports,
+                                    owner: *owner,
+                                    ..Default::default()
+                                },
+                            )?
                     }
                 }
             }
