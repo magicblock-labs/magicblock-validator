@@ -3962,6 +3962,13 @@ dependencies = [
 ]
 
 [[package]]
+name = "magicblock-time-delta"
+version = "0.1.3"
+dependencies = [
+ "solana-program",
+]
+
+[[package]]
 name = "magicblock-tokens"
 version = "0.1.4"
 dependencies = [

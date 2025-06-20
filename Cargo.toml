@@ -25,6 +25,7 @@ members = [
   "magicblock-processor",
   "magicblock-pubsub",
   "magicblock-rpc",
+  "magicblock-time-delta",
   "magicblock-tokens",
   "magicblock-transaction-status",
   "magicblock-version",
@@ -122,6 +123,7 @@ magicblock-processor = { path = "./magicblock-processor" }
 magicblock-program = { path = "./programs/magicblock" }
 magicblock-pubsub = { path = "./magicblock-pubsub" }
 magicblock-rpc = { path = "./magicblock-rpc" }
+magicblock-time-delta = { path = "./magicblock-time-delta" }
 magicblock-tokens = { path = "./magicblock-tokens" }
 magicblock-transaction-status = { path = "./magicblock-transaction-status" }
 magicblock-version = { path = "./magicblock-version" }
