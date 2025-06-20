@@ -1,11 +1,8 @@
 use std::str::FromStr;
 
 use magicblock_accounts_db::config::AccountsDbConfig;
-use serde::{
-    de::{self, Deserializer, SeqAccess, Visitor},
-    Deserialize, Serialize,
-};
-use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
+use serde::{Deserialize, Serialize};
+use solana_sdk::pubkey::Pubkey;
 use strum_macros::EnumString;
 use url::Url;
 
