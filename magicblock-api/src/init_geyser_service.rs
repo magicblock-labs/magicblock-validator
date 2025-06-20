@@ -88,7 +88,7 @@ pub fn init_geyser_service(
         // Library, to bypass this, we just make up one from a pointer to a leaked 8 byte memory,
         // and forget about it, this should work as long as geyser plugin manager doesn't try to do
         // anything fancy with that handle, and when drop method of the Library is called, nothing
-        // bad happens if the address is the garbage, as long as it's not null
+        // bad happens if the address is garbage, as long as it's not null
         // (admittedly ugly solution)
         let dummy = Box::leak(Box::new(0usize)) as *const usize;
         let lib =
