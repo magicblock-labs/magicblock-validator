@@ -1,5 +1,6 @@
 use std::sync::Arc;
 
+use libloading::Library;
 use log::*;
 use magicblock_config::GeyserGrpcConfig;
 use magicblock_geyser_plugin::{
@@ -10,7 +11,7 @@ use magicblock_geyser_plugin::{
     rpc::GeyserRpcService,
 };
 use solana_geyser_plugin_manager::{
-    geyser_plugin_manager::GeyserPluginManager,
+    geyser_plugin_manager::{GeyserPluginManager, LoadedGeyserPlugin},
     geyser_plugin_service::GeyserPluginServiceError,
 };
 
@@ -65,8 +66,8 @@ pub fn init_geyser_service(
         ),
         ..Default::default()
     };
-    let manager = GeyserPluginManager::new();
-    let rpc_service = {
+    let mut manager = GeyserPluginManager::new();
+    let (plugin, rpc_service) = {
         let plugin = GrpcGeyserPlugin::create(config)
             .map_err(|err| {
                 error!("Failed to load geyser plugin: {:?}", err);
@@ -82,8 +83,22 @@ pub fn init_geyser_service(
             "Launched GRPC Geyser service on '{}'",
             geyser_grpc.socket_addr()
         );
-        plugin.rpc()
+        let rpc_service = plugin.rpc();
+        // hack: we don't load the geyser plugin from .so file, as such we don't own a handle to
+        // Library, to bypass this, we just make up one from a pointer to a leaked 8 byte memory,
+        // and forget about it, this should work as long as geyser plugin manager doesn't try to do
+        // anything fancy with that handle, and when drop method of the Library is called, nothing
+        // bad happens if the address is garbage, as long as it's not null
+        // (admittedly ugly solution)
+        let dummy = Box::leak(Box::new(0usize)) as *const usize;
+        let lib =
+            unsafe { std::mem::transmute::<*const usize, Library>(dummy) };
+        (
+            LoadedGeyserPlugin::new(lib, Box::new(plugin), None),
+            rpc_service,
+        )
     };
+    manager.plugins.push(plugin);
 
     Ok((manager, rpc_service))
 }
