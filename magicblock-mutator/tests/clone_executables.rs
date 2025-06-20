@@ -7,7 +7,7 @@ use magicblock_bank::{
             create_solx_send_post_transaction, SolanaxPostAccounts,
         },
     },
-    LAMPORTS_PER_SIGNATURE,
+    DEFAULT_LAMPORTS_PER_SIGNATURE,
 };
 use magicblock_mutator::fetch::transaction_to_clone_pubkey_from_cluster;
 use magicblock_program::validator;
@@ -202,7 +202,7 @@ async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
         assert_eq!(author_acc.owner(), &system_program::ID);
         assert_eq!(
             author_acc.lamports(),
-            LAMPORTS_PER_SOL - 2 * LAMPORTS_PER_SIGNATURE
+            LAMPORTS_PER_SOL - 2 * DEFAULT_LAMPORTS_PER_SIGNATURE
         );
 
         let post_acc = tx_processor.bank().get_account(&post).unwrap();
@@ -258,7 +258,7 @@ async fn clone_executable_with_idl_and_program_data_and_then_upgrade() {
         assert_eq!(author_acc.owner(), &system_program::ID);
         assert_eq!(
             author_acc.lamports(),
-            LAMPORTS_PER_SOL - 2 * LAMPORTS_PER_SIGNATURE
+            LAMPORTS_PER_SOL - 2 * DEFAULT_LAMPORTS_PER_SIGNATURE
         );
 
         let post_acc = tx_processor.bank().get_account(&post).unwrap();

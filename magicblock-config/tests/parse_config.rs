@@ -4,10 +4,10 @@ use isocountry::CountryCode;
 use magicblock_config::{
     AccountsConfig, AllowedProgram, CommitStrategy, EphemeralConfig,
     GeyserGrpcConfig, LedgerConfig, LifecycleMode, MetricsConfig,
-    MetricsServiceConfig, Payer, PayerParams, ProgramConfig, RemoteConfig,
-    RpcConfig, ValidatorConfig,
+    MetricsServiceConfig, ProgramConfig, RemoteConfig, RpcConfig,
+    ValidatorConfig,
 };
-use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey};
+use solana_sdk::pubkey;
 use url::Url;
 
 #[test]
@@ -170,18 +170,10 @@ fn test_accounts_payer() {
         config,
         EphemeralConfig {
             accounts: AccountsConfig {
-                payer: Payer::new(PayerParams {
-                    init_lamports: None,
-                    init_sol: Some(2_000),
-                }),
                 ..Default::default()
             },
             ..Default::default()
         }
-    );
-    assert_eq!(
-        config.accounts.payer.try_init_lamports().unwrap(),
-        Some(2_000 * LAMPORTS_PER_SOL)
     );
 }
 
@@ -193,10 +185,6 @@ fn test_validator_with_base_fees() {
         config,
         EphemeralConfig {
             accounts: AccountsConfig {
-                payer: Payer::new(PayerParams {
-                    init_lamports: None,
-                    init_sol: None,
-                }),
                 ..Default::default()
             },
             validator: ValidatorConfig {
@@ -233,27 +221,4 @@ path = "/tmp/program.so"
     let res = toml::from_str::<EphemeralConfig>(toml);
     eprintln!("{:?}", res);
     assert!(res.is_err());
-}
-
-#[test]
-fn test_accounts_payer_specifies_both_lamports_and_sol() {
-    let toml = r#"
-[accounts]
-payer = { init_sol = 2000, init_lamports = 300_000 }
-"#;
-
-    let config = toml::from_str::<EphemeralConfig>(toml).unwrap();
-    assert!(config.accounts.payer.try_init_lamports().is_err());
-}
-
-#[test]
-fn test_custom_remote_with_multiple_ws() {
-    let toml = r#"
-[accounts]
-remote = { http = "http://localhost:8899", ws = ["ws://awesomews1.com:933", "wss://awesomews2.com:944"] }
-"#;
-
-    let res = toml::from_str::<EphemeralConfig>(toml);
-    println!("{res:?}");
-    assert!(res.is_ok());
 }
