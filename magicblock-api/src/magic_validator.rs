@@ -134,9 +134,9 @@ pub struct MagicValidator {
     sample_performance_service: Option<SamplePerformanceService>,
     commit_accounts_ticker: Option<tokio::task::JoinHandle<()>>,
     remote_account_fetcher_worker: Option<RemoteAccountFetcherWorker>,
-    remote_account_fetcher_handle: Option<thread::JoinHandle<()>>,
+    remote_account_fetcher_handle: Option<tokio::task::JoinHandle<()>>,
     remote_account_updates_worker: Option<RemoteAccountUpdatesWorker>,
-    remote_account_updates_handle: Option<thread::JoinHandle<()>>,
+    remote_account_updates_handle: Option<tokio::task::JoinHandle<()>>,
     remote_account_cloner_worker: Option<
         RemoteAccountClonerWorker<
             BankAccountProvider,
@@ -145,7 +145,7 @@ pub struct MagicValidator {
             AccountDumperBank,
         >,
     >,
-    remote_account_cloner_handle: Option<thread::JoinHandle<()>>,
+    remote_account_cloner_handle: Option<tokio::task::JoinHandle<()>>,
     accounts_manager: Arc<AccountsManager>,
     transaction_listener: GeyserTransactionNotifyListener,
     rpc_service: JsonRpcService,
@@ -275,12 +275,8 @@ impl MagicValidator {
             RemoteAccountFetcherWorker::new(remote_rpc_config.clone());
 
         let remote_account_updates_worker = RemoteAccountUpdatesWorker::new(
-            // We'll maintain 3 connections constantly (those could be on different nodes if we wanted to)
-            vec![
-                remote_rpc_config.clone(),
-                remote_rpc_config.clone(),
-                remote_rpc_config.clone(),
-            ],
+            accounts_config.remote_cluster.ws_urls(),
+            remote_rpc_config.commitment(),
             // We'll kill/refresh one connection every 50 minutes
             Duration::from_secs(60 * 50),
         );
@@ -332,6 +328,7 @@ impl MagicValidator {
         let pubsub_config = PubsubConfig::from_rpc(
             config.validator_config.rpc.addr,
             config.validator_config.rpc.port,
+            config.validator_config.rpc.max_ws_connections,
         );
         validator::init_validator_authority(identity_keypair);
 
@@ -607,7 +604,7 @@ impl MagicValidator {
             validator_info,
         )
         .map_err(|err| {
-            ApiError::FailedToRegisterValidatorOnChain(err.to_string())
+            ApiError::FailedToRegisterValidatorOnChain(format!("{:?}", err))
         })
     }
 
@@ -620,7 +617,7 @@ impl MagicValidator {
             &validator_keypair,
         )
         .map_err(|err| {
-            ApiError::FailedToUnregisterValidatorOnChain(err.to_string())
+            ApiError::FailedToUnregisterValidatorOnChain(format!("{err:#}"))
         })
     }
 
@@ -699,15 +696,10 @@ impl MagicValidator {
         {
             let cancellation_token = self.token.clone();
             self.remote_account_fetcher_handle =
-                Some(thread::spawn(move || {
-                    create_worker_runtime("remote_account_fetcher_worker")
-                        .block_on(async move {
-                            remote_account_fetcher_worker
-                                .start_fetch_request_processing(
-                                    cancellation_token,
-                                )
-                                .await;
-                        });
+                Some(tokio::spawn(async move {
+                    remote_account_fetcher_worker
+                        .start_fetch_request_processing(cancellation_token)
+                        .await;
                 }));
         }
     }
@@ -718,15 +710,10 @@ impl MagicValidator {
         {
             let cancellation_token = self.token.clone();
             self.remote_account_updates_handle =
-                Some(thread::spawn(move || {
-                    create_worker_runtime("remote_account_updates_worker")
-                        .block_on(async move {
-                            remote_account_updates_worker
-                                .start_monitoring_request_processing(
-                                    cancellation_token,
-                                )
-                                .await
-                        });
+                Some(tokio::spawn(async move {
+                    remote_account_updates_worker
+                        .start_monitoring_request_processing(cancellation_token)
+                        .await
                 }));
         }
     }
@@ -742,15 +729,10 @@ impl MagicValidator {
 
             let cancellation_token = self.token.clone();
             self.remote_account_cloner_handle =
-                Some(thread::spawn(move || {
-                    create_worker_runtime("remote_account_cloner_worker")
-                        .block_on(async move {
-                            remote_account_cloner_worker
-                                .start_clone_request_processing(
-                                    cancellation_token,
-                                )
-                                .await
-                        });
+                Some(tokio::spawn(async move {
+                    remote_account_cloner_worker
+                        .start_clone_request_processing(cancellation_token)
+                        .await
                 }));
         }
         Ok(())
@@ -779,7 +761,9 @@ impl MagicValidator {
 
         // we have two memory mapped databases, flush them to disk before exitting
         self.bank.flush();
-        self.ledger.flush();
+        if let Err(err) = self.ledger.shutdown(false) {
+            error!("Failed to shutdown ledger: {:?}", err);
+        }
     }
 
     pub fn join(self) {
@@ -807,12 +791,4 @@ fn programs_to_load(programs: &[ProgramConfig]) -> Vec<(Pubkey, String)> {
         .iter()
         .map(|program| (program.id, program.path.clone()))
         .collect()
-}
-
-fn create_worker_runtime(thread_name: &str) -> tokio::runtime::Runtime {
-    tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .thread_name(thread_name)
-        .build()
-        .unwrap()
 }

@@ -1,11 +1,11 @@
-use std::{fmt, str::FromStr};
+use std::str::FromStr;
 
 use magicblock_accounts_db::config::AccountsDbConfig;
 use serde::{
     de::{self, Deserializer, SeqAccess, Visitor},
     Deserialize, Serialize,
 };
-use solana_sdk::pubkey::Pubkey;
+use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
 use strum_macros::EnumString;
 use url::Url;
 
@@ -57,90 +57,17 @@ pub enum RemoteConfig {
     #[serde(alias = "local")]
     #[serde(alias = "localhost")]
     Development,
-    #[serde(untagged, deserialize_with = "deserialize_url")]
+    #[serde(untagged)]
     Custom(Url),
-    #[serde(untagged, deserialize_with = "deserialize_tuple_url")]
+    #[serde(untagged)]
     CustomWithWs(Url, Url),
+    #[serde(untagged)]
+    CustomWithMultipleWs {
+        http: Url,
+        ws: Vec<Url>,
+    },
 }
 
-pub fn deserialize_url<'de, D>(deserializer: D) -> Result<Url, D::Error>
-where
-    D: Deserializer<'de>,
-{
-    struct UrlVisitor;
-
-    impl Visitor<'_> for UrlVisitor {
-        type Value = Url;
-
-        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-            formatter.write_str("a valid URL string")
-        }
-
-        fn visit_str<E>(self, value: &str) -> Result<Url, E>
-        where
-            E: de::Error,
-        {
-            Url::parse(value).map_err(|e| {
-                    // The error returned here by serde is a bit unhelpful so we help out
-                    // by logging a bit more information.
-                    eprintln!(
-                        "RemoteConfig encountered invalid URL '{value}', err: ({e}).",
-                    );
-                    de::Error::custom(e)
-                })
-        }
-    }
-
-    deserializer.deserialize_str(UrlVisitor)
-}
-
-pub fn deserialize_tuple_url<'de, D>(
-    deserializer: D,
-) -> Result<(Url, Url), D::Error>
-where
-    D: Deserializer<'de>,
-{
-    struct UrlTupleVisitor;
-
-    impl<'de> Visitor<'de> for UrlTupleVisitor {
-        type Value = (Url, Url);
-
-        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-            formatter.write_str("a sequence of two URL strings")
-        }
-
-        fn visit_seq<A>(self, mut seq: A) -> Result<(Url, Url), A::Error>
-        where
-            A: SeqAccess<'de>,
-        {
-            let first: String = seq.next_element()?.ok_or_else(|| {
-                eprintln!("expected a sequence of two URLs: http and ws");
-                de::Error::invalid_length(0, &self)
-            })?;
-            let second: String = seq.next_element()?.ok_or_else(|| {
-                eprintln!("expected a sequence of two URLs: http and ws");
-                de::Error::invalid_length(1, &self)
-            })?;
-
-            let http = Url::parse(&first).map_err(|e| {
-                eprintln!(
-                    "Invalid HTTP URL in RemoteConfig '{first}', err: ({e}).",
-                );
-                de::Error::custom(e)
-            })?;
-            let ws = Url::parse(&second).map_err(|e| {
-                eprintln!(
-                    "Invalid WS URL in RemoteConfig '{second}', err: ({e}).",
-                );
-                de::Error::custom(e)
-            })?;
-
-            Ok((http, ws))
-        }
-    }
-
-    deserializer.deserialize_seq(UrlTupleVisitor)
-}
 // -----------------
 // LifecycleMode
 // -----------------

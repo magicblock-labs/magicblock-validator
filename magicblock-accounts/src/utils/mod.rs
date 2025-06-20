@@ -33,6 +33,9 @@ pub fn try_rpc_cluster_from_cluster(
         Cluster::CustomWithWs(http, ws) => {
             Ok(RpcCluster::Custom(http.to_string(), ws.to_string()))
         }
+        Cluster::CustomWithMultipleWs { http, ws } => {
+            Ok(RpcCluster::Custom(http.to_string(), ws[0].to_string()))
+        }
     }
 }
 

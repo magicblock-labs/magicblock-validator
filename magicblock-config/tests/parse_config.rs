@@ -97,7 +97,8 @@ fn test_local_dev_with_programs_toml() {
             }],
             rpc: RpcConfig {
                 addr: IpAddr::V4(Ipv4Addr::new(127, 0, 0, 1)),
-                port: 7799
+                port: 7799,
+                max_ws_connections: 16384
             },
             validator: ValidatorConfig {
                 millis_per_slot: 14,

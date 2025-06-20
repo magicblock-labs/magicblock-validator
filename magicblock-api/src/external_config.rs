@@ -29,6 +29,10 @@ pub(crate) fn cluster_from_remote(
         CustomWithWs(http, ws) => {
             Cluster::CustomWithWs(http.clone(), ws.clone())
         }
+        CustomWithMultipleWs { http, ws } => Cluster::CustomWithMultipleWs {
+            http: http.clone(),
+            ws: ws.clone(),
+        },
     }
 }
 

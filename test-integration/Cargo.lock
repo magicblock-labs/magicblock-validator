@@ -1830,7 +1830,7 @@ dependencies = [
 
 [[package]]
 name = "expiring-hashmap"
-version = "0.1.2"
+version = "0.1.3"
 
 [[package]]
 name = "fake-simd"
@@ -1926,6 +1926,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "98de4bbd547a563b716d8dfa9aad1cb19bfab00f4fa09a6a4ed21dbcf44ce9c4"
 dependencies = [
  "num-traits",
+]
+
+[[package]]
+name = "flume"
+version = "0.11.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "da0e4dd2a88388a1f4ccc7c9ce104604dab68d9f408dc34cd45823d5a9069095"
+dependencies = [
+ "futures-core",
+ "futures-sink",
+ "nanorand",
+ "spin",
 ]
 
 [[package]]
@@ -2166,7 +2178,7 @@ dependencies = [
 
 [[package]]
 name = "geyser-grpc-proto"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "anyhow",
  "bincode",
@@ -3423,7 +3435,7 @@ dependencies = [
 [[package]]
 name = "magic-domain-program"
 version = "0.0.1"
-source = "git+https://github.com/magicblock-labs/magic-domain-program.git?rev=eba7644#eba76443b39047e1be1dd5a1d72fc1943e5e1fc0"
+source = "git+https://github.com/magicblock-labs/magic-domain-program.git?rev=ea04d46#ea04d4646ede8e19307683d288e582bf60a3547a"
 dependencies = [
  "borsh 1.5.7",
  "bytemuck_derive",
@@ -3432,7 +3444,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-cloner"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "conjunto-transwise",
  "futures-util",
@@ -3453,7 +3465,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-dumper"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "bincode",
  "magicblock-bank",
@@ -3466,7 +3478,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-fetcher"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "async-trait",
  "conjunto-transwise",
@@ -3481,7 +3493,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-updates"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "bincode",
  "conjunto-transwise",
@@ -3500,7 +3512,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "async-trait",
  "conjunto-transwise",
@@ -3529,7 +3541,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts-api"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "magicblock-bank",
  "solana-sdk",
@@ -3537,7 +3549,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts-db"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "lmdb-rkv",
  "log",
@@ -3553,7 +3565,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-api"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "agave-geyser-plugin-interface",
  "anyhow",
@@ -3598,7 +3610,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-bank"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "agave-geyser-plugin-interface",
  "bincode",
@@ -3633,7 +3645,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-config"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "isocountry",
  "magicblock-accounts-db",
@@ -3648,7 +3660,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-core"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "solana-sdk",
 ]
@@ -3671,7 +3683,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-geyser-plugin"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "agave-geyser-plugin-interface",
  "anyhow",
@@ -3679,11 +3691,13 @@ dependencies = [
  "bs58 0.4.0",
  "cargo-lock",
  "expiring-hashmap",
+ "flume",
  "geyser-grpc-proto",
  "git-version",
  "hostname",
  "log",
  "magicblock-transaction-status",
+ "scc",
  "serde",
  "serde_json",
  "solana-sdk",
@@ -3698,7 +3712,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-ledger"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "bincode",
  "byteorder",
@@ -3728,7 +3742,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-metrics"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "http-body-util",
  "hyper 1.6.0",
@@ -3742,7 +3756,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-mutator"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "bincode",
  "log",
@@ -3755,7 +3769,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-perf-service"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "log",
  "magicblock-bank",
@@ -3764,7 +3778,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-processor"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "lazy_static",
  "log",
@@ -3785,7 +3799,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-program"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "bincode",
  "lazy_static",
@@ -3802,7 +3816,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-pubsub"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "bincode",
  "geyser-grpc-proto",
@@ -3824,7 +3838,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-rpc"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "base64 0.21.7",
  "bincode",
@@ -3859,7 +3873,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-tokens"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "log",
  "magicblock-bank",
@@ -3874,7 +3888,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-transaction-status"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "crossbeam-channel",
  "log",
@@ -3886,7 +3900,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-version"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "rustc_version",
  "semver",
@@ -4090,6 +4104,15 @@ name = "multimap"
 version = "0.8.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "e5ce46fe64a9d73be07dcbe690a38ce1b293be448fd8ce1e6c1b8062c9f72c6a"
+
+[[package]]
+name = "nanorand"
+version = "0.7.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "6a51313c5820b0b02bd422f4b44776fbf47961755c74ce64afc73bfad10226c3"
+dependencies = [
+ "getrandom 0.2.15",
+]
 
 [[package]]
 name = "native-tls"
@@ -5545,6 +5568,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "scc"
+version = "2.3.4"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "22b2d775fb28f245817589471dd49c5edf64237f4a19d10ce9a92ff4651a27f4"
+dependencies = [
+ "sdd",
+]
+
+[[package]]
 name = "schannel"
 version = "0.1.27"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -5613,6 +5645,12 @@ dependencies = [
  "ring",
  "untrusted",
 ]
+
+[[package]]
+name = "sdd"
+version = "3.0.8"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "584e070911c7017da6cb2eb0788d09f43d789029b5877d3e5ecc8acf86ceee21"
 
 [[package]]
 name = "security-framework"
@@ -8609,7 +8647,7 @@ dependencies = [
 
 [[package]]
 name = "solana-storage-proto"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "bincode",
  "bs58 0.4.0",
@@ -9392,6 +9430,9 @@ name = "spin"
 version = "0.9.8"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67"
+dependencies = [
+ "lock_api",
+]
 
 [[package]]
 name = "spinning_top"
@@ -10010,6 +10051,18 @@ dependencies = [
 ]
 
 [[package]]
+name = "test-pubsub"
+version = "0.0.0"
+dependencies = [
+ "futures 0.3.31",
+ "solana-pubsub-client",
+ "solana-rpc-client",
+ "solana-rpc-client-api",
+ "solana-sdk",
+ "tokio",
+]
+
+[[package]]
 name = "test-runner"
 version = "0.0.0"
 dependencies = [
@@ -10019,7 +10072,7 @@ dependencies = [
 
 [[package]]
 name = "test-tools-core"
-version = "0.1.2"
+version = "0.1.3"
 dependencies = [
  "env_logger 0.11.6",
  "log",

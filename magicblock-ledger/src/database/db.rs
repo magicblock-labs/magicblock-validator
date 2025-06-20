@@ -1,4 +1,8 @@
-use std::{marker::PhantomData, path::Path, sync::Arc};
+use std::{
+    marker::PhantomData,
+    path::Path,
+    sync::{atomic::AtomicI64, Arc},
+};
 
 use bincode::deserialize;
 use rocksdb::{ColumnFamily, DBRawIterator, LiveFile};
@@ -12,7 +16,10 @@ use super::{
     rocks_db::Rocks,
     write_batch::WriteBatch,
 };
-use crate::{errors::LedgerError, metrics::PerfSamplingStatus};
+use crate::{
+    database::columns::DIRTY_COUNT, errors::LedgerError,
+    metrics::PerfSamplingStatus,
+};
 
 #[derive(Debug)]
 pub struct Database {
@@ -25,7 +32,7 @@ impl Database {
     pub fn open(
         path: &Path,
         options: LedgerOptions,
-    ) -> std::result::Result<Self, LedgerError> {
+    ) -> Result<Self, LedgerError> {
         let column_options = Arc::new(options.column_options.clone());
         let backend = Arc::new(Rocks::open(path, options)?);
 
@@ -36,16 +43,13 @@ impl Database {
         })
     }
 
-    pub fn destroy(path: &Path) -> std::result::Result<(), LedgerError> {
+    pub fn destroy(path: &Path) -> Result<(), LedgerError> {
         Rocks::destroy(path)?;
 
         Ok(())
     }
 
-    pub fn get<C>(
-        &self,
-        key: C::Index,
-    ) -> std::result::Result<Option<C::Type>, LedgerError>
+    pub fn get<C>(&self, key: C::Index) -> Result<Option<C::Type>, LedgerError>
     where
         C: TypedColumn + ColumnName,
     {
@@ -63,10 +67,7 @@ impl Database {
     pub fn iter<C>(
         &self,
         iterator_mode: IteratorMode<C::Index>,
-    ) -> std::result::Result<
-        impl Iterator<Item = (C::Index, Box<[u8]>)> + '_,
-        LedgerError,
-    >
+    ) -> Result<impl Iterator<Item = (C::Index, Box<[u8]>)> + '_, LedgerError>
     where
         C: Column + ColumnName,
     {
@@ -96,6 +97,7 @@ impl Database {
             column_options: Arc::clone(&self.column_options),
             read_perf_status: PerfSamplingStatus::default(),
             write_perf_status: PerfSamplingStatus::default(),
+            entry_counter: AtomicI64::new(DIRTY_COUNT),
         }
     }
 
@@ -157,6 +159,21 @@ impl Database {
             self.cf_handle::<C>(),
             &C::key(C::as_index(from)),
             &C::key(C::as_index(to)),
+        )
+    }
+
+    /// See [crate::database::rocks_db::Rocks::compact_range_cf] for documentation.
+    pub fn compact_range_cf<C>(
+        &self,
+        from: Option<C::Index>,
+        to: Option<C::Index>,
+    ) where
+        C: Column + ColumnName,
+    {
+        self.backend.compact_range_cf(
+            self.cf_handle::<C>(),
+            from.map(|index| C::key(index)),
+            to.map(|index| C::key(index)),
         )
     }
 

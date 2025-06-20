@@ -7,9 +7,10 @@ use std::{
     time::Duration,
 };
 
-use conjunto_transwise::RpcProviderConfig;
 use log::*;
-use solana_sdk::{clock::Slot, pubkey::Pubkey};
+use solana_sdk::{
+    clock::Slot, commitment_config::CommitmentLevel, pubkey::Pubkey,
+};
 use thiserror::Error;
 use tokio::{
     sync::mpsc::{channel, Receiver, Sender},
@@ -42,7 +43,8 @@ struct RemoteAccountUpdatesWorkerRunner {
 }
 
 pub struct RemoteAccountUpdatesWorker {
-    rpc_provider_configs: Vec<RpcProviderConfig>,
+    ws_urls: Vec<String>,
+    commitment: Option<CommitmentLevel>,
     refresh_interval: Duration,
     monitoring_request_receiver: Receiver<(Pubkey, bool)>,
     monitoring_request_sender: Sender<(Pubkey, bool)>,
@@ -52,13 +54,15 @@ pub struct RemoteAccountUpdatesWorker {
 
 impl RemoteAccountUpdatesWorker {
     pub fn new(
-        rpc_provider_configs: Vec<RpcProviderConfig>,
+        ws_urls: Vec<String>,
+        commitment: Option<CommitmentLevel>,
         refresh_interval: Duration,
     ) -> Self {
         let (monitoring_request_sender, monitoring_request_receiver) =
             channel(INFLIGHT_ACCOUNT_FETCHES_LIMIT);
         Self {
-            rpc_provider_configs,
+            ws_urls,
+            commitment,
             refresh_interval,
             monitoring_request_receiver,
             monitoring_request_sender,
@@ -91,13 +95,12 @@ impl RemoteAccountUpdatesWorker {
         let mut runners = vec![];
         let mut monitored_accounts = HashSet::new();
         // Initialize all the runners for all configs
-        for (index, rpc_provider_config) in
-            self.rpc_provider_configs.iter().enumerate()
-        {
+        for (index, url) in self.ws_urls.iter().enumerate() {
             runners.push(
                 self.create_runner_from_config(
                     index,
-                    rpc_provider_config.clone(),
+                    url.clone(),
+                    self.commitment,
                     &monitored_accounts,
                 )
                 .await,
@@ -127,14 +130,15 @@ impl RemoteAccountUpdatesWorker {
                 }
                 // Periodically we refresh runners to keep them fresh
                 _ = refresh_interval.tick() => {
-                    current_refresh_index = (current_refresh_index + 1) % self.rpc_provider_configs.len();
-                    let rpc_provider_config = self.rpc_provider_configs
+                    current_refresh_index = (current_refresh_index + 1) % self.ws_urls.len();
+                    let url = self.ws_urls
                         .get(current_refresh_index)
                         .unwrap()
                         .clone();
                     let new_runner = self.create_runner_from_config(
                         current_refresh_index,
-                        rpc_provider_config,
+                        url,
+                        self.commitment,
                         &monitored_accounts
                     ).await;
                     let old_runner = std::mem::replace(&mut runners[current_refresh_index], new_runner);
@@ -157,7 +161,8 @@ impl RemoteAccountUpdatesWorker {
     async fn create_runner_from_config(
         &self,
         index: usize,
-        rpc_provider_config: RpcProviderConfig,
+        url: String,
+        commitment: Option<CommitmentLevel>,
         monitored_accounts: &HashSet<Pubkey>,
     ) -> RemoteAccountUpdatesWorkerRunner {
         let (monitoring_request_sender, monitoring_request_receiver) =
@@ -171,7 +176,8 @@ impl RemoteAccountUpdatesWorker {
         let join_handle = tokio::spawn(async move {
             let mut shard = RemoteAccountUpdatesShard::new(
                 shard_id.clone(),
-                rpc_provider_config,
+                url,
+                commitment,
                 monitoring_request_receiver,
                 first_subscribed_slots,
                 last_known_update_slots,
@@ -180,7 +186,11 @@ impl RemoteAccountUpdatesWorker {
                 .start_monitoring_request_processing(shard_cancellation_token)
                 .await
             {
+                #[cfg(not(test))]
                 error!("Runner shard has failed: {}: {:?}", shard_id, error);
+
+                #[cfg(test)]
+                panic!("Runner shard has failed: {}: {:?}", shard_id, error);
             }
         });
         let runner = RemoteAccountUpdatesWorkerRunner {
