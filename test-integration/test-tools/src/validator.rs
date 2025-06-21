@@ -6,13 +6,15 @@ use std::{
     time::Duration,
 };
 
-use crate::toml_to_args::{
-    config_to_args, rpc_port_from_config, ProgramLoader,
+use crate::{
+    loaded_accounts::LoadedAccounts,
+    toml_to_args::{config_to_args, rpc_port_from_config, ProgramLoader},
 };
 
 pub fn start_magic_block_validator_with_config(
     test_runner_paths: &TestRunnerPaths,
     log_suffix: &str,
+    loaded_chain_accounts: &LoadedAccounts,
     release: bool,
 ) -> Option<Child> {
     let TestRunnerPaths {
@@ -25,13 +27,14 @@ pub fn start_magic_block_validator_with_config(
 
     // First build so that the validator can start fast
     let mut command = process::Command::new("cargo");
+    let keypair_base58 = loaded_chain_accounts.validator_authority_base58();
     command.arg("build");
     if release {
         command.arg("--release");
     }
     let build_res = command.current_dir(root_dir.clone()).output();
 
-    if build_res.map_or(false, |output| !output.status.success()) {
+    if build_res.is_ok_and(|output| !output.status.success()) {
         eprintln!("Failed to build validator");
         return None;
     }
@@ -46,9 +49,15 @@ pub fn start_magic_block_validator_with_config(
         .arg("--")
         .arg(config_path)
         .env("RUST_LOG_STYLE", log_suffix)
+        .env("VALIDATOR_KEYPAIR", keypair_base58.clone())
         .current_dir(root_dir);
 
     eprintln!("Starting validator with {:?}", command);
+    eprintln!(
+        "Setting validator keypair to {} ({})",
+        loaded_chain_accounts.validator_authority(),
+        keypair_base58
+    );
 
     let validator = command.spawn().expect("Failed to start validator");
     wait_for_validator(validator, port)
@@ -57,6 +66,7 @@ pub fn start_magic_block_validator_with_config(
 pub fn start_test_validator_with_config(
     test_runner_paths: &TestRunnerPaths,
     program_loader: Option<ProgramLoader>,
+    loaded_accounts: &LoadedAccounts,
     log_suffix: &str,
 ) -> Option<process::Child> {
     let TestRunnerPaths {
@@ -71,35 +81,35 @@ pub fn start_test_validator_with_config(
     let accounts_dir = workspace_dir.join("configs").join("accounts");
     let accounts = [
         (
-            "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev",
+            loaded_accounts.validator_authority().to_string(),
             "validator-authority.json",
         ),
         (
-            "LUzidNSiPNjYNkxZcUm5hYHwnWPwsUfh2US1cpWwaBm",
+            loaded_accounts.luzid_authority().to_string(),
             "luzid-authority.json",
         ),
         (
-            "EpJnX7ueXk7fKojBymqmVuCuwyhDQsYcLVL1XMsBbvDX",
+            loaded_accounts.validator_fees_vault().to_string(),
             "validator-fees-vault.json",
         ),
         (
-            "7JrkjmZPprHwtuvtuGTXp9hwfGYFAQLnLeFM52kqAgXg",
+            loaded_accounts.protocol_fees_vault().to_string(),
             "protocol-fees-vault.json",
         ),
         (
-            "9yXjZTevvMp1XgZSZEaziPRgFiXtAQChpnP2oX9eCpvt",
+            "9yXjZTevvMp1XgZSZEaziPRgFiXtAQChpnP2oX9eCpvt".to_string(),
             "non-delegated-cloneable-account1.json",
         ),
         (
-            "BHBuATGifAD4JbRpM5nVdyhKzPgv3p2CxLEHAqwBzAj5",
+            "BHBuATGifAD4JbRpM5nVdyhKzPgv3p2CxLEHAqwBzAj5".to_string(),
             "non-delegated-cloneable-account2.json",
         ),
         (
-            "2o48ieM95rmHqMWC5B3tTX4DL7cLm4m1Kuwjay3keQSv",
+            "2o48ieM95rmHqMWC5B3tTX4DL7cLm4m1Kuwjay3keQSv".to_string(),
             "non-delegated-cloneable-account3.json",
         ),
         (
-            "2EmfL3MqL3YHABudGNmajjCpR13NNEn9Y4LWxbDm6SwR",
+            "2EmfL3MqL3YHABudGNmajjCpR13NNEn9Y4LWxbDm6SwR".to_string(),
             "non-delegated-cloneable-account4.json",
         ),
     ];
@@ -110,7 +120,7 @@ pub fn start_test_validator_with_config(
             let account_path = accounts_dir.join(file).canonicalize().unwrap();
             vec![
                 "--account".to_string(),
-                account.to_string(),
+                account.clone(),
                 account_path.to_str().unwrap().to_string(),
             ]
         })
@@ -135,7 +145,7 @@ pub fn wait_for_validator(mut validator: Child, port: u16) -> Option<Child> {
     let max_retries = if std::env::var("CI").is_ok() {
         1500
     } else {
-        75
+        800
     };
 
     for _ in 0..max_retries {

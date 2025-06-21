@@ -1,0 +1,21 @@
+[package]
+name = "test-table-mania"
+version.workspace = true
+edition.workspace = true
+
+[dev-dependencies]
+log = { workspace = true }
+magicblock-rpc-client = { workspace = true }
+magicblock-table-mania = { workspace = true, features = [
+  "randomize_lookup_table_slot",
+] }
+paste = { workspace = true }
+solana-pubkey = { workspace = true }
+solana-rpc-client = { workspace = true }
+solana-sdk = { workspace = true }
+test-tools-core = { workspace = true }
+tokio = { workspace = true }
+
+[features]
+default = []
+test_table_close = []

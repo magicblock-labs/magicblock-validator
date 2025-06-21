@@ -23,6 +23,10 @@ mod utils;
 
 #[test]
 fn test_committing_fee_payer_without_escrowing_lamports() {
+    // NOTE: this test requires the following config
+    //   [validator]
+    //   base_fees = 1000
+    // see ../../../configs/schedulecommit-conf-fees.ephem.toml
     run_test!({
         let ctx = get_context_with_delegated_committees_without_payer_escrow(2);
 
@@ -64,9 +68,8 @@ fn test_committing_fee_payer_without_escrowing_lamports() {
                 },
             );
         info!("{} '{:?}'", sig, res);
-        assert!(!res.is_ok());
 
-        // Should fail because the fee payer was not escrowed
+        assert!(res.is_err());
         assert!(res
             .err()
             .unwrap()
@@ -121,10 +124,10 @@ fn test_committing_fee_payer_escrowing_lamports() {
         assert!(res.is_ok());
 
         let res = verify::fetch_and_verify_commit_result_from_logs(&ctx, *sig);
-        assert_two_committees_were_committed(&ctx, &res);
+        assert_two_committees_were_committed(&ctx, &res, true);
         assert_two_committees_synchronized_count(&ctx, &res, 1);
 
         // The fee payer should have been committed
-        assert_feepayer_was_committed(&ctx, &res);
+        assert_feepayer_was_committed(&ctx, &res, true);
     });
 }

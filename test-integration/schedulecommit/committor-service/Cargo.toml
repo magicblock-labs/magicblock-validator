@@ -1,0 +1,28 @@
+[package]
+name = "schedulecommit-committor-service"
+version.workspace = true
+edition.workspace = true
+
+[dev-dependencies]
+log = { workspace = true }
+magicblock-committor-program = { workspace = true, features = [
+  "no-entrypoint",
+] }
+magicblock-delegation-program = { workspace = true, features = [
+  "no-entrypoint",
+] }
+magicblock-committor-service = { workspace = true, features = [
+  "dev-context-only-utils",
+] }
+magicblock-rpc-client = { workspace = true }
+program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
+solana-account = { workspace = true }
+solana-pubkey = { workspace = true }
+solana-rpc-client = { workspace = true }
+solana-rpc-client-api = { workspace = true }
+solana-sdk = { workspace = true }
+test-tools-core = { workspace = true }
+tokio = { workspace = true }
+
+[features]
+test_table_close = []

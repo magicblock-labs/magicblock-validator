@@ -1,5 +1,6 @@
 pub mod conversions;
 mod integration_test_context;
+pub mod loaded_accounts;
 mod run_test;
 pub mod scheduled_commits;
 pub mod tmpdir;
