@@ -151,7 +151,7 @@ pub(crate) enum MagicBlockInstruction {
     /// - **1.**  `[WRITE]`  Magic Context Account containing the initially scheduled commits
     AcceptScheduleCommits,
 
-    /// Records the the attempt to realize a scheduled commit on chain.
+    /// Records the attempt to realize a scheduled commit on chain.
     ///
     /// The signature of this transaction can be pre-calculated since we pass the
     /// ID of the scheduled commit and retrieve the signature from a globally

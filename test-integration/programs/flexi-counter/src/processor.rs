@@ -17,6 +17,7 @@ use solana_program::{
     sysvar::Sysvar,
 };
 
+use crate::instruction::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE;
 use crate::{
     instruction::{DelegateArgs, FlexiCounterInstruction},
     state::FlexiCounter,
@@ -42,6 +43,10 @@ pub fn process(
     use FlexiCounterInstruction::*;
     match ix {
         Init { label, bump } => process_init(program_id, accounts, label, bump),
+        Realloc {
+            bytes,
+            invocation_count,
+        } => process_realloc(accounts, bytes, invocation_count),
         Add { count } => process_add(accounts, count),
         Mul { multiplier } => process_mul(accounts, multiplier),
         Delegate(args) => process_delegate(accounts, &args),
@@ -95,6 +100,50 @@ fn process_init(
 
     counter_pda_info.data.borrow_mut()[..size].copy_from_slice(&counter_data);
 
+    Ok(())
+}
+
+fn process_realloc(
+    accounts: &[AccountInfo],
+    bytes: u64,
+    invocation_count: u16,
+) -> ProgramResult {
+    msg!("Instruction: Realloc {}", invocation_count);
+
+    let account_info_iter = &mut accounts.iter();
+    let payer_info = next_account_info(account_info_iter)?;
+    let counter_pda_info = next_account_info(account_info_iter)?;
+
+    let (counter_pda, _) = FlexiCounter::pda(payer_info.key);
+    assert_keys_equal(counter_pda_info.key, &counter_pda, || {
+        format!(
+            "Invalid Counter PDA {}, should be {}",
+            counter_pda_info.key, counter_pda
+        )
+    })?;
+
+    let current_size = counter_pda_info.data.borrow().len() as u64;
+    if current_size >= bytes {
+        msg!(
+            "Counter account already has {} bytes, no need to realloc",
+            counter_pda_info.data.borrow().len()
+        );
+        return Ok(());
+    }
+
+    let next_alloc_size = std::cmp::min(
+        bytes,
+        current_size + MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as u64,
+    );
+
+    msg!(
+        "Allocating from {} to {} of desired {} bytes.",
+        current_size,
+        next_alloc_size,
+        bytes
+    );
+
+    counter_pda_info.realloc(next_alloc_size as usize, true)?;
     Ok(())
 }
 
