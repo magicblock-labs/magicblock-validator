@@ -748,7 +748,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "115e54d64eb62cdebad391c19efc9dce4981c690c85a33a12199d99bb9546fee"
 dependencies = [
  "borsh-derive 0.10.4",
- "hashbrown 0.12.3",
+ "hashbrown 0.13.2",
 ]
 
 [[package]]
@@ -1861,7 +1861,7 @@ dependencies = [
 
 [[package]]
 name = "expiring-hashmap"
-version = "0.1.5"
+version = "0.1.7"
 
 [[package]]
 name = "fake-simd"
@@ -2234,7 +2234,7 @@ dependencies = [
 
 [[package]]
 name = "geyser-grpc-proto"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "anyhow",
  "bincode",
@@ -3533,7 +3533,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-cloner"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "conjunto-transwise",
  "flume",
@@ -3555,7 +3555,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-dumper"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "bincode",
  "magicblock-bank",
@@ -3568,7 +3568,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-fetcher"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "async-trait",
  "conjunto-transwise",
@@ -3584,7 +3584,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-account-updates"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "bincode",
  "conjunto-transwise",
@@ -3605,7 +3605,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "async-trait",
  "conjunto-transwise",
@@ -3636,7 +3636,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts-api"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "magicblock-bank",
  "solana-sdk",
@@ -3644,7 +3644,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-accounts-db"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "env_logger 0.11.8",
  "lmdb-rkv",
@@ -3661,7 +3661,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-api"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "agave-geyser-plugin-interface",
  "anyhow",
@@ -3706,7 +3706,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-bank"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "agave-geyser-plugin-interface",
  "assert_matches",
@@ -3747,7 +3747,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-config"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "isocountry",
  "magicblock-accounts-db",
@@ -3763,7 +3763,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-core"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "solana-sdk",
 ]
@@ -3786,7 +3786,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-geyser-plugin"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "agave-geyser-plugin-interface",
  "anyhow",
@@ -3815,7 +3815,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-ledger"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "bincode",
  "byteorder",
@@ -3834,7 +3834,7 @@ dependencies = [
  "solana-measure",
  "solana-metrics",
  "solana-sdk",
- "solana-storage-proto 0.1.5",
+ "solana-storage-proto 0.1.7",
  "solana-svm 2.2.1 (git+https://github.com/magicblock-labs/magicblock-svm.git?rev=e93eb57)",
  "solana-timings",
  "solana-transaction-status",
@@ -3847,7 +3847,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-metrics"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "http-body-util",
  "hyper 1.6.0",
@@ -3861,7 +3861,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-mutator"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "assert_matches",
  "bincode",
@@ -3878,7 +3878,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-perf-service"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "log",
  "magicblock-bank",
@@ -3887,7 +3887,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-processor"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "lazy_static",
  "log",
@@ -3908,7 +3908,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-program"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "assert_matches",
  "bincode",
@@ -3929,7 +3929,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-pubsub"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "bincode",
  "geyser-grpc-proto",
@@ -3951,7 +3951,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-rpc"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "base64 0.21.7",
  "bincode",
@@ -3986,7 +3986,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-tokens"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "log",
  "magicblock-bank",
@@ -4001,7 +4001,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-transaction-status"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "crossbeam-channel",
  "log",
@@ -4013,7 +4013,7 @@ dependencies = [
 
 [[package]]
 name = "magicblock-version"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "rustc_version",
  "semver",
@@ -8816,7 +8816,7 @@ dependencies = [
 
 [[package]]
 name = "solana-storage-proto"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "bincode",
  "bs58 0.4.0",
@@ -10193,7 +10193,7 @@ checksum = "8f50febec83f5ee1df3015341d8bd429f2d1cc62bcba7ea2076759d315084683"
 
 [[package]]
 name = "test-bins"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "console-subscriber",
  "env_logger 0.11.8",
@@ -10208,7 +10208,7 @@ dependencies = [
 
 [[package]]
 name = "test-tools"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "log",
  "magicblock-accounts-db",
@@ -10227,7 +10227,7 @@ dependencies = [
 
 [[package]]
 name = "test-tools-core"
-version = "0.1.5"
+version = "0.1.7"
 dependencies = [
  "env_logger 0.11.8",
  "log",
