@@ -158,7 +158,7 @@ fn read(ledger_path: &Path, payer: &Keypair) -> Child {
 
     // NOTE: account hydration runs in the background _after_ the validator starts up
     // thus we need to wait for that to complete before we can send this transaction
-    sleep(Duration::from_secs(5));
+    sleep(Duration::from_secs(10));
 
     let mut tx = Transaction::new_with_payer(&[ix], Some(&payer.pubkey()));
     let signers = &[payer];
