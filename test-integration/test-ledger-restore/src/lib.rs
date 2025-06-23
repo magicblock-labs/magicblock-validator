@@ -1,5 +1,11 @@
 use solana_rpc_client::rpc_client::RpcClient;
-use std::{fs, path::Path, process, process::Child};
+use std::{
+    fs,
+    path::Path,
+    process::{self, Child},
+    thread::sleep,
+    time::Duration,
+};
 
 use integration_test_tools::{
     expect,
@@ -11,7 +17,10 @@ use integration_test_tools::{
     workspace_paths::path_relative_to_workspace,
     IntegrationTestContext,
 };
-use magicblock_config::{AccountsConfig, EphemeralConfig, LedgerConfig, LifecycleMode, ProgramConfig, RemoteConfig, ValidatorConfig, DEFAULT_LEDGER_SIZE_BYTES};
+use magicblock_config::{
+    AccountsConfig, EphemeralConfig, LedgerConfig, LifecycleMode,
+    ProgramConfig, RemoteConfig, ValidatorConfig, DEFAULT_LEDGER_SIZE_BYTES,
+};
 use program_flexi_counter::state::FlexiCounter;
 use solana_sdk::{
     clock::Slot,
@@ -104,7 +113,7 @@ pub fn setup_offline_validator(
         ledger: LedgerConfig {
             reset,
             path: Some(ledger_path.display().to_string()),
-            size: DEFAULT_LEDGER_SIZE_BYTES
+            size: DEFAULT_LEDGER_SIZE_BYTES,
         },
         accounts: accounts_config.clone(),
         programs,
@@ -364,4 +373,10 @@ macro_rules! assert_counter_state {
             $crate::cleanup($validator)
         );
     };
+}
+
+pub fn wait_for_cloned_accounts_hydration() {
+    // NOTE: account hydration runs in the background _after_ the validator starts up
+    // thus we need to wait for that to complete before we can send this transaction
+    sleep(Duration::from_secs(5));
 }

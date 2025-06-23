@@ -18,8 +18,8 @@ use std::time::Duration;
 use test_ledger_restore::{
     assert_counter_state, cleanup, confirm_tx_with_payer_chain,
     confirm_tx_with_payer_ephem, get_programs_with_flexi_counter,
-    setup_validator_with_local_remote, wait_for_ledger_persist, Counter, State,
-    TMP_DIR_LEDGER,
+    setup_validator_with_local_remote, wait_for_cloned_accounts_hydration,
+    wait_for_ledger_persist, Counter, State, TMP_DIR_LEDGER,
 };
 
 const COUNTER: &str = "Counter of Payer";
@@ -156,9 +156,7 @@ fn read(ledger_path: &Path, payer: &Keypair) -> Child {
     let ix = create_add_ix(payer.pubkey(), 1);
     let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
 
-    // NOTE: account hydration runs in the background _after_ the validator starts up
-    // thus we need to wait for that to complete before we can send this transaction
-    sleep(Duration::from_secs(10));
+    wait_for_cloned_accounts_hydration();
 
     let mut tx = Transaction::new_with_payer(&[ix], Some(&payer.pubkey()));
     let signers = &[payer];
