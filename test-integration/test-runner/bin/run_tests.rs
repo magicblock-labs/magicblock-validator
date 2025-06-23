@@ -2,7 +2,8 @@ use integration_test_tools::validator::start_test_validator_with_config;
 use integration_test_tools::{
     toml_to_args::ProgramLoader,
     validator::{
-        resolve_workspace_dir, start_magic_block_validator_with_config,
+        resolve_workspace_dir,
+        start_magic_block_validator_with_config,
         TestRunnerPaths,
     },
 };
