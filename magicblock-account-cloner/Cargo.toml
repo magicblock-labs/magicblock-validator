@@ -9,6 +9,7 @@ edition.workspace = true
 
 [dependencies]
 conjunto-transwise = { workspace = true }
+flume = { workspace = true }
 futures-util = { workspace = true }
 log = { workspace = true }
 magicblock-account-fetcher = { workspace = true }

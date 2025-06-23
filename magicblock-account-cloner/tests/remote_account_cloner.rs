@@ -52,10 +52,11 @@ fn setup_custom(
     let cancellation_token = CancellationToken::new();
     let cloner_worker_handle = {
         let cloner_cancellation_token = cancellation_token.clone();
-        tokio::spawn(
+        tokio::spawn(async move {
             cloner_worker
-                .start_clone_request_processing(cloner_cancellation_token),
-        )
+                .start_clone_request_processing(cloner_cancellation_token)
+                .await
+        })
     };
     // Ready to run
     (cloner_client, cancellation_token, cloner_worker_handle)

@@ -3447,6 +3447,7 @@ name = "magicblock-account-cloner"
 version = "0.1.5"
 dependencies = [
  "conjunto-transwise",
+ "flume",
  "futures-util",
  "log",
  "lru 0.14.0",

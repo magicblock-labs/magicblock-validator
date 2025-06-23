@@ -12,7 +12,7 @@ use magicblock_account_fetcher::AccountFetcher;
 use magicblock_account_updates::AccountUpdates;
 use magicblock_accounts_api::InternalAccountProvider;
 use solana_sdk::pubkey::Pubkey;
-use tokio::sync::{mpsc::UnboundedSender, oneshot::channel};
+use tokio::sync::oneshot::channel;
 
 use crate::{
     AccountCloner, AccountClonerError, AccountClonerListeners,
@@ -20,7 +20,7 @@ use crate::{
 };
 
 pub struct RemoteAccountClonerClient {
-    clone_request_sender: UnboundedSender<Pubkey>,
+    clone_request_sender: flume::Sender<Pubkey>,
     clone_listeners: Arc<RwLock<HashMap<Pubkey, AccountClonerListeners>>>,
 }
 
