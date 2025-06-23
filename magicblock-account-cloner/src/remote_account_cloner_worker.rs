@@ -9,7 +9,7 @@ use conjunto_transwise::{
     AccountChainSnapshot, AccountChainSnapshotShared, AccountChainState,
     DelegationRecord,
 };
-use futures_util::stream::{self, StreamExt, TryStreamExt};
+use futures_util::stream::{self, FuturesUnordered, StreamExt, TryStreamExt};
 use log::*;
 use lru::LruCache;
 use magicblock_account_dumper::AccountDumper;
@@ -187,16 +187,18 @@ where
         &self,
         cancellation_token: CancellationToken,
     ) {
+        let mut requests = FuturesUnordered::new();
         loop {
             tokio::select! {
                 res = self.clone_request_receiver.recv_async() => {
                     match res {
-                        Ok(req) => self.process_clone_request(req).await,
+                        Ok(req) => requests.push(self.process_clone_request(req)),
                         Err(err) => {
                             error!("Failed to receive clone request: {:?}", err);
                         }
                     }
                 }
+                _ = requests.next(), if !requests.is_empty() => {},
                 _ = cancellation_token.cancelled() => {
                     return;
                 }
