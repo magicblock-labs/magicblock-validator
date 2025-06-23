@@ -14,4 +14,7 @@ pub enum ConfigError {
 
     #[error("Program with id '{0}' has invalid path '{1}'")]
     ProgramPathInvalidUnicode(String, String),
+
+    #[error("Cannot specify both init_lamports and init_sol")]
+    CannotSpecifyBothInitLamportAndInitSol,
 }

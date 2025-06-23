@@ -122,7 +122,7 @@ use crate::{
         TransactionBalances, TransactionBalancesSet,
     },
     transaction_simulation::TransactionSimulationResult,
-    DEFAULT_LAMPORTS_PER_SIGNATURE,
+    LAMPORTS_PER_SIGNATURE,
 };
 
 pub type BankStatusCache = StatusCache<Result<()>>;
@@ -447,8 +447,7 @@ impl Bank {
             accounts_update_notifier,
             millis_per_slot,
         );
-        bank.fee_rate_governor.lamports_per_signature =
-            DEFAULT_LAMPORTS_PER_SIGNATURE;
+        bank.fee_rate_governor.lamports_per_signature = LAMPORTS_PER_SIGNATURE;
 
         bank.transaction_debug_keys = debug_keys;
         bank.runtime_config = runtime_config;

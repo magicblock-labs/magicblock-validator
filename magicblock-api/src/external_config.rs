@@ -11,6 +11,7 @@ pub(crate) fn try_convert_accounts_config(
         remote_cluster: cluster_from_remote(&conf.remote),
         lifecycle: lifecycle_mode_from_lifecycle_mode(&conf.lifecycle),
         commit_compute_unit_price: conf.commit.compute_unit_price,
+        payer_init_lamports: conf.payer.try_init_lamports()?,
         allowed_program_ids: allowed_program_ids_from_allowed_programs(
             &conf.allowed_programs,
         ),

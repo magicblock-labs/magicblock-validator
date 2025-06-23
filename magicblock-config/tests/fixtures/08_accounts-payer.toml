@@ -1,6 +1,7 @@
 [accounts]
 remote = "devnet"
 lifecycle = "programs-replica"
+payer = { init_sol = 2000 }
 
 [rpc]
 addr = "0.0.0.0"
