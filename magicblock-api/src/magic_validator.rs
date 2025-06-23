@@ -138,11 +138,13 @@ pub struct MagicValidator {
     remote_account_updates_worker: Option<RemoteAccountUpdatesWorker>,
     remote_account_updates_handle: Option<tokio::task::JoinHandle<()>>,
     remote_account_cloner_worker: Option<
-        RemoteAccountClonerWorker<
-            BankAccountProvider,
-            RemoteAccountFetcherClient,
-            RemoteAccountUpdatesClient,
-            AccountDumperBank,
+        Arc<
+            RemoteAccountClonerWorker<
+                BankAccountProvider,
+                RemoteAccountFetcherClient,
+                RemoteAccountUpdatesClient,
+                AccountDumperBank,
+            >,
         >,
     >,
     remote_account_cloner_handle: Option<tokio::task::JoinHandle<()>>,
@@ -354,7 +356,9 @@ impl MagicValidator {
             remote_account_fetcher_handle: None,
             remote_account_updates_worker: Some(remote_account_updates_worker),
             remote_account_updates_handle: None,
-            remote_account_cloner_worker: Some(remote_account_cloner_worker),
+            remote_account_cloner_worker: Some(Arc::new(
+                remote_account_cloner_worker,
+            )),
             remote_account_cloner_handle: None,
             pubsub_handle: Default::default(),
             pubsub_close_handle: Default::default(),
@@ -720,8 +724,20 @@ impl MagicValidator {
             self.remote_account_cloner_worker.take()
         {
             if !self.config.ledger.reset {
-                remote_account_cloner_worker.hydrate().await?;
-                info!("Validator hydration complete (bank hydrate, replay, account clone)");
+                let remote_account_cloner_worker =
+                    remote_account_cloner_worker.clone();
+                tokio::spawn(async move {
+                    let _ = remote_account_cloner_worker
+                        .hydrate()
+                        .await
+                        .inspect_err(|err| {
+                            error!(
+                                "Failed to hydrate validator accounts: {:?}",
+                                err
+                            );
+                        });
+                    info!("Validator hydration complete (bank hydrate, replay, account clone)");
+                });
             }
 
             let cancellation_token = self.token.clone();

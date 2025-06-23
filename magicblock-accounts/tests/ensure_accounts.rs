@@ -62,10 +62,11 @@ fn setup_with_lifecycle(
         RemoteAccountClonerClient::new(&remote_account_cloner_worker);
     let remote_account_cloner_worker_handle = {
         let cloner_cancellation_token = cancellation_token.clone();
-        tokio::spawn(
+        tokio::spawn(async move {
             remote_account_cloner_worker
-                .start_clone_request_processing(cloner_cancellation_token),
-        )
+                .start_clone_request_processing(cloner_cancellation_token)
+                .await
+        })
     };
 
     let external_account_manager = ExternalAccountsManager {

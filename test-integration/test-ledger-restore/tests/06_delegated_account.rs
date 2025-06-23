@@ -16,8 +16,8 @@ use solana_sdk::{
 use test_ledger_restore::{
     cleanup, confirm_tx_with_payer_chain, confirm_tx_with_payer_ephem,
     fetch_counter_chain, fetch_counter_ephem, fetch_counter_owner_chain,
-    setup_validator_with_local_remote, wait_for_ledger_persist,
-    FLEXI_COUNTER_ID, TMP_DIR_LEDGER,
+    setup_validator_with_local_remote, wait_for_cloned_accounts_hydration,
+    wait_for_ledger_persist, FLEXI_COUNTER_ID, TMP_DIR_LEDGER,
 };
 
 const COUNTER: &str = "Counter of Payer";
@@ -106,6 +106,8 @@ fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
 
     let (_, mut validator, _) =
         setup_validator_with_local_remote(ledger_path, Some(programs), false);
+
+    wait_for_cloned_accounts_hydration();
 
     let counter_decoded = fetch_counter_ephem(payer, &mut validator);
     assert_eq!(
