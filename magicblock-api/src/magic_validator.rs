@@ -177,7 +177,11 @@ impl MagicValidator {
             genesis_config,
             validator_pubkey,
             ..
-        } = create_genesis_config_with_leader(u64::MAX, &validator_pubkey);
+        } = create_genesis_config_with_leader(
+            u64::MAX,
+            &validator_pubkey,
+            config.validator_config.validator.base_fees,
+        );
 
         let ledger = Self::init_ledger(
             config.validator_config.ledger.path.as_ref(),
@@ -304,7 +308,6 @@ impl MagicValidator {
             account_dumper_bank,
             accounts_config.allowed_program_ids,
             blacklisted_accounts,
-            accounts_config.payer_init_lamports,
             if config.validator_config.validator.base_fees.is_none() {
                 ValidatorCollectionMode::NoFees
             } else {
