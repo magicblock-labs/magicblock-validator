@@ -2,9 +2,11 @@ use std::str::FromStr;
 
 use magicblock_accounts_db::config::AccountsDbConfig;
 use serde::{Deserialize, Serialize};
-use solana_sdk::pubkey::Pubkey;
+use solana_sdk::{native_token::LAMPORTS_PER_SOL, pubkey::Pubkey};
 use strum_macros::EnumString;
 use url::Url;
+
+use crate::errors::{ConfigError, ConfigResult};
 
 // -----------------
 // AccountsConfig
@@ -18,6 +20,8 @@ pub struct AccountsConfig {
     pub lifecycle: LifecycleMode,
     #[serde(default)]
     pub commit: CommitStrategy,
+    #[serde(default)]
+    pub payer: Payer,
     #[serde(default)]
     pub allowed_programs: Vec<AllowedProgram>,
 
@@ -34,6 +38,7 @@ impl Default for AccountsConfig {
             remote: Default::default(),
             lifecycle: Default::default(),
             commit: Default::default(),
+            payer: Default::default(),
             allowed_programs: Default::default(),
             db: Default::default(),
             max_monitored_accounts: default_max_monitored_accounts(),
@@ -115,6 +120,43 @@ impl Default for CommitStrategy {
             frequency_millis: default_frequency_millis(),
             compute_unit_price: default_compute_unit_price(),
         }
+    }
+}
+
+// -----------------
+// Payer
+// -----------------
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+pub struct Payer {
+    /// The payer init balance in lamports.
+    /// Read it via [Self::try_init_lamports].
+    pub init_lamports: Option<u64>,
+    /// The payer init balance in SOL.
+    /// Read it via [Self::try_init_lamports].
+    init_sol: Option<u64>,
+}
+
+pub struct PayerParams {
+    pub init_lamports: Option<u64>,
+    pub init_sol: Option<u64>,
+}
+
+impl Payer {
+    pub fn new(params: PayerParams) -> Self {
+        Self {
+            init_lamports: params.init_lamports,
+            init_sol: params.init_sol,
+        }
+    }
+    pub fn try_init_lamports(&self) -> ConfigResult<Option<u64>> {
+        if self.init_lamports.is_some() && self.init_sol.is_some() {
+            return Err(ConfigError::CannotSpecifyBothInitLamportAndInitSol);
+        }
+        Ok(match self.init_lamports {
+            Some(lamports) => Some(lamports),
+            None => self.init_sol.map(|sol| sol * LAMPORTS_PER_SOL),
+        })
     }
 }
 
