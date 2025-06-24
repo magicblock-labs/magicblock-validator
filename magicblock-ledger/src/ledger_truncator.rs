@@ -114,6 +114,10 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
 
         let (highest_slot, _) = self.ledger.get_max_blockhash()?;
         let lowest_slot = self.ledger.get_lowest_slot()?.unwrap_or(0);
+        info!(
+            "Fat truncation. lowest slot: {}, hightest slot: {}",
+            lowest_slot, highest_slot
+        );
         if lowest_slot == highest_slot {
             warn!("Nani3?");
             return Ok(());
