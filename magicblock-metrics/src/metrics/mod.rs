@@ -87,38 +87,38 @@ lazy_static::lazy_static! {
     static ref LEDGER_SIZE_GAUGE: IntGauge = IntGauge::new(
         "ledger_size", "Ledger size in Bytes",
     ).unwrap();
-    static ref LEDGER_BLOCK_TIMES_GAUGE: IntGauge = IntGauge::new(
-        "ledger_blocktimes_gauge", "Ledger Blocktimes Gauge",
+    static ref LEDGER_BLOCK_TIMES_COUNT: IntCounter = IntCounter::new(
+        "ledger_blocktimes_count", "Ledger Blocktimes Count",
     ).unwrap();
-    static ref LEDGER_BLOCKHASHES_GAUGE: IntGauge = IntGauge::new(
-        "ledger_blockhashes_gauge", "Ledger Blockhashes Gauge",
+    static ref LEDGER_BLOCKHASHES_COUNT: IntCounter = IntCounter::new(
+        "ledger_blockhashes_count", "Ledger Blockhashes Count",
     ).unwrap();
-    static ref LEDGER_SLOT_SIGNATURES_GAUGE: IntGauge = IntGauge::new(
-        "ledger_slot_signatures_gauge", "Ledger Slot Signatures Gauge",
+    static ref LEDGER_SLOT_SIGNATURES_COUNT: IntCounter = IntCounter::new(
+        "ledger_slot_signatures_count", "Ledger Slot Signatures Count",
     ).unwrap();
-    static ref LEDGER_ADDRESS_SIGNATURES_GAUGE: IntGauge = IntGauge::new(
-        "ledger_address_signatures_gauge", "Ledger Address Signatures Gauge",
+    static ref LEDGER_ADDRESS_SIGNATURES_COUNT: IntCounter = IntCounter::new(
+        "ledger_address_signatures_count", "Ledger Address Signatures Count",
     ).unwrap();
-    static ref LEDGER_TRANSACTION_STATUS_GAUGE: IntGauge = IntGauge::new(
-        "ledger_transaction_status_gauge", "Ledger Transaction Status Gauge",
+    static ref LEDGER_TRANSACTION_STATUS_COUNT: IntCounter = IntCounter::new(
+        "ledger_transaction_status_count", "Ledger Transaction Status Count",
     ).unwrap();
-    static ref LEDGER_TRANSACTION_SUCCESSFUL_STATUS_GAUGE: IntGauge = IntGauge::new(
-        "ledger_transaction_successful_status_gauge", "Ledger Successful Transaction Status Gauge",
+    static ref LEDGER_TRANSACTION_SUCCESSFUL_STATUS_COUNT: IntCounter = IntCounter::new(
+        "ledger_transaction_successful_status_count", "Ledger Successful Transaction Status Count",
     ).unwrap();
-    static ref LEDGER_TRANSACTION_FAILED_STATUS_GAUGE: IntGauge = IntGauge::new(
-        "ledger_transaction_failed_status_gauge", "Ledger Failed Transaction Status Gauge",
+    static ref LEDGER_TRANSACTION_FAILED_STATUS_COUNT: IntCounter = IntCounter::new(
+        "ledger_transaction_failed_status_count", "Ledger Failed Transaction Status Count",
     ).unwrap();
-    static ref LEDGER_TRANSACTIONS_GAUGE: IntGauge = IntGauge::new(
-        "ledger_transactions_gauge", "Ledger Transactions Gauge",
+    static ref LEDGER_TRANSACTIONS_COUNT: IntCounter = IntCounter::new(
+        "ledger_transactions_count", "Ledger Transactions Count",
     ).unwrap();
-    static ref LEDGER_TRANSACTION_MEMOS_GAUGE: IntGauge = IntGauge::new(
-        "ledger_transaction_memos_gauge", "Ledger Transaction Memos Gauge",
+    static ref LEDGER_TRANSACTION_MEMOS_COUNT: IntCounter = IntCounter::new(
+        "ledger_transaction_memos_count", "Ledger Transaction Memos Count",
     ).unwrap();
-    static ref LEDGER_PERF_SAMPLES_GAUGE: IntGauge = IntGauge::new(
-        "ledger_perf_samples_gauge", "Ledger Perf Samples Gauge",
+    static ref LEDGER_PERF_SAMPLES_COUNT: IntCounter = IntCounter::new(
+        "ledger_perf_samples_count", "Ledger Perf Samples Count",
     ).unwrap();
-    static ref LEDGER_ACCOUNT_MOD_DATA_GAUGE: IntGauge = IntGauge::new(
-        "ledger_account_mod_data_gauge", "Ledger Account Mod Data Gauge",
+    static ref LEDGER_ACCOUNT_MOD_DATA_COUNT: IntCounter = IntCounter::new(
+        "ledger_account_mod_data_count", "Ledger Account Mod Data Count",
     ).unwrap();
 
     // -----------------
@@ -221,17 +221,17 @@ pub(crate) fn register() {
         register!(ACCOUNT_COMMIT_TIME_HISTOGRAM);
         register!(CACHED_CLONE_OUTPUTS_COUNT);
         register!(LEDGER_SIZE_GAUGE);
-        register!(LEDGER_BLOCK_TIMES_GAUGE);
-        register!(LEDGER_BLOCKHASHES_GAUGE);
-        register!(LEDGER_SLOT_SIGNATURES_GAUGE);
-        register!(LEDGER_ADDRESS_SIGNATURES_GAUGE);
-        register!(LEDGER_TRANSACTION_STATUS_GAUGE);
-        register!(LEDGER_TRANSACTION_SUCCESSFUL_STATUS_GAUGE);
-        register!(LEDGER_TRANSACTION_FAILED_STATUS_GAUGE);
-        register!(LEDGER_TRANSACTIONS_GAUGE);
-        register!(LEDGER_TRANSACTION_MEMOS_GAUGE);
-        register!(LEDGER_PERF_SAMPLES_GAUGE);
-        register!(LEDGER_ACCOUNT_MOD_DATA_GAUGE);
+        register!(LEDGER_BLOCK_TIMES_COUNT);
+        register!(LEDGER_BLOCKHASHES_COUNT);
+        register!(LEDGER_SLOT_SIGNATURES_COUNT);
+        register!(LEDGER_ADDRESS_SIGNATURES_COUNT);
+        register!(LEDGER_TRANSACTION_STATUS_COUNT);
+        register!(LEDGER_TRANSACTION_SUCCESSFUL_STATUS_COUNT);
+        register!(LEDGER_TRANSACTION_FAILED_STATUS_COUNT);
+        register!(LEDGER_TRANSACTIONS_COUNT);
+        register!(LEDGER_TRANSACTION_MEMOS_COUNT);
+        register!(LEDGER_PERF_SAMPLES_COUNT);
+        register!(LEDGER_ACCOUNT_MOD_DATA_COUNT);
         register!(ACCOUNTS_SIZE_GAUGE);
         register!(ACCOUNTS_COUNT_GAUGE);
         register!(INMEM_ACCOUNTS_SIZE_GAUGE);
@@ -343,48 +343,48 @@ pub fn set_ledger_size(size: u64) {
     LEDGER_SIZE_GAUGE.set(size as i64);
 }
 
-pub fn set_ledger_block_times_count(count: i64) {
-    LEDGER_BLOCK_TIMES_GAUGE.set(count);
+pub fn inc_ledger_block_times_count() {
+    LEDGER_BLOCK_TIMES_COUNT.inc();
 }
 
-pub fn set_ledger_blockhashes_count(count: i64) {
-    LEDGER_BLOCKHASHES_GAUGE.set(count);
+pub fn inc_ledger_blockhashes_count() {
+    LEDGER_BLOCKHASHES_COUNT.inc();
 }
 
-pub fn set_ledger_slot_signatures_count(count: i64) {
-    LEDGER_SLOT_SIGNATURES_GAUGE.set(count);
+pub fn inc_ledger_slot_signatures_count() {
+    LEDGER_SLOT_SIGNATURES_COUNT.inc();
 }
 
-pub fn set_ledger_address_signatures_count(count: i64) {
-    LEDGER_ADDRESS_SIGNATURES_GAUGE.set(count);
+pub fn inc_ledger_address_signatures_count() {
+    LEDGER_ADDRESS_SIGNATURES_COUNT.inc();
 }
 
-pub fn set_ledger_transaction_status_count(count: i64) {
-    LEDGER_TRANSACTION_STATUS_GAUGE.set(count);
+pub fn inc_ledger_transaction_status_count() {
+    LEDGER_TRANSACTION_STATUS_COUNT.inc();
 }
 
-pub fn set_ledger_transaction_successful_status_count(count: i64) {
-    LEDGER_TRANSACTION_SUCCESSFUL_STATUS_GAUGE.set(count);
+pub fn inc_ledger_transaction_successful_status_count() {
+    LEDGER_TRANSACTION_SUCCESSFUL_STATUS_COUNT.inc();
 }
 
-pub fn set_ledger_transaction_failed_status_count(count: i64) {
-    LEDGER_TRANSACTION_FAILED_STATUS_GAUGE.set(count);
+pub fn inc_ledger_transaction_failed_status_count() {
+    LEDGER_TRANSACTION_FAILED_STATUS_COUNT.inc();
 }
 
-pub fn set_ledger_transactions_count(count: i64) {
-    LEDGER_TRANSACTIONS_GAUGE.set(count);
+pub fn inc_ledger_transactions_count() {
+    LEDGER_TRANSACTIONS_COUNT.inc();
 }
 
-pub fn set_ledger_transaction_memos_count(count: i64) {
-    LEDGER_TRANSACTION_MEMOS_GAUGE.set(count);
+pub fn inc_ledger_transaction_memos_count() {
+    LEDGER_TRANSACTION_MEMOS_COUNT.inc();
 }
 
-pub fn set_ledger_perf_samples_count(count: i64) {
-    LEDGER_PERF_SAMPLES_GAUGE.set(count);
+pub fn inc_ledger_perf_samples_count() {
+    LEDGER_PERF_SAMPLES_COUNT.inc();
 }
 
-pub fn set_ledger_account_mod_data_count(count: i64) {
-    LEDGER_ACCOUNT_MOD_DATA_GAUGE.set(count);
+pub fn inc_ledger_account_mod_data_count(count: u64) {
+    LEDGER_ACCOUNT_MOD_DATA_COUNT.inc_by(count);
 }
 
 pub fn set_accounts_size(size: u64) {
