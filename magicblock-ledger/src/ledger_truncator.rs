@@ -130,7 +130,13 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
         let truncate_to_slot = if truncate_to_slot >= finality_slot {
             // Shouldn't really happen
             warn!("LedgerTruncator: want to truncate past finality slot, finality slot:{}, truncating to: {}", finality_slot, truncate_to_slot);
-            finality_slot
+            if finality_slot == 0 {
+                // No truncation at that case
+                return Ok(());
+            } else {
+                // Not cleaning finality slot
+                finality_slot - 1
+            }
         } else {
             truncate_to_slot
         };
@@ -140,6 +146,10 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
             truncate_to_slot
         );
         self.ledger.set_lowest_cleanup_slot(truncate_to_slot);
+        if let Err(err) = self.ledger.flush() {
+            // We will still compact
+            error!("Failed to flush: {}", err);
+        }
         Self::compact_slot_range(&self.ledger, 0, truncate_to_slot).await;
 
         Ok(())
