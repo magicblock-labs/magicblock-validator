@@ -250,7 +250,6 @@ impl MagicValidator {
                 Duration::from_secs(
                     metrics_config.system_metrics_tick_interval_secs,
                 ),
-                &ledger,
                 &bank,
                 token.clone(),
             );

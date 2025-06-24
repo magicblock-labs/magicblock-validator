@@ -113,16 +113,9 @@ pub fn init_commit_accounts_ticker(
 
 pub fn init_system_metrics_ticker(
     tick_duration: Duration,
-    ledger: &Arc<Ledger>,
     bank: &Arc<Bank>,
     token: CancellationToken,
 ) -> tokio::task::JoinHandle<()> {
-    fn try_set_ledger_storage_size(ledger: &Ledger) {
-        match ledger.storage_size() {
-            Ok(byte_size) => metrics::set_ledger_size(byte_size),
-            Err(err) => warn!("Failed to get ledger storage size: {:?}", err),
-        }
-    }
     fn set_accounts_storage_size(bank: &Bank) {
         let byte_size = bank.accounts_db_storage_size();
         metrics::set_accounts_size(byte_size);
@@ -131,13 +124,11 @@ pub fn init_system_metrics_ticker(
         metrics::set_accounts_count(bank.accounts_db.get_accounts_count());
     }
 
-    let ledger = ledger.clone();
     let bank = bank.clone();
     tokio::task::spawn(async move {
         loop {
             tokio::select! {
                 _ = tokio::time::sleep(tick_duration) => {
-                    try_set_ledger_storage_size(&ledger);
                     set_accounts_storage_size(&bank);
                     set_accounts_count(&bank);
                 },
