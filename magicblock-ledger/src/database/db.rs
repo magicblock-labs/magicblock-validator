@@ -1,8 +1,4 @@
-use std::{
-    marker::PhantomData,
-    path::Path,
-    sync::{atomic::AtomicI64, Arc},
-};
+use std::{marker::PhantomData, path::Path, sync::Arc};
 
 use bincode::deserialize;
 use rocksdb::{ColumnFamily, DBRawIterator, LiveFile};
@@ -16,10 +12,7 @@ use super::{
     rocks_db::Rocks,
     write_batch::WriteBatch,
 };
-use crate::{
-    database::columns::DIRTY_COUNT, errors::LedgerError,
-    metrics::PerfSamplingStatus,
-};
+use crate::{errors::LedgerError, metrics::PerfSamplingStatus};
 
 #[derive(Debug)]
 pub struct Database {
@@ -97,7 +90,6 @@ impl Database {
             column_options: Arc::clone(&self.column_options),
             read_perf_status: PerfSamplingStatus::default(),
             write_perf_status: PerfSamplingStatus::default(),
-            entry_counter: AtomicI64::new(DIRTY_COUNT),
         }
     }
 
