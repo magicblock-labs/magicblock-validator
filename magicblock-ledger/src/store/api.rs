@@ -233,6 +233,15 @@ impl Ledger {
         (lowest_cleanup_slot, lowest_available_slot)
     }
 
+    /// Returns lowest slot in the ledger if there's any
+    pub fn get_lowest_slot(&self) -> Result<Option<Slot>, LedgerError> {
+        Ok(self
+            .blockhash_cf
+            .iter(IteratorMode::Start)?
+            .next()
+            .map(|(slot, _)| slot))
+    }
+
     pub fn get_lowest_cleanup_slot(&self) -> Slot {
         *self
             .lowest_cleanup_slot
@@ -242,20 +251,13 @@ impl Ledger {
 
     /// Initializes lowest slot to cleanup from
     pub fn initialize_lowest_cleanup_slot(&self) -> Result<(), LedgerError> {
-        match self.blockhash_cf.iter(IteratorMode::Start)?.next() {
-            Some((lowest_slot, _)) => {
-                *self
-                    .lowest_cleanup_slot
-                    .write()
-                    .expect(Self::LOWEST_CLEANUP_SLOT_POISONED) = lowest_slot;
-            }
-            None => {
-                *self
-                    .lowest_cleanup_slot
-                    .write()
-                    .expect(Self::LOWEST_CLEANUP_SLOT_POISONED) = 0;
-            }
-        }
+        let lowest_cleanup_slot = match self.get_lowest_slot()? {
+            Some(lowest_slot) if lowest_slot > 0 => lowest_slot - 1,
+            _ => 0,
+        };
+
+        info!("initializing lowest cleanup slot: {}", lowest_cleanup_slot);
+        self.set_lowest_cleanup_slot(lowest_cleanup_slot);
 
         Ok(())
     }
@@ -1142,6 +1144,25 @@ impl Ledger {
         self.slot_signatures_cf.get(index)
     }
 
+    /// Updates both lowest_cleanup_slot and oldest_slot for CompactionFilter
+    /// All slots less or equal to argument will be removed during compaction
+    pub fn set_lowest_cleanup_slot(&self, slot: Slot) {
+        let mut lowest_cleanup_slot = self
+            .lowest_cleanup_slot
+            .write()
+            .expect(Self::LOWEST_CLEANUP_SLOT_POISONED);
+
+        let new_lowest_cleanup_slot = std::cmp::max(*lowest_cleanup_slot, slot);
+        *lowest_cleanup_slot = new_lowest_cleanup_slot;
+
+        if new_lowest_cleanup_slot == 0 {
+            // fresh db case
+            self.db.set_oldest_slot(new_lowest_cleanup_slot);
+        } else {
+            self.db.set_oldest_slot(new_lowest_cleanup_slot + 1);
+        }
+    }
+
     /// Permanently removes ledger data for slots in the inclusive range `[from_slot, to_slot]`.
     /// # Note:
     /// - This is a destructive operation that cannot be undone
@@ -1152,14 +1173,9 @@ impl Ledger {
         from_slot: Slot,
         to_slot: Slot,
     ) -> LedgerResult<()> {
+        self.set_lowest_cleanup_slot(to_slot);
+
         let mut batch = self.db.batch();
-
-        let mut lowest_cleanup_slot = self
-            .lowest_cleanup_slot
-            .write()
-            .expect(Self::LOWEST_CLEANUP_SLOT_POISONED);
-        *lowest_cleanup_slot = std::cmp::max(*lowest_cleanup_slot, to_slot);
-
         let num_deleted_slots = to_slot + 1 - from_slot;
         self.blocktime_cf.delete_range_in_batch(
             &mut batch,

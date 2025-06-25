@@ -231,14 +231,13 @@ async fn test_truncator_with_tx_spammer() {
     tokio::time::sleep(Duration::from_secs(3)).await;
 
     let signatures_result = handle.await;
+    assert!(ledger.flush().is_ok());
     assert!(signatures_result.is_ok());
     let signatures = signatures_result.unwrap();
 
     // Stop truncator assuming that complete after sleep
     ledger_truncator.stop();
     assert!(ledger_truncator.join().await.is_ok());
-
-    assert!(ledger.flush().is_ok());
 
     let lowest_existing =
         finality_provider.latest_final_slot.load(Ordering::Relaxed);
