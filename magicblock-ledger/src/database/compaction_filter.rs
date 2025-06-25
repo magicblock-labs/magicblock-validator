@@ -7,7 +7,7 @@ use std::{
     },
 };
 
-use log::debug;
+use log::trace;
 use rocksdb::{
     compaction_filter::CompactionFilter,
     compaction_filter_factory::{
@@ -87,13 +87,14 @@ impl<C: Column + ColumnName> CompactionFilter for PurgedSlotFilter<C> {
         _value: &[u8],
     ) -> CompactionDecision {
         use rocksdb::CompactionDecision::*;
-        debug!("CompactionFilter: triggered!");
+        trace!("CompactionFilter: triggered!");
 
         let slot_in_key = C::slot(C::index(key));
         if slot_in_key < self.oldest_slot {
-            debug!(
+            trace!(
                 "CompactionFilter: removing key. level: {}, slot: {}",
-                level, slot_in_key
+                level,
+                slot_in_key
             );
 
             // It is safe to delete this key
