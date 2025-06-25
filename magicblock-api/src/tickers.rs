@@ -180,5 +180,5 @@ pub fn init_system_metrics_ticker(
     //     }
     // })
 
-    tokio::task::spawn(async move  {})
+    tokio::task::spawn(async move {})
 }
