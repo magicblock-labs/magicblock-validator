@@ -21,7 +21,7 @@ impl Shutdown {
                 info!("SIGTERM has been received, initiating graceful shutdown");
             },
             _ = tokio::signal::ctrl_c() => {
-                info!("ctr-c signal received, initiating graceful shutdown");
+                info!("SIGINT signal received, initiating graceful shutdown");
             },
         }
 
