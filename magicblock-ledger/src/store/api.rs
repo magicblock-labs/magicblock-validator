@@ -2,7 +2,10 @@ use std::{
     collections::HashMap,
     fmt, fs,
     path::{Path, PathBuf},
-    sync::{atomic::Ordering, Arc, RwLock},
+    sync::{
+        atomic::{AtomicU64, Ordering},
+        Arc, RwLock,
+    },
 };
 
 use bincode::{deserialize, serialize};
@@ -63,6 +66,9 @@ pub struct Ledger {
 
     lowest_cleanup_slot: RwLock<Slot>,
     rpc_api_metrics: LedgerRpcApiMetrics,
+
+    last_slot: AtomicU64,
+    last_mod_id: AtomicU64,
 }
 
 impl fmt::Display for Ledger {
@@ -155,9 +161,20 @@ impl Ledger {
 
             lowest_cleanup_slot: RwLock::<Slot>::default(),
             rpc_api_metrics: LedgerRpcApiMetrics::default(),
+
+            last_slot: AtomicU64::new(0),
+            last_mod_id: AtomicU64::new(0),
         };
 
         Ok(ledger)
+    }
+
+    pub fn last_slot(&self) -> Slot {
+        self.last_slot.load(Ordering::Relaxed)
+    }
+
+    pub fn last_mod_id(&self) -> u64 {
+        self.last_mod_id.load(Ordering::Relaxed)
     }
 
     /// Collects and reports [`BlockstoreRocksDbColumnFamilyMetrics`] for
@@ -309,6 +326,7 @@ impl Ledger {
 
         self.blockhash_cf.put(slot, &blockhash)?;
         metrics::inc_ledger_blockhashes_count();
+        self.last_slot.store(slot, Ordering::Relaxed);
         Ok(())
     }
 
@@ -1085,6 +1103,7 @@ impl Ledger {
         data: &AccountModData,
     ) -> LedgerResult<()> {
         self.account_mod_datas_cf.put(id, data)?;
+        self.last_mod_id.store(id, Ordering::Relaxed);
         Ok(())
     }
 

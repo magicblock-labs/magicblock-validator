@@ -1,7 +1,6 @@
 use std::{marker::PhantomData, path::Path, sync::Arc};
 
 use bincode::deserialize;
-use magicblock_metrics::metrics;
 use rocksdb::{ColumnFamily, DBRawIterator, LiveFile};
 use solana_sdk::clock::Slot;
 
@@ -115,7 +114,6 @@ impl Database {
 
     pub fn storage_size(&self) -> Result<u64, LedgerError> {
         let size = fs_extra::dir::get_size(&self.path)?;
-        metrics::set_ledger_size(size);
         Ok(size)
     }
 
