@@ -1173,14 +1173,9 @@ impl Ledger {
         from_slot: Slot,
         to_slot: Slot,
     ) -> LedgerResult<()> {
+        self.set_lowest_cleanup_slot(to_slot);
+
         let mut batch = self.db.batch();
-
-        let mut lowest_cleanup_slot = self
-            .lowest_cleanup_slot
-            .write()
-            .expect(Self::LOWEST_CLEANUP_SLOT_POISONED);
-        *lowest_cleanup_slot = std::cmp::max(*lowest_cleanup_slot, to_slot);
-
         let num_deleted_slots = to_slot + 1 - from_slot;
         self.blocktime_cf.delete_range_in_batch(
             &mut batch,
