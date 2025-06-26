@@ -1,8 +1,8 @@
-use lmdb::{Cursor, Database, RoCursor, RoTransaction, Transaction};
+use lmdb::{Cursor, RoCursor, RoTransaction};
 use log::error;
 use solana_pubkey::Pubkey;
 
-use super::lmdb_utils::MDB_GET_CURRENT_OP;
+use super::{lmdb_utils::MDB_GET_CURRENT_OP, table::Table};
 use crate::AdbResult;
 
 /// Iterator over pubkeys and offsets, where accounts
@@ -18,11 +18,11 @@ pub(crate) struct OffsetPubkeyIter<'env, const S: u32, const N: u32> {
 
 impl<'a, const S: u32, const N: u32> OffsetPubkeyIter<'a, S, N> {
     pub(super) fn new(
-        db: Database,
+        table: &Table,
         txn: RoTransaction<'a>,
         pubkey: Option<&Pubkey>,
     ) -> AdbResult<Self> {
-        let cursor = txn.open_ro_cursor(db)?;
+        let cursor = table.cursor_ro(&txn)?;
         // SAFETY:
         // nasty/neat trick for lifetime erasure, but we are upholding
         // the rust's  ownership contracts by keeping txn around as well
