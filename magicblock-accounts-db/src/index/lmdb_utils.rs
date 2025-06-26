@@ -21,12 +21,9 @@ pub(super) const MDB_GET_CURRENT_OP: u32 = 4;
 #[doc = "Position at key/data pair. Only for #MDB_DUPSORT"]
 pub(super) const MDB_GET_BOTH_OP: u32 = 2;
 
-pub(super) fn lmdb_env(
-    name: &str,
-    dir: &Path,
-    size: usize,
-    maxdb: u32,
-) -> lmdb::Result<Environment> {
+const TABLES_COUNT: u32 = 4;
+
+pub(super) fn lmdb_env(dir: &Path, size: usize) -> lmdb::Result<Environment> {
     let lmdb_env_flags: EnvironmentFlags =
         // allows to manually trigger flush syncs, but OS initiated flushes are somewhat beyond our control
         EnvironmentFlags::NO_SYNC
@@ -34,29 +31,15 @@ pub(super) fn lmdb_env(
         // directly, saves CPU cycles and memory access
         | EnvironmentFlags::WRITE_MAP
         // we never read uninit memory, so there's no point in paying for meminit
-        | EnvironmentFlags::NO_MEM_INIT;
+        | EnvironmentFlags::NO_MEM_INIT
+        // accounts' access is pretty much random, so read ahead might be doing unecessary work
+        | EnvironmentFlags::NO_READAHEAD;
 
-    let path = dir.join(name);
+    let path = dir.join("index");
     let _ = fs::create_dir_all(&path);
     Environment::new()
         .set_map_size(size)
-        .set_max_dbs(maxdb)
+        .set_max_dbs(TABLES_COUNT)
         .set_flags(lmdb_env_flags)
         .open_with_permissions(&path, 0o644)
-}
-
-/// Utility type to enforce big endian representation of u32. This is useful when u32
-/// is used as a key in lmdb and we need an ascending ordering on byte representation
-pub(super) struct BigEndianU32([u8; 4]);
-
-impl BigEndianU32 {
-    pub(super) fn new(val: u32) -> Self {
-        Self(val.to_be_bytes())
-    }
-}
-
-impl AsRef<[u8]> for BigEndianU32 {
-    fn as_ref(&self) -> &[u8] {
-        &self.0
-    }
 }

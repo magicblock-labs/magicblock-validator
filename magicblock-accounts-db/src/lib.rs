@@ -48,7 +48,7 @@ impl AccountsDb {
         ))?;
         let storage = AccountsStorage::new(config, &directory)
             .inspect_err(log_err!("storage creation"))?;
-        let index = AccountsDbIndex::new(config, &directory)
+        let index = AccountsDbIndex::new(config.index_map_size, &directory)
             .inspect_err(log_err!("index creation"))?;
         let snapshot_engine =
             SnapshotEngine::new(directory, config.max_snapshots as usize)
