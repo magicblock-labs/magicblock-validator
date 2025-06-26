@@ -171,7 +171,7 @@ fn test_ensure_correct_owner() {
     );
     let result = tenv.get_program_accounts_iter(&owner);
     assert!(
-        matches!(result, Err(AccountsDbError::NotFound)),
+        matches!(result.map(|i| i.count()), Ok(0)),
         "programs index still has record of account after owner change"
     );
 
@@ -201,14 +201,18 @@ fn test_program_index_cleanup() {
         .env
         .begin_rw_txn()
         .expect("failed to start new RW transaction");
-    let result =
-        tenv.remove_programs_index_entry(&pubkey, &mut txn, allocation.offset);
+    let result = tenv.remove_programs_index_entry(
+        &pubkey,
+        None,
+        &mut txn,
+        allocation.offset,
+    );
     assert!(result.is_ok(), "failed to remove entry from programs index");
     txn.commit().expect("failed to commit transaction");
 
     let result = tenv.get_program_accounts_iter(&owner);
     assert!(
-        matches!(result, Err(AccountsDbError::NotFound)),
+        matches!(result.map(|i| i.count()), Ok(0)),
         "programs index still has record of account after cleanup"
     );
 }
