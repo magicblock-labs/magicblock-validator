@@ -4,10 +4,10 @@ use iterator::OffsetPubkeyIter;
 use lmdb::{
     Cursor, DatabaseFlags, Environment, RwTransaction, Transaction, WriteFlags,
 };
-use lmdb_utils::*;
 use log::warn;
 use solana_pubkey::Pubkey;
 use table::Table;
+use utils::*;
 
 use crate::{
     error::AccountsDbError,
@@ -142,9 +142,9 @@ impl AccountsDbIndex {
     }
 
     /// Retrieve the offset and the size (number of blocks) given account occupies
-    fn get_allocation(
+    fn get_allocation<T: Transaction>(
         &self,
-        txn: &RwTransaction,
+        txn: &T,
         pubkey: &Pubkey,
     ) -> AdbResult<ExistingAllocation> {
         let Some(slice) = self.accounts.get(txn, pubkey)? else {
@@ -178,7 +178,7 @@ impl AccountsDbIndex {
                 .put_if_not_exists(&mut txn, pubkey, index_value)?;
         // if the account does exist, then it already occupies space in main storage
         if !inserted {
-            // in which case we just move the account to new allocation
+            // in which case we just move the account to a new allocation
             // adjusting all of the offsets and cleaning up the older ones
             let previous =
                 self.reallocate_account(pubkey, &mut txn, &index_value)?;
@@ -213,10 +213,8 @@ impl AccountsDbIndex {
         self.accounts.put(txn, pubkey, index_value)?;
 
         // we also need to delete old entry from `programs` index
-        match self.remove_programs_index_entry(pubkey, txn, allocation.offset) {
-            Ok(()) | Err(lmdb::Error::NotFound) => Ok(allocation),
-            Err(err) => Err(err.into()),
-        }
+        self.remove_programs_index_entry(pubkey, txn, allocation.offset)?;
+        Ok(allocation)
     }
 
     /// Removes account from the database and marks its backing storage for recycling
@@ -260,7 +258,7 @@ impl AccountsDbIndex {
         pubkey: &Pubkey,
         owner: &Pubkey,
     ) -> AdbResult<()> {
-        let mut txn = self.env.begin_rw_txn()?;
+        let txn = self.env.begin_ro_txn()?;
         match self.owners.get(&txn, pubkey)? {
             // if current owner matches with that stored in index, then we are all set
             Some(val) if owner.as_ref() == val => {
@@ -271,6 +269,7 @@ impl AccountsDbIndex {
             Some(_) => (),
         };
         let allocation = self.get_allocation(&txn, pubkey)?;
+        let mut txn = self.env.begin_rw_txn()?;
         // cleanup `programs` and `owners` index
         self.remove_programs_index_entry(pubkey, &mut txn, allocation.offset)?;
         // track new owner of the account via programs' index
@@ -291,8 +290,9 @@ impl AccountsDbIndex {
     ) -> lmdb::Result<()> {
         // in order to delete the old entry from `programs` index, we consult
         // the `owners` index to fetch the previous owner of the account
-        let owner = match self.owners.get(txn, pubkey)? {
-            Some(val) => {
+        let mut owners = self.owners.cursor_rw(txn)?;
+        let owner = match owners.get(Some(pubkey.as_ref()), None, MDB_SET_OP) {
+            Ok((_, val)) => {
                 let pk = Pubkey::try_from(val).inspect_err(log_err!(
                     "owners index contained invalid value for pubkey of len {}",
                     val.len()
@@ -302,11 +302,16 @@ impl AccountsDbIndex {
                 };
                 owner
             }
-            None => {
+            Err(lmdb::Error::NotFound) => {
                 warn!("account {pubkey} didn't have owners index entry");
                 return Ok(());
             }
+            Err(e) => {
+                return Err(e);
+            }
         };
+        owners.del(WEMPTY)?;
+        drop(owners);
 
         //let mut cursor = self.programs.cursor_rw(txn)?;
 
@@ -324,7 +329,6 @@ impl AccountsDbIndex {
         //}
         //drop(cursor);
         // and cleanup `owners` index as well
-        self.owners.del(txn, pubkey, None)?;
         Ok(())
     }
 
@@ -405,7 +409,7 @@ impl AccountsDbIndex {
 }
 
 pub(crate) mod iterator;
-mod lmdb_utils;
+mod utils;
 //mod standalone;
 mod table;
 #[cfg(test)]

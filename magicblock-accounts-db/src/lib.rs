@@ -127,9 +127,9 @@ impl AccountsDb {
                 // https://github.com/magicblock-labs/magicblock-validator/issues/327
                 let allocation = match self.index.try_recycle_allocation(blocks)
                 {
-                    // if we could recycle some "hole" in database, use it
+                    // if we could recycle some "hole" in the database, use it
                     Ok(recycled) => {
-                        // bookkeeping for deallocated(free hole) space
+                        // bookkeeping for the deallocated (free hole) space
                         self.storage.decrement_deallocations(recycled.blocks);
                         self.storage.recycle(recycled)
                     }

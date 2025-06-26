@@ -18,8 +18,6 @@ pub(super) const MDB_NEXT_OP: u32 = 8;
 pub(super) const MDB_NEXT_DUP_OP: u32 = 9;
 #[doc = "Return key/data at current cursor position"]
 pub(super) const MDB_GET_CURRENT_OP: u32 = 4;
-#[doc = "Position at key/data pair. Only for #MDB_DUPSORT"]
-pub(super) const MDB_GET_BOTH_OP: u32 = 2;
 
 const TABLES_COUNT: u32 = 4;
 
