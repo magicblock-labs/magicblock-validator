@@ -11,4 +11,5 @@ pub trait ManagableLedger: Send + Sync + 'static {
     fn initialize_lowest_cleanup_slot(&self) -> LedgerResult<()>;
     async fn compact_slot_range(&self, to: Slot);
     async fn truncate_fat_ledger(&self, lowest_slot: Slot);
+    fn get_lowest_cleanup_slot(&self) -> Slot;
 }

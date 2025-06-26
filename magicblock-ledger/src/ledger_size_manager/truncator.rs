@@ -108,6 +108,10 @@ impl ManagableLedger for Truncator {
         self.ledger.initialize_lowest_cleanup_slot()
     }
 
+    fn get_lowest_cleanup_slot(&self) -> Slot {
+        self.ledger.get_lowest_cleanup_slot()
+    }
+
     async fn compact_slot_range(&self, to: Slot) {
         let from_slot = self.ledger.get_lowest_cleanup_slot() + 1;
         Self::truncate(&self.ledger, from_slot, to).await;
