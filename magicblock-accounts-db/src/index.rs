@@ -312,7 +312,7 @@ impl AccountsDbIndex {
                 };
                 owner
             }
-            None => {
+            Err(lmdb::Error::NotFound) => {
                 warn!("account {pubkey} didn't have owners index entry");
                 return Ok(());
             }
