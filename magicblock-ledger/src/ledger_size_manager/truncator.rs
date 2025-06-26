@@ -24,16 +24,21 @@ pub struct Truncator {
 impl Truncator {
     /// Synchronous utility function that triggers and awaits compaction on all the columns
     /// Compacts [from_slot; to_slot] inclusive
-    pub async fn compact_slot_range(
+    pub async fn truncate(
         ledger: &Arc<Ledger>,
-        from_slot: u64,
-        to_slot: u64,
+        from_slot: Slot,
+        to_slot: Slot,
     ) {
-        debug_assert!(to_slot >= from_slot, "to_slot >= from_slot");
-        if to_slot < from_slot {
-            error!("BUG: to_slot < from_slot, not compacting");
+        debug_assert!(from_slot <= to_slot);
+        if from_slot > to_slot {
+            error!(
+                "Truncation requested with from_slot: {from_slot} > to_slot: {to_slot}, skipping"
+            );
             return;
         }
+        // The compaction filter uses lowest_cleanup_slot to determine what slots
+        // to remove so we need to set this _before_ we run compaction
+        ledger.set_lowest_cleanup_slot(to_slot);
 
         // Compaction can be run concurrently for different cf
         // but it utilizes rocksdb threads, in order not to drain
@@ -103,16 +108,16 @@ impl ManagableLedger for Truncator {
         self.ledger.initialize_lowest_cleanup_slot()
     }
 
-    async fn compact_slot_range(&self, from: Slot, to: Slot) {
-        Self::compact_slot_range(&self.ledger, from, to).await;
+    async fn compact_slot_range(&self, to: Slot) {
+        let from_slot = self.ledger.get_lowest_cleanup_slot() + 1;
+        Self::truncate(&self.ledger, from_slot, to).await;
     }
 
     async fn truncate_fat_ledger(&self, lowest_slot: u64) {
-        self.ledger.set_lowest_cleanup_slot(lowest_slot);
         if let Err(err) = self.ledger.flush() {
-            // We will still compact
-            error!("Failed to flush: {}", err);
+            error!("Failed to flush, but compaction will still run: {}", err);
         }
-        Self::compact_slot_range(&self.ledger, 0, lowest_slot).await;
+
+        Self::truncate(&self.ledger, 0, lowest_slot).await;
     }
 }

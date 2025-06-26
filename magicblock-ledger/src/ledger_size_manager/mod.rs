@@ -182,3 +182,65 @@ impl<T: ManagableLedger> LedgerSizeManager<T> {
         );
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Mutex;
+
+    use async_trait::async_trait;
+
+    use super::*;
+    use crate::{errors::LedgerResult, Ledger};
+
+    struct ManageableLedgerMock {
+        first_slot: Mutex<Slot>,
+        last_slot: Mutex<Slot>,
+        last_mod_id: Mutex<u64>,
+    }
+    impl ManageableLedgerMock {
+        fn new(first_slot: Slot, last_slot: Slot, last_mod_id: u64) -> Self {
+            ManageableLedgerMock {
+                first_slot: Mutex::new(first_slot),
+                last_slot: Mutex::new(last_slot),
+                last_mod_id: Mutex::new(last_mod_id),
+            }
+        }
+
+        fn slots(&self) -> Slot {
+            let first_slot = *self.first_slot.lock().unwrap();
+            let last_slot = *self.last_slot.lock().unwrap();
+            last_slot - first_slot
+        }
+    }
+
+    #[async_trait]
+    impl ManagableLedger for ManageableLedgerMock {
+        fn storage_size(&self) -> LedgerResult<u64> {
+            Ok(self.slots() * 100)
+        }
+
+        fn last_slot(&self) -> Slot {
+            *self.last_slot.lock().unwrap()
+        }
+
+        fn last_mod_id(&self) -> u64 {
+            *self.last_mod_id.lock().unwrap()
+        }
+
+        fn initialize_lowest_cleanup_slot(&self) -> LedgerResult<()> {
+            Ok(())
+        }
+
+        async fn compact_slot_range(&self, to: Slot) {
+            assert!(to >= self.last_slot());
+            *self.first_slot.lock().unwrap() = to;
+        }
+
+        async fn truncate_fat_ledger(&self, lowest_slot: Slot) {
+            *self.first_slot.lock().unwrap() = lowest_slot;
+        }
+    }
+
+    #[tokio::test]
+    async fn test_ledger_size_manager() {}
+}
