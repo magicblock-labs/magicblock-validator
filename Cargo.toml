@@ -184,4 +184,4 @@ vergen = "8.3.1"
 # and we use protobuf-src v2.1.1. Otherwise compilation fails
 solana-storage-proto = { path = "./storage-proto" }
 solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "7bdfefc" }
-solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git", features = [ "dev-context-only-utils" ] }
+solana-svm = { git = "https://github.com/magicblock-labs/magicblock-svm.git" }

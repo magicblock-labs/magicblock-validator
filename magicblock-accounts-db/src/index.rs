@@ -213,7 +213,7 @@ impl AccountsDbIndex {
         self.accounts.put(txn, pubkey, index_value)?;
 
         // we also need to delete old entry from `programs` index
-        self.remove_programs_index_entry(pubkey, txn, allocation.offset)?;
+        self.remove_programs_index_entry(pubkey, None, txn, allocation.offset)?;
         Ok(allocation)
     }
 
@@ -245,7 +245,7 @@ impl AccountsDbIndex {
         )?;
 
         // we also need to cleanup `programs` index
-        self.remove_programs_index_entry(pubkey, &mut txn, offset)?;
+        self.remove_programs_index_entry(pubkey, None, &mut txn, offset)?;
         txn.commit()?;
         Ok(())
     }
@@ -259,19 +259,24 @@ impl AccountsDbIndex {
         owner: &Pubkey,
     ) -> AdbResult<()> {
         let txn = self.env.begin_ro_txn()?;
-        match self.owners.get(&txn, pubkey)? {
+        let old_owner = match self.owners.get(&txn, pubkey)? {
             // if current owner matches with that stored in index, then we are all set
             Some(val) if owner.as_ref() == val => {
                 return Ok(());
             }
             None => return Ok(()),
-            // if they don't match, well then we have to remove old entries and create new ones
-            Some(_) => (),
+            // if they don't match, then we have to remove old entries and create new ones
+            Some(val) => Pubkey::try_from(val).ok(),
         };
         let allocation = self.get_allocation(&txn, pubkey)?;
         let mut txn = self.env.begin_rw_txn()?;
         // cleanup `programs` and `owners` index
-        self.remove_programs_index_entry(pubkey, &mut txn, allocation.offset)?;
+        self.remove_programs_index_entry(
+            pubkey,
+            old_owner,
+            &mut txn,
+            allocation.offset,
+        )?;
         // track new owner of the account via programs' index
         let offset_and_pubkey =
             bytes!(#pack, allocation.offset, u32, *pubkey, Pubkey);
@@ -285,9 +290,14 @@ impl AccountsDbIndex {
     fn remove_programs_index_entry(
         &self,
         pubkey: &Pubkey,
+        old_owner: Option<Pubkey>,
         txn: &mut RwTransaction,
         offset: u32,
     ) -> lmdb::Result<()> {
+        let val = bytes!(#pack, offset, u32, *pubkey, Pubkey);
+        if let Some(owner) = old_owner {
+            return self.programs.del(txn, owner, Some(&val));
+        }
         // in order to delete the old entry from `programs` index, we consult
         // the `owners` index to fetch the previous owner of the account
         let mut owners = self.owners.cursor_rw(txn)?;
@@ -313,22 +323,7 @@ impl AccountsDbIndex {
         owners.del(WEMPTY)?;
         drop(owners);
 
-        //let mut cursor = self.programs.cursor_rw(txn)?;
-
-        //let key = Some(owner.as_ref());
-        let val = bytes!(#pack, offset, u32, *pubkey, Pubkey);
         self.programs.del(txn, owner, Some(&val))?;
-        //// locate the entry matching the owner and offset/pubkey combo
-        //let found = cursor.get(key, Some(&val), MDB_GET_BOTH_OP).is_ok();
-        //if found {
-        //    // delete the entry only if it was located successfully
-        //    cursor.del(WEMPTY)?;
-        //} else {
-        //    // NOTE: this should never happend in consistent database
-        //    warn!("account {pubkey} with owner {owner} didn't have programs index entry");
-        //}
-        //drop(cursor);
-        // and cleanup `owners` index as well
         Ok(())
     }
 
@@ -337,16 +332,14 @@ impl AccountsDbIndex {
     pub(crate) fn get_program_accounts_iter(
         &self,
         program: &Pubkey,
-    ) -> AdbResult<OffsetPubkeyIter<'_, MDB_SET_OP, MDB_NEXT_DUP_OP>> {
+    ) -> AdbResult<OffsetPubkeyIter<'_>> {
         let txn = self.env.begin_ro_txn()?;
         OffsetPubkeyIter::new(&self.programs, txn, Some(program))
     }
 
     /// Returns an iterator over offsets and pubkeys of all accounts in database
     /// offsets can be used further to retrieve the account from storage
-    pub(crate) fn get_all_accounts(
-        &self,
-    ) -> AdbResult<OffsetPubkeyIter<'_, MDB_FIRST_OP, MDB_NEXT_OP>> {
+    pub(crate) fn get_all_accounts(&self) -> AdbResult<OffsetPubkeyIter<'_>> {
         let txn = self.env.begin_ro_txn()?;
         OffsetPubkeyIter::new(&self.programs, txn, None)
     }

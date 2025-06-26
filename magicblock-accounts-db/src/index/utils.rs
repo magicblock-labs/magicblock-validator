@@ -10,14 +10,6 @@ use lmdb::{Environment, EnvironmentFlags};
 pub(super) const MDB_SET_RANGE_OP: u32 = 17;
 #[doc = "Position at specified key"]
 pub(super) const MDB_SET_OP: u32 = 15;
-#[doc = "Position at first key/data item"]
-pub(super) const MDB_FIRST_OP: u32 = 0;
-#[doc = "Position at next data item"]
-pub(super) const MDB_NEXT_OP: u32 = 8;
-#[doc = "Position at next data item of current key. Only for #MDB_DUPSORT"]
-pub(super) const MDB_NEXT_DUP_OP: u32 = 9;
-#[doc = "Return key/data at current cursor position"]
-pub(super) const MDB_GET_CURRENT_OP: u32 = 4;
 
 const TABLES_COUNT: u32 = 4;
 

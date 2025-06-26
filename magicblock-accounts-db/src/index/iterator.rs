@@ -2,7 +2,7 @@ use lmdb::{Cursor, RoCursor, RoTransaction};
 use log::error;
 use solana_pubkey::Pubkey;
 
-use super::{table::Table, utils::MDB_GET_CURRENT_OP};
+use super::{table::Table, MDB_SET_OP};
 use crate::AdbResult;
 
 /// Iterator over pubkeys and offsets, where accounts
@@ -10,51 +10,50 @@ use crate::AdbResult;
 ///
 /// S: Starting position operation, determines where to place cursor initially
 /// N: Next position operation, determines where to move cursor next
-pub(crate) struct OffsetPubkeyIter<'env, const S: u32, const N: u32> {
-    cursor: RoCursor<'env>,
-    terminated: bool,
+pub(crate) struct OffsetPubkeyIter<'env> {
+    iter: lmdb::Iter<'env>,
+    _cursor: RoCursor<'env>,
     _txn: RoTransaction<'env>,
 }
 
-impl<'a, const S: u32, const N: u32> OffsetPubkeyIter<'a, S, N> {
+impl<'env> OffsetPubkeyIter<'env> {
     pub(super) fn new(
         table: &Table,
-        txn: RoTransaction<'a>,
+        txn: RoTransaction<'env>,
         pubkey: Option<&Pubkey>,
     ) -> AdbResult<Self> {
         let cursor = table.cursor_ro(&txn)?;
         // SAFETY:
         // nasty/neat trick for lifetime erasure, but we are upholding
-        // the rust's  ownership contracts by keeping txn around as well
-        let cursor: RoCursor = unsafe { std::mem::transmute(cursor) };
-        // jump to the first entry, key might be ignored depending on OP
-        cursor.get(pubkey.map(AsRef::as_ref), None, S)?;
+        // the rust's ownership contracts by keeping txn around as well
+        let mut cursor: RoCursor = unsafe { std::mem::transmute(cursor) };
+        let iter = if let Some(pubkey) = pubkey {
+            // NOTE: there's a bug in the LMDB, which ignores NotFound error when
+            // iterating on DUPSORT databases, where it just jumps to the next key,
+            // here we check for the error explicitly to prevent this behavior
+            if let Err(lmdb::Error::NotFound) =
+                cursor.get(Some(pubkey.as_ref()), None, MDB_SET_OP)
+            {
+                lmdb::Iter::Err(lmdb::Error::NotFound)
+            } else {
+                cursor.iter_dup_of(pubkey)
+            }
+        } else {
+            cursor.iter_start()
+        };
         Ok(Self {
             _txn: txn,
-            cursor,
-            terminated: false,
+            _cursor: cursor,
+            iter,
         })
     }
 }
 
-impl<const S: u32, const N: u32> Iterator for OffsetPubkeyIter<'_, S, N> {
+impl Iterator for OffsetPubkeyIter<'_> {
     type Item = (u32, Pubkey);
     fn next(&mut self) -> Option<Self::Item> {
-        if self.terminated {
-            return None;
-        }
-
-        match self.cursor.get(None, None, MDB_GET_CURRENT_OP) {
-            Ok(entry) => {
-                // advance the cursor,
-                let advance = self.cursor.get(None, None, N);
-                // if we move past the iterable range, NotFound will be
-                // triggered by OP, and we can terminate the iteration
-                if let Err(lmdb::Error::NotFound) = advance {
-                    self.terminated = true;
-                }
-                Some(bytes!(#unpack, entry.1, u32, Pubkey))
-            }
+        match self.iter.next()? {
+            Ok(entry) => Some(bytes!(#unpack, entry.1, u32, Pubkey)),
             Err(error) => {
                 error!("error advancing offset iterator cursor: {error}");
                 None

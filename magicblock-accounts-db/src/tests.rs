@@ -424,7 +424,7 @@ fn test_owner_change() {
     let result = tenv.account_matches_owners(&acc.pubkey, &[OWNER]);
     assert!(matches!(result, Err(AccountsDbError::NotFound)));
     let result = tenv.get_program_accounts(&OWNER, |_| true);
-    assert!(matches!(result, Err(AccountsDbError::NotFound)));
+    assert!(result.map(|pks| pks.is_empty()).unwrap_or_default());
 
     let result = tenv.account_matches_owners(&acc.pubkey, &[OWNER, new_owner]);
     assert!(matches!(result, Ok(1)));
