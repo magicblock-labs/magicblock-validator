@@ -129,6 +129,9 @@ pub trait Column {
     // first item in the key.
     fn as_index(slot: Slot) -> Self::Index;
     fn slot(index: Self::Index) -> Slot;
+    fn keep_all_on_compaction() -> bool {
+        false
+    }
 }
 
 pub trait ColumnName {
@@ -650,6 +653,9 @@ impl Column for AccountModDatas {
     // AccountModDatas column is not keyed by slot so this method is meaningless
     fn as_index(slot: Slot) -> Self::Index {
         slot
+    }
+    fn keep_all_on_compaction() -> bool {
+        true
     }
 }
 

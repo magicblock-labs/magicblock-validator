@@ -87,6 +87,10 @@ impl<C: Column + ColumnName> CompactionFilter for PurgedSlotFilter<C> {
         _value: &[u8],
     ) -> CompactionDecision {
         use rocksdb::CompactionDecision::*;
+        if C::keep_all_on_compaction() {
+            return Keep;
+        }
+
         trace!("CompactionFilter: triggered!");
 
         let slot_in_key = C::slot(C::index(key));
