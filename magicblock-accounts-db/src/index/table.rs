@@ -19,6 +19,7 @@ impl Table {
         Ok(Self { db })
     }
 
+    #[inline]
     pub(super) fn get<'txn, T: Transaction, K: AsRef<[u8]>>(
         &self,
         txn: &'txn T,
@@ -31,6 +32,7 @@ impl Table {
         }
     }
 
+    #[inline]
     pub(super) fn put<K: AsRef<[u8]>, V: AsRef<[u8]>>(
         &self,
         txn: &mut RwTransaction,
@@ -40,6 +42,7 @@ impl Table {
         txn.put(self.db, &key, &value, WEMPTY)
     }
 
+    #[inline]
     pub(super) fn del<K: AsRef<[u8]>>(
         &self,
         txn: &mut RwTransaction,
@@ -52,6 +55,7 @@ impl Table {
         }
     }
 
+    #[inline]
     pub(super) fn put_if_not_exists<K: AsRef<[u8]>, V: AsRef<[u8]>>(
         &self,
         txn: &mut RwTransaction,
@@ -66,6 +70,7 @@ impl Table {
         }
     }
 
+    #[inline]
     pub(super) fn cursor_ro<'txn, T: Transaction>(
         &self,
         txn: &'txn T,
@@ -73,6 +78,7 @@ impl Table {
         txn.open_ro_cursor(self.db)
     }
 
+    #[inline]
     pub(super) fn cursor_rw<'txn>(
         &self,
         txn: &'txn mut RwTransaction,
