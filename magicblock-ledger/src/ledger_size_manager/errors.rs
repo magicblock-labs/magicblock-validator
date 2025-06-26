@@ -5,8 +5,6 @@ use tokio::task::JoinError;
 pub enum LedgerSizeManagerError {
     #[error(transparent)]
     LedgerError(#[from] crate::errors::LedgerError),
-    #[error("Ledger needs to be provided to start the manager")]
-    LedgerNotProvided,
     #[error("Failed to join worker: {0}")]
     JoinError(#[from] JoinError),
 }

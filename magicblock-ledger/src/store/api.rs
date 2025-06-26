@@ -248,6 +248,25 @@ impl Ledger {
             .read()
             .expect(Self::LOWEST_CLEANUP_SLOT_POISONED)
     }
+    ///
+    /// Updates both lowest_cleanup_slot and oldest_slot for CompactionFilter
+    /// All slots less or equal to argument will be removed during compaction
+    pub fn set_lowest_cleanup_slot(&self, slot: Slot) {
+        let mut lowest_cleanup_slot = self
+            .lowest_cleanup_slot
+            .write()
+            .expect(Self::LOWEST_CLEANUP_SLOT_POISONED);
+
+        let new_lowest_cleanup_slot = std::cmp::max(*lowest_cleanup_slot, slot);
+        *lowest_cleanup_slot = new_lowest_cleanup_slot;
+
+        if new_lowest_cleanup_slot == 0 {
+            // fresh db case
+            self.db.set_oldest_slot(new_lowest_cleanup_slot);
+        } else {
+            self.db.set_oldest_slot(new_lowest_cleanup_slot + 1);
+        }
+    }
 
     /// Initializes lowest slot to cleanup from
     pub fn initialize_lowest_cleanup_slot(&self) -> Result<(), LedgerError> {

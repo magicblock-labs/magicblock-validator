@@ -76,7 +76,7 @@ impl Watermarks {
         size >= self.max_ledger_size
     }
 
-    fn get_truncation_mark(
+    pub(super) fn get_truncation_mark(
         &mut self,
         ledger_size: u64,
         slot: Slot,
