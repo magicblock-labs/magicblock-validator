@@ -161,15 +161,27 @@ impl<T: ManagableLedger> LedgerSizeManager<T> {
             )
         });
 
-        if let Some(mark) = wms.get_truncation_mark(
-            ledger_size,
-            ledger.last_slot(),
-            ledger.last_mod_id(),
-        ) {
-            Self::truncate_ledger(ledger, mark);
-            ledger.storage_size().ok()
-        } else {
-            Some(ledger_size)
+        let mut ledger_size = ledger_size;
+        // If ledger exceeded size we downsize until we either reach below the max size
+        // or run out of watermarks.
+        loop {
+            let last_slot = ledger.last_slot();
+
+            if let Some(mark) = wms.get_truncation_mark(
+                ledger_size,
+                last_slot,
+                ledger.last_mod_id(),
+            ) {
+                Self::truncate_ledger(ledger, mark).await;
+
+                if let Ok(ls) = ledger.storage_size() {
+                    ledger_size = ls;
+                } else {
+                    break Some(ledger_size);
+                }
+            } else {
+                break Some(ledger_size);
+            }
         }
     }
 
@@ -210,8 +222,8 @@ impl<T: ManagableLedger> LedgerSizeManager<T> {
 
     async fn truncate_ledger(ledger: &Arc<T>, mark: Watermark) {
         debug!(
-            "Truncating ledger at slot {}, size {}",
-            mark.slot, mark.size
+            "Truncating ledger up to slot {} gaining {} bytes",
+            mark.slot, mark.size_delta
         );
         ledger.compact_slot_range(mark.slot).await;
     }
@@ -222,6 +234,7 @@ mod tests {
     use std::sync::Mutex;
 
     use async_trait::async_trait;
+    use test_tools_core::init_logger;
 
     use super::*;
     use crate::{errors::LedgerResult, Ledger};
@@ -231,7 +244,7 @@ mod tests {
     // -----------------
     const BYTES_PER_SLOT: u64 = 100;
     struct ManageableLedgerMock {
-        first_slot: Mutex<Slot>,
+        lowest_slot: Mutex<Slot>,
         last_slot: Mutex<Slot>,
         last_mod_id: Mutex<u64>,
     }
@@ -239,14 +252,14 @@ mod tests {
     impl ManageableLedgerMock {
         fn new(first_slot: Slot, last_slot: Slot, last_mod_id: u64) -> Self {
             ManageableLedgerMock {
-                first_slot: Mutex::new(first_slot),
+                lowest_slot: Mutex::new(first_slot),
                 last_slot: Mutex::new(last_slot),
                 last_mod_id: Mutex::new(last_mod_id),
             }
         }
 
         fn slots(&self) -> Slot {
-            let first_slot = *self.first_slot.lock().unwrap();
+            let first_slot = *self.lowest_slot.lock().unwrap();
             let last_slot = *self.last_slot.lock().unwrap();
             last_slot - first_slot
         }
@@ -276,16 +289,21 @@ mod tests {
         }
 
         fn get_lowest_cleanup_slot(&self) -> Slot {
-            *self.first_slot.lock().unwrap()
+            *self.lowest_slot.lock().unwrap()
         }
 
         async fn compact_slot_range(&self, to: Slot) {
-            assert!(to >= self.last_slot());
-            *self.first_slot.lock().unwrap() = to;
+            let lowest_slot = self.get_lowest_cleanup_slot();
+            assert!(
+                to >= lowest_slot,
+                "{to} must be >= last slot {lowest_slot}",
+            );
+            debug!("Setting lowest cleanup slot to {}", to);
+            *self.lowest_slot.lock().unwrap() = to;
         }
 
         async fn truncate_fat_ledger(&self, lowest_slot: Slot) {
-            *self.first_slot.lock().unwrap() = lowest_slot;
+            *self.lowest_slot.lock().unwrap() = lowest_slot;
         }
     }
 
@@ -293,5 +311,72 @@ mod tests {
     // Tests
     // -----------------
     #[tokio::test]
-    async fn test_ledger_size_manager() {}
+    async fn test_ledger_size_manager_new_ledger() {
+        init_logger!();
+
+        let ledger = Arc::new(ManageableLedgerMock::new(0, 0, 0));
+        let mut watermarks = None::<Watermarks>;
+        let resize_percentage = ResizePercentage::Large;
+        let max_ledger_size = 800;
+        let mut existing_ledger_state = None::<ExistingLedgerState>;
+
+        macro_rules! tick {
+            ($tick:expr) => {{
+                let ledger_size =
+                    LedgerSizeManager::<ManageableLedgerMock>::tick(
+                        &ledger,
+                        &mut watermarks,
+                        &resize_percentage,
+                        max_ledger_size,
+                        &mut existing_ledger_state,
+                    )
+                    .await
+                    .unwrap();
+                debug!(
+                    "Ledger after tick {}: Size {} {:#?}",
+                    $tick, ledger_size, watermarks
+                );
+                ledger_size
+            }};
+        }
+        info!("Slot: 0, New Ledger");
+        let ledger_size = tick!(1);
+        assert_eq!(ledger_size, 0);
+
+        info!("Slot: 1 added 1 slot -> 100 bytes");
+        ledger.add_slots(1);
+        let ledger_size = tick!(2);
+        assert_eq!(ledger_size, 100);
+
+        info!("Slot: 4, added 3 slots -> 400 bytes marked (delta: 400)");
+        ledger.add_slots(3);
+        let ledger_size = tick!(3);
+        assert_eq!(ledger_size, 400);
+
+        info!("Slot: 6, added 2 slots -> 600 bytes marked (delta: 200)");
+        ledger.add_slots(2);
+        let ledger_size = tick!(4);
+        assert_eq!(ledger_size, 600);
+
+        info!("Slot: 7, added 1 slot -> 700 bytes");
+        ledger.add_slots(1);
+        let ledger_size = tick!(5);
+        assert_eq!(ledger_size, 700);
+
+        // Here we go to 900 and truncate using the first watermark which removes 400 bytes
+        info!("Slot 9, added 2 slots -> 900 bytes marked (delta: 300) -> remove 400 -> 500 bytes ");
+        ledger.add_slots(2);
+        let ledger_size = tick!(6);
+        assert_eq!(ledger_size, 500);
+
+        info!("Slot 10, added 1 slot -> 600 bytes");
+        ledger.add_slots(1);
+        let ledger_size = tick!(7);
+        assert_eq!(ledger_size, 600);
+
+        info!("Slot 14, added 4 slots -> 1000 bytes marked (delta: 500) -> remove 200 -> remove 300");
+        ledger.add_slots(4);
+        let ledger_size = tick!(8);
+        assert_eq!(ledger_size, 500);
+    }
 }
