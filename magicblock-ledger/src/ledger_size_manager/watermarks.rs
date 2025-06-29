@@ -14,14 +14,18 @@ pub(super) struct Watermark {
     pub(crate) slot: u64,
     /// Account mod ID at which this watermark was captured
     pub(crate) mod_id: u64,
-    /// The size of the ledger when this watermark was captured
-    pub(crate) size: u64,
+    /// The size delta relative to the previous captured watermark
+    /// This tells us how much size we gain by removing all slots
+    /// added since the last watermark.
+    pub(crate) size_delta: u64,
 }
 
 #[derive(Debug, PartialEq, Eq)]
 pub(super) struct Watermarks {
     /// The watermarks captured
     pub(crate) marks: VecDeque<Watermark>,
+    /// The size of the ledger when the last watermark was captured.
+    pub(crate) size_at_last_capture: u64,
     /// The maximum number of watermarks to keep
     count: u64,
     /// The targeted size difference for each watermark
@@ -45,19 +49,32 @@ impl Watermarks {
         let mut marks = VecDeque::with_capacity(count as usize);
         let mark_size =
             (max_ledger_size * percentage.watermark_size_percent()) / 100;
-        if let Some(ExistingLedgerState { size, slot, mod_id }) = ledger_state {
-            // Since we don't know the actual ledger sizes at each slot we must assume
-            // they were evenly distributed.
-            let mark_size_delta = size / count;
-            let mod_id_delta = mod_id / count;
-            let slot_delta = slot / count;
-            for i in 0..count {
-                let size = (i + 1) * mark_size_delta;
-                let mod_id = (i + 1) * mod_id_delta;
-                let slot = (i + 1) * slot_delta;
-                marks.push_back(Watermark { slot, mod_id, size });
-            }
-        }
+        let initial_size =
+            if let Some(ExistingLedgerState { size, slot, mod_id }) =
+                ledger_state
+            {
+                // Since we don't know the actual ledger sizes at each slot we must assume
+                // they were evenly distributed.
+                let mark_size_delta = size / count;
+                let mod_id_delta = mod_id / count;
+                let slot_delta = slot / count;
+
+                let mut last_size = 0;
+                for i in 0..count {
+                    let size = (i + 1) * mark_size_delta;
+                    let mod_id = (i + 1) * mod_id_delta;
+                    let slot = (i + 1) * slot_delta;
+                    marks.push_back(Watermark {
+                        slot,
+                        mod_id,
+                        size_delta: size - last_size,
+                    });
+                    last_size = size;
+                }
+                last_size
+            } else {
+                0
+            };
         // In case we don't have an existing ledger state, we assume that the ledger size is
         // still zero and we won't need any fabricated watermarks.
         Watermarks {
@@ -65,6 +82,7 @@ impl Watermarks {
             count,
             mark_size,
             max_ledger_size,
+            size_at_last_capture: initial_size,
         }
     }
 
@@ -85,38 +103,37 @@ impl Watermarks {
         if ledger_size == 0 {
             return None;
         }
-        if self.reached_max(ledger_size) {
+        let mark = if self.reached_max(ledger_size) {
             debug!(
-                "Ledger size {} reached maximum size {}, resizing...",
+                "Ledger size {} exceeded maximum size {}, resizing...",
                 ledger_size, self.max_ledger_size
             );
             self.consume_next()
         } else {
-            self.update(slot, mod_id, ledger_size);
             None
+        };
+        self.update(slot, mod_id, ledger_size);
+
+        if let Some(mark) = mark.as_ref() {
+            // We assume that the ledger will be truncated since we return a mark
+            // Thus we adjust the size at last capture to represent what it would
+            // have been if we'd have truncated the ledger before capturing it
+            self.size_at_last_capture =
+                ledger_size.saturating_sub(mark.size_delta);
         }
+        mark
     }
 
     fn update(&mut self, slot: u64, mod_id: u64, size: u64) {
-        // We try to record a watermark as close as possible (but below) the ideal
-        // watermark cutoff size.
-        let mark_idx = (size as f64 / self.mark_size as f64).ceil() as u64 - 1;
-        if mark_idx < self.count {
-            let watermark = Watermark { slot, mod_id, size };
-            if let Some(mark) = self.marks.get_mut(mark_idx as usize) {
-                *mark = watermark;
-            } else {
-                self.marks.push_back(watermark);
-            }
-        }
-    }
-
-    fn adjust_for_truncation(&mut self) {
-        // The sizes recorded at specific slots need to be adjusted since we truncated
-        // the slots before
-
-        for mut mark in self.marks.iter_mut() {
-            mark.size = mark.size.saturating_sub(self.mark_size);
+        let size_delta = size.saturating_sub(self.size_at_last_capture);
+        if size_delta >= self.mark_size {
+            let mark = Watermark {
+                slot,
+                mod_id,
+                size_delta,
+            };
+            self.marks.push_back(mark);
+            self.size_at_last_capture = size;
         }
     }
 
@@ -132,44 +149,39 @@ mod tests {
     use super::*;
 
     macro_rules! mark {
-        ($slot:expr, $mod_id:expr, $size:expr) => {{
+        ($slot:expr, $mod_id:expr, $size_delta:expr) => {{
             Watermark {
                 slot: $slot,
                 mod_id: $mod_id,
-                size: $size,
+                size_delta: $size_delta,
             }
         }};
-        ($idx:expr, $size:expr) => {{
-            mark!($idx, $idx, $size)
+        ($idx:expr, $size_delta:expr) => {{
+            mark!($idx, $idx, $size_delta)
         }};
     }
 
     macro_rules! marks {
-        ($($slot:expr, $mod_id:expr, $size:expr);+) => {{
+        ($size:expr; $($slot:expr, $mod_id:expr, $size_delta:expr);+) => {{
             let mut marks = VecDeque::<Watermark>::new();
             $(
-                marks.push_back(mark!($slot, $mod_id, $size));
+                marks.push_back(mark!($slot, $mod_id, $size_delta));
             )+
             Watermarks {
                 marks,
                 count: 3,
+                size_at_last_capture: $size,
                 mark_size: 250,
                 max_ledger_size: 1000,
             }
         }};
     }
-
     macro_rules! truncate_ledger {
         ($slot:expr, $mod_id:expr, $watermarks:ident, $mark:expr, $size:ident) => {{
-            // These steps are usually performed in _actual_ ledger truncate method
-            $size -= $mark.size;
-            $watermarks.adjust_for_truncation();
-            $watermarks.update($slot, $mod_id, $size);
-            debug!(
-                "Truncated ledger to size {} -> {:#?}",
-                $size, $watermarks
-            );
-        }}
+            // This step is usually performed in _actual_ ledger truncate method
+            $size -= $mark.size_delta;
+            debug!("Truncated ledger to size {} -> {:#?}", $size, $watermarks);
+        }};
     }
 
     #[test]
@@ -193,16 +205,18 @@ mod tests {
             );
         }
 
-        assert_eq!(watermarks, marks!(4, 4, 250; 9, 9, 500; 14, 14, 750));
+        assert_eq!(watermarks, marks!(750; 4, 4, 250; 9, 9, 250; 14, 14, 250));
 
         // 2. Hit ledger max size
         size += STEP_SIZE;
         let mark = watermarks.get_truncation_mark(size, 20, 20);
-        assert_eq!(watermarks, marks!(9, 9, 500; 14, 14, 750));
         assert_eq!(mark, Some(mark!(4, 4, 250)));
+        assert_eq!(
+            watermarks,
+            marks!(750; 9, 9, 250; 14, 14, 250; 20, 20, 250)
+        );
 
         truncate_ledger!(20, 20, watermarks, mark.unwrap(), size);
-        assert_eq!(watermarks, marks!(9, 9, 250; 14, 14, 500; 20, 20, 750));
 
         // 3. Go up to right below the next truncation mark (also ledger max size)
         for i in 21..=24 {
@@ -214,7 +228,10 @@ mod tests {
                 size
             );
         }
-        assert_eq!(watermarks, marks!(9, 9, 250; 14, 14, 500; 20, 20, 750));
+        assert_eq!(
+            watermarks,
+            marks!(750; 9, 9, 250; 14, 14, 250; 20, 20, 250)
+        );
 
         // 4. Hit next truncation mark (also ledger max size)
         size += STEP_SIZE;
@@ -222,7 +239,10 @@ mod tests {
         assert_eq!(mark, Some(mark!(9, 9, 250)));
 
         truncate_ledger!(25, 25, watermarks, mark.unwrap(), size);
-        assert_eq!(watermarks, marks!(14, 14, 250; 20, 20, 500; 25, 25, 750));
+        assert_eq!(
+            watermarks,
+            marks!(750; 14, 14, 250; 20, 20, 250; 25, 25, 250)
+        );
 
         // 5. Go past 3 truncation marks
         for i in 26..=40 {
@@ -233,7 +253,10 @@ mod tests {
             }
         }
 
-        assert_eq!(watermarks, marks!(30, 30, 250; 35, 35, 500; 40, 40, 750));
+        assert_eq!(
+            watermarks,
+            marks!(750; 30, 30, 250; 35, 35, 250; 40, 40, 250)
+        );
     }
 
     #[test]
@@ -257,7 +280,7 @@ mod tests {
         // Initial watermarks should be based on the existing ledger state
         assert_eq!(
             watermarks,
-            marks!(50, 50, 300; 100, 100, 600; 150, 150, 900)
+            marks!(900; 50, 50, 300; 100, 100, 300; 150, 150, 300)
         );
     }
 }
