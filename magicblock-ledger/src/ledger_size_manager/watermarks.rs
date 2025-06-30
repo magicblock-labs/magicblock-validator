@@ -26,8 +26,6 @@ pub(super) struct Watermarks {
     pub(crate) marks: VecDeque<Watermark>,
     /// The size of the ledger when the last watermark was captured.
     pub(crate) size_at_last_capture: u64,
-    /// The maximum number of watermarks to keep
-    pub(crate) count: u64,
     /// The targeted size difference for each watermark
     pub(crate) mark_size: u64,
     /// The maximum ledger size to maintain
@@ -80,7 +78,6 @@ impl Watermarks {
         // still zero and we won't need any fabricated watermarks.
         Watermarks {
             marks,
-            count,
             mark_size,
             max_ledger_size,
             size_at_last_capture: initial_size,
@@ -170,7 +167,6 @@ mod tests {
             )+
             Watermarks {
                 marks,
-                count: 3,
                 size_at_last_capture: $size,
                 mark_size: 250,
                 max_ledger_size: 1000,

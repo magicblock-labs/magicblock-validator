@@ -440,7 +440,6 @@ mod tests {
                 ]
                 .into(),
                 size_at_last_capture: 600,
-                count: 3,
                 mark_size: 250,
                 max_ledger_size: 1000,
             },
