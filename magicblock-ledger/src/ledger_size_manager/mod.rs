@@ -123,6 +123,49 @@ impl<T: ManagableLedger> LedgerSizeManager<T> {
         max_ledger_size: u64,
         existing_ledger_state: &mut Option<ExistingLedgerState>,
     ) -> Option<u64> {
+        // If we restarted with an existing ledger we need to make sure that the
+        // ledger size is not far above the max size before we can
+        // start using the watermark strategy.
+        // NOTE: that watermarks are set during the first tick
+        if watermarks.is_none() {
+            if let Some(existing_ledger_state) = existing_ledger_state.take() {
+                let prev_size = existing_ledger_state.size;
+
+                let (adjusted_ledger_size, lowest_slot) =
+                    if prev_size > max_ledger_size {
+                        warn!(
+                        "Existing ledger size {} is above the max size {}, \
+                        waiting for truncation before using watermarks.",
+                        prev_size, max_ledger_size
+                    );
+
+                        Self::ensure_initial_max_ledger_size_below(
+                            ledger,
+                            &existing_ledger_state,
+                            resize_percentage,
+                            max_ledger_size,
+                        )
+                        .await
+                    } else {
+                        (prev_size, ledger.get_lowest_cleanup_slot())
+                    };
+
+                watermarks.replace({
+                    let mut marks = Watermarks::new(
+                        resize_percentage,
+                        max_ledger_size,
+                        Some(existing_ledger_state),
+                    );
+                    marks.size_at_last_capture = adjusted_ledger_size;
+                    // Remove watermarks that are below the lowest cleanup slot
+                    marks.marks.retain(|mark| mark.slot > lowest_slot);
+                    marks
+                });
+
+                return Some(adjusted_ledger_size);
+            }
+        }
+
         // This function is called on each tick to manage the ledger size.
         // It checks the current ledger size and truncates it if necessary.
         let Ok(ledger_size) = ledger.storage_size() else {
@@ -130,35 +173,9 @@ impl<T: ManagableLedger> LedgerSizeManager<T> {
             return None;
         };
 
-        // If we restarted with an existing ledger we need to make sure that the
-        // ledger size is not far above the max size before we can
-        // start using the watermark strategy.
-        if watermarks.is_none() && existing_ledger_state.is_some() {
-            warn!(
-                "Ledger size {} is above the max size {}, \
-                waiting for truncation before using watermarks.",
-                ledger_size, max_ledger_size
-            );
-
-            if ledger_size > max_ledger_size {
-                Self::ensure_initial_max_ledger_size_below(
-                    ledger,
-                    ledger_size,
-                    max_ledger_size,
-                )
-                .await;
-            }
-            watermarks.replace(Watermarks::new(
-                resize_percentage,
-                max_ledger_size,
-                existing_ledger_state.take(),
-            ));
-            return Some(ledger_size);
-        }
-
-        // If we started with an existing ledger state we already added watermarks,
-        // otherwise we do this here the during the first loop iteration
-        let wms = watermarks.get_or_insert_with(|| {
+        // If we started with an existing ledger state we already added watermarks
+        // above, otherwise we do this here the during the first tick
+        let mut wms = watermarks.get_or_insert_with(|| {
             Watermarks::new(resize_percentage, max_ledger_size, None)
         });
 
@@ -167,20 +184,27 @@ impl<T: ManagableLedger> LedgerSizeManager<T> {
         // or run out of watermarks.
         loop {
             let last_slot = ledger.last_slot();
-
-            if let Some(mark) = wms.get_truncation_mark(
+            let (mark, captured) = wms.get_truncation_mark(
                 ledger_size,
                 last_slot,
                 ledger.last_mod_id(),
-            ) {
+            );
+            if let Some(mark) = mark.as_ref() {
                 Self::truncate_ledger(ledger, mark).await;
 
                 if let Ok(ls) = ledger.storage_size() {
                     ledger_size = ls;
                 } else {
-                    break Some(ledger_size);
+                    // If we cannot get the ledger size we guess it
+                    ledger_size = ledger_size.saturating_sub(mark.size_delta);
+                }
+                if captured {
+                    wms.size_at_last_capture = ledger_size;
                 }
             } else {
+                if captured {
+                    wms.size_at_last_capture = ledger_size;
+                }
                 break Some(ledger_size);
             }
         }
@@ -205,23 +229,43 @@ impl<T: ManagableLedger> LedgerSizeManager<T> {
         }
     }
 
+    /// Downsizes the ledger to the percentage we want to truncate to whenever we reach or
+    /// exceed the maximum ledger size.
+    /// Returns the adjusted ledger size after truncation and the lowest cleanup slot.
     async fn ensure_initial_max_ledger_size_below(
         ledger: &Arc<T>,
-        current_size: u64,
+        existing_ledger_state: &ExistingLedgerState,
+        resize_percentage: &ResizePercentage,
         max_size: u64,
-    ) {
-        let total_slots = ledger.last_slot();
-        let avg_size_per_slot = current_size as f64 / total_slots as f64;
-        let max_slots = (max_size as f64 / avg_size_per_slot).floor() as Slot;
-        let cut_slots = total_slots - max_slots;
-        let current_lowest_slot = ledger.get_lowest_cleanup_slot();
+    ) -> (u64, Slot) {
+        let ExistingLedgerState {
+            size: current_size,
+            slot: total_slots,
+            mod_id,
+        } = existing_ledger_state;
+        let mut ledger_size = *current_size;
+        let mut total_slots = *total_slots;
 
-        let max_slot = (current_lowest_slot + cut_slots).min(total_slots);
+        while ledger_size >= max_size {
+            let avg_size_per_slot = *current_size as f64 / total_slots as f64;
+            let target_size = resize_percentage.upper_mark_size(max_size);
+            let target_slot =
+                (target_size as f64 / avg_size_per_slot).floor() as Slot;
+            let cut_slots = total_slots.saturating_sub(target_slot);
+            let current_lowest_slot = ledger.get_lowest_cleanup_slot();
 
-        ledger.truncate_fat_ledger(max_slot).await;
+            let max_slot = current_lowest_slot
+                .saturating_add(cut_slots)
+                .min(total_slots);
+            ledger.truncate_fat_ledger(max_slot).await;
+
+            ledger_size = ledger.storage_size().unwrap_or(target_size);
+            total_slots -= cut_slots;
+        }
+        (ledger_size, ledger.get_lowest_cleanup_slot())
     }
 
-    async fn truncate_ledger(ledger: &Arc<T>, mark: Watermark) {
+    async fn truncate_ledger(ledger: &Arc<T>, mark: &Watermark) {
         debug!(
             "Truncating ledger up to slot {} gaining {} bytes",
             mark.slot, mark.size_delta
@@ -396,7 +440,7 @@ mod tests {
         });
 
         macro_rules! tick {
-            ($tick:expr) => {{
+            () => {{
                 let ledger_size =
                     LedgerSizeManager::<ManageableLedgerMock>::tick(
                         &ledger,
@@ -407,16 +451,13 @@ mod tests {
                     )
                     .await
                     .unwrap();
-                debug!(
-                    "Ledger after tick {}: Size {} {:#?}",
-                    $tick, ledger_size, watermarks
-                );
+                debug!("Ledger Size {} {:#?}", ledger_size, watermarks);
                 ledger_size
             }};
         }
 
         info!("Slot: 6, existing ledger");
-        let ledger_size = tick!(1);
+        let ledger_size = tick!();
         assert_eq!(ledger_size, 600);
         assert_eq!(
             watermarks.as_ref().unwrap(),
@@ -445,19 +486,110 @@ mod tests {
             },
         );
 
-        info!("Slot: 10, added 1 slot -> 700 bytes");
+        info!("Slot: 7, added 1 slot -> 700 bytes");
         ledger.add_slots(1);
-        let ledger_size = tick!(2);
+        let ledger_size = tick!();
         assert_eq!(ledger_size, 700);
 
-        info!("Slot: 12, added 2 slots -> 900 bytes marked (delta: 200)");
+        info!("Slot: 9, added 2 slots -> 900 bytes marked (delta: 200)");
         ledger.add_slots(2);
-        let ledger_size = tick!(3);
+        let ledger_size = tick!();
         assert_eq!(ledger_size, 900);
 
-        info!("Slot: 14, added 2 slots -> 1100 bytes marked (delta: 200) -> remove 200 -> 900 bytes");
+        info!("Slot: 12, added 3 slots -> 1200 bytes marked (delta: 300) -> remove 200 -> 1000 bytes -> remove 200 -> 800 bytes");
+        ledger.add_slots(3);
+        let ledger_size = tick!();
+        assert_eq!(ledger_size, 800);
+    }
+
+    #[tokio::test]
+    async fn test_ledger_size_manager_existing_ledger_above_max_size() {
+        init_logger!();
+
+        let ledger = Arc::new(ManageableLedgerMock::new(0, 12, 12));
+        let mut watermarks = None::<Watermarks>;
+        let resize_percentage = ResizePercentage::Large;
+        let max_ledger_size = 1000;
+        let mut existing_ledger_state = Some(ExistingLedgerState {
+            size: 1200,
+            slot: 12,
+            mod_id: 12,
+        });
+
+        macro_rules! tick {
+            () => {{
+                let ledger_size =
+                    LedgerSizeManager::<ManageableLedgerMock>::tick(
+                        &ledger,
+                        &mut watermarks,
+                        &resize_percentage,
+                        max_ledger_size,
+                        &mut existing_ledger_state,
+                    )
+                    .await
+                    .unwrap();
+                debug!("Ledger Size {} {:#?}", ledger_size, watermarks);
+                ledger_size
+            }};
+        }
+
+        info!("Slot: 12, existing ledger above max size");
+        let ledger_size = tick!();
+        assert_eq!(ledger_size, 700);
+        assert_eq!(
+            watermarks.as_ref().unwrap(),
+            &Watermarks {
+                marks: [
+                    Watermark {
+                        slot: 8,
+                        mod_id: 8,
+                        size_delta: 400,
+                    },
+                    Watermark {
+                        slot: 12,
+                        mod_id: 12,
+                        size_delta: 400,
+                    },
+                ]
+                .into(),
+                size_at_last_capture: 700,
+                mark_size: 250,
+                max_ledger_size: 1000,
+            },
+        );
+
+        info!("Slot: 13, added 1 slot -> 800 bytes");
+        ledger.add_slots(1);
+        let ledger_size = tick!();
+        assert_eq!(ledger_size, 800);
+
+        info!(
+            "Slot: 15, added 2 slots -> 1000 bytes -> remove estimated 400 (really 300) -> 700 bytes"
+        );
         ledger.add_slots(2);
-        let ledger_size = tick!(4);
-        assert_eq!(ledger_size, 900);
+        let ledger_size = tick!();
+        assert_eq!(ledger_size, 700);
+
+        assert_eq!(
+            watermarks.as_ref().unwrap(),
+            &Watermarks {
+                marks: [
+                    Watermark {
+                        slot: 12,
+                        mod_id: 12,
+                        size_delta: 400,
+                    },
+                    Watermark {
+                        slot: 15,
+                        mod_id: 12,
+                        size_delta: 300,
+                    },
+                ]
+                .into(),
+                size_at_last_capture: 700,
+                mark_size: 250,
+                max_ledger_size: 1000,
+            },
+        );
     }
 }

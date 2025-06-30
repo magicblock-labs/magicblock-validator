@@ -13,6 +13,8 @@ pub(super) struct Watermark {
     /// The slot at which this watermark was captured
     pub(crate) slot: u64,
     /// Account mod ID at which this watermark was captured
+    /// NOTE: this tells us up to where to clean account mods, however
+    /// the size of that column is very small and thus we don't clean it yet
     pub(crate) mod_id: u64,
     /// The size delta relative to the previous captured watermark
     /// This tells us how much size we gain by removing all slots
@@ -25,6 +27,9 @@ pub(super) struct Watermarks {
     /// The watermarks captured
     pub(crate) marks: VecDeque<Watermark>,
     /// The size of the ledger when the last watermark was captured.
+    /// NOTE: this is updated by the watermarks client, NOT by the watermark
+    ///        implementation itself due to the fact that it isn't aware of the
+    ///        true ledger size at time of capture or after it was truncated
     pub(crate) size_at_last_capture: u64,
     /// The targeted size difference for each watermark
     pub(crate) mark_size: u64,
@@ -66,16 +71,12 @@ impl Watermarks {
                         mod_id,
                         size_delta: mark_size_delta,
                     };
-                    debug!("Adding initial watermark: {:#?}", mark);
-
                     marks.push_back(mark);
                 }
                 size
             } else {
                 0
             };
-        // In case we don't have an existing ledger state, we assume that the ledger size is
-        // still zero and we won't need any fabricated watermarks.
         Watermarks {
             marks,
             mark_size,
@@ -92,14 +93,22 @@ impl Watermarks {
         size >= self.max_ledger_size
     }
 
+    /// Returns a tuple containing two items:
+    /// - an optional watermark specifying the slot to truncate to and
+    ///   an indicator of how much size should be recuperated as a result
+    /// - a boolean indicating if a new watermark was captured.
+    ///
+    /// NOTE: if a new watermark is captured the caller needs to update the
+    /// [Watermarks::size_at_last_capture] with the current ledger size or the size
+    /// resulting from the truncation applied when a watermark is returned.
     pub(super) fn get_truncation_mark(
         &mut self,
         ledger_size: u64,
         slot: Slot,
         mod_id: u64,
-    ) -> Option<Watermark> {
+    ) -> (Option<Watermark>, bool) {
         if ledger_size == 0 {
-            return None;
+            return (None, false);
         }
         let mark = if self.reached_max(ledger_size) {
             debug!(
@@ -110,19 +119,11 @@ impl Watermarks {
         } else {
             None
         };
-        self.update(slot, mod_id, ledger_size);
-
-        if let Some(mark) = mark.as_ref() {
-            // We assume that the ledger will be truncated since we return a mark
-            // Thus we adjust the size at last capture to represent what it would
-            // have been if we'd have truncated the ledger before capturing it
-            self.size_at_last_capture =
-                ledger_size.saturating_sub(mark.size_delta);
-        }
-        mark
+        let captured = self.update(slot, mod_id, ledger_size);
+        (mark, captured)
     }
 
-    fn update(&mut self, slot: u64, mod_id: u64, size: u64) {
+    fn update(&mut self, slot: u64, mod_id: u64, size: u64) -> bool {
         let size_delta = size.saturating_sub(self.size_at_last_capture);
         if size_delta >= self.mark_size {
             let mark = Watermark {
@@ -131,7 +132,9 @@ impl Watermarks {
                 size_delta,
             };
             self.marks.push_back(mark);
-            self.size_at_last_capture = size;
+            true
+        } else {
+            false
         }
     }
 
@@ -181,6 +184,13 @@ mod tests {
         }};
     }
 
+    macro_rules! adjust_last_capture {
+        ($watermarks:ident, $size:ident, $mark:ident ) => {{
+            $watermarks.size_at_last_capture =
+                $size - $mark.as_ref().map(|x| x.size_delta).unwrap_or(0);
+        }};
+    }
+
     #[test]
     fn test_watermarks_new_ledger() {
         init_logger!();
@@ -194,20 +204,26 @@ mod tests {
         let mut size = 0;
         for i in 0..19 {
             size += STEP_SIZE;
-            let mark = watermarks.get_truncation_mark(size, i, i);
+            let (mark, captured) = watermarks.get_truncation_mark(size, i, i);
             assert!(
                 mark.is_none(),
                 "Expected no truncation mark at size {}",
                 size
             );
+            if captured {
+                watermarks.size_at_last_capture = size;
+            }
         }
 
         assert_eq!(watermarks, marks!(750; 4, 4, 250; 9, 9, 250; 14, 14, 250));
 
         // 2. Hit ledger max size
         size += STEP_SIZE;
-        let mark = watermarks.get_truncation_mark(size, 20, 20);
+        let (mark, captured) = watermarks.get_truncation_mark(size, 20, 20);
         assert_eq!(mark, Some(mark!(4, 4, 250)));
+        assert!(captured, "Expected to capture a truncation mark");
+        adjust_last_capture!(watermarks, size, mark);
+
         assert_eq!(
             watermarks,
             marks!(750; 9, 9, 250; 14, 14, 250; 20, 20, 250)
@@ -218,12 +234,13 @@ mod tests {
         // 3. Go up to right below the next truncation mark (also ledger max size)
         for i in 21..=24 {
             size += STEP_SIZE;
-            let mark = watermarks.get_truncation_mark(size, i, i);
+            let (mark, captured) = watermarks.get_truncation_mark(size, i, i);
             assert!(
                 mark.is_none(),
                 "Expected no truncation mark at size {}",
                 size
             );
+            assert!(!captured, "Expected no truncation mark captured");
         }
         assert_eq!(
             watermarks,
@@ -232,8 +249,10 @@ mod tests {
 
         // 4. Hit next truncation mark (also ledger max size)
         size += STEP_SIZE;
-        let mark = watermarks.get_truncation_mark(size, 25, 25);
+        let (mark, captured) = watermarks.get_truncation_mark(size, 25, 25);
         assert_eq!(mark, Some(mark!(9, 9, 250)));
+        assert!(captured, "Expected to capture a truncation mark");
+        adjust_last_capture!(watermarks, size, mark);
 
         truncate_ledger!(25, 25, watermarks, mark.unwrap(), size);
         assert_eq!(
@@ -244,7 +263,10 @@ mod tests {
         // 5. Go past 3 truncation marks
         for i in 26..=40 {
             size += STEP_SIZE;
-            let mark = watermarks.get_truncation_mark(size, i, i);
+            let (mark, captured) = watermarks.get_truncation_mark(size, i, i);
+            if captured {
+                adjust_last_capture!(watermarks, size, mark);
+            }
             if mark.is_some() {
                 truncate_ledger!(i, i, watermarks, mark.unwrap(), size);
             }

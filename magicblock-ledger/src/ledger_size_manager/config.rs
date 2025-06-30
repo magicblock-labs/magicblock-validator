@@ -30,6 +30,13 @@ impl ResizePercentage {
             Small => 1,
         }
     }
+
+    pub fn upper_mark_size(&self, max_ledger_size: u64) -> u64 {
+        (max_ledger_size as f64
+            * (self.watermark_size_percent() as f64 / 100.00)
+            * self.watermark_count() as f64)
+            .round() as u64
+    }
 }
 
 pub struct LedgerSizeManagerConfig {
