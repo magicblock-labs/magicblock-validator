@@ -145,7 +145,7 @@ impl Ledger {
         measure.stop();
         info!("Opening ledger done; {measure}");
 
-        let ledger = Ledger {
+        let mut ledger = Ledger {
             ledger_path: ledger_path.to_path_buf(),
             db,
 
@@ -165,6 +165,15 @@ impl Ledger {
             last_slot: AtomicU64::new(0),
             last_mod_id: AtomicU64::new(0),
         };
+
+        ledger.last_slot = AtomicU64::new(ledger.get_max_blockhash()?.0);
+        ledger.last_mod_id = AtomicU64::new(
+            ledger
+                .account_mod_datas_cf
+                .iter(IteratorMode::End)?
+                .next()
+                .map_or(0, |(mod_id, _)| mod_id),
+        );
 
         Ok(ledger)
     }

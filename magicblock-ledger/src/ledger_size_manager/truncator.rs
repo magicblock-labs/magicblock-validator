@@ -18,7 +18,7 @@ use crate::{
 use super::traits::ManagableLedger;
 
 pub struct Truncator {
-    ledger: Arc<Ledger>,
+    pub(crate) ledger: Arc<Ledger>,
 }
 
 impl Truncator {

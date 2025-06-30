@@ -11,6 +11,7 @@ use errors::{LedgerSizeManagerError, LedgerSizeManagerResult};
 use log::*;
 use std::{collections::VecDeque, sync::Arc, time::Duration};
 use traits::ManagableLedger;
+use truncator::Truncator;
 use watermarks::{Watermark, Watermarks};
 
 use magicblock_metrics::metrics;
@@ -40,37 +41,47 @@ enum ServiceState {
     },
 }
 
+pub type TruncatingLedgerSizeManager = LedgerSizeManager<Truncator>;
 pub struct LedgerSizeManager<T: ManagableLedger> {
     ledger: Arc<T>,
-    service_state: ServiceState,
+    service_state: Option<ServiceState>,
 }
 
 impl<T: ManagableLedger> LedgerSizeManager<T> {
+    pub fn new_from_ledger(
+        ledger: Arc<Ledger>,
+        ledger_state: Option<ExistingLedgerState>,
+        config: LedgerSizeManagerConfig,
+    ) -> LedgerSizeManager<Truncator> {
+        let managed_ledger = Truncator { ledger };
+        LedgerSizeManager::new(Arc::new(managed_ledger), ledger_state, config)
+    }
+
     pub(crate) fn new(
-        ledger: Arc<T>,
+        managed_ledger: Arc<T>,
         ledger_state: Option<ExistingLedgerState>,
         config: LedgerSizeManagerConfig,
     ) -> Self {
         LedgerSizeManager {
-            ledger,
-            service_state: ServiceState::Created {
+            ledger: managed_ledger,
+            service_state: Some(ServiceState::Created {
                 size_check_interval: Duration::from_millis(
                     config.size_check_interval_ms,
                 ),
                 resize_percentage: config.resize_percentage,
                 max_ledger_size: config.max_size,
                 existing_ledger_state: ledger_state,
-            },
+            }),
         }
     }
 
-    pub fn try_start(self) -> LedgerSizeManagerResult<Self> {
-        if let ServiceState::Created {
+    pub fn try_start(&mut self) -> LedgerSizeManagerResult<()> {
+        if let Some(ServiceState::Created {
             size_check_interval,
             resize_percentage,
             max_ledger_size,
             mut existing_ledger_state,
-        } = self.service_state
+        }) = self.service_state.take()
         {
             let cancellation_token = CancellationToken::new();
             let worker_handle = {
@@ -103,16 +114,14 @@ impl<T: ManagableLedger> LedgerSizeManager<T> {
                     }
                 })
             };
-            Ok(Self {
-                ledger: self.ledger,
-                service_state: ServiceState::Running {
-                    cancellation_token,
-                    worker_handle,
-                },
-            })
+            self.service_state = Some(ServiceState::Running {
+                cancellation_token,
+                worker_handle,
+            });
+            Ok(())
         } else {
             warn!("LedgerSizeManager already running, no need to start.");
-            Ok(self)
+            Ok(())
         }
     }
 
@@ -210,21 +219,18 @@ impl<T: ManagableLedger> LedgerSizeManager<T> {
         }
     }
 
-    pub fn stop(self) -> Self {
-        match self.service_state {
-            ServiceState::Running {
+    pub fn stop(&mut self) {
+        match self.service_state.take() {
+            Some(ServiceState::Running {
                 cancellation_token,
                 worker_handle,
-            } => {
+            }) => {
                 cancellation_token.cancel();
-                Self {
-                    ledger: self.ledger,
-                    service_state: ServiceState::Stopped { worker_handle },
-                }
+                self.service_state =
+                    Some(ServiceState::Stopped { worker_handle });
             }
             _ => {
                 warn!("LedgerSizeManager is not running, cannot stop.");
-                self
             }
         }
     }

@@ -1,4 +1,9 @@
+use std::time::Duration;
+
 use solana_sdk::clock::Slot;
+
+pub const CHECK_LEDGER_SIZE_INTERVAL_MS: u64 =
+    Duration::from_secs(2 * 60).as_millis() as u64;
 
 /// Percentage of ledger to keep when resizing.
 pub enum ResizePercentage {
@@ -55,9 +60,9 @@ pub struct LedgerSizeManagerConfig {
 #[derive(Debug)]
 pub struct ExistingLedgerState {
     /// The current size of the ledger
-    pub(crate) size: u64,
+    pub size: u64,
     /// The last slot in the ledger at time of restart
-    pub(crate) slot: Slot,
+    pub slot: Slot,
     /// The last account mod ID in the ledger at time of restart
-    pub(crate) mod_id: u64,
+    pub mod_id: u64,
 }
