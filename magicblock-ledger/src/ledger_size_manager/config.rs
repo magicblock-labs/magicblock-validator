@@ -45,6 +45,7 @@ pub struct LedgerSizeManagerConfig {
     pub resize_percentage: ResizePercentage,
 }
 
+#[derive(Debug)]
 pub struct ExistingLedgerState {
     /// The current size of the ledger
     pub(crate) size: u64,

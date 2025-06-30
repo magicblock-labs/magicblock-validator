@@ -27,11 +27,11 @@ pub(super) struct Watermarks {
     /// The size of the ledger when the last watermark was captured.
     pub(crate) size_at_last_capture: u64,
     /// The maximum number of watermarks to keep
-    count: u64,
+    pub(crate) count: u64,
     /// The targeted size difference for each watermark
-    mark_size: u64,
+    pub(crate) mark_size: u64,
     /// The maximum ledger size to maintain
-    max_ledger_size: u64,
+    pub(crate) max_ledger_size: u64,
 }
 
 impl Watermarks {
@@ -55,23 +55,24 @@ impl Watermarks {
             {
                 // Since we don't know the actual ledger sizes at each slot we must assume
                 // they were evenly distributed.
-                let mark_size_delta = size / count;
+                let mark_size_delta =
+                    (size as f64 / count as f64).round() as u64;
                 let mod_id_delta = mod_id / count;
-                let slot_delta = slot / count;
+                let slot_delta = (slot as f64 / count as f64).round() as u64;
 
-                let mut last_size = 0;
-                for i in 0..count {
-                    let size = (i + 1) * mark_size_delta;
-                    let mod_id = (i + 1) * mod_id_delta;
-                    let slot = (i + 1) * slot_delta;
-                    marks.push_back(Watermark {
+                for i in 1..=count {
+                    let mod_id = i * mod_id_delta;
+                    let slot = i * slot_delta;
+                    let mark = Watermark {
                         slot,
                         mod_id,
-                        size_delta: size - last_size,
-                    });
-                    last_size = size;
+                        size_delta: mark_size_delta,
+                    };
+                    debug!("Adding initial watermark: {:#?}", mark);
+
+                    marks.push_back(mark);
                 }
-                last_size
+                size
             } else {
                 0
             };
