@@ -201,16 +201,6 @@ impl MagicValidator {
                 slot: ledger.last_slot(),
                 mod_id: ledger.last_mod_id(),
             });
-        let ledger_size_manager: TruncatingLedgerSizeManager =
-            TruncatingLedgerSizeManager::new_from_ledger(
-                ledger.clone(),
-                existing_ledger_state,
-                LedgerSizeManagerConfig {
-                    max_size: config.validator_config.ledger.size,
-                    size_check_interval_ms: CHECK_LEDGER_SIZE_INTERVAL_MS,
-                    resize_percentage: ResizePercentage::Large,
-                },
-            );
 
         let exit = Arc::<AtomicBool>::default();
         // SAFETY:
@@ -251,6 +241,18 @@ impl MagicValidator {
             Self::init_transaction_listener(
                 &ledger,
                 Some(TransactionNotifier::new(geyser_manager)),
+            );
+
+        let ledger_size_manager: TruncatingLedgerSizeManager =
+            TruncatingLedgerSizeManager::new_from_ledger(
+                ledger.clone(),
+                bank.clone(),
+                existing_ledger_state,
+                LedgerSizeManagerConfig {
+                    max_size: config.validator_config.ledger.size,
+                    size_check_interval_ms: CHECK_LEDGER_SIZE_INTERVAL_MS,
+                    resize_percentage: ResizePercentage::Large,
+                },
             );
 
         let metrics_config = &config.validator_config.metrics;

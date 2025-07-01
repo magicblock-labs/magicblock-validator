@@ -9,6 +9,8 @@ mod watermarks;
 use config::{ExistingLedgerState, LedgerSizeManagerConfig, ResizePercentage};
 use errors::{LedgerSizeManagerError, LedgerSizeManagerResult};
 use log::*;
+use magicblock_bank::bank::Bank;
+use magicblock_core::traits::FinalityProvider;
 use std::{collections::VecDeque, sync::Arc, time::Duration};
 use traits::ManagableLedger;
 use truncator::Truncator;
@@ -41,29 +43,38 @@ enum ServiceState {
     },
 }
 
-pub type TruncatingLedgerSizeManager = LedgerSizeManager<Truncator>;
-pub struct LedgerSizeManager<T: ManagableLedger> {
+pub type TruncatingLedgerSizeManager = LedgerSizeManager<Truncator, Bank>;
+pub struct LedgerSizeManager<T: ManagableLedger, U: FinalityProvider> {
     ledger: Arc<T>,
+    finality_provider: Arc<U>,
     service_state: Option<ServiceState>,
 }
 
-impl<T: ManagableLedger> LedgerSizeManager<T> {
+impl<T: ManagableLedger, U: FinalityProvider> LedgerSizeManager<T, U> {
     pub fn new_from_ledger(
         ledger: Arc<Ledger>,
+        finality_provider: Arc<Bank>,
         ledger_state: Option<ExistingLedgerState>,
         config: LedgerSizeManagerConfig,
-    ) -> LedgerSizeManager<Truncator> {
+    ) -> LedgerSizeManager<Truncator, Bank> {
         let managed_ledger = Truncator { ledger };
-        LedgerSizeManager::new(Arc::new(managed_ledger), ledger_state, config)
+        LedgerSizeManager::new(
+            Arc::new(managed_ledger),
+            finality_provider,
+            ledger_state,
+            config,
+        )
     }
 
     pub(crate) fn new(
         managed_ledger: Arc<T>,
+        finality_provider: Arc<U>,
         ledger_state: Option<ExistingLedgerState>,
         config: LedgerSizeManagerConfig,
     ) -> Self {
         LedgerSizeManager {
             ledger: managed_ledger,
+            finality_provider,
             service_state: Some(ServiceState::Created {
                 size_check_interval: Duration::from_millis(
                     config.size_check_interval_ms,
@@ -88,6 +99,8 @@ impl<T: ManagableLedger> LedgerSizeManager<T> {
                 let ledger = self.ledger.clone();
                 ledger.initialize_lowest_cleanup_slot()?;
 
+                let finality_provider = self.finality_provider.clone();
+
                 let mut interval = interval(size_check_interval);
 
                 let mut watermarks = None::<Watermarks>;
@@ -101,6 +114,7 @@ impl<T: ManagableLedger> LedgerSizeManager<T> {
                             _ = interval.tick() => {
                                     let ledger_size = Self::tick(
                                         &ledger,
+                                        &finality_provider,
                                         &mut watermarks,
                                         &resize_percentage,
                                         max_ledger_size,
@@ -127,6 +141,7 @@ impl<T: ManagableLedger> LedgerSizeManager<T> {
 
     async fn tick(
         ledger: &Arc<T>,
+        finality_provider: &Arc<U>,
         watermarks: &mut Option<Watermarks>,
         resize_percentage: &ResizePercentage,
         max_ledger_size: u64,
@@ -150,6 +165,7 @@ impl<T: ManagableLedger> LedgerSizeManager<T> {
 
                         Self::ensure_initial_max_ledger_size_below(
                             ledger,
+                            finality_provider,
                             &existing_ledger_state,
                             resize_percentage,
                             max_ledger_size,
@@ -198,8 +214,57 @@ impl<T: ManagableLedger> LedgerSizeManager<T> {
                 last_slot,
                 ledger.last_mod_id(),
             );
-            if let Some(mark) = mark.as_ref() {
-                Self::truncate_ledger(ledger, mark).await;
+            if let Some(mark) = mark {
+                let latest_final_slot =
+                    finality_provider.get_latest_final_slot();
+
+                let lowest_cleanup_slot = ledger.get_lowest_cleanup_slot();
+                if lowest_cleanup_slot >= latest_final_slot {
+                    warn!(
+                        "Lowest cleanup slot {} is at or above the latest final slot {}. \
+                        Cannot truncate above the lowest cleanup slot.",
+                        lowest_cleanup_slot, latest_final_slot
+                    );
+                    wms.push_front(mark);
+                    return Some(ledger_size);
+                }
+
+                if mark.slot > latest_final_slot {
+                    warn!("Truncation would remove data above the latest final slot {}. \
+                           Adjusting truncation for mark: {mark:?} to cut up to the latest final slot.",
+                        latest_final_slot);
+
+                    // Estimate the size delta based on the ratio of the slots
+                    // that we can remove
+                    let original_diff =
+                        mark.slot.saturating_sub(lowest_cleanup_slot);
+                    let applied_diff =
+                        latest_final_slot.saturating_sub(lowest_cleanup_slot);
+                    let size_delta = (applied_diff as f64
+                        / original_diff as f64
+                        * mark.size_delta as f64)
+                        as u64;
+                    Self::truncate_ledger(
+                        ledger,
+                        latest_final_slot,
+                        size_delta,
+                    )
+                    .await;
+
+                    // Since we didn't truncate the full mark, we need to put one
+                    // back so it will be processed to remove the remaining space
+                    // when possible
+                    // Otherwise we would process the following mark which would
+                    // cause us to truncate too many slots
+                    wms.push_front(Watermark {
+                        slot: mark.slot,
+                        mod_id: mark.mod_id,
+                        size_delta: mark.size_delta.saturating_sub(size_delta),
+                    });
+                } else {
+                    Self::truncate_ledger(ledger, mark.slot, mark.size_delta)
+                        .await;
+                }
 
                 if let Ok(ls) = ledger.storage_size() {
                     ledger_size = ls;
@@ -214,7 +279,7 @@ impl<T: ManagableLedger> LedgerSizeManager<T> {
                 if captured {
                     wms.size_at_last_capture = ledger_size;
                 }
-                break Some(ledger_size);
+                return Some(ledger_size);
             }
         }
     }
@@ -240,6 +305,7 @@ impl<T: ManagableLedger> LedgerSizeManager<T> {
     /// Returns the adjusted ledger size after truncation and the lowest cleanup slot.
     async fn ensure_initial_max_ledger_size_below(
         ledger: &Arc<T>,
+        finality_provider: &Arc<U>,
         existing_ledger_state: &ExistingLedgerState,
         resize_percentage: &ResizePercentage,
         max_size: u64,
@@ -252,31 +318,61 @@ impl<T: ManagableLedger> LedgerSizeManager<T> {
         let mut ledger_size = *current_size;
         let mut total_slots = *total_slots;
 
+        let finality_slot = finality_provider.get_latest_final_slot();
+
         while ledger_size >= max_size {
             let avg_size_per_slot = *current_size as f64 / total_slots as f64;
             let target_size = resize_percentage.upper_mark_size(max_size);
             let target_slot =
                 (target_size as f64 / avg_size_per_slot).floor() as Slot;
+
             let cut_slots = total_slots.saturating_sub(target_slot);
             let current_lowest_slot = ledger.get_lowest_cleanup_slot();
 
             let max_slot = current_lowest_slot
                 .saturating_add(cut_slots)
                 .min(total_slots);
-            ledger.truncate_fat_ledger(max_slot).await;
+            // We can either truncate up to the calculated slot and repeat this until
+            // we reach the target size or we can truncate up to the latest final slot
+            // and then have to stop.
+            if max_slot > finality_slot {
+                let lowest_cleanup_slot = ledger.get_lowest_cleanup_slot();
+                if lowest_cleanup_slot >= finality_slot {
+                    warn!(
+                        "Lowest cleanup slot {} is above the latest final slot {}. \
+                        Initial truncation cannot truncate above the lowest cleanup slot.",
+                        lowest_cleanup_slot, finality_slot
+                    );
+                    return (ledger_size, lowest_cleanup_slot);
+                }
 
-            ledger_size = ledger.storage_size().unwrap_or(target_size);
-            total_slots -= cut_slots;
+                warn!(
+                    "Initial truncation would remove data above the latest final slot {}. \
+                    Truncating only up to the latest final slot {}.",
+                    finality_slot, max_slot
+                );
+                ledger.truncate_fat_ledger(finality_slot).await;
+
+                let ledger_size = ledger.storage_size().unwrap_or({
+                    (avg_size_per_slot * finality_slot as f64) as u64
+                });
+                return (ledger_size, ledger.get_lowest_cleanup_slot());
+            } else {
+                ledger.truncate_fat_ledger(max_slot).await;
+
+                ledger_size = ledger.storage_size().unwrap_or(target_size);
+                total_slots -= cut_slots;
+            }
         }
         (ledger_size, ledger.get_lowest_cleanup_slot())
     }
 
-    async fn truncate_ledger(ledger: &Arc<T>, mark: &Watermark) {
+    async fn truncate_ledger(ledger: &Arc<T>, slot: Slot, size_delta: u64) {
         debug!(
             "Truncating ledger up to slot {} gaining {} bytes",
-            mark.slot, mark.size_delta
+            slot, size_delta
         );
-        ledger.compact_slot_range(mark.slot).await;
+        ledger.compact_slot_range(slot).await;
     }
 }
 
@@ -358,6 +454,24 @@ mod tests {
         }
     }
 
+    struct FinalityProviderMock {
+        finality_slot: Mutex<u64>,
+    }
+
+    impl Default for FinalityProviderMock {
+        fn default() -> Self {
+            FinalityProviderMock {
+                finality_slot: Mutex::new(u64::MAX),
+            }
+        }
+    }
+
+    impl FinalityProvider for FinalityProviderMock {
+        fn get_latest_final_slot(&self) -> u64 {
+            *self.finality_slot.lock().unwrap()
+        }
+    }
+
     // -----------------
     // Tests
     // -----------------
@@ -366,6 +480,7 @@ mod tests {
         init_logger!();
 
         let ledger = Arc::new(ManageableLedgerMock::new(0, 0, 0));
+        let finality_provider = Arc::new(FinalityProviderMock::default());
         let mut watermarks = None::<Watermarks>;
         let resize_percentage = ResizePercentage::Large;
         let max_ledger_size = 800;
@@ -373,16 +488,19 @@ mod tests {
 
         macro_rules! tick {
             ($tick:expr) => {{
-                let ledger_size =
-                    LedgerSizeManager::<ManageableLedgerMock>::tick(
-                        &ledger,
-                        &mut watermarks,
-                        &resize_percentage,
-                        max_ledger_size,
-                        &mut existing_ledger_state,
-                    )
-                    .await
-                    .unwrap();
+                let ledger_size = LedgerSizeManager::<
+                    ManageableLedgerMock,
+                    FinalityProviderMock,
+                >::tick(
+                    &ledger,
+                    &finality_provider,
+                    &mut watermarks,
+                    &resize_percentage,
+                    max_ledger_size,
+                    &mut existing_ledger_state,
+                )
+                .await
+                .unwrap();
                 debug!(
                     "Ledger after tick {}: Size {} {:#?}",
                     $tick, ledger_size, watermarks
@@ -432,10 +550,72 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_ledger_size_manager_new_ledger_reaching_finality_slot() {
+        init_logger!();
+
+        let ledger = Arc::new(ManageableLedgerMock::new(0, 0, 0));
+        let finality_provider = Arc::new(FinalityProviderMock {
+            finality_slot: Mutex::new(4),
+        });
+        let mut watermarks = None::<Watermarks>;
+        let resize_percentage = ResizePercentage::Large;
+        let max_ledger_size = 800;
+        let mut existing_ledger_state = None::<ExistingLedgerState>;
+
+        macro_rules! tick {
+            ($tick:expr) => {{
+                let ledger_size = LedgerSizeManager::<
+                    ManageableLedgerMock,
+                    FinalityProviderMock,
+                >::tick(
+                    &ledger,
+                    &finality_provider,
+                    &mut watermarks,
+                    &resize_percentage,
+                    max_ledger_size,
+                    &mut existing_ledger_state,
+                )
+                .await
+                .unwrap();
+                debug!(
+                    "Ledger after tick {}: Size {} {:#?}",
+                    $tick, ledger_size, watermarks
+                );
+                ledger_size
+            }};
+        }
+
+        info!("Slot: 0, New Ledger");
+        let ledger_size = tick!(1);
+        assert_eq!(ledger_size, 0);
+
+        info!("Slot: 1 added 1 slot -> 100 bytes");
+        ledger.add_slots(1);
+        let ledger_size = tick!(2);
+        assert_eq!(ledger_size, 100);
+
+        info!("Slot: 2, added 1 slot -> 200 bytes marked (delta: 200)");
+        ledger.add_slots(1);
+        let ledger_size = tick!(3);
+        assert_eq!(ledger_size, 200);
+
+        info!("Slot: 8, added 6 slots -> 800 bytes marked (delta: 600)");
+        ledger.add_slots(6);
+        let ledger_size = tick!(4);
+        assert_eq!(ledger_size, 600);
+
+        info!("Slot: 12, added 4 slots -> 1000 bytes marked (delta: 400)");
+        ledger.add_slots(4);
+        let ledger_size = tick!(5);
+        assert_eq!(ledger_size, 800);
+    }
+
+    #[tokio::test]
     async fn test_ledger_size_manager_existing_ledger_below_max_size() {
         init_logger!();
 
         let ledger = Arc::new(ManageableLedgerMock::new(0, 6, 6));
+        let finality_provider = Arc::new(FinalityProviderMock::default());
         let mut watermarks = None::<Watermarks>;
         let resize_percentage = ResizePercentage::Large;
         let max_ledger_size = 1000;
@@ -447,16 +627,19 @@ mod tests {
 
         macro_rules! tick {
             () => {{
-                let ledger_size =
-                    LedgerSizeManager::<ManageableLedgerMock>::tick(
-                        &ledger,
-                        &mut watermarks,
-                        &resize_percentage,
-                        max_ledger_size,
-                        &mut existing_ledger_state,
-                    )
-                    .await
-                    .unwrap();
+                let ledger_size = LedgerSizeManager::<
+                    ManageableLedgerMock,
+                    FinalityProviderMock,
+                >::tick(
+                    &ledger,
+                    &finality_provider,
+                    &mut watermarks,
+                    &resize_percentage,
+                    max_ledger_size,
+                    &mut existing_ledger_state,
+                )
+                .await
+                .unwrap();
                 debug!("Ledger Size {} {:#?}", ledger_size, watermarks);
                 ledger_size
             }};
@@ -513,6 +696,7 @@ mod tests {
         init_logger!();
 
         let ledger = Arc::new(ManageableLedgerMock::new(0, 12, 12));
+        let finality_provider = Arc::new(FinalityProviderMock::default());
         let mut watermarks = None::<Watermarks>;
         let resize_percentage = ResizePercentage::Large;
         let max_ledger_size = 1000;
@@ -524,16 +708,19 @@ mod tests {
 
         macro_rules! tick {
             () => {{
-                let ledger_size =
-                    LedgerSizeManager::<ManageableLedgerMock>::tick(
-                        &ledger,
-                        &mut watermarks,
-                        &resize_percentage,
-                        max_ledger_size,
-                        &mut existing_ledger_state,
-                    )
-                    .await
-                    .unwrap();
+                let ledger_size = LedgerSizeManager::<
+                    ManageableLedgerMock,
+                    FinalityProviderMock,
+                >::tick(
+                    &ledger,
+                    &finality_provider,
+                    &mut watermarks,
+                    &resize_percentage,
+                    max_ledger_size,
+                    &mut existing_ledger_state,
+                )
+                .await
+                .unwrap();
                 debug!("Ledger Size {} {:#?}", ledger_size, watermarks);
                 ledger_size
             }};

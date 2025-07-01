@@ -123,6 +123,10 @@ impl Watermarks {
         (mark, captured)
     }
 
+    pub fn push_front(&mut self, mark: Watermark) {
+        self.marks.push_front(mark);
+    }
+
     fn update(&mut self, slot: u64, mod_id: u64, size: u64) -> bool {
         let size_delta = size.saturating_sub(self.size_at_last_capture);
         if size_delta >= self.mark_size {
