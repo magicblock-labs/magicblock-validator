@@ -1,12 +1,15 @@
 use std::{
+    cell::RefCell,
     cmp::{max, min},
-    collections::{hash_map::Entry, HashMap},
+    collections::{hash_map::Entry, BinaryHeap, HashMap},
     future::Future,
     pin::Pin,
+    rc::Rc,
     sync::{Arc, RwLock},
+    time::Instant,
 };
 
-use futures_util::{stream::FuturesUnordered, Stream, StreamExt};
+use futures_util::{stream::FuturesUnordered, FutureExt, Stream, StreamExt};
 use log::*;
 use magicblock_metrics::metrics;
 use solana_account_decoder::{UiAccount, UiAccountEncoding, UiDataSliceConfig};
@@ -41,43 +44,24 @@ pub enum RemoteAccountUpdatesShardError {
 
 pub struct RemoteAccountUpdatesShard {
     shard_id: String,
-    url: String,
-    commitment: Option<CommitmentLevel>,
     monitoring_request_receiver: Receiver<(Pubkey, bool)>,
     first_subscribed_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
     last_known_update_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
+    pool: PubsubPool,
 }
 
 impl RemoteAccountUpdatesShard {
-    pub fn new(
+    pub async fn new(
         shard_id: String,
         url: String,
         commitment: Option<CommitmentLevel>,
         monitoring_request_receiver: Receiver<(Pubkey, bool)>,
         first_subscribed_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
         last_known_update_slots: Arc<RwLock<HashMap<Pubkey, Slot>>>,
-    ) -> Self {
-        Self {
-            shard_id,
-            url,
-            commitment,
-            monitoring_request_receiver,
-            first_subscribed_slots,
-            last_known_update_slots,
-        }
-    }
-
-    pub async fn start_monitoring_request_processing(
-        &mut self,
-        cancellation_token: CancellationToken,
-    ) -> Result<(), RemoteAccountUpdatesShardError> {
-        // Create a pubsub client
-        info!("Shard {}: Starting", self.shard_id);
-        let ws_url = self.url.as_str();
+    ) -> Result<Self, RemoteAccountUpdatesShardError> {
         // For every account, we only want the updates, not the actual content of the accounts
         let config = RpcAccountInfoConfig {
-            commitment: self
-                .commitment
+            commitment: commitment
                 .map(|commitment| CommitmentConfig { commitment }),
             encoding: Some(UiAccountEncoding::Base64),
             data_slice: Some(UiDataSliceConfig {
@@ -86,15 +70,40 @@ impl RemoteAccountUpdatesShard {
             }),
             min_context_slot: None,
         };
-        let mut pool = PubsubPool::new(ws_url, config).await?;
-        // Subscribe to the clock from the RPC (to figure out the latest slot)
-        let mut clock_stream = pool.subscribe(clock::ID).await?;
+        // Create a pubsub client
+        info!("Shard {}: Starting", shard_id);
+        let pool = PubsubPool::new(&url, config).await?;
+        Ok(Self {
+            shard_id,
+            monitoring_request_receiver,
+            first_subscribed_slots,
+            last_known_update_slots,
+            pool,
+        })
+    }
+
+    pub async fn start_monitoring_request_processing(
+        mut self,
+        cancellation_token: CancellationToken,
+    ) {
         let mut clock_slot = 0;
         // We'll store useful maps for each of the account subscriptions
         let mut account_streams = StreamMap::new();
         const LOG_CLOCK_FREQ: u64 = 100;
         let mut log_clock_count = 0;
+        // Subscribe to the clock from the RPC (to figure out the latest slot)
+        let subscription = self.pool.subscribe(clock::ID).await;
+        let Ok((mut clock_stream, unsub)) = subscription.result else {
+            error!("failed to subscribe to clock on shard: {}", self.shard_id);
+            return;
+        };
+        self.pool
+            .unsubscribes
+            .insert(clock::ID, (subscription.client.subs.clone(), unsub));
+        self.pool.clients.push(subscription.client);
+        info!("subscribed to clock on shard: {}", self.shard_id);
 
+        let mut requests = FuturesUnordered::new();
         // Loop forever until we stop the worker
         loop {
             tokio::select! {
@@ -122,24 +131,36 @@ impl RemoteAccountUpdatesShard {
                     if unsub {
                         account_streams.remove(&pubkey);
                         metrics::set_subscriptions_count(account_streams.len(), &self.shard_id);
-                        pool.unsubscribe(&pubkey).await;
+                        self.pool.unsubscribe(&pubkey);
                         continue;
                     }
-                    if pool.subscribed(&pubkey) {
+                    if self.pool.subscribed(&pubkey) {
                         continue;
                     }
-                    debug!(
+                    // spawn the actual subscription handling to a background
+                    // task, so that the select loop is not blocked by it
+                    let sub = self.pool.subscribe(pubkey).map(move |stream| (stream,  pubkey));
+                    requests.push(sub);
+                }
+                Some((result, pubkey)) = requests.next(), if !requests.is_empty() => {
+                    let (stream, unsub) = match result.result {
+                        Ok(s) => s,
+                        Err(e) => {
+                            warn!("shard {} failed to websocket subscribe to {pubkey}: {e}", self.shard_id);
+                            continue;
+                        }
+                    };
+                    self.try_to_override_first_subscribed_slot(pubkey, clock_slot);
+                    self.pool.unsubscribes.insert(pubkey, (result.client.subs.clone(), unsub));
+                    self.pool.clients.push(result.client);
+                    account_streams.insert(pubkey, stream);
+                    info!(
                         "Shard {}: Account monitoring started: {:?}, clock_slot: {:?}",
                         self.shard_id,
                         pubkey,
                         clock_slot
                     );
-                    let stream = pool
-                        .subscribe(pubkey)
-                        .await?;
-                    account_streams.insert(pubkey, stream);
                     metrics::set_subscriptions_count(account_streams.len(), &self.shard_id);
-                    self.try_to_override_first_subscribed_slot(pubkey, clock_slot);
                 }
                 // When we receive an update from any account subscriptions
                 Some((pubkey, update)) = account_streams.next() => {
@@ -159,10 +180,8 @@ impl RemoteAccountUpdatesShard {
         // Cleanup all subscriptions and wait for proper shutdown
         drop(account_streams);
         drop(clock_stream);
-        pool.shutdown().await;
+        self.pool.shutdown().await;
         info!("Shard {}: Stopped", self.shard_id);
-        // Done
-        Ok(())
     }
 
     fn try_to_override_first_subscribed_slot(
@@ -223,8 +242,8 @@ impl RemoteAccountUpdatesShard {
 }
 
 struct PubsubPool {
-    clients: Vec<PubSubConnection>,
-    unsubscribes: HashMap<Pubkey, (usize, BoxFn)>,
+    clients: BinaryHeap<PubSubConnection>,
+    unsubscribes: HashMap<Pubkey, (Rc<RefCell<usize>>, BoxFn)>,
     config: RpcAccountInfoConfig,
 }
 
@@ -237,7 +256,7 @@ impl PubsubPool {
         // of connections per RPC upstream, we don't overcomplicate things
         // here, as the whole cloning pipeline will be rewritten quite soon
         const CONNECTIONS_PER_POOL: usize = 8;
-        let mut clients = Vec::with_capacity(CONNECTIONS_PER_POOL);
+        let mut clients = BinaryHeap::with_capacity(CONNECTIONS_PER_POOL);
         let mut connections: FuturesUnordered<_> = (0..CONNECTIONS_PER_POOL)
             .map(|_| PubSubConnection::new(url))
             .collect();
@@ -251,43 +270,50 @@ impl PubsubPool {
         })
     }
 
-    async fn subscribe(
+    fn subscribe(
         &mut self,
         pubkey: Pubkey,
-    ) -> Result<SubscriptionStream, RemoteAccountUpdatesShardError> {
-        let (index, client) = self
-            .clients
-            .iter_mut()
-            .enumerate()
-            .min_by(|a, b| a.1.subs.cmp(&b.1.subs))
-            .expect("clients vec is always greater than 0");
-        let (stream, unsubscribe) = client
-            .inner
-            .account_subscribe(&pubkey, Some(self.config.clone()))
-            .await
-            .map_err(RemoteAccountUpdatesShardError::PubsubClientError)?;
-        client.subs += 1;
-        // SAFETY:
-        // we never drop the PubsubPool before the returned subscription stream
-        // so the lifetime of the stream can be safely extended to 'static
-        #[allow(clippy::missing_transmute_annotations)]
-        let stream = unsafe { std::mem::transmute(stream) };
-        self.unsubscribes.insert(pubkey, (index, unsubscribe));
-        Ok(stream)
+    ) -> impl Future<Output = SubscriptionResult> {
+        let client = self.clients.pop().expect(
+            "websocket connection pool always has at least one connection",
+        );
+        let config = Some(self.config.clone());
+        let start = Instant::now();
+        async move {
+            info!("subscribing to {pubkey}");
+            let result = client
+                .inner
+                .account_subscribe(&pubkey, config)
+                .await
+                .map_err(RemoteAccountUpdatesShardError::PubsubClientError)
+                .map(|(stream, unsub)| {
+                    // SAFETY:
+                    // we never drop the PubsubPool before the returned subscription stream
+                    // so the lifetime of the stream can be safely extended to 'static
+                    #[allow(clippy::missing_transmute_annotations)]
+                    let stream = unsafe { std::mem::transmute(stream) };
+                    (stream, unsub)
+                });
+            *client.subs.borrow_mut() += 1;
+            info!(
+                "subscription to {pubkey} is complete in {}ms",
+                start.elapsed().as_millis()
+            );
+            SubscriptionResult { result, client }
+        }
     }
 
-    async fn unsubscribe(&mut self, pubkey: &Pubkey) {
-        let Some((index, callback)) = self.unsubscribes.remove(pubkey) else {
+    fn unsubscribe(&mut self, pubkey: &Pubkey) {
+        let Some((subs, callback)) = self.unsubscribes.remove(pubkey) else {
             return;
         };
-        callback().await;
-        let Some(client) = self.clients.get_mut(index) else {
-            return;
-        };
-        client.subs = client.subs.saturating_sub(1);
+        let count = *subs.borrow();
+        *subs.borrow_mut() = count.saturating_sub(1);
+        drop(subs);
+        tokio::spawn(callback());
     }
 
-    fn subscribed(&mut self, pubkey: &Pubkey) -> bool {
+    fn subscribed(&self, pubkey: &Pubkey) -> bool {
         self.unsubscribes.contains_key(pubkey)
     }
 
@@ -295,9 +321,9 @@ impl PubsubPool {
         // Cleanup all subscriptions and wait for proper shutdown
         for (pubkey, (_, callback)) in self.unsubscribes.drain() {
             info!("Account monitoring killed: {:?}", pubkey);
-            callback().await;
+            tokio::spawn(callback());
         }
-        for client in self.clients.drain(..) {
+        for client in self.clients.drain() {
             let _ = client.inner.shutdown().await;
         }
     }
@@ -305,7 +331,29 @@ impl PubsubPool {
 
 struct PubSubConnection {
     inner: PubsubClient,
-    subs: usize,
+    subs: Rc<RefCell<usize>>,
+}
+
+impl PartialEq for PubSubConnection {
+    fn eq(&self, other: &Self) -> bool {
+        self.subs.eq(&other.subs)
+    }
+}
+
+impl PartialOrd for PubSubConnection {
+    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
+        // NOTE: intentional reverse ordering for the use in the BinaryHeap
+        Some(other.subs.cmp(&self.subs))
+    }
+}
+
+impl Eq for PubSubConnection {}
+
+impl Ord for PubSubConnection {
+    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
+        // NOTE: intentional reverse ordering for the use in the BinaryHeap
+        other.subs.cmp(&self.subs)
+    }
 }
 
 impl PubSubConnection {
@@ -313,6 +361,20 @@ impl PubSubConnection {
         let inner = PubsubClient::new(url)
             .await
             .map_err(RemoteAccountUpdatesShardError::PubsubClientError)?;
-        Ok(Self { inner, subs: 0 })
+        Ok(Self {
+            inner,
+            subs: Default::default(),
+        })
     }
+}
+
+// SAFETY: the Rc<RefCell> used in the connection never escape outside of the Shard,
+// and the borrows are never held across the await points, thus these impls are safe
+unsafe impl Send for PubSubConnection {}
+unsafe impl Send for PubsubPool {}
+unsafe impl Send for RemoteAccountUpdatesShard {}
+
+struct SubscriptionResult {
+    result: Result<(SubscriptionStream, BoxFn), RemoteAccountUpdatesShardError>,
+    client: PubSubConnection,
 }

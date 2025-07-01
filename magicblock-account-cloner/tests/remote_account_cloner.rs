@@ -267,7 +267,7 @@ async fn test_clone_fails_stale_undelegated_account_when_ephemeral() {
     );
     // Account(s) involved
     let undelegated_account = Pubkey::new_unique();
-    account_updates.set_first_subscribed_slot(undelegated_account, 50); // Accounts subscribe is more recent than fetchable state
+    account_updates.set_last_known_update_slot(clock::ID, 50); // Accounts subscribe is more recent than fetchable state
     account_fetcher.set_undelegated_account(undelegated_account, 42);
     // Run test
     let result = cloner.clone_account(&undelegated_account).await;
