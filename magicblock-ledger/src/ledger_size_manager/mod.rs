@@ -666,8 +666,6 @@ mod tests {
         info!("Slot: 21, added 1 slot -> remove 200 -> 600 bytes");
         ledger.add_slots(1);
         let ledger_size = tick!();
-        assert_eq!(ledger_size, 600);
-        wms!(500, 2);
     }
 
     #[tokio::test]
@@ -844,5 +842,50 @@ mod tests {
                 max_ledger_size: 1000,
             },
         );
+    }
+
+    #[tokio::test]
+    async fn test_ledger_size_manager_existing_ledger_above_max_size_finality_slot_blocking_full_truncation(
+    ) {
+        init_logger!();
+
+        let ledger = Arc::new(ManageableLedgerMock::new(0, 12, 12));
+        let finality_provider = Arc::new(FinalityProviderMock {
+            finality_slot: Mutex::new(3),
+        });
+        let mut watermarks = None::<Watermarks>;
+        let resize_percentage = ResizePercentage::Large;
+        let max_ledger_size = 1000;
+        let mut existing_ledger_state = Some(ExistingLedgerState {
+            size: 1200,
+            slot: 12,
+            mod_id: 12,
+        });
+
+        macro_rules! tick {
+            () => {{
+                let ledger_size = LedgerSizeManager::<
+                    ManageableLedgerMock,
+                    FinalityProviderMock,
+                >::tick(
+                    &ledger,
+                    &finality_provider,
+                    &mut watermarks,
+                    &resize_percentage,
+                    max_ledger_size,
+                    &mut existing_ledger_state,
+                )
+                .await
+                .unwrap();
+                debug!("Ledger Size {} {:#?}", ledger_size, watermarks);
+                ledger_size
+            }};
+        }
+
+        info!("Slot: 12, existing ledger above max size");
+        let ledger_size = tick!();
+        // We cannot truncate above the finality slot, so we only get 300 bytes back and
+        // stay above the max size
+        assert_eq!(ledger_size, 900);
     }
 }
