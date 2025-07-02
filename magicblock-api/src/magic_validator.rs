@@ -146,6 +146,7 @@ pub struct MagicValidator {
     remote_account_fetcher_handle: Option<tokio::task::JoinHandle<()>>,
     remote_account_updates_worker: Option<RemoteAccountUpdatesWorker>,
     remote_account_updates_handle: Option<tokio::task::JoinHandle<()>>,
+    #[allow(clippy::type_complexity)]
     remote_account_cloner_worker: Option<
         Arc<
             RemoteAccountClonerWorker<
