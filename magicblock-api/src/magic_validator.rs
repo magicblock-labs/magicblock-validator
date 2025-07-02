@@ -147,12 +147,14 @@ pub struct MagicValidator {
     remote_account_updates_worker: Option<RemoteAccountUpdatesWorker>,
     remote_account_updates_handle: Option<tokio::task::JoinHandle<()>>,
     remote_account_cloner_worker: Option<
-        RemoteAccountClonerWorker<
-            BankAccountProvider,
-            RemoteAccountFetcherClient,
-            RemoteAccountUpdatesClient,
-            AccountDumperBank,
-            CommittorService,
+        Arc<
+            RemoteAccountClonerWorker<
+                BankAccountProvider,
+                RemoteAccountFetcherClient,
+                RemoteAccountUpdatesClient,
+                AccountDumperBank,
+                CommittorService,
+            >,
         >,
     >,
     remote_account_cloner_handle: Option<tokio::task::JoinHandle<()>>,
@@ -186,7 +188,11 @@ impl MagicValidator {
             genesis_config,
             validator_pubkey,
             ..
-        } = create_genesis_config_with_leader(u64::MAX, &validator_pubkey);
+        } = create_genesis_config_with_leader(
+            u64::MAX,
+            &validator_pubkey,
+            config.validator_config.validator.base_fees,
+        );
 
         let ledger = Self::init_ledger(
             config.validator_config.ledger.path.as_ref(),
@@ -338,7 +344,6 @@ impl MagicValidator {
             committor_service.clone(),
             accounts_config.allowed_program_ids,
             blacklisted_accounts,
-            accounts_config.payer_init_lamports,
             if config.validator_config.validator.base_fees.is_none() {
                 ValidatorCollectionMode::NoFees
             } else {
@@ -390,7 +395,9 @@ impl MagicValidator {
             remote_account_fetcher_handle: None,
             remote_account_updates_worker: Some(remote_account_updates_worker),
             remote_account_updates_handle: None,
-            remote_account_cloner_worker: Some(remote_account_cloner_worker),
+            remote_account_cloner_worker: Some(Arc::new(
+                remote_account_cloner_worker,
+            )),
             remote_account_cloner_handle: None,
             pubsub_handle: Default::default(),
             pubsub_close_handle: Default::default(),
@@ -800,8 +807,20 @@ impl MagicValidator {
             }
 
             if !self.config.ledger.reset {
-                remote_account_cloner_worker.hydrate().await?;
-                info!("Validator hydration complete (bank hydrate, replay, account clone)");
+                let remote_account_cloner_worker =
+                    remote_account_cloner_worker.clone();
+                tokio::spawn(async move {
+                    let _ = remote_account_cloner_worker
+                        .hydrate()
+                        .await
+                        .inspect_err(|err| {
+                            error!(
+                                "Failed to hydrate validator accounts: {:?}",
+                                err
+                            );
+                        });
+                    info!("Validator hydration complete (bank hydrate, replay, account clone)");
+                });
             }
 
             let cancellation_token = self.token.clone();

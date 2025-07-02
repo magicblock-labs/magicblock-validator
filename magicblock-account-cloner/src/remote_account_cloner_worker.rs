@@ -3,17 +3,13 @@ use std::{
     collections::{hash_map::Entry, HashMap, HashSet},
     sync::{Arc, RwLock},
     time::Duration,
-    vec,
 };
 
 use conjunto_transwise::{
     AccountChainSnapshot, AccountChainSnapshotShared, AccountChainState,
     DelegationRecord,
 };
-use futures_util::{
-    future::join_all,
-    stream::{self, StreamExt, TryStreamExt},
-};
+use futures_util::stream::{self, FuturesUnordered, StreamExt, TryStreamExt};
 use log::*;
 use lru::LruCache;
 use magicblock_account_dumper::AccountDumper;
@@ -30,10 +26,7 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::Signature,
 };
-use tokio::{
-    sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender},
-    time::sleep,
-};
+use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
@@ -105,12 +98,11 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU, CC> {
     changeset_committor: Option<Arc<CC>>,
     allowed_program_ids: Option<HashSet<Pubkey>>,
     blacklisted_accounts: HashSet<Pubkey>,
-    payer_init_lamports: Option<u64>,
     validator_charges_fees: ValidatorCollectionMode,
     permissions: AccountClonerPermissions,
     fetch_retries: u64,
-    clone_request_receiver: UnboundedReceiver<Pubkey>,
-    clone_request_sender: UnboundedSender<Pubkey>,
+    clone_request_sender: flume::Sender<Pubkey>,
+    clone_request_receiver: flume::Receiver<Pubkey>,
     clone_listeners: Arc<RwLock<HashMap<Pubkey, AccountClonerListeners>>>,
     last_clone_output: CloneOutputMap,
     validator_identity: Pubkey,
@@ -149,14 +141,12 @@ where
         changeset_committor: Option<Arc<CC>>,
         allowed_program_ids: Option<HashSet<Pubkey>>,
         blacklisted_accounts: HashSet<Pubkey>,
-        payer_init_lamports: Option<u64>,
         validator_charges_fees: ValidatorCollectionMode,
         permissions: AccountClonerPermissions,
         validator_authority: Pubkey,
         max_monitored_accounts: usize,
     ) -> Self {
-        let (clone_request_sender, clone_request_receiver) =
-            unbounded_channel();
+        let (clone_request_sender, clone_request_receiver) = flume::unbounded();
         let fetch_retries = 50;
         let max_monitored_accounts = max_monitored_accounts
             .try_into()
@@ -169,7 +159,6 @@ where
             changeset_committor,
             allowed_program_ids,
             blacklisted_accounts,
-            payer_init_lamports,
             validator_charges_fees,
             permissions,
             fetch_retries,
@@ -182,7 +171,7 @@ where
         }
     }
 
-    pub fn get_clone_request_sender(&self) -> UnboundedSender<Pubkey> {
+    pub fn get_clone_request_sender(&self) -> flume::Sender<Pubkey> {
         self.clone_request_sender.clone()
     }
 
@@ -197,19 +186,21 @@ where
     }
 
     pub async fn start_clone_request_processing(
-        mut self,
+        &self,
         cancellation_token: CancellationToken,
     ) {
-        let mut requests = vec![];
+        let mut requests = FuturesUnordered::new();
         loop {
             tokio::select! {
-                _ = self.clone_request_receiver.recv_many(&mut requests, 100) => {
-                    join_all(
-                        requests
-                            .drain(..)
-                            .map(|request| self.process_clone_request(request))
-                    ).await;
+                res = self.clone_request_receiver.recv_async() => {
+                    match res {
+                        Ok(req) => requests.push(self.process_clone_request(req)),
+                        Err(err) => {
+                            error!("Failed to receive clone request: {:?}", err);
+                        }
+                    }
                 }
+                _ = requests.next(), if !requests.is_empty() => {},
                 _ = cancellation_token.cancelled() => {
                     return;
                 }
@@ -301,7 +292,7 @@ where
         // TODO(GabrielePicco): Make the concurrency configurable
         let result = stream
             .map(Ok::<_, AccountClonerError>)
-            .try_for_each_concurrent(30, |(pubkey, owner)| async move {
+            .try_for_each_concurrent(10, |(pubkey, owner)| async move {
                 trace!("Hydrating '{}'", pubkey);
                 let res = self
                     .do_clone_and_update_cache(
@@ -553,8 +544,14 @@ where
                 self.track_not_delegated_account(*pubkey).await?;
                 match self.validator_charges_fees {
                     ValidatorCollectionMode::NoFees => self
-                        .do_clone_feepayer_account_for_non_charging_validator(
-                            pubkey, *lamports, owner,
+                        .do_clone_undelegated_account(
+                            pubkey,
+                            // TODO(GabrielePicco): change account fetching to return the account
+                            &Account {
+                                lamports: *lamports,
+                                owner: *owner,
+                                ..Default::default()
+                            },
                         )?,
                     ValidatorCollectionMode::Fees => {
                         // Fetch the associated escrowed account
@@ -758,17 +755,6 @@ where
                     balance_pda: balance_pda.map(|p| p.to_string()).as_deref(),
                 });
             })
-    }
-
-    /// Clone a fee payer account setting the initial lamports to payer_init_lamports
-    fn do_clone_feepayer_account_for_non_charging_validator(
-        &self,
-        pubkey: &Pubkey,
-        lamports: u64,
-        owner: &Pubkey,
-    ) -> AccountClonerResult<Signature> {
-        let lamports = self.payer_init_lamports.unwrap_or(lamports);
-        self.do_clone_feepayer_account(pubkey, lamports, owner, None)
     }
 
     fn do_clone_undelegated_account(

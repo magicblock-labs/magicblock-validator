@@ -17,7 +17,7 @@ use tokio::sync::oneshot::{self, Sender};
 #[derive(Debug, Clone, Error)]
 pub enum AccountClonerError {
     #[error(transparent)]
-    SendError(#[from] tokio::sync::mpsc::error::SendError<Pubkey>),
+    SendError(#[from] flume::SendError<Pubkey>),
 
     #[error(transparent)]
     RecvError(#[from] tokio::sync::oneshot::error::RecvError),

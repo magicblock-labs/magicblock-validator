@@ -67,7 +67,7 @@ pub fn init_geyser_service(
         ..Default::default()
     };
     let mut manager = GeyserPluginManager::new();
-    let (grpc_plugin, rpc_service): (_, Arc<GeyserRpcService>) = {
+    let (plugin, rpc_service) = {
         let plugin = GrpcGeyserPlugin::create(config)
             .map_err(|err| {
                 error!("Failed to load geyser plugin: {:?}", err);
@@ -84,16 +84,21 @@ pub fn init_geyser_service(
             geyser_grpc.socket_addr()
         );
         let rpc_service = plugin.rpc();
-        // hack: we don't load the geyser plugin from .so file, as such we don't own a handle to Library,
-        // to bypass this, we just make up one from null pointer and forget about it, this should work as long
-        // as geyser plugin manager doesn't try to do anything fancy with that handle
-        let lib = unsafe { std::mem::transmute::<usize, Library>(0_usize) };
+        // hack: we don't load the geyser plugin from .so file, as such we don't own a handle to
+        // Library, to bypass this, we just make up one from a pointer to a leaked 8 byte memory,
+        // and forget about it, this should work as long as geyser plugin manager doesn't try to do
+        // anything fancy with that handle, and when drop method of the Library is called, nothing
+        // bad happens if the address is garbage, as long as it's not null
+        // (admittedly ugly solution)
+        let dummy = Box::leak(Box::new(0usize)) as *const usize;
+        let lib =
+            unsafe { std::mem::transmute::<*const usize, Library>(dummy) };
         (
             LoadedGeyserPlugin::new(lib, Box::new(plugin), None),
             rpc_service,
         )
     };
-    manager.plugins.push(grpc_plugin);
+    manager.plugins.push(plugin);
 
     Ok((manager, rpc_service))
 }

@@ -1,4 +1,6 @@
 use cleanass::assert_eq;
+use std::thread::sleep;
+use std::time::Duration;
 use std::{path::Path, process::Child};
 
 use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};
@@ -16,7 +18,7 @@ use test_ledger_restore::{
     assert_counter_commits_on_chain, cleanup, confirm_tx_with_payer_chain,
     confirm_tx_with_payer_ephem, fetch_counter_chain, fetch_counter_ephem,
     get_programs_with_flexi_counter, setup_validator_with_local_remote,
-    wait_for_ledger_persist, TMP_DIR_LEDGER,
+    wait_for_cloned_accounts_hydration, wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 const COUNTER: &str = "Counter of Payer";
 fn payer_keypair() -> Keypair {
@@ -159,6 +161,8 @@ fn read(ledger_path: &Path, payer_kp: &Keypair) -> Child {
 
     let (_, mut validator, ctx) =
         setup_validator_with_local_remote(ledger_path, Some(programs), false);
+
+    wait_for_cloned_accounts_hydration();
 
     let counter_ephem = fetch_counter_ephem(payer, &mut validator);
     let counter_chain = fetch_counter_chain(payer, &mut validator);
