@@ -1,6 +1,6 @@
-use log::*;
 use std::collections::VecDeque;
 
+use log::*;
 use solana_sdk::clock::Slot;
 
 use super::config::{ExistingLedgerState, ResizePercentage};

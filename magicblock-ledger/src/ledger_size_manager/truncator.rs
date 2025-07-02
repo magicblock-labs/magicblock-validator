@@ -1,11 +1,12 @@
+use std::sync::Arc;
+
 use async_trait::async_trait;
 use log::*;
 use solana_measure::measure::Measure;
-use std::sync::Arc;
+use solana_sdk::clock::Slot;
 use tokio::task::JoinSet;
 
-use solana_sdk::clock::Slot;
-
+use super::traits::ManagableLedger;
 use crate::{
     database::columns::{
         AddressSignatures, Blockhash, Blocktime, PerfSamples, SlotSignatures,
@@ -14,8 +15,6 @@ use crate::{
     errors::{LedgerError, LedgerResult},
     Ledger,
 };
-
-use super::traits::ManagableLedger;
 
 pub struct Truncator {
     pub(crate) ledger: Arc<Ledger>,

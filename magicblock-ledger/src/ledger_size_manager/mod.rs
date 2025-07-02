@@ -6,16 +6,13 @@ pub mod traits;
 mod truncator;
 mod watermarks;
 
+use std::{collections::VecDeque, sync::Arc, time::Duration};
+
 use config::{ExistingLedgerState, LedgerSizeManagerConfig, ResizePercentage};
 use errors::{LedgerSizeManagerError, LedgerSizeManagerResult};
 use log::*;
 use magicblock_bank::bank::Bank;
 use magicblock_core::traits::FinalityProvider;
-use std::{collections::VecDeque, sync::Arc, time::Duration};
-use traits::ManagableLedger;
-use truncator::Truncator;
-use watermarks::{Watermark, Watermarks};
-
 use magicblock_metrics::metrics;
 use solana_sdk::clock::Slot;
 use thiserror::Error;
@@ -24,6 +21,9 @@ use tokio::{
     time::interval,
 };
 use tokio_util::sync::CancellationToken;
+use traits::ManagableLedger;
+use truncator::Truncator;
+use watermarks::{Watermark, Watermarks};
 
 use crate::Ledger;
 
