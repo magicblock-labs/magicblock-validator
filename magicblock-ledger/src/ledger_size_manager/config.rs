@@ -46,7 +46,7 @@ impl ResizePercentage {
 
 pub struct LedgerSizeManagerConfig {
     /// Max ledger size to maintain.
-    /// The [LedgerSizeManager] will attempt to respect this size,, but
+    /// The [LedgerSizeManager] will attempt to respect this size, but
     /// it may grow larger temporarily in between size checks.
     pub max_size: u64,
 

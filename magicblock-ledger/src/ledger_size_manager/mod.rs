@@ -666,6 +666,7 @@ mod tests {
         info!("Slot: 21, added 1 slot -> remove 200 -> 600 bytes");
         ledger.add_slots(1);
         let ledger_size = tick!();
+        assert_eq!(ledger_size, 600);
     }
 
     #[tokio::test]
