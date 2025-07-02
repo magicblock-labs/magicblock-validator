@@ -226,11 +226,14 @@ impl<T: ManagableLedger, U: FinalityProvider> LedgerSizeManager<T, U> {
                         lowest_cleanup_slot, latest_final_slot
                     );
                     wms.push_front(mark);
+                    if captured {
+                        wms.size_at_last_capture = ledger_size;
+                    }
                     return Some(ledger_size);
                 }
 
                 if mark.slot > latest_final_slot {
-                    warn!("Truncation would remove data above the latest final slot {}. \
+                    warn!("Truncation would remove data at or above the latest final slot {}. \
                            Adjusting truncation for mark: {mark:?} to cut up to the latest final slot.",
                         latest_final_slot);
 
@@ -250,6 +253,8 @@ impl<T: ManagableLedger, U: FinalityProvider> LedgerSizeManager<T, U> {
                         size_delta,
                     )
                     .await;
+                    wms.size_at_last_capture =
+                        wms.size_at_last_capture.saturating_sub(size_delta);
 
                     // Since we didn't truncate the full mark, we need to put one
                     // back so it will be processed to remove the remaining space
@@ -264,6 +269,9 @@ impl<T: ManagableLedger, U: FinalityProvider> LedgerSizeManager<T, U> {
                 } else {
                     Self::truncate_ledger(ledger, mark.slot, mark.size_delta)
                         .await;
+                    wms.size_at_last_capture = wms
+                        .size_at_last_capture
+                        .saturating_sub(mark.size_delta);
                 }
 
                 if let Ok(ls) = ledger.storage_size() {
@@ -563,7 +571,7 @@ mod tests {
         let mut existing_ledger_state = None::<ExistingLedgerState>;
 
         macro_rules! tick {
-            ($tick:expr) => {{
+            () => {{
                 let ledger_size = LedgerSizeManager::<
                     ManageableLedgerMock,
                     FinalityProviderMock,
@@ -577,37 +585,89 @@ mod tests {
                 )
                 .await
                 .unwrap();
-                debug!(
-                    "Ledger after tick {}: Size {} {:#?}",
-                    $tick, ledger_size, watermarks
-                );
+                debug!("Ledger Size {} {:#?}", ledger_size, watermarks);
                 ledger_size
             }};
         }
 
+        macro_rules! wms {
+            ($size:expr, $len:expr) => {
+                let wms = watermarks.as_ref().unwrap();
+                assert_eq!(wms.size_at_last_capture, $size);
+                assert_eq!(wms.marks.len(), $len);
+            };
+        }
+
         info!("Slot: 0, New Ledger");
-        let ledger_size = tick!(1);
+        let ledger_size = tick!();
         assert_eq!(ledger_size, 0);
 
         info!("Slot: 1 added 1 slot -> 100 bytes");
         ledger.add_slots(1);
-        let ledger_size = tick!(2);
+        let ledger_size = tick!();
         assert_eq!(ledger_size, 100);
 
         info!("Slot: 2, added 1 slot -> 200 bytes marked (delta: 200)");
         ledger.add_slots(1);
-        let ledger_size = tick!(3);
+        let ledger_size = tick!();
         assert_eq!(ledger_size, 200);
 
         info!("Slot: 8, added 6 slots -> 800 bytes marked (delta: 600)");
         ledger.add_slots(6);
-        let ledger_size = tick!(4);
+        let ledger_size = tick!();
         assert_eq!(ledger_size, 600);
 
-        info!("Slot: 12, added 4 slots -> 1000 bytes marked (delta: 400)");
+        // It would normally remove 600 bytes, but the finality slot is 4 so
+        // it can only remove up to 4 instead 8
+        info!("Slot: 12, added 4 slots -> 1000 bytes marked (delta: 400) -> remove 200 -> 800 bytes");
         ledger.add_slots(4);
-        let ledger_size = tick!(5);
+        let ledger_size = tick!();
         assert_eq!(ledger_size, 800);
+        wms!(800, 2);
+
+        info!("Slot: 13, added 1 slot -> 900 bytes -> cannot remove anything");
+        ledger.add_slots(1);
+        let ledger_size = tick!();
+        assert_eq!(ledger_size, 900);
+        wms!(800, 2);
+
+        info!("Slot: 14 - 15, adding slots, but finality slot blocks removal until it is increased");
+        ledger.add_slots(1);
+        let ledger_size = tick!();
+        assert_eq!(ledger_size, 1_000);
+        wms!(1_000, 3);
+
+        ledger.add_slots(1);
+        let ledger_size = tick!();
+        assert_eq!(ledger_size, 1_100);
+        wms!(1_000, 3);
+
+        *finality_provider.finality_slot.lock().unwrap() = 14;
+        let ledger_size = tick!();
+        assert_eq!(ledger_size, 700);
+        // We cut 400 bytes, so the size at last capture is adjusted down
+        wms!(600, 2);
+
+        info!(
+            "Slot: 16, added 1 slot -> marked (delta: 200) -> remove 400 -> 400 bytes"
+        );
+        ledger.add_slots(1);
+        let ledger_size = tick!();
+        assert_eq!(ledger_size, 400);
+        wms!(400, 2);
+
+        info!("Slot: 17-20, added 3 slots -> 700 bytes marked (delta: 300) + set finality 19");
+        ledger.add_slots(3);
+        *finality_provider.finality_slot.lock().unwrap() = 19;
+        let ledger_size = tick!();
+        assert_eq!(ledger_size, 700);
+        wms!(700, 3);
+
+        info!("Slot: 21, added 1 slot -> remove 200 -> 600 bytes");
+        ledger.add_slots(1);
+        let ledger_size = tick!();
+        assert_eq!(ledger_size, 600);
+        wms!(500, 2);
     }
 
     #[tokio::test]
