@@ -9,7 +9,7 @@ use conjunto_transwise::{
     AccountChainSnapshot, AccountChainSnapshotShared, AccountChainState,
     DelegationRecord,
 };
-use futures_util::stream::{self, StreamExt, TryStreamExt};
+use futures_util::stream::{self, FuturesUnordered, StreamExt, TryStreamExt};
 use log::*;
 use lru::LruCache;
 use magicblock_account_dumper::AccountDumper;
@@ -96,7 +96,6 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU> {
     account_dumper: ADU,
     allowed_program_ids: Option<HashSet<Pubkey>>,
     blacklisted_accounts: HashSet<Pubkey>,
-    payer_init_lamports: Option<u64>,
     validator_charges_fees: ValidatorCollectionMode,
     permissions: AccountClonerPermissions,
     fetch_retries: u64,
@@ -138,7 +137,6 @@ where
         account_dumper: ADU,
         allowed_program_ids: Option<HashSet<Pubkey>>,
         blacklisted_accounts: HashSet<Pubkey>,
-        payer_init_lamports: Option<u64>,
         validator_charges_fees: ValidatorCollectionMode,
         permissions: AccountClonerPermissions,
         validator_authority: Pubkey,
@@ -156,7 +154,6 @@ where
             account_dumper,
             allowed_program_ids,
             blacklisted_accounts,
-            payer_init_lamports,
             validator_charges_fees,
             permissions,
             fetch_retries,
@@ -187,16 +184,18 @@ where
         &self,
         cancellation_token: CancellationToken,
     ) {
+        let mut requests = FuturesUnordered::new();
         loop {
             tokio::select! {
                 res = self.clone_request_receiver.recv_async() => {
                     match res {
-                        Ok(req) => self.process_clone_request(req).await,
+                        Ok(req) => requests.push(self.process_clone_request(req)),
                         Err(err) => {
                             error!("Failed to receive clone request: {:?}", err);
                         }
                     }
                 }
+                _ = requests.next(), if !requests.is_empty() => {},
                 _ = cancellation_token.cancelled() => {
                     return;
                 }
@@ -543,8 +542,14 @@ where
                 self.track_not_delegated_account(*pubkey).await?;
                 match self.validator_charges_fees {
                     ValidatorCollectionMode::NoFees => self
-                        .do_clone_feepayer_account_for_non_charging_validator(
-                            pubkey, *lamports, owner,
+                        .do_clone_undelegated_account(
+                            pubkey,
+                            // TODO(GabrielePicco): change account fetching to return the account
+                            &Account {
+                                lamports: *lamports,
+                                owner: *owner,
+                                ..Default::default()
+                            },
                         )?,
                     ValidatorCollectionMode::Fees => {
                         // Fetch the associated escrowed account
@@ -734,17 +739,6 @@ where
                     balance_pda: balance_pda.map(|p| p.to_string()).as_deref(),
                 });
             })
-    }
-
-    /// Clone a fee payer account setting the initial lamports to payer_init_lamports
-    fn do_clone_feepayer_account_for_non_charging_validator(
-        &self,
-        pubkey: &Pubkey,
-        lamports: u64,
-        owner: &Pubkey,
-    ) -> AccountClonerResult<Signature> {
-        let lamports = self.payer_init_lamports.unwrap_or(lamports);
-        self.do_clone_feepayer_account(pubkey, lamports, owner, None)
     }
 
     fn do_clone_undelegated_account(
