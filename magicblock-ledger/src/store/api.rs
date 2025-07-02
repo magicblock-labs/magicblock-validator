@@ -1130,6 +1130,7 @@ impl Ledger {
         id: u64,
         data: &AccountModData,
     ) -> LedgerResult<()> {
+        metrics::inc_ledger_account_mod_data_count();
         self.account_mod_datas_cf.put(id, data)?;
         self.last_mod_id.store(id, Ordering::Relaxed);
         Ok(())

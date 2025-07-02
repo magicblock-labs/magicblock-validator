@@ -383,8 +383,8 @@ pub fn inc_ledger_perf_samples_count() {
     LEDGER_PERF_SAMPLES_COUNT.inc();
 }
 
-pub fn inc_ledger_account_mod_data_count(count: u64) {
-    LEDGER_ACCOUNT_MOD_DATA_COUNT.inc_by(count);
+pub fn inc_ledger_account_mod_data_count() {
+    LEDGER_ACCOUNT_MOD_DATA_COUNT.inc();
 }
 
 pub fn set_accounts_size(size: u64) {
