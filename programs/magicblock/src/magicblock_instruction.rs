@@ -5,7 +5,6 @@ use num_derive::{FromPrimitive, ToPrimitive};
 use serde::{Deserialize, Serialize};
 use solana_sdk::{
     account::Account,
-    decode_error::DecodeError,
     hash::Hash,
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
@@ -56,12 +55,6 @@ pub enum MagicBlockProgramError {
 
     #[error("Encountered an error when persisting account modification data.")]
     FailedToPersistAccountModData,
-}
-
-impl<T> DecodeError<T> for MagicBlockProgramError {
-    fn type_of() -> &'static str {
-        "MagicBlockProgramError"
-    }
 }
 
 #[derive(Default, Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
