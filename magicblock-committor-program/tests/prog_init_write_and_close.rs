@@ -9,46 +9,50 @@ use magicblock_committor_program::{
     instruction_chunks::chunk_realloc_ixs,
     ChangedAccount, Changeset, Chunks,
 };
+use solana_program::instruction::Instruction;
 use solana_program_test::*;
 use solana_pubkey::Pubkey;
+use solana_sdk::signature::Keypair;
 use solana_sdk::{
     blake3::HASH_BYTES, hash::Hash, native_token::LAMPORTS_PER_SOL,
     signer::Signer, transaction::Transaction,
 };
 
-macro_rules! exec {
-    ($banks_client:ident, $ix:expr, $auth:ident, $latest_blockhash:ident) => {{
-        let mut transaction =
-            Transaction::new_with_payer($ix, Some(&$auth.pubkey()));
-        transaction.sign(&[$auth.insecure_clone()], $latest_blockhash);
-        $banks_client
-            .process_transaction(transaction)
-            .await
-            .unwrap();
-    }};
+// Replace exec! macro
+async fn exec(
+    banks_client: &BanksClient,
+    ixs: &[Instruction],
+    auth: &Keypair,
+    latest_blockhash: Hash,
+) {
+    let mut transaction =
+        Transaction::new_with_payer(ixs, Some(&auth.pubkey()));
+    transaction.sign(&[auth.insecure_clone()], latest_blockhash);
+    banks_client.process_transaction(transaction).await.unwrap()
 }
 
-macro_rules! get_chunks {
-    ($banks_client:expr, $chunks_pda:expr) => {{
-        let chunks_data = $banks_client
-            .get_account($chunks_pda)
-            .await
-            .unwrap()
-            .unwrap()
-            .data;
-        Chunks::try_from_slice(&chunks_data).unwrap()
-    }};
+// Replace get_chunks! macro
+async fn get_chunks(banks_client: &BanksClient, chunks_pda: &Pubkey) -> Chunks {
+    let chunks_data = banks_client
+        .get_account(*chunks_pda)
+        .await
+        .unwrap()
+        .unwrap()
+        .data;
+    Chunks::try_from_slice(&chunks_data).unwrap()
 }
 
-macro_rules! get_buffer_data {
-    ($banks_client:expr, $buffer_pda:expr) => {{
-        $banks_client
-            .get_account($buffer_pda)
-            .await
-            .unwrap()
-            .unwrap()
-            .data
-    }};
+// Replace get_buffer_data! macro
+async fn get_buffer_data(
+    banks_client: &BanksClient,
+    buffer_pda: &Pubkey,
+) -> Vec<u8> {
+    banks_client
+        .get_account(*buffer_pda)
+        .await
+        .unwrap()
+        .unwrap()
+        .data
 }
 
 #[tokio::test]
@@ -180,8 +184,6 @@ async fn init_write_and_close(changeset: Changeset) {
     .start()
     .await;
 
-    let ephem_blockhash = Hash::from([1; HASH_BYTES]);
-
     let chunk_size = 439 / 14;
     let commitables = changeset.into_committables(chunk_size);
     for commitable in commitables.iter() {
@@ -197,7 +199,7 @@ async fn init_write_and_close(changeset: Changeset) {
                     pubkey: commitable.pubkey,
                     chunks_account_size,
                     buffer_account_size: commitable.size() as u64,
-                    blockhash: ephem_blockhash,
+                    commit_id: commitable.bundle_id,
                     chunk_count: commitable.chunk_count(),
                     chunk_size: commitable.chunk_size(),
                 });
@@ -206,22 +208,22 @@ async fn init_write_and_close(changeset: Changeset) {
                     authority: auth.pubkey(),
                     pubkey: commitable.pubkey,
                     buffer_account_size: commitable.size() as u64,
-                    blockhash: ephem_blockhash,
+                    commit_id: commitable.bundle_id,
                 });
 
             let ix_chunks = chunk_realloc_ixs(realloc_ixs, Some(init_ix));
             for ixs in ix_chunks {
                 let latest_blockhash =
                     banks_client.get_latest_blockhash().await.unwrap();
-                exec!(banks_client, &ixs, auth, latest_blockhash);
+                exec(&banks_client, &ixs, &auth, latest_blockhash).await;
             }
 
             (chunks_pda, buffer_pda)
         };
 
-        let chunks = get_chunks!(&banks_client, chunks_pda);
+        let chunks = get_chunks(&banks_client, &chunks_pda).await;
         for i in 0..chunks.count() {
-            assert!(!chunks.is_chunk_delivered(i));
+            assert!(!chunks.is_chunk_delivered(i).unwrap());
         }
         assert!(!chunks.is_complete());
 
@@ -237,21 +239,21 @@ async fn init_write_and_close(changeset: Changeset) {
                     pubkey: commitable.pubkey,
                     offset: first_chunk.offset,
                     data_chunk: first_chunk.data_chunk.clone(),
-                    blockhash: ephem_blockhash,
+                    commit_id: commitable.bundle_id,
                 },
             );
-            exec!(banks_client, &[write_ix], auth, latest_blockhash);
+            exec(&banks_client, &[write_ix], &auth, latest_blockhash).await;
 
-            let chunks = get_chunks!(&banks_client, chunks_pda);
+            let chunks = get_chunks(&banks_client, &chunks_pda).await;
             assert_eq!(chunks.count(), commitable.chunk_count());
             assert_eq!(chunks.chunk_size(), commitable.chunk_size());
-            assert!(chunks.is_chunk_delivered(0));
+            assert!(chunks.is_chunk_delivered(0).unwrap());
             for i in 1..chunks.count() {
-                assert!(!chunks.is_chunk_delivered(i));
+                assert!(!chunks.is_chunk_delivered(i).unwrap());
             }
             assert!(!chunks.is_complete());
 
-            let buffer_data = get_buffer_data!(&banks_client, buffer_pda);
+            let buffer_data = get_buffer_data(&banks_client, &buffer_pda).await;
             assert_eq!(
                 buffer_data[0..first_chunk.data_chunk.len()],
                 first_chunk.data_chunk
@@ -267,21 +269,22 @@ async fn init_write_and_close(changeset: Changeset) {
                     pubkey: commitable.pubkey,
                     offset: third_chunk.offset,
                     data_chunk: third_chunk.data_chunk.clone(),
-                    blockhash: ephem_blockhash,
+                    commit_id: commitable.bundle_id,
                 },
             );
-            exec!(banks_client, &[write_ix], auth, latest_blockhash);
+            exec(&banks_client, &[write_ix], &auth, latest_blockhash).await;
 
-            let chunks = get_chunks!(&banks_client, chunks_pda);
-            assert!(chunks.is_chunk_delivered(0));
-            assert!(!chunks.is_chunk_delivered(1));
-            assert!(chunks.is_chunk_delivered(2));
+            let chunks = get_chunks(&banks_client, &chunks_pda).await;
+            assert!(chunks.is_chunk_delivered(0).unwrap());
+            assert!(!chunks.is_chunk_delivered(1).unwrap());
+            assert!(chunks.is_chunk_delivered(2).unwrap());
             for i in 3..chunks.count() {
-                assert!(!chunks.is_chunk_delivered(i));
+                assert!(!chunks.is_chunk_delivered(i).unwrap());
             }
             assert!(!chunks.is_complete());
 
-            let buffer_data = get_buffer_data!(&banks_client, buffer_pda);
+            let buffer_data =
+                get_buffer_data(&banks_client, &&buffer_pda).await;
             assert_eq!(
                 buffer_data[third_chunk.offset as usize
                     ..third_chunk.offset as usize
@@ -301,19 +304,19 @@ async fn init_write_and_close(changeset: Changeset) {
                         pubkey: commitable.pubkey,
                         offset: chunk.offset,
                         data_chunk: chunk.data_chunk.clone(),
-                        blockhash: ephem_blockhash,
+                        commit_id: commitable.bundle_id,
                     },
                 );
-                exec!(banks_client, &[write_ix], auth, latest_blockhash);
+                exec(&banks_client, &[write_ix], &auth, latest_blockhash).await;
             }
 
-            let chunks = get_chunks!(&banks_client, chunks_pda);
+            let chunks = get_chunks(&banks_client, &chunks_pda).await;
             for i in 0..chunks.count() {
-                assert!(chunks.is_chunk_delivered(i));
+                assert!(chunks.is_chunk_delivered(i).unwrap());
             }
             assert!(chunks.is_complete());
 
-            let buffer = get_buffer_data!(&banks_client, buffer_pda);
+            let buffer = get_buffer_data(&banks_client, &&buffer_pda).await;
             assert_eq!(buffer, commitable.data);
         }
 
@@ -328,10 +331,10 @@ async fn init_write_and_close(changeset: Changeset) {
                 magicblock_committor_program::instruction_builder::close_buffer::CreateCloseIxArgs {
                     authority: auth.pubkey(),
                     pubkey: commitable.pubkey,
-                    blockhash: ephem_blockhash,
+                    commit_id: commitable.bundle_id,
                 },
             );
-            exec!(banks_client, &[close_ix], auth, latest_blockhash);
+            exec(&banks_client, &[close_ix], &auth, latest_blockhash).await;
 
             assert!(banks_client
                 .get_account(chunks_pda)

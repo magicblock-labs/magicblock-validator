@@ -198,7 +198,7 @@ mod test {
             if self.idx < self.chunks.count {
                 let idx = self.idx;
                 self.idx += 1;
-                Some(self.chunks.is_chunk_delivered(idx))
+                Some(self.chunks.is_chunk_delivered(idx).expect("invariant"))
             } else {
                 None
             }
@@ -219,12 +219,12 @@ mod test {
     fn test_chunks_set_get_idx() {
         let chunks = vec![false; 12];
         let mut chunks = Chunks::from((chunks, CHUNK_SIZE));
-        chunks.set_chunk_delivered(0);
-        chunks.set_chunk_delivered(10);
+        assert!(chunks.set_chunk_delivered(0).is_ok());
+        assert!(chunks.set_chunk_delivered(10).is_ok());
 
-        assert!(chunks.is_chunk_delivered(0));
-        assert!(!chunks.is_chunk_delivered(1));
-        assert!(chunks.is_chunk_delivered(10));
+        assert!(chunks.is_chunk_delivered(0).unwrap());
+        assert!(!chunks.is_chunk_delivered(1).unwrap());
+        assert!(chunks.is_chunk_delivered(10).unwrap());
 
         let vec = chunks.iter().collect::<Vec<_>>();
         #[rustfmt::skip]
@@ -241,18 +241,19 @@ mod test {
     fn test_chunks_set_get_idx_large() {
         let chunks = vec![false; 2048];
         let mut chunks = Chunks::from((chunks, CHUNK_SIZE));
-        chunks.set_chunk_delivered(99);
-        chunks.set_chunk_delivered(1043);
+        assert!(chunks.set_chunk_delivered(99).is_ok());
+        assert!(chunks.set_chunk_delivered(1043).is_ok());
 
-        assert!(!chunks.is_chunk_delivered(0));
-        assert!(!chunks.is_chunk_delivered(1));
-        assert!(chunks.is_chunk_delivered(99));
-        assert!(!chunks.is_chunk_delivered(1042));
-        assert!(chunks.is_chunk_delivered(1043));
-        assert!(!chunks.is_chunk_delivered(1044));
+        assert!(!chunks.is_chunk_delivered(0).unwrap());
+        assert!(!chunks.is_chunk_delivered(1).unwrap());
+        assert!(chunks.is_chunk_delivered(99).unwrap());
+        assert!(!chunks.is_chunk_delivered(1042).unwrap());
+        assert!(chunks.is_chunk_delivered(1043).unwrap());
+        assert!(!chunks.is_chunk_delivered(1044).unwrap());
 
-        assert!(!chunks.is_chunk_delivered(2048));
-        assert!(!chunks.is_chunk_delivered(2049));
+        // Out of bound request
+        assert!(chunks.is_chunk_delivered(2048).is_none());
+        assert!(chunks.is_chunk_delivered(2049).is_none());
 
         assert_eq!(chunks.iter().count(), 2048);
     }
