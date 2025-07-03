@@ -177,7 +177,7 @@ async fn init_write_and_close(changeset: Changeset) {
     let program_id = &magicblock_committor_program::id();
 
     let (banks_client, auth, _) = ProgramTest::new(
-        "committor_program",
+        "magicblock_committor_program",
         *program_id,
         processor!(magicblock_committor_program::process),
     )
