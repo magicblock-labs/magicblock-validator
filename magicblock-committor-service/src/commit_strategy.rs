@@ -2,6 +2,7 @@ use std::collections::HashSet;
 
 use magicblock_committor_program::{ChangedBundle, Changeset};
 use solana_pubkey::Pubkey;
+use solana_sdk::clock::Slot;
 
 use crate::{
     error::{CommittorServiceError, CommittorServiceResult},
@@ -102,93 +103,85 @@ impl TryFrom<(ChangedBundle, bool)> for CommitBundleStrategy {
 
 #[derive(Debug)]
 pub struct SplitChangesets {
-    /// This changeset can be committed in one processing step, passing account data as args
-    pub args_changeset: Changeset,
-    /// This changeset can be committed in one processing step, passing account data as args
+    /// These changesets can be committed in one processing step, passing account data as args
+    pub args_changesets: Vec<Changeset>,
+    /// These changesets can be committed in one processing step, passing account data as args
     /// and the finalize instruction fits into the same transaction
-    pub args_including_finalize_changeset: Changeset,
-    /// This changeset can be committed in one processing step, passing account data as args
+    pub args_including_finalize_changesets: Vec<Changeset>,
+    /// These changesets can be committed in one processing step, passing account data as args
     /// but needs to use lookup tables for the accounts
-    pub args_with_lookup_changeset: Changeset,
-    /// This changeset can be committed in one processing step, passing account data as args
+    pub args_with_lookup_changesets: Vec<Changeset>,
+    /// These changesets can be committed in one processing step, passing account data as args
     /// and the finalize instruction fits into the same transaction.
     /// It needs to use lookup tables for the accounts.
-    pub args_including_finalize_with_lookup_changeset: Changeset,
-    /// This changeset needs to be committed in two steps:
+    pub args_including_finalize_with_lookup_changesets: Vec<Changeset>,
+    /// These changesets need to be committed in two steps:
     /// 1. Prepare the buffer account
     /// 2. Process the buffer account
-    pub from_buffer_changeset: Changeset,
-    /// This changeset needs to be committed in three steps:
+    pub from_buffer_changesets: Vec<Changeset>,
+    /// These changesets need to be committed in three steps:
     /// 1. Prepare the buffer account
     /// 2. Prepare lookup table
     /// 3. Process the buffer account
-    pub from_buffer_with_lookup_changeset: Changeset,
+    pub from_buffer_with_lookup_changesets: Vec<Changeset>,
 }
 
 pub fn split_changesets_by_commit_strategy(
     changeset: Changeset,
     finalize: bool,
 ) -> CommittorServiceResult<SplitChangesets> {
-    fn add_to_changeset(
-        changeset: &mut Changeset,
+    fn add_to_changesets(
+        slot: Slot,
+        changesets: &mut Vec<Changeset>,
         accounts_to_undelegate: &HashSet<Pubkey>,
         bundle: ChangedBundle,
     ) {
+        let mut changeset = Changeset {
+            slot,
+            ..Default::default()
+        };
         for (pubkey, acc) in bundle {
             changeset.add(pubkey, acc);
             if accounts_to_undelegate.contains(&pubkey) {
                 changeset.accounts_to_undelegate.insert(pubkey);
             }
         }
+        changesets.push(changeset);
     }
 
-    let mut args_changeset = Changeset {
-        slot: changeset.slot,
-        ..Default::default()
-    };
-    let mut args_including_finalize_changeset = Changeset {
-        slot: changeset.slot,
-        ..Default::default()
-    };
-    let mut args_with_lookup_changeset = Changeset {
-        slot: changeset.slot,
-        ..Default::default()
-    };
-    let mut args_including_finalize_with_lookup_changeset = Changeset {
-        slot: changeset.slot,
-        ..Default::default()
-    };
-    let mut from_buffer_changeset = Changeset {
-        slot: changeset.slot,
-        ..Default::default()
-    };
-    let mut from_buffer_with_lookup_changeset = Changeset {
-        slot: changeset.slot,
-        ..Default::default()
-    };
+    let mut args_changeset = vec![];
+    let mut args_including_finalize_changeset = vec![];
+    let mut args_with_lookup_changeset = vec![];
+    let mut args_including_finalize_with_lookup_changeset = vec![];
+    let mut from_buffer_changeset = vec![];
+    let mut from_buffer_with_lookup_changeset = vec![];
 
     let accounts_to_undelegate = changeset.accounts_to_undelegate.clone();
+    let slot = changeset.slot;
     let changeset_bundles = changeset.into_small_changeset_bundles();
     for bundle in changeset_bundles.bundles.into_iter() {
         let commit_strategy =
             CommitBundleStrategy::try_from((bundle, finalize))?;
         match commit_strategy {
             CommitBundleStrategy::Args(bundle) => {
-                add_to_changeset(
+                add_to_changesets(
+                    slot,
                     &mut args_changeset,
                     &accounts_to_undelegate,
                     bundle,
                 );
             }
             CommitBundleStrategy::ArgsIncludeFinalize(bundle) => {
-                add_to_changeset(
+                add_to_changesets(
+                    slot,
                     &mut args_including_finalize_changeset,
                     &accounts_to_undelegate,
                     bundle,
                 );
             }
             CommitBundleStrategy::ArgsWithLookupTable(bundle) => {
-                add_to_changeset(
+                add_to_changesets(
+                    slot,
                     &mut args_with_lookup_changeset,
                     &accounts_to_undelegate,
                     bundle,
@@ -197,21 +190,24 @@ pub fn split_changesets_by_commit_strategy(
             CommitBundleStrategy::ArgsIncludeFinalizeWithLookupTable(
                 bundle,
             ) => {
-                add_to_changeset(
+                add_to_changesets(
+                    slot,
                     &mut args_including_finalize_with_lookup_changeset,
                     &accounts_to_undelegate,
                     bundle,
                 );
             }
             CommitBundleStrategy::FromBuffer(bundle) => {
-                add_to_changeset(
+                add_to_changesets(
+                    slot,
                     &mut from_buffer_changeset,
                     &accounts_to_undelegate,
                     bundle,
                 );
             }
             CommitBundleStrategy::FromBufferWithLookupTable(bundle) => {
-                add_to_changeset(
+                add_to_changesets(
+                    slot,
                     &mut from_buffer_with_lookup_changeset,
                     &accounts_to_undelegate,
                     bundle,
@@ -221,12 +217,13 @@ pub fn split_changesets_by_commit_strategy(
     }
 
     Ok(SplitChangesets {
-        args_changeset,
-        args_including_finalize_changeset,
-        args_with_lookup_changeset,
-        args_including_finalize_with_lookup_changeset,
-        from_buffer_changeset,
-        from_buffer_with_lookup_changeset,
+        args_changesets: args_changeset,
+        args_including_finalize_changesets: args_including_finalize_changeset,
+        args_with_lookup_changesets: args_with_lookup_changeset,
+        args_including_finalize_with_lookup_changesets:
+            args_including_finalize_with_lookup_changeset,
+        from_buffer_changesets: from_buffer_changeset,
+        from_buffer_with_lookup_changesets: from_buffer_with_lookup_changeset,
     })
 }
 
@@ -267,8 +264,63 @@ mod test {
         pubkey
     }
 
+    struct ChangesetCounts {
+        args_changeset_count: usize,
+        args_including_finalize_changeset_count: usize,
+        args_with_lookup_changeset_count: usize,
+        args_including_finalize_with_lookup_changeset_count: usize,
+        from_buffer_changeset_count: usize,
+        from_buffer_with_lookup_changeset_count: usize,
+    }
+
+    macro_rules! changeset_counts {
+        ($split_changesets:ident) => {
+            ChangesetCounts {
+                args_changeset_count: $split_changesets
+                    .args_changesets
+                    .iter()
+                    .map(|cs| cs.len())
+                    .sum::<usize>(),
+                args_including_finalize_changeset_count: $split_changesets
+                    .args_including_finalize_changesets
+                    .iter()
+                    .map(|cs| cs.len())
+                    .sum::<usize>(),
+                args_with_lookup_changeset_count: $split_changesets
+                    .args_with_lookup_changesets
+                    .iter()
+                    .map(|cs| cs.len())
+                    .sum::<usize>(),
+                args_including_finalize_with_lookup_changeset_count:
+                    $split_changesets
+                        .args_including_finalize_with_lookup_changesets
+                        .iter()
+                        .map(|cs| cs.len())
+                        .sum::<usize>(),
+                from_buffer_changeset_count: $split_changesets
+                    .from_buffer_changesets
+                    .iter()
+                    .map(|cs| cs.len())
+                    .sum::<usize>(),
+                from_buffer_with_lookup_changeset_count: $split_changesets
+                    .from_buffer_with_lookup_changesets
+                    .iter()
+                    .map(|cs| cs.len())
+                    .sum::<usize>(),
+            }
+        };
+    }
+
     macro_rules! debug_counts {
         ($label:expr, $changeset:ident, $split_changesets:ident) => {
+            let ChangesetCounts {
+                args_changeset_count,
+                args_including_finalize_changeset_count,
+                args_with_lookup_changeset_count,
+                args_including_finalize_with_lookup_changeset_count,
+                from_buffer_changeset_count,
+                from_buffer_with_lookup_changeset_count,
+            } = changeset_counts!($split_changesets);
             debug!(
                 "{}: ({}) {{
 args_changeset:                                 {}
@@ -280,29 +332,33 @@ from_buffer_with_lookup_changeset:              {}
 }}",
                 $label,
                 $changeset.accounts.len(),
-                $split_changesets.args_changeset.len(),
-                $split_changesets.args_including_finalize_changeset.len(),
-                $split_changesets.args_with_lookup_changeset.len(),
-                $split_changesets
-                    .args_including_finalize_with_lookup_changeset
-                    .len(),
-                $split_changesets.from_buffer_changeset.len(),
-                $split_changesets.from_buffer_with_lookup_changeset.len()
+                args_changeset_count,
+                args_including_finalize_changeset_count,
+                args_with_lookup_changeset_count,
+                args_including_finalize_with_lookup_changeset_count,
+                from_buffer_changeset_count,
+                from_buffer_with_lookup_changeset_count,
             );
         };
     }
 
     macro_rules! assert_accounts_sum_matches {
         ($changeset:ident, $split_changesets:ident) => {
+            let ChangesetCounts {
+                args_changeset_count,
+                args_including_finalize_changeset_count,
+                args_with_lookup_changeset_count,
+                args_including_finalize_with_lookup_changeset_count,
+                from_buffer_changeset_count,
+                from_buffer_with_lookup_changeset_count,
+            } = changeset_counts!($split_changesets);
             assert_eq!(
-                $split_changesets.args_changeset.len()
-                    + $split_changesets.args_including_finalize_changeset.len()
-                    + $split_changesets.args_with_lookup_changeset.len()
-                    + $split_changesets
-                        .args_including_finalize_with_lookup_changeset
-                        .len()
-                    + $split_changesets.from_buffer_changeset.len()
-                    + $split_changesets.from_buffer_with_lookup_changeset.len(),
+                args_changeset_count
+                    + args_including_finalize_changeset_count
+                    + args_with_lookup_changeset_count
+                    + args_including_finalize_with_lookup_changeset_count
+                    + from_buffer_changeset_count
+                    + from_buffer_with_lookup_changeset_count,
                 $changeset.len()
             );
         };
@@ -310,31 +366,52 @@ from_buffer_with_lookup_changeset:              {}
 
     macro_rules! assert_undelegate_sum_matches {
         ($changeset:ident, $split_changesets:ident) => {
+
+            let (args_changeset_accounts_to_undelegate_count,
+                args_including_finalize_changeset_accounts_to_undelegate_count,
+                args_with_lookup_changeset_accounts_to_undelegate_count,
+                args_including_finalize_with_lookup_changeset_accounts_to_undelegate_count,
+                from_buffer_changeset_accounts_to_undelegate_count,
+                from_buffer_with_lookup_changeset_accounts_to_undelegate_count) =(
+                    $split_changesets
+                        .args_changesets
+                        .iter()
+                        .map(|cs| cs.accounts_to_undelegate.len())
+                        .sum::<usize>(),
+                    $split_changesets
+                        .args_including_finalize_changesets
+                        .iter()
+                        .map(|cs| cs.accounts_to_undelegate.len())
+                        .sum::<usize>(),
+                    $split_changesets
+                        .args_with_lookup_changesets
+                        .iter()
+                        .map(|cs| cs.accounts_to_undelegate.len())
+                        .sum::<usize>(),
+                    $split_changesets
+                        .args_including_finalize_with_lookup_changesets
+                        .iter()
+                        .map(|cs| cs.accounts_to_undelegate.len())
+                        .sum::<usize>(),
+                    $split_changesets
+                        .from_buffer_changesets
+                        .iter()
+                        .map(|cs| cs.accounts_to_undelegate.len())
+                        .sum::<usize>(),
+                    $split_changesets
+                        .from_buffer_with_lookup_changesets
+                        .iter()
+                        .map(|cs| cs.accounts_to_undelegate.len())
+                        .sum::<usize>(),
+            );
+
             assert_eq!(
-                $split_changesets
-                    .args_changeset
-                    .accounts_to_undelegate
-                    .len()
-                    + $split_changesets
-                        .args_including_finalize_changeset
-                        .accounts_to_undelegate
-                        .len()
-                    + $split_changesets
-                        .args_with_lookup_changeset
-                        .accounts_to_undelegate
-                        .len()
-                    + $split_changesets
-                        .args_including_finalize_with_lookup_changeset
-                        .accounts_to_undelegate
-                        .len()
-                    + $split_changesets
-                        .from_buffer_changeset
-                        .accounts_to_undelegate
-                        .len()
-                    + $split_changesets
-                        .from_buffer_with_lookup_changeset
-                        .accounts_to_undelegate
-                        .len(),
+                args_changeset_accounts_to_undelegate_count
+                    + args_including_finalize_changeset_accounts_to_undelegate_count
+                    + args_with_lookup_changeset_accounts_to_undelegate_count
+                    + args_including_finalize_with_lookup_changeset_accounts_to_undelegate_count
+                    + from_buffer_changeset_accounts_to_undelegate_count
+                    + from_buffer_with_lookup_changeset_accounts_to_undelegate_count,
                 $changeset.accounts_to_undelegate.len()
             );
         };
@@ -370,29 +447,34 @@ from_buffer_with_lookup_changeset:              {}
         let split_changesets =
             split_changesets_by_commit_strategy(changeset.clone(), false)
                 .unwrap();
+        let ChangesetCounts {
+            args_changeset_count,
+            args_with_lookup_changeset_count,
+            ..
+        } = changeset_counts!(split_changesets);
+
         debug_counts!("No Finalize", changeset, split_changesets);
         assert_accounts_sum_matches!(changeset, split_changesets);
         assert_undelegate_sum_matches!(changeset, split_changesets);
-
-        assert_eq!(split_changesets.args_changeset.len(), 2,);
-        assert_eq!(split_changesets.args_with_lookup_changeset.len(), 8,);
+        assert_eq!(args_changeset_count, 2,);
+        assert_eq!(args_with_lookup_changeset_count, 8,);
 
         // Finalize
         let split_changesets =
             split_changesets_by_commit_strategy(changeset.clone(), true)
                 .unwrap();
+        let ChangesetCounts {
+            args_including_finalize_changeset_count,
+            args_including_finalize_with_lookup_changeset_count,
+            ..
+        } = changeset_counts!(split_changesets);
 
         debug_counts!("Finalize", changeset, split_changesets);
         assert_accounts_sum_matches!(changeset, split_changesets);
         assert_undelegate_sum_matches!(changeset, split_changesets);
 
-        assert_eq!(split_changesets.args_including_finalize_changeset.len(), 2,);
-        assert_eq!(
-            split_changesets
-                .args_including_finalize_with_lookup_changeset
-                .len(),
-            8,
-        );
+        assert_eq!(args_including_finalize_changeset_count, 2,);
+        assert_eq!(args_including_finalize_with_lookup_changeset_count, 8,);
     }
 
     #[test]
@@ -436,24 +518,35 @@ from_buffer_with_lookup_changeset:              {}
         let split_changesets =
             split_changesets_by_commit_strategy(changeset.clone(), false)
                 .unwrap();
+        let ChangesetCounts {
+            args_changeset_count,
+            from_buffer_changeset_count,
+            ..
+        } = changeset_counts!(split_changesets);
         debug_counts!("No Finalize", changeset, split_changesets);
         assert_accounts_sum_matches!(changeset, split_changesets);
         assert_undelegate_sum_matches!(changeset, split_changesets);
 
-        assert_eq!(split_changesets.args_changeset.len(), 4,);
-        assert_eq!(split_changesets.from_buffer_changeset.len(), 3,);
+        assert_eq!(args_changeset_count, 4,);
+        assert_eq!(from_buffer_changeset_count, 3,);
 
         // Finalize
         let split_changesets =
             split_changesets_by_commit_strategy(changeset.clone(), true)
                 .unwrap();
+        let ChangesetCounts {
+            args_changeset_count,
+            args_including_finalize_changeset_count,
+            from_buffer_changeset_count,
+            ..
+        } = changeset_counts!(split_changesets);
         debug_counts!("Finalize", changeset, split_changesets);
         assert_accounts_sum_matches!(changeset, split_changesets);
         assert_undelegate_sum_matches!(changeset, split_changesets);
 
-        assert_eq!(split_changesets.args_changeset.len(), 2,);
-        assert_eq!(split_changesets.args_including_finalize_changeset.len(), 2,);
-        assert_eq!(split_changesets.from_buffer_changeset.len(), 3,);
+        assert_eq!(args_changeset_count, 2,);
+        assert_eq!(args_including_finalize_changeset_count, 2,);
+        assert_eq!(from_buffer_changeset_count, 3,);
     }
 
     #[test]
@@ -487,23 +580,33 @@ from_buffer_with_lookup_changeset:              {}
         let split_changesets =
             split_changesets_by_commit_strategy(changeset.clone(), false)
                 .unwrap();
+        let ChangesetCounts {
+            from_buffer_changeset_count,
+            from_buffer_with_lookup_changeset_count,
+            ..
+        } = changeset_counts!(split_changesets);
         debug_counts!("No Finalize", changeset, split_changesets);
         assert_accounts_sum_matches!(changeset, split_changesets);
         assert_undelegate_sum_matches!(changeset, split_changesets);
 
-        assert_eq!(split_changesets.from_buffer_changeset.len(), 2,);
-        assert_eq!(split_changesets.from_buffer_with_lookup_changeset.len(), 5,);
+        assert_eq!(from_buffer_changeset_count, 2,);
+        assert_eq!(from_buffer_with_lookup_changeset_count, 5,);
 
         // Finalize
         let split_changesets =
             split_changesets_by_commit_strategy(changeset.clone(), true)
                 .unwrap();
+        let ChangesetCounts {
+            from_buffer_changeset_count,
+            from_buffer_with_lookup_changeset_count,
+            ..
+        } = changeset_counts!(split_changesets);
         debug_counts!("Finalize", changeset, split_changesets);
         assert_accounts_sum_matches!(changeset, split_changesets);
         assert_undelegate_sum_matches!(changeset, split_changesets);
 
-        assert_eq!(split_changesets.from_buffer_changeset.len(), 2,);
-        assert_eq!(split_changesets.from_buffer_with_lookup_changeset.len(), 5,);
+        assert_eq!(from_buffer_changeset_count, 2,);
+        assert_eq!(from_buffer_with_lookup_changeset_count, 5,);
     }
 
     #[test]
@@ -588,18 +691,22 @@ from_buffer_with_lookup_changeset:              {}
             let split_changesets =
                 split_changesets_by_commit_strategy(changeset.clone(), false)
                     .unwrap();
+            let ChangesetCounts {
+                args_changeset_count,
+                args_with_lookup_changeset_count,
+                from_buffer_changeset_count,
+                from_buffer_with_lookup_changeset_count,
+                ..
+            } = changeset_counts!(split_changesets);
 
             debug_counts!("No Finalize", changeset, split_changesets);
             assert_accounts_sum_matches!(changeset, split_changesets);
             assert_undelegate_sum_matches!(changeset, split_changesets);
 
-            assert_eq!(split_changesets.args_changeset.len(), 4);
-            assert_eq!(split_changesets.args_with_lookup_changeset.len(), 8);
-            assert_eq!(split_changesets.from_buffer_changeset.len(), 2);
-            assert_eq!(
-                split_changesets.from_buffer_with_lookup_changeset.len(),
-                5
-            );
+            assert_eq!(args_changeset_count, 4);
+            assert_eq!(args_with_lookup_changeset_count, 8);
+            assert_eq!(from_buffer_changeset_count, 2);
+            assert_eq!(from_buffer_with_lookup_changeset_count, 5);
         }
 
         // Finalize
@@ -607,27 +714,24 @@ from_buffer_with_lookup_changeset:              {}
             let split_changesets =
                 split_changesets_by_commit_strategy(changeset.clone(), true)
                     .unwrap();
+            let ChangesetCounts {
+                args_changeset_count,
+                args_including_finalize_changeset_count,
+                args_including_finalize_with_lookup_changeset_count,
+                from_buffer_changeset_count,
+                from_buffer_with_lookup_changeset_count,
+                ..
+            } = changeset_counts!(split_changesets);
 
             debug_counts!("Finalize", changeset, split_changesets);
             assert_accounts_sum_matches!(changeset, split_changesets);
             assert_undelegate_sum_matches!(changeset, split_changesets);
 
-            assert_eq!(split_changesets.args_changeset.len(), 2);
-            assert_eq!(
-                split_changesets.args_including_finalize_changeset.len(),
-                2
-            );
-            assert_eq!(
-                split_changesets
-                    .args_including_finalize_with_lookup_changeset
-                    .len(),
-                8
-            );
-            assert_eq!(split_changesets.from_buffer_changeset.len(), 2);
-            assert_eq!(
-                split_changesets.from_buffer_with_lookup_changeset.len(),
-                5
-            );
+            assert_eq!(args_changeset_count, 2);
+            assert_eq!(args_including_finalize_changeset_count, 2);
+            assert_eq!(args_including_finalize_with_lookup_changeset_count, 8);
+            assert_eq!(from_buffer_changeset_count, 2);
+            assert_eq!(from_buffer_with_lookup_changeset_count, 5);
         }
     }
 }

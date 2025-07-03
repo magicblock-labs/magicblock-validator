@@ -208,12 +208,12 @@ impl CommittorProcessor {
     ) -> Vec<CommitStage> {
         let changeset_meta = ChangesetMeta::from(&changeset);
         let SplitChangesets {
-            args_changeset,
-            args_including_finalize_changeset,
-            args_with_lookup_changeset,
-            args_including_finalize_with_lookup_changeset,
-            from_buffer_changeset,
-            from_buffer_with_lookup_changeset,
+            args_changesets,
+            args_including_finalize_changesets,
+            args_with_lookup_changesets,
+            args_including_finalize_with_lookup_changesets,
+            from_buffer_changesets,
+            from_buffer_with_lookup_changesets,
         } = match split_changesets_by_commit_strategy(changeset, finalize) {
             Ok(changesets) => changesets,
             Err(err) => {
@@ -228,17 +228,17 @@ impl CommittorProcessor {
 
         debug_assert!(
             finalize
-                || (args_including_finalize_changeset.is_empty()
-                    && args_including_finalize_with_lookup_changeset
+                || (args_including_finalize_changesets.is_empty()
+                    && args_including_finalize_with_lookup_changesets
                         .is_empty()),
             "BUG: args including finalize strategies should not be created when not finalizing"
         );
 
         let mut join_set = JoinSet::new();
-        if !args_changeset.is_empty()
-            || !args_with_lookup_changeset.is_empty()
-            || !args_including_finalize_changeset.is_empty()
-            || !args_including_finalize_with_lookup_changeset.is_empty()
+        if !args_changesets.is_empty()
+            || !args_with_lookup_changesets.is_empty()
+            || !args_including_finalize_changesets.is_empty()
+            || !args_including_finalize_with_lookup_changesets.is_empty()
         {
             let latest_blockhash = match self
                 .magicblock_rpc_client
@@ -252,8 +252,8 @@ impl CommittorProcessor {
                             err
                         );
                     let strategy = CommitStrategy::args(
-                        !args_with_lookup_changeset.is_empty()
-                            || !args_including_finalize_with_lookup_changeset
+                        !args_with_lookup_changesets.is_empty()
+                            || !args_including_finalize_with_lookup_changesets
                                 .is_empty(),
                     );
                     return changeset_meta
@@ -268,10 +268,10 @@ impl CommittorProcessor {
                 }
             };
 
-            if !args_changeset.is_empty() {
+            for changeset in args_changesets {
                 join_set.spawn(Self::commit_changeset_using_args(
                     Arc::new(self.clone()),
-                    args_changeset,
+                    changeset,
                     (finalize, true),
                     ephemeral_blockhash,
                     latest_blockhash,
@@ -279,10 +279,10 @@ impl CommittorProcessor {
                 ));
             }
 
-            if !args_including_finalize_changeset.is_empty() {
+            for changeset in args_including_finalize_changesets {
                 join_set.spawn(Self::commit_changeset_using_args(
                     Arc::new(self.clone()),
-                    args_including_finalize_changeset,
+                    changeset,
                     (finalize, false),
                     ephemeral_blockhash,
                     latest_blockhash,
@@ -290,10 +290,10 @@ impl CommittorProcessor {
                 ));
             }
 
-            if !args_with_lookup_changeset.is_empty() {
+            for changeset in args_with_lookup_changesets {
                 join_set.spawn(Self::commit_changeset_using_args(
                     Arc::new(self.clone()),
-                    args_with_lookup_changeset,
+                    changeset,
                     (finalize, true),
                     ephemeral_blockhash,
                     latest_blockhash,
@@ -301,10 +301,10 @@ impl CommittorProcessor {
                 ));
             }
 
-            if !args_including_finalize_with_lookup_changeset.is_empty() {
+            for changeset in args_including_finalize_with_lookup_changesets {
                 join_set.spawn(Self::commit_changeset_using_args(
                     Arc::new(self.clone()),
-                    args_including_finalize_with_lookup_changeset,
+                    changeset,
                     (finalize, false),
                     ephemeral_blockhash,
                     latest_blockhash,
@@ -313,19 +313,19 @@ impl CommittorProcessor {
             }
         }
 
-        if !from_buffer_changeset.is_empty() {
+        for changeset in from_buffer_changesets {
             join_set.spawn(Self::commit_changeset_using_buffers(
                 Arc::new(self.clone()),
-                from_buffer_changeset,
+                changeset,
                 finalize,
                 ephemeral_blockhash,
                 false,
             ));
         }
-        if !from_buffer_with_lookup_changeset.is_empty() {
+        for changeset in from_buffer_with_lookup_changesets {
             join_set.spawn(Self::commit_changeset_using_buffers(
                 Arc::new(self.clone()),
-                from_buffer_with_lookup_changeset,
+                changeset,
                 finalize,
                 ephemeral_blockhash,
                 true,
