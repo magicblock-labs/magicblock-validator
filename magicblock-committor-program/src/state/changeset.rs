@@ -464,7 +464,7 @@ mod test {
                 continue;
             }
 
-            chunks.set_idx(idx as usize);
+            chunks.set_chunk_delivered(idx as usize);
 
             let start = chunk.offset;
             for (i, d) in chunk.data_chunk.into_iter().enumerate() {
@@ -480,7 +480,7 @@ mod test {
 
         // 3. Retry the missing chunks
         for chunk in commitable.iter_missing() {
-            chunks.set_idx(chunk.chunk_idx() as usize);
+            chunks.set_chunk_delivered(chunk.chunk_idx() as usize);
 
             let start = chunk.offset;
             for (i, d) in chunk.data_chunk.into_iter().enumerate() {

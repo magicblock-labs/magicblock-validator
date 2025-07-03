@@ -1,8 +1,10 @@
 use borsh::{to_vec, BorshDeserialize};
 use magicblock_committor_program::{
-    instruction::{
-        create_init_ix, create_realloc_buffer_ixs, CreateInitIxArgs,
-        CreateReallocBufferIxArgs,
+    instruction_builder::{
+        init_buffer::{create_init_ix, CreateInitIxArgs},
+        realloc_buffer::{
+            create_realloc_buffer_ixs, CreateReallocBufferIxArgs,
+        },
     },
     instruction_chunks::chunk_realloc_ixs,
     ChangedAccount, Changeset, Chunks,
@@ -219,7 +221,7 @@ async fn init_write_and_close(changeset: Changeset) {
 
         let chunks = get_chunks!(&banks_client, chunks_pda);
         for i in 0..chunks.count() {
-            assert!(!chunks.get_idx(i));
+            assert!(!chunks.is_chunk_delivered(i));
         }
         assert!(!chunks.is_complete());
 
@@ -229,8 +231,8 @@ async fn init_write_and_close(changeset: Changeset) {
         // Write the first chunk
         {
             let first_chunk = &commitable.iter_all().next().unwrap();
-            let write_ix = magicblock_committor_program::instruction::create_write_ix(
-                magicblock_committor_program::instruction::CreateWriteIxArgs {
+            let write_ix = magicblock_committor_program::instruction_builder::write_buffer::create_write_ix(
+                magicblock_committor_program::instruction_builder::write_buffer::CreateWriteIxArgs {
                     authority: auth.pubkey(),
                     pubkey: commitable.pubkey,
                     offset: first_chunk.offset,
@@ -243,9 +245,9 @@ async fn init_write_and_close(changeset: Changeset) {
             let chunks = get_chunks!(&banks_client, chunks_pda);
             assert_eq!(chunks.count(), commitable.chunk_count());
             assert_eq!(chunks.chunk_size(), commitable.chunk_size());
-            assert!(chunks.get_idx(0));
+            assert!(chunks.is_chunk_delivered(0));
             for i in 1..chunks.count() {
-                assert!(!chunks.get_idx(i));
+                assert!(!chunks.is_chunk_delivered(i));
             }
             assert!(!chunks.is_complete());
 
@@ -259,8 +261,8 @@ async fn init_write_and_close(changeset: Changeset) {
         // Write third chunk
         {
             let third_chunk = &commitable.iter_all().nth(2).unwrap();
-            let write_ix = magicblock_committor_program::instruction::create_write_ix(
-                magicblock_committor_program::instruction::CreateWriteIxArgs {
+            let write_ix = magicblock_committor_program::instruction_builder::write_buffer::create_write_ix(
+                magicblock_committor_program::instruction_builder::write_buffer::CreateWriteIxArgs {
                     authority: auth.pubkey(),
                     pubkey: commitable.pubkey,
                     offset: third_chunk.offset,
@@ -271,11 +273,11 @@ async fn init_write_and_close(changeset: Changeset) {
             exec!(banks_client, &[write_ix], auth, latest_blockhash);
 
             let chunks = get_chunks!(&banks_client, chunks_pda);
-            assert!(chunks.get_idx(0));
-            assert!(!chunks.get_idx(1));
-            assert!(chunks.get_idx(2));
+            assert!(chunks.is_chunk_delivered(0));
+            assert!(!chunks.is_chunk_delivered(1));
+            assert!(chunks.is_chunk_delivered(2));
             for i in 3..chunks.count() {
-                assert!(!chunks.get_idx(i));
+                assert!(!chunks.is_chunk_delivered(i));
             }
             assert!(!chunks.is_complete());
 
@@ -293,8 +295,8 @@ async fn init_write_and_close(changeset: Changeset) {
             for chunk in commitable.iter_missing() {
                 let latest_blockhash =
                     banks_client.get_latest_blockhash().await.unwrap();
-                let write_ix = magicblock_committor_program::instruction::create_write_ix(
-                    magicblock_committor_program::instruction::CreateWriteIxArgs {
+                let write_ix = magicblock_committor_program::instruction_builder::write_buffer::create_write_ix(
+                    magicblock_committor_program::instruction_builder::write_buffer::CreateWriteIxArgs {
                         authority: auth.pubkey(),
                         pubkey: commitable.pubkey,
                         offset: chunk.offset,
@@ -307,7 +309,7 @@ async fn init_write_and_close(changeset: Changeset) {
 
             let chunks = get_chunks!(&banks_client, chunks_pda);
             for i in 0..chunks.count() {
-                assert!(chunks.get_idx(i));
+                assert!(chunks.is_chunk_delivered(i));
             }
             assert!(chunks.is_complete());
 
@@ -322,8 +324,8 @@ async fn init_write_and_close(changeset: Changeset) {
 
             // Normally this instruction would be part of a transaction that processes
             // the change set to update the corresponding accounts
-            let close_ix = magicblock_committor_program::instruction::create_close_ix(
-                magicblock_committor_program::instruction::CreateCloseIxArgs {
+            let close_ix = magicblock_committor_program::instruction_builder::close_buffer::create_close_ix(
+                magicblock_committor_program::instruction_builder::close_buffer::CreateCloseIxArgs {
                     authority: auth.pubkey(),
                     pubkey: commitable.pubkey,
                     blockhash: ephem_blockhash,

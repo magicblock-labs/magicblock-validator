@@ -10,7 +10,9 @@ mod state;
 mod utils;
 
 // #[cfg(not(feature = "no-entrypoint"))]
+pub mod instruction_builder;
 mod processor;
+
 // #[cfg(not(feature = "no-entrypoint"))]
 pub use processor::process;
 pub use state::{
