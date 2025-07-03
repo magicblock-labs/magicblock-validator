@@ -351,6 +351,42 @@ async fn test_ix_commit_two_accounts_1kb_2kb() {
 }
 
 #[tokio::test]
+async fn test_ix_commit_two_accounts_512kb() {
+    init_logger!();
+    commit_multiple_accounts(
+        &[512, 512],
+        1,
+        expect_strategies(&[(CommitStrategy::Args, 2)]),
+        false,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_three_accounts_512kb() {
+    init_logger!();
+    commit_multiple_accounts(
+        &[512, 512, 512],
+        1,
+        expect_strategies(&[(CommitStrategy::Args, 3)]),
+        false,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_six_accounts_512kb() {
+    init_logger!();
+    commit_multiple_accounts(
+        &[512, 512, 512, 512, 512, 512],
+        1,
+        expect_strategies(&[(CommitStrategy::Args, 6)]),
+        false,
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn test_ix_commit_four_accounts_1kb_2kb_5kb_10kb_single_bundle() {
     init_logger!();
     commit_multiple_accounts(
