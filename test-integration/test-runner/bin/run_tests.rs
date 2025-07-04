@@ -71,7 +71,7 @@ pub fn main() {
 fn should_run_test(test_name: &str) -> bool {
     let should_run = std::env::var("RUN_TESTS")
         .map(|tests| tests.split(',').any(|t| t.trim() == test_name))
-        .unwrap_or(false);
+        .unwrap_or(true);
 
     if !should_run {
         eprintln!("Skipping {test_name} since the RUN_TESTS env var does not include it");
