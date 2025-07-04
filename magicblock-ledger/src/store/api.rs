@@ -3,13 +3,14 @@ use std::{
     fmt, fs,
     path::{Path, PathBuf},
     sync::{
-        atomic::{AtomicI64, Ordering},
+        atomic::{AtomicU64, Ordering},
         Arc, RwLock,
     },
 };
 
 use bincode::{deserialize, serialize};
 use log::*;
+use magicblock_metrics::metrics;
 use rocksdb::{Direction as IteratorDirection, FlushOptions};
 use solana_measure::measure::Measure;
 use solana_sdk::{
@@ -30,10 +31,10 @@ use crate::{
     conversions::transaction,
     database::{
         columns as cf,
-        columns::{Column, ColumnName, DIRTY_COUNT},
+        columns::{Column, ColumnName},
         db::Database,
         iterator::IteratorMode,
-        ledger_column::{try_increase_entry_counter, LedgerColumn},
+        ledger_column::LedgerColumn,
         meta::{AccountModData, AddressSignatureMeta, PerfSample},
         options::LedgerOptions,
     },
@@ -63,11 +64,11 @@ pub struct Ledger {
     perf_samples_cf: LedgerColumn<cf::PerfSamples>,
     account_mod_datas_cf: LedgerColumn<cf::AccountModDatas>,
 
-    transaction_successful_status_count: AtomicI64,
-    transaction_failed_status_count: AtomicI64,
-
     lowest_cleanup_slot: RwLock<Slot>,
     rpc_api_metrics: LedgerRpcApiMetrics,
+
+    last_slot: AtomicU64,
+    last_mod_id: AtomicU64,
 }
 
 impl fmt::Display for Ledger {
@@ -144,7 +145,7 @@ impl Ledger {
         measure.stop();
         info!("Opening ledger done; {measure}");
 
-        let ledger = Ledger {
+        let mut ledger = Ledger {
             ledger_path: ledger_path.to_path_buf(),
             db,
 
@@ -158,14 +159,31 @@ impl Ledger {
             perf_samples_cf,
             account_mod_datas_cf,
 
-            transaction_successful_status_count: AtomicI64::new(DIRTY_COUNT),
-            transaction_failed_status_count: AtomicI64::new(DIRTY_COUNT),
-
             lowest_cleanup_slot: RwLock::<Slot>::default(),
             rpc_api_metrics: LedgerRpcApiMetrics::default(),
+
+            last_slot: AtomicU64::new(0),
+            last_mod_id: AtomicU64::new(0),
         };
 
+        ledger.last_slot = AtomicU64::new(ledger.get_max_blockhash()?.0);
+        ledger.last_mod_id = AtomicU64::new(
+            ledger
+                .account_mod_datas_cf
+                .iter(IteratorMode::End)?
+                .next()
+                .map_or(0, |(mod_id, _)| mod_id),
+        );
+
         Ok(ledger)
+    }
+
+    pub fn last_slot(&self) -> Slot {
+        self.last_slot.load(Ordering::Relaxed)
+    }
+
+    pub fn last_mod_id(&self) -> u64 {
+        self.last_mod_id.load(Ordering::Relaxed)
     }
 
     /// Collects and reports [`BlockstoreRocksDbColumnFamilyMetrics`] for
@@ -238,6 +256,25 @@ impl Ledger {
             .lowest_cleanup_slot
             .read()
             .expect(Self::LOWEST_CLEANUP_SLOT_POISONED)
+    }
+    ///
+    /// Updates both lowest_cleanup_slot and oldest_slot for CompactionFilter
+    /// All slots less or equal to argument will be removed during compaction
+    pub fn set_lowest_cleanup_slot(&self, slot: Slot) {
+        let mut lowest_cleanup_slot = self
+            .lowest_cleanup_slot
+            .write()
+            .expect(Self::LOWEST_CLEANUP_SLOT_POISONED);
+
+        let new_lowest_cleanup_slot = std::cmp::max(*lowest_cleanup_slot, slot);
+        *lowest_cleanup_slot = new_lowest_cleanup_slot;
+
+        if new_lowest_cleanup_slot == 0 {
+            // fresh db case
+            self.db.set_oldest_slot(new_lowest_cleanup_slot);
+        } else {
+            self.db.set_oldest_slot(new_lowest_cleanup_slot + 1);
+        }
     }
 
     /// Initializes lowest slot to cleanup from
@@ -313,10 +350,11 @@ impl Ledger {
         blockhash: Hash,
     ) -> LedgerResult<()> {
         self.blocktime_cf.put(slot, &timestamp)?;
-        self.blocktime_cf.try_increase_entry_counter(1);
+        metrics::inc_ledger_block_times_count();
 
         self.blockhash_cf.put(slot, &blockhash)?;
-        self.blockhash_cf.try_increase_entry_counter(1);
+        metrics::inc_ledger_blockhashes_count();
+        self.last_slot.store(slot, Ordering::Relaxed);
         Ok(())
     }
 
@@ -825,7 +863,7 @@ impl Ledger {
 
         self.transaction_cf
             .put_protobuf((signature, slot), &transaction)?;
-        self.transaction_cf.try_increase_entry_counter(1);
+        metrics::inc_ledger_transactions_count();
 
         Ok(())
     }
@@ -864,7 +902,7 @@ impl Ledger {
         memos: String,
     ) -> LedgerResult<()> {
         let res = self.transaction_memos_cf.put((*signature, slot), &memos);
-        self.transaction_memos_cf.try_increase_entry_counter(1);
+        metrics::inc_ledger_transaction_memos_count();
         res
     }
 
@@ -948,35 +986,29 @@ impl Ledger {
                 (*address, slot, transaction_slot_index, signature),
                 &AddressSignatureMeta { writeable: true },
             )?;
-            self.address_signatures_cf.try_increase_entry_counter(1);
+            metrics::inc_ledger_address_signatures_count();
         }
         for address in readonly_keys {
             self.address_signatures_cf.put(
                 (*address, slot, transaction_slot_index, signature),
                 &AddressSignatureMeta { writeable: false },
             )?;
-            self.address_signatures_cf.try_increase_entry_counter(1);
+            metrics::inc_ledger_address_signatures_count();
         }
 
         self.slot_signatures_cf
             .put((slot, transaction_slot_index), &signature)?;
-        self.slot_signatures_cf.try_increase_entry_counter(1);
+        metrics::inc_ledger_slot_signatures_count();
 
         let status = status.into();
         self.transaction_status_cf
             .put_protobuf((signature, slot), &status)?;
-        self.transaction_status_cf.try_increase_entry_counter(1);
+        metrics::inc_ledger_transaction_status_count();
 
         if status.err.is_none() {
-            try_increase_entry_counter(
-                &self.transaction_successful_status_count,
-                1,
-            );
+            metrics::inc_ledger_transaction_successful_status_count();
         } else {
-            try_increase_entry_counter(
-                &self.transaction_failed_status_count,
-                1,
-            );
+            metrics::inc_ledger_transaction_failed_status_count();
         }
 
         Ok(())
@@ -1043,34 +1075,13 @@ impl Ledger {
     }
 
     pub fn count_transaction_successful_status(&self) -> LedgerResult<i64> {
-        if self
-            .transaction_status_cf
-            .entry_counter
-            .load(Ordering::Relaxed)
-            == DIRTY_COUNT
-        {
-            let count = self.count_outcome_transaction_status(true)?;
-            self.transaction_successful_status_count
-                .store(count, Ordering::Relaxed);
-            Ok(count)
-        } else {
-            Ok(self
-                .transaction_successful_status_count
-                .load(Ordering::Relaxed))
-        }
+        let count = self.count_outcome_transaction_status(true)?;
+        Ok(count)
     }
 
     pub fn count_transaction_failed_status(&self) -> LedgerResult<i64> {
-        if self.transaction_failed_status_count.load(Ordering::Relaxed)
-            == DIRTY_COUNT
-        {
-            let count = self.count_outcome_transaction_status(false)?;
-            self.transaction_failed_status_count
-                .store(count, Ordering::Relaxed);
-            Ok(count)
-        } else {
-            Ok(self.transaction_failed_status_count.load(Ordering::Relaxed))
-        }
+        let count = self.count_outcome_transaction_status(false)?;
+        Ok(count)
     }
 
     // -----------------
@@ -1102,7 +1113,7 @@ impl Ledger {
         let bytes = serialize(perf_sample)
             .expect("`PerfSample` can be serialized with `bincode`");
         self.perf_samples_cf.put_bytes(index, &bytes)?;
-        self.perf_samples_cf.try_increase_entry_counter(1);
+        metrics::inc_ledger_perf_samples_count();
 
         Ok(())
     }
@@ -1119,8 +1130,9 @@ impl Ledger {
         id: u64,
         data: &AccountModData,
     ) -> LedgerResult<()> {
+        metrics::inc_ledger_account_mod_data_count();
         self.account_mod_datas_cf.put(id, data)?;
-        self.account_mod_datas_cf.try_increase_entry_counter(1);
+        self.last_mod_id.store(id, Ordering::Relaxed);
         Ok(())
     }
 
@@ -1160,7 +1172,6 @@ impl Ledger {
             .expect(Self::LOWEST_CLEANUP_SLOT_POISONED);
         *lowest_cleanup_slot = std::cmp::max(*lowest_cleanup_slot, to_slot);
 
-        let num_deleted_slots = to_slot + 1 - from_slot;
         self.blocktime_cf.delete_range_in_batch(
             &mut batch,
             from_slot,
@@ -1227,30 +1238,6 @@ impl Ledger {
             })?;
 
         self.db.write(batch)?;
-
-        self.blocktime_cf
-            .try_decrease_entry_counter(num_deleted_slots);
-        self.blockhash_cf
-            .try_decrease_entry_counter(num_deleted_slots);
-        self.perf_samples_cf
-            .try_decrease_entry_counter(num_deleted_slots);
-        self.slot_signatures_cf
-            .try_decrease_entry_counter(slot_signatures_deleted);
-        self.transaction_status_cf
-            .try_decrease_entry_counter(transaction_status_deleted);
-        self.transaction_cf
-            .try_decrease_entry_counter(transactions_deleted);
-        self.transaction_memos_cf
-            .try_decrease_entry_counter(transaction_memos_deleted);
-        self.address_signatures_cf
-            .try_decrease_entry_counter(address_signatures_deleted);
-
-        // To not spend time querying DB for value we set drop the counter
-        // This shouldn't happen very often due to rarity of actual truncations.
-        self.transaction_successful_status_count
-            .store(DIRTY_COUNT, Ordering::Release);
-        self.transaction_failed_status_count
-            .store(DIRTY_COUNT, Ordering::Release);
 
         Ok(())
     }

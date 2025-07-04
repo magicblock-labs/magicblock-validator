@@ -26,6 +26,9 @@ pub enum ApiError {
     #[error("Ledger error: {0}")]
     LedgerError(#[from] magicblock_ledger::errors::LedgerError),
 
+    #[error("LedgerSizeManager error: {0}")]
+    LedgerSizeManagerError(#[from] magicblock_ledger::ledger_size_manager::errors::LedgerSizeManagerError),
+
     #[error("Failed to load programs into bank: {0}")]
     FailedToLoadProgramsIntoBank(String),
 
