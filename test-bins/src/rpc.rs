@@ -1,3 +1,5 @@
+mod shutdown;
+
 use log::*;
 use magicblock_api::{
     ledger,
@@ -7,6 +9,8 @@ use magicblock_api::{
 use magicblock_config::{EphemeralConfig, GeyserGrpcConfig};
 use solana_sdk::signature::{Keypair, Signer};
 use test_tools::init_logger;
+
+use crate::shutdown::Shutdown;
 
 // mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev
 const TEST_KEYPAIR_BYTES: [u8; 64] = [
@@ -98,7 +102,6 @@ async fn main() {
         ledger::lock_ledger(api.ledger().ledger_path(), &mut ledger_lock);
 
     api.start().await.expect("Failed to start validator");
-
     info!("");
     info!("🧙 Magicblock Validator is running!");
     info!(
@@ -113,11 +116,9 @@ async fn main() {
     info!("Ready for connections!");
     info!("");
 
-    // validator is supposed to run forever, so we wait for
-    // termination signal to initiate a graceful shutdown
-    let _ = tokio::signal::ctrl_c().await;
-
-    info!("SIGTERM has been received, initiating graceful shutdown");
+    if let Err(err) = Shutdown::wait().await {
+        error!("Failed to gracefully shutdown: {}", err);
+    }
     // weird panic behavior in json rpc http server, which panics when stopped from
     // within async context, so we just move it to a different thread for shutdown
     //
