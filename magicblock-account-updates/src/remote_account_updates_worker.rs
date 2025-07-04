@@ -96,15 +96,15 @@ impl RemoteAccountUpdatesWorker {
         let mut monitored_accounts = HashSet::new();
         // Initialize all the runners for all configs
         for (index, url) in self.ws_urls.iter().enumerate() {
-            let runner = match self
+            let result = self
                 .create_runner_from_config(
                     index,
                     url.clone(),
                     self.commitment,
                     &monitored_accounts,
                 )
-                .await
-            {
+                .await;
+            let runner = match result {
                 Ok(s) => s,
                 Err(e) => {
                     warn!("failed to start monitoring runner {index}: {e}");
@@ -142,13 +142,14 @@ impl RemoteAccountUpdatesWorker {
                         .get(current_refresh_index)
                         .unwrap()
                         .clone();
-                    let new_runner = match self.create_runner_from_config(
+                    let result = self.create_runner_from_config(
                         current_refresh_index,
                         url,
                         self.commitment,
                         &monitored_accounts
-                    ).await
-                    {
+                    ).await;
+
+                    let new_runner = match result {
                         Ok(r) => r,
                         Err(e) => {
                             warn!("failed to recreate shard runner {current_refresh_index}: {e}");

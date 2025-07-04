@@ -6,7 +6,6 @@ use std::{
     pin::Pin,
     rc::Rc,
     sync::{Arc, RwLock},
-    time::Instant,
 };
 
 use futures_util::{stream::FuturesUnordered, FutureExt, Stream, StreamExt};
@@ -101,7 +100,6 @@ impl RemoteAccountUpdatesShard {
             .unsubscribes
             .insert(clock::ID, (subscription.client.subs.clone(), unsub));
         self.pool.clients.push(subscription.client);
-        info!("subscribed to clock on shard: {}", self.shard_id);
 
         let mut requests = FuturesUnordered::new();
         // Loop forever until we stop the worker
@@ -154,7 +152,7 @@ impl RemoteAccountUpdatesShard {
                     self.pool.unsubscribes.insert(pubkey, (result.client.subs.clone(), unsub));
                     self.pool.clients.push(result.client);
                     account_streams.insert(pubkey, stream);
-                    info!(
+                    debug!(
                         "Shard {}: Account monitoring started: {:?}, clock_slot: {:?}",
                         self.shard_id,
                         pubkey,
@@ -278,9 +276,7 @@ impl PubsubPool {
             "websocket connection pool always has at least one connection",
         );
         let config = Some(self.config.clone());
-        let start = Instant::now();
         async move {
-            info!("subscribing to {pubkey}");
             let result = client
                 .inner
                 .account_subscribe(&pubkey, config)
@@ -295,10 +291,6 @@ impl PubsubPool {
                     (stream, unsub)
                 });
             *client.subs.borrow_mut() += 1;
-            info!(
-                "subscription to {pubkey} is complete in {}ms",
-                start.elapsed().as_millis()
-            );
             SubscriptionResult { result, client }
         }
     }
@@ -320,7 +312,7 @@ impl PubsubPool {
     async fn shutdown(&mut self) {
         // Cleanup all subscriptions and wait for proper shutdown
         for (pubkey, (_, callback)) in self.unsubscribes.drain() {
-            info!("Account monitoring killed: {:?}", pubkey);
+            debug!("Account monitoring killed: {:?}", pubkey);
             tokio::spawn(callback());
         }
         for client in self.clients.drain() {

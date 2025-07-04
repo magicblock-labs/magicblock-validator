@@ -83,7 +83,7 @@ async fn test_devnet_monitoring_multiple_accounts_at_the_same_time() {
     assert!(client.get_last_known_update_slot(&sysvar_rent).is_none());
     assert!(client.get_last_known_update_slot(&sysvar_sh).is_none());
     // Start monitoring the accounts now
-    //assert!(client.ensure_account_monitoring(&sysvar_rent).await.is_ok());
+    assert!(client.ensure_account_monitoring(&sysvar_rent).await.is_ok());
     assert!(client.ensure_account_monitoring(&sysvar_sh).await.is_ok());
     assert!(client
         .ensure_account_monitoring(&sysvar_clock)
