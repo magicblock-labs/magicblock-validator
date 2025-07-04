@@ -21,7 +21,7 @@ pub(crate) fn gen_test_validator_start_script(
     config: TestValidatorConfig,
 ) {
     let temp_dir = tempdir().expect("Failed to create temporary directory");
-    let temp_dir_path = temp_dir.into_path();
+    let temp_dir_path = temp_dir.keep();
     let accounts_dir = temp_dir_path.join("accounts");
     fs::create_dir(&accounts_dir).expect("Failed to create accounts directory");
 

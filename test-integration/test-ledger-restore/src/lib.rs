@@ -9,6 +9,7 @@ use std::{
 
 use integration_test_tools::{
     expect,
+    loaded_accounts::LoadedAccounts,
     tmpdir::resolve_tmp_dir,
     validator::{
         resolve_workspace_dir, start_magic_block_validator_with_config,
@@ -45,6 +46,7 @@ pub const FLEXI_COUNTER_PUBKEY: Pubkey =
 /// Then uses that config to start the validator.
 pub fn start_validator_with_config(
     config: EphemeralConfig,
+    loaded_chain_accounts: &LoadedAccounts,
 ) -> (TempDir, Option<process::Child>) {
     let workspace_dir = resolve_workspace_dir();
     let (default_tmpdir, temp_dir) = resolve_tmp_dir(TMP_DIR_CONFIG);
@@ -65,7 +67,12 @@ pub fn start_validator_with_config(
     };
     (
         default_tmpdir,
-        start_magic_block_validator_with_config(&paths, "TEST", release),
+        start_magic_block_validator_with_config(
+            &paths,
+            "TEST",
+            loaded_chain_accounts,
+            release,
+        ),
     )
 }
 
@@ -121,7 +128,7 @@ pub fn setup_offline_validator(
         ..Default::default()
     };
     let (default_tmpdir_config, Some(mut validator)) =
-        start_validator_with_config(config)
+        start_validator_with_config(config, &Default::default())
     else {
         panic!("validator should set up correctly");
     };
@@ -162,7 +169,10 @@ pub fn setup_validator_with_local_remote(
     };
 
     let (default_tmpdir_config, Some(mut validator)) =
-        start_validator_with_config(config)
+        start_validator_with_config(
+            config,
+            &LoadedAccounts::with_delegation_program_test_authority(),
+        )
     else {
         panic!("validator should set up correctly");
     };

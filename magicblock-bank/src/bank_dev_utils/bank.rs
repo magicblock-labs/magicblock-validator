@@ -52,7 +52,7 @@ impl Bank {
         let accountsdb_config = AccountsDbConfig::temp_for_tests(500);
         let adb_path = tempfile::tempdir()
             .expect("failed to create temp dir for test bank")
-            .into_path();
+            .keep();
         // for test purposes we don't need to sync with the ledger slot, so any slot will do
         let adb_init_slot = u64::MAX;
         let bank = Self::new(

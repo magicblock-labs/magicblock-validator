@@ -5,14 +5,16 @@ members = [
   "programs/schedulecommit-security",
   "programs/sysvars",
   "schedulecommit/client",
+  "schedulecommit/committor-service",
   "schedulecommit/test-scenarios",
   "schedulecommit/test-security",
   "test-cloning",
   "test-issues",
   "test-ledger-restore",
-  "test-runner",
-  "test-tools",
   "test-magicblock-api",
+  "test-runner",
+  "test-table-mania",
+  "test-tools",
   "test-pubsub",
 ]
 resolver = "2"
@@ -29,18 +31,30 @@ ephemeral-rollups-sdk = { git = "https://github.com/magicblock-labs/ephemeral-ro
 integration-test-tools = { path = "test-tools" }
 log = "0.4.20"
 magicblock-api = { path = "../magicblock-api" }
-magicblock-accounts-db = { path = "../magicblock-accounts-db", features = [ "dev-tools" ] }
-magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "ea04d46", default-features = false}
+magicblock-accounts-db = { path = "../magicblock-accounts-db", features = [
+  "dev-tools",
+] }
+magic-domain-program = { git = "https://github.com/magicblock-labs/magic-domain-program.git", rev = "ea04d46", default-features = false }
 magicblock-config = { path = "../magicblock-config" }
 magicblock-core = { path = "../magicblock-core" }
+magicblock-committor-program = { path = "../magicblock-committor-program", features = [
+  "no-entrypoint",
+] }
+magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "4af7f1c" }
+magicblock-committor-service = { path = "../magicblock-committor-service" }
+magicblock-rpc-client = { path = "../magicblock-rpc-client" }
+magicblock-table-mania = { path = "../magicblock-table-mania" }
+paste = "1.0"
 program-flexi-counter = { path = "./programs/flexi-counter" }
 program-schedulecommit = { path = "programs/schedulecommit" }
 program-schedulecommit-security = { path = "programs/schedulecommit-security" }
 rayon = "1.10.0"
 schedulecommit-client = { path = "schedulecommit/client" }
 serde = "1.0.217"
+solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "7bdfefc" }
 solana-program = "2.2"
 solana-program-test = "2.2"
+solana-pubkey = { version = "2.2" }
 solana-pubsub-client = "2.2"
 solana-rpc-client = "2.2"
 solana-rpc-client-api = "2.2"

@@ -50,7 +50,6 @@ impl AccountsManager {
         );
 
         let scheduled_commits_processor = RemoteScheduledCommitsProcessor::new(
-            remote_cluster,
             bank.clone(),
             cloned_accounts.clone(),
             transaction_status_sender.clone(),

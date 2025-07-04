@@ -6,7 +6,7 @@ use program_schedulecommit::api::{
     delegate_account_cpi_instruction, init_account_instruction,
     init_payer_escrow, pda_and_bump,
 };
-use solana_rpc_client::rpc_client::RpcClient;
+use solana_rpc_client::rpc_client::{RpcClient, SerializableTransaction};
 use solana_rpc_client_api::config::RpcSendTransactionConfig;
 #[allow(unused_imports)]
 use solana_sdk::signer::SeedDerivable;
@@ -124,7 +124,12 @@ impl ScheduleCommitTestContext {
                     ..Default::default()
                 },
             )
-            .with_context(|| "Failed to initialize committees")
+            .with_context(|| {
+                format!(
+                    "Failed to initialize committees. Transaction signature: {}",
+                    tx.get_signature()
+                )
+            })
     }
 
     pub fn escrow_lamports_for_payer(&self) -> Result<Signature> {

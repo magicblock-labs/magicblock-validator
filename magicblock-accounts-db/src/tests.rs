@@ -566,7 +566,7 @@ pub fn init_db() -> (AccountsDb, PathBuf) {
         .try_init();
     let directory = tempfile::tempdir()
         .expect("failed to create temporary directory")
-        .into_path();
+        .keep();
     let config = AccountsDbConfig::temp_for_tests(SNAPSHOT_FREQUENCY);
     let lock = StWLock::default();
 

@@ -338,7 +338,7 @@ fn setup() -> IndexTestEnv {
     let config = AccountsDbConfig::temp_for_tests(TEST_SNAPSHOT_FREQUENCY);
     let directory = tempfile::tempdir()
         .expect("failed to create temp directory for index tests")
-        .into_path();
+        .keep();
     let index = AccountsDbIndex::new(&config, &directory)
         .expect("failed to create accountsdb index in temp dir");
     IndexTestEnv { index, directory }
