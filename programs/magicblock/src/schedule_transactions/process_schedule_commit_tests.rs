@@ -19,7 +19,7 @@ use test_tools_core::init_logger;
 
 use crate::{
     magic_context::MagicContext,
-    magic_schedule_l1_message::ScheduledL1Message,
+    magic_scheduled_l1_message::ScheduledL1Message,
     magicblock_instruction::MagicBlockInstruction,
     schedule_transactions::transaction_scheduler::TransactionScheduler,
     test_utils::{ensure_started_validator, process_instruction},
@@ -238,7 +238,7 @@ fn assert_first_commit(
 mod tests {
     use super::*;
     use crate::{
-        magic_schedule_l1_message::MagicL1Message,
+        magic_scheduled_l1_message::MagicL1Message,
         utils::instruction_utils::InstructionUtils,
     };
 

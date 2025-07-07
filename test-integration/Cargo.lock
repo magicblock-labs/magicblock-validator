@@ -1150,7 +1150,7 @@ dependencies = [
  "conjunto-addresses",
  "conjunto-core",
  "conjunto-providers",
- "magicblock-delegation-program",
+ "magicblock-delegation-program 1.0.0 (git+https://github.com/magicblock-labs/delegation-program.git?rev=4af7f1c)",
  "serde",
  "solana-rpc-client",
  "solana-rpc-client-api",
@@ -2949,7 +2949,7 @@ dependencies = [
  "log",
  "magicblock-config",
  "magicblock-core",
- "magicblock-delegation-program",
+ "magicblock-delegation-program 1.0.0",
  "rayon",
  "serde",
  "solana-pubkey",
@@ -3562,7 +3562,7 @@ dependencies = [
  "magicblock-bank",
  "magicblock-committor-service",
  "magicblock-core",
- "magicblock-delegation-program",
+ "magicblock-delegation-program 1.0.0",
  "magicblock-metrics",
  "magicblock-mutator",
  "magicblock-processor",
@@ -3699,12 +3699,16 @@ dependencies = [
 name = "magicblock-committor-service"
 version = "0.1.2"
 dependencies = [
+ "anyhow",
+ "async-trait",
  "base64 0.21.7",
  "bincode",
  "borsh 1.5.7",
+ "futures-util",
  "log",
  "magicblock-committor-program",
- "magicblock-delegation-program",
+ "magicblock-delegation-program 1.0.0",
+ "magicblock-program",
  "magicblock-rpc-client",
  "magicblock-table-mania",
  "rusqlite",
@@ -3740,6 +3744,21 @@ name = "magicblock-core"
 version = "0.1.2"
 dependencies = [
  "solana-sdk",
+]
+
+[[package]]
+name = "magicblock-delegation-program"
+version = "1.0.0"
+dependencies = [
+ "bincode",
+ "borsh 1.5.7",
+ "bytemuck",
+ "num_enum",
+ "paste",
+ "solana-curve25519",
+ "solana-program",
+ "solana-security-txt",
+ "thiserror 1.0.69",
 ]
 
 [[package]]
@@ -5728,7 +5747,7 @@ dependencies = [
  "log",
  "magicblock-committor-program",
  "magicblock-committor-service",
- "magicblock-delegation-program",
+ "magicblock-delegation-program 1.0.0",
  "magicblock-rpc-client",
  "program-flexi-counter",
  "solana-account",

@@ -13,12 +13,12 @@ use solana_sdk::{
 };
 
 use crate::{
-    magic_context::MagicContext, magic_schedule_l1_message::ScheduledL1Message,
+    magic_context::MagicContext, magic_scheduled_l1_message::ScheduledL1Message,
 };
 
 #[derive(Clone)]
 pub struct TransactionScheduler {
-    scheduled_action: Arc<RwLock<Vec<ScheduledL1Message>>>,
+    scheduled_l1_message: Arc<RwLock<Vec<ScheduledL1Message>>>,
 }
 
 impl Default for TransactionScheduler {
@@ -31,7 +31,7 @@ impl Default for TransactionScheduler {
                 Default::default();
         }
         Self {
-            scheduled_action: SCHEDULED_ACTION.clone(),
+            scheduled_l1_message: SCHEDULED_ACTION.clone(),
         }
     }
 }
@@ -57,8 +57,11 @@ impl TransactionScheduler {
         Ok(())
     }
 
-    pub fn accept_scheduled_actions(&self, commits: Vec<ScheduledL1Message>) {
-        self.scheduled_action
+    pub fn accept_scheduled_l1_message(
+        &self,
+        commits: Vec<ScheduledL1Message>,
+    ) {
+        self.scheduled_l1_message
             .write()
             .expect("scheduled_action lock poisoned")
             .extend(commits);
@@ -69,7 +72,7 @@ impl TransactionScheduler {
         payer: &Pubkey,
     ) -> Vec<ScheduledL1Message> {
         let commits = self
-            .scheduled_action
+            .scheduled_l1_message
             .read()
             .expect("scheduled_action lock poisoned");
 
@@ -82,7 +85,7 @@ impl TransactionScheduler {
 
     pub fn take_scheduled_actions(&self) -> Vec<ScheduledL1Message> {
         let mut lock = self
-            .scheduled_action
+            .scheduled_l1_message
             .write()
             .expect("scheduled_action lock poisoned");
         mem::take(&mut *lock)
@@ -90,7 +93,7 @@ impl TransactionScheduler {
 
     pub fn scheduled_actions_len(&self) -> usize {
         let lock = self
-            .scheduled_action
+            .scheduled_l1_message
             .read()
             .expect("scheduled_action lock poisoned");
 
@@ -99,7 +102,7 @@ impl TransactionScheduler {
 
     pub fn clear_scheduled_actions(&self) {
         let mut lock = self
-            .scheduled_action
+            .scheduled_l1_message
             .write()
             .expect("scheduled_action lock poisoned");
         lock.clear();

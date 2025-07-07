@@ -3,7 +3,7 @@ use std::collections::HashSet;
 use base64::{prelude::BASE64_STANDARD, Engine};
 use dlp::args::{CommitStateArgs, CommitStateFromBufferArgs};
 use magicblock_committor_program::{
-    instruction::{create_close_ix, CreateCloseIxArgs},
+    instruction_builder::close_buffer::{create_close_ix, CreateCloseIxArgs},
     ChangedBundle,
 };
 use solana_pubkey::Pubkey;
@@ -296,7 +296,7 @@ fn encoded_tx_size(
     Ok(encoded.len())
 }
 
-fn serialize_and_encode_base64(
+pub fn serialize_and_encode_base64(
     transaction: &impl SerializableTransaction,
 ) -> String {
     // SAFETY: runs statically
@@ -508,7 +508,7 @@ mod test {
                 let delegated_account_owner = Pubkey::new_unique();
                 let buffer_pda = Pubkey::new_unique();
                 let commit_args = CommitStateFromBufferArgs::default();
-                vec![super::process_commits_ix(
+                vec![process_commits_ix(
                     auth_pubkey,
                     &pubkey,
                     &delegated_account_owner,
@@ -523,7 +523,7 @@ mod test {
                 |auth_pubkey, committee, delegated_account_owner| {
                     let buffer_pda = Pubkey::new_unique();
                     let commit_args = CommitStateFromBufferArgs::default();
-                    vec![super::process_commits_ix(
+                    vec![process_commits_ix(
                         auth_pubkey,
                         &committee,
                         &delegated_account_owner,

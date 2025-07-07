@@ -141,6 +141,10 @@ impl CommitAndUndelegate {
             undelegate_action,
         })
     }
+
+    pub fn get_committed_accounts(&self) -> &Vec<CommittedAccountV2> {
+        self.commit_action.get_committed_accounts()
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -173,6 +177,7 @@ pub struct ShortAccountMeta {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct L1Action {
     pub destination_program: Pubkey,
+    pub escrow_authority: Pubkey,
     pub data_per_program: ProgramArgs,
     pub account_metas_per_program: Vec<ShortAccountMeta>,
 }
@@ -190,7 +195,6 @@ impl L1Action {
             context.transaction_context,
             args.destination_program as u16,
         )?;
-
         if !destination_program.borrow().executable() {
             ic_msg!(
                 context.invoke_context,
@@ -200,6 +204,24 @@ impl L1Action {
                 )
             );
             return Err(InstructionError::AccountNotExecutable);
+        }
+
+        // Since action on L1 performed on behalf of some escrow
+        // We need to ensure that action was authorized by legit owner
+        let authority_pubkey = get_instruction_pubkey_with_idx(
+            context.transaction_context,
+            args.destination_program as u16,
+        )?;
+        if !context.signers.contains(authority_pubkey) {
+            ic_msg!(
+                context.invoke_context,
+                &format!(
+                    "L1Action: authority pubkey must sign transaction: {}",
+                    authority_pubkey
+                )
+            );
+
+            return Err(InstructionError::MissingRequiredSignature);
         }
 
         let account_metas = args
@@ -215,6 +237,7 @@ impl L1Action {
 
         Ok(L1Action {
             destination_program: destination_program_pubkey,
+            escrow_authority: *authority_pubkey,
             data_per_program: args.args.clone().into(),
             account_metas_per_program: account_metas,
         })
@@ -369,6 +392,15 @@ impl CommitType {
                     l1_actions,
                 })
             }
+        }
+    }
+
+    pub fn get_committed_accounts(&self) -> &Vec<CommittedAccountV2> {
+        match self {
+            Self::Standalone(committed_accounts) => committed_accounts,
+            Self::WithL1Actions {
+                committed_accounts, ..
+            } => committed_accounts,
         }
     }
 }

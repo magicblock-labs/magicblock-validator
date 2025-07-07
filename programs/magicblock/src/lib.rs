@@ -4,8 +4,9 @@ mod mutate_accounts;
 mod schedule_transactions;
 pub use magic_context::{FeePayerAccount, MagicContext};
 pub mod args;
-mod magic_schedule_l1_message;
+pub mod magic_scheduled_l1_message;
 pub mod magicblock_instruction;
+// TODO(edwin): isolate with features
 pub mod magicblock_processor;
 #[cfg(test)]
 mod test_utils;

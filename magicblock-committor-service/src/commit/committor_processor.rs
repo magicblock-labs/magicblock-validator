@@ -6,6 +6,7 @@ use std::{
 
 use log::*;
 use magicblock_committor_program::{Changeset, ChangesetMeta};
+use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
 use magicblock_rpc_client::{
     MagicBlockSendTransactionConfig, MagicblockRpcClient,
 };
@@ -23,7 +24,9 @@ use tokio::task::JoinSet;
 use super::common::{lookup_table_keys, send_and_confirm};
 use crate::{
     commit_stage::CommitStage,
-    commit_strategy::{split_changesets_by_commit_strategy, SplitChangesets},
+    commit_strategist::commit_strategy::{
+        split_changesets_by_commit_strategy, SplitChangesets,
+    },
     compute_budget::{ComputeBudget, ComputeBudgetConfig},
     config::ChainConfig,
     error::CommittorServiceResult,
@@ -140,15 +143,13 @@ impl CommittorProcessor {
 
     pub async fn commit_changeset(
         &self,
-        changeset: Changeset,
-        finalize: bool,
-        ephemeral_blockhash: Hash,
+        l1_messages: Vec<ScheduledL1Message>,
     ) -> Option<String> {
         let reqid = match self
             .persister
             .lock()
             .expect("persister mutex poisoned")
-            .start_changeset(&changeset, ephemeral_blockhash, finalize)
+            .start_changeset(&l1_messages)
         {
             Ok(id) => Some(id),
             Err(err) => {
@@ -162,7 +163,6 @@ impl CommittorProcessor {
                 None
             }
         };
-        let owners = changeset.owners();
         let commit_stages = self
             .process_commit_changeset(changeset, finalize, ephemeral_blockhash)
             .await;

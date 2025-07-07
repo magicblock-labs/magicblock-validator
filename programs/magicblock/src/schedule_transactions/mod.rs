@@ -23,6 +23,7 @@ use solana_program_runtime::{
 
 use crate::utils::accounts::get_instruction_pubkey_with_idx;
 
+// TODO(edwin): is reset on restart
 pub(crate) static MESSAGE_ID: AtomicU64 = AtomicU64::new(0);
 
 pub fn check_magic_context_id(

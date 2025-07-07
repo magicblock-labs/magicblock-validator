@@ -2,6 +2,7 @@ use std::path::Path;
 
 use log::*;
 use magicblock_committor_program::Changeset;
+use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
 use solana_pubkey::Pubkey;
 use solana_sdk::{hash::Hash, signature::Keypair};
 use tokio::{
@@ -50,9 +51,7 @@ pub enum CommittorMessage {
         /// Called once the changeset has been committed
         respond_to: oneshot::Sender<Option<String>>,
         /// The changeset to commit
-        changeset: Changeset,
-        /// The blockhash in the ephemeral at the time the commit was requested
-        ephemeral_blockhash: Hash,
+        l1_messages: Vec<ScheduledL1Message>,
         /// If `true`, account commits will be finalized after they were processed
         finalize: bool,
     },
@@ -129,15 +128,11 @@ impl CommittorActor {
                 }
             }
             CommitChangeset {
-                changeset,
-                ephemeral_blockhash,
+                l1_messages,
                 respond_to,
                 finalize,
             } => {
-                let reqid = self
-                    .processor
-                    .commit_changeset(changeset, finalize, ephemeral_blockhash)
-                    .await;
+                let reqid = self.processor.commit_changeset(l1_messages).await;
                 if let Err(e) = respond_to.send(reqid) {
                     error!("Failed to send response {:?}", e);
                 }
@@ -303,7 +298,6 @@ impl ChangesetCommittor for CommittorService {
     fn commit_changeset(
         &self,
         changeset: Changeset,
-        ephemeral_blockhash: Hash,
         finalize: bool,
     ) -> oneshot::Receiver<Option<String>> {
         let (tx, rx) = oneshot::channel();
@@ -354,7 +348,6 @@ pub trait ChangesetCommittor: Send + Sync + 'static {
     fn commit_changeset(
         &self,
         changeset: Changeset,
-        ephemeral_blockhash: Hash,
         finalize: bool,
     ) -> oneshot::Receiver<Option<String>>;
 

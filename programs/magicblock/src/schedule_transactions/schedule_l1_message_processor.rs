@@ -5,7 +5,7 @@ use solana_sdk::{
 
 use crate::{
     args::MagicL1MessageArgs,
-    magic_schedule_l1_message::{CommitType, ConstructionContext},
+    magic_scheduled_l1_message::{CommitType, ConstructionContext},
     utils::account_actions::set_account_owner_to_delegation_program,
 };
 

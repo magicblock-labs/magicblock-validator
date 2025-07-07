@@ -9,7 +9,7 @@ use solana_sdk::{
 
 use crate::{
     args::MagicL1MessageArgs,
-    magic_schedule_l1_message::{ConstructionContext, ScheduledL1Message},
+    magic_scheduled_l1_message::{ConstructionContext, ScheduledL1Message},
     schedule_transactions::{
         check_magic_context_id,
         schedule_l1_message_processor::schedule_l1_message_processor,

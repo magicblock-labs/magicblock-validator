@@ -3,7 +3,7 @@ mod bundles;
 mod commit;
 mod commit_info;
 mod commit_stage;
-mod commit_strategy;
+mod commit_strategist;
 mod compute_budget;
 pub mod config;
 mod consts;
@@ -16,8 +16,10 @@ mod transactions;
 mod types;
 mod undelegate;
 
+mod commit_strategist;
 #[cfg(feature = "dev-context-only-utils")]
 pub mod stubs;
+mod transaction_preperator;
 
 pub use commit_info::CommitInfo;
 pub use commit_stage::CommitStage;

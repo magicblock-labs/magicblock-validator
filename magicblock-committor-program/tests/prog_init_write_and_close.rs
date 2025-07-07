@@ -12,9 +12,8 @@ use magicblock_committor_program::{
 use solana_program::instruction::Instruction;
 use solana_program_test::*;
 use solana_pubkey::Pubkey;
-use solana_sdk::signature::Keypair;
 use solana_sdk::{
-    blake3::HASH_BYTES, hash::Hash, native_token::LAMPORTS_PER_SOL,
+    hash::Hash, native_token::LAMPORTS_PER_SOL, signature::Keypair,
     signer::Signer, transaction::Transaction,
 };
 

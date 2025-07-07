@@ -310,32 +310,38 @@ where
         slot: u64,
         undelegation_request: bool,
     ) -> AccountsResult<Vec<CommitAccountsPayload>> {
-        // Get current account states from internal account provider
-        let mut committees = Vec::new();
-        for (pubkey, owner, committable_account_prev_hash) in
-            &accounts_to_be_committed
-        {
-            let account_state =
-                self.internal_account_provider.get_account(pubkey);
-            if let Some(acc) = account_state {
-                let should_commit = committable_account_prev_hash
-                    .map_or(true, |hash| hash_account(&acc).ne(&hash));
-                if should_commit {
-                    committees.push(AccountCommittee {
-                        pubkey: *pubkey,
-                        owner: *owner,
-                        account_data: acc,
-                        slot,
-                        undelegation_requested: undelegation_request,
-                    });
+        let mut committees = accounts_to_be_committed
+            .iter()
+            .filter_map(|(pubkey, owner, committable_account_prev_hash)| {
+                if let Some(account) = self.internal_account_provider.get_account(pubkey) {
+                    Some((pubkey, owner, committable_account_prev_hash, account))
+                } else {
+                    error!(
+                        "Cannot find state for account that needs to be committed '{}' ",
+                        pubkey
+                    );
+                    None
                 }
-            } else {
-                error!(
-                    "Cannot find state for account that needs to be committed '{}' ",
-                    pubkey
-                );
-            }
-        }
+            })
+            .filter(|(pubkey, _, committable_account_prev_hash, acc)| {
+                let should_commit = committable_account_prev_hash
+                    .map_or(true, |hash| hash_account(acc).ne(&hash));
+                if !should_commit {
+                    info!(
+                        "Cannot find state for account that needs to be committed '{}'",
+                        pubkey
+                    );
+                }
+                should_commit
+            })
+            .map(|(pubkey, owner, _, acc)| AccountCommittee {
+                pubkey: *pubkey,
+                owner: *owner,
+                account_data: acc,
+                slot,
+                undelegation_requested: undelegation_request,
+            })
+            .collect();
 
         // NOTE: Once we run into issues that the data to be committed in a single
         // transaction is too large, we can split these into multiple batches

@@ -180,74 +180,69 @@ impl TableMania {
         // Keep trying to store pubkeys until we're done
         while !remaining.is_empty() {
             // First try to use existing tables
-            let mut stored_in_existing = false;
+            let mut active_tables_write_lock = self.active_tables.write().await;
+            match self
+                .try_extend_existing_table(
+                    &active_tables_write_lock,
+                    &authority,
+                    &mut remaining,
+                    &mut tables_used,
+                )
+                .await
             {
-                // Taking a write lock here to prevent multiple tasks from
-                // updating tables at the same time
-                let active_tables_write_lock = self.active_tables.write().await;
-
-                // Try to use the last table if it's not full
-                if let Some(table) = active_tables_write_lock.last() {
-                    if !table.is_full() {
-                        if let Err(err) = self
-                            .extend_table(
-                                table,
-                                authority,
-                                &mut remaining,
-                                &mut tables_used,
-                            )
-                            .await
-                        {
-                            error!(
-                                "Error extending table {}: {:?}",
-                                table.table_address(),
-                                err
-                            );
-                            if extend_errors >= MAX_ALLOWED_EXTEND_ERRORS {
-                                extend_errors += 1;
-                            } else {
-                                return Err(err);
-                            }
-                        } else {
-                            stored_in_existing = true;
-                        }
+                Ok(true) => continue,
+                Ok(false) => {}
+                Err(err) => {
+                    if extend_errors >= MAX_ALLOWED_EXTEND_ERRORS {
+                        extend_errors += 1;
+                    } else {
+                        return Err(err);
                     }
                 }
             }
 
             // If we couldn't use existing tables, we need to create a new one
-            if !stored_in_existing && !remaining.is_empty() {
-                // We write lock the active tables to ensure that while we create a new
-                // table the requests looking for an existing table to extend are blocked
-                let mut active_tables_write_lock =
-                    self.active_tables.write().await;
+            // We write lock the active tables to ensure that while we create a new
+            // table the requests looking for an existing table to extend are blocked
+            // Create a new table and add it to active_tables
+            let table = self
+                .create_new_table_and_extend(authority, &mut remaining)
+                .await?;
 
-                // Double-check if a new table was created while we were waiting for the lock
-                if let Some(table) = active_tables_write_lock.last() {
-                    if !table.is_full() {
-                        // Another task created a table we can use, so drop the write lock
-                        // and try again with the read lock
-                        drop(active_tables_write_lock);
-                        continue;
-                    }
-                }
-
-                // Create a new table and add it to active_tables
-                let table = self
-                    .create_new_table_and_extend(authority, &mut remaining)
-                    .await?;
-
-                tables_used.insert(*table.table_address());
-                active_tables_write_lock.push(table);
-            }
-
-            // If we've stored all pubkeys, we're done
-            if remaining.is_empty() {
-                break;
-            }
+            tables_used.insert(*table.table_address());
+            active_tables_write_lock.push(table);
         }
 
         Ok(())
+    }
+
+    /// Tries to extend last table
+    /// Returns [`true`] if the table isn't full at we were able to insert some keys
+    /// Returns [`false`] otherwise
+    async fn try_extend_existing_table(
+        &self,
+        active_tables: &Vec<LookupTableRc>,
+        authority: &Keypair,
+        remaining: &mut Vec<Pubkey>,
+        tables_used: &mut HashSet<Pubkey>,
+    ) -> TableManiaResult<bool> {
+        // Try to use the last table if it's not full
+        let table = match active_tables.last() {
+            Some(table) if !table.is_full() => table,
+            _ => return Ok(false),
+        };
+
+        self.extend_table(table, authority, remaining, tables_used)
+            .await
+            .inspect_err(|err| {
+                error!(
+                    "Error extending table {}: {:?}",
+                    table.table_address(),
+                    err
+                );
+            })?;
+
+        Ok(true)
     }
 
     /// Extends the table to store as many of the provided pubkeys as possile.

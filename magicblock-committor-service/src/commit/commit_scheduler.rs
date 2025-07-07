@@ -1,11 +1,20 @@
-use std::collections::VecDeque;
-use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
-use tokio::sync::mpsc::error::{TryRecvError, TrySendError};
-use tokio::select;
-use tokio::sync::mpsc::{channel, Receiver, Sender};
-use tokio::sync::mpsc::error::SendError;
+use std::{
+    collections::VecDeque,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
+};
+
 use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
+use tokio::{
+    select,
+    sync::mpsc::{
+        channel,
+        error::{SendError, TryRecvError, TrySendError},
+        Receiver, Sender,
+    },
+};
 
 pub struct CommitScheduler {
     queue: VecDeque<ScheduledL1Message>,
@@ -20,21 +29,27 @@ impl CommitScheduler {
 
         Self {
             queue: VecDeque::default(),
-            sender
+            sender,
         }
     }
 
-    async fn start(mut l1_message_receiver: Receiver<ScheduledL1Message>, db_flag: Arc<AtomicBool>) {
+    async fn start(
+        mut l1_message_receiver: Receiver<ScheduledL1Message>,
+        db_flag: Arc<AtomicBool>,
+    ) {
         // scheduler
         // accepts messages
         // if no commits we shall be idle
         loop {
             let message = match l1_message_receiver.try_recv() {
-                Ok(val) => {
-                    val
-                }
+                Ok(val) => val,
                 Err(TryRecvError::Empty) => {
-                    if let Ok(val) = Self::get_next_message(&mut l1_message_receiver, &db_flag).await {
+                    if let Ok(val) = Self::get_next_message(
+                        &mut l1_message_receiver,
+                        &db_flag,
+                    )
+                    .await
+                    {
                         val
                     } else {
                         // TODO(edwin): handle
@@ -44,19 +59,20 @@ impl CommitScheduler {
                 Err(TryRecvError::Disconnected) => {
                     // TODO(edwin): handle
                     panic!("Asdasd")
-                },
+                }
             };
 
             // send and shit
             todo!()
         }
 
-        while let Some(l1_messages) = l1_message_receiver.recv().await {
-
-        }
+        while let Some(l1_messages) = l1_message_receiver.recv().await {}
     }
 
-    async fn get_next_message(l1_message_receiver: &mut Receiver<ScheduledL1Message>, db_flag: &AtomicBool) -> Result<ScheduledL1Message, Error> {
+    async fn get_next_message(
+        l1_message_receiver: &mut Receiver<ScheduledL1Message>,
+        db_flag: &AtomicBool,
+    ) -> Result<ScheduledL1Message, Error> {
         if db_flag.load(Ordering::Relaxed) {
             // TODO: expensive to fetch 1 by 1, implement fetching multiple. Could use static?
             Self::get_message_from_db().await
@@ -74,7 +90,10 @@ impl CommitScheduler {
         todo!()
     }
 
-    pub async fn schedule(&self, l1_messages: Vec<ScheduledL1Message>) -> Result<(), Error>{
+    pub async fn schedule(
+        &self,
+        l1_messages: Vec<ScheduledL1Message>,
+    ) -> Result<(), Error> {
         for el in l1_messages {
             let err = if let Err(err) = self.sender.try_send(el) {
                 err
@@ -83,9 +102,8 @@ impl CommitScheduler {
             };
 
             if matches!(err, TrySendError::Closed(_)) {
-                return Err(Error::ChannelClosed)
+                return Err(Error::ChannelClosed);
             }
-
         }
 
         Ok(())
@@ -95,9 +113,8 @@ impl CommitScheduler {
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
     #[error("Channel was closed")]
-    ChannelClosed
+    ChannelClosed,
 }
-
 
 /// ideal system:
 ///
@@ -114,32 +131,21 @@ pub enum Error {
 /// We insert into scheduler and then figure out how to optimally split messages
 // or we split messages and then try to commit specific chunks?
 
-
 // we write to channel it becom3s full
 // we need to write to db
 // Who will
-
-
 
 // TODO Scheduler also return revicer chammel that will receive
 // (commit_id, signature)s that it sent. Single worker in [`RemoteScheduledCommitsProcessor`]
 // can receive them and hande them txs and sucj
 
-
-
-
 // after we flagged that items in db
 // next sends can't fo to queue, since that will break an order
 // they need to go to db.
 
-
 // Our loop
-
-
 
 /// Design:
 /// Let it be a general service
 /// Gets directly commits from Processor, then
-///
-///
-/// 1.
+fn useless() {}

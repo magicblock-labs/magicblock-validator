@@ -1,14 +1,17 @@
 use async_trait::async_trait;
-use solana_rpc_client::rpc_client::RpcClient;
-use solana_sdk::message::v0::Message;
-use solana_sdk::transaction::Transaction;
 use magicblock_program::magic_scheduled_l1_message::{
-    ScheduledL1Message, MagicL1Message
+    CommittedAccountV2, L1Action, MagicL1Message, ScheduledL1Message,
 };
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
-use crate::transaction_preperator::budget_calculator::{ComputeBudgetCalculator, ComputeBudgetCalculatorV1};
-use crate::transaction_preperator::error::{Error, PreparatorResult};
+use solana_sdk::message::v0::Message;
+
+use crate::transaction_preperator::{
+    budget_calculator::{ComputeBudgetCalculator, ComputeBudgetCalculatorV1},
+    delivery_strategist::DeliveryStrategist,
+    error::{Error, PreparatorResult},
+    task_builder::{TaskBuilderV1, TasksBuilder},
+};
 
 /// Transaction Preparator version
 /// Some actions maybe imnvalid per version
@@ -17,15 +20,17 @@ pub enum PreparatorVersion {
     V1,
 }
 
-
 #[async_trait]
 trait TransactionPreparator {
-    type BudgetCalculator: ComputeBudgetCalculator;
-    
     fn version(&self) -> PreparatorVersion;
-    async fn prepare_commit_tx(&self, l1_message: &ScheduledL1Message) -> PreparatorResult<Message>;
-    async fn prepare_finalize_tx(&self, l1_message: &ScheduledL1Message) -> PreparatorResult<Message>;
-
+    async fn prepare_commit_tx(
+        &self,
+        l1_message: &ScheduledL1Message,
+    ) -> PreparatorResult<Message>;
+    async fn prepare_finalize_tx(
+        &self,
+        l1_message: &ScheduledL1Message,
+    ) -> PreparatorResult<Message>;
 }
 
 /// [`TransactionPreparatorV1`] first version of preparator
@@ -33,37 +38,94 @@ trait TransactionPreparator {
 /// It creates TXs using current per account commit/finalize
 struct TransactionPreparatorV1 {
     rpc_client: MagicblockRpcClient,
-    table_mania: TableMania // TODO(edwin): Arc<TableMania>?
+    table_mania: TableMania, // TODO(edwin): Arc<TableMania>?
 }
 
 impl TransactionPreparatorV1 {
-    pub fn new(rpc_client: MagicblockRpcClient, table_mania: TableMania) -> Self {
+    pub fn new(
+        rpc_client: MagicblockRpcClient,
+        table_mania: TableMania,
+    ) -> Self {
         Self {
             rpc_client,
-            table_mania
+            table_mania,
         }
+    }
+
+    // TODO(edwin)
+    fn prepare_action_tx(actions: &Vec<L1Action>) -> PreparatorResult<Message> {
+        todo!()
+    }
+
+    fn prepare_committed_accounts_tx(
+        account: &Vec<CommittedAccountV2>,
+    ) -> PreparatorResult<Message> {
+        todo!()
     }
 }
 
 impl TransactionPreparator for TransactionPreparatorV1 {
-    type BudgetCalculator = ComputeBudgetCalculatorV1;
-    
     fn version(&self) -> PreparatorVersion {
         PreparatorVersion::V1
     }
 
     /// In V1: prepares TX with commits for every account in message
     /// For pure actions message - outputs Tx that runs actions
-    async fn prepare_commit_tx(&self, l1_message: &ScheduledL1Message) -> PreparatorResult<Message> {
+    async fn prepare_commit_tx(
+        &self,
+        l1_message: &ScheduledL1Message,
+    ) -> PreparatorResult<Message> {
+        // 1. create tasks
+        // 2. optimize to fit tx size. aka Delivery Strategy
+        // 3. Pre tx preparations. Create buffer accs + lookup tables
+        // 4. Build resulting TX to be executed
+
+        // 1.
+        let tasks = TaskBuilderV1::commit_tasks(l1_message);
+        // 2.
+        let tx_strategy = DeliveryStrategist::build_strategies(tasks)?;
+        // 3.
+
         todo!()
     }
 
     /// In V1: prepares single TX with finalize, undelegation + actions
-    async fn prepare_finalize_tx(&self, l1_message: &ScheduledL1Message) -> PreparatorResult<Message> {
-        if matches!(l1_message.l1_message, MagicL1Message::L1Actions(_)) {
-            Err(Error::VersionError(PreparatorVersion::V1))
-        } else {
-            Ok(())
-        }
+    async fn prepare_finalize_tx(
+        &self,
+        l1_message: &ScheduledL1Message,
+    ) -> PreparatorResult<Message> {
+        let tasks = TaskBuilderV1::finalize_tasks(l1_message);
+        let tx_strategy = DeliveryStrategist::build_strategies(tasks);
+
+        todo!()
     }
 }
+
+/// We have 2 stages for L1Message
+/// 1. commit
+/// 2. finalize
+///
+/// Now, single "task" can be differently represented in 2 stage
+/// In terms of transaction and so on
+
+/// We have:
+/// Stages - type
+/// Strategy - enum
+/// Task - enum
+
+// Can [`Task`] have [`Strategy`] based on [`Stage`]
+// We receive proposals and actions from users
+// Those have to
+
+/// We get tasks we need to pass them through
+/// Strategy:
+// 1. Try to fit Vec<T: Serialize> into TX. save tx_size
+// 2. Start optimizing
+// 3. Find biggest ix
+// 4. Replace with BufferedIx(maybe pop from Heap)
+// 5. tx_size -= (og_size - buffered_size)
+// 6. If doesn't fit - continue
+// 7. If heap.is_empty() - doesn't fit with buffered
+// 8. Apply lookup table
+// 9. if fits - return Ok(tx), else return Err(Failed)
+fn useless() {}

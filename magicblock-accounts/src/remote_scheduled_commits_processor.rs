@@ -17,6 +17,7 @@ use magicblock_committor_service::{
 };
 use magicblock_processor::execute_transaction::execute_legacy_transaction;
 use magicblock_program::{
+    magic_scheduled_l1_message::ScheduledL1Message,
     register_scheduled_commit_sent, FeePayerAccount, Pubkey, ScheduledCommit,
     SentCommit, TransactionScheduler,
 };
@@ -47,147 +48,14 @@ impl ScheduledCommitsProcessor for RemoteScheduledCommitsProcessor {
         IAP: InternalAccountProvider,
         CC: ChangesetCommittor,
     {
-        let scheduled_actions =
+        let scheduled_l1_messages =
             self.transaction_scheduler.take_scheduled_actions();
 
-        // TODO(edwin): remove once actions are supported
-        let scheduled_commits: Vec<ScheduledCommit> = scheduled_actions
-            .into_iter()
-            .filter_map(|action| {
-                action
-                    .try_into()
-                    .inspect_err(|err| error!("Unexpected action: {:?}", err))
-                    .ok()
-            })
-            .collect();
-
-        if scheduled_commits.is_empty() {
+        if scheduled_l1_messages.is_empty() {
             return Ok(());
         }
 
-        let mut changeset = Changeset::default();
-        // SAFETY: we only get here if the scheduled commits are not empty
-        let max_slot = scheduled_commits
-            .iter()
-            .map(|commit| commit.slot)
-            .max()
-            .unwrap();
-        // Safety we just obtained the max slot from the scheduled commits
-        let ephemeral_blockhash = scheduled_commits
-            .iter()
-            .find(|commit| commit.slot == max_slot)
-            .map(|commit| commit.blockhash)
-            .unwrap();
-
-        changeset.slot = max_slot;
-
-        let mut sent_commits = HashMap::new();
-        for commit in scheduled_commits {
-            // Determine which accounts are available and can be committed
-            let mut committees = vec![];
-            let mut feepayers = HashSet::new();
-            let mut excluded_pubkeys = vec![];
-            for committed_account in commit.accounts {
-                let mut committee_pubkey = committed_account.pubkey;
-                let mut committee_owner = committed_account.owner;
-                if let Some(Cloned {
-                    account_chain_snapshot,
-                    ..
-                }) = Self::fetch_cloned_account(
-                    &committed_account.pubkey,
-                    &self.cloned_accounts,
-                ) {
-                    // If the account is a FeePayer, we commit the mapped delegated account
-                    if account_chain_snapshot.chain_state.is_feepayer() {
-                        committee_pubkey =
-                            AccountChainSnapshot::ephemeral_balance_pda(
-                                &committed_account.pubkey,
-                            );
-                        committee_owner =
-                            AccountChainSnapshot::ephemeral_balance_pda_owner();
-                        feepayers.insert(FeePayerAccount {
-                            pubkey: committed_account.pubkey,
-                            delegated_pda: committee_pubkey,
-                        });
-                    } else if account_chain_snapshot
-                        .chain_state
-                        .is_undelegated()
-                    {
-                        error!("Scheduled commit account '{}' is undelegated. This is not supported.", committed_account.pubkey);
-                        excluded_pubkeys.push(committed_account.pubkey);
-                        continue;
-                    }
-                }
-
-                match account_provider.get_account(&committed_account.pubkey) {
-                    Some(account_data) => {
-                        committees.push((
-                            commit.id,
-                            AccountCommittee {
-                                pubkey: committee_pubkey,
-                                owner: committee_owner,
-                                account_data,
-                                slot: commit.slot,
-                                undelegation_requested: commit
-                                    .request_undelegation,
-                            },
-                        ));
-                    }
-                    None => {
-                        error!(
-                            "Scheduled commmit account '{}' not found. It must have gotten undelegated and removed since it was scheduled.",
-                            committed_account.pubkey
-                        );
-                        excluded_pubkeys.push(committed_account.pubkey);
-                        continue;
-                    }
-                }
-            }
-
-            // Collect all SentCommit info available at this stage
-            // We add the chain_signatures after we sent off the changeset
-            let sent_commit = SentCommit {
-                chain_signatures: vec![],
-                commit_id: commit.id,
-                slot: commit.slot,
-                payer: commit.payer,
-                blockhash: commit.blockhash,
-                included_pubkeys: committees
-                    .iter()
-                    .map(|(_, committee)| committee.pubkey)
-                    .collect(),
-                excluded_pubkeys,
-                feepayers,
-                requested_undelegation: commit.request_undelegation,
-            };
-            sent_commits.insert(
-                commit.id,
-                (commit.commit_sent_transaction, sent_commit),
-            );
-
-            // Add the committee to the changeset
-            for (bundle_id, committee) in committees {
-                changeset.add(
-                    committee.pubkey,
-                    ChangedAccount::Full {
-                        lamports: committee.account_data.lamports(),
-                        data: committee.account_data.data().to_vec(),
-                        owner: committee.owner,
-                        bundle_id,
-                    },
-                );
-                if committee.undelegation_requested {
-                    changeset.request_undelegation(committee.pubkey);
-                }
-            }
-        }
-
-        self.process_changeset(
-            changeset_committor,
-            changeset,
-            sent_commits,
-            ephemeral_blockhash,
-        );
+        self.process_changeset(changeset_committor, changeset, sent_commits);
 
         Ok(())
     }
@@ -214,6 +82,7 @@ impl RemoteScheduledCommitsProcessor {
             transaction_scheduler: TransactionScheduler::default(),
         }
     }
+
     fn fetch_cloned_account(
         pubkey: &Pubkey,
         cloned_accounts: &CloneOutputMap,

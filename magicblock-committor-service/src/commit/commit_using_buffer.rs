@@ -8,10 +8,14 @@ use borsh::{to_vec, BorshDeserialize};
 use dlp::pda::commit_state_pda_from_delegated_account;
 use log::*;
 use magicblock_committor_program::{
-    instruction::{
-        create_init_ix, create_realloc_buffer_ixs,
-        create_realloc_buffer_ixs_to_add_remaining, create_write_ix,
-        CreateInitIxArgs, CreateReallocBufferIxArgs, CreateWriteIxArgs,
+    instruction_builder::{
+        init_buffer::{create_init_ix, CreateInitIxArgs},
+        realloc_buffer::{
+            create_realloc_buffer_ixs,
+            create_realloc_buffer_ixs_to_add_remaining,
+            CreateReallocBufferIxArgs,
+        },
+        write_buffer::{create_write_ix, CreateWriteIxArgs},
     },
     instruction_chunks::chunk_realloc_ixs,
     Changeset, ChangesetChunk, Chunks, CommitableAccount,

@@ -9,7 +9,7 @@ use solana_sdk::{
 };
 
 use crate::{
-    magic_schedule_l1_message::{
+    magic_scheduled_l1_message::{
         CommitAndUndelegate, CommitType, CommittedAccountV2, MagicL1Message,
         ScheduledL1Message, UndelegateType,
     },
@@ -131,7 +131,6 @@ pub(crate) fn process_schedule_commit(
             get_instruction_pubkey_with_idx(transaction_context, idx as u16)?;
         let acc =
             get_instruction_account_with_idx(transaction_context, idx as u16)?;
-
         {
             let acc_owner = *acc.borrow().owner();
             if parent_program_id != Some(&acc_owner)

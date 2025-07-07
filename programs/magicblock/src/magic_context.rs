@@ -10,7 +10,7 @@ use solana_sdk::{
     transaction::Transaction,
 };
 
-use crate::magic_schedule_l1_message::{
+use crate::magic_scheduled_l1_message::{
     CommitAndUndelegate, CommitType, CommittedAccountV2, MagicL1Message,
     ScheduledL1Message, ShortAccountMeta, UndelegateType,
 };

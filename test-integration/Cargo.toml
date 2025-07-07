@@ -38,7 +38,7 @@ magicblock-core = { path = "../magicblock-core" }
 magicblock-committor-program = { path = "../magicblock-committor-program", features = [
   "no-entrypoint",
 ] }
-magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "4af7f1c" }
+magicblock-delegation-program = { path = "../../delegation-program" }
 magicblock-committor-service = { path = "../magicblock-committor-service" }
 magicblock-rpc-client = { path = "../magicblock-rpc-client" }
 magicblock-table-mania = { path = "../magicblock-table-mania" }

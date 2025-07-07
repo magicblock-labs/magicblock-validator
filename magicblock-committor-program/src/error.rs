@@ -1,6 +1,7 @@
-use crate::state::chunks::ChunksError;
 use solana_program::{msg, program_error::ProgramError};
 use thiserror::Error;
+
+use crate::state::chunks::ChunksError;
 
 pub type CommittorResult<T> = std::result::Result<T, CommittorError>;
 
