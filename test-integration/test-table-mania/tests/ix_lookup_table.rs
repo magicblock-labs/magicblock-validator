@@ -1,7 +1,10 @@
 use log::*;
 
 use magicblock_rpc_client::MagicblockRpcClient;
-use magicblock_table_mania::{find_open_tables, LookupTable};
+use magicblock_table_mania::{
+    find_open_tables, LookupTable, CREATE_AND_EXTEND_TABLE_CUS,
+    EXTEND_TABLE_CUS, MAX_ENTRIES_AS_PART_OF_EXTEND,
+};
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
 use solana_sdk::{
@@ -161,4 +164,63 @@ async fn test_create_fetch_and_close_lookup_table() {
             0
         );
     }
+}
+
+#[tokio::test]
+async fn test_lookup_table_ixs_cus_per_pubkey() {
+    init_logger!();
+
+    let validator_auth = Keypair::new();
+    let init_pubkeys = vec![0; MAX_ENTRIES_AS_PART_OF_EXTEND as usize]
+        .into_iter()
+        .map(|_| Pubkey::new_unique())
+        .collect::<Vec<_>>();
+
+    let extend_pubkeys = vec![0; 10_000]
+        .into_iter()
+        .map(|_| Pubkey::new_unique())
+        .collect::<Vec<_>>();
+
+    let mut extend_idx = 0;
+    for i in 1..init_pubkeys.len() {
+        let (rpc_client, lookup_table) =
+            setup_lookup_table(&validator_auth, &init_pubkeys[0..=i]).await;
+
+        let init_sig = lookup_table.init_signature().unwrap();
+        let cus = get_tx_cus(&rpc_client, &init_sig).await;
+
+        debug!("Create for {i:03} CUs  {cus:04}");
+        assert_eq!(cus, CREATE_AND_EXTEND_TABLE_CUS as u64);
+
+        lookup_table
+            .extend(
+                &rpc_client,
+                &validator_auth,
+                &extend_pubkeys[extend_idx..=extend_idx + i],
+                0,
+            )
+            .await
+            .unwrap();
+        extend_idx += i;
+
+        let extend_sig =
+            *lookup_table.extend_signatures().unwrap().last().unwrap();
+        let cus = get_tx_cus(&rpc_client, &extend_sig).await;
+        debug!("Extend for {i:03} CUs  {cus:04}");
+        assert_eq!(cus, EXTEND_TABLE_CUS as u64);
+    }
+}
+
+async fn get_tx_cus(
+    rpc_client: &MagicblockRpcClient,
+    sig: &solana_sdk::signature::Signature,
+) -> u64 {
+    let tx = rpc_client.get_transaction(sig, None).await.unwrap();
+    tx.transaction
+        .meta
+        .as_ref()
+        .unwrap()
+        .compute_units_consumed
+        .clone()
+        .unwrap()
 }

@@ -36,8 +36,10 @@ pub enum LookupTable {
         pubkeys: Mutex<Vec<Pubkey>>,
         creation_slot: u64,
         creation_sub_slot: u64,
+        /// The signature of the transaction creating and possibly extending the lookup table
         init_signature: Signature,
-        extend_signatures: Vec<Signature>,
+        /// All signatures used to extend the lookup table
+        extend_signatures: Mutex<Vec<Signature>>,
     },
     Deactivated {
         derived_auth: Keypair,
@@ -67,6 +69,8 @@ impl fmt::Display for LookupTable {
                     .collect::<Vec<_>>()
                     .join(", ");
                 let comma_separated_sigs = extend_signatures
+                    .lock()
+                    .expect("extend_signatures mutex poisoned")
                     .iter()
                     .map(|x| x.to_string())
                     .collect::<Vec<_>>()
@@ -178,6 +182,27 @@ impl LookupTable {
         derive_keypair::derive_keypair(authority, slot, sub_slot)
     }
 
+    pub fn init_signature(&self) -> Option<Signature> {
+        match self {
+            Self::Active { init_signature, .. } => Some(*init_signature),
+            Self::Deactivated { .. } => None,
+        }
+    }
+
+    pub fn extend_signatures(&self) -> Option<Vec<Signature>> {
+        match self {
+            Self::Active {
+                extend_signatures, ..
+            } => Some(
+                extend_signatures
+                    .lock()
+                    .expect("extend_signatures mutex poisoned")
+                    .to_vec(),
+            ),
+            Self::Deactivated { .. } => None,
+        }
+    }
+
     /// Initializes an address lookup table deriving its authority from the provided
     /// [authority] keypair. The table is extended with the provided [pubkeys].
     /// The [authority] keypair pays for the transaction.
@@ -250,7 +275,7 @@ impl LookupTable {
             creation_slot: latest_slot,
             creation_sub_slot: sub_slot,
             init_signature: signature,
-            extend_signatures: vec![],
+            extend_signatures: Mutex::new(vec![]),
         })
     }
 
@@ -284,8 +309,12 @@ impl LookupTable {
 
         check_max_pubkeys(extra_pubkeys)?;
 
-        let pubkeys = match self {
-            Active { pubkeys, .. } => pubkeys,
+        let (pubkeys, extend_signatures) = match self {
+            Active {
+                pubkeys,
+                extend_signatures,
+                ..
+            } => (pubkeys, extend_signatures),
             Deactivated { .. } => {
                 return Err(TableManiaError::CannotExtendDeactivatedTable(
                     *self.table_address(),
@@ -324,6 +353,10 @@ impl LookupTable {
                 .lock()
                 .expect("pubkeys mutex poisoned")
                 .extend(extra_pubkeys);
+            extend_signatures
+                .lock()
+                .expect("extend_signatures mutex poisoned")
+                .push(signature);
         }
 
         Ok(())

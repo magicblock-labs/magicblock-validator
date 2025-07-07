@@ -9,7 +9,8 @@ use solana_rpc_client::{
 };
 use solana_rpc_client_api::{
     client_error::ErrorKind as RpcClientErrorKind,
-    config::RpcSendTransactionConfig, request::RpcError,
+    config::{RpcSendTransactionConfig, RpcTransactionConfig},
+    request::RpcError,
 };
 use solana_sdk::{
     account::Account,
@@ -21,7 +22,9 @@ use solana_sdk::{
     signature::Signature,
     transaction::TransactionError,
 };
-use solana_transaction_status_client_types::UiTransactionEncoding;
+use solana_transaction_status_client_types::{
+    EncodedConfirmedTransactionWithStatusMeta, UiTransactionEncoding,
+};
 use tokio::task::JoinSet;
 
 /// The encoding to use when sending transactions
@@ -508,5 +511,21 @@ impl MagicblockRpcClient {
             processed_err: processed_status.err(),
             confirmed_err: confirmed_status.and_then(|status| status.err()),
         })
+    }
+
+    pub async fn get_transaction(
+        &self,
+        signature: &Signature,
+        config: Option<RpcTransactionConfig>,
+    ) -> MagicBlockRpcClientResult<EncodedConfirmedTransactionWithStatusMeta>
+    {
+        let config = config.unwrap_or_else(|| RpcTransactionConfig {
+            commitment: Some(self.commitment()),
+            ..Default::default()
+        });
+        self.client
+            .get_transaction_with_config(signature, config)
+            .await
+            .map_err(MagicBlockRpcClientError::RpcClientError)
     }
 }

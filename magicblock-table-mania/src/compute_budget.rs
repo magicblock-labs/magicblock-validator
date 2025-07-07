@@ -1,0 +1,2 @@
+pub const CREATE_AND_EXTEND_TABLE_CUS: u32 = 2_100;
+pub const EXTEND_TABLE_CUS: u32 = 900;
