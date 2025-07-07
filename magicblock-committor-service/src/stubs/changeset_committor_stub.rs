@@ -4,7 +4,7 @@ use std::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
     },
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
 use magicblock_committor_program::Changeset;
@@ -119,14 +119,15 @@ impl ChangesetCommittor for ChangesetCommittorStub {
         &self,
         committee: Pubkey,
         owner: Pubkey,
-    ) -> oneshot::Receiver<CommittorServiceResult<()>> {
+    ) -> oneshot::Receiver<CommittorServiceResult<Instant>> {
+        let initiated = Instant::now();
         let (tx, rx) =
-            tokio::sync::oneshot::channel::<CommittorServiceResult<()>>();
+            tokio::sync::oneshot::channel::<CommittorServiceResult<Instant>>();
         self.reserved_pubkeys_for_committee
             .lock()
             .unwrap()
             .insert(committee, owner);
-        tx.send(Ok(())).unwrap_or_else(|_| {
+        tx.send(Ok(initiated)).unwrap_or_else(|_| {
             log::error!("Failed to send response");
         });
         rx

@@ -1,4 +1,4 @@
-use std::path::Path;
+use std::{path::Path, time::Instant};
 
 use log::*;
 use magicblock_committor_program::Changeset;
@@ -30,8 +30,11 @@ pub struct LookupTables {
 #[derive(Debug)]
 pub enum CommittorMessage {
     ReservePubkeysForCommittee {
-        /// Called once the pubkeys have been reserved
-        respond_to: oneshot::Sender<CommittorServiceResult<()>>,
+        /// When the request was initiated
+        initiated: Instant,
+        /// Called once the pubkeys have been reserved and includes that timestamp
+        /// at which the request was initiated
+        respond_to: oneshot::Sender<CommittorServiceResult<Instant>>,
         /// The committee whose pubkeys to reserve in a lookup table
         /// These pubkeys are used to process/finalize the commit
         committee: Pubkey,
@@ -101,14 +104,16 @@ impl CommittorActor {
         use CommittorMessage::*;
         match msg {
             ReservePubkeysForCommittee {
+                initiated,
                 respond_to,
                 committee,
                 owner,
             } => {
                 let pubkeys =
                     provide_committee_pubkeys(&committee, Some(&owner));
-                let reqid = self.processor.reserve_pubkeys(pubkeys).await;
-                if let Err(e) = respond_to.send(reqid) {
+                let result = self.processor.reserve_pubkeys(pubkeys).await;
+                let result = result.map(|_| initiated);
+                if let Err(e) = respond_to.send(result) {
                     error!("Failed to send response {:?}", e);
                 }
             }
@@ -290,9 +295,10 @@ impl ChangesetCommittor for CommittorService {
         &self,
         committee: Pubkey,
         owner: Pubkey,
-    ) -> oneshot::Receiver<CommittorServiceResult<()>> {
+    ) -> oneshot::Receiver<CommittorServiceResult<Instant>> {
         let (tx, rx) = oneshot::channel();
         self.try_send(CommittorMessage::ReservePubkeysForCommittee {
+            initiated: Instant::now(),
             respond_to: tx,
             committee,
             owner,
@@ -348,7 +354,7 @@ pub trait ChangesetCommittor: Send + Sync + 'static {
         &self,
         committee: Pubkey,
         owner: Pubkey,
-    ) -> oneshot::Receiver<CommittorServiceResult<()>>;
+    ) -> oneshot::Receiver<CommittorServiceResult<Instant>>;
 
     /// Commits the changeset and returns the reqid
     fn commit_changeset(
