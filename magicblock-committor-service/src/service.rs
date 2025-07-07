@@ -1,4 +1,4 @@
-use std::{path::Path, time::Instant};
+use std::{path::Path, sync::Arc, time::Instant};
 
 use log::*;
 use magicblock_committor_program::Changeset;
@@ -79,7 +79,7 @@ pub enum CommittorMessage {
 // -----------------
 struct CommittorActor {
     receiver: mpsc::Receiver<CommittorMessage>,
-    processor: CommittorProcessor,
+    processor: Arc<CommittorProcessor>,
 }
 
 impl CommittorActor {
@@ -92,8 +92,11 @@ impl CommittorActor {
     where
         P: AsRef<Path>,
     {
-        let processor =
-            CommittorProcessor::try_new(authority, persist_file, chain_config)?;
+        let processor = Arc::new(CommittorProcessor::try_new(
+            authority,
+            persist_file,
+            chain_config,
+        )?);
         Ok(Self {
             receiver,
             processor,
@@ -109,29 +112,44 @@ impl CommittorActor {
                 committee,
                 owner,
             } => {
-                let pubkeys =
-                    provide_committee_pubkeys(&committee, Some(&owner));
-                let result = self.processor.reserve_pubkeys(pubkeys).await;
-                let result = result.map(|_| initiated);
-                if let Err(e) = respond_to.send(result) {
-                    error!("Failed to send response {:?}", e);
-                }
+                let processor = self.processor.clone();
+                tokio::task::spawn(async move {
+                    let pubkeys =
+                        provide_committee_pubkeys(&committee, Some(&owner));
+                    // NOTE: we wait here until the reservation is done which causes the
+                    // cloning of a particular account to be blocked.
+                    // This leads to larger delays on the first clone of an account, but also
+                    // ensures that the account could be committed via a lookup table later.
+                    let result = processor
+                        .reserve_pubkeys(pubkeys)
+                        .await
+                        .map(|_| initiated);
+                    if let Err(e) = respond_to.send(result) {
+                        error!("Failed to send response {:?}", e);
+                    }
+                });
             }
             ReserveCommonPubkeys { respond_to } => {
-                let pubkeys =
-                    provide_common_pubkeys(&self.processor.auth_pubkey());
-                let reqid = self.processor.reserve_pubkeys(pubkeys).await;
-                if let Err(e) = respond_to.send(reqid) {
-                    error!("Failed to send response {:?}", e);
-                }
+                let processor = self.processor.clone();
+                tokio::task::spawn(async move {
+                    let pubkeys =
+                        provide_common_pubkeys(&processor.auth_pubkey());
+                    let reqid = processor.reserve_pubkeys(pubkeys).await;
+                    if let Err(e) = respond_to.send(reqid) {
+                        error!("Failed to send response {:?}", e);
+                    }
+                });
             }
             ReleaseCommonPubkeys { respond_to } => {
-                let pubkeys =
-                    provide_common_pubkeys(&self.processor.auth_pubkey());
-                self.processor.release_pubkeys(pubkeys).await;
-                if let Err(e) = respond_to.send(()) {
-                    error!("Failed to send response {:?}", e);
-                }
+                let processor = self.processor.clone();
+                tokio::task::spawn(async move {
+                    let pubkeys =
+                        provide_common_pubkeys(&processor.auth_pubkey());
+                    processor.release_pubkeys(pubkeys).await;
+                    if let Err(e) = respond_to.send(()) {
+                        error!("Failed to send response {:?}", e);
+                    }
+                });
             }
             CommitChangeset {
                 changeset,
@@ -139,13 +157,19 @@ impl CommittorActor {
                 respond_to,
                 finalize,
             } => {
-                let reqid = self
-                    .processor
-                    .commit_changeset(changeset, finalize, ephemeral_blockhash)
-                    .await;
-                if let Err(e) = respond_to.send(reqid) {
-                    error!("Failed to send response {:?}", e);
-                }
+                let processor = self.processor.clone();
+                tokio::task::spawn(async move {
+                    let reqid = processor
+                        .commit_changeset(
+                            changeset,
+                            finalize,
+                            ephemeral_blockhash,
+                        )
+                        .await;
+                    if let Err(e) = respond_to.send(reqid) {
+                        error!("Failed to send response {:?}", e);
+                    }
+                });
             }
             GetCommitStatuses { reqid, respond_to } => {
                 let commit_statuses =
@@ -164,15 +188,18 @@ impl CommittorActor {
                 }
             }
             GetLookupTables { respond_to } => {
-                let active_tables = self.processor.active_lookup_tables().await;
-                let released_tables =
-                    self.processor.released_lookup_tables().await;
-                if let Err(e) = respond_to.send(LookupTables {
-                    active: active_tables,
-                    released: released_tables,
-                }) {
-                    error!("Failed to send response {:?}", e);
-                }
+                let processor = self.processor.clone();
+                tokio::task::spawn(async move {
+                    let active_tables = processor.active_lookup_tables().await;
+                    let released_tables =
+                        processor.released_lookup_tables().await;
+                    if let Err(e) = respond_to.send(LookupTables {
+                        active: active_tables,
+                        released: released_tables,
+                    }) {
+                        error!("Failed to send response {:?}", e);
+                    }
+                });
             }
         }
     }

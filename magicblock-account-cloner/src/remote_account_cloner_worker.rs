@@ -720,13 +720,17 @@ where
                 // Allow the committer service to reserve pubkeys in lookup tables
                 // that could be needed when we commit this account
                 if let Some(committor) = self.changeset_committor.as_ref() {
-                    map_committor_request_result(
+                    let initiated = map_committor_request_result(
                         committor.reserve_pubkeys_for_committee(
                             *pubkey,
                             delegation_record.owner,
                         ),
                     )
                     .await?;
+                    trace!(
+                        "Reserving lookup keys for {pubkey} took {:?}",
+                        initiated.elapsed()
+                    );
                 }
 
                 sig
