@@ -30,6 +30,7 @@ use solana_sdk::{
 use crate::{
     derive_keypair,
     error::{TableManiaError, TableManiaResult},
+    TableManiaComputeBudget,
 };
 
 // -----------------
@@ -356,6 +357,7 @@ impl LookupTableRc {
         latest_slot: Slot,
         sub_slot: Slot,
         pubkeys: &[Pubkey],
+        compute_budget: &TableManiaComputeBudget,
     ) -> TableManiaResult<Self> {
         check_max_pubkeys(pubkeys)?;
 
@@ -377,7 +379,14 @@ impl LookupTableRc {
             pubkeys[..end].to_vec(),
         );
 
-        let ixs = vec![create_ix, extend_ix];
+        let (compute_budget_ix, compute_unit_price_ix) =
+            compute_budget.instructions();
+        let ixs = vec![
+            compute_budget_ix,
+            compute_unit_price_ix,
+            create_ix,
+            extend_ix,
+        ];
         let latest_blockhash = rpc_client.get_latest_blockhash().await?;
         let tx = Transaction::new_signed_with_payer(
             &ixs,
@@ -431,6 +440,7 @@ impl LookupTableRc {
         rpc_client: &MagicblockRpcClient,
         authority: &Keypair,
         extra_pubkeys: &[Pubkey],
+        compute_budget: &TableManiaComputeBudget,
     ) -> TableManiaResult<()> {
         use LookupTableRc::*;
 
@@ -444,6 +454,8 @@ impl LookupTableRc {
                 ));
             }
         };
+        let (compute_budget_ix, compute_unit_price_ix) =
+            compute_budget.instructions();
         let extend_ix = alt::instruction::extend_lookup_table(
             *self.table_address(),
             self.derived_auth().pubkey(),
@@ -451,7 +463,7 @@ impl LookupTableRc {
             extra_pubkeys.to_vec(),
         );
 
-        let ixs = vec![extend_ix];
+        let ixs = vec![compute_budget_ix, compute_unit_price_ix, extend_ix];
         let latest_blockhash = rpc_client.get_latest_blockhash().await?;
         let tx = Transaction::new_signed_with_payer(
             &ixs,
@@ -499,6 +511,7 @@ impl LookupTableRc {
         rpc_client: &MagicblockRpcClient,
         authority: &Keypair,
         pubkeys: &[Pubkey],
+        compute_budget: &TableManiaComputeBudget,
     ) -> TableManiaResult<Vec<Pubkey>> {
         let Some(len) = self.pubkeys().map(|x| x.len()) else {
             return Err(TableManiaError::CannotExtendDeactivatedTable(
@@ -517,7 +530,9 @@ impl LookupTableRc {
             pubkeys
         };
 
-        let res = self.extend(rpc_client, authority, storing).await;
+        let res = self
+            .extend(rpc_client, authority, storing, compute_budget)
+            .await;
         res.map(|_| storing.to_vec())
     }
 
@@ -530,6 +545,7 @@ impl LookupTableRc {
         rpc_client: &MagicblockRpcClient,
         authority: &Keypair,
     ) -> TableManiaResult<()> {
+        // TODO: @@@ set compute limit + price
         let deactivate_ix = alt::instruction::deactivate_lookup_table(
             *self.table_address(),
             self.derived_auth().pubkey(),
@@ -626,6 +642,7 @@ impl LookupTableRc {
         authority: &Keypair,
         current_slot: Option<Slot>,
     ) -> TableManiaResult<bool> {
+        // TODO: @@@ set compute limit + price
         if !self.is_deactivated(rpc_client, current_slot).await {
             return Ok(false);
         }

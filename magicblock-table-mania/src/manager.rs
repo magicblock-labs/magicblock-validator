@@ -23,6 +23,7 @@ use tokio::{
 use crate::{
     error::{TableManiaError, TableManiaResult},
     lookup_table_rc::{LookupTableRc, MAX_ENTRIES_AS_PART_OF_EXTEND},
+    TableManiaComputeBudgets,
 };
 
 // -----------------
@@ -55,6 +56,7 @@ pub struct TableMania {
     authority_pubkey: Pubkey,
     pub rpc_client: MagicblockRpcClient,
     randomize_lookup_table_slot: bool,
+    compute_budgets: TableManiaComputeBudgets,
 }
 
 impl TableMania {
@@ -69,6 +71,7 @@ impl TableMania {
             authority_pubkey: authority.pubkey(),
             rpc_client,
             randomize_lookup_table_slot: randomize_lookup_table_slot(),
+            compute_budgets: TableManiaComputeBudgets::default(),
         };
         if let Some(config) = garbage_collector_config {
             Self::launch_garbage_collector(
@@ -279,7 +282,12 @@ impl TableMania {
 
         let storing = remaining[..storing_len].to_vec();
         let stored = table
-            .extend_respecting_capacity(&self.rpc_client, authority, &storing)
+            .extend_respecting_capacity(
+                &self.rpc_client,
+                authority,
+                &storing,
+                &self.compute_budgets.extend,
+            )
             .await?;
         trace!("Stored {}", stored.len());
         tables_used.insert(*table.table_address());
@@ -328,6 +336,7 @@ impl TableMania {
             slot,
             SUB_SLOT.load(Ordering::Relaxed),
             &pubkeys[..len],
+            &self.compute_budgets.init,
         )
         .await?;
         pubkeys.retain_mut(|pk| !table.contains_key(pk));
