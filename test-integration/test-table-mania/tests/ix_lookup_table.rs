@@ -66,6 +66,12 @@ pub async fn setup_lookup_table(
             panic!("Failed to init lookup table: {err:?}");
         }
     };
+    let init_cus = rpc_client
+        .get_transaction_cus(&lookup_table.init_signature().unwrap(), None)
+        .await
+        .unwrap()
+        .unwrap();
+    info!("Lookup table initialized using {init_cus} CUs");
     (rpc_client, lookup_table)
 }
 
@@ -84,11 +90,13 @@ async fn get_table_addresses(
     rpc_client: &MagicblockRpcClient,
     lookup_table: &LookupTableRc,
 ) -> Vec<Pubkey> {
-    lookup_table
+    let mut keys = lookup_table
         .get_chain_pubkeys(rpc_client)
         .await
         .unwrap()
-        .expect("Table not found")
+        .expect("Table not found");
+    keys.sort();
+    keys
 }
 
 async fn get_open_tables(
@@ -108,10 +116,11 @@ async fn test_create_fetch_and_close_lookup_table() {
     init_logger!();
 
     let validator_auth = Keypair::new();
-    let pubkeys = vec![0; 10]
+    let mut pubkeys = vec![0; 10]
         .into_iter()
         .map(|_| Pubkey::new_unique())
         .collect::<Vec<_>>();
+    pubkeys.sort();
 
     let budgets = TableManiaComputeBudgets::default();
 
@@ -123,15 +132,14 @@ async fn test_create_fetch_and_close_lookup_table() {
 
     assert_eq!(meta.authority, Some(lookup_table.derived_auth().pubkey()));
     assert_eq!(meta.deactivation_slot, u64::MAX);
-    assert_eq!(
-        lookup_table
-            .pubkeys()
-            .unwrap()
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>(),
-        pubkeys[0..5]
-    );
+    let mut keys = lookup_table
+        .pubkeys()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    keys.sort();
+    assert_eq!(keys, pubkeys[0..5]);
     assert_eq!(
         get_table_addresses(&rpc_client, &lookup_table).await,
         pubkeys[0..5]
@@ -149,15 +157,14 @@ async fn test_create_fetch_and_close_lookup_table() {
         )
         .await
         .unwrap();
-    assert_eq!(
-        lookup_table
-            .pubkeys()
-            .unwrap()
-            .keys()
-            .cloned()
-            .collect::<Vec<_>>(),
-        pubkeys[0..10]
-    );
+    let mut keys = lookup_table
+        .pubkeys()
+        .unwrap()
+        .keys()
+        .cloned()
+        .collect::<Vec<_>>();
+    keys.sort();
+    assert_eq!(keys, pubkeys[0..10]);
     assert_eq!(
         get_table_addresses(&rpc_client, &lookup_table).await,
         pubkeys[0..10]
