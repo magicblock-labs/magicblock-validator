@@ -13,7 +13,7 @@ solana-sdk = { workspace = true }
 integration-test-tools = { workspace = true }
 isocountry = "0.3.2"
 
-# [[test]]
-# name = "test-domain-registry"
-# path = "tests/test_domain_registry.rs"
-# harness = false
+[[test]]
+name = "test-domain-registry"
+path = "tests/test_domain_registry.rs"
+harness = false
