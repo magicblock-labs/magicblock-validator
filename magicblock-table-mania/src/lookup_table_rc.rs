@@ -4,7 +4,7 @@ use std::{
     ops::Deref,
     sync::{
         atomic::{AtomicUsize, Ordering},
-        RwLock, RwLockReadGuard, RwLockWriteGuard,
+        Mutex, RwLock, RwLockReadGuard, RwLockWriteGuard,
     },
 };
 
@@ -135,7 +135,7 @@ pub enum LookupTableRc {
         creation_slot: u64,
         creation_sub_slot: u64,
         init_signature: Signature,
-        extend_signatures: Vec<Signature>,
+        extend_signatures: Mutex<Vec<Signature>>,
     },
     Deactivated {
         derived_auth: Keypair,
@@ -165,6 +165,8 @@ impl fmt::Display for LookupTableRc {
                     .collect::<Vec<_>>()
                     .join(", ");
                 let comma_separated_sigs = extend_signatures
+                    .lock()
+                    .expect("extend_signatures mutex poisoned")
                     .iter()
                     .map(|x| x.to_string())
                     .collect::<Vec<_>>()
@@ -216,11 +218,16 @@ impl LookupTableRc {
         }
     }
 
-    pub fn extend_signatures(&self) -> Option<&Vec<Signature>> {
+    pub fn extend_signatures(&self) -> Option<Vec<Signature>> {
         match self {
             Self::Active {
                 extend_signatures, ..
-            } => Some(extend_signatures),
+            } => Some(
+                extend_signatures
+                    .lock()
+                    .expect("extend_signatures mutex poisoned")
+                    .clone(),
+            ),
             Self::Deactivated { .. } => None,
         }
     }
@@ -447,7 +454,7 @@ impl LookupTableRc {
             creation_slot: latest_slot,
             creation_sub_slot: sub_slot,
             init_signature: signature,
-            extend_signatures: vec![],
+            extend_signatures: vec![].into(),
         })
     }
 
@@ -472,8 +479,12 @@ impl LookupTableRc {
 
         check_max_pubkeys(extra_pubkeys)?;
 
-        let pubkeys = match self {
-            Active { pubkeys, .. } => pubkeys,
+        let (pubkeys, extend_signatures) = match self {
+            Active {
+                pubkeys,
+                extend_signatures,
+                ..
+            } => (pubkeys, extend_signatures),
             Deactivated { .. } => {
                 return Err(TableManiaError::CannotExtendDeactivatedTable(
                     *self.table_address(),
@@ -517,6 +528,10 @@ impl LookupTableRc {
                 .write()
                 .expect("pubkeys rwlock poisoned")
                 .insert_many(extra_pubkeys);
+            extend_signatures
+                .lock()
+                .expect("extend_signatures mutex poisoned")
+                .push(signature);
         }
 
         Ok(())
