@@ -44,7 +44,8 @@ impl Chunks {
     }
 
     pub fn from_data_length(data_len: usize, chunk_size: u16) -> Self {
-        let chunk_count = (data_len + chunk_size as usize - 1) / chunk_size as usize;
+        let chunk_count =
+            (data_len + chunk_size as usize - 1) / chunk_size as usize;
         Self::new(chunk_count, chunk_size)
     }
 

@@ -1,11 +1,27 @@
 use dlp::args::{CallHandlerArgs, CommitStateArgs, CommitStateFromBufferArgs};
+use magicblock_committor_program::{
+    instruction_builder::{
+        init_buffer::{create_init_ix, CreateInitIxArgs},
+        realloc_buffer::{
+            create_realloc_buffer_ixs, CreateReallocBufferIxArgs,
+        },
+        write_buffer::{create_write_ix, CreateWriteIxArgs},
+    },
+    instruction_chunks::chunk_realloc_ixs,
+    ChangesetChunks, Chunks,
+};
 use magicblock_program::magic_scheduled_l1_message::{
     CommitAndUndelegate, CommitType, CommittedAccountV2, L1Action,
     MagicL1Message, ScheduledL1Message, UndelegateType,
 };
 use solana_pubkey::Pubkey;
-use solana_sdk::instruction::{AccountMeta, Instruction};
+use solana_sdk::{
+    instruction::{AccountMeta, Instruction},
+    signature::Keypair,
+    signer::Signer,
+};
 
+use crate::consts::MAX_WRITE_CHUNK_SIZE;
 // pub trait PossibleTaskTrait {
 //     fn instruction() -> Instruction;
 //     fn decrease(self: Box<Self>) -> Result<Box<dyn PossibleTaskTrait>, Box<dyn PossibleTaskTrait>>;
@@ -13,14 +29,25 @@ use solana_sdk::instruction::{AccountMeta, Instruction};
 //     fn prepare(self: Box<Self>) -> Option<Vec<Instruction>>;
 // }
 
+pub struct TaskPreparationInfo {
+    pub chunks_pda: Pubkey,
+    pub buffer_pda: Pubkey,
+    pub init_instruction: Instruction,
+    pub realloc_instructions: Vec<Instruction>,
+    pub write_instructions: Vec<Instruction>,
+}
+
+// TODO(edwin): commit_id is common thing, extract
 #[derive(Clone)]
 pub struct CommitTask {
-    pub allow_undelegatio: bool,
+    pub commit_id: u64,
+    pub allow_undelegation: bool,
     pub committed_account: CommittedAccountV2,
 }
 
 #[derive(Clone)]
 pub struct UndelegateTask {
+    pub commit_id: u64,
     pub delegated_account: Pubkey,
     pub owner_program: Pubkey,
     pub rent_reimbursement: Pubkey,
@@ -28,6 +55,7 @@ pub struct UndelegateTask {
 
 #[derive(Clone)]
 pub struct FinalizeTask {
+    pub commit_id: u64,
     pub delegated_account: Pubkey,
 }
 
@@ -49,18 +77,14 @@ impl Task {
         }
     }
 
-    pub fn args_instruction(
-        &self,
-        validator: Pubkey,
-        commit_id: u64,
-    ) -> Instruction {
+    pub fn args_instruction(&self, validator: Pubkey) -> Instruction {
         match self {
             Task::Commit(value) => {
                 let args = CommitStateArgs {
-                    slot: commit_id, // TODO(edwin): change slot,
+                    slot: value.commit_id, // TODO(edwin): change slot,
                     lamports: value.committed_account.account.lamports,
                     data: value.committed_account.account.data.clone(),
-                    allow_undelegation: value.allow_undelegatio, // TODO(edwin):
+                    allow_undelegation: value.allow_undelegation, // TODO(edwin):
                 };
                 dlp::instruction_builder::commit_state(
                     validator,
@@ -104,16 +128,12 @@ impl Task {
         todo!()
     }
 
-    pub fn buffer_instruction(
-        &self,
-        validator: Pubkey,
-        commit_id: u64,
-    ) -> Instruction {
+    pub fn buffer_instruction(&self, validator: Pubkey) -> Instruction {
         // TODO(edwin): now this is bad, while impossible
         // We should use dyn Task
         match self {
             Task::Commit(value) => {
-                let commit_id_slice = commit_id.to_le_bytes();
+                let commit_id_slice = value.commit_id.to_le_bytes();
                 let (commit_buffer_pubkey, _) =
                     magicblock_committor_program::pdas::chunks_pda(
                         &validator,
@@ -126,9 +146,9 @@ impl Task {
                     value.committed_account.account.owner,
                     commit_buffer_pubkey,
                     CommitStateFromBufferArgs {
-                        slot: commit_id, //TODO(edwin): change to commit_id
+                        slot: value.commit_id, //TODO(edwin): change to commit_id
                         lamports: value.committed_account.account.lamports,
-                        allow_undelegation: value.allow_undelegatio,
+                        allow_undelegation: value.allow_undelegation,
                     },
                 )
             }
@@ -136,6 +156,75 @@ impl Task {
             Task::Finalize(_) => unreachable!(),
             Task::L1Action(_) => unreachable!(), // TODO(edwin): enable
         }
+    }
+
+    pub fn get_preparation_instructions(
+        &self,
+        authority: &Keypair,
+    ) -> Option<TaskPreparationInfo> {
+        let Self::Commit(commit_task) = self else {
+            None
+        };
+
+        let committed_account = &commit_task.committed_account;
+        let chunks = Chunks::from_data_length(
+            committed_account.account.data.len(),
+            MAX_WRITE_CHUNK_SIZE,
+        );
+        let chunks_account_size =
+            borsh::object_length(&chunks).unwrap().len() as u64;
+        let buffer_account_size = committed_account.account.data.len() as u64;
+
+        let (init_instruction, chunks_pda, buffer_pda) =
+            create_init_ix(CreateInitIxArgs {
+                authority: authority.pubkey(),
+                pubkey: committed_account.pubkey,
+                chunks_account_size,
+                buffer_account_size,
+                commit_id,
+                chunk_count: chunks.count(),
+                chunk_size: chunks.chunk_size(),
+            });
+
+        let realloc_instructions =
+            create_realloc_buffer_ixs(CreateReallocBufferIxArgs {
+                authority: authority.pubkey(),
+                pubkey: committed_account.pubkey,
+                buffer_account_size,
+                commit_id,
+            });
+
+        let chunks_iter = ChangesetChunks::new(&chunks, chunks.chunk_size())
+            .iter(&committed_account.account.data);
+        let write_instructions = chunks_iter
+            .map(|chunk| {
+                create_write_ix(CreateWriteIxArgs {
+                    authority: authority.pubkey(),
+                    pubkey,
+                    offset: chunk.offset,
+                    data_chunk: chunk.data_chunk,
+                    commit_id,
+                })
+            })
+            .collect::<Vec<_>>();
+
+        Some(TaskPreparationInfo {
+            chunks_pda,
+            buffer_pda,
+            init_instruction,
+            realloc_instructions,
+            write_instructions,
+        })
+    }
+
+    pub fn instructions_from_info(
+        &self,
+        info: &TaskPreparationInfo,
+    ) -> Vec<Vec<Instruction>> {
+        chunk_realloc_ixs(
+            info.realloc_instructions.clone(),
+            Some(info.init_instruction.clone()),
+        )
     }
 }
 

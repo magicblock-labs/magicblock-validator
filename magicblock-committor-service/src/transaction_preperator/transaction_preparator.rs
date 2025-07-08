@@ -128,4 +128,13 @@ impl TransactionPreparator for TransactionPreparatorV1 {
 // 7. If heap.is_empty() - doesn't fit with buffered
 // 8. Apply lookup table
 // 9. if fits - return Ok(tx), else return Err(Failed)
+
+// Committor flow:
+// 1. Gets commits
+// 2. Passes to Scheduler
+// 3. Scheduler checks if any can run in parallel. Does scheduling basically
+// 4. Calls TransactionPreparator for those
+// 5. Executes TXs if all ok
+// 6. Populates Persister with necessary data
+
 fn useless() {}

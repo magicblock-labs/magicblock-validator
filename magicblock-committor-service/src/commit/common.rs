@@ -77,7 +77,7 @@ pub(crate) fn get_accounts_to_undelegate(
 /// Returns the signature of the transaction.
 pub(crate) async fn send_and_confirm(
     rpc_client: MagicblockRpcClient,
-    authority: Keypair,
+    authority: &Keypair,
     ixs: Vec<Instruction>,
     task_desc: String,
     latest_blockhash: Option<Hash>,
@@ -174,7 +174,7 @@ pub(crate) async fn send_and_confirm(
     };
     let tx = match VersionedTransaction::try_new(
         VersionedMessage::V0(versioned_msg),
-        &[&authority],
+        &[authority],
     ) {
         Ok(tx) => tx,
         Err(err) => {
