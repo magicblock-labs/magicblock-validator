@@ -544,13 +544,16 @@ impl LookupTableRc {
         &mut self,
         rpc_client: &MagicblockRpcClient,
         authority: &Keypair,
+        compute_budget: &TableManiaComputeBudget,
     ) -> TableManiaResult<()> {
-        // TODO: @@@ set compute limit + price
         let deactivate_ix = alt::instruction::deactivate_lookup_table(
             *self.table_address(),
             self.derived_auth().pubkey(),
         );
-        let ixs = vec![deactivate_ix];
+
+        let (compute_budget_ix, compute_unit_price_ix) =
+            compute_budget.instructions();
+        let ixs = vec![compute_budget_ix, compute_unit_price_ix, deactivate_ix];
         let latest_blockhash = rpc_client.get_latest_blockhash().await?;
         let tx = Transaction::new_signed_with_payer(
             &ixs,
@@ -641,8 +644,8 @@ impl LookupTableRc {
         rpc_client: &MagicblockRpcClient,
         authority: &Keypair,
         current_slot: Option<Slot>,
+        compute_budget: &TableManiaComputeBudget,
     ) -> TableManiaResult<bool> {
-        // TODO: @@@ set compute limit + price
         if !self.is_deactivated(rpc_client, current_slot).await {
             return Ok(false);
         }
@@ -652,7 +655,10 @@ impl LookupTableRc {
             self.derived_auth().pubkey(),
             authority.pubkey(),
         );
-        let ixs = vec![close_ix];
+
+        let (compute_budget_ix, compute_unit_price_ix) =
+            compute_budget.instructions();
+        let ixs = vec![compute_budget_ix, compute_unit_price_ix, close_ix];
         let latest_blockhash = rpc_client.get_latest_blockhash().await?;
         let tx = Transaction::new_signed_with_payer(
             &ixs,

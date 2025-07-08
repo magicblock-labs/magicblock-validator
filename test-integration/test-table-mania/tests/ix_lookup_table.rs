@@ -2,8 +2,9 @@ use log::*;
 
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{
-    find_open_tables, LookupTable, CREATE_AND_EXTEND_TABLE_CUS,
-    EXTEND_TABLE_CUS, MAX_ENTRIES_AS_PART_OF_EXTEND,
+    find_open_tables, LookupTable, CLOSE_TABLE_CUS,
+    CREATE_AND_EXTEND_TABLE_CUS, DEACTIVATE_TABLE_CUS, EXTEND_TABLE_CUS,
+    MAX_ENTRIES_AS_PART_OF_EXTEND,
 };
 use solana_pubkey::Pubkey;
 use solana_rpc_client::nonblocking::rpc_client::RpcClient;
@@ -183,13 +184,13 @@ async fn test_lookup_table_ixs_cus_per_pubkey() {
 
     let mut extend_idx = 0;
     for i in 1..init_pubkeys.len() {
-        let (rpc_client, lookup_table) =
+        let (rpc_client, mut lookup_table) =
             setup_lookup_table(&validator_auth, &init_pubkeys[0..=i]).await;
 
         let init_sig = lookup_table.init_signature().unwrap();
         let cus = get_tx_cus(&rpc_client, &init_sig).await;
 
-        debug!("Create for {i:03} CUs  {cus:04}");
+        debug!("Create for {i:03} {cus:04}CUs");
         assert_eq!(cus, CREATE_AND_EXTEND_TABLE_CUS as u64);
 
         lookup_table
@@ -206,8 +207,43 @@ async fn test_lookup_table_ixs_cus_per_pubkey() {
         let extend_sig =
             *lookup_table.extend_signatures().unwrap().last().unwrap();
         let cus = get_tx_cus(&rpc_client, &extend_sig).await;
-        debug!("Extend for {i:03} CUs  {cus:04}");
+        debug!("Extend for {i:03} CUs  {cus:04}CUs");
         assert_eq!(cus, EXTEND_TABLE_CUS as u64);
+
+        lookup_table
+            .deactivate(&rpc_client, &validator_auth)
+            .await
+            .unwrap();
+
+        let cus = get_tx_cus(
+            &rpc_client,
+            &lookup_table.deactivate_signature().unwrap(),
+        )
+        .await;
+        debug!("Deactivate table {cus:03}CUs");
+        assert_eq!(cus, DEACTIVATE_TABLE_CUS as u64);
+
+        #[cfg(feature = "test_table_close")]
+        {
+            // Testing close takes a long time and is always the same instruction,
+            // thus we only perform this test once
+            if i == 1 {
+                eprintln!(
+                    "Waiting for table to deactivate for about 2.5 min ..."
+                );
+                while !lookup_table.is_deactivated(&rpc_client, None).await {
+                    utils::sleep_millis(5_000).await;
+                }
+                let (is_closed, close_sig) = lookup_table
+                    .close(&rpc_client, &validator_auth, None)
+                    .await
+                    .unwrap();
+                assert!(is_closed);
+                let cus = get_tx_cus(&rpc_client, &close_sig.unwrap()).await;
+                debug!("Close table {cus:03}CUs",);
+                assert_eq!(cus, CLOSE_TABLE_CUS as u64);
+            }
+        }
     }
 }
 

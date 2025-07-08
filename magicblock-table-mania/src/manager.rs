@@ -23,7 +23,7 @@ use tokio::{
 use crate::{
     error::{TableManiaError, TableManiaResult},
     lookup_table_rc::{LookupTableRc, MAX_ENTRIES_AS_PART_OF_EXTEND},
-    TableManiaComputeBudgets,
+    TableManiaComputeBudget, TableManiaComputeBudgets,
 };
 
 // -----------------
@@ -79,6 +79,8 @@ impl TableMania {
                 authority,
                 me.released_tables.clone(),
                 config,
+                me.compute_budgets.deactivate.clone(),
+                me.compute_budgets.close.clone(),
             );
         }
         me
@@ -564,12 +566,13 @@ impl TableMania {
     // The next cycle will try the operation again so in case chain was congested
     // the problem should resolve itself.
     // Otherwise we can run a tool later to manually deactivate + close tables.
-
     fn launch_garbage_collector(
         rpc_client: &MagicblockRpcClient,
         authority: &Keypair,
         released_tables: Arc<Mutex<Vec<LookupTableRc>>>,
         config: GarbageCollectorConfig,
+        deactivate_compute_budget: TableManiaComputeBudget,
+        close_compute_budget: TableManiaComputeBudget,
     ) -> tokio::task::JoinHandle<()> {
         let rpc_client = rpc_client.clone();
         let authority = authority.insecure_clone();
@@ -592,6 +595,7 @@ impl TableMania {
                         &rpc_client,
                         &authority,
                         &released_tables,
+                        &deactivate_compute_budget,
                     )
                     .await;
                     last_deactivate = now;
@@ -608,6 +612,7 @@ impl TableMania {
                         &rpc_client,
                         &authority,
                         &released_tables,
+                        &close_compute_budget,
                     )
                     .await;
                     last_close = now;
@@ -627,6 +632,7 @@ impl TableMania {
         rpc_client: &MagicblockRpcClient,
         authority: &Keypair,
         released_tables: &Mutex<Vec<LookupTableRc>>,
+        compute_budget: &TableManiaComputeBudget,
     ) {
         for table in released_tables
             .lock()
@@ -636,15 +642,16 @@ impl TableMania {
         {
             // We don't bubble errors as there is no reasonable way to handle them.
             // Instead the next GC cycle will try again to deactivate the table.
-            let _ = table.deactivate(rpc_client, authority).await.inspect_err(
-                |err| {
+            let _ = table
+                .deactivate(rpc_client, authority, compute_budget)
+                .await
+                .inspect_err(|err| {
                     error!(
                         "Error deactivating table {}: {:?}",
                         table.table_address(),
                         err
                     )
-                },
-            );
+                });
         }
     }
 
@@ -653,6 +660,7 @@ impl TableMania {
         rpc_client: &MagicblockRpcClient,
         authority: &Keypair,
         released_tables: &Mutex<Vec<LookupTableRc>>,
+        compute_budget: &TableManiaComputeBudget,
     ) {
         let Ok(latest_slot) = rpc_client
             .get_slot()
@@ -675,7 +683,12 @@ impl TableMania {
                 // We don't bubble errors as there is no reasonable way to handle them.
                 // Instead the next GC cycle will try again to close the table.
                 match deactivated_table
-                    .close(rpc_client, authority, Some(latest_slot))
+                    .close(
+                        rpc_client,
+                        authority,
+                        Some(latest_slot),
+                        compute_budget,
+                    )
                     .await
                 {
                     Ok(closed) if closed => {
