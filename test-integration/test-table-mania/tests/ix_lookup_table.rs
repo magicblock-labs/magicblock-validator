@@ -71,7 +71,7 @@ pub async fn setup_lookup_table(
         .await
         .unwrap()
         .unwrap();
-    info!("Lookup table initialized using {init_cus} CUs");
+    debug!("Lookup table initialized using {init_cus} CUs");
     (rpc_client, lookup_table)
 }
 

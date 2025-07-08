@@ -116,9 +116,9 @@ impl Deref for RefcountedPubkeys {
     }
 }
 
-/// Determined via trial and error. The keys themselves take up
-/// 27 * 32 bytes = 864 bytes.
-pub const MAX_ENTRIES_AS_PART_OF_EXTEND: u64 = 27;
+/// Determined via trial and error, last updated when we added compute budget instructions.
+/// The keys themselves take up 24 * 32 = 768 bytes
+pub const MAX_ENTRIES_AS_PART_OF_EXTEND: u64 = 24;
 
 // -----------------
 // LookupTableRc
