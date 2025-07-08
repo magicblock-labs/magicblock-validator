@@ -1,9 +1,15 @@
 use std::{path::Path, sync::Arc, time::Instant};
 
+use async_trait::async_trait;
 use log::*;
 use magicblock_committor_program::Changeset;
+use magicblock_rpc_client::MagicblockRpcClient;
 use solana_pubkey::Pubkey;
-use solana_sdk::{hash::Hash, signature::Keypair};
+use solana_sdk::{
+    hash::Hash,
+    signature::{Keypair, Signature},
+};
+use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
 use tokio::{
     select,
     sync::{
@@ -16,7 +22,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     commit::CommittorProcessor,
     config::ChainConfig,
-    error::CommittorServiceResult,
+    error::{CommittorServiceError, CommittorServiceResult},
     persist::{BundleSignatureRow, CommitStatusRow},
     pubkeys_provider::{provide_committee_pubkeys, provide_common_pubkeys},
 };
@@ -71,6 +77,12 @@ pub enum CommittorMessage {
     },
     GetLookupTables {
         respond_to: oneshot::Sender<LookupTables>,
+    },
+    GetTransaction {
+        respond_to: oneshot::Sender<
+            CommittorServiceResult<EncodedConfirmedTransactionWithStatusMeta>,
+        >,
+        signature: Signature,
     },
 }
 
@@ -201,6 +213,22 @@ impl CommittorActor {
                     }
                 });
             }
+            GetTransaction {
+                signature,
+                respond_to,
+            } => {
+                let processor = self.processor.clone();
+                tokio::task::spawn(async move {
+                    let res = processor
+                        .magicblock_rpc_client
+                        .get_transaction(&signature, None)
+                        .await
+                        .map_err(Into::into);
+                    if let Err(err) = respond_to.send(res) {
+                        error!( "Failed to send response for GetTransactionLogs: {:?}", err);
+                    }
+                });
+            }
         }
     }
 
@@ -228,6 +256,8 @@ impl CommittorActor {
 pub struct CommittorService {
     sender: mpsc::Sender<CommittorMessage>,
     cancel_token: CancellationToken,
+    #[allow(unused)]
+    chain_config: ChainConfig,
 }
 
 impl CommittorService {
@@ -248,7 +278,7 @@ impl CommittorService {
                 receiver,
                 authority,
                 persist_file,
-                chain_config,
+                chain_config.clone(),
             )?;
             tokio::spawn(async move {
                 actor.run(cancel_token).await;
@@ -257,6 +287,7 @@ impl CommittorService {
         Ok(Self {
             sender,
             cancel_token,
+            chain_config,
         })
     }
 
@@ -317,6 +348,7 @@ impl CommittorService {
     }
 }
 
+#[async_trait]
 impl ChangesetCommittor for CommittorService {
     fn reserve_pubkeys_for_committee(
         &self,
@@ -373,8 +405,35 @@ impl ChangesetCommittor for CommittorService {
         });
         rx
     }
+
+    async fn get_transaction_logs(
+        &self,
+        signature: &Signature,
+    ) -> CommittorServiceResult<Option<Vec<String>>> {
+        let (tx, rx) = oneshot::channel();
+        self.try_send(CommittorMessage::GetTransaction {
+            respond_to: tx,
+            signature: *signature,
+        });
+        let tx = rx.await.map_err(CommittorServiceError::RecvError)??;
+        Ok(MagicblockRpcClient::get_logs_from_transaction(tx))
+    }
+
+    async fn get_transaction_cus(
+        &self,
+        signature: &Signature,
+    ) -> CommittorServiceResult<Option<u64>> {
+        let (tx, rx) = oneshot::channel();
+        self.try_send(CommittorMessage::GetTransaction {
+            respond_to: tx,
+            signature: *signature,
+        });
+        let tx = rx.await.map_err(CommittorServiceError::RecvError)??;
+        Ok(MagicblockRpcClient::get_cus_from_transaction(tx))
+    }
 }
 
+#[async_trait]
 pub trait ChangesetCommittor: Send + Sync + 'static {
     /// Reserves pubkeys used in most commits in a lookup table
     fn reserve_pubkeys_for_committee(
@@ -402,4 +461,14 @@ pub trait ChangesetCommittor: Send + Sync + 'static {
         &self,
         bundle_id: u64,
     ) -> oneshot::Receiver<CommittorServiceResult<Option<BundleSignatureRow>>>;
+
+    async fn get_transaction_logs(
+        &self,
+        signature: &Signature,
+    ) -> CommittorServiceResult<Option<Vec<String>>>;
+
+    async fn get_transaction_cus(
+        &self,
+        signature: &Signature,
+    ) -> CommittorServiceResult<Option<u64>>;
 }

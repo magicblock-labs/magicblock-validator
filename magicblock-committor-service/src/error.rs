@@ -18,6 +18,9 @@ pub enum CommittorServiceError {
     #[error("CommitPersistError: {0} ({0:?})")]
     CommitPersistError(#[from] crate::persist::error::CommitPersistError),
 
+    #[error(transparent)]
+    RecvError(#[from] tokio::sync::oneshot::error::RecvError),
+
     #[error("MagicBlockRpcClientError: {0} ({0:?})")]
     MagicBlockRpcClientError(
         #[from] magicblock_rpc_client::MagicBlockRpcClientError,

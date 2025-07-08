@@ -719,6 +719,7 @@ where
                     let owner = delegation_record.owner;
                     Some(tokio::spawn(map_committor_request_result(
                         committor.reserve_pubkeys_for_committee(pubkey, owner),
+                        committor,
                     )))
                 } else {
                     None

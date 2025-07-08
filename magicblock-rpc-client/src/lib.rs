@@ -528,4 +528,34 @@ impl MagicblockRpcClient {
             .await
             .map_err(MagicBlockRpcClientError::RpcClientError)
     }
+
+    pub fn get_logs_from_transaction(
+        tx: EncodedConfirmedTransactionWithStatusMeta,
+    ) -> Option<Vec<String>> {
+        tx.transaction.meta?.log_messages.into()
+    }
+
+    pub async fn get_transaction_logs(
+        &self,
+        signature: &Signature,
+        config: Option<RpcTransactionConfig>,
+    ) -> MagicBlockRpcClientResult<Option<Vec<String>>> {
+        let tx = self.get_transaction(signature, config).await?;
+        Ok(Self::get_logs_from_transaction(tx))
+    }
+
+    pub fn get_cus_from_transaction(
+        tx: EncodedConfirmedTransactionWithStatusMeta,
+    ) -> Option<u64> {
+        tx.transaction.meta?.compute_units_consumed.into()
+    }
+
+    pub async fn get_transaction_cus(
+        &self,
+        signature: &Signature,
+        config: Option<RpcTransactionConfig>,
+    ) -> MagicBlockRpcClientResult<Option<u64>> {
+        let tx = self.get_transaction(signature, config).await?;
+        Ok(Self::get_cus_from_transaction(tx))
+    }
 }

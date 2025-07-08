@@ -7,6 +7,7 @@ use std::{
     time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
+use async_trait::async_trait;
 use magicblock_committor_program::Changeset;
 use solana_pubkey::Pubkey;
 use solana_sdk::{hash::Hash, signature::Signature};
@@ -28,6 +29,7 @@ pub struct ChangesetCommittorStub {
     committed_changesets: Arc<Mutex<HashMap<u64, (Changeset, Hash, bool)>>>,
 }
 
+#[async_trait]
 impl ChangesetCommittor for ChangesetCommittorStub {
     fn commit_changeset(
         &self,
@@ -132,7 +134,22 @@ impl ChangesetCommittor for ChangesetCommittorStub {
         });
         rx
     }
+
+    async fn get_transaction_logs(
+        &self,
+        _signature: &Signature,
+    ) -> CommittorServiceResult<Option<Vec<String>>> {
+        Ok(None)
+    }
+
+    async fn get_transaction_cus(
+        &self,
+        _signature: &Signature,
+    ) -> CommittorServiceResult<Option<u64>> {
+        Ok(None)
+    }
 }
+
 fn now() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)

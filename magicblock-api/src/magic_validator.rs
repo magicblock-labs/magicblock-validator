@@ -803,6 +803,7 @@ impl MagicValidator {
                 debug!("Reserving common pubkeys for committor service");
                 map_committor_request_result(
                     committor_service.reserve_common_pubkeys(),
+                    committor_service.clone(),
                 )
                 .await?;
             }
