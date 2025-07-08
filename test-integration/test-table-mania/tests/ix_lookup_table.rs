@@ -66,12 +66,12 @@ pub async fn setup_lookup_table(
             panic!("Failed to init lookup table: {err:?}");
         }
     };
-    let init_cus = rpc_client
+    if let Ok(Some(init_cus)) = rpc_client
         .get_transaction_cus(&lookup_table.init_signature().unwrap(), None)
         .await
-        .unwrap()
-        .unwrap();
-    debug!("Lookup table initialized using {init_cus} CUs");
+    {
+        debug!("Lookup table initialized using {init_cus} CUs");
+    }
     (rpc_client, lookup_table)
 }
 
