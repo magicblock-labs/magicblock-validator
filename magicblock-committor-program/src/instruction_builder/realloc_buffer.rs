@@ -1,7 +1,10 @@
 use solana_program::instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
-use crate::{consts, instruction::CommittorInstruction, pdas};
+use crate::{
+    consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE,
+    instruction::CommittorInstruction, pdas,
+};
 
 // -----------------
 // create_realloc_buffer_ix
@@ -25,20 +28,14 @@ pub fn create_realloc_buffer_ixs(
 ) -> Vec<Instruction> {
     // We already allocated once during Init and only need to realloc
     // if the buffer is larger than [consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE]
-    if args.buffer_account_size
-        <= consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as u64
+    if args.buffer_account_size <= MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as u64
     {
         return vec![];
     }
 
-    let remaining_size = args.buffer_account_size as i128
-        - consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as i128;
-
-    // A) We just need to realloc once
-    if remaining_size <= consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as i128
-    {
-        return vec![create_realloc_buffer_ix(args, 1)];
-    }
+    // Use remaining since [`MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE`] allocated at init
+    let remaining_size = args.buffer_account_size
+        - MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as u64;
 
     // B) We need to realloc multiple times
     // SAFETY; remaining size > consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE
@@ -49,16 +46,14 @@ pub fn create_realloc_buffer_ixs_to_add_remaining(
     args: &CreateReallocBufferIxArgs,
     remaining_size: u64,
 ) -> Vec<Instruction> {
-    let invocation_count = (remaining_size as f64
-        / consts::MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as f64)
-        .ceil() as u16;
+    let remaining_invocation_count =
+        (remaining_size + MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as u64 - 1)
+            / MAX_ACCOUNT_ALLOC_PER_INSTRUCTION_SIZE as u64;
 
-    let mut ixs = vec![];
-    for i in 0..invocation_count {
-        ixs.push(create_realloc_buffer_ix(args.clone(), i + 1));
-    }
-
-    ixs
+    // Generate one instruction per needed allocation
+    (1..=remaining_invocation_count)
+        .map(|i| create_realloc_buffer_ix(args.clone(), i as u16))
+        .collect()
 }
 
 fn create_realloc_buffer_ix(

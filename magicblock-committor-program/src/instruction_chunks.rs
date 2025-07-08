@@ -16,13 +16,10 @@ pub fn chunk_realloc_ixs<T: Clone>(
         start_size: u16,
     ) {
         let mut total_size = start_size;
-        loop {
-            total_size += IX_REALLOC_SIZE;
-            if total_size >= MAX_INSTRUCTION_DATA_SIZE {
-                return;
-            }
+        while total_size + IX_REALLOC_SIZE < MAX_INSTRUCTION_DATA_SIZE {
             if let Some(realloc) = reallocs.pop() {
                 chunk.push(realloc);
+                total_size += IX_REALLOC_SIZE;
             } else {
                 return;
             }

@@ -110,8 +110,8 @@ pub const IX_INIT_SIZE: u16 =
         8 +
         // buffer_account_size: u64,
         8 +
-        // blockhash: Hash,
-        HASH_BYTES as u16 +
+        // commit_id: u64,
+        8 +
         // chunks_bump: u8,
         1 +
         // buffer_bump: u8,
@@ -128,8 +128,8 @@ pub const IX_REALLOC_SIZE: u16 =
     32 +
         // buffer_account_size: u64,
         8 +
-        // blockhash: Hash,
-        HASH_BYTES as u16 +
+        // commit_id: u64,
+        8 +
         // buffer_bump: u8,
         1 +
         // invocation_count: u16,
@@ -140,8 +140,8 @@ pub const IX_REALLOC_SIZE: u16 =
 pub const IX_WRITE_SIZE_WITHOUT_CHUNKS: u16 =
     // pubkey: Pubkey,
     32+
-        // blockhash: Hash,
-        HASH_BYTES as u16 +
+        // commit_id: u64,
+        8 +
         // chunks_bump: u8,
         1 +
         // buffer_bump: u8,
@@ -152,8 +152,8 @@ pub const IX_WRITE_SIZE_WITHOUT_CHUNKS: u16 =
 pub const IX_CLOSE_SIZE: u16 =
     // pubkey: Pubkey,
     32 +
-        // blockhash: Hash,
-        HASH_BYTES as u16 +
+        // commit_id: u64,
+        8 +
         // chunks_bump: u8,
         1 +
         // buffer_bump: u8,

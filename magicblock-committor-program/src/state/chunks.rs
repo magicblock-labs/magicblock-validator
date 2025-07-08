@@ -43,6 +43,11 @@ impl Chunks {
         }
     }
 
+    pub fn from_data_length(data_len: usize, chunk_size: u16) -> Self {
+        let chunk_count = (data_len + chunk_size as usize - 1) / chunk_size as usize;
+        Self::new(chunk_count, chunk_size)
+    }
+
     /// Calculates the minimum number of bytes needed to store `count` boolean values in a bitfield.
     ///
     /// Each boolean is stored as a single bit, packing 8 booleans per byte.
