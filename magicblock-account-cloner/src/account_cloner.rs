@@ -22,6 +22,9 @@ pub enum AccountClonerError {
     #[error(transparent)]
     RecvError(#[from] tokio::sync::oneshot::error::RecvError),
 
+    #[error("JoinError ({0})")]
+    JoinError(String),
+
     #[error(transparent)]
     AccountFetcherError(#[from] AccountFetcherError),
 

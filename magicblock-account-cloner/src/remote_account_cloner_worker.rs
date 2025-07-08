@@ -707,6 +707,23 @@ where
                     });
                 }
 
+                // Allow the committer service to reserve pubkeys in lookup tables
+                // that could be needed when we commit this account
+                // NOTE: we start reserving pubkeys so the transaction can complete while we
+                // clone the account.
+                let reserve_pubkeys_handle = if let Some(committor) =
+                    self.changeset_committor.as_ref()
+                {
+                    let committor = Arc::clone(committor);
+                    let pubkey = *pubkey;
+                    let owner = delegation_record.owner;
+                    Some(tokio::spawn(map_committor_request_result(
+                        committor.reserve_pubkeys_for_committee(pubkey, owner),
+                    )))
+                } else {
+                    None
+                };
+
                 let sig = self.do_clone_delegated_account(
                     pubkey,
                     // TODO(GabrielePicco): Avoid cloning
@@ -717,16 +734,10 @@ where
                     delegation_record,
                 )?;
 
-                // Allow the committer service to reserve pubkeys in lookup tables
-                // that could be needed when we commit this account
-                if let Some(committor) = self.changeset_committor.as_ref() {
-                    let initiated = map_committor_request_result(
-                        committor.reserve_pubkeys_for_committee(
-                            *pubkey,
-                            delegation_record.owner,
-                        ),
-                    )
-                    .await?;
+                if let Some(handle) = reserve_pubkeys_handle {
+                    let initiated = handle.await.map_err(|err| {
+                        AccountClonerError::JoinError(format!("{err} {err:?}"))
+                    })??;
                     trace!(
                         "Reserving lookup keys for {pubkey} took {:?}",
                         initiated.elapsed()
