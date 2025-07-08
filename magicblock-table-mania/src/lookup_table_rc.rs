@@ -209,6 +209,32 @@ impl fmt::Display for LookupTableRc {
 }
 
 impl LookupTableRc {
+    pub fn init_signature(&self) -> Option<Signature> {
+        match self {
+            Self::Active { init_signature, .. } => Some(*init_signature),
+            Self::Deactivated { .. } => None,
+        }
+    }
+
+    pub fn extend_signatures(&self) -> Option<&Vec<Signature>> {
+        match self {
+            Self::Active {
+                extend_signatures, ..
+            } => Some(extend_signatures),
+            Self::Deactivated { .. } => None,
+        }
+    }
+
+    pub fn deactivate_signature(&self) -> Option<Signature> {
+        match self {
+            Self::Active { .. } => None,
+            Self::Deactivated {
+                deactivate_signature,
+                ..
+            } => Some(*deactivate_signature),
+        }
+    }
+
     pub fn derived_auth(&self) -> &Keypair {
         match self {
             Self::Active { derived_auth, .. } => derived_auth,

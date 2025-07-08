@@ -2,7 +2,7 @@ use log::*;
 
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::{
-    find_open_tables, LookupTable, CLOSE_TABLE_CUS,
+    find_open_tables, LookupTableRc, TableManiaComputeBudgets,
     CREATE_AND_EXTEND_TABLE_CUS, DEACTIVATE_TABLE_CUS, EXTEND_TABLE_CUS,
     MAX_ENTRIES_AS_PART_OF_EXTEND,
 };
@@ -20,7 +20,8 @@ mod utils;
 pub async fn setup_lookup_table(
     validator_auth: &Keypair,
     pubkeys: &[Pubkey],
-) -> (MagicblockRpcClient, LookupTable) {
+    budgets: &TableManiaComputeBudgets,
+) -> (MagicblockRpcClient, LookupTableRc) {
     let rpc_client = {
         let client = RpcClient::new_with_commitment(
             "http://localhost:7799".to_string(),
@@ -35,14 +36,13 @@ pub async fn setup_lookup_table(
 
     let latest_slot = rpc_client.get_slot().await.unwrap();
     let sub_slot = 0;
-    let reqid = 0;
-    let lookup_table = LookupTable::init(
+    let lookup_table = LookupTableRc::init(
         &rpc_client,
         validator_auth,
         latest_slot,
         sub_slot,
         pubkeys,
-        reqid,
+        &budgets.init,
     )
     .await
     .unwrap();
@@ -51,7 +51,7 @@ pub async fn setup_lookup_table(
 
 async fn get_table_meta(
     rpc_client: &MagicblockRpcClient,
-    lookup_table: &LookupTable,
+    lookup_table: &LookupTableRc,
 ) -> LookupTableMeta {
     lookup_table
         .get_meta(rpc_client)
@@ -62,7 +62,7 @@ async fn get_table_meta(
 
 async fn get_table_addresses(
     rpc_client: &MagicblockRpcClient,
-    lookup_table: &LookupTable,
+    lookup_table: &LookupTableRc,
 ) -> Vec<Pubkey> {
     lookup_table
         .get_chain_pubkeys(rpc_client)
@@ -93,15 +93,25 @@ async fn test_create_fetch_and_close_lookup_table() {
         .map(|_| Pubkey::new_unique())
         .collect::<Vec<_>>();
 
+    let budgets = TableManiaComputeBudgets::default();
+
     // Init table
     let (rpc_client, mut lookup_table) =
-        setup_lookup_table(&validator_auth, &pubkeys[0..5]).await;
+        setup_lookup_table(&validator_auth, &pubkeys[0..5], &budgets).await;
     let creation_slot = lookup_table.creation_slot().unwrap();
     let meta = get_table_meta(&rpc_client, &lookup_table).await;
 
     assert_eq!(meta.authority, Some(lookup_table.derived_auth().pubkey()));
     assert_eq!(meta.deactivation_slot, u64::MAX);
-    assert_eq!(lookup_table.pubkeys().unwrap(), pubkeys[0..5]);
+    assert_eq!(
+        lookup_table
+            .pubkeys()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>(),
+        pubkeys[0..5]
+    );
     assert_eq!(
         get_table_addresses(&rpc_client, &lookup_table).await,
         pubkeys[0..5]
@@ -109,13 +119,25 @@ async fn test_create_fetch_and_close_lookup_table() {
     debug!("{}", lookup_table);
 
     // Extend table
-    let reqid = 0;
     debug!("Extending table ...");
     lookup_table
-        .extend(&rpc_client, &validator_auth, &pubkeys[5..10], reqid)
+        .extend(
+            &rpc_client,
+            &validator_auth,
+            &pubkeys[5..10],
+            &budgets.extend,
+        )
         .await
         .unwrap();
-    assert_eq!(lookup_table.pubkeys().unwrap(), pubkeys[0..10]);
+    assert_eq!(
+        lookup_table
+            .pubkeys()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<Vec<_>>(),
+        pubkeys[0..10]
+    );
     assert_eq!(
         get_table_addresses(&rpc_client, &lookup_table).await,
         pubkeys[0..10]
@@ -124,7 +146,7 @@ async fn test_create_fetch_and_close_lookup_table() {
     // Deactivate table
     debug!("Deactivating table ...");
     lookup_table
-        .deactivate(&rpc_client, &validator_auth)
+        .deactivate(&rpc_client, &validator_auth, &budgets.deactivate)
         .await
         .unwrap();
 
@@ -171,6 +193,8 @@ async fn test_create_fetch_and_close_lookup_table() {
 async fn test_lookup_table_ixs_cus_per_pubkey() {
     init_logger!();
 
+    let budgets = TableManiaComputeBudgets::default();
+
     let validator_auth = Keypair::new();
     let init_pubkeys = vec![0; MAX_ENTRIES_AS_PART_OF_EXTEND as usize]
         .into_iter()
@@ -185,7 +209,8 @@ async fn test_lookup_table_ixs_cus_per_pubkey() {
     let mut extend_idx = 0;
     for i in 1..init_pubkeys.len() {
         let (rpc_client, mut lookup_table) =
-            setup_lookup_table(&validator_auth, &init_pubkeys[0..=i]).await;
+            setup_lookup_table(&validator_auth, &init_pubkeys[0..=i], &budgets)
+                .await;
 
         let init_sig = lookup_table.init_signature().unwrap();
         let cus = get_tx_cus(&rpc_client, &init_sig).await;
@@ -198,7 +223,7 @@ async fn test_lookup_table_ixs_cus_per_pubkey() {
                 &rpc_client,
                 &validator_auth,
                 &extend_pubkeys[extend_idx..=extend_idx + i],
-                0,
+                &budgets.extend,
             )
             .await
             .unwrap();
@@ -211,7 +236,7 @@ async fn test_lookup_table_ixs_cus_per_pubkey() {
         assert_eq!(cus, EXTEND_TABLE_CUS as u64);
 
         lookup_table
-            .deactivate(&rpc_client, &validator_auth)
+            .deactivate(&rpc_client, &validator_auth, &budgets.deactivate)
             .await
             .unwrap();
 
