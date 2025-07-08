@@ -686,9 +686,9 @@ impl LookupTableRc {
         authority: &Keypair,
         current_slot: Option<Slot>,
         compute_budget: &TableManiaComputeBudget,
-    ) -> TableManiaResult<bool> {
+    ) -> TableManiaResult<(bool, Option<Signature>)> {
         if !self.is_deactivated(rpc_client, current_slot).await {
-            return Ok(false);
+            return Ok((false, None));
         }
 
         let close_ix = alt::instruction::close_lookup_table(
@@ -722,7 +722,8 @@ impl LookupTableRc {
                 error, signature
             );
         }
-        self.is_closed(rpc_client).await
+        let is_closed = self.is_closed(rpc_client).await?;
+        Ok((is_closed, Some(signature)))
     }
 
     pub async fn get_meta(
