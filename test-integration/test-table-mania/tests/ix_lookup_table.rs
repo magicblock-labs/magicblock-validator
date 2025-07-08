@@ -36,7 +36,7 @@ pub async fn setup_lookup_table(
 
     let latest_slot = rpc_client.get_slot().await.unwrap();
     let sub_slot = 0;
-    let lookup_table = LookupTableRc::init(
+    let lookup_table = match LookupTableRc::init(
         &rpc_client,
         validator_auth,
         latest_slot,
@@ -45,7 +45,27 @@ pub async fn setup_lookup_table(
         &budgets.init,
     )
     .await
-    .unwrap();
+    {
+        Ok(tbl) => tbl,
+        Err(err) => {
+            if let Some(sig) = err.signature() {
+                let logs = rpc_client
+                    .get_transaction_logs(&sig, None)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let cus = rpc_client
+                    .get_transaction_cus(&sig, None)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                panic!(
+                    "Failed to init lookup table: {err:?} with logs: {logs:#?} used {cus} CUs"
+                );
+            }
+            panic!("Failed to init lookup table: {err:?}");
+        }
+    };
     (rpc_client, lookup_table)
 }
 
