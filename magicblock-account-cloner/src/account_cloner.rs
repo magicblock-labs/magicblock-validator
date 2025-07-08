@@ -34,8 +34,8 @@ pub enum AccountClonerError {
     #[error(transparent)]
     AccountDumperError(#[from] AccountDumperError),
 
-    #[error("CommittorSerivceError {0}")]
-    CommittorSerivceError(String),
+    #[error("CommittorServiceError {0}")]
+    CommittorServiceError(String),
 
     #[error("ProgramDataDoesNotExist")]
     ProgramDataDoesNotExist,
@@ -79,13 +79,13 @@ pub async fn map_committor_request_result<T>(
     res.await
         .map_err(|err| {
             // Send request error
-            AccountClonerError::CommittorSerivceError(format!(
+            AccountClonerError::CommittorServiceError(format!(
                 "error sending request {err:?}"
             ))
         })?
         .map_err(|err| {
             // Commit error
-            AccountClonerError::CommittorSerivceError(format!("{:?}", err))
+            AccountClonerError::CommittorServiceError(format!("{:?}", err))
         })
 }
 
