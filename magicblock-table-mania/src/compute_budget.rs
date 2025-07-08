@@ -5,14 +5,14 @@ use solana_sdk::{
 /// Compute units required to create and extend a lookup table, with the initial
 /// pubkeys. This is the same no matter how many pubkeys are added to the table
 /// initially.
-pub const CREATE_AND_EXTEND_TABLE_CUS: u32 = 2_100;
+pub const CREATE_AND_EXTEND_TABLE_CUS: u32 = 2_400;
 /// Compute units required to extend a lookup table with additional pubkeys
 /// This is the same no matter how many pubkeys are added to the table.
-pub const EXTEND_TABLE_CUS: u32 = 900;
+pub const EXTEND_TABLE_CUS: u32 = 1_200;
 /// Compute units required to deactivate a lookup table.
-pub const DEACTIVATE_TABLE_CUS: u32 = 750;
+pub const DEACTIVATE_TABLE_CUS: u32 = 1_050;
 /// Compute units required to close a lookup table.
-pub const CLOSE_TABLE_CUS: u32 = 750;
+pub const CLOSE_TABLE_CUS: u32 = 1_050;
 
 #[derive(Clone)]
 pub struct TableManiaComputeBudget {
