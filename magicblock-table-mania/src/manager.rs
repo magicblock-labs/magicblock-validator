@@ -691,7 +691,7 @@ impl TableMania {
                     )
                     .await
                 {
-                    Ok(closed) if closed => {
+                    Ok((closed, _)) if closed => {
                         closed_tables.push(*deactivated_table.table_address())
                     }
                     Ok(_) => {

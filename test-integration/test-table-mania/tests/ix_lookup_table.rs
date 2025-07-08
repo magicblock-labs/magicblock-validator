@@ -277,6 +277,8 @@ async fn test_lookup_table_ixs_cus_per_pubkey() {
 
         #[cfg(feature = "test_table_close")]
         {
+            use magicblock_table_mania::CLOSE_TABLE_CUS;
+
             // Testing close takes a long time and is always the same instruction,
             // thus we only perform this test once
             if i == 1 {
@@ -287,7 +289,7 @@ async fn test_lookup_table_ixs_cus_per_pubkey() {
                     utils::sleep_millis(5_000).await;
                 }
                 let (is_closed, close_sig) = lookup_table
-                    .close(&rpc_client, &validator_auth, None)
+                    .close(&rpc_client, &validator_auth, None, &budgets.close)
                     .await
                     .unwrap();
                 assert!(is_closed);
