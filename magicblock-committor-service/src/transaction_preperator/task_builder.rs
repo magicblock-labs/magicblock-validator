@@ -12,9 +12,7 @@ use magicblock_committor_program::{
     instruction_chunks::chunk_realloc_ixs,
     ChangesetChunks, Chunks,
 };
-use magicblock_program::magic_scheduled_l1_message::{
-    CommitType, L1Action, MagicL1Message, ScheduledL1Message, UndelegateType,
-};
+use magicblock_program::magic_scheduled_l1_message::{CommitType, CommittedAccountV2, L1Action, MagicL1Message, ScheduledL1Message, UndelegateType};
 use solana_pubkey::Pubkey;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
@@ -204,10 +202,13 @@ pub trait TasksBuilder {
     fn commit_tasks(
         l1_message: &ScheduledL1Message,
         commit_ids: HashMap<Pubkey, u64>,
-    ) -> Vec<Task>;
+    ) -> Vec<Box<dyn L1Task>>;
 
     // Create tasks for finalize stage
-    fn finalize_tasks(l1_message: &ScheduledL1Message) -> Vec<Task>;
+    fn finalize_tasks(
+        l1_message: &ScheduledL1Message,
+        rent_reimbursement: &Pubkey,
+    ) -> Vec<Box<dyn L1Task>>;
 }
 
 /// V1 Task builder
@@ -247,16 +248,23 @@ impl TasksBuilder for TaskBuilderV1 {
                 }
             })
             .collect::<Result<_, _>>()
-            .unwrap()
+            .unwrap() // TODO(edwin): remove
     }
 
     /// Returns [`Task`]s for Finalize stage
-    fn finalize_tasks(l1_message: &ScheduledL1Message) -> Vec<Task> {
-        fn commit_type_tasks(value: &CommitType) -> Vec<Task> {
+    fn finalize_tasks(
+        l1_message: &ScheduledL1Message,
+        rent_reimbursement: &Pubkey,
+    ) -> Vec<Box<dyn L1Task>> {
+        fn commit_type_tasks(value: &CommitType) -> Vec<Box<dyn L1Task>> {
             match value {
                 CommitType::Standalone(accounts) => accounts
                     .into_iter()
-                    .map(|account| Task::Finalize(account.clone()))
+                    .map(|account| {
+                        Box::new(ArgsTask::Finalize(FinalizeTask {
+                            delegated_account: account.pubkey,
+                        }))
+                    })
                     .collect(),
                 CommitType::WithL1Actions {
                     committed_accounts,
@@ -264,21 +272,24 @@ impl TasksBuilder for TaskBuilderV1 {
                 } => {
                     let mut tasks = committed_accounts
                         .into_iter()
-                        .map(|account| Task::Finalize(account.clone()))
-                        .collect::<Vec<Task>>();
-                    tasks.extend(
-                        l1_actions
-                            .into_iter()
-                            .map(|action| Task::L1Action(action.clone())),
-                    );
+                        .map(|account| {
+                            Box::new(ArgsTask::Finalize(FinalizeTask {
+                                delegated_account: account.pubkey,
+                            }))
+                        })
+                        .collect();
+
+                    tasks.extend(l1_actions.into_iter().map(|action| {
+                        Box::new(ArgsTask::L1Action(action.clone()))
+                    }));
                     tasks
                 }
             }
         }
 
-        // TODO(edwin): improve, separate into smaller pieces. Maybe Visitor?
+        // TODO(edwin): improve
         match &l1_message.l1_message {
-            MagicL1Message::L1Actions(_) => panic!("enable"), // TODO(edwin)
+            MagicL1Message::L1Actions(_) => vec![],
             MagicL1Message::Commit(value) => commit_type_tasks(value),
             MagicL1Message::CommitAndUndelegate(t) => {
                 let mut commit_tasks = commit_type_tasks(&t.commit_action);
@@ -286,18 +297,32 @@ impl TasksBuilder for TaskBuilderV1 {
                     UndelegateType::Standalone => {
                         let accounts = t.get_committed_accounts();
                         commit_tasks.extend(
-                            accounts.into_iter().map(|account| {
-                                Task::Undelegate(account.clone())
-                            }),
+                            accounts
+                                .into_iter()
+                                .map(|account| {
+                                    ArgsTask::Undelegate(UndelegateTask {
+                                        delegated_account: account.pubkey,
+                                        owner_program: account.account.owner,
+                                        rent_reimbursement: *rent_reimbursement,
+                                    })
+                                })
+                                .map(Box::new),
                         );
                     }
                     UndelegateType::WithL1Actions(actions) => {
                         // tasks example: [Finalize(Acc1), Action, Undelegate(Acc1), Action]
                         let accounts = t.get_committed_accounts();
                         commit_tasks.extend(
-                            accounts.into_iter().map(|account| {
-                                Task::Undelegate(account.clone())
-                            }),
+                            accounts
+                                .into_iter()
+                                .map(|account| {
+                                    ArgsTask::Undelegate(UndelegateTask {
+                                        delegated_account: account.pubkey,
+                                        owner_program: account.account.owner,
+                                        rent_reimbursement: *rent_reimbursement,
+                                    })
+                                })
+                                .map(Box::new),
                         );
                         commit_tasks.extend(
                             actions
@@ -308,6 +333,61 @@ impl TasksBuilder for TaskBuilderV1 {
                 };
 
                 commit_tasks
+            }
+        }
+    }
+
+    /// Returns tasks for Finalize stage
+    fn finalize_tasks(
+        l1_message: &ScheduledL1Message,
+        rent_reimbursement: &Pubkey,
+    ) -> Vec<Box<dyn L1Task>> {
+        // Helper to create a finalize task
+        fn finalize_task(account: &CommittedAccountV2) -> Box<dyn L1Task> {
+            Box::new(ArgsTask::Finalize(FinalizeTask {
+                delegated_account: account.pubkey,
+            }))
+        }
+
+        // Helper to create an undelegate task
+        fn undelegate_task(account: &CommittedAccountV2, rent: &Pubkey) -> Box<dyn L1Task> {
+            Box::new(ArgsTask::Undelegate(UndelegateTask {
+                delegated_account: account.pubkey,
+                owner_program: account.account.owner,
+                rent_reimbursement: *rent,
+            }))
+        }
+
+        // Helper to process commit types
+        fn process_commit(commit: &CommitType) -> Vec<Box<dyn L1Task>> {
+            match commit {
+                CommitType::Standalone(accounts) => accounts.iter().map(finalize_task).collect(),
+                CommitType::WithL1Actions { committed_accounts, l1_actions } => {
+                    let mut tasks = committed_accounts.iter().map(finalize_task).collect::<Vec<_>>();
+                    tasks.extend(l1_actions.iter().map(|a| Box::new(ArgsTask::L1Action(a.clone()))));
+                    tasks
+                }
+            }
+        }
+
+        match &l1_message.l1_message {
+            MagicL1Message::L1Actions(_) => vec![],
+            MagicL1Message::Commit(commit) => process_commit(commit),
+            MagicL1Message::CommitAndUndelegate(t) => {
+                let mut tasks = process_commit(&t.commit_action);
+                let accounts = t.get_committed_accounts();
+
+                match &t.undelegate_action {
+                    UndelegateType::Standalone => {
+                        tasks.extend(accounts.iter().map(|a| undelegate_task(a, rent_reimbursement)));
+                    }
+                    UndelegateType::WithL1Actions(actions) => {
+                        tasks.extend(accounts.iter().map(|a| undelegate_task(a, rent_reimbursement)));
+                        tasks.extend(actions.iter().map(|a| Box::new(ArgsTask::L1Action(a.clone()))));
+                    }
+                }
+
+                tasks
             }
         }
     }

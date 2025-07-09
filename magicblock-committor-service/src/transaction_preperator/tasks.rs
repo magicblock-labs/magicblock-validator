@@ -69,7 +69,6 @@ pub struct CommitTask {
 
 #[derive(Clone)]
 pub struct UndelegateTask {
-    pub commit_id: u64,
     pub delegated_account: Pubkey,
     pub owner_program: Pubkey,
     pub rent_reimbursement: Pubkey,
@@ -77,7 +76,6 @@ pub struct UndelegateTask {
 
 #[derive(Clone)]
 pub struct FinalizeTask {
-    pub commit_id: u64,
     pub delegated_account: Pubkey,
 }
 
