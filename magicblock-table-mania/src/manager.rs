@@ -297,9 +297,19 @@ impl TableMania {
         let stored_count = remaining_len - remaining.len();
         trace!("Stored {}, remaining: {}", stored_count, remaining.len());
 
-        debug_assert!(storing.iter().all(|pk| {
-            table.pubkeys().map(|x| x.contains_key(pk)).unwrap_or(false)
-        }));
+        #[cfg(debug_assertions)]
+        {
+            for pk in &storing {
+                if !table.contains_key(pk) {
+                    panic!(
+                        "Pubkey {pk} stored as part of {} was not extended in table {} with {} items.",
+                        storing.len(),
+                        table.table_address(),
+                        table.pubkeys().map(|x| x.len()).unwrap_or(0)
+                    );
+                }
+            }
+        }
 
         Ok(())
     }
