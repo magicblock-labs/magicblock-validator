@@ -182,7 +182,7 @@ impl TaskStrategist {
         .unwrap(); // TODO(edwin): unwrap
         let tx = VersionedTransaction::try_new(
             VersionedMessage::V0(message),
-            &&[Keypair::new()],
+            &[Keypair::new()],
         )
         .unwrap();
         tx

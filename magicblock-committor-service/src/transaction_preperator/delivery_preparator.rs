@@ -101,8 +101,12 @@ impl DeliveryPreparator {
         };
 
         // Initialize buffer account. Init + reallocs
-        self.initialize_buffer_account(authority, task, &preparation_info)
-            .await?;
+        self.initialize_buffer_account(
+            authority,
+            task.as_ref(),
+            &preparation_info,
+        )
+        .await?;
         // Writing chunks with some retries. Stol
         self.write_buffer_with_retries::<5>(authority, &preparation_info)
             .await?;
@@ -224,8 +228,9 @@ impl DeliveryPreparator {
                 .instructions(instruction.data.len());
             instructions.push(instruction);
 
+            // TODO: replace with join_all
             join_set.spawn(async move {
-                self.send_ixs_with_retry::<2>(&write_instructions, authority)
+                self.send_ixs_with_retry::<2>(&instructions, authority)
                     .await
                     .inspect_err(|err| {
                         error!("Error writing into buffect account: {:?}", err)
@@ -236,7 +241,7 @@ impl DeliveryPreparator {
         join_set
             .join_all()
             .await
-            .iter()
+            .into_iter()
             .collect::<Result<Vec<_>, _>>()?;
 
         Ok(())

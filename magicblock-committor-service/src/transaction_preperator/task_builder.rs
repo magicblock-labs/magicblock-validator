@@ -17,11 +17,6 @@ use magicblock_program::magic_scheduled_l1_message::{
     ScheduledL1Message, UndelegateType,
 };
 use solana_pubkey::Pubkey;
-use solana_sdk::{
-    instruction::{AccountMeta, Instruction},
-    signature::Keypair,
-    signer::Signer,
-};
 
 use crate::transaction_preperator::tasks::{
     ArgsTask, CommitTask, FinalizeTask, L1Task, TaskPreparationInfo,
@@ -55,7 +50,7 @@ impl TasksBuilder for TaskBuilderV1 {
             MagicL1Message::L1Actions(actions) => {
                 return actions
                     .into_iter()
-                    .map(|el| Task::L1Action(el.clone()))
+                    .map(|el| Box::new(ArgsTask::L1Action(el.clone())) as Box<dyn L1Task>)
                     .collect()
             }
             MagicL1Message::Commit(t) => (t.get_committed_accounts(), false),
@@ -68,11 +63,11 @@ impl TasksBuilder for TaskBuilderV1 {
             .into_iter()
             .map(|account| {
                 if let Some(commit_id) = commit_ids.get(&account.pubkey) {
-                    Ok(ArgsTask::Commit(CommitTask {
+                    Ok(Box::new(ArgsTask::Commit(CommitTask {
                         commit_id: *commit_id + 1,
                         allow_undelegation,
                         committed_account: account.clone(),
-                    })) as Result<Box<dyn L1Task>, ()>
+                    })) as Box<dyn L1Task>)
                 } else {
                     // TODO(edwin): proper error
                     Err(())

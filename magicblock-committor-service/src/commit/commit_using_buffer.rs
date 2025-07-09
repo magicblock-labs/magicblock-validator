@@ -760,7 +760,7 @@ impl CommittorProcessor {
                     .instructions(init_ix_chunk.len() - 1);
                 match send_and_confirm(
                     self.magicblock_rpc_client.clone(),
-                    self.authority.insecure_clone(),
+                    &self.authority,
                     [init_budget_ixs, init_ix_chunk.clone()].concat(),
                     "init buffer and chunk account".to_string(),
                     None,
