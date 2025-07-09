@@ -69,15 +69,27 @@ pub fn main() {
 }
 
 fn should_run_test(test_name: &str) -> bool {
-    let should_run = std::env::var("RUN_TESTS")
+    let run = std::env::var("RUN_TESTS")
         .map(|tests| tests.split(',').any(|t| t.trim() == test_name))
         .unwrap_or(true);
 
-    if !should_run {
+    if !run {
         eprintln!("Skipping {test_name} since the RUN_TESTS env var does not include it");
+        return false;
     }
 
-    should_run
+    let skip = std::env::var("SKIP_TESTS")
+        .map(|tests| tests.split(',').any(|t| t.trim() == test_name))
+        .unwrap_or(false);
+
+    if skip {
+        eprintln!(
+            "Skipping {test_name} since the SKIP_TESTS env var includes it"
+        );
+        false
+    } else {
+        true
+    }
 }
 
 fn success_output() -> Output {
