@@ -8,9 +8,9 @@ use solana_sdk::message::v0::Message;
 
 use crate::transaction_preperator::{
     budget_calculator::{ComputeBudgetCalculator, ComputeBudgetCalculatorV1},
-    delivery_strategist::DeliveryStrategist,
     error::{Error, PreparatorResult},
     task_builder::{TaskBuilderV1, TasksBuilder},
+    task_strategist::TaskStrategist,
 };
 
 /// Transaction Preparator version
@@ -83,7 +83,7 @@ impl TransactionPreparator for TransactionPreparatorV1 {
         // 1.
         let tasks = TaskBuilderV1::commit_tasks(l1_message);
         // 2.
-        let tx_strategy = DeliveryStrategist::build_strategies(tasks)?;
+        let tx_strategy = TaskStrategist::build_strategy(tasks)?;
         // 3.
 
         todo!()
@@ -95,7 +95,7 @@ impl TransactionPreparator for TransactionPreparatorV1 {
         l1_message: &ScheduledL1Message,
     ) -> PreparatorResult<Message> {
         let tasks = TaskBuilderV1::finalize_tasks(l1_message);
-        let tx_strategy = DeliveryStrategist::build_strategies(tasks);
+        let tx_strategy = TaskStrategist::build_strategy(tasks);
 
         todo!()
     }

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use dlp::args::{CallHandlerArgs, CommitStateArgs, CommitStateFromBufferArgs};
 use magicblock_committor_program::{
     instruction_builder::{
@@ -11,8 +13,7 @@ use magicblock_committor_program::{
     ChangesetChunks, Chunks,
 };
 use magicblock_program::magic_scheduled_l1_message::{
-    CommitAndUndelegate, CommitType, CommittedAccountV2, L1Action,
-    MagicL1Message, ScheduledL1Message, UndelegateType,
+    CommitType, L1Action, MagicL1Message, ScheduledL1Message, UndelegateType,
 };
 use solana_pubkey::Pubkey;
 use solana_sdk::{
@@ -21,43 +22,13 @@ use solana_sdk::{
     signer::Signer,
 };
 
-use crate::consts::MAX_WRITE_CHUNK_SIZE;
-// pub trait PossibleTaskTrait {
-//     fn instruction() -> Instruction;
-//     fn decrease(self: Box<Self>) -> Result<Box<dyn PossibleTaskTrait>, Box<dyn PossibleTaskTrait>>;
-//     // If task is "preparable" returns Instructions for preparations
-//     fn prepare(self: Box<Self>) -> Option<Vec<Instruction>>;
-// }
-
-pub struct TaskPreparationInfo {
-    pub chunks_pda: Pubkey,
-    pub buffer_pda: Pubkey,
-    pub init_instruction: Instruction,
-    pub realloc_instructions: Vec<Instruction>,
-    pub write_instructions: Vec<Instruction>,
-}
-
-// TODO(edwin): commit_id is common thing, extract
-#[derive(Clone)]
-pub struct CommitTask {
-    pub commit_id: u64,
-    pub allow_undelegation: bool,
-    pub committed_account: CommittedAccountV2,
-}
-
-#[derive(Clone)]
-pub struct UndelegateTask {
-    pub commit_id: u64,
-    pub delegated_account: Pubkey,
-    pub owner_program: Pubkey,
-    pub rent_reimbursement: Pubkey,
-}
-
-#[derive(Clone)]
-pub struct FinalizeTask {
-    pub commit_id: u64,
-    pub delegated_account: Pubkey,
-}
+use crate::{
+    consts::MAX_WRITE_CHUNK_SIZE,
+    transaction_preperator::tasks::{
+        ArgsTask, CommitTask, FinalizeTask, L1Task, TaskPreparationInfo,
+        UndelegateTask,
+    },
+};
 
 #[derive(Clone)]
 pub enum Task {
@@ -230,7 +201,10 @@ impl Task {
 
 pub trait TasksBuilder {
     // Creates tasks for commit stage
-    fn commit_tasks(l1_message: &ScheduledL1Message) -> Vec<Task>;
+    fn commit_tasks(
+        l1_message: &ScheduledL1Message,
+        commit_ids: HashMap<Pubkey, u64>,
+    ) -> Vec<Task>;
 
     // Create tasks for finalize stage
     fn finalize_tasks(l1_message: &ScheduledL1Message) -> Vec<Task>;
@@ -241,24 +215,39 @@ pub trait TasksBuilder {
 pub struct TaskBuilderV1;
 impl TasksBuilder for TaskBuilderV1 {
     /// Returns [`Task`]s for Commit stage
-    fn commit_tasks(l1_message: &ScheduledL1Message) -> Vec<Task> {
-        let accounts = match &l1_message.l1_message {
+    fn commit_tasks(
+        l1_message: &ScheduledL1Message,
+        commit_ids: HashMap<Pubkey, u64>,
+    ) -> Vec<Box<dyn L1Task>> {
+        let (accounts, allow_undelegation) = match &l1_message.l1_message {
             MagicL1Message::L1Actions(actions) => {
                 return actions
                     .into_iter()
                     .map(|el| Task::L1Action(el.clone()))
                     .collect()
             }
-            MagicL1Message::Commit(t) => t.get_committed_accounts(),
+            MagicL1Message::Commit(t) => (t.get_committed_accounts(), false),
             MagicL1Message::CommitAndUndelegate(t) => {
-                t.commit_action.get_committed_accounts()
+                (t.commit_action.get_committed_accounts(), true)
             }
         };
 
         accounts
             .into_iter()
-            .map(|account| Task::Commit(account.clone()))
-            .collect()
+            .map(|account| {
+                if let Some(commit_id) = commit_ids.get(&account.pubkey) {
+                    Ok(ArgsTask::Commit(CommitTask {
+                        commit_id: *commit_id + 1,
+                        allow_undelegation,
+                        committed_account: account.clone(),
+                    }))
+                } else {
+                    // TODO(edwin): proper error
+                    Err(())
+                }
+            })
+            .collect::<Result<_, _>>()
+            .unwrap()
     }
 
     /// Returns [`Task`]s for Finalize stage

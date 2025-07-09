@@ -6,7 +6,7 @@ use solana_sdk::{
 use crate::{compute_budget::Budget, ComputeBudgetConfig};
 
 // TODO(edwin): rename
-struct ComputeBudgetV1 {
+pub struct ComputeBudgetV1 {
     /// Total compute budget
     pub compute_budget: u32,
     pub compute_unit_price: u64,

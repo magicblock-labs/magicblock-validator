@@ -37,9 +37,10 @@ use crate::{
     error::{CommitAccountError, CommitAccountResult},
     persist::CommitStrategy,
     transaction_preperator::{
-        delivery_strategist::{TaskDeliveryStrategy, TransactionStrategy},
         error::PreparatorResult,
-        task_builder::{CommitTask, Task, TaskPreparationInfo},
+        task_builder::Task,
+        task_strategist::{TaskDeliveryStrategy, TransactionStrategy},
+        tasks::{CommitTask, TaskPreparationInfo},
     },
     CommitInfo, ComputeBudgetConfig,
 };
@@ -184,6 +185,7 @@ impl DeliveryPreparator {
                         )));
                     }
                     Err(err) => {
+                        error!("Failed to fetch chunks PDA: {:?}", err);
                         last_error = err.into();
                         sleep(Duration::from_millis(100)).await;
                         continue;
@@ -231,6 +233,7 @@ impl DeliveryPreparator {
                 .buffer_write
                 .instructions(instruction.data.len());
             instructions.push(instruction);
+
             join_set.spawn(async move {
                 self.send_ixs_with_retry::<2>(&write_instructions, authority)
                     .await
@@ -245,6 +248,7 @@ impl DeliveryPreparator {
             .await
             .iter()
             .collect::<Result<Vec<_>, _>>()?;
+
         Ok(())
     }
 
