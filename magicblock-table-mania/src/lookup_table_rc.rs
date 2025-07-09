@@ -159,7 +159,7 @@ impl fmt::Display for LookupTableRc {
             } => {
                 let comma_separated_pubkeys = pubkeys
                     .read()
-                    .expect("pubkeys mutex poisoned")
+                    .expect("pubkeys rwlock poisoned")
                     .iter()
                     .map(|(key, _)| key.to_string())
                     .collect::<Vec<_>>()
@@ -259,7 +259,7 @@ impl LookupTableRc {
     pub fn pubkeys(&self) -> Option<RwLockReadGuard<'_, RefcountedPubkeys>> {
         match self {
             Self::Active { pubkeys, .. } => {
-                Some(pubkeys.read().expect("pubkeys mutex poisoned"))
+                Some(pubkeys.read().expect("pubkeys rwlock poisoned"))
             }
             Self::Deactivated { .. } => None,
         }
@@ -270,7 +270,7 @@ impl LookupTableRc {
     ) -> Option<RwLockWriteGuard<'_, RefcountedPubkeys>> {
         match self {
             Self::Active { pubkeys, .. } => {
-                Some(pubkeys.write().expect("pubkeys mutex poisoned"))
+                Some(pubkeys.write().expect("pubkeys rwlock poisoned"))
             }
             Self::Deactivated { .. } => None,
         }
