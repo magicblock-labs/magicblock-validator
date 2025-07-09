@@ -1,4 +1,7 @@
-use std::collections::{BinaryHeap, HashSet};
+use std::{
+    collections::{BinaryHeap, HashSet},
+    ptr::NonNull,
+};
 
 use solana_pubkey::Pubkey;
 use solana_sdk::{
@@ -14,13 +17,11 @@ use crate::{
     transaction_preperator::{
         budget_calculator::ComputeBudgetV1,
         error::{Error, PreparatorResult},
-        task_builder::Task,
-        tasks::L1Task,
+        tasks::{ArgsTask, L1Task},
     },
     transactions::{serialize_and_encode_base64, MAX_ENCODED_TRANSACTION_SIZE},
 };
 
-#[derive(Clone)]
 pub struct TransactionStrategy {
     pub optimized_tasks: Vec<Box<dyn L1Task>>,
     pub lookup_tables_keys: Vec<Vec<Pubkey>>,
@@ -42,7 +43,7 @@ impl TaskStrategist {
         }
 
         let budget_instructions = Self::budget_instructions(
-            &tasks.iter().map(|task| task.budget()).collect(),
+            &tasks.iter().map(|task| task.budget()).collect::<Vec<_>>(),
         );
         let lookup_tables = Self::assemble_lookup_table(
             &mut tasks,
@@ -54,9 +55,12 @@ impl TaskStrategist {
             &budget_instructions,
             &lookup_tables,
         );
-        if alt_tx.len() <= MAX_ENCODED_TRANSACTION_SIZE {
-            let lookup_tables_keys =
-                lookup_tables.iter().map(|table| table.addresses).collect();
+        let encoded_alt_tx = serialize_and_encode_base64(&alt_tx);
+        if encoded_alt_tx.len() <= MAX_ENCODED_TRANSACTION_SIZE {
+            let lookup_tables_keys = lookup_tables
+                .into_iter()
+                .map(|table| table.addresses)
+                .collect();
             Ok(TransactionStrategy {
                 optimized_tasks: tasks,
                 lookup_tables_keys,
@@ -84,7 +88,7 @@ impl TaskStrategist {
             .into_iter()
             .enumerate()
             .map(|(index, size)| (size, index))
-            .collect::<BinaryHeap<_, _>>();
+            .collect::<BinaryHeap<_>>();
         // We keep popping heaviest el-ts & try to optimize while heap is non-empty
         while let Some((_, index)) = map.pop() {
             if current_tx_length <= MAX_ENCODED_TRANSACTION_SIZE {
@@ -92,14 +96,24 @@ impl TaskStrategist {
             }
 
             let task = &mut tasks[index];
-            let task = std::mem::replace(task, Box::new_uninit());
-            match task.decrease() {
+            let task = {
+                // SAFETY:
+                // 1. We create a dangling pointer purely for temporary storage during replace
+                // 2. The pointer is never dereferenced before being replaced
+                // 3. No memory allocated, hence no leakage
+                let dangling = NonNull::<ArgsTask>::dangling();
+                let tmp_task = unsafe { Box::from_raw(dangling.as_ptr()) }
+                    as Box<dyn L1Task>;
+
+                std::mem::replace(task, tmp_task)
+            };
+            match task.optimize() {
                 // If we can decrease:
                 // 1. Calculate new tx size & ix size
                 // 2. Insert item's data back in the heap
                 // 3. Update overall tx size
                 Ok(optimized_task) => {
-                    task[index] = optimized_task;
+                    tasks[index] = optimized_task;
                     // TODO(edwin): this is expensive
                     let new_ix =
                         tasks[index].instruction(&Pubkey::new_unique());
@@ -114,7 +128,7 @@ impl TaskStrategist {
                 // We move it back with oldest state
                 // Heap forgets about this el-t
                 Err(old_task) => {
-                    task[index] = old_task;
+                    tasks[index] = old_task;
                 }
             }
         }

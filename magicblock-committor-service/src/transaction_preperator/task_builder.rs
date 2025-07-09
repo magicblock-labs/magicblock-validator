@@ -23,182 +23,10 @@ use solana_sdk::{
     signer::Signer,
 };
 
-use crate::{
-    consts::MAX_WRITE_CHUNK_SIZE,
-    transaction_preperator::tasks::{
-        ArgsTask, CommitTask, FinalizeTask, L1Task, TaskPreparationInfo,
-        UndelegateTask,
-    },
+use crate::transaction_preperator::tasks::{
+    ArgsTask, CommitTask, FinalizeTask, L1Task, TaskPreparationInfo,
+    UndelegateTask,
 };
-
-#[derive(Clone)]
-pub enum Task {
-    Commit(CommitTask),
-    Finalize(FinalizeTask), // TODO(edwin): introduce Stages instead?
-    Undelegate(UndelegateTask), // Special action really
-    L1Action(L1Action),
-}
-
-impl Task {
-    pub fn is_bufferable(&self) -> bool {
-        match self {
-            Self::Commit(_) => true,
-            Self::Finalize(_) => false,
-            Self::Undelegate(_) => false,
-            Self::L1Action(_) => false, // TODO(edwin): enable
-        }
-    }
-
-    pub fn args_instruction(&self, validator: Pubkey) -> Instruction {
-        match self {
-            Task::Commit(value) => {
-                let args = CommitStateArgs {
-                    slot: value.commit_id, // TODO(edwin): change slot,
-                    lamports: value.committed_account.account.lamports,
-                    data: value.committed_account.account.data.clone(),
-                    allow_undelegation: value.allow_undelegation, // TODO(edwin):
-                };
-                dlp::instruction_builder::commit_state(
-                    validator,
-                    value.committed_account.pubkey,
-                    value.committed_account.account.owner,
-                    args,
-                )
-            }
-            Task::Finalize(value) => dlp::instruction_builder::finalize(
-                validator,
-                value.delegated_account,
-            ),
-            Task::Undelegate(value) => dlp::instruction_builder::undelegate(
-                validator,
-                value.delegated_account,
-                value.owner_program,
-                value.rent_reimbursement,
-            ),
-            Task::L1Action(value) => {
-                let account_metas = value
-                    .account_metas_per_program
-                    .iter()
-                    .map(|short_meta| AccountMeta {
-                        pubkey: short_meta.pubkey,
-                        is_writable: short_meta.is_writable,
-                        is_signer: false,
-                    })
-                    .collect();
-                dlp::instruction_builder::call_handler(
-                    validator,
-                    value.destination_program,
-                    value.escrow_authority,
-                    account_metas,
-                    CallHandlerArgs {
-                        data: value.data_per_program.data.clone(),
-                        escrow_index: value.data_per_program.escrow_index,
-                    },
-                )
-            }
-        }
-        todo!()
-    }
-
-    pub fn buffer_instruction(&self, validator: Pubkey) -> Instruction {
-        // TODO(edwin): now this is bad, while impossible
-        // We should use dyn Task
-        match self {
-            Task::Commit(value) => {
-                let commit_id_slice = value.commit_id.to_le_bytes();
-                let (commit_buffer_pubkey, _) =
-                    magicblock_committor_program::pdas::chunks_pda(
-                        &validator,
-                        &value.committed_account.pubkey,
-                        &commit_id_slice,
-                    );
-                dlp::instruction_builder::commit_state_from_buffer(
-                    validator,
-                    value.committed_account.pubkey,
-                    value.committed_account.account.owner,
-                    commit_buffer_pubkey,
-                    CommitStateFromBufferArgs {
-                        slot: value.commit_id, //TODO(edwin): change to commit_id
-                        lamports: value.committed_account.account.lamports,
-                        allow_undelegation: value.allow_undelegation,
-                    },
-                )
-            }
-            Task::Undelegate(_) => unreachable!(),
-            Task::Finalize(_) => unreachable!(),
-            Task::L1Action(_) => unreachable!(), // TODO(edwin): enable
-        }
-    }
-
-    pub fn get_preparation_instructions(
-        &self,
-        authority: &Keypair,
-    ) -> Option<TaskPreparationInfo> {
-        let Self::Commit(commit_task) = self else {
-            None
-        };
-
-        let committed_account = &commit_task.committed_account;
-        let chunks = Chunks::from_data_length(
-            committed_account.account.data.len(),
-            MAX_WRITE_CHUNK_SIZE,
-        );
-        let chunks_account_size =
-            borsh::object_length(&chunks).unwrap().len() as u64;
-        let buffer_account_size = committed_account.account.data.len() as u64;
-
-        let (init_instruction, chunks_pda, buffer_pda) =
-            create_init_ix(CreateInitIxArgs {
-                authority: authority.pubkey(),
-                pubkey: committed_account.pubkey,
-                chunks_account_size,
-                buffer_account_size,
-                commit_id,
-                chunk_count: chunks.count(),
-                chunk_size: chunks.chunk_size(),
-            });
-
-        let realloc_instructions =
-            create_realloc_buffer_ixs(CreateReallocBufferIxArgs {
-                authority: authority.pubkey(),
-                pubkey: committed_account.pubkey,
-                buffer_account_size,
-                commit_id,
-            });
-
-        let chunks_iter = ChangesetChunks::new(&chunks, chunks.chunk_size())
-            .iter(&committed_account.account.data);
-        let write_instructions = chunks_iter
-            .map(|chunk| {
-                create_write_ix(CreateWriteIxArgs {
-                    authority: authority.pubkey(),
-                    pubkey,
-                    offset: chunk.offset,
-                    data_chunk: chunk.data_chunk,
-                    commit_id,
-                })
-            })
-            .collect::<Vec<_>>();
-
-        Some(TaskPreparationInfo {
-            chunks_pda,
-            buffer_pda,
-            init_instruction,
-            realloc_instructions,
-            write_instructions,
-        })
-    }
-
-    pub fn instructions_from_info(
-        &self,
-        info: &TaskPreparationInfo,
-    ) -> Vec<Vec<Instruction>> {
-        chunk_realloc_ixs(
-            info.realloc_instructions.clone(),
-            Some(info.init_instruction.clone()),
-        )
-    }
-}
 
 pub trait TasksBuilder {
     // Creates tasks for commit stage
@@ -244,7 +72,7 @@ impl TasksBuilder for TaskBuilderV1 {
                         commit_id: *commit_id + 1,
                         allow_undelegation,
                         committed_account: account.clone(),
-                    }))
+                    })) as Result<Box<dyn L1Task>, ()>
                 } else {
                     // TODO(edwin): proper error
                     Err(())
@@ -292,11 +120,10 @@ impl TasksBuilder for TaskBuilderV1 {
                         .iter()
                         .map(finalize_task)
                         .collect::<Vec<_>>();
-                    tasks.extend(
-                        l1_actions
-                            .iter()
-                            .map(|a| Box::new(ArgsTask::L1Action(a.clone()))),
-                    );
+                    tasks.extend(l1_actions.iter().map(|a| {
+                        Box::new(ArgsTask::L1Action(a.clone()))
+                            as Box<dyn L1Task>
+                    }));
                     tasks
                 }
             }
@@ -323,11 +150,10 @@ impl TasksBuilder for TaskBuilderV1 {
                                 undelegate_task(a, rent_reimbursement)
                             }),
                         );
-                        tasks.extend(
-                            actions.iter().map(|a| {
-                                Box::new(ArgsTask::L1Action(a.clone()))
-                            }),
-                        );
+                        tasks.extend(actions.iter().map(|a| {
+                            Box::new(ArgsTask::L1Action(a.clone()))
+                                as Box<dyn L1Task>
+                        }));
                     }
                 }
 

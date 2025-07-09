@@ -19,6 +19,7 @@ use magicblock_rpc_client::{
 };
 use magicblock_table_mania::TableMania;
 use solana_account::ReadableAccount;
+use solana_pubkey::Pubkey;
 use solana_rpc_client_api::client_error::reqwest::Version;
 use solana_sdk::{
     hash::Hash,
@@ -38,15 +39,11 @@ use crate::{
     persist::CommitStrategy,
     transaction_preperator::{
         error::PreparatorResult,
-        task_builder::Task,
-        task_strategist::{TaskDeliveryStrategy, TransactionStrategy},
-        tasks::{CommitTask, TaskPreparationInfo},
+        task_strategist::TransactionStrategy,
+        tasks::{CommitTask, L1Task, TaskPreparationInfo},
     },
     CommitInfo, ComputeBudgetConfig,
 };
-
-// TODO: likely separate errors
-type PreparationFuture = impl Future<Output = PreparatorResult<()>>;
 
 pub struct DeliveryPreparationResult {
     lookup_tables: Vec<AddressLookupTableAccount>,
@@ -78,16 +75,13 @@ impl DeliveryPreparator {
         strategy: &TransactionStrategy,
     ) -> DeliveryPreparatorResult<()> {
         let preparation_futures = strategy
-            .task_strategies
+            .optimized_tasks
             .iter()
             .map(|task| self.prepare_task(authority, task));
 
         let fut1 = join_all(preparation_futures);
-        let fut2 = if strategy.use_lookup_table {
-            self.prepare_lookup_tables(&strategy.task_strategies)
-        } else {
-            std::future::ready(Ok(()))
-        };
+        let fut2 = self.prepare_lookup_tables(&strategy.lookup_tables_keys);
+
         let (res1, res2) = join(fut1, fut2).await;
         res1.into_iter().collect::<Result<Vec<_>, _>>()?;
         res2?;
@@ -99,13 +93,9 @@ impl DeliveryPreparator {
     async fn prepare_task(
         &self,
         authority: &Keypair,
-        task: &TaskDeliveryStrategy,
+        task: &Box<dyn L1Task>,
     ) -> DeliveryPreparatorResult<()> {
-        let TaskDeliveryStrategy::Buffer(task) = task else {
-            return Ok(());
-        };
-        let Some(preparation_info) =
-            task.get_preparation_instructions(authority)
+        let Some(preparation_info) = task.preparation_info(&authority.pubkey())
         else {
             return Ok(());
         };
@@ -124,7 +114,7 @@ impl DeliveryPreparator {
     async fn initialize_buffer_account(
         &self,
         authority: &Keypair,
-        task: &Task,
+        task: &dyn L1Task,
         preparation_info: &TaskPreparationInfo,
     ) -> DeliveryPreparatorResult<()> {
         let preparation_instructions =
@@ -220,7 +210,7 @@ impl DeliveryPreparator {
     ) -> DeliveryPreparatorResult<()> {
         if write_instructions.len() != chunks.count() {
             let err = anyhow!("Chunks count mismatches write instruction! chunks: {}, ixs: {}", write_instructions.len(), chunks.count());
-            error!(err.to_string());
+            error!("{}", err.to_string());
             return Err(Error::InternalError(err));
         }
 
@@ -298,9 +288,10 @@ impl DeliveryPreparator {
         Ok(())
     }
 
+    /// Prepares ALTs for pubkeys participating in tx
     async fn prepare_lookup_tables(
         &self,
-        strategies: &[TaskDeliveryStrategy],
+        lookup_table_keys: &[Vec<Pubkey>],
     ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
         // self.table_mania.
         todo!()
@@ -316,7 +307,7 @@ pub enum Error {
     BorshError(#[from] std::io::Error),
     #[error("TransactionCreationError: {0}")]
     TransactionCreationError(#[from] CompileError),
-    #[error("TransactionSigningError: {0]")]
+    #[error("TransactionSigningError: {0}")]
     TransactionSigningError(#[from] SignerError),
     #[error("FailedToPrepareBufferError: {0}")]
     FailedToPrepareBufferError(#[from] MagicBlockRpcClientError),

@@ -107,7 +107,7 @@ impl CommittorProcessor {
             .instructions(committees.len());
         let process_sig = match send_and_confirm(
             me.magicblock_rpc_client.clone(),
-            me.authority.insecure_clone(),
+            &me.authority,
             [compute_budget_ixs, process_ixs].concat(),
             "commit changeset using args".to_string(),
             Some(latest_blockhash),
@@ -150,7 +150,7 @@ impl CommittorProcessor {
                 .instructions(committees.len());
             match send_and_confirm(
                 me.magicblock_rpc_client.clone(),
-                me.authority.insecure_clone(),
+                &me.authority,
                 [finalize_budget_ixs, finalize_ixs].concat(),
                 "commit changeset using args".to_string(),
                 Some(latest_blockhash),
@@ -236,7 +236,7 @@ impl CommittorProcessor {
                     .instructions(accounts_len);
                 match send_and_confirm(
                     me.magicblock_rpc_client.clone(),
-                    me.authority.insecure_clone(),
+                    &me.authority,
                     [undelegate_budget_ixs, undelegate_ixs].concat(),
                     "undelegate committed accounts using args".to_string(),
                     Some(latest_blockhash),

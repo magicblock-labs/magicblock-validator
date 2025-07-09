@@ -9,6 +9,7 @@ use magicblock_committor_program::{
         },
         write_buffer::{create_write_ix, CreateWriteIxArgs},
     },
+    instruction_chunks::chunk_realloc_ixs,
     ChangesetChunks, Chunks,
 };
 use magicblock_program::magic_scheduled_l1_message::{
@@ -19,9 +20,7 @@ use solana_sdk::instruction::{AccountMeta, Instruction};
 
 use crate::{
     consts::MAX_WRITE_CHUNK_SIZE,
-    transaction_preperator::{
-        budget_calculator::ComputeBudgetV1, task_builder::Task,
-    },
+    transaction_preperator::budget_calculator::ComputeBudgetV1,
 };
 
 pub struct TaskPreparationInfo {
@@ -46,7 +45,7 @@ pub trait L1Task {
     fn instruction(&self, validator: &Pubkey) -> Instruction;
 
     /// If has optimizations returns optimized Task, otherwise returns itself
-    fn optimize(self: Box<Self>) -> Result<Box<dyn L1Task>, Box<Self>>;
+    fn optimize(self: Box<Self>) -> Result<Box<dyn L1Task>, Box<dyn L1Task>>;
 
     /// Returns [`TaskPreparationInfo`] if task needs to be prepared before executing,
     /// otherwise returns None
@@ -57,6 +56,18 @@ pub trait L1Task {
 
     /// Returns [`Task`] budget
     fn budget(&self) -> ComputeBudgetV1;
+
+    /// Returns Instructions per TX
+    // TODO(edwin): shall be here?
+    fn instructions_from_info(
+        &self,
+        info: &TaskPreparationInfo,
+    ) -> Vec<Vec<Instruction>> {
+        chunk_realloc_ixs(
+            info.realloc_instructions.clone(),
+            Some(info.init_instruction.clone()),
+        )
+    }
 }
 
 // TODO(edwin): commit_id is common thing, extract
@@ -90,7 +101,7 @@ pub enum ArgsTask {
 impl L1Task for ArgsTask {
     fn instruction(&self, validator: &Pubkey) -> Instruction {
         match self {
-            Task::Commit(value) => {
+            Self::Commit(value) => {
                 let args = CommitStateArgs {
                     slot: value.commit_id, // TODO(edwin): change slot,
                     lamports: value.committed_account.account.lamports,
@@ -104,17 +115,17 @@ impl L1Task for ArgsTask {
                     args,
                 )
             }
-            Task::Finalize(value) => dlp::instruction_builder::finalize(
+            Self::Finalize(value) => dlp::instruction_builder::finalize(
                 *validator,
                 value.delegated_account,
             ),
-            Task::Undelegate(value) => dlp::instruction_builder::undelegate(
+            Self::Undelegate(value) => dlp::instruction_builder::undelegate(
                 *validator,
                 value.delegated_account,
                 value.owner_program,
                 value.rent_reimbursement,
             ),
-            Task::L1Action(value) => {
+            Self::L1Action(value) => {
                 let account_metas = value
                     .account_metas_per_program
                     .iter()
@@ -138,8 +149,8 @@ impl L1Task for ArgsTask {
         }
     }
 
-    fn optimize(self: Box<Self>) -> Result<Box<dyn L1Task>, Box<Self>> {
-        match self {
+    fn optimize(self: Box<Self>) -> Result<Box<dyn L1Task>, Box<dyn L1Task>> {
+        match *self {
             Self::Commit(value) => Ok(Box::new(BufferTask::Commit(value))),
             Self::L1Action(_) | Self::Finalize(_) | Self::Undelegate(_) => {
                 Err(self)
@@ -158,6 +169,7 @@ impl L1Task for ArgsTask {
 }
 
 /// Tasks that could be executed using buffers
+#[derive(Clone)]
 pub enum BufferTask {
     Commit(CommitTask),
     // TODO(edwin): Action in the future
@@ -188,7 +200,7 @@ impl L1Task for BufferTask {
     }
 
     /// No further optimizations
-    fn optimize(self: Box<Self>) -> Result<Box<dyn L1Task>, Box<Self>> {
+    fn optimize(self: Box<Self>) -> Result<Box<dyn L1Task>, Box<dyn L1Task>> {
         Err(self)
     }
 
@@ -203,8 +215,7 @@ impl L1Task for BufferTask {
             committed_account.account.data.len(),
             MAX_WRITE_CHUNK_SIZE,
         );
-        let chunks_account_size =
-            borsh::object_length(&chunks).unwrap().len() as u64;
+        let chunks_account_size = borsh::object_length(&chunks).unwrap() as u64;
         let buffer_account_size = committed_account.account.data.len() as u64;
 
         let (init_instruction, chunks_pda, buffer_pda) =
@@ -213,7 +224,7 @@ impl L1Task for BufferTask {
                 pubkey: committed_account.pubkey,
                 chunks_account_size,
                 buffer_account_size,
-                commit_id,
+                commit_id: commit_task.commit_id,
                 chunk_count: chunks.count(),
                 chunk_size: chunks.chunk_size(),
             });
@@ -223,7 +234,7 @@ impl L1Task for BufferTask {
                 authority: *authority_pubkey,
                 pubkey: committed_account.pubkey,
                 buffer_account_size,
-                commit_id,
+                commit_id: commit_task.commit_id,
             });
 
         let chunks_iter = ChangesetChunks::new(&chunks, chunks.chunk_size())
@@ -232,10 +243,10 @@ impl L1Task for BufferTask {
             .map(|chunk| {
                 create_write_ix(CreateWriteIxArgs {
                     authority: *authority_pubkey,
-                    pubkey,
+                    pubkey: committed_account.pubkey,
                     offset: chunk.offset,
                     data_chunk: chunk.data_chunk,
-                    commit_id,
+                    commit_id: commit_task.commit_id,
                 })
             })
             .collect::<Vec<_>>();
