@@ -1,10 +1,13 @@
+use std::collections::HashMap;
+
 use async_trait::async_trait;
 use magicblock_program::magic_scheduled_l1_message::{
     CommittedAccountV2, L1Action, MagicL1Message, ScheduledL1Message,
 };
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
-use solana_sdk::message::v0::Message;
+use solana_pubkey::Pubkey;
+use solana_sdk::{message::v0::Message, signature::Keypair, signer::Signer};
 
 use crate::transaction_preperator::{
     budget_calculator::{ComputeBudgetCalculator, ComputeBudgetCalculatorV1},
@@ -25,10 +28,14 @@ trait TransactionPreparator {
     fn version(&self) -> PreparatorVersion;
     async fn prepare_commit_tx(
         &self,
+        authority: &Keypair,
         l1_message: &ScheduledL1Message,
+        commit_ids: HashMap<Pubkey, u64>,
     ) -> PreparatorResult<Message>;
     async fn prepare_finalize_tx(
         &self,
+        authority: &Keypair,
+        rent_reimbursement: &Pubkey,
         l1_message: &ScheduledL1Message,
     ) -> PreparatorResult<Message>;
 }
@@ -73,7 +80,9 @@ impl TransactionPreparator for TransactionPreparatorV1 {
     /// For pure actions message - outputs Tx that runs actions
     async fn prepare_commit_tx(
         &self,
+        authority: &Keypair,
         l1_message: &ScheduledL1Message,
+        commit_ids: HashMap<Pubkey, u64>,
     ) -> PreparatorResult<Message> {
         // 1. create tasks
         // 2. optimize to fit tx size. aka Delivery Strategy
@@ -81,9 +90,10 @@ impl TransactionPreparator for TransactionPreparatorV1 {
         // 4. Build resulting TX to be executed
 
         // 1.
-        let tasks = TaskBuilderV1::commit_tasks(l1_message);
+        let tasks = TaskBuilderV1::commit_tasks(l1_message, commit_ids);
         // 2.
-        let tx_strategy = TaskStrategist::build_strategy(tasks)?;
+        let tx_strategy =
+            TaskStrategist::build_strategy(tasks, &authority.pubkey())?;
         // 3.
 
         todo!()
@@ -92,10 +102,14 @@ impl TransactionPreparator for TransactionPreparatorV1 {
     /// In V1: prepares single TX with finalize, undelegation + actions
     async fn prepare_finalize_tx(
         &self,
+        authority: &Keypair,
+        rent_reimbursement: &Pubkey,
         l1_message: &ScheduledL1Message,
     ) -> PreparatorResult<Message> {
-        let tasks = TaskBuilderV1::finalize_tasks(l1_message);
-        let tx_strategy = TaskStrategist::build_strategy(tasks);
+        let tasks =
+            TaskBuilderV1::finalize_tasks(l1_message, rent_reimbursement);
+        let tx_strategy =
+            TaskStrategist::build_strategy(tasks, &authority.pubkey());
 
         todo!()
     }

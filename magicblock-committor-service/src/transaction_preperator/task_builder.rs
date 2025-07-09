@@ -12,7 +12,10 @@ use magicblock_committor_program::{
     instruction_chunks::chunk_realloc_ixs,
     ChangesetChunks, Chunks,
 };
-use magicblock_program::magic_scheduled_l1_message::{CommitType, CommittedAccountV2, L1Action, MagicL1Message, ScheduledL1Message, UndelegateType};
+use magicblock_program::magic_scheduled_l1_message::{
+    CommitType, CommittedAccountV2, L1Action, MagicL1Message,
+    ScheduledL1Message, UndelegateType,
+};
 use solana_pubkey::Pubkey;
 use solana_sdk::{
     instruction::{AccountMeta, Instruction},
@@ -264,7 +267,10 @@ impl TasksBuilder for TaskBuilderV1 {
         }
 
         // Helper to create an undelegate task
-        fn undelegate_task(account: &CommittedAccountV2, rent_reimbursement: &Pubkey) -> Box<dyn L1Task> {
+        fn undelegate_task(
+            account: &CommittedAccountV2,
+            rent_reimbursement: &Pubkey,
+        ) -> Box<dyn L1Task> {
             Box::new(ArgsTask::Undelegate(UndelegateTask {
                 delegated_account: account.pubkey,
                 owner_program: account.account.owner,
@@ -275,10 +281,22 @@ impl TasksBuilder for TaskBuilderV1 {
         // Helper to process commit types
         fn process_commit(commit: &CommitType) -> Vec<Box<dyn L1Task>> {
             match commit {
-                CommitType::Standalone(accounts) => accounts.iter().map(finalize_task).collect(),
-                CommitType::WithL1Actions { committed_accounts, l1_actions } => {
-                    let mut tasks = committed_accounts.iter().map(finalize_task).collect::<Vec<_>>();
-                    tasks.extend(l1_actions.iter().map(|a| Box::new(ArgsTask::L1Action(a.clone()))));
+                CommitType::Standalone(accounts) => {
+                    accounts.iter().map(finalize_task).collect()
+                }
+                CommitType::WithL1Actions {
+                    committed_accounts,
+                    l1_actions,
+                } => {
+                    let mut tasks = committed_accounts
+                        .iter()
+                        .map(finalize_task)
+                        .collect::<Vec<_>>();
+                    tasks.extend(
+                        l1_actions
+                            .iter()
+                            .map(|a| Box::new(ArgsTask::L1Action(a.clone()))),
+                    );
                     tasks
                 }
             }
@@ -293,11 +311,23 @@ impl TasksBuilder for TaskBuilderV1 {
 
                 match &t.undelegate_action {
                     UndelegateType::Standalone => {
-                        tasks.extend(accounts.iter().map(|a| undelegate_task(a, rent_reimbursement)));
+                        tasks.extend(
+                            accounts.iter().map(|a| {
+                                undelegate_task(a, rent_reimbursement)
+                            }),
+                        );
                     }
                     UndelegateType::WithL1Actions(actions) => {
-                        tasks.extend(accounts.iter().map(|a| undelegate_task(a, rent_reimbursement)));
-                        tasks.extend(actions.iter().map(|a| Box::new(ArgsTask::L1Action(a.clone()))));
+                        tasks.extend(
+                            accounts.iter().map(|a| {
+                                undelegate_task(a, rent_reimbursement)
+                            }),
+                        );
+                        tasks.extend(
+                            actions.iter().map(|a| {
+                                Box::new(ArgsTask::L1Action(a.clone()))
+                            }),
+                        );
                     }
                 }
 
