@@ -299,11 +299,11 @@ impl TableMania {
 
         #[cfg(debug_assertions)]
         {
-            for pk in &storing {
+            for pk in &stored {
                 if !table.contains_key(pk) {
                     panic!(
                         "Pubkey {pk} stored as part of {} was not extended in table {} with {} items.",
-                        storing.len(),
+                        stored.len(),
                         table.table_address(),
                         table.pubkeys().map(|x| x.len()).unwrap_or(0)
                     );
