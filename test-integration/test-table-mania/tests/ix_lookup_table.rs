@@ -180,7 +180,11 @@ async fn test_create_fetch_and_close_lookup_table() {
     let meta = get_table_meta(&rpc_client, &lookup_table).await;
     assert_eq!(meta.authority, Some(lookup_table.derived_auth().pubkey()));
     assert_ne!(meta.deactivation_slot, u64::MAX);
-    assert!(!lookup_table.is_deactivated(&rpc_client, None).await);
+    assert!(
+        !lookup_table
+            .is_deactivated_on_chain(&rpc_client, None)
+            .await
+    );
 
     assert_eq!(
         get_open_tables(&rpc_client, &validator_auth, creation_slot)
@@ -198,7 +202,10 @@ async fn test_create_fetch_and_close_lookup_table() {
         debug!("{}", lookup_table);
 
         eprintln!("Waiting for table to deactivate for about 2.5 min ...");
-        while !lookup_table.is_deactivated(&rpc_client, None).await {
+        while !lookup_table
+            .is_deactivated_on_chain(&rpc_client, None)
+            .await
+        {
             utils::sleep_millis(5_000).await;
         }
         lookup_table
@@ -285,7 +292,10 @@ async fn test_lookup_table_ixs_cus_per_pubkey() {
                 eprintln!(
                     "Waiting for table to deactivate for about 2.5 min ..."
                 );
-                while !lookup_table.is_deactivated(&rpc_client, None).await {
+                while !lookup_table
+                    .is_deactivated_on_chain(&rpc_client, None)
+                    .await
+                {
                     utils::sleep_millis(5_000).await;
                 }
                 let (is_closed, close_sig) = lookup_table
