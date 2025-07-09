@@ -1,17 +1,5 @@
 use std::collections::HashMap;
 
-use dlp::args::{CallHandlerArgs, CommitStateArgs, CommitStateFromBufferArgs};
-use magicblock_committor_program::{
-    instruction_builder::{
-        init_buffer::{create_init_ix, CreateInitIxArgs},
-        realloc_buffer::{
-            create_realloc_buffer_ixs, CreateReallocBufferIxArgs,
-        },
-        write_buffer::{create_write_ix, CreateWriteIxArgs},
-    },
-    instruction_chunks::chunk_realloc_ixs,
-    ChangesetChunks, Chunks,
-};
 use magicblock_program::magic_scheduled_l1_message::{
     CommitType, CommittedAccountV2, L1Action, MagicL1Message,
     ScheduledL1Message, UndelegateType,
@@ -50,7 +38,10 @@ impl TasksBuilder for TaskBuilderV1 {
             MagicL1Message::L1Actions(actions) => {
                 return actions
                     .into_iter()
-                    .map(|el| Box::new(ArgsTask::L1Action(el.clone())) as Box<dyn L1Task>)
+                    .map(|el| {
+                        Box::new(ArgsTask::L1Action(el.clone()))
+                            as Box<dyn L1Task>
+                    })
                     .collect()
             }
             MagicL1Message::Commit(t) => (t.get_committed_accounts(), false),

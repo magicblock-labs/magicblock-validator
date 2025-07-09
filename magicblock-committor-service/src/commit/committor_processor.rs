@@ -524,7 +524,7 @@ pub(crate) async fn process_ixs_chunk(
     let compute_budget_ixs = compute_budget.instructions(commit_infos.len());
     match send_and_confirm(
         rpc_client,
-        authority,
+        &authority,
         [compute_budget_ixs, ixs].concat(),
         "process commitable and/or close pdas".to_string(),
         Some(latest_blockhash),

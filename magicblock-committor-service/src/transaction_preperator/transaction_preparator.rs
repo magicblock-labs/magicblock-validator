@@ -71,6 +71,7 @@ impl TransactionPreparatorV1 {
     }
 }
 
+#[async_trait]
 impl TransactionPreparator for TransactionPreparatorV1 {
     fn version(&self) -> PreparatorVersion {
         PreparatorVersion::V1

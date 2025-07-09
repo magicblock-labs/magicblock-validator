@@ -921,7 +921,7 @@ impl CommittorProcessor {
             join_set.spawn(async move {
                 send_and_confirm(
                     rpc_client,
-                    authority,
+                    &authority,
                     [realloc_budget_ixs, ixs].concat(),
                     format!(
                         "realloc buffer account {}/{}",

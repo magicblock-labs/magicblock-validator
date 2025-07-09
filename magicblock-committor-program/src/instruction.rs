@@ -1,5 +1,4 @@
 use borsh::{BorshDeserialize, BorshSerialize};
-use solana_program::hash::HASH_BYTES;
 use solana_pubkey::Pubkey;
 
 #[derive(BorshSerialize, BorshDeserialize, Debug, Clone)]

@@ -1,18 +1,10 @@
-use std::{future::Future, ptr::write, sync::Arc, time::Duration};
+use std::time::Duration;
 
 use anyhow::anyhow;
 use borsh::BorshDeserialize;
 use futures_util::future::{join, join_all};
 use log::{error, warn};
-use magicblock_committor_program::{
-    instruction_builder::{
-        init_buffer::{create_init_ix, CreateInitIxArgs},
-        realloc_buffer::{
-            create_realloc_buffer_ixs, CreateReallocBufferIxArgs,
-        },
-    },
-    Chunks, CommitableAccount,
-};
+use magicblock_committor_program::{Chunks, CommitableAccount};
 use magicblock_rpc_client::{
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
     MagicblockRpcClient,
@@ -22,7 +14,6 @@ use solana_account::ReadableAccount;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::client_error::reqwest::Version;
 use solana_sdk::{
-    hash::Hash,
     instruction::Instruction,
     message::{
         v0::Message, AddressLookupTableAccount, CompileError, VersionedMessage,
@@ -31,18 +22,15 @@ use solana_sdk::{
     signer::{Signer, SignerError},
     transaction::VersionedTransaction,
 };
-use tokio::{task::JoinSet, time::sleep};
+use tokio::time::sleep;
 
 use crate::{
-    consts::MAX_WRITE_CHUNK_SIZE,
-    error::{CommitAccountError, CommitAccountResult},
-    persist::CommitStrategy,
     transaction_preperator::{
         error::PreparatorResult,
         task_strategist::TransactionStrategy,
-        tasks::{CommitTask, L1Task, TaskPreparationInfo},
+        tasks::{L1Task, TaskPreparationInfo},
     },
-    CommitInfo, ComputeBudgetConfig,
+    ComputeBudgetConfig,
 };
 
 pub struct DeliveryPreparationResult {
@@ -218,28 +206,25 @@ impl DeliveryPreparator {
             return Err(Error::InternalError(err));
         }
 
-        let mut join_set = JoinSet::new();
         let missing_chunks = chunks.get_missing_chunks();
-        for missing_index in missing_chunks {
-            let instruction = write_instructions[missing_index].clone();
-            let mut instructions = self
-                .compute_budget_config
-                .buffer_write
-                .instructions(instruction.data.len());
-            instructions.push(instruction);
+        let chunks_write_instructions = missing_chunks
+            .into_iter()
+            .map(|missing_index| {
+                let instruction = write_instructions[missing_index].clone();
+                let mut instructions = self
+                    .compute_budget_config
+                    .buffer_write
+                    .instructions(instruction.data.len());
+                instructions.push(instruction);
+                instructions
+            })
+            .collect::<Vec<_>>();
 
-            // TODO: replace with join_all
-            join_set.spawn(async move {
-                self.send_ixs_with_retry::<2>(&instructions, authority)
-                    .await
-                    .inspect_err(|err| {
-                        error!("Error writing into buffect account: {:?}", err)
-                    })
-            });
-        }
+        let fut_iter = chunks_write_instructions.iter().map(|instructions| {
+            self.send_ixs_with_retry::<2>(instructions.as_slice(), authority)
+        });
 
-        join_set
-            .join_all()
+        join_all(fut_iter)
             .await
             .into_iter()
             .collect::<Result<Vec<_>, _>>()?;

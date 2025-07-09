@@ -4,16 +4,10 @@ use magicblock_core::magic_program;
 use serde::{Deserialize, Serialize};
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
-    clock::Slot,
-    hash::Hash,
     pubkey::Pubkey,
-    transaction::Transaction,
 };
 
-use crate::magic_scheduled_l1_message::{
-    CommitAndUndelegate, CommitType, CommittedAccountV2, MagicL1Message,
-    ScheduledL1Message, ShortAccountMeta, UndelegateType,
-};
+use crate::magic_scheduled_l1_message::ScheduledL1Message;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FeePayerAccount {

@@ -80,7 +80,7 @@ impl TaskStrategist {
         // Create heap size -> index
         let sizes = ixs
             .iter()
-            .map(|ix| borsh::object_length(ix))
+            .map(|ix| bincode::serialized_size(ix).map(|size| size as usize))
             .collect::<Result<Vec<usize>, _>>()
             .unwrap();
 
@@ -117,7 +117,8 @@ impl TaskStrategist {
                     // TODO(edwin): this is expensive
                     let new_ix =
                         tasks[index].instruction(&Pubkey::new_unique());
-                    let new_ix_size = borsh::object_length(&new_ix).unwrap(); // TODO(edwin): unwrap
+                    let new_ix_size =
+                        bincode::serialized_size(&new_ix).unwrap() as usize; // TODO(edwin): unwrap
                     let new_tx = Self::assemble_tx_with_budget(&tasks);
 
                     map.push((new_ix_size, index));
