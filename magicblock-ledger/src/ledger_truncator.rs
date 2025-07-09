@@ -47,6 +47,9 @@ impl<T: FinalityProvider> LedgerTrunctationWorker<T> {
     }
 
     pub async fn run(self) {
+        self.ledger
+            .initialize_lowest_cleanup_slot()
+            .expect("Lowest cleanup slot initialization");
         let mut interval = interval(self.truncation_time_interval);
         loop {
             tokio::select! {

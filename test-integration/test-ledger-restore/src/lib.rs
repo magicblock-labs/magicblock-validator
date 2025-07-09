@@ -1,5 +1,11 @@
 use solana_rpc_client::rpc_client::RpcClient;
-use std::{fs, path::Path, process, process::Child};
+use std::{
+    fs,
+    path::Path,
+    process::{self, Child},
+    thread::sleep,
+    time::Duration,
+};
 
 use integration_test_tools::{
     expect,
@@ -377,4 +383,10 @@ macro_rules! assert_counter_state {
             $crate::cleanup($validator)
         );
     };
+}
+
+pub fn wait_for_cloned_accounts_hydration() {
+    // NOTE: account hydration runs in the background _after_ the validator starts up
+    // thus we need to wait for that to complete before we can send this transaction
+    sleep(Duration::from_secs(5));
 }

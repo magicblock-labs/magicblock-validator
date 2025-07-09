@@ -1,12 +1,12 @@
 #![cfg(test)]
 
+use std::{collections::HashMap, sync::Arc};
+
 use log::*;
 use magicblock_committor_program::ChangedAccount;
-use std::{collections::HashMap, sync::Arc};
-use test_tools_core::init_logger;
-
 use solana_pubkey::Pubkey;
 use solana_sdk::hash::Hash;
+use test_tools_core::init_logger;
 
 use crate::{
     persist::{
@@ -139,9 +139,8 @@ mod successes {
 }
 
 mod failures {
-    use crate::retry::retry_service::RetryKind;
-
     use super::*;
+    use crate::retry::retry_service::RetryKind;
 
     #[tokio::test]
     async fn test_retry_single_totally_failed_commit() {

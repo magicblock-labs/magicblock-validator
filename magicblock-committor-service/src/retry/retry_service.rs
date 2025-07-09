@@ -1,20 +1,19 @@
-use log::*;
-use solana_sdk::hash::Hash;
 use std::{collections::HashMap, sync::Arc, time::Duration};
 
+use log::*;
 use magicblock_committor_program::Changeset;
 use solana_pubkey::Pubkey;
+use solana_sdk::hash::Hash;
 use tokio::task::JoinSet;
-
-use crate::{
-    error::{CommittorServiceError, CommittorServiceResult},
-    transactions::close_buffers_ix,
-    ChangesetCommittor,
-};
 
 use super::{
     previous_commit_state::PreviousCommitState,
     retry_steps::{RetryChangeset, RetryStep, RetrySteps},
+};
+use crate::{
+    error::{CommittorServiceError, CommittorServiceResult},
+    transactions::close_buffers_ix,
+    ChangesetCommittor,
 };
 
 #[derive(Default)]

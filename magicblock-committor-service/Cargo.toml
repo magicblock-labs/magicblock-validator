@@ -11,6 +11,7 @@ edition.workspace = true
 doctest = false
 
 [dependencies]
+async-trait = { workspace = true }
 base64 = { workspace = true }
 bincode = { workspace = true }
 borsh = { workspace = true }

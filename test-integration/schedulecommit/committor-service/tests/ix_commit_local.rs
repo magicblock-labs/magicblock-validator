@@ -1,9 +1,11 @@
 use log::*;
+use magicblock_committor_service::error::CommittorServiceResult;
 use magicblock_committor_service::{ChangesetCommittor, ComputeBudgetConfig};
 use magicblock_rpc_client::MagicblockRpcClient;
 use std::collections::{HashMap, HashSet};
 use std::time::{Duration, Instant};
 use test_tools_core::init_logger;
+use tokio::sync::oneshot;
 use tokio::task::JoinSet;
 use utils::transactions::tx_logs_contain;
 
@@ -351,6 +353,42 @@ async fn test_ix_commit_two_accounts_1kb_2kb() {
 }
 
 #[tokio::test]
+async fn test_ix_commit_two_accounts_512kb() {
+    init_logger!();
+    commit_multiple_accounts(
+        &[512, 512],
+        1,
+        expect_strategies(&[(CommitStrategy::Args, 2)]),
+        false,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_three_accounts_512kb() {
+    init_logger!();
+    commit_multiple_accounts(
+        &[512, 512, 512],
+        1,
+        expect_strategies(&[(CommitStrategy::Args, 3)]),
+        false,
+    )
+    .await;
+}
+
+#[tokio::test]
+async fn test_ix_commit_six_accounts_512kb() {
+    init_logger!();
+    commit_multiple_accounts(
+        &[512, 512, 512, 512, 512, 512],
+        1,
+        expect_strategies(&[(CommitStrategy::Args, 6)]),
+        false,
+    )
+    .await;
+}
+
+#[tokio::test]
 async fn test_ix_commit_four_accounts_1kb_2kb_5kb_10kb_single_bundle() {
     init_logger!();
     commit_multiple_accounts(
@@ -598,9 +636,11 @@ async fn commit_multiple_accounts(
             join_set.spawn(service.reserve_common_pubkeys());
             let owners = changeset.owners();
             for committee in changeset.account_keys().iter() {
-                join_set.spawn(service.reserve_pubkeys_for_committee(
-                    **committee,
-                    *owners.get(committee).unwrap(),
+                join_set.spawn(map_to_unit(
+                    service.reserve_pubkeys_for_committee(
+                        **committee,
+                        *owners.get(committee).unwrap(),
+                    ),
                 ));
             }
             debug!(
@@ -619,6 +659,12 @@ async fn commit_multiple_accounts(
         )
         .await;
     }
+}
+
+async fn map_to_unit(
+    res: oneshot::Receiver<CommittorServiceResult<Instant>>,
+) -> Result<CommittorServiceResult<()>, oneshot::error::RecvError> {
+    res.await.map(|res| res.map(|_| ()))
 }
 
 // TODO(thlorenz): once delegation program supports larger commits add the following

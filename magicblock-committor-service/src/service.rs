@@ -1,12 +1,20 @@
 use std::{
     collections::{HashMap, HashSet},
     path::Path,
+    sync::Arc,
+    time::Instant,
 };
 
+use async_trait::async_trait;
 use log::*;
 use magicblock_committor_program::Changeset;
-use solana_pubkey::Pubkey;
-use solana_sdk::{hash::Hash, instruction::Instruction, signature::Keypair};
+use magicblock_rpc_client::MagicblockRpcClient;
+use solana_sdk::{
+    hash::Hash,
+    instruction::Instruction,
+    signature::{Keypair, Signature},
+};
+use solana_transaction_status_client_types::EncodedConfirmedTransactionWithStatusMeta;
 use tokio::{
     select,
     sync::{
@@ -19,7 +27,7 @@ use tokio_util::sync::CancellationToken;
 use crate::{
     commit::CommittorProcessor,
     config::ChainConfig,
-    error::CommittorServiceResult,
+    error::{CommittorServiceError, CommittorServiceResult},
     persist::{BundleSignatureRow, CommitStatusRow},
     pubkeys_provider::{provide_committee_pubkeys, provide_common_pubkeys},
 };
@@ -33,8 +41,11 @@ pub struct LookupTables {
 #[derive(Debug)]
 pub enum CommittorMessage {
     ReservePubkeysForCommittee {
-        /// Called once the pubkeys have been reserved
-        respond_to: oneshot::Sender<CommittorServiceResult<()>>,
+        /// When the request was initiated
+        initiated: Instant,
+        /// Called once the pubkeys have been reserved and includes that timestamp
+        /// at which the request was initiated
+        respond_to: oneshot::Sender<CommittorServiceResult<Instant>>,
         /// The committee whose pubkeys to reserve in a lookup table
         /// These pubkeys are used to process/finalize the commit
         committee: Pubkey,
@@ -112,6 +123,12 @@ pub enum CommittorMessage {
     GetLookupTables {
         respond_to: oneshot::Sender<LookupTables>,
     },
+    GetTransaction {
+        respond_to: oneshot::Sender<
+            CommittorServiceResult<EncodedConfirmedTransactionWithStatusMeta>,
+        >,
+        signature: Signature,
+    },
 }
 
 // -----------------
@@ -119,7 +136,7 @@ pub enum CommittorMessage {
 // -----------------
 struct CommittorActor {
     receiver: mpsc::Receiver<CommittorMessage>,
-    processor: CommittorProcessor,
+    processor: Arc<CommittorProcessor>,
 }
 
 impl CommittorActor {
@@ -132,8 +149,11 @@ impl CommittorActor {
     where
         P: AsRef<Path>,
     {
-        let processor =
-            CommittorProcessor::try_new(authority, persist_file, chain_config)?;
+        let processor = Arc::new(CommittorProcessor::try_new(
+            authority,
+            persist_file,
+            chain_config,
+        )?);
         Ok(Self {
             receiver,
             processor,
@@ -144,32 +164,49 @@ impl CommittorActor {
         use CommittorMessage::*;
         match msg {
             ReservePubkeysForCommittee {
+                initiated,
                 respond_to,
                 committee,
                 owner,
             } => {
-                let pubkeys =
-                    provide_committee_pubkeys(&committee, Some(&owner));
-                let reqid = self.processor.reserve_pubkeys(pubkeys).await;
-                if let Err(e) = respond_to.send(reqid) {
-                    error!("Failed to send response {:?}", e);
-                }
+                let processor = self.processor.clone();
+                tokio::task::spawn(async move {
+                    let pubkeys =
+                        provide_committee_pubkeys(&committee, Some(&owner));
+                    // NOTE: we wait here until the reservation is done which causes the
+                    // cloning of a particular account to be blocked.
+                    // This leads to larger delays on the first clone of an account, but also
+                    // ensures that the account could be committed via a lookup table later.
+                    let result = processor
+                        .reserve_pubkeys(pubkeys)
+                        .await
+                        .map(|_| initiated);
+                    if let Err(e) = respond_to.send(result) {
+                        error!("Failed to send response {:?}", e);
+                    }
+                });
             }
             ReserveCommonPubkeys { respond_to } => {
-                let pubkeys =
-                    provide_common_pubkeys(&self.processor.auth_pubkey());
-                let reqid = self.processor.reserve_pubkeys(pubkeys).await;
-                if let Err(e) = respond_to.send(reqid) {
-                    error!("Failed to send response {:?}", e);
-                }
+                let processor = self.processor.clone();
+                tokio::task::spawn(async move {
+                    let pubkeys =
+                        provide_common_pubkeys(&processor.auth_pubkey());
+                    let reqid = processor.reserve_pubkeys(pubkeys).await;
+                    if let Err(e) = respond_to.send(reqid) {
+                        error!("Failed to send response {:?}", e);
+                    }
+                });
             }
             ReleaseCommonPubkeys { respond_to } => {
-                let pubkeys =
-                    provide_common_pubkeys(&self.processor.auth_pubkey());
-                self.processor.release_pubkeys(pubkeys).await;
-                if let Err(e) = respond_to.send(()) {
-                    error!("Failed to send response {:?}", e);
-                }
+                let processor = self.processor.clone();
+                tokio::task::spawn(async move {
+                    let pubkeys =
+                        provide_common_pubkeys(&processor.auth_pubkey());
+                    processor.release_pubkeys(pubkeys).await;
+                    if let Err(e) = respond_to.send(()) {
+                        error!("Failed to send response {:?}", e);
+                    }
+                });
             }
             CommitChangeset {
                 changeset,
@@ -177,13 +214,19 @@ impl CommittorActor {
                 respond_to,
                 finalize,
             } => {
-                let reqid = self
-                    .processor
-                    .commit_changeset(changeset, finalize, ephemeral_blockhash)
-                    .await;
-                if let Err(e) = respond_to.send(reqid) {
-                    error!("Failed to send response {:?}", e);
-                }
+                let processor = self.processor.clone();
+                tokio::task::spawn(async move {
+                    let reqid = processor
+                        .commit_changeset(
+                            changeset,
+                            finalize,
+                            ephemeral_blockhash,
+                        )
+                        .await;
+                    if let Err(e) = respond_to.send(reqid) {
+                        error!("Failed to send response {:?}", e);
+                    }
+                });
             }
             RecommitChangeset {
                 reqid,
@@ -258,15 +301,34 @@ impl CommittorActor {
                 }
             }
             GetLookupTables { respond_to } => {
-                let active_tables = self.processor.active_lookup_tables().await;
-                let released_tables =
-                    self.processor.released_lookup_tables().await;
-                if let Err(e) = respond_to.send(LookupTables {
-                    active: active_tables,
-                    released: released_tables,
-                }) {
-                    error!("Failed to send response {:?}", e);
-                }
+                let processor = self.processor.clone();
+                tokio::task::spawn(async move {
+                    let active_tables = processor.active_lookup_tables().await;
+                    let released_tables =
+                        processor.released_lookup_tables().await;
+                    if let Err(e) = respond_to.send(LookupTables {
+                        active: active_tables,
+                        released: released_tables,
+                    }) {
+                        error!("Failed to send response {:?}", e);
+                    }
+                });
+            }
+            GetTransaction {
+                signature,
+                respond_to,
+            } => {
+                let processor = self.processor.clone();
+                tokio::task::spawn(async move {
+                    let res = processor
+                        .magicblock_rpc_client
+                        .get_transaction(&signature, None)
+                        .await
+                        .map_err(Into::into);
+                    if let Err(err) = respond_to.send(res) {
+                        error!( "Failed to send response for GetTransactionLogs: {:?}", err);
+                    }
+                });
             }
         }
     }
@@ -295,6 +357,8 @@ impl CommittorActor {
 pub struct CommittorService {
     sender: mpsc::Sender<CommittorMessage>,
     cancel_token: CancellationToken,
+    #[allow(unused)]
+    chain_config: ChainConfig,
 }
 
 impl CommittorService {
@@ -315,7 +379,7 @@ impl CommittorService {
                 receiver,
                 authority,
                 persist_file,
-                chain_config,
+                chain_config.clone(),
             )?;
             tokio::spawn(async move {
                 actor.run(cancel_token).await;
@@ -324,6 +388,7 @@ impl CommittorService {
         Ok(Self {
             sender,
             cancel_token,
+            chain_config,
         })
     }
 
@@ -384,14 +449,16 @@ impl CommittorService {
     }
 }
 
+#[async_trait]
 impl ChangesetCommittor for CommittorService {
     fn reserve_pubkeys_for_committee(
         &self,
         committee: Pubkey,
         owner: Pubkey,
-    ) -> oneshot::Receiver<CommittorServiceResult<()>> {
+    ) -> oneshot::Receiver<CommittorServiceResult<Instant>> {
         let (tx, rx) = oneshot::channel();
         self.try_send(CommittorMessage::ReservePubkeysForCommittee {
+            initiated: Instant::now(),
             respond_to: tx,
             committee,
             owner,
@@ -514,15 +581,42 @@ impl ChangesetCommittor for CommittorService {
         let (_tx, rx) = oneshot::channel();
         rx
     }
+
+    async fn get_transaction_logs(
+        &self,
+        signature: &Signature,
+    ) -> CommittorServiceResult<Option<Vec<String>>> {
+        let (tx, rx) = oneshot::channel();
+        self.try_send(CommittorMessage::GetTransaction {
+            respond_to: tx,
+            signature: *signature,
+        });
+        let tx = rx.await.map_err(CommittorServiceError::RecvError)??;
+        Ok(MagicblockRpcClient::get_logs_from_transaction(tx))
+    }
+
+    async fn get_transaction_cus(
+        &self,
+        signature: &Signature,
+    ) -> CommittorServiceResult<Option<u64>> {
+        let (tx, rx) = oneshot::channel();
+        self.try_send(CommittorMessage::GetTransaction {
+            respond_to: tx,
+            signature: *signature,
+        });
+        let tx = rx.await.map_err(CommittorServiceError::RecvError)??;
+        Ok(MagicblockRpcClient::get_cus_from_transaction(tx))
+    }
 }
 
+#[async_trait]
 pub trait ChangesetCommittor: Send + Sync + 'static {
     /// Reserves pubkeys used in most commits in a lookup table
     fn reserve_pubkeys_for_committee(
         &self,
         committee: Pubkey,
         owner: Pubkey,
-    ) -> oneshot::Receiver<CommittorServiceResult<()>>;
+    ) -> oneshot::Receiver<CommittorServiceResult<Instant>>;
 
     /// Commits the changeset and returns the reqid
     fn commit_changeset(
@@ -584,4 +678,14 @@ pub trait ChangesetCommittor: Send + Sync + 'static {
         &self,
         ixs: Vec<Instruction>,
     ) -> oneshot::Receiver<CommittorServiceResult<()>>;
+
+    async fn get_transaction_logs(
+        &self,
+        signature: &Signature,
+    ) -> CommittorServiceResult<Option<Vec<String>>>;
+
+    async fn get_transaction_cus(
+        &self,
+        signature: &Signature,
+    ) -> CommittorServiceResult<Option<u64>>;
 }

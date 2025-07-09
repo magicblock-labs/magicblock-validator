@@ -1,4 +1,5 @@
 use solana_pubkey::Pubkey;
+use solana_sdk::signature::Signature;
 use thiserror::Error;
 
 pub type TableManiaResult<T> = std::result::Result<T, TableManiaError>;
@@ -24,4 +25,14 @@ pub enum TableManiaError {
 
     #[error("Timed out waiting for local tables to update: {0}")]
     TimedOutWaitingForLocalTablesToUpdate(String),
+}
+
+impl TableManiaError {
+    /// Returns a signature related to this error if available.
+    pub fn signature(&self) -> Option<Signature> {
+        match self {
+            TableManiaError::MagicBlockRpcClientError(err) => err.signature(),
+            _ => None,
+        }
+    }
 }

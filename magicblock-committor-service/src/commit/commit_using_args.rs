@@ -118,7 +118,7 @@ impl CommittorProcessor {
         {
             Ok(sig) => sig,
             Err(err) => {
-                error!("Failed to commit changeset using args: {:?}", err);
+                error!("Failed to commit changeset with {} accounts using args: {:?}", committees.len(), err);
                 let strategy = CommitStrategy::args(use_lookup);
                 let sigs = err.signature().map(|sig| CommitSignatures {
                     process_signature: sig,

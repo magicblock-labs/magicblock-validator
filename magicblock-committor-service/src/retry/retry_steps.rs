@@ -1,16 +1,14 @@
-use solana_sdk::hash::Hash;
 use std::ops::Deref;
 
 use magicblock_committor_program::{ChangedAccount, Changeset};
 use solana_pubkey::Pubkey;
-use solana_sdk::clock::Slot;
+use solana_sdk::{clock::Slot, hash::Hash};
 
+use super::previous_commit_state::PreviousCommitState;
 use crate::{
     error::{CommittorServiceError, CommittorServiceResult},
     persist::CommitType,
 };
-
-use super::previous_commit_state::PreviousCommitState;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum RetryStep {

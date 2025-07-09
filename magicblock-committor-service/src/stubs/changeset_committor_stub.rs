@@ -1,13 +1,14 @@
-use log::*;
 use std::{
     collections::{HashMap, HashSet},
     sync::{
         atomic::{AtomicU64, Ordering},
         Arc, Mutex,
     },
-    time::{SystemTime, UNIX_EPOCH},
+    time::{Instant, SystemTime, UNIX_EPOCH},
 };
 
+use async_trait::async_trait;
+use log::*;
 use magicblock_committor_program::Changeset;
 use solana_pubkey::Pubkey;
 use solana_sdk::{hash::Hash, instruction::Instruction, signature::Signature};
@@ -76,6 +77,7 @@ impl ChangesetCommittorStub {
     }
 }
 
+#[async_trait]
 impl ChangesetCommittor for ChangesetCommittorStub {
     fn commit_changeset(
         &self,
@@ -245,14 +247,15 @@ impl ChangesetCommittor for ChangesetCommittorStub {
         &self,
         committee: Pubkey,
         owner: Pubkey,
-    ) -> oneshot::Receiver<CommittorServiceResult<()>> {
+    ) -> oneshot::Receiver<CommittorServiceResult<Instant>> {
+        let initiated = Instant::now();
         let (tx, rx) =
-            tokio::sync::oneshot::channel::<CommittorServiceResult<()>>();
+            tokio::sync::oneshot::channel::<CommittorServiceResult<Instant>>();
         self.reserved_pubkeys_for_committee
             .lock()
             .unwrap()
             .insert(committee, owner);
-        tx.send(Ok(())).unwrap_or_else(|_| {
+        tx.send(Ok(initiated)).unwrap_or_else(|_| {
             error!("Failed to send response");
         });
         rx
@@ -303,6 +306,20 @@ impl ChangesetCommittor for ChangesetCommittorStub {
             error!("Failed to send run_validator_signed_ixs response");
         });
         rx
+    }
+
+    async fn get_transaction_logs(
+        &self,
+        _signature: &Signature,
+    ) -> CommittorServiceResult<Option<Vec<String>>> {
+        Ok(None)
+    }
+
+    async fn get_transaction_cus(
+        &self,
+        _signature: &Signature,
+    ) -> CommittorServiceResult<Option<u64>> {
+        Ok(None)
     }
 }
 

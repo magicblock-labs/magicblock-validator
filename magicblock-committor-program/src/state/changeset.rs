@@ -5,12 +5,11 @@ use solana_account::{Account, AccountSharedData, ReadableAccount};
 use solana_program::clock::Slot;
 use solana_pubkey::Pubkey;
 
-use crate::error::{CommittorError, CommittorResult};
-
 use super::{
     changeset_chunks::{ChangesetChunks, ChangesetChunksIter},
     chunks::Chunks,
 };
+use crate::error::{CommittorError, CommittorResult};
 
 // -----------------
 // ChangedAccount

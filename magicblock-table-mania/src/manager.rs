@@ -23,6 +23,7 @@ use tokio::{
 use crate::{
     error::{TableManiaError, TableManiaResult},
     lookup_table_rc::{LookupTableRc, MAX_ENTRIES_AS_PART_OF_EXTEND},
+    TableManiaComputeBudget, TableManiaComputeBudgets,
 };
 
 // -----------------
@@ -55,6 +56,7 @@ pub struct TableMania {
     authority_pubkey: Pubkey,
     pub rpc_client: MagicblockRpcClient,
     randomize_lookup_table_slot: bool,
+    compute_budgets: TableManiaComputeBudgets,
 }
 
 impl TableMania {
@@ -69,6 +71,7 @@ impl TableMania {
             authority_pubkey: authority.pubkey(),
             rpc_client,
             randomize_lookup_table_slot: randomize_lookup_table_slot(),
+            compute_budgets: TableManiaComputeBudgets::default(),
         };
         if let Some(config) = garbage_collector_config {
             Self::launch_garbage_collector(
@@ -76,6 +79,8 @@ impl TableMania {
                 authority,
                 me.released_tables.clone(),
                 config,
+                me.compute_budgets.deactivate.clone(),
+                me.compute_budgets.close.clone(),
             );
         }
         me
@@ -270,8 +275,7 @@ impl TableMania {
             remaining_len,
             table.table_address()
         );
-        let Some(table_addresses_count) = table.pubkeys().map(|x| x.len())
-        else {
+        if table.is_deactivated() {
             return Err(TableManiaError::CannotExtendDeactivatedTable(
                 *table.table_address(),
             ));
@@ -279,7 +283,12 @@ impl TableMania {
 
         let storing = remaining[..storing_len].to_vec();
         let stored = table
-            .extend_respecting_capacity(&self.rpc_client, authority, &storing)
+            .extend_respecting_capacity(
+                &self.rpc_client,
+                authority,
+                &storing,
+                &self.compute_budgets.extend,
+            )
             .await?;
         trace!("Stored {}", stored.len());
         tables_used.insert(*table.table_address());
@@ -288,10 +297,19 @@ impl TableMania {
         let stored_count = remaining_len - remaining.len();
         trace!("Stored {}, remaining: {}", stored_count, remaining.len());
 
-        debug_assert_eq!(
-            table_addresses_count + stored_count,
-            table.pubkeys().unwrap().len()
-        );
+        #[cfg(debug_assertions)]
+        {
+            for pk in &stored {
+                if !table.contains_key(pk) {
+                    panic!(
+                        "Pubkey {pk} stored as part of {} was not extended in table {} with {} items.",
+                        stored.len(),
+                        table.table_address(),
+                        table.pubkeys().map(|x| x.len()).unwrap_or(0)
+                    );
+                }
+            }
+        }
 
         Ok(())
     }
@@ -328,6 +346,7 @@ impl TableMania {
             slot,
             SUB_SLOT.load(Ordering::Relaxed),
             &pubkeys[..len],
+            &self.compute_budgets.init,
         )
         .await?;
         pubkeys.retain_mut(|pk| !table.contains_key(pk));
@@ -555,12 +574,13 @@ impl TableMania {
     // The next cycle will try the operation again so in case chain was congested
     // the problem should resolve itself.
     // Otherwise we can run a tool later to manually deactivate + close tables.
-
     fn launch_garbage_collector(
         rpc_client: &MagicblockRpcClient,
         authority: &Keypair,
         released_tables: Arc<Mutex<Vec<LookupTableRc>>>,
         config: GarbageCollectorConfig,
+        deactivate_compute_budget: TableManiaComputeBudget,
+        close_compute_budget: TableManiaComputeBudget,
     ) -> tokio::task::JoinHandle<()> {
         let rpc_client = rpc_client.clone();
         let authority = authority.insecure_clone();
@@ -583,6 +603,7 @@ impl TableMania {
                         &rpc_client,
                         &authority,
                         &released_tables,
+                        &deactivate_compute_budget,
                     )
                     .await;
                     last_deactivate = now;
@@ -599,6 +620,7 @@ impl TableMania {
                         &rpc_client,
                         &authority,
                         &released_tables,
+                        &close_compute_budget,
                     )
                     .await;
                     last_close = now;
@@ -618,6 +640,7 @@ impl TableMania {
         rpc_client: &MagicblockRpcClient,
         authority: &Keypair,
         released_tables: &Mutex<Vec<LookupTableRc>>,
+        compute_budget: &TableManiaComputeBudget,
     ) {
         for table in released_tables
             .lock()
@@ -627,15 +650,16 @@ impl TableMania {
         {
             // We don't bubble errors as there is no reasonable way to handle them.
             // Instead the next GC cycle will try again to deactivate the table.
-            let _ = table.deactivate(rpc_client, authority).await.inspect_err(
-                |err| {
+            let _ = table
+                .deactivate(rpc_client, authority, compute_budget)
+                .await
+                .inspect_err(|err| {
                     error!(
                         "Error deactivating table {}: {:?}",
                         table.table_address(),
                         err
                     )
-                },
-            );
+                });
         }
     }
 
@@ -644,6 +668,7 @@ impl TableMania {
         rpc_client: &MagicblockRpcClient,
         authority: &Keypair,
         released_tables: &Mutex<Vec<LookupTableRc>>,
+        compute_budget: &TableManiaComputeBudget,
     ) {
         let Ok(latest_slot) = rpc_client
             .get_slot()
@@ -666,10 +691,15 @@ impl TableMania {
                 // We don't bubble errors as there is no reasonable way to handle them.
                 // Instead the next GC cycle will try again to close the table.
                 match deactivated_table
-                    .close(rpc_client, authority, Some(latest_slot))
+                    .close(
+                        rpc_client,
+                        authority,
+                        Some(latest_slot),
+                        compute_budget,
+                    )
                     .await
                 {
-                    Ok(closed) if closed => {
+                    Ok((closed, _)) if closed => {
                         closed_tables.push(*deactivated_table.table_address())
                     }
                     Ok(_) => {

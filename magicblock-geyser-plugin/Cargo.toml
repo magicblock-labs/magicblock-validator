@@ -14,12 +14,12 @@ bs58 = { workspace = true }
 expiring-hashmap = { workspace = true }
 geyser-grpc-proto = { workspace = true }
 hostname = { workspace = true }
-flume = "0.11"
+flume = { workspace = true }
 log = { workspace = true }
 serde = { workspace = true }
 serde_json = { workspace = true }
 magicblock-transaction-status = { workspace = true }
-scc = "2.3" 
+scc = "2.3"
 solana-geyser-plugin-interface = { workspace = true }
 solana-sdk = { workspace = true }
 spl-token-2022 = { workspace = true, features = ["no-entrypoint"] }

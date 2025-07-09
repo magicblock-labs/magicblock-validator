@@ -56,7 +56,6 @@ fn setup_with_lifecycle(
         Some(changeset_committor_stub),
         None,
         HashSet::new(),
-        Some(1_000_000_000),
         ValidatorCollectionMode::NoFees,
         lifecycle.to_account_cloner_permissions(),
         Pubkey::new_unique(),
@@ -66,10 +65,11 @@ fn setup_with_lifecycle(
         RemoteAccountClonerClient::new(&remote_account_cloner_worker);
     let remote_account_cloner_worker_handle = {
         let cloner_cancellation_token = cancellation_token.clone();
-        tokio::spawn(
+        tokio::spawn(async move {
             remote_account_cloner_worker
-                .start_clone_request_processing(cloner_cancellation_token),
-        )
+                .start_clone_request_processing(cloner_cancellation_token)
+                .await
+        })
     };
 
     let external_account_manager = ExternalAccountsManager {
@@ -463,7 +463,7 @@ async fn test_ensure_one_delegated_and_one_feepayer_account_writable() {
     assert!(account_dumper.was_dumped_as_delegated_account(&delegated_account));
     assert!(manager.last_commit(&delegated_account).is_some());
 
-    assert!(account_dumper.was_dumped_as_feepayer_account(&feepayer_account));
+    assert!(account_dumper.was_dumped_as_undelegated_account(&feepayer_account));
     assert!(manager.last_commit(&feepayer_account).is_none());
 
     // Cleanup

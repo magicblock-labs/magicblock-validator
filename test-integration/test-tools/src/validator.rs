@@ -128,6 +128,10 @@ pub fn start_test_validator_with_config(
 
     args.extend(account_args);
 
+    let mut script = "#!/bin/bash\nsolana-test-validator".to_string();
+    for arg in &args {
+        script.push_str(&format!(" \\\n  {}", arg));
+    }
     let mut command = process::Command::new("solana-test-validator");
     command
         .args(args)
@@ -136,6 +140,7 @@ pub fn start_test_validator_with_config(
         .current_dir(root_dir);
 
     eprintln!("Starting test validator with {:?}", command);
+    eprintln!("{}", script);
     let validator = command.spawn().expect("Failed to start validator");
     wait_for_validator(validator, port)
 }

@@ -68,12 +68,47 @@ pub fn main() {
     assert_cargo_tests_passed(magicblock_pubsub_output);
 }
 
+fn should_run_test(test_name: &str) -> bool {
+    let run = std::env::var("RUN_TESTS")
+        .map(|tests| tests.split(',').any(|t| t.trim() == test_name))
+        .unwrap_or(true);
+
+    if !run {
+        eprintln!("Skipping {test_name} since the RUN_TESTS env var does not include it");
+        return false;
+    }
+
+    let skip = std::env::var("SKIP_TESTS")
+        .map(|tests| tests.split(',').any(|t| t.trim() == test_name))
+        .unwrap_or(false);
+
+    if skip {
+        eprintln!(
+            "Skipping {test_name} since the SKIP_TESTS env var includes it"
+        );
+        false
+    } else {
+        true
+    }
+}
+
+fn success_output() -> Output {
+    Output {
+        status: process::ExitStatus::default(),
+        stdout: vec![],
+        stderr: vec![],
+    }
+}
+
 // -----------------
 // Tests
 // -----------------
 fn run_restore_ledger_tests(
     manifest_dir: &str,
 ) -> Result<Output, Box<dyn Error>> {
+    if !should_run_test("restore_ledger") {
+        return Ok(success_output());
+    }
     eprintln!("======== RUNNING RESTORE LEDGER TESTS ========");
     let loaded_chain_accounts =
         LoadedAccounts::with_delegation_program_test_authority();
@@ -112,6 +147,14 @@ fn run_table_mania_and_committor_tests(
 ) -> Result<(Output, Output), Box<dyn Error>> {
     eprintln!("======== Starting DEVNET Validator for TableMania and Committor ========");
 
+    let (run_table_mania, run_committor) =
+        (should_run_test("table_mania"), should_run_test("committor"));
+
+    if !run_table_mania && !run_committor {
+        eprintln!("Skipping table mania and committor tests");
+        return Ok((success_output(), success_output()));
+    }
+
     let loaded_chain_accounts =
         LoadedAccounts::with_delegation_program_test_authority();
 
@@ -129,9 +172,10 @@ fn run_table_mania_and_committor_tests(
     // NOTE: the table mania and committor tests run directly against
     // a chain validator therefore no ephemeral validator needs to be started
 
-    let test_table_mania_dir =
-        format!("{}/../{}", manifest_dir, "test-table-mania");
-    let table_mania_test_output =
+    let table_mania_test_output = if run_table_mania {
+        let test_table_mania_dir =
+            format!("{}/../{}", manifest_dir, "test-table-mania");
+
         match run_test(test_table_mania_dir, Default::default()) {
             Ok(output) => output,
             Err(err) => {
@@ -139,12 +183,18 @@ fn run_table_mania_and_committor_tests(
                 cleanup_devnet_only(&mut devnet_validator);
                 return Err(err.into());
             }
-        };
+        }
+    } else {
+        eprintln!("Skipping table mania tests");
+        success_output()
+    };
 
-    let test_committor_dir =
-        format!("{}/../{}", manifest_dir, "schedulecommit/committor-service");
-    eprintln!("Running committor tests in {}", test_committor_dir);
-    let committor_test_output =
+    let committor_test_output = if run_committor {
+        let test_committor_dir = format!(
+            "{}/../{}",
+            manifest_dir, "schedulecommit/committor-service"
+        );
+        eprintln!("Running committor tests in {}", test_committor_dir);
         match run_test(test_committor_dir, Default::default()) {
             Ok(output) => output,
             Err(err) => {
@@ -152,7 +202,12 @@ fn run_table_mania_and_committor_tests(
                 cleanup_devnet_only(&mut devnet_validator);
                 return Err(err.into());
             }
-        };
+        }
+    } else {
+        eprintln!("Skipping committor tests");
+        success_output()
+    };
+
     cleanup_devnet_only(&mut devnet_validator);
 
     Ok((table_mania_test_output, committor_test_output))
@@ -161,6 +216,9 @@ fn run_table_mania_and_committor_tests(
 fn run_schedule_commit_tests(
     manifest_dir: &str,
 ) -> Result<(Output, Output), Box<dyn Error>> {
+    if !should_run_test("schedulecommit") {
+        return Ok((success_output(), success_output()));
+    }
     eprintln!(
         "======== Starting DEVNET Validator for Scenarios + Security ========"
     );
@@ -233,6 +291,10 @@ fn run_schedule_commit_tests(
 fn run_issues_frequent_commmits_tests(
     manifest_dir: &str,
 ) -> Result<Output, Box<dyn Error>> {
+    if !should_run_test("issues_frequent_commmits") {
+        return Ok(success_output());
+    }
+
     eprintln!("======== RUNNING ISSUES TESTS - Frequent Commits ========");
     let loaded_chain_accounts =
         LoadedAccounts::with_delegation_program_test_authority();
@@ -279,6 +341,9 @@ fn run_issues_frequent_commmits_tests(
 }
 
 fn run_cloning_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
+    if !should_run_test("cloning") {
+        return Ok(success_output());
+    }
     eprintln!("======== RUNNING CLONING TESTS ========");
     let loaded_chain_accounts =
         LoadedAccounts::with_delegation_program_test_authority();
@@ -323,6 +388,9 @@ fn run_cloning_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
 fn run_magicblock_api_tests(
     manifest_dir: &str,
 ) -> Result<Output, Box<dyn Error>> {
+    if !should_run_test("magicblock_api") {
+        return Ok(success_output());
+    }
     let test_dir = format!("{}/../{}", manifest_dir, "test-magicblock-api");
     eprintln!("Running magicblock-api tests in {}", test_dir);
 
@@ -337,6 +405,9 @@ fn run_magicblock_api_tests(
 fn run_magicblock_pubsub_tests(
     manifest_dir: &str,
 ) -> Result<Output, Box<dyn Error>> {
+    if !should_run_test("pubsub") {
+        return Ok(success_output());
+    }
     let loaded_chain_accounts =
         LoadedAccounts::with_delegation_program_test_authority();
 

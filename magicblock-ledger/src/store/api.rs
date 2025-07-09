@@ -240,6 +240,26 @@ impl Ledger {
             .expect(Self::LOWEST_CLEANUP_SLOT_POISONED)
     }
 
+    /// Initializes lowest slot to cleanup from
+    pub fn initialize_lowest_cleanup_slot(&self) -> Result<(), LedgerError> {
+        match self.blockhash_cf.iter(IteratorMode::Start)?.next() {
+            Some((lowest_slot, _)) => {
+                *self
+                    .lowest_cleanup_slot
+                    .write()
+                    .expect(Self::LOWEST_CLEANUP_SLOT_POISONED) = lowest_slot;
+            }
+            None => {
+                *self
+                    .lowest_cleanup_slot
+                    .write()
+                    .expect(Self::LOWEST_CLEANUP_SLOT_POISONED) = 0;
+            }
+        }
+
+        Ok(())
+    }
+
     // -----------------
     // Block time
     // -----------------
