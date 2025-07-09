@@ -256,92 +256,6 @@ impl TasksBuilder for TaskBuilderV1 {
         l1_message: &ScheduledL1Message,
         rent_reimbursement: &Pubkey,
     ) -> Vec<Box<dyn L1Task>> {
-        fn commit_type_tasks(value: &CommitType) -> Vec<Box<dyn L1Task>> {
-            match value {
-                CommitType::Standalone(accounts) => accounts
-                    .into_iter()
-                    .map(|account| {
-                        Box::new(ArgsTask::Finalize(FinalizeTask {
-                            delegated_account: account.pubkey,
-                        }))
-                    })
-                    .collect(),
-                CommitType::WithL1Actions {
-                    committed_accounts,
-                    l1_actions,
-                } => {
-                    let mut tasks = committed_accounts
-                        .into_iter()
-                        .map(|account| {
-                            Box::new(ArgsTask::Finalize(FinalizeTask {
-                                delegated_account: account.pubkey,
-                            }))
-                        })
-                        .collect();
-
-                    tasks.extend(l1_actions.into_iter().map(|action| {
-                        Box::new(ArgsTask::L1Action(action.clone()))
-                    }));
-                    tasks
-                }
-            }
-        }
-
-        // TODO(edwin): improve
-        match &l1_message.l1_message {
-            MagicL1Message::L1Actions(_) => vec![],
-            MagicL1Message::Commit(value) => commit_type_tasks(value),
-            MagicL1Message::CommitAndUndelegate(t) => {
-                let mut commit_tasks = commit_type_tasks(&t.commit_action);
-                match &t.undelegate_action {
-                    UndelegateType::Standalone => {
-                        let accounts = t.get_committed_accounts();
-                        commit_tasks.extend(
-                            accounts
-                                .into_iter()
-                                .map(|account| {
-                                    ArgsTask::Undelegate(UndelegateTask {
-                                        delegated_account: account.pubkey,
-                                        owner_program: account.account.owner,
-                                        rent_reimbursement: *rent_reimbursement,
-                                    })
-                                })
-                                .map(Box::new),
-                        );
-                    }
-                    UndelegateType::WithL1Actions(actions) => {
-                        // tasks example: [Finalize(Acc1), Action, Undelegate(Acc1), Action]
-                        let accounts = t.get_committed_accounts();
-                        commit_tasks.extend(
-                            accounts
-                                .into_iter()
-                                .map(|account| {
-                                    ArgsTask::Undelegate(UndelegateTask {
-                                        delegated_account: account.pubkey,
-                                        owner_program: account.account.owner,
-                                        rent_reimbursement: *rent_reimbursement,
-                                    })
-                                })
-                                .map(Box::new),
-                        );
-                        commit_tasks.extend(
-                            actions
-                                .into_iter()
-                                .map(|action| Task::L1Action(action.clone())),
-                        );
-                    }
-                };
-
-                commit_tasks
-            }
-        }
-    }
-
-    /// Returns tasks for Finalize stage
-    fn finalize_tasks(
-        l1_message: &ScheduledL1Message,
-        rent_reimbursement: &Pubkey,
-    ) -> Vec<Box<dyn L1Task>> {
         // Helper to create a finalize task
         fn finalize_task(account: &CommittedAccountV2) -> Box<dyn L1Task> {
             Box::new(ArgsTask::Finalize(FinalizeTask {
@@ -350,11 +264,11 @@ impl TasksBuilder for TaskBuilderV1 {
         }
 
         // Helper to create an undelegate task
-        fn undelegate_task(account: &CommittedAccountV2, rent: &Pubkey) -> Box<dyn L1Task> {
+        fn undelegate_task(account: &CommittedAccountV2, rent_reimbursement: &Pubkey) -> Box<dyn L1Task> {
             Box::new(ArgsTask::Undelegate(UndelegateTask {
                 delegated_account: account.pubkey,
                 owner_program: account.account.owner,
-                rent_reimbursement: *rent,
+                rent_reimbursement: *rent_reimbursement,
             }))
         }
 
