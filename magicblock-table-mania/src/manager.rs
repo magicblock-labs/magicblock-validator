@@ -275,8 +275,7 @@ impl TableMania {
             remaining_len,
             table.table_address()
         );
-        let Some(table_addresses_count) = table.pubkeys().map(|x| x.len())
-        else {
+        if table.is_deactivated() {
             return Err(TableManiaError::CannotExtendDeactivatedTable(
                 *table.table_address(),
             ));
@@ -298,10 +297,9 @@ impl TableMania {
         let stored_count = remaining_len - remaining.len();
         trace!("Stored {}, remaining: {}", stored_count, remaining.len());
 
-        debug_assert_eq!(
-            table_addresses_count + stored_count,
-            table.pubkeys().unwrap().len()
-        );
+        debug_assert!(storing.iter().all(|pk| {
+            table.pubkeys().map(|x| x.contains_key(pk)).unwrap_or(false)
+        }));
 
         Ok(())
     }

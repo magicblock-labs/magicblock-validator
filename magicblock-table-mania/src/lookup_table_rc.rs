@@ -58,12 +58,15 @@ impl RefcountedPubkeys {
     /// found in any other table.
     fn insert_many(&mut self, pubkeys: &[Pubkey]) {
         for pubkey in pubkeys {
-            debug_assert!(
-                !self.pubkeys.contains_key(pubkey),
-                "Pubkey {} already exists in the table",
-                pubkey
-            );
-            self.pubkeys.insert(*pubkey, AtomicUsize::new(1));
+            if let Some(pubkey_rc) = self.pubkeys.get_mut(pubkey) {
+                debug!(
+                    "Pubkey {} exists in the table. Not inserting, but increasing ref count instead",
+                    pubkey
+                );
+                pubkey_rc.fetch_add(1, Ordering::Relaxed);
+            } else {
+                self.pubkeys.insert(*pubkey, AtomicUsize::new(1));
+            }
         }
     }
 
@@ -628,11 +631,19 @@ impl LookupTableRc {
         Ok(())
     }
 
+    /// Checks if this lookup table has been requested to be deactivated.
+    /// Does not check if the deactivation period has passed. For that use
+    /// [Self::is_deactivated_on_chain] instead.
+    pub fn is_deactivated(&self) -> bool {
+        use LookupTableRc::*;
+        matches!(self, Deactivated { .. })
+    }
+
     /// Checks if this lookup table is deactivated via the following:
     ///
     /// 1. was [Self::deactivate] called
     /// 2. is the [LookupTable::Deactivated::deactivation_slot] far enough in the past
-    pub async fn is_deactivated(
+    pub async fn is_deactivated_on_chain(
         &self,
         rpc_client: &MagicblockRpcClient,
         current_slot: Option<Slot>,
@@ -687,7 +698,7 @@ impl LookupTableRc {
         current_slot: Option<Slot>,
         compute_budget: &TableManiaComputeBudget,
     ) -> TableManiaResult<(bool, Option<Signature>)> {
-        if !self.is_deactivated(rpc_client, current_slot).await {
+        if !self.is_deactivated_on_chain(rpc_client, current_slot).await {
             return Ok((false, None));
         }
 
