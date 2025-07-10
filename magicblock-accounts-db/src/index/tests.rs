@@ -3,13 +3,11 @@ use std::{
 };
 
 use lmdb::Transaction;
+use magicblock_config::{AccountsDbConfig, BlockSize, TEST_SNAPSHOT_FREQUENCY};
 use solana_pubkey::Pubkey;
 
 use super::{AccountsDbIndex, Allocation};
-use crate::{
-    config::{AccountsDbConfig, BlockSize, TEST_SNAPSHOT_FREQUENCY},
-    error::AccountsDbError,
-};
+use crate::error::AccountsDbError;
 
 #[test]
 fn test_insert_account() {

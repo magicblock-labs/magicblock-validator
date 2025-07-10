@@ -4,8 +4,8 @@ use isocountry::CountryCode;
 use magicblock_config::{
     AccountsConfig, AllowedProgram, CommitStrategy, EphemeralConfig,
     GeyserGrpcConfig, LedgerConfig, LifecycleMode, MetricsConfig,
-    MetricsServiceConfig, ProgramConfig, RemoteConfig, RpcConfig,
-    ValidatorConfig,
+    MetricsServiceConfig, ProgramConfig, RemoteCluster, RemoteConfig,
+    RpcConfig, ValidatorConfig,
 };
 use solana_sdk::pubkey;
 use url::Url;
@@ -132,9 +132,11 @@ fn test_custom_remote_toml() {
         config,
         EphemeralConfig {
             accounts: AccountsConfig {
-                remote: RemoteConfig::Custom(
-                    Url::parse("http://localhost:8899").unwrap()
-                ),
+                remote: RemoteConfig {
+                    cluster: RemoteCluster::Custom,
+                    url: Some(Url::parse("http://localhost:8899").unwrap()),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             ..Default::default()
@@ -151,10 +153,13 @@ fn test_custom_ws_remote_toml() {
         config,
         EphemeralConfig {
             accounts: AccountsConfig {
-                remote: RemoteConfig::CustomWithWs(
-                    Url::parse("http://localhost:8899").unwrap(),
-                    Url::parse("ws://localhost:9001").unwrap()
-                ),
+                remote: RemoteConfig {
+                    cluster: RemoteCluster::CustomWithWs,
+                    url: Some(Url::parse("http://localhost:8899").unwrap()),
+                    ws_url: Some(vec![
+                        Url::parse("ws://localhost:9001").unwrap()
+                    ]),
+                },
                 ..Default::default()
             },
             ..Default::default()
@@ -189,7 +194,7 @@ fn test_validator_with_base_fees() {
             },
             validator: ValidatorConfig {
                 base_fees: Some(1_000),
-                fdqn: Some("magicblock.er.com".to_string()),
+                fqdn: Some("magicblock.er.com".to_string()),
                 country_code: CountryCode::for_alpha2("US").unwrap(),
                 ..Default::default()
             },

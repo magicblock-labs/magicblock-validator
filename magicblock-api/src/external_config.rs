@@ -1,5 +1,6 @@
 use std::collections::HashSet;
 
+use log::warn;
 use magicblock_accounts::{AccountsConfig, Cluster, LifecycleMode};
 use magicblock_config::errors::ConfigResult;
 use solana_sdk::{genesis_config::ClusterType, pubkey::Pubkey};
@@ -19,20 +20,40 @@ pub(crate) fn try_convert_accounts_config(
 pub(crate) fn cluster_from_remote(
     remote: &magicblock_config::RemoteConfig,
 ) -> Cluster {
-    use magicblock_config::RemoteConfig::*;
-    match remote {
+    use magicblock_config::RemoteCluster::*;
+    match remote.cluster {
         Devnet => Cluster::Known(ClusterType::Devnet),
         Mainnet => Cluster::Known(ClusterType::MainnetBeta),
         Testnet => Cluster::Known(ClusterType::Testnet),
         Development => Cluster::Known(ClusterType::Development),
-        Custom(url) => Cluster::Custom(url.clone()),
-        CustomWithWs(http, ws) => {
-            Cluster::CustomWithWs(http.clone(), ws.clone())
+        Custom => Cluster::Custom(
+            remote.url.clone().expect("Custom remote must have a url"),
+        ),
+        CustomWithWs => Cluster::CustomWithWs(
+            remote
+                .url
+                .clone()
+                .expect("CustomWithWs remote must have a url"),
+            remote
+                .ws_url
+                .as_ref()
+                .and_then(|ws_urls| ws_urls.first())
+                .cloned()
+                .expect("CustomWithWs remote must have a ws url"),
+        ),
+        CustomWithMultipleWs => {
+            warn!("CustomWithMultipleWs only uses the first ws url");
+            Cluster::CustomWithMultipleWs {
+                http: remote
+                    .url
+                    .clone()
+                    .expect("CustomWithMultipleWs remote must have a url"),
+                ws: remote
+                    .ws_url
+                    .clone()
+                    .expect("CustomWithMultipleWs remote must have a ws url"),
+            }
         }
-        CustomWithMultipleWs { http, ws } => Cluster::CustomWithMultipleWs {
-            http: http.clone(),
-            ws: ws.clone(),
-        },
     }
 }
 
