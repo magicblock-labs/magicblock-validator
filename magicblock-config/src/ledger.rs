@@ -35,8 +35,20 @@ pub struct LedgerConfig {
     pub size: u64,
 }
 
-const fn default_ledger_size() -> u64 {
-    DEFAULT_LEDGER_SIZE_BYTES
+impl LedgerConfig {
+    pub fn merge(&mut self, other: LedgerConfig) {
+        if self.reset == bool_true() && other.reset != bool_true() {
+            self.reset = other.reset;
+        }
+        if self.path == Default::default() && other.path != Default::default() {
+            self.path = other.path;
+        }
+        if self.size == default_ledger_size()
+            && other.size != default_ledger_size()
+        {
+            self.size = other.size;
+        }
+    }
 }
 
 impl Default for LedgerConfig {
@@ -46,5 +58,62 @@ impl Default for LedgerConfig {
             path: Default::default(),
             size: DEFAULT_LEDGER_SIZE_BYTES,
         }
+    }
+}
+
+const fn default_ledger_size() -> u64 {
+    DEFAULT_LEDGER_SIZE_BYTES
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_merge_with_default() {
+        let mut config = LedgerConfig {
+            reset: false,
+            path: Some("ledger.example.com".to_string()),
+            size: 1000000000,
+        };
+        let original_config = config.clone();
+        let other = LedgerConfig::default();
+
+        config.merge(other);
+
+        assert_eq!(config, original_config);
+    }
+
+    #[test]
+    fn test_merge_default_with_non_default() {
+        let mut config = LedgerConfig::default();
+        let other = LedgerConfig {
+            reset: false,
+            path: Some("ledger.example.com".to_string()),
+            size: 1000000000,
+        };
+
+        config.merge(other.clone());
+
+        assert_eq!(config, other);
+    }
+
+    #[test]
+    fn test_merge_non_default() {
+        let mut config = LedgerConfig {
+            reset: false,
+            path: Some("ledger.example.com".to_string()),
+            size: 1000000000,
+        };
+        let original_config = config.clone();
+        let other = LedgerConfig {
+            reset: true,
+            path: Some("ledger2.example.com".to_string()),
+            size: 10000,
+        };
+
+        config.merge(other);
+
+        assert_eq!(config, original_config);
     }
 }

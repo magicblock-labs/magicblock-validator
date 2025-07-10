@@ -26,6 +26,22 @@ pub struct RpcConfig {
     pub max_ws_connections: usize,
 }
 
+impl RpcConfig {
+    pub fn merge(&mut self, other: RpcConfig) {
+        if self.addr == default_addr() && other.addr != default_addr() {
+            self.addr = other.addr;
+        }
+        if self.port == default_port() && other.port != default_port() {
+            self.port = other.port;
+        }
+        if self.max_ws_connections == default_max_ws_connections()
+            && other.max_ws_connections != default_max_ws_connections()
+        {
+            self.max_ws_connections = other.max_ws_connections;
+        }
+    }
+}
+
 impl Default for RpcConfig {
     fn default() -> Self {
         Self {
@@ -76,4 +92,57 @@ fn default_port() -> u16 {
 
 fn default_max_ws_connections() -> usize {
     16384
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_merge_with_default() {
+        let mut config = RpcConfig {
+            addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
+            port: 9090,
+            max_ws_connections: 8008,
+        };
+        let original_config = config.clone();
+        let other = RpcConfig::default();
+
+        config.merge(other);
+
+        assert_eq!(config, original_config);
+    }
+
+    #[test]
+    fn test_merge_default_with_non_default() {
+        let mut config = RpcConfig::default();
+        let other = RpcConfig {
+            addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
+            port: 9090,
+            max_ws_connections: 8008,
+        };
+
+        config.merge(other.clone());
+
+        assert_eq!(config, other);
+    }
+
+    #[test]
+    fn test_merge_non_default() {
+        let mut config = RpcConfig {
+            addr: IpAddr::V4(Ipv4Addr::new(0, 0, 1, 127)),
+            port: 9091,
+            max_ws_connections: 8009,
+        };
+        let original_config = config.clone();
+        let other = RpcConfig {
+            addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
+            port: 9090,
+            max_ws_connections: 8008,
+        };
+
+        config.merge(other);
+
+        assert_eq!(config, original_config);
+    }
 }

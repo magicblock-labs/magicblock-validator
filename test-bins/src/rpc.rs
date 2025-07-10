@@ -1,6 +1,5 @@
 mod shutdown;
 
-use clap::Parser;
 use log::*;
 use magicblock_api::{
     ledger,
@@ -60,35 +59,33 @@ async fn main() {
     #[cfg(feature = "tokio-console")]
     console_subscriber::init();
 
-    let mb_config = MagicBlockConfig::parse();
+    let mut mb_config = MagicBlockConfig::parse_config().unwrap();
 
     let (file, config) = load_config_from_arg(&mb_config.config_file);
-    let config = config.override_from_envs();
     match file {
         Some(file) => info!("Loading config from '{:?}'.", file),
         None => info!("Using default config. Override it by passing the path to a config file."),
     };
 
-    // TODO: implement merge
-    let config = config.merge(&mb_config.config);
+    mb_config.config.merge(config);
 
-    info!("Starting validator with config:\n{}", config);
+    info!("Starting validator with config:\n{}", mb_config.config);
+
     // Add a more developer-friendly startup message
     const WS_PORT_OFFSET: u16 = 1;
-    let rpc_port = config.rpc.port;
+    let rpc_port = mb_config.config.rpc.port;
     let ws_port = rpc_port + WS_PORT_OFFSET; // WebSocket port is typically RPC port + 1
-    let rpc_host = config.rpc.addr;
+    let rpc_host = mb_config.config.rpc.addr;
 
     let validator_keypair = mb_config.validator_keypair();
     info!("Validator identity: {}", validator_keypair.pubkey());
 
-    let geyser_grpc_config = config.geyser_grpc.clone();
+    let geyser_grpc_config = mb_config.config.geyser_grpc.clone();
+    let init_geyser_service_config =
+        init_geyser_config(&mb_config, geyser_grpc_config);
     let config = MagicValidatorConfig {
-        validator_config: config,
-        init_geyser_service_config: init_geyser_config(
-            mb_config,
-            geyser_grpc_config,
-        ),
+        validator_config: mb_config.config,
+        init_geyser_service_config,
     };
 
     debug!("{:#?}", config);
@@ -151,7 +148,7 @@ fn load_config_from_arg(
 }
 
 fn init_geyser_config(
-    mb_config: MagicBlockConfig,
+    mb_config: &MagicBlockConfig,
     grpc_config: GeyserGrpcConfig,
 ) -> InitGeyserServiceConfig {
     let (cache_accounts, cache_transactions) = {

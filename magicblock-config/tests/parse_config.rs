@@ -4,8 +4,8 @@ use isocountry::CountryCode;
 use magicblock_config::{
     AccountsConfig, AllowedProgram, CommitStrategy, EphemeralConfig,
     GeyserGrpcConfig, LedgerConfig, LifecycleMode, MetricsConfig,
-    MetricsServiceConfig, ProgramConfig, RemoteCluster, RemoteConfig,
-    RpcConfig, ValidatorConfig,
+    MetricsServiceConfig, ProgramConfig, RemoteConfig, RpcConfig,
+    ValidatorConfig,
 };
 use solana_sdk::pubkey;
 use url::Url;
@@ -133,7 +133,6 @@ fn test_custom_remote_toml() {
         EphemeralConfig {
             accounts: AccountsConfig {
                 remote: RemoteConfig {
-                    cluster: RemoteCluster::Custom,
                     url: Some(Url::parse("http://localhost:8899").unwrap()),
                     ..Default::default()
                 },
@@ -154,11 +153,11 @@ fn test_custom_ws_remote_toml() {
         EphemeralConfig {
             accounts: AccountsConfig {
                 remote: RemoteConfig {
-                    cluster: RemoteCluster::CustomWithWs,
                     url: Some(Url::parse("http://localhost:8899").unwrap()),
                     ws_url: Some(vec![
                         Url::parse("ws://localhost:9001").unwrap()
                     ]),
+                    ..Default::default()
                 },
                 ..Default::default()
             },

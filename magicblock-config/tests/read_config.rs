@@ -6,8 +6,9 @@ use std::{
 use isocountry::CountryCode;
 use magicblock_config::{
     AccountsConfig, CommitStrategy, EphemeralConfig, GeyserGrpcConfig,
-    LedgerConfig, LifecycleMode, MetricsConfig, MetricsServiceConfig,
-    ProgramConfig, RemoteCluster, RemoteConfig, RpcConfig, ValidatorConfig,
+    LedgerConfig, LifecycleMode, MagicBlockConfig, MetricsConfig,
+    MetricsServiceConfig, ProgramConfig, RemoteCluster, RemoteConfig,
+    RpcConfig, ValidatorConfig,
 };
 use solana_sdk::pubkey;
 use test_tools_core::paths::cargo_workspace_dir;
@@ -82,10 +83,10 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     let base_cluster_ws = "ws://remote-account-url";
 
     // Set the ENV variables
-    env::set_var("ACCOUNTS_REMOTE", base_cluster);
+    env::set_var("REMOTE_URL", base_cluster);
     env::set_var("ACCOUNTS_LIFECYCLE", "ephemeral");
-    env::set_var("ACCOUNTS_COMMIT_FREQUENCY_MILLIS", "123");
-    env::set_var("ACCOUNTS_COMMIT_COMPUTE_UNIT_PRICE", "1");
+    env::set_var("COMMIT_FREQUENCY_MILLIS", "123");
+    env::set_var("COMMIT_COMPUTE_UNIT_PRICE", "1");
     env::set_var("RPC_ADDR", "0.1.0.1");
     env::set_var("RPC_PORT", "123");
     env::set_var("GEYSER_GRPC_ADDR", "0.1.0.1");
@@ -100,8 +101,12 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     env::set_var("METRICS_SYSTEM_METRICS_TICK_INTERVAL_SECS", "10");
     env::set_var("LEDGER_SIZE", "123123");
 
-    let config = EphemeralConfig::try_load_from_file(&config_file_dir).unwrap();
-    let config = config.override_from_envs();
+    let mb_config = MagicBlockConfig::parse_config_from_arg(&vec![
+        "--config-file".to_string(),
+        config_file_dir.to_str().unwrap().to_string(),
+    ])
+    .unwrap();
+    let config = mb_config.config;
 
     assert_eq!(
         config,
@@ -156,8 +161,14 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
             },
         }
     );
-    env::set_var("ACCOUNTS_REMOTE_WS", base_cluster_ws);
-    let config = config.override_from_envs();
+
+    env::set_var("REMOTE_WS_URL", base_cluster_ws);
+    let config = MagicBlockConfig::parse_config_from_arg(&vec![
+        "--config-file".to_string(),
+        config_file_dir.to_str().unwrap().to_string(),
+    ])
+    .unwrap()
+    .config;
 
     assert_eq!(
         config.accounts.remote,

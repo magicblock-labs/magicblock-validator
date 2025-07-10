@@ -1,5 +1,5 @@
 [accounts]
-remote = "http://0.0.0.0:7799"
+remote.cluster = "http://0.0.0.0:7799"
 lifecycle = "ephemeral"
 commit = { frequency_millis = 500_000, compute_unit_price = 1_000_000 }
 max-monitored-accounts = 3
@@ -20,7 +20,6 @@ index-map-size = 2048576
 max-snapshots = 7
 # how frequently (slot-wise) we should take snapshots
 snapshot-frequency = 1024
-
 
 
 [rpc]

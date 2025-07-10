@@ -16,3 +16,4 @@ proc-macro2 = { workspace = true }
 quote = { workspace = true }
 syn = { workspace = true, features = ["full", "visit-mut"] }
 clap = { workspace = true, features = ["derive", "env"] }
+serde = { workspace = true, features = ["derive"] }

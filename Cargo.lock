@@ -3885,7 +3885,6 @@ dependencies = [
  "serde",
  "solana-sdk",
  "strum",
- "strum_macros",
  "test-tools-core",
  "thiserror 1.0.69",
  "toml 0.8.23",
@@ -3900,7 +3899,8 @@ dependencies = [
  "convert_case 0.8.0",
  "proc-macro2",
  "quote",
- "syn 2.0.104",
+ "serde",
+ "syn 2.0.101",
 ]
 
 [[package]]

@@ -13,8 +13,11 @@ use syn::{parse_macro_input, visit_mut::VisitMut, ItemStruct};
 ///
 /// # Example
 /// ```
+/// use std::net::IpAddr;
+/// use magicblock_config_macro::clap_prefix;
+///  
 /// #[clap_prefix("rpc")]
-/// #[derive(clap::Args)]
+/// #[derive(serde::Deserialize, serde::Serialize, clap::Args)]
 /// struct RpcConfig {
 ///     addr: IpAddr,
 ///     #[derive_env_var]
@@ -24,7 +27,9 @@ use syn::{parse_macro_input, visit_mut::VisitMut, ItemStruct};
 ///
 /// Will become:
 /// ```
-/// #[derive(clap::Args)]
+/// use std::net::IpAddr;
+///
+/// #[derive(serde::Deserialize, serde::Serialize, clap::Args)]
 /// struct RpcConfig {
 ///     #[arg(long = "rpc-addr", name = "rpc-addr")]
 ///     rpc_addr: IpAddr,
@@ -56,11 +61,42 @@ pub fn clap_prefix(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// # Example
 /// ```
+/// use std::net::IpAddr;
+/// use serde::{Deserialize, Deserializer};
+/// use clap::Args;
+/// use magicblock_config_macro::clap_from_serde;
+///
+/// fn clap_deserialize_addr(s: &str) -> Result<::std::net::IpAddr, String> {
+///     s.parse().map_err(|err| format!("Invalid IP address: {err}"))
+/// }
+///
+/// fn deserialize_addr<'de, D>(
+///     deserializer: D,
+/// ) -> Result<::std::net::IpAddr, D::Error>
+/// where
+///     D: ::serde::Deserializer<'de>,
+/// {
+///     let s =
+///         <String as ::serde::Deserialize>::deserialize(deserializer)?;
+///     s.parse().map_err(serde::de::Error::custom)
+/// }
+///
+/// fn bool_true() -> bool {
+///     true
+/// }
+///
+/// #[derive(serde::Deserialize, serde::Serialize, clap::Args)]
+/// struct SomeOtherConfig {
+///     #[serde(deserialize_with = "deserialize_addr")]
+///     inner_addr: IpAddr,
+/// }
+///
 /// #[clap_from_serde]
+/// #[derive(serde::Deserialize, serde::Serialize, clap::Args)]
 /// struct RpcConfig {
-///     #[serde(deserialize_with = "deserialize_ip_addr")]
+///     #[serde(deserialize_with = "deserialize_addr")]
 ///     addr: IpAddr,
-///     #[serde(default = "helpers::serde_defaults::bool_true")]
+///     #[serde(default = "bool_true")]
 ///     enabled: bool,
 ///     #[serde(flatten)]
 ///     config: SomeOtherConfig,
@@ -69,12 +105,41 @@ pub fn clap_prefix(attr: TokenStream, item: TokenStream) -> TokenStream {
 ///
 /// Will become:
 /// ```
+/// use std::net::IpAddr;
+/// use serde::{Deserialize, Deserializer};
+///
+/// fn clap_deserialize_addr(s: &str) -> Result<::std::net::IpAddr, String> {
+///     s.parse().map_err(|err| format!("Invalid IP address: {err}"))
+/// }
+///
+/// fn deserialize_addr<'de, D>(
+///     deserializer: D,
+/// ) -> Result<::std::net::IpAddr, D::Error>
+/// where
+///     D: ::serde::Deserializer<'de>,
+/// {
+///     let s =
+///         <String as ::serde::Deserialize>::deserialize(deserializer)?;
+///     s.parse().map_err(serde::de::Error::custom)
+/// }
+///
+/// fn bool_true() -> bool {
+///     true
+/// }
+///
+/// #[derive(serde::Deserialize, serde::Serialize, clap::Args)]
+/// struct SomeOtherConfig {
+///     #[serde(deserialize_with = "deserialize_addr")]
+///     inner_addr: IpAddr,
+/// }
+///
+/// #[derive(serde::Deserialize, serde::Serialize, clap::Args)]
 /// struct RpcConfig {
-///     #[serde(deserialize_with = "deserialize_ip_addr")]
-///     #[arg(default_value_t = clap_deserialize_ip_addr)]
+///     #[serde(deserialize_with = "deserialize_addr")]
+///     #[arg(value_parser = clap_deserialize_addr)]
 ///     addr: IpAddr,
-///     #[serde(default = "helpers::serde_defaults::bool_true")]
-///     #[arg(default_value = helpers::serde_defaults::bool_true())]
+///     #[serde(default = "bool_true")]
+///     #[arg(default_value_t = bool_true())]
 ///     enabled: bool,
 ///     #[serde(flatten)]
 ///     #[command(flatten)]

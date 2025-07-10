@@ -40,6 +40,15 @@ macro_rules! socket_addr_config {
             pub fn socket_addr(&self) -> ::std::net::SocketAddr {
                 ::std::net::SocketAddr::new(self.addr, self.port)
             }
+
+            pub fn merge(&mut self, other: $struct_name) {
+                if self.addr == default_addr() && other.addr != default_addr() {
+                    self.addr = other.addr;
+                }
+                if self.port == default_port() && other.port != default_port() {
+                    self.port = other.port;
+                }
+            }
         }
 
         fn default_port() -> u16 {

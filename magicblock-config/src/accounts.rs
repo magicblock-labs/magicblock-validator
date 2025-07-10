@@ -4,8 +4,7 @@ use clap::{Args, ValueEnum};
 use magicblock_config_macro::{clap_from_serde, clap_prefix};
 use serde::{Deserialize, Serialize};
 use solana_sdk::pubkey::Pubkey;
-use strum::Display;
-use strum_macros::EnumString;
+use strum::{Display, EnumString};
 use url::Url;
 
 use crate::accounts_db::AccountsDbConfig;
@@ -38,6 +37,37 @@ pub struct AccountsConfig {
     #[arg(help = "The max number of accounts to monitor.")]
     #[serde(default = "default_max_monitored_accounts")]
     pub max_monitored_accounts: usize,
+}
+
+impl AccountsConfig {
+    pub fn merge(&mut self, other: AccountsConfig) {
+        let default = Self::default();
+
+        if self.remote == default.remote && other.remote != default.remote {
+            self.remote = other.remote;
+        }
+        if self.lifecycle == default.lifecycle
+            && other.lifecycle != default.lifecycle
+        {
+            self.lifecycle = other.lifecycle;
+        }
+        if self.commit == default.commit && other.commit != default.commit {
+            self.commit = other.commit;
+        }
+        if self.allowed_programs == default.allowed_programs
+            && other.allowed_programs != default.allowed_programs
+        {
+            self.allowed_programs = other.allowed_programs;
+        }
+        if self.db == default.db && other.db != default.db {
+            self.db = other.db;
+        }
+        if self.max_monitored_accounts == default.max_monitored_accounts
+            && other.max_monitored_accounts != default.max_monitored_accounts
+        {
+            self.max_monitored_accounts = other.max_monitored_accounts;
+        }
+    }
 }
 
 impl Default for AccountsConfig {
@@ -214,12 +244,122 @@ where
     key.to_string().serialize(serializer)
 }
 
-// fn allowed_program_parser(s: &str) -> Result<Vec<AllowedProgram>, String> {
-//     let parts: Vec<String> =
-//         s.split(':').map(|part| part.to_string()).collect();
-//     let [id, path] = parts.as_slice() else {
-//         return Err(format!("Invalid program config: {}", s));
-//     };
-//     let id = Pubkey::from_str(id)
-//         .map_err(|e| format!("Invalid program id {}: {}", id, e))?;
-// }
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::BlockSize;
+
+    #[test]
+    fn test_merge_with_default() {
+        let mut config = AccountsConfig {
+            remote: RemoteConfig {
+                cluster: RemoteCluster::Custom,
+                url: Some(Url::parse("http://0.0.0.0:7799").unwrap()),
+                ws_url: None,
+            },
+            lifecycle: LifecycleMode::Ephemeral,
+            commit: CommitStrategy {
+                frequency_millis: 123,
+                compute_unit_price: 123,
+            },
+            allowed_programs: vec![AllowedProgram {
+                id: Pubkey::from_str(
+                    "wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4",
+                )
+                .unwrap(),
+            }],
+            db: AccountsDbConfig::default(),
+            max_monitored_accounts: 123,
+        };
+        let original_config = config.clone();
+        let other = AccountsConfig::default();
+
+        config.merge(other);
+
+        assert_eq!(config, original_config);
+    }
+
+    #[test]
+    fn test_merge_default_with_non_default() {
+        let mut config = AccountsConfig::default();
+        let other = AccountsConfig {
+            remote: RemoteConfig {
+                cluster: RemoteCluster::Custom,
+                url: Some(Url::parse("http://0.0.0.0:7799").unwrap()),
+                ws_url: None,
+            },
+            lifecycle: LifecycleMode::Ephemeral,
+            commit: CommitStrategy {
+                frequency_millis: 123,
+                compute_unit_price: 123,
+            },
+            allowed_programs: vec![AllowedProgram {
+                id: Pubkey::from_str(
+                    "wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4",
+                )
+                .unwrap(),
+            }],
+            db: AccountsDbConfig::default(),
+            max_monitored_accounts: 123,
+        };
+
+        config.merge(other.clone());
+
+        assert_eq!(config, other);
+    }
+
+    #[test]
+    fn test_merge_non_default() {
+        let mut config = AccountsConfig {
+            remote: RemoteConfig {
+                cluster: RemoteCluster::Custom,
+                url: Some(Url::parse("http://0.0.0.0:7999").unwrap()),
+                ws_url: Some(vec![Url::parse("wss://0.0.0.0:7999").unwrap()]),
+            },
+            lifecycle: LifecycleMode::Offline,
+            commit: CommitStrategy {
+                frequency_millis: 1234,
+                compute_unit_price: 1234,
+            },
+            allowed_programs: vec![AllowedProgram {
+                id: Pubkey::from_str(
+                    "wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4",
+                )
+                .unwrap(),
+            }],
+            db: AccountsDbConfig {
+                db_size: 1233,
+                block_size: BlockSize::Block512,
+                index_map_size: 1233,
+                max_snapshots: 1233,
+                snapshot_frequency: 1233,
+            },
+            max_monitored_accounts: 1233,
+        };
+        let original_config = config.clone();
+        let other = AccountsConfig {
+            remote: RemoteConfig {
+                cluster: RemoteCluster::Custom,
+                url: Some(Url::parse("http://0.0.0.0:7799").unwrap()),
+                ws_url: None,
+            },
+            lifecycle: LifecycleMode::Ephemeral,
+            commit: CommitStrategy {
+                frequency_millis: 123,
+                compute_unit_price: 123,
+            },
+            allowed_programs: vec![AllowedProgram {
+                id: Pubkey::from_str(
+                    "wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4",
+                )
+                .unwrap(),
+            }],
+            db: AccountsDbConfig::default(),
+            max_monitored_accounts: 123,
+        };
+
+        config.merge(other);
+
+        assert_eq!(config, original_config);
+    }
+}

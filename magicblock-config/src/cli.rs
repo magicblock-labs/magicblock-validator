@@ -1,9 +1,9 @@
 use std::path::PathBuf;
 
-use clap::Parser;
+use clap::{Error, Parser};
 use solana_sdk::signature::Keypair;
 
-use crate::EphemeralConfig;
+use crate::{EphemeralConfig, RemoteCluster};
 
 #[derive(Debug, Clone, Parser)]
 pub struct MagicBlockConfig {
@@ -42,6 +42,51 @@ pub struct MagicBlockConfig {
 impl MagicBlockConfig {
     pub fn validator_keypair(&self) -> Keypair {
         Keypair::from_base58_string(&self.validator_keypair)
+    }
+
+    pub fn parse_config() -> Result<Self, Error> {
+        let mb_config = Self::parse();
+        Ok(mb_config.post_parse())
+    }
+
+    pub fn parse_config_from_arg(args: &Vec<String>) -> Result<Self, Error> {
+        let mb_config = Self::try_parse_from(args)?;
+        Ok(mb_config.post_parse())
+    }
+
+    fn post_parse(mut self) -> Self {
+        if self.config.accounts.remote.url.is_some() {
+            match &self.config.accounts.remote.ws_url {
+                Some(ws_url) if ws_url.len() > 1 => {
+                    self.config.accounts.remote.cluster =
+                        RemoteCluster::CustomWithMultipleWs;
+                }
+                Some(ws_url) if ws_url.len() == 1 => {
+                    self.config.accounts.remote.cluster =
+                        RemoteCluster::CustomWithWs;
+                }
+                _ => {
+                    self.config.accounts.remote.cluster = RemoteCluster::Custom;
+                }
+            }
+        }
+
+        let config = match &self.config_file {
+            Some(config_file) => EphemeralConfig::try_load_from_file(
+                config_file,
+            )
+            .unwrap_or_else(|err| {
+                panic!(
+                    "Failed to load config file from '{:?}'. ({})",
+                    config_file, err
+                )
+            }),
+            None => Default::default(),
+        };
+
+        self.config.merge(config);
+
+        self
     }
 }
 

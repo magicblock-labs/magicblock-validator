@@ -46,6 +46,46 @@ pub struct ValidatorConfig {
     pub country_code: CountryCode,
 }
 
+impl ValidatorConfig {
+    pub fn merge(&mut self, other: ValidatorConfig) {
+        if self.millis_per_slot == default_millis_per_slot()
+            && other.millis_per_slot != default_millis_per_slot()
+        {
+            self.millis_per_slot = other.millis_per_slot;
+        }
+        if self.sigverify == default_sigverify()
+            && other.sigverify != default_sigverify()
+        {
+            self.sigverify = other.sigverify;
+        }
+        if self.fqdn == default_fqdn() && other.fqdn != default_fqdn() {
+            self.fqdn = other.fqdn;
+        }
+        if self.base_fees == default_base_fees()
+            && other.base_fees != default_base_fees()
+        {
+            self.base_fees = other.base_fees;
+        }
+        if self.country_code == default_country_code()
+            && other.country_code != default_country_code()
+        {
+            self.country_code = other.country_code;
+        }
+    }
+}
+
+impl Default for ValidatorConfig {
+    fn default() -> Self {
+        Self {
+            millis_per_slot: default_millis_per_slot(),
+            sigverify: default_sigverify(),
+            fqdn: default_fqdn(),
+            base_fees: default_base_fees(),
+            country_code: default_country_code(),
+        }
+    }
+}
+
 fn default_millis_per_slot() -> u64 {
     50
 }
@@ -66,18 +106,6 @@ fn default_country_code() -> CountryCode {
     CountryCode::for_alpha2("US").unwrap()
 }
 
-impl Default for ValidatorConfig {
-    fn default() -> Self {
-        Self {
-            millis_per_slot: default_millis_per_slot(),
-            sigverify: default_sigverify(),
-            fqdn: default_fqdn(),
-            base_fees: default_base_fees(),
-            country_code: default_country_code(),
-        }
-    }
-}
-
 fn parse_country_code(s: &str) -> Result<CountryCode, String> {
     if let Ok(code) = CountryCode::for_alpha2(s) {
         Ok(code)
@@ -85,5 +113,66 @@ fn parse_country_code(s: &str) -> Result<CountryCode, String> {
         Err(format!("Invalid country code: {s}"))
     } else {
         Ok(default_country_code())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_merge_with_default() {
+        let mut config = ValidatorConfig {
+            millis_per_slot: 5000,
+            sigverify: false,
+            fqdn: Some("validator.example.com".to_string()),
+            base_fees: Some(1000000000),
+            country_code: CountryCode::for_alpha2("FR").unwrap(),
+        };
+        let original_config = config.clone();
+        let other = ValidatorConfig::default();
+
+        config.merge(other);
+
+        assert_eq!(config, original_config);
+    }
+
+    #[test]
+    fn test_merge_default_with_non_default() {
+        let mut config = ValidatorConfig::default();
+        let other = ValidatorConfig {
+            millis_per_slot: 5000,
+            sigverify: false,
+            fqdn: Some("validator.example.com".to_string()),
+            base_fees: Some(1000000000),
+            country_code: CountryCode::for_alpha2("FR").unwrap(),
+        };
+
+        config.merge(other.clone());
+
+        assert_eq!(config, other);
+    }
+
+    #[test]
+    fn test_merge_non_default() {
+        let mut config = ValidatorConfig {
+            millis_per_slot: 5001,
+            sigverify: false,
+            fqdn: Some("validator2.example.com".to_string()),
+            base_fees: Some(9999),
+            country_code: CountryCode::for_alpha2("DE").unwrap(),
+        };
+        let original_config = config.clone();
+        let other = ValidatorConfig {
+            millis_per_slot: 5000,
+            sigverify: true,
+            fqdn: Some("validator.example.com".to_string()),
+            base_fees: Some(1000000000),
+            country_code: CountryCode::for_alpha2("FR").unwrap(),
+        };
+
+        config.merge(other);
+
+        assert_eq!(config, original_config);
     }
 }
