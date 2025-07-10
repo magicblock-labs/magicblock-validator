@@ -24,6 +24,7 @@ pub fn extract_scheduled_commit_sent_signature_from_logs(
     None
 }
 
+#[allow(clippy::type_complexity)]
 pub fn extract_sent_commit_info_from_logs(
     logs: &[String],
 ) -> (
@@ -214,9 +215,9 @@ impl IntegrationTestContext {
                 let ephem_account = T::try_from_slice(&ephem_data)
                     .with_context(|| {
                         format!(
-                        "Failed to deserialize ephemeral account data for {:?}",
-                        pubkey
-                    )
+                            "Failed to deserialize ephemeral account data for {:?}",
+                            pubkey
+                        )
                     })?;
                 committed_accounts.insert(pubkey, ephem_account);
             };

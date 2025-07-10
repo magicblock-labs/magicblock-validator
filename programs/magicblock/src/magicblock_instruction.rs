@@ -5,7 +5,6 @@ use num_derive::{FromPrimitive, ToPrimitive};
 use serde::{Deserialize, Serialize};
 use solana_sdk::{
     account::Account,
-    decode_error::DecodeError,
     hash::Hash,
     instruction::{AccountMeta, Instruction},
     pubkey::Pubkey,
@@ -56,12 +55,6 @@ pub enum MagicBlockProgramError {
 
     #[error("Encountered an error when persisting account modification data.")]
     FailedToPersistAccountModData,
-}
-
-impl<T> DecodeError<T> for MagicBlockProgramError {
-    fn type_of() -> &'static str {
-        "MagicBlockProgramError"
-    }
 }
 
 #[derive(Default, Clone, Serialize, Deserialize, Debug, PartialEq, Eq)]
@@ -151,7 +144,7 @@ pub(crate) enum MagicBlockInstruction {
     /// - **1.**  `[WRITE]`  Magic Context Account containing the initially scheduled commits
     AcceptScheduleCommits,
 
-    /// Records the the attempt to realize a scheduled commit on chain.
+    /// Records the attempt to realize a scheduled commit on chain.
     ///
     /// The signature of this transaction can be pre-calculated since we pass the
     /// ID of the scheduled commit and retrieve the signature from a globally
