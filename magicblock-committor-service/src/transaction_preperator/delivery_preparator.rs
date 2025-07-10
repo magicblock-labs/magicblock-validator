@@ -1,14 +1,5 @@
-use std::collections::HashSet;
-use std::time::Duration;
+use std::{collections::HashSet, time::Duration};
 
-use crate::{
-    transaction_preperator::{
-        error::PreparatorResult,
-        task_strategist::TransactionStrategy,
-        tasks::{L1Task, TaskPreparationInfo},
-    },
-    ComputeBudgetConfig,
-};
 use anyhow::anyhow;
 use borsh::BorshDeserialize;
 use futures_util::future::{join, join_all};
@@ -18,8 +9,7 @@ use magicblock_rpc_client::{
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
     MagicblockRpcClient,
 };
-use magicblock_table_mania::error::TableManiaError;
-use magicblock_table_mania::TableMania;
+use magicblock_table_mania::{error::TableManiaError, TableMania};
 use solana_account::ReadableAccount;
 use solana_pubkey::Pubkey;
 use solana_rpc_client_api::client_error::reqwest::Version;
@@ -33,6 +23,15 @@ use solana_sdk::{
     transaction::VersionedTransaction,
 };
 use tokio::time::sleep;
+
+use crate::{
+    transaction_preperator::{
+        error::PreparatorResult,
+        task_strategist::TransactionStrategy,
+        tasks::{L1Task, TaskPreparationInfo},
+    },
+    ComputeBudgetConfig,
+};
 
 pub struct DeliveryPreparationResult {
     lookup_tables: Vec<AddressLookupTableAccount>,
