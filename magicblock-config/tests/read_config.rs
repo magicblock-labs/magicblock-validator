@@ -101,7 +101,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     env::set_var("METRICS_SYSTEM_METRICS_TICK_INTERVAL_SECS", "10");
     env::set_var("LEDGER_SIZE", "123123");
 
-    let mb_config = MagicBlockConfig::parse_config_from_arg(&vec![
+    let mb_config = MagicBlockConfig::try_parse_config_from_arg(&vec![
         "--config-file".to_string(),
         config_file_dir.to_str().unwrap().to_string(),
     ])
@@ -163,7 +163,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     );
 
     env::set_var("REMOTE_WS_URL", base_cluster_ws);
-    let config = MagicBlockConfig::parse_config_from_arg(&vec![
+    let config = MagicBlockConfig::try_parse_config_from_arg(&vec![
         "--config-file".to_string(),
         config_file_dir.to_str().unwrap().to_string(),
     ])

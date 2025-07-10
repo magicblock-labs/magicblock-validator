@@ -44,12 +44,14 @@ impl MagicBlockConfig {
         Keypair::from_base58_string(&self.validator_keypair)
     }
 
-    pub fn parse_config() -> Result<Self, Error> {
+    pub fn parse_config() -> Self {
         let mb_config = Self::parse();
-        Ok(mb_config.post_parse())
+        mb_config.post_parse()
     }
 
-    pub fn parse_config_from_arg(args: &Vec<String>) -> Result<Self, Error> {
+    pub fn try_parse_config_from_arg(
+        args: &Vec<String>,
+    ) -> Result<Self, Error> {
         let mb_config = Self::try_parse_from(args)?;
         Ok(mb_config.post_parse())
     }

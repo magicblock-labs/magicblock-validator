@@ -1,5 +1,7 @@
 mod shutdown;
 
+use std::path::PathBuf;
+
 use log::*;
 use magicblock_api::{
     ledger,
@@ -8,7 +10,6 @@ use magicblock_api::{
 };
 use magicblock_config::{EphemeralConfig, GeyserGrpcConfig, MagicBlockConfig};
 use solana_sdk::signature::Signer;
-use std::path::PathBuf;
 use test_tools::init_logger;
 
 use crate::shutdown::Shutdown;
@@ -59,7 +60,7 @@ async fn main() {
     #[cfg(feature = "tokio-console")]
     console_subscriber::init();
 
-    let mut mb_config = MagicBlockConfig::parse_config().unwrap();
+    let mut mb_config = MagicBlockConfig::parse_config();
 
     let (file, config) = load_config_from_arg(&mb_config.config_file);
     match file {
