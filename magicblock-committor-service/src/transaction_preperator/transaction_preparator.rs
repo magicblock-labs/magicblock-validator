@@ -1,49 +1,61 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Formatter};
 
 use async_trait::async_trait;
-use magicblock_program::magic_scheduled_l1_message::{
-    CommittedAccountV2, L1Action, MagicL1Message, ScheduledL1Message,
-};
+use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
 use solana_pubkey::Pubkey;
-use solana_sdk::{message::v0::Message, signature::Keypair, signer::Signer};
+use solana_sdk::{
+    message::VersionedMessage, signature::Keypair, signer::Signer,
+};
 
 use crate::{
     transaction_preperator::{
-        budget_calculator::{
-            ComputeBudgetCalculator, ComputeBudgetCalculatorV1,
-        },
         delivery_preparator::DeliveryPreparator,
-        error::{Error, PreparatorResult},
+        error::PreparatorResult,
         task_builder::{TaskBuilderV1, TasksBuilder},
         task_strategist::TaskStrategist,
+        utils::TransactionUtils,
     },
     ComputeBudgetConfig,
 };
 
 /// Transaction Preparator version
-/// Some actions maybe imnvalid per version
+/// Some actions maybe invalid per version
 #[derive(Debug)]
 pub enum PreparatorVersion {
     V1,
 }
 
+impl std::fmt::Display for PreparatorVersion {
+    fn fmt(&self, f: &mut Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::V1 => write!(f, "V1"),
+        }
+    }
+}
+
 #[async_trait]
 trait TransactionPreparator {
     fn version(&self) -> PreparatorVersion;
+
+    /// Returns [`VersionedMessage`] corresponding to [`ScheduledL1Message`] tasks
+    /// Handles all necessary preparations for Message to be valid
     async fn prepare_commit_tx(
         &self,
         authority: &Keypair,
         l1_message: &ScheduledL1Message,
         commit_ids: HashMap<Pubkey, u64>,
-    ) -> PreparatorResult<Message>;
+    ) -> PreparatorResult<VersionedMessage>;
+
+    /// Returns [`VersionedMessage`] corresponding to [`ScheduledL1Message`] tasks
+    /// Handles all necessary preparations for Message to be valid
     async fn prepare_finalize_tx(
         &self,
         authority: &Keypair,
         rent_reimbursement: &Pubkey,
         l1_message: &ScheduledL1Message,
-    ) -> PreparatorResult<Message>;
+    ) -> PreparatorResult<VersionedMessage>;
 }
 
 /// [`TransactionPreparatorV1`] first version of preparator
@@ -72,17 +84,6 @@ impl TransactionPreparatorV1 {
             delivery_preparator,
         }
     }
-
-    // TODO(edwin)
-    fn prepare_action_tx(actions: &Vec<L1Action>) -> PreparatorResult<Message> {
-        todo!()
-    }
-
-    fn prepare_committed_accounts_tx(
-        account: &Vec<CommittedAccountV2>,
-    ) -> PreparatorResult<Message> {
-        todo!()
-    }
 }
 
 #[async_trait]
@@ -98,25 +99,27 @@ impl TransactionPreparator for TransactionPreparatorV1 {
         authority: &Keypair,
         l1_message: &ScheduledL1Message,
         commit_ids: HashMap<Pubkey, u64>,
-    ) -> PreparatorResult<Message> {
+    ) -> PreparatorResult<VersionedMessage> {
         // 1. create tasks
         // 2. optimize to fit tx size. aka Delivery Strategy
         // 3. Pre tx preparations. Create buffer accs + lookup tables
         // 4. Build resulting TX to be executed
-
-        // 1.
         let tasks = TaskBuilderV1::commit_tasks(l1_message, commit_ids);
-        // 2.
         let tx_strategy =
             TaskStrategist::build_strategy(tasks, &authority.pubkey())?;
-        // 3.
-        let _ = self
+        let lookup_tables = self
             .delivery_preparator
             .prepare_for_delivery(authority, &tx_strategy)
             .await
             .unwrap(); // TODO: fix
 
-        todo!()
+        let message = TransactionUtils::assemble_tasks_tx(
+            authority,
+            &tx_strategy.optimized_tasks,
+            &lookup_tables,
+        )
+        .message;
+        Ok(message)
     }
 
     /// In V1: prepares single TX with finalize, undelegation + actions
@@ -125,18 +128,24 @@ impl TransactionPreparator for TransactionPreparatorV1 {
         authority: &Keypair,
         rent_reimbursement: &Pubkey,
         l1_message: &ScheduledL1Message,
-    ) -> PreparatorResult<Message> {
+    ) -> PreparatorResult<VersionedMessage> {
         let tasks =
             TaskBuilderV1::finalize_tasks(l1_message, rent_reimbursement);
         let tx_strategy =
             TaskStrategist::build_strategy(tasks, &authority.pubkey())?;
-        let _ = self
+        let lookup_tables = self
             .delivery_preparator
             .prepare_for_delivery(authority, &tx_strategy)
             .await
             .unwrap(); // TODO: fix
 
-        todo!()
+        let message = TransactionUtils::assemble_tasks_tx(
+            authority,
+            &tx_strategy.optimized_tasks,
+            &lookup_tables,
+        )
+        .message;
+        Ok(message)
     }
 }
 

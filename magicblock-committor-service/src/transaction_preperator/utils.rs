@@ -79,7 +79,6 @@ impl TransactionUtils {
         tasks: &[Box<dyn L1Task>],
         lookup_tables: &[AddressLookupTableAccount],
     ) -> VersionedTransaction {
-        // In case we can't fit with optimal strategy - try ALT
         let budget_instructions =
             Self::budget_instructions(&Self::tasks_budgets(&tasks));
         let ixs = Self::tasks_instructions(&authority.pubkey(), &tasks);
@@ -98,7 +97,7 @@ impl TransactionUtils {
         lookup_tables: &[AddressLookupTableAccount],
     ) -> VersionedTransaction {
         let message = Message::try_compile(
-            &Pubkey::new_unique(),
+            &authority.pubkey(),
             &[budget_instructions, instructions].concat(),
             &lookup_tables,
             Hash::new_unique(),

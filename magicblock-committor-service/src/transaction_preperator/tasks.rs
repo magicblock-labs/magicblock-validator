@@ -31,7 +31,7 @@ pub struct TaskPreparationInfo {
     pub write_instructions: Vec<Instruction>,
 }
 
-pub trait L1Task {
+pub trait L1Task: Send + Sync {
     /// Gets all pubkeys that involved in Task's instruction
     fn involved_accounts(&self, validator: &Pubkey) -> Vec<Pubkey> {
         self.instruction(validator)

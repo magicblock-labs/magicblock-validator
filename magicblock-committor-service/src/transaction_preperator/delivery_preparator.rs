@@ -61,20 +61,21 @@ impl DeliveryPreparator {
         &self,
         authority: &Keypair,
         strategy: &TransactionStrategy,
-    ) -> DeliveryPreparatorResult<()> {
+    ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
         let preparation_futures = strategy
             .optimized_tasks
             .iter()
             .map(|task| self.prepare_task(authority, task));
 
-        let fut1 = join_all(preparation_futures);
-        let fut2 =
+        let task_preparations = join_all(preparation_futures);
+        let alts_preparations =
             self.prepare_lookup_tables(authority, &strategy.lookup_tables_keys);
 
-        let (res1, res2) = join(fut1, fut2).await;
+        let (res1, res2) = join(task_preparations, alts_preparations).await;
         res1.into_iter().collect::<Result<Vec<_>, _>>()?;
-        res2?;
-        Ok(())
+
+        let lookup_tables = res2?;
+        Ok(lookup_tables)
     }
 
     /// Prepares necessary parts for TX if needed, otherwise returns immediately
@@ -283,9 +284,9 @@ impl DeliveryPreparator {
     async fn prepare_lookup_tables(
         &self,
         authority: &Keypair,
-        lookup_table_keys: &[Vec<Pubkey>],
+        lookup_table_keys: &[Pubkey],
     ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
-        let pubkeys = HashSet::from_iter(lookup_table_keys.iter().flatten());
+        let pubkeys = HashSet::from_iter(lookup_table_keys.iter().copied());
         self.table_mania
             .reserve_pubkeys(authority, &pubkeys)
             .await?;

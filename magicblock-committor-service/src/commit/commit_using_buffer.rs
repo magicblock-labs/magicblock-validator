@@ -1011,7 +1011,7 @@ impl CommittorProcessor {
             join_set.spawn(async move {
                 send_and_confirm(
                     rpc_client,
-                    authority,
+                    &authority,
                     [write_budget_ixs, vec![ix]].concat(),
                     format!("write chunk for offset {}", chunk.offset),
                     Some(latest_blockhash),

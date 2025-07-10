@@ -17,12 +17,13 @@ use crate::{
 
 pub struct TransactionStrategy {
     pub optimized_tasks: Vec<Box<dyn L1Task>>,
-    pub lookup_tables_keys: Vec<Vec<Pubkey>>,
+    pub lookup_tables_keys: Vec<Pubkey>,
 }
 
 pub struct TaskStrategist;
 impl TaskStrategist {
     /// Returns [`TaskDeliveryStrategy`] for every [`Task`]
+    /// Returns Error if all optimizations weren't enough
     pub fn build_strategy(
         mut tasks: Vec<Box<dyn L1Task>>,
         validator: &Pubkey,
@@ -50,7 +51,7 @@ impl TaskStrategist {
     fn attempt_lookup_tables(
         validator: &Pubkey,
         tasks: &[Box<dyn L1Task>],
-    ) -> PreparatorResult<Vec<Vec<Pubkey>>> {
+    ) -> PreparatorResult<Vec<Pubkey>> {
         // Gather all involved keys in tx
         let budgets = TransactionUtils::tasks_budgets(&tasks);
         let budget_instructions =
@@ -74,11 +75,7 @@ impl TaskStrategist {
         );
         let encoded_alt_tx = serialize_and_encode_base64(&alt_tx);
         if encoded_alt_tx.len() <= MAX_ENCODED_TRANSACTION_SIZE {
-            let lookup_tables_keys = dummy_lookup_tables
-                .into_iter()
-                .map(|table| table.addresses)
-                .collect();
-            Ok(lookup_tables_keys)
+            Ok(unique_involved_pubkeys)
         } else {
             Err(Error::FailedToFitError)
         }
@@ -94,7 +91,8 @@ impl TaskStrategist {
 
         // Create heap size -> index
         // TODO(edwin): OPTIMIZATION. update ixs arr, since we know index, coul then reuse for tx creation
-        let ixs = TransactionUtils::tasks_instructions(&tasks);
+        let ixs =
+            TransactionUtils::tasks_instructions(&Pubkey::new_unique(), &tasks);
         let sizes = ixs
             .iter()
             .map(|ix| bincode::serialized_size(ix).map(|size| size as usize))
