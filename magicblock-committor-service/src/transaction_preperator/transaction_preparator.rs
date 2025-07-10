@@ -1,5 +1,13 @@
 use std::collections::HashMap;
 
+use crate::transaction_preperator::delivery_preparator::DeliveryPreparator;
+use crate::transaction_preperator::{
+    budget_calculator::{ComputeBudgetCalculator, ComputeBudgetCalculatorV1},
+    error::{Error, PreparatorResult},
+    task_builder::{TaskBuilderV1, TasksBuilder},
+    task_strategist::TaskStrategist,
+};
+use crate::ComputeBudgetConfig;
 use async_trait::async_trait;
 use magicblock_program::magic_scheduled_l1_message::{
     CommittedAccountV2, L1Action, MagicL1Message, ScheduledL1Message,
@@ -8,13 +16,6 @@ use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
 use solana_pubkey::Pubkey;
 use solana_sdk::{message::v0::Message, signature::Keypair, signer::Signer};
-
-use crate::transaction_preperator::{
-    budget_calculator::{ComputeBudgetCalculator, ComputeBudgetCalculatorV1},
-    error::{Error, PreparatorResult},
-    task_builder::{TaskBuilderV1, TasksBuilder},
-    task_strategist::TaskStrategist,
-};
 
 /// Transaction Preparator version
 /// Some actions maybe imnvalid per version
@@ -44,6 +45,7 @@ trait TransactionPreparator {
 /// It omits future commit_bundle/finalize_bundle logic
 /// It creates TXs using current per account commit/finalize
 struct TransactionPreparatorV1 {
+    delivery_preparator: DeliveryPreparator,
     rpc_client: MagicblockRpcClient,
     table_mania: TableMania, // TODO(edwin): Arc<TableMania>?
 }
@@ -52,10 +54,17 @@ impl TransactionPreparatorV1 {
     pub fn new(
         rpc_client: MagicblockRpcClient,
         table_mania: TableMania,
+        compute_budget_config: ComputeBudgetConfig,
     ) -> Self {
+        let delivery_preparator = DeliveryPreparator::new(
+            rpc_client.clone(),
+            table_mania.clone(),
+            compute_budget_config,
+        );
         Self {
             rpc_client,
             table_mania,
+            delivery_preparator,
         }
     }
 
@@ -96,6 +105,11 @@ impl TransactionPreparator for TransactionPreparatorV1 {
         let tx_strategy =
             TaskStrategist::build_strategy(tasks, &authority.pubkey())?;
         // 3.
+        let _ = self
+            .delivery_preparator
+            .prepare_for_delivery(authority, &tx_strategy)
+            .await
+            .unwrap(); // TODO: fix
 
         todo!()
     }
@@ -110,7 +124,12 @@ impl TransactionPreparator for TransactionPreparatorV1 {
         let tasks =
             TaskBuilderV1::finalize_tasks(l1_message, rent_reimbursement);
         let tx_strategy =
-            TaskStrategist::build_strategy(tasks, &authority.pubkey());
+            TaskStrategist::build_strategy(tasks, &authority.pubkey())?;
+        let _ = self
+            .delivery_preparator
+            .prepare_for_delivery(authority, &tx_strategy)
+            .await
+            .unwrap(); // TODO: fix
 
         todo!()
     }

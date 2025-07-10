@@ -1,5 +1,14 @@
+use std::collections::HashSet;
 use std::time::Duration;
 
+use crate::{
+    transaction_preperator::{
+        error::PreparatorResult,
+        task_strategist::TransactionStrategy,
+        tasks::{L1Task, TaskPreparationInfo},
+    },
+    ComputeBudgetConfig,
+};
 use anyhow::anyhow;
 use borsh::BorshDeserialize;
 use futures_util::future::{join, join_all};
@@ -9,6 +18,7 @@ use magicblock_rpc_client::{
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig,
     MagicblockRpcClient,
 };
+use magicblock_table_mania::error::TableManiaError;
 use magicblock_table_mania::TableMania;
 use solana_account::ReadableAccount;
 use solana_pubkey::Pubkey;
@@ -23,15 +33,6 @@ use solana_sdk::{
     transaction::VersionedTransaction,
 };
 use tokio::time::sleep;
-
-use crate::{
-    transaction_preperator::{
-        error::PreparatorResult,
-        task_strategist::TransactionStrategy,
-        tasks::{L1Task, TaskPreparationInfo},
-    },
-    ComputeBudgetConfig,
-};
 
 pub struct DeliveryPreparationResult {
     lookup_tables: Vec<AddressLookupTableAccount>,
@@ -68,7 +69,8 @@ impl DeliveryPreparator {
             .map(|task| self.prepare_task(authority, task));
 
         let fut1 = join_all(preparation_futures);
-        let fut2 = self.prepare_lookup_tables(&strategy.lookup_tables_keys);
+        let fut2 =
+            self.prepare_lookup_tables(authority, &strategy.lookup_tables_keys);
 
         let (res1, res2) = join(fut1, fut2).await;
         res1.into_iter().collect::<Result<Vec<_>, _>>()?;
@@ -281,9 +283,28 @@ impl DeliveryPreparator {
     /// Prepares ALTs for pubkeys participating in tx
     async fn prepare_lookup_tables(
         &self,
+        authority: &Keypair,
         lookup_table_keys: &[Vec<Pubkey>],
     ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
-        // self.table_mania.
+        let pubkeys = HashSet::from_iter(lookup_table_keys.iter().flatten());
+        self.table_mania
+            .reserve_pubkeys(authority, &pubkeys)
+            .await?;
+
+        let alts = self
+            .table_mania
+            .try_get_active_address_lookup_table_accounts(
+                &pubkeys, // enough time for init/extend lookup table transaction to complete
+                Duration::from_secs(50),
+                // enough time for lookup table to finalize
+                Duration::from_secs(50),
+            )
+            .await?;
+        Ok(alts)
+    }
+
+    // TODO(edwin): cleanup
+    async fn clean() {
         todo!()
     }
 }
@@ -295,6 +316,8 @@ pub enum Error {
     InternalError(anyhow::Error),
     #[error("BorshError: {0}")]
     BorshError(#[from] std::io::Error),
+    #[error("TableManiaError: {0}")]
+    TableManiaError(#[from] TableManiaError),
     #[error("TransactionCreationError: {0}")]
     TransactionCreationError(#[from] CompileError),
     #[error("TransactionSigningError: {0}")]

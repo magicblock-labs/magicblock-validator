@@ -5,17 +5,12 @@ use std::{
 
 use solana_pubkey::Pubkey;
 use solana_sdk::{
-    address_lookup_table::AddressLookupTableAccount,
-    hash::Hash,
-    instruction::Instruction,
-    message::{v0::Message, VersionedMessage},
     signature::Keypair,
-    transaction::VersionedTransaction,
 };
 
+use crate::transaction_preperator::utils::TransactionUtils;
 use crate::{
     transaction_preperator::{
-        budget_calculator::ComputeBudgetV1,
         error::{Error, PreparatorResult},
         tasks::{ArgsTask, L1Task},
     },
@@ -34,37 +29,58 @@ impl TaskStrategist {
         mut tasks: Vec<Box<dyn L1Task>>,
         validator: &Pubkey,
     ) -> PreparatorResult<TransactionStrategy> {
-        // Optimize srategy
+        // Attempt optimizing tasks themselves(using buffers)
         if Self::optimize_strategy(&mut tasks) <= MAX_ENCODED_TRANSACTION_SIZE {
-            return Ok(TransactionStrategy {
+            Ok(TransactionStrategy {
                 optimized_tasks: tasks,
                 lookup_tables_keys: vec![],
-            });
-        }
-
-        let budget_instructions = Self::budget_instructions(
-            &tasks.iter().map(|task| task.budget()).collect::<Vec<_>>(),
-        );
-        let lookup_tables = Self::assemble_lookup_table(
-            &mut tasks,
-            validator,
-            &budget_instructions,
-        );
-        let alt_tx = Self::assemble_tx_with_lookup_table(
-            &tasks,
-            &budget_instructions,
-            &lookup_tables,
-        );
-        let encoded_alt_tx = serialize_and_encode_base64(&alt_tx);
-        if encoded_alt_tx.len() <= MAX_ENCODED_TRANSACTION_SIZE {
-            let lookup_tables_keys = lookup_tables
-                .into_iter()
-                .map(|table| table.addresses)
-                .collect();
+            })
+        } else {
+            // In case task optimization didn't work
+            // attempt using lookup tables for all keys involved in tasks
+            let lookup_tables_keys =
+                Self::attempt_lookup_tables(&validator, &tasks)?;
             Ok(TransactionStrategy {
                 optimized_tasks: tasks,
                 lookup_tables_keys,
             })
+        }
+    }
+
+    /// Attempt to use ALTs for ALL keys in tx
+    /// TODO: optimize to use only necessary amount of pubkeys
+    fn attempt_lookup_tables(
+        validator: &Pubkey,
+        tasks: &[Box<dyn L1Task>],
+    ) -> PreparatorResult<Vec<Vec<Pubkey>>> {
+        // Gather all involved keys in tx
+        let budgets = TransactionUtils::tasks_budgets(&tasks);
+        let budget_instructions =
+            TransactionUtils::budget_instructions(&budgets);
+        let unique_involved_pubkeys = TransactionUtils::unique_involved_pubkeys(
+            &tasks,
+            validator,
+            &budget_instructions,
+        );
+        let dummy_lookup_tables =
+            TransactionUtils::dummy_lookup_table(&unique_involved_pubkeys);
+
+        // Create final tx
+        let instructions =
+            TransactionUtils::tasks_instructions(validator, &tasks);
+        let alt_tx = TransactionUtils::assemble_tx_raw(
+            &Keypair::new(),
+            &instructions,
+            &budget_instructions,
+            &dummy_lookup_tables,
+        );
+        let encoded_alt_tx = serialize_and_encode_base64(&alt_tx);
+        if encoded_alt_tx.len() <= MAX_ENCODED_TRANSACTION_SIZE {
+            let lookup_tables_keys = dummy_lookup_tables
+                .into_iter()
+                .map(|table| table.addresses)
+                .collect();
+            Ok(lookup_tables_keys)
         } else {
             Err(Error::FailedToFitError)
         }
@@ -73,22 +89,25 @@ impl TaskStrategist {
     /// Optimizes set of [`TaskDeliveryStrategy`] to fit [`MAX_ENCODED_TRANSACTION_SIZE`]
     /// Returns size of tx after optimizations
     fn optimize_strategy(tasks: &mut [Box<dyn L1Task>]) -> usize {
-        let ixs = Self::assemble_ixs(&tasks);
-        let tx = Self::assemble_tx_with_budget(&tasks);
+        // Get initial transaction size
+        let tx =
+            TransactionUtils::assemble_tasks_tx(&Keypair::new(), &tasks, &[]);
         let mut current_tx_length = serialize_and_encode_base64(&tx).len();
 
         // Create heap size -> index
+        // TODO(edwin): OPTIMIZATION. update ixs arr, since we know index, coul then reuse for tx creation
+        let ixs = TransactionUtils::tasks_instructions(&tasks);
         let sizes = ixs
             .iter()
             .map(|ix| bincode::serialized_size(ix).map(|size| size as usize))
             .collect::<Result<Vec<usize>, _>>()
             .unwrap();
-
         let mut map = sizes
             .into_iter()
             .enumerate()
             .map(|(index, size)| (size, index))
             .collect::<BinaryHeap<_>>();
+
         // We keep popping heaviest el-ts & try to optimize while heap is non-empty
         while let Some((_, index)) = map.pop() {
             if current_tx_length <= MAX_ENCODED_TRANSACTION_SIZE {
@@ -117,9 +136,14 @@ impl TaskStrategist {
                     // TODO(edwin): this is expensive
                     let new_ix =
                         tasks[index].instruction(&Pubkey::new_unique());
-                    let new_ix_size =
-                        bincode::serialized_size(&new_ix).unwrap() as usize; // TODO(edwin): unwrap
-                    let new_tx = Self::assemble_tx_with_budget(&tasks);
+                    let new_ix_size = bincode::serialized_size(&new_ix)
+                        .expect("instruction serialization")
+                        as usize; // TODO(edwin): unwrap
+                    let new_tx = TransactionUtils::assemble_tasks_tx(
+                        &Keypair::new(),
+                        &tasks,
+                        &[],
+                    );
 
                     map.push((new_ix_size, index));
                     current_tx_length =
@@ -135,79 +159,5 @@ impl TaskStrategist {
         }
 
         current_tx_length
-    }
-
-    fn assemble_lookup_table(
-        tasks: &[Box<dyn L1Task>],
-        validator: &Pubkey,
-        budget_instructions: &[Instruction],
-    ) -> Vec<AddressLookupTableAccount> {
-        // Collect all unique pubkeys from tasks and budget instructions
-        let mut all_pubkeys: HashSet<Pubkey> = tasks
-            .iter()
-            .flat_map(|task| task.involved_accounts(validator))
-            .collect();
-
-        all_pubkeys.extend(
-            budget_instructions
-                .iter()
-                .flat_map(|ix| ix.accounts.iter().map(|meta| meta.pubkey)),
-        );
-
-        // Split into chunks of max 256 addresses
-        all_pubkeys
-            .into_iter()
-            .collect::<Vec<_>>()
-            .chunks(256)
-            .map(|addresses| AddressLookupTableAccount {
-                key: Pubkey::new_unique(),
-                addresses: addresses.to_vec(),
-            })
-            .collect()
-    }
-
-    // TODO(edwin): improve
-    fn assemble_tx_with_lookup_table(
-        tasks: &[Box<dyn L1Task>],
-        budget_instructions: &[Instruction],
-        lookup_tables: &[AddressLookupTableAccount],
-    ) -> VersionedTransaction {
-        // In case we can't fit with optimal strategy - try ALT
-        let ixs = Self::assemble_ixs_with_budget(&tasks);
-        let message = Message::try_compile(
-            &Pubkey::new_unique(),
-            &[budget_instructions, &ixs].concat(),
-            &lookup_tables,
-            Hash::new_unique(),
-        )
-        .unwrap(); // TODO(edwin): unwrap
-        let tx = VersionedTransaction::try_new(
-            VersionedMessage::V0(message),
-            &[Keypair::new()],
-        )
-        .unwrap();
-        tx
-    }
-
-    fn budget_instructions(budgets: &[ComputeBudgetV1]) -> Vec<Instruction> {
-        todo!()
-    }
-
-    fn assemble_ixs_with_budget(
-        strategies: &[Box<dyn L1Task>],
-    ) -> Vec<Instruction> {
-        todo!()
-    }
-
-    fn assemble_ixs(tasks: &[Box<dyn L1Task>]) -> Vec<Instruction> {
-        // Just given Strategy(Task) creates dummy ixs
-        // Then assemls ixs into tx
-        todo!()
-    }
-
-    fn assemble_tx_with_budget(
-        tasks: &[Box<dyn L1Task>],
-    ) -> VersionedTransaction {
-        todo!()
     }
 }
