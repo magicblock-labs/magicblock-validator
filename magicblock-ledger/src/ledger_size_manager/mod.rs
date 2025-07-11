@@ -138,6 +138,47 @@ impl<T: ManagableLedger, U: FinalityProvider> LedgerSizeManager<T, U> {
         }
     }
 
+    async fn prepare_watermarks_for_existing_ledger(
+        ledger: &Arc<T>,
+        finality_provider: &Arc<U>,
+        existing_ledger_state: ExistingLedgerState,
+        resize_percentage: &ResizePercentage,
+        max_ledger_size: u64,
+    ) -> (Watermarks, u64) {
+        let prev_size = existing_ledger_state.size;
+
+        let (adjusted_ledger_size, lowest_slot) =
+            if prev_size > max_ledger_size {
+                warn!(
+                "Existing ledger size {} is above the max size {}, \
+                waiting for truncation before using watermarks.",
+                prev_size, max_ledger_size
+            );
+
+                Self::ensure_initial_max_ledger_size_below(
+                    ledger,
+                    finality_provider,
+                    &existing_ledger_state,
+                    resize_percentage,
+                    max_ledger_size,
+                )
+                .await
+            } else {
+                (prev_size, ledger.get_lowest_cleanup_slot())
+            };
+
+        let mut marks = Watermarks::new(
+            resize_percentage,
+            max_ledger_size,
+            Some(existing_ledger_state),
+        );
+        marks.size_at_last_capture = adjusted_ledger_size;
+        // Remove watermarks that are below the lowest cleanup slot
+        marks.marks.retain(|mark| mark.slot > lowest_slot);
+        
+        (marks, adjusted_ledger_size)
+    }
+
     async fn tick(
         ledger: &Arc<T>,
         finality_provider: &Arc<U>,
@@ -152,40 +193,15 @@ impl<T: ManagableLedger, U: FinalityProvider> LedgerSizeManager<T, U> {
         // NOTE: that watermarks are set during the first tick
         if watermarks.is_none() {
             if let Some(existing_ledger_state) = existing_ledger_state.take() {
-                let prev_size = existing_ledger_state.size;
+                let (prepared_watermarks, adjusted_ledger_size) = Self::prepare_watermarks_for_existing_ledger(
+                    ledger,
+                    finality_provider,
+                    existing_ledger_state,
+                    resize_percentage,
+                    max_ledger_size,
+                ).await;
 
-                let (adjusted_ledger_size, lowest_slot) =
-                    if prev_size > max_ledger_size {
-                        warn!(
-                        "Existing ledger size {} is above the max size {}, \
-                        waiting for truncation before using watermarks.",
-                        prev_size, max_ledger_size
-                    );
-
-                        Self::ensure_initial_max_ledger_size_below(
-                            ledger,
-                            finality_provider,
-                            &existing_ledger_state,
-                            resize_percentage,
-                            max_ledger_size,
-                        )
-                        .await
-                    } else {
-                        (prev_size, ledger.get_lowest_cleanup_slot())
-                    };
-
-                watermarks.replace({
-                    let mut marks = Watermarks::new(
-                        resize_percentage,
-                        max_ledger_size,
-                        Some(existing_ledger_state),
-                    );
-                    marks.size_at_last_capture = adjusted_ledger_size;
-                    // Remove watermarks that are below the lowest cleanup slot
-                    marks.marks.retain(|mark| mark.slot > lowest_slot);
-                    marks
-                });
-
+                watermarks.replace(prepared_watermarks);
                 return Some(adjusted_ledger_size);
             }
         }
