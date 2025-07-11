@@ -179,6 +179,48 @@ impl<T: ManagableLedger, U: FinalityProvider> LedgerSizeManager<T, U> {
         (marks, adjusted_ledger_size)
     }
 
+    async fn handle_partial_truncation(
+        ledger: &Arc<T>,
+        wms: &mut Watermarks,
+        mark: &Watermark,
+        latest_final_slot: u64,
+        lowest_cleanup_slot: u64,
+    ) {
+        warn!("Truncation would remove data at or above the latest final slot {}. \
+               Adjusting truncation for mark: {mark:?} to cut up to the latest final slot.",
+            latest_final_slot);
+
+        // Estimate the size delta based on the ratio of the slots
+        // that we can remove
+        let original_diff =
+            mark.slot.saturating_sub(lowest_cleanup_slot);
+        let applied_diff =
+            latest_final_slot.saturating_sub(lowest_cleanup_slot);
+        let size_delta = (applied_diff as f64
+            / original_diff as f64
+            * mark.size_delta as f64)
+            as u64;
+        Self::truncate_ledger(
+            ledger,
+            latest_final_slot,
+            size_delta,
+        )
+        .await;
+        wms.size_at_last_capture =
+            wms.size_at_last_capture.saturating_sub(size_delta);
+
+        // Since we didn't truncate the full mark, we need to put one
+        // back so it will be processed to remove the remaining space
+        // when possible
+        // Otherwise we would process the following mark which would
+        // cause us to truncate too many slots
+        wms.push_front(Watermark {
+            slot: mark.slot,
+            mod_id: mark.mod_id,
+            size_delta: mark.size_delta.saturating_sub(size_delta),
+        });
+    }
+
     async fn tick(
         ledger: &Arc<T>,
         finality_provider: &Arc<U>,
@@ -248,39 +290,13 @@ impl<T: ManagableLedger, U: FinalityProvider> LedgerSizeManager<T, U> {
                 }
 
                 if mark.slot > latest_final_slot {
-                    warn!("Truncation would remove data at or above the latest final slot {}. \
-                           Adjusting truncation for mark: {mark:?} to cut up to the latest final slot.",
-                        latest_final_slot);
-
-                    // Estimate the size delta based on the ratio of the slots
-                    // that we can remove
-                    let original_diff =
-                        mark.slot.saturating_sub(lowest_cleanup_slot);
-                    let applied_diff =
-                        latest_final_slot.saturating_sub(lowest_cleanup_slot);
-                    let size_delta = (applied_diff as f64
-                        / original_diff as f64
-                        * mark.size_delta as f64)
-                        as u64;
-                    Self::truncate_ledger(
+                    Self::handle_partial_truncation(
                         ledger,
+                        wms,
+                        &mark,
                         latest_final_slot,
-                        size_delta,
-                    )
-                    .await;
-                    wms.size_at_last_capture =
-                        wms.size_at_last_capture.saturating_sub(size_delta);
-
-                    // Since we didn't truncate the full mark, we need to put one
-                    // back so it will be processed to remove the remaining space
-                    // when possible
-                    // Otherwise we would process the following mark which would
-                    // cause us to truncate too many slots
-                    wms.push_front(Watermark {
-                        slot: mark.slot,
-                        mod_id: mark.mod_id,
-                        size_delta: mark.size_delta.saturating_sub(size_delta),
-                    });
+                        lowest_cleanup_slot,
+                    ).await;
                 } else {
                     Self::truncate_ledger(ledger, mark.slot, mark.size_delta)
                         .await;
