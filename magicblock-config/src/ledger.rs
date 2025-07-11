@@ -15,7 +15,6 @@ pub struct LedgerConfig {
     /// If a previous ledger is found it is removed before starting the validator
     /// This can be disabled by setting [Self::reset] to `false`.
     #[derive_env_var]
-    #[clap_from_serde_skip]
     #[arg(help = "Whether to reset the ledger before starting the validator.")]
     #[serde(default = "bool_true")]
     pub reset: bool,
