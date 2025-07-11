@@ -58,6 +58,7 @@ impl RpcConfig {
     }
 }
 
+// Used by the #[clap_from_serde] macro to parse the address
 fn clap_deserialize_addr(s: &str) -> Result<IpAddr, String> {
     s.parse().map_err(|err| format!("Invalid address: {err}"))
 }

@@ -20,7 +20,7 @@ pub struct ValidatorConfig {
     #[serde(default = "default_sigverify")]
     pub sigverify: bool,
 
-    /// By default FQDN is set tp None.
+    /// By default FQDN is set to None.
     /// If specified it will also register ER on chain
     #[derive_env_var]
     #[clap_from_serde_skip] // Skip because it defaults to None

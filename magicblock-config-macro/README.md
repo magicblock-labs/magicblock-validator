@@ -1,6 +1,6 @@
 # MagicBlock Config Macro
 
-A set a macro helpers to keep the config DRY (Don't Repeat Yourself). It contains two attributes meant to be used on struct that need to derive `serde::Deserialize` and `clap::Args`.
+A set of macro helpers to keep the config DRY (Don't Repeat Yourself). It contains two attributes meant to be used on struct that need to derive `serde::Deserialize` and `clap::Args`.
 
 ## `clap_prefix`
 
@@ -48,7 +48,7 @@ struct RpcConfig {
     #[serde(default = "helpers::serde_defaults::bool_true")]
     enabled: bool,
     #[clap_from_serde_skip]
-    #[serde(default = "helpers::serde_default::url_none")]
+    #[serde(default = "helpers::serde_defaults::url_none")]
     url: Option<Url>,
     #[serde(flatten)]
     config: SomeOtherConfig,

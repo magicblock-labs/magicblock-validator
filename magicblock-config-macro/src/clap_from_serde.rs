@@ -39,6 +39,7 @@ impl VisitMut for ClapFromSerde {
                 arg_index = Some(i);
             } else if attr.path().is_ident("clap_from_serde_skip") {
                 // Remove the attribute
+                // SAFETY: attributes have not changed yet
                 attrs.remove(i);
                 return;
             } else if attr.path().is_ident("command") {

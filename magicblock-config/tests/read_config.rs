@@ -1,6 +1,7 @@
 use std::{
     env,
     net::{IpAddr, Ipv4Addr},
+    path::Path,
 };
 
 use isocountry::CountryCode;
@@ -13,6 +14,15 @@ use magicblock_config::{
 use solana_sdk::pubkey;
 use test_tools_core::paths::cargo_workspace_dir;
 use url::Url;
+
+fn parse_config_with_file(config_file_dir: &Path) -> EphemeralConfig {
+    MagicBlockConfig::try_parse_config_from_arg(&vec![
+        "--config-file".to_string(),
+        config_file_dir.to_str().unwrap().to_string(),
+    ])
+    .unwrap()
+    .config
+}
 
 #[test]
 fn test_load_local_dev_with_programs_toml() {
@@ -101,12 +111,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     env::set_var("METRICS_SYSTEM_METRICS_TICK_INTERVAL_SECS", "10");
     env::set_var("LEDGER_SIZE", "123123");
 
-    let mb_config = MagicBlockConfig::try_parse_config_from_arg(&vec![
-        "--config-file".to_string(),
-        config_file_dir.to_str().unwrap().to_string(),
-    ])
-    .unwrap();
-    let config = mb_config.config;
+    let config = parse_config_with_file(&config_file_dir);
 
     assert_eq!(
         config,
@@ -163,12 +168,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     );
 
     env::set_var("REMOTE_WS_URL", base_cluster_ws);
-    let config = MagicBlockConfig::try_parse_config_from_arg(&vec![
-        "--config-file".to_string(),
-        config_file_dir.to_str().unwrap().to_string(),
-    ])
-    .unwrap()
-    .config;
+    let config = parse_config_with_file(&config_file_dir);
 
     assert_eq!(
         config.accounts.remote,
