@@ -1,5 +1,7 @@
 macro_rules! socket_addr_config {
-    ($struct_name:ident, $port:expr, $label:expr) => {
+    ($struct_name:ident, $port:expr, $label:expr, $prefix:expr) => {
+        #[magicblock_config_macro::clap_prefix($prefix)]
+        #[magicblock_config_macro::clap_from_serde]
         #[derive(
             Debug,
             Clone,
@@ -7,15 +9,20 @@ macro_rules! socket_addr_config {
             Eq,
             ::serde::Deserialize,
             ::serde::Serialize,
+            ::clap::Args,
         )]
         #[serde(deny_unknown_fields)]
         pub struct $struct_name {
+            #[derive_env_var]
+            #[arg(help = concat!("The address the ", $label, " service will listen on."))]
             #[serde(
                 default = "default_addr",
                 deserialize_with = "deserialize_addr",
                 serialize_with = "serialize_addr"
             )]
             pub addr: ::std::net::IpAddr,
+            #[derive_env_var]
+            #[arg(help = concat!("The port the ", $label, " service will listen on."))]
             #[serde(default = "default_port")]
             pub port: u16,
         }
@@ -33,10 +40,23 @@ macro_rules! socket_addr_config {
             pub fn socket_addr(&self) -> ::std::net::SocketAddr {
                 ::std::net::SocketAddr::new(self.addr, self.port)
             }
+
+            pub fn merge(&mut self, other: $struct_name) {
+                if self.addr == default_addr() && other.addr != default_addr() {
+                    self.addr = other.addr;
+                }
+                if self.port == default_port() && other.port != default_port() {
+                    self.port = other.port;
+                }
+            }
         }
 
         fn default_port() -> u16 {
             $port
+        }
+
+        fn clap_deserialize_addr(s: &str) -> Result<::std::net::IpAddr, String> {
+            s.parse().map_err(|err| format!("Invalid IP address: {err}"))
         }
 
         fn deserialize_addr<'de, D>(

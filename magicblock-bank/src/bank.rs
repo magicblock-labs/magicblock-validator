@@ -14,9 +14,8 @@ use std::{
 };
 
 use log::{debug, info, trace};
-use magicblock_accounts_db::{
-    config::AccountsDbConfig, error::AccountsDbError, AccountsDb, StWLock,
-};
+use magicblock_accounts_db::{error::AccountsDbError, AccountsDb, StWLock};
+use magicblock_config::AccountsDbConfig;
 use magicblock_core::traits::FinalityProvider;
 use solana_accounts_db::{
     accounts_update_notifier_interface::AccountsUpdateNotifierInterface,

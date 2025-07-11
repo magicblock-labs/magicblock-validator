@@ -7,7 +7,7 @@ use serde::Deserialize;
 
 #[derive(Deserialize)]
 struct Config {
-    accounts: RemoteConfig,
+    accounts: AccountsConfig,
     #[serde(default)]
     rpc: Rpc,
     #[serde(default)]
@@ -15,8 +15,14 @@ struct Config {
 }
 
 #[derive(Deserialize)]
+struct AccountsConfig {
+    remote: RemoteConfig,
+}
+
+#[derive(Deserialize)]
 struct RemoteConfig {
-    remote: String,
+    cluster: Option<String>,
+    url: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -97,7 +103,13 @@ pub fn config_to_args(
         }
     }
     args.push("--url".into());
-    args.push(config.accounts.remote);
+    args.push(
+        config
+            .accounts
+            .remote
+            .cluster
+            .unwrap_or_else(|| config.accounts.remote.url.unwrap()),
+    );
 
     args
 }

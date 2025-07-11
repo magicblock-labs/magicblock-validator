@@ -3,7 +3,7 @@
 [accounts]
 
 # devnet | mainnet/mainnet-beta | testnet | development/local | custom(url)
-remote = "devnet"
+remote.cluster = "devnet"
 # lifecycle: replica | programs-replica | ephemeral | offline
 lifecycle = "programs-replica"
 

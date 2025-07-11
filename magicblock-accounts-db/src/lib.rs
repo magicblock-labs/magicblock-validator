@@ -1,9 +1,9 @@
 use std::{path::Path, sync::Arc};
 
-use config::AccountsDbConfig;
 use error::AccountsDbError;
 use index::AccountsDbIndex;
 use log::{error, warn};
+use magicblock_config::AccountsDbConfig;
 use parking_lot::RwLock;
 use snapshot::SnapshotEngine;
 use solana_account::{
@@ -382,7 +382,6 @@ impl AccountsDb {
     }
 }
 
-pub mod config;
 pub mod error;
 mod index;
 mod snapshot;

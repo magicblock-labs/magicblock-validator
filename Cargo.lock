@@ -1319,6 +1319,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6245d59a3e82a7fc217c5828a6692dbc6dfb63a0c8c90495621f7b9d79704a0e"
 
 [[package]]
+name = "convert_case"
+version = "0.8.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "baaaa0ecca5b51987b9423ccdc971514dd8b0bb7b4060b983d3664dad3f1f89f"
+dependencies = [
+ "unicode-segmentation",
+]
+
+[[package]]
 name = "core-foundation"
 version = "0.9.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1587,7 +1596,7 @@ version = "0.99.20"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "6edb4b64a43d977b8e99788fe3a04d483834fba1215a7e02caa415b626497f7f"
 dependencies = [
- "convert_case",
+ "convert_case 0.4.0",
  "proc-macro2",
  "quote",
  "rustc_version",
@@ -3721,6 +3730,7 @@ dependencies = [
  "env_logger 0.11.8",
  "lmdb-rkv",
  "log",
+ "magicblock-config",
  "memmap2 0.9.5",
  "parking_lot 0.12.4",
  "reflink-copy",
@@ -3789,6 +3799,7 @@ dependencies = [
  "log",
  "magicblock-accounts-db",
  "magicblock-bank",
+ "magicblock-config",
  "magicblock-core",
  "magicblock-program",
  "rand 0.8.5",
@@ -3867,16 +3878,29 @@ dependencies = [
 name = "magicblock-config"
 version = "0.1.7"
 dependencies = [
+ "bs58 0.4.0",
+ "clap 4.5.40",
  "isocountry",
- "magicblock-accounts-db",
+ "magicblock-config-macro",
  "serde",
  "solana-sdk",
  "strum",
- "strum_macros",
  "test-tools-core",
  "thiserror 1.0.69",
  "toml 0.8.23",
  "url 2.5.4",
+]
+
+[[package]]
+name = "magicblock-config-macro"
+version = "0.1.7"
+dependencies = [
+ "clap 4.5.40",
+ "convert_case 0.8.0",
+ "proc-macro2",
+ "quote",
+ "serde",
+ "syn 2.0.104",
 ]
 
 [[package]]
@@ -10497,6 +10521,7 @@ checksum = "8f50febec83f5ee1df3015341d8bd429f2d1cc62bcba7ea2076759d315084683"
 name = "test-bins"
 version = "0.1.7"
 dependencies = [
+ "clap 4.5.40",
  "console-subscriber",
  "env_logger 0.11.8",
  "git-version",
@@ -10515,6 +10540,7 @@ dependencies = [
  "log",
  "magicblock-accounts-db",
  "magicblock-bank",
+ "magicblock-config",
  "magicblock-core",
  "magicblock-program",
  "solana-geyser-plugin-manager",

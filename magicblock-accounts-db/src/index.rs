@@ -7,13 +7,14 @@ use lmdb::{
 };
 use lmdb_utils::*;
 use log::warn;
+use magicblock_config::AccountsDbConfig;
 use solana_pubkey::Pubkey;
 use standalone::StandaloneIndex;
 
 use crate::{
     log_err,
     storage::{Allocation, ExistingAllocation},
-    AccountsDbConfig, AdbResult,
+    AdbResult,
 };
 
 const WEMPTY: WriteFlags = WriteFlags::empty();

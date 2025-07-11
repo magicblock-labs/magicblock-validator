@@ -1,13 +1,12 @@
 use std::sync::Arc;
 
-use magicblock_accounts_db::{
-    config::AccountsDbConfig, error::AccountsDbError, StWLock,
-};
+use magicblock_accounts_db::{error::AccountsDbError, StWLock};
 use magicblock_bank::{
     bank::Bank, geyser::AccountsUpdateNotifier,
     transaction_logs::TransactionLogCollectorFilter,
     EPHEM_DEFAULT_MILLIS_PER_SLOT,
 };
+use magicblock_config::AccountsDbConfig;
 use solana_geyser_plugin_manager::slot_status_notifier::SlotStatusNotifierImpl;
 use solana_sdk::{genesis_config::GenesisConfig, pubkey::Pubkey};
 use solana_svm::runtime_config::RuntimeConfig;

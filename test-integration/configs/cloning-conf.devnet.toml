@@ -1,5 +1,5 @@
 [accounts]
-remote = "devnet"
+remote.cluster = "devnet"
 lifecycle = "offline"
 commit = { frequency_millis = 9_000_000_000_000, compute_unit_price = 1_000_000 }
 
@@ -40,8 +40,6 @@ path = "../schedulecommit/elfs/dlp.so"
 [[program]]
 id = "DmnRGfyyftzacFb1XadYhWF6vWqXwtQk5tbr6XgR3BA1"
 path = "../schedulecommit/elfs/mdp.so"
-
-
 
 
 [rpc]

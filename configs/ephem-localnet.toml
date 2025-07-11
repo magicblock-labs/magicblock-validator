@@ -1,5 +1,5 @@
 [accounts]
-remote = "http://localhost:7799"
+remote.url = "http://localhost:7799"
 lifecycle = "ephemeral"
 commit = { frequency_millis = 50_000 }
 
