@@ -8,10 +8,14 @@ use futures_util::future::BoxFuture;
 use magicblock_account_dumper::AccountDumperError;
 use magicblock_account_fetcher::AccountFetcherError;
 use magicblock_account_updates::AccountUpdatesError;
+use magicblock_committor_service::{
+    error::{CommittorServiceError, CommittorServiceResult},
+    ChangesetCommittor,
+};
 use magicblock_core::magic_program;
 use solana_sdk::{clock::Slot, pubkey::Pubkey, signature::Signature};
 use thiserror::Error;
-use tokio::sync::oneshot::Sender;
+use tokio::sync::oneshot::{self, Sender};
 
 #[derive(Debug, Clone, Error)]
 pub enum AccountClonerError {
@@ -21,6 +25,9 @@ pub enum AccountClonerError {
     #[error(transparent)]
     RecvError(#[from] tokio::sync::oneshot::error::RecvError),
 
+    #[error("JoinError ({0})")]
+    JoinError(String),
+
     #[error(transparent)]
     AccountFetcherError(#[from] AccountFetcherError),
 
@@ -29,6 +36,9 @@ pub enum AccountClonerError {
 
     #[error(transparent)]
     AccountDumperError(#[from] AccountDumperError),
+
+    #[error("CommittorServiceError {0}")]
+    CommittorServiceError(String),
 
     #[error("ProgramDataDoesNotExist")]
     ProgramDataDoesNotExist,
@@ -66,6 +76,50 @@ pub enum AccountClonerUnclonableReason {
     DelegatedAccountsNotClonedWhileHydrating,
 }
 
+pub async fn map_committor_request_result<T, CC: ChangesetCommittor>(
+    res: oneshot::Receiver<CommittorServiceResult<T>>,
+    changeset_committor: Arc<CC>,
+) -> AccountClonerResult<T> {
+    match res.await.map_err(|err| {
+        // Send request error
+        AccountClonerError::CommittorServiceError(format!(
+            "error sending request {err:?}"
+        ))
+    })? {
+        Ok(val) => Ok(val),
+        Err(err) => {
+            // Commit error
+            match err {
+                CommittorServiceError::TableManiaError(table_mania_err) => {
+                    let Some(sig) = table_mania_err.signature() else {
+                        return Err(AccountClonerError::CommittorServiceError(
+                            format!("{:?}", table_mania_err),
+                        ));
+                    };
+                    let cus =
+                        changeset_committor.get_transaction_cus(&sig).await;
+                    let logs =
+                        changeset_committor.get_transaction_logs(&sig).await;
+                    let cus_str = cus
+                        .map(|cus| format!("{:?}", cus))
+                        .unwrap_or("N/A".to_string());
+                    let logs_str = logs
+                        .map(|logs| format!("{:#?}", logs))
+                        .unwrap_or("N/A".to_string());
+                    Err(AccountClonerError::CommittorServiceError(format!(
+                        "{:?}\nCUs: {cus_str}\nLogs: {logs_str}",
+                        table_mania_err
+                    )))
+                }
+                _ => Err(AccountClonerError::CommittorServiceError(format!(
+                    "{:?}",
+                    err
+                ))),
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct AccountClonerPermissions {
     pub allow_cloning_refresh: bool,
@@ -73,6 +127,15 @@ pub struct AccountClonerPermissions {
     pub allow_cloning_undelegated_accounts: bool,
     pub allow_cloning_delegated_accounts: bool,
     pub allow_cloning_program_accounts: bool,
+}
+
+impl AccountClonerPermissions {
+    pub fn can_clone(&self) -> bool {
+        self.allow_cloning_feepayer_accounts
+            || self.allow_cloning_undelegated_accounts
+            || self.allow_cloning_delegated_accounts
+            || self.allow_cloning_program_accounts
+    }
 }
 
 #[derive(Debug, Clone)]

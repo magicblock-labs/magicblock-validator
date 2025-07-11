@@ -17,7 +17,7 @@ use crate::{
     FeePayerAccount,
 };
 
-#[derive(Debug, Clone)]
+#[derive(Default, Debug, Clone)]
 pub struct SentCommit {
     pub commit_id: u64,
     pub slot: Slot,

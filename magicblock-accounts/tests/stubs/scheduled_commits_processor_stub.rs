@@ -1,20 +1,19 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use magicblock_accounts::{
-    errors::AccountsResult, AccountCommitter, ScheduledCommitsProcessor,
-};
+use magicblock_accounts::{errors::AccountsResult, ScheduledCommitsProcessor};
 use magicblock_accounts_api::InternalAccountProvider;
+use magicblock_committor_service::ChangesetCommittor;
 
 #[derive(Default)]
 pub struct ScheduledCommitsProcessorStub {}
 
 #[async_trait]
 impl ScheduledCommitsProcessor for ScheduledCommitsProcessorStub {
-    async fn process<AC: AccountCommitter, IAP: InternalAccountProvider>(
+    async fn process<IAP: InternalAccountProvider, CC: ChangesetCommittor>(
         &self,
-        _committer: &Arc<AC>,
         _account_provider: &IAP,
+        _changeset_committor: &Arc<CC>,
     ) -> AccountsResult<()> {
         Ok(())
     }

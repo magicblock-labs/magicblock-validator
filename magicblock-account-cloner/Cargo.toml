@@ -17,6 +17,7 @@ magicblock-account-updates = { workspace = true }
 magicblock-account-dumper = { workspace = true }
 magicblock-accounts-api = { workspace = true }
 magicblock-core = { workspace = true }
+magicblock-committor-service = { workspace = true }
 magicblock-metrics = { workspace = true }
 magicblock-mutator = { workspace = true }
 solana-sdk = { workspace = true }
@@ -26,3 +27,6 @@ thiserror = { workspace = true }
 lru = "0.14"
 
 [dev-dependencies]
+magicblock-committor-service = { workspace = true, features = [
+  "dev-context-only-utils",
+] }

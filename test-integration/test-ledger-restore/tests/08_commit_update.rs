@@ -1,6 +1,4 @@
 use cleanass::assert_eq;
-use std::thread::sleep;
-use std::time::Duration;
 use std::{path::Path, process::Child};
 
 use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};

@@ -213,7 +213,7 @@ pub(crate) async fn send_transaction(
 
 /// Verifies only the transaction signature and is used when sending a
 /// transaction to avoid the extra overhead of [sig_verify_transaction_and_check_precompiles]
-/// TODO(thlorenz): @@ sigverify takes upwards of 90µs which is 30%+ of
+/// TODO(thlorenz): sigverify takes upwards of 90µs which is 30%+ of
 /// the entire time it takes to execute a transaction.
 /// Therefore this an intermediate solution and we need to investigate verifying the
 /// wire_transaction instead (solana sigverify implementation is packet based)

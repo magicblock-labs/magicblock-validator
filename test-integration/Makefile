@@ -1,21 +1,25 @@
 DIR := $(dir $(abspath $(lastword $(MAKEFILE_LIST))))
 DEPLOY_DIR := $(DIR)target/deploy
+ROOT_DEPLOY_DIR := $(DIR)../target/deploy
 
 RUST_LOG ?= 'warn,geyser_plugin=warn,magicblock=trace,rpc=trace,bank=trace,banking_stage=warn,solana_geyser_plugin_manager=warn,solana_svm=warn,test_tools=trace,schedulecommit_test=trace,' \
 
 FLEXI_COUNTER_DIR := $(DIR)programs/flexi-counter
 SCHEDULECOMMIT_DIR := $(DIR)programs/schedulecommit
 SCHEDULECOMMIT_SECURITY_DIR := $(DIR)programs/schedulecommit-security
+COMMITTOR_PROGRAM_DIR := $(DIR)../magicblock-committor-program
 
 FLEXI_COUNTER_SRC := $(shell find $(FLEXI_COUNTER_DIR) -name '*.rs' -o -name '*.toml')
 SCHEDULECOMMIT_SRC := $(shell find $(SCHEDULECOMMIT_DIR) -name '*.rs' -o -name '*.toml')
 SCHEDULECOMMIT_SECURITY_SRC := $(shell find $(SCHEDULECOMMIT_SECURITY_DIR) -name '*.rs' -o -name '*.toml')
+COMMITTOR_PROGRAM_SRC := $(shell find $(COMMITTOR_PROGRAM_DIR) -name '*.rs' -o -name '*.toml')
 
 FLEXI_COUNTER_SO := $(DEPLOY_DIR)/program_flexi_counter.so
 SCHEDULECOMMIT_SO := $(DEPLOY_DIR)/program_schedulecommit.so
 SCHEDULECOMMIT_SECURITY_SO := $(DEPLOY_DIR)/program_schedulecommit_security.so
+COMMITTOR_PROGRAM_SO := $(ROOT_DEPLOY_DIR)/magicblock_committor_program.so
 
-PROGRAMS_SO := $(FLEXI_COUNTER_SO) $(SCHEDULECOMMIT_SO) $(SCHEDULECOMMIT_SECURITY_SO)
+PROGRAMS_SO := $(FLEXI_COUNTER_SO) $(SCHEDULECOMMIT_SO) $(SCHEDULECOMMIT_SECURITY_SO) $(COMMITTOR_PROGRAM_SO)
 
 list-tasks:
 	@cat Makefile | grep "^[a-z].*:" | sed 's/:.*//g'
@@ -25,19 +29,21 @@ list-programs:
 test: $(PROGRAMS_SO)
 	RUST_BACKTRACE=1 \
 	RUST_LOG=$(RUST_LOG) \
-	cargo run --package test-runner --bin run-tests 
+	cargo run --package test-runner --bin run-tests
 
 test-force-mb: $(PROGRAMS_SO) test-ledger-restore
 	RUST_LOG=$(RUST_LOG) \
 	FORCE_MAGIC_BLOCK_VALIDATOR=1 \
-	cargo run --package test-runner --bin run-tests 
+	cargo run --package test-runner --bin run-tests
 
 $(FLEXI_COUNTER_SO): $(FLEXI_COUNTER_SRC)
-	cargo build-sbf --manifest-path $(FLEXI_COUNTER_DIR)/Cargo.toml 
+	cargo build-sbf --manifest-path $(FLEXI_COUNTER_DIR)/Cargo.toml
 $(SCHEDULECOMMIT_SO): $(SCHEDULECOMMIT_SRC)
-	cargo build-sbf --manifest-path $(SCHEDULECOMMIT_DIR)/Cargo.toml 
+	cargo build-sbf --manifest-path $(SCHEDULECOMMIT_DIR)/Cargo.toml
 $(SCHEDULECOMMIT_SECURITY_SO): $(SCHEDULECOMMIT_SECURITY_SRC)
-	cargo build-sbf --manifest-path $(SCHEDULECOMMIT_SECURITY_DIR)/Cargo.toml 
+	cargo build-sbf --manifest-path $(SCHEDULECOMMIT_SECURITY_DIR)/Cargo.toml
+$(COMMITTOR_PROGRAM_SO): $(COMMITTOR_PROGRAM_SRC)
+	cargo build-sbf --manifest-path $(COMMITTOR_PROGRAM_DIR)/Cargo.toml
 
 deploy-flexi-counter: $(FLEXI_COUNTER_SO)
 	solana program deploy \

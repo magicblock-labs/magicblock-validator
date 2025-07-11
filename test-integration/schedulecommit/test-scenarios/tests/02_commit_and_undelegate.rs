@@ -171,7 +171,7 @@ fn test_committing_and_undelegating_one_account() {
 
         let res = verify::fetch_and_verify_commit_result_from_logs(&ctx, sig);
 
-        assert_one_committee_was_committed(&ctx, &res);
+        assert_one_committee_was_committed(&ctx, &res, true);
         assert_one_committee_synchronized_count(&ctx, &res, 1);
 
         assert_one_committee_account_was_undelegated_on_chain(&ctx);
@@ -186,7 +186,7 @@ fn test_committing_and_undelegating_two_accounts_success() {
 
         let res = verify::fetch_and_verify_commit_result_from_logs(&ctx, sig);
 
-        assert_two_committees_were_committed(&ctx, &res);
+        assert_two_committees_were_committed(&ctx, &res, true);
         assert_two_committees_synchronized_count(&ctx, &res, 1);
 
         assert_two_committee_accounts_were_undelegated_on_chain(&ctx);
