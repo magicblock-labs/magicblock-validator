@@ -102,10 +102,9 @@ impl<T: ManagableLedger, U: FinalityProvider> LedgerSizeManager<T, U> {
                 let finality_provider = self.finality_provider.clone();
 
                 let mut interval = interval(size_check_interval);
-
-                let mut watermarks = None::<Watermarks>;
                 let mut cancellation_token = cancellation_token.clone();
                 tokio::spawn(async move {
+                    let mut watermarks = None::<Watermarks>;
                     loop {
                         tokio::select! {
                             _ = cancellation_token.cancelled() => {
