@@ -48,6 +48,7 @@ impl From<CommitSignatures> for CommitStatusSignatures {
     }
 }
 
+// TODO(edwin): integrate
 #[derive(Debug)]
 pub enum CommitStage {
     /// This account was part of a changeset that could not be split into

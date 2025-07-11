@@ -52,8 +52,6 @@ pub enum CommittorMessage {
         respond_to: oneshot::Sender<Option<String>>,
         /// The changeset to commit
         l1_messages: Vec<ScheduledL1Message>,
-        /// If `true`, account commits will be finalized after they were processed
-        finalize: bool,
     },
     GetCommitStatuses {
         respond_to:
@@ -130,9 +128,9 @@ impl CommittorActor {
             CommitChangeset {
                 l1_messages,
                 respond_to,
-                finalize,
             } => {
-                let reqid = self.processor.commit_changeset(l1_messages).await;
+                let reqid =
+                    self.processor.commit_l1_messages(l1_messages).await;
                 if let Err(e) = respond_to.send(reqid) {
                     error!("Failed to send response {:?}", e);
                 }

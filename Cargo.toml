@@ -179,6 +179,7 @@ spl-token-2022 = "=6.0"
 static_assertions = "1.1.0"
 strum = "0.24"
 strum_macros = "0.24"
+lru = "0.16.0"
 tempfile = "3.10.1"
 test-tools = { path = "./test-tools" }
 test-tools-core = { path = "./test-tools-core" }

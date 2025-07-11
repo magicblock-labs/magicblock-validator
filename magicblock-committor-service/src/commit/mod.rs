@@ -1,4 +1,3 @@
-mod commit_scheduler;
 mod commit_using_args;
 mod commit_using_buffer;
 mod committor_processor;

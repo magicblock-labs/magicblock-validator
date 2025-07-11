@@ -16,6 +16,7 @@ mod transactions;
 mod types;
 mod undelegate;
 
+mod commit_scheduler;
 #[cfg(feature = "dev-context-only-utils")]
 pub mod stubs;
 mod transaction_preperator;

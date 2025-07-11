@@ -31,6 +31,7 @@ pub struct TaskPreparationInfo {
     pub write_instructions: Vec<Instruction>,
 }
 
+/// A trait representing a task that can be executed on Base layer
 pub trait L1Task: Send + Sync {
     /// Gets all pubkeys that involved in Task's instruction
     fn involved_accounts(&self, validator: &Pubkey) -> Vec<Pubkey> {
@@ -90,6 +91,7 @@ pub struct FinalizeTask {
     pub delegated_account: Pubkey,
 }
 
+/// Task that will be executed on Base layer via arguments
 #[derive(Clone)]
 pub enum ArgsTask {
     Commit(CommitTask),

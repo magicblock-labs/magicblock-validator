@@ -41,6 +41,7 @@ trait TransactionPreparator {
 
     /// Returns [`VersionedMessage`] corresponding to [`ScheduledL1Message`] tasks
     /// Handles all necessary preparations for Message to be valid
+    /// NOTE: [`VersionedMessage`] contains dummy recent_block_hash that should be replaced
     async fn prepare_commit_tx(
         &self,
         authority: &Keypair,
@@ -50,6 +51,7 @@ trait TransactionPreparator {
 
     /// Returns [`VersionedMessage`] corresponding to [`ScheduledL1Message`] tasks
     /// Handles all necessary preparations for Message to be valid
+    // NOTE: [`VersionedMessage`] contains dummy recent_block_hash that should be replaced
     async fn prepare_finalize_tx(
         &self,
         authority: &Keypair,
