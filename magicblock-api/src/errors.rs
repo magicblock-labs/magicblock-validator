@@ -27,6 +27,9 @@ pub enum ApiError {
     #[error("Ledger error: {0}")]
     LedgerError(#[from] magicblock_ledger::errors::LedgerError),
 
+    #[error("LedgerSizeManager error: {0}")]
+    LedgerSizeManagerError(#[from] magicblock_ledger::ledger_size_manager::errors::LedgerSizeManagerError),
+
     #[error("Failed to obtain balance for validator '{0}' from chain. ({1})")]
     FailedToObtainValidatorOnChainBalance(Pubkey, String),
 
