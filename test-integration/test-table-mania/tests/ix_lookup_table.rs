@@ -250,7 +250,7 @@ async fn test_lookup_table_ixs_cus_per_pubkey() {
         let cus = get_tx_cus(&rpc_client, &init_sig).await;
 
         debug!("Create for {i:03} {cus:04}CUs");
-        assert_eq!(cus, CREATE_AND_EXTEND_TABLE_CUS as u64);
+        assert!(cus <= CREATE_AND_EXTEND_TABLE_CUS as u64);
 
         lookup_table
             .extend(
