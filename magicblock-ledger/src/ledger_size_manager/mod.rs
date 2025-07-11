@@ -221,6 +221,18 @@ impl<T: ManagableLedger, U: FinalityProvider> LedgerSizeManager<T, U> {
         });
     }
 
+    async fn handle_full_truncation(
+        ledger: &Arc<T>,
+        wms: &mut Watermarks,
+        mark: &Watermark,
+    ) {
+        Self::truncate_ledger(ledger, mark.slot, mark.size_delta)
+            .await;
+        wms.size_at_last_capture = wms
+            .size_at_last_capture
+            .saturating_sub(mark.size_delta);
+    }
+
     async fn tick(
         ledger: &Arc<T>,
         finality_provider: &Arc<U>,
@@ -298,11 +310,7 @@ impl<T: ManagableLedger, U: FinalityProvider> LedgerSizeManager<T, U> {
                         lowest_cleanup_slot,
                     ).await;
                 } else {
-                    Self::truncate_ledger(ledger, mark.slot, mark.size_delta)
-                        .await;
-                    wms.size_at_last_capture = wms
-                        .size_at_last_capture
-                        .saturating_sub(mark.size_delta);
+                    Self::handle_full_truncation(ledger, wms, &mark).await;
                 }
 
                 if let Ok(ls) = ledger.storage_size() {
