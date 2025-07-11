@@ -211,7 +211,7 @@ impl MagicValidator {
             config.validator_config.ledger.reset,
         )?;
 
-        let existing_ledger_state = (!config.validator_config.ledger.reset 
+        let existing_ledger_state = (!config.validator_config.ledger.reset
             && ledger.last_slot() > 0)
             .then_some(ExistingLedgerState {
                 size: ledger.storage_size()?,
