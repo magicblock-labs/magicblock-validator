@@ -6339,7 +6339,7 @@ dependencies = [
 [[package]]
 name = "solana-account"
 version = "2.2.1"
-source = "git+https://github.com/magicblock-labs/solana-account.git?rev=5b50fad#5b50fadbdf7b9b59bdc0e6176bab6b16cea369cf"
+source = "git+https://github.com/magicblock-labs/solana-account.git?rev=876dcf3518#876dcf3518abf076ca4434df5f0678d63fbd1d32"
 dependencies = [
  "bincode",
  "qualifier_attr",
