@@ -106,6 +106,10 @@ impl AccountsDb {
                 // For borrowed variants everything is already written and we just increment the
                 // atomic counter. New readers will see the latest update.
                 acc.commit();
+                // check whether the account's owner has changed
+                if !acc.owner_changed {
+                    return;
+                }
                 // and perform some index bookkeeping to ensure correct owner
                 let _ = self
                     .index
@@ -116,11 +120,11 @@ impl AccountsDb {
                     ));
             }
             AccountSharedData::Owned(acc) => {
-                let datalen = account.data().len();
-                // we multiply by 2 for shadow buffer and add extra space for metadata
-                let size = AccountSharedData::serialized_size_aligned(datalen)
-                    * 2
-                    + AccountSharedData::SERIALIZED_META_SIZE;
+                let datalen = account.data().len() as u32;
+                let block_size = self.storage.block_size() as u32;
+                let size = AccountSharedData::serialized_size_aligned(
+                    datalen, block_size,
+                ) as usize;
 
                 let blocks = self.storage.get_block_count(size);
                 // TODO(bmuddha) perf optimization: use reallocs sparringly
@@ -143,13 +147,14 @@ impl AccountsDb {
                 };
 
                 // SAFETY:
-                // Allocation object is obtained by obtaining valid offset from storage, which
+                // Allocation object is constructed by obtaining a valid offset from storage, which
                 // is unoccupied by other accounts, points to valid memory within mmap and is
                 // properly aligned to 8 bytes, so the contract of serialize_to_mmap is satisfied
                 unsafe {
                     AccountSharedData::serialize_to_mmap(
                         acc,
                         allocation.storage.as_ptr(),
+                        block_size * allocation.blocks,
                     )
                 };
                 // update accounts index
