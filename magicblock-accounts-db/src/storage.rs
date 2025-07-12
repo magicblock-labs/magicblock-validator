@@ -273,7 +273,7 @@ impl AccountsStorage {
             + METADATA_STORAGE_SIZE as u64
     }
 
-    fn block_size(&self) -> usize {
+    pub(crate) fn block_size(&self) -> usize {
         self.meta.block_size as usize
     }
 
