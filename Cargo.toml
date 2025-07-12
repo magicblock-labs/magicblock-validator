@@ -133,7 +133,6 @@ prometheus = "0.13.4"
 # Needs to match https://crates.io/crates/solana-storage-bigtable/2.1.13/dependencies
 prost = "0.11.9"
 protobuf-src = "1.1"
-<<<<<<< HEAD
 rand = "0.8.5"
 rayon = "1.10.0"
 rustc_version = "0.4"
@@ -143,10 +142,6 @@ serde = "1.0.217"
 serde_derive = "1.0"
 serde_json = "1.0"
 sha3 = "0.10.8"
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "7bdfefc" }
-=======
-solana-account = { git = "https://github.com/magicblock-labs/solana-account.git", rev = "5b50fad" }
->>>>>>> 87a0614 (feat: modify account layout in database)
 solana-accounts-db = { version = "2.2" }
 solana-account-decoder = { version = "2.2" }
 solana-address-lookup-table-program = { version = "2.2" }
