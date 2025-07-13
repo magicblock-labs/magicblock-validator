@@ -131,15 +131,15 @@ fn init_geyser_config(
 ) -> InitGeyserServiceConfig {
     let (cache_accounts, cache_transactions) = {
         let cache_accounts =
-            !mb_config.geyser_cache_disable.contains("accounts");
+            mb_config.geyser_cache_disable.contains("accounts");
         let cache_transactions =
-            !mb_config.geyser_cache_disable.contains("transactions");
+            mb_config.geyser_cache_disable.contains("transactions");
         (cache_accounts, cache_transactions)
     };
     let (enable_account_notifications, enable_transaction_notifications) = {
-        let enable_accounts = !mb_config.geyser_disable.contains("accounts");
+        let enable_accounts = mb_config.geyser_disable.contains("accounts");
         let enable_transactions =
-            !mb_config.geyser_disable.contains("transactions");
+            mb_config.geyser_disable.contains("transactions");
         (enable_accounts, enable_transactions)
     };
 
