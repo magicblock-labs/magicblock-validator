@@ -95,13 +95,15 @@ impl EphemeralConfig {
                     .to_string()
             }
         }
+
+        config.post_parse();
+
         Ok(config)
     }
 
     pub fn merge(&mut self, other: EphemeralConfig) {
-        // If self differs from the default, use the value from self
         // If other differs from the default but not self, use the value from other
-        // If both self and other differ from the default, use the value from self
+        // Otherwise, use the value from self
         self.accounts.merge(other.accounts);
         self.rpc.merge(other.rpc);
         self.geyser_grpc.merge(other.geyser_grpc.clone());
@@ -111,6 +113,23 @@ impl EphemeralConfig {
 
         if self.programs.is_empty() && !other.programs.is_empty() {
             self.programs = other.programs.clone();
+        }
+    }
+
+    pub fn post_parse(&mut self) {
+        if self.accounts.remote.url.is_some() {
+            match &self.accounts.remote.ws_url {
+                Some(ws_url) if ws_url.len() > 1 => {
+                    self.accounts.remote.cluster =
+                        RemoteCluster::CustomWithMultipleWs;
+                }
+                Some(ws_url) if ws_url.len() == 1 => {
+                    self.accounts.remote.cluster = RemoteCluster::CustomWithWs;
+                }
+                _ => {
+                    self.accounts.remote.cluster = RemoteCluster::Custom;
+                }
+            }
         }
     }
 }
@@ -161,6 +180,20 @@ mod tests {
             )
         );
         assert_eq!(config.path, "path1");
+    }
+
+    #[test]
+    fn test_post_parse() {
+        let mut config = EphemeralConfig::default();
+        config.accounts.remote.url =
+            Some(Url::parse("https://validator.example.com").unwrap());
+        config.accounts.remote.ws_url =
+            Some(vec![Url::parse("wss://validator.example.com").unwrap()]);
+        assert_eq!(config.accounts.remote.cluster, RemoteCluster::Devnet);
+
+        config.post_parse();
+
+        assert_eq!(config.accounts.remote.cluster, RemoteCluster::CustomWithWs);
     }
 
     #[test]

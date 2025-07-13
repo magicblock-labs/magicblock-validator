@@ -3,7 +3,7 @@ use std::path::PathBuf;
 use clap::{Error, Parser};
 use solana_sdk::signature::Keypair;
 
-use crate::{EphemeralConfig, RemoteCluster};
+use crate::EphemeralConfig;
 
 #[derive(Debug, Clone, Parser)]
 pub struct MagicBlockConfig {
@@ -57,21 +57,7 @@ impl MagicBlockConfig {
     }
 
     fn post_parse(mut self) -> Self {
-        if self.config.accounts.remote.url.is_some() {
-            match &self.config.accounts.remote.ws_url {
-                Some(ws_url) if ws_url.len() > 1 => {
-                    self.config.accounts.remote.cluster =
-                        RemoteCluster::CustomWithMultipleWs;
-                }
-                Some(ws_url) if ws_url.len() == 1 => {
-                    self.config.accounts.remote.cluster =
-                        RemoteCluster::CustomWithWs;
-                }
-                _ => {
-                    self.config.accounts.remote.cluster = RemoteCluster::Custom;
-                }
-            }
-        }
+        self.config.post_parse();
 
         let config = match &self.config_file {
             Some(config_file) => EphemeralConfig::try_load_from_file(

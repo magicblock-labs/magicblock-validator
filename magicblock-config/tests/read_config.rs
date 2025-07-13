@@ -25,6 +25,18 @@ fn parse_config_with_file(config_file_dir: &Path) -> EphemeralConfig {
 }
 
 #[test]
+fn test_load_custom_ws_remote_toml() {
+    let workspace_dir = cargo_workspace_dir();
+    let config_file_dir = workspace_dir
+        .join("magicblock-config")
+        .join("tests")
+        .join("fixtures")
+        .join("09_custom-ws-remote.toml");
+    let config = EphemeralConfig::try_load_from_file(&config_file_dir).unwrap();
+    assert_eq!(config.accounts.remote.cluster, RemoteCluster::CustomWithWs);
+}
+
+#[test]
 fn test_load_local_dev_with_programs_toml() {
     let workspace_dir = cargo_workspace_dir();
     let config_file_dir = workspace_dir

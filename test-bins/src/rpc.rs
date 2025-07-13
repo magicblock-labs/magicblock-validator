@@ -1,14 +1,12 @@
 mod shutdown;
 
-use std::path::PathBuf;
-
 use log::*;
 use magicblock_api::{
     ledger,
     magic_validator::{MagicValidator, MagicValidatorConfig},
     InitGeyserServiceConfig,
 };
-use magicblock_config::{EphemeralConfig, GeyserGrpcConfig, MagicBlockConfig};
+use magicblock_config::{GeyserGrpcConfig, MagicBlockConfig};
 use solana_sdk::signature::Signer;
 use test_tools::init_logger;
 
@@ -60,15 +58,12 @@ async fn main() {
     #[cfg(feature = "tokio-console")]
     console_subscriber::init();
 
-    let mut mb_config = MagicBlockConfig::parse_config();
+    let mb_config = MagicBlockConfig::parse_config();
 
-    let (file, config) = load_config_from_arg(&mb_config.config_file);
-    match file {
+    match &mb_config.config_file {
         Some(file) => info!("Loading config from '{:?}'.", file),
         None => info!("Using default config. Override it by passing the path to a config file."),
     };
-
-    mb_config.config.merge(config);
 
     info!("Starting validator with config:\n{}", mb_config.config);
 
@@ -128,24 +123,6 @@ async fn main() {
         api.join();
     })
     .join();
-}
-
-fn load_config_from_arg(
-    path: &Option<PathBuf>,
-) -> (Option<PathBuf>, EphemeralConfig) {
-    match path {
-        Some(config_file) => {
-            let config = EphemeralConfig::try_load_from_file(config_file)
-                .unwrap_or_else(|err| {
-                    panic!(
-                        "Failed to load config file from '{:?}'. ({})",
-                        config_file, err
-                    )
-                });
-            (path.clone(), config)
-        }
-        None => (None, Default::default()),
-    }
 }
 
 fn init_geyser_config(

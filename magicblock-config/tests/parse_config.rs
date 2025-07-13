@@ -207,7 +207,7 @@ fn test_validator_with_base_fees() {
 fn test_custom_invalid_remote() {
     let toml = r#"
 [accounts]
-remote = "http://localhost::8899"
+remote.url = "http://localhost::8899"
 "#;
 
     let res = toml::from_str::<EphemeralConfig>(toml);

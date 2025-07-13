@@ -20,7 +20,8 @@ use integration_test_tools::{
 };
 use magicblock_config::{
     AccountsConfig, EphemeralConfig, LedgerConfig, LifecycleMode,
-    ProgramConfig, RemoteConfig, ValidatorConfig, DEFAULT_LEDGER_SIZE_BYTES,
+    ProgramConfig, RemoteCluster, RemoteConfig, ValidatorConfig,
+    DEFAULT_LEDGER_SIZE_BYTES,
 };
 use program_flexi_counter::state::FlexiCounter;
 use solana_sdk::{
@@ -148,9 +149,11 @@ pub fn setup_validator_with_local_remote(
 ) -> (TempDir, Child, IntegrationTestContext) {
     let mut accounts_config = AccountsConfig {
         lifecycle: LifecycleMode::Ephemeral,
-        remote: RemoteConfig::Custom(
-            IntegrationTestContext::url_chain().try_into().unwrap(),
-        ),
+        remote: RemoteConfig {
+            cluster: RemoteCluster::Custom,
+            url: Some(IntegrationTestContext::url_chain().try_into().unwrap()),
+            ws_url: None,
+        },
         ..Default::default()
     };
     accounts_config.db.snapshot_frequency = 2;

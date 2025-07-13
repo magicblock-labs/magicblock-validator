@@ -133,11 +133,8 @@ pub enum RemoteCluster {
     #[serde(alias = "local")]
     #[serde(alias = "localhost")]
     Development,
-    #[serde(untagged)]
     Custom,
-    #[serde(untagged)]
     CustomWithWs,
-    #[serde(untagged)]
     CustomWithMultipleWs,
 }
 
