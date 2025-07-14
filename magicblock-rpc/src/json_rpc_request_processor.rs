@@ -384,15 +384,20 @@ impl JsonRpcRequestProcessor {
                 data: None,
             })
         } else {
-            // Expressed as Unix time (i.e. seconds since the Unix epoch).
-            let current_time = self.bank.clock().unix_timestamp;
-            let slot_diff = current_slot - slot;
-            let secs_diff = (slot_diff as u128
-                * self.config.slot_duration.as_millis())
-                / 1_000;
-            let timestamp = current_time - secs_diff as i64;
+            // Try to get the time from the block itself
+            let timestamp = if let Ok(block) = self.ledger.get_block(slot) {
+                block.and_then(|b| b.block_time)
+            } else {
+                // Expressed as Unix time (i.e. seconds since the Unix epoch).
+                let current_time = self.bank.clock().unix_timestamp;
+                let slot_diff = current_slot - slot;
+                let secs_diff = (slot_diff as u128
+                    * self.config.slot_duration.as_millis())
+                    / 1_000;
+                Some(current_time - secs_diff as i64)
+            };
 
-            Ok(Some(timestamp))
+            Ok(timestamp)
         }
     }
 
