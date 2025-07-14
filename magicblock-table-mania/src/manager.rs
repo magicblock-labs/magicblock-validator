@@ -128,6 +128,17 @@ impl TableMania {
         pubkeys
     }
 
+    /// Returns the refcount of a pubkey if it exists in any active table
+    /// - *pubkey* to query refcount for
+    /// - *returns* `Some(refcount)` if the pubkey exists in any table, `None` otherwise
+    pub async fn get_pubkey_refcount(&self, pubkey: &Pubkey) -> Option<usize> {
+        for table in self.active_tables.read().await.iter() {
+            if let Some(refcount) = table.get_refcount(pubkey) {
+                return Some(refcount);
+            }
+        }
+        None
+    }
     // -----------------
     // Reserve
     // -----------------
@@ -148,6 +159,43 @@ impl TableMania {
         self.reserve_new_pubkeys(authority, &remaining).await
     }
 
+    /// Ensures that pubkeys exist in any active table without increasing reference counts.
+    /// If tables for any pubkeys do not exist, creates them using the same transaction
+    /// logic as when reserving pubkeys.
+    ///
+    /// This method awaits the transaction outcome and returns once all pubkeys are part of tables.
+    ///
+    /// - *authority* - The authority keypair to use for creating tables if needed
+    /// - *pubkeys* - The pubkeys to ensure exist in tables
+    /// - *returns* `Ok(())` if all pubkeys are now part of tables
+    pub async fn ensure_pubkeys_table(
+        &self,
+        authority: &Keypair,
+        pubkeys: &HashSet<Pubkey>,
+    ) -> TableManiaResult<()> {
+        let mut remaining = HashSet::new();
+
+        // 1. Check which pubkeys already exist in any table
+        for pubkey in pubkeys {
+            let mut found = false;
+            for table in self.active_tables.read().await.iter() {
+                if table.contains_key(pubkey) {
+                    found = true;
+                    break;
+                }
+            }
+            if !found {
+                remaining.insert(*pubkey);
+            }
+        }
+
+        // 2. If any pubkeys dont exist, create tables for them
+        if !remaining.is_empty() {
+            self.reserve_new_pubkeys(authority, &remaining).await?;
+        }
+
+        Ok(())
+    }
     /// Tries to find a table that holds this pubkey already and reserves it.
     /// - *pubkey* to reserve
     /// - *returns* `true` if the pubkey could be reserved
