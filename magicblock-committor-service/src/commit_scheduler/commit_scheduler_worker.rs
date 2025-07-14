@@ -1,23 +1,25 @@
-use std::{
-    collections::{hash_map::Entry, HashMap, LinkedList, VecDeque},
-    sync::{Arc, Mutex},
-};
+use std::sync::{Arc, Mutex};
 
-use magicblock_program::magic_scheduled_l1_message::{
-    MagicL1Message, ScheduledL1Message,
-};
+use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
 use magicblock_rpc_client::MagicblockRpcClient;
-use solana_pubkey::Pubkey;
+use magicblock_table_mania::TableMania;
 use tokio::sync::mpsc::{error::TryRecvError, Receiver};
 
-use crate::commit_scheduler::{
-    commit_scheduler_inner::CommitSchedulerInner, db::DB, Error,
+use crate::{
+    commit_scheduler::{
+        commit_scheduler_inner::{CommitSchedulerInner, POISONED_INNER_MSG},
+        db::DB,
+        Error,
+    },
+    l1_message_executor::L1MessageExecutor,
+    ComputeBudgetConfig,
 };
-const POISONED_INNER_MSG: &str = "Mutex on CommitSchedulerInner is poisoned.";
 
 pub(crate) struct CommitSchedulerWorker<D: DB> {
     db: Arc<D>,
     rpc_client: MagicblockRpcClient,
+    table_mania: TableMania,
+    compute_budget_config: ComputeBudgetConfig,
     receiver: Receiver<ScheduledL1Message>,
 
     inner: Arc<Mutex<CommitSchedulerInner>>,
@@ -27,11 +29,15 @@ impl<D: DB> CommitSchedulerWorker<D> {
     pub fn new(
         db: Arc<D>,
         rpc_client: MagicblockRpcClient,
+        table_mania: TableMania,
+        compute_budget_config: ComputeBudgetConfig,
         receiver: Receiver<ScheduledL1Message>,
     ) -> Self {
         Self {
             db,
             rpc_client,
+            table_mania,
+            compute_budget_config,
             receiver,
             inner: Arc::new(Mutex::new(CommitSchedulerInner::new())),
         }
@@ -58,39 +64,32 @@ impl<D: DB> CommitSchedulerWorker<D> {
     }
 
     async fn handle_message(&mut self, l1_message: ScheduledL1Message) {
-        if let Some(l1_message) = self
+        let l1_message = if let Some(l1_message) = self
             .inner
             .lock()
             .expect(POISONED_INNER_MSG)
             .schedule(l1_message)
         {
-            tokio::spawn(self.execute(l1_message));
-        }
-    }
+            l1_message
+        } else {
+            return;
+        };
 
-    // SchedulerWorker
-    // Message arrives
-    // Can execute?
-    // Yes - execute
-    // No - enqueue
-
-    // SchedulerWorker \
-    ///             Planner
-    //   MessageProcessor /
-
-    /// ScheduledL1Message arrives:
-    /// 1. Sent to Scheduler
-    /// 2. Scheduler sents to SchedulerWorker
-    /// 3. SchedulerWorker checks Sche
-    async fn execute(&self, l1_message: ScheduledL1Message) {
-        todo!()
+        let executor = L1MessageExecutor::new_v1(
+            self.inner.clone(),
+            self.rpc_client.clone(),
+            self.table_mania.clone(),
+            self.compute_budget_config.clone(),
+        );
+        tokio::spawn(executor.execute(l1_message, todo!()));
     }
 
     /// Return [`ScheduledL1Message`] from DB, otherwise waits on channel
     async fn get_or_wait_next_message(
         &mut self,
     ) -> Result<ScheduledL1Message, Error> {
-        // TODO: expensive to fetch 1 by 1, implement fetching multiple. Could use static?
+        // Worker either cleaned-up congested channel and now need to clean-up DB
+        // or we're just waiting on empty channel
         if let Some(l1_message) = self.db.pop_l1_message().await? {
             Ok(l1_message)
         } else {
@@ -102,3 +101,8 @@ impl<D: DB> CommitSchedulerWorker<D> {
         }
     }
 }
+
+// Worker schedule:
+// We have a pool of workers
+// We are ready to accept message
+// When we have a worker available to process it

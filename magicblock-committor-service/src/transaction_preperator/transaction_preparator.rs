@@ -36,7 +36,7 @@ impl std::fmt::Display for PreparatorVersion {
 }
 
 #[async_trait]
-trait TransactionPreparator {
+pub trait TransactionPreparator {
     fn version(&self) -> PreparatorVersion;
 
     /// Returns [`VersionedMessage`] corresponding to [`ScheduledL1Message`] tasks
@@ -63,7 +63,7 @@ trait TransactionPreparator {
 /// [`TransactionPreparatorV1`] first version of preparator
 /// It omits future commit_bundle/finalize_bundle logic
 /// It creates TXs using current per account commit/finalize
-struct TransactionPreparatorV1 {
+pub struct TransactionPreparatorV1 {
     delivery_preparator: DeliveryPreparator,
     rpc_client: MagicblockRpcClient,
     table_mania: TableMania, // TODO(edwin): Arc<TableMania>?

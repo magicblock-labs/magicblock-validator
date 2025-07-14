@@ -1,4 +1,4 @@
-mod commit_scheduler_inner;
+pub(crate) mod commit_scheduler_inner;
 mod commit_scheduler_worker;
 mod db;
 
@@ -38,6 +38,15 @@ impl<D: DB> CommitScheduler<D> {
         l1_messages: Vec<ScheduledL1Message>,
     ) -> Result<(), Error> {
         for el in l1_messages {
+            // If db not empty push el-t there
+            // This means that at some point channel got full
+            // Worker first will clean-up channel, and then DB.
+            // Pushing into channel would break order of commits
+            if !self.db.is_empty() {
+                self.db.store_l1_messages(l1_messages).await?;
+                continue;
+            }
+
             let err = if let Err(err) = self.sender.try_send(el) {
                 err
             } else {

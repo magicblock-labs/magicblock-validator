@@ -5,6 +5,11 @@ use magicblock_program::magic_scheduled_l1_message::{
 };
 use solana_pubkey::Pubkey;
 
+use crate::utils::ScheduledMessageExt;
+
+pub(crate) const POISONED_INNER_MSG: &str =
+    "Mutex on CommitSchedulerInner is poisoned.";
+
 type MessageID = u64;
 struct MessageMeta {
     num_keys: usize,
@@ -77,16 +82,10 @@ impl CommitSchedulerInner {
         l1_message: ScheduledL1Message,
     ) -> Option<ScheduledL1Message> {
         let message_id = l1_message.id;
-        let accounts = match &l1_message.l1_message {
-            MagicL1Message::L1Actions(val) => {
-                // This L1Action can be executed right away
-                return Some(l1_message);
-            }
-            MagicL1Message::Commit(t) => t.get_committed_accounts(),
-            MagicL1Message::CommitAndUndelegate(t) => {
-                t.get_committed_accounts()
-            }
+        let Some(accounts) = l1_message.get_committed_accounts() else {
+            return Some(l1_message);
         };
+
         let pubkeys = accounts
             .iter()
             .map(|account| *account.pubkey)
@@ -116,8 +115,14 @@ impl CommitSchedulerInner {
     /// Completes Message, cleaning up data after itself and allowing Messages to move forward
     /// Note: this shall be called on executing messages to finilize their execution.
     /// Calling on incorrect `pubkyes` set will result in panic
-    pub fn complete(&mut self, message_id: MessageID, pubkeys: &[Pubkey]) {
+    pub fn complete(&mut self, l1_message: &ScheduledL1Message) {
         // Release data for completed message
+        let message_id = l1_message.id;
+        let Some(pubkeys) = l1_message.get_committed_pubkeys() else {
+            // This means L1Action, it doesn't have to be scheduled
+            return;
+        };
+
         let (entries, _) =
             Self::find_conflicting_entries(&pubkeys, &mut self.blocked_keys);
         entries.into_iter().for_each(|entry| {
@@ -154,7 +159,7 @@ impl CommitSchedulerInner {
             self.blocked_messages.iter().find_map(|(message_id, meta)| {
                 if execute_candidates.get(message_id).expect(
                     "Invariant: blocked messages are always in candidates",
-                ) == meta.num_keys
+                ) == &meta.num_keys
                 {
                     Some(message_id)
                 } else {
