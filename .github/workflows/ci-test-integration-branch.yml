@@ -1,0 +1,32 @@
+on:
+  push:
+    branches: [thlorenz/committor-improve-table-speed]
+
+name: Run CI - Integration Tests (Branch)
+
+jobs:
+  run_make_ci_test:
+    runs-on: extra-large
+    steps:
+      - name: Checkout this magicblock-validator
+        uses: actions/checkout@v2
+        with:
+          path: magicblock-validator
+
+      - uses: ./magicblock-validator/.github/actions/setup-build-env
+        with:
+          build_cache_key_name: "magicblock-validator-ci-test-integration-branch-v000"
+          rust_toolchain_release: "1.84.1"
+          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: ./magicblock-validator/.github/actions/setup-solana
+
+      - name: Run integration tests
+        run: |
+          sudo prlimit --pid $$ --nofile=1048576:1048576
+          sudo sysctl fs.inotify.max_user_instances=1280
+          sudo sysctl fs.inotify.max_user_watches=655360
+          make ci-test-integration
+        shell: bash
+        working-directory: magicblock-validator
