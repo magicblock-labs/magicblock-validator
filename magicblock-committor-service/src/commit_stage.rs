@@ -88,6 +88,13 @@ pub enum CommitStage {
     /// initialized, but then this issue was detected.
     PartOfTooLargeBundleToProcess(CommitInfo),
 
+    /// Failed to create the lookup table required for this commit.
+    /// This happens when the table mania system cannot ensure that the lookup
+    /// table exists for the pubkeys needed by this commit.
+    CouldNotCreateLookupTable(
+        (CommitInfo, CommitStrategy, Option<CommitSignatures>),
+    ),
+
     /// The commit was properly initialized and added to a chunk of instructions to process
     /// commits via a transaction. For large commits the buffer and chunk accounts were properly
     /// prepared and haven't been closed.
@@ -211,6 +218,7 @@ impl CommitStage {
             | BufferAndChunkPartiallyInitialized((ci, _))
             | BufferAndChunkFullyInitialized((ci, _))
             | PartOfTooLargeBundleToProcess(ci)
+            | CouldNotCreateLookupTable((ci, _))
             | FailedProcess((ci, _, _))
             | PartOfTooLargeBundleToFinalize(ci)
             | FailedFinalize((ci, _, _))
@@ -235,6 +243,7 @@ impl CommitStage {
             | Failed((_, strategy))
             | BufferAndChunkPartiallyInitialized((_, strategy))
             | BufferAndChunkFullyInitialized((_, strategy))
+            | CouldNotCreateLookupTable((_, strategy))
             | FailedProcess((_, strategy, _))
             | FailedFinalize((_, strategy, _))
             | FailedUndelegate((_, strategy, _))
@@ -261,6 +270,9 @@ impl CommitStage {
             //       here
             | PartOfTooLargeBundleToFinalize(ci) => {
                 CommitStatus::PartOfTooLargeBundleToProcess(ci.bundle_id())
+            }
+            CouldNotCreateLookupTable((ci, _)) => {
+                CommitStatus::CouldNotCreateLookupTable(ci.bundle_id())
             }
             FailedProcess((ci, strategy, sigs)) => CommitStatus::FailedProcess((
                 ci.bundle_id(),

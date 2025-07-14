@@ -10,6 +10,7 @@ use super::CommittorProcessor;
 use crate::{
     commit::common::{
         get_accounts_to_undelegate, lookup_table_keys, send_and_confirm,
+        stages_from_lookup_table_err,
     },
     commit_stage::{CommitSignatures, CommitStage},
     persist::CommitStrategy,
@@ -101,6 +102,7 @@ impl CommittorProcessor {
             (tm, keys)
         });
 
+        let strategy = CommitStrategy::args(use_lookup);
         let compute_budget_ixs = me
             .compute_budget_config
             .args_process_budget()
@@ -119,12 +121,21 @@ impl CommittorProcessor {
             Ok(sig) => sig,
             Err(err) => {
                 error!("Failed to commit changeset with {} accounts using args: {:?}", committees.len(), err);
-                let strategy = CommitStrategy::args(use_lookup);
+
                 let sigs = err.signature().map(|sig| CommitSignatures {
                     process_signature: sig,
                     finalize_signature: None,
                     undelegate_signature: None,
                 });
+                if let Some(stages) = stages_from_lookup_table_err(
+                    &err,
+                    &commit_infos,
+                    strategy,
+                    sigs,
+                ) {
+                    return stages;
+                }
+
                 return commit_infos
                     .into_iter()
                     .map(|x| {
@@ -165,18 +176,25 @@ impl CommittorProcessor {
                         "Failed to finalize changeset using args: {:?}",
                         err
                     );
+
+                    let sigs = CommitSignatures {
+                        process_signature: process_sig,
+                        finalize_signature: err.signature(),
+                        undelegate_signature: None,
+                    };
+                    if let Some(stages) = stages_from_lookup_table_err(
+                        &err,
+                        &commit_infos,
+                        strategy,
+                        Some(sigs),
+                    ) {
+                        return stages;
+                    }
+
                     return commit_infos
                         .into_iter()
                         .map(|x| {
-                            CommitStage::FailedFinalize((
-                                x,
-                                CommitStrategy::args(use_lookup),
-                                CommitSignatures {
-                                    process_signature: process_sig,
-                                    finalize_signature: err.signature(),
-                                    undelegate_signature: None,
-                                },
-                            ))
+                            CommitStage::FailedFinalize((x, strategy, sigs))
                         })
                         .collect();
                 }
@@ -219,7 +237,7 @@ impl CommittorProcessor {
                             .map(|x| {
                                 CommitStage::FailedUndelegate((
                                     x,
-                                    CommitStrategy::args(use_lookup),
+                                    strategy,
                                     CommitSignatures {
                                         process_signature: process_sig,
                                         finalize_signature: finalize_sig,
@@ -254,17 +272,27 @@ impl CommittorProcessor {
                         "Failed to undelegate accounts via transaction '{}': {:?}",
                         err, err
                     );
+                        let sigs = CommitSignatures {
+                            process_signature: process_sig,
+                            finalize_signature: finalize_sig,
+                            undelegate_signature: err.signature(),
+                        };
+
+                        if let Some(stages) = stages_from_lookup_table_err(
+                            &err,
+                            &commit_infos,
+                            strategy,
+                            Some(sigs.clone()),
+                        ) {
+                            return stages;
+                        }
                         return commit_infos
                             .into_iter()
                             .map(|x| {
                                 CommitStage::FailedUndelegate((
                                     x,
-                                    CommitStrategy::args(use_lookup),
-                                    CommitSignatures {
-                                        process_signature: process_sig,
-                                        finalize_signature: finalize_sig,
-                                        undelegate_signature: err.signature(),
-                                    },
+                                    strategy,
+                                    sigs.clone(),
                                 ))
                             })
                             .collect();
@@ -282,7 +310,7 @@ impl CommittorProcessor {
             .map(|x| {
                 CommitStage::Succeeded((
                     x,
-                    CommitStrategy::args(use_lookup),
+                    strategy,
                     CommitSignatures {
                         process_signature: process_sig,
                         finalize_signature: finalize_sig,

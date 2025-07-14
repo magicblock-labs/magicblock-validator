@@ -35,4 +35,7 @@ pub enum CommitPersistError {
 
     #[error("Commit Status needs commit strategy: '{0}' ({0:?})")]
     CommitStatusNeedsStrategy(String),
+
+    #[error("Could not create lookup table: '{0}' ({0:?})")]
+    CouldNotCreateLookupTable(String),
 }

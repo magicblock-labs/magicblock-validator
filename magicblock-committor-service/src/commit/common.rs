@@ -20,8 +20,11 @@ use solana_sdk::{
 };
 
 use crate::{
+    commit_stage::CommitSignatures,
     error::{CommittorServiceError, CommittorServiceResult},
+    persist::CommitStrategy,
     pubkeys_provider::{provide_committee_pubkeys, provide_common_pubkeys},
+    CommitInfo, CommitStage,
 };
 
 pub(crate) fn lookup_table_keys(
@@ -101,6 +104,17 @@ pub(crate) async fn send_and_confirm(
     let tables =
         if let Some((table_mania, keys_from_tables)) = table_mania_setup {
             let start = Instant::now();
+
+            // Ensure all pubkeys have tables before proceeding
+            if let Err(err) = table_mania
+                .ensure_pubkeys_table(&authority, &keys_from_tables)
+                .await
+            {
+                error!("Failed to ensure table exists for pubkeys: {:?}", err);
+                return Err(CommittorServiceError::CouldNotCreateLookupTable(
+                    format!("{:?}", err),
+                ));
+            }
 
             // NOTE: we assume that all needed pubkeys were reserved earlier
             let address_lookup_tables = table_mania
@@ -203,5 +217,31 @@ pub(crate) async fn send_and_confirm(
         Err(EncounteredTransactionError(task_desc, err.clone()))
     } else {
         Ok(res.into_signature())
+    }
+}
+
+/// Checks if the error is a lookup table creation error and returns the appropriate
+/// commit stages if so. Returns None if the error is not a lookup table error.
+pub(crate) fn stages_from_lookup_table_err(
+    err: &CommittorServiceError,
+    commit_infos: &[CommitInfo],
+    strategy: CommitStrategy,
+    signatures: Option<CommitSignatures>,
+) -> Option<Vec<CommitStage>> {
+    if let CommittorServiceError::CouldNotCreateLookupTable(_) = err {
+        Some(
+            commit_infos
+                .iter()
+                .map(|x| {
+                    CommitStage::CouldNotCreateLookupTable((
+                        x.clone(),
+                        strategy,
+                        signatures.clone(),
+                    ))
+                })
+                .collect(),
+        )
+    } else {
+        None
     }
 }

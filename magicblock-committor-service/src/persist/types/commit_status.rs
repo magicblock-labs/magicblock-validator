@@ -29,6 +29,8 @@ pub enum CommitStatus {
     /// The commit is part of a bundle that contains too many commits to be included
     /// in a single transaction. Thus we cannot commit any of them.
     PartOfTooLargeBundleToProcess(u64),
+    /// Failed to create or access the lookup table required for this commit.
+    CouldNotCreateLookupTable(u64),
     /// The commit was properly initialized and added to a chunk of instructions to process
     /// commits via a transaction. For large commits the buffer and chunk accounts were properly
     /// prepared and haven't been closed.
@@ -59,6 +61,9 @@ impl fmt::Display for CommitStatus {
             }
             CommitStatus::PartOfTooLargeBundleToProcess(bundle_id) => {
                 write!(f, "PartOfTooLargeBundleToProcess({})", bundle_id)
+            }
+            CommitStatus::CouldNotCreateLookupTable(bundle_id) => {
+                write!(f, "CouldNotCreateLookupTable({})", bundle_id)
             }
             CommitStatus::FailedProcess((bundle_id, strategy, sigs)) => {
                 write!(
@@ -159,6 +164,9 @@ impl
             "PartOfTooLargeBundleToProcess" => {
                 Ok(PartOfTooLargeBundleToProcess(get_bundle_id!()))
             }
+            "CouldNotCreateLookupTable" => {
+                Ok(CouldNotCreateLookupTable(get_bundle_id!()))
+            }
             "FailedProcess" => {
                 Ok(FailedProcess((get_bundle_id!(), strategy, sigs)))
             }
@@ -209,6 +217,7 @@ impl CommitStatus {
                 "BufferAndChunkFullyInitialized"
             }
             PartOfTooLargeBundleToProcess(_) => "PartOfTooLargeBundleToProcess",
+            CouldNotCreateLookupTable(_) => "CouldNotCreateLookupTable",
             FailedProcess(_) => "FailedProcess",
             FailedFinalize(_) => "FailedFinalize",
             FailedUndelegate(_) => "FailedUndelegate",
@@ -224,6 +233,7 @@ impl CommitStatus {
             | BufferAndChunkInitialized(bundle_id)
             | BufferAndChunkFullyInitialized(bundle_id)
             | PartOfTooLargeBundleToProcess(bundle_id)
+            | CouldNotCreateLookupTable(bundle_id)
             | FailedProcess((bundle_id, _, _))
             | FailedFinalize((bundle_id, _, _))
             | FailedUndelegate((bundle_id, _, _))
@@ -251,6 +261,7 @@ impl CommitStatus {
             | BufferAndChunkInitialized(_)
             | BufferAndChunkFullyInitialized(_) => CommitStrategy::FromBuffer,
             PartOfTooLargeBundleToProcess(_) => CommitStrategy::Undetermined,
+            CouldNotCreateLookupTable(_) => CommitStrategy::Undetermined,
             FailedProcess((_, strategy, _)) => *strategy,
             FailedFinalize((_, strategy, _)) => *strategy,
             FailedUndelegate((_, strategy, _)) => *strategy,
