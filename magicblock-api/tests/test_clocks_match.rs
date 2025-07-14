@@ -26,7 +26,7 @@ async fn test_clocks_match() -> ApiResult<()> {
     let ledger_path = temp_dir.path().join("ledger");
 
     // Create a simple configuration for the validator using defaults
-    let millis_per_slot = 200; // 1 second per slot
+    let millis_per_slot = 200; // 200ms per slot
     let mut config = magicblock_config::EphemeralConfig::default();
     config.accounts.lifecycle = LifecycleMode::Offline;
     config.validator.millis_per_slot = millis_per_slot;
@@ -50,7 +50,7 @@ async fn test_clocks_match() -> ApiResult<()> {
     let ledger = validator.ledger();
 
     // Wait a moment for the validator to initialize
-    tokio::time::sleep(Duration::from_millis(100)).await;
+    tokio::time::sleep(Duration::from_millis(millis_per_slot / 2)).await;
 
     // Test multiple slots to ensure consistency
     for _ in 0..10 {
@@ -152,18 +152,15 @@ async fn test_clocks_match() -> ApiResult<()> {
 
         // Also verify that the timestamp is reasonable (not 0 and not in the future)
         assert!(transaction_timestamp > 0, "Timestamp should be positive");
+        let current_time = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as i64;
         assert!(
-            transaction_timestamp
-                <= std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs() as i64,
+            transaction_timestamp <= current_time,
             "Timestamp should be in the past: {} > {}",
             transaction_timestamp,
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .unwrap()
-                .as_secs() as i64
+            current_time
         );
     }
 
