@@ -211,10 +211,8 @@ async fn test_get_block_timestamp_stability() -> ApiResult<()> {
     ))
     .await;
 
-    let rpc_client = RpcClient::new(format!(
-        "http://{}",
-        config.rpc.socket_addr().to_string()
-    ));
+    let rpc_client =
+        RpcClient::new(format!("http://{}", config.rpc.socket_addr()));
 
     let current_slot = bank.slot();
     let block_time = rpc_client.get_block_time(current_slot - 1).await.unwrap();
