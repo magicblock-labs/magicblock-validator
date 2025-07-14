@@ -26,7 +26,7 @@ use crate::{
     commit_strategy::{split_changesets_by_commit_strategy, SplitChangesets},
     compute_budget::{ComputeBudget, ComputeBudgetConfig},
     config::ChainConfig,
-    error::CommittorServiceResult,
+    error::{CommittorServiceError, CommittorServiceResult},
     persist::{
         BundleSignatureRow, CommitPersister, CommitStatusRow, CommitStrategy,
     },
@@ -341,10 +341,7 @@ impl CommittorProcessor {
         chunked_close_ixs: Option<Vec<Vec<InstructionsForCommitable>>>,
         table_mania: Option<&TableMania>,
         owners: &HashMap<Pubkey, Pubkey>,
-    ) -> (
-        Vec<(Signature, Vec<(CommitInfo, InstructionsKind)>)>,
-        Vec<(Option<Signature>, Vec<CommitInfo>)>,
-    ) {
+    ) -> (ProcessIxChunkSuccesses, ProcessIxChunkFailures) {
         let latest_blockhash =
             match self.magicblock_rpc_client.get_latest_blockhash().await {
                 Ok(bh) => bh,
@@ -364,6 +361,7 @@ impl CommittorProcessor {
                                     .into_iter()
                                     .map(|ixs| ixs.commit_info)
                                     .collect::<Vec<_>>(),
+                                None::<CommittorServiceError>,
                             )
                         })
                         .collect::<Vec<_>>();
@@ -372,11 +370,8 @@ impl CommittorProcessor {
             };
 
         let mut join_set = JoinSet::new();
-        let successes = Arc::<
-            Mutex<Vec<(Signature, Vec<(CommitInfo, InstructionsKind)>)>>,
-        >::default();
-        let failures =
-            Arc::<Mutex<Vec<(Option<Signature>, Vec<CommitInfo>)>>>::default();
+        let successes = ProcessIxChunkSuccessesRc::default();
+        let failures = ProcessIxChunkFailuresRc::default();
         for ixs_chunk in ixs_chunks {
             let authority = self.authority.insecure_clone();
             let rpc_client = self.magicblock_rpc_client.clone();
@@ -439,9 +434,7 @@ impl CommittorProcessor {
 
             if let Some(latest_blockhash) = latest_blockhash {
                 let mut join_set = JoinSet::new();
-                let failures = Arc::<
-                    Mutex<Vec<(Option<Signature>, Vec<CommitInfo>)>>,
-                >::default();
+                let failures = ProcessIxChunkFailuresRc::default();
                 for ixs_chunk in chunked_close_ixs {
                     let authority = self.authority.insecure_clone();
                     let rpc_client = self.magicblock_rpc_client.clone();
@@ -450,7 +443,7 @@ impl CommittorProcessor {
                     let compute_budget =
                         self.compute_budget_config.buffer_close_budget();
                     // We ignore close successes
-                    let successes = Default::default();
+                    let successes = ProcessIxChunkSuccessesRc::default();
                     // We only log close failures since the commit was processed successfully
                     let failures = failures.clone();
                     join_set.spawn(process_ixs_chunk(
@@ -489,6 +482,16 @@ impl CommittorProcessor {
     }
 }
 
+pub(crate) type ProcessIxChunkSuccesses =
+    Vec<(Signature, Vec<(CommitInfo, InstructionsKind)>)>;
+pub(crate) type ProcessIxChunkSuccessesRc = Arc<Mutex<ProcessIxChunkSuccesses>>;
+pub(crate) type ProcessIxChunkFailures = Vec<(
+    Option<Signature>,
+    Vec<CommitInfo>,
+    Option<CommittorServiceError>,
+)>;
+pub(crate) type ProcessIxChunkFailuresRc = Arc<Mutex<ProcessIxChunkFailures>>;
+
 /// Processes a single chunk of instructions, sending them as a transaction.
 /// Updates the shared success or failure lists based on the transaction outcome.
 #[allow(clippy::type_complexity, clippy::too_many_arguments)]
@@ -497,10 +500,8 @@ pub(crate) async fn process_ixs_chunk(
     compute_budget: ComputeBudget,
     authority: Keypair,
     rpc_client: MagicblockRpcClient,
-    successes: Arc<
-        Mutex<Vec<(Signature, Vec<(CommitInfo, InstructionsKind)>)>>,
-    >,
-    failures: Arc<Mutex<Vec<(Option<Signature>, Vec<CommitInfo>)>>>,
+    successes: ProcessIxChunkSuccessesRc,
+    failures: ProcessIxChunkFailuresRc,
     table_mania: Option<TableMania>,
     owners: HashMap<Pubkey, Pubkey>,
     latest_blockhash: Hash,
@@ -546,14 +547,22 @@ pub(crate) async fn process_ixs_chunk(
                 commit_infos.len(),
                 err
             );
+
+            // Check if this is a lookup table error
+            let lookup_table_err = matches!(
+                err,
+                CommittorServiceError::CouldNotCreateLookupTable(_)
+            );
+
             let commit_infos = commit_infos
                 .into_iter()
                 .map(|(commit_info, _)| commit_info)
                 .collect();
-            failures
-                .lock()
-                .expect("ix failures mutex poisoned")
-                .push((err.signature(), commit_infos));
+            failures.lock().expect("ix failures mutex poisoned").push((
+                err.signature(),
+                commit_infos,
+                lookup_table_err.then_some(err),
+            ));
         }
     }
 }

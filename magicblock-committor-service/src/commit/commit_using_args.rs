@@ -131,7 +131,7 @@ impl CommittorProcessor {
                     &err,
                     &commit_infos,
                     strategy,
-                    sigs,
+                    sigs.clone(),
                 ) {
                     return stages;
                 }
@@ -139,11 +139,7 @@ impl CommittorProcessor {
                 return commit_infos
                     .into_iter()
                     .map(|x| {
-                        CommitStage::FailedProcess((
-                            x,
-                            strategy,
-                            sigs.as_ref().cloned(),
-                        ))
+                        CommitStage::FailedProcess((x, strategy, sigs.clone()))
                     })
                     .collect();
             }
@@ -186,7 +182,7 @@ impl CommittorProcessor {
                         &err,
                         &commit_infos,
                         strategy,
-                        Some(sigs),
+                        Some(sigs.clone()),
                     ) {
                         return stages;
                     }
@@ -194,7 +190,11 @@ impl CommittorProcessor {
                     return commit_infos
                         .into_iter()
                         .map(|x| {
-                            CommitStage::FailedFinalize((x, strategy, sigs))
+                            CommitStage::FailedFinalize((
+                                x,
+                                strategy,
+                                sigs.clone(),
+                            ))
                         })
                         .collect();
                 }

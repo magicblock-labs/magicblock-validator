@@ -218,7 +218,7 @@ impl CommitStage {
             | BufferAndChunkPartiallyInitialized((ci, _))
             | BufferAndChunkFullyInitialized((ci, _))
             | PartOfTooLargeBundleToProcess(ci)
-            | CouldNotCreateLookupTable((ci, _))
+            | CouldNotCreateLookupTable((ci, _, _))
             | FailedProcess((ci, _, _))
             | PartOfTooLargeBundleToFinalize(ci)
             | FailedFinalize((ci, _, _))
@@ -243,7 +243,7 @@ impl CommitStage {
             | Failed((_, strategy))
             | BufferAndChunkPartiallyInitialized((_, strategy))
             | BufferAndChunkFullyInitialized((_, strategy))
-            | CouldNotCreateLookupTable((_, strategy))
+            | CouldNotCreateLookupTable((_, strategy, _))
             | FailedProcess((_, strategy, _))
             | FailedFinalize((_, strategy, _))
             | FailedUndelegate((_, strategy, _))
@@ -271,7 +271,7 @@ impl CommitStage {
             | PartOfTooLargeBundleToFinalize(ci) => {
                 CommitStatus::PartOfTooLargeBundleToProcess(ci.bundle_id())
             }
-            CouldNotCreateLookupTable((ci, _)) => {
+            CouldNotCreateLookupTable((ci, _, _)) => {
                 CommitStatus::CouldNotCreateLookupTable(ci.bundle_id())
             }
             FailedProcess((ci, strategy, sigs)) => CommitStatus::FailedProcess((

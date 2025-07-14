@@ -21,11 +21,16 @@ use magicblock_rpc_client::{
     MagicBlockSendTransactionConfig,
 };
 use solana_pubkey::Pubkey;
-use solana_sdk::{hash::Hash, instruction::Instruction, signer::Signer};
+use solana_sdk::{
+    hash::Hash, instruction::Instruction, signature::Signature, signer::Signer,
+};
 use tokio::task::JoinSet;
 
 use super::{
-    common::send_and_confirm,
+    common::{
+        get_accounts_to_undelegate, send_and_confirm,
+        stages_from_lookup_table_err,
+    },
     process_buffers::{
         chunked_ixs_to_process_commitables_and_close_pdas,
         ChunkedIxsToProcessCommitablesAndClosePdasResult,
@@ -33,7 +38,6 @@ use super::{
     CommittorProcessor,
 };
 use crate::{
-    commit::common::get_accounts_to_undelegate,
     commit_stage::CommitSignatures,
     error::{CommitAccountError, CommitAccountResult},
     finalize::{
@@ -191,12 +195,23 @@ impl CommittorProcessor {
             .await;
 
         commit_stages.extend(failed_process.into_iter().flat_map(
-            |(sig, xs)| {
+            |(sig, xs, err)| {
                 let sigs = sig.map(|x| CommitSignatures {
                     process_signature: x,
                     finalize_signature: None,
                     undelegate_signature: None,
                 });
+                if let Some(err) = err.as_ref() {
+                    if let Some(stages) = stages_from_lookup_table_err(
+                        err,
+                        &xs,
+                        commit_strategy,
+                        sigs.clone(),
+                    ) {
+                        return stages;
+                    }
+                }
+
                 xs.into_iter()
                     .map(|x| {
                         CommitStage::FailedProcess((
@@ -274,7 +289,37 @@ impl CommittorProcessor {
                     )
                     .await;
             commit_stages.extend(failed_finalize.into_iter().flat_map(
-                |(sig, infos)| {
+                |(sig, infos, err)| {
+                    fn get_sigs_for_bundle(bundle_id: u64, processed_signatures: &HashMap<u64, Signature>, finalized_sig: Option<Signature>) -> CommitSignatures {
+                        CommitSignatures {
+                        // SAFETY: signatures for all bundles of succeeded process transactions
+                        //         have been added above
+                            process_signature: *processed_signatures
+                                .get(&bundle_id)
+                                .unwrap(),
+                            finalize_signature: finalized_sig,
+                            undelegate_signature: None,
+                        }
+                    }
+
+                    if let Some(err) = err.as_ref() {
+                        if let Some(stages) = stages_from_lookup_table_err(
+                            err,
+                            &infos,
+                            commit_strategy,
+                            None,
+                        ) {
+                            return stages.into_iter().map(|x| match x {
+                                CommitStage::CouldNotCreateLookupTable((commit_info, strategy, _)) => {
+                                    let bundle_id = commit_info.bundle_id();
+                                    let sigs = get_sigs_for_bundle(bundle_id, &processed_signatures, sig);
+                                    CommitStage::CouldNotCreateLookupTable((commit_info, strategy, Some(sigs)))
+                                },
+                                _ => unreachable!("stages_from_lookup_table_err always creates 'CommitStage::CouldNotCreateLookupTable'"),
+                            }).collect::<Vec<_>>()
+                        }
+                    }
+
                     infos
                         .into_iter()
                         .map(|x| {
@@ -282,15 +327,7 @@ impl CommittorProcessor {
                             CommitStage::FailedFinalize((
                                 x,
                                 commit_strategy,
-                                CommitSignatures {
-                                    // SAFETY: signatures for all bundles of succeeded process transactions
-                                    //         have been added above
-                                    process_signature: *processed_signatures
-                                        .get(&bundle_id)
-                                        .unwrap(),
-                                    finalize_signature: sig,
-                                    undelegate_signature: None,
-                                },
+                                get_sigs_for_bundle(bundle_id, &processed_signatures, sig),
                             ))
                         })
                         .collect::<Vec<_>>()
@@ -359,6 +396,25 @@ impl CommittorProcessor {
                     finalize_and_undelegate.len(),
                     "BUG: same amount of accounts to undelegate as to finalize and undelegate"
                 );
+                fn get_sigs_for_bundle(
+                    bundle_id: u64,
+                    processed_signatures: &HashMap<u64, Signature>,
+                    finalized_signatures: &HashMap<u64, Signature>,
+                    undelegated_sig: Option<Signature>,
+                ) -> CommitSignatures {
+                    CommitSignatures {
+                        // SAFETY: signatures for all bundles of succeeded process transactions
+                        //         have been added above
+                        process_signature: *processed_signatures
+                            .get(&bundle_id)
+                            .unwrap(),
+                        finalize_signature: finalized_signatures
+                            .get(&bundle_id)
+                            .cloned(),
+                        undelegate_signature: undelegated_sig,
+                    }
+                }
+
                 let undelegate_ixs = match undelegate_commitables_ixs(
                     &processor.magicblock_rpc_client,
                     processor.authority.pubkey(),
@@ -378,19 +434,12 @@ impl CommittorProcessor {
                                 CommitStage::FailedUndelegate((
                                     x.clone(),
                                     CommitStrategy::args(use_lookup),
-                                    CommitSignatures {
-                                        // SAFETY: signatures for all bundles of succeeded process transactions
-                                        //         have been added above
-                                        process_signature:
-                                            *processed_signatures
-                                                .get(&bundle_id)
-                                                .unwrap(),
-                                        finalize_signature:
-                                            finalized_signatures
-                                                .get(&bundle_id)
-                                                .cloned(),
-                                        undelegate_signature: err.signature(),
-                                    },
+                                    get_sigs_for_bundle(
+                                        bundle_id,
+                                        &processed_signatures,
+                                        &finalized_signatures,
+                                        err.signature(),
+                                    ),
                                 ))
                             }),
                         );
@@ -417,7 +466,30 @@ impl CommittorProcessor {
 
                     commit_stages.extend(
                         failed_undelegate.into_iter().flat_map(
-                            |(sig, infos)| {
+                            |(sig, infos, err)| {
+
+                                if let Some(err) = err.as_ref() {
+                                    if let Some(stages) = stages_from_lookup_table_err(
+                                        err,
+                                        &infos,
+                                        commit_strategy,
+                                        None,
+                                    ) {
+                                        return stages.into_iter().map(|x| match x {
+                                            CommitStage::CouldNotCreateLookupTable((commit_info, strategy, _)) => {
+                                                let bundle_id = commit_info.bundle_id();
+                                                let sigs = get_sigs_for_bundle(
+                                                        bundle_id,
+                                                        &processed_signatures,
+                                                        &finalized_signatures,
+                                                        sig);
+                                                CommitStage::CouldNotCreateLookupTable((commit_info, strategy, Some(sigs)))
+                                            },
+                                            _ => unreachable!("stages_from_lookup_table_err always creates 'CommitStage::CouldNotCreateLookupTable'"),
+                                        }).collect::<Vec<_>>()
+                                    }
+                                }
+
                                 infos
                                     .into_iter()
                                     .map(|x| {
@@ -425,19 +497,12 @@ impl CommittorProcessor {
                                         CommitStage::FailedUndelegate((
                                             x,
                                             commit_strategy,
-                                            CommitSignatures {
-                                                // SAFETY: signatures for all bundles of succeeded process transactions
-                                                //         have been added above
-                                                process_signature:
-                                                    *processed_signatures
-                                                        .get(&bundle_id)
-                                                        .unwrap(),
-                                                finalize_signature:
-                                                    finalized_signatures
-                                                        .get(&bundle_id)
-                                                        .cloned(),
-                                                undelegate_signature: sig,
-                                            },
+                                            get_sigs_for_bundle(
+                                                bundle_id,
+                                                &processed_signatures,
+                                                &finalized_signatures,
+                                                sig,
+                                            ),
                                         ))
                                     })
                                     .collect::<Vec<_>>()
@@ -1009,18 +1074,14 @@ impl CommittorProcessor {
                     rpc_client,
                     authority,
                     [write_budget_ixs, vec![ix]].concat(),
-                    format!("write chunk for offset {}", chunk.offset),
+                    format!("write chunk ({} bytes)", chunk_bytes),
                     Some(latest_blockhash),
-                    // NOTE: We could use `processed` here and wait to get the processed status at
-                    // least which would make things a bit slower.
-                    // However that way we would avoid sending unnecessary transactions potentially
-                    // since we may not see some written chunks yet when we get the chunks account.
                     MagicBlockSendTransactionConfig::ensure_processed(),
                     None,
                 )
                 .await
                 .inspect_err(|err| {
-                    error!("{:?}", err);
+                    warn!("{:?}", err);
                 })
             });
         }
