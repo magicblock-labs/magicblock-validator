@@ -6,6 +6,7 @@ use std::{
     pin::Pin,
     rc::Rc,
     sync::{Arc, RwLock},
+    time::Duration,
 };
 
 use futures_util::{stream::FuturesUnordered, FutureExt, Stream, StreamExt};
@@ -39,6 +40,8 @@ pub enum RemoteAccountUpdatesShardError {
         #[from]
         solana_pubsub_client::nonblocking::pubsub_client::PubsubClientError,
     ),
+    #[error("failed to subscribe to remote account updates")]
+    SubscriptionTimeout,
 }
 
 pub struct RemoteAccountUpdatesShard {
@@ -125,7 +128,7 @@ impl RemoteAccountUpdatesShard {
                     self.try_to_override_last_known_update_slot(clock::ID, clock_slot);
                 }
                 // When we receive a message to start monitoring an account
-                Some((pubkey, unsub)) = self.monitoring_request_receiver.recv() => {
+                Some((pubkey, unsub)) = self.monitoring_request_receiver.recv(), if !self.pool.is_empty() => {
                     if unsub {
                         account_streams.remove(&pubkey);
                         metrics::set_subscriptions_count(account_streams.len(), &self.shard_id);
@@ -145,6 +148,7 @@ impl RemoteAccountUpdatesShard {
                         Ok(s) => s,
                         Err(e) => {
                             warn!("shard {} failed to websocket subscribe to {pubkey}: {e}", self.shard_id);
+                            self.pool.clients.push(result.client);
                             continue;
                         }
                     };
@@ -275,12 +279,17 @@ impl PubsubPool {
         let client = self.clients.pop().expect(
             "websocket connection pool always has at least one connection",
         );
+        const SUBSCRIPTION_TIMEOUT: Duration = Duration::from_secs(30);
         let config = Some(self.config.clone());
         async move {
-            let result = client
-                .inner
-                .account_subscribe(&pubkey, config)
-                .await
+            let request = client.inner.account_subscribe(&pubkey, config);
+            let future = tokio::time::timeout(SUBSCRIPTION_TIMEOUT, request);
+            let Ok(result) = future.await else {
+                let result =
+                    Err(RemoteAccountUpdatesShardError::SubscriptionTimeout);
+                return SubscriptionResult { result, client };
+            };
+            let result = result
                 .map_err(RemoteAccountUpdatesShardError::PubsubClientError)
                 .map(|(stream, unsub)| {
                     // SAFETY:
@@ -288,9 +297,9 @@ impl PubsubPool {
                     // so the lifetime of the stream can be safely extended to 'static
                     #[allow(clippy::missing_transmute_annotations)]
                     let stream = unsafe { std::mem::transmute(stream) };
+                    *client.subs.borrow_mut() += 1;
                     (stream, unsub)
                 });
-            *client.subs.borrow_mut() += 1;
             SubscriptionResult { result, client }
         }
     }
@@ -318,6 +327,11 @@ impl PubsubPool {
         for client in self.clients.drain() {
             let _ = client.inner.shutdown().await;
         }
+    }
+
+    #[inline]
+    fn is_empty(&self) -> bool {
+        self.clients.is_empty()
     }
 }
 
