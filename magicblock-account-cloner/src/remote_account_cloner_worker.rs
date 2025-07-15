@@ -20,7 +20,7 @@ use magicblock_account_dumper::AccountDumper;
 use magicblock_account_fetcher::AccountFetcher;
 use magicblock_account_updates::{AccountUpdates, AccountUpdatesResult};
 use magicblock_accounts_api::InternalAccountProvider;
-use magicblock_committor_service::ChangesetCommittor;
+use magicblock_committor_service::L1MessageCommittor;
 use magicblock_metrics::metrics;
 use magicblock_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
 use solana_sdk::{
@@ -138,7 +138,7 @@ where
     AFE: AccountFetcher,
     AUP: AccountUpdates,
     ADU: AccountDumper,
-    CC: ChangesetCommittor,
+    CC: L1MessageCommittor,
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(

@@ -7,7 +7,10 @@ use std::{
 };
 
 use log::*;
-use magicblock_accounts::AccountsManager;
+use magicblock_accounts::{
+    remote_scheduled_commits_processor::RemoteScheduledCommitsProcessor,
+    AccountsManager, ScheduledCommitsProcessor,
+};
 use magicblock_bank::bank::Bank;
 use magicblock_committor_service::CommittorService;
 use magicblock_core::magic_program;
@@ -21,20 +24,19 @@ use tokio_util::sync::CancellationToken;
 
 use crate::slot::advance_slot_and_update_ledger;
 
-pub fn init_slot_ticker(
+pub fn init_slot_ticker<C: ScheduledCommitsProcessor>(
     bank: &Arc<Bank>,
-    accounts_manager: &Arc<AccountsManager>,
-    committor_service: &Arc<CommittorService>,
-    transaction_status_sender: Option<TransactionStatusSender>,
+    committor_processor: &Arc<C>,
+    transaction_status_sender: TransactionStatusSender,
     ledger: Arc<Ledger>,
     tick_duration: Duration,
     exit: Arc<AtomicBool>,
 ) -> tokio::task::JoinHandle<()> {
     let bank = bank.clone();
-    let accounts_manager = accounts_manager.clone();
-    let committor_service = committor_service.clone();
-    let log = tick_duration >= Duration::from_secs(5);
+    let committor_processor = committor_processor.clone();
+
     tokio::task::spawn(async move {
+        let log = tick_duration >= Duration::from_secs(5);
         while !exit.load(Ordering::Relaxed) {
             tokio::time::sleep(tick_duration).await;
 
@@ -58,17 +60,14 @@ pub fn init_slot_ticker(
                 if let Err(err) = execute_legacy_transaction(
                     tx,
                     &bank,
-                    transaction_status_sender.as_ref(),
+                    Some(&transaction_status_sender),
                 ) {
                     error!("Failed to accept scheduled commits: {:?}", err);
                 } else {
                     // 2. Process those scheduled commits
                     // TODO: fix the possible delay here
                     // https://github.com/magicblock-labs/magicblock-validator/issues/104
-                    if let Err(err) = accounts_manager
-                        .process_scheduled_commits(&committor_service)
-                        .await
-                    {
+                    if let Err(err) = committor_processor.process().await {
                         error!(
                             "Failed to process scheduled commits: {:?}",
                             err

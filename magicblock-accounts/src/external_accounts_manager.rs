@@ -16,7 +16,7 @@ use futures_util::future::{try_join, try_join_all};
 use log::*;
 use magicblock_account_cloner::{AccountCloner, AccountClonerOutput};
 use magicblock_accounts_api::InternalAccountProvider;
-use magicblock_committor_service::ChangesetCommittor;
+use magicblock_committor_service::L1MessageCommittor;
 use magicblock_core::magic_program;
 use solana_sdk::{
     account::{AccountSharedData, ReadableAccount},
@@ -87,14 +87,12 @@ where
     ACM: AccountCommitter,
     TAE: TransactionAccountsExtractor,
     TAV: TransactionAccountsValidator,
-    SCP: ScheduledCommitsProcessor,
 {
     pub internal_account_provider: IAP,
     pub account_cloner: ACL,
     pub account_committer: Arc<ACM>,
     pub transaction_accounts_extractor: TAE,
     pub transaction_accounts_validator: TAV,
-    pub scheduled_commits_processor: SCP,
     pub lifecycle: LifecycleMode,
     pub external_commitable_accounts:
         RwLock<HashMap<Pubkey, ExternalCommitableAccount>>,
@@ -407,23 +405,6 @@ where
             )
             .get(pubkey)
             .map(|x| x.last_committed_at())
-    }
-
-    pub async fn process_scheduled_commits<CC: ChangesetCommittor>(
-        &self,
-        changeset_committor: &Arc<CC>,
-    ) -> AccountsResult<()> {
-        self.scheduled_commits_processor
-            .process(&self.internal_account_provider, changeset_committor)
-            .await
-    }
-
-    pub fn scheduled_commits_len(&self) -> usize {
-        self.scheduled_commits_processor.scheduled_commits_len()
-    }
-
-    pub fn clear_scheduled_commits(&self) {
-        self.scheduled_commits_processor.clear_scheduled_commits()
     }
 }
 

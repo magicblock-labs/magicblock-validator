@@ -32,7 +32,7 @@ impl AccountsManager {
         bank: &Arc<Bank>,
         cloned_accounts: &CloneOutputMap,
         remote_account_cloner_client: RemoteAccountClonerClient,
-        transaction_status_sender: Option<TransactionStatusSender>,
+        transaction_status_sender: TransactionStatusSender,
         validator_keypair: Keypair,
         config: AccountsConfig,
     ) -> AccountsResult<Self> {
@@ -49,12 +49,6 @@ impl AccountsManager {
             config.commit_compute_unit_price,
         );
 
-        let scheduled_commits_processor = RemoteScheduledCommitsProcessor::new(
-            bank.clone(),
-            cloned_accounts.clone(),
-            transaction_status_sender.clone(),
-        );
-
         Ok(Self {
             internal_account_provider,
             account_cloner: remote_account_cloner_client,
@@ -62,7 +56,6 @@ impl AccountsManager {
             transaction_accounts_extractor: TransactionAccountsExtractorImpl,
             transaction_accounts_validator: TransactionAccountsValidatorImpl,
             lifecycle: config.lifecycle,
-            scheduled_commits_processor,
             external_commitable_accounts: Default::default(),
         })
     }
