@@ -16,7 +16,7 @@ async fn test_clocks_match() {
     let from_keypair = Keypair::new();
     let to_pubkey = Pubkey::new_unique();
 
-    let rpc_client = RpcClient::new("http://localhost:7799".to_string());
+    let rpc_client = RpcClient::new("http://localhost:7849".to_string());
     rpc_client
         .request_airdrop(&from_keypair.pubkey(), LAMPORTS_PER_SOL)
         .await
