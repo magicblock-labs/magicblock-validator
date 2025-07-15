@@ -24,9 +24,7 @@ use magicblock_account_fetcher::{
 use magicblock_account_updates::{
     RemoteAccountUpdatesClient, RemoteAccountUpdatesWorker,
 };
-use magicblock_accounts::{
-    utils::try_rpc_cluster_from_cluster, AccountsManager,
-};
+use magicblock_accounts::{remote_scheduled_commits_processor::RemoteScheduledCommitsProcessor, utils::try_rpc_cluster_from_cluster, AccountsManager, ScheduledCommitsProcessor};
 use magicblock_accounts_api::BankAccountProvider;
 use magicblock_accounts_db::{
     config::AccountsDbConfig, error::AccountsDbError,
@@ -142,6 +140,8 @@ pub struct MagicValidator {
     pubsub_close_handle: PubsubServiceCloseHandle,
     sample_performance_service: Option<SamplePerformanceService>,
     commit_accounts_ticker: Option<tokio::task::JoinHandle<()>>,
+    remote_scheduled_commits_processor:
+        Arc<RemoteScheduledCommitsProcessor<CommittorService>>,
     remote_account_fetcher_worker: Option<RemoteAccountFetcherWorker>,
     remote_account_fetcher_handle: Option<tokio::task::JoinHandle<()>>,
     remote_account_updates_worker: Option<RemoteAccountUpdatesWorker>,
@@ -323,6 +323,13 @@ impl MagicValidator {
             },
         )?);
 
+        let remote_scheduled_commits_processor =
+            Arc::new(RemoteScheduledCommitsProcessor::new(
+                bank.clone(),
+                committor_service.clone(),
+                transaction_status_sender.clone(),
+            ));
+
         let remote_account_cloner_worker = RemoteAccountClonerWorker::new(
             bank_account_provider,
             remote_account_fetcher_client,
@@ -378,6 +385,7 @@ impl MagicValidator {
             geyser_rpc_service,
             slot_ticker: None,
             commit_accounts_ticker: None,
+            remote_scheduled_commits_processor,
             remote_account_fetcher_worker: Some(remote_account_fetcher_worker),
             remote_account_fetcher_handle: None,
             remote_account_updates_worker: Some(remote_account_updates_worker),
@@ -448,7 +456,7 @@ impl MagicValidator {
             bank,
             cloned_accounts,
             remote_account_cloner_client,
-            Some(transaction_status_sender),
+            transaction_status_sender,
             // NOTE: we could avoid passing a copy of the keypair here if we instead pass
             // something akin to a ValidatorTransactionSigner that gets it via the [validator_authority]
             // method from the [magicblock_program] module, forgetting it immediately after.
@@ -573,12 +581,12 @@ impl MagicValidator {
         // Thus while the ledger is processed we don't yet run the machinery to handle
         // scheduled commits and we clear all scheduled commits before fully starting the
         // validator.
-        let scheduled_commits = self.accounts_manager.scheduled_commits_len();
+        let scheduled_commits = self.remote_scheduled_commits_processor.scheduled_commits_len();
         debug!(
             "Found {} scheduled commits while processing ledger, clearing them",
             scheduled_commits
         );
-        self.accounts_manager.clear_scheduled_commits();
+        self.remote_scheduled_commits_processor.clear_scheduled_commits();
 
         // We want the next transaction either due to hydrating of cloned accounts or
         // user request to be processed in the next slot such that it doesn't become
@@ -694,9 +702,8 @@ impl MagicValidator {
 
         self.slot_ticker = Some(init_slot_ticker(
             &self.bank,
-            &self.accounts_manager,
-            &self.committor_service,
-            Some(self.transaction_status_sender.clone()),
+            &self.remote_scheduled_commits_processor,
+            self.transaction_status_sender.clone(),
             self.ledger.clone(),
             Duration::from_millis(self.config.validator.millis_per_slot),
             self.exit.clone(),
