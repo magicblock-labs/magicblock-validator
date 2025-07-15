@@ -200,11 +200,14 @@ impl MagicValidator {
             config.validator_config.ledger.path.as_ref(),
             config.validator_config.ledger.reset,
         )?;
-        Self::sync_validator_keypair_with_ledger(
-            ledger.ledger_path(),
-            &identity_keypair,
-            config.validator_config.ledger.reset,
-        )?;
+
+        if config.validator_config.ledger.enforce_keypair_match {
+            Self::sync_validator_keypair_with_ledger(
+                ledger.ledger_path(),
+                &identity_keypair,
+                config.validator_config.ledger.reset,
+            )?;
+        }
 
         // SAFETY:
         // this code will never panic as the ledger_path always appends the
