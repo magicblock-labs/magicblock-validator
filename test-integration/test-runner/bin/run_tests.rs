@@ -399,14 +399,30 @@ fn run_magicblock_api_tests(
     if !should_run_test("magicblock_api") {
         return Ok(success_output());
     }
+    let loaded_chain_accounts =
+        LoadedAccounts::with_delegation_program_test_authority();
+
+    let mut ephem_validator = match start_validator(
+        "validator-offline.devnet.toml",
+        ValidatorCluster::Ephem,
+        &loaded_chain_accounts,
+    ) {
+        Some(validator) => validator,
+        None => {
+            panic!("Failed to start ephemeral validator properly");
+        }
+    };
+
     let test_dir = format!("{}/../{}", manifest_dir, "test-magicblock-api");
     eprintln!("Running magicblock-api tests in {}", test_dir);
 
     let output = run_test(test_dir, Default::default()).map_err(|err| {
         eprintln!("Failed to magicblock api tests: {:?}", err);
+        cleanup_validator(&mut ephem_validator, "ephemeral");
         err
     })?;
 
+    cleanup_validator(&mut ephem_validator, "ephemeral");
     Ok(output)
 }
 
