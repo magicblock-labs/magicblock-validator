@@ -13,7 +13,7 @@ async fn test_get_block_timestamp_stability() {
     ))
     .await;
 
-    let rpc_client = RpcClient::new("http://localhost:7799".to_string());
+    let rpc_client = RpcClient::new("http://localhost:7849".to_string());
 
     let current_slot = rpc_client.get_slot().await.unwrap();
     let block_time = rpc_client.get_block_time(current_slot - 1).await.unwrap();
