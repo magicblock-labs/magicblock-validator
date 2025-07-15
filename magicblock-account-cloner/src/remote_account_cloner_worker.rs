@@ -25,6 +25,7 @@ use solana_sdk::{
     clock::Slot,
     pubkey::Pubkey,
     signature::Signature,
+    sysvar::clock,
 };
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
@@ -485,7 +486,7 @@ where
             loop {
                 fetch_count += 1;
                 let min_context_slot =
-                    self.account_updates.get_first_subscribed_slot(pubkey);
+                    self.account_updates.get_last_known_update_slot(&clock::ID);
                 match self
                     .fetch_account_chain_snapshot(pubkey, min_context_slot)
                     .await

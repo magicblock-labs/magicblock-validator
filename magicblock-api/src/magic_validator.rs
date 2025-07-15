@@ -800,7 +800,7 @@ impl MagicValidator {
     }
 
     fn start_remote_account_updates_worker(&mut self) {
-        if let Some(mut remote_account_updates_worker) =
+        if let Some(remote_account_updates_worker) =
             self.remote_account_updates_worker.take()
         {
             let cancellation_token = self.token.clone();
