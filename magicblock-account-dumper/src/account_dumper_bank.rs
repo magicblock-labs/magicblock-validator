@@ -91,7 +91,12 @@ impl AccountDumper for AccountDumperBank {
             None,
             self.bank.last_blockhash(),
         );
-        self.execute_transaction(transaction)
+        let result = self.execute_transaction(transaction)?;
+        if let Some(mut acc) = self.bank.get_account(pubkey) {
+            acc.set_delegated(false);
+            self.bank.store_account(*pubkey, acc);
+        }
+        Ok(result)
     }
 
     fn dump_delegated_account(
@@ -111,7 +116,12 @@ impl AccountDumper for AccountDumperBank {
             overrides,
             self.bank.last_blockhash(),
         );
-        self.execute_transaction(transaction)
+        let result = self.execute_transaction(transaction)?;
+        if let Some(mut acc) = self.bank.get_account(pubkey) {
+            acc.set_delegated(true);
+            self.bank.store_account(*pubkey, acc);
+        }
+        Ok(result)
     }
 
     fn dump_program_accounts(

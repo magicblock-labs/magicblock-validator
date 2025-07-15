@@ -133,6 +133,11 @@ fn test_remove_account() {
         matches!(offset, Err(AccountsDbError::NotFound)),
         "removed account offset is still present in index"
     );
+    assert_eq!(
+        tenv.get_delloactions_count(),
+        1,
+        "the number of deallocations should have increased after account removal"
+    );
 }
 
 #[test]
@@ -239,10 +244,21 @@ fn test_recycle_allocation_after_realloc() {
     tenv.reallocate_account(&pubkey, &mut txn, &index_value)
         .expect("failed to reallocate account");
     txn.commit().expect("failed to commit transaction");
+    assert_eq!(
+        tenv.get_delloactions_count(),
+        1,
+        "the number of deallocations should have increased after account realloc"
+    );
+
     let result = tenv.try_recycle_allocation(new_allocation.blocks);
     assert_eq!(
         result.expect("failed to recycle allocation"),
         allocation.into()
+    );
+    assert_eq!(
+        tenv.get_delloactions_count(),
+        0,
+        "the number of deallocations should have decresed after recycling"
     );
     let result = tenv.try_recycle_allocation(new_allocation.blocks);
     assert!(
@@ -251,10 +267,20 @@ fn test_recycle_allocation_after_realloc() {
     );
     tenv.remove_account(&pubkey)
         .expect("failed to remove account");
+    assert_eq!(
+        tenv.get_delloactions_count(),
+        1,
+        "the number of deallocations should have increased after account removal"
+    );
     let result = tenv.try_recycle_allocation(new_allocation.blocks);
     assert_eq!(
         result.expect("failed to recycle allocation after account removal"),
         new_allocation.into()
+    );
+    assert_eq!(
+        tenv.get_delloactions_count(),
+        0,
+        "the number of deallocations should have decresed after recycling"
     );
 }
 
