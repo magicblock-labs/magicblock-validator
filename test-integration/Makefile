@@ -21,7 +21,7 @@ COMMITTOR_PROGRAM_SO := $(ROOT_DEPLOY_DIR)/magicblock_committor_program.so
 
 PROGRAMS_SO := $(FLEXI_COUNTER_SO) $(SCHEDULECOMMIT_SO) $(SCHEDULECOMMIT_SECURITY_SO) $(COMMITTOR_PROGRAM_SO)
 
-list-tasks:
+list:
 	@cat Makefile | grep "^[a-z].*:" | sed 's/:.*//g'
 list-programs:
 	@echo $(PROGRAMS_SO)
@@ -35,6 +35,38 @@ test-force-mb: $(PROGRAMS_SO) test-ledger-restore
 	RUST_LOG=$(RUST_LOG) \
 	FORCE_MAGIC_BLOCK_VALIDATOR=1 \
 	cargo run --package test-runner --bin run-tests
+
+test-schedulecommit:
+	RUN_TESTS=schedulecommit \
+	$(MAKE) test
+
+test-issues-frequent-commits:
+	RUN_TESTS=issues_frequent_commmits \
+	$(MAKE) test
+
+test-cloning:
+	RUN_TESTS=cloning \
+	$(MAKE) test
+
+test-restore-ledger:
+	RUN_TESTS=restore_ledger \
+	$(MAKE) test
+
+test-magicblock-api:
+	RUN_TESTS=magicblock_api \
+	$(MAKE) test
+
+test-table-mania:
+	RUN_TESTS=table_mania \
+	$(MAKE) test
+
+test-committor:
+	RUN_TESTS=committor \
+	$(MAKE) test
+
+test-pubsub:
+	RUN_TESTS=pubsub \
+	$(MAKE) test
 
 $(FLEXI_COUNTER_SO): $(FLEXI_COUNTER_SRC)
 	cargo build-sbf --manifest-path $(FLEXI_COUNTER_DIR)/Cargo.toml
@@ -53,4 +85,4 @@ deploy-flexi-counter: $(FLEXI_COUNTER_SO)
 		$(DIR)/target/deploy/program_flexi_counter.so
 
 
-.PHONY: test test-force-mb deploy-flexi-counter
+.PHONY: test test-force-mb test-schedulecommit test-issues-frequent-commits test-cloning test-restore-ledger test-magicblock-api test-table-mania test-committor test-pubsub deploy-flexi-counter list
