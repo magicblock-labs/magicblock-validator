@@ -283,7 +283,8 @@ impl PubsubPool {
         let config = Some(self.config.clone());
         async move {
             let request = client.inner.account_subscribe(&pubkey, config);
-            let request_with_timeout = tokio::time::timeout(SUBSCRIPTION_TIMEOUT, request);
+            let request_with_timeout =
+                tokio::time::timeout(SUBSCRIPTION_TIMEOUT, request);
             let Ok(result) = request_with_timeout.await else {
                 let result =
                     Err(RemoteAccountUpdatesShardError::SubscriptionTimeout);
