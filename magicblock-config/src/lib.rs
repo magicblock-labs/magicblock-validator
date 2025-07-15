@@ -1,16 +1,13 @@
-use std::{
-    env, fmt, fs,
-    net::{IpAddr, Ipv4Addr},
-    path::Path,
-    str::FromStr,
-};
+use std::{fmt, fs, path::PathBuf, str::FromStr};
 
+use clap::Args;
 use errors::{ConfigError, ConfigResult};
-use isocountry::CountryCode;
 use serde::{Deserialize, Serialize};
-use url::Url;
+use solana_sdk::pubkey::Pubkey;
 
 mod accounts;
+mod accounts_db;
+mod cli;
 pub mod errors;
 mod geyser_grpc;
 mod helpers;
@@ -20,6 +17,8 @@ mod program;
 mod rpc;
 mod validator;
 pub use accounts::*;
+pub use accounts_db::*;
+pub use cli::*;
 pub use geyser_grpc::*;
 pub use ledger::*;
 pub use metrics::*;
@@ -27,36 +26,48 @@ pub use program::*;
 pub use rpc::*;
 pub use validator::*;
 
-#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(
+    Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize, Args,
+)]
 #[serde(deny_unknown_fields)]
 pub struct EphemeralConfig {
     #[serde(default)]
+    #[command(flatten)]
     pub accounts: AccountsConfig,
     #[serde(default)]
+    #[command(flatten)]
     pub rpc: RpcConfig,
     #[serde(default)]
+    #[command(flatten)]
     pub geyser_grpc: GeyserGrpcConfig,
     #[serde(default)]
+    #[command(flatten)]
     pub validator: ValidatorConfig,
     #[serde(default)]
+    #[command(flatten)]
     pub ledger: LedgerConfig,
     #[serde(default)]
     #[serde(rename = "program")]
+    #[arg(
+        long,
+        help = "The list of programs to load. Format: <program_id>:<path_to_program_binary>",
+        value_parser = program_config_parser,
+    )]
     pub programs: Vec<ProgramConfig>,
     #[serde(default)]
+    #[command(flatten)]
     pub metrics: MetricsConfig,
 }
 
 impl EphemeralConfig {
-    pub fn try_load_from_file(path: &str) -> ConfigResult<Self> {
-        let p = Path::new(path);
-        let toml = fs::read_to_string(p)?;
-        Self::try_load_from_toml(&toml, Some(p))
+    pub fn try_load_from_file(path: &PathBuf) -> ConfigResult<Self> {
+        let toml = fs::read_to_string(path)?;
+        Self::try_load_from_toml(&toml, Some(path))
     }
 
     pub fn try_load_from_toml(
         toml: &str,
-        config_path: Option<&Path>,
+        config_path: Option<&PathBuf>,
     ) -> ConfigResult<Self> {
         let mut config: Self = toml::from_str(toml)?;
         for program in &mut config.programs {
@@ -84,207 +95,42 @@ impl EphemeralConfig {
                     .to_string()
             }
         }
+
+        config.post_parse();
+
         Ok(config)
     }
 
-    pub fn override_from_envs(&self) -> EphemeralConfig {
-        let mut config = self.clone();
+    pub fn merge(&mut self, other: EphemeralConfig) {
+        // If other differs from the default but not self, use the value from other
+        // Otherwise, use the value from self
+        self.accounts.merge(other.accounts);
+        self.rpc.merge(other.rpc);
+        self.geyser_grpc.merge(other.geyser_grpc.clone());
+        self.validator.merge(other.validator.clone());
+        self.ledger.merge(other.ledger.clone());
+        self.metrics.merge(other.metrics.clone());
 
-        // -----------------
-        // Accounts
-        // -----------------
-        if let Ok(http) = env::var("ACCOUNTS_REMOTE") {
-            if let Ok(ws) = env::var("ACCOUNTS_REMOTE_WS") {
-                config.accounts.remote = RemoteConfig::CustomWithWs(
-                    Url::parse(&http)
-                        .map_err(|err| {
-                            panic!(
-                                "Invalid 'ACCOUNTS_REMOTE' env var ({:?})",
-                                err
-                            )
-                        })
-                        .unwrap(),
-                    Url::parse(&ws)
-                        .map_err(|err| {
-                            panic!(
-                                "Invalid 'ACCOUNTS_REMOTE_WS' env var ({:?})",
-                                err
-                            )
-                        })
-                        .unwrap(),
-                );
-            } else {
-                config.accounts.remote = RemoteConfig::Custom(
-                    Url::parse(&http)
-                        .map_err(|err| {
-                            panic!(
-                                "Invalid 'ACCOUNTS_REMOTE' env var ({:?})",
-                                err
-                            )
-                        })
-                        .unwrap(),
-                );
+        if self.programs.is_empty() && !other.programs.is_empty() {
+            self.programs = other.programs.clone();
+        }
+    }
+
+    pub fn post_parse(&mut self) {
+        if self.accounts.remote.url.is_some() {
+            match &self.accounts.remote.ws_url {
+                Some(ws_url) if ws_url.len() > 1 => {
+                    self.accounts.remote.cluster =
+                        RemoteCluster::CustomWithMultipleWs;
+                }
+                Some(ws_url) if ws_url.len() == 1 => {
+                    self.accounts.remote.cluster = RemoteCluster::CustomWithWs;
+                }
+                _ => {
+                    self.accounts.remote.cluster = RemoteCluster::Custom;
+                }
             }
         }
-
-        if let Ok(lifecycle) = env::var("ACCOUNTS_LIFECYCLE") {
-            config.accounts.lifecycle = lifecycle.parse().unwrap_or_else(|err| {
-                panic!(
-                    "Failed to parse 'ACCOUNTS_LIFECYCLE' as LifecycleMode: {}: {:?}",
-                    lifecycle, err
-                )
-            })
-        }
-
-        if let Ok(frequency_millis) =
-            env::var("ACCOUNTS_COMMIT_FREQUENCY_MILLIS")
-        {
-            config.accounts.commit.frequency_millis = u64::from_str(&frequency_millis)
-                .unwrap_or_else(|err| panic!("Failed to parse 'ACCOUNTS_COMMIT_FREQUENCY_MILLIS' as u64: {:?}", err));
-        }
-
-        if let Ok(unit_price) = env::var("ACCOUNTS_COMMIT_COMPUTE_UNIT_PRICE") {
-            config.accounts.commit.compute_unit_price = u64::from_str(&unit_price)
-                .unwrap_or_else(|err| panic!("Failed to parse 'ACCOUNTS_COMMIT_COMPUTE_UNIT_PRICE' as u64: {:?}", err))
-        }
-
-        // -----------------
-        // RPC
-        // -----------------
-        if let Ok(addr) = env::var("RPC_ADDR") {
-            config.rpc.addr =
-                IpAddr::V4(Ipv4Addr::from_str(&addr).unwrap_or_else(|err| {
-                    panic!("Failed to parse 'RPC_ADDR' as Ipv4Addr: {:?}", err)
-                }));
-        }
-
-        if let Ok(port) = env::var("RPC_PORT") {
-            config.rpc.port = u16::from_str(&port).unwrap_or_else(|err| {
-                panic!("Failed to parse 'RPC_PORT' as u16: {:?}", err)
-            });
-        }
-
-        // -----------------
-        // Geyser GRPC
-        // -----------------
-        if let Ok(addr) = env::var("GEYSER_GRPC_ADDR") {
-            config.geyser_grpc.addr =
-                IpAddr::V4(Ipv4Addr::from_str(&addr).unwrap_or_else(|err| {
-                    panic!(
-                        "Failed to parse 'GEYSER_GRPC_ADDR' as Ipv4Addr: {:?}",
-                        err
-                    )
-                }));
-        }
-
-        if let Ok(port) = env::var("GEYSER_GRPC_PORT") {
-            config.geyser_grpc.port =
-                u16::from_str(&port).unwrap_or_else(|err| {
-                    panic!(
-                        "Failed to parse 'GEYSER_GRPC_PORT' as u16: {:?}",
-                        err
-                    )
-                });
-        }
-
-        // -----------------
-        // Validator
-        // -----------------
-        if let Ok(millis_per_slot) = env::var("VALIDATOR_MILLIS_PER_SLOT") {
-            config.validator.millis_per_slot = u64::from_str(&millis_per_slot)
-                .unwrap_or_else(|err| panic!("Failed to parse 'VALIDATOR_MILLIS_PER_SLOT' as u64: {:?}", err));
-        }
-
-        if let Ok(base_fees) = env::var("VALIDATOR_BASE_FEES") {
-            config.validator.base_fees =
-                Some(u64::from_str(&base_fees).unwrap_or_else(|err| {
-                    panic!(
-                        "Failed to parse 'VALIDATOR_BASE_FEES' as u64: {:?}",
-                        err
-                    )
-                }));
-        }
-
-        if let Ok(sig_verify) = env::var("VALIDATOR_SIG_VERIFY") {
-            config.validator.sigverify = bool::from_str(&sig_verify)
-                .unwrap_or_else(|err| {
-                    panic!(
-                        "Failed to parse 'VALIDATOR_SIG_VERIFY' as bool: {:?}",
-                        err
-                    )
-                });
-        }
-
-        if let Ok(country_code) = env::var("VALIDATOR_COUNTRY_CODE") {
-            config.validator.country_code = CountryCode::for_alpha2(&country_code).unwrap_or_else(|err| {
-                panic!(
-                    "Failed to parse 'VALIDATOR_COUNTRY_CODE' as CountryCode: {:?}",
-                    err
-                )
-            })
-        }
-
-        if let Ok(fdqn) = env::var("VALIDATOR_FDQN") {
-            config.validator.fdqn = Some(fdqn)
-        }
-
-        // -----------------
-        // Ledger
-        // -----------------
-        if let Ok(ledger_reset) = env::var("LEDGER_RESET") {
-            config.ledger.reset =
-                bool::from_str(&ledger_reset).unwrap_or_else(|err| {
-                    panic!("Failed to parse 'LEDGER_RESET' as bool: {:?}", err)
-                });
-        }
-        if let Ok(ledger_path) = env::var("LEDGER_PATH") {
-            config.ledger.path = Some(ledger_path);
-        }
-        if let Ok(ledger_path) = env::var("LEDGER_SIZE") {
-            config.ledger.size = ledger_path.parse().unwrap_or_else(|err| {
-                panic!("Failed to parse 'LEDGER_SIZE' as u64: {:?}", err)
-            });
-        }
-
-        // -----------------
-        // Metrics
-        // -----------------
-        if let Ok(enabled) = env::var("METRICS_ENABLED") {
-            config.metrics.enabled =
-                bool::from_str(&enabled).unwrap_or_else(|err| {
-                    panic!(
-                        "Failed to parse 'METRICS_ENABLED' as bool: {:?}",
-                        err
-                    )
-                });
-        }
-        if let Ok(addr) = env::var("METRICS_ADDR") {
-            config.metrics.service.addr =
-                IpAddr::V4(Ipv4Addr::from_str(&addr).unwrap_or_else(|err| {
-                    panic!(
-                        "Failed to parse 'METRICS_ADDR' as Ipv4Addr: {:?}",
-                        err
-                    )
-                }));
-        }
-        if let Ok(port) = env::var("METRICS_PORT") {
-            config.metrics.service.port =
-                u16::from_str(&port).unwrap_or_else(|err| {
-                    panic!("Failed to parse 'METRICS_PORT' as u16: {:?}", err)
-                });
-        }
-        if let Ok(interval) =
-            env::var("METRICS_SYSTEM_METRICS_TICK_INTERVAL_SECS")
-        {
-            config.metrics.system_metrics_tick_interval_secs =
-                u64::from_str(&interval).unwrap_or_else(|err| {
-                    panic!(
-                        "Failed to parse 'METRICS_SYSTEM_METRICS_TICK_INTERVAL_SECS' as u64: {:?}",
-                        err
-                    )
-                });
-        }
-        config
     }
 }
 
@@ -292,6 +138,357 @@ impl fmt::Display for EphemeralConfig {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let toml = toml::to_string_pretty(self)
             .unwrap_or("Invalid Config".to_string());
-        write!(f, "{}", toml)
+        write!(f, "{toml}")
+    }
+}
+
+fn program_config_parser(s: &str) -> Result<ProgramConfig, String> {
+    let parts: Vec<String> =
+        s.split(':').map(|part| part.to_string()).collect();
+    let [id, path] = parts.as_slice() else {
+        return Err(format!("Invalid program config: {s}"));
+    };
+    let id = Pubkey::from_str(id)
+        .map_err(|e| format!("Invalid program id {id}: {e}"))?;
+
+    Ok(ProgramConfig {
+        id,
+        path: path.clone(),
+    })
+}
+
+#[cfg(test)]
+mod tests {
+    use std::net::{IpAddr, Ipv4Addr};
+
+    use isocountry::CountryCode;
+    use solana_sdk::pubkey::Pubkey;
+    use url::Url;
+
+    use super::*;
+
+    #[test]
+    fn test_program_config_parser() {
+        let config = program_config_parser(
+            "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev:path1",
+        )
+        .unwrap();
+        assert_eq!(
+            config.id,
+            Pubkey::from_str_const(
+                "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev"
+            )
+        );
+        assert_eq!(config.path, "path1");
+    }
+
+    #[test]
+    fn test_post_parse() {
+        let mut config = EphemeralConfig::default();
+        config.accounts.remote.url =
+            Some(Url::parse("https://validator.example.com").unwrap());
+        config.accounts.remote.ws_url =
+            Some(vec![Url::parse("wss://validator.example.com").unwrap()]);
+        assert_eq!(config.accounts.remote.cluster, RemoteCluster::Devnet);
+
+        config.post_parse();
+
+        assert_eq!(config.accounts.remote.cluster, RemoteCluster::CustomWithWs);
+    }
+
+    #[test]
+    fn test_merge_with_default() {
+        let mut config = EphemeralConfig {
+            accounts: AccountsConfig {
+                remote: RemoteConfig {
+                    cluster: RemoteCluster::CustomWithWs,
+                    url: Some(
+                        Url::parse("https://validator.example.com").unwrap(),
+                    ),
+                    ws_url: Some(vec![Url::parse(
+                        "wss://validator.example.com",
+                    )
+                    .unwrap()]),
+                },
+                lifecycle: LifecycleMode::Offline,
+                commit: CommitStrategy {
+                    frequency_millis: 123,
+                    compute_unit_price: 123,
+                },
+                allowed_programs: vec![AllowedProgram {
+                    id: Pubkey::from_str_const(
+                        "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev",
+                    ),
+                }],
+                db: AccountsDbConfig {
+                    db_size: 1000000000,
+                    block_size: BlockSize::Block128,
+                    index_map_size: 1000000000,
+                    max_snapshots: 1234,
+                    snapshot_frequency: 1000000000,
+                },
+                max_monitored_accounts: 1234,
+            },
+            rpc: RpcConfig {
+                addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
+                port: 9090,
+                max_ws_connections: 8008,
+            },
+            geyser_grpc: GeyserGrpcConfig {
+                addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
+                port: 9090,
+            },
+            validator: ValidatorConfig {
+                millis_per_slot: 5000,
+                sigverify: false,
+                fqdn: Some("validator.example.com".to_string()),
+                base_fees: Some(1000000000),
+                country_code: CountryCode::for_alpha2("FR").unwrap(),
+            },
+            ledger: LedgerConfig {
+                reset: false,
+                path: Some("ledger.example.com".to_string()),
+                size: 1000000000,
+            },
+            programs: vec![ProgramConfig {
+                id: Pubkey::from_str_const(
+                    "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev",
+                ),
+                path: "path1".to_string(),
+            }],
+            metrics: MetricsConfig {
+                enabled: true,
+                system_metrics_tick_interval_secs: 321,
+                service: MetricsServiceConfig {
+                    addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
+                    port: 9090,
+                },
+            },
+        };
+        let original_config = config.clone();
+        let other = EphemeralConfig::default();
+
+        config.merge(other);
+
+        assert_eq!(config, original_config);
+    }
+
+    #[test]
+    fn test_merge_default_with_non_default() {
+        let mut config = EphemeralConfig::default();
+        let other = EphemeralConfig {
+            accounts: AccountsConfig {
+                remote: RemoteConfig {
+                    cluster: RemoteCluster::CustomWithWs,
+                    url: Some(
+                        Url::parse("https://validator.example.com").unwrap(),
+                    ),
+                    ws_url: Some(vec![Url::parse(
+                        "wss://validator.example.com",
+                    )
+                    .unwrap()]),
+                },
+                lifecycle: LifecycleMode::Offline,
+                commit: CommitStrategy {
+                    frequency_millis: 123,
+                    compute_unit_price: 123,
+                },
+                allowed_programs: vec![AllowedProgram {
+                    id: Pubkey::from_str_const(
+                        "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev",
+                    ),
+                }],
+                db: AccountsDbConfig {
+                    db_size: 1000000000,
+                    block_size: BlockSize::Block128,
+                    index_map_size: 1000000000,
+                    max_snapshots: 12345,
+                    snapshot_frequency: 1000000000,
+                },
+                max_monitored_accounts: 1234,
+            },
+            rpc: RpcConfig {
+                addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
+                port: 9090,
+                max_ws_connections: 8008,
+            },
+            geyser_grpc: GeyserGrpcConfig {
+                addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
+                port: 9090,
+            },
+            validator: ValidatorConfig {
+                millis_per_slot: 5000,
+                sigverify: false,
+                fqdn: Some("validator.example.com".to_string()),
+                base_fees: Some(1000000000),
+                country_code: CountryCode::for_alpha2("FR").unwrap(),
+            },
+            ledger: LedgerConfig {
+                reset: false,
+                path: Some("ledger.example.com".to_string()),
+                size: 1000000000,
+            },
+            programs: vec![ProgramConfig {
+                id: Pubkey::from_str_const(
+                    "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev",
+                ),
+                path: "path1".to_string(),
+            }],
+            metrics: MetricsConfig {
+                enabled: true,
+                system_metrics_tick_interval_secs: 321,
+                service: MetricsServiceConfig {
+                    addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
+                    port: 9090,
+                },
+            },
+        };
+
+        config.merge(other.clone());
+
+        assert_eq!(config, other);
+    }
+
+    #[test]
+    fn test_merge_non_default() {
+        let mut config = EphemeralConfig {
+            accounts: AccountsConfig {
+                remote: RemoteConfig {
+                    cluster: RemoteCluster::CustomWithWs,
+                    url: Some(
+                        Url::parse("https://validator2.example.com").unwrap(),
+                    ),
+                    ws_url: Some(vec![Url::parse(
+                        "wss://validator2.example.com",
+                    )
+                    .unwrap()]),
+                },
+                lifecycle: LifecycleMode::Offline,
+                commit: CommitStrategy {
+                    frequency_millis: 12365,
+                    compute_unit_price: 123665,
+                },
+                allowed_programs: vec![AllowedProgram {
+                    id: Pubkey::from_str_const(
+                        "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev",
+                    ),
+                }],
+                db: AccountsDbConfig {
+                    db_size: 999,
+                    block_size: BlockSize::Block128,
+                    index_map_size: 999,
+                    max_snapshots: 12345,
+                    snapshot_frequency: 999,
+                },
+                max_monitored_accounts: 12346,
+            },
+            rpc: RpcConfig {
+                addr: IpAddr::V4(Ipv4Addr::new(1, 0, 0, 127)),
+                port: 9091,
+                max_ws_connections: 8008,
+            },
+            geyser_grpc: GeyserGrpcConfig {
+                addr: IpAddr::V4(Ipv4Addr::new(1, 0, 0, 127)),
+                port: 9091,
+            },
+            validator: ValidatorConfig {
+                millis_per_slot: 5001,
+                sigverify: false,
+                fqdn: Some("validator2.example.com".to_string()),
+                base_fees: Some(9999),
+                country_code: CountryCode::for_alpha2("DE").unwrap(),
+            },
+            ledger: LedgerConfig {
+                reset: false,
+                path: Some("ledger2.example.com".to_string()),
+                size: 100000,
+            },
+            programs: vec![ProgramConfig {
+                id: Pubkey::from_str_const(
+                    "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev",
+                ),
+                path: "path1".to_string(),
+            }],
+            metrics: MetricsConfig {
+                enabled: true,
+                system_metrics_tick_interval_secs: 3210,
+                service: MetricsServiceConfig {
+                    addr: IpAddr::V4(Ipv4Addr::new(1, 0, 0, 127)),
+                    port: 9090,
+                },
+            },
+        };
+        let original_config = config.clone();
+        let other = EphemeralConfig {
+            accounts: AccountsConfig {
+                remote: RemoteConfig {
+                    cluster: RemoteCluster::CustomWithWs,
+                    url: Some(
+                        Url::parse("https://validator.example.com").unwrap(),
+                    ),
+                    ws_url: Some(vec![Url::parse(
+                        "wss://validator.example.com",
+                    )
+                    .unwrap()]),
+                },
+                lifecycle: LifecycleMode::Offline,
+                commit: CommitStrategy {
+                    frequency_millis: 123,
+                    compute_unit_price: 123,
+                },
+                allowed_programs: vec![AllowedProgram {
+                    id: Pubkey::from_str_const(
+                        "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev",
+                    ),
+                }],
+                db: AccountsDbConfig {
+                    db_size: 1000000000,
+                    block_size: BlockSize::Block128,
+                    index_map_size: 1000000000,
+                    max_snapshots: 12345,
+                    snapshot_frequency: 1000000000,
+                },
+                max_monitored_accounts: 1234,
+            },
+            rpc: RpcConfig {
+                addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
+                port: 9090,
+                max_ws_connections: 8008,
+            },
+            geyser_grpc: GeyserGrpcConfig {
+                addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
+                port: 9090,
+            },
+            validator: ValidatorConfig {
+                millis_per_slot: 5000,
+                sigverify: false,
+                fqdn: Some("validator.example.com".to_string()),
+                base_fees: Some(1000000000),
+                country_code: CountryCode::for_alpha2("FR").unwrap(),
+            },
+            ledger: LedgerConfig {
+                reset: false,
+                path: Some("ledger.example.com".to_string()),
+                size: 1000000000,
+            },
+            programs: vec![ProgramConfig {
+                id: Pubkey::from_str_const(
+                    "mAGicPQYBMvcYveUZA5F5UNNwyHvfYh5xkLS2Fr1mev",
+                ),
+                path: "path1".to_string(),
+            }],
+            metrics: MetricsConfig {
+                enabled: true,
+                system_metrics_tick_interval_secs: 321,
+                service: MetricsServiceConfig {
+                    addr: IpAddr::V4(Ipv4Addr::new(0, 0, 0, 127)),
+                    port: 9090,
+                },
+            },
+        };
+
+        config.merge(other);
+
+        assert_eq!(config, original_config);
     }
 }

@@ -1,5 +1,5 @@
 use cleanass::assert_eq;
-use magicblock_accounts_db::config::TEST_SNAPSHOT_FREQUENCY;
+use magicblock_config::TEST_SNAPSHOT_FREQUENCY;
 use std::{path::Path, process::Child};
 
 use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};

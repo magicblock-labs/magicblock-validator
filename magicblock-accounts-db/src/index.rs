@@ -5,6 +5,7 @@ use lmdb::{
     Cursor, DatabaseFlags, Environment, RwTransaction, Transaction, WriteFlags,
 };
 use log::warn;
+use magicblock_config::AccountsDbConfig;
 use solana_pubkey::Pubkey;
 use table::Table;
 use utils::*;

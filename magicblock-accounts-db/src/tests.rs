@@ -5,13 +5,11 @@ use std::{
     sync::Arc,
 };
 
+use magicblock_config::AccountsDbConfig;
 use solana_account::{AccountSharedData, ReadableAccount, WritableAccount};
 use solana_pubkey::Pubkey;
 
-use crate::{
-    config::AccountsDbConfig, error::AccountsDbError, storage::ADB_FILE,
-    AccountsDb, StWLock,
-};
+use crate::{error::AccountsDbError, storage::ADB_FILE, AccountsDb, StWLock};
 
 const LAMPORTS: u64 = 4425;
 const SPACE: usize = 73;

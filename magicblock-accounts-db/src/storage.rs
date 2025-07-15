@@ -7,13 +7,11 @@ use std::{
 };
 
 use log::error;
+use magicblock_config::{AccountsDbConfig, BlockSize};
 use memmap2::MmapMut;
 use solana_account::AccountSharedData;
 
-use crate::{
-    config::BlockSize, error::AccountsDbError, log_err, AccountsDbConfig,
-    AdbResult,
-};
+use crate::{error::AccountsDbError, log_err, AdbResult};
 
 /// Extra space in database storage file reserved for metadata
 /// Currently most of it is unused, but still reserved for future extensions

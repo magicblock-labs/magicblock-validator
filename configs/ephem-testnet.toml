@@ -1,5 +1,5 @@
 [accounts]
-remote = "testnet"
+remote.cluster = "testnet"
 lifecycle = "ephemeral"
 commit = { frequency_millis = 50_000 }
 
