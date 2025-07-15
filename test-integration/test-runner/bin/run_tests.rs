@@ -403,7 +403,7 @@ fn run_magicblock_api_tests(
         LoadedAccounts::with_delegation_program_test_authority();
 
     let mut ephem_validator = match start_validator(
-        "validator-offline.devnet.toml",
+        "validator-api-offline.devnet.toml",
         ValidatorCluster::Ephem,
         &loaded_chain_accounts,
     ) {
