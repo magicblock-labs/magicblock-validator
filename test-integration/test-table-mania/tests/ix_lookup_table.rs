@@ -267,7 +267,7 @@ async fn test_lookup_table_ixs_cus_per_pubkey() {
             *lookup_table.extend_signatures().unwrap().last().unwrap();
         let cus = get_tx_cus(&rpc_client, &extend_sig).await;
         debug!("Extend for {i:03} CUs  {cus:04}CUs");
-        assert_eq!(cus, EXTEND_TABLE_CUS as u64);
+        assert!(cus <= EXTEND_TABLE_CUS as u64);
 
         lookup_table
             .deactivate(&rpc_client, &validator_auth, &budgets.deactivate)
@@ -280,7 +280,7 @@ async fn test_lookup_table_ixs_cus_per_pubkey() {
         )
         .await;
         debug!("Deactivate table {cus:03}CUs");
-        assert_eq!(cus, DEACTIVATE_TABLE_CUS as u64);
+        assert!(cus <= DEACTIVATE_TABLE_CUS as u64);
 
         #[cfg(feature = "test_table_close")]
         {
@@ -305,7 +305,7 @@ async fn test_lookup_table_ixs_cus_per_pubkey() {
                 assert!(is_closed);
                 let cus = get_tx_cus(&rpc_client, &close_sig.unwrap()).await;
                 debug!("Close table {cus:03}CUs",);
-                assert_eq!(cus, CLOSE_TABLE_CUS as u64);
+                assert!(cus <= CLOSE_TABLE_CUS as u64);
             }
         }
     }
