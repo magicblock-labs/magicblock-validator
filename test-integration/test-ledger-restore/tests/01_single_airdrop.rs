@@ -35,6 +35,8 @@ fn write_ledger(
         None,
         None,
         LedgerResumeStrategy::Reset,
+        true,
+        &Default::default(),
     );
 
     let sig = expect!(ctx.airdrop_ephem(pubkey1, 1_111_111), validator);
@@ -59,6 +61,8 @@ fn read_ledger(
         None,
         None,
         LedgerResumeStrategy::Replay,
+        true,
+        &Default::default(),
     );
 
     let acc = expect!(

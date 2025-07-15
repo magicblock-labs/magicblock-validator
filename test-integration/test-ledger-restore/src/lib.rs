@@ -38,6 +38,8 @@ pub fn setup_offline_validator(
     programs: Option<Vec<ProgramConfig>>,
     millis_per_slot: Option<u64>,
     resume_strategy: LedgerResumeStrategy,
+    enforce_keypair_match: bool,
+    loaded_chain_accounts: &LoadedAccounts,
 ) -> (TempDir, Child, IntegrationTestContext) {
     let mut accounts_config = AccountsConfig {
         lifecycle: LifecycleMode::Offline,
@@ -57,6 +59,7 @@ pub fn setup_offline_validator(
     let config = EphemeralConfig {
         ledger: LedgerConfig {
             resume_strategy,
+            enforce_keypair_match,
             path: Some(ledger_path.display().to_string()),
             size: DEFAULT_LEDGER_SIZE_BYTES,
         },
@@ -66,10 +69,7 @@ pub fn setup_offline_validator(
         ..Default::default()
     };
     let (default_tmpdir_config, Some(mut validator)) =
-        start_magicblock_validator_with_config_struct(
-            config,
-            &Default::default(),
-        )
+        start_validator_with_config(config, loaded_chain_accounts)
     else {
         panic!("validator should set up correctly");
     };

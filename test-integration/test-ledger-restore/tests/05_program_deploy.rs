@@ -68,6 +68,8 @@ fn write(
         None,
         None,
         LedgerResumeStrategy::Reset,
+        true,
+        &Default::default(),
     );
 
     expect!(ctx.wait_for_slot_ephem(1), validator);
@@ -129,7 +131,8 @@ fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
         ledger_path,
         None,
         None,
-        LedgerResumeStrategy::Replay,
+        true,
+        &Default::default(),
     );
 
     let counter_decoded = fetch_counter_ephem(payer, &mut validator);
