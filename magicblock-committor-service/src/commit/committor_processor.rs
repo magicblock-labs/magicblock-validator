@@ -26,7 +26,7 @@ use crate::{
     commit_strategy::{split_changesets_by_commit_strategy, SplitChangesets},
     compute_budget::{ComputeBudget, ComputeBudgetConfig},
     config::ChainConfig,
-    error::{CommittorServiceError, CommittorServiceResult},
+    error::CommittorServiceResult,
     persist::{
         BundleSignatureRow, CommitPersister, CommitStatusRow, CommitStrategy,
     },
@@ -361,7 +361,6 @@ impl CommittorProcessor {
                                     .into_iter()
                                     .map(|ixs| ixs.commit_info)
                                     .collect::<Vec<_>>(),
-                                None::<CommittorServiceError>,
                             )
                         })
                         .collect::<Vec<_>>();
@@ -485,11 +484,8 @@ impl CommittorProcessor {
 pub(crate) type ProcessIxChunkSuccesses =
     Vec<(Signature, Vec<(CommitInfo, InstructionsKind)>)>;
 pub(crate) type ProcessIxChunkSuccessesRc = Arc<Mutex<ProcessIxChunkSuccesses>>;
-pub(crate) type ProcessIxChunkFailures = Vec<(
-    Option<Signature>,
-    Vec<CommitInfo>,
-    Option<CommittorServiceError>,
-)>;
+pub(crate) type ProcessIxChunkFailures =
+    Vec<(Option<Signature>, Vec<CommitInfo>)>;
 pub(crate) type ProcessIxChunkFailuresRc = Arc<Mutex<ProcessIxChunkFailures>>;
 
 /// Processes a single chunk of instructions, sending them as a transaction.
@@ -548,21 +544,14 @@ pub(crate) async fn process_ixs_chunk(
                 err
             );
 
-            // Check if this is a lookup table error
-            let lookup_table_err = matches!(
-                err,
-                CommittorServiceError::CouldNotCreateLookupTable(_)
-            );
-
             let commit_infos = commit_infos
                 .into_iter()
                 .map(|(commit_info, _)| commit_info)
                 .collect();
-            failures.lock().expect("ix failures mutex poisoned").push((
-                err.signature(),
-                commit_infos,
-                lookup_table_err.then_some(err),
-            ));
+            failures
+                .lock()
+                .expect("ix failures mutex poisoned")
+                .push((err.signature(), commit_infos));
         }
     }
 }

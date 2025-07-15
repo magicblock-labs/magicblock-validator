@@ -10,7 +10,6 @@ use super::CommittorProcessor;
 use crate::{
     commit::common::{
         get_accounts_to_undelegate, lookup_table_keys, send_and_confirm,
-        stages_from_lookup_table_err,
     },
     commit_stage::{CommitSignatures, CommitStage},
     persist::CommitStrategy,
@@ -127,15 +126,6 @@ impl CommittorProcessor {
                     finalize_signature: None,
                     undelegate_signature: None,
                 });
-                if let Some(stages) = stages_from_lookup_table_err(
-                    &err,
-                    &commit_infos,
-                    strategy,
-                    sigs.clone(),
-                ) {
-                    return stages;
-                }
-
                 return commit_infos
                     .into_iter()
                     .map(|x| {
@@ -178,15 +168,6 @@ impl CommittorProcessor {
                         finalize_signature: err.signature(),
                         undelegate_signature: None,
                     };
-                    if let Some(stages) = stages_from_lookup_table_err(
-                        &err,
-                        &commit_infos,
-                        strategy,
-                        Some(sigs.clone()),
-                    ) {
-                        return stages;
-                    }
-
                     return commit_infos
                         .into_iter()
                         .map(|x| {
@@ -278,14 +259,6 @@ impl CommittorProcessor {
                             undelegate_signature: err.signature(),
                         };
 
-                        if let Some(stages) = stages_from_lookup_table_err(
-                            &err,
-                            &commit_infos,
-                            strategy,
-                            Some(sigs.clone()),
-                        ) {
-                            return stages;
-                        }
                         return commit_infos
                             .into_iter()
                             .map(|x| {

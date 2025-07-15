@@ -27,10 +27,7 @@ use solana_sdk::{
 use tokio::task::JoinSet;
 
 use super::{
-    common::{
-        get_accounts_to_undelegate, send_and_confirm,
-        stages_from_lookup_table_err,
-    },
+    common::{get_accounts_to_undelegate, send_and_confirm},
     process_buffers::{
         chunked_ixs_to_process_commitables_and_close_pdas,
         ChunkedIxsToProcessCommitablesAndClosePdasResult,
@@ -195,23 +192,12 @@ impl CommittorProcessor {
             .await;
 
         commit_stages.extend(failed_process.into_iter().flat_map(
-            |(sig, xs, err)| {
+            |(sig, xs)| {
                 let sigs = sig.map(|x| CommitSignatures {
                     process_signature: x,
                     finalize_signature: None,
                     undelegate_signature: None,
                 });
-                if let Some(err) = err.as_ref() {
-                    if let Some(stages) = stages_from_lookup_table_err(
-                        err,
-                        &xs,
-                        commit_strategy,
-                        sigs.clone(),
-                    ) {
-                        return stages;
-                    }
-                }
-
                 xs.into_iter()
                     .map(|x| {
                         CommitStage::FailedProcess((
@@ -289,34 +275,20 @@ impl CommittorProcessor {
                     )
                     .await;
             commit_stages.extend(failed_finalize.into_iter().flat_map(
-                |(sig, infos, err)| {
-                    fn get_sigs_for_bundle(bundle_id: u64, processed_signatures: &HashMap<u64, Signature>, finalized_sig: Option<Signature>) -> CommitSignatures {
+                |(sig, infos)| {
+                    fn get_sigs_for_bundle(
+                        bundle_id: u64,
+                        processed_signatures: &HashMap<u64, Signature>,
+                        finalized_sig: Option<Signature>,
+                    ) -> CommitSignatures {
                         CommitSignatures {
-                        // SAFETY: signatures for all bundles of succeeded process transactions
-                        //         have been added above
+                            // SAFETY: signatures for all bundles of succeeded process transactions
+                            //         have been added above
                             process_signature: *processed_signatures
                                 .get(&bundle_id)
                                 .unwrap(),
                             finalize_signature: finalized_sig,
                             undelegate_signature: None,
-                        }
-                    }
-
-                    if let Some(err) = err.as_ref() {
-                        if let Some(stages) = stages_from_lookup_table_err(
-                            err,
-                            &infos,
-                            commit_strategy,
-                            None,
-                        ) {
-                            return stages.into_iter().map(|x| match x {
-                                CommitStage::CouldNotCreateLookupTable((commit_info, strategy, _)) => {
-                                    let bundle_id = commit_info.bundle_id();
-                                    let sigs = get_sigs_for_bundle(bundle_id, &processed_signatures, sig);
-                                    CommitStage::CouldNotCreateLookupTable((commit_info, strategy, Some(sigs)))
-                                },
-                                _ => unreachable!("stages_from_lookup_table_err always creates 'CommitStage::CouldNotCreateLookupTable'"),
-                            }).collect::<Vec<_>>()
                         }
                     }
 
@@ -327,7 +299,11 @@ impl CommittorProcessor {
                             CommitStage::FailedFinalize((
                                 x,
                                 commit_strategy,
-                                get_sigs_for_bundle(bundle_id, &processed_signatures, sig),
+                                get_sigs_for_bundle(
+                                    bundle_id,
+                                    &processed_signatures,
+                                    sig,
+                                ),
                             ))
                         })
                         .collect::<Vec<_>>()
@@ -466,30 +442,7 @@ impl CommittorProcessor {
 
                     commit_stages.extend(
                         failed_undelegate.into_iter().flat_map(
-                            |(sig, infos, err)| {
-
-                                if let Some(err) = err.as_ref() {
-                                    if let Some(stages) = stages_from_lookup_table_err(
-                                        err,
-                                        &infos,
-                                        commit_strategy,
-                                        None,
-                                    ) {
-                                        return stages.into_iter().map(|x| match x {
-                                            CommitStage::CouldNotCreateLookupTable((commit_info, strategy, _)) => {
-                                                let bundle_id = commit_info.bundle_id();
-                                                let sigs = get_sigs_for_bundle(
-                                                        bundle_id,
-                                                        &processed_signatures,
-                                                        &finalized_signatures,
-                                                        sig);
-                                                CommitStage::CouldNotCreateLookupTable((commit_info, strategy, Some(sigs)))
-                                            },
-                                            _ => unreachable!("stages_from_lookup_table_err always creates 'CommitStage::CouldNotCreateLookupTable'"),
-                                        }).collect::<Vec<_>>()
-                                    }
-                                }
-
+                            |(sig, infos)| {
                                 infos
                                     .into_iter()
                                     .map(|x| {

@@ -75,9 +75,6 @@ pub enum CommittorServiceError {
         Pubkey,
         solana_sdk::program_error::ProgramError,
     ),
-
-    #[error("Could not create lookup table for pubkey {0}")]
-    CouldNotCreateLookupTable(String),
 }
 
 impl CommittorServiceError {
