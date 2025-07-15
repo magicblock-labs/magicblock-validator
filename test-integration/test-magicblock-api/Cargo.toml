@@ -5,13 +5,16 @@ edition.workspace = true
 
 [dev-dependencies]
 magicblock-api = { workspace = true }
+magicblock-config = { workspace = true }
 tokio = { workspace = true }
 lazy_static = { workspace = true }
 magic-domain-program = { workspace = true }
 solana-rpc-client = { workspace = true }
+solana-rpc-client-api = { workspace = true }
 solana-sdk = { workspace = true }
+solana-transaction-status-client-types = { workspace = true }
 integration-test-tools = { workspace = true }
-isocountry = "0.3.2"
+isocountry = { workspace = true }
 
 [[test]]
 name = "test-domain-registry"
