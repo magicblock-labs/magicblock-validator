@@ -248,6 +248,7 @@ mod tests {
             },
             ledger: LedgerConfig {
                 reset: false,
+                skip_replay: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
             },
@@ -327,6 +328,7 @@ mod tests {
             },
             ledger: LedgerConfig {
                 reset: false,
+                skip_replay: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
             },
@@ -403,6 +405,7 @@ mod tests {
             },
             ledger: LedgerConfig {
                 reset: false,
+                skip_replay: true,
                 path: Some("ledger2.example.com".to_string()),
                 size: 100000,
             },
@@ -472,6 +475,7 @@ mod tests {
             },
             ledger: LedgerConfig {
                 reset: false,
+                skip_replay: true,
                 path: Some("ledger.example.com".to_string()),
                 size: 1000000000,
             },
