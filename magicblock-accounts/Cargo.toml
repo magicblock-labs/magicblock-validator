@@ -19,6 +19,7 @@ magicblock-account-dumper = { workspace = true }
 magicblock-account-cloner = { workspace = true }
 magicblock-accounts-api = { workspace = true }
 magicblock-bank = { workspace = true }
+magicblock-committor-service = { workspace = true }
 magicblock-core = { workspace = true }
 magicblock-metrics = { workspace = true }
 magicblock-mutator = { workspace = true }
@@ -33,5 +34,8 @@ thiserror = { workspace = true }
 url = { workspace = true }
 
 [dev-dependencies]
+magicblock-committor-service = { workspace = true, features = [
+  "dev-context-only-utils",
+] }
 test-tools-core = { workspace = true }
 tokio-util = { workspace = true }

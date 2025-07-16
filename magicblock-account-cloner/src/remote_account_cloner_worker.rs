@@ -16,6 +16,7 @@ use magicblock_account_dumper::AccountDumper;
 use magicblock_account_fetcher::AccountFetcher;
 use magicblock_account_updates::{AccountUpdates, AccountUpdatesResult};
 use magicblock_accounts_api::InternalAccountProvider;
+use magicblock_committor_service::ChangesetCommittor;
 use magicblock_metrics::metrics;
 use magicblock_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
 use solana_sdk::{
@@ -24,13 +25,14 @@ use solana_sdk::{
     clock::Slot,
     pubkey::Pubkey,
     signature::Signature,
+    sysvar::clock,
 };
 use tokio::time::sleep;
 use tokio_util::sync::CancellationToken;
 
 use crate::{
-    AccountClonerError, AccountClonerListeners, AccountClonerOutput,
-    AccountClonerPermissions, AccountClonerResult,
+    map_committor_request_result, AccountClonerError, AccountClonerListeners,
+    AccountClonerOutput, AccountClonerPermissions, AccountClonerResult,
     AccountClonerUnclonableReason, CloneOutputMap,
 };
 
@@ -89,11 +91,12 @@ impl ValidatorStage {
     }
 }
 
-pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU> {
+pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU, CC> {
     internal_account_provider: IAP,
     account_fetcher: AFE,
     account_updates: AUP,
     account_dumper: ADU,
+    changeset_committor: Option<Arc<CC>>,
     allowed_program_ids: Option<HashSet<Pubkey>>,
     blacklisted_accounts: HashSet<Pubkey>,
     validator_charges_fees: ValidatorCollectionMode,
@@ -110,24 +113,25 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU> {
 // SAFETY:
 // we never keep references to monitored_accounts around,
 // especially across await points, so this type is Send
-unsafe impl<IAP, AFE, AUP, ADU> Send
-    for RemoteAccountClonerWorker<IAP, AFE, AUP, ADU>
+unsafe impl<IAP, AFE, AUP, ADU, CC> Send
+    for RemoteAccountClonerWorker<IAP, AFE, AUP, ADU, CC>
 {
 }
 // SAFETY:
 // we never produce references to RefCell in monitored_accounts
 // especially not across await points, so this type is Sync
-unsafe impl<IAP, AFE, AUP, ADU> Sync
-    for RemoteAccountClonerWorker<IAP, AFE, AUP, ADU>
+unsafe impl<IAP, AFE, AUP, ADU, CC> Sync
+    for RemoteAccountClonerWorker<IAP, AFE, AUP, ADU, CC>
 {
 }
 
-impl<IAP, AFE, AUP, ADU> RemoteAccountClonerWorker<IAP, AFE, AUP, ADU>
+impl<IAP, AFE, AUP, ADU, CC> RemoteAccountClonerWorker<IAP, AFE, AUP, ADU, CC>
 where
     IAP: InternalAccountProvider,
     AFE: AccountFetcher,
     AUP: AccountUpdates,
     ADU: AccountDumper,
+    CC: ChangesetCommittor,
 {
     #[allow(clippy::too_many_arguments)]
     pub fn new(
@@ -135,6 +139,7 @@ where
         account_fetcher: AFE,
         account_updates: AUP,
         account_dumper: ADU,
+        changeset_committor: Option<Arc<CC>>,
         allowed_program_ids: Option<HashSet<Pubkey>>,
         blacklisted_accounts: HashSet<Pubkey>,
         validator_charges_fees: ValidatorCollectionMode,
@@ -152,6 +157,7 @@ where
             account_fetcher,
             account_updates,
             account_dumper,
+            changeset_committor,
             allowed_program_ids,
             blacklisted_accounts,
             validator_charges_fees,
@@ -230,10 +236,7 @@ where
     }
 
     fn can_clone(&self) -> bool {
-        self.permissions.allow_cloning_feepayer_accounts
-            || self.permissions.allow_cloning_undelegated_accounts
-            || self.permissions.allow_cloning_delegated_accounts
-            || self.permissions.allow_cloning_program_accounts
+        self.permissions.can_clone()
     }
 
     pub async fn hydrate(&self) -> AccountClonerResult<()> {
@@ -280,7 +283,7 @@ where
         let stream = stream::iter(account_keys);
         // NOTE: depending on the RPC provider we may get rate limited if we request
         // account states at a too high rate.
-        // I confirmed the the following concurrency working fine:
+        // I confirmed the following concurrency working fine:
         //   Solana Mainnet: 10
         //   Helius: 20
         // If we go higher than this we hit 429s which causes the fetcher to have to
@@ -483,7 +486,7 @@ where
             loop {
                 fetch_count += 1;
                 let min_context_slot =
-                    self.account_updates.get_first_subscribed_slot(pubkey);
+                    self.account_updates.get_last_known_update_slot(&clock::ID);
                 match self
                     .fetch_account_chain_snapshot(pubkey, min_context_slot)
                     .await
@@ -705,7 +708,25 @@ where
                     });
                 }
 
-                self.do_clone_delegated_account(
+                // Allow the committer service to reserve pubkeys in lookup tables
+                // that could be needed when we commit this account
+                // NOTE: we start reserving pubkeys so the transaction can complete while we
+                // clone the account.
+                let reserve_pubkeys_handle = if let Some(committor) =
+                    self.changeset_committor.as_ref()
+                {
+                    let committor = Arc::clone(committor);
+                    let pubkey = *pubkey;
+                    let owner = delegation_record.owner;
+                    Some(tokio::spawn(map_committor_request_result(
+                        committor.reserve_pubkeys_for_committee(pubkey, owner),
+                        committor,
+                    )))
+                } else {
+                    None
+                };
+
+                let sig = self.do_clone_delegated_account(
                     pubkey,
                     // TODO(GabrielePicco): Avoid cloning
                     &Account {
@@ -713,7 +734,19 @@ where
                         ..account.clone()
                     },
                     delegation_record,
-                )?
+                )?;
+
+                if let Some(handle) = reserve_pubkeys_handle {
+                    let initiated = handle.await.map_err(|err| {
+                        AccountClonerError::JoinError(format!("{err} {err:?}"))
+                    })??;
+                    trace!(
+                        "Reserving lookup keys for {pubkey} took {:?}",
+                        initiated.elapsed()
+                    );
+                }
+
+                sig
             }
         };
         // Return the result

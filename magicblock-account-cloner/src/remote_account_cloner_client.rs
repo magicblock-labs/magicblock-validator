@@ -11,6 +11,7 @@ use magicblock_account_dumper::AccountDumper;
 use magicblock_account_fetcher::AccountFetcher;
 use magicblock_account_updates::AccountUpdates;
 use magicblock_accounts_api::InternalAccountProvider;
+use magicblock_committor_service::ChangesetCommittor;
 use solana_sdk::pubkey::Pubkey;
 use tokio::sync::oneshot::channel;
 
@@ -25,14 +26,15 @@ pub struct RemoteAccountClonerClient {
 }
 
 impl RemoteAccountClonerClient {
-    pub fn new<IAP, AFE, AUP, ADU>(
-        worker: &RemoteAccountClonerWorker<IAP, AFE, AUP, ADU>,
+    pub fn new<IAP, AFE, AUP, ADU, CC>(
+        worker: &RemoteAccountClonerWorker<IAP, AFE, AUP, ADU, CC>,
     ) -> Self
     where
         IAP: InternalAccountProvider,
         AFE: AccountFetcher,
         AUP: AccountUpdates,
         ADU: AccountDumper,
+        CC: ChangesetCommittor,
     {
         Self {
             clone_request_sender: worker.get_clone_request_sender(),

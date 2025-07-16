@@ -2,6 +2,7 @@ use std::{collections::HashSet, sync::Arc};
 
 use async_trait::async_trait;
 use magicblock_accounts_api::InternalAccountProvider;
+use magicblock_committor_service::ChangesetCommittor;
 use magicblock_metrics::metrics::HistogramTimer;
 use solana_rpc_client::rpc_client::SerializableTransaction;
 use solana_sdk::{
@@ -14,10 +15,10 @@ use crate::errors::AccountsResult;
 #[async_trait]
 pub trait ScheduledCommitsProcessor {
     /// Processes all commits that were scheduled and accepted
-    async fn process<AC: AccountCommitter, IAP: InternalAccountProvider>(
+    async fn process<IAP: InternalAccountProvider, CC: ChangesetCommittor>(
         &self,
-        committer: &Arc<AC>,
         account_provider: &IAP,
+        changeset_committor: &Arc<CC>,
     ) -> AccountsResult<()>;
 
     /// Returns the number of commits that were scheduled and accepted

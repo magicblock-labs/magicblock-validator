@@ -1,4 +1,5 @@
 use magicblock_accounts_db::error::AccountsDbError;
+use magicblock_program::Pubkey;
 use thiserror::Error;
 
 pub type ApiResult<T> = std::result::Result<T, ApiError>;
@@ -25,6 +26,17 @@ pub enum ApiError {
 
     #[error("Ledger error: {0}")]
     LedgerError(#[from] magicblock_ledger::errors::LedgerError),
+
+    #[error("Failed to obtain balance for validator '{0}' from chain. ({1})")]
+    FailedToObtainValidatorOnChainBalance(Pubkey, String),
+
+    #[error("Validator '{0}' is insufficiently funded on chain. Minimum is ({1} SOL)")]
+    ValidatorInsufficientlyFunded(Pubkey, u64),
+
+    #[error("CommittorServiceError")]
+    CommittorServiceError(
+        #[from] magicblock_committor_service::error::CommittorServiceError,
+    ),
 
     #[error("Failed to load programs into bank: {0}")]
     FailedToLoadProgramsIntoBank(String),

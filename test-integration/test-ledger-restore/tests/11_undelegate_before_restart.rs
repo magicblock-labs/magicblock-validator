@@ -13,8 +13,6 @@ use solana_sdk::{
 };
 use std::path::Path;
 use std::process::Child;
-use std::thread::sleep;
-use std::time::Duration;
 use test_ledger_restore::{
     assert_counter_state, cleanup, confirm_tx_with_payer_chain,
     confirm_tx_with_payer_ephem, get_programs_with_flexi_counter,
