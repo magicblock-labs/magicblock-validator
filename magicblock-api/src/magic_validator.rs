@@ -24,7 +24,11 @@ use magicblock_account_fetcher::{
 use magicblock_account_updates::{
     RemoteAccountUpdatesClient, RemoteAccountUpdatesWorker,
 };
-use magicblock_accounts::{remote_scheduled_commits_processor::RemoteScheduledCommitsProcessor, utils::try_rpc_cluster_from_cluster, AccountsManager, ScheduledCommitsProcessor};
+use magicblock_accounts::{
+    remote_scheduled_commits_processor::RemoteScheduledCommitsProcessor,
+    utils::try_rpc_cluster_from_cluster, AccountsManager,
+    ScheduledCommitsProcessor,
+};
 use magicblock_accounts_api::BankAccountProvider;
 use magicblock_accounts_db::{
     config::AccountsDbConfig, error::AccountsDbError,
@@ -581,12 +585,15 @@ impl MagicValidator {
         // Thus while the ledger is processed we don't yet run the machinery to handle
         // scheduled commits and we clear all scheduled commits before fully starting the
         // validator.
-        let scheduled_commits = self.remote_scheduled_commits_processor.scheduled_commits_len();
+        let scheduled_commits = self
+            .remote_scheduled_commits_processor
+            .scheduled_commits_len();
         debug!(
             "Found {} scheduled commits while processing ledger, clearing them",
             scheduled_commits
         );
-        self.remote_scheduled_commits_processor.clear_scheduled_commits();
+        self.remote_scheduled_commits_processor
+            .clear_scheduled_commits();
 
         // We want the next transaction either due to hydrating of cloned accounts or
         // user request to be processed in the next slot such that it doesn't become

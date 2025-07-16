@@ -3,18 +3,14 @@ use std::sync::Arc;
 use async_trait::async_trait;
 use magicblock_accounts::{errors::AccountsResult, ScheduledCommitsProcessor};
 use magicblock_accounts_api::InternalAccountProvider;
-use magicblock_committor_service::ChangesetCommittor;
+use magicblock_committor_service::L1MessageCommittor;
 
 #[derive(Default)]
 pub struct ScheduledCommitsProcessorStub {}
 
 #[async_trait]
 impl ScheduledCommitsProcessor for ScheduledCommitsProcessorStub {
-    async fn process<IAP: InternalAccountProvider, CC: ChangesetCommittor>(
-        &self,
-        _account_provider: &IAP,
-        _changeset_committor: &Arc<CC>,
-    ) -> AccountsResult<()> {
+    async fn process(&self) -> AccountsResult<()> {
         Ok(())
     }
     fn scheduled_commits_len(&self) -> usize {

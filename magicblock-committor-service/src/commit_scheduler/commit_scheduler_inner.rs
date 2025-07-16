@@ -199,4 +199,10 @@ impl CommitSchedulerInner {
 
         (entries, is_conflicting)
     }
+
+    /// Returns number of blocked messages
+    /// Note: this doesn't include "executing" messages
+    pub fn blocked_messages_len(&self) -> usize {
+        self.blocked_messages.len()
+    }
 }

@@ -18,7 +18,7 @@ use crate::{
         BundleSignatureRow, CommitStatus, CommitStatusRow,
         CommitStatusSignatures, CommitStrategy, CommitType,
     },
-    ChangesetCommittor,
+    L1MessageCommittor,
 };
 
 #[derive(Default)]
@@ -28,8 +28,8 @@ pub struct ChangesetCommittorStub {
     committed_changesets: Arc<Mutex<HashMap<u64, (Changeset, Hash, bool)>>>,
 }
 
-impl ChangesetCommittor for ChangesetCommittorStub {
-    fn commit_changeset(
+impl L1MessageCommittor for ChangesetCommittorStub {
+    fn commit_l1_messages(
         &self,
         changeset: Changeset,
         ephemeral_blockhash: Hash,

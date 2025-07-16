@@ -278,7 +278,7 @@ impl CommittorService {
     }
 }
 
-impl ChangesetCommittor for CommittorService {
+impl L1MessageCommittor for CommittorService {
     fn reserve_pubkeys_for_committee(
         &self,
         committee: Pubkey,
@@ -293,17 +293,14 @@ impl ChangesetCommittor for CommittorService {
         rx
     }
 
-    fn commit_changeset(
+    fn commit_l1_messages(
         &self,
-        changeset: Changeset,
-        finalize: bool,
+        l1_messages: Vec<ScheduledL1Message>,
     ) -> oneshot::Receiver<Option<String>> {
         let (tx, rx) = oneshot::channel();
         self.try_send(CommittorMessage::CommitChangeset {
             respond_to: tx,
-            changeset,
-            ephemeral_blockhash,
-            finalize,
+            l1_messages,
         });
         rx
     }
@@ -334,7 +331,7 @@ impl ChangesetCommittor for CommittorService {
     }
 }
 
-pub trait ChangesetCommittor: Send + Sync + 'static {
+pub trait L1MessageCommittor: Send + Sync + 'static {
     /// Reserves pubkeys used in most commits in a lookup table
     fn reserve_pubkeys_for_committee(
         &self,
@@ -343,10 +340,9 @@ pub trait ChangesetCommittor: Send + Sync + 'static {
     ) -> oneshot::Receiver<CommittorServiceResult<()>>;
 
     /// Commits the changeset and returns the reqid
-    fn commit_changeset(
+    fn commit_l1_messages(
         &self,
-        changeset: Changeset,
-        finalize: bool,
+        l1_messages: Vec<ScheduledL1Message>,
     ) -> oneshot::Receiver<Option<String>>;
 
     /// Gets statuses of accounts that were committed as part of a request with provided reqid

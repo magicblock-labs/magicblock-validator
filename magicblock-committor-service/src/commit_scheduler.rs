@@ -1,6 +1,7 @@
 pub(crate) mod commit_scheduler_inner;
 mod commit_scheduler_worker;
 mod db;
+mod executor_pool;
 
 use std::sync::Arc;
 

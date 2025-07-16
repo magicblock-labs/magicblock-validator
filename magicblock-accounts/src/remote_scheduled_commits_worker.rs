@@ -42,6 +42,8 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsWorker<C> {
     pub async fn start(mut self) {
         while let Some(l1_messages) = self.message_receiver.recv().await {
             let metadata = ChangesetMeta::from(&l1_messages);
+            // TODO(edwin) mayne actuall  self.committor.commit_l1_messages(l1_messages).
+            // should be on a client, and here we just send receivers to wait on and process
             match self.committor.commit_l1_messages(l1_messages).await {
                 Ok(Some(reqid)) => {
                     debug!(
@@ -63,6 +65,8 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsWorker<C> {
                     );
                 }
             }
+
+            self.process_message_result(metadata, todo!()).await;
         }
     }
 

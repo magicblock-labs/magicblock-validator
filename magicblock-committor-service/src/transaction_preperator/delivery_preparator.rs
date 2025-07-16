@@ -98,7 +98,7 @@ impl DeliveryPreparator {
         )
         .await?;
         // Writing chunks with some retries. Stol
-        self.write_buffer_with_retries::<5>(authority, &preparation_info)
+        self.write_buffer_with_retries(authority, &preparation_info, 5)
             .await?;
 
         Ok(())
@@ -145,14 +145,15 @@ impl DeliveryPreparator {
     }
 
     /// Based on Chunks state, try MAX_RETRIES to fill buffer
-    async fn write_buffer_with_retries<const MAX_RETRIES: usize>(
+    async fn write_buffer_with_retries(
         &self,
         authority: &Keypair,
         info: &TaskPreparationInfo,
+        max_retries: usize,
     ) -> DeliveryPreparatorResult<()> {
         let mut last_error =
             Error::InternalError(anyhow!("ZeroRetriesRequested"));
-        for _ in 0..MAX_RETRIES {
+        for _ in 0..max_retries {
             let chunks =
                 match self.rpc_client.get_account(&info.chunks_pda).await {
                     Ok(Some(account)) => {

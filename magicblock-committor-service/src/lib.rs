@@ -30,7 +30,7 @@ pub use compute_budget::ComputeBudgetConfig;
 pub use magicblock_committor_program::{
     ChangedAccount, Changeset, ChangesetMeta,
 };
-pub use service::{ChangesetCommittor, CommittorService};
+pub use service::{CommittorService, L1MessageCommittor};
 pub fn changeset_for_slot(slot: u64) -> Changeset {
     Changeset {
         slot,

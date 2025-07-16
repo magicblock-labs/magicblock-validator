@@ -45,7 +45,7 @@ impl<T: TransactionPreparator> L1MessageExecutor<T> {
         rpc_client: MagicblockRpcClient,
         table_mania: TableMania,
         compute_budget_config: ComputeBudgetConfig,
-    ) -> Self {
+    ) -> L1MessageExecutor<TransactionPreparatorV1> {
         let authority = validator_authority();
         let transaction_preparator = TransactionPreparatorV1::new(
             rpc_client.clone(),
@@ -165,7 +165,7 @@ pub enum Error {
     SignerError(#[from] SignerError),
     #[error("PreparatorError: {0}")]
     PreparatorError(#[from] crate::transaction_preperator::error::Error),
-    #[error("MagicBlockRpcClientError: {)}")]
+    #[error("MagicBlockRpcClientError: {0}")]
     MagicBlockRpcClientError(#[from] MagicBlockRpcClientError),
 }
 
