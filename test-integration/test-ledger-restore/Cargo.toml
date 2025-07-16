@@ -10,6 +10,7 @@ integration-test-tools = { workspace = true }
 program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
 magicblock-accounts-db = { workspace = true }
 magicblock-config = { workspace = true }
+magicblock-ledger = { workspace = true }
 solana-rpc-client = { workspace = true }
 solana-sdk = { workspace = true }
 solana-transaction-status = { workspace = true }

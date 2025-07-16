@@ -30,7 +30,7 @@ fn write_ledger(
 ) -> (Child, Signature, u64) {
     // Launch a validator and airdrop to an account
     let (_, mut validator, ctx) =
-        setup_offline_validator(ledger_path, None, None, true);
+        setup_offline_validator(ledger_path, None, None, true, false, true);
 
     let sig = expect!(ctx.airdrop_ephem(pubkey1, 1_111_111), validator);
 
@@ -50,7 +50,7 @@ fn read_ledger(
 ) -> Child {
     // Launch another validator reusing ledger
     let (_, mut validator, ctx) =
-        setup_offline_validator(ledger_path, None, None, false);
+        setup_offline_validator(ledger_path, None, None, false, false, true);
 
     let acc = expect!(
         expect!(ctx.try_ephem_client(), validator).get_account(pubkey1),

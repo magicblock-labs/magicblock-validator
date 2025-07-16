@@ -77,8 +77,14 @@ fn write(
         assert!(confirmed, cleanup(validator));
     }
 
-    let (_, mut validator, ctx) =
-        setup_offline_validator(ledger_path, None, Some(SLOT_MS), true);
+    let (_, mut validator, ctx) = setup_offline_validator(
+        ledger_path,
+        None,
+        Some(SLOT_MS),
+        true,
+        false,
+        true,
+    );
 
     let mut slot = 1;
     expect!(ctx.wait_for_slot_ephem(slot), validator);
@@ -151,8 +157,14 @@ fn write(
 }
 
 fn read(ledger_path: &Path, keypairs: &[Keypair]) -> Child {
-    let (_, mut validator, ctx) =
-        setup_offline_validator(ledger_path, None, Some(SLOT_MS), false);
+    let (_, mut validator, ctx) = setup_offline_validator(
+        ledger_path,
+        None,
+        Some(SLOT_MS),
+        false,
+        false,
+        true,
+    );
 
     for keypair in keypairs {
         let acc = expect!(
