@@ -86,6 +86,8 @@ fn write(
         Some(programs),
         Some(SLOT_MS),
         true,
+        false,
+        true,
     );
 
     expect!(ctx.wait_for_slot_ephem(1), validator);
@@ -241,6 +243,8 @@ fn read(ledger_path: &Path, payer1: &Pubkey, payer2: &Pubkey) -> Child {
         Some(programs),
         Some(SLOT_MS),
         false,
+        false,
+        true,
     );
 
     let counter1_decoded = fetch_counter_ephem(payer1, &mut validator);

@@ -38,6 +38,8 @@ pub fn setup_offline_validator(
     programs: Option<Vec<ProgramConfig>>,
     millis_per_slot: Option<u64>,
     reset: bool,
+    skip_replay: bool,
+    sigverify: bool,
 ) -> (TempDir, Child, IntegrationTestContext) {
     let mut accounts_config = AccountsConfig {
         lifecycle: LifecycleMode::Offline,
@@ -45,18 +47,25 @@ pub fn setup_offline_validator(
     };
     accounts_config.db.snapshot_frequency = 2;
 
-    let validator_config = millis_per_slot
-        .map(|ms| ValidatorConfig {
+    let validator_config = if let Some(ms) = millis_per_slot {
+        ValidatorConfig {
             millis_per_slot: ms,
+            sigverify,
             ..Default::default()
-        })
-        .unwrap_or_default();
+        }
+    } else {
+        ValidatorConfig {
+            sigverify,
+            ..Default::default()
+        }
+    };
 
     let programs = resolve_programs(programs);
 
     let config = EphemeralConfig {
         ledger: LedgerConfig {
             reset,
+            skip_replay,
             path: Some(ledger_path.display().to_string()),
             size: DEFAULT_LEDGER_SIZE_BYTES,
         },
@@ -103,6 +112,7 @@ pub fn setup_validator_with_local_remote(
     let config = EphemeralConfig {
         ledger: LedgerConfig {
             reset,
+            skip_replay: false,
             path: Some(ledger_path.display().to_string()),
             size: DEFAULT_LEDGER_SIZE_BYTES,
         },

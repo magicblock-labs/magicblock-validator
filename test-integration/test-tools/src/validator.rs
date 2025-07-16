@@ -55,6 +55,7 @@ pub fn start_magic_block_validator_with_config(
         .arg("--")
         .arg(config_path)
         .env("RUST_LOG_STYLE", log_suffix)
+        .env("RUST_LOG", "info")
         .env("VALIDATOR_KEYPAIR", keypair_base58.clone())
         .current_dir(root_dir);
 
