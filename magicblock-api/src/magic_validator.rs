@@ -581,7 +581,7 @@ impl MagicValidator {
     // Start/Stop
     // -----------------
     fn maybe_process_ledger(&self) -> ApiResult<()> {
-        if self.config.ledger.reset {
+        if self.config.ledger.reset || self.config.ledger.skip_replay {
             return Ok(());
         }
         let slot_to_continue_at = process_ledger(&self.ledger, &self.bank)?;

@@ -117,6 +117,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     env::set_var("VALIDATOR_COUNTRY_CODE", "CY");
     env::set_var("VALIDATOR_FQDN", "magicblock.er.com");
     env::set_var("LEDGER_RESET", "false");
+    env::set_var("LEDGER_SKIP_REPLAY", "true");
     env::set_var("LEDGER_PATH", "/hello/world");
     env::set_var("METRICS_ENABLED", "false");
     env::set_var("METRICS_PORT", "1234");
@@ -165,6 +166,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
             },
             ledger: LedgerConfig {
                 reset: false,
+                skip_replay: true,
                 path: Some("/hello/world".to_string()),
                 size: 123123
             },

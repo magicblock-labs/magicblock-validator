@@ -2,7 +2,7 @@ use clap::Args;
 use magicblock_config_macro::{clap_from_serde, clap_prefix, Mergeable};
 use serde::{Deserialize, Serialize};
 
-use crate::helpers::serde_defaults::bool_true;
+use crate::helpers::serde_defaults::{bool_false, bool_true};
 
 // Default desired ledger size 100 GiB
 pub const DEFAULT_LEDGER_SIZE_BYTES: u64 = 100 * 1024 * 1024 * 1024;
@@ -20,6 +20,12 @@ pub struct LedgerConfig {
     #[arg(help = "Whether to reset the ledger before starting the validator.")]
     #[serde(default = "bool_true")]
     pub reset: bool,
+    /// If a previous ledger is found it is removed before starting the validator
+    /// This can be disabled by setting [Self::reset] to `false`.
+    #[derive_env_var]
+    #[arg(help = "Whether to skip replay of the ledger.")]
+    #[serde(default = "bool_false")]
+    pub skip_replay: bool,
     /// The file system path onto which the ledger should be written at
     /// If left empty it will be auto-generated to a temporary folder
     #[derive_env_var]
@@ -40,6 +46,7 @@ impl Default for LedgerConfig {
     fn default() -> Self {
         Self {
             reset: bool_true(),
+            skip_replay: bool_false(),
             path: Default::default(),
             size: DEFAULT_LEDGER_SIZE_BYTES,
         }
@@ -60,6 +67,7 @@ mod tests {
     fn test_merge_with_default() {
         let mut config = LedgerConfig {
             reset: false,
+            skip_replay: true,
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
         };
@@ -76,6 +84,7 @@ mod tests {
         let mut config = LedgerConfig::default();
         let other = LedgerConfig {
             reset: false,
+            skip_replay: true,
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
         };
@@ -89,12 +98,14 @@ mod tests {
     fn test_merge_non_default() {
         let mut config = LedgerConfig {
             reset: false,
+            skip_replay: true,
             path: Some("ledger.example.com".to_string()),
             size: 1000000000,
         };
         let original_config = config.clone();
         let other = LedgerConfig {
             reset: true,
+            skip_replay: false,
             path: Some("ledger2.example.com".to_string()),
             size: 10000,
         };
