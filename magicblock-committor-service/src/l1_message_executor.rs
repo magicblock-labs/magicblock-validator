@@ -63,7 +63,7 @@ impl<T: TransactionPreparator> L1MessageExecutor<T> {
 
     /// Executes message on L1
     pub async fn execute(
-        mut self,
+        &self,
         l1_message: ScheduledL1Message,
         commit_ids: HashMap<Pubkey, u64>,
     ) -> MessageExecutorResult<ExecutionOutput> {

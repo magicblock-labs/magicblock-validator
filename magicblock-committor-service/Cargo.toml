@@ -28,6 +28,7 @@ bincode = { workspace = true }
 borsh = { workspace = true }
 futures-util = { workspace = true }
 log = { workspace = true }
+lru = { workspace = true }
 rusqlite = { workspace = true }
 solana-account = { workspace = true }
 solana-pubkey = { workspace = true }

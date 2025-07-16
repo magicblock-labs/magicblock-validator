@@ -25,14 +25,17 @@ use crate::{
     transaction_preperator::transaction_preparator::TransactionPreparator,
     ComputeBudgetConfig,
 };
+use crate::commit_scheduler::commit_id_tracker::CommitIdTracker;
 
 const SEMAPHORE_CLOSED_MSG: &str = "Executors semaphore closed!";
 
+// TODO(edwin): reduce num of params: 1,2,3, could be united
 pub(crate) struct CommitSchedulerWorker<D: DB> {
     db: Arc<D>,
-    rpc_client: MagicblockRpcClient,
-    table_mania: TableMania,
-    compute_budget_config: ComputeBudgetConfig,
+    rpc_client: MagicblockRpcClient, // 1.
+    table_mania: TableMania, // 2.
+    compute_budget_config: ComputeBudgetConfig, // 3.
+    commit_id_tracker: CommitIdTracker,
     receiver: mpsc::Receiver<ScheduledL1Message>,
 
     // TODO(edwin): replace notify. issue: 2 simultaneous notifications
@@ -54,9 +57,10 @@ impl<D: DB> CommitSchedulerWorker<D> {
 
         Self {
             db,
-            rpc_client,
+            rpc_client: rpc_client.clone(),
             table_mania,
             compute_budget_config,
+            commit_id_tracker: CommitIdTracker::new(rpc_client),
             receiver,
             notify: Arc::new(Notify::new()),
             executors_semaphore: Arc::new(Semaphore::new(
@@ -70,10 +74,10 @@ impl<D: DB> CommitSchedulerWorker<D> {
     pub fn spawn(
         mut self,
     ) -> broadcast::Receiver<MessageExecutorResult<ExecutionOutput>> {
-        let (sender, receiver) = broadcast::channel(100);
-        tokio::spawn(self.main_loop(sender));
+        let (result_sender, result_receiver) = broadcast::channel(100);
+        tokio::spawn(self.main_loop(result_sender));
 
-        receiver
+        result_receiver
     }
 
     /// Main loop that:
@@ -149,7 +153,6 @@ impl<D: DB> CommitSchedulerWorker<D> {
             biased;
             _ = self.notify.notified() => {
                 trace!("Worker executed L1Message, fetching new available one");
-                // TODO(edwin): ensure that worker properly completes message in inner schedyler
                 self.inner.lock().expect(POISONED_INNER_MSG).pop_next_scheduled_message()
             },
             result = self.get_new_message(), if can_receive() => {

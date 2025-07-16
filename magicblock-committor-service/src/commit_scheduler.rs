@@ -1,3 +1,4 @@
+mod commit_id_tracker;
 pub(crate) mod commit_scheduler_inner;
 mod commit_scheduler_worker;
 mod db;
