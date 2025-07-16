@@ -9,8 +9,8 @@ use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
 use solana_pubkey::Pubkey;
 use tokio::sync::{
-    mpsc::{error::TryRecvError, Receiver},
-    Notify, OwnedSemaphorePermit, Semaphore,
+    broadcast, mpsc, mpsc::error::TryRecvError, Notify, OwnedSemaphorePermit,
+    Semaphore,
 };
 
 use crate::{
@@ -19,7 +19,9 @@ use crate::{
         db::DB,
         Error,
     },
-    l1_message_executor::L1MessageExecutor,
+    l1_message_executor::{
+        ExecutionOutput, L1MessageExecutor, MessageExecutorResult,
+    },
     transaction_preperator::transaction_preparator::TransactionPreparator,
     ComputeBudgetConfig,
 };
@@ -31,7 +33,7 @@ pub(crate) struct CommitSchedulerWorker<D: DB> {
     rpc_client: MagicblockRpcClient,
     table_mania: TableMania,
     compute_budget_config: ComputeBudgetConfig,
-    receiver: Receiver<ScheduledL1Message>,
+    receiver: mpsc::Receiver<ScheduledL1Message>,
 
     // TODO(edwin): replace notify. issue: 2 simultaneous notifications
     notify: Arc<Notify>,
@@ -45,7 +47,7 @@ impl<D: DB> CommitSchedulerWorker<D> {
         rpc_client: MagicblockRpcClient,
         table_mania: TableMania,
         compute_budget_config: ComputeBudgetConfig,
-        receiver: Receiver<ScheduledL1Message>,
+        receiver: mpsc::Receiver<ScheduledL1Message>,
     ) -> Self {
         // Number of executors that can send messages in parallel to L1
         const NUM_OF_EXECUTORS: u8 = 50;
@@ -64,7 +66,26 @@ impl<D: DB> CommitSchedulerWorker<D> {
         }
     }
 
-    pub async fn start(mut self) {
+    /// Spawns `main_loop` and return `Receiver` listening to results
+    pub fn spawn(
+        mut self,
+    ) -> broadcast::Receiver<MessageExecutorResult<ExecutionOutput>> {
+        let (sender, receiver) = broadcast::channel(100);
+        tokio::spawn(self.main_loop(sender));
+
+        receiver
+    }
+
+    /// Main loop that:
+    /// 1. Handles & schedules incoming message
+    /// 2. Finds available executor
+    /// 3. Spawns execution of scheduled message
+    async fn main_loop(
+        mut self,
+        result_sender: broadcast::Sender<
+            MessageExecutorResult<ExecutionOutput>,
+        >,
+    ) {
         loop {
             // TODO: unwraps
             let l1_message = self.next_scheduled_message().await.unwrap();
@@ -85,7 +106,6 @@ impl<D: DB> CommitSchedulerWorker<D> {
             // Prepare data for execution
             let commit_ids = self.deduce_commit_ids(&l1_message).await;
             let executor = L1MessageExecutor::new_v1(
-                self.inner.clone(),
                 self.rpc_client.clone(),
                 self.table_mania.clone(),
                 self.compute_budget_config.clone(),
@@ -98,6 +118,7 @@ impl<D: DB> CommitSchedulerWorker<D> {
                 commit_ids,
                 self.inner.clone(),
                 permit,
+                result_sender.clone(),
                 self.notify.clone(),
             ));
         }
@@ -164,11 +185,19 @@ impl<D: DB> CommitSchedulerWorker<D> {
         commit_ids: HashMap<Pubkey, u64>,
         inner_scheduler: Arc<Mutex<CommitSchedulerInner>>,
         execution_permit: OwnedSemaphorePermit,
+        result_sender: broadcast::Sender<
+            MessageExecutorResult<ExecutionOutput>,
+        >,
         notify: Arc<Notify>,
     ) {
-        let _ = executor.execute(l1_message.clone(), commit_ids).await;
+        let result = executor.execute(l1_message.clone(), commit_ids).await;
+        // TODO: unwrap
+        result_sender.send(result).unwrap();
         // Remove executed task from Scheduler to unblock other messages
-        inner_scheduler.lock().expect(POISONED_INNER_MSG).complete(&l1_message);
+        inner_scheduler
+            .lock()
+            .expect(POISONED_INNER_MSG)
+            .complete(&l1_message);
         // Notify main loop that executor is done
         // This will trigger scheduling next message
         notify.notify_waiters();

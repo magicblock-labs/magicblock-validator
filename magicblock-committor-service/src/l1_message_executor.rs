@@ -32,16 +32,18 @@ use crate::{
     ComputeBudgetConfig,
 };
 
+// TODO(edwin): define struct
+// (commit_id, signature)s that it sent. Single worker in [`RemoteScheduledCommitsProcessor`]
+pub struct ExecutionOutput {}
+
 pub(crate) struct L1MessageExecutor<T: TransactionPreparator> {
     authority: Keypair,
     rpc_client: MagicblockRpcClient,
     transaction_preparator: T,
-    inner: Arc<Mutex<CommitSchedulerInner>>,
 }
 
 impl<T: TransactionPreparator> L1MessageExecutor<T> {
     pub fn new_v1(
-        inner: Arc<Mutex<CommitSchedulerInner>>,
         rpc_client: MagicblockRpcClient,
         table_mania: TableMania,
         compute_budget_config: ComputeBudgetConfig,
@@ -56,7 +58,6 @@ impl<T: TransactionPreparator> L1MessageExecutor<T> {
             authority,
             rpc_client,
             transaction_preparator,
-            inner,
         }
     }
 
@@ -65,19 +66,13 @@ impl<T: TransactionPreparator> L1MessageExecutor<T> {
         mut self,
         l1_message: ScheduledL1Message,
         commit_ids: HashMap<Pubkey, u64>,
-    ) -> MessageExecutorResult<()> {
+    ) -> MessageExecutorResult<ExecutionOutput> {
         // Commit message first
         self.commit(&l1_message, commit_ids).await?;
         // At the moment validator finalizes right away
         // In the future there will be a challenge window
         self.finalize(&l1_message).await?;
-        // Signal that task is completed
-        // TODO(edwin): handle error case here as well
-        self.inner
-            .lock()
-            .expect(POISONED_INNER_MSG)
-            .complete(&l1_message);
-        Ok(())
+        Ok(ExecutionOutput {})
     }
 
     /// Executes Commit stage
