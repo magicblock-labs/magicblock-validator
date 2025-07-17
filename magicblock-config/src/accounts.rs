@@ -34,6 +34,9 @@ pub struct AccountsConfig {
     #[serde(default)]
     #[command(flatten)]
     pub db: AccountsDbConfig,
+    #[serde(default)]
+    #[command(flatten)]
+    pub clone: AccountsCloneConfig,
     #[arg(help = "The max number of accounts to monitor.")]
     #[serde(default = "default_max_monitored_accounts")]
     pub max_monitored_accounts: usize,
@@ -62,6 +65,9 @@ impl AccountsConfig {
         if self.db == default.db && other.db != default.db {
             self.db = other.db;
         }
+        if self.clone == default.clone && other.clone != default.clone {
+            self.clone = other.clone;
+        }
         if self.max_monitored_accounts == default.max_monitored_accounts
             && other.max_monitored_accounts != default.max_monitored_accounts
         {
@@ -78,6 +84,7 @@ impl Default for AccountsConfig {
             commit: Default::default(),
             allowed_programs: Default::default(),
             db: Default::default(),
+            clone: Default::default(),
             max_monitored_accounts: default_max_monitored_accounts(),
         }
     }
@@ -205,6 +212,44 @@ impl Default for CommitStrategy {
     }
 }
 
+// -----------------
+// PrepareLookupTables
+// -----------------
+#[derive(
+    Debug,
+    Clone,
+    Display,
+    Default,
+    PartialEq,
+    Eq,
+    Deserialize,
+    Serialize,
+    EnumString,
+    ValueEnum,
+)]
+#[serde(rename_all = "kebab-case")]
+#[strum(serialize_all = "kebab-case")]
+#[clap(rename_all = "kebab-case")]
+pub enum PrepareLookupTables {
+    Always,
+    #[default]
+    Never,
+}
+
+// -----------------
+// AccountsCloneConfig
+// -----------------
+#[clap_prefix("clone")]
+#[clap_from_serde]
+#[derive(
+    Debug, Default, Clone, PartialEq, Eq, Deserialize, Serialize, Args,
+)]
+#[serde(deny_unknown_fields)]
+pub struct AccountsCloneConfig {
+    #[serde(default)]
+    pub prepare_lookup_tables: PrepareLookupTables,
+}
+
 #[derive(
     Debug, Clone, Default, PartialEq, Eq, Deserialize, Serialize, Args,
 )]
@@ -266,6 +311,7 @@ mod tests {
                 .unwrap(),
             }],
             db: AccountsDbConfig::default(),
+            clone: AccountsCloneConfig::default(),
             max_monitored_accounts: 123,
         };
         let original_config = config.clone();
@@ -297,6 +343,7 @@ mod tests {
                 .unwrap(),
             }],
             db: AccountsDbConfig::default(),
+            clone: AccountsCloneConfig::default(),
             max_monitored_accounts: 123,
         };
 
@@ -331,6 +378,7 @@ mod tests {
                 max_snapshots: 1233,
                 snapshot_frequency: 1233,
             },
+            clone: AccountsCloneConfig::default(),
             max_monitored_accounts: 1233,
         };
         let original_config = config.clone();
@@ -352,11 +400,49 @@ mod tests {
                 .unwrap(),
             }],
             db: AccountsDbConfig::default(),
+            clone: AccountsCloneConfig::default(),
             max_monitored_accounts: 123,
         };
 
         config.merge(other);
 
         assert_eq!(config, original_config);
+    }
+
+    #[test]
+    fn test_clone_config_default() {
+        let config = AccountsCloneConfig::default();
+        assert_eq!(config.prepare_lookup_tables, PrepareLookupTables::Never);
+    }
+
+    #[test]
+    fn test_clone_config_merge() {
+        let mut config = AccountsConfig::default();
+        let other = AccountsConfig {
+            clone: AccountsCloneConfig {
+                prepare_lookup_tables: PrepareLookupTables::Always,
+            },
+            ..Default::default()
+        };
+
+        config.merge(other.clone());
+        assert_eq!(
+            config.clone.prepare_lookup_tables,
+            PrepareLookupTables::Always
+        );
+    }
+
+    #[test]
+    fn test_clone_config_serde() {
+        let toml_str = r#"
+[clone]
+prepare_lookup_tables = "always"
+"#;
+
+        let config: AccountsConfig = toml::from_str(toml_str).unwrap();
+        assert_eq!(
+            config.clone.prepare_lookup_tables,
+            PrepareLookupTables::Always
+        );
     }
 }
