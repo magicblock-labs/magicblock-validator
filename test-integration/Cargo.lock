@@ -10282,6 +10282,19 @@ dependencies = [
 ]
 
 [[package]]
+name = "test-config"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "cleanass",
+ "integration-test-tools",
+ "magicblock-config",
+ "solana-rpc-client",
+ "solana-sdk",
+ "tempfile",
+]
+
+[[package]]
 name = "test-issues"
 version = "0.0.0"
 dependencies = [
