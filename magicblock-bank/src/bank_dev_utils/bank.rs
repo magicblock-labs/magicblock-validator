@@ -1,9 +1,8 @@
 // NOTE: copied and slightly modified from bank.rs
 use std::{borrow::Cow, sync::Arc};
 
-use magicblock_accounts_db::{
-    config::AccountsDbConfig, error::AccountsDbError, StWLock,
-};
+use magicblock_accounts_db::{error::AccountsDbError, StWLock};
+use magicblock_config::AccountsDbConfig;
 use solana_geyser_plugin_manager::slot_status_notifier::SlotStatusNotifierImpl;
 use solana_sdk::{
     genesis_config::GenesisConfig,

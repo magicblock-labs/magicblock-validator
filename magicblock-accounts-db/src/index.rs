@@ -5,6 +5,7 @@ use lmdb::{
     Cursor, DatabaseFlags, Environment, RwTransaction, Transaction, WriteFlags,
 };
 use log::warn;
+use magicblock_config::AccountsDbConfig;
 use solana_pubkey::Pubkey;
 use table::Table;
 use utils::*;
@@ -398,6 +399,16 @@ impl AccountsDbIndex {
         const DEFAULT_SIZE: usize = 1024 * 1024;
         *self = Self::new(DEFAULT_SIZE, dbpath)?;
         Ok(())
+    }
+
+    /// Returns the number of deallocations in the database
+    #[cfg(test)]
+    pub(crate) fn get_delloactions_count(&self) -> usize {
+        let Ok(txn) = self.env.begin_ro_txn() else {
+            warn!("failed to start transaction for stats retrieval");
+            return 0;
+        };
+        self.deallocations.entries(&txn)
     }
 }
 
