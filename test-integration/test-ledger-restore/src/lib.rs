@@ -70,10 +70,7 @@ pub fn setup_offline_validator(
         ..Default::default()
     };
     let (default_tmpdir_config, Some(mut validator)) =
-        start_validator_with_config(
-            config,
-            &LoadedAccounts::with_delegation_program_test_authority(),
-        )
+        start_validator_with_config(config, &Default::default())
     else {
         panic!("validator should set up correctly");
     };
