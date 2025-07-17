@@ -2,20 +2,40 @@ use std::{
     path::Path,
     sync::atomic::{AtomicU64, Ordering},
 };
-
+use std::sync::{Arc, Mutex};
 use magicblock_committor_program::Changeset;
 use solana_sdk::{hash::Hash, pubkey::Pubkey};
-
+use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
 use super::{
-    db::{BundleSignatureRow, CommitStatusRow},
+    db::{CommitStatusRow},
     error::{CommitPersistError, CommitPersistResult},
     utils::now,
     CommitStatus, CommitType, CommittorDb,
 };
 
+const POISONED_MUTEX_MSG: &str = "Commitor Persister lock poisoned";
+
+/// Records lifespan pf commit
+pub trait CommitPersisterIface: Send + Sync + Clone {
+    /// Starts persisting L1Message
+    fn start_l1_messages(&self, l1_message: &ScheduledL1Message) -> CommitPersistResult<()>;
+    fn start_l1_message(&self, l1_message: &ScheduledL1Message) -> CommitPersistResult<()>;
+    fn update_status(&self, message_id: u64, status: CommitStatus) -> CommitPersistResult<()>;
+    fn get_commit_statuses_by_id(
+        &self,
+        message_id: u64,
+    ) -> CommitPersistResult<Vec<CommitStatusRow>>;
+    fn get_commit_status(
+        &self,
+        message_id: u64,
+        pubkey: &Pubkey,
+    ) -> CommitPersistResult<Option<CommitStatusRow>>;
+    // fn finalize_l1_message()
+}
+
+#[derive(Clone)]
 pub struct CommitPersister {
-    db: CommittorDb,
-    request_id_counter: AtomicU64,
+    db: Arc<Mutex<CommittorDb>>,
 }
 
 impl CommitPersister {
@@ -26,73 +46,45 @@ impl CommitPersister {
         let db = CommittorDb::new(db_file)?;
         db.create_commit_status_table()?;
         db.create_bundle_signature_table()?;
-        Ok(Self::for_db(db))
+
+        Ok(Self {
+            db: Arc::new(Mutex::new(db))
+        })
     }
 
-    fn for_db(db: CommittorDb) -> Self {
-        Self {
-            db,
-            request_id_counter: AtomicU64::new(1),
-        }
-    }
+    fn create_row(l1_message: &ScheduledL1Message) -> CommitPersistResult<CommitStatusRow> {
+        let undelegate = l1_message.accounts_to_undelegate.contains(pubkey);
+        let commit_type = if changed_account.data().is_empty() {
+            CommitType::EmptyAccount
+        } else {
+            CommitType::DataAccount
+        };
 
-    /// Generates a unique request ID for a changeset
-    fn generate_reqid(&self) -> String {
-        let id = self.request_id_counter.fetch_add(1, Ordering::SeqCst);
-        format!("req-{}", id)
-    }
+        let data = if commit_type == CommitType::DataAccount {
+            Some(changed_account.data().to_vec())
+        } else {
+            None
+        };
 
-    pub fn start_changeset(
-        &mut self,
-        changeset: &Changeset,
-        ephemeral_blockhash: Hash,
-        finalize: bool,
-    ) -> CommitPersistResult<String> {
-        let reqid = self.generate_reqid();
+        let now = now();
 
-        let mut commit_rows = Vec::new();
-
-        for (pubkey, changed_account) in changeset.accounts.iter() {
-            let undelegate = changeset.accounts_to_undelegate.contains(pubkey);
-            let commit_type = if changed_account.data().is_empty() {
-                CommitType::EmptyAccount
-            } else {
-                CommitType::DataAccount
-            };
-
-            let data = if commit_type == CommitType::DataAccount {
-                Some(changed_account.data().to_vec())
-            } else {
-                None
-            };
-
-            let now = now();
-
-            // Create a commit status row for this account
-            let commit_row = CommitStatusRow {
-                reqid: reqid.clone(),
-                pubkey: *pubkey,
-                delegated_account_owner: changed_account.owner(),
-                slot: changeset.slot,
-                ephemeral_blockhash,
-                undelegate,
-                lamports: changed_account.lamports(),
-                finalize,
-                data,
-                commit_type,
-                created_at: now,
-                commit_status: CommitStatus::Pending,
-                last_retried_at: now,
-                retries_count: 0,
-            };
-
-            commit_rows.push(commit_row);
-        }
-
-        // Insert all commit rows into the database
-        self.db.insert_commit_status_rows(&commit_rows)?;
-
-        Ok(reqid)
+        // Create a commit status row for this account
+        let commit_row = CommitStatusRow {
+            reqid: reqid.clone(),
+            pubkey: *pubkey,
+            delegated_account_owner: changed_account.owner(),
+            slot: changeset.slot,
+            ephemeral_blockhash,
+            undelegate,
+            lamports: changed_account.lamports(),
+            finalize,
+            data,
+            commit_type,
+            created_at: now,
+            commit_status: CommitStatus::Pending,
+            last_retried_at: now,
+            retries_count: 0,
+        };
     }
 
     pub fn update_status(
@@ -129,27 +121,44 @@ impl CommitPersister {
 
         // TODO(thlorenz): @@ once we see this works remove the succeeded commits
     }
+}
 
-    pub fn get_commit_statuses_by_reqid(
+
+impl CommitPersisterIface for CommitPersister {
+    fn start_l1_messages(
         &self,
-        reqid: &str,
-    ) -> CommitPersistResult<Vec<CommitStatusRow>> {
-        self.db.get_commit_statuses_by_reqid(reqid)
+        l1_message: &Vec<ScheduledL1Message>,
+    ) -> CommitPersistResult<()> {
+        let commit_rows = l1_message.iter().map(Self::create_row).collect();
+        // Insert all commit rows into the database
+        self.db.lock().expect(POISONED_MUTEX_MSG).insert_commit_status_rows(&commit_rows)?;
+        Ok(())
     }
 
-    pub fn get_commit_status(
+    fn start_l1_message(&self, l1_message: &ScheduledL1Message) -> CommitPersistResult<()> {
+        let commit_row = Self::create_row(l1_message)?;
+        self.db.lock().expect(POISONED_MUTEX_MSG).insert_commit_status_rows(&[commit_row])?;
+
+        Ok(())
+    }
+
+    fn update_status(&self, message_id: u64, status: CommitStatus) -> CommitPersistResult<()> {
+
+    }
+
+    fn get_commit_statuses_by_id(
         &self,
-        reqid: &str,
+        message_id: u64,
+    ) -> CommitPersistResult<Vec<CommitStatusRow>> {
+        self.db.lock().expect(POISONED_MUTEX_MSG).get_commit_statuses_by_id(message_id)
+    }
+
+    fn get_commit_status(
+        &self,
+        message_id: u64,
         pubkey: &Pubkey,
     ) -> CommitPersistResult<Option<CommitStatusRow>> {
-        self.db.get_commit_status(reqid, pubkey)
-    }
-
-    pub fn get_signature(
-        &self,
-        bundle_id: u64,
-    ) -> CommitPersistResult<Option<BundleSignatureRow>> {
-        self.db.get_bundle_signature_by_bundle_id(bundle_id)
+        self.db.lock().expect(POISONED_MUTEX_MSG).get_commit_status(message_id, pubkey)
     }
 }
 
@@ -203,7 +212,7 @@ mod tests {
         // Start tracking the changeset
         let blockhash = Hash::new_unique();
         let reqid = persister
-            .start_changeset(&changeset, blockhash, true)
+            .start_l1_messages(&changeset, blockhash, true)
             .unwrap();
 
         // Verify the rows were inserted correctly
