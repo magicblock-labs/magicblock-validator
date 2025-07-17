@@ -40,7 +40,8 @@ use magicblock_committor_service::{
     config::ChainConfig, CommittorService, ComputeBudgetConfig,
 };
 use magicblock_config::{
-    AccountsDbConfig, EphemeralConfig, LifecycleMode, ProgramConfig,
+    AccountsDbConfig, EphemeralConfig, LifecycleMode, PrepareLookupTables,
+    ProgramConfig,
 };
 use magicblock_geyser_plugin::rpc::GeyserRpcService;
 use magicblock_ledger::{
@@ -353,6 +354,7 @@ impl MagicValidator {
             clone_permissions,
             identity_keypair.pubkey(),
             config.validator_config.accounts.max_monitored_accounts,
+            config.validator_config.accounts.clone.clone(),
         );
 
         let accounts_manager = Self::init_accounts_manager(
@@ -800,12 +802,17 @@ impl MagicValidator {
             self.remote_account_cloner_worker.take()
         {
             if let Some(committor_service) = self.committor_service.as_ref() {
-                debug!("Reserving common pubkeys for committor service");
-                map_committor_request_result(
-                    committor_service.reserve_common_pubkeys(),
-                    committor_service.clone(),
-                )
-                .await?;
+                // Only reserve common pubkeys if the clone config is set to always
+                if self.config.accounts.clone.prepare_lookup_tables
+                    == PrepareLookupTables::Always
+                {
+                    debug!("Reserving common pubkeys for committor service");
+                    map_committor_request_result(
+                        committor_service.reserve_common_pubkeys(),
+                        committor_service.clone(),
+                    )
+                    .await?;
+                }
             }
 
             if !self.config.ledger.reset {

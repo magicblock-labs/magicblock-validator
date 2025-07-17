@@ -17,6 +17,7 @@ use magicblock_account_fetcher::AccountFetcher;
 use magicblock_account_updates::{AccountUpdates, AccountUpdatesResult};
 use magicblock_accounts_api::InternalAccountProvider;
 use magicblock_committor_service::ChangesetCommittor;
+use magicblock_config::{AccountsCloneConfig, PrepareLookupTables};
 use magicblock_metrics::metrics;
 use magicblock_mutator::idl::{get_pubkey_anchor_idl, get_pubkey_shank_idl};
 use solana_sdk::{
@@ -108,6 +109,7 @@ pub struct RemoteAccountClonerWorker<IAP, AFE, AUP, ADU, CC> {
     last_clone_output: CloneOutputMap,
     validator_identity: Pubkey,
     monitored_accounts: RefCell<LruCache<Pubkey, ()>>,
+    clone_config: AccountsCloneConfig,
 }
 
 // SAFETY:
@@ -146,6 +148,7 @@ where
         permissions: AccountClonerPermissions,
         validator_authority: Pubkey,
         max_monitored_accounts: usize,
+        clone_config: AccountsCloneConfig,
     ) -> Self {
         let (clone_request_sender, clone_request_receiver) = flume::unbounded();
         let fetch_retries = 50;
@@ -169,6 +172,7 @@ where
             last_clone_output: Default::default(),
             validator_identity: validator_authority,
             monitored_accounts: LruCache::new(max_monitored_accounts).into(),
+            clone_config,
         }
     }
 
@@ -711,28 +715,33 @@ where
                 // Allow the committer service to reserve pubkeys in lookup tables
                 // that could be needed when we commit this account
                 if let Some(committor) = self.changeset_committor.as_ref() {
-                    let committor = Arc::clone(committor);
-                    let pubkey = *pubkey;
-                    let owner = delegation_record.owner;
-                    tokio::spawn(async move {
-                        match map_committor_request_result(
-                            committor
-                                .reserve_pubkeys_for_committee(pubkey, owner),
-                            committor,
-                        )
-                        .await
-                        {
-                            Ok(initiated) => {
-                                trace!(
+                    if self.clone_config.prepare_lookup_tables
+                        == PrepareLookupTables::Always
+                    {
+                        let committor = Arc::clone(committor);
+                        let pubkey = *pubkey;
+                        let owner = delegation_record.owner;
+                        tokio::spawn(async move {
+                            match map_committor_request_result(
+                                committor.reserve_pubkeys_for_committee(
+                                    pubkey, owner,
+                                ),
+                                committor,
+                            )
+                            .await
+                            {
+                                Ok(initiated) => {
+                                    trace!(
                                     "Reserving lookup keys for {pubkey} took {:?}",
                                     initiated.elapsed()
                                 );
-                            }
-                            Err(err) => {
-                                error!("Failed to reserve lookup keys for {pubkey}: {err:?}");
-                            }
-                        };
-                    });
+                                }
+                                Err(err) => {
+                                    error!("Failed to reserve lookup keys for {pubkey}: {err:?}");
+                                }
+                            };
+                        });
+                    }
                 }
 
                 self.do_clone_delegated_account(

@@ -530,6 +530,9 @@ mod tests {
 
         assert_eq!(config, other);
         // Test that the clone config is properly set to Always
-        assert_eq!(config.accounts.clone.prepare_lookup_tables, PrepareLookupTables::Always);
+        assert_eq!(
+            config.accounts.clone.prepare_lookup_tables,
+            PrepareLookupTables::Always
+        );
     }
 }

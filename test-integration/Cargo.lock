@@ -3572,6 +3572,7 @@ dependencies = [
  "magicblock-account-updates",
  "magicblock-accounts-api",
  "magicblock-committor-service",
+ "magicblock-config",
  "magicblock-core",
  "magicblock-metrics",
  "magicblock-mutator",
