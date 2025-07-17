@@ -57,15 +57,18 @@ pub fn main() {
     };
 
     // Assert that all tests passed
-    assert_cargo_tests_passed(security_output);
-    assert_cargo_tests_passed(scenarios_output);
-    assert_cargo_tests_passed(cloning_output);
-    assert_cargo_tests_passed(issues_frequent_commits_output);
-    assert_cargo_tests_passed(restore_ledger_output);
-    assert_cargo_tests_passed(magicblock_api_output);
-    assert_cargo_tests_passed(table_mania_output);
-    assert_cargo_tests_passed(committor_output);
-    assert_cargo_tests_passed(magicblock_pubsub_output);
+    assert_cargo_tests_passed(security_output, "security");
+    assert_cargo_tests_passed(scenarios_output, "scenarios");
+    assert_cargo_tests_passed(cloning_output, "cloning");
+    assert_cargo_tests_passed(
+        issues_frequent_commits_output,
+        "issues_frequent_commits",
+    );
+    assert_cargo_tests_passed(restore_ledger_output, "restore_ledger");
+    assert_cargo_tests_passed(magicblock_api_output, "magicblock_api");
+    assert_cargo_tests_passed(table_mania_output, "table_mania");
+    assert_cargo_tests_passed(committor_output, "committor");
+    assert_cargo_tests_passed(magicblock_pubsub_output, "magicblock_pubsub");
 }
 
 fn should_run_test(test_name: &str) -> bool {
@@ -438,19 +441,19 @@ fn run_magicblock_pubsub_tests(
 // -----------------
 // Configs/Checks
 // -----------------
-fn assert_cargo_tests_passed(output: process::Output) {
+fn assert_cargo_tests_passed(output: process::Output, test_name: &str) {
     if !output.status.success() {
-        eprintln!("cargo test");
+        eprintln!("cargo test '{}'", test_name);
         eprintln!("status: {}", output.status);
         eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
         eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
     } else if std::env::var("DUMP").is_ok() {
-        eprintln!("cargo test success");
+        eprintln!("cargo test success '{}'", test_name);
         eprintln!("stdout: {}", String::from_utf8_lossy(&output.stdout));
         eprintln!("stderr: {}", String::from_utf8_lossy(&output.stderr));
     }
     // If a test in the suite fails the status shows that
-    assert!(output.status.success(), "cargo test failed");
+    assert!(output.status.success(), "cargo test failed '{}'", test_name);
 }
 
 #[derive(Default)]

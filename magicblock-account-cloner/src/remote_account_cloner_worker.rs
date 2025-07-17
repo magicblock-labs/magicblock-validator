@@ -710,23 +710,32 @@ where
 
                 // Allow the committer service to reserve pubkeys in lookup tables
                 // that could be needed when we commit this account
-                // NOTE: we start reserving pubkeys so the transaction can complete while we
-                // clone the account.
-                let reserve_pubkeys_handle = if let Some(committor) =
-                    self.changeset_committor.as_ref()
-                {
+                if let Some(committor) = self.changeset_committor.as_ref() {
                     let committor = Arc::clone(committor);
                     let pubkey = *pubkey;
                     let owner = delegation_record.owner;
-                    Some(tokio::spawn(map_committor_request_result(
-                        committor.reserve_pubkeys_for_committee(pubkey, owner),
-                        committor,
-                    )))
-                } else {
-                    None
-                };
+                    tokio::spawn(async move {
+                        match map_committor_request_result(
+                            committor
+                                .reserve_pubkeys_for_committee(pubkey, owner),
+                            committor,
+                        )
+                        .await
+                        {
+                            Ok(initiated) => {
+                                trace!(
+                                    "Reserving lookup keys for {pubkey} took {:?}",
+                                    initiated.elapsed()
+                                );
+                            }
+                            Err(err) => {
+                                error!("Failed to reserve lookup keys for {pubkey}: {err:?}");
+                            }
+                        };
+                    });
+                }
 
-                let sig = self.do_clone_delegated_account(
+                self.do_clone_delegated_account(
                     pubkey,
                     // TODO(GabrielePicco): Avoid cloning
                     &Account {
@@ -734,19 +743,7 @@ where
                         ..account.clone()
                     },
                     delegation_record,
-                )?;
-
-                if let Some(handle) = reserve_pubkeys_handle {
-                    let initiated = handle.await.map_err(|err| {
-                        AccountClonerError::JoinError(format!("{err} {err:?}"))
-                    })??;
-                    trace!(
-                        "Reserving lookup keys for {pubkey} took {:?}",
-                        initiated.elapsed()
-                    );
-                }
-
-                sig
+                )?
             }
         };
         // Return the result
