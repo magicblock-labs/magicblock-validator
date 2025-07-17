@@ -5,7 +5,6 @@ use lmdb::{
     Cursor, DatabaseFlags, Environment, RwTransaction, Transaction, WriteFlags,
 };
 use log::warn;
-use magicblock_config::AccountsDbConfig;
 use solana_pubkey::Pubkey;
 use table::Table;
 use utils::*;
@@ -131,12 +130,12 @@ impl AccountsDbIndex {
         };
         let offset =
             // SAFETY:
-            // The accounts index stores two u32 values (offset and blocks) 
+            // The accounts index stores two u32 values (offset and blocks)
             // serialized into 8 byte long slice. Here we are interested only in the first 4 bytes
             // (offset). The memory used by lmdb to store the serialization might not be u32
-            // aligned, so we make use `read_unaligned`. 
+            // aligned, so we make use `read_unaligned`.
             //
-            // We read the data stored by corresponding put in `insert_account`, 
+            // We read the data stored by corresponding put in `insert_account`,
             // thus it should be of valid length and contain valid value
             unsafe { (offset.as_ptr() as *const u32).read_unaligned() };
         Ok(offset)
