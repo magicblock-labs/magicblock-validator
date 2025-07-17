@@ -11,9 +11,18 @@ use integration_test_tools::{
     validator::{resolve_workspace_dir, TestRunnerPaths},
     IntegrationTestContext,
 };
+use test_ledger_restore::start_validator_with_config;
 use magicblock_config::{
     AccountsCloneConfig, AccountsConfig, EphemeralConfig, LifecycleMode,
     PrepareLookupTables, RemoteCluster, RemoteConfig,
+};
+use program_flexi_counter::{
+    instruction::{create_add_ix, create_delegate_ix, create_init_ix},
+    state::FlexiCounter,
+};
+use solana_sdk::{
+    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
+    signer::Signer,
 };
 use tempfile::TempDir;
 
@@ -62,7 +71,7 @@ pub fn start_validator_with_clone_config(
         workspace_dir,
     };
 
-    let (default_tmpdir_config, Some(mut validator)) =
+    let (default_tmpdir_config, Some(validator)) =
         start_validator_with_config(
             config,
             &LoadedAccounts::with_delegation_program_test_authority(),
@@ -86,4 +95,41 @@ pub fn wait_for_startup(validator: &mut Child) {
     let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
     // Wait for at least one slot to advance to ensure the validator is running
     expect!(ctx.wait_for_next_slot_ephem(), validator);
+}
+
+/// Create an account on chain, delegate it, and send a transaction to ephemeral validator to trigger cloning
+pub fn delegate_and_clone(
+    ctx: &IntegrationTestContext,
+    validator: &mut Child,
+) -> Keypair {
+    let payer = Keypair::new();
+
+    // 1. Airdrop to payer on chain
+    expect!(
+        ctx.airdrop_chain(&payer.pubkey(), LAMPORTS_PER_SOL),
+        validator
+    );
+
+    // 2. Create and send init counter instruction on chain
+    let init_ix = create_init_ix(payer.pubkey(), "TEST_COUNTER".to_string());
+    expect!(
+        ctx.send_transaction_with_payer_chain(&init_ix, &payer),
+        validator
+    );
+
+    // 3. Delegate counter to ephemeral
+    let delegate_ix = create_delegate_ix(payer.pubkey());
+    expect!(
+        ctx.send_transaction_with_payer_chain(&delegate_ix, &payer),
+        validator
+    );
+
+    // 4. Send a transaction to ephemeral validator to trigger cloning
+    let add_ix = create_add_ix(payer.pubkey(), 1);
+    expect!(
+        ctx.send_transaction_with_payer_ephem(&add_ix, &payer),
+        validator
+    );
+
+    payer
 }
