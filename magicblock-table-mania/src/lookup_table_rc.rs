@@ -116,7 +116,7 @@ impl RefcountedPubkeys {
     fn get_refcount(&self, pubkey: &Pubkey) -> Option<usize> {
         self.pubkeys
             .get(pubkey)
-            .map(|count| count.load(Ordering::SeqCst))
+            .map(|count| count.load(Ordering::Relaxed))
     }
 }
 
