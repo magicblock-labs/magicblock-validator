@@ -1,6 +1,8 @@
 use std::{path::Path, process::Child};
 
-use integration_test_tools::tmpdir::resolve_tmp_dir;
+use integration_test_tools::{
+    loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
+};
 use test_ledger_restore::{
     setup_validator_with_local_remote, wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
@@ -22,8 +24,13 @@ fn restore_ledger_empty_validator() {
 
 fn write(ledger_path: &Path) -> (Child, u64) {
     // Launch a validator and airdrop to an account
-    let (_, mut validator, _) =
-        setup_validator_with_local_remote(ledger_path, None, true);
+    let (_, mut validator, _) = setup_validator_with_local_remote(
+        ledger_path,
+        None,
+        true,
+        true,
+        &LoadedAccounts::with_delegation_program_test_authority(),
+    );
 
     let slot = wait_for_ledger_persist(&mut validator);
 
@@ -33,8 +40,13 @@ fn write(ledger_path: &Path) -> (Child, u64) {
 
 fn read(ledger_path: &Path) -> Child {
     // Launch another validator reusing ledger
-    let (_, validator, _) =
-        setup_validator_with_local_remote(ledger_path, None, false);
+    let (_, validator, _) = setup_validator_with_local_remote(
+        ledger_path,
+        None,
+        false,
+        true,
+        &LoadedAccounts::with_delegation_program_test_authority(),
+    );
 
     validator
 }
