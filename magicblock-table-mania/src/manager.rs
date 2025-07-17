@@ -176,18 +176,21 @@ impl TableMania {
         let mut remaining = HashSet::new();
 
         // 1. Check which pubkeys already exist in any table
-        for pubkey in pubkeys {
-            let mut found = false;
-            for table in self.active_tables.read().await.iter() {
-                if table.contains_key(pubkey) {
-                    found = true;
-                    break;
+        {
+            let active_tables = self.active_tables.read().await;
+            for pubkey in pubkeys {
+                let mut found = false;
+                for table in active_tables.iter() {
+                    if table.contains_key(pubkey) {
+                        found = true;
+                        break;
+                    }
+                }
+                if !found {
+                    remaining.insert(*pubkey);
                 }
             }
-            if !found {
-                remaining.insert(*pubkey);
-            }
-        }
+        } // Drop the lock here before calling reserve_new_pubkeys
 
         // 2. If any pubkeys dont exist, create tables for them
         if !remaining.is_empty() {
