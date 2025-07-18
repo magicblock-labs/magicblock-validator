@@ -7,35 +7,46 @@ use std::{
 use fd_lock::{RwLock, RwLockWriteGuard};
 use log::*;
 use magicblock_ledger::Ledger;
-use solana_sdk::{signature::Keypair, signer::EncodableKey};
+use solana_sdk::{clock::Slot, signature::Keypair, signer::EncodableKey};
 
 use crate::{
     errors::{ApiError, ApiResult},
-    utils::fs::remove_directory_contents_if_exists,
+    utils::fs::remove_ledger_directory_if_exists,
 };
 
 // -----------------
 // Init
 // -----------------
-pub(crate) fn init(ledger_path: PathBuf, reset: bool) -> ApiResult<Ledger> {
-    if reset {
-        remove_directory_contents_if_exists(ledger_path.as_path()).map_err(
-            |err| {
-                error!(
-                    "Error: Unable to remove {}: {}",
-                    ledger_path.display(),
-                    err
-                );
-                ApiError::UnableToCleanLedgerDirectory(
-                    ledger_path.display().to_string(),
-                )
-            },
-        )?;
+pub(crate) fn init(
+    ledger_path: PathBuf,
+    reset: bool,
+    skip_replay: bool,
+) -> ApiResult<(Ledger, Slot)> {
+    // Save the last slot from the previous ledger to restart from it
+    let last_slot = if skip_replay {
+        let previous_ledger = Ledger::open(ledger_path.as_path())?;
+        previous_ledger.get_max_blockhash().map(|(slot, _)| slot)?
+    } else {
+        Slot::default()
+    };
+
+    if reset || skip_replay {
+        remove_ledger_directory_if_exists(ledger_path.as_path(), skip_replay)
+            .map_err(|err| {
+            error!(
+                "Error: Unable to remove {}: {}",
+                ledger_path.display(),
+                err
+            );
+            ApiError::UnableToCleanLedgerDirectory(
+                ledger_path.display().to_string(),
+            )
+        })?;
     }
 
     fs::create_dir_all(&ledger_path)?;
 
-    Ok(Ledger::open(ledger_path.as_path())?)
+    Ok((Ledger::open(ledger_path.as_path())?, last_slot))
 }
 
 // -----------------

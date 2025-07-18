@@ -10320,7 +10320,6 @@ dependencies = [
  "integration-test-tools",
  "magicblock-accounts-db",
  "magicblock-config",
- "magicblock-ledger",
  "program-flexi-counter",
  "solana-rpc-client",
  "solana-sdk",

@@ -39,7 +39,6 @@ pub fn setup_offline_validator(
     millis_per_slot: Option<u64>,
     reset: bool,
     skip_replay: bool,
-    sigverify: bool,
 ) -> (TempDir, Child, IntegrationTestContext) {
     let mut accounts_config = AccountsConfig {
         lifecycle: LifecycleMode::Offline,
@@ -47,18 +46,12 @@ pub fn setup_offline_validator(
     };
     accounts_config.db.snapshot_frequency = 2;
 
-    let validator_config = if let Some(ms) = millis_per_slot {
-        ValidatorConfig {
+    let validator_config = millis_per_slot
+        .map(|ms| ValidatorConfig {
             millis_per_slot: ms,
-            sigverify,
             ..Default::default()
-        }
-    } else {
-        ValidatorConfig {
-            sigverify,
-            ..Default::default()
-        }
-    };
+        })
+        .unwrap_or_default();
 
     let programs = resolve_programs(programs);
 

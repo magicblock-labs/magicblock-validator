@@ -20,10 +20,9 @@ pub struct LedgerConfig {
     #[arg(help = "Whether to reset the ledger before starting the validator.")]
     #[serde(default = "bool_true")]
     pub reset: bool,
-    /// If a previous ledger is found it is removed before starting the validator
-    /// This can be disabled by setting [Self::reset] to `false`.
+    /// Whether to skip replay of the ledger but continue from the last slot.
+    /// Will discard the existing ledger.
     #[derive_env_var]
-    #[arg(help = "Whether to skip replay of the ledger.")]
     #[serde(default = "bool_false")]
     pub skip_replay: bool,
     /// The file system path onto which the ledger should be written at

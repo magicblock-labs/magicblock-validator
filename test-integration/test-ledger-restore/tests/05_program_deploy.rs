@@ -63,7 +63,7 @@ fn write(
     let authority = read_authority_pubkey(flexi_counter_paths);
 
     let (_, mut validator, ctx) =
-        setup_offline_validator(ledger_path, None, None, true, false, true);
+        setup_offline_validator(ledger_path, None, None, true, false);
 
     expect!(ctx.wait_for_slot_ephem(1), validator);
 
@@ -121,7 +121,7 @@ fn write(
 
 fn read(ledger_path: &Path, payer: &Pubkey) -> Child {
     let (_, mut validator, _) =
-        setup_offline_validator(ledger_path, None, None, false, false, true);
+        setup_offline_validator(ledger_path, None, None, false, false);
 
     let counter_decoded = fetch_counter_ephem(payer, &mut validator);
     assert_eq!(

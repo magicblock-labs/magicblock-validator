@@ -19,6 +19,7 @@ pub type AdbResult<T> = Result<T, AccountsDbError>;
 /// some critical operation is in action, e.g. snapshotting
 pub type StWLock = Arc<RwLock<()>>;
 
+pub const ACCOUNTSDB_DIR: &str = "accountsdb";
 const ACCOUNTSDB_SUB_DIR: &str = "accountsdb/main";
 
 pub struct AccountsDb {
