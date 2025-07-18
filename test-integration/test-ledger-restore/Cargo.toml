@@ -14,3 +14,6 @@ solana-rpc-client = { workspace = true }
 solana-sdk = { workspace = true }
 solana-transaction-status = { workspace = true }
 tempfile = { workspace = true }
+
+[lints.clippy]
+zombie_processes = "allow"
