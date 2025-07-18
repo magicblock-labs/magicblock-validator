@@ -6,7 +6,7 @@ use magicblock_program::magic_scheduled_l1_message::{
 };
 use solana_pubkey::Pubkey;
 
-use crate::transaction_preperator::tasks::{
+use crate::tasks::tasks::{
     ArgsTask, CommitTask, FinalizeTask, L1Task, UndelegateTask,
 };
 

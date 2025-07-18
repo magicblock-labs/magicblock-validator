@@ -11,12 +11,13 @@ use solana_sdk::{
 
 use crate::{
     persist::L1MessagesPersisterIface,
-    transaction_preperator::{
-        delivery_preparator::DeliveryPreparator,
-        error::PreparatorResult,
+    tasks::{
         task_builder::{TaskBuilderV1, TasksBuilder},
         task_strategist::TaskStrategist,
         utils::TransactionUtils,
+    },
+    transaction_preperator::{
+        delivery_preparator::DeliveryPreparator, error::PreparatorResult,
     },
     ComputeBudgetConfig,
 };

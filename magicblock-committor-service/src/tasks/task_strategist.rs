@@ -4,8 +4,7 @@ use solana_pubkey::Pubkey;
 use solana_sdk::signature::Keypair;
 
 use crate::{
-    transaction_preperator::{
-        error::{Error, PreparatorResult},
+    tasks::{
         tasks::{ArgsTask, L1Task},
         utils::TransactionUtils,
     },
@@ -24,7 +23,7 @@ impl TaskStrategist {
     pub fn build_strategy(
         mut tasks: Vec<Box<dyn L1Task>>,
         validator: &Pubkey,
-    ) -> PreparatorResult<TransactionStrategy> {
+    ) -> TaskStrategistResult<TransactionStrategy> {
         // Attempt optimizing tasks themselves(using buffers)
         if Self::optimize_strategy(&mut tasks) <= MAX_ENCODED_TRANSACTION_SIZE {
             Ok(TransactionStrategy {
@@ -48,7 +47,7 @@ impl TaskStrategist {
     fn attempt_lookup_tables(
         validator: &Pubkey,
         tasks: &[Box<dyn L1Task>],
-    ) -> PreparatorResult<Vec<Pubkey>> {
+    ) -> TaskStrategistResult<Vec<Pubkey>> {
         // Gather all involved keys in tx
         let budgets = TransactionUtils::tasks_budgets(&tasks);
         let budget_instructions =
@@ -154,3 +153,11 @@ impl TaskStrategist {
         current_tx_length
     }
 }
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("Failed to fit in single TX")]
+    FailedToFitError,
+}
+
+pub type TaskStrategistResult<T, E = Error> = Result<T, E>;

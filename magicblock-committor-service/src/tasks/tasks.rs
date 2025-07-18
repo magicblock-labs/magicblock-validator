@@ -17,8 +17,7 @@ use solana_pubkey::Pubkey;
 use solana_sdk::instruction::{AccountMeta, Instruction};
 
 use crate::{
-    consts::MAX_WRITE_CHUNK_SIZE,
-    transaction_preperator::budget_calculator::ComputeBudgetV1,
+    consts::MAX_WRITE_CHUNK_SIZE, tasks::budget_calculator::ComputeBudgetV1,
 };
 
 pub struct TaskPreparationInfo {

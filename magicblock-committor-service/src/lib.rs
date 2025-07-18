@@ -21,6 +21,7 @@ mod commit_scheduler;
 pub(crate) mod l1_message_executor;
 #[cfg(feature = "dev-context-only-utils")]
 pub mod stubs;
+pub mod tasks;
 pub(crate) mod transaction_preperator;
 pub(crate) mod utils;
 

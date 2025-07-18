@@ -12,4 +12,14 @@ pub enum Error {
     InternalError(#[from] anyhow::Error),
 }
 
+impl From<crate::tasks::task_strategist::Error> for Error {
+    fn from(value: crate::tasks::task_strategist::Error) -> Self {
+        match value {
+            crate::tasks::task_strategist::Error::FailedToFitError => {
+                Self::FailedToFitError
+            }
+        }
+    }
+}
+
 pub type PreparatorResult<T, E = Error> = Result<T, E>;
