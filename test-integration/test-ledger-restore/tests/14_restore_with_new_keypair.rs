@@ -4,6 +4,7 @@ use std::{path::Path, process::Child};
 
 use integration_test_tools::{
     expect, loaded_accounts::LoadedAccounts, tmpdir::resolve_tmp_dir,
+    validator::cleanup,
 };
 use solana_sdk::{
     account::Account, bpf_loader_upgradeable, instruction::Instruction,
@@ -11,8 +12,7 @@ use solana_sdk::{
     signer::Signer, transaction::Transaction,
 };
 use test_ledger_restore::{
-    cleanup, setup_validator_with_local_remote, wait_for_ledger_persist,
-    TMP_DIR_LEDGER,
+    setup_validator_with_local_remote, wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 
 const MEMO_PROGRAM_PK: Pubkey = Pubkey::new_from_array([
