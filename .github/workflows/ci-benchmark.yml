@@ -1,6 +1,4 @@
 on:
-  push:
-    branches: [ feat/ci-benchmark ]
   pull_request:
     types: [opened, reopened, synchronize, ready_for_review]
 
@@ -12,12 +10,12 @@ jobs:
     runs-on: extra-large
     steps:
       - name: Checkout magicblock-validator
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           path: magicblock-validator
 
       - name: Checkout redline
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           repository: magicblock-labs/redline
           path: redline
@@ -71,7 +69,7 @@ jobs:
         working-directory: redline
 
       - name: Upload benchmark results
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         if: always()
         with:
           name: benchmark-results
