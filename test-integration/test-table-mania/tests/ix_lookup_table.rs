@@ -198,6 +198,7 @@ async fn test_create_fetch_and_close_lookup_table() {
 
     #[cfg(feature = "test_table_close")]
     {
+        use magicblock_table_mania::TableManiaComputeBudgets;
         // Wait for deactivation and close table
         debug!("{}", lookup_table);
 
@@ -209,7 +210,12 @@ async fn test_create_fetch_and_close_lookup_table() {
             utils::sleep_millis(5_000).await;
         }
         lookup_table
-            .close(&rpc_client, &validator_auth, None)
+            .close(
+                &rpc_client,
+                &validator_auth,
+                None,
+                &TableManiaComputeBudgets::default().close,
+            )
             .await
             .unwrap();
         assert!(lookup_table.is_closed(&rpc_client).await.unwrap());
