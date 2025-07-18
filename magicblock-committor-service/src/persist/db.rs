@@ -9,16 +9,19 @@ use super::{
     utils::{i64_into_u64, now, u64_into_i64},
     CommitStatus, CommitStatusSignatures, CommitStrategy, CommitType,
 };
+
 // -----------------
 // CommitStatusRow
 // -----------------
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct CommitStatusRow {
-    /// ID of the message
+    /// ID of the messages within which this account is committed
     pub message_id: u64,
     /// The on chain address of the delegated account
     pub pubkey: Pubkey,
+    /// Commit ID of an account
+    /// Determined and set during runtime
+    pub commit_id: u64,
     /// The original owner of the delegated account on chain
     pub delegated_account_owner: Pubkey,
     /// The ephemeral slot at which those changes were requested
@@ -67,6 +70,7 @@ impl fmt::Display for CommitStatusRow {
             "CommitStatusRow {{
     message_id: {}
     pubkey: {},
+    commit_id: {},
     delegated_account_owner: {},
     slot: {},
     ephemeral_blockhash: {},
@@ -81,6 +85,7 @@ impl fmt::Display for CommitStatusRow {
 }}",
             self.message_id,
             self.pubkey,
+            self.commit_id,
             self.delegated_account_owner,
             self.slot,
             self.ephemeral_blockhash,
@@ -97,27 +102,25 @@ impl fmt::Display for CommitStatusRow {
 }
 
 const ALL_COMMIT_STATUS_COLUMNS: &str = "
-    message_id,
-    pubkey,
-    delegated_account_owner,
-    slot,
-    ephemeral_blockhash,
-    undelegate,
-    lamports,
-    finalize,
-    bundle_id,
-    data,
-    commit_type,
-    created_at,
-    commit_status,
-    commit_strategy,
-    processed_signature,
-    finalized_signature,
-    undelegated_signature,
-    last_retried_at,
-    retries_count
+    message_id, // 1
+    pubkey, // 2
+    commit_id, // 3
+    delegated_account_owner, // 4
+    slot, // 5
+    ephemeral_blockhash, // 6
+    undelegate, // 7
+    lamports, // 8
+    data, // 9
+    commit_type, // 10
+    created_at, // 11
+    commit_status, // 12
+    commit_strategy, // 13
+    processed_signature, // 14
+    finalized_signature, // 15
+    undelegated_signature, // 16
+    last_retried_at, // 17
+    retries_count // 18
 ";
-
 
 const SELECT_ALL_COMMIT_STATUS_COLUMNS: &str = const {
     concat!("SELECT", ALL_COMMIT_STATUS_COLUMNS, "FROM commit_status")
@@ -126,11 +129,11 @@ const SELECT_ALL_COMMIT_STATUS_COLUMNS: &str = const {
 // -----------------
 // CommittorDb
 // -----------------
-pub struct CommittorDb {
+pub struct CommittsDb {
     conn: Connection,
 }
 
-impl CommittorDb {
+impl CommittsDb {
     pub fn new<P>(db_file: P) -> Result<Self>
     where
         P: AsRef<Path>,
@@ -159,6 +162,24 @@ impl CommittorDb {
         Ok(())
     }
 
+    pub fn set_commit_id(
+        &mut self,
+        message_id: u64,
+        pubkey: &Pubkey,
+        commit_id: u64,
+    ) -> CommitPersistResult<()> {
+        let query = "UPDATE commit_status
+            SET
+                commit_id = ?1,
+            WHERE
+                pubkey = ?2 AND message_id = ?3";
+        let tx = self.conn.transaction()?;
+        let stmt = &mut tx.prepare(query)?;
+        stmt.execute(params![commit_id, pubkey.to_string(), message_id])?;
+
+        Ok(())
+    }
+
     // -----------------
     // Commit Status
     // -----------------
@@ -167,8 +188,9 @@ impl CommittorDb {
                 "
         BEGIN;
             CREATE TABLE IF NOT EXISTS commit_status (
-                message_id               INTEGER NOT NULL,
+                message_id              INTEGER NOT NULL,
                 pubkey                  TEXT NOT NULL,
+                commit_id               INTEGER NOT NULL,
                 delegated_account_owner TEXT NOT NULL,
                 slot                    INTEGER NOT NULL,
                 ephemeral_blockhash     TEXT NOT NULL,
@@ -202,6 +224,10 @@ impl CommittorDb {
         &mut self,
         commit_rows: &[CommitStatusRow],
     ) -> CommitPersistResult<()> {
+        if commit_rows.is_empty() {
+            return Ok(());
+        }
+
         let tx = self.conn.transaction()?;
         for commit in commit_rows {
             Self::insert_commit_status_row(&tx, commit)?;
@@ -226,34 +252,34 @@ impl CommittorDb {
         tx.execute(
             &format!(
                 "INSERT INTO commit_status ({ALL_COMMIT_STATUS_COLUMNS}) VALUES
-                (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19)",
+            (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18)",
             ),
             params![
-                commit.message_id,
-                commit.pubkey.to_string(),
-                commit.delegated_account_owner.to_string(),
-                u64_into_i64(commit.slot),
-                commit.ephemeral_blockhash.to_string(),
-                if commit.undelegate { 1 } else { 0 },
-                u64_into_i64(commit.lamports),
-                commit.commit_status.bundle_id().map(u64_into_i64),
-                commit.data.as_deref(),
-                commit.commit_type.as_str(),
-                u64_into_i64(commit.created_at),
-                commit.commit_status.as_str(),
-                commit.commit_status.commit_strategy().as_str(),
-                processed_signature
-                    .as_ref()
-                    .map(|s| s.to_string()),
-                finalized_signature
-                    .as_ref()
-                    .map(|s| s.to_string()),
-                undelegated_signature
-                    .as_ref()
-                    .map(|s| s.to_string()),
-                u64_into_i64(commit.last_retried_at),
-                commit.retries_count,
-            ],
+            commit.message_id,
+            commit.pubkey.to_string(),
+            commit.commit_id,
+            commit.delegated_account_owner.to_string(),
+            u64_into_i64(commit.slot),
+            commit.ephemeral_blockhash.to_string(),
+            if commit.undelegate { 1 } else { 0 },
+            u64_into_i64(commit.lamports),
+            commit.data.as_deref(),
+            commit.commit_type.as_str(),
+            u64_into_i64(commit.created_at),
+            commit.commit_status.as_str(),
+            commit.commit_status.commit_strategy().as_str(),
+            processed_signature
+                .as_ref()
+                .map(|s| s.to_string()),
+            finalized_signature
+                .as_ref()
+                .map(|s| s.to_string()),
+            undelegated_signature
+                .as_ref()
+                .map(|s| s.to_string()),
+            u64_into_i64(commit.last_retried_at),
+            commit.retries_count,
+        ],
         )?;
         Ok(())
     }
@@ -267,7 +293,6 @@ impl CommittorDb {
         let query = "UPDATE commit_status
             SET
                 commit_status = ?1,
-                bundle_id = ?2,
                 commit_strategy = ?3,
                 processed_signature = ?4,
                 finalized_signature = ?5,
@@ -277,7 +302,6 @@ impl CommittorDb {
         let stmt = &mut tx.prepare(query)?;
         stmt.execute(params![
             status.as_str(),
-            status.bundle_id(),
             status.commit_strategy().as_str(),
             status.signatures().map(|s| s.process_signature.to_string()),
             status
@@ -343,11 +367,43 @@ impl CommittorDb {
         Ok(())
     }
 
-    pub fn get_signatures_by_id(
+    pub fn get_signatures(
         &self,
-        message_id: u64
-    ) -> CommitPersistResult<MessageSignatures> {
-        todo!()
+        commit_id: u64,
+    ) -> CommitPersistResult<Option<MessageSignatures>> {
+        let query = "SELECT
+            processed_signature, finalized_signature, undelegated_signature, created_at
+            FROM commit_status
+        WHERE commit_id = ?1
+            LIMIT 1";
+
+        let mut stmt = self.conn.prepare(&query)?;
+        let mut rows = stmt.query(params![commit_id])?;
+
+        let result = rows
+            .next()?
+            .map(|row| {
+                let processed_signature: String = row.get(0)?;
+                let finalized_signature: Option<String> = row.get(1)?;
+                let undelegated_signature: Option<String> = row.get(2)?;
+                let created_at: i64 = row.get(3)?;
+
+                Ok(MessageSignatures {
+                    processed_signature: Signature::from_str(
+                        &processed_signature,
+                    )?,
+                    finalized_signature: finalized_signature
+                        .map(|s| Signature::from_str(&s))
+                        .transpose()?,
+                    undelegate_signature: undelegated_signature
+                        .map(|s| Signature::from_str(&s))
+                        .transpose()?,
+                    created_at: i64_into_u64(created_at),
+                })
+            })
+            .transpose()?;
+
+        Ok(result)
     }
 }
 
@@ -377,33 +433,32 @@ fn extract_committor_row(
         let pubkey: String = row.get(1)?;
         Pubkey::try_from(pubkey.as_str())?
     };
+    let commit_id = {
+        let message_id: i64 = row.get(2)?;
+        i64_into_u64(message_id)
+    };
     let delegated_account_owner = {
-        let delegated_account_owner: String = row.get(2)?;
+        let delegated_account_owner: String = row.get(3)?;
         Pubkey::try_from(delegated_account_owner.as_str())?
     };
     let slot: Slot = {
-        let slot: i64 = row.get(3)?;
+        let slot: i64 = row.get(4)?;
         i64_into_u64(slot)
     };
 
     let ephemeral_blockhash = {
-        let ephemeral_blockhash: String = row.get(4)?;
+        let ephemeral_blockhash: String = row.get(5)?;
         Hash::from_str(ephemeral_blockhash.as_str())?
     };
 
     let undelegate: bool = {
-        let undelegate: u8 = row.get(5)?;
+        let undelegate: u8 = row.get(6)?;
         undelegate == 1
     };
 
     let lamports: u64 = {
-        let lamports: i64 = row.get(6)?;
+        let lamports: i64 = row.get(7)?;
         i64_into_u64(lamports)
-    };
-
-    let bundle_id: Option<u64> = {
-        let bundle_id: Option<i64> = row.get(7)?;
-        bundle_id.map(i64_into_u64)
     };
 
     let data: Option<Vec<u8>> = row.get(8)?;
@@ -445,12 +500,7 @@ fn extract_committor_row(
             finalize_signature: finalized_signature,
             undelegate_signature: undelegated_signature,
         });
-        CommitStatus::try_from((
-            commit_status.as_str(),
-            bundle_id,
-            commit_strategy,
-            sigs,
-        ))?
+        CommitStatus::try_from((commit_status.as_str(), commit_strategy, sigs))?
     };
 
     let last_retried_at: u64 = {
@@ -465,6 +515,7 @@ fn extract_committor_row(
     Ok(CommitStatusRow {
         message_id,
         pubkey,
+        commit_id,
         delegated_account_owner,
         slot,
         ephemeral_blockhash,
@@ -479,13 +530,12 @@ fn extract_committor_row(
     })
 }
 
-
 #[cfg(test)]
 mod test {
     use super::*;
 
-    fn setup_db() -> CommittorDb {
-        let db = CommittorDb::new(":memory:").unwrap();
+    fn setup_db() -> CommittsDb {
+        let db = CommittsDb::new(":memory:").unwrap();
         db.create_commit_status_table().unwrap();
         db
     }
@@ -496,6 +546,7 @@ mod test {
     fn create_commit_status_row(message_id: u64) -> CommitStatusRow {
         CommitStatusRow {
             message_id,
+            commit_id: 0,
             pubkey: Pubkey::new_unique(),
             delegated_account_owner: Pubkey::new_unique(),
             slot: 100,
@@ -515,6 +566,7 @@ mod test {
     fn test_round_trip_commit_status_rows() {
         let one_unbundled_commit_row_no_data = CommitStatusRow {
             message_id: 123,
+            commit_id: 0,
             pubkey: Pubkey::new_unique(),
             delegated_account_owner: Pubkey::new_unique(),
             slot: 100,
@@ -531,6 +583,7 @@ mod test {
 
         let two_bundled_commit_row_with_data = CommitStatusRow {
             message_id: 123,
+            commit_id: 0,
             pubkey: Pubkey::new_unique(),
             delegated_account_owner: Pubkey::new_unique(),
             slot: 100,
@@ -587,6 +640,19 @@ mod test {
         );
     }
 
+    fn create_message_signature_row(
+        commit_status: &CommitStatus,
+    ) -> Option<MessageSignatures> {
+        commit_status
+            .bundle_id()
+            .map(|bundle_id| MessageSignatures {
+                processed_signature: Signature::new_unique(),
+                finalized_signature: None,
+                undelegate_signature: None,
+                created_at: 1000,
+            })
+    }
+
     #[test]
     fn test_commits_with_message_id() {
         let mut db = setup_db();
@@ -596,6 +662,7 @@ mod test {
         let commit_row_one = create_commit_status_row(MESSAGE_ID_ONE);
         let commit_row_one_other = create_commit_status_row(MESSAGE_ID_ONE);
         let commit_row_two = create_commit_status_row(MESSAGE_ID_TWO);
+
         db.insert_commit_status_rows(&[
             commit_row_one.clone(),
             commit_row_one_other.clone(),
@@ -643,7 +710,6 @@ mod test {
             failing_commit_row.message_id,
             &failing_commit_row.pubkey,
             &new_failing_status,
-            None,
         )
         .unwrap();
         let sigs = CommitStatusSignatures {
@@ -653,6 +719,9 @@ mod test {
         };
         let new_success_status =
             CommitStatus::Succeeded((33, CommitStrategy::Args, sigs));
+        let success_signatures_row =
+            create_message_signature_row(&new_success_status);
+        let success_signatures = success_signatures_row.clone().unwrap();
         db.update_commit_status(
             success_commit_row.message_id,
             &success_commit_row.pubkey,
@@ -672,8 +741,7 @@ mod test {
             .unwrap()
             .unwrap();
         assert_eq!(succeeded_commit_row.commit_status, new_success_status);
-        let signature_row =
-            db.get_signatures_by_id(33).unwrap().unwrap();
+        let signature_row = db.get_signatures(33).unwrap().unwrap();
         assert_eq!(
             signature_row.processed_signature,
             success_signatures.processed_signature,

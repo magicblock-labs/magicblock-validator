@@ -100,48 +100,27 @@ impl fmt::Display for CommitStatus {
     }
 }
 
-impl
-    TryFrom<(
-        &str,
-        Option<u64>,
-        CommitStrategy,
-        Option<CommitStatusSignatures>,
-    )> for CommitStatus
+impl TryFrom<(&str, CommitStrategy, Option<CommitStatusSignatures>)>
+    for CommitStatus
 {
     type Error = CommitPersistError;
 
     fn try_from(
-        (status, bundle_id, strategy, sigs): (
+        (status, strategy, sigs): (
             &str,
-            Option<u64>,
             CommitStrategy,
             Option<CommitStatusSignatures>,
         ),
     ) -> Result<Self, Self::Error> {
-        macro_rules! get_bundle_id {
-            () => {
-                if let Some(bundle_id) = bundle_id {
-                    bundle_id
-                } else {
-                    return Err(CommitPersistError::CommitStatusNeedsBundleId(
-                        status.to_string(),
-                    ));
-                }
-            };
-        }
-        macro_rules! get_sigs {
-            () => {
-                if let Some(sigs) = sigs {
-                    sigs
-                } else {
-                    return Err(
-                        CommitPersistError::CommitStatusNeedsSignatures(
-                            status.to_string(),
-                        ),
-                    );
-                }
-            };
-        }
+        let get_sigs = || {
+            if let Some(sigs) = sigs {
+                Ok(sigs)
+            } else {
+                return Err(CommitPersistError::CommitStatusNeedsSignatures(
+                    status.to_string(),
+                ));
+            }
+        };
 
         use CommitStatus::*;
         match status {
