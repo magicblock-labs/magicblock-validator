@@ -170,12 +170,19 @@ impl IntegrationTestContext {
     }
 
     pub fn dump_chain_logs(&self, sig: Signature) {
-        let logs = self.fetch_chain_logs(sig).unwrap();
+        let Some(logs) = self.fetch_chain_logs(sig) else {
+            eprintln!("No chain logs found for '{}'", sig);
+            return;
+        };
+
         eprintln!("Chain Logs for '{}':\n{:#?}", sig, logs);
     }
 
     pub fn dump_ephemeral_logs(&self, sig: Signature) {
-        let logs = self.fetch_ephemeral_logs(sig).unwrap();
+        let Some(logs) = self.fetch_ephemeral_logs(sig) else {
+            eprintln!("No ephemeral logs found for '{}'", sig);
+            return;
+        };
         eprintln!("Ephemeral Logs for '{}':\n{:#?}", sig, logs);
     }
 
@@ -593,13 +600,18 @@ impl IntegrationTestContext {
         payer: &Keypair,
     ) -> Result<(Signature, bool), anyhow::Error> {
         self.try_ephem_client().and_then(|ephem_client| {
-            Self::send_and_confirm_instructions_with_payer(
+            self.send_and_confirm_instructions_with_payer(
                 ephem_client,
                 ixs,
                 payer,
                 self.commitment,
-                "ephem",
             )
+            .with_context(|| {
+                format!(
+                    "Failed to confirm ephem instructions with payer '{:?}'",
+                    payer.pubkey()
+                )
+            })
         })
     }
 
@@ -609,13 +621,18 @@ impl IntegrationTestContext {
         payer: &Keypair,
     ) -> Result<(Signature, bool), anyhow::Error> {
         self.try_chain_client().and_then(|chain_client| {
-            Self::send_and_confirm_instructions_with_payer(
+            self.send_and_confirm_instructions_with_payer(
                 chain_client,
                 ixs,
                 payer,
                 self.commitment,
-                "chain",
             )
+            .with_context(|| {
+                format!(
+                    "Failed to confirm chain instructions with payer '{:?}'",
+                    payer.pubkey()
+                )
+            })
         })
     }
 
@@ -661,29 +678,19 @@ impl IntegrationTestContext {
     }
 
     pub fn send_and_confirm_instructions_with_payer(
+        &self,
         rpc_client: &RpcClient,
         ixs: &[Instruction],
         payer: &Keypair,
         commitment: CommitmentConfig,
-        label: &str,
-    ) -> Result<(Signature, bool), anyhow::Error> {
+    ) -> Result<(Signature, bool), client_error::Error> {
         let sig = Self::send_instructions_with_payer(rpc_client, ixs, payer)?;
+        debug!("Confirming transaction with signature: {}", sig);
         Self::confirm_transaction(&sig, rpc_client, commitment)
             .map(|confirmed| (sig, confirmed))
-            .inspect_err(|err| {
-                error!("Error {:#?}", err);
-                error!(
-                    "Failed to confirm {} instructions with '{}' ({})",
-                    label,
-                    payer.pubkey(),
-                    sig
-                );
-            })
-            .with_context(|| {
-                format!(
-                    "Failed to confirm {label} instructions with '{}' ({sig})",
-                    payer.pubkey()
-                )
+            .inspect_err(|_| {
+                self.dump_ephemeral_logs(sig);
+                self.dump_chain_logs(sig);
             })
     }
 

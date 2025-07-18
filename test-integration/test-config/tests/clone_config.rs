@@ -6,9 +6,12 @@ use test_config::{
     count_lookup_table_transactions, delegate_and_clone,
     start_validator_with_clone_config, wait_for_startup,
 };
+use test_tools_core::init_logger;
 
 #[test]
 fn test_clone_config_never() {
+    init_logger!();
+
     let (_temp_dir, mut validator, ctx) = start_validator_with_clone_config(
         PrepareLookupTables::Never,
         &LoadedAccounts::with_delegation_program_test_authority(),
@@ -29,6 +32,8 @@ fn test_clone_config_never() {
 
 #[test]
 fn test_clone_config_always() {
+    init_logger!();
+
     let loaded_accounts =
         LoadedAccounts::with_delegation_program_test_authority();
     let (_temp_dir, mut validator, ctx) = start_validator_with_clone_config(

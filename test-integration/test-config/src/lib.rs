@@ -1,12 +1,16 @@
 use std::process::Child;
 
 use integration_test_tools::{
-    expect, loaded_accounts::LoadedAccounts,
-    validator::start_validator_with_config_struct, IntegrationTestContext,
+    expect,
+    loaded_accounts::LoadedAccounts,
+    validator::{
+        resolve_programs, start_magicblock_validator_with_config_struct,
+    },
+    IntegrationTestContext,
 };
 use magicblock_config::{
     AccountsCloneConfig, AccountsConfig, EphemeralConfig, LifecycleMode,
-    PrepareLookupTables, RemoteCluster, RemoteConfig,
+    PrepareLookupTables, ProgramConfig, RemoteCluster, RemoteConfig,
 };
 use program_flexi_counter::instruction::{
     create_add_ix, create_delegate_ix, create_init_ix,
@@ -17,20 +21,34 @@ use solana_sdk::{
 };
 use tempfile::TempDir;
 
+fn get_programs() -> Vec<ProgramConfig> {
+    let flexicounter_id = program_flexi_counter::id();
+    resolve_programs(Some(vec![ProgramConfig {
+        id: flexicounter_id,
+        path: "program_flexi_counter.so".to_string(),
+    }]))
+}
+
 /// Starts a validator with the given clone configuration
 pub fn start_validator_with_clone_config(
     prepare_lookup_tables: PrepareLookupTables,
     loaded_chain_accounts: &LoadedAccounts,
 ) -> (TempDir, Child, IntegrationTestContext) {
+    let programs = get_programs();
+
     let config = EphemeralConfig {
+        programs,
         accounts: AccountsConfig {
             remote: RemoteConfig {
                 cluster: RemoteCluster::Custom,
                 url: Some(
                     IntegrationTestContext::url_chain().try_into().unwrap(),
                 ),
-                ws_url: None,
+                ws_url: Some(vec![IntegrationTestContext::ws_url_chain()
+                    .try_into()
+                    .unwrap()]),
             },
+
             lifecycle: LifecycleMode::Ephemeral,
             clone: AccountsCloneConfig {
                 prepare_lookup_tables,
@@ -41,12 +59,15 @@ pub fn start_validator_with_clone_config(
     };
 
     let (default_tmpdir, Some(mut validator)) =
-        start_validator_with_config_struct(config, loaded_chain_accounts)
+        start_magicblock_validator_with_config_struct(
+            config,
+            loaded_chain_accounts,
+        )
     else {
         panic!("validator should set up correctly");
     };
 
-    let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
+    let ctx = expect!(IntegrationTestContext::try_new(), validator);
     (default_tmpdir, validator, ctx)
 }
 

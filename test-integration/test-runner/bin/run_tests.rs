@@ -450,10 +450,10 @@ fn run_config_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
     eprintln!("======== RUNNING CONFIG TESTS ========");
     let loaded_chain_accounts =
         LoadedAccounts::with_delegation_program_test_authority();
-    
+
     // Initialize only a devnet cluster for config tests
     let mut devnet_validator = match start_validator(
-        "schedulecommit-conf.devnet.toml",
+        "config-conf.devnet.toml",
         ValidatorCluster::Chain(Some(ProgramLoader::UpgradeableProgram)),
         &loaded_chain_accounts,
     ) {
@@ -462,7 +462,7 @@ fn run_config_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
             panic!("Failed to start devnet validator properly");
         }
     };
-    
+
     let test_config_dir = format!("{}/../{}", manifest_dir, "test-config");
     eprintln!("Running config tests in {}", test_config_dir);
     let output = match run_test(test_config_dir, Default::default()) {

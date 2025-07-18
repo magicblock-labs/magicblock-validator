@@ -10293,6 +10293,7 @@ dependencies = [
  "solana-rpc-client",
  "solana-sdk",
  "tempfile",
+ "test-tools-core",
 ]
 
 [[package]]
