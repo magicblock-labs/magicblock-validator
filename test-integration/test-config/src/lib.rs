@@ -112,17 +112,13 @@ pub fn delegate_and_clone(
     payer
 }
 
-/// Count lookup table program transactions on chain
-pub fn count_lookup_table_transactions(
+pub fn count_lookup_table_transactions_on_chain(
     ctx: &IntegrationTestContext,
-    validator: &mut Child,
-) -> usize {
+) -> anyhow::Result<usize> {
     let lookup_table_program_id = address_lookup_table::program::id();
 
-    let signatures = expect!(
-        ctx.get_signaturestats_for_address_chain(&lookup_table_program_id),
-        validator
-    );
+    let sigs =
+        ctx.get_signaturestats_for_address_chain(&lookup_table_program_id)?;
 
-    signatures.len()
+    Ok(sigs.len())
 }
