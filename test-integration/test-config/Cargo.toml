@@ -8,8 +8,7 @@ anyhow = { workspace = true }
 cleanass = { workspace = true }
 integration-test-tools = { workspace = true }
 magicblock-config = { workspace = true }
-program-flexi-counter = { workspace = true }
+program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
 solana-rpc-client = { workspace = true }
 solana-sdk = { workspace = true }
 tempfile = { workspace = true }
-test-ledger-restore = { workspace = true }

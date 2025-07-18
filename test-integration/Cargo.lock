@@ -10289,6 +10289,7 @@ dependencies = [
  "cleanass",
  "integration-test-tools",
  "magicblock-config",
+ "program-flexi-counter",
  "solana-rpc-client",
  "solana-sdk",
  "tempfile",

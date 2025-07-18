@@ -1,44 +1,27 @@
-use std::{
-    fs,
-    path::Path,
-    process::{self, Child},
-};
+use std::process::Child;
 
 use integration_test_tools::{
-    expect,
-    loaded_accounts::LoadedAccounts,
-    tmpdir::resolve_tmp_dir,
-    validator::{resolve_workspace_dir, TestRunnerPaths},
-    IntegrationTestContext,
+    expect, loaded_accounts::LoadedAccounts,
+    validator::start_validator_with_config_struct, IntegrationTestContext,
 };
-use test_ledger_restore::start_validator_with_config;
 use magicblock_config::{
     AccountsCloneConfig, AccountsConfig, EphemeralConfig, LifecycleMode,
     PrepareLookupTables, RemoteCluster, RemoteConfig,
 };
-use program_flexi_counter::{
-    instruction::{create_add_ix, create_delegate_ix, create_init_ix},
-    state::FlexiCounter,
+use program_flexi_counter::instruction::{
+    create_add_ix, create_delegate_ix, create_init_ix,
 };
 use solana_sdk::{
-    native_token::LAMPORTS_PER_SOL, pubkey::Pubkey, signature::Keypair,
+    address_lookup_table, native_token::LAMPORTS_PER_SOL, signature::Keypair,
     signer::Signer,
 };
 use tempfile::TempDir;
-
-pub const TMP_DIR_CONFIG: &str = "TMP_DIR_CONFIG";
 
 /// Starts a validator with the given clone configuration
 pub fn start_validator_with_clone_config(
     prepare_lookup_tables: PrepareLookupTables,
     loaded_chain_accounts: &LoadedAccounts,
 ) -> (TempDir, Child, IntegrationTestContext) {
-    let workspace_dir = resolve_workspace_dir();
-    let (default_tmpdir, temp_dir) = resolve_tmp_dir(TMP_DIR_CONFIG);
-    let release = std::env::var("RELEASE").is_ok();
-    let config_path = temp_dir.join("config.toml");
-
-    // Create config with specific clone setting
     let config = EphemeralConfig {
         accounts: AccountsConfig {
             remote: RemoteConfig {
@@ -57,37 +40,14 @@ pub fn start_validator_with_clone_config(
         ..Default::default()
     };
 
-    let config_toml = config.to_string();
-    fs::write(&config_path, config_toml).unwrap();
-
-    let root_dir = Path::new(&workspace_dir)
-        .join("..")
-        .canonicalize()
-        .unwrap()
-        .to_path_buf();
-    let paths = TestRunnerPaths {
-        config_path,
-        root_dir,
-        workspace_dir,
-    };
-
-    let (default_tmpdir_config, Some(validator)) =
-        start_validator_with_config(
-            config,
-            &LoadedAccounts::with_delegation_program_test_authority(),
-        )
+    let (default_tmpdir, Some(mut validator)) =
+        start_validator_with_config_struct(config, loaded_chain_accounts)
     else {
         panic!("validator should set up correctly");
     };
 
-    let ctx = expect!(IntegrationTestContext::try_new(), validator);
-    (default_tmpdir_config, validator, ctx)
-}
-
-pub fn cleanup(validator: &mut Child) {
-    let _ = validator.kill().inspect_err(|e| {
-        eprintln!("ERR: Failed to kill validator: {:?}", e);
-    });
+    let ctx = expect!(IntegrationTestContext::try_new_ephem_only(), validator);
+    (default_tmpdir, validator, ctx)
 }
 
 /// Wait for the validator to start up properly
@@ -110,26 +70,38 @@ pub fn delegate_and_clone(
         validator
     );
 
-    // 2. Create and send init counter instruction on chain
+    // 2. Create and send init counter instruction on chain and delegate it
     let init_ix = create_init_ix(payer.pubkey(), "TEST_COUNTER".to_string());
-    expect!(
-        ctx.send_transaction_with_payer_chain(&init_ix, &payer),
-        validator
-    );
-
-    // 3. Delegate counter to ephemeral
     let delegate_ix = create_delegate_ix(payer.pubkey());
     expect!(
-        ctx.send_transaction_with_payer_chain(&delegate_ix, &payer),
+        ctx.send_and_confirm_instructions_with_payer_chain(
+            &[init_ix, delegate_ix],
+            &payer
+        ),
         validator
     );
 
-    // 4. Send a transaction to ephemeral validator to trigger cloning
+    // 3. Send a transaction to ephemeral validator to trigger cloning
     let add_ix = create_add_ix(payer.pubkey(), 1);
     expect!(
-        ctx.send_transaction_with_payer_ephem(&add_ix, &payer),
+        ctx.send_and_confirm_instructions_with_payer_ephem(&[add_ix], &payer),
         validator
     );
 
     payer
+}
+
+/// Count lookup table program transactions on chain
+pub fn count_lookup_table_transactions(
+    ctx: &IntegrationTestContext,
+    validator: &mut Child,
+) -> usize {
+    let lookup_table_program_id = address_lookup_table::program::id();
+
+    let signatures = expect!(
+        ctx.get_signaturestats_for_address_chain(&lookup_table_program_id),
+        validator
+    );
+
+    signatures.len()
 }
