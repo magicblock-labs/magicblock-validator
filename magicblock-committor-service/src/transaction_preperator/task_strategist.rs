@@ -1,7 +1,4 @@
-use std::{
-    collections::{BinaryHeap, HashSet},
-    ptr::NonNull,
-};
+use std::{collections::BinaryHeap, ptr::NonNull};
 
 use solana_pubkey::Pubkey;
 use solana_sdk::signature::Keypair;

@@ -15,11 +15,11 @@ use crate::utils::ScheduledMessageExt;
 const POISONED_MUTEX_MSG: &str = "Commitor Persister lock poisoned";
 
 /// Records lifespan pf L1Message
-pub trait L1MessagesPersisterIface: Send + Sync + Clone {
+pub trait L1MessagesPersisterIface: Send + Sync + Clone + 'static {
     /// Starts persisting L1Message
     fn start_l1_messages(
         &self,
-        l1_message: &ScheduledL1Message,
+        l1_message: &[ScheduledL1Message],
     ) -> CommitPersistResult<()>;
     fn start_l1_message(
         &self,
@@ -126,7 +126,7 @@ impl L1MessagePersister {
 impl L1MessagesPersisterIface for L1MessagePersister {
     fn start_l1_messages(
         &self,
-        l1_message: &Vec<ScheduledL1Message>,
+        l1_message: &[ScheduledL1Message],
     ) -> CommitPersistResult<()> {
         let commit_rows = l1_message
             .iter()

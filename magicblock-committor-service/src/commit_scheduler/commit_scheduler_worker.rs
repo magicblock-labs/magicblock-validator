@@ -212,12 +212,7 @@ impl<D: DB, P: L1MessagesPersisterIface> CommitSchedulerWorker<D, P> {
         commit_ids: HashMap<Pubkey, u64>,
         inner_scheduler: Arc<Mutex<CommitSchedulerInner>>,
         execution_permit: OwnedSemaphorePermit,
-        result_sender: broadcast::Sender<
-            MessageExecutorResult<
-                ExecutionOutput,
-                Arc<crate::l1_message_executor::Error>,
-            >,
-        >,
+        result_sender: broadcast::Sender<BroadcasteddMessageExecutionResult>,
         notify: Arc<Notify>,
     ) {
         let result = executor

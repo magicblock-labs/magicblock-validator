@@ -3,7 +3,7 @@ use solana_sdk::{
     compute_budget::ComputeBudgetInstruction, instruction::Instruction,
 };
 
-use crate::{compute_budget::Budget, ComputeBudgetConfig};
+use crate::ComputeBudgetConfig;
 
 // TODO(edwin): rename
 pub struct ComputeBudgetV1 {

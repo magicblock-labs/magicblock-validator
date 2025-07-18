@@ -23,15 +23,13 @@ use tokio::task::JoinSet;
 use super::common::{lookup_table_keys, send_and_confirm};
 use crate::{
     commit_scheduler::{db::DummyDB, CommitScheduler},
-    commit_stage::CommitStage,
     compute_budget::{ComputeBudget, ComputeBudgetConfig},
     config::ChainConfig,
     error::CommittorServiceResult,
     persist::{
-        CommitStatusRow, CommitStrategy, L1MessagePersister,
-        L1MessagesPersisterIface, MessageSignatures,
+        CommitStatusRow, L1MessagePersister, L1MessagesPersisterIface,
+        MessageSignatures,
     },
-    pubkeys_provider::provide_committee_pubkeys,
     types::{InstructionsForCommitable, InstructionsKind},
     CommitInfo,
 };

@@ -559,7 +559,7 @@ impl CommittorProcessor {
                     pubkey: commitable.pubkey,
                     chunks_account_size,
                     buffer_account_size,
-                    blockhash: ephemeral_blockhash,
+                    commit_id: 0, // TODO(edwin)
                     chunk_count: commitable.chunk_count(),
                     chunk_size: commitable.chunk_size(),
                 });
@@ -568,7 +568,7 @@ impl CommittorProcessor {
                     authority: me.authority.pubkey(),
                     pubkey: commitable.pubkey,
                     buffer_account_size,
-                    blockhash: ephemeral_blockhash,
+                    commit_id: 0, // TODO(edwin)
                 });
 
             let commit_info = CommitInfo::BufferedDataAccount {
@@ -999,7 +999,7 @@ impl CommittorProcessor {
                 pubkey,
                 offset: chunk.offset,
                 data_chunk: chunk.data_chunk,
-                blockhash: ephemeral_blockhash,
+                commit_id: 0, // TODO(edwin)
             });
             let write_budget_ixs = self
                 .compute_budget_config

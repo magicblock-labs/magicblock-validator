@@ -18,7 +18,6 @@ use crate::{
         },
         db::DB,
     },
-    l1_message_executor::{ExecutionOutput, MessageExecutorResult},
     persist::L1MessagesPersisterIface,
     ComputeBudgetConfig,
 };
@@ -65,30 +64,28 @@ impl<D: DB> CommitScheduler<D> {
         &self,
         l1_messages: Vec<ScheduledL1Message>,
     ) -> Result<(), Error> {
-        for el in l1_messages {
-            // If db not empty push el-t there
-            // This means that at some point channel got full
-            // Worker first will clean-up channel, and then DB.
-            // Pushing into channel would break order of commits
-            if !self.db.is_empty() {
-                self.db.store_l1_messages(l1_messages).await?;
-                continue;
-            }
+        // If db not empty push el-t there
+        // This means that at some point channel got full
+        // Worker first will clean-up channel, and then DB.
+        // Pushing into channel would break order of commits
+        if !self.db.is_empty() {
+            self.db.store_l1_messages(l1_messages).await?;
+            return Ok(());
+        }
 
+        for el in l1_messages {
             let err = if let Err(err) = self.message_sender.try_send(el) {
                 err
             } else {
                 continue;
             };
 
-            if matches!(err, TrySendError::Closed(_)) {
-                Err(Error::ChannelClosed)
-            } else {
-                self.db
-                    .store_l1_messages(l1_messages)
-                    .await
-                    .map_err(Error::from)
-            }?
+            match err {
+                TrySendError::Closed(_) => Err(Error::ChannelClosed),
+                TrySendError::Full(el) => {
+                    self.db.store_l1_message(el).await.map_err(Error::from)
+                }
+            }?;
         }
 
         Ok(())

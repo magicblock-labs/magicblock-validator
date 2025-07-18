@@ -1,5 +1,3 @@
-use std::arch::aarch64::vcale_f32;
-
 use dlp::args::{CallHandlerArgs, CommitStateArgs, CommitStateFromBufferArgs};
 use magicblock_committor_program::{
     instruction_builder::{

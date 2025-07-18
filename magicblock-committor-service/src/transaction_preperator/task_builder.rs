@@ -1,14 +1,13 @@
 use std::collections::HashMap;
 
 use magicblock_program::magic_scheduled_l1_message::{
-    CommitType, CommittedAccountV2, L1Action, MagicL1Message,
-    ScheduledL1Message, UndelegateType,
+    CommitType, CommittedAccountV2, MagicL1Message, ScheduledL1Message,
+    UndelegateType,
 };
 use solana_pubkey::Pubkey;
 
 use crate::transaction_preperator::tasks::{
-    ArgsTask, CommitTask, FinalizeTask, L1Task, TaskPreparationInfo,
-    UndelegateTask,
+    ArgsTask, CommitTask, FinalizeTask, L1Task, UndelegateTask,
 };
 
 pub trait TasksBuilder {

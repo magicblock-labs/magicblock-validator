@@ -2,7 +2,6 @@ use std::collections::HashSet;
 
 use solana_pubkey::Pubkey;
 use solana_sdk::{
-    address_lookup_table::state::AddressLookupTable,
     hash::Hash,
     instruction::Instruction,
     message::{v0::Message, AddressLookupTableAccount, VersionedMessage},

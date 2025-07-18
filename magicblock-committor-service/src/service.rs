@@ -1,7 +1,6 @@
 use std::path::Path;
 
 use log::*;
-use magicblock_committor_program::Changeset;
 use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
 use solana_pubkey::Pubkey;
 use solana_sdk::signature::Keypair;
