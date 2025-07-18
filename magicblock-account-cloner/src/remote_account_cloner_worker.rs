@@ -295,34 +295,36 @@ where
         // retry resulting in overall slower hydration.
         // If the optimal rate here is desired we might make this configurable in the
         // future.
-        // TODO(GabrielePicco): Make the concurrency configurable
         let result = stream
             .map(Ok::<_, AccountClonerError>)
-            .try_for_each_concurrent(10, |(pubkey, owner)| async move {
-                trace!("Hydrating '{}'", pubkey);
-                let res = self
-                    .do_clone_and_update_cache(
-                        &pubkey,
-                        ValidatorStage::Hydrating {
-                            validator_identity: self.validator_identity,
-                            account_owner: owner,
-                        },
-                    )
-                    .await;
-                match res {
-                    Ok(output) => {
-                        trace!("Cloned '{}': {:?}", pubkey, output);
-                        Ok(())
-                    }
-                    Err(err) => {
-                        error!("Failed to clone {} ('{:?}')", pubkey, err);
-                        // NOTE: the account fetch already has retries built in, so
-                        // we don't to retry here
+            .try_for_each_concurrent(
+                self.clone_config.concurrency,
+                |(pubkey, owner)| async move {
+                    trace!("Hydrating '{}'", pubkey);
+                    let res = self
+                        .do_clone_and_update_cache(
+                            &pubkey,
+                            ValidatorStage::Hydrating {
+                                validator_identity: self.validator_identity,
+                                account_owner: owner,
+                            },
+                        )
+                        .await;
+                    match res {
+                        Ok(output) => {
+                            trace!("Cloned '{}': {:?}", pubkey, output);
+                            Ok(())
+                        }
+                        Err(err) => {
+                            error!("Failed to clone {} ('{:?}')", pubkey, err);
+                            // NOTE: the account fetch already has retries built in, so
+                            // we don't to retry here
 
-                        Err(err)
+                            Err(err)
+                        }
                     }
-                }
-            })
+                },
+            )
             .await;
         info!("On-startup account ensurance is complete: {count}");
         result

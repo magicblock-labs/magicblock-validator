@@ -6,10 +6,10 @@ use std::{
 
 use isocountry::CountryCode;
 use magicblock_config::{
-    AccountsConfig, CommitStrategyConfig, EphemeralConfig, GeyserGrpcConfig,
-    LedgerConfig, LedgerResumeStrategy, LifecycleMode, MagicBlockConfig,
-    MetricsConfig, MetricsServiceConfig, ProgramConfig, RemoteCluster,
-    RemoteConfig, RpcConfig, ValidatorConfig,
+    AccountsCloneConfig, AccountsConfig, CommitStrategyConfig, EphemeralConfig,
+    GeyserGrpcConfig, LedgerConfig, LedgerResumeStrategy, LifecycleMode,
+    MagicBlockConfig, MetricsConfig, MetricsServiceConfig, PrepareLookupTables,
+    ProgramConfig, RemoteCluster, RemoteConfig, RpcConfig, ValidatorConfig,
 };
 use solana_sdk::pubkey;
 use test_tools_core::paths::cargo_workspace_dir;
@@ -123,6 +123,8 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
     env::set_var("METRICS_ENABLED", "false");
     env::set_var("METRICS_PORT", "1234");
     env::set_var("METRICS_SYSTEM_METRICS_TICK_INTERVAL_SECS", "10");
+    env::set_var("CLONE_CONCURRENCY", "20");
+    env::set_var("CLONE_AUTO_AIRDROP_LAMPORTS", "123");
 
     let config = parse_config_with_file(&config_file_dir);
 
@@ -139,6 +141,11 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
                     cluster: RemoteCluster::Custom,
                     url: Some(Url::parse(base_cluster).unwrap()),
                     ..Default::default()
+                },
+                clone: AccountsCloneConfig {
+                    prepare_lookup_tables: PrepareLookupTables::Never,
+                    concurrency: 20,
+                    auto_airdrop_lamports: 123,
                 },
                 ..Default::default()
             },
@@ -168,7 +175,7 @@ fn test_load_local_dev_with_programs_toml_envs_override() {
                 resume_strategy: LedgerResumeStrategy::ResumeOnly,
                 skip_keypair_match_check: true,
                 path: Some("/hello/world".to_string()),
-                size: 123123
+                size: 123123,
             },
             metrics: MetricsConfig {
                 enabled: false,

@@ -1,7 +1,7 @@
 [accounts]
 lifecycle = "programs-replica"
 allowed-programs = [{ id = "wormH7q6y9EBUUL6EyptYhryxs6HoJg8sPK3LMfoNf4" }]
-clone = { prepare-lookup-tables = "always", auto-airdrop-lamports = 123 }
+clone = { prepare-lookup-tables = "always", auto-airdrop-lamports = 123, concurrency = 20 }
 max-monitored-accounts = 1000000
 
 [accounts.remote]

@@ -237,6 +237,14 @@ pub struct AccountsCloneConfig {
     )]
     #[serde(default)]
     pub auto_airdrop_lamports: u64,
+    /// The number of threads to use for cloning accounts.
+    #[derive_env_var]
+    #[serde(default = "default_cloning_concurrency")]
+    pub concurrency: usize,
+}
+
+const fn default_cloning_concurrency() -> usize {
+    10
 }
 
 #[derive(
@@ -414,6 +422,7 @@ mod tests {
             clone: AccountsCloneConfig {
                 prepare_lookup_tables: PrepareLookupTables::Always,
                 auto_airdrop_lamports: 0,
+                concurrency: 20,
             },
             ..Default::default()
         };
@@ -423,6 +432,7 @@ mod tests {
             config.clone.prepare_lookup_tables,
             PrepareLookupTables::Always
         );
+        assert_eq!(config.clone.concurrency, 20);
     }
 
     #[test]
@@ -431,6 +441,7 @@ mod tests {
 [clone]
 prepare-lookup-tables = "always"
 auto-airdrop-lamports = 123
+concurrency = 20
 "#;
 
         let config: AccountsConfig = toml::from_str(toml_str).unwrap();
@@ -439,5 +450,6 @@ auto-airdrop-lamports = 123
             PrepareLookupTables::Always
         );
         assert_eq!(config.clone.auto_airdrop_lamports, 123);
+        assert_eq!(config.clone.concurrency, 20);
     }
 }
