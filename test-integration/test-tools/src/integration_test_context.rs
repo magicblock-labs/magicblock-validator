@@ -25,6 +25,7 @@ use solana_sdk::{
 };
 
 const URL_CHAIN: &str = "http://localhost:7799";
+const WS_URL_CHAIN: &str = "ws://localhost:7800";
 const URL_EPHEM: &str = "http://localhost:8899";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -597,13 +598,8 @@ impl IntegrationTestContext {
                 ixs,
                 payer,
                 self.commitment,
+                "ephem",
             )
-            .with_context(|| {
-                format!(
-                    "Failed to confirm ephem instructions with payer '{:?}'",
-                    payer.pubkey()
-                )
-            })
         })
     }
 
@@ -618,13 +614,8 @@ impl IntegrationTestContext {
                 ixs,
                 payer,
                 self.commitment,
+                "chain",
             )
-            .with_context(|| {
-                format!(
-                    "Failed to confirm chain instructions with payer '{:?}'",
-                    payer.pubkey()
-                )
-            })
         })
     }
 
@@ -674,10 +665,26 @@ impl IntegrationTestContext {
         ixs: &[Instruction],
         payer: &Keypair,
         commitment: CommitmentConfig,
-    ) -> Result<(Signature, bool), client_error::Error> {
+        label: &str,
+    ) -> Result<(Signature, bool), anyhow::Error> {
         let sig = Self::send_instructions_with_payer(rpc_client, ixs, payer)?;
         Self::confirm_transaction(&sig, rpc_client, commitment)
             .map(|confirmed| (sig, confirmed))
+            .inspect_err(|err| {
+                error!("Error {:#?}", err);
+                error!(
+                    "Failed to confirm {} instructions with '{}' ({})",
+                    label,
+                    payer.pubkey(),
+                    sig
+                );
+            })
+            .with_context(|| {
+                format!(
+                    "Failed to confirm {label} instructions with '{}' ({sig})",
+                    payer.pubkey()
+                )
+            })
     }
 
     // -----------------
@@ -814,5 +821,8 @@ impl IntegrationTestContext {
     }
     pub fn url_chain() -> &'static str {
         URL_CHAIN
+    }
+    pub fn ws_url_chain() -> &'static str {
+        WS_URL_CHAIN
     }
 }

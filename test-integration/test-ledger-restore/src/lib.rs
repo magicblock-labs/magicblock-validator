@@ -2,9 +2,12 @@ use solana_rpc_client::rpc_client::RpcClient;
 use std::{path::Path, process::Child, thread::sleep, time::Duration};
 
 use integration_test_tools::{
-    expect, loaded_accounts::LoadedAccounts,
-    validator::start_validator_with_config_struct,
-    workspace_paths::path_relative_to_workspace, IntegrationTestContext,
+    expect,
+    loaded_accounts::LoadedAccounts,
+    validator::{
+        resolve_programs, start_magicblock_validator_with_config_struct,
+    },
+    IntegrationTestContext,
 };
 use magicblock_config::{
     AccountsConfig, EphemeralConfig, LedgerConfig, LifecycleMode,
@@ -29,25 +32,6 @@ pub const FLEXI_COUNTER_ID: &str =
     "f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4";
 pub const FLEXI_COUNTER_PUBKEY: Pubkey =
     pubkey!("f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4");
-
-fn resolve_programs(
-    programs: Option<Vec<ProgramConfig>>,
-) -> Vec<ProgramConfig> {
-    programs
-        .map(|programs| {
-            programs
-                .into_iter()
-                .map(|program| ProgramConfig {
-                    id: program.id,
-                    path: path_relative_to_workspace(&format!(
-                        "target/deploy/{}",
-                        program.path
-                    )),
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
 
 pub fn setup_offline_validator(
     ledger_path: &Path,
@@ -82,7 +66,10 @@ pub fn setup_offline_validator(
         ..Default::default()
     };
     let (default_tmpdir_config, Some(mut validator)) =
-        start_validator_with_config_struct(config, &Default::default())
+        start_magicblock_validator_with_config_struct(
+            config,
+            &Default::default(),
+        )
     else {
         panic!("validator should set up correctly");
     };
@@ -125,7 +112,7 @@ pub fn setup_validator_with_local_remote(
     };
 
     let (default_tmpdir_config, Some(mut validator)) =
-        start_validator_with_config_struct(
+        start_magicblock_validator_with_config_struct(
             config,
             &LoadedAccounts::with_delegation_program_test_authority(),
         )

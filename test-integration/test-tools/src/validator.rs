@@ -7,13 +7,14 @@ use std::{
     time::Duration,
 };
 
-use magicblock_config::EphemeralConfig;
+use magicblock_config::{EphemeralConfig, ProgramConfig};
 use tempfile::TempDir;
 
 use crate::{
     loaded_accounts::LoadedAccounts,
     tmpdir::resolve_tmp_dir,
     toml_to_args::{config_to_args, rpc_port_from_config, ProgramLoader},
+    workspace_paths::path_relative_to_workspace,
 };
 
 pub fn start_magic_block_validator_with_config(
@@ -179,7 +180,7 @@ pub const TMP_DIR_CONFIG: &str = "TMP_DIR_CONFIG";
 
 /// Stringifies the config and writes it to a temporary config file.
 /// Then uses that config to start the validator.
-pub fn start_validator_with_config_struct(
+pub fn start_magicblock_validator_with_config_struct(
     config: EphemeralConfig,
     loaded_chain_accounts: &LoadedAccounts,
 ) -> (TempDir, Option<process::Child>) {
@@ -231,6 +232,25 @@ pub fn resolve_workspace_dir() -> PathBuf {
         .canonicalize()
         .unwrap()
         .to_path_buf()
+}
+
+pub fn resolve_programs(
+    programs: Option<Vec<ProgramConfig>>,
+) -> Vec<ProgramConfig> {
+    programs
+        .map(|programs| {
+            programs
+                .into_iter()
+                .map(|program| ProgramConfig {
+                    id: program.id,
+                    path: path_relative_to_workspace(&format!(
+                        "target/deploy/{}",
+                        program.path
+                    )),
+                })
+                .collect()
+        })
+        .unwrap_or_default()
 }
 
 // -----------------
