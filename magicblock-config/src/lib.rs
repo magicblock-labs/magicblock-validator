@@ -222,7 +222,10 @@ mod tests {
                     max_snapshots: 1234,
                     snapshot_frequency: 1000000000,
                 },
-                clone: AccountsCloneConfig::default(),
+                clone: AccountsCloneConfig {
+                    prepare_lookup_tables: PrepareLookupTables::Always,
+                    concurrency: 20,
+                },
                 max_monitored_accounts: 1234,
             },
             rpc: RpcConfig {
@@ -303,7 +306,10 @@ mod tests {
                     max_snapshots: 12345,
                     snapshot_frequency: 1000000000,
                 },
-                clone: AccountsCloneConfig::default(),
+                clone: AccountsCloneConfig {
+                    prepare_lookup_tables: PrepareLookupTables::Always,
+                    concurrency: 20,
+                },
                 max_monitored_accounts: 1234,
             },
             rpc: RpcConfig {
@@ -381,7 +387,10 @@ mod tests {
                     max_snapshots: 12345,
                     snapshot_frequency: 999,
                 },
-                clone: AccountsCloneConfig::default(),
+                clone: AccountsCloneConfig {
+                    prepare_lookup_tables: PrepareLookupTables::Always,
+                    concurrency: 20,
+                },
                 max_monitored_accounts: 12346,
             },
             rpc: RpcConfig {
@@ -452,7 +461,10 @@ mod tests {
                     max_snapshots: 12345,
                     snapshot_frequency: 1000000000,
                 },
-                clone: AccountsCloneConfig::default(),
+                clone: AccountsCloneConfig {
+                    prepare_lookup_tables: PrepareLookupTables::Always,
+                    concurrency: 30,
+                },
                 max_monitored_accounts: 1234,
             },
             rpc: RpcConfig {
@@ -518,6 +530,7 @@ mod tests {
                 db: AccountsDbConfig::default(),
                 clone: AccountsCloneConfig {
                     prepare_lookup_tables: PrepareLookupTables::Always,
+                    concurrency: 20,
                 },
                 max_monitored_accounts: 2048,
             },
