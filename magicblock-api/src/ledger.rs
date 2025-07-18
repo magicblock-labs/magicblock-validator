@@ -23,7 +23,7 @@ pub(crate) fn init(
     skip_replay: bool,
 ) -> ApiResult<(Ledger, Slot)> {
     // Save the last slot from the previous ledger to restart from it
-    let last_slot = if skip_replay {
+    let last_slot = if skip_replay || !reset {
         let previous_ledger = Ledger::open(ledger_path.as_path())?;
         previous_ledger.get_max_blockhash().map(|(slot, _)| slot)?
     } else {
@@ -31,8 +31,11 @@ pub(crate) fn init(
     };
 
     if reset || skip_replay {
-        remove_ledger_directory_if_exists(ledger_path.as_path(), skip_replay)
-            .map_err(|err| {
+        remove_ledger_directory_if_exists(
+            ledger_path.as_path(),
+            skip_replay && last_slot != Slot::default(),
+        )
+        .map_err(|err| {
             error!(
                 "Error: Unable to remove {}: {}",
                 ledger_path.display(),
