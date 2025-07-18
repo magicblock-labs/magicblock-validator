@@ -70,7 +70,10 @@ pub fn setup_offline_validator(
         ..Default::default()
     };
     let (default_tmpdir_config, Some(mut validator)) =
-        start_validator_with_config(config, &Default::default())
+        start_magicblock_validator_with_config_struct(
+            config,
+            &Default::default(),
+        )
     else {
         panic!("validator should set up correctly");
     };
@@ -122,7 +125,7 @@ pub fn setup_validator_with_local_remote(
     };
 
     let (default_tmpdir_config, Some(mut validator)) =
-        start_validator_with_config(config, &loaded_accounts)
+        start_magicblock_validator_with_config_struct(config, &loaded_accounts)
     else {
         panic!("validator should set up correctly");
     };
