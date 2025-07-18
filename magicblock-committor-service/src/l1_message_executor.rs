@@ -31,43 +31,40 @@ use crate::{
 #[derive(Clone, Debug)]
 pub struct ExecutionOutput {}
 
-pub(crate) struct L1MessageExecutor<T, P> {
+pub(crate) struct L1MessageExecutor<T> {
     authority: Keypair,
     rpc_client: MagicblockRpcClient,
     transaction_preparator: T,
-    l1_messages_persister: P,
 }
 
-impl<T, P> L1MessageExecutor<T, P>
+impl<T> L1MessageExecutor<T>
 where
     T: TransactionPreparator,
-    P: L1MessagesPersisterIface,
 {
     pub fn new_v1(
         rpc_client: MagicblockRpcClient,
         table_mania: TableMania,
         compute_budget_config: ComputeBudgetConfig,
-        l1_messages_persister: P,
-    ) -> L1MessageExecutor<TransactionPreparatorV1, P> {
+    ) -> L1MessageExecutor<TransactionPreparatorV1> {
         let authority = validator_authority();
         let transaction_preparator = TransactionPreparatorV1::new(
             rpc_client.clone(),
             table_mania,
             compute_budget_config,
         );
-        L1MessageExecutor::<TransactionPreparatorV1, P> {
+        L1MessageExecutor::<TransactionPreparatorV1> {
             authority,
             rpc_client,
             transaction_preparator,
-            l1_messages_persister,
         }
     }
 
     /// Executes message on L1
-    pub async fn execute(
+    pub async fn execute<P: L1MessagesPersisterIface>(
         &self,
         l1_message: ScheduledL1Message,
         commit_ids: HashMap<Pubkey, u64>,
+        persister: Option<P>,
     ) -> MessageExecutorResult<ExecutionOutput> {
         // Commit message first
         self.commit(&l1_message, commit_ids).await?;
@@ -78,10 +75,11 @@ where
     }
 
     /// Executes Commit stage
-    async fn commit(
+    async fn commit<P: L1MessagesPersisterIface>(
         &self,
         l1_message: &ScheduledL1Message,
         commit_ids: HashMap<Pubkey, u64>,
+        persister: Option<P>,
     ) -> MessageExecutorResult<()> {
         let prepared_message = self
             .transaction_preparator
@@ -89,7 +87,7 @@ where
                 &self.authority,
                 l1_message,
                 commit_ids,
-                &self.l1_messages_persister,
+                &persister,
             )
             .await?;
 
@@ -97,9 +95,10 @@ where
     }
 
     /// Executes Finalize stage
-    async fn finalize(
+    async fn finalize<P: L1MessagesPersisterIface>(
         &self,
         l1_message: &ScheduledL1Message,
+        persister: Option<P>,
     ) -> MessageExecutorResult<()> {
         let rent_reimbursement = self.authority.pubkey();
         let prepared_message = self
@@ -108,7 +107,7 @@ where
                 &self.authority,
                 &rent_reimbursement,
                 l1_message,
-                &self.l1_messages_persister,
+                &persister,
             )
             .await?;
 

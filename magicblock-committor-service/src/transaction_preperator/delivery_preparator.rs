@@ -24,6 +24,7 @@ use solana_sdk::{
 use tokio::time::sleep;
 
 use crate::{
+    persist::{CommitStatus, L1MessagesPersisterIface},
     tasks::{
         task_strategist::TransactionStrategy,
         tasks::{L1Task, TaskPreparationInfo},
@@ -55,10 +56,11 @@ impl DeliveryPreparator {
     }
 
     /// Prepares buffers and necessary pieces for optimized TX
-    pub async fn prepare_for_delivery(
+    pub async fn prepare_for_delivery<P: L1MessagesPersisterIface>(
         &self,
         authority: &Keypair,
         strategy: &TransactionStrategy,
+        persister: &Option<P>,
     ) -> DeliveryPreparatorResult<Vec<AddressLookupTableAccount>> {
         let preparation_futures = strategy
             .optimized_tasks
@@ -78,10 +80,11 @@ impl DeliveryPreparator {
 
     /// Prepares necessary parts for TX if needed, otherwise returns immediately
     // TODO(edwin): replace with interfaces
-    async fn prepare_task(
+    async fn prepare_task<P: L1MessagesPersisterIface>(
         &self,
         authority: &Keypair,
         task: &Box<dyn L1Task>,
+        persister: Option<P>,
     ) -> DeliveryPreparatorResult<()> {
         let Some(preparation_info) = task.preparation_info(&authority.pubkey())
         else {
@@ -98,6 +101,23 @@ impl DeliveryPreparator {
         // Writing chunks with some retries. Stol
         self.write_buffer_with_retries(authority, &preparation_info, 5)
             .await?;
+
+        // Persist that buffer account initiated successfully
+        if let Some(persister) = &persister {
+            let update_status = CommitStatus::BufferAndChunkFullyInitialized(
+                preparation_info.commit_id,
+            );
+            if let Err(err) = persister.update_status_by_message(
+                preparation_info.commit_id,
+                &preparation_info.pubkey,
+                update_status.clone(),
+            ) {
+                error!(
+                    "Failed to persist new status {}: {}",
+                    update_status, err
+                );
+            }
+        }
 
         Ok(())
     }

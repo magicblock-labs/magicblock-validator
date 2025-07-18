@@ -3,7 +3,7 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use log::{info, trace, warn};
+use log::{error, info, trace, warn};
 use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
 use magicblock_rpc_client::MagicblockRpcClient;
 use magicblock_table_mania::TableMania;
@@ -39,12 +39,10 @@ pub type BroadcasteddMessageExecutionResult = MessageExecutorResult<
 >;
 
 // TODO(edwin): reduce num of params: 1,2,3, could be united
-pub(crate) struct CommitSchedulerWorker<D: DB, P: L1MessagesPersisterIface> {
+pub(crate) struct CommitSchedulerWorker<D, P> {
     db: Arc<D>,
     l1_messages_persister: P,
-    rpc_client: MagicblockRpcClient, // 1.
-    table_mania: TableMania,         // 2.
-    compute_budget_config: ComputeBudgetConfig, // 3.
+    executor_factory: L1MessageExecutorFactory<P>,
     commit_id_tracker: CommitIdTracker,
     receiver: mpsc::Receiver<ScheduledL1Message>,
 
@@ -54,7 +52,11 @@ pub(crate) struct CommitSchedulerWorker<D: DB, P: L1MessagesPersisterIface> {
     inner: Arc<Mutex<CommitSchedulerInner>>,
 }
 
-impl<D: DB, P: L1MessagesPersisterIface> CommitSchedulerWorker<D, P> {
+impl<D, P> CommitSchedulerWorker<D, P>
+where
+    D: DB,
+    P: L1MessagesPersisterIface,
+{
     pub fn new(
         db: Arc<D>,
         l1_messages_persister: P,
@@ -66,13 +68,18 @@ impl<D: DB, P: L1MessagesPersisterIface> CommitSchedulerWorker<D, P> {
         // Number of executors that can send messages in parallel to L1
         const NUM_OF_EXECUTORS: u8 = 50;
 
-        Self {
-            db,
-            l1_messages_persister,
+        let executor_factory = L1MessageExecutorFactory {
             rpc_client: rpc_client.clone(),
             table_mania,
             compute_budget_config,
-            commit_id_tracker: CommitIdTracker::new(rpc_client),
+            l1_messages_persister: l1_messages_persister.clone(),
+        };
+        let commit_id_tracker = CommitIdTracker::new(rpc_client);
+        Self {
+            db,
+            l1_messages_persister,
+            executor_factory,
+            commit_id_tracker,
             receiver,
             notify: Arc::new(Notify::new()),
             executors_semaphore: Arc::new(Semaphore::new(
@@ -118,25 +125,31 @@ impl<D: DB, P: L1MessagesPersisterIface> CommitSchedulerWorker<D, P> {
                 .expect(SEMAPHORE_CLOSED_MSG);
 
             // Prepare data for execution
-            let commit_ids =
-                if let Some(pubkeys) = l1_message.get_committed_pubkeys() {
-                    self.commit_id_tracker
-                        .next_commit_ids(&pubkeys)
-                        .await
-                        .unwrap()
-                } else {
-                    // Pure L1Action, no commit ids used
-                    HashMap::new()
-                };
-            let executor =
-                L1MessageExecutor::<TransactionPreparatorV1, P>::new_v1(
-                    self.rpc_client.clone(),
-                    self.table_mania.clone(),
-                    self.compute_budget_config.clone(),
-                    self.l1_messages_persister.clone(),
-                );
+            let commit_ids = if let Some(pubkeys) =
+                l1_message.get_committed_pubkeys()
+            {
+                let commit_ids = self
+                    .commit_id_tracker
+                    .next_commit_ids(&pubkeys)
+                    .await
+                    .unwrap();
+                // Persist data
+                commit_ids
+                    .iter()
+                    .for_each(|(pubkey, commit_id) | {
+                        if let Err(err) = self.l1_messages_persister.set_commit_id(l1_message.id, pubkey, *commit_id) {
+                            error!("Failed to persist commit id: {}, for message id: {} with pubkey {}: {}", commit_id, l1_message.id, pubkey, err);
+                        }
+                    });
+
+                commit_ids
+            } else {
+                // Pure L1Action, no commit ids used
+                HashMap::new()
+            };
 
             // Spawn executor
+            let executor = self.executor_factory.create_executor();
             let inner = self.inner.clone();
             let notify = self.notify.clone();
             tokio::spawn(Self::execute(
@@ -219,8 +232,11 @@ impl<D: DB, P: L1MessagesPersisterIface> CommitSchedulerWorker<D, P> {
             .execute(l1_message.clone(), commit_ids)
             .await
             .map_err(|err| Arc::new(err));
-        // TODO: unwrap
-        result_sender.send(result).unwrap();
+
+        // Broadcast result to subscribers
+        if let Err(err) = result_sender.send(result) {
+            error!("Failed to broadcast result: {}", err);
+        }
         // Remove executed task from Scheduler to unblock other messages
         inner_scheduler
             .lock()
@@ -232,12 +248,26 @@ impl<D: DB, P: L1MessagesPersisterIface> CommitSchedulerWorker<D, P> {
         // Free worker
         drop(execution_permit);
     }
+}
 
-    async fn deduce_commit_ids(
-        &mut self,
-        l1_message: &ScheduledL1Message,
-    ) -> HashMap<Pubkey, u64> {
-        todo!()
+/// Dummy struct to implify signatur
+struct L1MessageExecutorFactory<P> {
+    rpc_client: MagicblockRpcClient,
+    table_mania: TableMania,
+    compute_budget_config: ComputeBudgetConfig,
+    l1_messages_persister: P,
+}
+
+impl<P: L1MessagesPersisterIface> L1MessageExecutorFactory<P> {
+    pub fn create_executor(
+        &self,
+    ) -> L1MessageExecutor<TransactionPreparatorV1, P> {
+        L1MessageExecutor::<TransactionPreparatorV1, P>::new_v1(
+            self.rpc_client.clone(),
+            self.table_mania.clone(),
+            self.compute_budget_config.clone(),
+            self.l1_messages_persister.clone(),
+        )
     }
 }
 

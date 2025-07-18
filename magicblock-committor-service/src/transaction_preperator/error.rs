@@ -1,3 +1,4 @@
+use solana_pubkey::{pubkey, Pubkey};
 use thiserror::Error;
 
 use crate::transaction_preperator::transaction_preparator::PreparatorVersion;
@@ -8,6 +9,8 @@ pub enum Error {
     VersionError(PreparatorVersion),
     #[error("Failed to fit in single TX")]
     FailedToFitError,
+    #[error("Missing commit id for pubkey: {0}")]
+    MissingCommitIdError(Pubkey),
     #[error("InternalError: {0}")]
     InternalError(#[from] anyhow::Error),
 }
@@ -17,6 +20,16 @@ impl From<crate::tasks::task_strategist::Error> for Error {
         match value {
             crate::tasks::task_strategist::Error::FailedToFitError => {
                 Self::FailedToFitError
+            }
+        }
+    }
+}
+
+impl From<crate::tasks::task_builder::Error> for Error {
+    fn from(value: crate::tasks::task_builder::Error) -> Self {
+        match value {
+            crate::tasks::task_builder::Error::MissingCommitIdError(pubkey) => {
+                Self::MissingCommitIdError(pubkey)
             }
         }
     }

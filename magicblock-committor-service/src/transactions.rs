@@ -195,7 +195,6 @@ pub(crate) fn process_commits_ix(
     pubkey: &Pubkey,
     delegated_account_owner: &Pubkey,
     buffer_pda: &Pubkey,
-    commit_id: u64,
     commit_args: CommitStateFromBufferArgs,
 ) -> Instruction {
     dlp::instruction_builder::commit_state_from_buffer(
@@ -234,8 +233,7 @@ pub(crate) fn process_and_close_ixs(
         buffer_pda,
         commit_args,
     );
-    let close_ix =
-        close_buffers_ix(validator_auth, pubkey, ephemeral_blockhash);
+    let close_ix = close_buffers_ix(validator_auth, pubkey, 0); // TODO(edwin)
 
     vec![process_ix, close_ix]
 }

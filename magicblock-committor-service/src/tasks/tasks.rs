@@ -21,6 +21,8 @@ use crate::{
 };
 
 pub struct TaskPreparationInfo {
+    pub commit_id: u64,
+    pub pubkey: Pubkey,
     pub chunks_pda: Pubkey,
     pub buffer_pda: Pubkey,
     pub init_instruction: Instruction,
@@ -251,6 +253,8 @@ impl L1Task for BufferTask {
             .collect::<Vec<_>>();
 
         Some(TaskPreparationInfo {
+            commit_id: commit_task.commit_id,
+            pubkey: commit_task.committed_account.pubkey,
             chunks_pda,
             buffer_pda,
             init_instruction,

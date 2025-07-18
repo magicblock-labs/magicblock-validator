@@ -49,20 +49,18 @@ pub enum CommittorMessage {
         respond_to: oneshot::Sender<()>,
     },
     CommitChangeset {
-        /// Called once the changeset has been committed
-        respond_to: oneshot::Sender<Option<String>>,
-        /// The changeset to commit
+        /// The [`ScheduledL1Message`]s to commit
         l1_messages: Vec<ScheduledL1Message>,
     },
     GetCommitStatuses {
         respond_to:
             oneshot::Sender<CommittorServiceResult<Vec<CommitStatusRow>>>,
-        reqid: String,
+        message_id: u64,
     },
-    GetBundleSignatures {
+    GetCommitSignatures {
         respond_to:
             oneshot::Sender<CommittorServiceResult<Option<MessageSignatures>>>,
-        bundle_id: u64,
+        commit_id: u64,
     },
     GetLookupTables {
         respond_to: oneshot::Sender<LookupTables>,
@@ -126,28 +124,24 @@ impl CommittorActor {
                     error!("Failed to send response {:?}", e);
                 }
             }
-            CommitChangeset {
-                l1_messages,
+            CommitChangeset { l1_messages } => {
+                self.processor.commit_l1_messages(l1_messages).await;
+            }
+            GetCommitStatuses {
+                message_id,
                 respond_to,
             } => {
-                let reqid =
-                    self.processor.commit_l1_messages(l1_messages).await;
-                if let Err(e) = respond_to.send(reqid) {
-                    error!("Failed to send response {:?}", e);
-                }
-            }
-            GetCommitStatuses { reqid, respond_to } => {
                 let commit_statuses =
-                    self.processor.get_commit_statuses(&reqid);
+                    self.processor.get_commit_statuses(message_id);
                 if let Err(e) = respond_to.send(commit_statuses) {
                     error!("Failed to send response {:?}", e);
                 }
             }
-            GetBundleSignatures {
-                bundle_id,
+            GetCommitSignatures {
+                commit_id,
                 respond_to,
             } => {
-                let sig = self.processor.get_signature(bundle_id);
+                let sig = self.processor.get_signature(commit_id);
                 if let Err(e) = respond_to.send(sig) {
                     error!("Failed to send response {:?}", e);
                 }
@@ -240,15 +234,15 @@ impl CommittorService {
         rx
     }
 
-    pub fn get_bundle_signatures(
+    pub fn get_commit_signatures(
         &self,
-        bundle_id: u64,
+        commit_id: u64,
     ) -> oneshot::Receiver<CommittorServiceResult<Option<MessageSignatures>>>
     {
         let (tx, rx) = oneshot::channel();
-        self.try_send(CommittorMessage::GetBundleSignatures {
+        self.try_send(CommittorMessage::GetCommitSignatures {
             respond_to: tx,
-            bundle_id,
+            commit_id,
         });
         rx
     }
@@ -308,25 +302,25 @@ impl L1MessageCommittor for CommittorService {
 
     fn get_commit_statuses(
         &self,
-        reqid: String,
+        message_id: u64,
     ) -> oneshot::Receiver<CommittorServiceResult<Vec<CommitStatusRow>>> {
         let (tx, rx) = oneshot::channel();
         self.try_send(CommittorMessage::GetCommitStatuses {
             respond_to: tx,
-            reqid,
+            message_id,
         });
         rx
     }
 
-    fn get_bundle_signatures(
+    fn get_commit_signatures(
         &self,
-        bundle_id: u64,
+        commit_id: u64,
     ) -> oneshot::Receiver<CommittorServiceResult<Option<MessageSignatures>>>
     {
         let (tx, rx) = oneshot::channel();
-        self.try_send(CommittorMessage::GetBundleSignatures {
+        self.try_send(CommittorMessage::GetCommitSignatures {
             respond_to: tx,
-            bundle_id,
+            commit_id,
         });
         rx
     }
@@ -355,8 +349,8 @@ pub trait L1MessageCommittor: Send + Sync + 'static {
         message_id: u64,
     ) -> oneshot::Receiver<CommittorServiceResult<Vec<CommitStatusRow>>>;
 
-    /// Gets signatures of commits processed as part of the bundle with the provided bundle_id
-    fn get_bundle_signatures(
+    /// Gets signatures for commit of particular accounts
+    fn get_commit_signatures(
         &self,
         bundle_id: u64,
     ) -> oneshot::Receiver<CommittorServiceResult<Option<MessageSignatures>>>;

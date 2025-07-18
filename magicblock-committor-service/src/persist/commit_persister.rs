@@ -31,24 +31,31 @@ pub trait L1MessagesPersisterIface: Send + Sync + Clone + 'static {
         pubkey: &Pubkey,
         commit_id: u64,
     ) -> CommitPersistResult<()>;
-    fn update_status(
+    fn update_status_by_message(
         &self,
         message_id: u64,
         pubkey: &Pubkey,
         status: CommitStatus,
     ) -> CommitPersistResult<()>;
-    fn get_commit_statuses_by_id(
+    fn update_status_by_commit(
+        &self,
+        commit_id: u64,
+        pubkey: &Pubkey,
+        status: CommitStatus,
+    ) -> CommitPersistResult<()>;
+    fn get_commit_statuses_by_message(
         &self,
         message_id: u64,
     ) -> CommitPersistResult<Vec<CommitStatusRow>>;
-    fn get_commit_status(
+    fn get_commit_status_by_message(
         &self,
         message_id: u64,
         pubkey: &Pubkey,
     ) -> CommitPersistResult<Option<CommitStatusRow>>;
-    fn get_signatures(
+    fn get_signatures_by_commit(
         &self,
-        commit_ud: u64,
+        commit_id: u64,
+        pubkey: &Pubkey,
     ) -> CommitPersistResult<Option<MessageSignatures>>;
     // fn finalize_l1_message(&self blockhash: Hash) -> CommitPersistResult<()>;
 }
@@ -166,7 +173,7 @@ impl L1MessagesPersisterIface for L1MessagePersister {
             .set_commit_id(message_id, pubkey, commit_id)
     }
 
-    fn update_status(
+    fn update_status_by_message(
         &self,
         message_id: u64,
         pubkey: &Pubkey,
@@ -175,10 +182,22 @@ impl L1MessagesPersisterIface for L1MessagePersister {
         self.commits_db
             .lock()
             .expect(POISONED_MUTEX_MSG)
-            .update_commit_status(message_id, pubkey, &status)
+            .update_status_by_message(message_id, pubkey, &status)
     }
 
-    fn get_commit_statuses_by_id(
+    fn update_status_by_commit(
+        &self,
+        commit_id: u64,
+        pubkey: &Pubkey,
+        status: CommitStatus,
+    ) -> CommitPersistResult<()> {
+        self.commits_db
+            .lock()
+            .expect(POISONED_MUTEX_MSG)
+            .update_status_by_commit(commit_id, pubkey, &status)
+    }
+
+    fn get_commit_statuses_by_message(
         &self,
         message_id: u64,
     ) -> CommitPersistResult<Vec<CommitStatusRow>> {
@@ -188,7 +207,7 @@ impl L1MessagesPersisterIface for L1MessagePersister {
             .get_commit_statuses_by_id(message_id)
     }
 
-    fn get_commit_status(
+    fn get_commit_status_by_message(
         &self,
         message_id: u64,
         pubkey: &Pubkey,
@@ -199,14 +218,15 @@ impl L1MessagesPersisterIface for L1MessagePersister {
             .get_commit_status(message_id, pubkey)
     }
 
-    fn get_signatures(
+    fn get_signatures_by_commit(
         &self,
-        commit_ud: u64,
+        commit_id: u64,
+        pubkey: &Pubkey,
     ) -> CommitPersistResult<Option<MessageSignatures>> {
         self.commits_db
             .lock()
             .expect(POISONED_MUTEX_MSG)
-            .get_signatures(commit_ud)
+            .get_signatures_by_commit(commit_id, pubkey)
     }
 
     // fn finalize_l1_message(&self, blockhash: Hash) -> CommitPersistResult<()> {
@@ -302,18 +322,18 @@ mod tests {
             },
         ));
         persister
-            .update_status(&reqid, &pubkey1, new_status.clone())
+            .update_status_by_message(&reqid, &pubkey1, new_status.clone())
             .unwrap();
 
         let updated_row = persister
-            .get_commit_status(&reqid, &pubkey1)
+            .get_commit_status_by_message(&reqid, &pubkey1)
             .unwrap()
             .unwrap();
 
         assert_eq!(updated_row.commit_status, new_status);
 
         let signatures = persister
-            .get_signatures(new_status.bundle_id().unwrap())
+            .get_signatures_by_commit(new_status.bundle_id().unwrap())
             .unwrap()
             .unwrap();
         assert_eq!(signatures.processed_signature, process_signature);

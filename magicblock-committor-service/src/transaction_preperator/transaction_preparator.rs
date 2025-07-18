@@ -49,7 +49,7 @@ pub trait TransactionPreparator {
         authority: &Keypair,
         l1_message: &ScheduledL1Message,
         commit_ids: HashMap<Pubkey, u64>,
-        l1_messages_persister: &P,
+        l1_messages_persister: &Option<P>,
     ) -> PreparatorResult<VersionedMessage>;
 
     /// Returns [`VersionedMessage`] corresponding to [`ScheduledL1Message`] tasks
@@ -60,7 +60,7 @@ pub trait TransactionPreparator {
         authority: &Keypair,
         rent_reimbursement: &Pubkey,
         l1_message: &ScheduledL1Message,
-        l1_messages_persister: &P,
+        l1_messages_persister: &Option<P>,
     ) -> PreparatorResult<VersionedMessage>;
 }
 
@@ -105,21 +105,36 @@ impl TransactionPreparator for TransactionPreparatorV1 {
         authority: &Keypair,
         l1_message: &ScheduledL1Message,
         commit_ids: HashMap<Pubkey, u64>,
-        l1_messages_persister: &P,
+        l1_messages_persister: &Option<P>,
     ) -> PreparatorResult<VersionedMessage> {
-        // 1. create tasks
-        // 2. optimize to fit tx size. aka Delivery Strategy
-        // 3. Pre tx preparations. Create buffer accs + lookup tables
-        // 4. Build resulting TX to be executed
-        let tasks = TaskBuilderV1::commit_tasks(l1_message, commit_ids);
-        let tx_strategy =
-            TaskStrategist::build_strategy(tasks, &authority.pubkey())?;
+        // create tasks
+        let tasks = TaskBuilderV1::commit_tasks(l1_message, &commit_ids)?;
+        // optimize to fit tx size. aka Delivery Strategy
+        let tx_strategy = match TaskStrategist::build_strategy(
+            tasks,
+            &authority.pubkey(),
+        ) {
+            Ok(value) => Ok(value),
+            Err(err) => match err {
+                err
+                @ crate::tasks::task_strategist::Error::FailedToFitError => {
+                    // TODO(edwin)
+                    commit_ids.iter().for_each(|(pubkey, commit_id)| {});
+                    Err(err.into())
+                }
+            },
+        }?;
+        // Pre tx preparations. Create buffer accs + lookup tables
         let lookup_tables = self
             .delivery_preparator
-            .prepare_for_delivery(authority, &tx_strategy)
+            .prepare_for_delivery(
+                authority,
+                &tx_strategy,
+                l1_messages_persister,
+            )
             .await
             .unwrap(); // TODO: fix
-
+                       // Build resulting TX to be executed
         let message = TransactionUtils::assemble_tasks_tx(
             authority,
             &tx_strategy.optimized_tasks,
@@ -135,12 +150,15 @@ impl TransactionPreparator for TransactionPreparatorV1 {
         authority: &Keypair,
         rent_reimbursement: &Pubkey,
         l1_message: &ScheduledL1Message,
-        l1_messages_persister: &P,
+        l1_messages_persister: &Option<P>,
     ) -> PreparatorResult<VersionedMessage> {
+        // create tasks
         let tasks =
             TaskBuilderV1::finalize_tasks(l1_message, rent_reimbursement);
+        // optimize to fit tx size. aka Delivery Strategy
         let tx_strategy =
             TaskStrategist::build_strategy(tasks, &authority.pubkey())?;
+        // Pre tx preparations. Create buffer accs + lookup tables
         let lookup_tables = self
             .delivery_preparator
             .prepare_for_delivery(authority, &tx_strategy)
@@ -156,41 +174,3 @@ impl TransactionPreparator for TransactionPreparatorV1 {
         Ok(message)
     }
 }
-
-/// We have 2 stages for L1Message
-/// 1. commit
-/// 2. finalize
-///
-/// Now, single "task" can be differently represented in 2 stage
-/// In terms of transaction and so on
-
-/// We have:
-/// Stages - type
-/// Strategy - enum
-/// Task - enum
-
-// Can [`Task`] have [`Strategy`] based on [`Stage`]
-// We receive proposals and actions from users
-// Those have to
-
-/// We get tasks we need to pass them through
-/// Strategy:
-// 1. Try to fit Vec<T: Serialize> into TX. save tx_size
-// 2. Start optimizing
-// 3. Find biggest ix
-// 4. Replace with BufferedIx(maybe pop from Heap)
-// 5. tx_size -= (og_size - buffered_size)
-// 6. If doesn't fit - continue
-// 7. If heap.is_empty() - doesn't fit with buffered
-// 8. Apply lookup table
-// 9. if fits - return Ok(tx), else return Err(Failed)
-
-// Committor flow:
-// 1. Gets commits
-// 2. Passes to Scheduler
-// 3. Scheduler checks if any can run in parallel. Does scheduling basically
-// 4. Calls TransactionPreparator for those
-// 5. Executes TXs if all ok
-// 6. Populates Persister with necessary data
-
-fn useless() {}

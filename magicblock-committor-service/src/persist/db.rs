@@ -151,14 +151,77 @@ impl CommittsDb {
     // -----------------
     // Methods affecting both tables
     // -----------------
-    pub fn update_commit_status(
+    pub fn update_status_by_message(
         &mut self,
         message_id: u64,
         pubkey: &Pubkey,
         status: &CommitStatus,
     ) -> CommitPersistResult<()> {
+        let query = "UPDATE commit_status
+            SET
+                commit_status = ?1,
+                commit_strategy = ?3,
+                processed_signature = ?4,
+                finalized_signature = ?5,
+                undelegated_signature = ?6
+            WHERE
+                pubkey = ?7 AND message_id = ?8";
+
         let tx = self.conn.transaction()?;
-        Self::update_commit_status_impl(&tx, message_id, pubkey, status)?;
+        let stmt = &mut tx.prepare(query)?;
+        stmt.execute(params![
+            status.as_str(),
+            status.commit_strategy().as_str(),
+            status.signatures().map(|s| s.process_signature.to_string()),
+            status
+                .signatures()
+                .and_then(|s| s.finalize_signature)
+                .map(|s| s.to_string()),
+            status
+                .signatures()
+                .and_then(|s| s.undelegate_signature)
+                .map(|s| s.to_string()),
+            pubkey.to_string(),
+            message_id
+        ])?;
+        tx.commit()?;
+
+        Ok(())
+    }
+
+    pub fn update_status_by_commit(
+        &mut self,
+        commit_id: u64,
+        pubkey: &Pubkey,
+        status: &CommitStatus,
+    ) -> CommitPersistResult<()> {
+        let query = "UPDATE commit_status
+            SET
+                commit_status = ?1,
+                commit_strategy = ?3,
+                processed_signature = ?4,
+                finalized_signature = ?5,
+                undelegated_signature = ?6
+            WHERE
+                pubkey = ?7 AND commit_id = ?8";
+
+        let tx = self.conn.transaction()?;
+        let stmt = &mut tx.prepare(query)?;
+        stmt.execute(params![
+            status.as_str(),
+            status.commit_strategy().as_str(),
+            status.signatures().map(|s| s.process_signature.to_string()),
+            status
+                .signatures()
+                .and_then(|s| s.finalize_signature)
+                .map(|s| s.to_string()),
+            status
+                .signatures()
+                .and_then(|s| s.undelegate_signature)
+                .map(|s| s.to_string()),
+            pubkey.to_string(),
+            commit_id
+        ])?;
         tx.commit()?;
 
         Ok(())
@@ -286,40 +349,6 @@ impl CommittsDb {
         Ok(())
     }
 
-    fn update_commit_status_impl(
-        tx: &Transaction<'_>,
-        message_id: u64,
-        pubkey: &Pubkey,
-        status: &CommitStatus,
-    ) -> CommitPersistResult<()> {
-        let query = "UPDATE commit_status
-            SET
-                commit_status = ?1,
-                commit_strategy = ?3,
-                processed_signature = ?4,
-                finalized_signature = ?5,
-                undelegated_signature = ?6
-            WHERE
-                pubkey = ?7 AND message_id = ?8";
-        let stmt = &mut tx.prepare(query)?;
-        stmt.execute(params![
-            status.as_str(),
-            status.commit_strategy().as_str(),
-            status.signatures().map(|s| s.process_signature.to_string()),
-            status
-                .signatures()
-                .and_then(|s| s.finalize_signature)
-                .map(|s| s.to_string()),
-            status
-                .signatures()
-                .and_then(|s| s.undelegate_signature)
-                .map(|s| s.to_string()),
-            pubkey.to_string(),
-            message_id
-        ])?;
-        Ok(())
-    }
-
     #[cfg(test)]
     fn get_commit_statuses_by_pubkey(
         &self,
@@ -369,18 +398,19 @@ impl CommittsDb {
         Ok(())
     }
 
-    pub fn get_signatures(
+    pub fn get_signatures_by_commit(
         &self,
         commit_id: u64,
+        pubkey: &Pubkey,
     ) -> CommitPersistResult<Option<MessageSignatures>> {
         let query = "SELECT
             processed_signature, finalized_signature, undelegated_signature, created_at
             FROM commit_status
-        WHERE commit_id = ?1
+        WHERE commit_id = ?1 AND pubkey = ?2
             LIMIT 1";
 
         let mut stmt = self.conn.prepare(&query)?;
-        let mut rows = stmt.query(params![commit_id])?;
+        let mut rows = stmt.query(params![commit_id, pubkey])?;
 
         let result = rows
             .next()?
@@ -713,7 +743,7 @@ mod test {
         // Update the statuses
         let new_failing_status =
             CommitStatus::FailedProcess((22, CommitStrategy::FromBuffer, None));
-        db.update_commit_status(
+        db.update_status_by_message(
             failing_commit_row.message_id,
             &failing_commit_row.pubkey,
             &new_failing_status,
@@ -729,7 +759,7 @@ mod test {
         let success_signatures_row =
             create_message_signature_row(&new_success_status);
         let success_signatures = success_signatures_row.clone().unwrap();
-        db.update_commit_status(
+        db.update_status_by_message(
             success_commit_row.message_id,
             &success_commit_row.pubkey,
             &new_success_status,
@@ -748,7 +778,7 @@ mod test {
             .unwrap()
             .unwrap();
         assert_eq!(succeeded_commit_row.commit_status, new_success_status);
-        let signature_row = db.get_signatures(33).unwrap().unwrap();
+        let signature_row = db.get_signatures_by_commit(33).unwrap().unwrap();
         assert_eq!(
             signature_row.processed_signature,
             success_signatures.processed_signature,

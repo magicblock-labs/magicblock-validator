@@ -95,7 +95,7 @@ impl L1MessageCommittor for ChangesetCommittorStub {
         rx
     }
 
-    fn get_bundle_signatures(
+    fn get_commit_signatures(
         &self,
         bundle_id: u64,
     ) -> tokio::sync::oneshot::Receiver<

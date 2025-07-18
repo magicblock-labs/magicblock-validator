@@ -31,8 +31,8 @@ impl TasksBuilder for TaskBuilderV1 {
     /// Returns [`Task`]s for Commit stage
     fn commit_tasks(
         l1_message: &ScheduledL1Message,
-        commit_ids: HashMap<Pubkey, u64>,
-    ) -> Vec<Box<dyn L1Task>> {
+        commit_ids: &HashMap<Pubkey, u64>,
+    ) -> TaskBuilderResult<Vec<Box<dyn L1Task>>> {
         let (accounts, allow_undelegation) = match &l1_message.l1_message {
             MagicL1Message::L1Actions(actions) => {
                 return actions
@@ -49,7 +49,7 @@ impl TasksBuilder for TaskBuilderV1 {
             }
         };
 
-        accounts
+        let tasks = accounts
             .into_iter()
             .map(|account| {
                 if let Some(commit_id) = commit_ids.get(&account.pubkey) {
@@ -59,12 +59,12 @@ impl TasksBuilder for TaskBuilderV1 {
                         committed_account: account.clone(),
                     })) as Box<dyn L1Task>)
                 } else {
-                    // TODO(edwin): proper error
-                    Err(())
+                    Err(Error::MissingCommitIdError(account.pubkey))
                 }
             })
-            .collect::<Result<_, _>>()
-            .unwrap() // TODO(edwin): remove
+            .collect::<Result<_, _>>()?;
+
+        Ok(tasks)
     }
 
     /// Returns [`Task`]s for Finalize stage
@@ -147,3 +147,11 @@ impl TasksBuilder for TaskBuilderV1 {
         }
     }
 }
+
+#[derive(thiserror::Error, Debug)]
+pub enum Error {
+    #[error("Missing commit id for pubkey: {0}")]
+    MissingCommitIdError(Pubkey),
+}
+
+pub type TaskBuilderResult<T, E = Error> = Result<T, E>;

@@ -828,7 +828,7 @@ impl CommittorProcessor {
                     authority: self.authority.pubkey(),
                     pubkey,
                     buffer_account_size,
-                    blockhash: ephemeral_blockhash,
+                    commit_id: 0, // TODO(edwin)
                 };
 
                 const MAX_STALE_REALLOCS: u8 = 10;

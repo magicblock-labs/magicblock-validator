@@ -84,7 +84,7 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsWorker<C> {
         {
             let bundle_signatures = match self
                 .committor
-                .get_bundle_signatures(bundle_id)
+                .get_commit_signatures(bundle_id)
                 .await
             {
                 Ok(Ok(sig)) => sig,
