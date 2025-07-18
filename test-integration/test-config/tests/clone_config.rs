@@ -67,10 +67,12 @@ fn test_clone_config_never() {
         lookup_table_tx_count_after_clone
     );
 
+    // Common pubkeys should be not reserved during validator startup
     assert_eq!(
         lookup_table_tx_count_after_start,
         lookup_table_tx_count_before
     );
+    // The pubkeys needed to commit the cloned account should not be reserved when it was cloned
     assert_eq!(
         lookup_table_tx_count_after_clone,
         lookup_table_tx_count_before
@@ -94,11 +96,15 @@ fn test_clone_config_always() {
         lookup_table_tx_count_after_clone
     );
 
+    // Common pubkeys should be reserved during validator startup, in a single lookup table
+    // transaction
     assert_eq!(
         lookup_table_tx_count_after_start,
         lookup_table_tx_count_before + 1
     );
 
+    // The pubkeys needed to commit the cloned account should be reserved when it was cloned
+    // in a single lookup table transaction
     assert_eq!(
         lookup_table_tx_count_after_clone,
         lookup_table_tx_count_after_start + 1
