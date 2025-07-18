@@ -7,7 +7,8 @@ use std::{
 };
 
 use integration_test_tools::{
-    expect, tmpdir::resolve_tmp_dir, workspace_paths::TestProgramPaths,
+    expect, tmpdir::resolve_tmp_dir, validator::cleanup,
+    workspace_paths::TestProgramPaths,
 };
 use program_flexi_counter::{
     instruction::{create_add_ix, create_init_ix, create_mul_ix},
@@ -20,9 +21,8 @@ use solana_sdk::{
     signer::{EncodableKey, Signer},
 };
 use test_ledger_restore::{
-    cleanup, confirm_tx_with_payer_ephem, fetch_counter_ephem,
-    setup_offline_validator, wait_for_ledger_persist, FLEXI_COUNTER_ID,
-    TMP_DIR_LEDGER,
+    confirm_tx_with_payer_ephem, fetch_counter_ephem, setup_offline_validator,
+    wait_for_ledger_persist, FLEXI_COUNTER_ID, TMP_DIR_LEDGER,
 };
 
 fn read_authority_pubkey(paths: &TestProgramPaths) -> Pubkey {

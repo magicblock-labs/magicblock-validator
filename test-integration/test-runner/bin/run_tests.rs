@@ -56,6 +56,10 @@ pub fn main() {
         return;
     };
 
+    let Ok(config_output) = run_config_tests(&manifest_dir) else {
+        return;
+    };
+
     // Assert that all tests passed
     assert_cargo_tests_passed(security_output, "security");
     assert_cargo_tests_passed(scenarios_output, "scenarios");
@@ -69,6 +73,7 @@ pub fn main() {
     assert_cargo_tests_passed(table_mania_output, "table_mania");
     assert_cargo_tests_passed(committor_output, "committor");
     assert_cargo_tests_passed(magicblock_pubsub_output, "magicblock_pubsub");
+    assert_cargo_tests_passed(config_output, "config");
 }
 
 fn should_run_test(test_name: &str) -> bool {
@@ -435,6 +440,40 @@ fn run_magicblock_pubsub_tests(
     })?;
 
     cleanup_validator(&mut ephem_validator, "ephemeral");
+    Ok(output)
+}
+
+fn run_config_tests(manifest_dir: &str) -> Result<Output, Box<dyn Error>> {
+    if !should_run_test("config") {
+        return Ok(success_output());
+    }
+    eprintln!("======== RUNNING CONFIG TESTS ========");
+    let loaded_chain_accounts =
+        LoadedAccounts::with_delegation_program_test_authority();
+
+    // Initialize only a devnet cluster for config tests
+    let mut devnet_validator = match start_validator(
+        "config-conf.devnet.toml",
+        ValidatorCluster::Chain(Some(ProgramLoader::UpgradeableProgram)),
+        &loaded_chain_accounts,
+    ) {
+        Some(validator) => validator,
+        None => {
+            panic!("Failed to start devnet validator properly");
+        }
+    };
+
+    let test_config_dir = format!("{}/../{}", manifest_dir, "test-config");
+    eprintln!("Running config tests in {}", test_config_dir);
+    let output = match run_test(test_config_dir, Default::default()) {
+        Ok(output) => output,
+        Err(err) => {
+            eprintln!("Failed to run config tests: {:?}", err);
+            cleanup_devnet_only(&mut devnet_validator);
+            return Err(err.into());
+        }
+    };
+    cleanup_devnet_only(&mut devnet_validator);
     Ok(output)
 }
 

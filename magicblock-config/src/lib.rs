@@ -227,6 +227,7 @@ mod tests {
                     max_snapshots: 1234,
                     snapshot_frequency: 1000000000,
                 },
+                clone: AccountsCloneConfig::default(),
                 max_monitored_accounts: 1234,
             },
             rpc: RpcConfig {
@@ -305,6 +306,7 @@ mod tests {
                     max_snapshots: 12345,
                     snapshot_frequency: 1000000000,
                 },
+                clone: AccountsCloneConfig::default(),
                 max_monitored_accounts: 1234,
             },
             rpc: RpcConfig {
@@ -380,6 +382,7 @@ mod tests {
                     max_snapshots: 12345,
                     snapshot_frequency: 999,
                 },
+                clone: AccountsCloneConfig::default(),
                 max_monitored_accounts: 12346,
             },
             rpc: RpcConfig {
@@ -448,6 +451,7 @@ mod tests {
                     max_snapshots: 12345,
                     snapshot_frequency: 1000000000,
                 },
+                clone: AccountsCloneConfig::default(),
                 max_monitored_accounts: 1234,
             },
             rpc: RpcConfig {
@@ -490,5 +494,45 @@ mod tests {
         config.merge(other);
 
         assert_eq!(config, original_config);
+    }
+
+    #[test]
+    fn test_accounts_clone_config_always() {
+        let mut config = EphemeralConfig::default();
+        let other = EphemeralConfig {
+            accounts: AccountsConfig {
+                remote: RemoteConfig {
+                    cluster: RemoteCluster::Devnet,
+                    url: None,
+                    ws_url: None,
+                },
+                lifecycle: LifecycleMode::Offline,
+                commit: CommitStrategy {
+                    frequency_millis: 9_000_000_000_000,
+                    compute_unit_price: 1_000_000,
+                },
+                allowed_programs: vec![],
+                db: AccountsDbConfig::default(),
+                clone: AccountsCloneConfig {
+                    prepare_lookup_tables: PrepareLookupTables::Always,
+                },
+                max_monitored_accounts: 2048,
+            },
+            rpc: RpcConfig::default(),
+            geyser_grpc: GeyserGrpcConfig::default(),
+            validator: ValidatorConfig::default(),
+            ledger: LedgerConfig::default(),
+            programs: vec![],
+            metrics: MetricsConfig::default(),
+        };
+
+        config.merge(other.clone());
+
+        assert_eq!(config, other);
+        // Test that the clone config is properly set to Always
+        assert_eq!(
+            config.accounts.clone.prepare_lookup_tables,
+            PrepareLookupTables::Always
+        );
     }
 }

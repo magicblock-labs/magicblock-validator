@@ -3572,6 +3572,7 @@ dependencies = [
  "magicblock-account-updates",
  "magicblock-accounts-api",
  "magicblock-committor-service",
+ "magicblock-config",
  "magicblock-core",
  "magicblock-metrics",
  "magicblock-mutator",
@@ -10278,6 +10279,22 @@ version = "0.0.0"
 dependencies = [
  "integration-test-tools",
  "solana-sdk",
+]
+
+[[package]]
+name = "test-config"
+version = "0.0.0"
+dependencies = [
+ "anyhow",
+ "cleanass",
+ "integration-test-tools",
+ "log",
+ "magicblock-config",
+ "program-flexi-counter",
+ "solana-rpc-client",
+ "solana-sdk",
+ "tempfile",
+ "test-tools-core",
 ]
 
 [[package]]

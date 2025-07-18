@@ -68,6 +68,10 @@ test-pubsub:
 	RUN_TESTS=pubsub \
 	$(MAKE) test
 
+test-config:
+	RUN_TESTS=config \
+	$(MAKE) test
+
 $(FLEXI_COUNTER_SO): $(FLEXI_COUNTER_SRC)
 	cargo build-sbf --manifest-path $(FLEXI_COUNTER_DIR)/Cargo.toml
 $(SCHEDULECOMMIT_SO): $(SCHEDULECOMMIT_SRC)
@@ -85,4 +89,4 @@ deploy-flexi-counter: $(FLEXI_COUNTER_SO)
 		$(DIR)/target/deploy/program_flexi_counter.so
 
 
-.PHONY: test test-force-mb test-schedulecommit test-issues-frequent-commits test-cloning test-restore-ledger test-magicblock-api test-table-mania test-committor test-pubsub deploy-flexi-counter list
+.PHONY: test test-force-mb test-schedulecommit test-issues-frequent-commits test-cloning test-restore-ledger test-magicblock-api test-table-mania test-committor test-pubsub test-config deploy-flexi-counter list

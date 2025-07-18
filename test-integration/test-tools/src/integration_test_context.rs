@@ -17,12 +17,15 @@ use solana_sdk::{
     clock::Slot,
     commitment_config::CommitmentConfig,
     hash::Hash,
+    instruction::Instruction,
     pubkey::Pubkey,
     signature::{Keypair, Signature},
+    signer::Signer,
     transaction::{Transaction, TransactionError},
 };
 
 const URL_CHAIN: &str = "http://localhost:7799";
+const WS_URL_CHAIN: &str = "ws://localhost:7800";
 const URL_EPHEM: &str = "http://localhost:8899";
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -167,12 +170,19 @@ impl IntegrationTestContext {
     }
 
     pub fn dump_chain_logs(&self, sig: Signature) {
-        let logs = self.fetch_chain_logs(sig).unwrap();
+        let Some(logs) = self.fetch_chain_logs(sig) else {
+            eprintln!("No chain logs found for '{}'", sig);
+            return;
+        };
+
         eprintln!("Chain Logs for '{}':\n{:#?}", sig, logs);
     }
 
     pub fn dump_ephemeral_logs(&self, sig: Signature) {
-        let logs = self.fetch_ephemeral_logs(sig).unwrap();
+        let Some(logs) = self.fetch_ephemeral_logs(sig) else {
+            eprintln!("No ephemeral logs found for '{}'", sig);
+            return;
+        };
         eprintln!("Ephemeral Logs for '{}':\n{:#?}", sig, logs);
     }
 
@@ -512,6 +522,36 @@ impl IntegrationTestContext {
         )
     }
 
+    pub fn send_instructions_with_payer_ephem(
+        &self,
+        ixs: &[Instruction],
+        payer: &Keypair,
+    ) -> Result<Signature, client_error::Error> {
+        Self::send_instructions_with_payer(
+            self.try_ephem_client().map_err(|err| client_error::Error {
+                request: None,
+                kind: client_error::ErrorKind::Custom(err.to_string()),
+            })?,
+            ixs,
+            payer,
+        )
+    }
+
+    pub fn send_instructions_with_payer_chain(
+        &self,
+        ixs: &[Instruction],
+        payer: &Keypair,
+    ) -> Result<Signature, client_error::Error> {
+        Self::send_instructions_with_payer(
+            self.try_chain_client().map_err(|err| client_error::Error {
+                request: None,
+                kind: client_error::ErrorKind::Custom(err.to_string()),
+            })?,
+            ixs,
+            payer,
+        )
+    }
+
     pub fn send_and_confirm_transaction_ephem(
         &self,
         tx: &mut Transaction,
@@ -554,6 +594,48 @@ impl IntegrationTestContext {
         })
     }
 
+    pub fn send_and_confirm_instructions_with_payer_ephem(
+        &self,
+        ixs: &[Instruction],
+        payer: &Keypair,
+    ) -> Result<(Signature, bool), anyhow::Error> {
+        self.try_ephem_client().and_then(|ephem_client| {
+            self.send_and_confirm_instructions_with_payer(
+                ephem_client,
+                ixs,
+                payer,
+                self.commitment,
+            )
+            .with_context(|| {
+                format!(
+                    "Failed to confirm ephem instructions with payer '{:?}'",
+                    payer.pubkey()
+                )
+            })
+        })
+    }
+
+    pub fn send_and_confirm_instructions_with_payer_chain(
+        &self,
+        ixs: &[Instruction],
+        payer: &Keypair,
+    ) -> Result<(Signature, bool), anyhow::Error> {
+        self.try_chain_client().and_then(|chain_client| {
+            self.send_and_confirm_instructions_with_payer(
+                chain_client,
+                ixs,
+                payer,
+                self.commitment,
+            )
+            .with_context(|| {
+                format!(
+                    "Failed to confirm chain instructions with payer '{:?}'",
+                    payer.pubkey()
+                )
+            })
+        })
+    }
+
     pub fn send_transaction(
         rpc_client: &RpcClient,
         tx: &mut Transaction,
@@ -573,6 +655,17 @@ impl IntegrationTestContext {
         Ok(sig)
     }
 
+    pub fn send_instructions_with_payer(
+        rpc_client: &RpcClient,
+        ixs: &[Instruction],
+        payer: &Keypair,
+    ) -> Result<Signature, client_error::Error> {
+        let blockhash = rpc_client.get_latest_blockhash()?;
+        let mut tx = Transaction::new_with_payer(ixs, Some(&payer.pubkey()));
+        tx.sign(&[payer], blockhash);
+        Self::send_transaction(rpc_client, &mut tx, &[payer])
+    }
+
     pub fn send_and_confirm_transaction(
         rpc_client: &RpcClient,
         tx: &mut Transaction,
@@ -582,6 +675,23 @@ impl IntegrationTestContext {
         let sig = Self::send_transaction(rpc_client, tx, signers)?;
         Self::confirm_transaction(&sig, rpc_client, commitment)
             .map(|confirmed| (sig, confirmed))
+    }
+
+    pub fn send_and_confirm_instructions_with_payer(
+        &self,
+        rpc_client: &RpcClient,
+        ixs: &[Instruction],
+        payer: &Keypair,
+        commitment: CommitmentConfig,
+    ) -> Result<(Signature, bool), client_error::Error> {
+        let sig = Self::send_instructions_with_payer(rpc_client, ixs, payer)?;
+        debug!("Confirming transaction with signature: {}", sig);
+        Self::confirm_transaction(&sig, rpc_client, commitment)
+            .map(|confirmed| (sig, confirmed))
+            .inspect_err(|_| {
+                self.dump_ephemeral_logs(sig);
+                self.dump_chain_logs(sig);
+            })
     }
 
     // -----------------
@@ -718,5 +828,8 @@ impl IntegrationTestContext {
     }
     pub fn url_chain() -> &'static str {
         URL_CHAIN
+    }
+    pub fn ws_url_chain() -> &'static str {
+        WS_URL_CHAIN
     }
 }

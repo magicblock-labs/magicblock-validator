@@ -2,7 +2,7 @@ use cleanass::{assert, assert_eq};
 use std::{path::Path, process::Child};
 
 use integration_test_tools::{
-    expect, tmpdir::resolve_tmp_dir, IntegrationTestContext,
+    expect, tmpdir::resolve_tmp_dir, validator::cleanup, IntegrationTestContext,
 };
 use solana_sdk::{
     native_token::LAMPORTS_PER_SOL,
@@ -11,7 +11,7 @@ use solana_sdk::{
     transaction::Transaction,
 };
 use test_ledger_restore::{
-    cleanup, setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
+    setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 
 const SLOT_MS: u64 = 150;

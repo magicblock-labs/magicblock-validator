@@ -1,21 +1,12 @@
 use solana_rpc_client::rpc_client::RpcClient;
-use std::{
-    fs,
-    path::Path,
-    process::{self, Child},
-    thread::sleep,
-    time::Duration,
-};
+use std::{path::Path, process::Child, thread::sleep, time::Duration};
 
 use integration_test_tools::{
     expect,
     loaded_accounts::LoadedAccounts,
-    tmpdir::resolve_tmp_dir,
     validator::{
-        resolve_workspace_dir, start_magic_block_validator_with_config,
-        TestRunnerPaths,
+        resolve_programs, start_magicblock_validator_with_config_struct,
     },
-    workspace_paths::path_relative_to_workspace,
     IntegrationTestContext,
 };
 use magicblock_config::{
@@ -36,65 +27,11 @@ use solana_sdk::{
 use tempfile::TempDir;
 
 pub const TMP_DIR_LEDGER: &str = "TMP_DIR_LEDGER";
-pub const TMP_DIR_CONFIG: &str = "TMP_DIR_CONFIG";
 
 pub const FLEXI_COUNTER_ID: &str =
     "f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4";
 pub const FLEXI_COUNTER_PUBKEY: Pubkey =
     pubkey!("f1exzKGtdeVX3d6UXZ89cY7twiNJe9S5uq84RTA4Rq4");
-
-/// Stringifies the config and writes it to a temporary config file.
-/// Then uses that config to start the validator.
-pub fn start_validator_with_config(
-    config: EphemeralConfig,
-    loaded_chain_accounts: &LoadedAccounts,
-) -> (TempDir, Option<process::Child>) {
-    let workspace_dir = resolve_workspace_dir();
-    let (default_tmpdir, temp_dir) = resolve_tmp_dir(TMP_DIR_CONFIG);
-    let release = std::env::var("RELEASE").is_ok();
-    let config_path = temp_dir.join("config.toml");
-    let config_toml = config.to_string();
-    fs::write(&config_path, config_toml).unwrap();
-
-    let root_dir = Path::new(&workspace_dir)
-        .join("..")
-        .canonicalize()
-        .unwrap()
-        .to_path_buf();
-    let paths = TestRunnerPaths {
-        config_path,
-        root_dir,
-        workspace_dir,
-    };
-    (
-        default_tmpdir,
-        start_magic_block_validator_with_config(
-            &paths,
-            "TEST",
-            loaded_chain_accounts,
-            release,
-        ),
-    )
-}
-
-fn resolve_programs(
-    programs: Option<Vec<ProgramConfig>>,
-) -> Vec<ProgramConfig> {
-    programs
-        .map(|programs| {
-            programs
-                .into_iter()
-                .map(|program| ProgramConfig {
-                    id: program.id,
-                    path: path_relative_to_workspace(&format!(
-                        "target/deploy/{}",
-                        program.path
-                    )),
-                })
-                .collect()
-        })
-        .unwrap_or_default()
-}
 
 pub fn setup_offline_validator(
     ledger_path: &Path,
@@ -129,7 +66,10 @@ pub fn setup_offline_validator(
         ..Default::default()
     };
     let (default_tmpdir_config, Some(mut validator)) =
-        start_validator_with_config(config, &Default::default())
+        start_magicblock_validator_with_config_struct(
+            config,
+            &Default::default(),
+        )
     else {
         panic!("validator should set up correctly");
     };
@@ -172,7 +112,7 @@ pub fn setup_validator_with_local_remote(
     };
 
     let (default_tmpdir_config, Some(mut validator)) =
-        start_validator_with_config(
+        start_magicblock_validator_with_config_struct(
             config,
             &LoadedAccounts::with_delegation_program_test_authority(),
         )
@@ -182,12 +122,6 @@ pub fn setup_validator_with_local_remote(
 
     let ctx = expect!(IntegrationTestContext::try_new(), validator);
     (default_tmpdir_config, validator, ctx)
-}
-
-pub fn cleanup(validator: &mut Child) {
-    let _ = validator.kill().inspect_err(|e| {
-        eprintln!("ERR: Failed to kill validator: {:?}", e);
-    });
 }
 
 // -----------------
@@ -371,7 +305,7 @@ macro_rules! assert_counter_state {
                 updates: $expected.chain.updates,
                 label: $label.to_string()
             },
-            $crate::cleanup($validator)
+            ::integration_test_tools::validator::cleanup($validator)
         );
 
         let counter_ephem =
@@ -383,7 +317,7 @@ macro_rules! assert_counter_state {
                 updates: $expected.ephem.updates,
                 label: $label.to_string()
             },
-            $crate::cleanup($validator)
+            ::integration_test_tools::validator::cleanup($validator)
         );
     };
 }
