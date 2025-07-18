@@ -1,0 +1,123 @@
+on:
+  push:
+    branches: [ feat/ci-benchmark ]
+  pull_request:
+    types: [opened, reopened, synchronize, ready_for_review]
+
+name: Run Benchmarks with Redline
+
+jobs:
+  benchmark:
+    if: github.event.pull_request.draft == false
+    runs-on: extra-large
+    steps:
+      - name: Checkout magicblock-validator
+        uses: actions/checkout@v2
+        with:
+          path: magicblock-validator
+
+      - name: Checkout redline
+        uses: actions/checkout@v2
+        with:
+          repository: magicblock-labs/redline
+          path: redline
+          token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+
+      - uses: ./magicblock-validator/.github/actions/setup-build-env
+        with:
+          build_cache_key_name: "magicblock-validator-benchmark-v000"
+          rust_toolchain_release: "1.84.1"
+          github_access_token: ${{ secrets.GH_PERSONAL_ACCESS_TOKEN }}
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: ./magicblock-validator/.github/actions/setup-solana
+
+      - name: Build magicblock-validator
+        run: |
+          sudo prlimit --pid $$ --nofile=1048576:1048576
+          sudo sysctl fs.inotify.max_user_instances=1280
+          sudo sysctl fs.inotify.max_user_watches=655360
+          make build-release
+        shell: bash
+        working-directory: magicblock-validator
+
+      - name: Setup redline dependencies
+        run: |
+          # Installa dipendenze per redline se necessario
+          # Questo dipende da come è strutturato il progetto redline
+          cargo build --release
+        shell: bash
+        working-directory: redline
+
+      - name: Start validator in background
+        run: |
+          # Avvia il validatore in background
+          # Modifica questo comando secondo la tua configurazione
+          ./target/release/magicblock-validator --test-validator --rpc-port 8899 --rpc-bind-address 0.0.0.0 &
+          VALIDATOR_PID=$!
+          echo "VALIDATOR_PID=$VALIDATOR_PID" >> $GITHUB_ENV
+          
+          # Aspetta che il validatore sia pronto
+          timeout 60 bash -c 'until curl -s http://localhost:8899/health; do sleep 1; done'
+        shell: bash
+        working-directory: magicblock-validator
+
+      - name: Run benchmarks with redline
+        run: |
+          # Lancia i benchmark con redline
+          # Modifica questi comandi secondo la configurazione di redline
+          ./target/release/redline --rpc-url http://localhost:8899 --benchmark-suite all
+        shell: bash
+        working-directory: redline
+
+      - name: Upload benchmark results
+        uses: actions/upload-artifact@v3
+        if: always()
+        with:
+          name: benchmark-results
+          path: |
+            redline/benchmark-results.json
+            redline/benchmark-report.html
+          retention-days: 30
+
+      - name: Comment PR with results
+        uses: actions/github-script@v6
+        if: always()
+        with:
+          script: |
+            const fs = require('fs');
+            let comment = '## 🚀 Benchmark Results\n\n';
+            
+            try {
+              // Leggi i risultati del benchmark se disponibili
+              const results = fs.readFileSync('redline/benchmark-results.json', 'utf8');
+              const data = JSON.parse(results);
+            
+              comment += `✅ Benchmarks completed successfully!\n\n`;
+              comment += `**Summary:**\n`;
+              comment += `- Total tests: ${data.total_tests || 'N/A'}\n`;
+              comment += `- Average TPS: ${data.average_tps || 'N/A'}\n`;
+              comment += `- Peak TPS: ${data.peak_tps || 'N/A'}\n`;
+              comment += `- Duration: ${data.duration || 'N/A'}\n\n`;
+              comment += `📊 [Full benchmark report](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})\n`;
+            } catch (error) {
+              comment += `❌ Error reading benchmark results: ${error.message}\n`;
+            }
+            
+            github.rest.issues.createComment({
+              issue_number: context.issue.number,
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              body: comment
+            });
+
+      - name: Cleanup
+        if: always()
+        run: |
+          # Termina il validatore se è ancora in esecuzione
+          if [ ! -z "$VALIDATOR_PID" ]; then
+            kill $VALIDATOR_PID || true
+          fi
+          # Cleanup di eventuali processi rimasti
+          pkill -f magicblock-validator || true
+        shell: bash
