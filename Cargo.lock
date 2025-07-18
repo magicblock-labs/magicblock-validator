@@ -3883,6 +3883,7 @@ dependencies = [
  "bs58 0.4.0",
  "clap 4.5.40",
  "isocountry",
+ "magicblock-config-helpers",
  "magicblock-config-macro",
  "serde",
  "solana-sdk",
@@ -3894,11 +3895,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "magicblock-config-helpers"
+version = "0.1.7"
+
+[[package]]
 name = "magicblock-config-macro"
 version = "0.1.7"
 dependencies = [
  "clap 4.5.40",
  "convert_case 0.8.0",
+ "magicblock-config-helpers",
  "proc-macro2",
  "quote",
  "serde",

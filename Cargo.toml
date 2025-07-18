@@ -18,6 +18,7 @@ members = [
   "magicblock-committor-program",
   "magicblock-committor-service",
   "magicblock-config",
+  "magicblock-config-helpers",
   "magicblock-config-macro",
   "magicblock-core",
   "magicblock-geyser-plugin",
@@ -110,6 +111,7 @@ magicblock-committor-program = { path = "./magicblock-committor-program", featur
 ] }
 magicblock-committor-service = { path = "./magicblock-committor-service" }
 magicblock-config = { path = "./magicblock-config" }
+magicblock-config-helpers = { path = "./magicblock-config-helpers" }
 magicblock-config-macro = { path = "./magicblock-config-macro" }
 magicblock-core = { path = "./magicblock-core" }
 magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "4af7f1c" }

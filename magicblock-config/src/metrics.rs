@@ -1,5 +1,5 @@
 use clap::Args;
-use magicblock_config_macro::{clap_from_serde, clap_prefix};
+use magicblock_config_macro::{clap_from_serde, clap_prefix, Mergeable};
 use serde::{Deserialize, Serialize};
 
 use crate::helpers;
@@ -13,7 +13,9 @@ helpers::socket_addr_config! {
 
 #[clap_prefix("metrics")]
 #[clap_from_serde]
-#[derive(Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Args)]
+#[derive(
+    Debug, Clone, PartialEq, Eq, Deserialize, Serialize, Args, Mergeable,
+)]
 pub struct MetricsConfig {
     #[derive_env_var]
     #[arg(help = "Whether to enable metrics.")]
@@ -28,25 +30,6 @@ pub struct MetricsConfig {
     #[serde(default)]
     #[serde(flatten)]
     pub service: MetricsServiceConfig,
-}
-
-impl MetricsConfig {
-    pub fn merge(&mut self, other: MetricsConfig) {
-        if self.enabled == helpers::serde_defaults::bool_true()
-            && other.enabled != helpers::serde_defaults::bool_true()
-        {
-            self.enabled = other.enabled;
-        }
-        if self.system_metrics_tick_interval_secs
-            == default_system_metrics_tick_interval_secs()
-            && other.system_metrics_tick_interval_secs
-                != default_system_metrics_tick_interval_secs()
-        {
-            self.system_metrics_tick_interval_secs =
-                other.system_metrics_tick_interval_secs;
-        }
-        self.service.merge(other.service);
-    }
 }
 
 impl Default for MetricsConfig {
@@ -67,6 +50,8 @@ fn default_system_metrics_tick_interval_secs() -> u64 {
 #[cfg(test)]
 mod tests {
     use std::net::{IpAddr, Ipv4Addr};
+
+    use magicblock_config_helpers::Merge;
 
     use super::*;
 

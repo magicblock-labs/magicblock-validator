@@ -72,3 +72,9 @@ struct RpcConfig {
     config: SomeOtherConfig,
 }
 ```
+
+## `derive(Mergeable)`
+
+This macro will implement the `magicblock_config_helpers::Merge` trait for annotated struct. 
+
+### Example
