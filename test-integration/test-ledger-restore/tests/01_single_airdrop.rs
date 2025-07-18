@@ -1,12 +1,14 @@
 use cleanass::{assert, assert_eq};
 use std::{path::Path, process::Child};
 
-use integration_test_tools::{expect, tmpdir::resolve_tmp_dir, unwrap};
+use integration_test_tools::{
+    expect, tmpdir::resolve_tmp_dir, unwrap, validator::cleanup,
+};
 use solana_sdk::{
     commitment_config::CommitmentConfig, pubkey::Pubkey, signature::Signature,
 };
 use test_ledger_restore::{
-    cleanup, setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
+    setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 
 #[test]

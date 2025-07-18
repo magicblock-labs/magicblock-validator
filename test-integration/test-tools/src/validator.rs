@@ -1,4 +1,5 @@
 use std::{
+    fs,
     net::TcpStream,
     path::{Path, PathBuf},
     process::{self, Child},
@@ -6,8 +7,12 @@ use std::{
     time::Duration,
 };
 
+use magicblock_config::EphemeralConfig;
+use tempfile::TempDir;
+
 use crate::{
     loaded_accounts::LoadedAccounts,
+    tmpdir::resolve_tmp_dir,
     toml_to_args::{config_to_args, rpc_port_from_config, ProgramLoader},
 };
 
@@ -168,6 +173,48 @@ pub fn wait_for_validator(mut validator: Child, port: u16) -> Option<Child> {
     );
     validator.kill().expect("Failed to kill validator");
     None
+}
+
+pub const TMP_DIR_CONFIG: &str = "TMP_DIR_CONFIG";
+
+/// Stringifies the config and writes it to a temporary config file.
+/// Then uses that config to start the validator.
+pub fn start_validator_with_config_struct(
+    config: EphemeralConfig,
+    loaded_chain_accounts: &LoadedAccounts,
+) -> (TempDir, Option<process::Child>) {
+    let workspace_dir = resolve_workspace_dir();
+    let (default_tmpdir, temp_dir) = resolve_tmp_dir(TMP_DIR_CONFIG);
+    let release = std::env::var("RELEASE").is_ok();
+    let config_path = temp_dir.join("config.toml");
+    let config_toml = config.to_string();
+    fs::write(&config_path, config_toml).unwrap();
+
+    let root_dir = Path::new(&workspace_dir)
+        .join("..")
+        .canonicalize()
+        .unwrap()
+        .to_path_buf();
+    let paths = TestRunnerPaths {
+        config_path,
+        root_dir,
+        workspace_dir,
+    };
+    (
+        default_tmpdir,
+        start_magic_block_validator_with_config(
+            &paths,
+            "TEST",
+            loaded_chain_accounts,
+            release,
+        ),
+    )
+}
+
+pub fn cleanup(validator: &mut Child) {
+    let _ = validator.kill().inspect_err(|e| {
+        eprintln!("ERR: Failed to kill validator: {:?}", e);
+    });
 }
 
 /// Directories
