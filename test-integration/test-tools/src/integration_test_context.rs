@@ -752,6 +752,21 @@ impl IntegrationTestContext {
     // -----------------
     // Slot
     // -----------------
+    pub fn get_slot_ephem(&self) -> Result<Slot> {
+        self.try_ephem_client().and_then(|ephem_client| {
+            ephem_client
+                .get_slot()
+                .map_err(|e| anyhow::anyhow!("{}", e))
+        })
+    }
+
+    pub fn get_slot_chain(&self) -> Result<Slot> {
+        self.try_chain_client().and_then(|chain_client| {
+            chain_client
+                .get_slot()
+                .map_err(|e| anyhow::anyhow!("{}", e))
+        })
+    }
     pub fn wait_for_next_slot_ephem(&self) -> Result<Slot> {
         self.try_ephem_client().and_then(Self::wait_for_next_slot)
     }

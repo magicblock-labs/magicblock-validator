@@ -43,7 +43,6 @@ magicblock-committor-program = { path = "../magicblock-committor-program", featu
 ] }
 magicblock-delegation-program = { git = "https://github.com/magicblock-labs/delegation-program.git", rev = "4af7f1c" }
 magicblock-committor-service = { path = "../magicblock-committor-service" }
-magicblock-ledger = { path = "../magicblock-ledger" }
 magicblock-rpc-client = { path = "../magicblock-rpc-client" }
 magicblock-table-mania = { path = "../magicblock-table-mania" }
 paste = "1.0"

@@ -35,7 +35,7 @@ fn restore_ledger_with_two_airdrops_with_account_flush_in_between() {
 
 fn write(ledger_path: &Path, pubkey: &Pubkey) -> (Child, u64) {
     let (_, mut validator, ctx) =
-        setup_offline_validator(ledger_path, None, None, true, false, true);
+        setup_offline_validator(ledger_path, None, None, true, false);
 
     // First airdrop followed by wait until account is flushed
     {
@@ -67,7 +67,7 @@ fn read(ledger_path: &Path, pubkey: &Pubkey) -> Child {
     // Measure time
     let _ = std::time::Instant::now();
     let (_, mut validator, ctx) =
-        setup_offline_validator(ledger_path, None, None, false, false, true);
+        setup_offline_validator(ledger_path, None, None, false, false);
     eprintln!(
         "Validator started in {:?}",
         std::time::Instant::now().elapsed()
