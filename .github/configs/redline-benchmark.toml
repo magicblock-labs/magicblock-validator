@@ -1,0 +1,153 @@
+# Example configuration file for Redline application
+
+# Inidicates how many concurrent benchmarks to run
+#
+# NOTE: each provided unit of parallelism will start its own thread of
+# execution for benchmark, dramatically increasing the load on target
+# validator. I.e. each benchmark will run in parallel with others on their own
+# OS thread, so for example providing 10 for parallelism, has 10x load in
+# comparison to 1. This might negatively affect validator performance running
+# on the same host as the REDLINE will compete for compute resources with
+# validator process
+parallelism = 1
+
+# Connection settings for main chain and ephemeral URLs
+[connection]
+# URL of the chain node to connect to
+chain-url = "http://api.devnet.solana.com"
+# URL of the ephemeral node to connect to
+ephem-url = "http://127.0.0.1:8899"
+# Type of HTTP connection: "http1" or "{ http2 = { streams = <NUM> } }"
+http-connection-type = { http2 = { streams = 128 } }
+# Maximum number of HTTP connections
+http-connections-count = 16
+# Maximum number of WebSocket connections
+ws-connections-count = 16
+
+# RPS Benchmark settings (getX Requests)
+[rps-benchmark]
+# whether to perform RPS benchmark, either RPS or TPS benchmark should be enabled or both
+enabled = true
+# Number of iterations for the benchmark
+iterations = 150000
+# The desired throughput for transaction submission to the target ER node,
+# expressed in transactions per second.
+# Note: This serves as a hint rather than a strict limit. For instance,
+# specifying a rate of 10,000 RPS while the ER node's request handling
+# rate is 3,000 RPS, will not increase the validator's capacity to handle the
+# specified throughput. Consequently, any value exceeding the validator's
+# saturation point is ineffective.
+rps = 5000
+# Number of concurrent executions
+concurrency = 50
+# Number of accounts in the pool to be used getX requests
+accounts-count = 8
+
+# Mode of rps benchmark, options:
+# mode = "get-account-info"
+# mode = "get-multiple-accounts"
+# mode = "get-token-account-balance"
+# mode = "get-balance"
+mode = { mixed = [ "get-account-info", "get-balance", "get-multiple-accounts" ] }
+
+# TPS Benchmark settings
+[tps-benchmark]
+# whether to perform TPS benchmark, either RPS or TPS benchmark should be enabled or both
+enabled = true
+# Number of iterations for the benchmark
+iterations = 100000
+# The desired throughput for transaction submission to the target ER node,
+# expressed in transactions per second.
+# Note: This serves as a hint rather than a strict limit. For instance,
+# specifying a rate of 10,000 TPS while the ER node's transaction ingestion
+# rate is 3,000 TPS, will not increase the validator's capacity to handle the
+# specified throughput. Consequently, any value exceeding the validator's
+# saturation point is ineffective.
+tps = 3000
+# Number of concurrent executions
+concurrency = 64
+# Perform a preflight check for each transaction: true or false
+preflight-check = false
+
+
+# Mode of tps benchmark
+# this is the most basic transaction which writes some bytes
+# to a single account from the pool of the provided accounts
+# mode = { simple-byte-set = { accounts-count = 8 } }
+
+# Alternative modes are:
+#--------------------------------------------------------------------------------
+#-------------------------------### TRIGGER-CLONES ###----------------------------------
+# every clone-frequency-secs, and airdrop will be performed on of the readonly
+# accounts on chain, thus triggering clone of account on ER
+
+# mode = { trigger-clones = { clone-frequency-secs = 1, accounts-count = 16 } }
+
+#-------------------------------### HIGH-CU ###-------------------------------
+# performs an expensive hash compute in loop (iters times), 28 iterations
+# consume almost the entirety of 200K CUs
+
+# mode = { high-cu-cost = { iters = 8 } }
+
+#-------------------------------### READ-WRITE ###--------------------------------
+# performs data copy operation between accounts in the pool, each transaction
+# involves 2 accounts, one readable, one writable, thus high number of
+# transactions using intersecting set of accounts will create pressure on
+# scheduler due to account locking
+
+# mode = { read-write = { accounts-count = 32 } }
+
+#-------------------------------### READ-ONLY ###-----------------------------------
+# Uses provided accounts in the pool to read the length of the data field an log it,
+# all of the accounts are used in read only mode, so multiple transactions of this
+# kind can run in parallel on multi-threaded scheduler
+
+# mode = { read-only = { accounts-count = 32, accounts-per-transaction = 8 } }
+
+#-------------------------------### COMMIT ###------------------------------------
+# Sends commit transactions to the ER choosinng accounts-per-transaction from
+# the pool of accounts-count
+
+# mode = { commit = { accounts-count = 32, accounts-per-transaction = 8 } }
+
+#-------------------------------### MIXED ###--------------------------------------
+# a combination of various benchmarking modes, to simulate more real world
+# scenarios, the weight argument specifies the frequency of the transaction
+# from the given mode to be generated, in the example below 50% of transactions
+# will be from high-cu-cost, 30% from simple-byte-set and 20% from read-write
+
+[[tps-benchmark.mode.mixed]]
+mode = { high-cu-cost = { accounts-count = 8, iters = 23 } }
+weight = 50
+[[tps-benchmark.mode.mixed]]
+mode = { simple-byte-set = { accounts-count = 8 } }
+weight = 29
+[[tps-benchmark.mode.mixed]]
+mode = { read-write = { accounts-count = 32 } }
+weight = 20
+[[tps-benchmark.mode.mixed]]
+mode = { commit = { accounts-count = 32, accounts-per-transaction = 2 } }
+weight = 1
+
+[confirmations]
+# Subscription settings
+# Whether to subscribe to account notifications: true or false
+subscribe-to-accounts = true
+# Whether to subscribe to signature notifications: true or false
+subscribe-to-signatures = true
+# Enforce total synchronization: true or false
+# this ensures that a transaction is considered completed only if account
+# update and signature update has been received, while preventing other
+# transactions from running, thus significantly decreasinng throughput.
+# If disabled, transaction will reserve concurrency slot only for as long as
+# it's required to receive HTTP response
+enforce-total-sync = true
+# TODO: unused
+get-signature-status = false
+
+[data]
+# Data settings for account encoding and size
+# Encoding type of the account data: "base58", "base64", "base64+zstd"
+account-encoding = "base64+zstd"
+# Size of the account data: bytes128, bytes512, bytes2048, bytes8192
+account-size = "bytes128"

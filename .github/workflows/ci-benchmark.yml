@@ -15,6 +15,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           path: magicblock-validator
+          ref: '7d55f5bd48e56cd1d6120ca5b08d6913de604683'
 
       - name: Checkout redline
         uses: actions/checkout@v4
@@ -53,7 +54,7 @@ jobs:
         run: |
           # Avvia il validatore in background
           # Modifica questo comando secondo la tua configurazione
-          ./target/release/rpc
+          ./target/release/rpc .github/configs/validator-ci.toml &
           VALIDATOR_PID=$!
           echo "VALIDATOR_PID=$VALIDATOR_PID" >> $GITHUB_ENV
           
@@ -66,7 +67,7 @@ jobs:
         run: |
           # Lancia i benchmark con redline
           # Modifica questi comandi secondo la configurazione di redline
-          ./target/release/redline --rpc-url http://localhost:8899 --benchmark-suite all
+          make bench ../magicblock-validator/.github/configs/redline-benchmark.toml
         shell: bash
         working-directory: redline
 
