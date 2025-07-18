@@ -3,12 +3,14 @@ use magicblock_config::TEST_SNAPSHOT_FREQUENCY;
 use solana_transaction_status::UiTransactionEncoding;
 use std::{path::Path, process::Child};
 
-use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};
+use integration_test_tools::{
+    expect, tmpdir::resolve_tmp_dir, validator::cleanup,
+};
 use solana_sdk::{
     signature::{Keypair, Signature},
     signer::Signer,
 };
-use test_ledger_restore::{cleanup, setup_offline_validator, TMP_DIR_LEDGER};
+use test_ledger_restore::{setup_offline_validator, TMP_DIR_LEDGER};
 
 // In this test we ensure that we can optionally skip the replay of the ledger
 // when restoring, restarting at the last slot.
