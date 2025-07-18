@@ -802,7 +802,6 @@ impl MagicValidator {
             self.remote_account_cloner_worker.take()
         {
             if let Some(committor_service) = self.committor_service.as_ref() {
-                // Only reserve common pubkeys if the clone config is set to always
                 if self.config.accounts.clone.prepare_lookup_tables
                     == PrepareLookupTables::Always
                 {

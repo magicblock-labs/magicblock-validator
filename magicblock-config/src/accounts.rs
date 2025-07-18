@@ -213,7 +213,7 @@ impl Default for CommitStrategy {
 }
 
 // -----------------
-// PrepareLookupTables
+// AccountsCloneConfig
 // -----------------
 #[derive(
     Debug,
@@ -236,9 +236,6 @@ pub enum PrepareLookupTables {
     Never,
 }
 
-// -----------------
-// AccountsCloneConfig
-// -----------------
 #[clap_prefix("clone")]
 #[clap_from_serde]
 #[derive(
