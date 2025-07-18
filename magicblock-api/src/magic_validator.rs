@@ -40,8 +40,8 @@ use magicblock_committor_service::{
     config::ChainConfig, CommittorService, ComputeBudgetConfig,
 };
 use magicblock_config::{
-    AccountsDbConfig, EphemeralConfig, LifecycleMode, PrepareLookupTables,
-    ProgramConfig,
+    AccountsDbConfig, EphemeralConfig, LedgerConfig, LifecycleMode,
+    PrepareLookupTables, ProgramConfig,
 };
 use magicblock_geyser_plugin::rpc::GeyserRpcService;
 use magicblock_ledger::{
@@ -817,7 +817,7 @@ impl MagicValidator {
                 }
             }
 
-            if !self.config.ledger.reset {
+            if !(self.config.ledger.reset || self.config.ledger.skip_replay) {
                 let remote_account_cloner_worker =
                     remote_account_cloner_worker.clone();
                 tokio::spawn(async move {

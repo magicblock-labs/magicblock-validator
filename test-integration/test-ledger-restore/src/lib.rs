@@ -105,9 +105,9 @@ pub fn setup_validator_with_local_remote(
     let config = EphemeralConfig {
         ledger: LedgerConfig {
             reset,
-            skip_replay: false,
             path: Some(ledger_path.display().to_string()),
             size: DEFAULT_LEDGER_SIZE_BYTES,
+            ..Default::default()
         },
         accounts: accounts_config.clone(),
         programs,
