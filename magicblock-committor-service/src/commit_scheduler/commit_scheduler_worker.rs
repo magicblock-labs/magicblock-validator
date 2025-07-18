@@ -15,6 +15,7 @@ use tokio::sync::{
 
 use crate::{
     commit_scheduler::{
+        commit_id_tracker::CommitIdTracker,
         commit_scheduler_inner::{CommitSchedulerInner, POISONED_INNER_MSG},
         db::DB,
         Error,
@@ -22,18 +23,27 @@ use crate::{
     l1_message_executor::{
         ExecutionOutput, L1MessageExecutor, MessageExecutorResult,
     },
-    transaction_preperator::transaction_preparator::TransactionPreparator,
+    persist::L1MessagesPersisterIface,
+    transaction_preperator::transaction_preparator::{
+        TransactionPreparator, TransactionPreparatorV1,
+    },
+    utils::ScheduledMessageExt,
     ComputeBudgetConfig,
 };
-use crate::commit_scheduler::commit_id_tracker::CommitIdTracker;
 
 const SEMAPHORE_CLOSED_MSG: &str = "Executors semaphore closed!";
 
+pub type BroadcasteddMessageExecutionResult = MessageExecutorResult<
+    ExecutionOutput,
+    Arc<crate::l1_message_executor::Error>,
+>;
+
 // TODO(edwin): reduce num of params: 1,2,3, could be united
-pub(crate) struct CommitSchedulerWorker<D: DB> {
+pub(crate) struct CommitSchedulerWorker<D: DB, P: L1MessagesPersisterIface> {
     db: Arc<D>,
+    l1_messages_persister: P,
     rpc_client: MagicblockRpcClient, // 1.
-    table_mania: TableMania, // 2.
+    table_mania: TableMania,         // 2.
     compute_budget_config: ComputeBudgetConfig, // 3.
     commit_id_tracker: CommitIdTracker,
     receiver: mpsc::Receiver<ScheduledL1Message>,
@@ -44,9 +54,10 @@ pub(crate) struct CommitSchedulerWorker<D: DB> {
     inner: Arc<Mutex<CommitSchedulerInner>>,
 }
 
-impl<D: DB> CommitSchedulerWorker<D> {
+impl<D: DB, P: L1MessagesPersisterIface> CommitSchedulerWorker<D, P> {
     pub fn new(
         db: Arc<D>,
+        l1_messages_persister: P,
         rpc_client: MagicblockRpcClient,
         table_mania: TableMania,
         compute_budget_config: ComputeBudgetConfig,
@@ -57,6 +68,7 @@ impl<D: DB> CommitSchedulerWorker<D> {
 
         Self {
             db,
+            l1_messages_persister,
             rpc_client: rpc_client.clone(),
             table_mania,
             compute_budget_config,
@@ -73,7 +85,7 @@ impl<D: DB> CommitSchedulerWorker<D> {
     /// Spawns `main_loop` and return `Receiver` listening to results
     pub fn spawn(
         mut self,
-    ) -> broadcast::Receiver<MessageExecutorResult<ExecutionOutput>> {
+    ) -> broadcast::Receiver<BroadcasteddMessageExecutionResult> {
         let (result_sender, result_receiver) = broadcast::channel(100);
         tokio::spawn(self.main_loop(result_sender));
 
@@ -86,9 +98,7 @@ impl<D: DB> CommitSchedulerWorker<D> {
     /// 3. Spawns execution of scheduled message
     async fn main_loop(
         mut self,
-        result_sender: broadcast::Sender<
-            MessageExecutorResult<ExecutionOutput>,
-        >,
+        result_sender: broadcast::Sender<BroadcasteddMessageExecutionResult>,
     ) {
         loop {
             // TODO: unwraps
@@ -108,22 +118,35 @@ impl<D: DB> CommitSchedulerWorker<D> {
                 .expect(SEMAPHORE_CLOSED_MSG);
 
             // Prepare data for execution
-            let commit_ids = self.deduce_commit_ids(&l1_message).await;
-            let executor = L1MessageExecutor::new_v1(
-                self.rpc_client.clone(),
-                self.table_mania.clone(),
-                self.compute_budget_config.clone(),
-            );
+            let commit_ids =
+                if let Some(pubkeys) = l1_message.get_committed_pubkeys() {
+                    self.commit_id_tracker
+                        .next_commit_ids(&pubkeys)
+                        .await
+                        .unwrap()
+                } else {
+                    // Pure L1Action, no commit ids used
+                    HashMap::new()
+                };
+            let executor =
+                L1MessageExecutor::<TransactionPreparatorV1, P>::new_v1(
+                    self.rpc_client.clone(),
+                    self.table_mania.clone(),
+                    self.compute_budget_config.clone(),
+                    self.l1_messages_persister.clone(),
+                );
 
             // Spawn executor
+            let inner = self.inner.clone();
+            let notify = self.notify.clone();
             tokio::spawn(Self::execute(
                 executor,
                 l1_message,
                 commit_ids,
-                self.inner.clone(),
+                inner,
                 permit,
                 result_sender.clone(),
-                self.notify.clone(),
+                notify,
             ));
         }
     }
@@ -148,10 +171,11 @@ impl<D: DB> CommitSchedulerWorker<D> {
                 false
             }
         };
+        let notify = self.notify.clone();
         let message = tokio::select! {
             // Notify polled first to prioritize unblocked messages over new one
             biased;
-            _ = self.notify.notified() => {
+            _ = notify.notified() => {
                 trace!("Worker executed L1Message, fetching new available one");
                 self.inner.lock().expect(POISONED_INNER_MSG).pop_next_scheduled_message()
             },
@@ -183,17 +207,23 @@ impl<D: DB> CommitSchedulerWorker<D> {
 
     /// Wrapper on [`L1MessageExecutor`] that handles its results and drops execution permit
     async fn execute<T: TransactionPreparator>(
-        executor: L1MessageExecutor<T>,
+        executor: L1MessageExecutor<T, P>,
         l1_message: ScheduledL1Message,
         commit_ids: HashMap<Pubkey, u64>,
         inner_scheduler: Arc<Mutex<CommitSchedulerInner>>,
         execution_permit: OwnedSemaphorePermit,
         result_sender: broadcast::Sender<
-            MessageExecutorResult<ExecutionOutput>,
+            MessageExecutorResult<
+                ExecutionOutput,
+                Arc<crate::l1_message_executor::Error>,
+            >,
         >,
         notify: Arc<Notify>,
     ) {
-        let result = executor.execute(l1_message.clone(), commit_ids).await;
+        let result = executor
+            .execute(l1_message.clone(), commit_ids)
+            .await
+            .map_err(|err| Arc::new(err));
         // TODO: unwrap
         result_sender.send(result).unwrap();
         // Remove executed task from Scheduler to unblock other messages

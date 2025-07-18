@@ -6,7 +6,7 @@ use std::{
 use log::{debug, error};
 use magicblock_bank::bank::Bank;
 use magicblock_committor_service::{
-    persist::BundleSignatureRow, ChangesetMeta, L1MessageCommittor,
+    persist::MessageSignatures, ChangesetMeta, L1MessageCommittor,
 };
 use magicblock_processor::execute_transaction::execute_legacy_transaction;
 use magicblock_program::{
@@ -39,6 +39,7 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsWorker<C> {
         }
     }
 
+    // TODO(edwin): maybe not needed
     pub async fn start(mut self) {
         while let Some(l1_messages) = self.message_receiver.recv().await {
             let metadata = ChangesetMeta::from(&l1_messages);
@@ -97,7 +98,7 @@ impl<C: L1MessageCommittor> RemoteScheduledCommitsWorker<C> {
                 }
             };
             match bundle_signatures {
-                Some(BundleSignatureRow {
+                Some(MessageSignatures {
                     processed_signature,
                     finalized_signature,
                     bundle_id,

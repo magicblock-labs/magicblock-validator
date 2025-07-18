@@ -22,12 +22,14 @@ use tokio::task::JoinSet;
 
 use super::common::{lookup_table_keys, send_and_confirm};
 use crate::{
+    commit_scheduler::{db::DummyDB, CommitScheduler},
     commit_stage::CommitStage,
     compute_budget::{ComputeBudget, ComputeBudgetConfig},
     config::ChainConfig,
     error::CommittorServiceResult,
     persist::{
-        BundleSignatureRow, CommitPersister, CommitStatusRow, CommitStrategy,
+        CommitStatusRow, CommitStrategy, L1MessagePersister,
+        L1MessagesPersisterIface, MessageSignatures,
     },
     pubkeys_provider::provide_committee_pubkeys,
     types::{InstructionsForCommitable, InstructionsKind},
@@ -38,20 +40,9 @@ pub(crate) struct CommittorProcessor {
     pub(crate) magicblock_rpc_client: MagicblockRpcClient,
     pub(crate) table_mania: TableMania,
     pub(crate) authority: Keypair,
-    pub(crate) persister: Arc<Mutex<CommitPersister>>,
-    pub(crate) compute_budget_config: Arc<ComputeBudgetConfig>,
-}
-
-impl Clone for CommittorProcessor {
-    fn clone(&self) -> Self {
-        Self {
-            magicblock_rpc_client: self.magicblock_rpc_client.clone(),
-            table_mania: self.table_mania.clone(),
-            authority: self.authority.insecure_clone(),
-            persister: self.persister.clone(),
-            compute_budget_config: self.compute_budget_config.clone(),
-        }
-    }
+    pub(crate) compute_budget_config: ComputeBudgetConfig,
+    persister: L1MessagePersister,
+    commits_scheduler: CommitScheduler<DummyDB>,
 }
 
 impl CommittorProcessor {
@@ -71,19 +62,34 @@ impl CommittorProcessor {
         );
         let rpc_client = Arc::new(rpc_client);
         let magic_block_rpc_client = MagicblockRpcClient::new(rpc_client);
+
+        // Create TableMania
         let gc_config = GarbageCollectorConfig::default();
         let table_mania = TableMania::new(
             magic_block_rpc_client.clone(),
             &authority,
             Some(gc_config),
         );
-        let persister = CommitPersister::try_new(persist_file)?;
+
+        // Create commit persister
+        let persister = L1MessagePersister::try_new(persist_file)?;
+
+        // Create commit scheduler
+        let commits_scheduler = CommitScheduler::new(
+            magic_block_rpc_client.clone(),
+            DummyDB::new(),
+            persister.clone(),
+            table_mania.clone(),
+            chain_config.compute_budget_config.clone(),
+        );
+
         Ok(Self {
             authority,
             magicblock_rpc_client: magic_block_rpc_client,
             table_mania,
-            persister: Arc::new(Mutex::new(persister)),
-            compute_budget_config: Arc::new(chain_config.compute_budget_config),
+            commits_scheduler,
+            persister,
+            compute_budget_config: chain_config.compute_budget_config,
         })
     }
 
@@ -115,85 +121,39 @@ impl CommittorProcessor {
 
     pub fn get_commit_statuses(
         &self,
-        reqid: &str,
+        message_id: u64,
     ) -> CommittorServiceResult<Vec<CommitStatusRow>> {
-        let commit_statuses = self
-            .persister
-            .lock()
-            .expect("persister mutex poisoned")
-            .get_commit_statuses_by_reqid(reqid)?;
+        let commit_statuses =
+            self.persister.get_commit_statuses_by_id(message_id)?;
         Ok(commit_statuses)
     }
 
     pub fn get_signature(
         &self,
-        bundle_id: u64,
-    ) -> CommittorServiceResult<Option<BundleSignatureRow>> {
-        let signatures = self
-            .persister
-            .lock()
-            .expect("persister mutex poisoned")
-            .get_signature(bundle_id)?;
+        commit_id: u64,
+    ) -> CommittorServiceResult<Option<MessageSignatures>> {
+        let signatures = self.persister.get_signatures(commit_id)?;
         Ok(signatures)
     }
 
     pub async fn commit_l1_messages(
         &self,
         l1_messages: Vec<ScheduledL1Message>,
-    ) -> Option<String> {
-        let reqid = match self
-            .persister
-            .lock()
-            .expect("persister mutex poisoned")
-            .start_changeset(&l1_messages)
-        {
-            Ok(id) => Some(id),
-            Err(err) => {
-                // We will still try to perform the commits, but the fact that we cannot
-                // persist the intent is very serious and we should probably restart the
-                // valiator
-                error!(
-                    "DB EXCEPTION: Failed to persist changeset to be committed: {:?}",
-                    err
-                );
-                None
-            }
+    ) {
+        if let Err(err) = self.persister.start_l1_messages(&l1_messages) {
+            // We will still try to perform the commits, but the fact that we cannot
+            // persist the intent is very serious and we should probably restart the
+            // valiator
+            error!(
+                "DB EXCEPTION: Failed to persist changeset to be committed: {:?}",
+                err
+            );
         };
-        let commit_stages = self
-            .process_commit_changeset(changeset, finalize, ephemeral_blockhash)
-            .await;
 
-        // Release pubkeys related to all undelegated accounts from the lookup tables
-        let releaseable_pubkeys = commit_stages
-            .iter()
-            .filter(|x| CommitStage::is_successfully_undelegated(x))
-            .flat_map(|x| {
-                provide_committee_pubkeys(&x.pubkey(), owners.get(&x.pubkey()))
-            })
-            .collect::<HashSet<_>>();
-        self.table_mania.release_pubkeys(&releaseable_pubkeys).await;
-
-        if let Some(reqid) = &reqid {
-            for stage in commit_stages {
-                let _ = self.persister
-                    .lock()
-                    .expect("persister mutex poisoned")
-                    .update_status(
-                        reqid,
-                        &stage.pubkey(),
-                        stage.commit_status(),
-                    ).map_err(|err| {
-                        // We log the error here, but there is nothing we can do if we encounter
-                        // a db issue.
-                        error!(
-                            "DB EXCEPTION: Failed to update status of changeset {}: {:?}",
-                            reqid, err
-                        );
-                    });
-            }
+        if let Err(err) = self.commits_scheduler.schedule(l1_messages).await {
+            error!("Failed to schedule L1 message: {}", err);
+            // TODO(edwin): handle
         }
-
-        reqid
     }
 
     pub(crate) async fn process_ixs_chunks(

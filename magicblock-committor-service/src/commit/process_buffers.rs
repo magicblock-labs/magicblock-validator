@@ -66,17 +66,12 @@ fn close_buffers_separate_ix(
     commit_info: CommitInfo,
 ) -> InstructionsForCommitable {
     debug!("Processing commitable: {:?}", commit_info);
-    let CommitInfo::BufferedDataAccount {
-        pubkey,
-        ephemeral_blockhash,
-        ..
-    } = &commit_info
-    else {
+    let CommitInfo::BufferedDataAccount { pubkey, .. } = &commit_info else {
         panic!("Only data accounts are supported for now");
     };
 
-    let close_ix =
-        close_buffers_ix(validator_auth, pubkey, ephemeral_blockhash);
+    // TODO(edwin)L fix commit_id
+    let close_ix = close_buffers_ix(validator_auth, pubkey, 0);
     InstructionsForCommitable {
         instructions: vec![close_ix],
         commit_info,

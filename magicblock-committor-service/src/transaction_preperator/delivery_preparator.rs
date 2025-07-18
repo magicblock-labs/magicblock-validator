@@ -3,7 +3,7 @@ use std::{collections::HashSet, time::Duration};
 use anyhow::anyhow;
 use borsh::BorshDeserialize;
 use futures_util::future::{join, join_all};
-use log::{error, warn};
+use log::error;
 use magicblock_committor_program::{Chunks, CommitableAccount};
 use magicblock_rpc_client::{
     MagicBlockRpcClientError, MagicBlockSendTransactionConfig,

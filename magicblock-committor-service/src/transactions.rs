@@ -195,6 +195,7 @@ pub(crate) fn process_commits_ix(
     pubkey: &Pubkey,
     delegated_account_owner: &Pubkey,
     buffer_pda: &Pubkey,
+    commit_id: u64,
     commit_args: CommitStateFromBufferArgs,
 ) -> Instruction {
     dlp::instruction_builder::commit_state_from_buffer(
@@ -209,12 +210,12 @@ pub(crate) fn process_commits_ix(
 pub(crate) fn close_buffers_ix(
     validator_auth: Pubkey,
     pubkey: &Pubkey,
-    ephemeral_blockhash: &Hash,
+    commit_id: u64,
 ) -> Instruction {
     create_close_ix(CreateCloseIxArgs {
         authority: validator_auth,
         pubkey: *pubkey,
-        blockhash: *ephemeral_blockhash,
+        commit_id,
     })
 }
 
@@ -508,7 +509,7 @@ mod test {
                 let delegated_account_owner = Pubkey::new_unique();
                 let buffer_pda = Pubkey::new_unique();
                 let commit_args = CommitStateFromBufferArgs::default();
-                vec![process_commits_ix(
+                vec![dlp::instruction_builder::process_commits_ix(
                     auth_pubkey,
                     &pubkey,
                     &delegated_account_owner,
@@ -535,10 +536,10 @@ mod test {
             )
         };
         pub(crate) static ref MAX_CLOSE_PER_TX: u8 = {
-            let ephemeral_blockhash = Hash::default();
+            let commit_id = 0;
             max_chunks_per_transaction("Max close per tx", |auth_pubkey| {
                 let pubkey = Pubkey::new_unique();
-                vec![super::close_buffers_ix(
+                vec![close_buffers_ix(
                     auth_pubkey,
                     &pubkey,
                     &ephemeral_blockhash,
@@ -546,11 +547,11 @@ mod test {
             })
         };
         pub(crate) static ref MAX_CLOSE_PER_TX_USING_LOOKUP: u8 = {
-            let ephemeral_blockhash = Hash::default();
+            let commit_id = 0;
             max_chunks_per_transaction_using_lookup_table(
                 "Max close per tx using lookup",
                 |auth_pubkey, committee, _| {
-                    vec![super::close_buffers_ix(
+                    vec![close_buffers_ix(
                         auth_pubkey,
                         &committee,
                         &ephemeral_blockhash,
@@ -560,7 +561,7 @@ mod test {
             )
         };
         pub(crate) static ref MAX_PROCESS_AND_CLOSE_PER_TX: u8 = {
-            let ephemeral_blockhash = Hash::default();
+            let commit_id = 0;
             max_chunks_per_transaction(
                 "Max process and close per tx",
                 |auth_pubkey| {
@@ -568,12 +569,12 @@ mod test {
                     let delegated_account_owner = Pubkey::new_unique();
                     let buffer_pda = Pubkey::new_unique();
                     let commit_args = CommitStateFromBufferArgs::default();
-                    super::process_and_close_ixs(
+                    process_and_close_ixs(
                         auth_pubkey,
                         &pubkey,
                         &delegated_account_owner,
                         &buffer_pda,
-                        &ephemeral_blockhash,
+                        commit_id,
                         commit_args,
                     )
                 },

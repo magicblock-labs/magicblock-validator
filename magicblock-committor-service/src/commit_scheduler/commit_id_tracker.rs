@@ -1,7 +1,4 @@
-use std::{
-    collections::HashMap,
-    num::{NonZero, NonZeroUsize},
-};
+use std::{collections::HashMap, num::NonZeroUsize};
 
 use lru::LruCache;
 use magicblock_rpc_client::{
@@ -82,7 +79,7 @@ impl CommitIdTracker {
 
 #[derive(thiserror::Error, Debug)]
 pub enum Error {
-    #[error("Failed to get keys: {0}")]
+    #[error("Failed to get keys: {:?0}")]
     GetCommitIdsError(Vec<u64>),
     #[error("MagicBlockRpcClientError: {0}")]
     MagicBlockRpcClientError(#[from] MagicBlockRpcClientError),

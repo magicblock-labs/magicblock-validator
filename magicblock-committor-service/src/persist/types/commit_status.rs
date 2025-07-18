@@ -100,20 +100,21 @@ impl fmt::Display for CommitStatus {
     }
 }
 
-impl TryFrom<(&str, CommitStrategy, Option<CommitStatusSignatures>)>
+impl TryFrom<(&str, u64, CommitStrategy, Option<CommitStatusSignatures>)>
     for CommitStatus
 {
     type Error = CommitPersistError;
 
     fn try_from(
-        (status, strategy, sigs): (
+        (status, commit_id, strategy, sigs): (
             &str,
+            u64,
             CommitStrategy,
             Option<CommitStatusSignatures>,
         ),
     ) -> Result<Self, Self::Error> {
         let get_sigs = || {
-            if let Some(sigs) = sigs {
+            if let Some(sigs) = sigs.clone() {
                 Ok(sigs)
             } else {
                 return Err(CommitPersistError::CommitStatusNeedsSignatures(
@@ -125,31 +126,27 @@ impl TryFrom<(&str, CommitStrategy, Option<CommitStatusSignatures>)>
         use CommitStatus::*;
         match status {
             "Pending" => Ok(Pending),
-            "Failed" => Ok(Failed(get_bundle_id!())),
+            "Failed" => Ok(Failed(commit_id)),
             "BufferAndChunkPartiallyInitialized" => {
-                Ok(BufferAndChunkPartiallyInitialized(get_bundle_id!()))
+                Ok(BufferAndChunkPartiallyInitialized(commit_id))
             }
             "BufferAndChunkInitialized" => {
-                Ok(BufferAndChunkInitialized(get_bundle_id!()))
+                Ok(BufferAndChunkInitialized(commit_id))
             }
             "BufferAndChunkFullyInitialized" => {
-                Ok(BufferAndChunkFullyInitialized(get_bundle_id!()))
+                Ok(BufferAndChunkFullyInitialized(commit_id))
             }
             "PartOfTooLargeBundleToProcess" => {
-                Ok(PartOfTooLargeBundleToProcess(get_bundle_id!()))
+                Ok(PartOfTooLargeBundleToProcess(commit_id))
             }
-            "FailedProcess" => {
-                Ok(FailedProcess((get_bundle_id!(), strategy, sigs)))
-            }
+            "FailedProcess" => Ok(FailedProcess((commit_id, strategy, sigs))),
             "FailedFinalize" => {
-                Ok(FailedFinalize((get_bundle_id!(), strategy, get_sigs!())))
+                Ok(FailedFinalize((commit_id, strategy, get_sigs()?)))
             }
             "FailedUndelegate" => {
-                Ok(FailedUndelegate((get_bundle_id!(), strategy, get_sigs!())))
+                Ok(FailedUndelegate((commit_id, strategy, get_sigs()?)))
             }
-            "Succeeded" => {
-                Ok(Succeeded((get_bundle_id!(), strategy, get_sigs!())))
-            }
+            "Succeeded" => Ok(Succeeded((commit_id, strategy, get_sigs()?))),
             _ => {
                 Err(CommitPersistError::InvalidCommitStatus(status.to_string()))
             }

@@ -4,10 +4,12 @@ use log::*;
 use magicblock_committor_program::Changeset;
 use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
 use solana_pubkey::Pubkey;
-use solana_sdk::{hash::Hash, signature::Keypair};
+use solana_sdk::signature::Keypair;
 use tokio::{
     select,
     sync::{
+        broadcast,
+        broadcast::Receiver,
         mpsc::{self, error::TrySendError},
         oneshot,
     },
@@ -18,7 +20,7 @@ use crate::{
     commit::CommittorProcessor,
     config::ChainConfig,
     error::CommittorServiceResult,
-    persist::{BundleSignatureRow, CommitStatusRow},
+    persist::{CommitStatusRow, MessageSignatures},
     pubkeys_provider::{provide_committee_pubkeys, provide_common_pubkeys},
 };
 
@@ -60,7 +62,7 @@ pub enum CommittorMessage {
     },
     GetBundleSignatures {
         respond_to:
-            oneshot::Sender<CommittorServiceResult<Option<BundleSignatureRow>>>,
+            oneshot::Sender<CommittorServiceResult<Option<MessageSignatures>>>,
         bundle_id: u64,
     },
     GetLookupTables {
@@ -242,7 +244,7 @@ impl CommittorService {
     pub fn get_bundle_signatures(
         &self,
         bundle_id: u64,
-    ) -> oneshot::Receiver<CommittorServiceResult<Option<BundleSignatureRow>>>
+    ) -> oneshot::Receiver<CommittorServiceResult<Option<MessageSignatures>>>
     {
         let (tx, rx) = oneshot::channel();
         self.try_send(CommittorMessage::GetBundleSignatures {
@@ -320,7 +322,7 @@ impl L1MessageCommittor for CommittorService {
     fn get_bundle_signatures(
         &self,
         bundle_id: u64,
-    ) -> oneshot::Receiver<CommittorServiceResult<Option<BundleSignatureRow>>>
+    ) -> oneshot::Receiver<CommittorServiceResult<Option<MessageSignatures>>>
     {
         let (tx, rx) = oneshot::channel();
         self.try_send(CommittorMessage::GetBundleSignatures {
@@ -328,6 +330,10 @@ impl L1MessageCommittor for CommittorService {
             bundle_id,
         });
         rx
+    }
+
+    fn subscribe_for_results(&self) -> Receiver<()> {
+        todo!()
     }
 }
 
@@ -339,21 +345,20 @@ pub trait L1MessageCommittor: Send + Sync + 'static {
         owner: Pubkey,
     ) -> oneshot::Receiver<CommittorServiceResult<()>>;
 
-    /// Commits the changeset and returns the reqid
-    fn commit_l1_messages(
-        &self,
-        l1_messages: Vec<ScheduledL1Message>,
-    ) -> oneshot::Receiver<Option<String>>;
+    /// Commits the changeset and returns
+    fn commit_l1_messages(&self, l1_messages: Vec<ScheduledL1Message>);
 
-    /// Gets statuses of accounts that were committed as part of a request with provided reqid
+    fn subscribe_for_results(&self) -> broadcast::Receiver<()>;
+
+    /// Gets statuses of accounts that were committed as part of a request with provided message_id
     fn get_commit_statuses(
         &self,
-        reqid: String,
+        message_id: u64,
     ) -> oneshot::Receiver<CommittorServiceResult<Vec<CommitStatusRow>>>;
 
     /// Gets signatures of commits processed as part of the bundle with the provided bundle_id
     fn get_bundle_signatures(
         &self,
         bundle_id: u64,
-    ) -> oneshot::Receiver<CommittorServiceResult<Option<BundleSignatureRow>>>;
+    ) -> oneshot::Receiver<CommittorServiceResult<Option<MessageSignatures>>>;
 }

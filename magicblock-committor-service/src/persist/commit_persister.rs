@@ -3,15 +3,12 @@ use std::{
     sync::{Arc, Mutex},
 };
 
-use magicblock_committor_program::Changeset;
 use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
-use solana_sdk::{hash::Hash, pubkey::Pubkey};
+use solana_sdk::pubkey::Pubkey;
 
 use super::{
-    db::CommitStatusRow,
-    error::{CommitPersistError, CommitPersistResult},
-    utils::now,
-    CommitStatus, CommitType, CommittsDb, MessageSignatures,
+    db::CommitStatusRow, error::CommitPersistResult, utils::now, CommitStatus,
+    CommitType, CommittsDb, MessageSignatures,
 };
 use crate::utils::ScheduledMessageExt;
 
@@ -108,7 +105,7 @@ impl L1MessagePersister {
                 CommitStatusRow {
                     message_id: l1_message.id,
                     commit_id: 0, // Not known at creation, set later
-                    pubkey: *account.pubkey,
+                    pubkey: account.pubkey,
                     delegated_account_owner: account.account.owner,
                     slot: l1_message.slot,
                     ephemeral_blockhash: l1_message.blockhash,

@@ -1,6 +1,4 @@
-use solana_sdk::{
-    instruction::InstructionError, transaction_context::TransactionContext,
-};
+use solana_sdk::instruction::InstructionError;
 
 use crate::{
     args::MagicL1MessageArgs,

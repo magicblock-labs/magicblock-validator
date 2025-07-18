@@ -6,9 +6,10 @@ use solana_sdk::{clock::Slot, hash::Hash, signature::Signature};
 
 use super::{
     error::CommitPersistResult,
-    utils::{i64_into_u64, now, u64_into_i64},
+    utils::{i64_into_u64, u64_into_i64},
     CommitStatus, CommitStatusSignatures, CommitStrategy, CommitType,
 };
+use crate::persist::error::CommitPersistError;
 
 // -----------------
 // CommitStatusRow
@@ -50,6 +51,7 @@ pub struct CommitStatusRow {
     pub retries_count: u16,
 }
 
+#[derive(Debug)]
 pub struct MessageSignatures {
     /// The signature of the transaction on chain that processed the commit
     pub processed_signature: Signature,
@@ -388,7 +390,7 @@ impl CommittsDb {
                 let undelegated_signature: Option<String> = row.get(2)?;
                 let created_at: i64 = row.get(3)?;
 
-                Ok(MessageSignatures {
+                Ok::<_, CommitPersistError>(MessageSignatures {
                     processed_signature: Signature::from_str(
                         &processed_signature,
                     )?,
@@ -500,7 +502,12 @@ fn extract_committor_row(
             finalize_signature: finalized_signature,
             undelegate_signature: undelegated_signature,
         });
-        CommitStatus::try_from((commit_status.as_str(), commit_strategy, sigs))?
+        CommitStatus::try_from((
+            commit_status.as_str(),
+            commit_id,
+            commit_strategy,
+            sigs,
+        ))?
     };
 
     let last_retried_at: u64 = {

@@ -1,8 +1,4 @@
-use std::{
-    collections::HashMap,
-    marker::PhantomData,
-    sync::{Arc, Mutex},
-};
+use std::collections::HashMap;
 
 use log::warn;
 use magicblock_program::{
@@ -23,9 +19,7 @@ use solana_sdk::{
 };
 
 use crate::{
-    commit_scheduler::commit_scheduler_inner::{
-        CommitSchedulerInner, POISONED_INNER_MSG,
-    },
+    persist::L1MessagesPersisterIface,
     transaction_preperator::transaction_preparator::{
         TransactionPreparator, TransactionPreparatorV1,
     },
@@ -34,30 +28,38 @@ use crate::{
 
 // TODO(edwin): define struct
 // (commit_id, signature)s that it sent. Single worker in [`RemoteScheduledCommitsProcessor`]
+#[derive(Clone, Debug)]
 pub struct ExecutionOutput {}
 
-pub(crate) struct L1MessageExecutor<T: TransactionPreparator> {
+pub(crate) struct L1MessageExecutor<T, P> {
     authority: Keypair,
     rpc_client: MagicblockRpcClient,
     transaction_preparator: T,
+    l1_messages_persister: P,
 }
 
-impl<T: TransactionPreparator> L1MessageExecutor<T> {
+impl<T, P> L1MessageExecutor<T, P>
+where
+    T: TransactionPreparator,
+    P: L1MessagesPersisterIface,
+{
     pub fn new_v1(
         rpc_client: MagicblockRpcClient,
         table_mania: TableMania,
         compute_budget_config: ComputeBudgetConfig,
-    ) -> L1MessageExecutor<TransactionPreparatorV1> {
+        l1_messages_persister: P,
+    ) -> L1MessageExecutor<TransactionPreparatorV1, P> {
         let authority = validator_authority();
         let transaction_preparator = TransactionPreparatorV1::new(
             rpc_client.clone(),
             table_mania,
             compute_budget_config,
         );
-        Self {
+        L1MessageExecutor::<TransactionPreparatorV1, P> {
             authority,
             rpc_client,
             transaction_preparator,
+            l1_messages_persister,
         }
     }
 
@@ -81,34 +83,17 @@ impl<T: TransactionPreparator> L1MessageExecutor<T> {
         l1_message: &ScheduledL1Message,
         commit_ids: HashMap<Pubkey, u64>,
     ) -> MessageExecutorResult<()> {
-        let mut prepared_message = self
+        let prepared_message = self
             .transaction_preparator
-            .prepare_commit_tx(&self.authority, &l1_message, commit_ids)
-            .await?;
-
-        let latest_blockhash = self.rpc_client.get_latest_blockhash()?;
-        match &mut prepared_message {
-            VersionedMessage::V0(value) => {
-                value.recent_blockhash = latest_blockhash;
-            }
-            VersionedMessage::Legacy(value) => {
-                warn!("TransactionPreparator v1 does not use Legacy message");
-                value.recent_blockhash = latest_blockhash;
-            }
-        };
-
-        let transaction = VersionedTransaction::try_new(
-            prepared_message,
-            &[&self.authority],
-        )?;
-        // TODO(edwin): add retries here?
-        self.rpc_client
-            .send_transaction(
-                &transaction,
-                &MagicBlockSendTransactionConfig::ensure_committed(),
+            .prepare_commit_tx(
+                &self.authority,
+                l1_message,
+                commit_ids,
+                &self.l1_messages_persister,
             )
             .await?;
-        Ok(())
+
+        self.send_prepared_message(prepared_message).await
     }
 
     /// Executes Finalize stage
@@ -116,18 +101,26 @@ impl<T: TransactionPreparator> L1MessageExecutor<T> {
         &self,
         l1_message: &ScheduledL1Message,
     ) -> MessageExecutorResult<()> {
-        // TODO(edwin): properly define this.
         let rent_reimbursement = self.authority.pubkey();
-        let mut prepared_message = self
+        let prepared_message = self
             .transaction_preparator
             .prepare_finalize_tx(
                 &self.authority,
                 &rent_reimbursement,
-                &l1_message,
+                l1_message,
+                &self.l1_messages_persister,
             )
             .await?;
 
-        let latest_blockhash = self.rpc_client.get_latest_blockhash()?;
+        self.send_prepared_message(prepared_message).await
+    }
+
+    /// Shared helper for sending transactions
+    async fn send_prepared_message(
+        &self,
+        mut prepared_message: VersionedMessage,
+    ) -> MessageExecutorResult<()> {
+        let latest_blockhash = self.rpc_client.get_latest_blockhash().await?;
         match &mut prepared_message {
             VersionedMessage::V0(value) => {
                 value.recent_blockhash = latest_blockhash;
@@ -142,13 +135,13 @@ impl<T: TransactionPreparator> L1MessageExecutor<T> {
             prepared_message,
             &[&self.authority],
         )?;
-        // TODO(edwin): add retries here?
         self.rpc_client
             .send_transaction(
                 &transaction,
                 &MagicBlockSendTransactionConfig::ensure_committed(),
             )
             .await?;
+
         Ok(())
     }
 }

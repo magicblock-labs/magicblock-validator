@@ -21,8 +21,16 @@ pub(crate) trait DB {
     fn is_empty(&self) -> bool;
 }
 
-struct DummyDB {
+pub(crate) struct DummyDB {
     db: Mutex<VecDeque<ScheduledL1Message>>,
+}
+
+impl DummyDB {
+    pub fn new() -> Self {
+        Self {
+            db: Mutex::new(VecDeque::new()),
+        }
+    }
 }
 
 #[async_trait]

@@ -1,7 +1,7 @@
 mod commit_id_tracker;
 pub(crate) mod commit_scheduler_inner;
 mod commit_scheduler_worker;
-mod db;
+pub(crate) mod db; // TODO(edwin): define visibility
 mod executor_pool;
 
 use std::sync::Arc;
@@ -13,23 +13,27 @@ use tokio::sync::{broadcast, mpsc, mpsc::error::TrySendError};
 
 use crate::{
     commit_scheduler::{
-        commit_scheduler_worker::CommitSchedulerWorker, db::DB,
+        commit_scheduler_worker::{
+            BroadcasteddMessageExecutionResult, CommitSchedulerWorker,
+        },
+        db::DB,
     },
     l1_message_executor::{ExecutionOutput, MessageExecutorResult},
+    persist::L1MessagesPersisterIface,
     ComputeBudgetConfig,
 };
 
 pub struct CommitScheduler<D: DB> {
     db: Arc<D>,
-    result_receiver:
-        broadcast::Receiver<MessageExecutorResult<ExecutionOutput>>,
+    result_receiver: broadcast::Receiver<BroadcasteddMessageExecutionResult>,
     message_sender: mpsc::Sender<ScheduledL1Message>,
 }
 
 impl<D: DB> CommitScheduler<D> {
-    pub fn new(
+    pub fn new<P: L1MessagesPersisterIface>(
         rpc_client: MagicblockRpcClient,
         db: D,
+        l1_message_persister: P,
         table_mania: TableMania,
         compute_budget_config: ComputeBudgetConfig,
     ) -> Self {
@@ -39,6 +43,7 @@ impl<D: DB> CommitScheduler<D> {
         // TODO(edwin): add concellation logic
         let worker = CommitSchedulerWorker::new(
             db.clone(),
+            l1_message_persister,
             rpc_client,
             table_mania,
             compute_budget_config,

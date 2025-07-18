@@ -10,6 +10,7 @@ use solana_sdk::{
 };
 
 use crate::{
+    persist::L1MessagesPersisterIface,
     transaction_preperator::{
         delivery_preparator::DeliveryPreparator,
         error::PreparatorResult,
@@ -42,21 +43,23 @@ pub trait TransactionPreparator {
     /// Returns [`VersionedMessage`] corresponding to [`ScheduledL1Message`] tasks
     /// Handles all necessary preparations for Message to be valid
     /// NOTE: [`VersionedMessage`] contains dummy recent_block_hash that should be replaced
-    async fn prepare_commit_tx(
+    async fn prepare_commit_tx<P: L1MessagesPersisterIface>(
         &self,
         authority: &Keypair,
         l1_message: &ScheduledL1Message,
         commit_ids: HashMap<Pubkey, u64>,
+        l1_messages_persister: &P,
     ) -> PreparatorResult<VersionedMessage>;
 
     /// Returns [`VersionedMessage`] corresponding to [`ScheduledL1Message`] tasks
     /// Handles all necessary preparations for Message to be valid
     // NOTE: [`VersionedMessage`] contains dummy recent_block_hash that should be replaced
-    async fn prepare_finalize_tx(
+    async fn prepare_finalize_tx<P: L1MessagesPersisterIface>(
         &self,
         authority: &Keypair,
         rent_reimbursement: &Pubkey,
         l1_message: &ScheduledL1Message,
+        l1_messages_persister: &P,
     ) -> PreparatorResult<VersionedMessage>;
 }
 
@@ -96,11 +99,12 @@ impl TransactionPreparator for TransactionPreparatorV1 {
 
     /// In V1: prepares TX with commits for every account in message
     /// For pure actions message - outputs Tx that runs actions
-    async fn prepare_commit_tx(
+    async fn prepare_commit_tx<P: L1MessagesPersisterIface>(
         &self,
         authority: &Keypair,
         l1_message: &ScheduledL1Message,
         commit_ids: HashMap<Pubkey, u64>,
+        l1_messages_persister: &P,
     ) -> PreparatorResult<VersionedMessage> {
         // 1. create tasks
         // 2. optimize to fit tx size. aka Delivery Strategy
@@ -125,11 +129,12 @@ impl TransactionPreparator for TransactionPreparatorV1 {
     }
 
     /// In V1: prepares single TX with finalize, undelegation + actions
-    async fn prepare_finalize_tx(
+    async fn prepare_finalize_tx<P: L1MessagesPersisterIface>(
         &self,
         authority: &Keypair,
         rent_reimbursement: &Pubkey,
         l1_message: &ScheduledL1Message,
+        l1_messages_persister: &P,
     ) -> PreparatorResult<VersionedMessage> {
         let tasks =
             TaskBuilderV1::finalize_tasks(l1_message, rent_reimbursement);

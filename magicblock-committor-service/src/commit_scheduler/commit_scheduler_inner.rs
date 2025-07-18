@@ -1,8 +1,6 @@
 use std::collections::{hash_map::Entry, HashMap, VecDeque};
 
-use magicblock_program::magic_scheduled_l1_message::{
-    MagicL1Message, ScheduledL1Message,
-};
+use magicblock_program::magic_scheduled_l1_message::ScheduledL1Message;
 use solana_pubkey::Pubkey;
 
 use crate::utils::ScheduledMessageExt;
@@ -82,14 +80,9 @@ impl CommitSchedulerInner {
         l1_message: ScheduledL1Message,
     ) -> Option<ScheduledL1Message> {
         let message_id = l1_message.id;
-        let Some(accounts) = l1_message.get_committed_accounts() else {
+        let Some(pubkeys) = l1_message.get_committed_pubkeys() else {
             return Some(l1_message);
         };
-
-        let pubkeys = accounts
-            .iter()
-            .map(|account| *account.pubkey)
-            .collect::<Vec<Pubkey>>();
 
         let (entries, is_conflicting) =
             Self::find_conflicting_entries(&pubkeys, &mut self.blocked_keys);
@@ -161,23 +154,26 @@ impl CommitSchedulerInner {
                     "Invariant: blocked messages are always in candidates",
                 ) == &meta.num_keys
                 {
-                    Some(message_id)
+                    Some(*message_id)
                 } else {
                     None
                 }
             });
 
         if let Some(next) = candidate {
-            Some(self.blocked_messages.remove(next).unwrap().message)
+            Some(self.blocked_messages.remove(&next).unwrap().message)
         } else {
             None
         }
     }
 
-    fn find_conflicting_entries<'a>(
+    fn find_conflicting_entries<'a, 'b>(
         pubkeys: &[Pubkey],
         blocked_keys: &'a mut HashMap<Pubkey, VecDeque<MessageID>>,
-    ) -> (Vec<Entry<'a, Pubkey, VecDeque<MessageID>>>, bool) {
+    ) -> (Vec<Entry<'b, Pubkey, VecDeque<MessageID>>>, bool)
+    where
+        'a: 'b,
+    {
         let mut is_conflicting = false;
         let entries = pubkeys
             .iter()

@@ -15,8 +15,8 @@ use tokio::sync::oneshot;
 use crate::{
     error::CommittorServiceResult,
     persist::{
-        BundleSignatureRow, CommitStatus, CommitStatusRow,
-        CommitStatusSignatures, CommitStrategy, CommitType,
+        CommitStatus, CommitStatusRow, CommitStatusSignatures, CommitStrategy,
+        CommitType, MessageSignatures,
     },
     L1MessageCommittor,
 };
@@ -99,10 +99,10 @@ impl L1MessageCommittor for ChangesetCommittorStub {
         &self,
         bundle_id: u64,
     ) -> tokio::sync::oneshot::Receiver<
-        crate::error::CommittorServiceResult<Option<BundleSignatureRow>>,
+        crate::error::CommittorServiceResult<Option<MessageSignatures>>,
     > {
         let (tx, rx) = tokio::sync::oneshot::channel();
-        let bundle_signature = BundleSignatureRow {
+        let bundle_signature = MessageSignatures {
             bundle_id,
             processed_signature: Signature::new_unique(),
             finalized_signature: Some(Signature::new_unique()),
