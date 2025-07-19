@@ -239,13 +239,15 @@ pub struct AccountsCloneConfig {
 
 impl AccountsCloneConfig {
     pub fn merge(&mut self, other: AccountsCloneConfig) {
-        if self.prepare_lookup_tables == PrepareLookupTables::Never
-            && other.prepare_lookup_tables != PrepareLookupTables::Never
+        let default = Self::default();
+
+        if self.prepare_lookup_tables == default.prepare_lookup_tables
+            && other.prepare_lookup_tables != default.prepare_lookup_tables
         {
             self.prepare_lookup_tables = other.prepare_lookup_tables;
         }
-        if self.concurrency == default_cloning_concurrency()
-            && other.concurrency != default_cloning_concurrency()
+        if self.concurrency == default.concurrency
+            && other.concurrency != default.concurrency
         {
             self.concurrency = other.concurrency;
         }
