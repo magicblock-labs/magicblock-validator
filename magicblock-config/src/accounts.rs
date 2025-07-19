@@ -65,14 +65,12 @@ impl AccountsConfig {
         if self.db == default.db && other.db != default.db {
             self.db = other.db;
         }
-        if self.clone == default.clone && other.clone != default.clone {
-            self.clone = other.clone;
-        }
         if self.max_monitored_accounts == default.max_monitored_accounts
             && other.max_monitored_accounts != default.max_monitored_accounts
         {
             self.max_monitored_accounts = other.max_monitored_accounts;
         }
+        self.clone.merge(other.clone);
     }
 }
 
@@ -253,13 +251,15 @@ pub struct AccountsCloneConfig {
 
 impl AccountsCloneConfig {
     pub fn merge(&mut self, other: AccountsCloneConfig) {
-        if self.prepare_lookup_tables == PrepareLookupTables::Never
-            && other.prepare_lookup_tables != PrepareLookupTables::Never
+        let default = Self::default();
+
+        if self.prepare_lookup_tables == default.prepare_lookup_tables
+            && other.prepare_lookup_tables != default.prepare_lookup_tables
         {
             self.prepare_lookup_tables = other.prepare_lookup_tables;
         }
-        if self.concurrency == default_cloning_concurrency()
-            && other.concurrency != default_cloning_concurrency()
+        if self.concurrency == default.concurrency
+            && other.concurrency != default.concurrency
         {
             self.concurrency = other.concurrency;
         }
