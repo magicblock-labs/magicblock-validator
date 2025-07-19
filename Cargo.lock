@@ -3768,6 +3768,7 @@ dependencies = [
  "magicblock-committor-service",
  "magicblock-config",
  "magicblock-core",
+ "magicblock-delegation-program",
  "magicblock-geyser-plugin",
  "magicblock-ledger",
  "magicblock-metrics",

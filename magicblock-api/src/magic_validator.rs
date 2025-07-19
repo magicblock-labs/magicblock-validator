@@ -11,6 +11,7 @@ use std::{
 };
 
 use conjunto_transwise::RpcProviderConfig;
+use dlp::instruction_builder::validator_claim_fees;
 use log::*;
 use magicblock_account_cloner::{
     map_committor_request_result, standard_blacklisted_accounts,
@@ -83,6 +84,7 @@ use solana_sdk::{
     pubkey::Pubkey,
     signature::Keypair,
     signer::Signer,
+    transaction::Transaction,
 };
 use tempfile::TempDir;
 use tokio_util::sync::CancellationToken;
@@ -167,7 +169,6 @@ pub struct MagicValidator {
     geyser_rpc_service: Arc<GeyserRpcService>,
     pubsub_config: PubsubConfig,
     pub transaction_status_sender: TransactionStatusSender,
-    validator_keypair: Arc<Keypair>,
 }
 
 impl MagicValidator {
@@ -371,7 +372,7 @@ impl MagicValidator {
             config.validator_config.rpc.port,
             config.validator_config.rpc.max_ws_connections,
         );
-        validator::init_validator_authority(identity_keypair.insecure_clone());
+        validator::init_validator_authority(identity_keypair);
 
         // Make sure we process the ledger before we're open to handle
         // transactions via RPC
@@ -414,7 +415,6 @@ impl MagicValidator {
             accounts_manager,
             transaction_listener,
             transaction_status_sender,
-            validator_keypair: Arc::new(identity_keypair),
         })
     }
 
@@ -700,15 +700,6 @@ impl MagicValidator {
     }
 
     async fn claim_fees(&self) -> ApiResult<()> {
-        use crate::external_config::cluster_from_remote; // I'm adding the import here to be clear what I'm using
-        use solana_rpc_client::nonblocking::rpc_client::RpcClient;
-        use solana_sdk::commitment_config::CommitmentConfig;
-        use solana_sdk::instruction::AccountMeta;
-        use solana_sdk::{
-            instruction::Instruction, pubkey::Pubkey, signer::Signer,
-            transaction::Transaction,
-        };
-
         info!("Claiming validator fees");
 
         // building the config
@@ -719,36 +710,10 @@ impl MagicValidator {
         );
 
         // setting the keypair and validator pubkey
-        let keypair_ref = &*self.validator_keypair; //safe borrow to avoid cloning the keypair
+        let keypair_ref = &validator_authority();
         let validator = keypair_ref.pubkey();
 
-        let delegation_program_id: Pubkey =
-            "DELeGGvXpWV2fqJUhqcF5ZSYMS4JTLjteaAMARRSaeSh"
-                .parse()
-                .expect("Invalid delegation program ID");
-
-        let (fees_vault, _) = Pubkey::find_program_address(
-            &[b"fees-vault"],
-            &delegation_program_id,
-        );
-        let (validator_fees_vault, _) = Pubkey::find_program_address(
-            &[b"v-fees-vault", validator.as_ref()],
-            &delegation_program_id,
-        );
-
-        // build the instruction with the ValidatorClaimFees discriminator
-        // data[0] is the discriminator and data[8] is the option<u64> serialized as 0, meaning None so it will claim all the fees from the fees vault
-        let data = vec![7, 0, 0, 0, 0, 0, 0, 0, 0];
-
-        let ix = Instruction {
-            program_id: delegation_program_id,
-            accounts: vec![
-                AccountMeta::new(validator, true),
-                AccountMeta::new(fees_vault, false),
-                AccountMeta::new(validator_fees_vault, false),
-            ],
-            data,
-        };
+        let ix = validator_claim_fees(validator, None);
 
         let latest_blockhash =
             rpc_client.get_latest_blockhash().await.map_err(|err| {
