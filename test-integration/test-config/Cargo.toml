@@ -1,0 +1,16 @@
+[package]
+name = "test-config"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+anyhow = { workspace = true }
+cleanass = { workspace = true }
+integration-test-tools = { workspace = true }
+log = { workspace = true }
+magicblock-config = { workspace = true }
+program-flexi-counter = { workspace = true, features = ["no-entrypoint"] }
+solana-rpc-client = { workspace = true }
+solana-sdk = { workspace = true }
+tempfile = { workspace = true }
+test-tools-core = { workspace = true }

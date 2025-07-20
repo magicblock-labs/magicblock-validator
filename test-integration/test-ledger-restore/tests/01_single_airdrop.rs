@@ -1,12 +1,14 @@
 use cleanass::{assert, assert_eq};
 use std::{path::Path, process::Child};
 
-use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};
+use integration_test_tools::{
+    expect, tmpdir::resolve_tmp_dir, unwrap, validator::cleanup,
+};
 use solana_sdk::{
     commitment_config::CommitmentConfig, pubkey::Pubkey, signature::Signature,
 };
 use test_ledger_restore::{
-    cleanup, setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
+    setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 
 #[test]
@@ -57,14 +59,24 @@ fn read_ledger(
     assert_eq!(acc.lamports, 1_111_111, cleanup(&mut validator));
 
     if let Some(sig) = airdrop_sig1 {
-        let status = expect!(ctx.try_ephem_client(), validator)
+        let status = match expect!(ctx.try_ephem_client(), validator)
             .get_signature_status_with_commitment_and_history(
                 sig,
                 CommitmentConfig::confirmed(),
                 true,
-            )
-            .unwrap()
-            .unwrap();
+            ) {
+            Ok(status) => {
+                unwrap!(
+                    status,
+                    format!("Should have received signature status for {sig}"),
+                    validator
+                )
+            }
+            Err(err) => {
+                cleanup(&mut validator);
+                panic!("Error fetching signature status: {:?}", err);
+            }
+        };
         assert!(status.is_ok(), cleanup(&mut validator));
     }
 

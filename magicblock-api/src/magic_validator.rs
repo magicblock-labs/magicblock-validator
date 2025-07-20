@@ -28,9 +28,7 @@ use magicblock_accounts::{
     utils::try_rpc_cluster_from_cluster, AccountsManager,
 };
 use magicblock_accounts_api::BankAccountProvider;
-use magicblock_accounts_db::{
-    config::AccountsDbConfig, error::AccountsDbError,
-};
+use magicblock_accounts_db::error::AccountsDbError;
 use magicblock_bank::{
     bank::Bank,
     genesis_utils::create_genesis_config_with_leader,
@@ -41,7 +39,10 @@ use magicblock_bank::{
 use magicblock_committor_service::{
     config::ChainConfig, CommittorService, ComputeBudgetConfig,
 };
-use magicblock_config::{EphemeralConfig, LifecycleMode, ProgramConfig};
+use magicblock_config::{
+    AccountsDbConfig, EphemeralConfig, LifecycleMode, PrepareLookupTables,
+    ProgramConfig,
+};
 use magicblock_geyser_plugin::rpc::GeyserRpcService;
 use magicblock_ledger::{
     blockstore_processor::process_ledger,
@@ -353,6 +354,7 @@ impl MagicValidator {
             clone_permissions,
             identity_keypair.pubkey(),
             config.validator_config.accounts.max_monitored_accounts,
+            config.validator_config.accounts.clone.clone(),
         );
 
         let accounts_manager = Self::init_accounts_manager(
@@ -623,7 +625,7 @@ impl MagicValidator {
 
     async fn register_validator_on_chain(
         &self,
-        fdqn: impl ToString,
+        fqdn: impl ToString,
     ) -> ApiResult<()> {
         let url = cluster_from_remote(&self.config.accounts.remote);
         let country_code =
@@ -637,7 +639,7 @@ impl MagicValidator {
             features: FeaturesSet::default(),
             load_average: 0, // not implemented
             country_code,
-            addr: fdqn.to_string(),
+            addr: fqdn.to_string(),
         });
 
         DomainRegistryManager::handle_registration_static(
@@ -699,8 +701,8 @@ impl MagicValidator {
     pub async fn start(&mut self) -> ApiResult<()> {
         if matches!(self.config.accounts.lifecycle, LifecycleMode::Ephemeral) {
             self.ensure_validator_funded_on_chain().await?;
-            if let Some(ref fdqn) = self.config.validator.fdqn {
-                self.register_validator_on_chain(fdqn).await?;
+            if let Some(ref fqdn) = self.config.validator.fqdn {
+                self.register_validator_on_chain(fqdn).await?;
             }
         }
 
@@ -800,12 +802,16 @@ impl MagicValidator {
             self.remote_account_cloner_worker.take()
         {
             if let Some(committor_service) = self.committor_service.as_ref() {
-                debug!("Reserving common pubkeys for committor service");
-                map_committor_request_result(
-                    committor_service.reserve_common_pubkeys(),
-                    committor_service.clone(),
-                )
-                .await?;
+                if self.config.accounts.clone.prepare_lookup_tables
+                    == PrepareLookupTables::Always
+                {
+                    debug!("Reserving common pubkeys for committor service");
+                    map_committor_request_result(
+                        committor_service.reserve_common_pubkeys(),
+                        committor_service.clone(),
+                    )
+                    .await?;
+                }
             }
 
             if !self.config.ledger.reset {
@@ -846,7 +852,7 @@ impl MagicValidator {
         // wait a bit for services to stop
         thread::sleep(Duration::from_secs(1));
 
-        if self.config.validator.fdqn.is_some()
+        if self.config.validator.fqdn.is_some()
             && matches!(
                 self.config.accounts.lifecycle,
                 LifecycleMode::Ephemeral

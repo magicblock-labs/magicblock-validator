@@ -21,11 +21,13 @@ use magicblock_rpc_client::{
     MagicBlockSendTransactionConfig,
 };
 use solana_pubkey::Pubkey;
-use solana_sdk::{hash::Hash, instruction::Instruction, signer::Signer};
+use solana_sdk::{
+    hash::Hash, instruction::Instruction, signature::Signature, signer::Signer,
+};
 use tokio::task::JoinSet;
 
 use super::{
-    common::send_and_confirm,
+    common::{get_accounts_to_undelegate, send_and_confirm},
     process_buffers::{
         chunked_ixs_to_process_commitables_and_close_pdas,
         ChunkedIxsToProcessCommitablesAndClosePdasResult,
@@ -33,7 +35,6 @@ use super::{
     CommittorProcessor,
 };
 use crate::{
-    commit::common::get_accounts_to_undelegate,
     commit_stage::CommitSignatures,
     error::{CommitAccountError, CommitAccountResult},
     finalize::{
@@ -275,6 +276,22 @@ impl CommittorProcessor {
                     .await;
             commit_stages.extend(failed_finalize.into_iter().flat_map(
                 |(sig, infos)| {
+                    fn get_sigs_for_bundle(
+                        bundle_id: u64,
+                        processed_signatures: &HashMap<u64, Signature>,
+                        finalized_sig: Option<Signature>,
+                    ) -> CommitSignatures {
+                        CommitSignatures {
+                            // SAFETY: signatures for all bundles of succeeded process transactions
+                            //         have been added above
+                            process_signature: *processed_signatures
+                                .get(&bundle_id)
+                                .unwrap(),
+                            finalize_signature: finalized_sig,
+                            undelegate_signature: None,
+                        }
+                    }
+
                     infos
                         .into_iter()
                         .map(|x| {
@@ -282,15 +299,11 @@ impl CommittorProcessor {
                             CommitStage::FailedFinalize((
                                 x,
                                 commit_strategy,
-                                CommitSignatures {
-                                    // SAFETY: signatures for all bundles of succeeded process transactions
-                                    //         have been added above
-                                    process_signature: *processed_signatures
-                                        .get(&bundle_id)
-                                        .unwrap(),
-                                    finalize_signature: sig,
-                                    undelegate_signature: None,
-                                },
+                                get_sigs_for_bundle(
+                                    bundle_id,
+                                    &processed_signatures,
+                                    sig,
+                                ),
                             ))
                         })
                         .collect::<Vec<_>>()
@@ -359,6 +372,25 @@ impl CommittorProcessor {
                     finalize_and_undelegate.len(),
                     "BUG: same amount of accounts to undelegate as to finalize and undelegate"
                 );
+                fn get_sigs_for_bundle(
+                    bundle_id: u64,
+                    processed_signatures: &HashMap<u64, Signature>,
+                    finalized_signatures: &HashMap<u64, Signature>,
+                    undelegated_sig: Option<Signature>,
+                ) -> CommitSignatures {
+                    CommitSignatures {
+                        // SAFETY: signatures for all bundles of succeeded process transactions
+                        //         have been added above
+                        process_signature: *processed_signatures
+                            .get(&bundle_id)
+                            .unwrap(),
+                        finalize_signature: finalized_signatures
+                            .get(&bundle_id)
+                            .cloned(),
+                        undelegate_signature: undelegated_sig,
+                    }
+                }
+
                 let undelegate_ixs = match undelegate_commitables_ixs(
                     &processor.magicblock_rpc_client,
                     processor.authority.pubkey(),
@@ -378,19 +410,12 @@ impl CommittorProcessor {
                                 CommitStage::FailedUndelegate((
                                     x.clone(),
                                     CommitStrategy::args(use_lookup),
-                                    CommitSignatures {
-                                        // SAFETY: signatures for all bundles of succeeded process transactions
-                                        //         have been added above
-                                        process_signature:
-                                            *processed_signatures
-                                                .get(&bundle_id)
-                                                .unwrap(),
-                                        finalize_signature:
-                                            finalized_signatures
-                                                .get(&bundle_id)
-                                                .cloned(),
-                                        undelegate_signature: err.signature(),
-                                    },
+                                    get_sigs_for_bundle(
+                                        bundle_id,
+                                        &processed_signatures,
+                                        &finalized_signatures,
+                                        err.signature(),
+                                    ),
                                 ))
                             }),
                         );
@@ -425,19 +450,12 @@ impl CommittorProcessor {
                                         CommitStage::FailedUndelegate((
                                             x,
                                             commit_strategy,
-                                            CommitSignatures {
-                                                // SAFETY: signatures for all bundles of succeeded process transactions
-                                                //         have been added above
-                                                process_signature:
-                                                    *processed_signatures
-                                                        .get(&bundle_id)
-                                                        .unwrap(),
-                                                finalize_signature:
-                                                    finalized_signatures
-                                                        .get(&bundle_id)
-                                                        .cloned(),
-                                                undelegate_signature: sig,
-                                            },
+                                            get_sigs_for_bundle(
+                                                bundle_id,
+                                                &processed_signatures,
+                                                &finalized_signatures,
+                                                sig,
+                                            ),
                                         ))
                                     })
                                     .collect::<Vec<_>>()
@@ -1009,18 +1027,14 @@ impl CommittorProcessor {
                     rpc_client,
                     authority,
                     [write_budget_ixs, vec![ix]].concat(),
-                    format!("write chunk for offset {}", chunk.offset),
+                    format!("write chunk ({} bytes)", chunk_bytes),
                     Some(latest_blockhash),
-                    // NOTE: We could use `processed` here and wait to get the processed status at
-                    // least which would make things a bit slower.
-                    // However that way we would avoid sending unnecessary transactions potentially
-                    // since we may not see some written chunks yet when we get the chunks account.
                     MagicBlockSendTransactionConfig::ensure_processed(),
                     None,
                 )
                 .await
                 .inspect_err(|err| {
-                    error!("{:?}", err);
+                    warn!("{:?}", err);
                 })
             });
         }

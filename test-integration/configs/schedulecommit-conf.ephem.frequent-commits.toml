@@ -1,5 +1,5 @@
 [accounts]
-remote = "http://0.0.0.0:7799"
+remote.url = "http://0.0.0.0:7799"
 lifecycle = "ephemeral"
 # NOTE: we'd be committing almost every slot here if we didn't detect when
 #       a commit is not needed

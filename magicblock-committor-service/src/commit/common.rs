@@ -102,7 +102,12 @@ pub(crate) async fn send_and_confirm(
         if let Some((table_mania, keys_from_tables)) = table_mania_setup {
             let start = Instant::now();
 
-            // NOTE: we assume that all needed pubkeys were reserved earlier
+            // Ensure all pubkeys have tables before proceeding
+            table_mania
+                .ensure_pubkeys_table(&authority, &keys_from_tables)
+                .await?;
+
+            // NOTE: we assume that all needed pubkeys were reserved by now
             let address_lookup_tables = table_mania
                 .try_get_active_address_lookup_table_accounts(
                     &keys_from_tables,

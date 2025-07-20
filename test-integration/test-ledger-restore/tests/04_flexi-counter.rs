@@ -1,7 +1,9 @@
 use cleanass::assert_eq;
 use std::{path::Path, process::Child};
 
-use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};
+use integration_test_tools::{
+    expect, tmpdir::resolve_tmp_dir, validator::cleanup,
+};
 use magicblock_config::ProgramConfig;
 use program_flexi_counter::{
     instruction::{create_add_ix, create_init_ix, create_mul_ix},
@@ -12,9 +14,8 @@ use solana_sdk::{
     signer::Signer,
 };
 use test_ledger_restore::{
-    cleanup, confirm_tx_with_payer_ephem, fetch_counter_ephem,
-    setup_offline_validator, wait_for_ledger_persist, FLEXI_COUNTER_ID,
-    TMP_DIR_LEDGER,
+    confirm_tx_with_payer_ephem, fetch_counter_ephem, setup_offline_validator,
+    wait_for_ledger_persist, FLEXI_COUNTER_ID, TMP_DIR_LEDGER,
 };
 
 const SLOT_MS: u64 = 150;
