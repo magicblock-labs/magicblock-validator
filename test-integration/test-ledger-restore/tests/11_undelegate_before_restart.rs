@@ -1,5 +1,6 @@
 use cleanass::assert;
 use integration_test_tools::conversions::get_rpc_transwise_error_msg;
+use integration_test_tools::validator::cleanup;
 use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};
 use integration_test_tools::{expect_err, unwrap, IntegrationTestContext};
 use program_flexi_counter::instruction::{
@@ -14,7 +15,7 @@ use solana_sdk::{
 use std::path::Path;
 use std::process::Child;
 use test_ledger_restore::{
-    assert_counter_state, cleanup, confirm_tx_with_payer_chain,
+    assert_counter_state, confirm_tx_with_payer_chain,
     confirm_tx_with_payer_ephem, get_programs_with_flexi_counter,
     setup_validator_with_local_remote, wait_for_cloned_accounts_hydration,
     wait_for_ledger_persist, Counter, State, TMP_DIR_LEDGER,

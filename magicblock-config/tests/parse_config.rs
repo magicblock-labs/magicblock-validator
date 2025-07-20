@@ -132,9 +132,10 @@ fn test_custom_remote_toml() {
         config,
         EphemeralConfig {
             accounts: AccountsConfig {
-                remote: RemoteConfig::Custom(
-                    Url::parse("http://localhost:8899").unwrap()
-                ),
+                remote: RemoteConfig {
+                    url: Some(Url::parse("http://localhost:8899").unwrap()),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             ..Default::default()
@@ -151,10 +152,13 @@ fn test_custom_ws_remote_toml() {
         config,
         EphemeralConfig {
             accounts: AccountsConfig {
-                remote: RemoteConfig::CustomWithWs(
-                    Url::parse("http://localhost:8899").unwrap(),
-                    Url::parse("ws://localhost:9001").unwrap()
-                ),
+                remote: RemoteConfig {
+                    url: Some(Url::parse("http://localhost:8899").unwrap()),
+                    ws_url: Some(vec![
+                        Url::parse("ws://localhost:9001").unwrap()
+                    ]),
+                    ..Default::default()
+                },
                 ..Default::default()
             },
             ..Default::default()
@@ -189,7 +193,7 @@ fn test_validator_with_base_fees() {
             },
             validator: ValidatorConfig {
                 base_fees: Some(1_000),
-                fdqn: Some("magicblock.er.com".to_string()),
+                fqdn: Some("magicblock.er.com".to_string()),
                 country_code: CountryCode::for_alpha2("US").unwrap(),
                 ..Default::default()
             },
@@ -203,7 +207,7 @@ fn test_validator_with_base_fees() {
 fn test_custom_invalid_remote() {
     let toml = r#"
 [accounts]
-remote = "http://localhost::8899"
+remote.url = "http://localhost::8899"
 "#;
 
     let res = toml::from_str::<EphemeralConfig>(toml);

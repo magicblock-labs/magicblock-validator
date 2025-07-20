@@ -1,11 +1,13 @@
 use cleanass::assert_eq;
-use magicblock_accounts_db::config::TEST_SNAPSHOT_FREQUENCY;
+use magicblock_config::TEST_SNAPSHOT_FREQUENCY;
 use std::{path::Path, process::Child};
 
-use integration_test_tools::{expect, tmpdir::resolve_tmp_dir};
+use integration_test_tools::{
+    expect, tmpdir::resolve_tmp_dir, validator::cleanup,
+};
 use solana_sdk::pubkey::Pubkey;
 use test_ledger_restore::{
-    cleanup, setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
+    setup_offline_validator, wait_for_ledger_persist, TMP_DIR_LEDGER,
 };
 
 // In this test we ensure that restoring from a later slot by hydrating the

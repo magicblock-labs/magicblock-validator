@@ -10,7 +10,7 @@ edition.workspace = true
 [dependencies]
 # storage
 memmap2 = "0.9"
-lmdb = { package = "lmdb-rkv", version = "0.14" } # more up to date fork of lmdb bindings by mozilla, still ancient though :(
+lmdb = { package = "lmdb-rkv", version = "0.14" }       # more up to date fork of lmdb bindings by mozilla, still ancient though :(
 reflink = { package = "reflink-copy", version = "0.1" }
 
 # solana
@@ -21,11 +21,11 @@ solana-account = { workspace = true }
 parking_lot = "0.12"
 
 # misc
-serde = { workspace = true, features = [ "derive" ] }
+serde = { workspace = true, features = ["derive"] }
 thiserror = { workspace = true }
 log = { workspace = true }
 tempfile = { workspace = true }
-
+magicblock-config = { workspace = true }
 
 [dev-dependencies]
 env_logger = "0.11"
